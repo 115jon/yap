@@ -73,8 +73,15 @@ fn runtime() -> &'static Runtime {
     })
 }
 
+/// When the core was started, for startup timing in the log.
+pub(crate) fn started_at() -> &'static std::time::Instant {
+    static STARTED: OnceLock<std::time::Instant> = OnceLock::new();
+    STARTED.get_or_init(std::time::Instant::now)
+}
+
 /// Starts the core and returns its command channel.
 pub fn spawn(sink: Sink) -> UnboundedSender<Command> {
+    started_at();
     let (tx, rx) = mpsc::unbounded_channel();
     let core = Core::new(sink, tx.clone());
     runtime().spawn(core.run(rx));
@@ -265,7 +272,9 @@ impl Core {
         self.ui(Ui::Phase("loading"));
         self.ui(Ui::Status("Signing in…".into()));
         let api = Api::new(self.http.clone(), &token);
-        let me = match api.get("/api/users/me").await {
+        // Independent requests overlap: each one costs a Kova session check.
+        let (me, servers) = tokio::join!(api.get("/api/users/me"), api.get("/api/servers"));
+        let me = match me {
             Ok(me) => me,
             Err(error) => {
                 if api::is_unauthorized(&error) {
@@ -302,7 +311,7 @@ impl Core {
         });
 
         self.ui(Ui::Status("Loading servers…".into()));
-        self.load_servers().await?;
+        self.apply_servers(servers?).await?;
         self.ui(Ui::Phase("ready"));
         self.ui(Ui::Status(String::new()));
         Ok(())
@@ -351,6 +360,10 @@ impl Core {
     async fn load_servers(&mut self) -> Result<()> {
         let Some(api) = self.api() else { return Ok(()) };
         let servers = api.get("/api/servers").await?;
+        self.apply_servers(servers).await
+    }
+
+    async fn apply_servers(&mut self, servers: Value) -> Result<()> {
         self.servers = servers.as_array().cloned().unwrap_or_default();
         let list: Vec<Value> = self
             .servers
@@ -477,6 +490,10 @@ impl Core {
         }
         let list: Vec<Value> = messages.iter().map(ui_message).collect();
         self.ui(Ui::MessagesReset(Value::Array(list)));
+        static FIRST: std::sync::Once = std::sync::Once::new();
+        FIRST.call_once(|| {
+            eprintln!("[startup] messages shown after {} ms", started_at().elapsed().as_millis());
+        });
         Ok(())
     }
 

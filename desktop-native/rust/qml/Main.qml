@@ -47,6 +47,9 @@ ApplicationWindow {
                     anchors.verticalCenter: parent.verticalCenter
                     color: Theme.idle
                     SequentialAnimation on opacity {
+                        // Only while shown: a running animation keeps the
+                        // render loop ticking even under an invisible item.
+                        running: client.phase === "boot" || client.phase === "loading"
                         loops: Animation.Infinite
                         NumberAnimation { to: 0.25; duration: 600; easing.type: Easing.InOutQuad }
                         NumberAnimation { to: 1; duration: 600; easing.type: Easing.InOutQuad }

@@ -110,6 +110,7 @@ async fn session(
                         writer.send(Message::text(identify.to_string())).await?;
                     }
                     Some(2) | Some(9) => {
+                        eprintln!("[startup] gateway ready after {} ms", super::started_at().elapsed().as_millis());
                         let _ = events.send(Command::Event(Event::GatewayReady));
                     }
                     Some(19) => {
