@@ -5,7 +5,6 @@
 //! singleton sends through.
 
 pub mod gateway;
-pub mod sfu;
 pub mod voice;
 
 use std::sync::{Arc, OnceLock};

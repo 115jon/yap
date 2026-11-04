@@ -1,0 +1,27 @@
+[package]
+name = "yap-voice"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Yap voice calls: a pure call state machine with its roster and track table, a media engine trait (libwebrtc or fake), the SFU client and the async driver. No Qt."
+
+[features]
+default = ["libwebrtc"]
+# The production media engine. Off, the crate builds and tests without
+# linking WebRTC (`cargo test -p yap-voice --no-default-features`).
+libwebrtc = ["dep:libwebrtc"]
+
+[dependencies]
+anyhow = "1.0.104"
+libwebrtc = { version = "0.3.55", optional = true }
+reqwest.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid = { version = "1.29.0", features = ["v4"] }
+yap-protocol.workspace = true
+yap-realtime.workspace = true
+
+[lints]
+workspace = true

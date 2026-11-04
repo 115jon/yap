@@ -4,13 +4,12 @@
 //! The proxy swaps raw SFU session ids for signed capabilities: always send
 //! back exactly the `sessionId` values it returned.
 
+use std::future::Future;
 use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, bail, Result};
 use reqwest::{Client, Method};
 use serde_json::{json, Value};
-
-use yap_core::config;
 
 #[derive(Clone)]
 pub struct Sfu {
@@ -34,13 +33,16 @@ pub struct Pulled {
 }
 
 impl Sfu {
-    pub fn new(http: Client, room_slug: &str, participant_id: &str, voice_token: &str) -> Self {
+    pub fn new(
+        http: Client,
+        api_base: &str,
+        room_slug: &str,
+        participant_id: &str,
+        voice_token: &str,
+    ) -> Self {
         Self {
             http,
-            prefix: format!(
-                "{}/api/channels/{room_slug}/partytracks",
-                config::get().api_base
-            ),
+            prefix: format!("{api_base}/api/channels/{room_slug}/partytracks"),
             participant_id: participant_id.to_owned(),
             voice_token: Arc::new(RwLock::new(voice_token.to_owned())),
         }
@@ -66,7 +68,8 @@ impl Sfu {
         if let Some(body) = body {
             request = request.json(&body);
         }
-        let response = request.send().await?;
+        // Without the URL: it holds our signed session capability.
+        let response = request.send().await.map_err(reqwest::Error::without_url)?;
         let status = response.status();
         let body: Value = response.json().await.unwrap_or(Value::Null);
         // Name the operation, not the path: the path holds our signed
@@ -195,5 +198,56 @@ impl Sfu {
         )
         .await
         .map(|_| ())
+    }
+}
+
+/// The SFU calls the pull worker makes; [`Sfu`] in production.
+pub(crate) trait Signaling: Clone + Send + Sync + 'static {
+    fn pull(
+        &self,
+        session: &str,
+        track_name: &str,
+        remote_session: &str,
+    ) -> impl Future<Output = Result<Pulled>> + Send;
+
+    fn renegotiate(
+        &self,
+        session: &str,
+        answer_sdp: &str,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    fn close(
+        &self,
+        session: &str,
+        mids: &[String],
+        offer_sdp: &str,
+    ) -> impl Future<Output = Result<String>> + Send;
+}
+
+impl Signaling for Sfu {
+    fn pull(
+        &self,
+        session: &str,
+        track_name: &str,
+        remote_session: &str,
+    ) -> impl Future<Output = Result<Pulled>> + Send {
+        Sfu::pull(self, session, track_name, remote_session)
+    }
+
+    fn renegotiate(
+        &self,
+        session: &str,
+        answer_sdp: &str,
+    ) -> impl Future<Output = Result<()>> + Send {
+        Sfu::renegotiate(self, session, answer_sdp)
+    }
+
+    fn close(
+        &self,
+        session: &str,
+        mids: &[String],
+        offer_sdp: &str,
+    ) -> impl Future<Output = Result<String>> + Send {
+        Sfu::close(self, session, mids, offer_sdp)
     }
 }

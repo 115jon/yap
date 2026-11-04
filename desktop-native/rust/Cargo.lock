@@ -2539,25 +2539,38 @@ dependencies = [
 ]
 
 [[package]]
-name = "yap_native"
+name = "yap-voice"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libwebrtc",
+ "reqwest 0.13.5",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "uuid",
+ "yap-protocol",
+ "yap-realtime",
+]
+
+[[package]]
+name = "yap_native"
+version = "0.1.0"
+dependencies = [
  "cxx",
  "cxx-qt",
  "cxx-qt-build",
  "cxx-qt-lib",
  "futures-util",
- "libwebrtc",
  "reqwest 0.13.5",
  "serde",
  "serde_json",
  "tokio",
  "tokio-tungstenite",
- "uuid",
  "yap-core",
  "yap-protocol",
  "yap-realtime",
+ "yap-voice",
 ]
 
 [[package]]
