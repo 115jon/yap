@@ -23,23 +23,12 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use yap_protocol::{Frame as WireFrame, GatewayCloseCode, GatewayOp};
 
-use super::api::Api;
+use yap_core::{Api, VoiceCommand, VoiceEvents, VoiceUpdate};
+
 use super::sfu::Sfu;
 use super::socket::{self, Frame};
-use super::{Command, Event};
 
-pub enum VoiceCommand {
-    SetMuted(bool),
-    Leave,
-}
-
-/// What the core hears back from a session.
-pub enum VoiceUpdate {
-    Status(String),
-    Connected,
-    Roster(Value),
-    Ended(Option<String>),
-}
+pub use yap_core::VoiceTarget as Target;
 
 fn factory() -> &'static PeerConnectionFactory {
     static FACTORY: OnceLock<PeerConnectionFactory> = OnceLock::new();
@@ -80,25 +69,15 @@ fn member_name(value: &Value) -> String {
     "Someone".to_owned()
 }
 
-pub struct Target {
-    pub server_id: String,
-    pub channel_id: String,
-    pub me_name: String,
-    pub me_username: String,
-}
-
 /// Runs one call until it is left or ends; reports through `events`.
 pub async fn run(
-    id: u64,
     api: Api,
     http: reqwest::Client,
     target: Target,
     commands: UnboundedReceiver<VoiceCommand>,
-    events: UnboundedSender<Command>,
+    events: VoiceEvents,
 ) {
-    let send = |update: VoiceUpdate| {
-        let _ = events.send(Command::Event(Event::Voice(id, update)));
-    };
+    let send = |update: VoiceUpdate| events.send(update);
     let result = session(&api, http, &target, commands, &send).await;
     factory().release_platform_adm();
     send(VoiceUpdate::Ended(result.err().map(|e| format!("{e:#}"))));

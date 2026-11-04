@@ -10,7 +10,7 @@ use anyhow::{anyhow, bail, Result};
 use reqwest::{Client, Method};
 use serde_json::{json, Value};
 
-use super::config;
+use yap_core::config;
 
 #[derive(Clone)]
 pub struct Sfu {

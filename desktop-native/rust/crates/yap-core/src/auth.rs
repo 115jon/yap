@@ -3,17 +3,38 @@
 
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Result};
 use reqwest::{Client, StatusCode};
 use serde_json::{json, Value};
 
-use super::config;
+use crate::api::Token;
+use crate::config;
 
 const KEYRING_SERVICE: &str = "com.115jon.yap.native-spike";
 const KEYRING_USER: &str = "kova-session";
 const SLOW_DOWN_STEP: Duration = Duration::from_secs(5);
 
 pub use yap_protocol::rest::DeviceStart;
+
+/// Why a device sign-in stopped. `Display` is the text the UI shows.
+#[derive(Debug, thiserror::Error)]
+pub enum AuthError {
+    #[error("sign-in could not start ({0})")]
+    Start(String),
+    #[error("The code expired. Start again.")]
+    Expired,
+    #[error("Sign-in was denied.")]
+    Denied,
+    #[error("approved without a session")]
+    NoSession,
+    #[error("Sign-in failed ({0}).")]
+    Failed(String),
+    #[error("Sign-in failed (HTTP {0}).")]
+    Status(u16),
+    #[error(transparent)]
+    Network(#[from] reqwest::Error),
+    #[error(transparent)]
+    Decode(#[from] serde_json::Error),
+}
 
 fn device_url(step: &str) -> String {
     let cfg = config::get();
@@ -23,7 +44,11 @@ fn device_url(step: &str) -> String {
     )
 }
 
-async fn device_post(http: &Client, step: &str, body: Value) -> Result<(StatusCode, Value)> {
+async fn device_post(
+    http: &Client,
+    step: &str,
+    body: Value,
+) -> Result<(StatusCode, Value), reqwest::Error> {
     let response = http
         .post(device_url(step))
         .header("X-Publishable-Key", &config::get().publishable_key)
@@ -35,7 +60,7 @@ async fn device_post(http: &Client, step: &str, body: Value) -> Result<(StatusCo
     Ok((status, body))
 }
 
-pub async fn start(http: &Client) -> Result<DeviceStart> {
+pub async fn start(http: &Client) -> Result<DeviceStart, AuthError> {
     let hostname = std::env::var("COMPUTERNAME").ok();
     let (status, body) = device_post(
         http,
@@ -44,23 +69,21 @@ pub async fn start(http: &Client) -> Result<DeviceStart> {
     )
     .await?;
     if !status.is_success() {
-        bail!(
-            "sign-in could not start ({})",
-            body.get("error").and_then(Value::as_str).unwrap_or("error")
-        );
+        let error = body.get("error").and_then(Value::as_str).unwrap_or("error");
+        return Err(AuthError::Start(error.to_owned()));
     }
     Ok(serde_json::from_value(body)?)
 }
 
 /// Polls until the code is approved and returns the session token.
-pub async fn wait_for_approval(http: &Client, start: &DeviceStart) -> Result<String> {
+pub async fn wait_for_approval(http: &Client, start: &DeviceStart) -> Result<Token, AuthError> {
     let deadline = Instant::now() + Duration::from_secs(start.expires_in);
     let mut interval = Duration::from_secs(start.interval.max(1));
     let mut failures = 0u32;
     loop {
         tokio::time::sleep(interval).await;
         if Instant::now() >= deadline {
-            bail!("The code expired. Start again.");
+            return Err(AuthError::Expired);
         }
         let result = device_post(http, "poll", json!({ "deviceCode": start.device_code })).await;
         let (status, body) = match result {
@@ -88,17 +111,17 @@ pub async fn wait_for_approval(http: &Client, start: &DeviceStart) -> Result<Str
                     .get("sessionToken")
                     .and_then(Value::as_str)
                     .filter(|t| !t.is_empty())
-                    .map(str::to_owned)
-                    .ok_or_else(|| anyhow!("approved without a session"));
+                    .map(Token::new)
+                    .ok_or(AuthError::NoSession);
             }
-            Some("denied") => bail!("Sign-in was denied."),
+            Some("denied") => return Err(AuthError::Denied),
             _ => {}
         }
-        match error {
-            Some("expired_token") => bail!("The code expired. Start again."),
-            Some(other) => bail!("Sign-in failed ({other})."),
-            None => bail!("Sign-in failed (HTTP {}).", status.as_u16()),
-        }
+        return Err(match error {
+            Some("expired_token") => AuthError::Expired,
+            Some(other) => AuthError::Failed(other.to_owned()),
+            None => AuthError::Status(status.as_u16()),
+        });
     }
 }
 
@@ -107,41 +130,60 @@ pub async fn cancel(http: &Client, device_code: &str) {
 }
 
 /// Revokes this app session on Kova (best effort).
-pub async fn revoke(http: &Client, token: &str) {
+pub async fn revoke(http: &Client, token: &Token) {
     let cfg = config::get();
     let _ = http
         .post(format!(
             "{}/api/pub/apps/{}/revoke-session",
             cfg.kova_auth_url, cfg.publishable_key
         ))
-        .bearer_auth(token)
+        .bearer_auth(token.as_str())
         .header("X-Publishable-Key", &cfg.publishable_key)
         .send()
         .await;
 }
 
+/// Where the session token lives between launches. Calls block (the OS
+/// credential store), so the runner calls them on a blocking thread, one at a
+/// time and in order.
+pub trait TokenStore: Send + Sync + 'static {
+    fn load(&self) -> Option<Token>;
+    fn store(&self, token: &Token);
+    fn clear(&self);
+}
+
+/// Windows Credential Manager (or the platform's store), with `YAP_TOKEN`
+/// taking precedence for development.
+pub struct Keyring;
+
 fn entry() -> Option<keyring::Entry> {
     keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).ok()
 }
 
-pub fn load_token() -> Option<String> {
-    if let Some(token) = &config::get().dev_token {
-        return Some(token.clone());
+impl TokenStore for Keyring {
+    fn load(&self) -> Option<Token> {
+        if let Some(token) = &config::get().dev_token {
+            return Some(Token::new(token));
+        }
+        entry()?
+            .get_password()
+            .ok()
+            .filter(|t| !t.is_empty())
+            .map(|t| Token::new(&t))
     }
-    entry()?.get_password().ok().filter(|t| !t.is_empty())
-}
 
-pub fn store_token(token: &str) {
-    if config::get().dev_token.is_some() {
-        return;
+    fn store(&self, token: &Token) {
+        if config::get().dev_token.is_some() {
+            return;
+        }
+        if let Some(entry) = entry() {
+            let _ = entry.set_password(token.as_str());
+        }
     }
-    if let Some(entry) = entry() {
-        let _ = entry.set_password(token);
-    }
-}
 
-pub fn clear_token() {
-    if let Some(entry) = entry() {
-        let _ = entry.delete_credential();
+    fn clear(&self) {
+        if let Some(entry) = entry() {
+            let _ = entry.delete_credential();
+        }
     }
 }

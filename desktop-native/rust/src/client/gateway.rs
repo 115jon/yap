@@ -9,29 +9,27 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::{interval_at, Instant, Interval};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::api::{self, Api};
+use yap_core::{config, Api, ApiError, GatewayEvents};
 use yap_protocol::{GatewayOp, DEFAULT_HEARTBEAT_INTERVAL_MS, HEARTBEAT_FRAME};
-
-use super::{config, Command, Event};
 
 /// Runs until the task is aborted, reconnecting with backoff.
 pub async fn run(
     api: Api,
     user_id: String,
     mut outgoing: UnboundedReceiver<String>,
-    events: UnboundedSender<Command>,
+    events: GatewayEvents,
 ) {
     let mut attempt: u32 = 0;
     loop {
         let mut reached_ready = false;
         let result = session(&api, &user_id, &mut outgoing, &events, &mut reached_ready).await;
-        let _ = events.send(Command::Event(Event::GatewayClosed));
+        events.closed();
         // Only a session that got to Ready resets the backoff; a server that
         // accepts and then closes must not be retried every second.
         if reached_ready {
@@ -41,8 +39,8 @@ pub async fn run(
             Ok(true) => return,
             Ok(false) => {}
             Err(error) => {
-                if api::is_unauthorized(&error) {
-                    let _ = events.send(Command::Event(Event::SessionExpired));
+                if matches!(error.downcast_ref(), Some(ApiError::Unauthorized)) {
+                    events.session_expired();
                     return;
                 }
                 eprintln!("[gateway] {error:#}");
@@ -68,7 +66,7 @@ async fn session(
     api: &Api,
     user_id: &str,
     outgoing: &mut UnboundedReceiver<String>,
-    events: &UnboundedSender<Command>,
+    events: &GatewayEvents,
     reached_ready: &mut bool,
 ) -> Result<bool> {
     let cfg = config::get();
@@ -122,13 +120,13 @@ async fn session(
                     }
                     Some(GatewayOp::Ready | GatewayOp::Resumed) => {
                         *reached_ready = true;
-                        eprintln!("[startup] gateway ready after {} ms", super::started_at().elapsed().as_millis());
-                        let _ = events.send(Command::Event(Event::GatewayReady));
+                        eprintln!("[startup] gateway ready after {} ms", yap_core::started_at().elapsed().as_millis());
+                        events.ready();
                     }
                     Some(GatewayOp::Dispatch) => {
-                        let event = data.get("event").and_then(Value::as_str).unwrap_or_default().to_owned();
+                        let event = data.get("event").and_then(Value::as_str).unwrap_or_default();
                         let payload = data.get("data").cloned().unwrap_or(Value::Null);
-                        let _ = events.send(Command::Event(Event::Dispatch(event, payload)));
+                        events.dispatch(event, payload);
                     }
                     Some(GatewayOp::Error) => eprintln!("[gateway] error frame: {data}"),
                     _ => {}

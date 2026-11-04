@@ -1,0 +1,19 @@
+[package]
+name = "yap-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Yap client core: typed state store (pure reducer), effect runner, REST and auth. No Qt."
+
+[dependencies]
+keyring.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+yap-protocol.workspace = true
+
+[lints]
+workspace = true

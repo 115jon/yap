@@ -16,7 +16,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use yap_protocol::{GatewayOp, HEARTBEAT_FRAME};
 
-use super::config;
+use yap_core::config;
 
 pub enum Frame {
     /// `{op, d}` from the server (Hello and HeartbeatACK are handled here,
