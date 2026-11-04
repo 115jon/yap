@@ -15,7 +15,9 @@ pub mod runtime;
 pub mod store;
 
 pub use api::{Api, ApiError, Token};
-pub use runtime::{spawn, started_at, GatewayEvents, GatewayHandle, Realtime, Sink, VoiceEvents};
+pub use runtime::{
+    shutdown, spawn, started_at, GatewayEvents, GatewayHandle, Realtime, Sink, VoiceEvents,
+};
 pub use store::{
     Command, LocalOffset, Phase, ViewDiff, ViewUpdate, VoiceCommand, VoiceMember, VoiceTarget,
     VoiceUpdate,

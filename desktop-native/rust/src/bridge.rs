@@ -175,6 +175,12 @@ pub struct SessionRust {
     me_initials: QString,
 }
 
+impl Drop for SessionRust {
+    fn drop(&mut self) {
+        client::shutdown();
+    }
+}
+
 #[derive(Default)]
 pub struct NavRust {
     connected: bool,

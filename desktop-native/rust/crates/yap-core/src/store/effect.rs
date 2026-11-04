@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 use yap_protocol::rest::{ChannelsResponse, Message, Server, User};
 use yap_protocol::Frame;
 
+pub use yap_cache::Write as CacheWrite;
+
 use super::{CallId, Input, RequestId, SessionId, SignInId, ViewUpdate, VoiceCommand, VoiceTarget};
 use crate::api::{ApiError, Token};
 
@@ -31,6 +33,18 @@ pub enum Effect {
     GatewayDisconnect,
     /// Read the stored session; answered by `Input::TokenLoaded`.
     LoadToken,
+    /// Open the cache and read the last session's snapshot; answered by
+    /// `Input::SnapshotLoaded`.
+    LoadSnapshot,
+    /// Replace part of a user's snapshot (write-behind, coalesced).
+    CacheWrite {
+        user_id: String,
+        write: CacheWrite,
+    },
+    /// Wipe a user's snapshot (sign-out, expired session, another account).
+    CacheClear {
+        user_id: String,
+    },
     StoreToken(Token),
     ClearToken,
     /// Revoke a session on Kova (best effort, no answer).

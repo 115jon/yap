@@ -74,6 +74,12 @@ pub fn start(sink: Sink) -> bool {
     COMMANDS.set(tx).is_ok()
 }
 
+/// Commits the snapshot cache writes still pending (waits up to a second).
+/// Called once, when the `Session` singleton goes away with the engine.
+pub fn shutdown() {
+    yap_core::shutdown();
+}
+
 /// Sends a command to the core (dropped before `start`).
 pub fn command(command: Command) {
     if let Some(tx) = COMMANDS.get() {

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/yap-core", "crates/yap-protocol", "crates/yap-realtime"]
+members = ["crates/yap-cache", "crates/yap-core", "crates/yap-protocol", "crates/yap-realtime"]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,6 +14,7 @@ keyring = { version = "3", features = ["windows-native"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "native-tls"] }
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+yap-cache = { path = "crates/yap-cache" }
 yap-core = { path = "crates/yap-core" }
 yap-protocol = { path = "crates/yap-protocol" }
 yap-realtime = { path = "crates/yap-realtime" }

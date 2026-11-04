@@ -7,14 +7,16 @@
 //! inputs, so a slow request no longer holds up dispatches or other commands.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
+use yap_cache::{Cache, Snapshot};
 
 use crate::api::{Api, Token};
 use crate::auth::{self, TokenStore};
@@ -35,6 +37,44 @@ const MAX_INPUTS_PER_BATCH: usize = 64;
 
 /// HTTP requests in flight at once; more wait for a slot.
 const MAX_HTTP_IN_FLIGHT: usize = 8;
+
+/// The snapshot writer commits at most this often.
+const CACHE_WRITE_INTERVAL: Duration = Duration::from_millis(500);
+
+/// How long [`shutdown`] waits for the last snapshot write.
+const CACHE_SHUTDOWN_WAIT: Duration = Duration::from_secs(1);
+
+/// The snapshot writer, for [`shutdown`]. Set once the cache is opened.
+static CACHE_WRITER: OnceLock<yap_cache::Writer> = OnceLock::new();
+
+/// Commits the snapshot writes still pending. Call once on the way out
+/// (it waits up to a second); a no-op without a cache.
+pub fn shutdown() {
+    if let Some(writer) = CACHE_WRITER.get() {
+        if !writer.flush(CACHE_SHUTDOWN_WAIT) {
+            eprintln!("[cache] last write did not finish before exit");
+        }
+    }
+}
+
+/// Opens the cache and reads the newest snapshot; any failure is "no cache".
+fn read_snapshot(path: &std::path::Path) -> (Option<Cache>, Option<Snapshot>) {
+    let started = Instant::now();
+    let cache = match Cache::open(path) {
+        Ok(cache) => cache,
+        Err(error) => {
+            eprintln!("[cache] {error}; starting without it");
+            return (None, None);
+        }
+    };
+    let snapshot = cache.latest().unwrap_or_else(|error| {
+        eprintln!("[cache] {error}; ignoring the snapshot");
+        None
+    });
+    let ms = started.elapsed().as_millis();
+    eprintln!("[cache] snapshot read in {ms} ms");
+    (Some(cache), snapshot)
+}
 
 /// When the core was started, for startup timing in the log.
 pub fn started_at() -> &'static Instant {
@@ -176,6 +216,10 @@ pub struct Runner {
     /// Answers requests locally instead of the network (`YAP_FIXTURE`).
     fixture: Option<Fixture>,
     fixture_serial: u64,
+    /// Where the snapshot cache lives; `None` runs without one.
+    cache_path: Option<PathBuf>,
+    /// The writer thread, once `LoadSnapshot` started it.
+    cache: Option<yap_cache::Writer>,
 }
 
 impl Runner {
@@ -203,7 +247,15 @@ impl Runner {
             batch: Vec::new(),
             fixture: None,
             fixture_serial: 0,
+            cache_path: None,
+            cache: None,
         }
+    }
+
+    /// Keeps the snapshot cache at `path` (`None`: no cache).
+    pub fn with_cache(mut self, path: Option<PathBuf>) -> Self {
+        self.cache_path = path;
+        self
     }
 
     /// Serves every request from `fixture` and keeps off the keyring, the
@@ -239,6 +291,8 @@ impl Runner {
                 });
             }
             Effect::LoadToken => self.send(Input::TokenLoaded(Some(Token::new("fixture")))),
+            // The fixture never reads or writes the snapshot cache.
+            Effect::LoadSnapshot => self.send(Input::SnapshotLoaded(None)),
             Effect::GatewayConnect { session, .. } => self.send(Input::Gateway {
                 session: *session,
                 event: GatewayEvent::Ready,
@@ -270,7 +324,9 @@ impl Runner {
             | Effect::SignInStart(_)
             | Effect::SignInCancel
             | Effect::Voice { .. }
-            | Effect::VoiceForget(_) => {}
+            | Effect::VoiceForget(_)
+            | Effect::CacheWrite { .. }
+            | Effect::CacheClear { .. } => {}
             Effect::View(_) | Effect::Later { .. } | Effect::StartupMark(_) => return false,
         }
         true
@@ -330,6 +386,17 @@ impl Runner {
             }
             Effect::GatewayDisconnect => self.disconnect_gateway(),
             Effect::LoadToken => self.keyring(KeyringOp::Load),
+            Effect::LoadSnapshot => self.load_snapshot(),
+            Effect::CacheWrite { user_id, write } => {
+                if let Some(cache) = &self.cache {
+                    cache.write(&user_id, write);
+                }
+            }
+            Effect::CacheClear { user_id } => {
+                if let Some(cache) = &self.cache {
+                    cache.clear(&user_id);
+                }
+            }
             Effect::StoreToken(token) => self.keyring(KeyringOp::Store(token)),
             Effect::ClearToken => self.keyring(KeyringOp::Clear),
             Effect::Revoke(token) => {
@@ -379,6 +446,38 @@ impl Runner {
                 }
             }
         }
+    }
+
+    /// Starts the writer thread and reads the snapshot on a blocking thread;
+    /// always answers with `Input::SnapshotLoaded`.
+    fn load_snapshot(&mut self) {
+        let Some(path) = self.cache_path.clone() else {
+            return self.send(Input::SnapshotLoaded(None));
+        };
+        let writer = match yap_cache::Writer::spawn(CACHE_WRITE_INTERVAL) {
+            Ok(writer) => writer,
+            Err(error) => {
+                eprintln!("[cache] writer thread: {error}");
+                return self.send(Input::SnapshotLoaded(None));
+            }
+        };
+        let _ = CACHE_WRITER.set(writer.clone());
+        self.cache = Some(writer.clone());
+        let inbox = self.inbox.clone();
+        tokio::spawn(async move {
+            let read = tokio::task::spawn_blocking(move || {
+                let (cache, snapshot) = read_snapshot(&path);
+                writer.attach(cache);
+                snapshot
+            })
+            .await;
+            // A failed read is no snapshot; the launch must not wait forever.
+            let snapshot = read.unwrap_or_else(|error| {
+                eprintln!("[cache] {error}");
+                None
+            });
+            let _ = inbox.send(Input::SnapshotLoaded(snapshot.map(Box::new)));
+        });
     }
 
     fn keyring(&self, op: KeyringOp) {
@@ -481,7 +580,11 @@ pub fn spawn(
     }
     let state = State::new(&config::get().api_base).with_local_offset(local_offset);
     runtime().spawn(async move {
-        let runner = Runner::new(http, inbox.clone(), sink, realtime, tokens).with_fixture(fixture);
+        // The fixture runs offline and never touches the cache.
+        let cache = fixture.is_none().then(yap_cache::default_path).flatten();
+        let runner = Runner::new(http, inbox.clone(), sink, realtime, tokens)
+            .with_fixture(fixture)
+            .with_cache(cache);
         // Commands join the same queue as effect results, in arrival order.
         tokio::spawn(async move {
             while let Some(command) = command_rx.recv().await {

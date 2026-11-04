@@ -1,0 +1,20 @@
+[package]
+name = "yap-cache"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Yap local snapshot cache: the last session's me, servers, channels, route and newest messages per user, in SQLite. No tokens."
+
+[dependencies]
+rusqlite = { version = "0.41", features = ["bundled"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+yap-protocol.workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints]
+workspace = true

@@ -8,16 +8,21 @@ use yap_protocol::payload::{ChannelRef, ServerSubscribe, VoiceChannelJoin, Voice
 use yap_protocol::rest::{ChannelType, Message, Server, User};
 use yap_protocol::{Frame, GatewayOp};
 
-use super::state::{Boot, MessageLog, Pending, Phase, ServerChannels, Session, State, VoiceCall};
+use super::state::{
+    Boot, MessageLog, Pending, Phase, ServerChannels, Session, Startup, State, VoiceCall,
+};
 use super::view::{self, ChannelTreeRow, MessageRow, Row, RowContext, ViewDiff, ViewUpdate};
 use super::view::{MeView, VoiceView};
 use super::{
-    ApiRequest, ApiResponse, CallId, Command, Dispatch, Effect, GatewayEvent, Input, RequestId,
-    SessionId, SignInEvent, SignInId, VoiceCommand, VoiceTarget, VoiceUpdate,
+    ApiRequest, ApiResponse, CacheWrite, CallId, Command, Dispatch, Effect, GatewayEvent, Input,
+    RequestId, SessionId, SignInEvent, SignInId, Snapshot, VoiceCommand, VoiceTarget, VoiceUpdate,
 };
 use crate::api::{ApiError, Token};
 
 const SESSION_ENDED: &str = "Your session ended. Sign in again.";
+
+/// The status line while a view shown from the cache is revalidated.
+pub const REFRESHING: &str = "Refreshing…";
 
 /// How long the typing line stays after the last typing event.
 pub const TYPING_TIMEOUT: Duration = Duration::from_secs(8);
@@ -27,8 +32,8 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
     let mut fx = Effects(Vec::new());
     match input {
         Input::User(command) => state.on_command(&mut fx, command),
-        Input::TokenLoaded(Some(token)) => state.begin_session(&mut fx, token),
-        Input::TokenLoaded(None) => state.set_phase(&mut fx, Phase::SignedOut),
+        Input::TokenLoaded(token) => state.on_token(&mut fx, token),
+        Input::SnapshotLoaded(snapshot) => state.on_snapshot(&mut fx, snapshot),
         Input::Http { id, result } => state.on_http(&mut fx, id, result),
         Input::SignIn { attempt, event } => state.on_sign_in(&mut fx, attempt, event),
         Input::Gateway { session, event } => state.on_gateway(&mut fx, session, event),
@@ -259,11 +264,65 @@ impl State {
         }
     }
 
+    // Snapshot cache (write-through; the writer coalesces)
+
+    /// Stores part of the signed-in user's snapshot.
+    fn persist(&self, fx: &mut Effects, write: CacheWrite) {
+        if let Some(me) = self.me() {
+            fx.push(Effect::CacheWrite {
+                user_id: me.id.clone(),
+                write,
+            });
+        }
+    }
+
+    fn persist_route(&self, fx: &mut Effects) {
+        self.persist(
+            fx,
+            CacheWrite::Route {
+                server_id: self.active_server.clone(),
+                channel_id: self.active_channel.clone(),
+            },
+        );
+    }
+
+    /// The open channel's newest window.
+    fn persist_messages(&self, fx: &mut Effects) {
+        let Some(log) = &self.messages else {
+            return;
+        };
+        let skip = log.len().saturating_sub(yap_cache::MESSAGE_WINDOW);
+        self.persist(
+            fx,
+            CacheWrite::Messages {
+                channel_id: log.channel_id.clone(),
+                messages: log.iter().skip(skip).cloned().collect(),
+            },
+        );
+    }
+
+    /// Wipes the signed-in user's snapshot (sign-out, session gone).
+    fn forget_user(&self, fx: &mut Effects) {
+        if let Some(me) = self.me() {
+            fx.push(Effect::CacheClear {
+                user_id: me.id.clone(),
+            });
+        }
+    }
+
     // Commands
 
     fn on_command(&mut self, fx: &mut Effects, command: Command) {
         match command {
-            Command::Start => fx.push(Effect::LoadToken),
+            Command::Start => {
+                // The keyring and the cache are read in parallel.
+                self.startup = Startup::Waiting {
+                    token: None,
+                    snapshot: None,
+                };
+                fx.push(Effect::LoadToken);
+                fx.push(Effect::LoadSnapshot);
+            }
             Command::StartSignIn => {
                 let attempt = SignInId(self.next_id());
                 self.sign_in = Some(attempt);
@@ -286,7 +345,10 @@ impl State {
                     self.begin_session(fx, Token::new(token));
                 }
             }
-            Command::SignOut => self.end_session(fx, true),
+            Command::SignOut => {
+                self.forget_user(fx);
+                self.end_session(fx, true);
+            }
             Command::SelectServer(id) => self.select_server(fx, id),
             Command::SelectChannel(id) => self.select_channel(fx, &id),
             Command::Send(text) => self.send(fx, text.trim()),
@@ -307,13 +369,180 @@ impl State {
 
     // Session
 
-    fn begin_session(&mut self, fx: &mut Effects, token: Token) {
+    fn on_token(&mut self, fx: &mut Effects, token: Option<Token>) {
+        match &mut self.startup {
+            Startup::Idle => match token {
+                Some(token) => self.begin_session(fx, token),
+                None => self.set_phase(fx, Phase::SignedOut),
+            },
+            Startup::Waiting { token: slot, .. } => {
+                *slot = Some(token);
+                self.launch(fx);
+            }
+            Startup::Done => {}
+        }
+    }
+
+    fn on_snapshot(&mut self, fx: &mut Effects, snapshot: Option<Box<Snapshot>>) {
+        if let Startup::Waiting { snapshot: slot, .. } = &mut self.startup {
+            *slot = Some(snapshot);
+            self.launch(fx);
+        }
+    }
+
+    /// Starts the launch once the token and the snapshot are both read.
+    fn launch(&mut self, fx: &mut Effects) {
+        let Startup::Waiting {
+            token: Some(_),
+            snapshot: Some(_),
+        } = &self.startup
+        else {
+            return;
+        };
+        let Startup::Waiting {
+            token: Some(token),
+            snapshot: Some(snapshot),
+        } = std::mem::replace(&mut self.startup, Startup::Done)
+        else {
+            return;
+        };
+        match (token, snapshot) {
+            (None, snapshot) => {
+                // Signed out since: what the snapshot shows is no one's now.
+                if let Some(snapshot) = snapshot {
+                    fx.push(Effect::CacheClear {
+                        user_id: snapshot.me.id,
+                    });
+                }
+                self.set_phase(fx, Phase::SignedOut);
+            }
+            (Some(token), None) => self.begin_session(fx, token),
+            (Some(token), Some(snapshot)) => self.begin_cached_session(fx, token, *snapshot),
+        }
+    }
+
+    /// Ends whatever ran before a new session (and any launch still waiting).
+    fn replace_session(&mut self, fx: &mut Effects) {
         // A pasted token wins over a device sign-in still in flight; its
         // later approval would otherwise replace this session.
         if self.sign_in.take().is_some() {
             fx.push(Effect::SignInCancel);
         }
+        if matches!(self.startup, Startup::Waiting { .. }) {
+            self.startup = Startup::Done;
+        }
         self.end_session(fx, false);
+    }
+
+    /// Shows the last session at once and revalidates all of it in parallel:
+    /// `me`, servers, the cached server's channels and the cached channel's
+    /// page, with the gateway (its ticket) connecting alongside as the
+    /// cached user. Results reconcile through the same diffs as live events.
+    fn begin_cached_session(&mut self, fx: &mut Effects, token: Token, snapshot: Snapshot) {
+        self.replace_session(fx);
+        let Snapshot {
+            me,
+            servers,
+            channels,
+            active_server,
+            active_channel,
+            messages,
+            ..
+        } = snapshot;
+        let session = SessionId(self.next_id());
+        fx.push(Effect::GatewayConnect {
+            session,
+            token: token.clone(),
+            user_id: me.id.clone(),
+        });
+        self.names.insert(me.id.clone(), me.label().to_owned());
+        fx.view(ViewUpdate::Me(view::me(&me, &self.api_base)));
+        self.session = Some(Session {
+            id: session,
+            token,
+            me: Some(me),
+            gateway: Default::default(),
+        });
+        self.refreshing = true;
+
+        self.servers = servers;
+        self.sync_servers(fx);
+        self.channels = channels
+            .into_iter()
+            .map(|(id, tree)| (id, ServerChannels::new(tree)))
+            .collect();
+        let server = active_server
+            .filter(|id| self.servers.iter().any(|s| &s.id == id))
+            .or_else(|| self.servers.first().map(|s| s.id.clone()));
+        if let Some(server) = &server {
+            self.active_server = Some(server.clone());
+            fx.view(ViewUpdate::ActiveServer {
+                id: server.clone(),
+                name: self.active_server_name(),
+            });
+            if self.channels.contains_key(server) {
+                self.tree_server = Some(server.clone());
+                self.reset_tree(fx);
+            }
+        }
+        let channel = active_channel.filter(|_| server.is_some()).and_then(|id| {
+            let list = self.channels.get(server.as_deref()?)?;
+            list.get(&id)
+                .filter(|c| c.channel_type == ChannelType::Text)
+                .map(|c| (id.clone(), c.name.clone()))
+        });
+        if let Some((id, name)) = &channel {
+            self.active_channel = Some(id.clone());
+            fx.view(ViewUpdate::ActiveChannel {
+                id: id.clone(),
+                name: name.clone(),
+            });
+            let mut log = MessageLog::new(id);
+            for message in messages.into_iter().filter(|m| &m.channel_id == id) {
+                self.remember_author(&message);
+                log.upsert(message);
+            }
+            let shown = !log.is_empty();
+            self.messages = Some(log);
+            fx.messages(ViewDiff::Reset(self.message_rows()));
+            if shown {
+                fx.push(Effect::StartupMark("cached content"));
+            }
+        }
+        self.set_phase(fx, Phase::Ready);
+        self.set_status(fx, REFRESHING);
+
+        self.pending.me = self.http(fx, ApiRequest::Me);
+        self.pending.servers = self.http(fx, ApiRequest::Servers);
+        if let Some(server_id) = server {
+            let request = ApiRequest::Channels {
+                server_id: server_id.clone(),
+            };
+            self.pending.channels = self.http(fx, request).map(|req| (req, server_id));
+        }
+        if let Some((channel_id, _)) = channel {
+            self.load_page(fx, &channel_id);
+        }
+    }
+
+    /// Ends the revalidation once every request it started has answered.
+    fn settle_refresh(&mut self, fx: &mut Effects) {
+        let pending = &self.pending;
+        let waiting = pending.me.is_some()
+            || pending.servers.is_some()
+            || pending.channels.is_some()
+            || pending.page.is_some();
+        if self.refreshing && !waiting {
+            self.refreshing = false;
+            // An error shown meanwhile stays.
+            if self.status == REFRESHING {
+                self.set_status(fx, "");
+            }
+        }
+    }
+
+    fn begin_session(&mut self, fx: &mut Effects, token: Token) {
+        self.replace_session(fx);
         self.set_phase(fx, Phase::Loading);
         self.set_status(fx, "Signing in…");
         self.session = Some(Session {
@@ -366,6 +595,7 @@ impl State {
         self.sync_tree(fx);
         self.pending = Pending::default();
         self.boot = None;
+        self.refreshing = false;
         self.set_connected(fx, false);
         self.set_phase(fx, Phase::SignedOut);
     }
@@ -373,6 +603,7 @@ impl State {
     /// A request failed: a 401 ends the session, anything else is a status line.
     fn fail(&mut self, fx: &mut Effects, error: &ApiError) {
         if error.is_unauthorized() {
+            self.forget_user(fx);
             self.end_session(fx, false);
             fx.push(Effect::ClearToken);
             self.set_status(fx, SESSION_ENDED);
@@ -423,6 +654,16 @@ impl State {
     // HTTP results
 
     fn on_http(&mut self, fx: &mut Effects, id: RequestId, result: Result<ApiResponse, ApiError>) {
+        self.route_http(fx, id, result);
+        self.settle_refresh(fx);
+    }
+
+    fn route_http(
+        &mut self,
+        fx: &mut Effects,
+        id: RequestId,
+        result: Result<ApiResponse, ApiError>,
+    ) {
         let pending = &mut self.pending;
         if pending.me == Some(id) {
             pending.me = None;
@@ -457,6 +698,26 @@ impl State {
         let Some(session) = &mut self.session else {
             return;
         };
+        if let Some(cached) = &session.me {
+            // A session shown from the cache: the gateway is already up as
+            // the cached user.
+            if cached.id != me.id {
+                // The token is someone else's: drop the cached view and
+                // start over as them.
+                fx.push(Effect::CacheClear {
+                    user_id: cached.id.clone(),
+                });
+                let token = session.token.clone();
+                return self.begin_session(fx, token);
+            }
+            fx.push(Effect::StoreToken(session.token.clone()));
+            if *cached != me {
+                self.names.insert(me.id.clone(), me.label().to_owned());
+                fx.view(ViewUpdate::Me(view::me(&me, &self.api_base)));
+            }
+            session.me = Some(me.clone());
+            return self.persist(fx, CacheWrite::Me(Box::new(me)));
+        }
         fx.push(Effect::StoreToken(session.token.clone()));
         self.names.insert(me.id.clone(), me.label().to_owned());
         fx.view(ViewUpdate::Me(view::me(&me, &self.api_base)));
@@ -465,7 +726,8 @@ impl State {
             token: session.token.clone(),
             user_id: me.id.clone(),
         });
-        session.me = Some(me);
+        session.me = Some(me.clone());
+        self.persist(fx, CacheWrite::Me(Box::new(me)));
         self.set_status(fx, "Loading servers…");
         let early = self.boot.as_mut().and_then(|boot| {
             boot.me_done = true;
@@ -477,6 +739,14 @@ impl State {
     }
 
     fn me_failed(&mut self, fx: &mut Effects, error: &ApiError) {
+        if self.me().is_some() {
+            // A cached session: a 401 signs out (and wipes the snapshot);
+            // anything else keeps the cached view up, offline.
+            if !error.is_unauthorized() {
+                self.refreshing = false;
+            }
+            return self.fail(fx, error);
+        }
         self.session = None;
         self.boot = None;
         self.pending = Pending::default();
@@ -501,15 +771,56 @@ impl State {
     fn apply_servers(&mut self, fx: &mut Effects, servers: Vec<Server>) {
         self.servers = servers;
         self.sync_servers(fx);
+        self.persist(fx, CacheWrite::Servers(self.servers.clone()));
         let keep = self
             .active_server
             .clone()
             .filter(|id| self.servers.iter().any(|s| &s.id == id));
-        let first = self.servers.first().map(|s| s.id.clone());
-        match keep.or(first) {
+        match keep {
+            // Revalidating the cached server: its channels were requested
+            // with everything else, so only its name can have changed.
+            Some(id) if self.refreshing => {
+                let name = self.active_server_name();
+                fx.view(ViewUpdate::ActiveServer { id, name });
+            }
             Some(id) => self.select_server(fx, id),
-            None => self.finish_boot(fx),
+            None => match self.servers.first().map(|s| s.id.clone()) {
+                Some(first) => self.select_server(fx, first),
+                None => {
+                    self.clear_route(fx);
+                    self.finish_boot(fx);
+                }
+            },
         }
+    }
+
+    /// No server is left (a cached one went away): clear what showed it.
+    fn clear_route(&mut self, fx: &mut Effects) {
+        if self.active_server.take().is_none() {
+            return;
+        }
+        fx.view(ViewUpdate::ActiveServer {
+            id: String::new(),
+            name: String::new(),
+        });
+        self.tree_server = None;
+        self.sync_tree(fx);
+        self.pending.channels = None;
+        self.clear_channel(fx);
+        self.persist_route(fx);
+    }
+
+    /// No text channel is open.
+    fn clear_channel(&mut self, fx: &mut Effects) {
+        self.active_channel = None;
+        self.messages = None;
+        self.pending.page = None;
+        fx.view(ViewUpdate::ActiveChannel {
+            id: String::new(),
+            name: String::new(),
+        });
+        self.set_typing(fx, Vec::new());
+        fx.messages(ViewDiff::Reset(Vec::new()));
     }
 
     fn select_server(&mut self, fx: &mut Effects, id: String) {
@@ -521,6 +832,7 @@ impl State {
             id: id.clone(),
             name: self.active_server_name(),
         });
+        self.persist_route(fx);
         let request = ApiRequest::Channels {
             server_id: id.clone(),
         };
@@ -549,6 +861,14 @@ impl State {
             .map(|c| (c.id.clone(), c.name.clone()));
         let first_text = list.first_text().map(|c| c.id.clone());
         let same_tree = self.tree_server.as_deref() == Some(server_id.as_str());
+        let tree = list.to_response();
+        self.persist(
+            fx,
+            CacheWrite::Channels {
+                server_id: server_id.clone(),
+                tree,
+            },
+        );
         self.channels.insert(server_id.clone(), list);
         self.tree_server = Some(server_id);
         if same_tree {
@@ -565,15 +885,8 @@ impl State {
         match first_text {
             Some(channel) => self.select_channel(fx, &channel),
             None => {
-                self.active_channel = None;
-                self.messages = None;
-                self.pending.page = None;
-                fx.view(ViewUpdate::ActiveChannel {
-                    id: String::new(),
-                    name: String::new(),
-                });
-                self.set_typing(fx, Vec::new());
-                fx.messages(ViewDiff::Reset(Vec::new()));
+                self.clear_channel(fx);
+                self.persist_route(fx);
                 self.finish_boot(fx);
             }
         }
@@ -607,6 +920,7 @@ impl State {
         });
         self.set_typing(fx, Vec::new());
         fx.messages(ViewDiff::Reset(Vec::new()));
+        self.persist_route(fx);
         self.gateway_send(fx, Self::channel_frame(GatewayOp::ChannelSubscribe, id));
         self.load_page(fx, id);
     }
@@ -635,13 +949,32 @@ impl State {
         if self.active_channel.as_deref() != Some(channel_id) {
             return;
         }
+        // A refetch of what is on screen (the cached window, or a refetch
+        // after a reconnect) changes only the rows that differ.
+        let shown = self
+            .messages
+            .as_ref()
+            .is_some_and(|log| log.channel_id == channel_id && !log.is_empty());
+        let before = if shown {
+            self.message_rows()
+        } else {
+            Vec::new()
+        };
         let mut log = MessageLog::new(channel_id);
         for message in messages {
             self.remember_author(&message);
             log.upsert(message);
         }
         self.messages = Some(log);
-        fx.messages(ViewDiff::Reset(self.message_rows()));
+        let rows = self.message_rows();
+        if shown {
+            for diff in view::ordered_diff(&before, &rows) {
+                fx.messages(diff);
+            }
+        } else {
+            fx.messages(ViewDiff::Reset(rows));
+        }
+        self.persist_messages(fx);
         if !std::mem::replace(&mut self.first_page_shown, true) {
             fx.push(Effect::StartupMark("messages shown"));
         }
@@ -704,6 +1037,7 @@ impl State {
             return;
         };
         let at = log.upsert(message);
+        self.persist_messages(fx);
         match before {
             Some(before) => self.emit_message_changes(fx, at, before),
             None => {
@@ -779,6 +1113,7 @@ impl State {
                 self.set_connected(fx, false);
             }
             GatewayEvent::SessionExpired => {
+                self.forget_user(fx);
                 self.end_session(fx, false);
                 fx.push(Effect::ClearToken);
                 self.set_status(fx, SESSION_ENDED);
@@ -806,6 +1141,7 @@ impl State {
                     log.patch(&patch);
                 }
                 self.emit_message_changes(fx, at, before);
+                self.persist_messages(fx);
             }
             Dispatch::MessageDelete(delete) => {
                 let here = delete.channel_id.as_deref().is_none_or(|c| c == active);
@@ -824,6 +1160,7 @@ impl State {
                 }
                 fx.messages(ViewDiff::Remove { at, count: 1 });
                 self.emit_message_changes(fx, at, [below, None]);
+                self.persist_messages(fx);
             }
             Dispatch::TypingStart(typing) => {
                 let me = self.me().map(|me| me.id.as_str()).unwrap_or_default();

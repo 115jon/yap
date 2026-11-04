@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use yap_cache::Snapshot;
 use yap_protocol::rest::{Category, Channel, ChannelType, ChannelsResponse, Message, MessagePatch};
 use yap_protocol::rest::{Server, User};
 
@@ -75,6 +76,14 @@ impl ServerChannels {
 
     pub fn get(&self, id: &str) -> Option<&Channel> {
         self.channels.iter().find(|c| c.id == id)
+    }
+
+    /// The tree as the REST response had it (for the cache).
+    pub fn to_response(&self) -> ChannelsResponse {
+        ChannelsResponse {
+            channels: self.channels.clone(),
+            categories: self.categories.clone(),
+        }
     }
 
     pub fn first_text(&self) -> Option<&Channel> {
@@ -216,6 +225,22 @@ pub(super) struct Boot {
     pub early_servers: Option<Result<Vec<Server>, ApiError>>,
 }
 
+/// The launch: the stored token and the cached snapshot are read in
+/// parallel, and the session starts once both are known.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) enum Startup {
+    /// No `Start` yet: a token on its own starts a session (tests, tools).
+    #[default]
+    Idle,
+    /// Waiting for the token read and the snapshot read; `None` = not yet.
+    Waiting {
+        token: Option<Option<Token>>,
+        snapshot: Option<Option<Box<Snapshot>>>,
+    },
+    /// The launch is decided; late reads are ignored.
+    Done,
+}
+
 /// Everything the client knows. Built by [`State::new`], changed only by
 /// [`super::reduce`].
 #[derive(Debug, Clone, PartialEq)]
@@ -246,6 +271,9 @@ pub struct State {
     pub(super) pending: Pending,
     pub(super) boot: Option<Boot>,
     pub(super) first_page_shown: bool,
+    pub(super) startup: Startup,
+    /// The view came from the cache and is being revalidated.
+    pub(super) refreshing: bool,
     pub(super) next_id: u64,
 }
 
@@ -274,6 +302,8 @@ impl State {
             pending: Pending::default(),
             boot: None,
             first_page_shown: false,
+            startup: Startup::Idle,
+            refreshing: false,
             next_id: 0,
         }
     }
@@ -322,6 +352,11 @@ impl State {
 
     pub fn messages(&self) -> Option<&MessageLog> {
         self.messages.as_ref()
+    }
+
+    /// `true` while a view shown from the cache waits for the network.
+    pub fn refreshing(&self) -> bool {
+        self.refreshing
     }
 
     /// Names typing in the open channel.

@@ -9,8 +9,9 @@ use yap_core::store::view::{
     ChannelTreeRow, MeView, MessageRole, MessageRow, TreeKind, TreeRole, VoiceView,
 };
 use yap_core::store::{
-    reduce, ApiRequest, CallId, Command, Dispatch, Effect, GatewayEvent, Input, Phase, RequestId,
-    SignInEvent, State, ViewDiff, ViewUpdate, VoiceCommand, VoiceUpdate,
+    reduce, ApiRequest, ApiResponse, CacheWrite, CallId, Command, Dispatch, Effect, GatewayEvent,
+    Input, Phase, RequestId, SignInEvent, Snapshot, State, ViewDiff, ViewUpdate, VoiceCommand,
+    VoiceUpdate,
 };
 use yap_core::{ApiError, Token, VoiceMember};
 use yap_protocol::GatewayOp;
@@ -227,12 +228,6 @@ impl Client {
 }
 
 // Boot
-
-#[test]
-fn start_should_load_the_stored_token() {
-    let mut client = Client::new();
-    assert_eq!(client.command(Command::Start), vec![Effect::LoadToken]);
-}
 
 #[test]
 fn start_without_a_stored_token_should_show_sign_in() {
@@ -1359,4 +1354,370 @@ fn categories_sharing_a_rank_should_get_one_label_each() {
     };
     let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
     assert_eq!(ids, ["cat_a", "a1", "a2", "cat_b", "b1"]);
+}
+
+// Cached boot (snapshot cache)
+
+const ME: &str = "user_fixture_me";
+
+/// The last session as the cache returns it: the fixture user on the
+/// fixture server's text channel, with the fixture page.
+fn snapshot() -> Snapshot {
+    let ApiResponse::Messages(messages) = messages()
+        .decode(fixture("messages-page.json"))
+        .expect("page")
+    else {
+        panic!("not a page");
+    };
+    Snapshot {
+        me: serde_json::from_value(fixture("user-me.json")).expect("me"),
+        servers: serde_json::from_value(fixture("servers-list.json")).expect("servers"),
+        channels: vec![(
+            SERVER.into(),
+            serde_json::from_value(fixture("channels-response.json")).expect("channels"),
+        )],
+        active_server: Some(SERVER.into()),
+        active_channel: Some(TEXT.into()),
+        messages,
+        written_at_ms: 0,
+    }
+}
+
+fn cache_writes(fx: &[Effect]) -> Vec<&CacheWrite> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::CacheWrite { user_id, write } if user_id == ME => Some(write),
+            _ => None,
+        })
+        .collect()
+}
+
+fn cleared(fx: &[Effect], user: &str) -> bool {
+    fx.contains(&Effect::CacheClear {
+        user_id: user.into(),
+    })
+}
+
+impl Client {
+    /// `Start`, then the token and the snapshot reads; returns the effects
+    /// of the read that completed the launch.
+    fn launch(snapshot: Option<Snapshot>) -> (Self, Vec<Effect>) {
+        let mut client = Self::new();
+        client.command(Command::Start);
+        let token = client.input(Input::TokenLoaded(Some(Token::new("tok_fixture"))));
+        assert!(token.is_empty(), "waits for the snapshot: {token:#?}");
+        let fx = client.input(Input::SnapshotLoaded(snapshot.map(Box::new)));
+        (client, fx)
+    }
+
+    /// Answers the cached boot's requests with the fixtures, `page` for the page.
+    fn revalidate(&mut self, boot: &[Effect], page: Value) -> Vec<Effect> {
+        let mut fx = self.respond(
+            request_for(boot, &ApiRequest::Me),
+            &ApiRequest::Me,
+            fixture("user-me.json"),
+        );
+        fx.extend(self.respond(
+            request_for(boot, &ApiRequest::Servers),
+            &ApiRequest::Servers,
+            fixture("servers-list.json"),
+        ));
+        fx.extend(self.respond(
+            request_for(boot, &channels()),
+            &channels(),
+            fixture("channels-response.json"),
+        ));
+        fx.extend(self.respond(request_for(boot, &messages()), &messages(), page));
+        fx
+    }
+}
+
+#[test]
+fn start_should_read_the_token_and_the_snapshot_in_parallel() {
+    let mut client = Client::new();
+    assert_eq!(
+        client.command(Command::Start),
+        vec![Effect::LoadToken, Effect::LoadSnapshot]
+    );
+}
+
+#[test]
+fn a_snapshot_read_first_should_wait_for_the_token() {
+    let mut client = Client::new();
+    client.command(Command::Start);
+    let fx = client.input(Input::SnapshotLoaded(Some(Box::new(snapshot()))));
+    assert!(fx.is_empty(), "{fx:#?}");
+    let fx = client.input(Input::TokenLoaded(Some(Token::new("tok_fixture"))));
+    assert_eq!(message_diffs(&fx).len(), 1, "{fx:#?}");
+}
+
+#[test]
+fn cached_boot_should_show_the_snapshot_before_any_http_result() {
+    let (client, fx) = Client::launch(Some(snapshot()));
+    let rows = match message_diffs(&fx).as_slice() {
+        [ViewDiff::Reset(rows)] => rows.clone(),
+        other => panic!("{other:#?}"),
+    };
+    assert_eq!(rows.len(), 2);
+    assert!(fx.contains(&Effect::View(ViewUpdate::Phase(Phase::Ready))));
+    assert!(fx.contains(&Effect::View(ViewUpdate::ActiveChannel {
+        id: TEXT.into(),
+        name: "general".into(),
+    })));
+    assert!(fx.contains(&Effect::StartupMark("cached content")));
+    assert_eq!(client.state.phase(), Phase::Ready);
+    assert!(client.state.refreshing());
+    assert_eq!(client.state.status(), "Refreshing…");
+}
+
+#[test]
+fn cached_boot_should_revalidate_everything_in_one_batch() {
+    let (_, fx) = Client::launch(Some(snapshot()));
+    let kinds: Vec<ApiRequest> = requests(&fx).into_iter().map(|(_, r)| r).collect();
+    assert_eq!(
+        kinds,
+        vec![ApiRequest::Me, ApiRequest::Servers, channels(), messages()]
+    );
+}
+
+#[test]
+fn cached_boot_should_connect_the_gateway_as_the_cached_user_at_once() {
+    let (_, fx) = Client::launch(Some(snapshot()));
+    assert!(fx
+        .iter()
+        .any(|e| matches!(e, Effect::GatewayConnect { user_id, .. } if user_id == ME)));
+}
+
+#[test]
+fn revalidation_that_matches_the_cache_should_change_no_rows() {
+    let (mut client, boot) = Client::launch(Some(snapshot()));
+    let fx = client.revalidate(&boot, fixture("messages-page.json"));
+    assert!(message_diffs(&fx).is_empty(), "{:#?}", message_diffs(&fx));
+    assert!(tree_diffs(&fx).is_empty(), "{:#?}", tree_diffs(&fx));
+    assert!(
+        !views(&fx)
+            .iter()
+            .any(|v| matches!(v, ViewUpdate::Servers(_))),
+        "{fx:#?}"
+    );
+}
+
+#[test]
+fn revalidation_should_not_refetch_what_it_already_requested() {
+    let (mut client, boot) = Client::launch(Some(snapshot()));
+    let fx = client.revalidate(&boot, fixture("messages-page.json"));
+    assert!(requests(&fx).is_empty(), "{:#?}", requests(&fx));
+    assert!(
+        !fx.iter()
+            .any(|e| matches!(e, Effect::GatewayConnect { .. })),
+        "the gateway is already up: {fx:#?}"
+    );
+}
+
+#[test]
+fn revalidation_should_clear_the_refreshing_status() {
+    let (mut client, boot) = Client::launch(Some(snapshot()));
+    client.revalidate(&boot, fixture("messages-page.json"));
+    assert!(!client.state.refreshing());
+    assert_eq!(client.state.status(), "");
+}
+
+#[test]
+fn revalidation_should_update_only_the_changed_row() {
+    let (mut client, boot) = Client::launch(Some(snapshot()));
+    let mut page = fixture("messages-page.json");
+    page["messages"][0]["content"] = json!("edited while away");
+    let fx = client.revalidate(&boot, page);
+    match message_diffs(&fx).as_slice() {
+        [ViewDiff::Update { at: 0, roles, .. }] => {
+            assert!(roles.contains(&MessageRole::Body), "{roles:?}");
+        }
+        other => panic!("{other:#?}"),
+    }
+}
+
+#[test]
+fn revalidation_should_insert_new_messages_after_the_cached_ones() {
+    let (mut client, boot) = Client::launch(Some(snapshot()));
+    let mut rows = match message_diffs(&boot).as_slice() {
+        [ViewDiff::Reset(rows)] => rows.clone(),
+        other => panic!("{other:#?}"),
+    };
+    let mut page = fixture("messages-page.json");
+    let messages = page["messages"].as_array_mut().expect("messages");
+    messages.push(message_in(TEXT, "msg_fixture_new"));
+    let fx = client.revalidate(&boot, page);
+    assert!(
+        !message_diffs(&fx)
+            .iter()
+            .any(|d| matches!(d, ViewDiff::Reset(_))),
+        "{fx:#?}"
+    );
+    replay_messages(&mut rows, &fx);
+    let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["msg_fixture_0002", "msg_fixture_0001", "msg_fixture_new"]
+    );
+}
+
+#[test]
+fn unauthorized_revalidation_should_sign_out_and_clear_the_snapshot() {
+    let (mut client, boot) = Client::launch(Some(snapshot()));
+    let fx = client.fail(request_for(&boot, &ApiRequest::Me), ApiError::Unauthorized);
+    assert!(cleared(&fx, ME), "{fx:#?}");
+    assert!(fx.contains(&Effect::ClearToken));
+    assert!(fx.contains(&Effect::GatewayDisconnect));
+    assert_eq!(client.state.phase(), Phase::SignedOut);
+}
+
+#[test]
+fn unauthorized_page_during_revalidation_should_clear_the_snapshot() {
+    let (mut client, boot) = Client::launch(Some(snapshot()));
+    let fx = client.fail(request_for(&boot, &messages()), ApiError::Unauthorized);
+    assert!(cleared(&fx, ME), "{fx:#?}");
+    assert_eq!(client.state.phase(), Phase::SignedOut);
+}
+
+#[test]
+fn a_network_error_on_me_should_keep_the_cached_view() {
+    let (mut client, boot) = Client::launch(Some(snapshot()));
+    let fx = client.fail(
+        request_for(&boot, &ApiRequest::Me),
+        ApiError::Network("offline".into()),
+    );
+    assert!(!cleared(&fx, ME), "{fx:#?}");
+    assert_eq!(client.state.phase(), Phase::Ready);
+    assert_eq!(client.state.status(), "offline");
+    assert_eq!(client.message_count(), 2);
+}
+
+#[test]
+fn no_stored_token_should_sign_out_and_clear_the_snapshot() {
+    let mut client = Client::new();
+    client.command(Command::Start);
+    client.input(Input::SnapshotLoaded(Some(Box::new(snapshot()))));
+    let fx = client.input(Input::TokenLoaded(None));
+    assert!(cleared(&fx, ME), "{fx:#?}");
+    assert_eq!(client.state.phase(), Phase::SignedOut);
+}
+
+#[test]
+fn no_snapshot_should_boot_from_the_network_as_before() {
+    let (client, fx) = Client::launch(None);
+    let kinds: Vec<ApiRequest> = requests(&fx).into_iter().map(|(_, r)| r).collect();
+    assert_eq!(kinds, vec![ApiRequest::Me, ApiRequest::Servers]);
+    assert_eq!(client.state.phase(), Phase::Loading);
+}
+
+#[test]
+fn sign_out_should_clear_the_snapshot() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SignOut);
+    assert!(cleared(&fx, ME), "{fx:#?}");
+}
+
+#[test]
+fn gateway_session_expired_should_clear_the_snapshot() {
+    let mut client = Client::online();
+    let fx = client.gateway(GatewayEvent::SessionExpired);
+    assert!(cleared(&fx, ME), "{fx:#?}");
+}
+
+#[test]
+fn me_for_another_user_should_drop_the_cache_and_start_over() {
+    let (mut client, boot) = Client::launch(Some(snapshot()));
+    let mut other = fixture("user-me.json");
+    other["id"] = json!("user_fixture_other");
+    let fx = client.respond(request_for(&boot, &ApiRequest::Me), &ApiRequest::Me, other);
+    assert!(cleared(&fx, ME), "{fx:#?}");
+    assert!(fx.contains(&Effect::GatewayDisconnect));
+    let kinds: Vec<ApiRequest> = requests(&fx).into_iter().map(|(_, r)| r).collect();
+    assert_eq!(kinds, vec![ApiRequest::Me, ApiRequest::Servers]);
+    assert_eq!(client.state.phase(), Phase::Loading);
+    assert_eq!(client.message_count(), 0);
+}
+
+#[test]
+fn results_for_the_dropped_cached_session_should_be_ignored() {
+    let (mut client, boot) = Client::launch(Some(snapshot()));
+    let mut other = fixture("user-me.json");
+    other["id"] = json!("user_fixture_other");
+    client.respond(request_for(&boot, &ApiRequest::Me), &ApiRequest::Me, other);
+    let fx = client.respond(
+        request_for(&boot, &messages()),
+        &messages(),
+        fixture("messages-page.json"),
+    );
+    assert!(fx.is_empty(), "{fx:#?}");
+}
+
+#[test]
+fn a_token_pasted_while_launching_should_win_over_the_stored_one() {
+    let mut client = Client::new();
+    client.command(Command::Start);
+    client.command(Command::UseToken("tok_pasted".into()));
+    let fx = client.input(Input::TokenLoaded(Some(Token::new("tok_fixture"))));
+    let fx2 = client.input(Input::SnapshotLoaded(Some(Box::new(snapshot()))));
+    assert!(fx.is_empty() && fx2.is_empty(), "{fx:#?} {fx2:#?}");
+}
+
+#[test]
+fn a_network_boot_should_write_through_every_part_of_the_snapshot() {
+    let mut client = Client::new();
+    let fx = client.command(Command::UseToken("tok_fixture".into()));
+    let mut all = client.respond(
+        request_for(&fx, &ApiRequest::Me),
+        &ApiRequest::Me,
+        fixture("user-me.json"),
+    );
+    let fx = client.respond(
+        request_for(&fx, &ApiRequest::Servers),
+        &ApiRequest::Servers,
+        fixture("servers-list.json"),
+    );
+    all.extend(fx.clone());
+    let fx = client.respond(
+        request_for(&fx, &channels()),
+        &channels(),
+        fixture("channels-response.json"),
+    );
+    all.extend(fx.clone());
+    all.extend(client.respond(
+        request_for(&fx, &messages()),
+        &messages(),
+        fixture("messages-page.json"),
+    ));
+    let writes = cache_writes(&all);
+    assert!(writes
+        .iter()
+        .any(|w| matches!(w, CacheWrite::Me(me) if me.id == ME)));
+    assert!(writes
+        .iter()
+        .any(|w| matches!(w, CacheWrite::Servers(list) if list.len() == 2)));
+    assert!(writes
+        .iter()
+        .any(|w| matches!(w, CacheWrite::Channels { server_id, .. } if server_id == SERVER)));
+    assert!(writes.contains(&&CacheWrite::Route {
+        server_id: Some(SERVER.into()),
+        channel_id: Some(TEXT.into()),
+    }));
+    assert!(writes.iter().any(|w| matches!(
+        w,
+        CacheWrite::Messages { channel_id, messages } if channel_id == TEXT && messages.len() == 2
+    )));
+}
+
+#[test]
+fn a_new_message_should_write_the_channel_window() {
+    let mut client = Client::online();
+    let fx = client.gateway(GatewayEvent::Dispatch(message(
+        "msg_new",
+        "user_fixture_alice",
+        "2026-11-01T12:10:00.000Z",
+    )));
+    assert!(cache_writes(&fx).iter().any(|w| matches!(
+        w,
+        CacheWrite::Messages { messages, .. } if messages.len() == 3
+    )));
 }

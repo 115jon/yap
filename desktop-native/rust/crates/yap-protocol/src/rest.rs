@@ -80,7 +80,7 @@ pub struct SocketTicket {
 // Users, servers, channels
 
 /// A user (`GET /api/users/me` returns one for the signed-in account).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct User {
     pub id: String,
     #[serde(default)]
@@ -106,7 +106,7 @@ impl User {
 }
 
 /// A server (guild) from `GET /api/servers`.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Server {
     pub id: String,
     pub name: String,
@@ -116,7 +116,7 @@ pub struct Server {
 }
 
 /// Channel kind. Anything else decodes as [`ChannelType::Other`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChannelType {
     Text,
@@ -127,7 +127,7 @@ pub enum ChannelType {
 }
 
 /// A channel.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Channel {
     pub id: String,
     pub server_id: Option<String>,
@@ -143,7 +143,7 @@ pub struct Channel {
 }
 
 /// A channel category.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Category {
     pub id: String,
     pub server_id: Option<String>,
@@ -154,7 +154,7 @@ pub struct Category {
 }
 
 /// `GET /api/servers/:id/channels`.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ChannelsResponse {
     #[serde(default)]
     pub channels: Vec<Channel>,
@@ -165,7 +165,7 @@ pub struct ChannelsResponse {
 // Messages
 
 /// A message attachment.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Attachment {
     pub id: Option<String>,
     #[serde(default)]
@@ -177,7 +177,7 @@ pub struct Attachment {
 
 /// A chat message. `embeds`, `reactions` and `reply_to` stay untyped until a
 /// client renders them.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Message {
     pub id: String,
     pub channel_id: String,

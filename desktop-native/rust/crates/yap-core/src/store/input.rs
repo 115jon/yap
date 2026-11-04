@@ -4,6 +4,8 @@ use serde_json::Value;
 use yap_protocol::payload::{MessageDeleteEvent, TypingStartEvent};
 use yap_protocol::rest::{Message, MessagePatch};
 
+use yap_cache::Snapshot;
+
 use super::{ApiResponse, CallId, RequestId, SessionId, SignInId, VoiceUpdate};
 use crate::api::{ApiError, Token};
 
@@ -29,6 +31,8 @@ pub enum Input {
     User(Command),
     /// The stored session, if there is one.
     TokenLoaded(Option<Token>),
+    /// The last session's snapshot, if the cache has one.
+    SnapshotLoaded(Option<Box<Snapshot>>),
     Http {
         id: RequestId,
         result: Result<ApiResponse, ApiError>,
