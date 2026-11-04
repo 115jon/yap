@@ -94,7 +94,12 @@ Rectangle {
         selectedTextColor: Theme.ink1
         font.family: Theme.text
         font.pixelSize: 15
-        onLinkActivated: link => Qt.openUrlExternally(link)
+        // Message text is untrusted: only open web and mail links. On Windows
+        // openUrlExternally is ShellExecute, so file:// etc. would run things.
+        onLinkActivated: link => {
+            if (/^(https?:|mailto:)/i.test(link))
+                Qt.openUrlExternally(link)
+        }
 
         HoverHandler {
             cursorShape: body.hoveredLink.length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
