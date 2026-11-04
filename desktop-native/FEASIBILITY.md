@@ -35,19 +35,25 @@ weeks.
 
 ## Measured: prototype vs current desktop app (2026-11-04)
 
-Both against production `yap.115jon.com`, on the same PC.
+All against production `yap.115jon.com`, on the same PC. "Text-only" is
+the build before voice; "with voice" statically links LiveKit's libwebrtc
+too. That is the current tree.
 
-| metric                   | YapNative prototype                                        | Yap desktop 3.10.1 (Tauri + CEF)                                                                     |
-| ------------------------ | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| what ships               | one `YapNative.exe`, **30.7 MB**, only Windows system DLLs | **406 MB** per installed version (`libcef.dll` 244 MB, `Yap.exe` 40 MB, `dxcompiler.dll` 24 MB, ...) |
-| processes                | 1                                                          | 8                                                                                                    |
-| idle working set         | **82 MB**                                                  | 310 MB                                                                                               |
-| idle private bytes       | **97 MB**                                                  | 652 MB                                                                                               |
-| idle CPU, 60 s sample    | **0.03 %** of one core                                     | 6.7 % of one core (see the caveat below)                                                             |
-| threads                  | 91                                                         | 310                                                                                                  |
-| first frame after launch | **430–510 ms** (5 warm-cache runs)                         | did not run                                                                                          |
-| messages on screen       | 1.5–3.1 s (network-bound, see below)                       | did not run                                                                                          |
-| gateway Ready            | 1.6–3.3 s                                                  | did not run                                                                                          |
+| metric                   | YapNative, text-only             | YapNative, with voice                                                  | Yap desktop 3.10.1 (Tauri + CEF)                                                                     |
+| ------------------------ | -------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| what ships               | one `YapNative.exe`, **30.7 MB** | one `YapNative.exe`, **49.6 MB**                                       | **406 MB** per installed version (`libcef.dll` 244 MB, `Yap.exe` 40 MB, `dxcompiler.dll` 24 MB, ...) |
+| DLLs it needs            | Windows system DLLs only         | Windows system DLLs only                                               | its own CEF, ANGLE and SwiftShader DLLs                                                              |
+| processes                | 1                                | 1                                                                      | 8                                                                                                    |
+| idle working set         | **82 MB**                        | **84 MB**                                                              | 310 MB                                                                                               |
+| idle private bytes       | **97 MB**                        | **100 MB**                                                             | 652 MB                                                                                               |
+| idle CPU, 60 s sample    | **0.03 %** of one core           | **0.00 %**                                                             | 6.7 % of one core (see the caveat below)                                                             |
+| threads, idle            | 91                               | 91                                                                     | 310                                                                                                  |
+| first frame after launch | **430–510 ms**                   | 480–730 ms                                                             | did not run                                                                                          |
+| messages on screen       | 1.5–3.1 s (network-bound)        | 1.7–3.2 s                                                              | did not run                                                                                          |
+| gateway Ready            | 1.6–3.3 s                        | 1.9–3.7 s                                                              | did not run                                                                                          |
+| in a call (1 peer, Opus) | n/a                              | 101 MB working set, 110 MB private, 122 threads, **7.2 %** of one core | not measured                                                                                         |
+
+All native startup times come from 5 warm-cache runs.
 
 **How each was measured:**
 
@@ -113,13 +119,15 @@ on visibility brought idle to 0.03 %.
 **For:**
 
 - Logic lives in Rust:
-  - auth, REST, and the gateway: `reqwest` + `rustls`, `tokio-tungstenite`;
+  - auth, REST, and the gateway: `reqwest` and `tokio-tungstenite` on
+    native TLS (Schannel);
   - the state reducer;
   - voice: the `libwebrtc` crate (LiveKit), which ships prebuilt **static**
     libwebrtc for `x86_64-pc-windows-msvc` with the WebRTC APM (AEC, NS, AGC)
     and the Windows audio device module.
 - The C++ is only what cxx-qt generates, plus QML.
-- Rust TLS (rustls) avoids Qt's runtime-loaded OpenSSL entirely.
+- TLS in Rust over the OS stack (Schannel) avoids Qt's runtime-loaded
+  OpenSSL entirely.
 
 **Against, and how to handle it:**
 
@@ -190,10 +198,9 @@ interval, expiresIn}`.
    `ralph.ticket.<ticket>`.
 3. **The server checks `Origin`** (`isAllowedRealtimeOrigin`), and native
    sockets send none.
-   - The spike sends `Origin: https://tauri.localhost`, which is already
-     allowed for the current desktop app.
-   - A real client should get its own allowlisted origin: a one-line change
-     in `custom-server-entry.ts`.
+   - The worker accepts its own origin, so the client sends
+     `Origin: <api base>` (`YAP_GATEWAY_ORIGIN` overrides it). No backend
+     change was needed.
    - The ticket is the real authentication; the origin check only guards
      against cross-site WebSocket hijacking in browsers.
 4. Ops:
@@ -229,20 +236,27 @@ read-state events.
 
 ### Voice: Cloudflare Realtime SFU through the partytracks proxy
 
-1. A socket ticket with `audience:"voice"` returns `media_bootstrap
-{participantId, voiceToken, iceServers}`.
-2. The voice gateway is `wss://.../api/channels/{id}/voice`, the VoiceRoom
-   DO. It handles join, presence, and track announcements.
-3. Media goes through `/api/channels/{id}/partytracks/...`. The worker
+[VOICE_PROTOCOL.md](VOICE_PROTOCOL.md) has the full wire spec, with
+citations. In short:
+
+1. The URL segment is the room slug `voice-<serverId>-<channelId>`, not the
+   channel id.
+2. Two socket tickets are needed, `room` and `voice`. Only the **room**
+   ticket carries `media_bootstrap` (`participant_id`, `voice_token`,
+   `ice_servers`).
+3. Two sockets:
+   - **Room** (`/ws`, MeetingRoom): its non-standby Identify is what grants
+     the join.
+   - **Voice** (`/voice`, VoiceRoom): track announcements (op 12) and
+     speaking flags.
+4. Media goes through `/api/channels/<roomSlug>/partytracks/...`. The worker
    proxies to the Cloudflare Realtime API:
-   - `sessions/new`, `sessions/{id}/tracks/new`, `renegotiate`,
-     `tracks/close`;
-   - bodies are SDP offers and answers plus track lists;
-   - the proxy authenticates with `X-Voice-Session-Id` and the voice token,
-     and signs session capabilities with HMAC.
-4. Nothing here is browser-specific. Any WebRTC stack that can do unified
-   plan, Opus, and BUNDLE can speak it. Track names follow
-   `{prefix}-{kind}-{participantId}`.
+   - `sessions/new`, `tracks/new` (push: we offer; pull: the SFU offers),
+     `renegotiate`;
+   - authenticated with Bearer voice token plus `X-Voice-Session-Id`;
+   - session ids come back as HMAC-signed capabilities.
+5. Nothing here is browser-specific. **The prototype does all of it with
+   libwebrtc and has two-way audio with a web client.**
 
 **Native WebRTC options:**
 
@@ -322,3 +336,20 @@ Full parity takes roughly **6–9 months** solo.
   origin.
 - **`MESSAGE_UPDATE` can be partial.** A link unfurl sends embeds without
   `content`, so the client patches only the fields an update carries.
+- **Voice works natively.** Tested against a headless Edge peer using
+  Yap's own web client and a fake mic:
+  - both directions carry Opus;
+  - the native mic goes out through the platform ADM with WebRTC's APM;
+  - the browser's tone plays through the PC's speakers;
+  - roster, speaking LEDs, mute and leave all work.
+- **libwebrtc and the static CRT:** LiveKit's prebuilt libwebrtc is itself
+  `/MT` static (`MT_StaticRelease`), so the static-CRT build is required,
+  not optional. Linked into the exe it adds about 19 MB.
+- **ADM recording is off by default.** In "synthetic" mode, WebRTC's
+  Init/StartRecording calls are no-ops. Call
+  `set_adm_recording_enabled(true)` before creating the device track.
+  Without it the SFU never sees RTP, and listeners get
+  `not_found_track_error` and ask for a republish.
+- **Untrusted links:** message Markdown is rendered with links, and on
+  Windows `Qt.openUrlExternally` is ShellExecute. Only `http(s)` and
+  `mailto` links are opened.

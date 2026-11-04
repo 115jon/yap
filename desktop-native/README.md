@@ -16,10 +16,13 @@ the decisions.
 - A text channel's history, with Markdown, grouping and edits.
 - Live updates over the gateway: create, update, delete, typing.
 - Sending from the composer.
+- Audio-only voice calls: join a voice channel, real mic and speakers with
+  echo cancellation, roster with speaking LEDs, mute, leave. Interoperates
+  with the web client. Wire details are in [VOICE_PROTOCOL.md](VOICE_PROTOCOL.md).
 
 ## Not yet
 
-Voice, attachments preview, embeds, reactions, DMs, unread state,
+Video and screen share, device picker, deafen, attachments preview, embeds, reactions, DMs, unread state,
 notifications, tray, single instance, auto-update, and the brand fonts. Those
 need TTF builds; the prototype uses Segoe UI Variable and Cascadia Mono.
 
@@ -30,7 +33,10 @@ You need:
 - Visual Studio 2022+ with the C++ tools;
 - Rust (stable, `x86_64-pc-windows-msvc`);
 - CMake 3.24+ and Ninja;
-- a static Qt 6 built with `-static -static-runtime`.
+- a static Qt 6 built with `-static -static-runtime`;
+- LiveKit's prebuilt libwebrtc. `webrtc-sys` downloads it (about 430 MB
+  extracted) unless `LK_CUSTOM_WEBRTC` or `YAP_LIBWEBRTC_DIR` points at an
+  extracted copy. `build.ps1` uses `F:/ct/libwebrtc/...` when present.
 
 ```powershell
 # Defaults: Qt at F:/Files/Downloads/qt/src/6.6.3, build dir build/Release
@@ -52,7 +58,7 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_API_URL`              | `https://yap.115jon.com`  | API and gateway                                  |
 | `YAP_KOVA_AUTH_URL`        | `https://auth.115jon.com` | Kova                                             |
 | `YAP_KOVA_PUBLISHABLE_KEY` | Yap's live key            | Kova app                                         |
-| `YAP_GATEWAY_ORIGIN`       | `https://tauri.localhost` | `Origin` sent on the gateway socket              |
+| `YAP_GATEWAY_ORIGIN`       | `YAP_API_URL`             | `Origin` sent on realtime sockets                |
 | `YAP_TOKEN`                | none                      | use this session instead of the credential store |
 
 The defaults mirror `src/lib/site-defaults.ts`.
@@ -63,6 +69,7 @@ The defaults mirror `src/lib/site-defaults.ts`.
 CMakeLists.txt        exe, static Qt plugin imports, cxx-qt crate import
 cpp/main.cpp          QGuiApplication, DWM title bar colours, startup timing
 rust/src/bridge.rs    YapClient QObject (properties, invokables, signals)
-rust/src/client/      core: config, api (REST), auth (device flow), gateway
+rust/src/client/      core: config, api (REST), auth (device flow), gateway,
+                      socket (room/voice sockets), sfu (partytracks), voice (calls)
 rust/qml/             UI: Main, SignInView, ServerRail, ChannelSidebar, ChatView, ...
 ```
