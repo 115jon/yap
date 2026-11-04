@@ -40,6 +40,9 @@ pub mod qobject {
         #[qproperty(QString, me_username, cxx_name = "meUsername")]
         #[qproperty(QString, me_avatar, cxx_name = "meAvatar")]
         #[qproperty(QString, me_initials, cxx_name = "meInitials")]
+        /// `online`, `idle`, `dnd` or `offline`.
+        #[qproperty(QString, me_status, cxx_name = "meStatus")]
+        #[qproperty(QString, me_custom_status, cxx_name = "meCustomStatus")]
         type Session = super::SessionRust;
 
         /// Starts the core (once).
@@ -75,6 +78,10 @@ pub mod qobject {
         #[qproperty(QString, active_server_name, cxx_name = "activeServerName")]
         #[qproperty(QString, active_channel_id, cxx_name = "activeChannelId")]
         #[qproperty(QString, active_channel_name, cxx_name = "activeChannelName")]
+        /// The open voice channel's view (landing or call); empty when none.
+        #[qproperty(QString, voice_panel_id, cxx_name = "voicePanelId")]
+        #[qproperty(QString, voice_panel_name, cxx_name = "voicePanelName")]
+        #[qproperty(i32, voice_panel_count, cxx_name = "voicePanelCount")]
         type Nav = super::NavRust;
 
         #[qinvokable]
@@ -118,6 +125,7 @@ pub mod qobject {
         // The media path is up.
         #[qproperty(bool, live)]
         #[qproperty(bool, muted)]
+        #[qproperty(bool, deafened)]
         type Voice = super::VoiceRust;
 
         #[qinvokable]
@@ -129,6 +137,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "requestMute"]
         fn set_muted_from_ui(self: &Voice, muted: bool);
+
+        #[qinvokable]
+        #[cxx_name = "requestDeafen"]
+        fn set_deafened_from_ui(self: &Voice, deafened: bool);
     }
 
     impl cxx_qt::Initialize for Voice {}
@@ -173,6 +185,8 @@ pub struct SessionRust {
     me_username: QString,
     me_avatar: QString,
     me_initials: QString,
+    me_status: QString,
+    me_custom_status: QString,
 }
 
 impl Drop for SessionRust {
@@ -188,6 +202,9 @@ pub struct NavRust {
     active_server_name: QString,
     active_channel_id: QString,
     active_channel_name: QString,
+    voice_panel_id: QString,
+    voice_panel_name: QString,
+    voice_panel_count: i32,
 }
 
 #[derive(Default)]
@@ -203,6 +220,7 @@ pub struct VoiceRust {
     status: QString,
     live: bool,
     muted: bool,
+    deafened: bool,
 }
 
 /// View updates waiting for the Qt thread, and whether a closure that will
@@ -288,6 +306,10 @@ impl qobject::Voice {
 
     pub fn set_muted_from_ui(&self, muted: bool) {
         client::command(Command::SetVoiceMuted(muted));
+    }
+
+    pub fn set_deafened_from_ui(&self, deafened: bool) {
+        client::command(Command::SetVoiceDeafened(deafened));
     }
 }
 

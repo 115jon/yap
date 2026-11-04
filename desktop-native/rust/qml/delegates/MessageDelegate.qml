@@ -14,21 +14,29 @@ Rectangle {
     required property string author
     required property string initials
     required property string avatar
-    required property string body
+    required property string html
     required property string time
     required property string date
     required property int day
     required property bool edited
     required property bool grouped
     required property string attachmentNames
+    required property bool mine
     // Today's local day number (`Chat.today`).
     required property int today
 
     readonly property string dayText: day === today ? qsTr("Today at %1").arg(time) : date + " · " + time
     readonly property int padTop: grouped ? 2 : 16 + 2
 
-    // A pooled row must not carry a selection into the row it is reused for.
-    ListView.onPooled: bodyText.deselect()
+    // ||Spoilers|| show once clicked.
+    property bool revealed: false
+
+    // A pooled row must not carry a selection (or a revealed spoiler) into
+    // the row it is reused for.
+    ListView.onPooled: {
+        bodyText.deselect()
+        revealed = false
+    }
 
     implicitHeight: bodyText.y + bodyText.height + (attachments.visible ? attachments.height + 4 : 0) + 2
     color: hover.hovered ? Theme.tint1 : "transparent"
@@ -84,8 +92,9 @@ Rectangle {
         readOnly: true
         selectByMouse: true
         wrapMode: TextEdit.Wrap
-        textFormat: TextEdit.MarkdownText
-        text: root.body + (root.edited ? "  *(edited)*" : "")
+        // yap-core markdown.rs: the web's grammar as Qt rich text.
+        textFormat: TextEdit.RichText
+        text: Theme.richText(root.html, root.revealed)
         color: Theme.ink1
         selectionColor: Theme.selection
         selectedTextColor: Theme.ink1
@@ -93,7 +102,9 @@ Rectangle {
         // Message text is untrusted: only open web and mail links. On Windows
         // openUrlExternally is ShellExecute, so file:// etc. would run things.
         onLinkActivated: link => {
-            if (/^(https?:|mailto:)/i.test(link))
+            if (link === "spoiler:")
+                root.revealed = true
+            else if (/^(https?:|mailto:)/i.test(link))
                 Qt.openUrlExternally(link)
         }
 
@@ -130,6 +141,31 @@ Rectangle {
                 color: Theme.ink2
                 font: Theme.type.description
             }
+        }
+    }
+
+    // The hover bar (MessageItem.tsx): -16 from the top, 24 from the
+    // right, ply-3 with a seam (no shadow yet), 28 px keys 2 px apart. Not
+    // wired yet.
+    Rectangle {
+        visible: hover.hovered
+        anchors.right: parent.right
+        anchors.rightMargin: 24
+        y: root.padTop - 16
+        width: actions.implicitWidth + 4
+        height: 32
+        radius: Theme.radius
+        color: Theme.ply3
+        border.width: 1
+        border.color: Theme.line
+        Row {
+            id: actions
+            anchors.centerIn: parent
+            spacing: 2
+            IconKey { size: 28; iconName: "react"; tip: qsTr("Add reaction") }
+            IconKey { size: 28; iconName: "reply"; tip: qsTr("Reply") }
+            IconKey { size: 28; iconName: "edit"; tip: qsTr("Edit"); visible: root.mine }
+            IconKey { size: 28; iconName: "more"; tip: qsTr("More") }
         }
     }
 }

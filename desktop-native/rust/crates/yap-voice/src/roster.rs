@@ -13,16 +13,21 @@ pub struct Member {
     /// The participant id.
     pub id: String,
     pub name: String,
+    /// The Yap user id, once a full state named it (empty before).
+    pub user_id: String,
     pub muted: bool,
+    pub deafened: bool,
     pub speaking: bool,
     /// This client's own participant.
     pub me: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct Row {
     name: String,
+    user_id: String,
     muted: bool,
+    deafened: bool,
     speaking: bool,
     me: bool,
 }
@@ -45,9 +50,8 @@ impl Roster {
             me.to_owned(),
             Row {
                 name: my_name.to_owned(),
-                muted: false,
-                speaking: false,
                 me: true,
+                ..Row::default()
             },
         );
         Self {
@@ -64,7 +68,9 @@ impl Roster {
             .map(|(id, row)| Member {
                 id: id.clone(),
                 name: row.name.clone(),
+                user_id: row.user_id.clone(),
                 muted: row.muted,
+                deafened: row.deafened,
                 speaking: row.speaking,
                 me: row.me,
             })
@@ -91,7 +97,9 @@ impl Roster {
                 p.id.clone(),
                 Row {
                     name,
+                    user_id: p.user_id.clone().unwrap_or_default(),
                     muted: p.self_mute.unwrap_or(false),
+                    deafened: p.self_deaf.unwrap_or(false),
                     speaking: speaking.get(&p.id).copied().unwrap_or(false),
                     me: false,
                 },
@@ -109,15 +117,16 @@ impl Roster {
             .get(&p.id)
             .cloned()
             .unwrap_or_else(|| FALLBACK_NAME.to_owned());
-        let row = self.rows.entry(p.id.clone()).or_insert(Row {
-            name: name.clone(),
-            muted: false,
-            speaking: false,
-            me: false,
-        });
+        let row = self.rows.entry(p.id.clone()).or_default();
         row.name = name;
+        if let Some(user_id) = &p.user_id {
+            row.user_id.clone_from(user_id);
+        }
         if let Some(muted) = p.self_mute {
             row.muted = muted;
+        }
+        if let Some(deafened) = p.self_deaf {
+            row.deafened = deafened;
         }
     }
 
@@ -139,6 +148,12 @@ impl Roster {
     pub fn set_my_mute(&mut self, muted: bool) {
         if let Some(row) = self.rows.get_mut(&self.me) {
             row.muted = muted;
+        }
+    }
+
+    pub fn set_my_deaf(&mut self, deafened: bool) {
+        if let Some(row) = self.rows.get_mut(&self.me) {
+            row.deafened = deafened;
         }
     }
 }

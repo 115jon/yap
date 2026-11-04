@@ -2,6 +2,7 @@
 //! mic and speakers, with WebRTC's APM: echo cancellation, noise
 //! suppression, gain control) and one peer connection per call.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use libwebrtc::media_stream_track::MediaStreamTrack;
@@ -43,6 +44,8 @@ pub struct LibwebrtcSession {
     pc: PeerConnection,
     mic: RtcAudioTrack,
     remote_tracks: Arc<Mutex<Vec<MediaStreamTrack>>>,
+    /// Deafened: remote tracks are disabled, new ones included.
+    silenced: Arc<AtomicBool>,
 }
 
 impl MediaEngine for LibwebrtcEngine {
@@ -89,8 +92,13 @@ impl MediaEngine for LibwebrtcEngine {
             });
         })));
         let remote_tracks = Arc::new(Mutex::new(Vec::new()));
+        let silenced = Arc::new(AtomicBool::new(false));
         let kept = Arc::clone(&remote_tracks);
+        let quiet = Arc::clone(&silenced);
         pc.on_track(Some(Box::new(move |event| {
+            if quiet.load(Ordering::Relaxed) {
+                event.track.set_enabled(false);
+            }
             kept.lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(event.track);
@@ -100,6 +108,7 @@ impl MediaEngine for LibwebrtcEngine {
                 pc,
                 mic,
                 remote_tracks,
+                silenced,
             },
             states,
         ))
@@ -201,6 +210,18 @@ impl MediaSession for LibwebrtcSession {
 
     fn set_mic_enabled(&self, enabled: bool) {
         self.mic.set_enabled(enabled);
+    }
+
+    fn set_playout_enabled(&self, enabled: bool) {
+        self.silenced.store(!enabled, Ordering::Relaxed);
+        for track in self
+            .remote_tracks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+        {
+            track.set_enabled(enabled);
+        }
     }
 
     async fn stats(&self) -> Result<String, MediaError> {

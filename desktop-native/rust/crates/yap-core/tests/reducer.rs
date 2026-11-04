@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 use yap_core::store::view::{
-    ChannelTreeRow, MeView, MessageRole, MessageRow, TreeKind, TreeRole, VoiceView,
+    ChannelTreeRow, MeView, MessageRole, MessageRow, TreeKind, TreeRole, VoicePanelView, VoiceView,
 };
 use yap_core::store::{
     reduce, ApiRequest, ApiResponse, CacheWrite, CallId, Command, Dispatch, Effect, GatewayEvent,
@@ -124,8 +124,10 @@ fn message(id: &str, author: &str, created_at: &str) -> Dispatch {
 fn member(id: &str, speaking: bool) -> VoiceMember {
     VoiceMember {
         id: id.into(),
+        user_id: String::new(),
         name: id.to_uppercase(),
         muted: false,
+        deafened: false,
         speaking,
         me: id == "p_me",
     }
@@ -261,6 +263,8 @@ fn me_should_store_the_token_show_me_and_connect_the_gateway() {
         username: "me".into(),
         avatar: format!("{BASE}/api/avatars/user_fixture_me"),
         initials: "FM".into(),
+        status: "online".into(),
+        custom_status: String::new(),
     }))));
     assert!(fx.iter().any(
         |e| matches!(e, Effect::GatewayConnect { user_id, .. } if user_id == "user_fixture_me")
@@ -333,6 +337,12 @@ fn channels_result_should_open_the_first_text_channel_and_request_its_page() {
         muted: false,
         speaking: false,
         me: false,
+        avatar: String::new(),
+        deafened: false,
+        live: false,
+        first: false,
+        last: false,
+        lit: 0,
     };
     let channel = |id: &str, name: &str, voice| ChannelTreeRow {
         kind: TreeKind::Channel,
@@ -403,6 +413,9 @@ fn first_page_should_project_messages_like_before() {
             initials: "B".into(),
             avatar: String::new(),
             body: "see the attached file".into(),
+            html: "see the attached file \
+                   <span style=\"color:%EDITED%; font-size:12px\">(edited)</span>"
+                .into(),
             created_at: "2026-11-04T12:00:05.000Z".into(),
             // `State::new` formats in UTC.
             time: "12:00 PM".into(),
@@ -590,7 +603,7 @@ fn partial_update_with_content_should_patch_and_mark_edited() {
         (
             "edited!",
             true,
-            [MessageRole::Body, MessageRole::Edited].as_slice()
+            [MessageRole::Body, MessageRole::Html, MessageRole::Edited].as_slice()
         )
     );
     let log = client.state.messages().expect("log");
@@ -921,9 +934,10 @@ fn voice_call(fx: &[Effect]) -> CallId {
 }
 
 #[test]
-fn selecting_a_voice_channel_should_join_it() {
+fn joining_from_the_voice_view_should_start_the_call() {
     let mut client = Client::online();
-    let fx = client.command(Command::SelectChannel(VOICE.into()));
+    client.command(Command::SelectChannel(VOICE.into()));
+    let fx = client.command(Command::JoinVoice(VOICE.into()));
     let Some(Effect::VoiceStart { target, .. }) =
         fx.iter().find(|e| matches!(e, Effect::VoiceStart { .. }))
     else {
@@ -935,6 +949,234 @@ fn selecting_a_voice_channel_should_join_it() {
     );
     assert_eq!(target.me_name, "Fixture Me");
     assert_eq!(client.state.active_channel(), Some(TEXT));
+}
+
+// Voice view and the Talk Tree
+
+fn voice_states(states: Value) -> Dispatch {
+    Dispatch::decode("VOICE_CHANNEL_STATES", json!({ "voice_states": states })).expect("decodes")
+}
+
+fn voice_state(channel: &str, members: Value) -> Dispatch {
+    Dispatch::decode(
+        "VOICE_CHANNEL_STATE_UPDATE",
+        json!({ "channel_id": channel, "members": members }),
+    )
+    .expect("decodes")
+}
+
+fn occupant(user: &str, name: &str) -> Value {
+    json!({
+        "user_id": user, "name": name, "avatar_url": format!("/api/avatars/{user}"),
+        "self_mute": false, "self_deaf": false, "self_video": false, "self_stream": false,
+    })
+}
+
+fn members_of(fx: &[Effect]) -> Vec<ChannelTreeRow> {
+    tree_diffs(fx)
+        .into_iter()
+        .flat_map(|d| match d {
+            ViewDiff::Reset(rows) | ViewDiff::Insert { rows, .. } => rows.clone(),
+            ViewDiff::Update { row, .. } => vec![row.clone()],
+            ViewDiff::Remove { .. } => Vec::new(),
+        })
+        .filter(|r| r.kind == TreeKind::Member)
+        .collect()
+}
+
+#[test]
+fn selecting_a_voice_channel_should_open_its_view_without_joining() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SelectChannel(VOICE.into()));
+    assert!(!fx.iter().any(|e| matches!(e, Effect::VoiceStart { .. })));
+    assert!(
+        fx.contains(&Effect::View(ViewUpdate::VoicePanel(VoicePanelView {
+            id: VOICE.into(),
+            name: "lounge".into(),
+            count: 0,
+        })))
+    );
+    assert_eq!(client.state.voice_view(), Some(VOICE));
+    assert_eq!(client.state.active_channel(), Some(TEXT));
+}
+
+#[test]
+fn selecting_a_text_channel_should_close_the_voice_view() {
+    let mut client = Client::online();
+    client.command(Command::SelectChannel(VOICE.into()));
+    let fx = client.command(Command::SelectChannel(TEXT.into()));
+    assert!(fx.contains(&Effect::View(ViewUpdate::VoicePanel(
+        VoicePanelView::default()
+    ))));
+    assert_eq!(client.state.voice_view(), None);
+}
+
+#[test]
+fn voice_channel_states_should_put_occupants_under_every_voice_channel() {
+    let mut client = Client::online();
+    let fx = client.gateway(GatewayEvent::Dispatch(voice_states(json!({
+        VOICE: [occupant("user_ada", "Ada"), occupant("user_bob", "Bob")],
+    }))));
+    let rows = members_of(&fx);
+    let names: Vec<_> = rows.iter().map(|r| r.name.as_str()).collect();
+    assert_eq!(names, ["Ada", "Bob"]);
+    assert_eq!(rows[0].id, format!("{VOICE}/user_ada"));
+    assert_eq!(rows[0].avatar, format!("{BASE}/api/avatars/user_ada"));
+    assert_eq!((rows[0].first, rows[0].last), (true, false));
+    assert_eq!((rows[1].first, rows[1].last), (false, true));
+    // Not in the call: no lit path.
+    assert!(rows.iter().all(|r| r.lit == 0 && !r.me));
+    assert_eq!(client.state.occupants(VOICE).len(), 2);
+}
+
+#[test]
+fn a_voice_state_delta_should_keep_names_and_avatars() {
+    let mut client = Client::online();
+    client.gateway(GatewayEvent::Dispatch(voice_states(json!({
+        VOICE: [occupant("user_ada", "Ada")],
+    }))));
+    let fx = client.gateway(GatewayEvent::Dispatch(voice_state(
+        VOICE,
+        json!([{ "user_id": "user_ada", "self_mute": true, "self_deaf": true }]),
+    )));
+    let ada = &client.state.occupants(VOICE)[0];
+    assert_eq!(
+        (ada.name.as_str(), ada.muted, ada.deafened),
+        ("Ada", true, true)
+    );
+    assert_eq!(ada.avatar_url, "/api/avatars/user_ada");
+    assert_eq!(
+        tree_diffs(&fx),
+        vec![&ViewDiff::Update {
+            at: 4,
+            row: members_of(&fx)[0].clone(),
+            roles: vec![TreeRole::Muted, TreeRole::Deafened],
+        }]
+    );
+}
+
+#[test]
+fn an_empty_voice_state_should_clear_the_channel() {
+    let mut client = Client::online();
+    client.gateway(GatewayEvent::Dispatch(voice_states(json!({
+        VOICE: [occupant("user_ada", "Ada")],
+    }))));
+    let fx = client.gateway(GatewayEvent::Dispatch(voice_state(VOICE, json!([]))));
+    assert!(client.state.occupants(VOICE).is_empty());
+    assert_eq!(tree_diffs(&fx), vec![&ViewDiff::Remove { at: 4, count: 1 }]);
+}
+
+#[test]
+fn the_path_should_run_down_to_you_and_speaking_should_come_from_the_call() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let mut bob = member("p_bob", true);
+    bob.user_id = "user_bob".into();
+    client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Roster(vec![member("p_me", false), bob]),
+    });
+    let fx = client.gateway(GatewayEvent::Dispatch(voice_states(json!({
+        VOICE: [
+            occupant("user_bob", "Bob"),
+            occupant("user_fixture_me", "Fixture Me"),
+            occupant("user_cy", "Cy"),
+        ],
+    }))));
+    let rows = members_of(&fx);
+    let lit: Vec<_> = rows
+        .iter()
+        .map(|r| (r.name.as_str(), r.lit, r.speaking, r.me))
+        .collect();
+    assert_eq!(
+        lit,
+        [
+            ("Bob", 1, true, false),
+            ("Fixture Me", 2, false, true),
+            ("Cy", 0, false, false),
+        ]
+    );
+}
+
+#[test]
+fn the_call_roster_should_stand_in_until_the_gateway_lists_the_channel() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Roster(vec![member("p_me", false), member("p_ana", true)]),
+    });
+    let rows = members_of(&fx);
+    let names: Vec<_> = rows.iter().map(|r| (r.name.as_str(), r.speaking)).collect();
+    assert_eq!(names, [("P_ME", false), ("P_ANA", true)]);
+    assert_eq!(rows[0].id, format!("{VOICE}/user_fixture_me"));
+}
+
+#[test]
+fn the_voice_view_roster_should_count_who_is_in_the_channel() {
+    let mut client = Client::online();
+    client.command(Command::SelectChannel(VOICE.into()));
+    let fx = client.gateway(GatewayEvent::Dispatch(voice_states(json!({
+        VOICE: [occupant("user_ada", "Ada")],
+    }))));
+    assert!(
+        fx.contains(&Effect::View(ViewUpdate::VoicePanel(VoicePanelView {
+            id: VOICE.into(),
+            name: "lounge".into(),
+            count: 1,
+        })))
+    );
+    let roster: Vec<_> = fx
+        .iter()
+        .filter_map(|e| match e {
+            Effect::View(ViewUpdate::Roster(ViewDiff::Insert { rows, .. })) => Some(rows.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(roster.len(), 1);
+    assert_eq!(
+        (roster[0].id.as_str(), roster[0].initials.as_str()),
+        ("user_ada", "A")
+    );
+}
+
+#[test]
+fn deafen_should_be_kept_and_applied_when_joining() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SetVoiceDeafened(true));
+    assert!(fx.contains(&Effect::View(ViewUpdate::Voice(VoiceView {
+        deafened: true,
+        ..VoiceView::default()
+    }))));
+    let fx = client.command(Command::JoinVoice(VOICE.into()));
+    let call = voice_call(&fx);
+    assert!(fx.contains(&Effect::Voice {
+        call,
+        command: VoiceCommand::SetDeafened(true),
+    }));
+    assert!(client.state.voice().is_some_and(|c| c.deafened));
+}
+
+#[test]
+fn deafen_in_a_call_should_reach_the_voice_session() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let fx = client.command(Command::SetVoiceDeafened(true));
+    assert!(fx.contains(&Effect::Voice {
+        call,
+        command: VoiceCommand::SetDeafened(true),
+    }));
+}
+
+#[test]
+fn switching_servers_should_close_the_voice_view() {
+    let mut client = Client::online();
+    client.command(Command::SelectChannel(VOICE.into()));
+    let fx = client.command(Command::SelectServer("srv_other".into()));
+    assert!(fx.contains(&Effect::View(ViewUpdate::VoicePanel(
+        VoicePanelView::default()
+    ))));
 }
 
 #[test]
@@ -1102,7 +1344,7 @@ fn an_edit_should_update_only_the_changed_roles() {
     let fx = client.gateway(GatewayEvent::Dispatch(patch));
     assert!(matches!(
         message_diffs(&fx)[..],
-        [ViewDiff::Update { at: 0, roles, .. }] if roles == &[MessageRole::Body]
+        [ViewDiff::Update { at: 0, roles, .. }] if roles == &[MessageRole::Body, MessageRole::Html]
     ));
     replay_messages(&mut model, &fx);
     assert_eq!(model[0].body, "fixed");
@@ -1142,8 +1384,8 @@ fn joining_voice_should_put_the_roster_under_the_voice_channel() {
     assert_eq!(
         names,
         [
-            (TreeKind::Member, "p_me", true),
-            (TreeKind::Member, "p_two", false)
+            (TreeKind::Member, "chan_fixture_voice/user_fixture_me", true),
+            (TreeKind::Member, "chan_fixture_voice/p_two", false)
         ]
     );
 }
@@ -1199,6 +1441,7 @@ fn voice_view_should_name_the_channel_and_go_live_when_connected() {
         status: "Connected".into(),
         live: true,
         muted: false,
+        deafened: false,
     }))));
 }
 

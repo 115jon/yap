@@ -265,6 +265,11 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
                     session.set_mic_enabled(enabled);
                 }
             }
+            Effect::SetPlayoutEnabled(enabled) => {
+                if let Some(session) = &self.session {
+                    session.set_playout_enabled(enabled);
+                }
+            }
             Effect::LogStats => {
                 if let Some(session) = &self.session {
                     match session.stats().await {

@@ -34,6 +34,7 @@ impl yap_voice::Commands for Commands {
     async fn recv(&mut self) -> Option<UserCommand> {
         self.0.recv().await.map(|command| match command {
             VoiceCommand::SetMuted(muted) => UserCommand::SetMuted(muted),
+            VoiceCommand::SetDeafened(deafened) => UserCommand::SetDeafened(deafened),
             VoiceCommand::Leave => UserCommand::Leave,
         })
     }
@@ -70,8 +71,10 @@ pub async fn run(
                 .into_iter()
                 .map(|m| VoiceMember {
                     id: m.id,
+                    user_id: m.user_id,
                     name: m.name,
                     muted: m.muted,
+                    deafened: m.deafened,
                     speaking: m.speaking,
                     me: m.me,
                 })

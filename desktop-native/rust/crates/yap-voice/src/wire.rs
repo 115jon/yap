@@ -27,7 +27,10 @@ pub struct Participant {
     /// Full states carry one; deltas ("update", because we send
     /// `supports_voice_state_deltas`) leave the profile fields out.
     pub name: Option<String>,
+    /// The Yap user behind the participant (full states only).
+    pub user_id: Option<String>,
     pub self_mute: Option<bool>,
+    pub self_deaf: Option<bool>,
 }
 
 /// A room Ready or Resumed `d`.
@@ -111,7 +114,13 @@ impl Participant {
         Self {
             id: str_of(p, "id").to_owned(),
             name: member_name(p),
+            user_id: p
+                .get("user_id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned),
             self_mute: p.get("self_mute").and_then(Value::as_bool),
+            self_deaf: p.get("self_deaf").and_then(Value::as_bool),
         }
     }
 }
@@ -207,9 +216,9 @@ pub fn voice_identify(me: &str, voice_token: &str) -> Value {
 }
 
 /// Our voice state (op 15 C->S).
-pub fn voice_state(muted: bool) -> String {
+pub fn voice_state(muted: bool, deafened: bool) -> String {
     json!({ "op": GatewayOp::VoiceStateUpdate as u16, "d": {
-        "self_mute": muted, "self_deaf": false, "self_video": false,
+        "self_mute": muted, "self_deaf": deafened, "self_video": false,
         "self_stream": false, "self_stream_audio": false,
     }})
     .to_string()

@@ -7,9 +7,11 @@ use std::hash::Hash;
 
 use yap_protocol::rest::{Channel, ChannelType, Message, Server, User};
 
-use super::state::{Phase, ServerChannels};
+use std::collections::HashMap;
+
+use super::state::{Phase, ServerChannels, VoiceCall};
 use super::time::{parse_rfc3339, LocalOffset, Stamp};
-use super::VoiceMember;
+use super::Occupant;
 
 /// One role value, borrowed from a row.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -121,7 +123,7 @@ pub enum TreeKind {
     /// A category heading.
     Label,
     Channel,
-    /// Someone in the call, under the joined voice channel.
+    /// Someone in a voice channel, under it (the Talk Tree).
     Member,
 }
 
@@ -154,13 +156,24 @@ rows! {
     /// One row of the flattened channel tree.
     pub struct ChannelTreeRow / TreeRole {
         kind: TreeKind => Kind "kind",
-        /// Category, channel or participant id.
+        /// Category or channel id; `<channel>/<user>` for a member.
         id: String => Id "itemId",
         name: String => Name "name",
         voice: bool => Voice "voice",
         muted: bool => Muted "muted",
         speaking: bool => Speaking "speaking",
         me: bool => Me "me",
+        /// Members: the avatar URL (absolute), or empty.
+        avatar: String => Avatar "avatar",
+        deafened: bool => Deafened "deafened",
+        /// Members: screen sharing.
+        live: bool => Live "live",
+        /// Members: first and last leaf of their channel's branch.
+        first: bool => First "first",
+        last: bool => Last "last",
+        /// Members: the lit path (`path`). 0 off; 1 the trunk passes this
+        /// leaf on its way to you; 2 this leaf is you (the path ends here).
+        lit: i64 => Lit "lit",
     }
     key(row) -> (TreeKind, String) { (row.kind, row.id.clone()) }
 
@@ -173,6 +186,9 @@ rows! {
         avatar: String => Avatar "avatar",
         /// The Markdown source.
         body: String => Body "body",
+        /// The body as Qt rich text with `%TOKEN%` colours
+        /// ([`crate::markdown`]), the edited marker included.
+        html: String => Html "html",
         created_at: String => CreatedAt "createdAt",
         /// `h:mm AM`, local.
         time: String => Time "time",
@@ -189,11 +205,14 @@ rows! {
     }
     key(row) -> String { row.id.clone() }
 
-    /// One participant in the current call.
+    /// Someone in the open voice channel (its landing, or the call).
     pub struct VoiceMemberRow / VoiceMemberRole {
         id: String => Id "memberId",
         name: String => Name "name",
+        initials: String => Initials "initials",
+        avatar: String => Avatar "avatar",
         muted: bool => Muted "muted",
+        deafened: bool => Deafened "deafened",
         speaking: bool => Speaking "speaking",
         me: bool => Me "me",
     }
@@ -297,9 +316,13 @@ pub struct MeView {
     pub username: String,
     pub avatar: String,
     pub initials: String,
+    /// `online`, `idle`, `dnd` or `offline` (invisible).
+    pub status: String,
+    pub custom_status: String,
 }
 
-/// The call, as the sidebar shows it. Empty ids and `false` when not in one.
+/// The call, as the sidebar shows it. Empty ids and `false` when not in one;
+/// `muted` and `deafened` are the kept preferences, in a call or not.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct VoiceView {
     pub channel_id: String,
@@ -308,6 +331,16 @@ pub struct VoiceView {
     /// The media path is up.
     pub live: bool,
     pub muted: bool,
+    pub deafened: bool,
+}
+
+/// The open voice channel (its landing or the call), empty when none.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct VoicePanelView {
+    pub id: String,
+    pub name: String,
+    /// How many people are in it.
+    pub count: i64,
 }
 
 /// Updates for the Qt side: typed scalars and one diff stream per model.
@@ -332,6 +365,7 @@ pub enum ViewUpdate {
     /// The typing line (`"Alice is typing…"`), empty when nobody is.
     Typing(String),
     Voice(VoiceView),
+    VoicePanel(VoicePanelView),
     Servers(ViewDiff<ServerRow>),
     Channels(ViewDiff<ChannelTreeRow>),
     Messages(ViewDiff<MessageRow>),
@@ -363,12 +397,101 @@ pub fn initials(name: &str) -> String {
 }
 
 pub(super) fn me(user: &User, api_base: &str) -> MeView {
+    let status = match user.status.as_deref() {
+        Some(s @ ("online" | "idle" | "dnd" | "offline")) => s,
+        Some("invisible") => "offline",
+        _ => "online",
+    };
     MeView {
         id: user.id.clone(),
         name: user.label().to_owned(),
         username: user.username.clone(),
         avatar: absolute_url(api_base, user.avatar_url.as_deref()),
         initials: initials(user.label()),
+        status: status.to_owned(),
+        custom_status: user
+            .custom_status
+            .clone()
+            .unwrap_or_default()
+            .trim()
+            .to_owned(),
+    }
+}
+
+/// One person in a voice channel, with what only the call knows (speaking)
+/// merged in.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct Seat {
+    /// The user id, or the participant id before the room named the user.
+    pub key: String,
+    pub name: String,
+    pub avatar: String,
+    pub muted: bool,
+    pub deafened: bool,
+    pub live: bool,
+    pub speaking: bool,
+    pub me: bool,
+}
+
+/// Who is in `channel_id`: the gateway's occupants, with speaking (and our
+/// own fresher mute and deafen) from the call when it is this channel. Until
+/// the gateway lists the call's channel, the call's roster stands in.
+pub(super) fn seats(
+    channel_id: &str,
+    occupants: &HashMap<String, Vec<Occupant>>,
+    call: Option<&VoiceCall>,
+    me_id: &str,
+    api_base: &str,
+) -> Vec<Seat> {
+    let call = call.filter(|c| c.channel_id == channel_id);
+    let listed = occupants.get(channel_id).filter(|list| !list.is_empty());
+    match (listed, call) {
+        (Some(list), call) => list
+            .iter()
+            .map(|o| {
+                let me = !me_id.is_empty() && o.user_id == me_id;
+                let member = call.and_then(|c| {
+                    c.roster
+                        .iter()
+                        .find(|m| if me { m.me } else { m.user_id == o.user_id })
+                });
+                let (muted, deafened) = match call.filter(|_| me) {
+                    Some(c) => (c.muted, c.deafened),
+                    None => (o.muted, o.deafened),
+                };
+                Seat {
+                    key: o.user_id.clone(),
+                    name: o.name.clone(),
+                    avatar: absolute_url(api_base, Some(&o.avatar_url)),
+                    muted,
+                    deafened,
+                    live: o.stream,
+                    speaking: member.is_some_and(|m| m.speaking),
+                    me,
+                }
+            })
+            .collect(),
+        (None, Some(call)) => call
+            .roster
+            .iter()
+            .map(|m| Seat {
+                key: if m.me && !me_id.is_empty() {
+                    me_id.to_owned()
+                } else if m.user_id.is_empty() {
+                    m.id.clone()
+                } else {
+                    m.user_id.clone()
+                },
+                name: m.name.clone(),
+                avatar: String::new(),
+                muted: m.muted,
+                deafened: m.deafened,
+                live: false,
+                speaking: m.speaking,
+                me: m.me,
+            })
+            .collect(),
+        (None, None) => Vec::new(),
     }
 }
 
@@ -384,35 +507,67 @@ pub(super) fn server_rows(servers: &[Server], api_base: &str) -> Vec<ServerRow> 
         .collect()
 }
 
-fn channel_row(channel: &Channel) -> ChannelTreeRow {
+fn plain_row(kind: TreeKind, id: &str, name: &str) -> ChannelTreeRow {
     ChannelTreeRow {
-        kind: TreeKind::Channel,
-        id: channel.id.clone(),
-        name: channel.name.clone(),
-        voice: channel.channel_type == ChannelType::Voice,
+        kind,
+        id: id.to_owned(),
+        name: name.to_owned(),
+        voice: false,
         muted: false,
         speaking: false,
         me: false,
+        avatar: String::new(),
+        deafened: false,
+        live: false,
+        first: false,
+        last: false,
+        lit: 0,
     }
 }
 
-fn member_tree_row(member: &VoiceMember) -> ChannelTreeRow {
+fn channel_row(channel: &Channel) -> ChannelTreeRow {
     ChannelTreeRow {
-        kind: TreeKind::Member,
-        id: member.id.clone(),
-        name: member.name.clone(),
-        voice: false,
-        muted: member.muted,
-        speaking: member.speaking,
-        me: member.me,
+        voice: channel.channel_type == ChannelType::Voice,
+        ..plain_row(TreeKind::Channel, &channel.id, &channel.name)
     }
 }
 
-/// Category labels, channels, and the call's roster under the joined voice
-/// channel. A label starts the first run of channels with a named category.
+/// A voice channel's leaves. The path runs from the channel down to you:
+/// every leaf above yours carries the trunk, yours ends it.
+fn member_rows(channel_id: &str, seats: &[Seat]) -> Vec<ChannelTreeRow> {
+    let you = seats.iter().position(|s| s.me);
+    seats
+        .iter()
+        .enumerate()
+        .map(|(i, seat)| ChannelTreeRow {
+            muted: seat.muted,
+            speaking: seat.speaking,
+            me: seat.me,
+            avatar: seat.avatar.clone(),
+            deafened: seat.deafened,
+            live: seat.live,
+            first: i == 0,
+            last: i + 1 == seats.len(),
+            lit: match you {
+                Some(y) if i < y => 1,
+                Some(y) if i == y => 2,
+                _ => 0,
+            },
+            ..plain_row(
+                TreeKind::Member,
+                &format!("{channel_id}/{}", seat.key),
+                &seat.name,
+            )
+        })
+        .collect()
+}
+
+/// Category labels, channels, and under every voice channel the people in
+/// it. A label starts the first run of channels with a named category.
+/// `seats_of` lists a voice channel's people.
 pub(super) fn tree_rows(
     list: Option<&ServerChannels>,
-    call: Option<(&str, &[VoiceMember])>,
+    seats_of: impl Fn(&str) -> Vec<Seat>,
 ) -> Vec<ChannelTreeRow> {
     let Some(list) = list else {
         return Vec::new();
@@ -428,34 +583,33 @@ pub(super) fn tree_rows(
             category = current;
             let name = list.category_name(channel);
             if !name.is_empty() && labelled.insert(current.unwrap_or_default()) {
-                rows.push(ChannelTreeRow {
-                    kind: TreeKind::Label,
-                    id: current.unwrap_or_default().to_owned(),
-                    name: name.to_owned(),
-                    voice: false,
-                    muted: false,
-                    speaking: false,
-                    me: false,
-                });
+                rows.push(plain_row(
+                    TreeKind::Label,
+                    current.unwrap_or_default(),
+                    name,
+                ));
             }
         }
         rows.push(channel_row(channel));
-        if let Some((_, members)) = call.filter(|(id, _)| *id == channel.id) {
-            rows.extend(members.iter().map(member_tree_row));
+        if channel.channel_type == ChannelType::Voice {
+            rows.extend(member_rows(&channel.id, &seats_of(&channel.id)));
         }
     }
     rows
 }
 
-pub(super) fn roster_rows(members: &[VoiceMember]) -> Vec<VoiceMemberRow> {
-    members
+pub(super) fn roster_rows(seats: &[Seat]) -> Vec<VoiceMemberRow> {
+    seats
         .iter()
-        .map(|m| VoiceMemberRow {
-            id: m.id.clone(),
-            name: m.name.clone(),
-            muted: m.muted,
-            speaking: m.speaking,
-            me: m.me,
+        .map(|s| VoiceMemberRow {
+            id: s.key.clone(),
+            name: s.name.clone(),
+            initials: initials(&s.name),
+            avatar: s.avatar.clone(),
+            muted: s.muted,
+            deafened: s.deafened,
+            speaking: s.speaking,
+            me: s.me,
         })
         .collect()
 }
@@ -504,6 +658,7 @@ pub(super) fn message_row(
         initials: initials(author_name),
         avatar: absolute_url(ctx.api_base, author.and_then(|a| a.avatar_url.as_deref())),
         body: message.content.clone(),
+        html: crate::markdown::to_html(&message.content, message.updated_at.is_some()),
         created_at: message.created_at.clone(),
         time: stamp.time,
         date: stamp.date,
@@ -532,7 +687,10 @@ mod tests {
         VoiceMemberRow {
             id: id.into(),
             name: id.to_uppercase(),
+            initials: id.to_uppercase(),
+            avatar: String::new(),
             muted: false,
+            deafened: false,
             speaking,
             me: false,
         }

@@ -2,8 +2,8 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
 
-// One row of ChannelTreeModel: a category label, a channel, or a member of
-// the call under its voice channel.
+// One row of ChannelTreeModel: a category label, a channel, or someone in a
+// voice channel (a Talk Tree leaf under it).
 Loader {
     id: cell
 
@@ -15,15 +15,16 @@ Loader {
     required property bool muted
     required property bool speaking
     required property bool me
-    // The open text channel and the joined voice channel.
+    required property string avatar
+    required property bool deafened
+    required property bool live
+    required property bool first
+    required property bool last
+    required property int lit
+    // The open channel (text, or a voice channel's view) and the joined call.
     required property string activeId
     required property string callId
     signal selected(string id)
-
-    property bool animate: true
-
-    ListView.onPooled: animate = false
-    ListView.onReused: animate = true
 
     sourceComponent: kind === "label" ? labelRow : kind === "member" ? memberRow : channelRow
 
@@ -41,10 +42,15 @@ Loader {
         MemberRow {
             width: cell.width
             name: cell.name
+            avatar: cell.avatar
             muted: cell.muted
+            deafened: cell.deafened
             speaking: cell.speaking
+            live: cell.live
             me: cell.me
-            animate: cell.animate
+            first: cell.first
+            last: cell.last
+            lit: cell.lit
         }
     }
 

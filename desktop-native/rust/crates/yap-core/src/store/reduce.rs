@@ -12,12 +12,14 @@ use super::state::{
     Boot, MessageLog, Pending, Phase, ServerChannels, Session, Startup, State, VoiceCall,
 };
 use super::view::{self, ChannelTreeRow, MessageRow, Row, RowContext, ViewDiff, ViewUpdate};
-use super::view::{MeView, VoiceView};
+use super::view::{MeView, Seat, VoicePanelView, VoiceView};
 use super::{
     ApiRequest, ApiResponse, CacheWrite, CallId, Command, Dispatch, Effect, GatewayEvent, Input,
-    RequestId, SessionId, SignInEvent, SignInId, Snapshot, VoiceCommand, VoiceTarget, VoiceUpdate,
+    Occupant, RequestId, SessionId, SignInEvent, SignInId, Snapshot, VoiceCommand, VoiceTarget,
+    VoiceUpdate,
 };
 use crate::api::{ApiError, Token};
+use yap_protocol::payload::VoiceChannelMember;
 
 const SESSION_ENDED: &str = "Your session ended. Sign in again.";
 
@@ -188,16 +190,32 @@ impl State {
         self.view.servers = rows;
     }
 
+    /// Who is in a voice channel, as the tree and the voice view show it.
+    fn seats(&self, channel_id: &str) -> Vec<Seat> {
+        let me = self.me().map_or("", |me| me.id.as_str());
+        view::seats(
+            channel_id,
+            &self.voice_channels,
+            self.voice.as_ref(),
+            me,
+            &self.api_base,
+        )
+    }
+
     fn tree_rows(&self) -> Vec<ChannelTreeRow> {
         let list = self
             .tree_server
             .as_ref()
             .and_then(|id| self.channels.get(id));
-        let call = self
-            .voice
-            .as_ref()
-            .map(|c| (c.channel_id.as_str(), c.roster.as_slice()));
-        view::tree_rows(list, call)
+        view::tree_rows(list, |id| self.seats(id))
+    }
+
+    /// The voice channel the roster model shows: the open voice view, else
+    /// the call's channel.
+    fn roster_channel(&self) -> Option<&str> {
+        self.voice_view
+            .as_deref()
+            .or(self.voice.as_ref().map(|c| c.channel_id.as_str()))
     }
 
     /// A newly loaded tree (another server, or a refetch): one reset.
@@ -217,19 +235,36 @@ impl State {
     }
 
     fn sync_roster(&mut self, fx: &mut Effects) {
-        let rows = self
-            .voice
-            .as_ref()
-            .map(|c| view::roster_rows(&c.roster))
+        let seats = self
+            .roster_channel()
+            .map(|id| self.seats(id))
             .unwrap_or_default();
+        let rows = view::roster_rows(&seats);
         for diff in view::ordered_diff(&self.view.roster, &rows) {
             fx.view(ViewUpdate::Roster(diff));
         }
         self.view.roster = rows;
     }
 
-    /// The call's scalars, its roster, and its members in the tree.
+    /// The open voice view's scalars (its count follows the roster).
+    fn emit_voice_panel(&mut self, fx: &mut Effects) {
+        let panel = match self.voice_view.as_deref() {
+            Some(id) => VoicePanelView {
+                id: id.to_owned(),
+                name: self
+                    .find_channel(id)
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default(),
+                count: i64::try_from(self.seats(id).len()).unwrap_or(i64::MAX),
+            },
+            None => VoicePanelView::default(),
+        };
+        fx.view(ViewUpdate::VoicePanel(panel));
+    }
+
+    /// The call's scalars, the roster, and the voice channels in the tree.
     fn emit_voice(&mut self, fx: &mut Effects) {
+        let prefs = self.voice_prefs;
         let voice = match &self.voice {
             Some(call) => VoiceView {
                 channel_id: call.channel_id.clone(),
@@ -240,10 +275,72 @@ impl State {
                 live: call.status == "Connected",
                 status: call.status.clone(),
                 muted: call.muted,
+                deafened: call.deafened,
             },
-            None => VoiceView::default(),
+            None => VoiceView {
+                muted: prefs.muted,
+                deafened: prefs.deafened,
+                ..VoiceView::default()
+            },
         };
         fx.view(ViewUpdate::Voice(voice));
+        if self.voice_view.is_some() {
+            self.emit_voice_panel(fx);
+        }
+        self.sync_roster(fx);
+        self.sync_tree(fx);
+    }
+
+    /// Opens a voice channel's view (its landing; the call once joined).
+    fn open_voice_panel(&mut self, fx: &mut Effects, id: &str) {
+        self.voice_view = Some(id.to_owned());
+        self.emit_voice_panel(fx);
+        self.sync_roster(fx);
+    }
+
+    fn close_voice_panel(&mut self, fx: &mut Effects) {
+        if self.voice_view.take().is_some() {
+            fx.view(ViewUpdate::VoicePanel(VoicePanelView::default()));
+            self.sync_roster(fx);
+        }
+    }
+
+    /// A gateway roster for one voice channel, profiles kept from the last
+    /// full member with the same user (deltas leave them out).
+    fn occupants_from(&self, channel_id: &str, members: Vec<VoiceChannelMember>) -> Vec<Occupant> {
+        let previous = self.voice_channels.get(channel_id);
+        members
+            .into_iter()
+            .map(|m| {
+                let known = previous.and_then(|list| list.iter().find(|o| o.user_id == m.user_id));
+                let name = [&m.display_name, &m.name, &m.username]
+                    .into_iter()
+                    .flatten()
+                    .find(|n| !n.is_empty())
+                    .cloned()
+                    .or_else(|| known.map(|o| o.name.clone()))
+                    .unwrap_or_else(|| "Someone".to_owned());
+                Occupant {
+                    avatar_url: m
+                        .avatar_url
+                        .or_else(|| known.map(|o| o.avatar_url.clone()))
+                        .unwrap_or_default(),
+                    name,
+                    muted: m.self_mute.unwrap_or(false),
+                    deafened: m.self_deaf.unwrap_or(false),
+                    video: m.self_video.unwrap_or(false),
+                    stream: m.self_stream.unwrap_or(false),
+                    user_id: m.user_id,
+                }
+            })
+            .collect()
+    }
+
+    /// The voice channels changed: the tree, the roster and the open view.
+    fn sync_voice_channels(&mut self, fx: &mut Effects) {
+        if self.voice_view.is_some() {
+            self.emit_voice_panel(fx);
+        }
         self.sync_roster(fx);
         self.sync_tree(fx);
     }
@@ -355,11 +452,23 @@ impl State {
             Command::JoinVoice(id) => self.join_voice(fx, id),
             Command::LeaveVoice => self.leave_voice(fx),
             Command::SetVoiceMuted(muted) => {
+                self.voice_prefs.muted = muted;
                 if let Some(call) = &mut self.voice {
                     call.muted = muted;
                     fx.push(Effect::Voice {
                         call: call.id,
                         command: VoiceCommand::SetMuted(muted),
+                    });
+                }
+                self.emit_voice(fx);
+            }
+            Command::SetVoiceDeafened(deafened) => {
+                self.voice_prefs.deafened = deafened;
+                if let Some(call) = &mut self.voice {
+                    call.deafened = deafened;
+                    fx.push(Effect::Voice {
+                        call: call.id,
+                        command: VoiceCommand::SetDeafened(deafened),
                     });
                 }
                 self.emit_voice(fx);
@@ -559,6 +668,8 @@ impl State {
 
     fn end_session(&mut self, fx: &mut Effects, revoke: bool) {
         self.leave_voice(fx);
+        self.close_voice_panel(fx);
+        self.voice_channels.clear();
         if let Some(session) = self.session.take() {
             fx.push(Effect::GatewayDisconnect);
             if session.me.is_some() {
@@ -827,6 +938,9 @@ impl State {
         if self.signed_in().is_none() {
             return;
         }
+        if self.active_server.as_deref() != Some(id.as_str()) {
+            self.close_voice_panel(fx);
+        }
         self.active_server = Some(id.clone());
         fx.view(ViewUpdate::ActiveServer {
             id: id.clone(),
@@ -900,11 +1014,12 @@ impl State {
             return;
         };
         match channel.channel_type {
-            ChannelType::Voice => return self.join_voice(fx, id.to_owned()),
+            ChannelType::Voice => return self.open_voice_panel(fx, id),
             ChannelType::Text => {}
             ChannelType::Dm | ChannelType::Other => return,
         }
         let name = channel.name.clone();
+        self.close_voice_panel(fx);
         if let Some(previous) = self.active_channel.replace(id.to_owned()) {
             if previous != id {
                 self.gateway_send(
@@ -1187,6 +1302,28 @@ impl State {
                     self.pending.servers = self.http(fx, ApiRequest::Servers);
                 }
             }
+            Dispatch::VoiceChannelStates(states) => {
+                let next = states
+                    .voice_states
+                    .into_iter()
+                    .filter(|(_, members)| !members.is_empty())
+                    .map(|(id, members)| {
+                        let occupants = self.occupants_from(&id, members);
+                        (id, occupants)
+                    })
+                    .collect();
+                self.voice_channels = next;
+                self.sync_voice_channels(fx);
+            }
+            Dispatch::VoiceChannelState(update) => {
+                if update.members.is_empty() {
+                    self.voice_channels.remove(&update.channel_id);
+                } else {
+                    let occupants = self.occupants_from(&update.channel_id, update.members);
+                    self.voice_channels.insert(update.channel_id, occupants);
+                }
+                self.sync_voice_channels(fx);
+            }
         }
     }
 
@@ -1218,12 +1355,27 @@ impl State {
             token,
             target,
         });
+        // The kept mic and deafen apply from the start.
+        let prefs = self.voice_prefs;
+        if prefs.muted {
+            fx.push(Effect::Voice {
+                call,
+                command: VoiceCommand::SetMuted(true),
+            });
+        }
+        if prefs.deafened {
+            fx.push(Effect::Voice {
+                call,
+                command: VoiceCommand::SetDeafened(true),
+            });
+        }
         self.voice = Some(VoiceCall {
             id: call,
             channel_id,
             status: "Connecting".into(),
             roster: Vec::new(),
-            muted: false,
+            muted: prefs.muted,
+            deafened: prefs.deafened,
         });
         self.emit_voice(fx);
     }

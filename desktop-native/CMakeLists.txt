@@ -33,6 +33,7 @@ cxx_qt_import_qml_module(yap_native_qml
 
 qt_add_executable(YapNative WIN32
   cpp/main.cpp
+  cpp/ditherprovider.cpp cpp/ditherprovider.h
   cpp/iconprovider.cpp cpp/iconprovider.h
   cpp/windowchrome.cpp cpp/windowchrome.h)
 target_link_libraries(YapNative PRIVATE

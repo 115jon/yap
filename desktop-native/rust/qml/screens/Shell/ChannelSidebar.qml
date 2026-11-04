@@ -3,8 +3,9 @@ import QtQuick
 import com.yap.native
 
 // The tree panel (ChannelSidebar.tsx): the 48 px server header with its
-// chevron and theme banner, then channels under silkscreen branch labels
-// (and the call's members under its channel), then the call and gateway.
+// chevron and theme banner, then the Talk Tree (channels under silkscreen
+// branch labels, everyone in each voice channel under it), the call strip
+// and the account row.
 Rectangle {
     id: root
 
@@ -100,7 +101,7 @@ Rectangle {
 
         delegate: TreeRow {
             width: list.width
-            activeId: Nav.activeChannelId
+            activeId: Nav.voicePanelId.length > 0 ? Nav.voicePanelId : Nav.activeChannelId
             callId: Voice.channelId
             onSelected: channelId => Nav.selectChannel(channelId)
         }
@@ -108,32 +109,15 @@ Rectangle {
 
     CallPanel {
         id: callPanel
-        anchors.bottom: footer.top
+        anchors.bottom: account.top
         width: parent.width - 1
     }
 
-    Rectangle {
-        id: footer
+    // The account row, then the 8 px spacer under it.
+    AccountRow {
+        id: account
         anchors.bottom: parent.bottom
+        anchors.bottomMargin: 8
         width: parent.width - 1
-        height: 40
-        color: Theme.ply1
-        Rectangle { width: parent.width; height: 1; color: Theme.line }
-
-        Row {
-            anchors.left: parent.left
-            anchors.leftMargin: 16
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 8
-            Led {
-                anchors.verticalCenter: parent.verticalCenter
-                color: Nav.connected ? Theme.talk : Theme.idle
-            }
-            Text {
-                text: Nav.connected ? qsTr("Gateway · live") : qsTr("Gateway · connecting")
-                color: Theme.ink3
-                font: Theme.type.silk
-            }
-        }
     }
 }

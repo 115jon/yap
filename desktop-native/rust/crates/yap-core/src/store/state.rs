@@ -8,7 +8,7 @@ use yap_protocol::rest::{Server, User};
 
 use super::time::LocalOffset;
 use super::view::{ChannelTreeRow, ServerRow, VoiceMemberRow};
-use super::{CallId, RequestId, SessionId, SignInId, VoiceMember};
+use super::{CallId, Occupant, RequestId, SessionId, SignInId, VoiceMember};
 use crate::api::{ApiError, Token};
 
 /// Which top-level screen the UI shows.
@@ -192,6 +192,14 @@ pub struct VoiceCall {
     /// The roster as the voice session reports it.
     pub roster: Vec<VoiceMember>,
     pub muted: bool,
+    pub deafened: bool,
+}
+
+/// Mic and deafen, kept between calls (the account row shows them always).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct VoicePrefs {
+    pub muted: bool,
+    pub deafened: bool,
 }
 
 /// The rows each list model shows, as last emitted. Diffs are computed
@@ -265,6 +273,11 @@ pub struct State {
     /// Bumped by each typing event; only the newest expiry clears the line.
     pub(super) typing_generation: u64,
     pub(super) voice: Option<VoiceCall>,
+    pub(super) voice_prefs: VoicePrefs,
+    /// Who is in each voice channel, by channel id (from the gateway).
+    pub(super) voice_channels: HashMap<String, Vec<Occupant>>,
+    /// The voice channel whose view is open (landing or call), if any.
+    pub(super) voice_view: Option<String>,
     /// The server whose channel tree is shown (the last one that loaded).
     pub(super) tree_server: Option<String>,
     pub(super) view: Projection,
@@ -297,6 +310,9 @@ impl State {
             typing: Vec::new(),
             typing_generation: 0,
             voice: None,
+            voice_prefs: VoicePrefs::default(),
+            voice_channels: HashMap::new(),
+            voice_view: None,
             tree_server: None,
             view: Projection::default(),
             pending: Pending::default(),
@@ -366,6 +382,18 @@ impl State {
 
     pub fn voice(&self) -> Option<&VoiceCall> {
         self.voice.as_ref()
+    }
+
+    /// Who the gateway says is in a voice channel.
+    pub fn occupants(&self, channel_id: &str) -> &[Occupant] {
+        self.voice_channels
+            .get(channel_id)
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The voice channel whose view is open.
+    pub fn voice_view(&self) -> Option<&str> {
+        self.voice_view.as_deref()
     }
 
     /// A channel from any loaded server.

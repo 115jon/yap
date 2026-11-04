@@ -152,6 +152,38 @@ QtObject {
     readonly property url bannerGlyph: t.bannerGlyph ?? ""
     readonly property bool hasBanner: t.bannerGlyph !== undefined
 
+    // ---------- Rich text and cell art ----------
+    // Qt rich text takes solid colours: a tint is flattened onto the ply it
+    // sits on. Message bodies carry %TOKEN% placeholders (yap-core
+    // markdown.rs) that richText() swaps for these.
+    function solid(c, ground) {
+        return String(Qt.tint(ground ?? ply0, c))
+    }
+    function hex(c) {
+        return String(c).slice(1)
+    }
+    readonly property var richColors: ({
+        "%LINK%": String(accentInk),
+        "%CODEBG%": solid(tint2),
+        "%BLOCKBG%": String(ply2),
+        "%LINE%": solid(line),
+        "%QUOTE%": String(ink2),
+        "%QUOTEBAR%": solid(lineStrong),
+        "%MENTION%": String(accentInk),
+        "%MENTIONBG%": solid(accentTint),
+        "%SPOILERFG%": solid(tint3),
+        "%SPOILERBG%": solid(tint3),
+        "%EDITED%": String(ink3)
+    })
+    readonly property var richRevealed: Object.assign({}, richColors, {
+        "%SPOILERFG%": String(ink1),
+        "%SPOILERBG%": solid(tint1)
+    })
+    function richText(html, revealed) {
+        const colors = revealed ? richRevealed : richColors
+        return html.replace(/%[A-Z]+%/g, token => colors[token] ?? token)
+    }
+
     // ---------- Radii, spacing, sizes (DESIGN.md:125-136) ----------
     readonly property int radius: 2
     readonly property int radiusSheet: 4

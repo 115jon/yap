@@ -137,6 +137,41 @@ pub struct VoiceChannelLeave {
     pub channel_id: Option<String>,
 }
 
+/// Someone in a server's voice channel, as the sidebar shows it
+/// (`VOICE_CHANNEL_STATES`, `VOICE_CHANNEL_STATE_UPDATE`). With
+/// `supports_voice_state_deltas` an update leaves the profile fields out;
+/// keep them from the last full member with the same `user_id`.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct VoiceChannelMember {
+    #[serde(default)]
+    pub user_id: String,
+    pub name: Option<String>,
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub self_mute: Option<bool>,
+    pub self_deaf: Option<bool>,
+    pub self_video: Option<bool>,
+    pub self_stream: Option<bool>,
+}
+
+/// `VOICE_CHANNEL_STATES` dispatch data: every visible voice channel that
+/// has someone in it, sent after a subscribe.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct VoiceChannelStates {
+    #[serde(default)]
+    pub voice_states: BTreeMap<String, Vec<VoiceChannelMember>>,
+}
+
+/// `VOICE_CHANNEL_STATE_UPDATE` dispatch data: one channel's whole roster
+/// (empty when the last person left).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct VoiceChannelStateUpdate {
+    pub channel_id: String,
+    #[serde(default)]
+    pub members: Vec<VoiceChannelMember>,
+}
+
 // Room socket: roster and voice state
 
 /// A room participant. Join and leave carry the full state; an update may be

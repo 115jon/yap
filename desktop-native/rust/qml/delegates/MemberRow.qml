@@ -1,51 +1,141 @@
 import QtQuick
 import com.yap.native
 
-// Someone in the call, under the voice channel: 28 high, Geist 13/500 in
-// ink-2 (ink-1 for you and anyone speaking), the speaking LED, and the
-// muted glyph in the 14 px trailing cluster. The guides and lit path of
-// the Talk Tree come with TreeLeaf.
+// A Talk Tree leaf (ui/tree.tsx, ChannelSidebar.tsx VoiceOccupantLeaf):
+// someone in a voice channel, hung off the trunk that drops from the
+// channel's glyph (x 18). Each leaf draws its 1 px guide segments: up to
+// its middle, an 8 px tick to its LED node, and down unless it is last.
+// The path to you is lit in `path`; your unlit node fills in `path`, and a
+// talk LED (speaking) paints over it. Then a 24 px avatar, the name (ink-1
+// for you and anyone speaking), and the 14 px state glyphs.
 Item {
     id: root
 
     required property string name
+    required property string avatar
     required property bool muted
+    required property bool deafened
     required property bool speaking
+    required property bool live
     required property bool me
-    property bool animate: true
+    required property bool first
+    required property bool last
+    // 0 off, 1 the trunk passes here on its way to you, 2 you.
+    required property int lit
 
-    height: Theme.occupantRow
+    // Rows are 26 + the list's 2 px spacing, so leaves sit on a 28 px pitch.
+    readonly property int guideX: 18
+    readonly property int mid: height / 2
+    // The first leaf's trunk reaches up past the 8 px stem under the glyph.
+    readonly property int reach: first ? 8 + 2 : 2
 
+    height: Theme.occupantRow - 2
+    Accessible.role: Accessible.ListItem
+    Accessible.name: [name, me ? qsTr("you") : "", speaking ? qsTr("speaking") : "",
+                      muted ? qsTr("muted") : "", deafened ? qsTr("deafened") : ""].filter(s => s.length > 0).join(", ")
+
+    // Guides: up, tick, down.
+    Rectangle {
+        x: root.guideX
+        y: -root.reach
+        width: 1
+        height: root.mid + root.reach
+        color: root.lit > 0 ? Theme.path : Theme.guide
+    }
+    Rectangle {
+        x: root.guideX
+        y: root.mid
+        width: 8
+        height: 1
+        color: root.lit === 2 ? Theme.path : Theme.guide
+    }
+    Rectangle {
+        visible: !root.last
+        x: root.guideX
+        y: root.mid
+        width: 1
+        height: root.height - root.mid
+        color: root.lit === 1 ? Theme.path : Theme.guide
+    }
+
+    // Hover: the row's own box from the node on (OCCUPANT_ROW).
+    Rectangle {
+        x: 34
+        width: parent.width - x
+        height: parent.height
+        radius: Theme.radius
+        color: hover.hovered ? Theme.tint1 : "transparent"
+        Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+    }
+
+    // Node: the LED; yours fills in path while unlit.
     Led {
-        id: led
-        x: 8 + 7
+        x: root.guideX + 8
         anchors.verticalCenter: parent.verticalCenter
-        lit: root.speaking
+        lit: root.speaking && !root.muted
         color: Theme.talk
+        Rectangle {
+            anchors.fill: parent
+            radius: width / 2
+            visible: !parent.lit
+            color: root.lit === 2 ? Theme.path : Theme.lineStrong
+        }
+    }
+
+    Avatar {
+        id: face
+        x: 38
+        anchors.verticalCenter: parent.verticalCenter
+        size: 24
+        initials: root.name
+        source: root.avatar
+        // The speaking ring: 2 px talk, inset.
+        Rectangle {
+            anchors.fill: parent
+            visible: root.speaking
+            color: "transparent"
+            radius: Theme.radius
+            border.width: 2
+            border.color: Theme.talk
+        }
     }
     Text {
-        anchors.left: led.right
-        anchors.leftMargin: 8 + 7
-        anchors.right: muteGlyph.left
+        anchors.left: face.right
+        anchors.leftMargin: 8
+        anchors.right: glyphs.left
         anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter
-        text: root.me ? qsTr("%1 (you)").arg(root.name) : root.name
+        text: root.name
         elide: Text.ElideRight
-        color: root.speaking || root.me ? Theme.ink1 : Theme.ink2
+        color: root.speaking || root.me || hover.hovered ? Theme.ink1 : Theme.ink2
         font: Theme.type.occupant
     }
-    Icon {
-        id: muteGlyph
+    Row {
+        id: glyphs
         anchors.right: parent.right
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
-        visible: root.muted
-        name: "mic"
-        variant: "off"
-        size: 14
-        color: Theme.mutedState
-        Accessible.ignored: false
-        Accessible.role: Accessible.StaticText
-        Accessible.name: qsTr("Muted")
+        spacing: 4
+        Icon {
+            visible: root.live
+            name: "screenShare"
+            size: 14
+            color: Theme.liveInk
+        }
+        Icon {
+            visible: root.muted
+            name: "mic"
+            variant: "off"
+            size: 14
+            color: Theme.mutedState
+        }
+        Icon {
+            visible: root.deafened
+            name: "deafen"
+            variant: "off"
+            size: 14
+            color: Theme.mutedState
+        }
     }
+    HoverHandler { id: hover }
 }

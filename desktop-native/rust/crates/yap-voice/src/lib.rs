@@ -53,6 +53,8 @@
 //!   pulls and drops the row.
 //! - Queued tracks are pulled once media has connected.
 //! - `SetMuted` toggles the mic track and sends op 15.
+//! - `SetDeafened` turns every remote track off (new ones too) and sends
+//!   op 15 with `self_deaf`; the mic is left as it is.
 
 mod driver;
 mod engine;

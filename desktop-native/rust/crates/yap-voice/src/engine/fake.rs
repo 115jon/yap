@@ -19,6 +19,7 @@ pub enum FakeOp {
     AnswerOffer { sdp: String },
     CloseMids(Vec<String>),
     SetMicEnabled(bool),
+    SetPlayoutEnabled(bool),
     Stats,
     Close,
     Release,
@@ -160,6 +161,10 @@ impl MediaSession for FakeSession {
 
     fn set_mic_enabled(&self, enabled: bool) {
         record(&self.shared, FakeOp::SetMicEnabled(enabled));
+    }
+
+    fn set_playout_enabled(&self, enabled: bool) {
+        record(&self.shared, FakeOp::SetPlayoutEnabled(enabled));
     }
 
     async fn stats(&self) -> Result<String, MediaError> {

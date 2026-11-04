@@ -1,7 +1,9 @@
 //! What changes the state: user intents, effect results, gateway and voice events.
 
 use serde_json::Value;
-use yap_protocol::payload::{MessageDeleteEvent, TypingStartEvent};
+use yap_protocol::payload::{
+    MessageDeleteEvent, TypingStartEvent, VoiceChannelStateUpdate, VoiceChannelStates,
+};
 use yap_protocol::rest::{Message, MessagePatch};
 
 use yap_cache::Snapshot;
@@ -23,6 +25,8 @@ pub enum Command {
     JoinVoice(String),
     LeaveVoice,
     SetVoiceMuted(bool),
+    /// Deafen (or not). Like mute, it is kept between calls.
+    SetVoiceDeafened(bool),
 }
 
 /// Everything [`super::reduce`] consumes.
@@ -87,6 +91,10 @@ pub enum Dispatch {
     TypingStart(TypingStartEvent),
     /// The server list changed (`USER_SERVERS_UPDATE`, `GUILD_UPDATE`, `GUILD_DELETE`).
     ServersChanged,
+    /// Who is in each voice channel (after a subscribe): replaces them all.
+    VoiceChannelStates(VoiceChannelStates),
+    /// One voice channel's roster changed.
+    VoiceChannelState(VoiceChannelStateUpdate),
 }
 
 impl Dispatch {
@@ -106,6 +114,10 @@ impl Dispatch {
             "MESSAGE_DELETE" => Self::MessageDelete(serde_json::from_value(data).ok()?),
             "TYPING_START" => Self::TypingStart(serde_json::from_value(data).ok()?),
             "USER_SERVERS_UPDATE" | "GUILD_DELETE" | "GUILD_UPDATE" => Self::ServersChanged,
+            "VOICE_CHANNEL_STATES" => Self::VoiceChannelStates(serde_json::from_value(data).ok()?),
+            "VOICE_CHANNEL_STATE_UPDATE" => {
+                Self::VoiceChannelState(serde_json::from_value(data).ok()?)
+            }
             _ => return None,
         })
     }

@@ -78,6 +78,8 @@ pub enum Socket {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserCommand {
     SetMuted(bool),
+    /// Deafen: silence the others (remote tracks off) and say so (op 15).
+    SetDeafened(bool),
     Leave,
 }
 
@@ -275,6 +277,8 @@ pub enum Effect {
     /// Stop these receive transceivers and close them on the SFU.
     Close(Vec<String>),
     SetMicEnabled(bool),
+    /// Play the others (`false` while deafened).
+    SetPlayoutEnabled(bool),
     LogStats,
     /// A diagnostic line.
     Log(String),
@@ -307,6 +311,7 @@ pub struct CallMachine {
     /// Media connected at least once.
     connected: bool,
     muted: bool,
+    deafened: bool,
     roster: Option<Roster>,
     tracks: TrackTable,
     next_token: u64,
@@ -328,6 +333,7 @@ impl CallMachine {
             reidentified: false,
             connected: false,
             muted: false,
+            deafened: false,
             roster: None,
             tracks: TrackTable::default(),
             next_token: 0,
@@ -485,6 +491,9 @@ impl CallMachine {
                 if self.muted {
                     fx.push(Effect::SetMicEnabled(false));
                 }
+                if self.deafened {
+                    fx.push(Effect::SetPlayoutEnabled(false));
+                }
                 self.emit_roster(fx);
                 // Only if the voice socket was ready first (the driver holds
                 // socket events until now, so normally it is not).
@@ -554,7 +563,10 @@ impl CallMachine {
                 self.room_identified = true;
                 self.room_up = true;
                 self.replace_roster(&d);
-                fx.push(Effect::Send(Socket::Room, wire::voice_state(self.muted)));
+                fx.push(Effect::Send(
+                    Socket::Room,
+                    wire::voice_state(self.muted, self.deafened),
+                ));
                 self.emit_roster(fx);
                 self.maybe_joined(fx);
             }
@@ -732,7 +744,26 @@ impl CallMachine {
                     roster.set_my_mute(muted);
                 }
                 if self.sockets_open {
-                    fx.push(Effect::Send(Socket::Room, wire::voice_state(muted)));
+                    fx.push(Effect::Send(
+                        Socket::Room,
+                        wire::voice_state(muted, self.deafened),
+                    ));
+                }
+                self.emit_roster(fx);
+            }
+            UserCommand::SetDeafened(deafened) => {
+                self.deafened = deafened;
+                if self.published.is_some() {
+                    fx.push(Effect::SetPlayoutEnabled(!deafened));
+                }
+                if let Some(roster) = &mut self.roster {
+                    roster.set_my_deaf(deafened);
+                }
+                if self.sockets_open {
+                    fx.push(Effect::Send(
+                        Socket::Room,
+                        wire::voice_state(self.muted, deafened),
+                    ));
                 }
                 self.emit_roster(fx);
             }

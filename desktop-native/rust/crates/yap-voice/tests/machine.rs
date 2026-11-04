@@ -42,7 +42,7 @@ fn participant(id: &str, name: Option<&str>) -> Participant {
     Participant {
         id: id.into(),
         name: name.map(str::to_owned),
-        self_mute: None,
+        ..Participant::default()
     }
 }
 
@@ -286,13 +286,17 @@ fn deltas_should_keep_names_from_full_states() {
         leave: false,
         participant: Participant {
             id: "ana".into(),
-            name: None,
             self_mute: Some(true),
+            self_deaf: Some(true),
+            ..Participant::default()
         },
     }));
     let roster = last_roster(&fx).expect("roster");
     let ana = roster.iter().find(|r| r.id == "ana").expect("ana row");
-    assert_eq!((ana.name.as_str(), ana.muted), ("Ana", true));
+    assert_eq!(
+        (ana.name.as_str(), ana.muted, ana.deafened),
+        ("Ana", true, true)
+    );
 }
 
 #[test]
@@ -549,6 +553,33 @@ fn mute_should_disable_the_mic_and_send_voice_state() {
     assert_eq!(sends(&fx, Socket::Room)[0]["d"]["self_mute"], true);
     let roster = last_roster(&fx).expect("roster");
     assert!(roster.iter().any(|r| r.me && r.muted));
+}
+
+#[test]
+fn deafen_should_silence_playout_and_send_self_deaf() {
+    let mut m = joined();
+    let fx = m.handle(Input::Command(UserCommand::SetDeafened(true)));
+    assert!(fx.contains(&Effect::SetPlayoutEnabled(false)));
+    let sent = &sends(&fx, Socket::Room)[0];
+    assert_eq!(
+        (sent["op"].clone(), sent["d"]["self_deaf"].clone()),
+        (15.into(), true.into())
+    );
+    assert_eq!(sent["d"]["self_mute"], false);
+    let roster = last_roster(&fx).expect("roster");
+    assert!(roster.iter().any(|r| r.me && r.deafened && !r.muted));
+    let fx = m.handle(Input::Command(UserCommand::SetDeafened(false)));
+    assert!(fx.contains(&Effect::SetPlayoutEnabled(true)));
+}
+
+#[test]
+fn deafen_before_publish_should_apply_once_published() {
+    let mut m = CallMachine::new(target());
+    m.handle(Input::Start);
+    m.handle(Input::Command(UserCommand::SetDeafened(true)));
+    m.handle(Input::Tickets(Ok(tickets())));
+    let fx = m.handle(Input::Published(Ok(published())));
+    assert!(fx.contains(&Effect::SetPlayoutEnabled(false)));
 }
 
 #[test]

@@ -79,6 +79,10 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
 
     fn set_mic_enabled(&self, enabled: bool);
 
+    /// Plays or silences every remote track, including ones that arrive
+    /// later.
+    fn set_playout_enabled(&self, enabled: bool);
+
     /// One line of media stats for the log.
     fn stats(&self) -> impl Future<Output = Result<String, MediaError>> + Send;
 

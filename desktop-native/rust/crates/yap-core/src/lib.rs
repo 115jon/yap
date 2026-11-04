@@ -11,6 +11,7 @@ pub mod api;
 pub mod auth;
 pub mod config;
 pub mod fixture;
+pub mod markdown;
 pub mod runtime;
 pub mod store;
 
@@ -19,6 +20,6 @@ pub use runtime::{
     shutdown, spawn, started_at, GatewayEvents, GatewayHandle, Realtime, Sink, VoiceEvents,
 };
 pub use store::{
-    Command, LocalOffset, Phase, ViewDiff, ViewUpdate, VoiceCommand, VoiceMember, VoiceTarget,
-    VoiceUpdate,
+    Command, LocalOffset, Occupant, Phase, ViewDiff, ViewUpdate, VoiceCommand, VoiceMember,
+    VoiceTarget, VoiceUpdate,
 };

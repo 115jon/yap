@@ -31,52 +31,20 @@ Rectangle {
         }
     }
 
-    // Header (ChatHeader.tsx): 48 px, px-4, the channel glyph at 20 px in
-    // ink-3, then Bricolage 18/800.
-    Item {
+    ChatHeader {
         id: header
         width: parent.width
-        height: Theme.header
+    }
 
-        Row {
-            anchors.left: parent.left
-            anchors.leftMargin: 16
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 8
-            Icon {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: Nav.activeChannelId.length > 0
-                name: "textChannel"
-                size: Theme.iconLg
-                color: Theme.ink3
-            }
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: Nav.activeChannelName
-                color: Theme.ink1
-                font: Theme.type.columnTitle
-            }
-        }
-        Text {
-            anchors.right: parent.right
-            anchors.rightMargin: 16
-            anchors.verticalCenter: parent.verticalCenter
-            visible: Session.status.length > 0
-            text: Session.status
-            color: Theme.ink3
-            font: Theme.type.caption
-        }
-        Rectangle {
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 1
-            color: Theme.line
-        }
+    ConnectionStrip {
+        id: strip
+        anchors.top: header.bottom
+        width: parent.width
     }
 
     ListView {
         id: view
-        anchors.top: header.bottom
+        anchors.top: strip.bottom
         anchors.bottom: typingLine.top
         anchors.left: parent.left
         anchors.right: parent.right

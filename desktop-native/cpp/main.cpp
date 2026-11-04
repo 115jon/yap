@@ -12,6 +12,7 @@
 
 #include <cstdio>
 
+#include "ditherprovider.h"
 #include "iconprovider.h"
 #include "windowchrome.h"
 
@@ -69,6 +70,7 @@ int main(int argc, char* argv[])
 
   QQmlApplicationEngine engine;
   engine.addImageProvider(QStringLiteral("icon"), new IconProvider);
+  engine.addImageProvider(QStringLiteral("dither"), new DitherProvider);
   QObject::connect(
     &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
     [] { QCoreApplication::exit(-1); }, Qt::QueuedConnection);

@@ -1,11 +1,9 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls.Basic
 import com.yap.native
 
 // The 60 px rail (ServerList.tsx): Home with the Yappy mark, the ink rule,
-// one tile per server, the create tile; the signed-in user at the bottom
-// until the account row exists.
+// one tile per server, the create tile.
 Rectangle {
     id: root
 
@@ -14,10 +12,10 @@ Rectangle {
     ListView {
         id: list
         anchors.top: parent.top
-        anchors.bottom: user.top
-        anchors.bottomMargin: 12
+        anchors.bottom: parent.bottom
         width: parent.width
         topMargin: 12
+        bottomMargin: 12
         spacing: 8
         clip: true
         model: ServerListModel
@@ -36,6 +34,11 @@ Rectangle {
                 height: Theme.railTile
                 Accessible.role: Accessible.Button
                 Accessible.name: qsTr("Direct messages")
+                RailPill {
+                    anchors.verticalCenter: parent.verticalCenter
+                    hovered: homeHover.hovered
+                }
+                HoverHandler { id: homeHover }
                 Rectangle {
                     anchors.centerIn: parent
                     width: Theme.railTile
@@ -89,47 +92,6 @@ Rectangle {
                     color: addHover.hovered ? Theme.ink1 : Theme.ink2
                 }
                 HoverHandler { id: addHover }
-            }
-        }
-    }
-
-    Item {
-        id: user
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 12
-        width: parent.width
-        height: Theme.railTile
-
-        Avatar {
-            anchors.centerIn: parent
-            size: 40
-            initials: Session.meId.length > 0 ? Session.meInitials : "?"
-            source: Session.meAvatar
-        }
-        // Presence LED in a square notch cut from the rail ply.
-        Rectangle {
-            x: parent.width / 2 + 8
-            y: parent.height - 12
-            width: 14
-            height: 14
-            color: Theme.ply0
-            Led {
-                anchors.centerIn: parent
-                size: 8
-                color: Nav.connected ? Theme.statusOnline : Theme.statusIdle
-            }
-        }
-        HoverHandler { id: userHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: menu.popup() }
-        ToolTip.visible: userHover.hovered && !menu.visible
-        ToolTip.text: Session.meId.length > 0 ? Session.meName + " · @" + Session.meUsername : ""
-        ToolTip.delay: 400
-
-        Menu {
-            id: menu
-            MenuItem {
-                text: qsTr("Sign out")
-                onTriggered: Session.signOut()
             }
         }
     }

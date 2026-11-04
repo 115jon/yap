@@ -11,7 +11,9 @@ ApplicationWindow {
     readonly property bool booting: Session.phase === Session.Boot || Session.phase === Session.Loading
     readonly property bool ready: Session.phase === Session.Ready
     // formatAppTitle (AppTitleBarModel.ts): "#general · Yap HQ".
+    // A voice channel has no "#".
     readonly property string location: !ready || Nav.activeServerName.length === 0 ? "Yap"
+        : Nav.voicePanelName.length > 0 ? Nav.voicePanelName + " · " + Nav.activeServerName
         : Nav.activeChannelName.length > 0 ? "#" + Nav.activeChannelName + " · " + Nav.activeServerName
         : Nav.activeServerName
 

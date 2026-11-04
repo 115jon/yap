@@ -19,7 +19,9 @@ pub mod view;
 pub use effect::{ApiRequest, ApiResponse, CacheWrite, Effect};
 pub use input::{Command, Dispatch, GatewayEvent, Input, SignInEvent};
 pub use reduce::reduce;
-pub use state::{GatewayStatus, MessageLog, Phase, ServerChannels, Session, State, VoiceCall};
+pub use state::{
+    GatewayStatus, MessageLog, Phase, ServerChannels, Session, State, VoiceCall, VoicePrefs,
+};
 pub use time::LocalOffset;
 pub use view::{Row, ViewDiff, ViewUpdate};
 pub use yap_cache::Snapshot;
@@ -53,6 +55,7 @@ pub struct VoiceTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoiceCommand {
     SetMuted(bool),
+    SetDeafened(bool),
     Leave,
 }
 
@@ -61,11 +64,29 @@ pub enum VoiceCommand {
 pub struct VoiceMember {
     /// The participant id.
     pub id: String,
+    /// The Yap user id when the room named it (empty otherwise).
+    pub user_id: String,
     pub name: String,
     pub muted: bool,
+    pub deafened: bool,
     pub speaking: bool,
     /// This client's own participant.
     pub me: bool,
+}
+
+/// Someone in a server voice channel, as the gateway reports it for the
+/// sidebar (`VOICE_CHANNEL_STATES`); profile fields carry over from the
+/// last full state of the same user.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Occupant {
+    pub user_id: String,
+    pub name: String,
+    /// As sent (possibly relative); empty when there is none.
+    pub avatar_url: String,
+    pub muted: bool,
+    pub deafened: bool,
+    pub video: bool,
+    pub stream: bool,
 }
 
 /// What a voice session reports back.

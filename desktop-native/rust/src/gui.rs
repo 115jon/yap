@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cxx_qt_lib::QString;
 use yap_core::store::time::local_day;
 use yap_core::store::view::{
-    ChannelTreeRow, MeView, MessageRow, ServerRow, VoiceMemberRow, VoiceView,
+    ChannelTreeRow, MeView, MessageRow, ServerRow, VoiceMemberRow, VoicePanelView, VoiceView,
 };
 use yap_core::ViewUpdate;
 
@@ -38,6 +38,7 @@ struct Scalars {
     channel: (String, String),
     typing: String,
     voice: VoiceView,
+    panel: VoicePanelView,
 }
 
 /// The live QObjects. Each registers from its constructor and clears its
@@ -132,12 +133,18 @@ impl Slot for Nav {
     }
 
     fn restore(mut self: Pin<&mut Self>) {
-        let (connected, server, channel) = GUI.with(|gui| {
+        let (connected, server, channel, panel) = GUI.with(|gui| {
             let s = &gui.borrow().scalars;
-            (s.connected, s.server.clone(), s.channel.clone())
+            (
+                s.connected,
+                s.server.clone(),
+                s.channel.clone(),
+                s.panel.clone(),
+            )
         });
         self.as_mut().set_connected(connected);
         set_server(self.as_mut(), &server.0, &server.1);
+        set_panel(self.as_mut(), &panel);
         set_channel(self, &channel.0, &channel.1);
     }
 }
@@ -192,11 +199,19 @@ fn set_channel(mut nav: Pin<&mut Nav>, id: &str, name: &str) {
     nav.set_active_channel_id(q(id));
 }
 
+fn set_panel(mut nav: Pin<&mut Nav>, panel: &VoicePanelView) {
+    nav.as_mut().set_voice_panel_name(q(&panel.name));
+    nav.as_mut()
+        .set_voice_panel_count(i32::try_from(panel.count).unwrap_or(i32::MAX));
+    nav.set_voice_panel_id(q(&panel.id));
+}
+
 fn set_voice(mut voice: Pin<&mut Voice>, view: &VoiceView) {
     voice.as_mut().set_status(q(&view.status));
     voice.as_mut().set_channel_name(q(&view.channel_name));
     voice.as_mut().set_live(view.live);
     voice.as_mut().set_muted(view.muted);
+    voice.as_mut().set_deafened(view.deafened);
     voice.set_channel_id(q(&view.channel_id));
 }
 
@@ -205,6 +220,8 @@ fn set_me(mut session: Pin<&mut Session>, me: &MeView) {
     session.as_mut().set_me_username(q(&me.username));
     session.as_mut().set_me_avatar(q(&me.avatar));
     session.as_mut().set_me_initials(q(&me.initials));
+    session.as_mut().set_me_status(q(&me.status));
+    session.as_mut().set_me_custom_status(q(&me.custom_status));
     session.set_me_id(q(&me.id));
 }
 
@@ -244,6 +261,10 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::Voice(view) => {
             with::<Voice>(|voice| set_voice(voice, &view));
             scalars(|s| s.voice = view);
+        }
+        ViewUpdate::VoicePanel(panel) => {
+            with::<Nav>(|nav| set_panel(nav, &panel));
+            scalars(|s| s.panel = panel);
         }
         ViewUpdate::Servers(diff) => models::apply::<m::ServerListModel>(diff),
         ViewUpdate::Channels(diff) => models::apply::<m::ChannelTreeModel>(diff),

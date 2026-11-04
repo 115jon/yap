@@ -300,8 +300,10 @@ impl Runner {
             Effect::VoiceStart { call, target, .. } => {
                 let me = VoiceMember {
                     id: "fixture-me".into(),
+                    user_id: String::new(),
                     name: target.me_name.clone(),
                     muted: false,
+                    deafened: false,
                     speaking: false,
                     me: true,
                 };

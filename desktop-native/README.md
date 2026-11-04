@@ -16,13 +16,19 @@ the decisions.
 - A text channel's history, with Markdown, grouping and edits.
 - Live updates over the gateway: create, update, delete, typing.
 - Sending from the composer.
-- Audio-only voice calls: join a voice channel, real mic and speakers with
-  echo cancellation, roster with speaking LEDs, mute, leave. Interoperates
-  with the web client. Wire details are in [VOICE_PROTOCOL.md](VOICE_PROTOCOL.md).
+- Audio-only voice calls: a voice channel opens its landing, Join starts the
+  call; real mic and speakers with echo cancellation, a participant grid,
+  mute and deafen (kept between calls), leave. Interoperates with the web
+  client. Wire details are in [VOICE_PROTOCOL.md](VOICE_PROTOCOL.md).
+- The Talk Tree: everyone in every voice channel of the server
+  (`VOICE_CHANNEL_STATES` / `_UPDATE`), with guides, the lit path to you,
+  speaking LEDs and mute/deafen glyphs.
+- The account row, the connection strip, and messages through the web's
+  Markdown grammar (`yap-core` `markdown.rs`) as Qt rich text.
 
 ## Not yet
 
-Video and screen share, device picker, deafen, attachments preview, embeds, reactions, DMs, unread state,
+Video and screen share, device picker, attachments preview, embeds, reactions, DMs, unread state,
 notifications, tray, single instance and auto-update.
 
 ## Build (Windows)
