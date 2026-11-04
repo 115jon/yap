@@ -14,11 +14,14 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::Message;
 
+use yap_protocol::{GatewayOp, HEARTBEAT_FRAME};
+
 use super::config;
 
 pub enum Frame {
-    /// `{op, d}` from the server (Hello is handled here, not forwarded).
-    Op(i64, Value),
+    /// `{op, d}` from the server (Hello and HeartbeatACK are handled here,
+    /// not forwarded; frames with an opcode this build does not know are dropped).
+    Op(GatewayOp, Value),
     /// The socket ended; the close code if the server sent one.
     Closed(Option<u16>),
 }
@@ -74,9 +77,15 @@ async fn pump(
             frame = reader.next() => match frame {
                 Some(Ok(Message::Text(text))) => {
                     let Ok(message) = serde_json::from_str::<Value>(&text) else { continue };
-                    let op = message.get("op").and_then(Value::as_i64).unwrap_or(-1);
+                    let Some(op) = message
+                        .get("op")
+                        .and_then(Value::as_i64)
+                        .and_then(|op| GatewayOp::try_from(op).ok())
+                    else {
+                        continue;
+                    };
                     let data = message.get("d").cloned().unwrap_or(Value::Null);
-                    if op == 8 {
+                    if op == GatewayOp::Hello {
                         let ms = data.get("heartbeat_interval").and_then(Value::as_u64).unwrap_or(15_000);
                         let period = Duration::from_millis(ms);
                         heartbeat = Some(interval_at(Instant::now() + period, period));
@@ -85,7 +94,7 @@ async fn pump(
                                 break None;
                             }
                         }
-                    } else if op != 6 && frames.send(Frame::Op(op, data)).is_err() {
+                    } else if op != GatewayOp::HeartbeatACK && frames.send(Frame::Op(op, data)).is_err() {
                         break None;
                     }
                 }
@@ -110,7 +119,7 @@ async fn pump(
                 }
             },
             _ = tick(&mut heartbeat) => {
-                if writer.send(Message::text(r#"{"op":3}"#)).await.is_err() {
+                if writer.send(Message::text(HEARTBEAT_FRAME)).await.is_err() {
                     break None;
                 }
             }

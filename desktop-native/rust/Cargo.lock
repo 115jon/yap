@@ -2424,6 +2424,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
+name = "yap-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "yap_native"
 version = "0.1.0"
 dependencies = [
@@ -2441,6 +2449,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "uuid",
+ "yap-protocol",
 ]
 
 [[package]]

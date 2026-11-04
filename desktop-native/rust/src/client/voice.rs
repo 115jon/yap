@@ -21,6 +21,7 @@ use libwebrtc::session_description::{SdpType, SessionDescription};
 use libwebrtc::MediaType;
 use serde_json::{json, Value};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use yap_protocol::{Frame as WireFrame, GatewayCloseCode, GatewayOp};
 
 use super::api::Api;
 use super::sfu::Sfu;
@@ -161,7 +162,7 @@ async fn session(
     let room_tx = socket::open(
         &format!("/api/channels/{slug}/ws?v=1"),
         str_of(&room, "ticket"),
-        json!({ "op": 0, "d": {
+        json!({ "op": GatewayOp::Identify as u16, "d": {
             "name": target.me_name, "username": target.me_username,
             "platform": "desktop", "supports_voice_state_deltas": true,
         }}),
@@ -172,7 +173,7 @@ async fn session(
     let voice_tx = socket::open(
         &format!("/api/channels/{slug}/voice?v=1"),
         str_of(&voice, "ticket"),
-        json!({ "op": 100, "d": { "participant_id": me, "voice_token": voice_token } }),
+        json!({ "op": GatewayOp::VoiceIdentify as u16, "d": { "participant_id": me, "voice_token": voice_token } }),
         voice_frames_tx,
     )
     .await
@@ -250,7 +251,7 @@ async fn session(
     }
 
     let my_track = format!("cam-audio-{me}");
-    let announce = json!({ "op": 12, "d": { "tracks": [{
+    let announce = json!({ "op": GatewayOp::Video as u16, "d": { "tracks": [{
         "participant_id": me, "track_name": my_track, "sfu_track_name": pushed.track_name,
         "session_id": session_cap, "kind": "audio",
     }]}});
@@ -335,7 +336,7 @@ async fn session(
 
         tokio::select! {
             frame = room_frames.recv() => match frame {
-                Some(Frame::Op(2, d)) => {
+                Some(Frame::Op(GatewayOp::Ready, d)) => {
                     for p in d.get("participants").and_then(Value::as_array).into_iter().flatten() {
                         let id = str_of(p, "id");
                         if id.is_empty() || id == me { continue }
@@ -349,7 +350,7 @@ async fn session(
                     let _ = room_tx.send(voice_state(muted).to_string());
                     send(roster(&members));
                 }
-                Some(Frame::Op(15, d)) => {
+                Some(Frame::Op(GatewayOp::VoiceStateUpdate, d)) => {
                     let p = d.get("participant").cloned().unwrap_or(Value::Null);
                     let id = str_of(&p, "id").to_owned();
                     if !id.is_empty() && id != me {
@@ -363,20 +364,20 @@ async fn session(
                         send(roster(&members));
                     }
                 }
-                Some(Frame::Op(9, d)) => {
+                Some(Frame::Op(GatewayOp::Resumed, d)) => {
                     let token = str_of(&d, "voice_token");
                     if !token.is_empty() {
                         voice_token = token.to_owned();
                         sfu.set_voice_token(&voice_token);
                     }
                 }
-                Some(Frame::Op(18, d)) => eprintln!("[voice] room error {d}"),
+                Some(Frame::Op(GatewayOp::Error, d)) => eprintln!("[voice] room error {d}"),
                 Some(Frame::Op(..)) => {}
                 Some(Frame::Closed(code)) => break Some(format!("Room connection closed ({})", code.map_or("no code".into(), |c| c.to_string()))),
                 None => break Some("Room connection closed".into()),
             },
             frame = voice_frames.recv() => match frame {
-                Some(Frame::Op(101, d)) => {
+                Some(Frame::Op(GatewayOp::VoiceReady, d)) => {
                     voice_ready = true;
                     let _ = voice_tx.send(announce.to_string());
                     queue_tracks(d.get("tracks").unwrap_or(&Value::Null), "", &mut pending);
@@ -387,17 +388,17 @@ async fn session(
                     }
                     send(roster(&members));
                 }
-                Some(Frame::Op(12, d)) => {
+                Some(Frame::Op(GatewayOp::Video, d)) => {
                     let outer = str_of(&d, "participant_id").to_owned();
                     queue_tracks(d.get("tracks").unwrap_or(&Value::Null), &outer, &mut pending);
                 }
-                Some(Frame::Op(5, d)) => {
+                Some(Frame::Op(GatewayOp::Speaking, d)) => {
                     if let Some(m) = members.get_mut(str_of(&d, "participant_id")) {
                         m.speaking = d.get("speaking").and_then(Value::as_i64).unwrap_or(0) & 1 == 1;
                         send(roster(&members));
                     }
                 }
-                Some(Frame::Op(13, d)) => {
+                Some(Frame::Op(GatewayOp::StopTracks, d)) => {
                     // Only the named tracks stopped (a screen share can stop
                     // while the mic stays). Their transceivers go quiet on
                     // their own; forget them so a republish is pulled again.
@@ -417,7 +418,7 @@ async fn session(
                     retire(&gone, &mut pulled, &mut mids, &pull_tx);
                     pending.retain(|r| !stopped(&r.sfu_track_name, &r.participant_id, &r.track_name));
                 }
-                Some(Frame::Op(11, d)) => {
+                Some(Frame::Op(GatewayOp::ClientDisconnect, d)) => {
                     let pid = str_of(&d, "participant_id").to_owned();
                     let gone: Vec<String> = pulled.iter().filter(|(_, (owner, _))| *owner == pid).map(|(sfu, _)| sfu.clone()).collect();
                     retire(&gone, &mut pulled, &mut mids, &pull_tx);
@@ -425,16 +426,19 @@ async fn session(
                     if let Some(m) = members.get_mut(&pid) { m.speaking = false; }
                     send(roster(&members));
                 }
-                Some(Frame::Op(18, d)) => {
+                Some(Frame::Op(GatewayOp::Error, d)) => {
                     let code = d.get("code").and_then(Value::as_i64).unwrap_or(0);
                     eprintln!("[voice] voice error {d}");
-                    if code == 4008 || code == 4010 {
+                    if matches!(
+                        GatewayCloseCode::try_from(code),
+                        Ok(GatewayCloseCode::AdmissionRejected | GatewayCloseCode::SessionReplaced)
+                    ) {
                         break Some(str_of(&d, "message").to_owned());
                     }
                 }
                 Some(Frame::Op(..)) => {}
-                Some(Frame::Closed(Some(4010))) => break Some("You joined this call somewhere else.".into()),
-                Some(Frame::Closed(Some(4008))) => break Some("The call refused this join.".into()),
+                Some(Frame::Closed(Some(code))) if code == GatewayCloseCode::SessionReplaced.code() => break Some("You joined this call somewhere else.".into()),
+                Some(Frame::Closed(Some(code))) if code == GatewayCloseCode::AdmissionRejected.code() => break Some("The call refused this join.".into()),
                 Some(Frame::Closed(code)) => break Some(format!("Voice connection closed ({})", code.map_or("no code".into(), |c| c.to_string()))),
                 None => break Some("Voice connection closed".into()),
             },
@@ -477,10 +481,10 @@ async fn session(
                 }
                 Some(VoiceCommand::Leave) | None => {
                     if voice_ready {
-                        let _ = voice_tx.send(json!({ "op": 13, "d": { "track_names": [my_track] } }).to_string());
+                        let _ = voice_tx.send(json!({ "op": GatewayOp::StopTracks as u16, "d": { "track_names": [my_track] } }).to_string());
                     }
-                    let _ = voice_tx.send(r#"{"op":11,"d":{}}"#.to_owned());
-                    let _ = room_tx.send(r#"{"op":11,"d":{}}"#.to_owned());
+                    let _ = voice_tx.send(empty_frame(GatewayOp::ClientDisconnect));
+                    let _ = room_tx.send(empty_frame(GatewayOp::ClientDisconnect));
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     break None;
                 }
@@ -491,7 +495,7 @@ async fn session(
                 }
             }
             _ = refresh.tick() => {
-                let _ = room_tx.send(r#"{"op":40,"d":{}}"#.to_owned());
+                let _ = room_tx.send(empty_frame(GatewayOp::RefreshVoiceCredentials));
             }
         }
     };
@@ -536,8 +540,13 @@ async fn log_stats(pc: &PeerConnection) {
     eprintln!("{line}");
 }
 
+/// `{"op":<op>,"d":{}}`.
+fn empty_frame(op: GatewayOp) -> String {
+    WireFrame::new(op, json!({})).encode()
+}
+
 fn voice_state(muted: bool) -> Value {
-    json!({ "op": 15, "d": {
+    json!({ "op": GatewayOp::VoiceStateUpdate as u16, "d": {
         "self_mute": muted, "self_deaf": false, "self_video": false,
         "self_stream": false, "self_stream_audio": false,
     }})

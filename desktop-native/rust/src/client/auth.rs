@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 use reqwest::{Client, StatusCode};
-use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::config;
@@ -14,15 +13,7 @@ const KEYRING_SERVICE: &str = "com.115jon.yap.native-spike";
 const KEYRING_USER: &str = "kova-session";
 const SLOW_DOWN_STEP: Duration = Duration::from_secs(5);
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeviceStart {
-    pub device_code: String,
-    pub user_code: String,
-    pub verification_uri_complete: String,
-    pub interval: u64,
-    pub expires_in: u64,
-}
+pub use yap_protocol::rest::DeviceStart;
 
 fn device_url(step: &str) -> String {
     let cfg = config::get();

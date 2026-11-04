@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
+use yap_protocol::GatewayOp;
 
 use api::Api;
 
@@ -408,15 +409,19 @@ impl Core {
     /// (Re)subscribes the gateway to what is on screen.
     fn sync_subscriptions(&self) {
         if let Some(server) = &self.active_server {
-            self.gateway_send(json!({ "op": 35, "d": { "server_id": server } }));
+            self.gateway_send(
+                json!({ "op": GatewayOp::ServerSubscribe as u16, "d": { "server_id": server } }),
+            );
         }
         if let Some(channel) = &self.active_channel {
-            self.gateway_send(json!({ "op": 27, "d": { "channel_id": channel } }));
+            self.gateway_send(
+                json!({ "op": GatewayOp::ChannelSubscribe as u16, "d": { "channel_id": channel } }),
+            );
         }
         // A re-identified gateway session has no voice presence: assert it
         // again or we drop out of everyone's sidebar mid-call.
         if let Some(call) = &self.voice {
-            self.gateway_send(json!({ "op": 33, "d": {
+            self.gateway_send(json!({ "op": GatewayOp::VoiceChannelJoin as u16, "d": {
                 "channel_id": call.channel_id, "self_mute": call.muted,
             }}));
         }
@@ -542,7 +547,7 @@ impl Core {
         let name = str_field(channel, "name").to_owned();
         if let Some(previous) = self.active_channel.replace(id.clone()) {
             if previous != id {
-                self.gateway_send(json!({ "op": 28, "d": { "channel_id": previous } }));
+                self.gateway_send(json!({ "op": GatewayOp::ChannelUnsubscribe as u16, "d": { "channel_id": previous } }));
             }
         }
         self.ui(Ui::ActiveChannel {
@@ -550,7 +555,9 @@ impl Core {
             name,
         });
         self.ui(Ui::MessagesReset(json!([])));
-        self.gateway_send(json!({ "op": 27, "d": { "channel_id": id } }));
+        self.gateway_send(
+            json!({ "op": GatewayOp::ChannelSubscribe as u16, "d": { "channel_id": id } }),
+        );
         self.load_channel_page(&api, id).await
     }
 
@@ -694,7 +701,7 @@ impl Core {
     fn leave_voice(&mut self) {
         if let Some(call) = self.voice.take() {
             let _ = call.commands.send(voice::VoiceCommand::Leave);
-            self.gateway_send(json!({ "op": 34, "d": { "channel_id": call.channel_id } }));
+            self.gateway_send(json!({ "op": GatewayOp::VoiceChannelLeave as u16, "d": { "channel_id": call.channel_id } }));
         }
         self.push_voice();
     }
@@ -735,14 +742,14 @@ impl Core {
             voice::VoiceUpdate::Connected => {
                 if let Some(call) = &self.voice {
                     // Sidebar presence for everyone else (VOICE_PROTOCOL.md §7).
-                    self.gateway_send(json!({ "op": 33, "d": {
+                    self.gateway_send(json!({ "op": GatewayOp::VoiceChannelJoin as u16, "d": {
                         "channel_id": call.channel_id, "self_mute": call.muted,
                     }}));
                 }
             }
             voice::VoiceUpdate::Ended(error) => {
                 if let Some(call) = self.voice.take() {
-                    self.gateway_send(json!({ "op": 34, "d": { "channel_id": call.channel_id } }));
+                    self.gateway_send(json!({ "op": GatewayOp::VoiceChannelLeave as u16, "d": { "channel_id": call.channel_id } }));
                 }
                 if let Some(error) = error {
                     self.ui(Ui::Status(format!("Left the call: {error}")));

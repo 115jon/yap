@@ -1,0 +1,313 @@
+//! Typed `d` payloads for the opcodes the native client sends or reads.
+//!
+//! Mirrors `packages/protocol/src/{client,server}-payloads.ts` and
+//! `desktop-native/VOICE_PROTOCOL.md`. Like the TypeScript schemas these are
+//! deliberately loose: unknown fields are ignored (never `deny_unknown_fields`)
+//! and a field is required only when the client reads it without a fallback.
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::opcode::GatewayCloseCode;
+use crate::rest::IceServer;
+
+// Both gateways
+
+/// Hello (op 8): first frame after connect.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Hello {
+    pub heartbeat_interval: Option<u64>,
+    pub gateway_version: Option<Value>,
+}
+
+/// Error (op 18).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct GatewayError {
+    pub code: i64,
+    pub message: String,
+    /// Native screen-share errors only.
+    pub request_id: Option<String>,
+    pub operation: Option<String>,
+    pub push_prefix: Option<String>,
+}
+
+impl GatewayError {
+    /// The code as a known [`GatewayCloseCode`], if it is one.
+    pub fn close_code(&self) -> Option<GatewayCloseCode> {
+        GatewayCloseCode::try_from(self.code).ok()
+    }
+}
+
+// Main gateway (chat socket and room socket)
+
+/// Identify (op 0). One struct for both sockets: the global gateway sends
+/// `clerk_user_id`, the room socket sends `username` and friends. Only `name`
+/// is required. Do not set `standby` on a room socket that must get the voice
+/// join grant.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Identify {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clerk_user_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    /// A string or an avatar display object; the room stores what it gets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_display: Option<Value>,
+    /// Unknown values fall back to `"web"` on the server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_voice_state_deltas: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standby: Option<bool>,
+}
+
+/// Resume (op 7).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Resume {
+    pub session_id: String,
+    pub seq_ack: u64,
+}
+
+/// Ready (op 2) on the global (chat) gateway: only the session id is read.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ChatReady {
+    pub participant_id: Option<String>,
+}
+
+/// Dispatch (op 19): `event` routes `data`; `seq` is the replay cursor.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Dispatch {
+    pub event: String,
+    #[serde(default)]
+    pub data: Value,
+    pub seq: Option<u64>,
+}
+
+/// `MESSAGE_DELETE` dispatch data.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct MessageDeleteEvent {
+    pub id: String,
+    pub channel_id: Option<String>,
+}
+
+/// `TYPING_START` dispatch data.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct TypingStartEvent {
+    pub channel_id: String,
+    pub user_id: String,
+}
+
+/// Subscribe (op 27) or unsubscribe (op 28) to a channel.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChannelRef {
+    pub channel_id: String,
+}
+
+/// ServerSubscribe (op 35).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ServerSubscribe {
+    pub server_id: String,
+}
+
+/// VoiceChannelJoin (op 33).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VoiceChannelJoin {
+    pub channel_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_mute: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<Value>,
+    /// A voice move grant: stands in for CONNECT on the channel it names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub move_grant: Option<String>,
+}
+
+/// VoiceChannelLeave (op 34). Without a channel it applies to the current one.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct VoiceChannelLeave {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<String>,
+}
+
+// Room socket: roster and voice state
+
+/// A room participant. Join and leave carry the full state; an update may be
+/// a delta without the profile fields, so only `id` is required.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct VoiceState {
+    pub id: String,
+    pub user_id: Option<String>,
+    pub name: Option<String>,
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub self_mute: Option<bool>,
+    pub self_deaf: Option<bool>,
+    pub self_video: Option<bool>,
+    pub self_stream: Option<bool>,
+}
+
+/// What a [`VoiceStateUpdate`] did to the participant. Anything this build
+/// does not know is [`VoiceAction::Unknown`] and should be treated as an update.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VoiceAction {
+    Join,
+    Leave,
+    Update,
+    #[serde(other)]
+    Unknown,
+}
+
+/// VoiceStateUpdate (op 15), server to client.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct VoiceStateUpdate {
+    pub participant: VoiceState,
+    pub action: VoiceAction,
+}
+
+/// VoiceStateUpdate (op 15), client to server: the sender's own flags.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ClientVoiceState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_mute: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_deaf: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_video: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_stream: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_stream_audio: Option<bool>,
+}
+
+/// MediaReady (op 41): media credentials before the full Ready.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct MediaReady {
+    pub participant_id: String,
+    #[serde(default)]
+    pub ice_servers: Vec<IceServer>,
+    pub voice_token: String,
+}
+
+/// Ready (op 2) on a room socket.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct RoomReady {
+    pub participant_id: String,
+    #[serde(default)]
+    pub ice_servers: Vec<IceServer>,
+    pub voice_token: String,
+    /// The roster, excluding the receiver.
+    #[serde(default)]
+    pub participants: Vec<VoiceState>,
+    pub heartbeat_interval: Option<u64>,
+    pub spatial_audio_state: Option<Value>,
+}
+
+/// Resumed (op 9) on a room socket: the reply to a credentials refresh (op 40).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Resumed {
+    pub voice_token: Option<String>,
+    pub ice_servers: Option<Vec<IceServer>>,
+    pub participants: Option<Vec<VoiceState>>,
+}
+
+// Voice socket
+
+/// VoiceIdentify (op 100).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VoiceIdentify {
+    pub participant_id: String,
+    pub voice_token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_listen_together_snapshot_events: Option<bool>,
+}
+
+/// Kind of a published track. Anything else decodes as [`TrackKind::Unknown`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TrackKind {
+    Audio,
+    Video,
+    #[serde(other)]
+    Unknown,
+}
+
+/// A published track as the voice room describes it (Video, op 12, and
+/// VoiceReady `tracks`). Skip tracks without `sfu_track_name`: they are
+/// legacy or native screen tracks and cannot be pulled.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrackInfo {
+    /// Absent on a broadcast track; use the outer `participant_id` then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub participant_id: Option<String>,
+    /// Yap's alias, e.g. `cam-audio-<participant id>`.
+    pub track_name: String,
+    /// The SFU's track name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sfu_track_name: Option<String>,
+    /// The PartyTracks session capability.
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mid: Option<String>,
+    pub kind: TrackKind,
+}
+
+/// Video (op 12): tracks announced or changed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Video {
+    /// Set by the server on the broadcast to listeners.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub participant_id: Option<String>,
+    pub tracks: Vec<TrackInfo>,
+}
+
+/// StopTracks (op 13). Clients send only `track_names`; the server's
+/// broadcast adds `participant_id` and `tracks`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct StopTracks {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub participant_id: Option<String>,
+    #[serde(default)]
+    pub track_names: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tracks: Vec<TrackInfo>,
+}
+
+/// ClientDisconnect (op 11). Clients send `{}`; on the voice socket the
+/// server sends the departing `participant_id`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ClientDisconnect {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub participant_id: Option<String>,
+}
+
+/// Speaking (op 5). Clients send `speaking` only; the server relays it with
+/// the speaker's `participant_id`. Bit 0 is the microphone.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Speaking {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub participant_id: Option<String>,
+    pub speaking: i64,
+}
+
+/// VoiceReady (op 101).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct VoiceReady {
+    pub participant_id: String,
+    /// Every live track except the receiver's own.
+    #[serde(default)]
+    pub tracks: Vec<TrackInfo>,
+    /// Speaking flags by participant id.
+    #[serde(default)]
+    pub speaking: BTreeMap<String, i64>,
+    pub join_wait_ms: Option<u64>,
+}

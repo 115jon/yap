@@ -16,9 +16,9 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::api::{self, Api};
-use super::{config, Command, Event};
+use yap_protocol::{GatewayOp, DEFAULT_HEARTBEAT_INTERVAL_MS, HEARTBEAT_FRAME};
 
-const HEARTBEAT: &str = r#"{"op":3}"#;
+use super::{config, Command, Event};
 
 /// Runs until the task is aborted, reconnecting with backoff.
 pub async fn run(
@@ -100,13 +100,17 @@ async fn session(
                 };
                 let Ok(message) = serde_json::from_str::<Value>(&text) else { continue };
                 let data = message.get("d").cloned().unwrap_or(Value::Null);
-                match message.get("op").and_then(Value::as_i64) {
-                    Some(8) => {
-                        let ms = data.get("heartbeat_interval").and_then(Value::as_u64).unwrap_or(45_000);
+                match message
+                    .get("op")
+                    .and_then(Value::as_i64)
+                    .and_then(|op| GatewayOp::try_from(op).ok())
+                {
+                    Some(GatewayOp::Hello) => {
+                        let ms = data.get("heartbeat_interval").and_then(Value::as_u64).unwrap_or(DEFAULT_HEARTBEAT_INTERVAL_MS);
                         let period = Duration::from_millis(ms);
                         heartbeat = Some(interval_at(Instant::now() + period, period));
                         let identify = json!({
-                            "op": 0,
+                            "op": GatewayOp::Identify as u16,
                             "d": {
                                 "name": "ChatClient",
                                 "clerk_user_id": user_id,
@@ -116,17 +120,17 @@ async fn session(
                         });
                         writer.send(Message::text(identify.to_string())).await?;
                     }
-                    Some(2) | Some(9) => {
+                    Some(GatewayOp::Ready | GatewayOp::Resumed) => {
                         *reached_ready = true;
                         eprintln!("[startup] gateway ready after {} ms", super::started_at().elapsed().as_millis());
                         let _ = events.send(Command::Event(Event::GatewayReady));
                     }
-                    Some(19) => {
+                    Some(GatewayOp::Dispatch) => {
                         let event = data.get("event").and_then(Value::as_str).unwrap_or_default().to_owned();
                         let payload = data.get("data").cloned().unwrap_or(Value::Null);
                         let _ = events.send(Command::Event(Event::Dispatch(event, payload)));
                     }
-                    Some(18) => eprintln!("[gateway] error frame: {data}"),
+                    Some(GatewayOp::Error) => eprintln!("[gateway] error frame: {data}"),
                     _ => {}
                 }
             }
@@ -138,7 +142,7 @@ async fn session(
                 }
             },
             _ = tick(&mut heartbeat) => {
-                writer.send(Message::text(HEARTBEAT)).await?;
+                writer.send(Message::text(HEARTBEAT_FRAME)).await?;
             }
         }
     }
