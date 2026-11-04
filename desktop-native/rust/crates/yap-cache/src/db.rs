@@ -9,13 +9,13 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::{
-    CacheError, ChannelsResponse, Message, Server, Snapshot, User, Write, CHANNEL_WINDOWS,
-    MESSAGE_WINDOW,
+    CacheError, ChannelsResponse, Message, Server, Snapshot, User, VoicePrefs, Write,
+    CHANNEL_WINDOWS, MESSAGE_WINDOW,
 };
 
 /// Bumped whenever the tables or the JSON in them change shape. Any other
 /// version on disk is dropped and recreated.
-pub const SCHEMA_VERSION: i32 = 1;
+pub const SCHEMA_VERSION: i32 = 2;
 
 const SCHEMA: &str = "
 CREATE TABLE users (
@@ -23,6 +23,7 @@ CREATE TABLE users (
     me             TEXT,
     active_server  TEXT,
     active_channel TEXT,
+    voice          TEXT,
     written_at     INTEGER NOT NULL
 );
 CREATE TABLE servers (
@@ -61,6 +62,7 @@ struct UserBatch {
     me: Option<Box<User>>,
     servers: Option<Vec<Server>>,
     route: Option<(Option<String>, Option<String>)>,
+    voice: Option<VoicePrefs>,
     channels: HashMap<String, ChannelsResponse>,
     messages: HashMap<String, Vec<Message>>,
 }
@@ -70,6 +72,7 @@ impl UserBatch {
         self.me.is_some()
             || self.servers.is_some()
             || self.route.is_some()
+            || self.voice.is_some()
             || !self.channels.is_empty()
             || !self.messages.is_empty()
     }
@@ -99,6 +102,7 @@ impl Batch {
             } => {
                 user.messages.insert(channel_id, messages);
             }
+            Write::Voice(prefs) => user.voice = Some(prefs),
         }
     }
 
@@ -223,16 +227,25 @@ impl Cache {
     /// One user's snapshot, with the newest window of its active channel.
     /// `None` until `me` has been stored for that user.
     pub fn load(&self, user_id: &str) -> Result<Option<Snapshot>, CacheError> {
-        let head: Option<(String, Option<String>, Option<String>, i64)> = self
+        type Head = (String, Option<String>, Option<String>, Option<String>, i64);
+        let head: Option<Head> = self
             .conn
             .query_row(
-                "SELECT me, active_server, active_channel, written_at FROM users
+                "SELECT me, active_server, active_channel, voice, written_at FROM users
                  WHERE user_id = ?1 AND me IS NOT NULL",
                 [user_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .optional()?;
-        let Some((me, active_server, active_channel, written_at_ms)) = head else {
+        let Some((me, active_server, active_channel, voice, written_at_ms)) = head else {
             return Ok(None);
         };
         let Some(me) = decode::<User>(&me) else {
@@ -274,6 +287,7 @@ impl Cache {
             active_channel,
             messages,
             written_at_ms,
+            voice: voice.as_deref().and_then(decode),
         }))
     }
 
@@ -353,6 +367,12 @@ fn write_user(
         tx.execute(
             "UPDATE users SET active_server = ?2, active_channel = ?3 WHERE user_id = ?1",
             params![user_id, server, channel],
+        )?;
+    }
+    if let Some(voice) = &user.voice {
+        tx.execute(
+            "UPDATE users SET voice = ?2 WHERE user_id = ?1",
+            params![user_id, encode(voice)?],
         )?;
     }
     if let Some(servers) = &user.servers {

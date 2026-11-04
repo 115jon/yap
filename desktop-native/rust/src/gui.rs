@@ -212,6 +212,7 @@ fn set_voice(mut voice: Pin<&mut Voice>, view: &VoiceView) {
     voice.as_mut().set_live(view.live);
     voice.as_mut().set_muted(view.muted);
     voice.as_mut().set_deafened(view.deafened);
+    voice.as_mut().set_error(q(&view.error));
     voice.set_channel_id(q(&view.channel_id));
 }
 

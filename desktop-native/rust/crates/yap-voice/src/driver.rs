@@ -157,8 +157,34 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
         loop {
             // Effects run in order. Tickets and media are awaited here, so
             // socket events wait in their channels until the mic is
-            // published (VOICE_PROTOCOL.md §6).
+            // published (VOICE_PROTOCOL.md §6). The ticket fetch listens
+            // for commands meanwhile: a Leave drops it before any socket opens.
             while let Some(effect) = queue.pop_front() {
+                if let Effect::FetchTickets { room, voice } = effect {
+                    let fetch = self.fetch_tickets(room, voice);
+                    tokio::pin!(fetch);
+                    let tickets = loop {
+                        tokio::select! {
+                            tickets = &mut fetch => break Some(tickets),
+                            command = commands.recv(), if commands_open => {
+                                let command = command.unwrap_or_else(|| {
+                                    commands_open = false;
+                                    UserCommand::Leave
+                                });
+                                let fx = machine.handle(Input::Command(command));
+                                let ended = fx.iter().any(|e| matches!(e, Effect::End(_)));
+                                queue.extend(fx);
+                                if ended {
+                                    break None;
+                                }
+                            }
+                        }
+                    };
+                    if let Some(tickets) = tickets {
+                        queue.extend(machine.handle(Input::Tickets(tickets)));
+                    }
+                    continue;
+                }
                 match self.apply(effect, inbox, notify).await {
                     Applied::Done => {}
                     Applied::Input(input) => queue.extend(machine.handle(input)),
@@ -641,6 +667,42 @@ mod tests {
             sfu_track_name: name.into(),
             session_id: "their-session".into(),
         }
+    }
+
+    /// Ticket replies that never come.
+    #[derive(Clone)]
+    struct StuckTickets;
+
+    impl TicketApi for StuckTickets {
+        async fn socket_ticket(&self, _: Value) -> Result<Value, ApiFailure> {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn leave_while_getting_tickets_should_end_before_any_socket_opens() {
+        let engine = FakeEngine::new();
+        let env = CallEnv {
+            engine: engine.clone(),
+            tickets: StuckTickets,
+            http: reqwest::Client::new(),
+            api_base: "https://api.invalid".into(),
+            origin: "https://api.invalid".into(),
+        };
+        let target = CallTarget {
+            server_id: "s1".into(),
+            channel_id: "c1".into(),
+            me_name: "Jon".into(),
+            me_username: "jon".into(),
+        };
+        let (commands, rx) = mpsc::unbounded_channel();
+        commands.send(UserCommand::Leave).expect("open");
+        let ended = tokio::time::timeout(Duration::from_secs(5), run_call(env, target, rx, |_| {}))
+            .await
+            .expect("ends without waiting for the tickets");
+        assert_eq!(ended, None);
+        // No media was opened, only released.
+        assert_eq!(engine.ops(), vec![FakeOp::Release]);
     }
 
     #[tokio::test]

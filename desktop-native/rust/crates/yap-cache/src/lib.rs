@@ -3,8 +3,9 @@
 //!
 //! One SQLite file ([`default_path`]) holds, per user id: `me`, the server
 //! list, the channel tree of each server seen, the last active server and
-//! channel, and the newest [`MESSAGE_WINDOW`] messages of each text channel
-//! opened. Tokens and tickets are never stored.
+//! channel, the newest [`MESSAGE_WINDOW`] messages of each text channel
+//! opened, and the mic and deafen settings. Tokens and tickets are never
+//! stored.
 //!
 //! It is a cache: a schema version mismatch or a file that does not open
 //! drops it and starts over. [`Cache`] is blocking; [`Writer`] owns it on a
@@ -36,6 +37,16 @@ pub enum CacheError {
     Json(#[from] serde_json::Error),
 }
 
+/// Mic and deafen as the user left them (the web's useVoiceSettingsStore):
+/// deafening also mutes and remembers whether the mic was muted before, so
+/// undeafening can put it back.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VoicePrefs {
+    pub muted: bool,
+    pub deafened: bool,
+    pub muted_before_deafen: bool,
+}
+
 /// One user's last session, as read at boot.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
@@ -50,6 +61,8 @@ pub struct Snapshot {
     pub messages: Vec<Message>,
     /// When the snapshot was last written, epoch milliseconds.
     pub written_at_ms: i64,
+    /// `None` until the user changed mic or deafen once.
+    pub voice: Option<VoicePrefs>,
 }
 
 /// One replacement for part of a user's snapshot. Each replaces what was
@@ -72,6 +85,8 @@ pub enum Write {
         channel_id: String,
         messages: Vec<Message>,
     },
+    /// Mic and deafen.
+    Voice(VoicePrefs),
 }
 
 /// `%LOCALAPPDATA%\YapNative\cache\snapshot.db`, apart from the installed

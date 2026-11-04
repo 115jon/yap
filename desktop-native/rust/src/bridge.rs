@@ -126,6 +126,8 @@ pub mod qobject {
         #[qproperty(bool, live)]
         #[qproperty(bool, muted)]
         #[qproperty(bool, deafened)]
+        /// Why the last call failed; empty once a join starts.
+        #[qproperty(QString, error)]
         type Voice = super::VoiceRust;
 
         #[qinvokable]
@@ -221,6 +223,7 @@ pub struct VoiceRust {
     live: bool,
     muted: bool,
     deafened: bool,
+    error: QString,
 }
 
 /// View updates waiting for the Qt thread, and whether a closure that will

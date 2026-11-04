@@ -106,6 +106,8 @@ fn escape_into(text: &str, out: &mut String) {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
+            // Theme.richText swaps %TOKEN%s: user text never forms one.
+            '%' => out.push_str("&#37;"),
             '\n' => out.push_str("<br>"),
             _ => out.push(c),
         }
@@ -171,8 +173,11 @@ fn token<'a>(s: &'a str, before: Option<char>) -> Option<(usize, Token<'a>)> {
             let rest = s[close + 1..].strip_prefix('(')?;
             let end = rest.find(')')?;
             let url = &rest[..end];
-            (!label.is_empty() && !url.is_empty() && !label.contains('['))
-                .then_some((close + 2 + end + 1, Token::Link(label, url)))
+            let ok = !label.is_empty()
+                && !url.is_empty()
+                && !label.contains('[')
+                && !url.contains(char::is_whitespace);
+            ok.then_some((close + 2 + end + 1, Token::Link(label, url)))
         }
         '<' => {
             // <:name:id>
@@ -383,6 +388,17 @@ mod tests {
     #[test]
     fn edited_should_append_the_marker() {
         assert!(to_html("x", true).ends_with("(edited)</span>"));
+    }
+
+    #[test]
+    fn percent_signs_should_never_form_a_colour_token() {
+        assert_eq!(html("%LINK% 100%"), "&#37;LINK&#37; 100&#37;");
+    }
+
+    #[test]
+    fn link_urls_with_spaces_should_stay_text() {
+        assert!(!html("[x](https://a.example/ b)").contains(">x</a>"));
+        assert!(!html("[x](https://a.example/\nb)").contains(">x</a>"));
     }
 
     #[test]

@@ -72,7 +72,7 @@ Item {
     Led {
         x: root.guideX + 8
         anchors.verticalCenter: parent.verticalCenter
-        lit: root.speaking && !root.muted
+        lit: root.speaking && !root.muted && !root.deafened
         color: Theme.talk
         Rectangle {
             anchors.fill: parent

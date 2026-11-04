@@ -145,27 +145,31 @@ Rectangle {
     }
 
     // The hover bar (MessageItem.tsx): -16 from the top, 24 from the
-    // right, ply-3 with a seam (no shadow yet), 28 px keys 2 px apart. Not
-    // wired yet.
-    Rectangle {
-        visible: hover.hovered
+    // right, ply-3 with a seam (no shadow yet), 28 px keys 2 px apart. Built
+    // only for the hovered row, which rises above its neighbours so the bar
+    // can overhang the row above. Not wired yet.
+    z: hover.hovered ? 1 : 0
+    Loader {
+        active: hover.hovered
         anchors.right: parent.right
         anchors.rightMargin: 24
         y: root.padTop - 16
-        width: actions.implicitWidth + 4
-        height: 32
-        radius: Theme.radius
-        color: Theme.ply3
-        border.width: 1
-        border.color: Theme.line
-        Row {
-            id: actions
-            anchors.centerIn: parent
-            spacing: 2
-            IconKey { size: 28; iconName: "react"; tip: qsTr("Add reaction") }
-            IconKey { size: 28; iconName: "reply"; tip: qsTr("Reply") }
-            IconKey { size: 28; iconName: "edit"; tip: qsTr("Edit"); visible: root.mine }
-            IconKey { size: 28; iconName: "more"; tip: qsTr("More") }
+        sourceComponent: Rectangle {
+            width: actions.implicitWidth + 4
+            height: 32
+            radius: Theme.radius
+            color: Theme.ply3
+            border.width: 1
+            border.color: Theme.line
+            Row {
+                id: actions
+                anchors.centerIn: parent
+                spacing: 2
+                IconKey { size: 28; iconName: "react"; tip: qsTr("Add reaction") }
+                IconKey { size: 28; iconName: "reply"; tip: qsTr("Reply") }
+                IconKey { size: 28; iconName: "edit"; tip: qsTr("Edit"); visible: root.mine }
+                IconKey { size: 28; iconName: "more"; tip: qsTr("More") }
+            }
         }
     }
 }

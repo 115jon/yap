@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls.Basic
 import com.yap.native
 
 // The account row (UserPanel.tsx): 64 high, pl-3 pr-1, gap 4. A 40 px
@@ -120,15 +119,19 @@ Rectangle {
         }
 
         HoverHandler { id: identityHover }
-        TapHandler { id: identityTap; onTapped: menu.popup() }
-        ToolTip.visible: identityHover.hovered && !menu.visible
-        ToolTip.text: qsTr("View profile · %1").arg(Session.meCustomStatus.length > 0 ? root.presenceWord + ": " + Session.meCustomStatus : root.presenceWord)
-        ToolTip.delay: 600
+        TapHandler { id: identityTap; onTapped: menu.open() }
+        Tooltip {
+            visible: identityHover.hovered && !menu.visible
+            text: qsTr("View profile · %1").arg(Session.meCustomStatus.length > 0 ? root.presenceWord + ": " + Session.meCustomStatus : root.presenceWord)
+        }
 
-        Menu {
+        MenuPanel {
             id: menu
-            MenuItem {
+            y: -height - 8
+            MenuRow {
+                glyph: "logout"
                 text: qsTr("Sign out")
+                danger: true
                 onTriggered: Session.signOut()
             }
         }

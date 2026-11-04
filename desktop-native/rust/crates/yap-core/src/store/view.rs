@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use super::state::{Phase, ServerChannels, VoiceCall};
 use super::time::{parse_rfc3339, LocalOffset, Stamp};
-use super::Occupant;
+use super::{Occupant, VoiceMember};
 
 /// One role value, borrowed from a row.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -332,6 +332,8 @@ pub struct VoiceView {
     pub live: bool,
     pub muted: bool,
     pub deafened: bool,
+    /// Why the last call failed (shown on the landing); empty otherwise.
+    pub error: String,
 }
 
 /// The open voice channel (its landing or the call), empty when none.
@@ -446,52 +448,81 @@ pub(super) fn seats(
     let call = call.filter(|c| c.channel_id == channel_id);
     let listed = occupants.get(channel_id).filter(|list| !list.is_empty());
     match (listed, call) {
-        (Some(list), call) => list
-            .iter()
-            .map(|o| {
-                let me = !me_id.is_empty() && o.user_id == me_id;
-                let member = call.and_then(|c| {
-                    c.roster
-                        .iter()
-                        .find(|m| if me { m.me } else { m.user_id == o.user_id })
-                });
-                let (muted, deafened) = match call.filter(|_| me) {
-                    Some(c) => (c.muted, c.deafened),
-                    None => (o.muted, o.deafened),
-                };
-                Seat {
-                    key: o.user_id.clone(),
-                    name: o.name.clone(),
-                    avatar: absolute_url(api_base, Some(&o.avatar_url)),
-                    muted,
-                    deafened,
-                    live: o.stream,
-                    speaking: member.is_some_and(|m| m.speaking),
-                    me,
+        (Some(list), call) => {
+            let mut seats: Vec<Seat> = list
+                .iter()
+                .map(|o| {
+                    let me = !me_id.is_empty() && o.user_id == me_id;
+                    let member = call.and_then(|c| {
+                        c.roster
+                            .iter()
+                            .find(|m| if me { m.me } else { m.user_id == o.user_id })
+                    });
+                    let (muted, deafened) = match call.filter(|_| me) {
+                        Some(c) => (c.muted, c.deafened),
+                        None => (o.muted, o.deafened),
+                    };
+                    Seat {
+                        key: o.user_id.clone(),
+                        name: o.name.clone(),
+                        avatar: absolute_url(api_base, Some(&o.avatar_url)),
+                        muted,
+                        deafened,
+                        live: o.stream,
+                        speaking: member.is_some_and(|m| m.speaking),
+                        me,
+                    }
+                })
+                .collect();
+            // The call knows people (us first of all) before the gateway's
+            // echo lists them: add them after the listed ones.
+            if let Some(call) = call {
+                let listed = |key: &str| list.iter().any(|o| o.user_id == key);
+                for m in &call.roster {
+                    let key = call_seat_key(m, me_id);
+                    let known = m.me || !m.user_id.is_empty();
+                    if known && !listed(&key) {
+                        seats.push(call_seat(m, key, call));
+                    }
                 }
-            })
-            .collect(),
+            }
+            seats
+        }
         (None, Some(call)) => call
             .roster
             .iter()
-            .map(|m| Seat {
-                key: if m.me && !me_id.is_empty() {
-                    me_id.to_owned()
-                } else if m.user_id.is_empty() {
-                    m.id.clone()
-                } else {
-                    m.user_id.clone()
-                },
-                name: m.name.clone(),
-                avatar: String::new(),
-                muted: m.muted,
-                deafened: m.deafened,
-                live: false,
-                speaking: m.speaking,
-                me: m.me,
-            })
+            .map(|m| call_seat(m, call_seat_key(m, me_id), call))
             .collect(),
         (None, None) => Vec::new(),
+    }
+}
+
+/// A call member's seat key: the user id (ours from the session).
+fn call_seat_key(m: &VoiceMember, me_id: &str) -> String {
+    if m.me && !me_id.is_empty() {
+        me_id.to_owned()
+    } else if m.user_id.is_empty() {
+        m.id.clone()
+    } else {
+        m.user_id.clone()
+    }
+}
+
+fn call_seat(m: &VoiceMember, key: String, call: &VoiceCall) -> Seat {
+    let (muted, deafened) = if m.me {
+        (call.muted, call.deafened)
+    } else {
+        (m.muted, m.deafened)
+    };
+    Seat {
+        key,
+        name: m.name.clone(),
+        avatar: String::new(),
+        muted,
+        deafened,
+        live: false,
+        speaking: m.speaking,
+        me: m.me,
     }
 }
 

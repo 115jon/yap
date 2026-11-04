@@ -11,7 +11,7 @@ use yap_core::store::view::{
 use yap_core::store::{
     reduce, ApiRequest, ApiResponse, CacheWrite, CallId, Command, Dispatch, Effect, GatewayEvent,
     Input, Phase, RequestId, SignInEvent, Snapshot, State, ViewDiff, ViewUpdate, VoiceCommand,
-    VoiceUpdate,
+    VoicePrefs, VoiceUpdate,
 };
 use yap_core::{ApiError, Token, VoiceMember};
 use yap_protocol::GatewayOp;
@@ -1146,6 +1146,7 @@ fn deafen_should_be_kept_and_applied_when_joining() {
     let mut client = Client::online();
     let fx = client.command(Command::SetVoiceDeafened(true));
     assert!(fx.contains(&Effect::View(ViewUpdate::Voice(VoiceView {
+        muted: true,
         deafened: true,
         ..VoiceView::default()
     }))));
@@ -1156,6 +1157,179 @@ fn deafen_should_be_kept_and_applied_when_joining() {
         command: VoiceCommand::SetDeafened(true),
     }));
     assert!(client.state.voice().is_some_and(|c| c.deafened));
+}
+
+fn voice_frames(fx: &[Effect]) -> Vec<Value> {
+    frames(fx)
+        .into_iter()
+        .filter(|(code, _)| *code == op(GatewayOp::VoiceStateUpdate))
+        .map(|(_, d)| d)
+        .collect()
+}
+
+fn prefs(client: &Client) -> (bool, bool) {
+    let voice = client.state.voice_prefs();
+    (voice.muted, voice.deafened)
+}
+
+#[test]
+fn connecting_should_send_our_voice_state_to_the_gateway() {
+    let mut client = Client::online();
+    client.command(Command::SetVoiceMuted(true));
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Connected,
+    });
+    assert_eq!(
+        voice_frames(&fx),
+        vec![json!({
+            "self_mute": true, "self_deaf": false, "self_video": false,
+            "self_stream": false, "self_stream_audio": false,
+        })]
+    );
+}
+
+#[test]
+fn toggles_in_a_joined_call_should_reach_the_gateway() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    // Not before the media path is up.
+    assert!(voice_frames(&client.command(Command::SetVoiceMuted(true))).is_empty());
+    client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Connected,
+    });
+    let fx = client.command(Command::SetVoiceDeafened(true));
+    let sent = voice_frames(&fx);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+        (sent[0]["self_mute"].clone(), sent[0]["self_deaf"].clone()),
+        (json!(true), json!(true))
+    );
+}
+
+#[test]
+fn deafen_should_mute_and_undeafen_should_restore_the_mic() {
+    let mut client = Client::online();
+    client.command(Command::SetVoiceDeafened(true));
+    assert_eq!(prefs(&client), (true, true));
+    client.command(Command::SetVoiceDeafened(false));
+    assert_eq!(prefs(&client), (false, false));
+    // Muted before deafening stays muted after.
+    client.command(Command::SetVoiceMuted(true));
+    client.command(Command::SetVoiceDeafened(true));
+    client.command(Command::SetVoiceDeafened(false));
+    assert_eq!(prefs(&client), (true, false));
+}
+
+#[test]
+fn unmuting_while_deafened_should_undeafen() {
+    let mut client = Client::online();
+    client.command(Command::SetVoiceDeafened(true));
+    client.command(Command::SetVoiceMuted(false));
+    assert_eq!(prefs(&client), (false, false));
+}
+
+#[test]
+fn deafen_in_a_call_should_mute_the_session_too() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let fx = client.command(Command::SetVoiceDeafened(true));
+    assert!(fx.contains(&Effect::Voice {
+        call,
+        command: VoiceCommand::SetMuted(true),
+    }));
+}
+
+#[test]
+fn voice_prefs_should_be_stored_and_restored_from_the_snapshot() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SetVoiceDeafened(true));
+    let stored = VoicePrefs {
+        muted: true,
+        deafened: true,
+        muted_before_deafen: false,
+    };
+    assert!(cache_writes(&fx).contains(&&CacheWrite::Voice(stored)));
+    let mut cached = snapshot();
+    cached.voice = Some(stored);
+    let (client, fx) = Client::launch(Some(cached));
+    assert_eq!(prefs(&client), (true, true));
+    assert!(fx.iter().any(|e| matches!(
+        e,
+        Effect::View(ViewUpdate::Voice(VoiceView {
+            muted: true,
+            deafened: true,
+            ..
+        }))
+    )));
+}
+
+#[test]
+fn our_call_seat_should_show_before_the_gateway_lists_us() {
+    let mut client = Client::online();
+    client.gateway(GatewayEvent::Dispatch(voice_states(json!({
+        VOICE: [occupant("user_ada", "Ada")],
+    }))));
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Roster(vec![member("p_me", false)]),
+    });
+    let rows = members_of(&fx);
+    let names: Vec<_> = rows.iter().map(|r| (r.name.as_str(), r.me)).collect();
+    // Ada's row only relights (the path now runs past her to us).
+    assert_eq!(names, [("Ada", false), ("P_ME", true)]);
+    assert_eq!(rows[1].id, format!("{VOICE}/user_fixture_me"));
+    let tree: Vec<_> = client
+        .state
+        .occupants(VOICE)
+        .iter()
+        .map(|o| o.name.as_str())
+        .collect();
+    assert_eq!(tree, ["Ada"]);
+}
+
+#[test]
+fn a_failed_call_should_say_why_on_the_voice_view_until_the_next_join() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Ended(Some("room ticket: 503".into())),
+    });
+    assert!(fx.iter().any(|e| matches!(
+        e,
+        Effect::View(ViewUpdate::Voice(VoiceView { error, .. })) if error == "Couldn't join the call. Try again."
+    )));
+    // A network failure and a refusal get their own plain lines.
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Ended(Some(
+            "room ticket: error sending request for url (https://x/api/voice/socket-ticket)".into(),
+        )),
+    });
+    assert!(fx.iter().any(|e| matches!(
+        e,
+        Effect::View(ViewUpdate::Voice(VoiceView { error, .. }))
+            if error == "Couldn't reach Yap. Check your connection and try again."
+    )));
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Ended(Some("room ticket: HTTP 403 CONNECT_DENIED".into())),
+    });
+    assert!(fx.iter().any(|e| matches!(
+        e,
+        Effect::View(ViewUpdate::Voice(VoiceView { error, .. })) if error == "You can't join this channel."
+    )));
+    let fx = client.command(Command::JoinVoice(VOICE.into()));
+    assert!(fx.iter().any(|e| matches!(
+        e,
+        Effect::View(ViewUpdate::Voice(VoiceView { error, .. })) if error.is_empty()
+    )));
 }
 
 #[test]
@@ -1195,12 +1369,13 @@ fn voice_connected_should_assert_presence() {
         update: VoiceUpdate::Connected,
     });
     assert_eq!(
-        frames(&fx),
-        vec![(
+        frames(&fx)[0],
+        (
             op(GatewayOp::VoiceChannelJoin),
             json!({ "channel_id": VOICE, "self_mute": false })
-        )]
+        )
     );
+    assert_eq!(frames(&fx)[1].0, op(GatewayOp::VoiceStateUpdate));
 }
 
 #[test]
@@ -1442,6 +1617,7 @@ fn voice_view_should_name_the_channel_and_go_live_when_connected() {
         live: true,
         muted: false,
         deafened: false,
+        error: String::new(),
     }))));
 }
 
@@ -1623,6 +1799,7 @@ fn snapshot() -> Snapshot {
         active_channel: Some(TEXT.into()),
         messages,
         written_at_ms: 0,
+        voice: None,
     }
 }
 

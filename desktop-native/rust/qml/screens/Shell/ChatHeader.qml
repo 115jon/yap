@@ -68,9 +68,9 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 4
             rightPadding: 8
-            IconKey { iconName: "pin"; tone: "muted"; tip: qsTr("Pinned messages") }
-            IconKey { iconName: "bell"; tone: "muted"; tip: qsTr("Notifications") }
-            IconKey { iconName: "members"; tone: "muted"; tip: qsTr("Show members") }
+            IconKey { iconName: "pin"; tone: "muted"; tipSide: "bottom"; tip: qsTr("Pinned messages") }
+            IconKey { iconName: "bell"; tone: "muted"; tipSide: "bottom"; tip: qsTr("Notifications") }
+            IconKey { iconName: "members"; tone: "muted"; tipSide: "bottom"; tip: qsTr("Show members") }
             Rectangle {
                 width: 1
                 height: 40

@@ -8,8 +8,8 @@ use rusqlite::Connection;
 use serde_json::json;
 use tempfile::TempDir;
 use yap_cache::{
-    Batch, Cache, ChannelsResponse, Message, Server, Snapshot, User, Write, Writer, MESSAGE_WINDOW,
-    SCHEMA_VERSION,
+    Batch, Cache, ChannelsResponse, Message, Server, Snapshot, User, VoicePrefs, Write, Writer,
+    MESSAGE_WINDOW, SCHEMA_VERSION,
 };
 
 const ALICE: &str = "user_alice";
@@ -131,8 +131,27 @@ fn a_snapshot_should_round_trip_through_the_file() {
             active_channel: Some("chan_text".into()),
             messages: (0..3).map(|n| message("chan_text", n)).collect(),
             written_at_ms: 1_000,
+            voice: None,
         }
     );
+}
+
+#[test]
+fn voice_prefs_should_round_trip_with_the_snapshot() {
+    let (_dir, path) = temp();
+    let mut cache = Cache::open(&path).expect("open");
+    write_snapshot(&mut cache, ALICE, 1_000);
+    let prefs = VoicePrefs {
+        muted: true,
+        deafened: true,
+        muted_before_deafen: false,
+    };
+    let mut batch = Batch::default();
+    batch.push(ALICE, Write::Voice(prefs));
+    cache.apply_at(batch, 2_000).expect("apply");
+    drop(cache);
+    let cache = Cache::open(&path).expect("reopen");
+    assert_eq!(load(&cache, ALICE).expect("snapshot").voice, Some(prefs));
 }
 
 #[test]

@@ -10,6 +10,7 @@ use yap_protocol::{Frame, GatewayOp};
 
 use super::state::{
     Boot, MessageLog, Pending, Phase, ServerChannels, Session, Startup, State, VoiceCall,
+    VoicePrefs,
 };
 use super::view::{self, ChannelTreeRow, MessageRow, Row, RowContext, ViewDiff, ViewUpdate};
 use super::view::{MeView, Seat, VoicePanelView, VoiceView};
@@ -19,7 +20,7 @@ use super::{
     VoiceUpdate,
 };
 use crate::api::{ApiError, Token};
-use yap_protocol::payload::VoiceChannelMember;
+use yap_protocol::payload::{ClientVoiceState, VoiceChannelMember};
 
 const SESSION_ENDED: &str = "Your session ended. Sign in again.";
 
@@ -115,6 +116,20 @@ impl State {
             move_grant: None,
         };
         frame(GatewayOp::VoiceChannelJoin, &join)
+    }
+
+    /// Our voice state on the chat gateway (op 15), so the others' trees and
+    /// landings show our mute and deafen (useVoiceChannel.ts sends it there
+    /// as well as on the room socket).
+    fn voice_state_frame(call: &VoiceCall) -> Option<Frame> {
+        let state = ClientVoiceState {
+            self_mute: Some(call.muted),
+            self_deaf: Some(call.deafened),
+            self_video: Some(false),
+            self_stream: Some(false),
+            self_stream_audio: Some(false),
+        };
+        frame(GatewayOp::VoiceStateUpdate, &state)
     }
 
     fn voice_leave_frame(channel_id: &str) -> Option<Frame> {
@@ -276,10 +291,12 @@ impl State {
                 status: call.status.clone(),
                 muted: call.muted,
                 deafened: call.deafened,
+                error: String::new(),
             },
             None => VoiceView {
                 muted: prefs.muted,
                 deafened: prefs.deafened,
+                error: self.voice_error.clone(),
                 ..VoiceView::default()
             },
         };
@@ -451,27 +468,31 @@ impl State {
             Command::Send(text) => self.send(fx, text.trim()),
             Command::JoinVoice(id) => self.join_voice(fx, id),
             Command::LeaveVoice => self.leave_voice(fx),
+            // useVoiceSettingsStore.ts: unmuting while deafened undeafens;
+            // a mute change outside deafen is the one to come back to.
             Command::SetVoiceMuted(muted) => {
-                self.voice_prefs.muted = muted;
-                if let Some(call) = &mut self.voice {
-                    call.muted = muted;
-                    fx.push(Effect::Voice {
-                        call: call.id,
-                        command: VoiceCommand::SetMuted(muted),
-                    });
+                let mut prefs = self.voice_prefs;
+                if !muted {
+                    prefs.deafened = false;
                 }
-                self.emit_voice(fx);
+                if !prefs.deafened {
+                    prefs.muted_before_deafen = muted;
+                }
+                prefs.muted = muted;
+                self.set_voice_prefs(fx, prefs);
             }
+            // Deafening mutes too and remembers the mic; undeafening puts
+            // it back.
             Command::SetVoiceDeafened(deafened) => {
-                self.voice_prefs.deafened = deafened;
-                if let Some(call) = &mut self.voice {
-                    call.deafened = deafened;
-                    fx.push(Effect::Voice {
-                        call: call.id,
-                        command: VoiceCommand::SetDeafened(deafened),
-                    });
+                let mut prefs = self.voice_prefs;
+                if deafened && !prefs.deafened {
+                    prefs.muted_before_deafen = prefs.muted;
+                    prefs.muted = true;
+                } else if !deafened && prefs.deafened {
+                    prefs.muted = prefs.muted_before_deafen;
                 }
-                self.emit_voice(fx);
+                prefs.deafened = deafened;
+                self.set_voice_prefs(fx, prefs);
             }
         }
     }
@@ -556,8 +577,13 @@ impl State {
             active_server,
             active_channel,
             messages,
+            voice,
             ..
         } = snapshot;
+        if let Some(prefs) = voice.filter(|p| *p != self.voice_prefs) {
+            self.voice_prefs = prefs;
+            self.emit_voice(fx);
+        }
         let session = SessionId(self.next_id());
         fx.push(Effect::GatewayConnect {
             session,
@@ -670,6 +696,9 @@ impl State {
         self.leave_voice(fx);
         self.close_voice_panel(fx);
         self.voice_channels.clear();
+        // The next user brings their own (from their snapshot).
+        self.voice_prefs = VoicePrefs::default();
+        self.voice_error.clear();
         if let Some(session) = self.session.take() {
             fx.push(Effect::GatewayDisconnect);
             if session.me.is_some() {
@@ -1192,6 +1221,9 @@ impl State {
         // again or we drop out of everyone's sidebar mid-call.
         if let Some(call) = self.voice.as_ref().filter(|_| voice) {
             self.gateway_send(fx, Self::voice_join_frame(call));
+            if call.joined {
+                self.gateway_send(fx, Self::voice_state_frame(call));
+            }
         }
     }
 
@@ -1349,6 +1381,7 @@ impl State {
             me_username: me.username.clone(),
         };
         let token = session.token.clone();
+        self.voice_error.clear();
         let call = CallId(self.next_id());
         fx.push(Effect::VoiceStart {
             call,
@@ -1376,6 +1409,7 @@ impl State {
             roster: Vec::new(),
             muted: prefs.muted,
             deafened: prefs.deafened,
+            joined: false,
         });
         self.emit_voice(fx);
     }
@@ -1391,6 +1425,36 @@ impl State {
         self.emit_voice(fx);
     }
 
+    /// New mic and deafen: kept, stored, sent to the call and, once it is
+    /// up, to the gateway.
+    fn set_voice_prefs(&mut self, fx: &mut Effects, prefs: VoicePrefs) {
+        if prefs == self.voice_prefs {
+            return;
+        }
+        self.voice_prefs = prefs;
+        self.persist(fx, CacheWrite::Voice(prefs));
+        if let Some(call) = &mut self.voice {
+            if call.muted != prefs.muted {
+                call.muted = prefs.muted;
+                fx.push(Effect::Voice {
+                    call: call.id,
+                    command: VoiceCommand::SetMuted(prefs.muted),
+                });
+            }
+            if call.deafened != prefs.deafened {
+                call.deafened = prefs.deafened;
+                fx.push(Effect::Voice {
+                    call: call.id,
+                    command: VoiceCommand::SetDeafened(prefs.deafened),
+                });
+            }
+        }
+        if let Some(call) = self.voice.as_ref().filter(|c| c.joined) {
+            self.gateway_send(fx, Self::voice_state_frame(call));
+        }
+        self.emit_voice(fx);
+    }
+
     fn on_voice(&mut self, fx: &mut Effects, call: CallId, update: VoiceUpdate) {
         let Some(current) = self.voice.as_mut().filter(|c| c.id == call) else {
             return;
@@ -1399,9 +1463,13 @@ impl State {
             VoiceUpdate::Status(status) => current.status = status,
             VoiceUpdate::Roster(roster) => current.roster = roster,
             VoiceUpdate::Connected => {
-                // Sidebar presence for everyone else (VOICE_PROTOCOL.md §7).
+                // Sidebar presence for everyone else (VOICE_PROTOCOL.md §7),
+                // then our mute and deafen.
+                current.joined = true;
                 let join = Self::voice_join_frame(current);
+                let state = Self::voice_state_frame(current);
                 self.gateway_send(fx, join);
+                self.gateway_send(fx, state);
             }
             VoiceUpdate::Ended(error) => {
                 if let Some(ended) = self.voice.take() {
@@ -1409,12 +1477,38 @@ impl State {
                     self.gateway_send(fx, Self::voice_leave_frame(&ended.channel_id));
                 }
                 if let Some(error) = error {
+                    self.voice_error = join_error_copy(&error);
                     self.set_status(fx, format!("Left the call: {error}"));
                 }
             }
         }
         self.emit_voice(fx);
     }
+}
+
+/// What the voice view says when a call ends with an error. The raw text
+/// stays in the session status (and the log); users get one plain line.
+fn join_error_copy(error: &str) -> String {
+    let lower = error.to_ascii_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|n| lower.contains(n));
+    if has(&["somewhere else", "moved to another"]) {
+        // Already written for people (yap-voice close reasons).
+        return error.to_owned();
+    }
+    if has(&["403", "forbidden", "connect_denied"]) {
+        return "You can't join this channel.".to_owned();
+    }
+    if has(&[
+        "error sending request",
+        "connect",
+        "timed out",
+        "timeout",
+        "dns",
+        "network",
+    ]) {
+        return "Couldn't reach Yap. Check your connection and try again.".to_owned();
+    }
+    "Couldn't join the call. Try again.".to_owned()
 }
 
 fn unexpected(response: &ApiResponse) -> ApiError {

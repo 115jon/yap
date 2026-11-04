@@ -12,8 +12,10 @@ Item {
     // Only animate while shown.
     required property bool active
 
-    // 0 signing in, 1 opening chat, 2 loading messages.
-    readonly property int step: status.indexOf("servers") >= 0 ? 2 : 0
+    // 0 signing in (until /me), 1 opening chat (the gateway connecting),
+    // 2 loading messages (servers and the page).
+    readonly property int step: status.indexOf("servers") >= 0 ? 2
+        : Session.meId.length > 0 && !Nav.connected ? 1 : 0
     readonly property var lines: [
         { line: qsTr("Signing you in"), detail: qsTr("Checking your session on this device.") },
         { line: qsTr("Opening chat"), detail: qsTr("Connecting to the chat server.") },

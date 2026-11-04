@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls.Basic
 import com.yap.native
 
 // One rail tile (ServerList.tsx RAIL_TILE): a 40 px tint-1 key with a
@@ -72,7 +71,9 @@ Item {
 
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
     TapHandler { id: tap; onTapped: entry.selected() }
-    ToolTip.visible: hover.hovered
-    ToolTip.text: entry.name
-    ToolTip.delay: 400
+    Tooltip {
+        visible: hover.hovered
+        text: entry.name
+        side: "right"
+    }
 }

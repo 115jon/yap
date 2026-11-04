@@ -44,6 +44,7 @@ Rectangle {
             tone: "muted"
             iconName: "chat"
             tip: qsTr("Show chat")
+            tipSide: "bottom"
         }
         Rectangle {
             anchors.bottom: parent.bottom
@@ -116,12 +117,16 @@ Rectangle {
                 x: 4
                 y: 4
                 width: parent.width - 8
-                Repeater {
+                // Builds only the rows it shows: six at most.
+                ListView {
+                    width: parent.width
+                    height: Math.min(root.count, 6) * 32
+                    interactive: false
+                    cacheBuffer: 0
                     model: VoiceRosterModel
                     delegate: LandingMember {
                         width: people.width
-                        visible: index < 6
-                        height: visible ? 32 : 0
+                        height: 32
                     }
                 }
                 Text {
@@ -141,25 +146,80 @@ Rectangle {
             text: qsTr("Join voice")
             onClicked: Voice.join(Nav.voicePanelId)
         }
+
+        // Why the last join failed; the next join clears it.
+        Row {
+            visible: Voice.error.length > 0
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: 8
+            // On the first line, even when the reason wraps.
+            Led {
+                y: 6
+                color: Theme.dangerInk
+            }
+            Text {
+                width: Math.min(implicitWidth, 420)
+                wrapMode: Text.Wrap
+                text: Voice.error
+                color: Theme.dangerInk
+                font: Theme.type.description
+                Accessible.role: Accessible.AlertMessage
+            }
+        }
     }
 
-    // Joined: one tile per person.
-    GridView {
-        id: grid
+    // Joined: one tile per person, fitted to the stage (grid-columns.ts
+    // fitGrid): the column count that gives the largest 16:9 tile under
+    // both the width and the height, 8 px gaps; one tile stops at 640, and
+    // below 200 the grid keeps 200 and scrolls.
+    function fitGrid(width, height, count) {
+        const gap = 8
+        const n = Math.max(1, count)
+        let best = { cols: 1, tileW: 0, scrolls: false }
+        for (let cols = 1; cols <= n; cols++) {
+            const rows = Math.ceil(n / cols)
+            const byWidth = (width - (cols - 1) * gap) / cols
+            const byHeight = ((height - (rows - 1) * gap) / rows) * 16 / 9
+            const tileW = Math.floor(Math.min(byWidth, byHeight))
+            if (tileW > best.tileW)
+                best = { cols: cols, tileW: tileW, scrolls: false }
+        }
+        if (n === 1)
+            best.tileW = Math.min(best.tileW, 640)
+        if (best.tileW < 200) {
+            const cols = Math.max(1, Math.min(n, Math.floor((width + gap) / (200 + gap))))
+            return { cols: cols, tileW: Math.max(0, Math.floor((width - (cols - 1) * gap) / cols)), scrolls: true }
+        }
+        return best
+    }
+
+    Flickable {
+        id: stage
         visible: root.joined
         anchors.fill: body
         anchors.margins: 16
-        // Tiles 200-640 wide at 16:9, 8 px apart (VoiceStage.tsx).
-        readonly property int columns: Math.max(1, Math.min(count, Math.floor(width / 208)))
-        readonly property int tileWidth: Math.min(640, Math.floor(width / columns) - 8)
-        cellWidth: Math.floor(width / columns)
-        cellHeight: Math.round(tileWidth * 9 / 16) + 8
-        clip: true
-        model: VoiceRosterModel
+        readonly property var fit: root.fitGrid(width, height, tiles.count)
+        contentWidth: width
+        contentHeight: Math.max(height, grid.height)
+        interactive: fit.scrolls
+        clip: fit.scrolls
         boundsBehavior: Flickable.StopAtBounds
-        delegate: VoiceTile {
-            width: grid.tileWidth
-            height: grid.cellHeight - 8
+
+        Grid {
+            id: grid
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: stage.fit.scrolls ? 0 : Math.max(0, (stage.height - height) / 2)
+            columns: stage.fit.cols
+            spacing: 8
+            Repeater {
+                id: tiles
+                model: VoiceRosterModel
+                delegate: VoiceTile {
+                    width: stage.fit.tileW
+                    height: Math.round(stage.fit.tileW * 9 / 16)
+                    solo: tiles.count === 1
+                }
+            }
         }
     }
 
@@ -170,30 +230,43 @@ Rectangle {
         width: parent.width
     }
 
-    // The dock: mic, deafen, leave (the stage bar, ui/dock.ts).
-    Item {
+    // The stage bar (VoiceControls.tsx): ply-1 with a top seam, 48 px
+    // square keys in the dock recipe (ui/dock.ts), a divider, then Leave,
+    // the one solid danger fill.
+    Rectangle {
         id: dock
         anchors.bottom: parent.bottom
         width: parent.width
         height: root.joined ? 72 : 0
         visible: root.joined
+        color: Theme.ply1
+        Rectangle { width: parent.width; height: 1; color: Theme.line }
         Row {
             anchors.centerIn: parent
             spacing: 8
             IconKey {
+                size: 48
                 iconName: "mic"
                 tone: Voice.muted ? "off" : "rest"
                 tip: Voice.muted ? qsTr("Unmute") : qsTr("Mute")
                 onClicked: Voice.requestMute(!Voice.muted)
             }
             IconKey {
+                size: 48
                 iconName: "deafen"
                 tone: Voice.deafened ? "off" : "rest"
                 tip: Voice.deafened ? qsTr("Undeafen") : qsTr("Deafen")
                 onClicked: Voice.requestDeafen(!Voice.deafened)
             }
+            Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 1
+                height: 24
+                color: Theme.line
+            }
             IconKey {
                 id: leaveKey
+                size: 48
                 iconName: "disconnect"
                 tip: qsTr("Leave call")
                 onClicked: Voice.leave()
@@ -211,7 +284,7 @@ Rectangle {
                     Icon {
                         anchors.centerIn: parent
                         name: "disconnect"
-                        size: Theme.iconLg
+                        size: Theme.iconXl
                         color: Theme.dangerFillInk
                     }
                 }

@@ -18,6 +18,7 @@ T.Button {
     property string iconVariant: tone === "off" ? "off" : "idle"
     property string tip: ""
     property bool square: false
+    property string tipSide: "top"
 
     property int glyph: size >= 48 ? Theme.iconXl : size >= 40 ? Theme.iconLg : size >= 32 ? Theme.iconMd : Theme.iconSm
     readonly property color ink: tone === "off" ? Theme.mutedState
@@ -32,6 +33,12 @@ T.Button {
 
     Accessible.role: Accessible.Button
     Accessible.name: tip
+
+    Tooltip {
+        visible: control.hovered && control.tip.length > 0
+        text: control.tip
+        side: control.tipSide
+    }
 
     contentItem: Item {
         Icon {

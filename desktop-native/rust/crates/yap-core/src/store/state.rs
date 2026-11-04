@@ -193,14 +193,13 @@ pub struct VoiceCall {
     pub roster: Vec<VoiceMember>,
     pub muted: bool,
     pub deafened: bool,
+    /// The media path came up once: our voice state goes to the gateway.
+    pub joined: bool,
 }
 
-/// Mic and deafen, kept between calls (the account row shows them always).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct VoicePrefs {
-    pub muted: bool,
-    pub deafened: bool,
-}
+/// Mic and deafen, kept between calls and in the snapshot cache (the
+/// account row shows them always).
+pub use yap_cache::VoicePrefs;
 
 /// The rows each list model shows, as last emitted. Diffs are computed
 /// against these, so they must only change together with a diff.
@@ -274,6 +273,8 @@ pub struct State {
     pub(super) typing_generation: u64,
     pub(super) voice: Option<VoiceCall>,
     pub(super) voice_prefs: VoicePrefs,
+    /// Why the last call failed; cleared by the next join.
+    pub(super) voice_error: String,
     /// Who is in each voice channel, by channel id (from the gateway).
     pub(super) voice_channels: HashMap<String, Vec<Occupant>>,
     /// The voice channel whose view is open (landing or call), if any.
@@ -311,6 +312,7 @@ impl State {
             typing_generation: 0,
             voice: None,
             voice_prefs: VoicePrefs::default(),
+            voice_error: String::new(),
             voice_channels: HashMap::new(),
             voice_view: None,
             tree_server: None,
@@ -382,6 +384,11 @@ impl State {
 
     pub fn voice(&self) -> Option<&VoiceCall> {
         self.voice.as_ref()
+    }
+
+    /// Mic and deafen, kept between calls.
+    pub fn voice_prefs(&self) -> VoicePrefs {
+        self.voice_prefs
     }
 
     /// Who the gateway says is in a voice channel.
