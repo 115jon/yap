@@ -119,6 +119,8 @@ struct Session {
     gateway_tx: UnboundedSender<String>,
     gateway: JoinHandle<()>,
     gateway_ready: bool,
+    /// Set after the first Ready; a later Ready is a reconnect.
+    gateway_was_ready: bool,
 }
 
 struct Core {
@@ -354,6 +356,7 @@ impl Core {
             gateway_tx,
             gateway,
             gateway_ready: false,
+            gateway_was_ready: false,
         });
 
         self.ui(Ui::Status("Loading servers…".into()));
@@ -548,7 +551,11 @@ impl Core {
         });
         self.ui(Ui::MessagesReset(json!([])));
         self.gateway_send(json!({ "op": 27, "d": { "channel_id": id } }));
+        self.load_channel_page(&api, id).await
+    }
 
+    /// Fetches the newest page of a channel and replaces the list with it.
+    async fn load_channel_page(&mut self, api: &Api, id: String) -> Result<()> {
         let page = api
             .get(&format!("/api/channels/{id}/messages?limit=50"))
             .await?;
@@ -612,11 +619,20 @@ impl Core {
                 self.ui(Ui::Status(message));
             }
             Event::GatewayReady => {
+                let mut reconnect = false;
                 if let Some(session) = &mut self.session {
                     session.gateway_ready = true;
+                    reconnect = std::mem::replace(&mut session.gateway_was_ready, true);
                 }
                 self.ui(Ui::Connected(true));
                 self.sync_subscriptions();
+                // No Resume yet: events during the gap are lost, so refetch
+                // what is on screen.
+                if reconnect {
+                    if let (Some(api), Some(channel)) = (self.api(), self.active_channel.clone()) {
+                        self.load_channel_page(&api, channel).await?;
+                    }
+                }
             }
             Event::GatewayClosed => {
                 if let Some(session) = &mut self.session {
