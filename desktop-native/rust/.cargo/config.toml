@@ -2,3 +2,8 @@
 # including C/C++ built by `cc` in build scripts, must match it.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# Generated C++ (cxx-qt, qmlcachegen) has UTF-8 string literals; without
+# /utf-8, MSVC reads it in the ANSI code page and "·" becomes "Â·".
+[env]
+CXXFLAGS_x86_64_pc_windows_msvc = "/utf-8"

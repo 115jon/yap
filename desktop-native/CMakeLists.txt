@@ -7,6 +7,8 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+# Sources and generated code are UTF-8; MSVC otherwise assumes the ANSI code page.
+add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 
 find_package(Qt6 REQUIRED COMPONENTS
   Core Gui Network Qml Quick QuickControls2 QmlImportScanner)
