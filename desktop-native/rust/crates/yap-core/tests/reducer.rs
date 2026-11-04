@@ -869,6 +869,25 @@ fn ready_after_a_reconnect_should_refetch_and_resubscribe() {
 }
 
 #[test]
+fn resumed_after_a_reconnect_should_resubscribe_without_refetching() {
+    let mut client = Client::online();
+    client.command(Command::JoinVoice(VOICE.into()));
+    client.gateway(GatewayEvent::Closed);
+    let fx = client.gateway(GatewayEvent::Resumed);
+    assert!(requests(&fx).is_empty());
+    // The server kept the voice presence: no second VoiceChannelJoin.
+    let ops: Vec<i64> = frames(&fx).into_iter().map(|(op, _)| op).collect();
+    assert_eq!(
+        ops,
+        [
+            op(GatewayOp::ServerSubscribe),
+            op(GatewayOp::ChannelSubscribe)
+        ]
+    );
+    assert!(client.state.connected());
+}
+
+#[test]
 fn frames_should_wait_for_the_gateway() {
     let mut client = Client::signed_in_with(channels_with_two_text());
     let fx = client.command(Command::SelectChannel(SECOND_TEXT.into()));

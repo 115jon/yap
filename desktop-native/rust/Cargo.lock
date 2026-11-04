@@ -2445,6 +2445,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "yap-realtime"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite",
+ "yap-protocol",
+]
+
+[[package]]
 name = "yap_native"
 version = "0.1.0"
 dependencies = [
@@ -2463,6 +2475,7 @@ dependencies = [
  "uuid",
  "yap-core",
  "yap-protocol",
+ "yap-realtime",
 ]
 
 [[package]]

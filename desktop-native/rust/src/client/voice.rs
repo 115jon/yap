@@ -1,10 +1,13 @@
 //! An audio-only voice session (VOICE_PROTOCOL.md §6): room socket for the
 //! join grant and roster, voice socket for track announcements, one peer
-//! connection to the Cloudflare SFU. Capture and playout go through
+//! connection to the Cloudflare SFU. Both sockets are `yap_realtime`
+//! connections: a network blip reconnects them (the room resumes, the voice
+//! socket identifies again and re-announces) while the peer connection
+//! carries on. Capture and playout go through
 //! libwebrtc's platform audio device module, which runs WebRTC's APM (echo
 //! cancellation, noise suppression, gain control) on the microphone.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -21,12 +24,13 @@ use libwebrtc::session_description::{SdpType, SessionDescription};
 use libwebrtc::MediaType;
 use serde_json::{json, Value};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use yap_protocol::{Frame as WireFrame, GatewayCloseCode, GatewayOp};
+use yap_protocol::{Frame as WireFrame, GatewayCloseCode, GatewayOp, VOICE_MOVED_CLOSE_REASON};
+use yap_realtime::{Config, Connection, Event, Policy, Reconnect, StopReason, TicketError};
 
-use yap_core::{Api, VoiceCommand, VoiceEvents, VoiceMember, VoiceUpdate};
+use yap_core::{config, Api, VoiceCommand, VoiceEvents, VoiceMember, VoiceUpdate};
 
+use super::gateway::ticket_error;
 use super::sfu::Sfu;
-use super::socket::{self, Frame};
 
 pub use yap_core::VoiceTarget as Target;
 
@@ -136,28 +140,43 @@ async fn session(
         });
 
     // Both sockets. The room Identify (not standby) is what grants the join.
+    // They live in this function, so a new call never sees an old call's
+    // frames, and dropping them on the way out closes them.
     send(VoiceUpdate::Status("Joining".into()));
-    let (room_frames_tx, mut room_frames) = mpsc::unbounded_channel();
-    let (voice_frames_tx, mut voice_frames) = mpsc::unbounded_channel();
-    let room_tx = socket::open(
-        &format!("/api/channels/{slug}/ws?v=1"),
-        str_of(&room, "ticket"),
-        json!({ "op": GatewayOp::Identify as u16, "d": {
-            "name": target.me_name, "username": target.me_username,
-            "platform": "desktop", "supports_voice_state_deltas": true,
-        }}),
-        room_frames_tx,
-    )
-    .await
-    .context("room socket")?;
-    let voice_tx = socket::open(
-        &format!("/api/channels/{slug}/voice?v=1"),
-        str_of(&voice, "ticket"),
-        json!({ "op": GatewayOp::VoiceIdentify as u16, "d": { "participant_id": me, "voice_token": voice_token } }),
-        voice_frames_tx,
-    )
-    .await
-    .context("voice socket")?;
+    let cfg = config::get();
+    let (room_events_tx, mut room_events) = mpsc::unbounded_channel();
+    let (voice_events_tx, mut voice_events) = mpsc::unbounded_channel();
+    let room_tx = Connection::spawn(
+        Config {
+            label: "voice/room",
+            url: yap_realtime::ws_url(&cfg.api_base, &format!("/api/channels/{slug}/ws?v=1")),
+            origin: cfg.gateway_origin.clone(),
+            identify: json!({ "op": GatewayOp::Identify.code(), "d": {
+                "name": target.me_name, "username": target.me_username,
+                "platform": "desktop", "supports_voice_state_deltas": true,
+            }}),
+            reconnect: Reconnect::Resume,
+            ready_op: GatewayOp::Ready,
+            policy: Policy::CALL,
+            debug_drop_after: yap_realtime::debug_drop_after(),
+        },
+        call_tickets(api.clone(), str_of(&room, "ticket"), room_body),
+        room_events_tx,
+    );
+    let voice_tx = Connection::spawn(
+        Config {
+            label: "voice/voice",
+            url: yap_realtime::ws_url(&cfg.api_base, &format!("/api/channels/{slug}/voice?v=1")),
+            origin: cfg.gateway_origin.clone(),
+            identify: voice_identify(&me, &voice_token),
+            reconnect: Reconnect::Reidentify,
+            ready_op: GatewayOp::VoiceReady,
+            policy: Policy::CALL,
+            debug_drop_after: yap_realtime::debug_drop_after(),
+        },
+        call_tickets(api.clone(), str_of(&voice, "ticket"), voice_body),
+        voice_events_tx,
+    );
 
     // Media: platform ADM (real mic + speakers, with APM), one peer connection.
     let f = factory();
@@ -264,6 +283,11 @@ async fn session(
     send(roster(&members));
 
     let mut voice_ready = false;
+    // VoiceReady was seen before (a later one follows a re-identify).
+    let mut reidentified = false;
+    // The room was identified once (a later Ready is a fresh session).
+    let mut room_identified = false;
+    let mut room_up = false;
     let mut connected = false;
     let mut muted = false;
     let mut pending: Vec<Remote> = Vec::new();
@@ -289,6 +313,13 @@ async fn session(
     );
 
     let mut stats_tick = tokio::time::interval(Duration::from_secs(5));
+    // Participants whose voice socket went away (ClientDisconnect), until
+    // when they may re-announce. The voice room sends ClientDisconnect when a
+    // participant merely re-identifies (purgeParticipantState), so their row
+    // and pulls are kept through this grace and only dropped if no Video
+    // follows.
+    let mut orphans: HashMap<String, tokio::time::Instant> = HashMap::new();
+    let mut orphan_sweep = tokio::time::interval(Duration::from_secs(1));
     let queue_tracks = |tracks: &Value, outer: &str, pending: &mut Vec<Remote>| {
         for t in tracks.as_array().into_iter().flatten() {
             let pid = match str_of(t, "participant_id") {
@@ -323,29 +354,42 @@ async fn session(
         }
 
         tokio::select! {
-            frame = room_frames.recv() => match frame {
-                Some(Frame::Op(GatewayOp::Ready, d)) => {
-                    for p in d.get("participants").and_then(Value::as_array).into_iter().flatten() {
-                        let id = str_of(p, "id");
-                        if id.is_empty() || id == me { continue }
-                        let name = member_name(p).unwrap_or_else(|| "Someone".to_owned());
-                        known_names.insert(id.to_owned(), name.clone());
-                        members.insert(id.to_owned(), Member {
-                            name,
-                            muted: p.get("self_mute").and_then(Value::as_bool).unwrap_or(false),
-                            speaking: false,
-                            me: false,
-                        });
+            event = room_events.recv() => match event {
+                Some(Event::Ready(d)) => {
+                    let pid = str_of(&d, "participant_id");
+                    if room_identified && !pid.is_empty() && pid != me {
+                        // Resume failed and the room made a new participant:
+                        // the voice grant and SFU session belong to the old one.
+                        break Some("The call connection was reset. Join again.".into());
                     }
-                    let _ = room_tx.send(voice_state(muted).to_string());
+                    if room_identified {
+                        eprintln!("[voice/room] identified fresh after a drop");
+                    }
+                    room_identified = true;
+                    room_up = true;
+                    apply_roster(&mut members, &mut known_names, &d, &me);
+                    room_tx.send(voice_state(muted).to_string());
                     send(roster(&members));
+                    if connected && voice_ready { send(VoiceUpdate::Status("Connected".into())); }
                 }
-                Some(Frame::Op(GatewayOp::VoiceStateUpdate, d)) => {
+                Some(Event::Resumed(d)) => {
+                    eprintln!("[voice/room] resumed");
+                    room_up = true;
+                    update_token(&d, &mut voice_token, &sfu, &voice_tx, &me);
+                    apply_roster(&mut members, &mut known_names, &d, &me);
+                    send(roster(&members));
+                    if connected && voice_ready { send(VoiceUpdate::Status("Connected".into())); }
+                }
+                Some(Event::Frame(GatewayOp::VoiceStateUpdate, d)) => {
                     let p = d.get("participant").cloned().unwrap_or(Value::Null);
                     let id = str_of(&p, "id").to_owned();
                     if !id.is_empty() && id != me {
                         if str_of(&d, "action") == "leave" {
                             members.remove(&id);
+                            orphans.remove(&id);
+                            let gone = owned_by(&pulled, &id);
+                            retire(&gone, &mut pulled, &mut mids, &pull_tx);
+                            pending.retain(|r| r.participant_id != id);
                         } else {
                             if let Some(name) = member_name(&p) {
                                 known_names.insert(id.clone(), name);
@@ -358,41 +402,71 @@ async fn session(
                         send(roster(&members));
                     }
                 }
-                Some(Frame::Op(GatewayOp::Resumed, d)) => {
-                    let token = str_of(&d, "voice_token");
-                    if !token.is_empty() {
-                        voice_token = token.to_owned();
-                        sfu.set_voice_token(&voice_token);
-                    }
+                // The reply to a credentials refresh (op 40).
+                Some(Event::Frame(GatewayOp::Resumed, d)) => update_token(&d, &mut voice_token, &sfu, &voice_tx, &me),
+                Some(Event::Frame(GatewayOp::Error, d)) => eprintln!("[voice] room error {d}"),
+                Some(Event::Disconnected { .. }) => {
+                    room_up = false;
+                    send(VoiceUpdate::Status("Reconnecting".into()));
                 }
-                Some(Frame::Op(GatewayOp::Error, d)) => eprintln!("[voice] room error {d}"),
-                Some(Frame::Op(..)) => {}
-                Some(Frame::Closed(code)) => break Some(format!("Room connection closed ({})", code.map_or("no code".into(), |c| c.to_string()))),
+                Some(Event::Stopped(reason)) => break Some(stop_message(reason)),
+                Some(_) => {}
                 None => break Some("Room connection closed".into()),
             },
-            frame = voice_frames.recv() => match frame {
-                Some(Frame::Op(GatewayOp::VoiceReady, d)) => {
+            event = voice_events.recv() => match event {
+                Some(Event::Ready(d)) => {
                     voice_ready = true;
-                    let _ = voice_tx.send(announce.to_string());
-                    queue_tracks(d.get("tracks").unwrap_or(&Value::Null), "", &mut pending);
+                    let tracks = d.get("tracks").unwrap_or(&Value::Null);
+                    if std::mem::replace(&mut reidentified, true) {
+                        eprintln!("[voice/voice] re-identified; re-announcing");
+                        // VoiceReady lists every live track: drop pulls of
+                        // tracks that went away during the blip, keep the
+                        // rest, queue new ones.
+                        let live: HashSet<&str> = tracks.as_array().into_iter().flatten()
+                            .map(|t| str_of(t, "sfu_track_name")).collect();
+                        let gone: Vec<String> = pulled.keys().filter(|k| !live.contains(k.as_str())).cloned().collect();
+                        retire(&gone, &mut pulled, &mut mids, &pull_tx);
+                        pending.retain(|r| live.contains(r.sfu_track_name.as_str()));
+                    }
+                    // Announce (again): a re-identified socket is a new voice
+                    // session to everyone else.
+                    voice_tx.send(announce.to_string());
+                    for t in tracks.as_array().into_iter().flatten() {
+                        orphans.remove(str_of(t, "participant_id"));
+                    }
+                    queue_tracks(tracks, "", &mut pending);
                     if let Some(speaking) = d.get("speaking").and_then(Value::as_object) {
                         for (pid, bits) in speaking {
                             if let Some(m) = members.get_mut(pid) { m.speaking = bits.as_i64().unwrap_or(0) & 1 == 1; }
                         }
                     }
                     send(roster(&members));
+                    if connected && room_up { send(VoiceUpdate::Status("Connected".into())); }
                 }
-                Some(Frame::Op(GatewayOp::Video, d)) => {
+                Some(Event::Frame(GatewayOp::Video, d)) => {
                     let outer = str_of(&d, "participant_id").to_owned();
-                    queue_tracks(d.get("tracks").unwrap_or(&Value::Null), &outer, &mut pending);
+                    let tracks = d.get("tracks").unwrap_or(&Value::Null);
+                    // A publication announced under a new SFU name replaces
+                    // the pull of its old one; the same name keeps its pull.
+                    let mut replaced = Vec::new();
+                    for t in tracks.as_array().into_iter().flatten() {
+                        let pid = match str_of(t, "participant_id") { "" => outer.as_str(), pid => pid };
+                        orphans.remove(pid);
+                        let (alias, sfu_name) = (str_of(t, "track_name"), str_of(t, "sfu_track_name"));
+                        replaced.extend(pulled.iter()
+                            .filter(|(sfu, (owner, a))| owner == pid && a == alias && sfu.as_str() != sfu_name)
+                            .map(|(sfu, _)| sfu.clone()));
+                    }
+                    retire(&replaced, &mut pulled, &mut mids, &pull_tx);
+                    queue_tracks(tracks, &outer, &mut pending);
                 }
-                Some(Frame::Op(GatewayOp::Speaking, d)) => {
+                Some(Event::Frame(GatewayOp::Speaking, d)) => {
                     if let Some(m) = members.get_mut(str_of(&d, "participant_id")) {
                         m.speaking = d.get("speaking").and_then(Value::as_i64).unwrap_or(0) & 1 == 1;
                         send(roster(&members));
                     }
                 }
-                Some(Frame::Op(GatewayOp::StopTracks, d)) => {
+                Some(Event::Frame(GatewayOp::StopTracks, d)) => {
                     // Only the named tracks stopped (a screen share can stop
                     // while the mic stays). Their transceivers go quiet on
                     // their own; forget them so a republish is pulled again.
@@ -412,18 +486,17 @@ async fn session(
                     retire(&gone, &mut pulled, &mut mids, &pull_tx);
                     pending.retain(|r| !stopped(&r.sfu_track_name, &r.participant_id, &r.track_name));
                 }
-                Some(Frame::Op(GatewayOp::ClientDisconnect, d)) => {
+                Some(Event::Frame(GatewayOp::ClientDisconnect, d)) => {
+                    // Their voice socket is gone, or they re-identified (the
+                    // room sends this either way). Keep the row and pulls for
+                    // a grace; a Video from them in time cancels it.
                     let pid = str_of(&d, "participant_id").to_owned();
-                    let gone: Vec<String> = pulled.iter().filter(|(_, (owner, _))| *owner == pid).map(|(sfu, _)| sfu.clone()).collect();
-                    retire(&gone, &mut pulled, &mut mids, &pull_tx);
-                    pending.retain(|r| r.participant_id != pid);
-                    // Their voice socket is gone. The room keeps a dropped
-                    // participant through its resume grace, so drop the row
-                    // here; a later room update re-adds it with its known name.
-                    members.remove(&pid);
-                    send(roster(&members));
+                    if !pid.is_empty() && pid != me {
+                        orphans.insert(pid.clone(), tokio::time::Instant::now() + REANNOUNCE_GRACE);
+                        pending.retain(|r| r.participant_id != pid);
+                    }
                 }
-                Some(Frame::Op(GatewayOp::Error, d)) => {
+                Some(Event::Frame(GatewayOp::Error, d)) => {
                     let code = d.get("code").and_then(Value::as_i64).unwrap_or(0);
                     eprintln!("[voice] voice error {d}");
                     if matches!(
@@ -433,10 +506,18 @@ async fn session(
                         break Some(str_of(&d, "message").to_owned());
                     }
                 }
-                Some(Frame::Op(..)) => {}
-                Some(Frame::Closed(Some(code))) if code == GatewayCloseCode::SessionReplaced.code() => break Some("You joined this call somewhere else.".into()),
-                Some(Frame::Closed(Some(code))) if code == GatewayCloseCode::AdmissionRejected.code() => break Some("The call refused this join.".into()),
-                Some(Frame::Closed(code)) => break Some(format!("Voice connection closed ({})", code.map_or("no code".into(), |c| c.to_string()))),
+                Some(Event::IdentifyRejected) => {
+                    // Expired voice token: the room's Resumed reply carries a
+                    // fresh one, which update_token sends as a new identify.
+                    eprintln!("[voice] voice token refused; refreshing");
+                    room_tx.send(empty_frame(GatewayOp::RefreshVoiceCredentials));
+                }
+                Some(Event::Disconnected { .. }) => {
+                    voice_ready = false;
+                    send(VoiceUpdate::Status("Reconnecting".into()));
+                }
+                Some(Event::Stopped(reason)) => break Some(stop_message(reason)),
+                Some(_) => {}
                 None => break Some("Voice connection closed".into()),
             },
             state = states.recv() => match state {
@@ -473,26 +554,42 @@ async fn session(
                     muted = value;
                     mic.set_enabled(!muted);
                     if let Some(m) = members.get_mut(&me) { m.muted = muted; }
-                    let _ = room_tx.send(voice_state(muted).to_string());
+                    room_tx.send(voice_state(muted).to_string());
                     send(roster(&members));
                 }
                 Some(VoiceCommand::Leave) | None => {
+                    // A socket that is not ready queues these and drops them
+                    // when it closes below.
                     if voice_ready {
-                        let _ = voice_tx.send(json!({ "op": GatewayOp::StopTracks as u16, "d": { "track_names": [my_track] } }).to_string());
+                        voice_tx.send(json!({ "op": GatewayOp::StopTracks.code(), "d": { "track_names": [my_track] } }).to_string());
                     }
-                    let _ = voice_tx.send(empty_frame(GatewayOp::ClientDisconnect));
-                    let _ = room_tx.send(empty_frame(GatewayOp::ClientDisconnect));
+                    voice_tx.send(empty_frame(GatewayOp::ClientDisconnect));
+                    room_tx.send(empty_frame(GatewayOp::ClientDisconnect));
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     break None;
                 }
             },
+            _ = orphan_sweep.tick(), if !orphans.is_empty() => {
+                let now = tokio::time::Instant::now();
+                let expired: Vec<String> = orphans.iter().filter(|(_, at)| **at <= now).map(|(pid, _)| pid.clone()).collect();
+                for pid in expired {
+                    orphans.remove(&pid);
+                    let gone = owned_by(&pulled, &pid);
+                    retire(&gone, &mut pulled, &mut mids, &pull_tx);
+                    // The room keeps a dropped participant through its resume
+                    // grace, so drop the row here; a later room update re-adds
+                    // it with its known name.
+                    members.remove(&pid);
+                    send(roster(&members));
+                }
+            }
             _ = stats_tick.tick() => {
                 if connected {
                     log_stats(&pc).await;
                 }
             }
             _ = refresh.tick() => {
-                let _ = room_tx.send(empty_frame(GatewayOp::RefreshVoiceCredentials));
+                room_tx.send(empty_frame(GatewayOp::RefreshVoiceCredentials));
             }
         }
     };
@@ -535,6 +632,110 @@ async fn log_stats(pc: &PeerConnection) {
         }
     }
     eprintln!("{line}");
+}
+
+/// How long a participant whose voice socket went away has to re-announce
+/// (a voice reconnect: call-socket backoff tops out at 10 s, plus a ticket).
+const REANNOUNCE_GRACE: Duration = Duration::from_secs(15);
+
+/// The SFU track names pulled from `pid`.
+fn owned_by(pulled: &HashMap<String, (String, String)>, pid: &str) -> Vec<String> {
+    pulled
+        .iter()
+        .filter(|(_, (owner, _))| owner == pid)
+        .map(|(sfu, _)| sfu.clone())
+        .collect()
+}
+
+/// Tickets for one call socket: the one fetched at join first, then a fresh
+/// one per reconnect (tickets are single use).
+fn call_tickets(
+    api: Api,
+    first: &str,
+    body: Value,
+) -> impl FnMut() -> yap_realtime::TicketFuture + Send + 'static {
+    let mut first = Some(first.to_owned()).filter(|t| !t.is_empty());
+    move || {
+        let first = first.take();
+        let api = api.clone();
+        let body = body.clone();
+        Box::pin(async move {
+            if let Some(ticket) = first {
+                return Ok(ticket);
+            }
+            let reply = api
+                .post("/api/voice/socket-ticket", &body)
+                .await
+                .map_err(ticket_error)?;
+            reply
+                .get("ticket")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| TicketError::Failed("socket ticket missing".into()))
+        })
+    }
+}
+
+fn voice_identify(me: &str, voice_token: &str) -> Value {
+    json!({ "op": GatewayOp::VoiceIdentify.code(), "d": { "participant_id": me, "voice_token": voice_token } })
+}
+
+/// Takes a fresh voice token from a room Ready/Resumed `d`, for the SFU and
+/// the voice socket's next identify.
+fn update_token(d: &Value, voice_token: &mut String, sfu: &Sfu, voice: &Connection, me: &str) {
+    let token = str_of(d, "voice_token");
+    if !token.is_empty() && token != voice_token {
+        token.clone_into(voice_token);
+        sfu.set_voice_token(voice_token);
+        voice.set_identify(voice_identify(me, voice_token));
+    }
+}
+
+/// Replaces the others in the roster with a room Ready/Resumed's
+/// `participants` (it excludes you).
+fn apply_roster(
+    members: &mut BTreeMap<String, Member>,
+    known_names: &mut HashMap<String, String>,
+    d: &Value,
+    me: &str,
+) {
+    let Some(list) = d.get("participants").and_then(Value::as_array) else {
+        return;
+    };
+    let speaking: HashMap<String, bool> = members
+        .iter()
+        .map(|(id, m)| (id.clone(), m.speaking))
+        .collect();
+    members.retain(|id, _| id == me);
+    for p in list {
+        let id = str_of(p, "id");
+        if id.is_empty() || id == me {
+            continue;
+        }
+        let name = member_name(p).unwrap_or_else(|| "Someone".to_owned());
+        known_names.insert(id.to_owned(), name.clone());
+        members.insert(
+            id.to_owned(),
+            Member {
+                name,
+                muted: p.get("self_mute").and_then(Value::as_bool).unwrap_or(false),
+                speaking: speaking.get(id).copied().unwrap_or(false),
+                me: false,
+            },
+        );
+    }
+}
+
+/// What the call shows when a socket stops for good.
+fn stop_message(reason: StopReason) -> String {
+    match reason {
+        StopReason::Replaced { reason, .. } if reason == VOICE_MOVED_CLOSE_REASON => {
+            "You were moved to another voice channel.".into()
+        }
+        StopReason::Replaced { .. } => "You joined this call somewhere else.".into(),
+        StopReason::AdmissionRejected { .. } => "The call refused this join.".into(),
+        StopReason::SessionExpired => "Your session expired. Sign in again.".into(),
+    }
 }
 
 /// `{"op":<op>,"d":{}}`.

@@ -1,0 +1,21 @@
+[package]
+name = "yap-realtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Yap realtime sockets: one reconnecting, resuming WebSocket connection with heartbeat liveness and the close-code policy. No Qt."
+
+[dependencies]
+futures-util = "0.3.34"
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite = { version = "0.30.0", features = ["native-tls"] }
+yap-protocol.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["net"] }
+
+[lints]
+workspace = true

@@ -86,6 +86,10 @@ impl GatewayEvents {
         self.send(GatewayEvent::Ready);
     }
 
+    pub fn resumed(&self) {
+        self.send(GatewayEvent::Resumed);
+    }
+
     pub fn closed(&self) {
         self.send(GatewayEvent::Closed);
     }

@@ -6,7 +6,6 @@
 
 pub mod gateway;
 pub mod sfu;
-pub mod socket;
 pub mod voice;
 
 use std::sync::{Arc, OnceLock};

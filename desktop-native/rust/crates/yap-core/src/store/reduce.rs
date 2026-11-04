@@ -556,7 +556,7 @@ impl State {
         } else {
             self.reset_tree(fx);
         }
-        self.sync_subscriptions(fx);
+        self.sync_subscriptions(fx, true);
         if let Some((id, name)) = kept {
             // Only the name can have changed; the messages stay.
             fx.view(ViewUpdate::ActiveChannel { id, name });
@@ -724,8 +724,9 @@ impl State {
 
     // Gateway
 
-    /// (Re)subscribes the gateway to what is on screen.
-    fn sync_subscriptions(&self, fx: &mut Effects) {
+    /// (Re)subscribes the gateway to what is on screen; `voice` also
+    /// re-asserts the call's voice presence.
+    fn sync_subscriptions(&self, fx: &mut Effects, voice: bool) {
         if let Some(server) = &self.active_server {
             let subscribe = ServerSubscribe {
                 server_id: server.clone(),
@@ -740,7 +741,7 @@ impl State {
         }
         // A re-identified gateway session has no voice presence: assert it
         // again or we drop out of everyone's sidebar mid-call.
-        if let Some(call) = &self.voice {
+        if let Some(call) = self.voice.as_ref().filter(|_| voice) {
             self.gateway_send(fx, Self::voice_join_frame(call));
         }
     }
@@ -754,14 +755,24 @@ impl State {
                 current.gateway.ready = true;
                 let reconnect = std::mem::replace(&mut current.gateway.was_ready, true);
                 self.set_connected(fx, true);
-                self.sync_subscriptions(fx);
-                // No Resume yet: events during the gap are lost, so refetch
-                // what is on screen.
+                self.sync_subscriptions(fx, true);
+                // A fresh session after a drop (Resume failed or was not
+                // possible): events during the gap are lost, so refetch what
+                // is on screen.
                 if reconnect {
                     if let Some(channel) = self.active_channel.clone() {
                         self.load_page(fx, &channel);
                     }
                 }
+            }
+            GatewayEvent::Resumed => {
+                current.gateway.ready = true;
+                current.gateway.was_ready = true;
+                self.set_connected(fx, true);
+                // The server restored the old subscriptions and voice
+                // presence; resend the subscriptions anyway, since switches
+                // made while offline were not sent (they are idempotent).
+                self.sync_subscriptions(fx, false);
             }
             GatewayEvent::Closed => {
                 current.gateway.ready = false;

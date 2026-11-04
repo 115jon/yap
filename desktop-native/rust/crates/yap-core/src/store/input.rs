@@ -58,8 +58,12 @@ pub enum SignInEvent {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GatewayEvent {
-    /// Ready (op 2) or Resumed (op 9).
+    /// Ready (op 2): a fresh session. After a drop, events in the gap are
+    /// lost, so what is on screen is refetched.
     Ready,
+    /// Resumed (op 9): the server replayed what was missed and kept the
+    /// subscriptions, so nothing is refetched.
+    Resumed,
     /// The socket dropped; the gateway reconnects on its own.
     Closed,
     /// A ticket fetch got a 401.
