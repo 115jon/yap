@@ -166,6 +166,26 @@ impl Sfu {
         Ok(Pulled { mid, offer_sdp })
     }
 
+    /// Closes receive tracks by mid: our offer in, the SFU's answer out.
+    pub async fn close(&self, session: &str, mids: &[String], offer_sdp: &str) -> Result<String> {
+        let tracks: Vec<Value> = mids.iter().map(|mid| json!({ "mid": mid })).collect();
+        let body = self
+            .call(
+                Method::PUT,
+                &format!("/sessions/{session}/tracks/close"),
+                Some(json!({
+                    "tracks": tracks,
+                    "sessionDescription": { "sdp": offer_sdp, "type": "offer" },
+                    "force": false,
+                })),
+            )
+            .await?;
+        body.pointer("/sessionDescription/sdp")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| anyhow!("close without an answer"))
+    }
+
     /// Sends our answer to an SFU offer.
     pub async fn renegotiate(&self, session: &str, answer_sdp: &str) -> Result<()> {
         self.call(

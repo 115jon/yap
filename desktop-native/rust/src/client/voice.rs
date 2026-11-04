@@ -52,6 +52,12 @@ struct Member {
     me: bool,
 }
 
+enum PullJob {
+    Pull(Remote),
+    /// Stop and close the receive transceivers with these mids.
+    Close(Vec<String>),
+}
+
 struct Remote {
     participant_id: String,
     track_name: String,
@@ -275,8 +281,11 @@ async fn session(
     // SFU track name -> (participant, track alias), for what is pulled or in flight.
     let mut pulled: HashMap<String, (String, String)> = HashMap::new();
     // Pulls run in their own task so a slow retry never blocks Leave or frames.
-    let (pull_tx, pull_rx) = mpsc::unbounded_channel::<Remote>();
-    let (pull_done_tx, mut pull_done) = mpsc::unbounded_channel::<(String, bool)>();
+    let (pull_tx, pull_rx) = mpsc::unbounded_channel::<PullJob>();
+    // (SFU track name, mid if the pull worked).
+    let (pull_done_tx, mut pull_done) = mpsc::unbounded_channel::<(String, Option<String>)>();
+    // SFU track name -> receive transceiver mid, for closing it later.
+    let mut mids: HashMap<String, String> = HashMap::new();
     let pull_worker = tokio::spawn(pull_worker(
         pc.clone(),
         sfu.clone(),
@@ -320,7 +329,7 @@ async fn session(
                     remote.sfu_track_name.clone(),
                     (remote.participant_id.clone(), remote.track_name.clone()),
                 );
-                let _ = pull_tx.send(remote);
+                let _ = pull_tx.send(PullJob::Pull(remote));
             }
         }
 
@@ -404,12 +413,14 @@ async fn session(
                     let stopped = |sfu: &str, owner: &str, alias: &str| {
                         if names.is_empty() { owner == pid } else { names.iter().any(|n| n == sfu || n == alias) }
                     };
-                    pulled.retain(|sfu, (owner, alias)| !stopped(sfu, owner, alias));
+                    let gone: Vec<String> = pulled.iter().filter(|(sfu, (owner, alias))| stopped(sfu, owner, alias)).map(|(sfu, _)| sfu.clone()).collect();
+                    retire(&gone, &mut pulled, &mut mids, &pull_tx);
                     pending.retain(|r| !stopped(&r.sfu_track_name, &r.participant_id, &r.track_name));
                 }
                 Some(Frame::Op(11, d)) => {
                     let pid = str_of(&d, "participant_id").to_owned();
-                    pulled.retain(|_, (owner, _)| *owner != pid);
+                    let gone: Vec<String> = pulled.iter().filter(|(_, (owner, _))| *owner == pid).map(|(sfu, _)| sfu.clone()).collect();
+                    retire(&gone, &mut pulled, &mut mids, &pull_tx);
                     pending.retain(|r| r.participant_id != pid);
                     if let Some(m) = members.get_mut(&pid) { m.speaking = false; }
                     send(roster(&members));
@@ -440,8 +451,17 @@ async fn session(
                 None => break Some("Media connection ended".into()),
             },
             done = pull_done.recv() => {
-                if let Some((sfu_track_name, ok)) = done {
-                    if !ok { pulled.remove(&sfu_track_name); }
+                match done {
+                    Some((sfu_track_name, Some(mid))) => {
+                        if pulled.contains_key(&sfu_track_name) {
+                            mids.insert(sfu_track_name, mid);
+                        } else {
+                            // Retired while the pull was in flight.
+                            let _ = pull_tx.send(PullJob::Close(vec![mid]));
+                        }
+                    }
+                    Some((sfu_track_name, None)) => { pulled.remove(&sfu_track_name); }
+                    None => {}
                 }
             }
             track = remote_tracks.recv() => {
@@ -523,34 +543,85 @@ fn voice_state(muted: bool) -> Value {
     }})
 }
 
-/// Runs pulls one at a time (each renegotiates the one peer connection).
+/// Forgets retired pulls and closes their transceivers.
+fn retire(
+    gone: &[String],
+    pulled: &mut HashMap<String, (String, String)>,
+    mids: &mut HashMap<String, String>,
+    jobs: &UnboundedSender<PullJob>,
+) {
+    let mut closing = Vec::new();
+    for sfu in gone {
+        pulled.remove(sfu);
+        if let Some(mid) = mids.remove(sfu) {
+            closing.push(mid);
+        }
+    }
+    if !closing.is_empty() {
+        let _ = jobs.send(PullJob::Close(closing));
+    }
+}
+
+/// Runs pulls and closes one at a time (each renegotiates the one peer
+/// connection).
 async fn pull_worker(
     pc: PeerConnection,
     sfu: Sfu,
     session: String,
-    mut remotes: UnboundedReceiver<Remote>,
-    done: UnboundedSender<(String, bool)>,
+    mut jobs: UnboundedReceiver<PullJob>,
+    done: UnboundedSender<(String, Option<String>)>,
 ) {
-    while let Some(remote) = remotes.recv().await {
-        let ok = match pull(&pc, &sfu, &session, &remote).await {
-            Ok(()) => {
-                eprintln!(
-                    "[voice] pulled {} from {}",
-                    remote.track_name, remote.participant_id
-                );
-                true
+    while let Some(job) = jobs.recv().await {
+        match job {
+            PullJob::Pull(remote) => {
+                let mid = match pull(&pc, &sfu, &session, &remote).await {
+                    Ok(mid) => {
+                        eprintln!(
+                            "[voice] pulled {} from {}",
+                            remote.track_name, remote.participant_id
+                        );
+                        Some(mid)
+                    }
+                    Err(error) => {
+                        eprintln!("[voice] pull {} failed: {error:#}", remote.track_name);
+                        None
+                    }
+                };
+                let _ = done.send((remote.sfu_track_name, mid));
             }
-            Err(error) => {
-                eprintln!("[voice] pull {} failed: {error:#}", remote.track_name);
-                false
-            }
-        };
-        let _ = done.send((remote.sfu_track_name, ok));
+            PullJob::Close(mids) => match close(&pc, &sfu, &session, &mids).await {
+                Ok(()) => eprintln!("[voice] closed {} transceiver(s)", mids.len()),
+                Err(error) => eprintln!("[voice] close failed: {error:#}"),
+            },
+        }
     }
 }
 
+/// Stops receive transceivers and tells the SFU (§3.3d: we offer).
+async fn close(pc: &PeerConnection, sfu: &Sfu, session: &str, mids: &[String]) -> Result<()> {
+    for transceiver in pc.transceivers() {
+        if transceiver.mid().is_some_and(|mid| mids.contains(&mid)) {
+            let _ = transceiver.stop();
+        }
+    }
+    let offer = pc
+        .create_offer(OfferOptions::default())
+        .await
+        .map_err(|e| anyhow!("close offer: {e:?}"))?;
+    pc.set_local_description(offer.clone())
+        .await
+        .map_err(|e| anyhow!("local close offer: {e:?}"))?;
+    let answer = sfu.close(session, mids, &offer.to_string()).await?;
+    pc.set_remote_description(
+        SessionDescription::parse(&answer, SdpType::Answer)
+            .map_err(|e| anyhow!("close answer sdp: {e:?}"))?,
+    )
+    .await
+    .map_err(|e| anyhow!("remote close answer: {e:?}"))
+}
+
 /// SFU offers, we answer (§3.3c). Retries "track not ready yet" briefly.
-async fn pull(pc: &PeerConnection, sfu: &Sfu, session: &str, remote: &Remote) -> Result<()> {
+async fn pull(pc: &PeerConnection, sfu: &Sfu, session: &str, remote: &Remote) -> Result<String> {
     let mut delay = Duration::from_millis(100);
     let pulled = loop {
         match sfu
@@ -567,7 +638,7 @@ async fn pull(pc: &PeerConnection, sfu: &Sfu, session: &str, remote: &Remote) ->
         }
     };
     let Some(offer) = pulled.offer_sdp else {
-        return Ok(());
+        return Ok(pulled.mid);
     };
     pc.set_remote_description(
         SessionDescription::parse(&offer, SdpType::Offer)
@@ -583,6 +654,5 @@ async fn pull(pc: &PeerConnection, sfu: &Sfu, session: &str, remote: &Remote) ->
         .await
         .map_err(|e| anyhow!("local answer: {e:?}"))?;
     sfu.renegotiate(session, &answer.to_string()).await?;
-    let _ = pulled.mid;
-    Ok(())
+    Ok(pulled.mid)
 }
