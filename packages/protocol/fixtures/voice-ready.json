@@ -1,0 +1,23 @@
+{
+  "op": 101,
+  "d": {
+    "participant_id": "pid_fixture_me",
+    "join_wait_ms": 12,
+    "tracks": [
+      {
+        "participant_id": "pid_fixture_alice",
+        "track_name": "cam-audio-pid_fixture_alice",
+        "sfu_track_name": "sfu_track_fixture_alice",
+        "session_id": "cap_fixture_alice",
+        "kind": "audio"
+      },
+      {
+        "participant_id": "pid_fixture_bob",
+        "track_name": "screen-video-pid_fixture_bob",
+        "session_id": "cap_fixture_bob",
+        "kind": "video"
+      }
+    ],
+    "speaking": { "pid_fixture_alice": 1, "pid_fixture_bob": 0 }
+  }
+}

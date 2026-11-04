@@ -1,0 +1,38 @@
+{
+  "categories": [
+    {
+      "id": "cat_fixture_text",
+      "server_id": "srv_fixture",
+      "name": "Text",
+      "rank": 0
+    },
+    {
+      "id": "cat_fixture_voice",
+      "server_id": "srv_fixture",
+      "name": "Voice",
+      "rank": 1
+    }
+  ],
+  "channels": [
+    {
+      "id": "chan_fixture_text",
+      "server_id": "srv_fixture",
+      "name": "general",
+      "description": null,
+      "channel_type": "text",
+      "category_id": "cat_fixture_text",
+      "position": 0,
+      "created_at": "2026-11-01T00:00:00.000Z",
+      "permissions": 1024
+    },
+    {
+      "id": "chan_fixture_voice",
+      "server_id": "srv_fixture",
+      "name": "lounge",
+      "channel_type": "voice",
+      "category_id": "cat_fixture_voice",
+      "position": 0,
+      "created_at": "2026-11-01T00:00:00.000Z"
+    }
+  ]
+}
