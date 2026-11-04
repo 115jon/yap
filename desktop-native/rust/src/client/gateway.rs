@@ -29,11 +29,17 @@ pub async fn run(
 ) {
     let mut attempt: u32 = 0;
     loop {
-        let result = session(&api, &user_id, &mut outgoing, &events).await;
+        let mut reached_ready = false;
+        let result = session(&api, &user_id, &mut outgoing, &events, &mut reached_ready).await;
         let _ = events.send(Command::Event(Event::GatewayClosed));
+        // Only a session that got to Ready resets the backoff; a server that
+        // accepts and then closes must not be retried every second.
+        if reached_ready {
+            attempt = 0;
+        }
         match result {
             Ok(true) => return,
-            Ok(false) => attempt = 0,
+            Ok(false) => {}
             Err(error) => {
                 if api::is_unauthorized(&error) {
                     let _ = events.send(Command::Event(Event::SessionExpired));
@@ -63,6 +69,7 @@ async fn session(
     user_id: &str,
     outgoing: &mut UnboundedReceiver<String>,
     events: &UnboundedSender<Command>,
+    reached_ready: &mut bool,
 ) -> Result<bool> {
     let cfg = config::get();
     let ticket = api.socket_ticket("global").await?;
@@ -110,6 +117,7 @@ async fn session(
                         writer.send(Message::text(identify.to_string())).await?;
                     }
                     Some(2) | Some(9) => {
+                        *reached_ready = true;
                         eprintln!("[startup] gateway ready after {} ms", super::started_at().elapsed().as_millis());
                         let _ = events.send(Command::Event(Event::GatewayReady));
                     }
