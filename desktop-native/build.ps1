@@ -8,6 +8,11 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
+# LiveKit's prebuilt libwebrtc (static, /MT). Reuse an extracted copy instead
+# of the ~430 MB download webrtc-sys does per target dir.
+$webrtc = if ($env:YAP_LIBWEBRTC_DIR) { $env:YAP_LIBWEBRTC_DIR } else { "F:/ct/libwebrtc/win-x64-release-webrtc-a545de4/win-x64-release" }
+if (-not $env:LK_CUSTOM_WEBRTC -and (Test-Path "$webrtc/lib")) { $env:LK_CUSTOM_WEBRTC = $webrtc }
+
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vs) { throw "No Visual Studio with the x64 C++ tools found." }

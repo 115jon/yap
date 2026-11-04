@@ -21,11 +21,48 @@ Rectangle {
                     out.push({ kind: "label", name: category })
             }
             out.push({ kind: "channel", id: c.id, name: c.name, type: c.type })
+            // The call we are in: its roster hangs under the channel.
+            if (c.id === client.voiceChannelId)
+                for (const m of voiceRoster)
+                    out.push({ kind: "member", id: m.id, name: m.name, muted: m.muted, speaking: m.speaking, me: m.me })
         }
         return out
     }
+    readonly property var voiceRoster: client.voiceRosterJson.length > 0 ? JSON.parse(client.voiceRosterJson) : []
+    readonly property bool inCall: client.voiceChannelId.length > 0
+    readonly property bool callLive: inCall && client.voiceStatus === "Connected"
+    readonly property string callChannelName: {
+        const channels = client.channelsJson.length > 0 ? JSON.parse(client.channelsJson) : []
+        const c = channels.find(ch => ch.id === client.voiceChannelId)
+        return c ? c.name : ""
+    }
 
     color: Theme.ply1
+
+    component CallKey: Rectangle {
+        id: key
+        property string label
+        property bool lit: false
+        property color litColor: Theme.ink1
+        signal clicked()
+        height: 28
+        width: keyText.implicitWidth + 24
+        radius: Theme.radius
+        color: lit ? litColor : keyHover.hovered ? Theme.ply4 : Theme.ply3
+        Text {
+            id: keyText
+            anchors.centerIn: parent
+            text: key.label
+            color: key.lit ? Theme.ply0 : Theme.ink1
+            font.family: Theme.mono
+            font.pixelSize: 11
+            font.weight: Font.DemiBold
+            font.letterSpacing: 0.8
+        }
+        HoverHandler { id: keyHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: key.clicked() }
+    }
+
 
     Rectangle {
         anchors.right: parent.right
@@ -65,7 +102,7 @@ Rectangle {
         id: list
         anchors.top: header.bottom
         anchors.topMargin: 8
-        anchors.bottom: footer.top
+        anchors.bottom: callPanel.top
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.leftMargin: 8
@@ -79,7 +116,47 @@ Rectangle {
             required property var modelData
             required property int index
             width: list.width
-            sourceComponent: cell.modelData.kind === "label" ? labelRow : channelRow
+            sourceComponent: cell.modelData.kind === "label" ? labelRow : cell.modelData.kind === "member" ? memberRow : channelRow
+
+            Component {
+                id: memberRow
+                Item {
+                    height: 28
+                    // Speaking LED: lit green while they talk.
+                    Rectangle {
+                        id: led
+                        x: 30
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 6; height: 6; radius: 3
+                        color: cell.modelData.speaking ? Theme.talk : Theme.ply4
+                        Behavior on color { ColorAnimation { duration: 90 } }
+                    }
+                    Text {
+                        anchors.left: led.right
+                        anchors.leftMargin: 10
+                        anchors.right: muteTag.left
+                        anchors.rightMargin: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: cell.modelData.name + (cell.modelData.me ? " (you)" : "")
+                        elide: Text.ElideRight
+                        color: cell.modelData.speaking ? Theme.ink1 : Theme.ink2
+                        font.family: Theme.text
+                        font.pixelSize: 13
+                    }
+                    Text {
+                        id: muteTag
+                        anchors.right: parent.right
+                        anchors.rightMargin: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: cell.modelData.muted
+                        text: "MUTED"
+                        color: Theme.danger
+                        font.family: Theme.mono
+                        font.pixelSize: 10
+                        font.letterSpacing: 0.8
+                    }
+                }
+            }
 
             Component {
                 id: labelRow
@@ -104,7 +181,7 @@ Rectangle {
                 id: channelRow
                 Rectangle {
                     id: row
-                    readonly property bool active: cell.modelData.id === root.client.activeChannelId
+                    readonly property bool active: cell.modelData.id === root.client.activeChannelId || cell.modelData.id === root.client.voiceChannelId
                     readonly property bool voice: cell.modelData.type === "voice"
                     height: Theme.treeRow
                     radius: Theme.radius
@@ -154,6 +231,63 @@ Rectangle {
                     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
                     TapHandler { onTapped: root.client.selectChannel(cell.modelData.id) }
                 }
+            }
+        }
+    }
+
+    // The call: status LED, channel, mute and leave keys.
+    Rectangle {
+        id: callPanel
+        anchors.bottom: footer.top
+        width: parent.width
+        height: root.inCall ? 92 : 0
+        visible: root.inCall
+        color: Theme.ply2
+        clip: true
+        Rectangle { width: parent.width; height: 1; color: Theme.ply3 }
+
+        Row {
+            x: 16
+            y: 14
+            spacing: 8
+            Rectangle {
+                width: 6; height: 6; radius: 3
+                anchors.verticalCenter: parent.verticalCenter
+                color: root.callLive ? Theme.talk : Theme.idle
+            }
+            Text {
+                text: "VOICE · " + (root.client.voiceStatus || "Connecting").toUpperCase()
+                color: root.callLive ? Theme.talk : Theme.ink3
+                font.family: Theme.mono
+                font.pixelSize: 11
+                font.weight: Font.Medium
+                font.letterSpacing: 1
+            }
+        }
+        Text {
+            x: 16
+            y: 32
+            width: parent.width - 32
+            text: root.callChannelName + (root.server ? " / " + root.server.name : "")
+            elide: Text.ElideRight
+            color: Theme.ink2
+            font.family: Theme.text
+            font.pixelSize: 13
+        }
+
+        Row {
+            x: 16
+            y: 54
+            spacing: 6
+            CallKey {
+                label: root.client.voiceMuted ? "UNMUTE" : "MUTE"
+                lit: root.client.voiceMuted
+                litColor: Theme.danger
+                onClicked: root.client.muteVoice(!root.client.voiceMuted)
+            }
+            CallKey {
+                label: "LEAVE"
+                onClicked: root.client.leaveVoice()
             }
         }
     }

@@ -5,6 +5,9 @@ pub mod api;
 pub mod auth;
 pub mod config;
 pub mod gateway;
+pub mod sfu;
+pub mod socket;
+pub mod voice;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -28,35 +31,56 @@ pub enum Command {
     SelectChannel(String),
     Send(String),
     ReloadServers,
+    JoinVoice(String),
+    LeaveVoice,
+    SetVoiceMuted(bool),
     Event(Event),
 }
 
 pub enum Event {
-    DeviceCode { user_code: String, url: String },
+    DeviceCode {
+        user_code: String,
+        url: String,
+    },
     SignedIn(String),
     SignInFailed(String),
     GatewayReady,
     GatewayClosed,
     SessionExpired,
     Dispatch(String, Value),
+    /// From call number `.0`; stale calls are ignored.
+    Voice(u64, voice::VoiceUpdate),
 }
 
 /// Updates for the Qt side. Lists travel as JSON so QML can bind them
 /// directly; the message list is incremental (reset / upsert / remove).
 pub enum Ui {
     Phase(&'static str),
-    DeviceCode { user_code: String, url: String },
+    DeviceCode {
+        user_code: String,
+        url: String,
+    },
     Status(String),
     Connected(bool),
     Me(Value),
     Servers(Value),
     ActiveServer(String),
     Channels(Value),
-    ActiveChannel { id: String, name: String },
+    ActiveChannel {
+        id: String,
+        name: String,
+    },
     MessagesReset(Value),
     MessageUpsert(Value),
     MessageRemoved(String),
     Typing(String),
+    /// The call: channel id (empty when not in one), status line, roster, mute.
+    Voice {
+        channel_id: String,
+        status: String,
+        roster: Value,
+        muted: bool,
+    },
 }
 
 pub type Sink = Box<dyn Fn(Ui) + Send + Sync>;
@@ -109,6 +133,17 @@ struct Core {
     active_channel: Option<String>,
     /// Display names seen so far, for typing indicators.
     names: HashMap<String, String>,
+    voice: Option<VoiceCall>,
+    voice_calls: u64,
+}
+
+struct VoiceCall {
+    id: u64,
+    channel_id: String,
+    commands: UnboundedSender<voice::VoiceCommand>,
+    status: String,
+    roster: Value,
+    muted: bool,
 }
 
 fn str_field<'a>(value: &'a Value, key: &str) -> &'a str {
@@ -176,6 +211,8 @@ impl Core {
             active_server: None,
             active_channel: None,
             names: HashMap::new(),
+            voice: None,
+            voice_calls: 0,
         }
     }
 
@@ -220,6 +257,15 @@ impl Core {
             Command::SelectChannel(id) => self.select_channel(id).await?,
             Command::Send(text) => self.send(text).await?,
             Command::ReloadServers => self.load_servers().await?,
+            Command::JoinVoice(id) => self.join_voice(id),
+            Command::LeaveVoice => self.leave_voice(),
+            Command::SetVoiceMuted(muted) => {
+                if let Some(call) = &mut self.voice {
+                    call.muted = muted;
+                    let _ = call.commands.send(voice::VoiceCommand::SetMuted(muted));
+                }
+                self.push_voice();
+            }
             Command::Event(event) => self.on_event(event).await?,
         }
         Ok(())
@@ -311,13 +357,22 @@ impl Core {
         });
 
         self.ui(Ui::Status("Loading servers…".into()));
-        self.apply_servers(servers?).await?;
+        let applied = match servers {
+            Ok(servers) => self.apply_servers(servers).await,
+            Err(error) => Err(error),
+        };
+        if let Err(error) = applied {
+            // Signed in but the list failed: show the shell, not the boot screen.
+            self.ui(Ui::Phase("ready"));
+            return Err(error);
+        }
         self.ui(Ui::Phase("ready"));
         self.ui(Ui::Status(String::new()));
         Ok(())
     }
 
     async fn end_session(&mut self, revoke: bool) {
+        self.leave_voice();
         if let Some(session) = self.session.take() {
             session.gateway.abort();
             if revoke {
@@ -355,6 +410,13 @@ impl Core {
         if let Some(channel) = &self.active_channel {
             self.gateway_send(json!({ "op": 27, "d": { "channel_id": channel } }));
         }
+        // A re-identified gateway session has no voice presence: assert it
+        // again or we drop out of everyone's sidebar mid-call.
+        if let Some(call) = &self.voice {
+            self.gateway_send(json!({ "op": 33, "d": {
+                "channel_id": call.channel_id, "self_mute": call.muted,
+            }}));
+        }
     }
 
     async fn load_servers(&mut self) -> Result<()> {
@@ -381,10 +443,7 @@ impl Core {
             .active_server
             .clone()
             .filter(|id| self.servers.iter().any(|s| str_field(s, "id") == id));
-        let first = self
-            .servers
-            .first()
-            .map(|s| str_field(s, "id").to_owned());
+        let first = self.servers.first().map(|s| str_field(s, "id").to_owned());
         if let Some(id) = keep.or(first) {
             self.select_server(id).await?;
         }
@@ -399,14 +458,25 @@ impl Core {
         if self.active_server.as_deref() != Some(id.as_str()) {
             return Ok(());
         }
-        let categories = data.get("categories").and_then(Value::as_array).cloned().unwrap_or_default();
-        let mut channels = data.get("channels").and_then(Value::as_array).cloned().unwrap_or_default();
+        let categories = data
+            .get("categories")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut channels = data
+            .get("channels")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         let category_rank: HashMap<&str, (i64, &str)> = categories
             .iter()
             .map(|c| {
                 (
                     str_field(c, "id"),
-                    (c.get("rank").and_then(Value::as_i64).unwrap_or(0), str_field(c, "name")),
+                    (
+                        c.get("rank").and_then(Value::as_i64).unwrap_or(0),
+                        str_field(c, "name"),
+                    ),
                 )
             })
             .collect();
@@ -459,8 +529,11 @@ impl Core {
         let Some(channel) = self.channels.iter().find(|c| str_field(c, "id") == id) else {
             return Ok(());
         };
+        if str_field(channel, "channel_type") == "voice" {
+            self.join_voice(id);
+            return Ok(());
+        }
         if str_field(channel, "channel_type") != "text" {
-            self.ui(Ui::Status("Voice channels are not in the prototype yet.".into()));
             return Ok(());
         }
         let name = str_field(channel, "name").to_owned();
@@ -469,11 +542,16 @@ impl Core {
                 self.gateway_send(json!({ "op": 28, "d": { "channel_id": previous } }));
             }
         }
-        self.ui(Ui::ActiveChannel { id: id.clone(), name });
+        self.ui(Ui::ActiveChannel {
+            id: id.clone(),
+            name,
+        });
         self.ui(Ui::MessagesReset(json!([])));
         self.gateway_send(json!({ "op": 27, "d": { "channel_id": id } }));
 
-        let page = api.get(&format!("/api/channels/{id}/messages?limit=50")).await?;
+        let page = api
+            .get(&format!("/api/channels/{id}/messages?limit=50"))
+            .await?;
         if self.active_channel.as_deref() != Some(id.as_str()) {
             return Ok(());
         }
@@ -485,14 +563,18 @@ impl Core {
             .unwrap_or_default();
         for message in &messages {
             if let Some(author) = message.get("author") {
-                self.names.insert(str_field(author, "id").to_owned(), display_name(author));
+                self.names
+                    .insert(str_field(author, "id").to_owned(), display_name(author));
             }
         }
         let list: Vec<Value> = messages.iter().map(ui_message).collect();
         self.ui(Ui::MessagesReset(Value::Array(list)));
         static FIRST: std::sync::Once = std::sync::Once::new();
         FIRST.call_once(|| {
-            eprintln!("[startup] messages shown after {} ms", started_at().elapsed().as_millis());
+            eprintln!(
+                "[startup] messages shown after {} ms",
+                started_at().elapsed().as_millis()
+            );
         });
         Ok(())
     }
@@ -548,8 +630,110 @@ impl Core {
                 self.ui(Ui::Status("Your session ended. Sign in again.".into()));
             }
             Event::Dispatch(name, data) => self.on_dispatch(&name, data),
+            Event::Voice(id, update) => self.on_voice(id, update),
         }
         Ok(())
+    }
+
+    fn join_voice(&mut self, channel_id: String) {
+        if self
+            .voice
+            .as_ref()
+            .is_some_and(|c| c.channel_id == channel_id)
+        {
+            return;
+        }
+        self.leave_voice();
+        let (Some(session), Some(server_id)) = (&self.session, self.active_server.clone()) else {
+            return;
+        };
+        self.voice_calls += 1;
+        let id = self.voice_calls;
+        let (tx, rx) = mpsc::unbounded_channel();
+        let target = voice::Target {
+            server_id,
+            channel_id: channel_id.clone(),
+            me_name: display_name(&session.me),
+            me_username: str_field(&session.me, "username").to_owned(),
+        };
+        tokio::spawn(voice::run(
+            id,
+            session.api.clone(),
+            self.http.clone(),
+            target,
+            rx,
+            self.tx.clone(),
+        ));
+        self.voice = Some(VoiceCall {
+            id,
+            channel_id,
+            commands: tx,
+            status: "Connecting".into(),
+            roster: json!([]),
+            muted: false,
+        });
+        self.push_voice();
+    }
+
+    fn leave_voice(&mut self) {
+        if let Some(call) = self.voice.take() {
+            let _ = call.commands.send(voice::VoiceCommand::Leave);
+            self.gateway_send(json!({ "op": 34, "d": { "channel_id": call.channel_id } }));
+        }
+        self.push_voice();
+    }
+
+    fn push_voice(&self) {
+        let update = match &self.voice {
+            Some(call) => Ui::Voice {
+                channel_id: call.channel_id.clone(),
+                status: call.status.clone(),
+                roster: call.roster.clone(),
+                muted: call.muted,
+            },
+            None => Ui::Voice {
+                channel_id: String::new(),
+                status: String::new(),
+                roster: json!([]),
+                muted: false,
+            },
+        };
+        self.ui(update);
+    }
+
+    fn on_voice(&mut self, id: u64, update: voice::VoiceUpdate) {
+        if self.voice.as_ref().map(|c| c.id) != Some(id) {
+            return;
+        }
+        match update {
+            voice::VoiceUpdate::Status(status) => {
+                if let Some(call) = &mut self.voice {
+                    call.status = status;
+                }
+            }
+            voice::VoiceUpdate::Roster(roster) => {
+                if let Some(call) = &mut self.voice {
+                    call.roster = roster;
+                }
+            }
+            voice::VoiceUpdate::Connected => {
+                if let Some(call) = &self.voice {
+                    // Sidebar presence for everyone else (VOICE_PROTOCOL.md §7).
+                    self.gateway_send(json!({ "op": 33, "d": {
+                        "channel_id": call.channel_id, "self_mute": call.muted,
+                    }}));
+                }
+            }
+            voice::VoiceUpdate::Ended(error) => {
+                if let Some(call) = self.voice.take() {
+                    self.gateway_send(json!({ "op": 34, "d": { "channel_id": call.channel_id } }));
+                }
+                if let Some(error) = error {
+                    self.ui(Ui::Status(format!("Left the call: {error}")));
+                }
+            }
+        }
+        self.push_voice();
     }
 
     fn on_dispatch(&mut self, name: &str, data: Value) {
@@ -557,7 +741,8 @@ impl Core {
         match name {
             "MESSAGE_CREATE" | "MESSAGE_UPDATE" => {
                 if let Some(author) = data.get("author") {
-                    self.names.insert(str_field(author, "id").to_owned(), display_name(author));
+                    self.names
+                        .insert(str_field(author, "id").to_owned(), display_name(author));
                 }
                 if str_field(&data, "channel_id") == active {
                     if name == "MESSAGE_CREATE" || data.get("author").is_some() {

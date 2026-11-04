@@ -32,8 +32,13 @@ cxx_qt_import_qml_module(yap_native_qml
 qt_add_executable(YapNative WIN32 cpp/main.cpp)
 target_link_libraries(YapNative PRIVATE
   yap_native_qml
-  Qt::Gui Qt::Network Qt::Quick Qt::QuickControls2
-  $<$<PLATFORM_ID:Windows>:dwmapi>)
+  Qt::Gui Qt::Network Qt::Quick Qt::QuickControls2)
+if(WIN32)
+  # dwmapi for the title bar; the rest is what libwebrtc (static) needs.
+  target_link_libraries(YapNative PRIVATE
+    dwmapi msdmo wmcodecdspuuid dmoguids crypt32 iphlpapi ole32 secur32
+    winmm ws2_32 strmiids d3d11 gdi32 dxgi shcore userenv dbghelp)
+endif()
 
 # Static Qt: pull in the QML plugins the UI imports.
 qt_import_qml_plugins(YapNative)

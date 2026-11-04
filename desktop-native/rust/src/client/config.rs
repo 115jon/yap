@@ -13,9 +13,8 @@ pub struct Config {
     pub kova_auth_url: String,
     /// Yap's Kova publishable key.
     pub publishable_key: String,
-    /// `Origin` sent on the gateway WebSocket. The worker only admits
-    /// browser origins it knows (`isAllowedRealtimeOrigin`); until it has a
-    /// native entry the spike reuses the Tauri app's origin.
+    /// `Origin` sent on realtime WebSockets. The worker admits its own
+    /// origin (`isAllowedRealtimeOrigin`), so this defaults to `api_base`.
     pub gateway_origin: String,
     /// A session token to use instead of the credential store (dev only).
     pub dev_token: Option<String>,
@@ -30,18 +29,21 @@ fn env_or(name: &str, default: &str) -> String {
 
 pub fn get() -> &'static Config {
     static CONFIG: OnceLock<Config> = OnceLock::new();
-    CONFIG.get_or_init(|| Config {
-        api_base: env_or("YAP_API_URL", "https://yap.115jon.com")
+    CONFIG.get_or_init(|| {
+        let api_base = env_or("YAP_API_URL", "https://yap.115jon.com")
             .trim_end_matches('/')
-            .to_owned(),
-        kova_auth_url: env_or("YAP_KOVA_AUTH_URL", "https://auth.115jon.com")
-            .trim_end_matches('/')
-            .to_owned(),
-        publishable_key: env_or(
-            "YAP_KOVA_PUBLISHABLE_KEY",
-            "pk_live_yl2Z9ssEwlWuOYHVRWozk9WThozu4nFP3QAhCWAsPhE",
-        ),
-        gateway_origin: env_or("YAP_GATEWAY_ORIGIN", "https://tauri.localhost"),
-        dev_token: std::env::var("YAP_TOKEN").ok().filter(|v| !v.is_empty()),
+            .to_owned();
+        Config {
+            gateway_origin: env_or("YAP_GATEWAY_ORIGIN", &api_base),
+            api_base,
+            kova_auth_url: env_or("YAP_KOVA_AUTH_URL", "https://auth.115jon.com")
+                .trim_end_matches('/')
+                .to_owned(),
+            publishable_key: env_or(
+                "YAP_KOVA_PUBLISHABLE_KEY",
+                "pk_live_yl2Z9ssEwlWuOYHVRWozk9WThozu4nFP3QAhCWAsPhE",
+            ),
+            dev_token: std::env::var("YAP_TOKEN").ok().filter(|v| !v.is_empty()),
+        }
     })
 }

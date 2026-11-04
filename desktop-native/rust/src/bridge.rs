@@ -22,6 +22,10 @@ pub mod qobject {
         #[qproperty(QString, active_server_id, cxx_name = "activeServerId")]
         #[qproperty(QString, active_channel_id, cxx_name = "activeChannelId")]
         #[qproperty(QString, active_channel_name, cxx_name = "activeChannelName")]
+        #[qproperty(QString, voice_channel_id, cxx_name = "voiceChannelId")]
+        #[qproperty(QString, voice_status, cxx_name = "voiceStatus")]
+        #[qproperty(QString, voice_roster_json, cxx_name = "voiceRosterJson")]
+        #[qproperty(bool, voice_muted, cxx_name = "voiceMuted")]
         type YapClient = super::YapClientRust;
 
         #[qinvokable]
@@ -54,6 +58,18 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "sendMessage"]
         fn send_message(self: Pin<&mut Self>, text: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "joinVoice"]
+        fn join_voice(self: Pin<&mut Self>, channel_id: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "leaveVoice"]
+        fn leave_voice(self: Pin<&mut Self>);
+
+        #[qinvokable]
+        #[cxx_name = "muteVoice"]
+        fn set_voice_muted_from_ui(self: Pin<&mut Self>, muted: bool);
 
         /// The whole list for a newly opened channel (JSON array).
         #[qsignal]
@@ -97,6 +113,10 @@ pub struct YapClientRust {
     active_server_id: QString,
     active_channel_id: QString,
     active_channel_name: QString,
+    voice_channel_id: QString,
+    voice_status: QString,
+    voice_roster_json: QString,
+    voice_muted: bool,
     commands: Option<UnboundedSender<Command>>,
 }
 
@@ -152,6 +172,18 @@ impl qobject::YapClient {
     pub fn send_message(self: Pin<&mut Self>, text: &QString) {
         self.command(Command::Send(text.to_string()));
     }
+
+    pub fn join_voice(self: Pin<&mut Self>, channel_id: &QString) {
+        self.command(Command::JoinVoice(channel_id.to_string()));
+    }
+
+    pub fn leave_voice(self: Pin<&mut Self>) {
+        self.command(Command::LeaveVoice);
+    }
+
+    pub fn set_voice_muted_from_ui(self: Pin<&mut Self>, muted: bool) {
+        self.command(Command::SetVoiceMuted(muted));
+    }
 }
 
 fn apply(mut this: Pin<&mut qobject::YapClient>, update: Ui) {
@@ -175,5 +207,16 @@ fn apply(mut this: Pin<&mut qobject::YapClient>, update: Ui) {
         Ui::MessageUpsert(message) => this.message_upserted(q(message.to_string())),
         Ui::MessageRemoved(id) => this.message_removed(q(id)),
         Ui::Typing(name) => this.typing(q(name)),
+        Ui::Voice {
+            channel_id,
+            status,
+            roster,
+            muted,
+        } => {
+            this.as_mut().set_voice_status(q(status));
+            this.as_mut().set_voice_roster_json(q(roster.to_string()));
+            this.as_mut().set_voice_muted(muted);
+            this.set_voice_channel_id(q(channel_id));
+        }
     }
 }
