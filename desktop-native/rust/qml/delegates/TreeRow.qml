@@ -30,6 +30,7 @@ Loader {
     Component {
         id: labelRow
         CategoryLabel {
+            width: cell.width
             name: cell.name
             first: cell.index === 0
         }
@@ -38,6 +39,7 @@ Loader {
     Component {
         id: memberRow
         MemberRow {
+            width: cell.width
             name: cell.name
             muted: cell.muted
             speaking: cell.speaking
@@ -49,6 +51,7 @@ Loader {
     Component {
         id: channelRow
         ChannelRow {
+            width: cell.width
             name: cell.name
             voice: cell.voice
             active: cell.itemId === cell.activeId || cell.itemId === cell.callId

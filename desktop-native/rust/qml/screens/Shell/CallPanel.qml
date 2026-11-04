@@ -51,7 +51,7 @@ Rectangle {
             label: Voice.muted ? "UNMUTE" : "MUTE"
             lit: Voice.muted
             litColor: Theme.danger
-            onClicked: Voice.setMuted(!Voice.muted)
+            onClicked: Voice.requestMute(!Voice.muted)
         }
         CallKey {
             label: "LEAVE"

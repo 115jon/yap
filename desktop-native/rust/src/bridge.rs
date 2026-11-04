@@ -127,7 +127,7 @@ pub mod qobject {
         fn leave(self: &Voice);
 
         #[qinvokable]
-        #[cxx_name = "setMuted"]
+        #[cxx_name = "requestMute"]
         fn set_muted_from_ui(self: &Voice, muted: bool);
     }
 
