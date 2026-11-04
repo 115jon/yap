@@ -104,11 +104,76 @@ pub mod qobject {
         #[qproperty(QString, typing_text, cxx_name = "typingText")]
         // Today's local day number, to compare with a row's `day`.
         #[qproperty(i32, today)]
+        // The "New" divider: the message it sits above (empty: none), the
+        // banner, its count and when the first unread message was sent.
+        #[qproperty(QString, divider_id, cxx_name = "dividerId")]
+        #[qproperty(bool, unread_banner, cxx_name = "unreadBanner")]
+        #[qproperty(i32, unread_count, cxx_name = "unreadCount")]
+        #[qproperty(QString, unread_since_time, cxx_name = "unreadSinceTime")]
+        #[qproperty(QString, unread_since_date, cxx_name = "unreadSinceDate")]
+        #[qproperty(i32, unread_since_day, cxx_name = "unreadSinceDay")]
         type Chat = super::ChatRust;
 
+        /// Something failed that the user should hear about (a toast).
+        #[qsignal]
+        fn notice(self: Pin<&mut Chat>, text: QString);
+
+        /// Posts to the open channel; `reply_to_id` may be empty.
         #[qinvokable]
         #[cxx_name = "sendMessage"]
-        fn send_message(self: &Chat, text: &QString);
+        fn send_message(self: &Chat, text: &QString, reply_to_id: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "retrySend"]
+        fn retry_send(self: &Chat, nonce: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "discardSend"]
+        fn discard_send(self: &Chat, nonce: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "editMessage"]
+        fn edit_message(self: &Chat, id: &QString, text: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "deleteMessage"]
+        fn delete_message(self: &Chat, id: &QString);
+
+        /// The composer has text; call at most every 3 s.
+        #[qinvokable]
+        #[cxx_name = "sendTyping"]
+        fn send_typing(self: &Chat);
+
+        #[qinvokable]
+        #[cxx_name = "loadOlder"]
+        fn load_older(self: &Chat);
+
+        #[qinvokable]
+        #[cxx_name = "setAtBottom"]
+        fn set_at_bottom(self: &Chat, at_bottom: bool);
+
+        #[qinvokable]
+        #[cxx_name = "setFocused"]
+        fn set_focused(self: &Chat, focused: bool);
+
+        #[qinvokable]
+        #[cxx_name = "markRead"]
+        fn mark_read(self: &Chat);
+
+        /// Filters `MentionListModel` by username; an empty query closes it.
+        #[qinvokable]
+        #[cxx_name = "queryMentions"]
+        fn query_mentions(self: &Chat, query: &QString, open: bool);
+
+        /// The newest of our own sent messages (Up to edit), or empty.
+        #[qinvokable]
+        #[cxx_name = "lastEditableId"]
+        fn last_editable_id(self: &Chat) -> QString;
+
+        /// A message's row in `MessageListModel`, or -1.
+        #[qinvokable]
+        #[cxx_name = "indexOfMessage"]
+        fn index_of_message(self: &Chat, id: &QString) -> i32;
     }
 
     impl cxx_qt::Initialize for Chat {}
@@ -149,10 +214,13 @@ pub mod qobject {
 }
 
 use core::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cxx_qt::Threading;
 use cxx_qt_lib::QString;
+use yap_core::store::time::format_rfc3339;
 use yap_core::{Phase, ViewUpdate};
 
 use crate::client::{self, Command};
@@ -213,6 +281,12 @@ pub struct NavRust {
 pub struct ChatRust {
     typing_text: QString,
     today: i32,
+    divider_id: QString,
+    unread_banner: bool,
+    unread_count: i32,
+    unread_since_time: QString,
+    unread_since_date: QString,
+    unread_since_day: i32,
 }
 
 #[derive(Default)]
@@ -292,9 +366,92 @@ impl qobject::Nav {
     }
 }
 
+/// A nonce no other send from this process shares: the wall clock in
+/// nanoseconds and a counter.
+fn next_nonce(now: Duration) -> String {
+    static SENT: AtomicU64 = AtomicU64::new(0);
+    let n = SENT.fetch_add(1, Ordering::Relaxed);
+    format!("native-{:x}-{n:x}", now.as_nanos())
+}
+
 impl qobject::Chat {
-    pub fn send_message(&self, text: &QString) {
-        client::command(Command::Send(text.to_string()));
+    pub fn send_message(&self, text: &QString, reply_to_id: &QString) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        let ms = i64::try_from(now.as_millis()).unwrap_or(i64::MAX);
+        let reply = reply_to_id.to_string();
+        client::command(Command::Send {
+            content: text.to_string(),
+            reply_to_id: (!reply.is_empty()).then_some(reply),
+            nonce: next_nonce(now),
+            sent_at: format_rfc3339(ms),
+        });
+    }
+
+    pub fn retry_send(&self, nonce: &QString) {
+        client::command(Command::RetrySend(nonce.to_string()));
+    }
+
+    pub fn discard_send(&self, nonce: &QString) {
+        client::command(Command::DiscardSend(nonce.to_string()));
+    }
+
+    pub fn edit_message(&self, id: &QString, text: &QString) {
+        client::command(Command::EditMessage {
+            message_id: id.to_string(),
+            content: text.to_string(),
+        });
+    }
+
+    pub fn delete_message(&self, id: &QString) {
+        client::command(Command::DeleteMessage(id.to_string()));
+    }
+
+    pub fn send_typing(&self) {
+        client::command(Command::Typing);
+    }
+
+    pub fn load_older(&self) {
+        client::command(Command::LoadOlder);
+    }
+
+    pub fn set_at_bottom(&self, at_bottom: bool) {
+        client::command(Command::SetAtBottom(at_bottom));
+    }
+
+    pub fn set_focused(&self, focused: bool) {
+        client::command(Command::SetFocused(focused));
+    }
+
+    pub fn mark_read(&self) {
+        client::command(Command::MarkRead);
+    }
+
+    pub fn query_mentions(&self, query: &QString, open: bool) {
+        client::command(Command::MentionQuery(open.then(|| query.to_string())));
+    }
+
+    pub fn last_editable_id(&self) -> QString {
+        gui::with_rows(|rows| {
+            rows.messages
+                .iter()
+                .rev()
+                .find(|r| r.mine && !r.pending && !r.failed)
+                .map(|r| QString::from(r.id.as_str()))
+                .unwrap_or_default()
+        })
+    }
+
+    pub fn index_of_message(&self, id: &QString) -> i32 {
+        let id = id.to_string();
+        gui::with_rows(|rows| {
+            rows.messages
+                .iter()
+                .position(|r| r.id == id)
+                .and_then(|i| i32::try_from(i).ok())
+                .unwrap_or(-1)
+        })
     }
 }
 

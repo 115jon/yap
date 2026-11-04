@@ -13,7 +13,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cxx_qt_lib::QString;
 use yap_core::store::time::local_day;
 use yap_core::store::view::{
-    ChannelTreeRow, MeView, MessageRow, ServerRow, VoiceMemberRow, VoicePanelView, VoiceView,
+    ChannelTreeRow, MeView, MentionRow, MessageRow, ServerRow, UnreadView, VoiceMemberRow,
+    VoicePanelView, VoiceView,
 };
 use yap_core::ViewUpdate;
 
@@ -28,6 +29,7 @@ pub struct Rows {
     pub tree: Vec<ChannelTreeRow>,
     pub messages: Vec<MessageRow>,
     pub roster: Vec<VoiceMemberRow>,
+    pub mentions: Vec<MentionRow>,
 }
 
 /// The last scalar values for the singletons that may not exist yet.
@@ -37,6 +39,7 @@ struct Scalars {
     server: (String, String),
     channel: (String, String),
     typing: String,
+    unread: UnreadView,
     voice: VoiceView,
     panel: VoicePanelView,
 }
@@ -52,6 +55,7 @@ pub struct Objects {
     tree: Option<NonNull<m::ChannelTreeModel>>,
     messages: Option<NonNull<m::MessageListModel>>,
     roster: Option<NonNull<m::VoiceRosterModel>>,
+    mentions: Option<NonNull<m::MentionListModel>>,
 }
 
 #[derive(Default)]
@@ -155,8 +159,12 @@ impl Slot for Chat {
     }
 
     fn restore(mut self: Pin<&mut Self>) {
-        let typing = GUI.with(|gui| gui.borrow().scalars.typing.clone());
+        let (typing, unread) = GUI.with(|gui| {
+            let s = &gui.borrow().scalars;
+            (s.typing.clone(), s.unread.clone())
+        });
         self.as_mut().set_typing_text(q(&typing));
+        set_unread(self.as_mut(), &unread);
         self.set_today(today());
     }
 }
@@ -187,7 +195,18 @@ model_slots!(
     ChannelTreeModel => tree,
     MessageListModel => messages,
     VoiceRosterModel => roster,
+    MentionListModel => mentions,
 );
+
+fn set_unread(mut chat: Pin<&mut Chat>, view: &UnreadView) {
+    let int = |n: i64| i32::try_from(n).unwrap_or(i32::MAX);
+    chat.as_mut().set_unread_count(int(view.count));
+    chat.as_mut().set_unread_since_time(q(&view.since_time));
+    chat.as_mut().set_unread_since_date(q(&view.since_date));
+    chat.as_mut().set_unread_since_day(int(view.since_day));
+    chat.as_mut().set_unread_banner(view.banner);
+    chat.set_divider_id(q(&view.divider_id));
+}
 
 fn set_server(mut nav: Pin<&mut Nav>, id: &str, name: &str) {
     nav.as_mut().set_active_server_name(q(name));
@@ -269,7 +288,13 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         }
         ViewUpdate::Servers(diff) => models::apply::<m::ServerListModel>(diff),
         ViewUpdate::Channels(diff) => models::apply::<m::ChannelTreeModel>(diff),
-        ViewUpdate::Messages(diff) => models::apply::<m::MessageListModel>(diff),
+        ViewUpdate::Messages(diff) => models::apply::<m::MessageListModel>(*diff),
         ViewUpdate::Roster(diff) => models::apply::<m::VoiceRosterModel>(diff),
+        ViewUpdate::Mentions(diff) => models::apply::<m::MentionListModel>(diff),
+        ViewUpdate::Unread(view) => {
+            with::<Chat>(|chat| set_unread(chat, &view));
+            scalars(|s| s.unread = view);
+        }
+        ViewUpdate::Notice(text) => with::<Chat>(|chat| chat.notice(q(&text))),
     }
 }

@@ -123,6 +123,30 @@ impl Api {
         self.send(self.request(Method::POST, path).json(body)).await
     }
 
+    /// Any method; a `Null` body sends none.
+    pub async fn call(
+        &self,
+        method: crate::store::Method,
+        path: &str,
+        body: &Value,
+    ) -> Result<Value, ApiError> {
+        use crate::store::Method as M;
+        let method = match method {
+            M::Get => Method::GET,
+            M::Post => Method::POST,
+            M::Put => Method::PUT,
+            M::Patch => Method::PATCH,
+            M::Delete => Method::DELETE,
+        };
+        let builder = self.request(method, path);
+        let builder = if body.is_null() {
+            builder
+        } else {
+            builder.json(body)
+        };
+        self.send(builder).await
+    }
+
     /// A single-use, 60 s ticket for one realtime socket.
     pub async fn socket_ticket(&self, audience: &str) -> Result<String, ApiError> {
         let body = self

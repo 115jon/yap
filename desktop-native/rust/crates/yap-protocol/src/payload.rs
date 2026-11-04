@@ -105,6 +105,15 @@ pub struct TypingStartEvent {
     pub user_id: String,
 }
 
+/// `NOTIFICATIONS_READ` dispatch data: these ids, or every one.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct NotificationsRead {
+    #[serde(default)]
+    pub ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub all: bool,
+}
+
 /// Subscribe (op 27) or unsubscribe (op 28) to a channel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChannelRef {

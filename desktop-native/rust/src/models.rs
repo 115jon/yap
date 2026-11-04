@@ -53,12 +53,20 @@ pub mod qobject {
         #[qml_element]
         #[qml_singleton]
         type VoiceRosterModel = super::VoiceRosterModelRust;
+
+        /// The composer's `@` suggestions.
+        #[qobject]
+        #[base = QAbstractListModel]
+        #[qml_element]
+        #[qml_singleton]
+        type MentionListModel = super::MentionListModelRust;
     }
 
     impl cxx_qt::Initialize for ServerListModel {}
     impl cxx_qt::Initialize for ChannelTreeModel {}
     impl cxx_qt::Initialize for MessageListModel {}
     impl cxx_qt::Initialize for VoiceRosterModel {}
+    impl cxx_qt::Initialize for MentionListModel {}
 
     // Messages: scroll anchoring around appends.
     extern "RustQt" {
@@ -111,6 +119,15 @@ pub mod qobject {
             bottom_right: &QModelIndex,
             roles: &QVector_i32,
         );
+        #[inherit]
+        #[qsignal]
+        #[cxx_name = "dataChanged"]
+        fn data_changed(
+            self: Pin<&mut MentionListModel>,
+            top_left: &QModelIndex,
+            bottom_right: &QModelIndex,
+            roles: &QVector_i32,
+        );
     }
 
     unsafe extern "RustQt" {
@@ -138,6 +155,13 @@ pub mod qobject {
         #[inherit]
         fn index(
             self: &VoiceRosterModel,
+            row: i32,
+            column: i32,
+            parent: &QModelIndex,
+        ) -> QModelIndex;
+        #[inherit]
+        fn index(
+            self: &MentionListModel,
             row: i32,
             column: i32,
             parent: &QModelIndex,
@@ -261,6 +285,35 @@ pub mod qobject {
         #[inherit]
         #[cxx_name = "endResetModel"]
         unsafe fn end_reset_model(self: Pin<&mut VoiceRosterModel>);
+
+        #[inherit]
+        #[cxx_name = "beginInsertRows"]
+        unsafe fn begin_insert_rows(
+            self: Pin<&mut MentionListModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
+        #[cxx_name = "endInsertRows"]
+        unsafe fn end_insert_rows(self: Pin<&mut MentionListModel>);
+        #[inherit]
+        #[cxx_name = "beginRemoveRows"]
+        unsafe fn begin_remove_rows(
+            self: Pin<&mut MentionListModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
+        #[cxx_name = "endRemoveRows"]
+        unsafe fn end_remove_rows(self: Pin<&mut MentionListModel>);
+        #[inherit]
+        #[cxx_name = "beginResetModel"]
+        unsafe fn begin_reset_model(self: Pin<&mut MentionListModel>);
+        #[inherit]
+        #[cxx_name = "endResetModel"]
+        unsafe fn end_reset_model(self: Pin<&mut MentionListModel>);
     }
 
     extern "RustQt" {
@@ -311,6 +364,18 @@ pub mod qobject {
         #[cxx_override]
         #[cxx_name = "rowCount"]
         fn row_count(self: &VoiceRosterModel, parent: &QModelIndex) -> i32;
+
+        #[qinvokable]
+        #[cxx_override]
+        fn data(self: &MentionListModel, index: &QModelIndex, role: i32) -> QVariant;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "roleNames"]
+        fn role_names(self: &MentionListModel) -> QHash_i32_QByteArray;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "rowCount"]
+        fn row_count(self: &MentionListModel, parent: &QModelIndex) -> i32;
     }
 }
 
@@ -318,7 +383,9 @@ use core::pin::Pin;
 
 use cxx_qt_lib::QVector;
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
-use yap_core::store::view::{Cell, ChannelTreeRow, MessageRow, Row, ServerRow, VoiceMemberRow};
+use yap_core::store::view::{
+    Cell, ChannelTreeRow, MentionRow, MessageRow, Row, ServerRow, VoiceMemberRow,
+};
 use yap_core::ViewDiff;
 
 use crate::gui::{self, Rows, Slot};
@@ -476,6 +543,7 @@ list_model!(
     VoiceMemberRow,
     roster
 );
+list_model!(MentionListModel, MentionListModelRust, MentionRow, mentions);
 
 impl ListModel for qobject::ServerListModel {
     type Row = ServerRow;
@@ -490,6 +558,11 @@ impl ListModel for qobject::ChannelTreeModel {
 impl ListModel for qobject::VoiceRosterModel {
     type Row = VoiceMemberRow;
     list_model_ops!(VoiceMemberRow, roster);
+}
+
+impl ListModel for qobject::MentionListModel {
+    type Row = MentionRow;
+    list_model_ops!(MentionRow, mentions);
 }
 
 impl ListModel for qobject::MessageListModel {

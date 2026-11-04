@@ -5,11 +5,12 @@
 //! variable is set.
 
 use yap_protocol::rest::{
-    Attachment, Category, Channel, ChannelType, ChannelsResponse, Message, Server, User,
+    Attachment, Category, Channel, ChannelType, ChannelsResponse, Member, Message, MessagePatch,
+    ReadStates, Server, User,
 };
 
 use crate::store::time::{format_rfc3339, parse_rfc3339};
-use crate::store::{ApiRequest, ApiResponse};
+use crate::store::{ApiRequest, ApiResponse, Page};
 
 pub const SERVER: &str = "srv_fixture";
 pub const TEXT: &str = "chan_fixture_general";
@@ -55,22 +56,61 @@ impl Fixture {
                 created_at: None,
             }]),
             ApiRequest::Channels { .. } => ApiResponse::Channels(channels()),
-            ApiRequest::Messages { channel_id } if channel_id == TEXT => {
-                ApiResponse::Messages(messages(self.message_count()))
-            }
-            ApiRequest::Messages { .. } => ApiResponse::Messages(Vec::new()),
+            // All of it on the first page, so a scroll test has the whole
+            // channel at once.
+            ApiRequest::Messages {
+                channel_id,
+                before: None,
+            } if channel_id == TEXT => ApiResponse::Messages(Page {
+                messages: messages(self.message_count()),
+                has_more_before: false,
+            }),
+            ApiRequest::Messages { .. } => ApiResponse::Messages(Page {
+                messages: Vec::new(),
+                has_more_before: false,
+            }),
             ApiRequest::SendMessage {
                 channel_id,
                 content,
+                reply_to_id,
+                nonce,
             } => ApiResponse::Sent(Some(Box::new(Message {
                 id: format!("msg_fixture_sent_{serial}"),
                 channel_id: channel_id.clone(),
                 author_id: ME.into(),
                 author: Some(user(ME, "me", Some("Fixture Me"))),
                 content: content.clone(),
+                reply_to_id: reply_to_id.clone(),
+                nonce: Some(nonce.clone()),
                 created_at: format_rfc3339(now_ms),
                 ..blank_message()
             }))),
+            ApiRequest::EditMessage {
+                channel_id,
+                message_id,
+                content,
+            } => ApiResponse::Edited(Some(MessagePatch {
+                id: message_id.clone(),
+                channel_id: Some(channel_id.clone()),
+                content: Some(content.clone()),
+                updated_at: Some(format_rfc3339(now_ms)),
+                embeds: None,
+                content_revision: None,
+            })),
+            ApiRequest::ReadStates => ApiResponse::ReadStates(ReadStates::default()),
+            ApiRequest::Notifications => ApiResponse::Notifications(Vec::new()),
+            ApiRequest::Members { .. } => ApiResponse::Members(
+                AUTHORS
+                    .iter()
+                    .map(|&(id, username, display)| Member {
+                        user: user(id, username, display),
+                    })
+                    .collect(),
+            ),
+            ApiRequest::DeleteMessage { .. }
+            | ApiRequest::Typing { .. }
+            | ApiRequest::MarkRead { .. }
+            | ApiRequest::MarkNotificationsRead { .. } => ApiResponse::Done,
         }
     }
 }

@@ -4,10 +4,10 @@ use std::collections::HashMap;
 
 use yap_cache::Snapshot;
 use yap_protocol::rest::{Category, Channel, ChannelType, ChannelsResponse, Message, MessagePatch};
-use yap_protocol::rest::{Server, User};
+use yap_protocol::rest::{Notification, Server, User};
 
 use super::time::LocalOffset;
-use super::view::{ChannelTreeRow, ServerRow, VoiceMemberRow};
+use super::view::{ChannelTreeRow, MentionRow, ServerRow, VoiceMemberRow};
 use super::{CallId, Occupant, RequestId, SessionId, SignInId, VoiceMember};
 use crate::api::{ApiError, Token};
 
@@ -98,6 +98,8 @@ impl ServerChannels {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MessageLog {
     pub channel_id: String,
+    /// The server has older messages than the first one here.
+    pub has_more_before: bool,
     messages: Vec<Message>,
     index: HashMap<String, usize>,
 }
@@ -118,7 +120,7 @@ impl MessageLog {
         self.messages.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Message> {
+    pub fn iter(&self) -> std::slice::Iter<'_, Message> {
         self.messages.iter()
     }
 
@@ -176,10 +178,60 @@ impl MessageLog {
     pub fn remove(&mut self, id: &str) -> Option<(usize, Message)> {
         let i = self.index.remove(id)?;
         let message = self.messages.remove(i);
-        for (j, m) in self.messages.iter().enumerate().skip(i) {
+        self.reindex(i);
+        Some((i, message))
+    }
+
+    fn reindex(&mut self, from: usize) {
+        for (j, m) in self.messages.iter().enumerate().skip(from) {
             self.index.insert(m.id.clone(), j);
         }
-        Some((i, message))
+    }
+
+    pub fn first(&self) -> Option<&Message> {
+        self.messages.first()
+    }
+
+    /// Puts an older page in front, skipping messages already here; returns
+    /// how many went in.
+    pub fn prepend(&mut self, older: Vec<Message>) -> usize {
+        let fresh: Vec<Message> = older
+            .into_iter()
+            .filter(|m| !self.index.contains_key(&m.id))
+            .collect();
+        let count = fresh.len();
+        if count > 0 {
+            self.messages.splice(0..0, fresh);
+            self.reindex(0);
+        }
+        count
+    }
+
+    /// Inserts by `created_at` (after equal times); returns the position.
+    /// For putting back a message whose delete failed.
+    pub fn insert_sorted(&mut self, message: Message) -> usize {
+        if let Some(&i) = self.index.get(&message.id) {
+            self.messages[i] = message;
+            return i;
+        }
+        let at = self
+            .messages
+            .partition_point(|m| m.created_at <= message.created_at);
+        self.messages.insert(at, message);
+        self.reindex(at);
+        at
+    }
+
+    /// Puts `message` where `old_id` is (a pending row taking its server
+    /// id); `None` if `old_id` is not here or `message` already is.
+    pub fn replace(&mut self, old_id: &str, message: Message) -> Option<usize> {
+        if self.index.contains_key(&message.id) {
+            return None;
+        }
+        let i = self.index.remove(old_id)?;
+        self.index.insert(message.id.clone(), i);
+        self.messages[i] = message;
+        Some(i)
     }
 }
 
@@ -208,6 +260,7 @@ pub(super) struct Projection {
     pub servers: Vec<ServerRow>,
     pub tree: Vec<ChannelTreeRow>,
     pub roster: Vec<VoiceMemberRow>,
+    pub mentions: Vec<MentionRow>,
 }
 
 /// The request id each slot is waiting for. A result for any other id is stale.
@@ -219,8 +272,58 @@ pub(super) struct Pending {
     pub channels: Option<(RequestId, String)>,
     /// (request, channel id)
     pub page: Option<(RequestId, String)>,
-    /// request → channel id
+    /// request → nonce of the send
     pub sends: HashMap<RequestId, String>,
+    /// (request, channel id) of the page before the open window
+    pub older: Option<(RequestId, String)>,
+    /// Channel trees of servers other than the shown one (for unread).
+    pub trees: HashMap<RequestId, String>,
+    pub read_states: Option<RequestId>,
+    pub notifications: Option<RequestId>,
+    /// request → server id
+    pub members: HashMap<RequestId, String>,
+    /// request → (channel, the mark before, the optimistic mark)
+    pub reads: HashMap<RequestId, (String, Option<String>, String)>,
+    /// request → the message as it was before the edit
+    pub edits: HashMap<RequestId, Message>,
+    /// request → the message the delete removed
+    pub deletes: HashMap<RequestId, Message>,
+}
+
+/// A message this client posted that the server has not confirmed. Its row
+/// is `pending-<nonce>` until the echo (or the POST answer) replaces it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Outgoing {
+    /// The pending row as shown (`pending-<nonce>`, local time).
+    pub message: Message,
+    pub failed: bool,
+}
+
+/// The row id of a pending send.
+pub fn pending_id(nonce: &str) -> String {
+    format!("pending-{nonce}")
+}
+
+/// Where the "New" divider sits in the open channel.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Divider {
+    /// The first unread message; the divider is drawn above it.
+    pub message_id: String,
+    /// Messages from it on (the banner count).
+    pub count: i64,
+    /// The banner shows until the list reaches its end.
+    pub banner: bool,
+    /// Seen at the end with the window focused: the next batch that
+    /// arrives while away moves it (useChatArea.ts).
+    pub locked: bool,
+}
+
+/// Someone typing in the open channel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Typer {
+    pub user_id: String,
+    pub name: String,
+    pub generation: u64,
 }
 
 /// The sign-in chain (me + servers, then channels, then the first page).
@@ -267,10 +370,25 @@ pub struct State {
     pub(super) messages: Option<MessageLog>,
     /// Display names seen so far, for typing indicators.
     pub(super) names: HashMap<String, String>,
-    /// Names seen typing in the open channel, in arrival order.
-    pub(super) typing: Vec<String>,
-    /// Bumped by each typing event; only the newest expiry clears the line.
+    /// Who is typing in the open channel, in arrival order.
+    pub(super) typing: Vec<Typer>,
+    /// The typing line as last emitted.
+    pub(super) typing_text: String,
+    /// Bumped by each typing event; only the newest one of a typer clears them.
     pub(super) typing_generation: u64,
+    /// Read marks by channel (ISO 8601; compared as strings like the web).
+    pub(super) read_states: HashMap<String, String>,
+    /// Newest message time by channel.
+    pub(super) last_message_at: HashMap<String, String>,
+    /// Unread notifications; `mention` and `reply` ones are the badges.
+    pub(super) notifications: Vec<Notification>,
+    /// Members by server id (mention suggestions, typing names).
+    pub(super) members: HashMap<String, Vec<User>>,
+    pub(super) divider: Option<Divider>,
+    /// Sends not yet confirmed, by nonce.
+    pub(super) outbox: HashMap<String, Outgoing>,
+    pub(super) focused: bool,
+    pub(super) at_bottom: bool,
     pub(super) voice: Option<VoiceCall>,
     pub(super) voice_prefs: VoicePrefs,
     /// Why the last call failed; cleared by the next join.
@@ -309,7 +427,16 @@ impl State {
             messages: None,
             names: HashMap::new(),
             typing: Vec::new(),
+            typing_text: String::new(),
             typing_generation: 0,
+            read_states: HashMap::new(),
+            last_message_at: HashMap::new(),
+            notifications: Vec::new(),
+            members: HashMap::new(),
+            divider: None,
+            outbox: HashMap::new(),
+            focused: true,
+            at_bottom: false,
             voice: None,
             voice_prefs: VoicePrefs::default(),
             voice_error: String::new(),
@@ -377,9 +504,71 @@ impl State {
         self.refreshing
     }
 
-    /// Names typing in the open channel.
-    pub fn typing(&self) -> &[String] {
+    /// Who is typing in the open channel.
+    pub fn typing(&self) -> &[Typer] {
         &self.typing
+    }
+
+    /// A channel read mark.
+    pub fn read_at(&self, channel_id: &str) -> Option<&str> {
+        self.read_states.get(channel_id).map(String::as_str)
+    }
+
+    /// The open channel "New" divider.
+    pub fn divider(&self) -> Option<&Divider> {
+        self.divider.as_ref()
+    }
+
+    /// Sends not yet confirmed, by nonce.
+    pub fn outbox(&self) -> &HashMap<String, Outgoing> {
+        &self.outbox
+    }
+
+    /// A channel has messages newer than its read mark (ChannelSidebar.tsx;
+    /// the open channel never shows as unread).
+    pub fn is_unread(&self, channel_id: &str) -> bool {
+        self.active_channel.as_deref() != Some(channel_id) && self.has_unread(channel_id)
+    }
+
+    /// The newest message is after the read mark (or nothing was read).
+    pub(super) fn has_unread(&self, channel_id: &str) -> bool {
+        match (
+            self.last_message_at.get(channel_id),
+            self.read_states.get(channel_id),
+        ) {
+            (Some(last), Some(read)) => last > read,
+            (Some(_), None) => true,
+            (None, _) => false,
+        }
+    }
+
+    /// Unread mention and reply notifications in a channel.
+    pub fn channel_mentions(&self, channel_id: &str) -> i64 {
+        let n = self
+            .notifications
+            .iter()
+            .filter(|n| n.is_mention() && n.channel_id.as_deref() == Some(channel_id))
+            .count();
+        i64::try_from(n).unwrap_or(i64::MAX)
+    }
+
+    /// Unread mention and reply notifications in a server.
+    pub fn server_mentions(&self, server_id: &str) -> i64 {
+        let n = self
+            .notifications
+            .iter()
+            .filter(|n| n.is_mention() && n.server_id.as_deref() == Some(server_id))
+            .count();
+        i64::try_from(n).unwrap_or(i64::MAX)
+    }
+
+    /// Any text channel of the server is unread.
+    pub fn server_unread(&self, server_id: &str) -> bool {
+        self.channels.get(server_id).is_some_and(|list| {
+            list.channels
+                .iter()
+                .any(|c| c.channel_type == ChannelType::Text && self.is_unread(&c.id))
+        })
     }
 
     pub fn voice(&self) -> Option<&VoiceCall> {

@@ -175,8 +175,30 @@ pub struct Attachment {
     pub size_bytes: Option<u64>,
 }
 
-/// A chat message. `embeds`, `reactions` and `reply_to` stay untyped until a
-/// client renders them.
+/// The message a reply quotes (`reply_to`): the server sends the first 200
+/// characters of its content. Absent when the parent was deleted.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct ReplyTo {
+    pub id: String,
+    #[serde(default)]
+    pub content: String,
+    pub author_id: Option<String>,
+    pub author: Option<User>,
+    #[serde(default)]
+    pub attachment_count: i64,
+}
+
+/// Decodes an optional field that may have any shape; one that does not fit
+/// is `None` rather than failing the whole body.
+fn lenient<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    let value = Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
+}
+
+/// A chat message. `embeds` and `reactions` stay untyped until a client
+/// renders them.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Message {
     pub id: String,
@@ -187,7 +209,8 @@ pub struct Message {
     #[serde(default)]
     pub content: String,
     pub reply_to_id: Option<String>,
-    pub reply_to: Option<Value>,
+    #[serde(default, deserialize_with = "lenient")]
+    pub reply_to: Option<ReplyTo>,
     #[serde(default)]
     pub is_pinned: bool,
     #[serde(default)]
@@ -229,6 +252,58 @@ pub struct MessagePage {
     pub messages: Vec<Message>,
     pub has_more_before: Option<bool>,
     pub has_more_after: Option<bool>,
+}
+
+/// One channel's read mark (`GET /api/read-states`, `READ_STATE_UPDATE`).
+/// Timestamps are ISO 8601 and compare as strings, as on the web.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ReadState {
+    pub channel_id: String,
+    pub last_read_at: String,
+}
+
+/// The newest message time of one channel.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct LastMessage {
+    pub channel_id: String,
+    pub last_message_at: String,
+}
+
+/// `GET /api/read-states`: every read mark and every channel's newest
+/// message time.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ReadStates {
+    #[serde(default)]
+    pub read_states: Vec<ReadState>,
+    #[serde(default)]
+    pub last_messages: Vec<LastMessage>,
+}
+
+/// One notification (`GET /api/notifications`, `NOTIFICATION_CREATE`).
+/// Unread `mention` and `reply` notifications are the mention counts.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Notification {
+    pub id: String,
+    #[serde(rename = "type", default)]
+    pub kind: String,
+    pub channel_id: Option<String>,
+    pub server_id: Option<String>,
+    pub message_id: Option<String>,
+    #[serde(default)]
+    pub is_read: bool,
+}
+
+impl Notification {
+    /// Counts toward a channel's and a server's mention badge.
+    pub fn is_mention(&self) -> bool {
+        !self.is_read && matches!(self.kind.as_str(), "mention" | "reply")
+    }
+}
+
+/// One server member (`GET /api/servers/:id/members` is a bare array).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct Member {
+    pub user: User,
 }
 
 // Device sign-in (Kova)

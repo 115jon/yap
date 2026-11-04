@@ -9,7 +9,7 @@ use yap_protocol::rest::{Channel, ChannelType, Message, Server, User};
 
 use std::collections::HashMap;
 
-use super::state::{Phase, ServerChannels, VoiceCall};
+use super::state::{Outgoing, Phase, ServerChannels, VoiceCall};
 use super::time::{parse_rfc3339, LocalOffset, Stamp};
 use super::{Occupant, VoiceMember};
 
@@ -150,6 +150,10 @@ rows! {
         name: String => Name "name",
         initials: String => Initials "initials",
         icon: String => Icon "icon",
+        /// A text channel in it has unread messages.
+        unread: bool => Unread "unread",
+        /// Unread mentions and replies.
+        mentions: i64 => Mentions "mentions",
     }
     key(row) -> String { row.id.clone() }
 
@@ -174,6 +178,10 @@ rows! {
         /// Members: the lit path (`path`). 0 off; 1 the trunk passes this
         /// leaf on its way to you; 2 this leaf is you (the path ends here).
         lit: i64 => Lit "lit",
+        /// Channels: newer messages than the read mark.
+        unread: bool => Unread "unread",
+        /// Channels: unread mentions and replies.
+        mentions: i64 => Mentions "mentions",
     }
     key(row) -> (TreeKind, String) { (row.kind, row.id.clone()) }
 
@@ -202,6 +210,25 @@ rows! {
         attachment_names: String => AttachmentNames "attachmentNames",
         /// Sent by the signed-in user.
         mine: bool => Mine "mine",
+        /// The send nonce of a row this client posted, else empty.
+        nonce: String => Nonce "nonce",
+        /// Posted here and not confirmed yet.
+        pending: bool => Pending "pending",
+        /// The send failed (Retry or Delete).
+        failed: bool => Failed "failed",
+        /// Mentions the signed-in user, `@everyone`/`@here`, or replies to them.
+        mentioned: bool => Mentioned "mentioned",
+        /// The "New" divider is drawn above this row.
+        divider: bool => Divider "newDivider",
+        /// The quoted message, when this is a reply whose parent exists.
+        reply_id: String => ReplyId "replyId",
+        reply_author: String => ReplyAuthor "replyAuthor",
+        reply_avatar: String => ReplyAvatar "replyAvatar",
+        reply_initials: String => ReplyInitials "replyInitials",
+        /// One line of the parent, or what stands in for it.
+        reply_text: String => ReplyText "replyText",
+        /// `reply_text` is a placeholder ("(no content)"), not the parent text.
+        reply_placeholder: bool => ReplyPlaceholder "replyPlaceholder",
     }
     key(row) -> String { row.id.clone() }
 
@@ -215,6 +242,16 @@ rows! {
         deafened: bool => Deafened "deafened",
         speaking: bool => Speaking "speaking",
         me: bool => Me "me",
+    }
+    key(row) -> String { row.id.clone() }
+
+    /// One mention suggestion in the composer.
+    pub struct MentionRow / MentionRole {
+        id: String => Id "userId",
+        username: String => Username "username",
+        name: String => Name "name",
+        avatar: String => Avatar "avatar",
+        initials: String => Initials "initials",
     }
     key(row) -> String { row.id.clone() }
 }
@@ -345,6 +382,21 @@ pub struct VoicePanelView {
     pub count: i64,
 }
 
+/// The open channel's "New" divider and the banner over the list.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct UnreadView {
+    /// The first unread message, or empty when there is no divider.
+    pub divider_id: String,
+    /// Messages from the divider on.
+    pub count: i64,
+    /// The banner shows (until the list reaches its end).
+    pub banner: bool,
+    /// When the first unread message was sent: `h:mm AM`, `MMM d`, day number.
+    pub since_time: String,
+    pub since_date: String,
+    pub since_day: i64,
+}
+
 /// Updates for the Qt side: typed scalars and one diff stream per model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewUpdate {
@@ -370,8 +422,13 @@ pub enum ViewUpdate {
     VoicePanel(VoicePanelView),
     Servers(ViewDiff<ServerRow>),
     Channels(ViewDiff<ChannelTreeRow>),
-    Messages(ViewDiff<MessageRow>),
+    /// Boxed: a message row is large, and most updates are not messages.
+    Messages(Box<ViewDiff<MessageRow>>),
     Roster(ViewDiff<VoiceMemberRow>),
+    Unread(UnreadView),
+    Mentions(ViewDiff<MentionRow>),
+    /// A short-lived line about something that failed (a toast).
+    Notice(String),
 }
 
 /// Messages from the same author within this window share one header.
@@ -526,14 +583,26 @@ fn call_seat(m: &VoiceMember, key: String, call: &VoiceCall) -> Seat {
     }
 }
 
-pub(super) fn server_rows(servers: &[Server], api_base: &str) -> Vec<ServerRow> {
+/// A badge: unread, and the mention count.
+pub(super) type Badge = (bool, i64);
+
+pub(super) fn server_rows(
+    servers: &[Server],
+    api_base: &str,
+    badge_of: impl Fn(&str) -> Badge,
+) -> Vec<ServerRow> {
     servers
         .iter()
-        .map(|s| ServerRow {
-            id: s.id.clone(),
-            name: s.name.clone(),
-            initials: initials(&s.name),
-            icon: absolute_url(api_base, s.icon_url.as_deref()),
+        .map(|s| {
+            let (unread, mentions) = badge_of(&s.id);
+            ServerRow {
+                id: s.id.clone(),
+                name: s.name.clone(),
+                initials: initials(&s.name),
+                icon: absolute_url(api_base, s.icon_url.as_deref()),
+                unread,
+                mentions,
+            }
         })
         .collect()
 }
@@ -553,12 +622,16 @@ fn plain_row(kind: TreeKind, id: &str, name: &str) -> ChannelTreeRow {
         first: false,
         last: false,
         lit: 0,
+        unread: false,
+        mentions: 0,
     }
 }
 
-fn channel_row(channel: &Channel) -> ChannelTreeRow {
+fn channel_row(channel: &Channel, (unread, mentions): Badge) -> ChannelTreeRow {
     ChannelTreeRow {
         voice: channel.channel_type == ChannelType::Voice,
+        unread,
+        mentions,
         ..plain_row(TreeKind::Channel, &channel.id, &channel.name)
     }
 }
@@ -595,10 +668,11 @@ fn member_rows(channel_id: &str, seats: &[Seat]) -> Vec<ChannelTreeRow> {
 
 /// Category labels, channels, and under every voice channel the people in
 /// it. A label starts the first run of channels with a named category.
-/// `seats_of` lists a voice channel's people.
+/// `seats_of` lists a voice channel's people, `badge_of` a channel's badge.
 pub(super) fn tree_rows(
     list: Option<&ServerChannels>,
     seats_of: impl Fn(&str) -> Vec<Seat>,
+    badge_of: impl Fn(&str) -> Badge,
 ) -> Vec<ChannelTreeRow> {
     let Some(list) = list else {
         return Vec::new();
@@ -621,7 +695,7 @@ pub(super) fn tree_rows(
                 ));
             }
         }
-        rows.push(channel_row(channel));
+        rows.push(channel_row(channel, badge_of(&channel.id)));
         if channel.channel_type == ChannelType::Voice {
             rows.extend(member_rows(&channel.id, &seats_of(&channel.id)));
         }
@@ -649,11 +723,59 @@ pub(super) fn roster_rows(seats: &[Seat]) -> Vec<VoiceMemberRow> {
 pub(super) struct RowContext<'a> {
     pub api_base: &'a str,
     pub me_id: &'a str,
+    pub me_username: &'a str,
     pub offset: LocalOffset,
+    pub outbox: &'a HashMap<String, Outgoing>,
+    /// The message the "New" divider sits above.
+    pub divider: Option<&'a str>,
 }
 
-/// Grouped under `previous`: same author, created within the window.
-fn grouped(previous: Option<&Message>, message: &Message) -> bool {
+/// `\w` as JavaScript reads it without the `u` flag.
+fn is_word(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+/// `(^|[^\w@])@(everyone|here|<username>)(?!\w)`, case-insensitive
+/// (message-author.ts `mentionsViewer`).
+pub fn mentions_user(content: &str, username: &str) -> bool {
+    let targets = ["everyone", "here", username];
+    let mut previous: Option<char> = None;
+    for (i, c) in content.char_indices() {
+        let boundary = previous.is_none_or(|p| !is_word(p) && p != '@');
+        previous = Some(c);
+        if c != '@' || !boundary {
+            continue;
+        }
+        let rest = &content[i + 1..];
+        let hit = targets.iter().filter(|t| !t.is_empty()).any(|target| {
+            rest.get(..target.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(target))
+                && rest[target.len()..]
+                    .chars()
+                    .next()
+                    .is_none_or(|n| !is_word(n))
+        });
+        if hit {
+            return true;
+        }
+    }
+    false
+}
+
+/// The parent of a reply as one line (`ReplyPreviewContent.tsx`), and
+/// whether it is a placeholder.
+fn reply_line(content: &str, attachments: i64) -> (String, bool) {
+    let line = content.split_whitespace().collect::<Vec<_>>().join(" ");
+    match line.is_empty() {
+        false => (line, false),
+        true if attachments > 0 => ("Click to see attachment".to_owned(), true),
+        true => ("(no content)".to_owned(), true),
+    }
+}
+
+/// Grouped under `previous` (message-rows.ts): same author, not a reply or
+/// a call record, created within the window on the same local day.
+fn grouped(previous: Option<&Message>, message: &Message, offset: LocalOffset) -> bool {
     let Some(previous) = previous else {
         return false;
     };
@@ -663,7 +785,13 @@ fn grouped(previous: Option<&Message>, message: &Message) -> bool {
     ) else {
         return false;
     };
-    previous.author_id == message.author_id && now - before < GROUP_WINDOW_MS
+    let call = |m: &Message| m.kind.as_deref() == Some("call");
+    previous.author_id == message.author_id
+        && message.reply_to_id.is_none()
+        && !call(previous)
+        && !call(message)
+        && now - before <= GROUP_WINDOW_MS
+        && super::time::local_day(before, offset) == super::time::local_day(now, offset)
 }
 
 pub(super) fn message_row(
@@ -682,6 +810,23 @@ pub(super) fn message_row(
         .map(|a| a.filename.as_str())
         .collect::<Vec<_>>()
         .join("  ·  ");
+    let outgoing = message
+        .nonce
+        .as_deref()
+        .filter(|_| message.id.starts_with("pending-"))
+        .and_then(|nonce| ctx.outbox.get(nonce));
+    let mine = !ctx.me_id.is_empty() && message.author_id == ctx.me_id;
+    let reply = message.reply_to.as_ref();
+    let reply_name = reply
+        .and_then(|r| r.author.as_ref())
+        .map(User::label)
+        .unwrap_or_default();
+    let (reply_text, reply_placeholder) = reply
+        .map(|r| reply_line(&r.content, r.attachment_count))
+        .unwrap_or_default();
+    let replies_to_me = reply
+        .and_then(|r| r.author_id.as_deref())
+        .is_some_and(|id| !ctx.me_id.is_empty() && id == ctx.me_id);
     MessageRow {
         id: message.id.clone(),
         author_id: message.author_id.clone(),
@@ -695,18 +840,53 @@ pub(super) fn message_row(
         date: stamp.date,
         day: stamp.day,
         edited: message.updated_at.is_some(),
-        grouped: grouped(previous, message),
+        // The divider always starts a new header.
+        grouped: grouped(previous, message, ctx.offset) && ctx.divider != Some(message.id.as_str()),
         attachment_names,
-        mine: !ctx.me_id.is_empty() && message.author_id == ctx.me_id,
+        mine,
+        nonce: message.nonce.clone().filter(|_| mine).unwrap_or_default(),
+        pending: outgoing.is_some_and(|o| !o.failed),
+        failed: outgoing.is_some_and(|o| o.failed),
+        mentioned: !mine && (replies_to_me || mentions_user(&message.content, ctx.me_username)),
+        divider: ctx.divider == Some(message.id.as_str()),
+        reply_id: reply.map(|r| r.id.clone()).unwrap_or_default(),
+        reply_author: reply_name.to_owned(),
+        reply_avatar: absolute_url(
+            ctx.api_base,
+            reply
+                .and_then(|r| r.author.as_ref())
+                .and_then(|a| a.avatar_url.as_deref()),
+        ),
+        reply_initials: reply.map(|_| initials(reply_name)).unwrap_or_default(),
+        reply_text,
+        reply_placeholder,
     }
 }
 
-/// The typing line for these names.
-pub(super) fn typing_text(names: &[String]) -> String {
+pub(super) fn mention_rows(users: &[&User], api_base: &str) -> Vec<MentionRow> {
+    users
+        .iter()
+        .map(|u| MentionRow {
+            id: u.id.clone(),
+            username: u.username.clone(),
+            name: u.label().to_owned(),
+            avatar: absolute_url(api_base, u.avatar_url.as_deref()),
+            initials: initials(u.label()),
+        })
+        .collect()
+}
+
+/// The typing line for these names (ChatTypingIndicator.tsx): up to three
+/// by name, comma-joined, then a count.
+pub fn typing_text<S: AsRef<str>>(names: &[S]) -> String {
     match names {
         [] => String::new(),
-        [one] => format!("{one} is typing…"),
-        many => format!("{} are typing…", many.join(", ")),
+        [one] => format!("{} is typing…", one.as_ref()),
+        few if few.len() <= 3 => {
+            let joined: Vec<&str> = few.iter().map(AsRef::as_ref).collect();
+            format!("{} are typing…", joined.join(", "))
+        }
+        many => format!("{} people are typing…", many.len()),
     }
 }
 
@@ -808,6 +988,32 @@ mod tests {
     #[test]
     fn initials_of_a_blank_name_should_be_a_question_mark() {
         assert_eq!(initials("   "), "?");
+    }
+
+    #[test]
+    fn typing_text_should_count_four_or_more() {
+        let names = ["A", "B", "C", "D"];
+        assert_eq!(typing_text(&names), "4 people are typing…");
+    }
+
+    #[test]
+    fn mentions_user_should_match_a_whole_username_case_insensitively() {
+        assert!(mentions_user("hey @Spike, look", "spike"));
+    }
+
+    #[test]
+    fn mentions_user_should_not_match_a_longer_name() {
+        assert!(!mentions_user("hey @spiker", "spike"));
+    }
+
+    #[test]
+    fn mentions_user_should_not_match_inside_an_email() {
+        assert!(!mentions_user("mail a@spike now", "spike"));
+    }
+
+    #[test]
+    fn mentions_user_should_match_everyone_at_the_start() {
+        assert!(mentions_user("@everyone dinner", "spike"));
     }
 
     #[test]

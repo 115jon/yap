@@ -90,8 +90,11 @@ Rectangle {
         anchors.bottom: callPanel.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.leftMargin: 8
         anchors.rightMargin: 9
+        // Rows sit 8 px in as a content margin (inside the clip), so the
+        // unread pill can reach back to the panel edge.
+        leftMargin: 8
+        flickableDirection: Flickable.VerticalFlick
         bottomMargin: 8
         spacing: 2
         clip: true
@@ -100,7 +103,7 @@ Rectangle {
         reuseItems: true
 
         delegate: TreeRow {
-            width: list.width
+            width: list.width - list.leftMargin
             activeId: Nav.voicePanelId.length > 0 ? Nav.voicePanelId : Nav.activeChannelId
             callId: Voice.channelId
             onSelected: channelId => Nav.selectChannel(channelId)

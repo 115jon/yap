@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
-use yap_protocol::rest::{ChannelsResponse, Message, Server, User};
+use yap_protocol::rest::{
+    ChannelsResponse, Member, Message, MessagePatch, Notification, ReadStates, Server, User,
+};
 use yap_protocol::Frame;
 
 pub use yap_cache::Write as CacheWrite;
@@ -75,6 +77,16 @@ pub enum Effect {
     StartupMark(&'static str),
 }
 
+/// An HTTP method.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Method {
+    Get,
+    Post,
+    Put,
+    Patch,
+    Delete,
+}
+
 /// The REST calls the store makes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApiRequest {
@@ -83,25 +95,69 @@ pub enum ApiRequest {
     Channels {
         server_id: String,
     },
-    /// The newest page of a channel.
+    /// A page of 50: the newest, or the one before `before` (a
+    /// `created_at|id` cursor, as `useChatArea.ts` builds it).
     Messages {
         channel_id: String,
+        before: Option<String>,
     },
+    /// `nonce` comes back on the created message and its `MESSAGE_CREATE`.
     SendMessage {
         channel_id: String,
         content: String,
+        reply_to_id: Option<String>,
+        nonce: String,
+    },
+    EditMessage {
+        channel_id: String,
+        message_id: String,
+        content: String,
+    },
+    DeleteMessage {
+        channel_id: String,
+        message_id: String,
+    },
+    Typing {
+        channel_id: String,
+    },
+    ReadStates,
+    /// The server sets `last_read_at` to now and broadcasts `READ_STATE_UPDATE`.
+    MarkRead {
+        channel_id: String,
+    },
+    /// Unread notifications (the mention counts).
+    Notifications,
+    MarkNotificationsRead {
+        ids: Vec<String>,
+    },
+    Members {
+        server_id: String,
     },
 }
 
-/// A decoded REST response, one variant per [`ApiRequest`].
+/// A page of messages, oldest first.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Page {
+    pub messages: Vec<Message>,
+    pub has_more_before: bool,
+}
+
+/// A decoded REST response, one variant per kind of [`ApiRequest`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApiResponse {
     Me(Box<User>),
     Servers(Vec<Server>),
     Channels(ChannelsResponse),
-    Messages(Vec<Message>),
+    Messages(Page),
     /// The created message, when the body decodes as one.
     Sent(Option<Box<Message>>),
+    /// The edit as the server stored it.
+    Edited(Option<MessagePatch>),
+    ReadStates(ReadStates),
+    Notifications(Vec<Notification>),
+    Members(Vec<Member>),
+    /// A call whose body the store does not read.
+    Done,
 }
 
 /// Decodes each element that fits and skips the rest, so one odd row does not
@@ -123,10 +179,34 @@ fn take(value: &mut Value, key: &str) -> Value {
         .unwrap_or(Value::Null)
 }
 
+/// Percent-encodes a query value (RFC 3986 unreserved characters stay).
+fn query_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
 impl ApiRequest {
-    /// `true` for a POST.
-    pub fn is_post(&self) -> bool {
-        matches!(self, Self::SendMessage { .. })
+    pub fn method(&self) -> Method {
+        match self {
+            Self::SendMessage { .. } | Self::Typing { .. } => Method::Post,
+            Self::MarkRead { .. } => Method::Put,
+            Self::EditMessage { .. } | Self::MarkNotificationsRead { .. } => Method::Patch,
+            Self::DeleteMessage { .. } => Method::Delete,
+            Self::Me
+            | Self::Servers
+            | Self::Channels { .. }
+            | Self::Messages { .. }
+            | Self::ReadStates
+            | Self::Notifications
+            | Self::Members { .. } => Method::Get,
+        }
     }
 
     pub fn path(&self) -> String {
@@ -134,18 +214,57 @@ impl ApiRequest {
             Self::Me => "/api/users/me".into(),
             Self::Servers => "/api/servers".into(),
             Self::Channels { server_id } => format!("/api/servers/{server_id}/channels"),
-            Self::Messages { channel_id } => {
-                format!("/api/channels/{channel_id}/messages?limit=50")
+            Self::Messages { channel_id, before } => match before {
+                Some(cursor) => format!(
+                    "/api/channels/{channel_id}/messages?limit=50&before={}",
+                    query_value(cursor)
+                ),
+                None => format!("/api/channels/{channel_id}/messages?limit=50"),
+            },
+            Self::SendMessage { channel_id, .. }
+            | Self::EditMessage { channel_id, .. }
+            | Self::DeleteMessage { channel_id, .. } => {
+                format!("/api/channels/{channel_id}/messages")
             }
-            Self::SendMessage { channel_id, .. } => format!("/api/channels/{channel_id}/messages"),
+            Self::Typing { channel_id } => format!("/api/channels/{channel_id}/typing"),
+            Self::ReadStates => "/api/read-states".into(),
+            Self::MarkRead { channel_id } => format!("/api/channels/{channel_id}/read-state"),
+            Self::Notifications => "/api/notifications?limit=100&unread=true".into(),
+            Self::MarkNotificationsRead { .. } => "/api/notifications".into(),
+            Self::Members { server_id } => format!("/api/servers/{server_id}/members"),
         }
     }
 
-    /// The JSON body of a POST.
+    /// The JSON body (`Null` for a GET).
     pub fn body(&self) -> Value {
         match self {
-            Self::SendMessage { content, .. } => json!({ "content": content }),
-            _ => Value::Null,
+            Self::SendMessage {
+                content,
+                reply_to_id,
+                nonce,
+                ..
+            } => {
+                let mut body = json!({ "content": content, "nonce": nonce });
+                if let Some(reply) = reply_to_id {
+                    body["reply_to_id"] = json!(reply);
+                }
+                body
+            }
+            Self::EditMessage {
+                message_id,
+                content,
+                ..
+            } => json!({ "message_id": message_id, "content": content }),
+            Self::DeleteMessage { message_id, .. } => json!({ "message_id": message_id }),
+            Self::MarkNotificationsRead { ids } => json!({ "ids": ids }),
+            Self::Typing { .. } | Self::MarkRead { .. } => json!({}),
+            Self::Me
+            | Self::Servers
+            | Self::Channels { .. }
+            | Self::Messages { .. }
+            | Self::ReadStates
+            | Self::Notifications
+            | Self::Members { .. } => Value::Null,
         }
     }
 
@@ -160,15 +279,38 @@ impl ApiRequest {
                 channels: lenient_list(take(&mut body, "channels")),
                 categories: lenient_list(take(&mut body, "categories")),
             }),
-            // A page object, or (older servers) a bare array.
-            Self::Messages { .. } => ApiResponse::Messages(if body.is_array() {
-                lenient_list(body)
-            } else {
-                lenient_list(take(&mut body, "messages"))
+            // A page object, or (older servers) a bare array, where a full
+            // page means there may be more (chat-actions.ts).
+            Self::Messages { .. } if body.is_array() => {
+                let messages: Vec<Message> = lenient_list(body);
+                ApiResponse::Messages(Page {
+                    has_more_before: messages.len() >= 50,
+                    messages,
+                })
+            }
+            Self::Messages { .. } => ApiResponse::Messages(Page {
+                has_more_before: body
+                    .get("hasMoreBefore")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                messages: lenient_list(take(&mut body, "messages")),
             }),
             Self::SendMessage { .. } => {
                 ApiResponse::Sent(serde_json::from_value(body).ok().map(Box::new))
             }
+            Self::EditMessage { .. } => ApiResponse::Edited(serde_json::from_value(body).ok()),
+            Self::ReadStates => ApiResponse::ReadStates(ReadStates {
+                read_states: lenient_list(take(&mut body, "read_states")),
+                last_messages: lenient_list(take(&mut body, "last_messages")),
+            }),
+            Self::Notifications => {
+                ApiResponse::Notifications(lenient_list(take(&mut body, "notifications")))
+            }
+            Self::Members { .. } => ApiResponse::Members(lenient_list(body)),
+            Self::DeleteMessage { .. }
+            | Self::Typing { .. }
+            | Self::MarkRead { .. }
+            | Self::MarkNotificationsRead { .. } => ApiResponse::Done,
         })
     }
 }

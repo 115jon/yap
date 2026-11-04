@@ -16,14 +16,15 @@ mod state;
 pub mod time;
 pub mod view;
 
-pub use effect::{ApiRequest, ApiResponse, CacheWrite, Effect};
+pub use effect::{ApiRequest, ApiResponse, CacheWrite, Effect, Method, Page};
 pub use input::{Command, Dispatch, GatewayEvent, Input, SignInEvent};
 pub use reduce::reduce;
 pub use state::{
-    GatewayStatus, MessageLog, Phase, ServerChannels, Session, State, VoiceCall, VoicePrefs,
+    pending_id, Divider, GatewayStatus, MessageLog, Outgoing, Phase, ServerChannels, Session,
+    State, Typer, VoiceCall, VoicePrefs,
 };
 pub use time::LocalOffset;
-pub use view::{Row, ViewDiff, ViewUpdate};
+pub use view::{MentionRow, Row, UnreadView, ViewDiff, ViewUpdate};
 pub use yap_cache::Snapshot;
 
 /// Which HTTP request a result answers.

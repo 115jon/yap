@@ -2,9 +2,10 @@
 
 use serde_json::Value;
 use yap_protocol::payload::{
-    MessageDeleteEvent, TypingStartEvent, VoiceChannelStateUpdate, VoiceChannelStates,
+    MessageDeleteEvent, NotificationsRead, TypingStartEvent, VoiceChannelStateUpdate,
+    VoiceChannelStates,
 };
-use yap_protocol::rest::{Message, MessagePatch};
+use yap_protocol::rest::{Message, MessagePatch, Notification, ReadState};
 
 use yap_cache::Snapshot;
 
@@ -21,7 +22,36 @@ pub enum Command {
     SignOut,
     SelectServer(String),
     SelectChannel(String),
-    Send(String),
+    /// Post to the open channel. The UI stamps the nonce and the local send
+    /// time (the store has no clock or randomness), so the pending row can
+    /// show at once and the echo can find it.
+    Send {
+        content: String,
+        reply_to_id: Option<String>,
+        nonce: String,
+        sent_at: String,
+    },
+    /// Post a failed send again, with the same nonce.
+    RetrySend(String),
+    /// Drop a failed send's row.
+    DiscardSend(String),
+    EditMessage {
+        message_id: String,
+        content: String,
+    },
+    DeleteMessage(String),
+    /// The composer has text (the UI throttles this to every 3 s).
+    Typing,
+    /// The message list is scrolled near its top: load the page before.
+    LoadOlder,
+    /// Whether the message list is at its newest end.
+    SetAtBottom(bool),
+    /// Whether the window has focus.
+    SetFocused(bool),
+    /// Mark the open channel read and drop its "New" divider.
+    MarkRead,
+    /// The `@` query in the composer, or `None` when no suggestion list is open.
+    MentionQuery(Option<String>),
     JoinVoice(String),
     LeaveVoice,
     SetVoiceMuted(bool),
@@ -53,8 +83,11 @@ pub enum Input {
         call: CallId,
         update: VoiceUpdate,
     },
-    /// The typing line's timeout for the typing event with this generation.
-    TypingExpired(u64),
+    /// One typer's timeout; only the newest event of theirs clears them.
+    TypingExpired {
+        user_id: String,
+        generation: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -89,6 +122,11 @@ pub enum Dispatch {
     MessagePatch(MessagePatch),
     MessageDelete(MessageDeleteEvent),
     TypingStart(TypingStartEvent),
+    ReadStateUpdate(ReadState),
+    NotificationCreate(Notification),
+    NotificationsRead(NotificationsRead),
+    /// Every notification was cleared.
+    NotificationsClear,
     /// The server list changed (`USER_SERVERS_UPDATE`, `GUILD_UPDATE`, `GUILD_DELETE`).
     ServersChanged,
     /// Who is in each voice channel (after a subscribe): replaces them all.
@@ -113,6 +151,10 @@ impl Dispatch {
             "MESSAGE_UPDATE" => Self::MessagePatch(serde_json::from_value(data).ok()?),
             "MESSAGE_DELETE" => Self::MessageDelete(serde_json::from_value(data).ok()?),
             "TYPING_START" => Self::TypingStart(serde_json::from_value(data).ok()?),
+            "READ_STATE_UPDATE" => Self::ReadStateUpdate(serde_json::from_value(data).ok()?),
+            "NOTIFICATION_CREATE" => Self::NotificationCreate(serde_json::from_value(data).ok()?),
+            "NOTIFICATIONS_READ" => Self::NotificationsRead(serde_json::from_value(data).ok()?),
+            "NOTIFICATIONS_CLEAR" => Self::NotificationsClear,
             "USER_SERVERS_UPDATE" | "GUILD_DELETE" | "GUILD_UPDATE" => Self::ServersChanged,
             "VOICE_CHANNEL_STATES" => Self::VoiceChannelStates(serde_json::from_value(data).ok()?),
             "VOICE_CHANNEL_STATE_UPDATE" => {

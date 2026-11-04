@@ -15,7 +15,14 @@ the decisions.
 - The server rail and channel tree (categories, text and voice).
 - A text channel's history, with Markdown, grouping and edits.
 - Live updates over the gateway: create, update, delete, typing.
-- Sending from the composer.
+- Messaging as on the web: optimistic sends with a nonce (failed rows retry
+  or go back to the composer), replies, edit (inline, Up in an empty
+  composer) and delete (with the confirm dialog, Shift skips it), typing out
+  and in, `@` member suggestions, mention highlights, older pages on scroll.
+- Unread state: read marks (`/api/read-states`, `READ_STATE_UPDATE`,
+  mark-read at the end of a focused list), bold rows with the edge pill,
+  mention counts on channels and the rail (unread mention/reply
+  notifications), the "New" divider and its banner.
 - Audio-only voice calls: a voice channel opens its landing, Join starts the
   call; real mic and speakers with echo cancellation, a participant grid,
   mute and deafen (kept between calls), leave. Interoperates with the web
@@ -28,8 +35,8 @@ the decisions.
 
 ## Not yet
 
-Video and screen share, device picker, attachments preview, embeds, reactions, DMs, unread state,
-notifications, tray, single instance and auto-update.
+Video and screen share, device picker, attachments preview, embeds, reactions, DMs, jumping to
+messages that are not loaded (`around=`), OS notifications, tray, single instance and auto-update.
 
 ## Build (Windows)
 

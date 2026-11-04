@@ -9,16 +9,17 @@ Rectangle {
 
     property bool selected: false
     property bool hovered: false
+    property bool unread: false
     property bool animate: true
 
     x: -2
     width: 6
     height: 32
     radius: 2
-    color: selected ? Theme.path : Theme.ink2
+    color: selected ? Theme.path : unread && !hovered ? Theme.ink1 : Theme.ink2
     transform: Scale {
         origin.y: pill.height / 2
-        yScale: pill.selected ? 1 : pill.hovered ? 0.5 : 0
+        yScale: pill.selected ? 1 : pill.hovered ? 0.5 : pill.unread ? 0.25 : 0
         Behavior on yScale {
             enabled: pill.animate
             NumberAnimation { duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }

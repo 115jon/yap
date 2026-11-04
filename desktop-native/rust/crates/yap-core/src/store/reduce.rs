@@ -5,19 +5,20 @@ use std::time::Duration;
 
 use serde::Serialize;
 use yap_protocol::payload::{ChannelRef, ServerSubscribe, VoiceChannelJoin, VoiceChannelLeave};
-use yap_protocol::rest::{ChannelType, Message, Server, User};
+use yap_protocol::rest::{ChannelType, Message, MessagePatch, ReplyTo, Server, User};
 use yap_protocol::{Frame, GatewayOp};
 
 use super::state::{
-    Boot, MessageLog, Pending, Phase, ServerChannels, Session, Startup, State, VoiceCall,
-    VoicePrefs,
+    pending_id, Boot, Divider, MessageLog, Outgoing, Pending, Phase, ServerChannels, Session,
+    Startup, State, Typer, VoiceCall, VoicePrefs,
 };
+use super::time::{parse_rfc3339, Stamp};
 use super::view::{self, ChannelTreeRow, MessageRow, Row, RowContext, ViewDiff, ViewUpdate};
-use super::view::{MeView, Seat, VoicePanelView, VoiceView};
+use super::view::{MeView, Seat, UnreadView, VoicePanelView, VoiceView};
 use super::{
     ApiRequest, ApiResponse, CacheWrite, CallId, Command, Dispatch, Effect, GatewayEvent, Input,
-    Occupant, RequestId, SessionId, SignInEvent, SignInId, Snapshot, VoiceCommand, VoiceTarget,
-    VoiceUpdate,
+    Occupant, Page, RequestId, SessionId, SignInEvent, SignInId, Snapshot, VoiceCommand,
+    VoiceTarget, VoiceUpdate,
 };
 use crate::api::{ApiError, Token};
 use yap_protocol::payload::{ClientVoiceState, VoiceChannelMember};
@@ -27,8 +28,19 @@ const SESSION_ENDED: &str = "Your session ended. Sign in again.";
 /// The status line while a view shown from the cache is revalidated.
 pub const REFRESHING: &str = "Refreshing…";
 
-/// How long the typing line stays after the last typing event.
+/// How long someone stays on the typing line after their last typing event.
 pub const TYPING_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Mention suggestions shown at once (MentionAutocomplete.tsx).
+pub const MENTION_SUGGESTIONS: usize = 5;
+
+const EDIT_FAILED: &str =
+    "Couldn't save your edit. Your message is unchanged. Try editing it again.";
+const DELETE_FAILED: &str = "Couldn't delete the message. Check your connection and try again.";
+
+fn is_pending(message: &Message) -> bool {
+    message.id.starts_with("pending-")
+}
 
 /// Applies one input and returns the effects to run, in order.
 pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
@@ -41,9 +53,16 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
         Input::SignIn { attempt, event } => state.on_sign_in(&mut fx, attempt, event),
         Input::Gateway { session, event } => state.on_gateway(&mut fx, session, event),
         Input::Voice { call, update } => state.on_voice(&mut fx, call, update),
-        Input::TypingExpired(generation) => {
-            if generation == state.typing_generation {
-                state.set_typing(&mut fx, Vec::new());
+        Input::TypingExpired {
+            user_id,
+            generation,
+        } => {
+            let before = state.typing.len();
+            state
+                .typing
+                .retain(|t| !(t.user_id == user_id && t.generation == generation));
+            if state.typing.len() != before {
+                state.emit_typing(&mut fx);
             }
         }
     }
@@ -62,7 +81,7 @@ impl Effects {
     }
 
     fn messages(&mut self, diff: ViewDiff<MessageRow>) {
-        self.view(ViewUpdate::Messages(diff));
+        self.view(ViewUpdate::Messages(Box::new(diff)));
     }
 }
 
@@ -149,11 +168,73 @@ impl State {
     // View projection
 
     fn row_context(&self) -> RowContext<'_> {
+        let me = self.me();
         RowContext {
             api_base: &self.api_base,
-            me_id: self.me().map_or("", |me| me.id.as_str()),
+            me_id: me.map_or("", |me| me.id.as_str()),
+            me_username: me.map_or("", |me| me.username.as_str()),
             offset: self.local_offset,
+            outbox: &self.outbox,
+            divider: self.divider.as_ref().map(|d| d.message_id.as_str()),
         }
+    }
+
+    /// Runs `change`, then emits updates for the rows at `indices` that it
+    /// changed (a flag the row reads from the state, not the message).
+    fn touch_rows(&mut self, fx: &mut Effects, indices: &[usize], change: impl FnOnce(&mut Self)) {
+        let before: Vec<(usize, Option<MessageRow>)> = indices
+            .iter()
+            .map(|&i| (i, self.message_row_at(i)))
+            .collect();
+        change(self);
+        for (at, old) in before {
+            if let (Some(old), Some(row)) = (old, self.message_row_at(at)) {
+                let roles = old.changed(&row);
+                if !roles.is_empty() {
+                    fx.messages(ViewDiff::Update { at, row, roles });
+                }
+            }
+        }
+    }
+
+    fn position_of(&self, id: &str) -> Option<usize> {
+        self.messages.as_ref()?.position(id)
+    }
+
+    /// Removes a row from the open channel (the one below may regroup).
+    fn remove_row(&mut self, fx: &mut Effects, id: &str) -> Option<Message> {
+        let at = self.position_of(id)?;
+        let below = self.message_row_at(at + 1);
+        let (_, message) = self.messages.as_mut()?.remove(id)?;
+        fx.messages(ViewDiff::Remove { at, count: 1 });
+        self.emit_message_changes(fx, at, [below, None]);
+        Some(message)
+    }
+
+    /// Puts a message back into the open channel by time.
+    fn insert_row_sorted(&mut self, fx: &mut Effects, message: Message) {
+        let Some(log) = self.messages.as_ref() else {
+            return;
+        };
+        if log.channel_id != message.channel_id || log.get(&message.id).is_some() {
+            return;
+        }
+        let at = log
+            .iter()
+            .position(|m| m.created_at > message.created_at)
+            .unwrap_or(log.len());
+        // The row at `at` moves down one and may regroup under the new one.
+        let shifted = self.message_row_at(at);
+        if let Some(log) = self.messages.as_mut() {
+            log.insert_sorted(message);
+        }
+        if let Some(row) = self.message_row_at(at) {
+            fx.messages(ViewDiff::Insert {
+                at,
+                rows: vec![row],
+            });
+        }
+        self.emit_message_changes(fx, at, [None, shifted]);
     }
 
     /// The open channel's row at `index`, grouped against the one above.
@@ -198,7 +279,9 @@ impl State {
     }
 
     fn sync_servers(&mut self, fx: &mut Effects) {
-        let rows = view::server_rows(&self.servers, &self.api_base);
+        let rows = view::server_rows(&self.servers, &self.api_base, |id| {
+            (self.server_unread(id), self.server_mentions(id))
+        });
         for diff in view::ordered_diff(&self.view.servers, &rows) {
             fx.view(ViewUpdate::Servers(diff));
         }
@@ -222,7 +305,17 @@ impl State {
             .tree_server
             .as_ref()
             .and_then(|id| self.channels.get(id));
-        view::tree_rows(list, |id| self.seats(id))
+        view::tree_rows(
+            list,
+            |id| self.seats(id),
+            |id| (self.is_unread(id), self.channel_mentions(id)),
+        )
+    }
+
+    /// Read marks, newest messages or notifications changed.
+    fn sync_badges(&mut self, fx: &mut Effects) {
+        self.sync_servers(fx);
+        self.sync_tree(fx);
     }
 
     /// The voice channel the roster model shows: the open voice view, else
@@ -371,11 +464,191 @@ impl State {
             .unwrap_or_default()
     }
 
-    fn set_typing(&mut self, fx: &mut Effects, names: Vec<String>) {
-        if self.typing != names {
-            fx.view(ViewUpdate::Typing(view::typing_text(&names)));
-            self.typing = names;
+    fn emit_typing(&mut self, fx: &mut Effects) {
+        let names: Vec<&str> = self.typing.iter().map(|t| t.name.as_str()).collect();
+        let text = view::typing_text(&names);
+        if text != self.typing_text {
+            self.typing_text.clone_from(&text);
+            fx.view(ViewUpdate::Typing(text));
         }
+    }
+
+    fn clear_typing(&mut self, fx: &mut Effects) {
+        self.typing.clear();
+        self.emit_typing(fx);
+    }
+
+    /// A user's name for the typing line: what messages and the member
+    /// list said, else "Someone" (useChatArea.ts).
+    fn user_name(&self, user_id: &str) -> String {
+        if let Some(name) = self.names.get(user_id) {
+            return name.clone();
+        }
+        self.active_server
+            .as_ref()
+            .and_then(|server| self.members.get(server))
+            .and_then(|list| list.iter().find(|u| u.id == user_id))
+            .map_or_else(|| "Someone".to_owned(), |u| u.label().to_owned())
+    }
+
+    // Unread
+
+    /// The banner and the divider's scalars.
+    fn emit_unread(&self, fx: &mut Effects) {
+        let view = self
+            .divider
+            .as_ref()
+            .map(|d| {
+                let sent = self
+                    .messages
+                    .as_ref()
+                    .and_then(|log| log.get(&d.message_id))
+                    .and_then(|m| parse_rfc3339(&m.created_at))
+                    .map(|ms| Stamp::new(ms, self.local_offset))
+                    .unwrap_or_default();
+                UnreadView {
+                    divider_id: d.message_id.clone(),
+                    count: d.count,
+                    banner: d.banner,
+                    since_time: sent.time,
+                    since_date: sent.date,
+                    since_day: sent.day,
+                }
+            })
+            .unwrap_or_default();
+        fx.view(ViewUpdate::Unread(view));
+    }
+
+    /// Moves (or drops) the divider, updating the rows it leaves and joins.
+    fn set_divider(&mut self, fx: &mut Effects, divider: Option<Divider>) {
+        let indices: Vec<usize> = [self.divider.as_ref(), divider.as_ref()]
+            .into_iter()
+            .flatten()
+            .filter_map(|d| self.position_of(&d.message_id))
+            .collect();
+        self.touch_rows(fx, &indices, |state| state.divider = divider);
+        self.emit_unread(fx);
+    }
+
+    /// Keeps the newest message time per channel.
+    fn bump_last_message(&mut self, channel_id: &str, at: &str) {
+        let newer = self
+            .last_message_at
+            .get(channel_id)
+            .is_none_or(|last| at > last.as_str());
+        if newer && !at.is_empty() {
+            self.last_message_at
+                .insert(channel_id.to_owned(), at.to_owned());
+        }
+    }
+
+    /// Marks a channel read up to `at` (its newest message by default),
+    /// optimistically; skipped when it already is (chat-actions.ts).
+    fn mark_read(&mut self, fx: &mut Effects, channel_id: &str, at: Option<&str>) {
+        let Some(mark) = at
+            .map(str::to_owned)
+            .or_else(|| self.last_message_at.get(channel_id).cloned())
+        else {
+            return;
+        };
+        let previous = self.read_states.get(channel_id).cloned();
+        if previous
+            .as_deref()
+            .is_some_and(|read| read >= mark.as_str())
+        {
+            return;
+        }
+        self.read_states.insert(channel_id.to_owned(), mark.clone());
+        let request = ApiRequest::MarkRead {
+            channel_id: channel_id.to_owned(),
+        };
+        if let Some(id) = self.http(fx, request) {
+            self.pending
+                .reads
+                .insert(id, (channel_id.to_owned(), previous, mark));
+        }
+        self.sync_badges(fx);
+    }
+
+    /// Marks read the unread notifications for messages loaded in the open
+    /// channel: the list is at its end, so they have been seen.
+    fn read_seen_mentions(&mut self, fx: &mut Effects) {
+        let Some(log) = &self.messages else {
+            return;
+        };
+        let ids: Vec<String> = self
+            .notifications
+            .iter()
+            .filter(|n| n.channel_id.as_deref() == Some(log.channel_id.as_str()))
+            .filter(|n| {
+                n.message_id
+                    .as_deref()
+                    .is_some_and(|m| log.get(m).is_some())
+            })
+            .map(|n| n.id.clone())
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
+        self.notifications.retain(|n| !ids.contains(&n.id));
+        let _ = self.http(fx, ApiRequest::MarkNotificationsRead { ids });
+        self.sync_badges(fx);
+    }
+
+    /// The open channel shows its end in a focused window: read it, clear
+    /// its seen mentions, lock the divider and drop the banner
+    /// (useChatArea.ts `handleAtBottom`).
+    fn on_seen(&mut self, fx: &mut Effects) {
+        if !(self.focused && self.at_bottom) || self.pending.page.is_some() {
+            return;
+        }
+        let Some(channel) = self.active_channel.clone() else {
+            return;
+        };
+        if self
+            .messages
+            .as_ref()
+            .is_none_or(|l| l.channel_id != channel)
+        {
+            return;
+        }
+        if let Some(divider) = self.divider.as_mut().filter(|d| d.banner || !d.locked) {
+            divider.banner = false;
+            divider.locked = true;
+            self.emit_unread(fx);
+        }
+        self.mark_read(fx, &channel, None);
+        self.read_seen_mentions(fx);
+    }
+
+    /// Read states and notifications (at sign-in and after a fresh
+    /// gateway session).
+    fn load_unread(&mut self, fx: &mut Effects) {
+        self.pending.read_states = self.http(fx, ApiRequest::ReadStates);
+        self.pending.notifications = self.http(fx, ApiRequest::Notifications);
+    }
+
+    fn mention_query(&mut self, fx: &mut Effects, query: Option<String>) {
+        let list = self
+            .active_server
+            .as_ref()
+            .and_then(|server| self.members.get(server));
+        let rows = match (query, list) {
+            (Some(query), Some(list)) => {
+                let query = query.to_lowercase();
+                let hits: Vec<&User> = list
+                    .iter()
+                    .filter(|u| u.username.to_lowercase().contains(&query))
+                    .take(MENTION_SUGGESTIONS)
+                    .collect();
+                view::mention_rows(&hits, &self.api_base)
+            }
+            _ => Vec::new(),
+        };
+        for diff in view::ordered_diff(&self.view.mentions, &rows) {
+            fx.view(ViewUpdate::Mentions(diff));
+        }
+        self.view.mentions = rows;
     }
 
     // Snapshot cache (write-through; the writer coalesces)
@@ -405,12 +678,13 @@ impl State {
         let Some(log) = &self.messages else {
             return;
         };
-        let skip = log.len().saturating_sub(yap_cache::MESSAGE_WINDOW);
+        let sent: Vec<&Message> = log.iter().filter(|m| !is_pending(m)).collect();
+        let skip = sent.len().saturating_sub(yap_cache::MESSAGE_WINDOW);
         self.persist(
             fx,
             CacheWrite::Messages {
                 channel_id: log.channel_id.clone(),
-                messages: log.iter().skip(skip).cloned().collect(),
+                messages: sent.into_iter().skip(skip).cloned().collect(),
             },
         );
     }
@@ -465,7 +739,46 @@ impl State {
             }
             Command::SelectServer(id) => self.select_server(fx, id),
             Command::SelectChannel(id) => self.select_channel(fx, &id),
-            Command::Send(text) => self.send(fx, text.trim()),
+            Command::Send {
+                content,
+                reply_to_id,
+                nonce,
+                sent_at,
+            } => self.send(fx, content.trim(), reply_to_id, nonce, sent_at),
+            Command::RetrySend(nonce) => self.retry_send(fx, &nonce),
+            Command::DiscardSend(nonce) => {
+                if self.outbox.remove(&nonce).is_some() {
+                    self.remove_row(fx, &pending_id(&nonce));
+                }
+            }
+            Command::EditMessage {
+                message_id,
+                content,
+            } => self.edit_message(fx, &message_id, content.trim()),
+            Command::DeleteMessage(id) => self.delete_message(fx, &id),
+            Command::Typing => {
+                if let (Some(channel_id), Some(_)) = (self.active_channel.clone(), self.signed_in())
+                {
+                    let _ = self.http(fx, ApiRequest::Typing { channel_id });
+                }
+            }
+            Command::LoadOlder => self.load_older(fx),
+            Command::SetAtBottom(at_bottom) => {
+                self.at_bottom = at_bottom;
+                self.on_seen(fx);
+            }
+            Command::SetFocused(focused) => {
+                self.focused = focused;
+                self.on_seen(fx);
+            }
+            Command::MarkRead => {
+                if let Some(channel) = self.active_channel.clone() {
+                    self.mark_read(fx, &channel, None);
+                    self.read_seen_mentions(fx);
+                    self.set_divider(fx, None);
+                }
+            }
+            Command::MentionQuery(query) => self.mention_query(fx, query),
             Command::JoinVoice(id) => self.join_voice(fx, id),
             Command::LeaveVoice => self.leave_voice(fx),
             // useVoiceSettingsStore.ts: unmuting while deafened undeafens;
@@ -633,6 +946,8 @@ impl State {
                 name: name.clone(),
             });
             let mut log = MessageLog::new(id);
+            // Unknown until the page answers; it keeps what is older.
+            log.has_more_before = true;
             for message in messages.into_iter().filter(|m| &m.channel_id == id) {
                 self.remember_author(&message);
                 log.upsert(message);
@@ -650,6 +965,7 @@ impl State {
         self.pending.me = self.http(fx, ApiRequest::Me);
         self.pending.servers = self.http(fx, ApiRequest::Servers);
         if let Some(server_id) = server {
+            self.request_members(fx, &server_id);
             let request = ApiRequest::Channels {
                 server_id: server_id.clone(),
             };
@@ -729,7 +1045,17 @@ impl State {
             fx.messages(ViewDiff::Reset(Vec::new()));
         }
         self.names.clear();
-        self.set_typing(fx, Vec::new());
+        self.clear_typing(fx);
+        self.read_states.clear();
+        self.last_message_at.clear();
+        self.notifications.clear();
+        self.members.clear();
+        self.outbox.clear();
+        self.at_bottom = false;
+        if self.divider.take().is_some() {
+            self.emit_unread(fx);
+        }
+        self.mention_query(fx, None);
         self.tree_server = None;
         self.sync_servers(fx);
         self.sync_tree(fx);
@@ -823,10 +1149,37 @@ impl State {
         if let Some((_, channel_id)) = pending.page.take_if(|(slot, _)| *slot == id) {
             return self.on_page(fx, &channel_id, result);
         }
-        // Anything else is stale: a newer request replaced it, or the session ended.
-        if let Some(channel_id) = pending.sends.remove(&id) {
-            self.on_sent(fx, &channel_id, result);
+        if let Some((_, channel_id)) = pending.older.take_if(|(slot, _)| *slot == id) {
+            return self.on_older(fx, &channel_id, result);
         }
+        if let Some(server_id) = pending.trees.remove(&id) {
+            return self.on_tree(fx, server_id, result);
+        }
+        if pending.read_states == Some(id) {
+            pending.read_states = None;
+            return self.on_read_states(fx, result);
+        }
+        if pending.notifications == Some(id) {
+            pending.notifications = None;
+            return self.on_notifications(fx, result);
+        }
+        if let Some(server_id) = pending.members.remove(&id) {
+            return self.on_members(fx, server_id, result);
+        }
+        if let Some(read) = pending.reads.remove(&id) {
+            return self.on_marked(fx, read, result);
+        }
+        if let Some(original) = pending.edits.remove(&id) {
+            return self.on_edited(fx, original, result);
+        }
+        if let Some(message) = pending.deletes.remove(&id) {
+            return self.on_deleted(fx, message, result);
+        }
+        if let Some(nonce) = pending.sends.remove(&id) {
+            self.on_sent(fx, &nonce, result);
+        }
+        // Anything else is stale (a newer request replaced it, or the
+        // session ended) or fire-and-forget (typing).
     }
 
     fn on_me(&mut self, fx: &mut Effects, result: Result<ApiResponse, ApiError>) {
@@ -856,7 +1209,8 @@ impl State {
                 fx.view(ViewUpdate::Me(view::me(&me, &self.api_base)));
             }
             session.me = Some(me.clone());
-            return self.persist(fx, CacheWrite::Me(Box::new(me)));
+            self.persist(fx, CacheWrite::Me(Box::new(me)));
+            return self.load_unread(fx);
         }
         fx.push(Effect::StoreToken(session.token.clone()));
         self.names.insert(me.id.clone(), me.label().to_owned());
@@ -868,6 +1222,7 @@ impl State {
         });
         session.me = Some(me.clone());
         self.persist(fx, CacheWrite::Me(Box::new(me)));
+        self.load_unread(fx);
         self.set_status(fx, "Loading servers…");
         let early = self.boot.as_mut().and_then(|boot| {
             boot.me_done = true;
@@ -909,6 +1264,30 @@ impl State {
     }
 
     fn apply_servers(&mut self, fx: &mut Effects, servers: Vec<Server>) {
+        self.select_servers(fx, servers);
+        self.prefetch_trees(fx);
+    }
+
+    /// Every other server's channel tree, for its unread pill.
+    fn prefetch_trees(&mut self, fx: &mut Effects) {
+        let wanted: Vec<String> = self
+            .servers
+            .iter()
+            .map(|s| s.id.clone())
+            .filter(|id| Some(id) != self.active_server.as_ref())
+            .filter(|id| !self.pending.trees.values().any(|pending| pending == id))
+            .collect();
+        for server_id in wanted {
+            let request = ApiRequest::Channels {
+                server_id: server_id.clone(),
+            };
+            if let Some(id) = self.http(fx, request) {
+                self.pending.trees.insert(id, server_id);
+            }
+        }
+    }
+
+    fn select_servers(&mut self, fx: &mut Effects, servers: Vec<Server>) {
         self.servers = servers;
         self.sync_servers(fx);
         self.persist(fx, CacheWrite::Servers(self.servers.clone()));
@@ -955,11 +1334,15 @@ impl State {
         self.active_channel = None;
         self.messages = None;
         self.pending.page = None;
+        self.pending.older = None;
         fx.view(ViewUpdate::ActiveChannel {
             id: String::new(),
             name: String::new(),
         });
-        self.set_typing(fx, Vec::new());
+        self.clear_typing(fx);
+        if self.divider.take().is_some() {
+            self.emit_unread(fx);
+        }
         fx.messages(ViewDiff::Reset(Vec::new()));
     }
 
@@ -976,10 +1359,25 @@ impl State {
             name: self.active_server_name(),
         });
         self.persist_route(fx);
+        self.request_members(fx, &id);
         let request = ApiRequest::Channels {
             server_id: id.clone(),
         };
         self.pending.channels = self.http(fx, request).map(|req| (req, id));
+    }
+
+    /// A server's members, once per session (mention suggestions).
+    fn request_members(&mut self, fx: &mut Effects, server_id: &str) {
+        let asked = self.pending.members.values().any(|s| s == server_id);
+        if asked || self.members.contains_key(server_id) {
+            return;
+        }
+        let request = ApiRequest::Members {
+            server_id: server_id.to_owned(),
+        };
+        if let Some(id) = self.http(fx, request) {
+            self.pending.members.insert(id, server_id.to_owned());
+        }
     }
 
     fn on_channels(
@@ -1058,21 +1456,30 @@ impl State {
             }
         }
         self.messages = Some(MessageLog::new(id));
+        self.pending.older = None;
+        // Where the list lands is the UI's to report once it has rows.
+        self.at_bottom = false;
+        if self.divider.take().is_some() {
+            self.emit_unread(fx);
+        }
         fx.view(ViewUpdate::ActiveChannel {
             id: id.to_owned(),
             name,
         });
-        self.set_typing(fx, Vec::new());
+        self.clear_typing(fx);
         fx.messages(ViewDiff::Reset(Vec::new()));
         self.persist_route(fx);
         self.gateway_send(fx, Self::channel_frame(GatewayOp::ChannelSubscribe, id));
         self.load_page(fx, id);
+        // The open channel stops showing as unread.
+        self.sync_badges(fx);
     }
 
     /// Fetches the newest page of a channel; the result replaces the list.
     fn load_page(&mut self, fx: &mut Effects, channel_id: &str) {
         let request = ApiRequest::Messages {
             channel_id: channel_id.to_owned(),
+            before: None,
         };
         self.pending.page = self
             .http(fx, request)
@@ -1085,8 +1492,11 @@ impl State {
         channel_id: &str,
         result: Result<ApiResponse, ApiError>,
     ) {
-        let messages = match result {
-            Ok(ApiResponse::Messages(messages)) => messages,
+        let Page {
+            messages,
+            has_more_before,
+        } = match result {
+            Ok(ApiResponse::Messages(page)) => page,
             Ok(other) => return self.chain_failed(fx, &unexpected(&other)),
             Err(error) => return self.chain_failed(fx, &error),
         };
@@ -1104,10 +1514,58 @@ impl State {
         } else {
             Vec::new()
         };
+        let old = self.messages.take();
         let mut log = MessageLog::new(channel_id);
+        log.has_more_before = has_more_before;
+        // A refetch keeps the older pages already loaded.
+        let oldest = messages.iter().map(|m| m.created_at.as_str()).min();
+        if let (Some(old), Some(oldest)) = (old.as_ref().filter(|_| shown), oldest) {
+            let older = old
+                .iter()
+                .filter(|m| !is_pending(m) && m.created_at.as_str() < oldest);
+            for message in older {
+                log.upsert(message.clone());
+                log.has_more_before = old.has_more_before;
+            }
+        }
         for message in messages {
             self.remember_author(&message);
             log.upsert(message);
+        }
+        // Sends still in flight (or failed) stay at the end.
+        let mut outgoing: Vec<&Outgoing> = self
+            .outbox
+            .values()
+            .filter(|o| o.message.channel_id == channel_id)
+            .collect();
+        outgoing.sort_by(|a, b| a.message.created_at.cmp(&b.message.created_at));
+        for o in outgoing {
+            if log.get(&o.message.id).is_none() {
+                log.upsert(o.message.clone());
+            }
+        }
+        if let Some(newest) = log.iter().rev().find(|m| !is_pending(m)) {
+            let at = newest.created_at.clone();
+            self.bump_last_message(channel_id, &at);
+        }
+        // Opening with unread messages: the divider goes above the first
+        // one after the read mark (useChatArea.ts).
+        if !shown {
+            let read = self
+                .read_states
+                .get(channel_id)
+                .filter(|_| self.has_unread(channel_id));
+            self.divider = read.and_then(|read| {
+                let first = log
+                    .iter()
+                    .position(|m| m.created_at.as_str() > read.as_str())?;
+                Some(Divider {
+                    message_id: log.at(first)?.id.clone(),
+                    count: i64::try_from(log.len() - first).unwrap_or(i64::MAX),
+                    banner: true,
+                    locked: false,
+                })
+            });
         }
         self.messages = Some(log);
         let rows = self.message_rows();
@@ -1118,44 +1576,305 @@ impl State {
         } else {
             fx.messages(ViewDiff::Reset(rows));
         }
+        if !shown && self.divider.is_some() {
+            self.emit_unread(fx);
+        }
         self.persist_messages(fx);
         if !std::mem::replace(&mut self.first_page_shown, true) {
             fx.push(Effect::StartupMark("messages shown"));
         }
         self.finish_boot(fx);
+        self.sync_badges(fx);
+        self.on_seen(fx);
     }
 
-    fn send(&mut self, fx: &mut Effects, text: &str) {
-        let Some(channel_id) = self.active_channel.clone() else {
-            return;
-        };
-        if self.signed_in().is_none() || text.is_empty() {
+    /// Asks for the page before the oldest loaded message.
+    fn load_older(&mut self, fx: &mut Effects) {
+        if self.pending.older.is_some() || self.pending.page.is_some() {
             return;
         }
-        let request = ApiRequest::SendMessage {
+        let Some(log) = self.messages.as_ref().filter(|l| l.has_more_before) else {
+            return;
+        };
+        let Some(first) = log.iter().find(|m| !is_pending(m)) else {
+            return;
+        };
+        let channel_id = log.channel_id.clone();
+        let request = ApiRequest::Messages {
             channel_id: channel_id.clone(),
-            content: text.to_owned(),
+            before: Some(format!("{}|{}", first.created_at, first.id)),
         };
-        if let Some(id) = self.http(fx, request) {
-            self.pending.sends.insert(id, channel_id);
-        }
+        self.pending.older = self.http(fx, request).map(|id| (id, channel_id));
     }
 
-    fn on_sent(
+    /// An older page goes in at the top as one insert; the old first row
+    /// may regroup under it.
+    fn on_older(
         &mut self,
         fx: &mut Effects,
         channel_id: &str,
         result: Result<ApiResponse, ApiError>,
     ) {
-        match result {
-            Ok(ApiResponse::Sent(Some(message))) => {
-                if message.channel_id == channel_id {
-                    self.upsert_if_open(fx, *message);
-                }
-            }
-            Ok(_) => {}
-            Err(error) => self.fail(fx, &error),
+        let page = match result {
+            Ok(ApiResponse::Messages(page)) => page,
+            Ok(_) => return,
+            Err(error) if error.is_unauthorized() => return self.fail(fx, &error),
+            // Scrolling up again retries.
+            Err(_) => return,
+        };
+        if self
+            .messages
+            .as_ref()
+            .is_none_or(|l| l.channel_id != channel_id)
+        {
+            return;
         }
+        for message in &page.messages {
+            self.remember_author(message);
+        }
+        let old_first = self.message_row_at(0);
+        let Some(log) = self.messages.as_mut() else {
+            return;
+        };
+        let added = log.prepend(page.messages);
+        log.has_more_before = page.has_more_before;
+        if added == 0 {
+            return;
+        }
+        let rows: Vec<MessageRow> = (0..added).filter_map(|i| self.message_row_at(i)).collect();
+        fx.messages(ViewDiff::Insert { at: 0, rows });
+        if let (Some(old), Some(row)) = (old_first, self.message_row_at(added)) {
+            let roles = old.changed(&row);
+            if !roles.is_empty() {
+                fx.messages(ViewDiff::Update {
+                    at: added,
+                    row,
+                    roles,
+                });
+            }
+        }
+    }
+
+    /// Shows the message at once as a pending row, then posts it with its
+    /// nonce; the echo (or the answer) takes the row's place.
+    fn send(
+        &mut self,
+        fx: &mut Effects,
+        content: &str,
+        reply_to_id: Option<String>,
+        nonce: String,
+        sent_at: String,
+    ) {
+        let Some(channel_id) = self.active_channel.clone() else {
+            return;
+        };
+        let Some((_, me)) = self.signed_in() else {
+            return;
+        };
+        if content.is_empty() || nonce.is_empty() || self.outbox.contains_key(&nonce) {
+            return;
+        }
+        let me = me.clone();
+        let reply_to_id = reply_to_id.filter(|id| !id.is_empty());
+        let reply_to = reply_to_id
+            .as_deref()
+            .and_then(|id| self.messages.as_ref()?.get(id))
+            .map(|parent| ReplyTo {
+                id: parent.id.clone(),
+                content: parent.content.chars().take(200).collect(),
+                author_id: Some(parent.author_id.clone()),
+                author: parent.author.clone(),
+                attachment_count: i64::try_from(parent.attachments.len()).unwrap_or(0),
+            });
+        let message = Message {
+            id: pending_id(&nonce),
+            channel_id,
+            author_id: me.id.clone(),
+            author: Some(me),
+            content: content.to_owned(),
+            reply_to_id,
+            reply_to,
+            is_pinned: false,
+            created_at: sent_at,
+            updated_at: None,
+            attachments: Vec::new(),
+            reactions: Vec::new(),
+            embeds: Vec::new(),
+            nonce: Some(nonce.clone()),
+            content_revision: None,
+            kind: None,
+        };
+        self.outbox.insert(
+            nonce.clone(),
+            Outgoing {
+                message: message.clone(),
+                failed: false,
+            },
+        );
+        self.upsert_if_open(fx, message);
+        self.post(fx, &nonce);
+    }
+
+    fn post(&mut self, fx: &mut Effects, nonce: &str) {
+        let Some(out) = self.outbox.get(nonce) else {
+            return;
+        };
+        let request = ApiRequest::SendMessage {
+            channel_id: out.message.channel_id.clone(),
+            content: out.message.content.clone(),
+            reply_to_id: out.message.reply_to_id.clone(),
+            nonce: nonce.to_owned(),
+        };
+        if let Some(id) = self.http(fx, request) {
+            self.pending.sends.insert(id, nonce.to_owned());
+        }
+    }
+
+    fn set_send_failed(&mut self, fx: &mut Effects, nonce: &str, failed: bool) {
+        let at: Vec<usize> = self.position_of(&pending_id(nonce)).into_iter().collect();
+        self.touch_rows(fx, &at, |state| {
+            if let Some(out) = state.outbox.get_mut(nonce) {
+                out.failed = failed;
+            }
+        });
+    }
+
+    fn retry_send(&mut self, fx: &mut Effects, nonce: &str) {
+        if self.outbox.get(nonce).is_some_and(|o| o.failed) {
+            self.set_send_failed(fx, nonce, false);
+            self.post(fx, nonce);
+        }
+    }
+
+    fn on_sent(&mut self, fx: &mut Effects, nonce: &str, result: Result<ApiResponse, ApiError>) {
+        match result {
+            Ok(ApiResponse::Sent(Some(message))) => self.upsert_if_open(fx, *message),
+            // An odd body: the gateway echo still reconciles the row.
+            Ok(_) => {}
+            Err(error) if error.is_unauthorized() => self.fail(fx, &error),
+            Err(_) => self.set_send_failed(fx, nonce, true),
+        }
+    }
+
+    /// Edits one of our messages in place at once; the answer confirms it
+    /// and a failure puts the old text back.
+    fn edit_message(&mut self, fx: &mut Effects, id: &str, content: &str) {
+        let Some((_, me)) = self.signed_in() else {
+            return;
+        };
+        let me = me.id.clone();
+        let Some(original) = self
+            .messages
+            .as_ref()
+            .and_then(|log| log.get(id))
+            .filter(|m| m.author_id == me && !is_pending(m))
+            .cloned()
+        else {
+            return;
+        };
+        if content.is_empty() || content == original.content {
+            return;
+        }
+        let patch = MessagePatch {
+            id: id.to_owned(),
+            channel_id: Some(original.channel_id.clone()),
+            content: Some(content.to_owned()),
+            // Shows "(edited)" until the server's time arrives.
+            updated_at: Some(
+                original
+                    .updated_at
+                    .clone()
+                    .unwrap_or_else(|| original.created_at.clone()),
+            ),
+            embeds: None,
+            content_revision: None,
+        };
+        self.apply_patch(fx, &patch);
+        let request = ApiRequest::EditMessage {
+            channel_id: original.channel_id.clone(),
+            message_id: id.to_owned(),
+            content: content.to_owned(),
+        };
+        if let Some(request) = self.http(fx, request) {
+            self.pending.edits.insert(request, original);
+        }
+    }
+
+    fn on_edited(
+        &mut self,
+        fx: &mut Effects,
+        original: Message,
+        result: Result<ApiResponse, ApiError>,
+    ) {
+        match result {
+            Ok(ApiResponse::Edited(Some(patch))) => self.apply_patch(fx, &patch),
+            Ok(_) => {}
+            Err(error) if error.is_unauthorized() => self.fail(fx, &error),
+            Err(_) => {
+                self.upsert_if_open(fx, original);
+                fx.view(ViewUpdate::Notice(EDIT_FAILED.to_owned()));
+            }
+        }
+    }
+
+    /// Deletes one of our messages: the row goes at once and comes back if
+    /// the server refuses.
+    fn delete_message(&mut self, fx: &mut Effects, id: &str) {
+        let Some((_, me)) = self.signed_in() else {
+            return;
+        };
+        let me = me.id.clone();
+        let ours = self
+            .messages
+            .as_ref()
+            .and_then(|log| log.get(id))
+            .is_some_and(|m| m.author_id == me && !is_pending(m));
+        if !ours {
+            return;
+        }
+        let Some(message) = self.remove_row(fx, id) else {
+            return;
+        };
+        self.persist_messages(fx);
+        let request = ApiRequest::DeleteMessage {
+            channel_id: message.channel_id.clone(),
+            message_id: id.to_owned(),
+        };
+        if let Some(request) = self.http(fx, request) {
+            self.pending.deletes.insert(request, message);
+        }
+    }
+
+    fn on_deleted(
+        &mut self,
+        fx: &mut Effects,
+        message: Message,
+        result: Result<ApiResponse, ApiError>,
+    ) {
+        match result {
+            Ok(_) => {}
+            Err(error) if error.is_unauthorized() => self.fail(fx, &error),
+            Err(_) => {
+                self.insert_row_sorted(fx, message);
+                fx.view(ViewUpdate::Notice(DELETE_FAILED.to_owned()));
+            }
+        }
+    }
+
+    fn apply_patch(&mut self, fx: &mut Effects, patch: &MessagePatch) {
+        let active = self.active_channel.as_deref();
+        if patch.channel_id.is_some() && patch.channel_id.as_deref() != active {
+            return;
+        }
+        let Some(at) = self.position_of(&patch.id) else {
+            return;
+        };
+        let before = [self.message_row_at(at), self.message_row_at(at + 1)];
+        if let Some(log) = &mut self.messages {
+            log.patch(patch);
+        }
+        self.emit_message_changes(fx, at, before);
+        self.persist_messages(fx);
     }
 
     fn remember_author(&mut self, message: &Message) {
@@ -1166,9 +1885,30 @@ impl State {
     }
 
     /// Upserts into the open channel (by id, so the POST answer and the
-    /// gateway echo of the same message end up as one row). A new message
-    /// takes its author off the typing line.
+    /// gateway echo of the same message end up as one row). Our own send
+    /// coming back takes its pending row's place (chat-reducer.ts).
     fn upsert_if_open(&mut self, fx: &mut Effects, message: Message) {
+        let nonce = message.nonce.clone().filter(|_| !is_pending(&message));
+        if let Some(nonce) = nonce.filter(|n| self.outbox.contains_key(n)) {
+            let stand_in = pending_id(&nonce);
+            let at = self.position_of(&stand_in);
+            // Read while the row still counts as pending, so the diff says so.
+            let before = at.map(|at| [self.message_row_at(at), self.message_row_at(at + 1)]);
+            self.outbox.remove(&nonce);
+            if let (Some(at), Some(before)) = (at, before) {
+                let replaced = self
+                    .messages
+                    .as_mut()
+                    .and_then(|log| log.replace(&stand_in, message.clone()));
+                if replaced.is_some() {
+                    self.emit_message_changes(fx, at, before);
+                    self.persist_messages(fx);
+                    return;
+                }
+                // The real row is already here: drop the stand-in.
+                self.remove_row(fx, &stand_in);
+            }
+        }
         let open = self.messages.as_ref();
         let Some(log) = open.filter(|log| log.channel_id == message.channel_id) else {
             return;
@@ -1176,7 +1916,6 @@ impl State {
         let before = log
             .position(&message.id)
             .map(|i| [self.message_row_at(i), self.message_row_at(i + 1)]);
-        let author = message.author.as_ref().map(|a| a.label().to_owned());
         let Some(log) = &mut self.messages else {
             return;
         };
@@ -1190,11 +1929,6 @@ impl State {
                         at,
                         rows: vec![row],
                     });
-                }
-                if let Some(author) = author {
-                    let names = self.typing.iter().filter(|n| **n != author).cloned();
-                    let names = names.collect();
-                    self.set_typing(fx, names);
                 }
             }
         }
@@ -1244,6 +1978,7 @@ impl State {
                     if let Some(channel) = self.active_channel.clone() {
                         self.load_page(fx, &channel);
                     }
+                    self.load_unread(fx);
                 }
             }
             GatewayEvent::Resumed => {
@@ -1272,23 +2007,40 @@ impl State {
     fn on_dispatch(&mut self, fx: &mut Effects, dispatch: Dispatch) {
         let active = self.active_channel.clone().unwrap_or_default();
         match dispatch {
-            Dispatch::MessageCreate(message) | Dispatch::MessageUpdate(message) => {
+            Dispatch::MessageCreate(message) => self.on_message_create(fx, *message),
+            Dispatch::MessageUpdate(message) => {
                 self.remember_author(&message);
                 self.upsert_if_open(fx, *message);
             }
             Dispatch::MessagePatch(patch) => {
-                if patch.channel_id.as_deref() != Some(active.as_str()) {
-                    return;
+                if patch.channel_id.as_deref() == Some(active.as_str()) {
+                    self.apply_patch(fx, &patch);
                 }
-                let Some(at) = self.messages.as_ref().and_then(|l| l.position(&patch.id)) else {
-                    return;
-                };
-                let before = [self.message_row_at(at), self.message_row_at(at + 1)];
-                if let Some(log) = &mut self.messages {
-                    log.patch(&patch);
+            }
+            Dispatch::ReadStateUpdate(read) => {
+                self.read_states.insert(read.channel_id, read.last_read_at);
+                self.sync_badges(fx);
+            }
+            Dispatch::NotificationCreate(notification) => {
+                let known = self.notifications.iter().any(|n| n.id == notification.id);
+                if !known && !notification.is_read {
+                    self.notifications.push(notification);
+                    if self.focused && self.at_bottom {
+                        self.read_seen_mentions(fx);
+                    }
+                    self.sync_badges(fx);
                 }
-                self.emit_message_changes(fx, at, before);
-                self.persist_messages(fx);
+            }
+            Dispatch::NotificationsRead(read) => {
+                match read.ids {
+                    Some(ids) if !read.all => self.notifications.retain(|n| !ids.contains(&n.id)),
+                    _ => self.notifications.clear(),
+                }
+                self.sync_badges(fx);
+            }
+            Dispatch::NotificationsClear => {
+                self.notifications.clear();
+                self.sync_badges(fx);
             }
             Dispatch::MessageDelete(delete) => {
                 let here = delete.channel_id.as_deref().is_none_or(|c| c == active);
@@ -1312,20 +2064,27 @@ impl State {
             Dispatch::TypingStart(typing) => {
                 let me = self.me().map(|me| me.id.as_str()).unwrap_or_default();
                 if typing.channel_id == active && typing.user_id != me {
-                    let name = self
-                        .names
-                        .get(&typing.user_id)
-                        .cloned()
-                        .unwrap_or_else(|| "Someone".to_owned());
-                    let mut names = self.typing.clone();
-                    if !names.contains(&name) {
-                        names.push(name);
-                    }
-                    self.set_typing(fx, names);
                     self.typing_generation += 1;
+                    let generation = self.typing_generation;
+                    let user_id = typing.user_id;
+                    match self.typing.iter_mut().find(|t| t.user_id == user_id) {
+                        Some(typer) => typer.generation = generation,
+                        None => {
+                            let name = self.user_name(&user_id);
+                            self.typing.push(Typer {
+                                user_id: user_id.clone(),
+                                name,
+                                generation,
+                            });
+                        }
+                    }
+                    self.emit_typing(fx);
                     fx.push(Effect::Later {
                         delay: TYPING_TIMEOUT,
-                        input: Box::new(Input::TypingExpired(self.typing_generation)),
+                        input: Box::new(Input::TypingExpired {
+                            user_id,
+                            generation,
+                        }),
                     });
                 }
             }
@@ -1355,6 +2114,162 @@ impl State {
                     self.voice_channels.insert(update.channel_id, occupants);
                 }
                 self.sync_voice_channels(fx);
+            }
+        }
+    }
+
+    /// `MESSAGE_CREATE` (chat-gateway.ts): the author stops typing, the
+    /// channel's newest time moves, the open channel is read up to it. A
+    /// message from someone else while the window is away moves the
+    /// divider to it (or extends the batch it already marks).
+    fn on_message_create(&mut self, fx: &mut Effects, message: Message) {
+        self.remember_author(&message);
+        let channel = message.channel_id.clone();
+        let at = message.created_at.clone();
+        let mine = self.me().is_some_and(|me| me.id == message.author_id);
+        if self.typing.iter().any(|t| t.user_id == message.author_id) {
+            self.typing.retain(|t| t.user_id != message.author_id);
+            self.emit_typing(fx);
+        }
+        self.bump_last_message(&channel, &at);
+        let open = self
+            .messages
+            .as_ref()
+            .is_some_and(|log| log.channel_id == channel && log.get(&message.id).is_none());
+        if open && !mine && !self.focused {
+            match self.divider.as_mut().filter(|d| !d.locked) {
+                Some(divider) => {
+                    divider.count += 1;
+                    divider.banner = true;
+                    self.emit_unread(fx);
+                }
+                None => {
+                    let divider = Divider {
+                        message_id: message.id.clone(),
+                        count: 1,
+                        banner: true,
+                        locked: false,
+                    };
+                    self.set_divider(fx, Some(divider));
+                }
+            }
+        }
+        self.upsert_if_open(fx, message);
+        if self.active_channel.as_deref() == Some(channel.as_str()) {
+            self.mark_read(fx, &channel, Some(&at));
+        }
+        self.sync_badges(fx);
+    }
+
+    // Read states, notifications, members
+
+    fn on_read_states(&mut self, fx: &mut Effects, result: Result<ApiResponse, ApiError>) {
+        let states = match result {
+            Ok(ApiResponse::ReadStates(states)) => states,
+            Ok(_) => return,
+            Err(error) => return self.fail(fx, &error),
+        };
+        // Marks made while it was in flight are newer: keep the later one.
+        for read in states.read_states {
+            let newer = self
+                .read_states
+                .get(&read.channel_id)
+                .is_none_or(|mine| read.last_read_at > *mine);
+            if newer {
+                self.read_states.insert(read.channel_id, read.last_read_at);
+            }
+        }
+        for last in states.last_messages {
+            self.bump_last_message(&last.channel_id, &last.last_message_at);
+        }
+        self.sync_badges(fx);
+    }
+
+    fn on_notifications(&mut self, fx: &mut Effects, result: Result<ApiResponse, ApiError>) {
+        let list = match result {
+            Ok(ApiResponse::Notifications(list)) => list,
+            Ok(_) => return,
+            Err(error) => return self.fail(fx, &error),
+        };
+        // Live ones that arrived meanwhile stay.
+        let live = std::mem::take(&mut self.notifications);
+        self.notifications = list.into_iter().filter(|n| !n.is_read).collect();
+        for n in live {
+            if !self.notifications.iter().any(|known| known.id == n.id) {
+                self.notifications.push(n);
+            }
+        }
+        if self.focused && self.at_bottom && self.pending.page.is_none() {
+            self.read_seen_mentions(fx);
+        }
+        self.sync_badges(fx);
+    }
+
+    fn on_members(
+        &mut self,
+        fx: &mut Effects,
+        server_id: String,
+        result: Result<ApiResponse, ApiError>,
+    ) {
+        let members = match result {
+            Ok(ApiResponse::Members(members)) => members,
+            Ok(_) => return,
+            Err(error) => return self.fail(fx, &error),
+        };
+        let users: Vec<User> = members.into_iter().map(|m| m.user).collect();
+        for user in &users {
+            self.names
+                .entry(user.id.clone())
+                .or_insert_with(|| user.label().to_owned());
+        }
+        self.members.insert(server_id, users);
+    }
+
+    /// Another server's tree: kept for its unread pill (and shown if it is
+    /// the tree on screen).
+    fn on_tree(
+        &mut self,
+        fx: &mut Effects,
+        server_id: String,
+        result: Result<ApiResponse, ApiError>,
+    ) {
+        let response = match result {
+            Ok(ApiResponse::Channels(response)) => response,
+            Ok(_) => return,
+            Err(error) if error.is_unauthorized() => return self.fail(fx, &error),
+            Err(_) => return,
+        };
+        let list = ServerChannels::new(response);
+        let tree = list.to_response();
+        self.persist(
+            fx,
+            CacheWrite::Channels {
+                server_id: server_id.clone(),
+                tree,
+            },
+        );
+        self.channels.insert(server_id, list);
+        self.sync_badges(fx);
+    }
+
+    fn on_marked(
+        &mut self,
+        fx: &mut Effects,
+        (channel, previous, mark): (String, Option<String>, String),
+        result: Result<ApiResponse, ApiError>,
+    ) {
+        match result {
+            Ok(_) => {}
+            Err(error) if error.is_unauthorized() => self.fail(fx, &error),
+            // Roll back unless a newer mark replaced ours.
+            Err(_) => {
+                if self.read_states.get(&channel) == Some(&mark) {
+                    match previous {
+                        Some(previous) => self.read_states.insert(channel, previous),
+                        None => self.read_states.remove(&channel),
+                    };
+                    self.sync_badges(fx);
+                }
             }
         }
     }

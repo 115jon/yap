@@ -21,6 +21,8 @@ Loader {
     required property bool first
     required property bool last
     required property int lit
+    required property bool unread
+    required property int mentions
     // The open channel (text, or a voice channel's view) and the joined call.
     required property string activeId
     required property string callId
@@ -62,6 +64,8 @@ Loader {
             voice: cell.voice
             active: cell.itemId === cell.activeId
             joined: cell.itemId === cell.callId
+            unread: cell.unread
+            mentions: cell.mentions
             onSelected: cell.selected(cell.itemId)
         }
     }

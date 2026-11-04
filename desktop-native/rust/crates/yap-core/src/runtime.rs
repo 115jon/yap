@@ -358,12 +358,9 @@ impl Runner {
                 tokio::spawn(async move {
                     // The semaphore is never closed, so a permit always comes.
                     let _permit = slots.acquire_owned().await;
-                    let path = request.path();
-                    let body = if request.is_post() {
-                        api.post(&path, &request.body()).await
-                    } else {
-                        api.get(&path).await
-                    };
+                    let body = api
+                        .call(request.method(), &request.path(), &request.body())
+                        .await;
                     let result = body.and_then(|body| request.decode(body));
                     let _ = inbox.send(Input::Http { id, result });
                 });

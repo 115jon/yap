@@ -12,6 +12,8 @@ Item {
     required property string initials
     required property string icon
     required property bool active
+    required property bool unread
+    required property int mentions
     signal selected()
 
     // Off while a pooled delegate takes a new row, so its pill does not
@@ -23,16 +25,19 @@ Item {
 
     height: Theme.railTile
     Accessible.role: Accessible.Button
-    Accessible.name: entry.name
+    Accessible.name: entry.mentions > 0 ? qsTr("%1, %n mention(s)", "", entry.mentions).arg(entry.name)
+        : entry.unread ? qsTr("%1, unread messages").arg(entry.name) : entry.name
 
     RailPill {
         anchors.verticalCenter: parent.verticalCenter
         selected: entry.active
         hovered: hover.hovered
+        unread: entry.unread
         animate: entry.animate
     }
 
     Rectangle {
+        id: tile
         anchors.centerIn: parent
         width: Theme.railTile
         height: Theme.railTile
@@ -67,6 +72,16 @@ Item {
             opacity: tap.pressed ? 0.14 : hover.hovered ? 0.08 : 0
             Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
         }
+    }
+
+    // The mention chip at -6/-6 on the tile's bottom-right corner, cut
+    // out of the rail.
+    CountBadge {
+        x: tile.x + tile.width - width + 6
+        y: tile.y + tile.height - height + 6
+        count: entry.mentions
+        ring: 2
+        ground: Theme.ply0
     }
 
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
