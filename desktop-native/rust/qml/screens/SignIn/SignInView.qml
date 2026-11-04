@@ -1,44 +1,18 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import com.yap.native
 
 // Device-code sign-in: the app shows a code, the user approves it on
 // yap.115jon.com/activate in a browser where they are signed in.
 Rectangle {
     id: root
 
-    required property var client
-    readonly property bool waiting: client.phase === "deviceCode"
-    readonly property bool hasCode: client.userCode.length > 0
+    readonly property bool waiting: Session.phase === Session.DeviceCode
+    readonly property bool hasCode: Session.userCode.length > 0
 
     color: Theme.ply0
-
-    component KeyButton: Button {
-        id: control
-        property bool primary: false
-        implicitHeight: 48
-        leftPadding: 20
-        rightPadding: 20
-        font.family: Theme.display
-        font.pixelSize: 15
-        font.weight: Font.DemiBold
-        contentItem: Text {
-            text: control.text
-            font: control.font
-            color: control.primary ? Theme.onPrimary : Theme.ink1
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            opacity: control.enabled ? 1 : 0.4
-        }
-        background: Rectangle {
-            radius: Theme.radius
-            color: control.primary
-                   ? (control.down ? Qt.darker(Theme.primaryFill, 1.15) : control.hovered ? "#ffffff" : Theme.primaryFill)
-                   : (control.down ? Theme.ply4 : control.hovered ? Theme.ply3 : "transparent")
-            border.width: control.primary ? 0 : 1
-            border.color: Theme.ply4
-        }
-    }
 
     ColumnLayout {
         anchors.centerIn: parent
@@ -82,8 +56,9 @@ Rectangle {
             visible: root.waiting
             spacing: 6
             Repeater {
-                model: root.hasCode ? root.client.userCode.split("") : "••••-••••".split("")
+                model: root.hasCode ? Session.userCode.split("") : "••••-••••".split("")
                 delegate: Rectangle {
+                    id: cap
                     required property string modelData
                     width: modelData === "-" ? 16 : 44
                     height: 56
@@ -93,7 +68,7 @@ Rectangle {
                     border.color: Theme.ply4
                     Text {
                         anchors.centerIn: parent
-                        text: parent.modelData
+                        text: cap.modelData
                         color: root.hasCode ? Theme.ink1 : Theme.inkOff
                         font.family: Theme.mono
                         font.pixelSize: 24
@@ -107,8 +82,7 @@ Rectangle {
             Layout.topMargin: 16
             visible: root.waiting
             spacing: 8
-            Rectangle {
-                width: 6; height: 6; radius: 3
+            Led {
                 anchors.verticalCenter: parent.verticalCenter
                 color: Theme.idle
                 SequentialAnimation on opacity {
@@ -134,27 +108,27 @@ Rectangle {
                 visible: !root.waiting
                 primary: true
                 text: "Get a sign-in code"
-                onClicked: root.client.startSignIn()
+                onClicked: Session.startSignIn()
             }
             KeyButton {
                 visible: root.waiting
                 primary: true
                 enabled: root.hasCode
                 text: "Open browser"
-                onClicked: Qt.openUrlExternally(root.client.verificationUrl)
+                onClicked: Qt.openUrlExternally(Session.verificationUrl)
             }
             KeyButton {
                 visible: root.waiting
                 text: "Cancel"
-                onClicked: root.client.cancelSignIn()
+                onClicked: Session.cancelSignIn()
             }
         }
 
         Text {
             Layout.topMargin: 16
             Layout.fillWidth: true
-            visible: root.client.status.length > 0
-            text: root.client.status
+            visible: Session.status.length > 0
+            text: Session.status
             wrapMode: Text.WordWrap
             color: Theme.danger
             font.family: Theme.text
@@ -163,7 +137,6 @@ Rectangle {
 
         // Dev: paste a session token instead.
         Text {
-            id: devToggle
             Layout.topMargin: 40
             visible: !root.waiting
             text: tokenRow.visible ? "Hide token sign-in" : "Developer: use a session token"
@@ -204,7 +177,7 @@ Rectangle {
                 text: "Use"
                 enabled: tokenField.text.length > 0
                 onClicked: {
-                    root.client.useToken(tokenField.text)
+                    Session.useToken(tokenField.text)
                     tokenField.clear()
                 }
             }

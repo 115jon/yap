@@ -1,19 +1,23 @@
 //! The client core lives in `yap-core` (typed store, reducer, effect runner,
 //! REST and auth). This module plugs the realtime pieces that still live in
-//! this crate (the gateway socket and voice calls) into its runtime, and
-//! keeps the `spawn` / [`Command`] / [`Ui`] / [`Sink`] interface the bridge uses.
+//! this crate (the gateway socket and voice calls) into its runtime, gives
+//! it the OS time zone, and holds the one command channel every QML
+//! singleton sends through.
 
 pub mod gateway;
 pub mod sfu;
 pub mod socket;
 pub mod voice;
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
+use cxx_qt_lib::{QDateTime, QTimeZone};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use yap_core::{Api, GatewayEvents, GatewayHandle, Realtime, VoiceCommand, VoiceEvents};
+use yap_core::{
+    Api, GatewayEvents, GatewayHandle, LocalOffset, Realtime, VoiceCommand, VoiceEvents,
+};
 
-pub use yap_core::{Command, Sink, Ui};
+pub use yap_core::{Command, Sink};
 
 struct NativeRealtime;
 
@@ -36,14 +40,44 @@ impl Realtime for NativeRealtime {
     }
 }
 
-/// Starts the core and returns its command channel.
-pub fn spawn(sink: Sink) -> UnboundedSender<Command> {
+/// The local UTC offset at an instant, from the system time zone (so DST
+/// applies per date, as `Date.toLocaleTimeString` did in QML).
+fn system_offset(utc_ms: i64) -> i32 {
+    thread_local! {
+        static ZONE: cxx::UniquePtr<QTimeZone> = QTimeZone::system_time_zone();
+    }
+    ZONE.with(|zone| match zone.as_ref() {
+        Some(zone) => QDateTime::from_msecs_since_epoch(utc_ms, zone).offset_from_utc(),
+        None => 0,
+    })
+}
+
+/// The local-time source for message stamps and "today".
+pub const LOCAL: LocalOffset = LocalOffset(system_offset);
+
+static COMMANDS: OnceLock<UnboundedSender<Command>> = OnceLock::new();
+
+/// Starts the core once; later calls are ignored. `false` if it was running.
+pub fn start(sink: Sink) -> bool {
+    if COMMANDS.get().is_some() {
+        return false;
+    }
     // Fails only if the TLS backend cannot start; there is no client then.
     let http = yap_core::api::http_client().expect("HTTP client");
-    yap_core::spawn(
+    let tx = yap_core::spawn(
         sink,
         http,
         Box::new(NativeRealtime),
         Arc::new(yap_core::auth::Keyring),
-    )
+        LOCAL,
+    );
+    let _ = tx.send(Command::Start);
+    COMMANDS.set(tx).is_ok()
+}
+
+/// Sends a command to the core (dropped before `start`).
+pub fn command(command: Command) {
+    if let Some(tx) = COMMANDS.get() {
+        let _ = tx.send(command);
+    }
 }

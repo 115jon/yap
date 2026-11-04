@@ -23,7 +23,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use yap_protocol::{Frame as WireFrame, GatewayCloseCode, GatewayOp};
 
-use yap_core::{Api, VoiceCommand, VoiceEvents, VoiceUpdate};
+use yap_core::{Api, VoiceCommand, VoiceEvents, VoiceMember, VoiceUpdate};
 
 use super::sfu::Sfu;
 use super::socket::{self, Frame};
@@ -59,14 +59,15 @@ fn str_of<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
-fn member_name(value: &Value) -> String {
-    for key in ["display_name", "name", "username"] {
-        let name = str_of(value, key);
-        if !name.is_empty() {
-            return name.to_owned();
-        }
-    }
-    "Someone".to_owned()
+/// The display name a voice state carries. Full states (Ready, join) have
+/// one; deltas ("update", because we send supports_voice_state_deltas)
+/// leave the profile fields out.
+fn member_name(value: &Value) -> Option<String> {
+    ["display_name", "name", "username"]
+        .into_iter()
+        .map(|key| str_of(value, key))
+        .find(|name| !name.is_empty())
+        .map(str::to_owned)
 }
 
 /// Runs one call until it is left or ends; reports through `events`.
@@ -235,6 +236,8 @@ async fn session(
         "session_id": session_cap, "kind": "audio",
     }]}});
 
+    // Names from full voice states, kept for rows re-added by name-less deltas.
+    let mut known_names: HashMap<String, String> = HashMap::new();
     let mut members: BTreeMap<String, Member> = BTreeMap::new();
     members.insert(
         me.clone(),
@@ -246,11 +249,17 @@ async fn session(
         },
     );
     let roster = |members: &BTreeMap<String, Member>| {
-        let list: Vec<Value> = members
+        let list = members
             .iter()
-            .map(|(id, m)| json!({ "id": id, "name": m.name, "muted": m.muted, "speaking": m.speaking, "me": m.me }))
+            .map(|(id, m)| VoiceMember {
+                id: id.clone(),
+                name: m.name.clone(),
+                muted: m.muted,
+                speaking: m.speaking,
+                me: m.me,
+            })
             .collect();
-        VoiceUpdate::Roster(Value::Array(list))
+        VoiceUpdate::Roster(list)
     };
     send(roster(&members));
 
@@ -319,8 +328,10 @@ async fn session(
                     for p in d.get("participants").and_then(Value::as_array).into_iter().flatten() {
                         let id = str_of(p, "id");
                         if id.is_empty() || id == me { continue }
+                        let name = member_name(p).unwrap_or_else(|| "Someone".to_owned());
+                        known_names.insert(id.to_owned(), name.clone());
                         members.insert(id.to_owned(), Member {
-                            name: member_name(p),
+                            name,
                             muted: p.get("self_mute").and_then(Value::as_bool).unwrap_or(false),
                             speaking: false,
                             me: false,
@@ -336,8 +347,12 @@ async fn session(
                         if str_of(&d, "action") == "leave" {
                             members.remove(&id);
                         } else {
-                            let entry = members.entry(id).or_insert(Member { name: member_name(&p), muted: false, speaking: false, me: false });
-                            entry.name = member_name(&p);
+                            if let Some(name) = member_name(&p) {
+                                known_names.insert(id.clone(), name);
+                            }
+                            let name = known_names.get(&id).cloned().unwrap_or_else(|| "Someone".to_owned());
+                            let entry = members.entry(id).or_insert(Member { name: name.clone(), muted: false, speaking: false, me: false });
+                            entry.name = name;
                             if let Some(m) = p.get("self_mute").and_then(Value::as_bool) { entry.muted = m; }
                         }
                         send(roster(&members));
@@ -402,7 +417,10 @@ async fn session(
                     let gone: Vec<String> = pulled.iter().filter(|(_, (owner, _))| *owner == pid).map(|(sfu, _)| sfu.clone()).collect();
                     retire(&gone, &mut pulled, &mut mids, &pull_tx);
                     pending.retain(|r| r.participant_id != pid);
-                    if let Some(m) = members.get_mut(&pid) { m.speaking = false; }
+                    // Their voice socket is gone. The room keeps a dropped
+                    // participant through its resume grace, so drop the row
+                    // here; a later room update re-adds it with its known name.
+                    members.remove(&pid);
                     send(roster(&members));
                 }
                 Some(Frame::Op(GatewayOp::Error, d)) => {

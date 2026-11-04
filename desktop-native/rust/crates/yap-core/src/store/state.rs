@@ -2,11 +2,12 @@
 
 use std::collections::HashMap;
 
-use serde_json::Value;
 use yap_protocol::rest::{Category, Channel, ChannelType, ChannelsResponse, Message, MessagePatch};
 use yap_protocol::rest::{Server, User};
 
-use super::{CallId, RequestId, SessionId, SignInId};
+use super::time::LocalOffset;
+use super::view::{ChannelTreeRow, ServerRow, VoiceMemberRow};
+use super::{CallId, RequestId, SessionId, SignInId, VoiceMember};
 use crate::api::{ApiError, Token};
 
 /// Which top-level screen the UI shows.
@@ -18,19 +19,6 @@ pub enum Phase {
     DeviceCode,
     Loading,
     Ready,
-}
-
-impl Phase {
-    /// The name QML compares against.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Boot => "boot",
-            Self::SignedOut => "signedOut",
-            Self::DeviceCode => "deviceCode",
-            Self::Loading => "loading",
-            Self::Ready => "ready",
-        }
-    }
 }
 
 /// The gateway as the store sees it.
@@ -69,7 +57,8 @@ impl ServerChannels {
                 .find(|c| Some(c.id.as_str()) == channel.category_id.as_deref())
                 .map_or(-1, |c| c.rank)
         };
-        channels.sort_by_cached_key(|c| (rank(c), c.position));
+        // The category id keeps categories that share a rank contiguous.
+        channels.sort_by_cached_key(|c| (rank(c), c.category_id.clone(), c.position));
         Self {
             channels,
             categories,
@@ -128,23 +117,36 @@ impl MessageLog {
         self.index.get(id).map(|&i| &self.messages[i])
     }
 
-    /// Inserts or replaces by id.
-    pub fn upsert(&mut self, message: Message) {
+    /// The message at a list position.
+    pub fn at(&self, index: usize) -> Option<&Message> {
+        self.messages.get(index)
+    }
+
+    /// The list position of a message.
+    pub fn position(&self, id: &str) -> Option<usize> {
+        self.index.get(id).copied()
+    }
+
+    /// Inserts (at the end) or replaces by id; returns the position.
+    pub fn upsert(&mut self, message: Message) -> usize {
         match self.index.get(&message.id) {
-            Some(&i) => self.messages[i] = message,
+            Some(&i) => {
+                self.messages[i] = message;
+                i
+            }
             None => {
-                self.index.insert(message.id.clone(), self.messages.len());
+                let i = self.messages.len();
+                self.index.insert(message.id.clone(), i);
                 self.messages.push(message);
+                i
             }
         }
     }
 
-    /// Applies the fields a partial update carries. `false` if the message
-    /// is not loaded.
-    pub fn patch(&mut self, patch: &MessagePatch) -> bool {
-        let Some(&i) = self.index.get(&patch.id) else {
-            return false;
-        };
+    /// Applies the fields a partial update carries; returns the position, or
+    /// `None` if the message is not loaded.
+    pub fn patch(&mut self, patch: &MessagePatch) -> Option<usize> {
+        let &i = self.index.get(&patch.id)?;
         let message = &mut self.messages[i];
         if let Some(content) = &patch.content {
             message.content.clone_from(content);
@@ -158,16 +160,17 @@ impl MessageLog {
         if patch.content_revision.is_some() {
             message.content_revision = patch.content_revision;
         }
-        true
+        Some(i)
     }
 
-    pub fn remove(&mut self, id: &str) -> Option<Message> {
+    /// Removes by id; returns the position it had.
+    pub fn remove(&mut self, id: &str) -> Option<(usize, Message)> {
         let i = self.index.remove(id)?;
         let message = self.messages.remove(i);
         for (j, m) in self.messages.iter().enumerate().skip(i) {
             self.index.insert(m.id.clone(), j);
         }
-        Some(message)
+        Some((i, message))
     }
 }
 
@@ -178,8 +181,17 @@ pub struct VoiceCall {
     pub channel_id: String,
     pub status: String,
     /// The roster as the voice session reports it.
-    pub roster: Value,
+    pub roster: Vec<VoiceMember>,
     pub muted: bool,
+}
+
+/// The rows each list model shows, as last emitted. Diffs are computed
+/// against these, so they must only change together with a diff.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct Projection {
+    pub servers: Vec<ServerRow>,
+    pub tree: Vec<ChannelTreeRow>,
+    pub roster: Vec<VoiceMemberRow>,
 }
 
 /// The request id each slot is waiting for. A result for any other id is stale.
@@ -209,6 +221,7 @@ pub(super) struct Boot {
 #[derive(Debug, Clone, PartialEq)]
 pub struct State {
     pub(super) api_base: String,
+    pub(super) local_offset: LocalOffset,
     pub(super) phase: Phase,
     pub(super) status: String,
     pub(super) connected: bool,
@@ -222,9 +235,14 @@ pub struct State {
     pub(super) messages: Option<MessageLog>,
     /// Display names seen so far, for typing indicators.
     pub(super) names: HashMap<String, String>,
-    /// The last user seen typing in the open channel.
-    pub(super) typing: Option<String>,
+    /// Names seen typing in the open channel, in arrival order.
+    pub(super) typing: Vec<String>,
+    /// Bumped by each typing event; only the newest expiry clears the line.
+    pub(super) typing_generation: u64,
     pub(super) voice: Option<VoiceCall>,
+    /// The server whose channel tree is shown (the last one that loaded).
+    pub(super) tree_server: Option<String>,
+    pub(super) view: Projection,
     pub(super) pending: Pending,
     pub(super) boot: Option<Boot>,
     pub(super) first_page_shown: bool,
@@ -236,6 +254,7 @@ impl State {
     pub fn new(api_base: &str) -> Self {
         Self {
             api_base: api_base.to_owned(),
+            local_offset: LocalOffset::UTC,
             phase: Phase::Boot,
             status: String::new(),
             connected: false,
@@ -247,13 +266,22 @@ impl State {
             active_channel: None,
             messages: None,
             names: HashMap::new(),
-            typing: None,
+            typing: Vec::new(),
+            typing_generation: 0,
             voice: None,
+            tree_server: None,
+            view: Projection::default(),
             pending: Pending::default(),
             boot: None,
             first_page_shown: false,
             next_id: 0,
         }
+    }
+
+    /// Formats message times with this offset source (UTC by default).
+    pub fn with_local_offset(mut self, offset: LocalOffset) -> Self {
+        self.local_offset = offset;
+        self
     }
 
     pub fn phase(&self) -> Phase {
@@ -296,8 +324,9 @@ impl State {
         self.messages.as_ref()
     }
 
-    pub fn typing(&self) -> Option<&str> {
-        self.typing.as_deref()
+    /// Names typing in the open channel.
+    pub fn typing(&self) -> &[String] {
+        &self.typing
     }
 
     pub fn voice(&self) -> Option<&VoiceCall> {

@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use tokio::runtime::Runtime;
@@ -19,13 +19,19 @@ use tokio::task::JoinHandle;
 use crate::api::{Api, Token};
 use crate::auth::{self, TokenStore};
 use crate::config;
+use crate::fixture::Fixture;
 use crate::store::{
-    reduce, CallId, Command, Dispatch, Effect, GatewayEvent, Input, SessionId, SignInEvent,
-    SignInId, State, Ui, VoiceCommand, VoiceTarget, VoiceUpdate,
+    reduce, CallId, Command, Dispatch, Effect, GatewayEvent, Input, LocalOffset, SessionId,
+    SignInEvent, SignInId, State, ViewUpdate, VoiceCommand, VoiceMember, VoiceTarget, VoiceUpdate,
 };
 
-/// Where [`Ui`] updates go (the bridge queues them onto the Qt thread).
-pub type Sink = Box<dyn Fn(Ui) + Send + Sync>;
+/// Where [`ViewUpdate`]s go, one batch at a time, in order (the bridge
+/// queues each batch onto the Qt thread).
+pub type Sink = Box<dyn Fn(Vec<ViewUpdate>) + Send + Sync>;
+
+/// Inputs reduced back to back before the view batch is flushed. Bounds the
+/// latency of a burst; an idle store flushes after every input.
+const MAX_INPUTS_PER_BATCH: usize = 64;
 
 /// HTTP requests in flight at once; more wait for a slot.
 const MAX_HTTP_IN_FLIGHT: usize = 8;
@@ -161,6 +167,11 @@ pub struct Runner {
     calls: HashMap<CallId, UnboundedSender<VoiceCommand>>,
     sign_in: Option<JoinHandle<()>>,
     startup_marks: Vec<&'static str>,
+    /// View updates since the last flush.
+    batch: Vec<ViewUpdate>,
+    /// Answers requests locally instead of the network (`YAP_FIXTURE`).
+    fixture: Option<Fixture>,
+    fixture_serial: u64,
 }
 
 impl Runner {
@@ -185,13 +196,99 @@ impl Runner {
             calls: HashMap::new(),
             sign_in: None,
             startup_marks: Vec::new(),
+            batch: Vec::new(),
+            fixture: None,
+            fixture_serial: 0,
         }
     }
 
-    /// Starts one effect. Never blocks and never awaits.
-    pub fn run(&mut self, effect: Effect) {
+    /// Serves every request from `fixture` and keeps off the keyring, the
+    /// gateway and voice.
+    pub fn with_fixture(mut self, fixture: Option<Fixture>) -> Self {
+        self.fixture = fixture;
+        self
+    }
+
+    /// Hands the view updates gathered since the last flush to the sink.
+    pub fn flush(&mut self) {
+        if !self.batch.is_empty() {
+            (self.sink)(std::mem::take(&mut self.batch));
+        }
+    }
+
+    fn send(&self, input: Input) {
+        let _ = self.inbox.send(input);
+    }
+
+    /// The fixture's side of an effect; `false` when the normal path runs it.
+    fn run_fixture(&mut self, fixture: Fixture, effect: &Effect) -> bool {
         match effect {
-            Effect::Ui(update) => (self.sink)(update),
+            Effect::Http { id, request, .. } => {
+                self.fixture_serial += 1;
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+                let response = fixture.respond(request, now, self.fixture_serial);
+                self.send(Input::Http {
+                    id: *id,
+                    result: Ok(response),
+                });
+            }
+            Effect::LoadToken => self.send(Input::TokenLoaded(Some(Token::new("fixture")))),
+            Effect::GatewayConnect { session, .. } => self.send(Input::Gateway {
+                session: *session,
+                event: GatewayEvent::Ready,
+            }),
+            Effect::VoiceStart { call, target, .. } => {
+                let me = VoiceMember {
+                    id: "fixture-me".into(),
+                    name: target.me_name.clone(),
+                    muted: false,
+                    speaking: false,
+                    me: true,
+                };
+                for update in [
+                    VoiceUpdate::Roster(vec![me]),
+                    VoiceUpdate::Connected,
+                    VoiceUpdate::Status("Connected".into()),
+                ] {
+                    self.send(Input::Voice {
+                        call: *call,
+                        update,
+                    });
+                }
+            }
+            Effect::GatewaySend(_)
+            | Effect::GatewayDisconnect
+            | Effect::StoreToken(_)
+            | Effect::ClearToken
+            | Effect::Revoke(_)
+            | Effect::SignInStart(_)
+            | Effect::SignInCancel
+            | Effect::Voice { .. }
+            | Effect::VoiceForget(_) => {}
+            Effect::View(_) | Effect::Later { .. } | Effect::StartupMark(_) => return false,
+        }
+        true
+    }
+
+    /// Starts one effect. Never blocks and never awaits. View updates are
+    /// held until [`Self::flush`].
+    pub fn run(&mut self, effect: Effect) {
+        if let Some(fixture) = self.fixture {
+            if self.run_fixture(fixture, &effect) {
+                return;
+            }
+        }
+        match effect {
+            Effect::View(update) => self.batch.push(update),
+            Effect::Later { delay, input } => {
+                let inbox = self.inbox.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(delay).await;
+                    let _ = inbox.send(*input);
+                });
+            }
             Effect::Http { id, token, request } => {
                 let api = Api::new(self.http.clone(), token);
                 let inbox = self.inbox.clone();
@@ -328,12 +425,23 @@ async fn sign_in(http: reqwest::Client, attempt: SignInId, inbox: UnboundedSende
     });
 }
 
-/// The store actor: the only owner of [`State`].
+/// The store actor: the only owner of [`State`]. It reduces whatever is
+/// already queued (up to [`MAX_INPUTS_PER_BATCH`]) before flushing the view,
+/// so a burst of dispatches reaches the UI as one batch.
 async fn actor(mut state: State, mut runner: Runner, mut inbox: UnboundedReceiver<Input>) {
-    while let Some(input) = inbox.recv().await {
-        for effect in reduce(&mut state, input) {
-            runner.run(effect);
+    while let Some(first) = inbox.recv().await {
+        let mut next = Some(first);
+        let mut reduced = 0;
+        while let Some(input) = next.take() {
+            for effect in reduce(&mut state, input) {
+                runner.run(effect);
+            }
+            reduced += 1;
+            if reduced < MAX_INPUTS_PER_BATCH {
+                next = inbox.try_recv().ok();
+            }
         }
+        runner.flush();
     }
 }
 
@@ -351,18 +459,25 @@ fn runtime() -> &'static Runtime {
 }
 
 /// Starts the core on its own runtime and returns its command channel.
+/// `local_offset` puts message times in the user's time zone. With
+/// `YAP_FIXTURE` set, the core runs offline on that fixture.
 pub fn spawn(
     sink: Sink,
     http: reqwest::Client,
     realtime: Box<dyn Realtime>,
     tokens: Arc<dyn TokenStore>,
+    local_offset: LocalOffset,
 ) -> UnboundedSender<Command> {
     started_at();
     let (commands, mut command_rx) = mpsc::unbounded_channel::<Command>();
     let (inbox, inbox_rx) = mpsc::unbounded_channel();
-    let state = State::new(&config::get().api_base);
+    let fixture = Fixture::from_env();
+    if let Some(fixture) = fixture {
+        eprintln!("[fixture] {fixture:?}: offline, no keyring, gateway or voice");
+    }
+    let state = State::new(&config::get().api_base).with_local_offset(local_offset);
     runtime().spawn(async move {
-        let runner = Runner::new(http, inbox.clone(), sink, realtime, tokens);
+        let runner = Runner::new(http, inbox.clone(), sink, realtime, tokens).with_fixture(fixture);
         // Commands join the same queue as effect results, in arrival order.
         tokio::spawn(async move {
             while let Some(command) = command_rx.recv().await {

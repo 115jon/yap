@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import com.yap.native
 
 // Enter sends, Shift+Enter adds a line.
 Rectangle {

@@ -1,5 +1,13 @@
-//! The QML-facing object. It forwards calls to the core as [`Command`]s and
-//! applies [`Ui`] updates on the Qt thread.
+//! The QML-facing domain objects, one QML singleton per domain: `Session`,
+//! `Nav`, `Chat` and `Voice`. Each holds typed properties and forwards
+//! intents to the core as [`Command`]s. The list models are their own
+//! singletons in [`crate::models`]: cxx-qt 0.10 has no clean way to expose
+//! a Rust-owned child QObject as a property, and a singleton needs no
+//! ownership at all.
+//!
+//! `Session.start()` starts the core. Its view updates arrive in batches;
+//! the bridge keeps at most one queued Qt-thread closure, which drains every
+//! batch that arrived meanwhile and applies them in order ([`gui::apply`]).
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -8,215 +16,289 @@ pub mod qobject {
         type QString = cxx_qt_lib::QString;
     }
 
+    /// Which top-level screen shows.
+    #[qenum(Session)]
+    enum Phase {
+        Boot,
+        SignedOut,
+        DeviceCode,
+        Loading,
+        Ready,
+    }
+
     extern "RustQt" {
+        /// Sign-in and the signed-in user.
         #[qobject]
         #[qml_element]
-        #[qproperty(QString, phase)]
+        #[qml_singleton]
+        #[qproperty(Phase, phase)]
         #[qproperty(QString, status)]
-        #[qproperty(bool, connected)]
         #[qproperty(QString, user_code, cxx_name = "userCode")]
         #[qproperty(QString, verification_url, cxx_name = "verificationUrl")]
-        #[qproperty(QString, me_json, cxx_name = "meJson")]
-        #[qproperty(QString, servers_json, cxx_name = "serversJson")]
-        #[qproperty(QString, channels_json, cxx_name = "channelsJson")]
-        #[qproperty(QString, active_server_id, cxx_name = "activeServerId")]
-        #[qproperty(QString, active_channel_id, cxx_name = "activeChannelId")]
-        #[qproperty(QString, active_channel_name, cxx_name = "activeChannelName")]
-        #[qproperty(QString, voice_channel_id, cxx_name = "voiceChannelId")]
-        #[qproperty(QString, voice_status, cxx_name = "voiceStatus")]
-        #[qproperty(QString, voice_roster_json, cxx_name = "voiceRosterJson")]
-        #[qproperty(bool, voice_muted, cxx_name = "voiceMuted")]
-        type YapClient = super::YapClientRust;
+        #[qproperty(QString, me_id, cxx_name = "meId")]
+        #[qproperty(QString, me_name, cxx_name = "meName")]
+        #[qproperty(QString, me_username, cxx_name = "meUsername")]
+        #[qproperty(QString, me_avatar, cxx_name = "meAvatar")]
+        #[qproperty(QString, me_initials, cxx_name = "meInitials")]
+        type Session = super::SessionRust;
 
+        /// Starts the core (once).
         #[qinvokable]
-        fn start(self: Pin<&mut Self>);
+        fn start(self: Pin<&mut Session>);
 
         #[qinvokable]
         #[cxx_name = "startSignIn"]
-        fn start_sign_in(self: Pin<&mut Self>);
+        fn start_sign_in(self: &Session);
 
         #[qinvokable]
         #[cxx_name = "cancelSignIn"]
-        fn cancel_sign_in(self: Pin<&mut Self>);
+        fn cancel_sign_in(self: &Session);
 
         #[qinvokable]
         #[cxx_name = "useToken"]
-        fn use_token(self: Pin<&mut Self>, token: &QString);
+        fn use_token(self: &Session, token: &QString);
 
         #[qinvokable]
         #[cxx_name = "signOut"]
-        fn sign_out(self: Pin<&mut Self>);
+        fn sign_out(self: &Session);
+    }
+
+    impl cxx_qt::Threading for Session {}
+
+    extern "RustQt" {
+        /// Where the user is: server, channel, and the gateway link.
+        #[qobject]
+        #[qml_element]
+        #[qml_singleton]
+        #[qproperty(bool, connected)]
+        #[qproperty(QString, active_server_id, cxx_name = "activeServerId")]
+        #[qproperty(QString, active_server_name, cxx_name = "activeServerName")]
+        #[qproperty(QString, active_channel_id, cxx_name = "activeChannelId")]
+        #[qproperty(QString, active_channel_name, cxx_name = "activeChannelName")]
+        type Nav = super::NavRust;
 
         #[qinvokable]
         #[cxx_name = "selectServer"]
-        fn select_server(self: Pin<&mut Self>, id: &QString);
+        fn select_server(self: &Nav, id: &QString);
 
+        /// Opens a text channel, or joins a voice channel.
         #[qinvokable]
         #[cxx_name = "selectChannel"]
-        fn select_channel(self: Pin<&mut Self>, id: &QString);
+        fn select_channel(self: &Nav, id: &QString);
+    }
+
+    impl cxx_qt::Initialize for Nav {}
+
+    extern "RustQt" {
+        /// The open channel. Its rows are `MessageListModel`.
+        #[qobject]
+        #[qml_element]
+        #[qml_singleton]
+        #[qproperty(QString, typing_text, cxx_name = "typingText")]
+        // Today's local day number, to compare with a row's `day`.
+        #[qproperty(i32, today)]
+        type Chat = super::ChatRust;
 
         #[qinvokable]
         #[cxx_name = "sendMessage"]
-        fn send_message(self: Pin<&mut Self>, text: &QString);
-
-        #[qinvokable]
-        #[cxx_name = "joinVoice"]
-        fn join_voice(self: Pin<&mut Self>, channel_id: &QString);
-
-        #[qinvokable]
-        #[cxx_name = "leaveVoice"]
-        fn leave_voice(self: Pin<&mut Self>);
-
-        #[qinvokable]
-        #[cxx_name = "muteVoice"]
-        fn set_voice_muted_from_ui(self: Pin<&mut Self>, muted: bool);
-
-        /// The whole list for a newly opened channel (JSON array).
-        #[qsignal]
-        #[cxx_name = "messagesReset"]
-        fn messages_reset(self: Pin<&mut Self>, json: QString);
-
-        /// One message, new or changed (JSON object, may be partial).
-        #[qsignal]
-        #[cxx_name = "messageUpserted"]
-        fn message_upserted(self: Pin<&mut Self>, json: QString);
-
-        #[qsignal]
-        #[cxx_name = "messageRemoved"]
-        fn message_removed(self: Pin<&mut Self>, id: QString);
-
-        #[qsignal]
-        fn typing(self: Pin<&mut Self>, name: QString);
+        fn send_message(self: &Chat, text: &QString);
     }
 
-    impl cxx_qt::Threading for YapClient {}
+    impl cxx_qt::Initialize for Chat {}
+
+    extern "RustQt" {
+        /// The call. Its members are `VoiceRosterModel` (and member rows in
+        /// `ChannelTreeModel`).
+        #[qobject]
+        #[qml_element]
+        #[qml_singleton]
+        #[qproperty(QString, channel_id, cxx_name = "channelId")]
+        #[qproperty(QString, channel_name, cxx_name = "channelName")]
+        #[qproperty(QString, status)]
+        // The media path is up.
+        #[qproperty(bool, live)]
+        #[qproperty(bool, muted)]
+        type Voice = super::VoiceRust;
+
+        #[qinvokable]
+        fn join(self: &Voice, channel_id: &QString);
+
+        #[qinvokable]
+        fn leave(self: &Voice);
+
+        #[qinvokable]
+        #[cxx_name = "setMuted"]
+        fn set_muted_from_ui(self: &Voice, muted: bool);
+    }
+
+    impl cxx_qt::Initialize for Voice {}
 }
 
 use core::pin::Pin;
+use std::sync::{Arc, Mutex, PoisonError};
 
-use cxx_qt::{CxxQtType, Threading};
+use cxx_qt::Threading;
 use cxx_qt_lib::QString;
-use tokio::sync::mpsc::UnboundedSender;
+use yap_core::{Phase, ViewUpdate};
 
-use crate::client::{self, Command, Ui};
+use crate::client::{self, Command};
+use crate::gui;
+
+impl Default for qobject::Phase {
+    fn default() -> Self {
+        Self::Boot
+    }
+}
+
+impl From<Phase> for qobject::Phase {
+    fn from(phase: Phase) -> Self {
+        match phase {
+            Phase::Boot => Self::Boot,
+            Phase::SignedOut => Self::SignedOut,
+            Phase::DeviceCode => Self::DeviceCode,
+            Phase::Loading => Self::Loading,
+            Phase::Ready => Self::Ready,
+        }
+    }
+}
 
 #[derive(Default)]
-pub struct YapClientRust {
-    phase: QString,
+pub struct SessionRust {
+    phase: qobject::Phase,
     status: QString,
-    connected: bool,
     user_code: QString,
     verification_url: QString,
-    me_json: QString,
-    servers_json: QString,
-    channels_json: QString,
+    me_id: QString,
+    me_name: QString,
+    me_username: QString,
+    me_avatar: QString,
+    me_initials: QString,
+}
+
+#[derive(Default)]
+pub struct NavRust {
+    connected: bool,
     active_server_id: QString,
+    active_server_name: QString,
     active_channel_id: QString,
     active_channel_name: QString,
-    voice_channel_id: QString,
-    voice_status: QString,
-    voice_roster_json: QString,
-    voice_muted: bool,
-    commands: Option<UnboundedSender<Command>>,
 }
 
-fn q(value: impl AsRef<str>) -> QString {
-    QString::from(value.as_ref())
+#[derive(Default)]
+pub struct ChatRust {
+    typing_text: QString,
+    today: i32,
 }
 
-impl qobject::YapClient {
-    fn command(&self, command: Command) {
-        if let Some(tx) = &self.rust().commands {
-            let _ = tx.send(command);
-        }
-    }
+#[derive(Default)]
+pub struct VoiceRust {
+    channel_id: QString,
+    channel_name: QString,
+    status: QString,
+    live: bool,
+    muted: bool,
+}
 
-    pub fn start(mut self: Pin<&mut Self>) {
-        if self.rust().commands.is_some() {
-            return;
-        }
-        self.as_mut().set_phase(q("boot"));
+/// View updates waiting for the Qt thread, and whether a closure that will
+/// drain them is already queued.
+#[derive(Default)]
+struct Pending {
+    updates: Vec<ViewUpdate>,
+    queued: bool,
+}
+
+impl qobject::Session {
+    pub fn start(self: Pin<&mut Self>) {
         let qt = self.qt_thread();
-        let sink: client::Sink = Box::new(move |update| {
-            let _ = qt.queue(move |this| apply(this, update));
+        let pending = Arc::new(Mutex::new(Pending::default()));
+        let sink: client::Sink = Box::new(move |batch| {
+            let mut waiting = pending.lock().unwrap_or_else(PoisonError::into_inner);
+            waiting.updates.extend(batch);
+            if std::mem::replace(&mut waiting.queued, true) {
+                return;
+            }
+            drop(waiting);
+            let drain = Arc::clone(&pending);
+            let queued = qt.queue(move |session| {
+                let updates = {
+                    let mut waiting = drain.lock().unwrap_or_else(PoisonError::into_inner);
+                    waiting.queued = false;
+                    std::mem::take(&mut waiting.updates)
+                };
+                gui::apply(session, updates);
+            });
+            // Fails only once the Session is gone (shutdown): nothing will
+            // drain, so drop what is waiting instead of growing forever.
+            if queued.is_err() {
+                let mut waiting = pending.lock().unwrap_or_else(PoisonError::into_inner);
+                waiting.queued = false;
+                waiting.updates.clear();
+            }
         });
-        let tx = client::spawn(sink);
-        let _ = tx.send(Command::Start);
-        self.rust_mut().commands = Some(tx);
+        client::start(sink);
     }
 
-    pub fn start_sign_in(self: Pin<&mut Self>) {
-        self.command(Command::StartSignIn);
+    pub fn start_sign_in(&self) {
+        client::command(Command::StartSignIn);
     }
 
-    pub fn cancel_sign_in(self: Pin<&mut Self>) {
-        self.command(Command::CancelSignIn);
+    pub fn cancel_sign_in(&self) {
+        client::command(Command::CancelSignIn);
     }
 
-    pub fn use_token(self: Pin<&mut Self>, token: &QString) {
-        self.command(Command::UseToken(token.to_string()));
+    pub fn use_token(&self, token: &QString) {
+        client::command(Command::UseToken(token.to_string()));
     }
 
-    pub fn sign_out(self: Pin<&mut Self>) {
-        self.command(Command::SignOut);
-    }
-
-    pub fn select_server(self: Pin<&mut Self>, id: &QString) {
-        self.command(Command::SelectServer(id.to_string()));
-    }
-
-    pub fn select_channel(self: Pin<&mut Self>, id: &QString) {
-        self.command(Command::SelectChannel(id.to_string()));
-    }
-
-    pub fn send_message(self: Pin<&mut Self>, text: &QString) {
-        self.command(Command::Send(text.to_string()));
-    }
-
-    pub fn join_voice(self: Pin<&mut Self>, channel_id: &QString) {
-        self.command(Command::JoinVoice(channel_id.to_string()));
-    }
-
-    pub fn leave_voice(self: Pin<&mut Self>) {
-        self.command(Command::LeaveVoice);
-    }
-
-    pub fn set_voice_muted_from_ui(self: Pin<&mut Self>, muted: bool) {
-        self.command(Command::SetVoiceMuted(muted));
+    pub fn sign_out(&self) {
+        client::command(Command::SignOut);
     }
 }
 
-fn apply(mut this: Pin<&mut qobject::YapClient>, update: Ui) {
-    match update {
-        Ui::Phase(phase) => this.set_phase(q(phase)),
-        Ui::Status(text) => this.set_status(q(text)),
-        Ui::Connected(connected) => this.set_connected(connected),
-        Ui::DeviceCode { user_code, url } => {
-            this.as_mut().set_user_code(q(user_code));
-            this.set_verification_url(q(url));
-        }
-        Ui::Me(me) => this.set_me_json(q(me.to_string())),
-        Ui::Servers(list) => this.set_servers_json(q(list.to_string())),
-        Ui::ActiveServer(id) => this.set_active_server_id(q(id)),
-        Ui::Channels(list) => this.set_channels_json(q(list.to_string())),
-        Ui::ActiveChannel { id, name } => {
-            this.as_mut().set_active_channel_name(q(name));
-            this.set_active_channel_id(q(id));
-        }
-        Ui::MessagesReset(list) => this.messages_reset(q(list.to_string())),
-        Ui::MessageUpsert(message) => this.message_upserted(q(message.to_string())),
-        Ui::MessageRemoved(id) => this.message_removed(q(id)),
-        Ui::Typing(name) => this.typing(q(name)),
-        Ui::Voice {
-            channel_id,
-            status,
-            roster,
-            muted,
-        } => {
-            this.as_mut().set_voice_status(q(status));
-            this.as_mut().set_voice_roster_json(q(roster.to_string()));
-            this.as_mut().set_voice_muted(muted);
-            this.set_voice_channel_id(q(channel_id));
-        }
+impl qobject::Nav {
+    pub fn select_server(&self, id: &QString) {
+        client::command(Command::SelectServer(id.to_string()));
+    }
+
+    pub fn select_channel(&self, id: &QString) {
+        client::command(Command::SelectChannel(id.to_string()));
     }
 }
+
+impl qobject::Chat {
+    pub fn send_message(&self, text: &QString) {
+        client::command(Command::Send(text.to_string()));
+    }
+}
+
+impl qobject::Voice {
+    pub fn join(&self, channel_id: &QString) {
+        client::command(Command::JoinVoice(channel_id.to_string()));
+    }
+
+    pub fn leave(&self) {
+        client::command(Command::LeaveVoice);
+    }
+
+    pub fn set_muted_from_ui(&self, muted: bool) {
+        client::command(Command::SetVoiceMuted(muted));
+    }
+}
+
+macro_rules! registered {
+    ($($object:ident => $rust:ident),* $(,)?) => {$(
+        impl cxx_qt::Initialize for qobject::$object {
+            fn initialize(self: Pin<&mut Self>) {
+                gui::register(self);
+            }
+        }
+
+        impl Drop for $rust {
+            fn drop(&mut self) {
+                gui::unregister::<qobject::$object>();
+            }
+        }
+    )*};
+}
+
+registered!(Nav => NavRust, Chat => ChatRust, Voice => VoiceRust);

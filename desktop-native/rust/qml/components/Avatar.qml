@@ -1,24 +1,25 @@
 import QtQuick
+import com.yap.native
 
 // Square key-cap avatar: the picture when there is one, initials otherwise.
 Rectangle {
     id: root
 
-    property string name
-    property string key
-    property url source
+    required property string initials
+    required property string fillKey
+    required property url source
     property int size: 40
 
     width: size
     height: size
     radius: Theme.radius
-    color: Theme.fillFor(key)
+    color: Theme.fillFor(fillKey)
     clip: true
 
     Text {
         anchors.centerIn: parent
         visible: picture.status !== Image.Ready
-        text: Theme.initials(root.name)
+        text: root.initials
         color: Theme.ink1
         font.family: Theme.display
         font.pixelSize: Math.round(root.size * 0.38)

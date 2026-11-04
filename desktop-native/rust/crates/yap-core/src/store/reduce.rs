@@ -1,20 +1,26 @@
 //! The reducer: one arm per input, emitting effects in the order the old
 //! sequential core performed them, so the UI sees the same updates.
 
+use std::time::Duration;
+
 use serde::Serialize;
 use yap_protocol::payload::{ChannelRef, ServerSubscribe, VoiceChannelJoin, VoiceChannelLeave};
 use yap_protocol::rest::{ChannelType, Message, Server, User};
 use yap_protocol::{Frame, GatewayOp};
 
 use super::state::{Boot, MessageLog, Pending, Phase, ServerChannels, Session, State, VoiceCall};
-use super::view;
+use super::view::{self, ChannelTreeRow, MessageRow, Row, RowContext, ViewDiff, ViewUpdate};
+use super::view::{MeView, VoiceView};
 use super::{
     ApiRequest, ApiResponse, CallId, Command, Dispatch, Effect, GatewayEvent, Input, RequestId,
-    SessionId, SignInEvent, SignInId, Ui, VoiceCommand, VoiceTarget, VoiceUpdate,
+    SessionId, SignInEvent, SignInId, VoiceCommand, VoiceTarget, VoiceUpdate,
 };
 use crate::api::{ApiError, Token};
 
 const SESSION_ENDED: &str = "Your session ended. Sign in again.";
+
+/// How long the typing line stays after the last typing event.
+pub const TYPING_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Applies one input and returns the effects to run, in order.
 pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
@@ -27,6 +33,11 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
         Input::SignIn { attempt, event } => state.on_sign_in(&mut fx, attempt, event),
         Input::Gateway { session, event } => state.on_gateway(&mut fx, session, event),
         Input::Voice { call, update } => state.on_voice(&mut fx, call, update),
+        Input::TypingExpired(generation) => {
+            if generation == state.typing_generation {
+                state.set_typing(&mut fx, Vec::new());
+            }
+        }
     }
     fx.0
 }
@@ -38,8 +49,12 @@ impl Effects {
         self.0.push(effect);
     }
 
-    fn ui(&mut self, update: Ui) {
-        self.0.push(Effect::Ui(update));
+    fn view(&mut self, update: ViewUpdate) {
+        self.0.push(Effect::View(update));
+    }
+
+    fn messages(&mut self, diff: ViewDiff<MessageRow>) {
+        self.view(ViewUpdate::Messages(diff));
     }
 }
 
@@ -51,17 +66,17 @@ fn frame<T: Serialize>(op: GatewayOp, payload: &T) -> Option<Frame> {
 impl State {
     fn set_phase(&mut self, fx: &mut Effects, phase: Phase) {
         self.phase = phase;
-        fx.ui(Ui::Phase(phase.as_str()));
+        fx.view(ViewUpdate::Phase(phase));
     }
 
     fn set_status(&mut self, fx: &mut Effects, text: impl Into<String>) {
         self.status = text.into();
-        fx.ui(Ui::Status(self.status.clone()));
+        fx.view(ViewUpdate::Status(self.status.clone()));
     }
 
     fn set_connected(&mut self, fx: &mut Effects, connected: bool) {
         self.connected = connected;
-        fx.ui(Ui::Connected(connected));
+        fx.view(ViewUpdate::Connected(connected));
     }
 
     /// The session once `me` is known (what the old core called a session).
@@ -109,6 +124,141 @@ impl State {
         frame(op, &channel)
     }
 
+    // View projection
+
+    fn row_context(&self) -> RowContext<'_> {
+        RowContext {
+            api_base: &self.api_base,
+            me_id: self.me().map_or("", |me| me.id.as_str()),
+            offset: self.local_offset,
+        }
+    }
+
+    /// The open channel's row at `index`, grouped against the one above.
+    fn message_row_at(&self, index: usize) -> Option<MessageRow> {
+        let log = self.messages.as_ref()?;
+        let message = log.at(index)?;
+        let previous = index.checked_sub(1).and_then(|i| log.at(i));
+        Some(view::message_row(message, previous, &self.row_context()))
+    }
+
+    fn message_rows(&self) -> Vec<MessageRow> {
+        let Some(log) = &self.messages else {
+            return Vec::new();
+        };
+        let ctx = self.row_context();
+        let mut previous = None;
+        log.iter()
+            .map(|message| {
+                let row = view::message_row(message, previous, &ctx);
+                previous = Some(message);
+                row
+            })
+            .collect()
+    }
+
+    /// Emits updates for rows `at` and `at + 1` that differ from `before`
+    /// (a change at `at` can regroup the row below it).
+    fn emit_message_changes(&self, fx: &mut Effects, at: usize, before: [Option<MessageRow>; 2]) {
+        for (offset, old) in before.into_iter().enumerate() {
+            let index = at + offset;
+            if let (Some(old), Some(row)) = (old, self.message_row_at(index)) {
+                let roles = old.changed(&row);
+                if !roles.is_empty() {
+                    fx.messages(ViewDiff::Update {
+                        at: index,
+                        row,
+                        roles,
+                    });
+                }
+            }
+        }
+    }
+
+    fn sync_servers(&mut self, fx: &mut Effects) {
+        let rows = view::server_rows(&self.servers, &self.api_base);
+        for diff in view::ordered_diff(&self.view.servers, &rows) {
+            fx.view(ViewUpdate::Servers(diff));
+        }
+        self.view.servers = rows;
+    }
+
+    fn tree_rows(&self) -> Vec<ChannelTreeRow> {
+        let list = self
+            .tree_server
+            .as_ref()
+            .and_then(|id| self.channels.get(id));
+        let call = self
+            .voice
+            .as_ref()
+            .map(|c| (c.channel_id.as_str(), c.roster.as_slice()));
+        view::tree_rows(list, call)
+    }
+
+    /// A newly loaded tree (another server, or a refetch): one reset.
+    fn reset_tree(&mut self, fx: &mut Effects) {
+        let rows = self.tree_rows();
+        fx.view(ViewUpdate::Channels(ViewDiff::Reset(rows.clone())));
+        self.view.tree = rows;
+    }
+
+    /// The same tree with the call's members changed: row diffs only.
+    fn sync_tree(&mut self, fx: &mut Effects) {
+        let rows = self.tree_rows();
+        for diff in view::ordered_diff(&self.view.tree, &rows) {
+            fx.view(ViewUpdate::Channels(diff));
+        }
+        self.view.tree = rows;
+    }
+
+    fn sync_roster(&mut self, fx: &mut Effects) {
+        let rows = self
+            .voice
+            .as_ref()
+            .map(|c| view::roster_rows(&c.roster))
+            .unwrap_or_default();
+        for diff in view::ordered_diff(&self.view.roster, &rows) {
+            fx.view(ViewUpdate::Roster(diff));
+        }
+        self.view.roster = rows;
+    }
+
+    /// The call's scalars, its roster, and its members in the tree.
+    fn emit_voice(&mut self, fx: &mut Effects) {
+        let voice = match &self.voice {
+            Some(call) => VoiceView {
+                channel_id: call.channel_id.clone(),
+                channel_name: self
+                    .find_channel(&call.channel_id)
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default(),
+                live: call.status == "Connected",
+                status: call.status.clone(),
+                muted: call.muted,
+            },
+            None => VoiceView::default(),
+        };
+        fx.view(ViewUpdate::Voice(voice));
+        self.sync_roster(fx);
+        self.sync_tree(fx);
+    }
+
+    fn active_server_name(&self) -> String {
+        let id = self.active_server.as_deref();
+        self.servers
+            .iter()
+            .find(|s| Some(s.id.as_str()) == id)
+            .map(|s| s.name.clone())
+            .unwrap_or_default()
+    }
+
+    fn set_typing(&mut self, fx: &mut Effects, names: Vec<String>) {
+        if self.typing != names {
+            fx.view(ViewUpdate::Typing(view::typing_text(&names)));
+            self.typing = names;
+        }
+    }
+
     // Commands
 
     fn on_command(&mut self, fx: &mut Effects, command: Command) {
@@ -118,7 +268,7 @@ impl State {
                 let attempt = SignInId(self.next_id());
                 self.sign_in = Some(attempt);
                 self.set_phase(fx, Phase::DeviceCode);
-                fx.ui(Ui::DeviceCode {
+                fx.view(ViewUpdate::DeviceCode {
                     user_code: String::new(),
                     url: String::new(),
                 });
@@ -150,7 +300,7 @@ impl State {
                         command: VoiceCommand::SetMuted(muted),
                     });
                 }
-                fx.ui(view::voice(self.voice.as_ref()));
+                self.emit_voice(fx);
             }
         }
     }
@@ -158,6 +308,11 @@ impl State {
     // Session
 
     fn begin_session(&mut self, fx: &mut Effects, token: Token) {
+        // A pasted token wins over a device sign-in still in flight; its
+        // later approval would otherwise replace this session.
+        if self.sign_in.take().is_some() {
+            fx.push(Effect::SignInCancel);
+        }
         self.end_session(fx, false);
         self.set_phase(fx, Phase::Loading);
         self.set_status(fx, "Signing in…");
@@ -177,6 +332,9 @@ impl State {
         self.leave_voice(fx);
         if let Some(session) = self.session.take() {
             fx.push(Effect::GatewayDisconnect);
+            if session.me.is_some() {
+                fx.view(ViewUpdate::Me(MeView::default()));
+            }
             if revoke {
                 fx.push(Effect::Revoke(session.token));
             }
@@ -186,11 +344,26 @@ impl State {
         }
         self.servers.clear();
         self.channels.clear();
-        self.active_server = None;
-        self.active_channel = None;
-        self.messages = None;
+        if self.active_server.take().is_some() {
+            fx.view(ViewUpdate::ActiveServer {
+                id: String::new(),
+                name: String::new(),
+            });
+        }
+        if self.active_channel.take().is_some() {
+            fx.view(ViewUpdate::ActiveChannel {
+                id: String::new(),
+                name: String::new(),
+            });
+        }
+        if self.messages.take().is_some() {
+            fx.messages(ViewDiff::Reset(Vec::new()));
+        }
         self.names.clear();
-        self.typing = None;
+        self.set_typing(fx, Vec::new());
+        self.tree_server = None;
+        self.sync_servers(fx);
+        self.sync_tree(fx);
         self.pending = Pending::default();
         self.boot = None;
         self.set_connected(fx, false);
@@ -201,6 +374,7 @@ impl State {
     fn fail(&mut self, fx: &mut Effects, error: &ApiError) {
         if error.is_unauthorized() {
             self.end_session(fx, false);
+            fx.push(Effect::ClearToken);
             self.set_status(fx, SESSION_ENDED);
         } else {
             self.set_status(fx, error.to_string());
@@ -232,7 +406,7 @@ impl State {
         }
         match event {
             SignInEvent::DeviceCode { user_code, url } => {
-                fx.ui(Ui::DeviceCode { user_code, url });
+                fx.view(ViewUpdate::DeviceCode { user_code, url });
             }
             SignInEvent::Approved(token) => {
                 self.sign_in = None;
@@ -285,7 +459,7 @@ impl State {
         };
         fx.push(Effect::StoreToken(session.token.clone()));
         self.names.insert(me.id.clone(), me.label().to_owned());
-        fx.ui(Ui::Me(view::me(&me, &self.api_base)));
+        fx.view(ViewUpdate::Me(view::me(&me, &self.api_base)));
         fx.push(Effect::GatewayConnect {
             session: session.id,
             token: session.token.clone(),
@@ -306,10 +480,8 @@ impl State {
         self.session = None;
         self.boot = None;
         self.pending = Pending::default();
-        if error.is_unauthorized() {
-            fx.push(Effect::ClearToken);
-        }
         self.set_phase(fx, Phase::SignedOut);
+        // On a 401 this ends the session and clears the stored token.
         self.fail(fx, error);
     }
 
@@ -328,7 +500,7 @@ impl State {
 
     fn apply_servers(&mut self, fx: &mut Effects, servers: Vec<Server>) {
         self.servers = servers;
-        fx.ui(Ui::Servers(view::servers(&self.servers, &self.api_base)));
+        self.sync_servers(fx);
         let keep = self
             .active_server
             .clone()
@@ -345,7 +517,10 @@ impl State {
             return;
         }
         self.active_server = Some(id.clone());
-        fx.ui(Ui::ActiveServer(id.clone()));
+        fx.view(ViewUpdate::ActiveServer {
+            id: id.clone(),
+            name: self.active_server_name(),
+        });
         let request = ApiRequest::Channels {
             server_id: id.clone(),
         };
@@ -364,21 +539,41 @@ impl State {
             Err(error) => return self.chain_failed(fx, &error),
         };
         let list = ServerChannels::new(response);
-        fx.ui(Ui::Channels(view::channels(&list)));
+        // A refetch of the shown server (e.g. after GUILD_UPDATE) keeps the
+        // open channel while it is still one of its text channels.
+        let kept = self
+            .active_channel
+            .as_deref()
+            .and_then(|id| list.get(id))
+            .filter(|c| c.channel_type == ChannelType::Text)
+            .map(|c| (c.id.clone(), c.name.clone()));
         let first_text = list.first_text().map(|c| c.id.clone());
-        self.channels.insert(server_id, list);
+        let same_tree = self.tree_server.as_deref() == Some(server_id.as_str());
+        self.channels.insert(server_id.clone(), list);
+        self.tree_server = Some(server_id);
+        if same_tree {
+            self.sync_tree(fx);
+        } else {
+            self.reset_tree(fx);
+        }
         self.sync_subscriptions(fx);
+        if let Some((id, name)) = kept {
+            // Only the name can have changed; the messages stay.
+            fx.view(ViewUpdate::ActiveChannel { id, name });
+            return self.finish_boot(fx);
+        }
         match first_text {
             Some(channel) => self.select_channel(fx, &channel),
             None => {
                 self.active_channel = None;
                 self.messages = None;
                 self.pending.page = None;
-                fx.ui(Ui::ActiveChannel {
+                fx.view(ViewUpdate::ActiveChannel {
                     id: String::new(),
                     name: String::new(),
                 });
-                fx.ui(Ui::MessagesReset(serde_json::json!([])));
+                self.set_typing(fx, Vec::new());
+                fx.messages(ViewDiff::Reset(Vec::new()));
                 self.finish_boot(fx);
             }
         }
@@ -406,12 +601,12 @@ impl State {
             }
         }
         self.messages = Some(MessageLog::new(id));
-        self.typing = None;
-        fx.ui(Ui::ActiveChannel {
+        fx.view(ViewUpdate::ActiveChannel {
             id: id.to_owned(),
             name,
         });
-        fx.ui(Ui::MessagesReset(serde_json::json!([])));
+        self.set_typing(fx, Vec::new());
+        fx.messages(ViewDiff::Reset(Vec::new()));
         self.gateway_send(fx, Self::channel_frame(GatewayOp::ChannelSubscribe, id));
         self.load_page(fx, id);
     }
@@ -445,11 +640,8 @@ impl State {
             self.remember_author(&message);
             log.upsert(message);
         }
-        fx.ui(Ui::MessagesReset(view::messages(
-            log.iter(),
-            &self.api_base,
-        )));
         self.messages = Some(log);
+        fx.messages(ViewDiff::Reset(self.message_rows()));
         if !std::mem::replace(&mut self.first_page_shown, true) {
             fx.push(Effect::StartupMark("messages shown"));
         }
@@ -497,17 +689,37 @@ impl State {
     }
 
     /// Upserts into the open channel (by id, so the POST answer and the
-    /// gateway echo of the same message end up as one row).
+    /// gateway echo of the same message end up as one row). A new message
+    /// takes its author off the typing line.
     fn upsert_if_open(&mut self, fx: &mut Effects, message: Message) {
-        let Some(log) = self
-            .messages
-            .as_mut()
-            .filter(|log| log.channel_id == message.channel_id)
-        else {
+        let open = self.messages.as_ref();
+        let Some(log) = open.filter(|log| log.channel_id == message.channel_id) else {
             return;
         };
-        fx.ui(Ui::MessageUpsert(view::message(&message, &self.api_base)));
-        log.upsert(message);
+        let before = log
+            .position(&message.id)
+            .map(|i| [self.message_row_at(i), self.message_row_at(i + 1)]);
+        let author = message.author.as_ref().map(|a| a.label().to_owned());
+        let Some(log) = &mut self.messages else {
+            return;
+        };
+        let at = log.upsert(message);
+        match before {
+            Some(before) => self.emit_message_changes(fx, at, before),
+            None => {
+                if let Some(row) = self.message_row_at(at) {
+                    fx.messages(ViewDiff::Insert {
+                        at,
+                        rows: vec![row],
+                    });
+                }
+                if let Some(author) = author {
+                    let names = self.typing.iter().filter(|n| **n != author).cloned();
+                    let names = names.collect();
+                    self.set_typing(fx, names);
+                }
+            }
+        }
     }
 
     // Gateway
@@ -572,21 +784,35 @@ impl State {
                 self.upsert_if_open(fx, *message);
             }
             Dispatch::MessagePatch(patch) => {
-                if patch.channel_id.as_deref() == Some(active.as_str()) {
-                    if let Some(log) = &mut self.messages {
-                        log.patch(&patch);
-                    }
-                    fx.ui(Ui::MessageUpsert(view::patch(&patch)));
+                if patch.channel_id.as_deref() != Some(active.as_str()) {
+                    return;
                 }
+                let Some(at) = self.messages.as_ref().and_then(|l| l.position(&patch.id)) else {
+                    return;
+                };
+                let before = [self.message_row_at(at), self.message_row_at(at + 1)];
+                if let Some(log) = &mut self.messages {
+                    log.patch(&patch);
+                }
+                self.emit_message_changes(fx, at, before);
             }
             Dispatch::MessageDelete(delete) => {
                 let here = delete.channel_id.as_deref().is_none_or(|c| c == active);
-                if here {
-                    if let Some(log) = &mut self.messages {
-                        log.remove(&delete.id);
-                    }
-                    fx.ui(Ui::MessageRemoved(delete.id));
+                let Some(at) = self
+                    .messages
+                    .as_ref()
+                    .filter(|_| here)
+                    .and_then(|log| log.position(&delete.id))
+                else {
+                    return;
+                };
+                // The row below moves up into `at` and may regroup.
+                let below = self.message_row_at(at + 1);
+                if let Some(log) = &mut self.messages {
+                    log.remove(&delete.id);
                 }
+                fx.messages(ViewDiff::Remove { at, count: 1 });
+                self.emit_message_changes(fx, at, [below, None]);
             }
             Dispatch::TypingStart(typing) => {
                 let me = self.me().map(|me| me.id.as_str()).unwrap_or_default();
@@ -596,8 +822,16 @@ impl State {
                         .get(&typing.user_id)
                         .cloned()
                         .unwrap_or_else(|| "Someone".to_owned());
-                    self.typing = Some(typing.user_id);
-                    fx.ui(Ui::Typing(name));
+                    let mut names = self.typing.clone();
+                    if !names.contains(&name) {
+                        names.push(name);
+                    }
+                    self.set_typing(fx, names);
+                    self.typing_generation += 1;
+                    fx.push(Effect::Later {
+                        delay: TYPING_TIMEOUT,
+                        input: Box::new(Input::TypingExpired(self.typing_generation)),
+                    });
                 }
             }
             Dispatch::ServersChanged => {
@@ -640,10 +874,10 @@ impl State {
             id: call,
             channel_id,
             status: "Connecting".into(),
-            roster: serde_json::json!([]),
+            roster: Vec::new(),
             muted: false,
         });
-        fx.ui(view::voice(self.voice.as_ref()));
+        self.emit_voice(fx);
     }
 
     fn leave_voice(&mut self, fx: &mut Effects) {
@@ -654,7 +888,7 @@ impl State {
             });
             self.gateway_send(fx, Self::voice_leave_frame(&call.channel_id));
         }
-        fx.ui(view::voice(None));
+        self.emit_voice(fx);
     }
 
     fn on_voice(&mut self, fx: &mut Effects, call: CallId, update: VoiceUpdate) {
@@ -679,7 +913,7 @@ impl State {
                 }
             }
         }
-        fx.ui(view::voice(self.voice.as_ref()));
+        self.emit_voice(fx);
     }
 }
 

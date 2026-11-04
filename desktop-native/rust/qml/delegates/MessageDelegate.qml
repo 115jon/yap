@@ -1,46 +1,43 @@
 import QtQuick
+import com.yap.native
 
 // One message. A grouped message (same author, a few minutes later) drops the
-// avatar and name and shows its time in the gutter on hover.
+// avatar and name and shows its time in the gutter on hover. Every value is
+// a MessageListModel role, already formatted.
 Rectangle {
     id: root
 
-    required property int index
-    required property string messageId
     required property string authorId
     required property string author
+    required property string initials
     required property string avatar
-    required property string content
-    required property string createdAt
+    required property string body
+    required property string time
+    required property string date
+    required property int day
     required property bool edited
-    required property string attachmentNames
     required property bool grouped
+    required property string attachmentNames
+    // Today's local day number (`Chat.today`).
+    required property int today
 
-    readonly property date created: new Date(createdAt)
+    readonly property string dayText: day === today ? "Today at " + time : date + " · " + time
 
-    implicitHeight: body.y + body.height + (attachments.visible ? attachments.height + 4 : 0) + 4
+    // A pooled row must not carry a selection into the row it is reused for.
+    ListView.onPooled: bodyText.deselect()
+
+    implicitHeight: bodyText.y + bodyText.height + (attachments.visible ? attachments.height + 4 : 0) + 4
     color: hover.hovered ? Theme.ply1 : "transparent"
 
     HoverHandler { id: hover }
 
-    function timeText(d) {
-        return d.toLocaleTimeString(Qt.locale(), "h:mm AP")
-    }
-    function dayText(d) {
-        const today = new Date()
-        if (d.toDateString() === today.toDateString())
-            return "Today at " + timeText(d)
-        return d.toLocaleDateString(Qt.locale(), "MMM d") + " · " + timeText(d)
-    }
-
     Avatar {
-        id: avatarKey
         visible: !root.grouped
         x: 20
         y: 4
         size: 40
-        name: root.author
-        key: root.authorId
+        initials: root.initials
+        fillKey: root.authorId
         source: root.avatar
     }
 
@@ -49,9 +46,9 @@ Rectangle {
         visible: root.grouped && hover.hovered
         x: 20
         width: 40
-        y: body.y + 3
+        y: bodyText.y + 3
         horizontalAlignment: Text.AlignHCenter
-        text: root.timeText(root.created)
+        text: root.time
         color: Theme.inkOff
         font.family: Theme.mono
         font.pixelSize: 10
@@ -64,6 +61,7 @@ Rectangle {
         y: 4
         spacing: 8
         Text {
+            id: authorText
             text: root.author
             color: Theme.ink1
             font.family: Theme.display
@@ -71,8 +69,8 @@ Rectangle {
             font.weight: Font.Bold
         }
         Text {
-            anchors.baseline: parent.children[0].baseline
-            text: root.dayText(root.created)
+            anchors.baseline: authorText.baseline
+            text: root.dayText
             color: Theme.ink3
             font.family: Theme.mono
             font.pixelSize: 11
@@ -80,7 +78,7 @@ Rectangle {
     }
 
     TextEdit {
-        id: body
+        id: bodyText
         x: 76
         y: root.grouped ? 2 : meta.y + 22
         width: root.width - x - 24
@@ -88,7 +86,7 @@ Rectangle {
         selectByMouse: true
         wrapMode: TextEdit.Wrap
         textFormat: TextEdit.MarkdownText
-        text: root.content + (root.edited ? "  *(edited)*" : "")
+        text: root.body + (root.edited ? "  *(edited)*" : "")
         color: Theme.ink1
         selectionColor: "#4d4cc2ff"
         selectedTextColor: Theme.ink1
@@ -102,7 +100,7 @@ Rectangle {
         }
 
         HoverHandler {
-            cursorShape: body.hoveredLink.length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
+            cursorShape: bodyText.hoveredLink.length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
         }
     }
 
@@ -110,7 +108,7 @@ Rectangle {
         id: attachments
         visible: root.attachmentNames.length > 0
         x: 76
-        y: body.y + body.height + 4
+        y: bodyText.y + bodyText.height + 4
         height: 28
         width: attachmentText.implicitWidth + 20
         radius: Theme.radius

@@ -13,13 +13,15 @@ mod effect;
 mod input;
 mod reduce;
 mod state;
-mod view;
+pub mod time;
+pub mod view;
 
 pub use effect::{ApiRequest, ApiResponse, Effect};
 pub use input::{Command, Dispatch, GatewayEvent, Input, SignInEvent};
 pub use reduce::reduce;
 pub use state::{GatewayStatus, MessageLog, Phase, ServerChannels, Session, State, VoiceCall};
-pub use view::Ui;
+pub use time::LocalOffset;
+pub use view::{Row, ViewDiff, ViewUpdate};
 
 /// Which HTTP request a result answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -53,13 +55,25 @@ pub enum VoiceCommand {
     Leave,
 }
 
+/// One participant in a call, as the voice session reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VoiceMember {
+    /// The participant id.
+    pub id: String,
+    pub name: String,
+    pub muted: bool,
+    pub speaking: bool,
+    /// This client's own participant.
+    pub me: bool,
+}
+
 /// What a voice session reports back.
 #[derive(Debug, Clone, PartialEq)]
 pub enum VoiceUpdate {
     Status(String),
     Connected,
-    /// The roster as the UI shows it (`[{id, name, muted, speaking, me}]`).
-    Roster(serde_json::Value),
+    /// The whole roster, in a stable order.
+    Roster(Vec<VoiceMember>),
     /// The call is over; the error text if it failed.
     Ended(Option<String>),
 }

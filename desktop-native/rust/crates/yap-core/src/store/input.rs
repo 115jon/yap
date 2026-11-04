@@ -45,6 +45,8 @@ pub enum Input {
         call: CallId,
         update: VoiceUpdate,
     },
+    /// The typing line's timeout for the typing event with this generation.
+    TypingExpired(u64),
 }
 
 #[derive(Debug, Clone, PartialEq)]

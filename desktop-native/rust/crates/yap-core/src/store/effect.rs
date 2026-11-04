@@ -1,11 +1,13 @@
 //! What the reducer asks the runtime to do.
 
+use std::time::Duration;
+
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use yap_protocol::rest::{ChannelsResponse, Message, Server, User};
 use yap_protocol::Frame;
 
-use super::{CallId, RequestId, SessionId, SignInId, Ui, VoiceCommand, VoiceTarget};
+use super::{CallId, Input, RequestId, SessionId, SignInId, ViewUpdate, VoiceCommand, VoiceTarget};
 use crate::api::{ApiError, Token};
 
 /// One piece of I/O, or one update for the UI. The runner starts each in
@@ -48,7 +50,13 @@ pub enum Effect {
     },
     /// Let go of a call that ended on its own.
     VoiceForget(CallId),
-    Ui(Ui),
+    /// An update for the UI. The runner hands each batch to the sink at once.
+    View(ViewUpdate),
+    /// Feed `input` back after `delay` (timeouts; the store has no clock).
+    Later {
+        delay: Duration,
+        input: Box<Input>,
+    },
     /// Log `[startup] <mark> after N ms` (once per mark; the reducer decides).
     StartupMark(&'static str),
 }
