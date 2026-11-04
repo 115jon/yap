@@ -33,18 +33,48 @@ weeks.
 - Voice uses LiveKit's `libwebrtc` crate: prebuilt static libwebrtc, used
   only as a PeerConnection. LiveKit's own server protocol is not involved.
 
-## Baseline: current desktop app (installed 3.10.1, read-only)
+## Measured: prototype vs current desktop app (2026-11-04)
 
-| metric                    | value                                                                  |
-| ------------------------- | ---------------------------------------------------------------------- |
-| install folder, 1 version | 406 MB (`libcef.dll` 244 MB, `Yap.exe` 40 MB, `dxcompiler` 24 MB, ...) |
-| processes when idle       | 8 (browser, GPU, network, renderers, ...)                              |
-| idle working set          | 313 MB total                                                           |
-| idle private bytes        | 656 MB total                                                           |
+Both against production `yap.115jon.com`, on the same PC.
 
-The idle figures are a snapshot of the instance that has been running since
-2026-11-03 10:00. I will measure cold start and CPU the same way for both
-clients in step 3.
+| metric                   | YapNative prototype                                        | Yap desktop 3.10.1 (Tauri + CEF)                                                                     |
+| ------------------------ | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| what ships               | one `YapNative.exe`, **30.7 MB**, only Windows system DLLs | **406 MB** per installed version (`libcef.dll` 244 MB, `Yap.exe` 40 MB, `dxcompiler.dll` 24 MB, ...) |
+| processes                | 1                                                          | 8                                                                                                    |
+| idle working set         | **82 MB**                                                  | 310 MB                                                                                               |
+| idle private bytes       | **97 MB**                                                  | 652 MB                                                                                               |
+| idle CPU, 60 s sample    | **0.03 %** of one core                                     | 6.7 % of one core (see the caveat below)                                                             |
+| threads                  | 91                                                         | 310                                                                                                  |
+| first frame after launch | **430–510 ms** (5 warm-cache runs)                         | did not run                                                                                          |
+| messages on screen       | 1.5–3.1 s (network-bound, see below)                       | did not run                                                                                          |
+| gateway Ready            | 1.6–3.3 s                                                  | did not run                                                                                          |
+
+**How each was measured:**
+
+- **Native:** the script launches the exe 5 times and reads the
+  `[startup]` lines it writes to stderr. Then it leaves the last instance
+  signed in on `#general` for 70 s and samples the final 60 s.
+- **CEF:** a read-only `Get-Process` sample of the user's running instance.
+  - That instance had been up since 2026-11-03 and had used native screen
+    share, so its 6.7 % CPU may include a visible window or call state.
+    Treat it as indicative, not like-for-like.
+  - I did not measure cold start for the CEF app. Launching the installed
+    app would hit its single-instance lock and touch its data.
+  - A fair number needs an isolated smoke build (the
+    desktop-smoke-isolation recipe).
+
+**Startup is network-bound.** Each API call takes 0.3–0.8 s server-side
+(curl: `/api/users/me` 0.40–0.64 s, `/api/voice/socket-ticket` 0.29–0.82 s,
+`/api/servers` 0.29–0.41 s). Each one includes a Kova session check.
+
+- The client already overlaps `me` and `servers`.
+- Next steps:
+  - render the last session's state from a local cache at once;
+  - prefetch the gateway ticket alongside `me`.
+
+**Idle CPU fix:** the first build idled at 1.1 % because a looping QML
+pulse animation under a hidden item kept the render loop ticking. Gating it
+on visibility brought idle to 0.03 %.
 
 ## 1. Stack choice
 
@@ -250,12 +280,45 @@ Full parity takes roughly **6–9 months** solo.
 - Rarely used admin and settings screens, at first.
 - Wordle and other mini-apps.
 
-## Open decisions for the user
+## Decisions (2026-11-04)
 
-1. Use the Rust + cxx-qt stack, or go C++ only?
-2. Which backend and account for the prototype?
-   - Prod `yap.115jon.com` with device-code approval by the user, or
-     approval with a test account.
-   - A local dev worker with the dev Kova app.
-3. Download the prebuilt `libwebrtc` (about 100–200 MB) for the voice
-   stretch goal?
+1. **Stack:** Rust + cxx-qt.
+2. **Backend:** production `yap.115jon.com`, with a dedicated test account
+   (`yap-native-spike@example.test`, Kova user
+   `sNOXObG6XFuVTau0rMdgjlm26cIVHzag`) and its own "Native Spike Lab"
+   server.
+   - The real device-code flow was exercised end to end. The code was
+     approved through the same `lookup` / `approve` endpoints the `/activate`
+     page uses, with that account's app session.
+   - Remove the account and its server when the spike ends.
+3. **Prebuilt libraries:** use them.
+   - The static Qt 6.6.3 from resonance stays, because it already exists and
+     works.
+   - The libraries around it are new and current:
+     - cxx-qt 0.10;
+     - reqwest 0.13 and tokio-tungstenite 0.30 on native TLS (Schannel);
+     - `keyring` for Windows Credential Manager.
+   - Nothing else is taken over from resonance (no QWindowKit,
+     SingleApplication, or JUCE).
+   - The title bar is the native one, recoloured through DWM. That keeps
+     snap layouts, shadows and resize with no library.
+
+## Findings from building it
+
+- **Static linking works with cargo + CMake:**
+  - `cxx_qt_import_crate` (Corrosion) plus `qt_import_qml_plugins` linked
+    against the static Qt on the first try;
+  - `+crt-static` in `rust/.cargo/config.toml` matches Qt's `/MT`.
+- **QML files must live under the crate directory.**
+  - A `../qml/Main.qml` path lands in qrc as `com/yap/native/qml/...`, but
+    the generated qmldir resolves it to `com/yap/qml/...`.
+  - The type lookup then fails at runtime.
+- **WIN32-subsystem Qt apps swallow warnings.** Set
+  `QT_FORCE_STDERR_LOGGING=1` when debugging.
+- **The device flow needs no `Origin`.** `start` and `poll` work from a
+  native client as-is.
+- **The gateway does need an `Origin`.** The prototype sends the Tauri
+  app's (`YAP_GATEWAY_ORIGIN`). A real client should get its own allowlisted
+  origin.
+- **`MESSAGE_UPDATE` can be partial.** A link unfurl sends embeds without
+  `content`, so the client patches only the fields an update carries.
