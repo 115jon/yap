@@ -4,10 +4,14 @@ use cxx_qt_build::{CxxQtBuilder, QmlFile, QmlModule};
 /// names must be unique across folders.
 const QML: &[&str] = &[
     "qml/Main.qml",
+    "qml/chrome/TitleBar.qml",
+    "qml/chrome/WindowKey.qml",
     "qml/components/Avatar.qml",
     "qml/components/CallKey.qml",
+    "qml/components/Icon.qml",
     "qml/components/KeyButton.qml",
     "qml/components/Led.qml",
+    "qml/components/RailPill.qml",
     "qml/delegates/CategoryLabel.qml",
     "qml/delegates/ChannelRow.qml",
     "qml/delegates/MemberRow.qml",

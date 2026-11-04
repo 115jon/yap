@@ -14,14 +14,12 @@ Item {
         anchors.centerIn: parent
         spacing: 16
 
-        Text {
+        Image {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: "YAP"
-            color: Theme.ink1
-            font.family: Theme.display
-            font.pixelSize: 44
-            font.weight: Font.ExtraBold
-            font.letterSpacing: -1.5
+            width: 48
+            height: 48
+            sourceSize: Qt.size(48, 48)
+            source: Theme.themeMark.toString().length > 0 ? Theme.themeMark : Theme.homeMark
         }
         Row {
             anchors.horizontalCenter: parent.horizontalCenter
@@ -37,11 +35,9 @@ Item {
                 }
             }
             Text {
-                text: (root.status.length > 0 ? root.status : "Starting").toUpperCase()
+                text: root.status.length > 0 ? root.status : qsTr("Starting")
                 color: Theme.ink3
-                font.family: Theme.mono
-                font.pixelSize: 11
-                font.letterSpacing: 1
+                font: Theme.type.silk
             }
         }
     }

@@ -13,7 +13,7 @@ Rectangle {
     radius: Theme.radius
     color: Theme.ply2
     border.width: 1
-    border.color: input.activeFocus ? Theme.ply4 : Theme.ply3
+    border.color: Theme.lineField
 
     ScrollView {
         anchors.fill: parent
@@ -21,12 +21,12 @@ Rectangle {
             id: input
             focus: true
             wrapMode: TextArea.Wrap
-            placeholderText: root.channelName.length > 0 ? "Message #" + root.channelName : "Message"
-            placeholderTextColor: Theme.inkOff
+            placeholderText: root.channelName.length > 0 ? qsTr("Message #%1").arg(root.channelName) : qsTr("Message")
+            placeholderTextColor: Theme.ink3
             color: Theme.ink1
-            selectionColor: "#4d4cc2ff"
-            font.family: Theme.text
-            font.pixelSize: 15
+            selectionColor: Theme.selection
+            selectedTextColor: Theme.ink1
+            font: Theme.type.message
             leftPadding: 16
             rightPadding: 16
             topPadding: 13

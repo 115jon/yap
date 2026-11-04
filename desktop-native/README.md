@@ -23,8 +23,7 @@ the decisions.
 ## Not yet
 
 Video and screen share, device picker, deafen, attachments preview, embeds, reactions, DMs, unread state,
-notifications, tray, single instance, auto-update, and the brand fonts. Those
-need TTF builds; the prototype uses Segoe UI Variable and Cascadia Mono.
+notifications, tray, single instance and auto-update.
 
 ## Build (Windows)
 
@@ -63,11 +62,39 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 
 The defaults mirror `src/lib/site-defaults.ts`.
 
+## Assets and theme
+
+`assets/` is generated and committed, so a build needs neither Python nor
+Node. It is embedded as `:/fonts`, `:/icons` and `:/svg`.
+
+```powershell
+# Static cuts of Bricolage, Geist, Geist Mono and Martian Mono from a pinned
+# google/fonts commit (SHA-256 checked, versions matched to the web's
+# Fontsource files), renamed to one "Yap *" family per cut, plus OFL texts.
+uvx --from fonttools --with brotli python -I tools/build-fonts.py
+# Phosphor SVGs for every concept in src/components/ui/icon/mapping.ts,
+# manifest.json (fill, slash, rotate, off pairs), and the brand marks.
+node tools/build-icons.mjs
+```
+
+- `Theme.qml` holds every token for the six themes; `YAP_THEME` picks one
+  (`dark`, `light`, `miku-dark`, `miku-light`, `spiderman-dark`,
+  `spiderman-light`). Type roles are `Theme.type.*` font values.
+- `Icon { name: "mic"; variant: "off"; size: 20; color: Theme.ink2 }` draws
+  through `cpp/iconprovider.cpp` (`image://icon/<concept>/<variant>/<rgb>`),
+  which composites the slash and rotation as `Icon.tsx` does.
+- `cpp/windowchrome.cpp` removes the caption (`WM_NCCALCSIZE`) and hit-tests
+  the QML title bar (`WM_NCHITTEST`, `HTMAXBUTTON` for snap layouts).
+- `YAP_TEXT=qt` switches text from native glyph rendering to distance fields.
+
 ## Layout
 
 ```
 CMakeLists.txt        exe, static Qt plugin imports, cxx-qt crate import
-cpp/main.cpp          QGuiApplication, DWM title bar colours, startup timing
+cpp/main.cpp          QGuiApplication, fonts, icon provider, theme, startup timing
+cpp/windowchrome.*    custom title bar: caption removal, hit testing, snap layouts
+cpp/iconprovider.*    Phosphor icons, tinted and cached per size and colour
+assets/, tools/       generated fonts, icons and brand SVGs, and their scripts
 rust/src/bridge.rs    YapClient QObject (properties, invokables, signals)
 rust/src/client/      core: config, api (REST), auth (device flow), gateway,
                       socket (room/voice sockets), sfu (partytracks), voice (calls)

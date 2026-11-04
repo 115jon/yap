@@ -1,7 +1,8 @@
 import QtQuick
 import com.yap.native
 
-// The call: status LED, channel, mute and leave keys.
+// The call: status LED, channel, mute and leave keys. (The web's
+// VoiceDashboard strip and account row replace this in phase 2.)
 Rectangle {
     id: root
 
@@ -10,10 +11,9 @@ Rectangle {
 
     height: inCall ? 92 : 0
     visible: inCall
-    color: Theme.ply2
-    clip: true
+    color: Theme.ply1
 
-    Rectangle { width: parent.width; height: 1; color: Theme.ply3 }
+    Rectangle { width: parent.width; height: 2; color: Theme.ink1 }
 
     Row {
         x: 16
@@ -24,12 +24,9 @@ Rectangle {
             color: root.callLive ? Theme.talk : Theme.idle
         }
         Text {
-            text: "VOICE · " + (Voice.status || "Connecting").toUpperCase()
+            text: root.callLive ? qsTr("Voice connected") : (Voice.status || qsTr("Connecting"))
             color: root.callLive ? Theme.talk : Theme.ink3
-            font.family: Theme.mono
-            font.pixelSize: 11
-            font.weight: Font.Medium
-            font.letterSpacing: 1
+            font: Theme.type.silk
         }
     }
     Text {
@@ -39,8 +36,7 @@ Rectangle {
         text: Voice.channelName + (Nav.activeServerId.length > 0 ? " / " + Nav.activeServerName : "")
         elide: Text.ElideRight
         color: Theme.ink2
-        font.family: Theme.text
-        font.pixelSize: 13
+        font: Theme.type.description
     }
 
     Row {
@@ -48,13 +44,17 @@ Rectangle {
         y: 54
         spacing: 6
         CallKey {
-            label: Voice.muted ? "UNMUTE" : "MUTE"
+            icon: "mic"
+            iconVariant: Voice.muted ? "off" : "idle"
+            label: Voice.muted ? qsTr("Unmute") : qsTr("Mute")
             lit: Voice.muted
-            litColor: Theme.danger
+            litColor: Theme.mutedStateTint
+            litInk: Theme.mutedState
             onClicked: Voice.requestMute(!Voice.muted)
         }
         CallKey {
-            label: "LEAVE"
+            icon: "disconnect"
+            label: qsTr("Leave")
             onClicked: Voice.leave()
         }
     }

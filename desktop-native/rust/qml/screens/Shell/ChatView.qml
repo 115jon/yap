@@ -31,6 +31,8 @@ Rectangle {
         }
     }
 
+    // Header (ChatHeader.tsx): 48 px, px-4, the channel glyph at 20 px in
+    // ink-3, then Bricolage 18/800.
     Item {
         id: header
         width: parent.width
@@ -38,41 +40,37 @@ Rectangle {
 
         Row {
             anchors.left: parent.left
-            anchors.leftMargin: 20
+            anchors.leftMargin: 16
             anchors.verticalCenter: parent.verticalCenter
             spacing: 8
-            Text {
-                text: "#"
-                color: Theme.inkOff
-                font.family: Theme.mono
-                font.pixelSize: 18
+            Icon {
                 anchors.verticalCenter: parent.verticalCenter
+                visible: Nav.activeChannelId.length > 0
+                name: "textChannel"
+                size: Theme.iconLg
+                color: Theme.ink3
             }
             Text {
+                anchors.verticalCenter: parent.verticalCenter
                 text: Nav.activeChannelName
                 color: Theme.ink1
-                font.family: Theme.display
-                font.pixelSize: 18
-                font.weight: Font.ExtraBold
-                font.letterSpacing: -0.4
-                anchors.verticalCenter: parent.verticalCenter
+                font: Theme.type.columnTitle
             }
         }
         Text {
             anchors.right: parent.right
-            anchors.rightMargin: 20
+            anchors.rightMargin: 16
             anchors.verticalCenter: parent.verticalCenter
             visible: Session.status.length > 0
             text: Session.status
             color: Theme.ink3
-            font.family: Theme.text
-            font.pixelSize: 12
+            font: Theme.type.caption
         }
         Rectangle {
             anchors.bottom: parent.bottom
             width: parent.width
             height: 1
-            color: Theme.ply2
+            color: Theme.line
         }
     }
 
@@ -86,7 +84,7 @@ Rectangle {
         model: MessageListModel
         boundsBehavior: Flickable.StopAtBounds
         reuseItems: true
-        topMargin: 16
+        topMargin: 0
         bottomMargin: 8
         delegate: MessageDelegate {
             width: view.width
@@ -98,17 +96,16 @@ Rectangle {
             contentItem: Rectangle {
                 implicitWidth: 6
                 radius: 3
-                color: Theme.ply4
+                color: Theme.lineStrong
             }
         }
 
         Text {
             anchors.centerIn: parent
             visible: view.count === 0 && Nav.activeChannelId.length > 0
-            text: "No messages yet. Say something."
+            text: qsTr("No messages yet. Say something.")
             color: Theme.ink3
-            font.family: Theme.text
-            font.pixelSize: 15
+            font: Theme.type.message
         }
     }
 
@@ -121,13 +118,12 @@ Rectangle {
 
         Text {
             anchors.left: parent.left
-            anchors.leftMargin: 20
+            anchors.leftMargin: 16
             anchors.verticalCenter: parent.verticalCenter
             visible: Chat.typingText.length > 0
             text: Chat.typingText
             color: Theme.ink3
-            font.family: Theme.text
-            font.pixelSize: 12
+            font: Theme.type.caption
         }
     }
 

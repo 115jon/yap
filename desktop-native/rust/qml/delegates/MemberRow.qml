@@ -1,7 +1,10 @@
 import QtQuick
 import com.yap.native
 
-// Someone in the call, under the voice channel.
+// Someone in the call, under the voice channel: 28 high, Geist 13/500 in
+// ink-2 (ink-1 for you and anyone speaking), the speaking LED, and the
+// muted glyph in the 14 px trailing cluster. The guides and lit path of
+// the Talk Tree come with TreeLeaf.
 Item {
     id: root
 
@@ -11,41 +14,38 @@ Item {
     required property bool me
     property bool animate: true
 
-    height: 28
+    height: Theme.occupantRow
 
-    // Speaking LED: lit green while they talk.
     Led {
         id: led
-        x: 30
+        x: 8 + 7
         anchors.verticalCenter: parent.verticalCenter
-        color: root.speaking ? Theme.talk : Theme.ply4
-        Behavior on color {
-            enabled: root.animate
-            ColorAnimation { duration: 90 }
-        }
+        lit: root.speaking
+        color: Theme.talk
     }
     Text {
         anchors.left: led.right
-        anchors.leftMargin: 10
-        anchors.right: muteTag.left
-        anchors.rightMargin: 6
+        anchors.leftMargin: 8 + 7
+        anchors.right: muteGlyph.left
+        anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter
-        text: root.name + (root.me ? " (you)" : "")
+        text: root.me ? qsTr("%1 (you)").arg(root.name) : root.name
         elide: Text.ElideRight
-        color: root.speaking ? Theme.ink1 : Theme.ink2
-        font.family: Theme.text
-        font.pixelSize: 13
+        color: root.speaking || root.me ? Theme.ink1 : Theme.ink2
+        font: Theme.type.occupant
     }
-    Text {
-        id: muteTag
+    Icon {
+        id: muteGlyph
         anchors.right: parent.right
-        anchors.rightMargin: 10
+        anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
         visible: root.muted
-        text: "MUTED"
-        color: Theme.danger
-        font.family: Theme.mono
-        font.pixelSize: 10
-        font.letterSpacing: 0.8
+        name: "mic"
+        variant: "off"
+        size: 14
+        color: Theme.mutedState
+        Accessible.ignored: false
+        Accessible.role: Accessible.StaticText
+        Accessible.name: qsTr("Muted")
     }
 }

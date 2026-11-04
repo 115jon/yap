@@ -1,33 +1,60 @@
 import QtQuick
 import com.yap.native
 
-// A small mono key for the call panel; lit keys take the LED colour.
+// A small call key: glyph plus silkscreen word on tint-1; lit keys take the
+// state's tint and ink.
 Rectangle {
     id: key
 
     required property string label
+    required property string icon
+    property string iconVariant: "idle"
     property bool lit: false
-    property color litColor: Theme.ink1
+    property color litColor: Theme.tint3
+    property color litInk: Theme.ink1
     signal clicked()
 
-    height: 28
-    width: keyText.implicitWidth + 24
-    radius: Theme.radius
-    color: lit ? litColor : keyHover.hovered ? Theme.ply4 : Theme.ply3
+    readonly property color ink: lit ? litInk : keyHover.hovered ? Theme.ink1 : Theme.ink2
 
+    height: 28
+    width: content.implicitWidth + 20
+    radius: Theme.radius
+    color: lit ? litColor : keyTap.pressed ? Theme.tint3 : keyHover.hovered ? Theme.tint2 : Theme.tint1
+    Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+
+    activeFocusOnTab: true
     Accessible.role: Accessible.Button
     Accessible.name: label
+    Accessible.onPressAction: key.clicked()
+    Keys.onSpacePressed: key.clicked()
 
-    Text {
-        id: keyText
+    Row {
+        id: content
         anchors.centerIn: parent
-        text: key.label
-        color: key.lit ? Theme.ply0 : Theme.ink1
-        font.family: Theme.mono
-        font.pixelSize: 11
-        font.weight: Font.DemiBold
-        font.letterSpacing: 0.8
+        spacing: 6
+        Icon {
+            anchors.verticalCenter: parent.verticalCenter
+            name: key.icon
+            variant: key.iconVariant
+            size: Theme.iconSm
+            color: key.ink
+        }
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: key.label
+            color: key.ink
+            font: Theme.type.silk
+        }
+    }
+    Rectangle {
+        anchors.fill: parent
+        anchors.margins: -2
+        visible: key.activeFocus
+        color: "transparent"
+        radius: Theme.radius
+        border.width: 2
+        border.color: Theme.focus
     }
     HoverHandler { id: keyHover; cursorShape: Qt.PointingHandCursor }
-    TapHandler { onTapped: key.clicked() }
+    TapHandler { id: keyTap; onTapped: key.clicked() }
 }

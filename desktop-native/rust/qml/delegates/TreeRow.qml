@@ -54,7 +54,8 @@ Loader {
             width: cell.width
             name: cell.name
             voice: cell.voice
-            active: cell.itemId === cell.activeId || cell.itemId === cell.callId
+            active: cell.itemId === cell.activeId
+            joined: cell.itemId === cell.callId
             onSelected: cell.selected(cell.itemId)
         }
     }

@@ -20,21 +20,15 @@ Rectangle {
         spacing: 0
 
         Text {
-            text: "YAP · DESKTOP"
+            text: qsTr("Yap · desktop")
             color: Theme.ink3
-            font.family: Theme.mono
-            font.pixelSize: 11
-            font.weight: Font.Medium
-            font.letterSpacing: 1
+            font: Theme.type.silk
         }
         Text {
             Layout.topMargin: 12
-            text: root.waiting ? "Approve this device" : "Sign in"
+            text: root.waiting ? qsTr("Approve this device") : qsTr("Sign in")
             color: Theme.ink1
-            font.family: Theme.display
-            font.pixelSize: 44
-            font.weight: Font.ExtraBold
-            font.letterSpacing: -1.5
+            font: Theme.type.headline
         }
         Text {
             Layout.topMargin: 12
@@ -44,9 +38,8 @@ Rectangle {
                   ? "Open the link in a browser where you're signed in to Yap, check the code matches, and approve it."
                   : "You'll get a code to approve in your browser. Nothing to type here."
             color: Theme.ink2
-            font.family: Theme.text
-            font.pixelSize: 15
-            lineHeight: 22
+            font: Theme.type.message
+            lineHeight: Theme.type.messageLine
             lineHeightMode: Text.FixedHeight
         }
 
@@ -65,14 +58,12 @@ Rectangle {
                     radius: Theme.radius
                     color: modelData === "-" ? "transparent" : Theme.ply2
                     border.width: modelData === "-" ? 0 : 1
-                    border.color: Theme.ply4
+                    border.color: Theme.lineField
                     Text {
                         anchors.centerIn: parent
                         text: cap.modelData
                         color: root.hasCode ? Theme.ink1 : Theme.inkOff
-                        font.family: Theme.mono
-                        font.pixelSize: 24
-                        font.weight: Font.DemiBold
+                        font: Theme.type.deviceCode
                     }
                 }
             }
@@ -93,11 +84,9 @@ Rectangle {
                 }
             }
             Text {
-                text: root.hasCode ? "WAITING FOR APPROVAL" : "GETTING A CODE"
+                text: root.hasCode ? qsTr("Waiting for approval") : qsTr("Getting a code")
                 color: Theme.ink3
-                font.family: Theme.mono
-                font.pixelSize: 11
-                font.letterSpacing: 1
+                font: Theme.type.silk
             }
         }
 
@@ -130,9 +119,8 @@ Rectangle {
             visible: Session.status.length > 0
             text: Session.status
             wrapMode: Text.WordWrap
-            color: Theme.danger
-            font.family: Theme.text
-            font.pixelSize: 13
+            color: Theme.dangerInk
+            font: Theme.type.description
         }
 
         // Dev: paste a session token instead.
@@ -141,8 +129,7 @@ Rectangle {
             visible: !root.waiting
             text: tokenRow.visible ? "Hide token sign-in" : "Developer: use a session token"
             color: devHover.hovered ? Theme.ink2 : Theme.ink3
-            font.family: Theme.text
-            font.pixelSize: 12
+            font: Theme.type.caption
             HoverHandler { id: devHover; cursorShape: Qt.PointingHandCursor }
             TapHandler { onTapped: tokenRow.visible = !tokenRow.visible }
         }
@@ -158,16 +145,16 @@ Rectangle {
                 implicitHeight: 40
                 echoMode: TextInput.Password
                 placeholderText: "Session token"
-                placeholderTextColor: Theme.inkOff
+                placeholderTextColor: Theme.ink3
                 color: Theme.ink1
-                font.family: Theme.mono
-                font.pixelSize: 13
+                selectionColor: Theme.selection
+                font: Theme.type.code
                 leftPadding: 12
                 background: Rectangle {
                     radius: Theme.radius
                     color: Theme.ply2
                     border.width: 1
-                    border.color: tokenField.activeFocus ? Theme.ink3 : Theme.ply4
+                    border.color: tokenField.activeFocus ? Theme.ink1 : Theme.lineField
                 }
                 onAccepted: useButton.clicked()
             }
