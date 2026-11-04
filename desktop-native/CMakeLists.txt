@@ -11,7 +11,7 @@ set(CMAKE_AUTOMOC ON)
 add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 
 find_package(Qt6 REQUIRED COMPONENTS
-  Core Gui Network Qml Quick QuickControls2 QmlImportScanner)
+  Core Gui Network Qml Quick QuickControls2 Svg QmlImportScanner)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -31,10 +31,31 @@ cxx_qt_import_qml_module(yap_native_qml
   URI "com.yap.native"
   SOURCE_CRATE yap_native)
 
-qt_add_executable(YapNative WIN32 cpp/main.cpp)
+qt_add_executable(YapNative WIN32
+  cpp/main.cpp
+  cpp/iconprovider.cpp cpp/iconprovider.h
+  cpp/windowchrome.cpp cpp/windowchrome.h)
 target_link_libraries(YapNative PRIVATE
   yap_native_qml
-  Qt::Gui Qt::Network Qt::Quick Qt::QuickControls2)
+  Qt::Gui Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg)
+
+# Brand fonts, Phosphor icons and brand SVGs (assets/, built by tools/),
+# embedded as :/fonts, :/icons and :/svg.
+file(GLOB YAP_FONT_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/assets
+  CONFIGURE_DEPENDS assets/fonts/*.ttf)
+file(GLOB YAP_SVG_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/assets
+  CONFIGURE_DEPENDS assets/svg/*.svg)
+file(STRINGS assets/icons/files.txt YAP_ICON_NAMES)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS assets/icons/files.txt)
+list(TRANSFORM YAP_ICON_NAMES PREPEND icons/ OUTPUT_VARIABLE YAP_ICON_FILES)
+list(TRANSFORM YAP_FONT_FILES PREPEND assets/ OUTPUT_VARIABLE YAP_FONT_PATHS)
+list(TRANSFORM YAP_SVG_FILES PREPEND assets/ OUTPUT_VARIABLE YAP_SVG_PATHS)
+list(TRANSFORM YAP_ICON_FILES PREPEND assets/ OUTPUT_VARIABLE YAP_ICON_PATHS)
+qt_add_resources(YapNative yap_assets
+  PREFIX /
+  BASE assets
+  FILES ${YAP_FONT_PATHS} ${YAP_SVG_PATHS} ${YAP_ICON_PATHS})
+qt_import_plugins(YapNative INCLUDE Qt::QSvgPlugin)
 if(WIN32)
   # dwmapi for the title bar; the rest is what libwebrtc (static) needs.
   target_link_libraries(YapNative PRIVATE
