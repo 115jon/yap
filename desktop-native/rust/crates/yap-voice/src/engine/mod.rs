@@ -132,7 +132,8 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
     fn set_camera_live(&self, live: bool);
 
     /// The parked camera's keepalive stalled long enough that the SFU may
-    /// have dropped its track: it must be pushed afresh.
+    /// have dropped its track, or there is no camera send at all: it must
+    /// be pushed afresh.
     fn camera_stale(&self) -> bool;
 
     /// Adds our share as a send-only VP8 transceiver in `stream_id` with
@@ -145,6 +146,13 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
         encoding: &ShareEncoding,
     ) -> impl Future<Output = Result<LocalOffer, MediaError>> + Send;
 
+    /// Drops a camera send whose push failed (its keepalive stops, its
+    /// transceiver is retired).
+    fn abandon_camera(&self);
+
+    /// Drops a share send whose push failed, as [`Self::abandon_camera`].
+    fn abandon_screen(&self);
+
     /// The share's caps and content hint, in place (`setParameters`).
     fn set_screen_encoding(&self, encoding: &ShareEncoding);
 
@@ -152,20 +160,29 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
     fn set_screen_live(&self, live: bool);
 
     /// The parked share's keepalive stalled long enough that the SFU may
-    /// have dropped its track: it must be pushed afresh.
+    /// have dropped its track, or there is no share send: push afresh.
     fn screen_stale(&self) -> bool;
 
     /// Adds the share's audio (48 kHz stereo, fed by
     /// [`crate::push_screen_audio`]) as a send-only Opus transceiver in
-    /// `stream_id`, and sets and returns the local offer.
+    /// `stream_id`, and sets and returns the local offer. A send there was
+    /// is abandoned first.
     fn publish_screen_audio(
         &self,
         stream_id: &str,
     ) -> impl Future<Output = Result<LocalOffer, MediaError>> + Send;
 
-    /// Retires the share's audio: nothing feeds it any more and its
-    /// transceiver stays, sending nothing.
-    fn retire_screen_audio(&self);
+    /// Parks the share's audio between shares: disabled and fed silence,
+    /// so the SFU keeps its track for the next share with audio.
+    fn park_screen_audio(&self);
+
+    /// Resumes the parked share audio (`true`), unless there is none or
+    /// its keepalive stalled long enough that it must be pushed afresh.
+    fn resume_screen_audio(&self) -> bool;
+
+    /// Retires the share's audio send (a failed push, or before a fresh
+    /// one): nothing feeds it and its transceiver stays, sending nothing.
+    fn abandon_screen_audio(&self);
 
     /// The share audio track on or off (in place: off sends silence).
     fn set_screen_audio_enabled(&self, enabled: bool);

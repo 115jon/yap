@@ -32,18 +32,21 @@ Popup {
         quality = qualityIds.includes(Audio.screenShareQuality) ? Audio.screenShareQuality : "720p30"
         withAudio = Audio.screenShareWithAudio
         selectedId = ""
-        sourcesJson = ""
+        loading = true
         nonce++
-        refresh()
+        Voice.refreshShareSources()
         open()
     }
 
+    // Until the first list after opening lands ("Finding what you can share").
+    property bool loading: true
     // The list as last read: the tiles (and their stills) are rebuilt only
     // when it changes, not on every poll.
     property string sourcesJson: ""
 
-    function refresh() {
-        const json = Voice.shareSources()
+    // A refresh landed (off the GUI thread; see Voice.refreshShareSources).
+    function take() {
+        const json = Voice.shareSources
         if (json !== sourcesJson) {
             sourcesJson = json
             try {
@@ -52,6 +55,7 @@ Popup {
                 sources = []
             }
         }
+        loading = false
         keepPick()
     }
 
@@ -83,12 +87,16 @@ Popup {
         target: ShellState
         function onShareTabChanged() { root.keepPick() }
     }
+    Connections {
+        target: Voice
+        function onShareSourcesRevisionChanged() { root.take() }
+    }
 
     Timer {
         interval: 5000
         repeat: true
         running: root.visible
-        onTriggered: root.refresh()
+        onTriggered: Voice.refreshShareSources()
     }
 
     parent: Overlay.overlay
@@ -207,7 +215,7 @@ Popup {
                 Grid {
                     id: grid
                     y: 16
-                    visible: root.shown.length > 0
+                    visible: !root.loading && root.shown.length > 0
                     columns: body.columns
                     spacing: 12
                     Repeater {
@@ -227,9 +235,38 @@ Popup {
                     }
                 }
 
+                // Looking (the first list after opening).
+                Column {
+                    visible: root.loading
+                    anchors.centerIn: parent
+                    spacing: 8
+                    Icon {
+                        id: finding
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        name: "loader"
+                        smooth: true
+                        size: Theme.iconXl
+                        color: Theme.ink3
+                        RotationAnimator on rotation {
+                            from: 0
+                            to: 360
+                            duration: 900
+                            loops: Animation.Infinite
+                            running: finding.visible && !Theme.reducedMotion
+                        }
+                    }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: qsTr("Finding what you can share")
+                        color: Theme.ink2
+                        font: Theme.type.captionStrong
+                        Accessible.role: Accessible.StaticText
+                    }
+                }
+
                 // Nothing to share on this tab.
                 Column {
-                    visible: root.shown.length === 0
+                    visible: !root.loading && root.shown.length === 0
                     anchors.centerIn: parent
                     width: Math.min(parent.width, 360)
                     spacing: 8

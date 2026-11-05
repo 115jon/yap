@@ -1516,7 +1516,9 @@ fn wanted(
         }
         Kind::Video => {
             let pid = offer.participant_id.as_str();
-            (watched.contains(pid) || video.stage.as_deref() == Some(pid))
+            // Watched, or its own tile shows it (on stage). Their camera on
+            // stage pulls it only as watched (SCREEN_SHARE.md "Watching").
+            (watched.contains(pid) || video.demand.contains_key(&offer.track_name))
                 .then(|| select_rid(Quality::High, &offer.simulcast_rids))
         }
     }

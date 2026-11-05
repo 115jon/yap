@@ -38,11 +38,15 @@ pub enum FakeOp {
         encoding: ShareEncoding,
     },
     SetScreenEncoding(ShareEncoding),
+    AbandonCamera,
+    AbandonScreen,
     SetScreenLive(bool),
     PublishScreenAudio {
         stream_id: String,
     },
-    RetireScreenAudio,
+    ParkScreenAudio,
+    ResumeScreenAudio,
+    AbandonScreenAudio,
     SetScreenAudioEnabled(bool),
     SetMicEnabled(bool),
     SetPlayoutEnabled(bool),
@@ -271,6 +275,14 @@ impl MediaSession for FakeSession {
         })
     }
 
+    fn abandon_camera(&self) {
+        record(&self.shared, FakeOp::AbandonCamera);
+    }
+
+    fn abandon_screen(&self) {
+        record(&self.shared, FakeOp::AbandonScreen);
+    }
+
     fn set_screen_encoding(&self, encoding: &ShareEncoding) {
         record(&self.shared, FakeOp::SetScreenEncoding(*encoding));
     }
@@ -299,8 +311,21 @@ impl MediaSession for FakeSession {
         })
     }
 
-    fn retire_screen_audio(&self) {
-        record(&self.shared, FakeOp::RetireScreenAudio);
+    fn park_screen_audio(&self) {
+        record(&self.shared, FakeOp::ParkScreenAudio);
+    }
+
+    fn resume_screen_audio(&self) -> bool {
+        record(&self.shared, FakeOp::ResumeScreenAudio);
+        !self
+            .shared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .screen_stale
+    }
+
+    fn abandon_screen_audio(&self) {
+        record(&self.shared, FakeOp::AbandonScreenAudio);
     }
 
     fn set_screen_audio_enabled(&self, enabled: bool) {

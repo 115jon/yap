@@ -67,7 +67,9 @@ use crate::audio::{resolve, AudioDevice, AudioDevices, Processing};
 use crate::camera::live::{set_sink, Keepalive};
 use crate::layers::CAMERA_SIMULCAST;
 use crate::machine::MediaState;
-use crate::share::live::{set_audio as set_share_audio, set_sink as set_share_sink, Refresher};
+use crate::share::live::{
+    set_audio as set_share_audio, set_sink as set_share_sink, AudioKeepalive, Refresher,
+};
 use crate::share::{ShareEncoding, SHARE_AUDIO_CHANNELS, SHARE_AUDIO_RATE};
 use crate::wire::IceServer;
 
@@ -492,8 +494,12 @@ struct ScreenSend {
 
 /// Our share's audio send side, while the share carries audio.
 struct ScreenAudioSend {
+    source: NativeAudioSource,
     track: RtcAudioTrack,
     transceiver: RtpTransceiver,
+    keepalive: AudioKeepalive,
+    /// Between shares: disabled, fed silence by the keepalive.
+    parked: bool,
 }
 
 /// The share's one encoding, and its degradation preference: `detail`
@@ -838,7 +844,21 @@ impl MediaSession for LibwebrtcSession {
     fn camera_stale(&self) -> bool {
         lock(&self.camera)
             .as_ref()
-            .is_some_and(|camera| camera.keepalive.stale())
+            .is_none_or(|camera| camera.keepalive.stale())
+    }
+
+    fn abandon_camera(&self) {
+        if let Some(old) = lock(&self.camera).take() {
+            set_sink(None);
+            lock(&self.retired).push(old.transceiver);
+        }
+    }
+
+    fn abandon_screen(&self) {
+        if let Some(old) = lock(&self.screen).take() {
+            set_share_sink(None);
+            lock(&self.retired).push(old.transceiver);
+        }
     }
 
     async fn publish_screen(
@@ -924,11 +944,11 @@ impl MediaSession for LibwebrtcSession {
     fn screen_stale(&self) -> bool {
         lock(&self.screen)
             .as_ref()
-            .is_some_and(|screen| screen.refresher.stale())
+            .is_none_or(|screen| screen.refresher.stale())
     }
 
     async fn publish_screen_audio(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
-        self.retire_screen_audio();
+        self.abandon_screen_audio();
         // No processing: the source's audio as it plays. Unbuffered, so
         // `push_screen_audio` hands 10 ms frames straight to the track.
         let source = NativeAudioSource::new(
@@ -956,10 +976,13 @@ impl MediaSession for LibwebrtcSession {
             .filter(|c| c.mime_type.eq_ignore_ascii_case("audio/opus"))
             .collect();
         let _ = transceiver.set_codec_preferences(opus);
-        set_share_audio(Some(source));
+        set_share_audio(Some(source.clone()));
         *lock(&self.screen_audio) = Some(ScreenAudioSend {
+            keepalive: AudioKeepalive::start(source.clone()),
+            source,
             track,
             transceiver: transceiver.clone(),
+            parked: false,
         });
         let offer = self
             .pc
@@ -979,9 +1002,30 @@ impl MediaSession for LibwebrtcSession {
         })
     }
 
-    fn retire_screen_audio(&self) {
-        // Nothing feeds its source any more, so the sender sends nothing;
-        // disabled too, in case anything did.
+    fn park_screen_audio(&self) {
+        set_share_audio(None);
+        if let Some(audio) = lock(&self.screen_audio).as_mut() {
+            audio.track.set_enabled(false);
+            audio.keepalive.park(true);
+            audio.parked = true;
+        }
+    }
+
+    fn resume_screen_audio(&self) -> bool {
+        let mut audio = lock(&self.screen_audio);
+        let Some(send) = audio.as_mut().filter(|a| a.parked && !a.keepalive.stale()) else {
+            return false;
+        };
+        send.keepalive.park(false);
+        send.parked = false;
+        send.track.set_enabled(true);
+        set_share_audio(Some(send.source.clone()));
+        true
+    }
+
+    fn abandon_screen_audio(&self) {
+        // Nothing feeds a retired send (its keepalive goes with it), so it
+        // sends nothing; disabled too.
         set_share_audio(None);
         if let Some(old) = lock(&self.screen_audio).take() {
             old.track.set_enabled(false);

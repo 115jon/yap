@@ -99,7 +99,7 @@ pub(crate) fn thumbnail(source_id: &str, max_width: u32) -> Option<Image> {
 
     ensure_mta();
     let item = item::capture_item(id).ok()?;
-    let mut shot = snapshot::capture(&item, THUMBNAIL_BUDGET).ok()?;
+    let mut shot = snapshot_on_shared_gpu(&item)?;
     // Opaque: a viewer would otherwise show a window's zero alpha as nothing.
     force_opaque(&mut shot.bgra);
     let (width, height) = fit_width(shot.width, shot.height, max_width);
@@ -117,6 +117,33 @@ pub(crate) fn thumbnail(source_id: &str, max_width: u32) -> Option<Image> {
         .unwrap_or_else(PoisonError::into_inner)
         .put(source_id, max_width, thumb.clone(), Instant::now());
     Some(thumb)
+}
+
+/// The stills' one D3D11 device, made on first use and kept (a device per
+/// still cost a device creation each, and they come in batches). Behind a
+/// lock, so stills are taken one at a time. A device the driver removed
+/// is dropped, and the next still makes a new one.
+struct SharedGpu(Option<Gpu>);
+
+// SAFETY: the device is created multithread-protected, and the lock below
+// lets only one thread use it (and its immediate context) at a time.
+unsafe impl Send for SharedGpu {}
+
+fn snapshot_on_shared_gpu(item: &windows::Graphics::Capture::GraphicsCaptureItem) -> Option<Image> {
+    static GPU: Mutex<SharedGpu> = Mutex::new(SharedGpu(None));
+    let mut shared = GPU.lock().unwrap_or_else(PoisonError::into_inner);
+    if shared.0.is_none() {
+        shared.0 = Gpu::new()
+            .map_err(|error| eprintln!("[capture] no device for stills: {error}"))
+            .ok();
+    }
+    let gpu = shared.0.as_ref()?;
+    let shot = snapshot::capture(item, gpu, THUMBNAIL_BUDGET).ok();
+    // SAFETY: a plain status query on a live device.
+    if unsafe { gpu.device.GetDeviceRemovedReason() }.is_err() {
+        shared.0 = None;
+    }
+    shot
 }
 
 pub(crate) fn window_icon(source_id: &str, size: u32) -> Option<Image> {

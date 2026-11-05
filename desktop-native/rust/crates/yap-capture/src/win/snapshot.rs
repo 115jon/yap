@@ -16,10 +16,13 @@ use windows::Graphics::DirectX::DirectXPixelFormat;
 use super::gpu::{frame_texture, texture_size, Gpu, Staging};
 use crate::Image;
 
-/// The first frame of `item`, cursor off, or an error if none arrives within
-/// `timeout`.
-pub(super) fn capture(item: &GraphicsCaptureItem, timeout: Duration) -> Result<Image, String> {
-    let gpu = Gpu::new()?;
+/// The first frame of `item`, cursor off, on `gpu`, or an error if none
+/// arrives within `timeout`.
+pub(super) fn capture(
+    item: &GraphicsCaptureItem,
+    gpu: &Gpu,
+    timeout: Duration,
+) -> Result<Image, String> {
     let size = item.Size().map_err(|e| e.to_string())?;
     let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
         &gpu.winrt,
@@ -51,7 +54,7 @@ pub(super) fn capture(item: &GraphicsCaptureItem, timeout: Duration) -> Result<I
                 .recv_timeout(timeout)
                 .map_err(|_| "no frame in time".to_owned())
         })
-        .and_then(|()| read_frame(&pool, &gpu));
+        .and_then(|()| read_frame(&pool, gpu));
 
     // Stop the callbacks before anything they could touch goes away.
     let _ = pool.RemoveFrameArrived(token);

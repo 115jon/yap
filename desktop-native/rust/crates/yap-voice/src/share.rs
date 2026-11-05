@@ -380,7 +380,11 @@ pub(crate) mod live {
         if !LIVE.load(Ordering::Acquire) {
             return false;
         }
-        let Some(source) = SINK.read().unwrap_or_else(PoisonError::into_inner).clone() else {
+        // The frame is kept for the repeater under the sink's read guard:
+        // `set_sink` clears it under the write guard, so a push racing a
+        // stop can never leave the stopped share's frame for the next one.
+        let sink = SINK.read().unwrap_or_else(PoisonError::into_inner);
+        let Some(source) = sink.as_ref() else {
             return false;
         };
         let frame = VideoFrame {
@@ -440,6 +444,94 @@ pub(crate) mod live {
             }
         }
         pending.drain(..whole);
+    }
+
+    /// The share audio's publication between shares: parked, its source
+    /// gets 10 ms of silence every 10 ms (the track is disabled, so it
+    /// sends muted frames), so the SFU keeps the track and the next share
+    /// with audio resumes it on the same transceiver.
+    pub(crate) struct AudioKeepalive {
+        parked: Arc<AtomicBool>,
+        last_ms: Arc<AtomicU64>,
+        longest_gap_ms: Arc<AtomicU64>,
+        epoch: Instant,
+        task: JoinHandle<()>,
+    }
+
+    impl AudioKeepalive {
+        /// Starts live (the capture feeds the source).
+        pub(crate) fn start(source: NativeAudioSource) -> Self {
+            let parked = Arc::new(AtomicBool::new(false));
+            let last_ms = Arc::new(AtomicU64::new(0));
+            let longest_gap_ms = Arc::new(AtomicU64::new(0));
+            let epoch = Instant::now();
+            let task = tokio::spawn(run_audio(
+                source,
+                Arc::clone(&parked),
+                Arc::clone(&last_ms),
+                Arc::clone(&longest_gap_ms),
+                epoch,
+            ));
+            Self {
+                parked,
+                last_ms,
+                longest_gap_ms,
+                epoch,
+                task,
+            }
+        }
+
+        pub(crate) fn park(&self, parked: bool) {
+            if parked {
+                self.longest_gap_ms.store(0, Ordering::Relaxed);
+                self.last_ms.store(millis(self.epoch), Ordering::Relaxed);
+            }
+            self.parked.store(parked, Ordering::Relaxed);
+        }
+
+        /// Parked, and silent long enough that the SFU may have dropped it.
+        pub(crate) fn stale(&self) -> bool {
+            let open = millis(self.epoch).saturating_sub(self.last_ms.load(Ordering::Relaxed));
+            let gap = self.longest_gap_ms.load(Ordering::Relaxed).max(open);
+            self.parked.load(Ordering::Relaxed) && u128::from(gap) >= STALE_AFTER.as_millis()
+        }
+    }
+
+    impl Drop for AudioKeepalive {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    async fn run_audio(
+        source: NativeAudioSource,
+        parked: Arc<AtomicBool>,
+        last_ms: Arc<AtomicU64>,
+        longest_gap_ms: Arc<AtomicU64>,
+        epoch: Instant,
+    ) {
+        let silence = vec![0i16; SAMPLES_10MS];
+        let mut ticks = tokio::time::interval(std::time::Duration::from_millis(10));
+        // The timer is coarser than 10 ms on Windows: catch up in bursts so
+        // the encoder sees real time.
+        ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
+        loop {
+            ticks.tick().await;
+            if !parked.load(Ordering::Relaxed) {
+                continue;
+            }
+            let frame = AudioFrame {
+                data: silence.as_slice().into(),
+                sample_rate: SHARE_AUDIO_RATE,
+                num_channels: SHARE_AUDIO_CHANNELS,
+                samples_per_channel: SHARE_AUDIO_RATE / 100,
+            };
+            // Unbuffered: ready at once (see `push_audio`).
+            let _ = source.capture_frame(&frame).now_or_never();
+            let now = millis(epoch);
+            let last = last_ms.swap(now, Ordering::Relaxed);
+            longest_gap_ms.fetch_max(now.saturating_sub(last), Ordering::Relaxed);
+        }
     }
 
     /// The share's publication between shares (SCREEN_SHARE.md "Keepalive

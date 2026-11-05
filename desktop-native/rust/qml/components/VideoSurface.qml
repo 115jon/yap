@@ -8,14 +8,17 @@ import com.yap.native
 // is on screen it reports the device pixels it spans, so the call pulls the
 // simulcast layer that size needs (video-layers.ts); hidden, minimised or
 // gone, it withdraws and detaches, and the key's frames are dropped before
-// any copy. Our own camera ("local-camera") is the capture itself: shown
-// mirrored, as the web's local preview, and never reported (nothing pulls
-// it).
+// any copy. Our own captures ("local-camera", "local-screen") are never
+// reported (nothing pulls them); the camera's is shown mirrored, as the
+// web's local preview.
 VideoOutput {
     id: root
 
     required property string videoKey
-    readonly property bool local: videoKey === "local-camera"
+    // Our own capture (camera or share): never reported, nothing pulls it.
+    readonly property bool local: videoKey.startsWith("local-")
+    // Only the camera preview is mirrored, as the web's.
+    readonly property bool mirrored: videoKey === "local-camera"
     // The first frame has arrived.
     readonly property bool hasFrame: sourceRect.width > 0
     readonly property bool onScreen: visible && width > 0 && height > 0 && videoKey.length > 0
@@ -28,7 +31,7 @@ VideoOutput {
     fillMode: VideoOutput.PreserveAspectCrop
     transform: Scale {
         origin.x: root.width / 2
-        xScale: root.local ? -1 : 1
+        xScale: root.mirrored ? -1 : 1
     }
 
     function sync() {

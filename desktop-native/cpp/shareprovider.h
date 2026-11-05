@@ -7,17 +7,25 @@
 //                               requested width (480 by default)
 //   icon/<source id>            a window's app icon, at the requested size
 //
-// Loading is asynchronous (a Windows Graphics Capture snapshot can take a
-// few hundred milliseconds); a source with no picture gives a null image,
-// and the picker draws its glyph instead. The nonce only busts the cache.
+// Asynchronous, on the provider's own one-thread pool: a Windows Graphics
+// Capture still takes up to a few hundred milliseconds, so the stills are
+// taken one after another, in the order the picker asks, and never on
+// Qt's shared image reader (avatars, icons and attachments keep loading).
+// A source with no picture gives an error, and the picker draws its glyph.
+// The nonce only busts the cache.
 
-#include <QtQuick/QQuickImageProvider>
+#include <QtCore/QThreadPool>
+#include <QtQuick/QQuickAsyncImageProvider>
 
-class ShareProvider : public QQuickImageProvider
+class ShareProvider : public QQuickAsyncImageProvider
 {
 public:
   ShareProvider();
+  ~ShareProvider() override;
 
-  QImage requestImage(const QString& id, QSize* size,
-                      const QSize& requestedSize) override;
+  QQuickImageResponse* requestImageResponse(const QString& id,
+                                            const QSize& requestedSize) override;
+
+private:
+  QThreadPool m_pool;
 };

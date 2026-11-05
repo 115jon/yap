@@ -310,6 +310,12 @@ pub mod qobject {
         #[qproperty(bool, share_audio, cxx_name = "shareAudio")]
         /// Why the last share failed; empty otherwise.
         #[qproperty(QString, share_error, cxx_name = "shareError")]
+        /// What can be shared, as JSON: `[{id, name, kind, appName, ours}]`
+        /// (`get_screen_sources`), monitors first, our own windows last, as
+        /// the last `refreshShareSources` found it; the revision counts the
+        /// refreshes that landed (changed or not).
+        #[qproperty(QString, share_sources, cxx_name = "shareSources")]
+        #[qproperty(i32, share_sources_revision, cxx_name = "shareSourcesRevision")]
         type Voice = super::VoiceRust;
 
         #[qinvokable]
@@ -341,11 +347,11 @@ pub mod qobject {
         #[cxx_name = "cameraFailed"]
         fn camera_failed(self: &Voice, reason: &QString);
 
-        /// What can be shared, as JSON: `[{id, name, kind, appName, ours}]`
-        /// (`get_screen_sources`). Monitors first, our own windows last.
+        /// Lists the shareable sources again, off the GUI thread, into
+        /// `shareSources`. One at a time: a call while one runs is dropped.
         #[qinvokable]
-        #[cxx_name = "shareSources"]
-        fn share_sources(self: &Voice) -> QString;
+        #[cxx_name = "refreshShareSources"]
+        fn refresh_share_sources(self: Pin<&mut Voice>);
 
         /// Thumbnails and capture only for our own windows
         /// (`YAP_SHARE_ONLY_OURS=1`, for tests).
@@ -395,6 +401,7 @@ pub mod qobject {
     }
 
     impl cxx_qt::Initialize for Voice {}
+    impl cxx_qt::Threading for Voice {}
 
     extern "RustQt" {
         /// The user popout: who it shows, filled in as their profile loads.
@@ -435,7 +442,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use cxx_qt::Threading;
+use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QList, QString, QStringList};
 use yap_core::store::time::format_rfc3339;
 use yap_core::{Phase, ViewUpdate};
@@ -543,6 +550,10 @@ pub struct VoiceRust {
     share_quality: QString,
     share_audio: bool,
     share_error: QString,
+    share_sources: QString,
+    share_sources_revision: i32,
+    /// A source refresh is running.
+    share_refreshing: bool,
 }
 
 /// View updates waiting for the Qt thread, and whether a closure that will
@@ -853,8 +864,23 @@ impl qobject::Voice {
         client::command(Command::VoiceCameraFailed(reason.to_string()));
     }
 
-    pub fn share_sources(&self) -> QString {
-        QString::from(crate::share::sources_json().as_str())
+    pub fn refresh_share_sources(mut self: Pin<&mut Self>) {
+        if std::mem::replace(&mut self.as_mut().rust_mut().share_refreshing, true) {
+            return;
+        }
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let json = crate::share::sources_json();
+            let _ = qt.queue(move |mut voice| {
+                voice.as_mut().rust_mut().share_refreshing = false;
+                let json = QString::from(json.as_str());
+                if *voice.share_sources() != json {
+                    voice.as_mut().set_share_sources(json);
+                }
+                let revision = voice.share_sources_revision().wrapping_add(1);
+                voice.set_share_sources_revision(revision);
+            });
+        });
     }
 
     pub fn share_only_ours(&self) -> bool {

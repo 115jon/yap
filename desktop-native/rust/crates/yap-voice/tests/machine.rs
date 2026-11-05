@@ -1214,6 +1214,28 @@ fn unwatching_a_share_should_hide_it_and_keep_its_pull() {
 }
 
 #[test]
+fn their_camera_on_stage_should_not_pull_their_share() {
+    let mut m = joined_with_user();
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![share("ana", "sfu-ana-share")],
+    }));
+    let fx = m.handle(show(&[("cam-video-ana", 1280, 720)], Some("ana")));
+    assert!(pulls(&fx).is_empty());
+}
+
+#[test]
+fn their_share_tile_on_stage_should_pull_it_unwatched() {
+    let mut m = joined_with_user();
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![share("ana", "sfu-ana-share")],
+    }));
+    let fx = m.handle(show(&[("screen-video-ana", 1280, 720)], Some("ana")));
+    assert_eq!(pulls(&fx), vec!["sfu-ana-share"]);
+}
+
+#[test]
 fn share_audio_should_be_silent_until_the_share_is_on_stage() {
     let mut m = joined_with_user();
     m.handle(Input::Voice(VoiceEvent::Video {

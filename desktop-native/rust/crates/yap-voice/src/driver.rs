@@ -807,9 +807,10 @@ async fn pull_worker<S: MediaSession, G: Signaling>(
             }
             Job::UnpublishShare => {
                 session.set_screen_live(false);
-                session.retire_screen_audio();
-                share.audio = None;
-                eprintln!("[share] withdrawn; video parked");
+                if std::mem::take(&mut share.audio_live) {
+                    session.park_screen_audio();
+                }
+                eprintln!("[share] withdrawn; video and audio parked");
             }
             Job::Close(mids) => match close(&session, &sfu, &session_id, &mids).await {
                 Ok(()) => eprintln!("[voice] closed {} transceiver(s)", mids.len()),
@@ -842,12 +843,21 @@ async fn publish_camera<S: MediaSession, G: Signaling>(
     if let Some(kept) = kept.as_ref().filter(|_| !session.camera_stale()) {
         return Ok(kept.clone());
     }
-    let offer = session.publish_camera(stream_id).await?;
-    let track_name = uuid::Uuid::new_v4().to_string();
-    let answer = sfu
-        .push(session_id, &offer.sdp, &offer.mid, &track_name)
-        .await?;
-    session.apply_answer(&answer, "camera answer").await?;
+    // The old track goes either way: a failed push must not leave it to be
+    // "resumed" next time, nor a half-made send sending keepalives.
+    *kept = None;
+    let pushed = async {
+        let offer = session.publish_camera(stream_id).await?;
+        push_local(session, sfu, session_id, offer, "camera answer").await
+    }
+    .await;
+    let track_name = match pushed {
+        Ok(name) => name,
+        Err(error) => {
+            session.abandon_camera();
+            return Err(error);
+        }
+    };
     let published = CameraPublished {
         sfu_track_name: track_name,
         simulcast_rids: session.camera_rids(),
@@ -861,8 +871,10 @@ async fn publish_camera<S: MediaSession, G: Signaling>(
 struct ShareTracks {
     /// The video track, kept (parked) between shares.
     video: Option<String>,
-    /// The audio track while the share carries audio.
+    /// The audio track, kept (parked) between shares, and whether the live
+    /// share carries it.
     audio: Option<String>,
+    audio_live: bool,
 }
 
 /// Pushes one local track the session just offered (we offer, a new UUID
@@ -901,27 +913,57 @@ async fn publish_share<S: MediaSession, G: Signaling>(
             kept
         }
         None => {
-            let offer = session.publish_screen(stream_id, encoding).await?;
-            let name = push_local(session, sfu, session_id, offer, "share answer").await?;
+            // As the camera: a failed push leaves nothing to resume.
+            tracks.video = None;
+            let pushed = async {
+                let offer = session.publish_screen(stream_id, encoding).await?;
+                push_local(session, sfu, session_id, offer, "share answer").await
+            }
+            .await;
+            let name = match pushed {
+                Ok(name) => name,
+                Err(error) => {
+                    session.abandon_screen();
+                    return Err(error);
+                }
+            };
             tracks.video = Some(name.clone());
             name
         }
     };
-    match (audio, tracks.audio.is_some()) {
+    match (audio, tracks.audio_live) {
+        // The parked track comes back on the same transceiver unless its
+        // keepalive stalled; otherwise a fresh push.
+        (true, false) if tracks.audio.is_some() && session.resume_screen_audio() => {
+            tracks.audio_live = true;
+        }
         (true, false) => {
-            let offer = session.publish_screen_audio(stream_id).await?;
-            let name = push_local(session, sfu, session_id, offer, "share audio answer").await?;
-            tracks.audio = Some(name);
+            tracks.audio = None;
+            let pushed = async {
+                let offer = session.publish_screen_audio(stream_id).await?;
+                push_local(session, sfu, session_id, offer, "share audio answer").await
+            }
+            .await;
+            match pushed {
+                Ok(name) => {
+                    tracks.audio = Some(name);
+                    tracks.audio_live = true;
+                }
+                Err(error) => {
+                    session.abandon_screen_audio();
+                    return Err(error);
+                }
+            }
         }
         (false, true) => {
-            session.retire_screen_audio();
-            tracks.audio = None;
+            session.park_screen_audio();
+            tracks.audio_live = false;
         }
         _ => {}
     }
     Ok(SharePublished {
         video_sfu_track: video,
-        audio_sfu_track: tracks.audio.clone(),
+        audio_sfu_track: tracks.audio.clone().filter(|_| tracks.audio_live),
     })
 }
 
@@ -983,11 +1025,13 @@ mod tests {
     use crate::engine::{FakeEngine, FakeOp};
     use crate::sfu::Pulled;
 
-    /// Records SFU calls; the first pull of `flaky` fails once.
+    /// Records SFU calls; the first pull of `flaky` fails once, and the
+    /// next `failing_pushes` pushes fail.
     #[derive(Clone, Default)]
     struct FakeSfu {
         calls: Arc<Mutex<Vec<String>>>,
         flaky: Option<String>,
+        failing_pushes: Arc<std::sync::atomic::AtomicUsize>,
     }
 
     impl FakeSfu {
@@ -1009,6 +1053,17 @@ mod tests {
     impl Signaling for FakeSfu {
         async fn push(&self, _: &str, offer_sdp: &str, mid: &str, _: &str) -> Result<String> {
             self.log(format!("push {mid} {offer_sdp}"));
+            let failing = &self.failing_pushes;
+            let fail = failing
+                .fetch_update(
+                    std::sync::atomic::Ordering::Relaxed,
+                    std::sync::atomic::Ordering::Relaxed,
+                    |n| n.checked_sub(1),
+                )
+                .is_ok();
+            if fail {
+                return Err(anyhow!("push refused"));
+            }
             Ok("sfu-camera-answer".into())
         }
 
@@ -1189,5 +1244,112 @@ mod tests {
             sfu.calls(),
             vec!["push 1 fake-camera-offer", "push 1 fake-camera-offer"]
         );
+    }
+
+    /// The worker, and a way to run one job and wait for its result.
+    fn worker_on(
+        engine: &FakeEngine,
+        sfu: &FakeSfu,
+    ) -> (UnboundedSender<Job>, UnboundedReceiver<Done>) {
+        let (session, _states) = engine.open(&[]).expect("fake open");
+        let (jobs, jobs_rx) = mpsc::unbounded_channel();
+        let (done_tx, done) = mpsc::unbounded_channel();
+        tokio::spawn(pull_worker(
+            session,
+            sfu.clone(),
+            "cap".into(),
+            jobs_rx,
+            done_tx,
+        ));
+        (jobs, done)
+    }
+
+    #[tokio::test]
+    async fn a_failed_camera_push_should_push_afresh_next_time() {
+        let engine = FakeEngine::new();
+        let sfu = FakeSfu::default();
+        let (jobs, mut done) = worker_on(&engine, &sfu);
+        let publish = || Job::PublishCamera {
+            stream_id: "cam-me".into(),
+        };
+        jobs.send(publish()).expect("worker alive");
+        let first = done.recv().await.expect("first");
+        sfu.failing_pushes
+            .store(1, std::sync::atomic::Ordering::Relaxed);
+        // Stale: a fresh push, which fails; the old track must not come back.
+        engine.set_camera_stale(true);
+        jobs.send(publish()).expect("worker alive");
+        let failed = done.recv().await.expect("failed");
+        engine.set_camera_stale(false);
+        jobs.send(publish()).expect("worker alive");
+        let third = done.recv().await.expect("third");
+
+        assert!(matches!(failed, Done::Camera(Err(_))));
+        assert!(engine.ops().contains(&FakeOp::AbandonCamera));
+        let (Done::Camera(Ok(a)), Done::Camera(Ok(c))) = (first, third) else {
+            panic!("camera results");
+        };
+        assert_ne!(a.sfu_track_name, c.sfu_track_name);
+        assert_eq!(sfu.calls().len(), 3, "the third publish pushed again");
+    }
+
+    #[tokio::test]
+    async fn a_failed_share_push_should_push_afresh_next_time() {
+        let engine = FakeEngine::new();
+        let sfu = FakeSfu::default();
+        sfu.failing_pushes
+            .store(1, std::sync::atomic::Ordering::Relaxed);
+        let (jobs, mut done) = worker_on(&engine, &sfu);
+        let publish = || Job::PublishShare {
+            stream_id: "screen-me".into(),
+            encoding: crate::share::ShareEncoding {
+                max_bitrate: 8_000_000,
+                max_framerate: 30.0,
+                detail: true,
+            },
+            audio: false,
+        };
+        jobs.send(publish()).expect("worker alive");
+        let failed = done.recv().await.expect("failed");
+        jobs.send(publish()).expect("worker alive");
+        let second = done.recv().await.expect("second");
+
+        assert!(matches!(failed, Done::Share(Err(_))));
+        assert!(engine.ops().contains(&FakeOp::AbandonScreen));
+        assert!(matches!(second, Done::Share(Ok(_))));
+        assert_eq!(sfu.calls().len(), 2, "pushed again, not resumed");
+    }
+
+    #[tokio::test]
+    async fn share_audio_should_park_and_resume_its_one_transceiver() {
+        let engine = FakeEngine::new();
+        let sfu = FakeSfu::default();
+        let (jobs, mut done) = worker_on(&engine, &sfu);
+        let publish = || Job::PublishShare {
+            stream_id: "screen-me".into(),
+            encoding: crate::share::ShareEncoding {
+                max_bitrate: 5_000_000,
+                max_framerate: 30.0,
+                detail: false,
+            },
+            audio: true,
+        };
+        let audio_of = |d: Done| match d {
+            Done::Share(Ok(p)) => p.audio_sfu_track,
+            other => panic!("not a share result: {other:?}"),
+        };
+        jobs.send(publish()).expect("worker alive");
+        let first = audio_of(done.recv().await.expect("first"));
+        jobs.send(Job::UnpublishShare).expect("worker alive");
+        jobs.send(publish()).expect("worker alive");
+        let second = audio_of(done.recv().await.expect("second"));
+
+        assert!(first.is_some());
+        assert_eq!(first, second, "the same SFU audio track");
+        assert_eq!(sfu.calls().len(), 2, "video and audio pushed once each");
+        let ops = engine.ops();
+        assert!(ops.contains(&FakeOp::ParkScreenAudio));
+        assert!(ops.contains(&FakeOp::ResumeScreenAudio));
+        assert!(!ops.contains(&FakeOp::AbandonScreenAudio));
     }
 }
