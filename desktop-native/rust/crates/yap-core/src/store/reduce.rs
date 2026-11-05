@@ -25,7 +25,7 @@ use super::{
 };
 use crate::api::{ApiError, Token};
 use crate::shell::{self, Sound};
-use yap_protocol::payload::{ClientVoiceState, VoiceChannelMember};
+use yap_protocol::payload::VoiceChannelMember;
 
 const SESSION_ENDED: &str = "Your session ended. Sign in again.";
 
@@ -144,20 +144,6 @@ impl State {
             move_grant: None,
         };
         frame(GatewayOp::VoiceChannelJoin, &join)
-    }
-
-    /// Our voice state on the chat gateway (op 15), so the others' trees and
-    /// landings show our mute and deafen (useVoiceChannel.ts sends it there
-    /// as well as on the room socket).
-    fn voice_state_frame(call: &VoiceCall) -> Option<Frame> {
-        let state = ClientVoiceState {
-            self_mute: Some(call.muted),
-            self_deaf: Some(call.deafened),
-            self_video: Some(false),
-            self_stream: Some(false),
-            self_stream_audio: Some(false),
-        };
-        frame(GatewayOp::VoiceStateUpdate, &state)
     }
 
     fn voice_leave_frame(channel_id: &str) -> Option<Frame> {
@@ -423,6 +409,15 @@ impl State {
             fx.view(ViewUpdate::Roster(diff));
         }
         self.view.roster = rows;
+        let tiles = self
+            .voice
+            .as_ref()
+            .map(|call| view::tile_rows(&self.seats(&call.channel_id), call))
+            .unwrap_or_default();
+        for diff in view::ordered_diff(&self.view.tiles, &tiles) {
+            fx.view(ViewUpdate::Tiles(diff));
+        }
+        self.view.tiles = tiles;
     }
 
     /// The open voice view's scalars (its count follows the roster).
@@ -1031,6 +1026,10 @@ impl State {
             } => self.send_gif(fx, &gif_id, reply_to_id, nonce, sent_at),
             Command::Download { url, dest, open } => self.download(fx, &url, &dest, open),
             Command::JoinVoice(id) => self.join_voice(fx, id),
+            Command::WatchStream {
+                participant_id,
+                watch,
+            } => self.watch_stream(fx, participant_id, watch),
             Command::LeaveVoice => self.leave_voice(fx),
             // useVoiceSettingsStore.ts: unmuting while deafened undeafens;
             // a mute change outside deafen is the one to come back to.
@@ -1732,7 +1731,7 @@ impl State {
         } else {
             self.reset_tree(fx);
         }
-        self.sync_subscriptions(fx, true);
+        self.sync_subscriptions(fx);
         if self.home {
             // A tree that answered after Home opened: kept, not shown.
             return self.finish_boot(fx);
@@ -2357,9 +2356,8 @@ impl State {
 
     // Gateway
 
-    /// (Re)subscribes the gateway to what is on screen; `voice` also
-    /// re-asserts the call's voice presence.
-    fn sync_subscriptions(&self, fx: &mut Effects, voice: bool) {
+    /// (Re)subscribes the gateway to what is on screen.
+    fn sync_subscriptions(&self, fx: &mut Effects) {
         // Every server (chat-gateway.ts): presence, member and profile
         // events fan out to a server's subscribers.
         for server in &self.servers {
@@ -2374,14 +2372,9 @@ impl State {
                 Self::channel_frame(GatewayOp::ChannelSubscribe, channel),
             );
         }
-        // A re-identified gateway session has no voice presence: assert it
-        // again or we drop out of everyone's sidebar mid-call.
-        if let Some(call) = self.voice.as_ref().filter(|_| voice) {
-            self.gateway_send(fx, Self::voice_join_frame(call));
-            if call.joined {
-                self.gateway_send(fx, Self::voice_state_frame(call));
-            }
-        }
+        // No voice presence here: the room is the roster's source of truth
+        // (realtime/VOICE_ROSTER.md), so a fresh gateway session needs no
+        // op 33 to keep us in anyone's sidebar.
     }
 
     fn on_gateway(&mut self, fx: &mut Effects, session: SessionId, event: GatewayEvent) {
@@ -2395,7 +2388,7 @@ impl State {
                 self.set_connected(fx, true);
                 // A fresh gateway session starts online: say otherwise.
                 self.send_status(fx);
-                self.sync_subscriptions(fx, true);
+                self.sync_subscriptions(fx);
                 // A fresh session after a drop (Resume failed or was not
                 // possible): events during the gap are lost, so refetch what
                 // is on screen.
@@ -2413,7 +2406,7 @@ impl State {
                 // The server restored the old subscriptions and voice
                 // presence; resend the subscriptions anyway, since switches
                 // made while offline were not sent (they are idempotent).
-                self.sync_subscriptions(fx, false);
+                self.sync_subscriptions(fx);
             }
             GatewayEvent::Closed => {
                 current.gateway.ready = false;
@@ -2830,20 +2823,47 @@ impl State {
             muted: prefs.muted,
             deafened: prefs.deafened,
             joined: false,
+            watched: Default::default(),
         });
         self.emit_voice(fx);
     }
 
+    /// A user leave (STATE_MACHINE.md "Teardown"): a joined call plays the
+    /// leave sound and sends the presence leave (op 34); one the room never
+    /// answered just goes.
     fn leave_voice(&mut self, fx: &mut Effects) {
         if let Some(call) = self.voice.take() {
-            fx.view(ViewUpdate::Sound(Sound::Disconnect));
+            if call.joined {
+                fx.view(ViewUpdate::Sound(Sound::Disconnect));
+            }
             fx.push(Effect::Voice {
                 call: call.id,
                 command: VoiceCommand::Leave,
             });
-            self.gateway_send(fx, Self::voice_leave_frame(&call.channel_id));
+            if call.joined {
+                self.gateway_send(fx, Self::voice_leave_frame(&call.channel_id));
+            }
         }
         self.emit_voice(fx);
+    }
+
+    /// Watches a share (or stops): the call pulls it and says so (op 106).
+    fn watch_stream(&mut self, fx: &mut Effects, participant_id: String, watch: bool) {
+        let Some(call) = self.voice.as_mut() else {
+            return;
+        };
+        let changed = if watch {
+            call.watched.insert(participant_id)
+        } else {
+            call.watched.remove(&participant_id)
+        };
+        if changed {
+            fx.push(Effect::Voice {
+                call: call.id,
+                command: VoiceCommand::SetWatched(call.watched.iter().cloned().collect()),
+            });
+            self.sync_roster(fx);
+        }
     }
 
     /// New mic and deafen: kept, stored, sent to the call and, once it is
@@ -2870,9 +2890,6 @@ impl State {
                 });
             }
         }
-        if let Some(call) = self.voice.as_ref().filter(|c| c.joined) {
-            self.gateway_send(fx, Self::voice_state_frame(call));
-        }
         self.emit_voice(fx);
     }
 
@@ -2884,21 +2901,28 @@ impl State {
             VoiceUpdate::Status(status) => current.status = status,
             VoiceUpdate::Roster(roster) => current.roster = roster,
             VoiceUpdate::Connected => {
-                // Sidebar presence for everyone else (VOICE_PROTOCOL.md §7),
-                // then our mute and deafen.
+                // `joined`: the connect sound and one presence join (op 33),
+                // as the web sends once the room join completes. Mute and
+                // deafen go on the room socket only (VOICE_ROSTER.md).
                 if !std::mem::replace(&mut current.joined, true) {
                     fx.view(ViewUpdate::Sound(Sound::Connect));
                 }
                 let join = Self::voice_join_frame(current);
-                let state = Self::voice_state_frame(current);
                 self.gateway_send(fx, join);
-                self.gateway_send(fx, state);
+            }
+            VoiceUpdate::Rejoined => {
+                let join = Self::voice_join_frame(current);
+                self.gateway_send(fx, join);
             }
             VoiceUpdate::Ended(error) => {
+                // A forced end: the leave sound and presence leave only if
+                // the room had said Ready.
                 if let Some(ended) = self.voice.take() {
-                    fx.view(ViewUpdate::Sound(Sound::Disconnect));
+                    if ended.joined {
+                        fx.view(ViewUpdate::Sound(Sound::Disconnect));
+                        self.gateway_send(fx, Self::voice_leave_frame(&ended.channel_id));
+                    }
                     fx.push(Effect::VoiceForget(ended.id));
-                    self.gateway_send(fx, Self::voice_leave_frame(&ended.channel_id));
                 }
                 if let Some(error) = error {
                     self.voice_error = join_error_copy(&error);

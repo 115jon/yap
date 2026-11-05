@@ -267,6 +267,36 @@ rows! {
     }
     key(row) -> String { row.id.clone() }
 
+    /// One tile on the call stage (VoiceGrid.tsx): a person, or a share.
+    pub struct VoiceTileRow / VoiceTileRole {
+        /// `person:<seat>` or `screen:<seat>`.
+        id: String => Id "tileId",
+        /// `person` or `screen`.
+        kind: String => Kind "kind",
+        /// The seat key: the user id, or the participant id before the room
+        /// named the user (for the peer menu).
+        member_id: String => MemberId "memberId",
+        /// The call participant, empty until the call lists them.
+        participant_id: String => ParticipantId "participantId",
+        name: String => Name "name",
+        initials: String => Initials "initials",
+        avatar: String => Avatar "avatar",
+        muted: bool => Muted "muted",
+        deafened: bool => Deafened "deafened",
+        speaking: bool => Speaking "speaking",
+        me: bool => Me "me",
+        /// A person's camera is on, or (a share) the share is live.
+        video: bool => Video "video",
+        /// Its frames are pulled and arriving.
+        live: bool => Live "live",
+        /// The key its frames come under (`cam-video-<pid>`,
+        /// `screen-video-<pid>`); empty for our own tile.
+        video_key: String => VideoKey "videoKey",
+        /// A share the user pressed Watch on.
+        watching: bool => Watching "watching",
+    }
+    key(row) -> String { row.id.clone() }
+
     /// One conversation in the home DM list. The rail shows the unread ones
     /// as avatar keys (`rail` is the order among them, -1 when read).
     pub struct DmRow / DmRole {
@@ -673,6 +703,8 @@ pub enum ViewUpdate {
     /// Boxed: a message row is large, and most updates are not messages.
     Messages(Box<ViewDiff<MessageRow>>),
     Roster(ViewDiff<VoiceMemberRow>),
+    /// The call stage's tiles.
+    Tiles(ViewDiff<VoiceTileRow>),
     Unread(UnreadView),
     /// The divider was placed after the list had already landed (read
     /// states that answered late): land on it again.
@@ -1035,6 +1067,64 @@ pub(super) fn tree_rows(
         if channel.channel_type == ChannelType::Voice {
             rows.extend(member_rows(&channel.id, &seats_of(&channel.id)));
         }
+    }
+    rows
+}
+
+/// The call stage: a tile per seat, in seat order, each person followed by
+/// their share when they have one (useVoiceChannel.ts `gridItems`). Video
+/// state comes from the call's member for the seat.
+pub(super) fn tile_rows(seats: &[Seat], call: &VoiceCall) -> Vec<VoiceTileRow> {
+    let mut rows = Vec::new();
+    for s in seats {
+        let member = call.roster.iter().find(|m| {
+            if s.me {
+                m.me
+            } else {
+                m.user_id == s.key || m.id == s.key
+            }
+        });
+        let pid = member.map(|m| m.id.clone()).unwrap_or_default();
+        let remote = !s.me && !pid.is_empty();
+        let key = |prefix: &str| {
+            if remote {
+                format!("{prefix}-{pid}")
+            } else {
+                String::new()
+            }
+        };
+        let person = VoiceTileRow {
+            id: format!("person:{}", s.key),
+            kind: "person".into(),
+            member_id: s.key.clone(),
+            participant_id: pid.clone(),
+            name: s.name.clone(),
+            initials: initials(&s.name),
+            avatar: s.avatar.clone(),
+            muted: s.muted,
+            deafened: s.deafened,
+            speaking: s.speaking,
+            me: s.me,
+            video: member.is_some_and(|m| m.video),
+            live: remote && member.is_some_and(|m| m.camera_live),
+            video_key: key("cam-video"),
+            watching: false,
+        };
+        let sharing = !s.me && (s.live || member.is_some_and(|m| m.stream));
+        let share = sharing.then(|| VoiceTileRow {
+            id: format!("screen:{}", s.key),
+            kind: "screen".into(),
+            muted: false,
+            deafened: false,
+            speaking: false,
+            video: true,
+            live: remote && member.is_some_and(|m| m.screen_live),
+            video_key: key("screen-video"),
+            watching: call.watched.contains(&pid),
+            ..person.clone()
+        });
+        rows.push(person);
+        rows.extend(share);
     }
     rows
 }

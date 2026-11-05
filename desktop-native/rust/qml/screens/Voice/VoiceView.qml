@@ -4,15 +4,50 @@ import com.yap.native
 
 // A voice channel's view. Before you join (voice/VoiceLanding.tsx): the
 // still level meter, the channel, who is already in it and one Join key;
-// nothing animates at rest. Joined: the call's people as a grid of tiles
-// (the stage, video and the dock come later).
+// nothing animates at rest. Joined (VoiceStage.tsx): the call's tiles in a
+// fitted grid, or one tile on stage with everyone in a tray above the stage
+// bar; the stage bar; fullscreen hides the rest of the shell.
 Rectangle {
     id: root
 
     readonly property bool joined: Voice.channelId.length > 0 && Voice.channelId === Nav.voicePanelId
     readonly property int count: Nav.voicePanelCount
+    readonly property bool focused: joined && ShellState.focusedTile.length > 0
 
     color: Theme.ply0
+
+    // The stage and fullscreen belong to this call's view.
+    onJoinedChanged: {
+        if (!joined) {
+            ShellState.focusedTile = ""
+            ShellState.stageFullscreen = false
+        }
+    }
+    Component.onDestruction: {
+        ShellState.focusedTile = ""
+        ShellState.stageFullscreen = false
+        ShellState.stageParticipant = ""
+        Voice.setStage("")
+    }
+    onFocusedChanged: {
+        if (!focused) {
+            ShellState.stageParticipant = ""
+            ShellState.stageLabel = ""
+            ShellState.stageAvatar = ""
+            ShellState.stageLive = false
+            ShellState.stageRemoteStream = false
+        }
+    }
+    // Whose share audio is audible: the participant on stage.
+    Connections {
+        target: ShellState
+        function onStageParticipantChanged() { Voice.setStage(ShellState.stageParticipant) }
+    }
+    Shortcut {
+        enabled: ShellState.stageFullscreen
+        sequence: "Escape"
+        onActivated: ShellState.stageFullscreen = false
+    }
 
     // Header: 48, the channel glyph at 20 in ink-3, Bricolage 18/800.
     Item {
@@ -34,6 +69,45 @@ Rectangle {
                 text: Nav.voicePanelName
                 color: Theme.ink1
                 font: Theme.type.columnTitle
+            }
+            // On stage: who, and Live for media (VoiceHeader.tsx).
+            Rectangle {
+                visible: root.focused
+                anchors.verticalCenter: parent.verticalCenter
+                width: 1
+                height: 16
+                color: Theme.lineStrong
+            }
+            Avatar {
+                visible: root.focused
+                anchors.verticalCenter: parent.verticalCenter
+                size: 20
+                initials: ShellState.stageLabel
+                source: ShellState.stageAvatar
+            }
+            Text {
+                visible: root.focused
+                anchors.verticalCenter: parent.verticalCenter
+                text: ShellState.stageLabel
+                color: Theme.ink1
+                font.family: "Yap Bricolage Key Bold"
+                font.pixelSize: 14
+                font.weight: Font.Bold
+            }
+            Row {
+                visible: root.focused && ShellState.stageLive
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 6
+                Led {
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: Theme.live
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Live")
+                    color: Theme.liveInk
+                    font: Theme.type.captionStrong
+                }
             }
         }
         IconKey {
@@ -195,7 +269,7 @@ Rectangle {
 
     Flickable {
         id: stage
-        visible: root.joined
+        visible: root.joined && !root.focused
         anchors.fill: body
         anchors.margins: 16
         readonly property var fit: root.fitGrid(width, height, tiles.count)
@@ -213,7 +287,7 @@ Rectangle {
             spacing: 8
             Repeater {
                 id: tiles
-                model: VoiceRosterModel
+                model: root.joined && !root.focused ? VoiceTileModel : null
                 delegate: VoiceTile {
                     width: stage.fit.tileW
                     height: Math.round(stage.fit.tileW * 9 / 16)
@@ -223,11 +297,56 @@ Rectangle {
         }
     }
 
+    // On stage: one slot per tile, only the focused one built. A focused
+    // tile that goes away (their share ended, they left) leaves the stage.
+    Item {
+        id: focusArea
+        visible: root.focused
+        anchors.fill: body
+        anchors.margins: 16
+        Repeater {
+            model: root.joined ? VoiceTileModel : null
+            delegate: Loader {
+                id: slot
+                required property string tileId
+                required property string kind
+                required property string memberId
+                required property string participantId
+                required property string name
+                required property string avatar
+                required property bool me
+                required property bool video
+                required property string videoKey
+                anchors.fill: parent
+                active: tileId === ShellState.focusedTile
+                sourceComponent: FocusedStage { tile: slot }
+            }
+            onItemRemoved: (index, item) => {
+                if (item.tileId === ShellState.focusedTile)
+                    ShellState.focusedTile = ""
+            }
+        }
+    }
+
     Item {
         id: body
         anchors.top: strip.bottom
+        anchors.bottom: tray.top
+        width: parent.width
+    }
+
+    MembersTray {
+        id: tray
         anchors.bottom: dock.top
         width: parent.width
+        height: root.focused ? implicitHeight : 0
+        visible: root.focused
+        z: 1
+        Rectangle {
+            anchors.fill: parent
+            z: -1
+            color: Theme.ply1
+        }
     }
 
     // The stage bar (VoiceControls.tsx): ply-1 with a top seam, 48 px
@@ -264,6 +383,15 @@ Rectangle {
                 height: 24
                 color: Theme.line
             }
+            // Watching someone's share on stage: back to the grid.
+            IconKey {
+                visible: root.focused && ShellState.stageRemoteStream
+                size: 48
+                iconName: "streamOff"
+                tone: "rest"
+                tip: qsTr("Stop watching")
+                onClicked: ShellState.focusedTile = ""
+            }
             IconKey {
                 id: leaveKey
                 size: 48
@@ -289,6 +417,16 @@ Rectangle {
                     }
                 }
             }
+        }
+        // Trailing: fullscreen.
+        IconKey {
+            anchors.right: parent.right
+            anchors.rightMargin: 24
+            anchors.verticalCenter: parent.verticalCenter
+            size: 48
+            iconName: ShellState.stageFullscreen ? "minimize" : "maximize"
+            tip: ShellState.stageFullscreen ? qsTr("Exit fullscreen") : qsTr("Fullscreen")
+            onClicked: ShellState.stageFullscreen = !ShellState.stageFullscreen
         }
     }
 }

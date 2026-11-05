@@ -66,6 +66,7 @@
 mod audio;
 mod driver;
 mod engine;
+pub mod layers;
 mod machine;
 mod roster;
 mod sfu;
@@ -76,18 +77,21 @@ pub mod wire;
 pub use audio::{peer_gain, resolve, AudioDevice, AudioDevices, Playback, Processing, MAX_VOLUME};
 pub use driver::{run_call, ApiFailure, CallEnv, Commands, TicketApi};
 pub use engine::{
-    FakeEngine, FakeOp, FakeSession, LocalOffer, MediaEngine, MediaError, MediaSession,
+    FakeEngine, FakeOp, FakeSession, I420Frame, LocalOffer, MediaEngine, MediaError, MediaSession,
+    VideoOutput,
 };
 #[cfg(feature = "libwebrtc")]
 pub use engine::{LibwebrtcEngine, LibwebrtcSession};
+pub use layers::{Quality, RenderSize};
 pub use machine::{
-    stop_message, CallMachine, CallState, CallTarget, Effect, Input, MediaEvent, MediaSpec,
-    MediaState, Notice, Published, RoomEvent, Socket, SocketSpec, TicketReplies, Timer,
-    UserCommand, VoiceEvent, LEAVE_LINGER, REANNOUNCE_GRACE,
+    camera_alias, screen_alias, stop_message, CallMachine, CallState, CallTarget, Effect, Input,
+    MediaEvent, MediaSpec, MediaState, Notice, Published, RoomEvent, Socket, SocketSpec,
+    TicketReplies, Timer, UserCommand, VideoIntent, VoiceEvent, LEAVE_SEND_WINDOW,
+    REMOTE_RECONNECT_GRACE,
 };
 pub use roster::{Member, Roster};
-pub use sfu::{Pulled, Pushed, Sfu};
-pub use tracks::{Remote, TrackTable};
+pub use sfu::{LayerUpdate, Pulled, Pushed, Sfu};
+pub use tracks::{Kind, Offer, Pull, Remote, TrackTable};
 pub use vad::{
     level_percent, EnergyMeter, Sensitivity, Vad, AUTO_THRESHOLD, SILENCE_DELAY_MS, VAD_TICK,
 };

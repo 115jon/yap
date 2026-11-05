@@ -119,6 +119,11 @@ pub enum Command {
     SetVoiceMuted(bool),
     /// Deafen (or not). Like mute, it is kept between calls.
     SetVoiceDeafened(bool),
+    /// Watch (or stop watching) a participant's share in the call.
+    WatchStream {
+        participant_id: String,
+        watch: bool,
+    },
 }
 
 /// A file the user picked, pasted or dropped, as the UI read it.

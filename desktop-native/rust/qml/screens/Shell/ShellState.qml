@@ -12,6 +12,22 @@ QtObject {
 
     property bool showMembers: true
 
+    // The call stage (VoiceGrid.tsx `focusedId`): the tile on stage, the
+    // participant whose camera or share it is (their share audio is
+    // audible; set by the stage while the tile exists), and fullscreen.
+    property string focusedTile: ""
+    property string stageParticipant: ""
+    property bool stageFullscreen: false
+    // What the stage header says about it ("Linus's Stream", Live).
+    property string stageLabel: ""
+    property string stageAvatar: ""
+    property bool stageLive: false
+    property bool stageRemoteStream: false
+
+    function toggleFocus(tileId) {
+        focusedTile = focusedTile === tileId ? "" : tileId
+    }
+
     // `side`: where the card opens next to `anchor`: right, left or top.
     signal profileRequested(string userId, Item anchor, string side)
 

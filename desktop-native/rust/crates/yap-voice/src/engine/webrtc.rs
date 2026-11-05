@@ -6,11 +6,26 @@
 //! process and applied by endpoint id whenever the ADM is up; in a call it
 //! switches at once (stop, select, init, start). Two track calls the crate
 //! lacks (remote volume, live APM options) go through `cpp/track_audio.cpp`.
+//!
+//! Video: each routed remote video track gets a `NativeVideoStream` (a
+//! WebRTC sink with a one-frame queue: a slow consumer sees the newest frame,
+//! never a backlog) pumped by a tokio task that hands I420 planes to the
+//! installed [`VideoOutput`]. A decoded I420 buffer is passed as is; other
+//! buffer kinds are converted once. An unrouted track has no sink at all, so
+//! its frames cost nothing past the decoder.
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
+use std::time::{Duration, Instant};
+
+use futures_util::StreamExt;
+use libwebrtc::video_frame::{VideoBuffer, VideoRotation};
+use libwebrtc::video_stream::native::NativeVideoStream;
+use libwebrtc::video_track::RtcVideoTrack;
+use tokio::runtime::Handle;
+use tokio::task::JoinHandle;
 
 use libwebrtc::media_stream_track::MediaStreamTrack;
 use libwebrtc::peer_connection::{
@@ -28,7 +43,7 @@ use libwebrtc::stats::RtcStats;
 use libwebrtc::MediaType;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
-use super::{LocalOffer, MediaEngine, MediaError, MediaSession};
+use super::{I420Frame, LocalOffer, MediaEngine, MediaError, MediaSession, VideoOutput};
 use crate::audio::{resolve, AudioDevice, AudioDevices, Processing};
 use crate::machine::MediaState;
 use crate::wire::IceServer;
@@ -213,6 +228,13 @@ fn apply(f: &PeerConnectionFactory, sel: &mut Selection) -> Option<String> {
 }
 
 impl LibwebrtcEngine {
+    /// Installs where remote video frames go, for this and later calls.
+    pub fn set_video_output(output: Arc<dyn VideoOutput>) {
+        *video_output()
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = Some(output);
+    }
+
     /// The platform's input and output devices. Outside a call this opens
     /// the ADM briefly (no capture or playout starts). Blocks on WebRTC's
     /// worker thread: call it off the GUI thread.
@@ -252,29 +274,174 @@ impl LibwebrtcEngine {
     }
 }
 
-/// The remote tracks (the ADM mixes and plays them), by receive mid.
-#[derive(Default)]
+fn video_output() -> &'static RwLock<Option<Arc<dyn VideoOutput>>> {
+    static OUTPUT: RwLock<Option<Arc<dyn VideoOutput>>> = RwLock::new(None);
+    &OUTPUT
+}
+
+/// How often a routed track logs its frame rate and size.
+const VIDEO_STATS_EVERY: Duration = Duration::from_secs(5);
+
+/// Feeds one remote video track's frames to the output under `key` until
+/// aborted (dropping the stream removes its sink from the track).
+async fn pump_video(track: RtcVideoTrack, key: String) {
+    let mut stream = NativeVideoStream::new(track);
+    let output = video_output()
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    let Some(output) = output else {
+        eprintln!("[video] no output installed; {key} dropped");
+        return;
+    };
+    let (mut frames, mut since) = (0u32, Instant::now());
+    while let Some(frame) = stream.next().await {
+        let buffer = frame.buffer.as_ref();
+        let converted;
+        let i420 = match buffer.as_i420() {
+            Some(i420) => i420,
+            None => {
+                converted = buffer.to_i420();
+                &converted
+            }
+        };
+        let (y, u, v) = i420.data();
+        let (stride_y, stride_u, stride_v) = i420.strides();
+        let rotation = match frame.rotation {
+            VideoRotation::VideoRotation0 => 0,
+            VideoRotation::VideoRotation90 => 90,
+            VideoRotation::VideoRotation180 => 180,
+            VideoRotation::VideoRotation270 => 270,
+        };
+        let size = (i420.width(), i420.height());
+        output.frame(
+            &key,
+            &I420Frame {
+                width: size.0,
+                height: size.1,
+                rotation,
+                y,
+                u,
+                v,
+                stride_y,
+                stride_u,
+                stride_v,
+            },
+        );
+        frames += 1;
+        let elapsed = since.elapsed();
+        if elapsed >= VIDEO_STATS_EVERY {
+            eprintln!(
+                "[video] {key} {}x{} {:.1} fps",
+                size.0,
+                size.1,
+                f64::from(frames) / elapsed.as_secs_f64()
+            );
+            (frames, since) = (0, Instant::now());
+        }
+    }
+}
+
+/// The remote tracks (the ADM mixes and plays the audio ones), by receive
+/// mid, and the video routes.
 struct Remotes {
     tracks: Vec<(Option<String>, MediaStreamTrack)>,
     /// Gains set by mid, also for tracks that have not arrived yet.
     gains: HashMap<String, f64>,
-    /// Deafened: remote tracks are disabled, new ones included.
+    /// Deafened: remote audio tracks are disabled, new ones included.
     silenced: bool,
+    /// Video mid -> the output key its frames go to, also for tracks that
+    /// have not arrived yet.
+    routes: HashMap<String, String>,
+    /// Video mid -> the task pumping its frames.
+    pumps: HashMap<String, JoinHandle<()>>,
+    /// The call's runtime (WebRTC calls `on_track` on its own thread).
+    runtime: Handle,
 }
 
 impl Remotes {
-    fn add(&mut self, mid: Option<String>, track: MediaStreamTrack) {
-        if self.silenced {
-            track.set_enabled(false);
+    fn new(runtime: Handle) -> Self {
+        Self {
+            tracks: Vec::new(),
+            gains: HashMap::new(),
+            silenced: false,
+            routes: HashMap::new(),
+            pumps: HashMap::new(),
+            runtime,
         }
-        if let (Some(gain), MediaStreamTrack::Audio(audio)) =
-            (mid.as_ref().and_then(|m| self.gains.get(m)), &track)
-        {
-            if !set_volume(audio, *gain) {
-                eprintln!("[voice] track volume refused for a new track");
+    }
+
+    fn add(&mut self, mid: Option<String>, track: MediaStreamTrack) {
+        match &track {
+            MediaStreamTrack::Audio(audio) => {
+                if self.silenced {
+                    track.set_enabled(false);
+                }
+                if let Some(gain) = mid.as_ref().and_then(|m| self.gains.get(m)) {
+                    if !set_volume(audio, *gain) {
+                        eprintln!("[voice] track volume refused for a new track");
+                    }
+                }
+            }
+            MediaStreamTrack::Video(video) => {
+                if let Some((mid, key)) = mid
+                    .as_ref()
+                    .and_then(|m| Some((m.clone(), self.routes.get(m)?.clone())))
+                {
+                    self.start_pump(mid, video.clone(), key);
+                }
             }
         }
         self.tracks.push((mid, track));
+    }
+
+    fn start_pump(&mut self, mid: String, track: RtcVideoTrack, key: String) {
+        let pump = self.runtime.spawn(pump_video(track, key));
+        if let Some(old) = self.pumps.insert(mid, pump) {
+            old.abort();
+        }
+    }
+
+    fn video_track(&self, mid: &str) -> Option<RtcVideoTrack> {
+        self.tracks.iter().find_map(|(m, track)| match track {
+            MediaStreamTrack::Video(video) if m.as_deref() == Some(mid) => Some(video.clone()),
+            _ => None,
+        })
+    }
+
+    fn route(&mut self, mid: &str, key: Option<&str>) {
+        match key {
+            Some(key) => {
+                self.routes.insert(mid.to_owned(), key.to_owned());
+                if let Some(track) = self.video_track(mid) {
+                    self.start_pump(mid.to_owned(), track, key.to_owned());
+                }
+            }
+            None => {
+                self.routes.remove(mid);
+                if let Some(pump) = self.pumps.remove(mid) {
+                    pump.abort();
+                }
+            }
+        }
+    }
+
+    /// Forgets these mids: their gains, routes, pumps and tracks.
+    fn forget(&mut self, mids: &[String]) {
+        for mid in mids {
+            self.route(mid, None);
+            self.gains.remove(mid);
+        }
+        self.tracks
+            .retain(|(mid, _)| !mid.as_ref().is_some_and(|m| mids.contains(m)));
+    }
+
+    fn clear(&mut self) {
+        for (_, pump) in self.pumps.drain() {
+            pump.abort();
+        }
+        self.routes.clear();
+        self.tracks.clear();
     }
 }
 
@@ -342,7 +509,7 @@ impl MediaEngine for LibwebrtcEngine {
                 PeerConnectionState::Closed => MediaState::Closed,
             });
         })));
-        let remotes = Arc::new(Mutex::new(Remotes::default()));
+        let remotes = Arc::new(Mutex::new(Remotes::new(Handle::current())));
         let kept = Arc::clone(&remotes);
         pc.on_track(Some(Box::new(move |event| {
             lock(&kept).add(event.transceiver.mid(), event.track);
@@ -456,13 +623,7 @@ impl MediaSession for LibwebrtcSession {
                 let _ = transceiver.stop();
             }
         }
-        {
-            let mut remotes = lock(&self.remotes);
-            remotes.gains.retain(|mid, _| !mids.contains(mid));
-            remotes
-                .tracks
-                .retain(|(mid, _)| !mid.as_ref().is_some_and(|m| mids.contains(m)));
-        }
+        lock(&self.remotes).forget(mids);
         let offer = self
             .pc
             .create_offer(OfferOptions::default())
@@ -484,7 +645,9 @@ impl MediaSession for LibwebrtcSession {
         let mut remotes = lock(&self.remotes);
         remotes.silenced = !enabled;
         for (_, track) in &remotes.tracks {
-            track.set_enabled(enabled);
+            if matches!(track, MediaStreamTrack::Audio(_)) {
+                track.set_enabled(enabled);
+            }
         }
     }
 
@@ -519,6 +682,19 @@ impl MediaSession for LibwebrtcSession {
                     eprintln!("[voice] track volume refused on {mid}");
                 }
             }
+        }
+    }
+
+    fn set_video_sink(&self, mid: &str, key: Option<&str>) {
+        lock(&self.remotes).route(mid, key);
+    }
+
+    fn stop_local(&self) {
+        self.mic.set_enabled(false);
+        MIC_LIVE.store(false, Ordering::Relaxed);
+        let f = factory();
+        if f.recording_is_initialized() {
+            f.stop_recording();
         }
     }
 
@@ -566,7 +742,7 @@ impl MediaSession for LibwebrtcSession {
     }
 
     fn close(&self) {
-        lock(&self.remotes).tracks.clear();
+        lock(&self.remotes).clear();
         *lock(&self.sender) = None;
         self.pc.close();
     }

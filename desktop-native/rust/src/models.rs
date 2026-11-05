@@ -54,6 +54,13 @@ pub mod qobject {
         #[qml_singleton]
         type VoiceRosterModel = super::VoiceRosterModelRust;
 
+        /// The call stage: one tile per person, and one per share.
+        #[qobject]
+        #[base = QAbstractListModel]
+        #[qml_element]
+        #[qml_singleton]
+        type VoiceTileModel = super::VoiceTileModelRust;
+
         /// The composer's `@` suggestions.
         #[qobject]
         #[base = QAbstractListModel]
@@ -101,6 +108,7 @@ pub mod qobject {
     impl cxx_qt::Initialize for ChannelTreeModel {}
     impl cxx_qt::Initialize for MessageListModel {}
     impl cxx_qt::Initialize for VoiceRosterModel {}
+    impl cxx_qt::Initialize for VoiceTileModel {}
     impl cxx_qt::Initialize for MentionListModel {}
     impl cxx_qt::Initialize for DmListModel {}
     impl cxx_qt::Initialize for MemberListModel {}
@@ -155,6 +163,15 @@ pub mod qobject {
         #[cxx_name = "dataChanged"]
         fn data_changed(
             self: Pin<&mut VoiceRosterModel>,
+            top_left: &QModelIndex,
+            bottom_right: &QModelIndex,
+            roles: &QVector_i32,
+        );
+        #[inherit]
+        #[qsignal]
+        #[cxx_name = "dataChanged"]
+        fn data_changed(
+            self: Pin<&mut VoiceTileModel>,
             top_left: &QModelIndex,
             bottom_right: &QModelIndex,
             roles: &QVector_i32,
@@ -244,6 +261,9 @@ pub mod qobject {
             column: i32,
             parent: &QModelIndex,
         ) -> QModelIndex;
+        #[inherit]
+        fn index(self: &VoiceTileModel, row: i32, column: i32, parent: &QModelIndex)
+            -> QModelIndex;
         #[inherit]
         fn index(
             self: &MentionListModel,
@@ -372,8 +392,19 @@ pub mod qobject {
             last: i32,
         );
         #[inherit]
+        #[cxx_name = "beginInsertRows"]
+        unsafe fn begin_insert_rows(
+            self: Pin<&mut VoiceTileModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
         #[cxx_name = "endInsertRows"]
         unsafe fn end_insert_rows(self: Pin<&mut VoiceRosterModel>);
+        #[inherit]
+        #[cxx_name = "endInsertRows"]
+        unsafe fn end_insert_rows(self: Pin<&mut VoiceTileModel>);
         #[inherit]
         #[cxx_name = "beginRemoveRows"]
         unsafe fn begin_remove_rows(
@@ -383,14 +414,31 @@ pub mod qobject {
             last: i32,
         );
         #[inherit]
+        #[cxx_name = "beginRemoveRows"]
+        unsafe fn begin_remove_rows(
+            self: Pin<&mut VoiceTileModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
         #[cxx_name = "endRemoveRows"]
         unsafe fn end_remove_rows(self: Pin<&mut VoiceRosterModel>);
+        #[inherit]
+        #[cxx_name = "endRemoveRows"]
+        unsafe fn end_remove_rows(self: Pin<&mut VoiceTileModel>);
         #[inherit]
         #[cxx_name = "beginResetModel"]
         unsafe fn begin_reset_model(self: Pin<&mut VoiceRosterModel>);
         #[inherit]
+        #[cxx_name = "beginResetModel"]
+        unsafe fn begin_reset_model(self: Pin<&mut VoiceTileModel>);
+        #[inherit]
         #[cxx_name = "endResetModel"]
         unsafe fn end_reset_model(self: Pin<&mut VoiceRosterModel>);
+        #[inherit]
+        #[cxx_name = "endResetModel"]
+        unsafe fn end_reset_model(self: Pin<&mut VoiceTileModel>);
 
         #[inherit]
         #[cxx_name = "beginInsertRows"]
@@ -604,12 +652,23 @@ pub mod qobject {
         fn data(self: &VoiceRosterModel, index: &QModelIndex, role: i32) -> QVariant;
         #[qinvokable]
         #[cxx_override]
+        fn data(self: &VoiceTileModel, index: &QModelIndex, role: i32) -> QVariant;
+        #[qinvokable]
+        #[cxx_override]
         #[cxx_name = "roleNames"]
         fn role_names(self: &VoiceRosterModel) -> QHash_i32_QByteArray;
         #[qinvokable]
         #[cxx_override]
+        #[cxx_name = "roleNames"]
+        fn role_names(self: &VoiceTileModel) -> QHash_i32_QByteArray;
+        #[qinvokable]
+        #[cxx_override]
         #[cxx_name = "rowCount"]
         fn row_count(self: &VoiceRosterModel, parent: &QModelIndex) -> i32;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "rowCount"]
+        fn row_count(self: &VoiceTileModel, parent: &QModelIndex) -> i32;
 
         #[qinvokable]
         #[cxx_override]
@@ -686,7 +745,7 @@ use cxx_qt_lib::QVector;
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
 use yap_core::store::view::{
     Cell, ChannelTreeRow, DmRow, EmojiRow, GifRow, MemberListRow, MentionRow, MessageRow, Row,
-    ServerRow, UploadRow, VoiceMemberRow,
+    ServerRow, UploadRow, VoiceMemberRow, VoiceTileRow,
 };
 use yap_core::ViewDiff;
 
@@ -845,6 +904,7 @@ list_model!(
     VoiceMemberRow,
     roster
 );
+list_model!(VoiceTileModel, VoiceTileModelRust, VoiceTileRow, tiles);
 list_model!(MentionListModel, MentionListModelRust, MentionRow, mentions);
 list_model!(DmListModel, DmListModelRust, DmRow, dms);
 list_model!(MemberListModel, MemberListModelRust, MemberListRow, members);
@@ -865,6 +925,11 @@ impl ListModel for qobject::ChannelTreeModel {
 impl ListModel for qobject::VoiceRosterModel {
     type Row = VoiceMemberRow;
     list_model_ops!(VoiceMemberRow, roster);
+}
+
+impl ListModel for qobject::VoiceTileModel {
+    type Row = VoiceTileRow;
+    list_model_ops!(VoiceTileRow, tiles);
 }
 
 impl ListModel for qobject::MentionListModel {

@@ -38,10 +38,12 @@ RowLayout {
     }
 
     ServerRail {
+        visible: !ShellState.stageFullscreen
         Layout.fillHeight: true
         Layout.preferredWidth: Theme.rail
     }
     ChannelSidebar {
+        visible: !ShellState.stageFullscreen
         Layout.fillHeight: true
         Layout.preferredWidth: Theme.treePanel
     }

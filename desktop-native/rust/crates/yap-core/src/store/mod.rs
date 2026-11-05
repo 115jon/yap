@@ -57,15 +57,17 @@ pub struct VoiceTarget {
 }
 
 /// Commands to a running voice session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VoiceCommand {
     SetMuted(bool),
     SetDeafened(bool),
+    /// The participants whose shares the user watches.
+    SetWatched(Vec<String>),
     Leave,
 }
 
 /// One participant in a call, as the voice session reports it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VoiceMember {
     /// The participant id.
     pub id: String,
@@ -77,6 +79,14 @@ pub struct VoiceMember {
     pub speaking: bool,
     /// This client's own participant.
     pub me: bool,
+    /// Camera on (`self_video`).
+    pub video: bool,
+    /// Sharing their screen (`self_stream`).
+    pub stream: bool,
+    /// Their camera's frames arrive.
+    pub camera_live: bool,
+    /// Their share's frames arrive.
+    pub screen_live: bool,
 }
 
 /// Someone in a server voice channel, as the gateway reports it for the
@@ -98,7 +108,10 @@ pub struct Occupant {
 #[derive(Debug, Clone, PartialEq)]
 pub enum VoiceUpdate {
     Status(String),
+    /// The room said Ready for the first time.
     Connected,
+    /// The room identified us afresh mid-call: presence goes out again.
+    Rejoined,
     /// The whole roster, in a stable order.
     Roster(Vec<VoiceMember>),
     /// The call is over; the error text if it failed.

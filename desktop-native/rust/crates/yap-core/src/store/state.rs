@@ -10,7 +10,7 @@ use yap_protocol::rest::{DmChannel, GifItem, Member, Notification, Server, Uploa
 use super::time::{is_after, LocalOffset};
 use super::view::{
     ChannelTreeRow, DmRow, DmView, GifRow, MemberListRow, MentionRow, ProfileView, ServerRow,
-    UploadRow, VoiceMemberRow,
+    UploadRow, VoiceMemberRow, VoiceTileRow,
 };
 use super::{CallId, Occupant, RequestId, SessionId, SignInId, VoiceMember};
 use crate::api::{ApiError, Token};
@@ -295,8 +295,11 @@ pub struct VoiceCall {
     pub roster: Vec<VoiceMember>,
     pub muted: bool,
     pub deafened: bool,
-    /// The media path came up once: our voice state goes to the gateway.
+    /// The room said Ready once (STATE_MACHINE.md `joined`): a leave is a
+    /// joined teardown (sound, presence leave).
     pub joined: bool,
+    /// Participants whose shares the user watches.
+    pub watched: std::collections::BTreeSet<String>,
 }
 
 /// Mic and deafen, kept between calls and in the snapshot cache (the
@@ -310,6 +313,7 @@ pub(super) struct Projection {
     pub servers: Vec<ServerRow>,
     pub tree: Vec<ChannelTreeRow>,
     pub roster: Vec<VoiceMemberRow>,
+    pub tiles: Vec<VoiceTileRow>,
     pub mentions: Vec<MentionRow>,
     pub dms: Vec<DmRow>,
     pub members: Vec<MemberListRow>,

@@ -23,6 +23,8 @@ pub enum FakeOp {
     SetPlayoutEnabled(bool),
     SetTrackGain { mid: String, gain: f64 },
     SetProcessing(Processing),
+    SetVideoSink { mid: String, key: Option<String> },
+    StopLocal,
     Stats,
     Close,
     Release,
@@ -193,6 +195,20 @@ impl MediaSession for FakeSession {
                 gain,
             },
         );
+    }
+
+    fn set_video_sink(&self, mid: &str, key: Option<&str>) {
+        record(
+            &self.shared,
+            FakeOp::SetVideoSink {
+                mid: mid.to_owned(),
+                key: key.map(str::to_owned),
+            },
+        );
+    }
+
+    fn stop_local(&self) {
+        record(&self.shared, FakeOp::StopLocal);
     }
 
     async fn mic_energy(&self) -> Option<(f64, f64)> {

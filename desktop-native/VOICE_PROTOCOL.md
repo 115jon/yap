@@ -1,8 +1,42 @@
-# Yap voice wire protocol: minimal audio-only native client
+# Yap voice wire protocol: the native client
 
 Read from code on `spike/qt-desktop` (2026-11-04). Every claim cites `file:line`.
 Paths are relative to the repo root. "UNVERIFIED" means the repo does not show it
 (usually Cloudflare Realtime API behaviour behind the proxy).
+
+## The specs come first (2026-11-05)
+
+The web team's contracts now live next to the code, and they win over this file
+where the two differ:
+
+- `packages/voice/STATE_MACHINE.md`: phases, teardown order and plan, server-initiated
+  ends, the remote reconnect grace, voice-state deltas, the publication reconciler.
+- `packages/voice/SCREEN_SHARE.md`: track names, watching a share, keepalive park and reuse.
+- `packages/voice/DEVICES.md`: device choice, fallback and output routing.
+- `realtime/SOCKET_CORE.md`: which opcodes each socket accepts. A frame on the wrong
+  socket gets `4001 "Unknown opcode"`.
+- `realtime/VOICE_ROSTER.md`: the room object owns sidebar voice occupancy; op 33/34/15
+  on the global socket no longer add, remove or update anyone.
+- Simulcast: `src/lib/voice/video-layers.ts`, `video-render-demand.ts`, `video-keepalive.ts`,
+  `realtime/partytracks-proxy.ts`.
+
+What `yap-voice`/`yap-core` do now, and where they still differ:
+
+| Topic                             | Native client                                                                                                                                                                                                                                                                                                                                                                                                         | Spec                                          |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| Sends per socket                  | global 0, 3, 7, 26, 27, 28, 33, 34, 35; room 0, 3, 7, 11, 15, 40; voice 100, 3, 5, 11, 12, 106. All are in the role tables. Op 13 is no longer sent (leave relies on op 11).                                                                                                                                                                                                                                          | SOCKET_CORE.md tables                         |
+| Global op 15                      | Not sent any more. It carried mute/deafen, which no longer reaches the sidebar.                                                                                                                                                                                                                                                                                                                                       | VOICE_ROSTER.md "Old clients"                 |
+| Op 33 / 34                        | One op 33 when the room says Ready, again after a fresh room Ready mid-call. No re-send when the chat gateway re-identifies. Op 34 only for a joined call.                                                                                                                                                                                                                                                            | STATE_MACHINE.md note 1, Teardown             |
+| Phases                            | `joined` on the room's Ready. `reconnecting` on a room drop or the peer connection going `disconnected`. A voice socket drop only changes the status line.                                                                                                                                                                                                                                                            | STATE_MACHINE.md Transitions                  |
+| Peer connection `failed`          | Ends the call. There is no SFU session rebuild.                                                                                                                                                                                                                                                                                                                                                                       | PartyTracks rebuilds and republishes          |
+| Teardown                          | Stop the mic, then wait 100 ms (joined) or no time at all. Then op 11 on room, op 11 on voice, close room, close voice, close the peer connection. No leave sound or op 34 for a call that never joined.                                                                                                                                                                                                              | STATE_MACHINE.md Teardown                     |
+| Leave trigger (op 106 soundboard) | Not sent: there is no soundboard yet.                                                                                                                                                                                                                                                                                                                                                                                 | Teardown step 2                               |
+| Remote op 11                      | 3 s grace (was 15 s). Speaking clears at once. The roster row always stays: only the room removes people. On expiry, only the tracks they did not offer again are dropped.                                                                                                                                                                                                                                            | REMOTE_RECONNECT_GRACE_MS                     |
+| Deltas                            | Merged over the existing row. A delta for an unknown participant is dropped (it used to show "Someone").                                                                                                                                                                                                                                                                                                              | Voice-state deltas                            |
+| Republish                         | Only the mic is published. Mute is `set_enabled`. A voice reconnect re-announces op 12 because the peer connection keeps its publication.                                                                                                                                                                                                                                                                             | Reconnect republish                           |
+| Cameras                           | Pulled once a visible tile renders them, with `simulcast.preferredRid` for the tile size (f/h/q). A size change goes through `tracks/update`, using `priorityOrdering: "none"` and then a settle update 2 s later. Upgrades wait 150 ms, downgrades 1 s. A hidden camera keeps its pull: it switches to `q` and its frames are dropped. Camera off (op 13) parks the pull; the same SFU track coming back unparks it. | video-layers.ts, partytracks-media-manager.ts |
+| Shares                            | Video is pulled only after Watch (or when on stage) and kept until the share ends. Unwatching hides it. Watching sends op 106 `stream.watch.start` / `stop`. Share audio is always pulled; its gain is 0 unless the owner's share or camera is on stage.                                                                                                                                                              | SCREEN_SHARE.md Watching                      |
+| Video pulls                       | Never closed in order to pull them again, because the SFU's recycled m-line breaks libwebrtc.                                                                                                                                                                                                                                                                                                                         | SCREEN_SHARE.md Watching                      |
 
 The closest existing reference is the mobile app (`apps/mobile/src/features/voice/`),
 a port of the web client without the browser-only parts. Its join order is
@@ -431,14 +465,16 @@ with a new `trackName` and re-announce (`src/lib/sfu-client.ts:848-875`, `apps/m
 13. On peer-connection failure, repeat steps 6 and 8 with the new capability. On socket drop (not 4008/4010), get a new ticket for that socket,
     reconnect, and re-identify. The room socket may Resume (op 7, `{session_id: participant_id, seq_ack}`) (`src/lib/voice/gateways/room-gateway.ts:169-182`).
     The voice socket re-identifies and VoiceReady replays the tracks (`src/lib/voice/gateways/voice-gateway.ts:46-51`).
-14. Leave: voice `{"op":11,"d":{}}`, room `{"op":11,"d":{}}`, close both sockets, close the peer connection.
+14. Leave (STATE_MACHINE.md "Teardown"): stop the mic; for a joined call wait the 100 ms send window;
+    then room `{"op":11,"d":{}}`, voice `{"op":11,"d":{}}`, close the room socket, then the voice socket,
+    then the peer connection.
 15. On error 4010 or close 4010/4008: stop. Do not reconnect.
 
 ## 7. Web-only or optional (safe to skip for audio only)
 
-- **Global chat gateway presence** (`/api/gateway`, VoiceChannelJoin op 33 / Leave op 34): this is what puts you in other members'
-  sidebar channel tree (`src/hooks/useVoiceChannel.ts:1978-1983`, `src/stores/chat-gateway.ts:1165-1184`,
-  `apps/mobile/src/features/voice/session.ts:1029-1047`). It is not needed for media, but without it the sidebar will not list you.
+- **Global chat gateway presence** (`/api/gateway`, VoiceChannelJoin op 33 / Leave op 34): since `realtime/VOICE_ROSTER.md`
+  the room object puts you in the sidebar on its own; op 33/34 only set a hint channel and may trigger a roster pull.
+  The native client still sends one op 33 when the room says Ready and op 34 on a joined leave, as the web does.
 - Ticket prefetch on hover (`src/lib/voice/socket-ticket-client.ts:97-155`). Move grants (`moveGrant`, VoiceMove op 42).
 - Standby / pre-warm (`standby: true`, `promote_standby`) (`src/lib/sfu-client.ts:933-950,1111-1121`).
 - Speaking / VAD (op 5). It is cosmetic for others.

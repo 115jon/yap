@@ -26,6 +26,18 @@ pub struct Pushed {
     pub track_name: String,
 }
 
+/// A simulcast layer switch for one pulled camera (`tracks/update`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LayerUpdate {
+    pub mid: String,
+    pub sfu_track_name: String,
+    /// The publisher's session capability.
+    pub session_id: String,
+    pub rid: String,
+    /// The first update of a switch; the settle update 2 s later is not.
+    pub switch_now: bool,
+}
+
 /// The SFU's offer for a pull (the client answers through [`Sfu::renegotiate`]).
 pub struct Pulled {
     pub mid: String,
@@ -127,20 +139,26 @@ impl Sfu {
         })
     }
 
-    /// Asks to pull another participant's track into our session.
+    /// Asks to pull another participant's track into our session; a
+    /// simulcast camera at `preferred_rid` (the proxy adds the downward
+    /// fallback, `realtime/partytracks-proxy.ts`).
     pub async fn pull(
         &self,
         session: &str,
         track_name: &str,
         remote_session: &str,
+        preferred_rid: Option<&str>,
     ) -> Result<Pulled> {
+        let mut track =
+            json!({ "location": "remote", "trackName": track_name, "sessionId": remote_session });
+        if let Some(rid) = preferred_rid {
+            track["simulcast"] = json!({ "preferredRid": rid });
+        }
         let body = self
             .call(
                 Method::POST,
                 &format!("/sessions/{session}/tracks/new"),
-                Some(json!({
-                    "tracks": [{ "location": "remote", "trackName": track_name, "sessionId": remote_session }],
-                })),
+                Some(json!({ "tracks": [track] })),
             )
             .await?;
         let track = body
@@ -189,6 +207,27 @@ impl Sfu {
             .ok_or_else(|| anyhow!("close without an answer"))
     }
 
+    /// Moves a simulcast pull to another layer in place (no renegotiation).
+    /// `switch_now` asks the SFU to switch at once (`priorityOrdering:
+    /// "none"`); the follow-up without it restores the proxy's
+    /// bandwidth-aware policy, as the patched PartyTracks does.
+    pub async fn update_layer(&self, session: &str, layer: &LayerUpdate) -> Result<()> {
+        let mut simulcast = json!({ "preferredRid": layer.rid });
+        if layer.switch_now {
+            simulcast["priorityOrdering"] = json!("none");
+        }
+        self.call(
+            Method::PUT,
+            &format!("/sessions/{session}/tracks/update"),
+            Some(json!({ "tracks": [{
+                "location": "remote", "trackName": layer.sfu_track_name,
+                "sessionId": layer.session_id, "mid": layer.mid, "simulcast": simulcast,
+            }]})),
+        )
+        .await
+        .map(|_| ())
+    }
+
     /// Sends our answer to an SFU offer.
     pub async fn renegotiate(&self, session: &str, answer_sdp: &str) -> Result<()> {
         self.call(
@@ -208,7 +247,14 @@ pub(crate) trait Signaling: Clone + Send + Sync + 'static {
         session: &str,
         track_name: &str,
         remote_session: &str,
+        preferred_rid: Option<&str>,
     ) -> impl Future<Output = Result<Pulled>> + Send;
+
+    fn update_layer(
+        &self,
+        session: &str,
+        layer: &LayerUpdate,
+    ) -> impl Future<Output = Result<()>> + Send;
 
     fn renegotiate(
         &self,
@@ -230,8 +276,17 @@ impl Signaling for Sfu {
         session: &str,
         track_name: &str,
         remote_session: &str,
+        preferred_rid: Option<&str>,
     ) -> impl Future<Output = Result<Pulled>> + Send {
-        Sfu::pull(self, session, track_name, remote_session)
+        Sfu::pull(self, session, track_name, remote_session, preferred_rid)
+    }
+
+    fn update_layer(
+        &self,
+        session: &str,
+        layer: &LayerUpdate,
+    ) -> impl Future<Output = Result<()>> + Send {
+        Sfu::update_layer(self, session, layer)
     }
 
     fn renegotiate(

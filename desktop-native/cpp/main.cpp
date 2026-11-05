@@ -23,6 +23,7 @@
 #include "iconprovider.h"
 #include "logfile.h"
 #include "mediashell.h"
+#include "videohub.h"
 #include "windowchrome.h"
 
 #ifdef Q_OS_WIN
@@ -176,6 +177,10 @@ int main(int argc, char* argv[])
   static CachedNetworkFactory networkFactory;
   networkFactory.shell = files;
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "Files", files);
+  // Never deleted: media threads may still deliver a frame while the
+  // window closes.
+  auto* video = new VideoHub;
+  qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "VideoHub", video);
 
   QQmlApplicationEngine engine;
   // Not owned by the engine; it outlives it here.

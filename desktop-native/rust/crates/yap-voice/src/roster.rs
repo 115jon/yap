@@ -20,6 +20,14 @@ pub struct Member {
     pub speaking: bool,
     /// This client's own participant.
     pub me: bool,
+    /// Camera on (`self_video`).
+    pub video: bool,
+    /// Sharing their screen (`self_stream`).
+    pub stream: bool,
+    /// Their camera is pulled and showing (`cam-video-<id>` frames arrive).
+    pub camera_live: bool,
+    /// Their share is pulled and showing (`screen-video-<id>`).
+    pub screen_live: bool,
 }
 
 #[derive(Debug, Default)]
@@ -30,6 +38,8 @@ struct Row {
     deafened: bool,
     speaking: bool,
     me: bool,
+    video: bool,
+    stream: bool,
 }
 
 /// The roster, ordered by participant id. Names come from full voice
@@ -73,6 +83,10 @@ impl Roster {
                 deafened: row.deafened,
                 speaking: row.speaking,
                 me: row.me,
+                video: row.video,
+                stream: row.stream,
+                camera_live: false,
+                screen_live: false,
             })
             .collect()
     }
@@ -102,15 +116,21 @@ impl Roster {
                     deafened: p.self_deaf.unwrap_or(false),
                     speaking: speaking.get(&p.id).copied().unwrap_or(false),
                     me: false,
+                    video: p.self_video.unwrap_or(false),
+                    stream: p.self_stream.unwrap_or(false),
                 },
             );
         }
     }
 
-    /// An op 15 join or update for someone else (full state or delta).
+    /// An op 15 join or update for someone else. A full state (it has a
+    /// name) may create the row; a delta merges over the row it has and is
+    /// dropped without one (STATE_MACHINE.md, "Voice-state deltas").
     pub fn upsert(&mut self, p: &Participant) {
         if let Some(name) = &p.name {
             self.known_names.insert(p.id.clone(), name.clone());
+        } else if !self.rows.contains_key(&p.id) {
+            return;
         }
         let name = self
             .known_names
@@ -128,6 +148,17 @@ impl Roster {
         if let Some(deafened) = p.self_deaf {
             row.deafened = deafened;
         }
+        if let Some(video) = p.self_video {
+            row.video = video;
+        }
+        if let Some(stream) = p.self_stream {
+            row.stream = stream;
+        }
+    }
+
+    /// A row exists for `id`.
+    pub fn contains(&self, id: &str) -> bool {
+        self.rows.contains_key(id)
     }
 
     pub fn remove(&mut self, id: &str) {

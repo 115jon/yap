@@ -23,10 +23,30 @@ the decisions.
   mark-read at the end of a focused list), bold rows with the edge pill,
   mention counts on channels and the rail (unread mention/reply
   notifications), the "New" divider and its banner.
-- Audio-only voice calls: a voice channel opens its landing, Join starts the
-  call; real mic and speakers with echo cancellation, a participant grid,
-  mute and deafen (kept between calls), leave. Interoperates with the web
-  client. Wire details are in [VOICE_PROTOCOL.md](VOICE_PROTOCOL.md).
+- Voice calls: a voice channel opens its landing, and Join starts the call.
+  The mic and speakers are real, with echo cancellation. Mute and deafen
+  carry over between calls. Interoperates with the web client and follows its
+  specs (`packages/voice/STATE_MACHINE.md`, `realtime/SOCKET_CORE.md`,
+  `realtime/VOICE_ROSTER.md`): 3 s reconnect grace, the web's teardown order,
+  and nothing sent on the wrong socket. The wire details and the remaining
+  differences are in [VOICE_PROTOCOL.md](VOICE_PROTOCOL.md).
+- Watching video (no publishing yet): other people's cameras and screen
+  shares, as the web's stage shows them.
+  - Tiles: camera video cropped to the tile, the avatar otherwise, speaking
+    rings, and a spinner until the first frame.
+  - Shares: a share tile with "is sharing" and Watch stream, then the stream
+    letterboxed.
+  - Focus: a click puts a tile on stage, with a members tray, the header's
+    "Linus's Stream" and Live, and Stop watching. Fullscreen hides the shell
+    (Esc exits).
+  - Cameras are pulled once a visible tile shows them, at the simulcast
+    layer for the tile's size (`preferredRid`, `tracks/update` on resize).
+    Shares are pulled on Watch and kept until they end. Share audio is
+    audible only while the share is on stage.
+  - Frames: libwebrtc's decoder, then `NativeVideoStream` (one-frame queue),
+    then `src/video.rs`, then `cpp/videohub.cpp`. That is one copy into a
+    `QVideoFrame` (YUV420P), and Qt Multimedia's `VideoOutput` converts it
+    on the GPU. Frames for a key nothing shows are dropped before the copy.
 - Voice controls as on the web: device menus on the mic and headphone
   carets (system default first; switching applies at once in a call, an
   unplugged choice falls back to the default), the output volume, the
@@ -85,7 +105,8 @@ unless "Open on startup" is on), data and logs under
 
 ## Not yet
 
-Video and screen share, input volume, a mic test outside a call, inline video playback, clips in the GIF picker,
+Publishing camera or screen share, the stream watcher list and stream
+volume, input volume, a mic test outside a call, inline video playback, clips in the GIF picker,
 GIF favorites and categories, stickers, emoji generation, the reaction details
 modal, remove-embeds, embed players (WebView2), jumping to
 messages that are not loaded (`around=`), `yap://` deep links, toast buttons (reply, mark read)
@@ -163,11 +184,13 @@ cpp/iconprovider.*    Phosphor icons, tinted and cached per size and colour
 cpp/desktopshell.*    one instance, tray and badge, toasts, Run key, window rect
 cpp/toast_win.*       WinRT toasts (WRL, no Qt headers)
 cpp/logfile.*         stderr tee into %LOCALAPPDATA%\YapNative\logs, rotated
+cpp/videohub.*        remote call video into QVideoSinks (VideoHub singleton)
 assets/, tools/       generated fonts, icons and brand SVGs, and their scripts
 rust/src/bridge.rs    YapClient QObject (properties, invokables, signals)
 rust/src/client/      core: config, api (REST), auth (device flow), gateway,
                       socket (room/voice sockets), sfu (partytracks), voice (calls)
 rust/src/desktop.rs   Desktop QObject: shell settings, badge, toasts, window rect
+rust/src/video.rs     video frames to the hub; render demand to the call
 rust/src/sound.rs     UI sounds through waveOut
 rust/qml/             UI: Main, SignInView, ServerRail, ChannelSidebar, ChatView, ...
 ```

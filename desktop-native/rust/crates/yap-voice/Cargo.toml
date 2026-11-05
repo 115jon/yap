@@ -10,10 +10,11 @@ description = "Yap voice calls: a pure call state machine with its roster and tr
 default = ["libwebrtc"]
 # The production media engine. Off, the crate builds and tests without
 # linking WebRTC (`cargo test -p yap-voice --no-default-features`).
-libwebrtc = ["dep:libwebrtc", "dep:webrtc-sys", "dep:cc", "dep:webrtc-sys-build"]
+libwebrtc = ["dep:libwebrtc", "dep:webrtc-sys", "dep:cc", "dep:webrtc-sys-build", "dep:futures-util"]
 
 [dependencies]
 anyhow = "1.0.104"
+futures-util = { version = "0.3.34", optional = true }
 # Pinned: cpp/track_audio.cpp relies on the webrtc-sys track layout, so the
 # crate that defines it is pinned itself, next to the libwebrtc that brings
 # it in. Upgrade both together and re-check the shim.

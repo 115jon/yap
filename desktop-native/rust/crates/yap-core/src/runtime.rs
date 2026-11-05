@@ -311,6 +311,7 @@ impl Runner {
                     deafened: false,
                     speaking: false,
                     me: true,
+                    ..VoiceMember::default()
                 };
                 for update in [
                     VoiceUpdate::Roster(vec![me]),
@@ -447,10 +448,11 @@ impl Runner {
                     .spawn_voice(api, self.http.clone(), target, rx, events);
             }
             Effect::Voice { call, command } => {
+                let leave = command == VoiceCommand::Leave;
                 if let Some(commands) = self.calls.get(&call) {
                     let _ = commands.send(command);
                 }
-                if command == VoiceCommand::Leave {
+                if leave {
                     self.calls.remove(&call);
                 }
             }

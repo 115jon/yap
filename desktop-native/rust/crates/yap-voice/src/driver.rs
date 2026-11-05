@@ -20,7 +20,7 @@ use crate::machine::{
     CallMachine, CallTarget, Effect, Input, MediaEvent, MediaSpec, Notice, Published, RoomEvent,
     Socket, SocketSpec, TicketReplies, Timer, UserCommand, VoiceEvent,
 };
-use crate::sfu::{Sfu, Signaling};
+use crate::sfu::{LayerUpdate, Sfu, Signaling};
 use crate::tracks::Remote;
 use crate::vad::{EnergyMeter, VAD_TICK};
 use crate::wire::{self, Participant, RoomState, Track};
@@ -91,6 +91,8 @@ enum Job {
     Pull(Remote),
     /// Stop and close the receive transceivers with these mids.
     Close(Vec<String>),
+    /// Switch a pulled camera's simulcast layer (no renegotiation).
+    Update(LayerUpdate),
 }
 
 /// (SFU track name, mid if the pull worked).
@@ -308,6 +310,17 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
             }
             Effect::Pull(remote) => self.job(Job::Pull(remote)),
             Effect::Close(mids) => self.job(Job::Close(mids)),
+            Effect::UpdateLayer(layer) => self.job(Job::Update(layer)),
+            Effect::SetVideoSink { mid, key } => {
+                if let Some(session) = &self.session {
+                    session.set_video_sink(&mid, key.as_deref());
+                }
+            }
+            Effect::StopLocalMedia => {
+                if let Some(session) = &self.session {
+                    session.stop_local();
+                }
+            }
             Effect::SetMicEnabled(enabled) => {
                 if let Some(session) = &self.session {
                     session.set_mic_enabled(enabled);
@@ -575,8 +588,14 @@ async fn pull_worker<S: MediaSession, G: Signaling>(
                 let mid = match pull(&session, &sfu, &session_id, &remote).await {
                     Ok(mid) => {
                         eprintln!(
-                            "[voice] pulled {} from {}",
-                            remote.track_name, remote.participant_id
+                            "[voice] pulled {} from {}{}",
+                            remote.track_name,
+                            remote.participant_id,
+                            remote
+                                .preferred_rid
+                                .as_deref()
+                                .map(|rid| format!(" (rid {rid})"))
+                                .unwrap_or_default()
                         );
                         Some(mid)
                     }
@@ -590,6 +609,15 @@ async fn pull_worker<S: MediaSession, G: Signaling>(
             Job::Close(mids) => match close(&session, &sfu, &session_id, &mids).await {
                 Ok(()) => eprintln!("[voice] closed {} transceiver(s)", mids.len()),
                 Err(error) => eprintln!("[voice] close failed: {error:#}"),
+            },
+            Job::Update(layer) => match sfu.update_layer(&session_id, &layer).await {
+                Ok(()) => eprintln!(
+                    "[voice] layer {} on mid {}{}",
+                    layer.rid,
+                    layer.mid,
+                    if layer.switch_now { "" } else { " (settled)" }
+                ),
+                Err(error) => eprintln!("[voice] layer update failed: {error:#}"),
             },
         }
     }
@@ -618,7 +646,12 @@ async fn pull<S: MediaSession, G: Signaling>(
     let mut delay = Duration::from_millis(100);
     let pulled = loop {
         match sfu
-            .pull(session_id, &remote.sfu_track_name, &remote.session_id)
+            .pull(
+                session_id,
+                &remote.sfu_track_name,
+                &remote.session_id,
+                remote.preferred_rid.as_deref(),
+            )
             .await
         {
             Ok(pulled) => break pulled,
@@ -672,7 +705,21 @@ mod tests {
     }
 
     impl Signaling for FakeSfu {
-        async fn pull(&self, _: &str, track_name: &str, _: &str) -> Result<Pulled> {
+        async fn update_layer(&self, _: &str, layer: &LayerUpdate) -> Result<()> {
+            self.log(format!("update {} {}", layer.mid, layer.rid));
+            Ok(())
+        }
+
+        async fn pull(
+            &self,
+            _: &str,
+            track_name: &str,
+            _: &str,
+            rid: Option<&str>,
+        ) -> Result<Pulled> {
+            if let Some(rid) = rid {
+                self.log(format!("rid {rid}"));
+            }
             let first = !self
                 .calls()
                 .iter()
@@ -704,6 +751,8 @@ mod tests {
             track_name: format!("alias-{name}"),
             sfu_track_name: name.into(),
             session_id: "their-session".into(),
+            kind: crate::tracks::Kind::Audio,
+            preferred_rid: None,
         }
     }
 

@@ -3,11 +3,13 @@
 
 use serde_json::{json, Value};
 use yap_realtime::StopReason;
+use yap_voice::layers::{LAYER_DOWNGRADE_DELAY, LAYER_SWITCH_SETTLE, LAYER_UPGRADE_DELAY};
 use yap_voice::wire::{Participant, RoomState, Track};
 use yap_voice::{
-    CallMachine, CallState, CallTarget, Effect, Input, MediaEvent, MediaState, Member, Notice,
-    Playback, Processing, Published, RoomEvent, Sensitivity, Socket, TicketReplies, Timer,
-    UserCommand, VoiceEvent, LEAVE_LINGER, REANNOUNCE_GRACE, SILENCE_DELAY_MS,
+    CallMachine, CallState, CallTarget, Effect, Input, Kind, LayerUpdate, MediaEvent, MediaState,
+    Member, Notice, Playback, Processing, Published, RenderSize, RoomEvent, Sensitivity, Socket,
+    TicketReplies, Timer, UserCommand, VideoIntent, VoiceEvent, LEAVE_SEND_WINDOW,
+    REMOTE_RECONNECT_GRACE, SILENCE_DELAY_MS,
 };
 
 const ME: &str = "me-1";
@@ -61,6 +63,24 @@ fn track(pid: &str, alias: &str, sfu: &str) -> Track {
         sfu_track_name: sfu.into(),
         session_id: format!("session-{pid}"),
         kind: "audio".into(),
+        simulcast_rids: Vec::new(),
+    }
+}
+
+/// A simulcast camera (`f`, `h`, `q`).
+fn camera(pid: &str, sfu: &str) -> Track {
+    Track {
+        kind: "video".into(),
+        simulcast_rids: ["f", "h", "q"].map(str::to_owned).to_vec(),
+        ..track(pid, &format!("cam-video-{pid}"), sfu)
+    }
+}
+
+/// A single-layer share.
+fn share(pid: &str, sfu: &str) -> Track {
+    Track {
+        kind: "video".into(),
+        ..track(pid, &format!("screen-video-{pid}"), sfu)
     }
 }
 
@@ -146,7 +166,9 @@ fn ends(fx: &[Effect]) -> Vec<Option<String>> {
 fn grace_timer(fx: &[Effect]) -> Timer {
     fx.iter()
         .find_map(|e| match e {
-            Effect::ArmTimer { timer, after } if *after == REANNOUNCE_GRACE => Some(timer.clone()),
+            Effect::ArmTimer { timer, after } if *after == REMOTE_RECONNECT_GRACE => {
+                Some(timer.clone())
+            }
             _ => None,
         })
         .expect("a grace timer")
@@ -234,6 +256,9 @@ fn join_should_announce_on_voice_ready_and_pull_only_after_media_connects() {
     )]))));
     assert_eq!(sends(&fx, Socket::Room)[0]["d"]["self_mute"], false);
     assert_eq!(ops(&fx, Socket::Room), vec![15]);
+    // The room's Ready is `joined` (STATE_MACHINE.md): before media is up.
+    assert_eq!(states(&fx), vec![CallState::Joined]);
+    assert!(fx.contains(&Effect::Notify(Notice::Connected)));
 
     let fx = m.handle(voice_ready(vec![track("ana", "mic-ana", "sfu-ana")]));
     let announce = &sends(&fx, Socket::Voice)[0];
@@ -244,30 +269,58 @@ fn join_should_announce_on_voice_ready_and_pull_only_after_media_connects() {
                 "sfu_track_name": "my-sfu", "session_id": "cap-1", "kind": "audio" })
     );
     assert!(pulls(&fx).is_empty(), "no pull before media is up");
-    assert_eq!(m.state(), CallState::Connecting);
 
     let fx = m.handle(connected());
     assert_eq!(
         fx,
         vec![
-            Effect::Notify(Notice::Connected),
             Effect::Notify(Notice::Status("Connected")),
-            Effect::Notify(Notice::State(CallState::Joined)),
             Effect::Pull(yap_voice::Remote {
                 participant_id: "ana".into(),
                 track_name: "mic-ana".into(),
                 sfu_track_name: "sfu-ana".into(),
                 session_id: "session-ana".into(),
+                kind: Kind::Audio,
+                preferred_rid: None,
             }),
         ]
     );
 }
 
 #[test]
-fn pull_should_skip_our_own_and_non_audio_tracks() {
+fn a_second_ready_while_joined_should_rejoin_without_a_connect() {
     let mut m = joined();
-    let mut video = track("bob", "cam-bob", "sfu-bob-video");
-    video.kind = "video".into();
+    let fx = m.handle(Input::Room(RoomEvent::Ready(room_state(&[participant(
+        "ana",
+        Some("Ana"),
+    )]))));
+    assert!(fx.contains(&Effect::Notify(Notice::Rejoined)));
+    assert!(!fx.contains(&Effect::Notify(Notice::Connected)));
+    assert_eq!(ops(&fx, Socket::Room), vec![15]);
+}
+
+#[test]
+fn a_voice_socket_drop_should_not_change_the_phase() {
+    let mut m = joined();
+    let fx = m.handle(Input::Voice(VoiceEvent::Disconnected));
+    assert!(states(&fx).is_empty());
+    assert!(fx.contains(&Effect::Notify(Notice::Status("Reconnecting"))));
+}
+
+#[test]
+fn a_media_drop_should_reconnect_and_its_return_should_restore() {
+    let mut m = joined();
+    let fx = m.handle(Input::Media(MediaEvent::State(MediaState::Disconnected)));
+    assert_eq!(states(&fx), vec![CallState::Reconnecting]);
+    let fx = m.handle(connected());
+    assert_eq!(states(&fx), vec![CallState::Joined]);
+    assert!(fx.contains(&Effect::Notify(Notice::Status("Connected"))));
+}
+
+#[test]
+fn pull_should_skip_our_own_tracks_and_video_nobody_shows() {
+    let mut m = joined();
+    let video = camera("bob", "sfu-bob-video");
     let fx = m.handle(Input::Voice(VoiceEvent::Video {
         participant_id: "bob".into(),
         tracks: vec![
@@ -300,31 +353,42 @@ fn deltas_should_keep_names_from_full_states() {
 }
 
 #[test]
-fn delta_should_readd_a_dropped_row_with_its_known_name() {
+fn delta_after_a_leave_should_be_dropped() {
     let mut m = joined();
     m.handle(Input::Room(RoomEvent::VoiceState {
         leave: true,
         participant: participant("ana", None),
     }));
-    let fx = m.handle(Input::Room(RoomEvent::VoiceState {
+    m.handle(Input::Room(RoomEvent::VoiceState {
         leave: false,
         participant: participant("ana", None),
     }));
-    assert_eq!(
-        names(&last_roster(&fx).expect("roster")),
-        vec![("ana", "Ana"), (ME, "Jon")]
-    );
+    assert_eq!(names(&m.roster()), vec![(ME, "Jon")]);
 }
 
 #[test]
-fn delta_for_an_unknown_participant_should_show_someone() {
+fn delta_for_an_unknown_participant_should_be_dropped() {
     let mut m = joined();
-    let fx = m.handle(Input::Room(RoomEvent::VoiceState {
+    m.handle(Input::Room(RoomEvent::VoiceState {
         leave: false,
         participant: participant("zed", None),
     }));
-    let roster = last_roster(&fx).expect("roster");
-    assert!(roster.iter().any(|r| r.id == "zed" && r.name == "Someone"));
+    assert!(!m.roster().iter().any(|r| r.id == "zed"));
+}
+
+#[test]
+fn a_full_state_should_create_a_row_with_camera_and_share_flags() {
+    let mut m = joined();
+    let mut zed = participant("zed", Some("Zed"));
+    zed.self_video = Some(true);
+    zed.self_stream = Some(true);
+    m.handle(Input::Room(RoomEvent::VoiceState {
+        leave: false,
+        participant: zed,
+    }));
+    let roster = m.roster();
+    let row = roster.iter().find(|r| r.id == "zed").expect("zed row");
+    assert_eq!((row.video, row.stream), (true, true));
 }
 
 #[test]
@@ -344,20 +408,63 @@ fn client_disconnect_should_keep_row_and_pull_when_they_reannounce_in_grace() {
     assert!(pulls(&fx).is_empty(), "already pulled");
 
     let fx = m.handle(Input::Timer(timer));
-    assert!(fx.is_empty(), "a cancelled grace does nothing: {fx:?}");
+    assert!(
+        closes(&fx).is_empty(),
+        "what was offered again stays: {fx:?}"
+    );
     assert!(m.roster().iter().any(|r| r.id == "ana"));
 }
 
 #[test]
-fn client_disconnect_should_close_pull_and_drop_row_when_grace_expires() {
+fn grace_should_last_three_seconds() {
+    assert_eq!(REMOTE_RECONNECT_GRACE.as_millis(), 3000);
+}
+
+#[test]
+fn client_disconnect_should_close_pulls_but_keep_the_row_when_grace_expires() {
     let mut m = joined();
     let fx = m.handle(Input::Voice(VoiceEvent::ClientDisconnect {
         participant_id: "ana".into(),
     }));
     let fx = m.handle(Input::Timer(grace_timer(&fx)));
     assert_eq!(closes(&fx), vec![vec!["m-ana".to_owned()]]);
-    assert_eq!(names(&last_roster(&fx).expect("roster")), vec![(ME, "Jon")]);
+    // Only the room decides who left.
+    assert!(m.roster().iter().any(|r| r.id == "ana"));
     assert!(m.tracks().pulled_names().is_empty());
+}
+
+#[test]
+fn grace_expiry_should_drop_only_tracks_not_offered_again() {
+    let mut m = joined();
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![track("ana", "screen-audio-ana", "sfu-ana-sa")],
+    }));
+    m.handle(done("sfu-ana-sa", "m-sa"));
+    let timer = grace_timer(&m.handle(Input::Voice(VoiceEvent::ClientDisconnect {
+        participant_id: "ana".into(),
+    })));
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![track("ana", "mic-ana", "sfu-ana")],
+    }));
+    let fx = m.handle(Input::Timer(timer));
+    assert_eq!(closes(&fx), vec![vec!["m-sa".to_owned()]]);
+    assert_eq!(m.tracks().pulled_names(), vec!["mic-ana"]);
+}
+
+#[test]
+fn client_disconnect_should_clear_speaking_at_once() {
+    let mut m = joined();
+    m.handle(Input::Voice(VoiceEvent::Speaking {
+        participant_id: "ana".into(),
+        speaking: true,
+    }));
+    let fx = m.handle(Input::Voice(VoiceEvent::ClientDisconnect {
+        participant_id: "ana".into(),
+    }));
+    let roster = last_roster(&fx).expect("roster");
+    assert!(roster.iter().any(|r| r.id == "ana" && !r.speaking));
 }
 
 #[test]
@@ -398,7 +505,7 @@ fn stop_tracks_should_close_only_the_named_tracks() {
         names: vec!["screen-audio-ana".into()],
     }));
     assert_eq!(closes(&fx), vec![vec!["m-screen".to_owned()]]);
-    assert_eq!(m.tracks().pulled_names(), vec!["sfu-ana"]);
+    assert_eq!(m.tracks().pulled_names(), vec!["mic-ana"]);
 }
 
 #[test]
@@ -431,15 +538,14 @@ fn reidentify_should_reannounce_and_keep_still_present_pulls() {
     }));
     m.handle(done("sfu-bob", "m-bob"));
 
-    let fx = m.handle(Input::Voice(VoiceEvent::Disconnected));
-    assert_eq!(states(&fx), vec![CallState::Reconnecting]);
+    m.handle(Input::Voice(VoiceEvent::Disconnected));
 
     let fx = m.handle(voice_ready(vec![track("ana", "mic-ana", "sfu-ana")]));
     assert_eq!(closes(&fx), vec![vec!["m-bob".to_owned()]]);
     assert_eq!(ops(&fx, Socket::Voice), vec![12]);
     assert!(pulls(&fx).is_empty(), "ana's pull is kept, not redone");
-    assert_eq!(states(&fx), vec![CallState::Joined]);
-    assert_eq!(m.tracks().pulled_names(), vec!["sfu-ana"]);
+    assert!(fx.contains(&Effect::Notify(Notice::Status("Connected"))));
+    assert_eq!(m.tracks().pulled_names(), vec!["mic-ana"]);
 }
 
 #[test]
@@ -512,36 +618,58 @@ fn voice_error_4008_or_4010_should_stop_with_its_message() {
 }
 
 #[test]
-fn leave_should_send_op13_op11_op11_then_close() {
+fn joined_leave_should_stop_media_wait_the_send_window_then_disconnect() {
     let mut m = joined();
     let fx = m.handle(Input::Command(UserCommand::Leave));
-    assert_eq!(ops(&fx, Socket::Voice), vec![13, 11]);
     assert_eq!(
-        sends(&fx, Socket::Voice)[0]["d"],
-        json!({ "track_names": ["cam-audio-me-1"] })
+        fx,
+        vec![
+            Effect::StopLocalMedia,
+            Effect::ArmTimer {
+                timer: Timer::Linger,
+                after: LEAVE_SEND_WINDOW,
+            },
+            Effect::Notify(Notice::State(CallState::Leaving)),
+        ]
     );
-    assert_eq!(ops(&fx, Socket::Room), vec![11]);
-    assert!(fx.contains(&Effect::ArmTimer {
-        timer: Timer::Linger,
-        after: LEAVE_LINGER,
-    }));
-    assert_eq!(m.state(), CallState::Leaving);
-    assert!(ends(&fx).is_empty());
+    assert_eq!(LEAVE_SEND_WINDOW.as_millis(), 100);
 
     let fx = m.handle(Input::Timer(Timer::Linger));
+    // Op 11 on the room socket, then the voice socket, then the end.
+    let order: Vec<(Socket, i64)> = fx
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Send(socket, text) => {
+                let frame: Value = serde_json::from_str(text).expect("JSON");
+                Some((*socket, frame["op"].as_i64().expect("op")))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(order, vec![(Socket::Room, 11), (Socket::Voice, 11)]);
     assert_eq!(ends(&fx), vec![None]);
     assert_eq!(states(&fx), vec![CallState::Idle]);
 }
 
 #[test]
-fn leave_before_voice_ready_should_skip_op13() {
+fn leave_before_the_room_is_ready_should_disconnect_at_once() {
     let mut m = CallMachine::new(target());
     m.handle(Input::Start);
     m.handle(Input::Tickets(Ok(tickets())));
     m.handle(Input::Published(Ok(published())));
     let fx = m.handle(Input::Command(UserCommand::Leave));
-    assert_eq!(ops(&fx, Socket::Voice), vec![11]);
+    assert_eq!(fx[0], Effect::StopLocalMedia);
     assert_eq!(ops(&fx, Socket::Room), vec![11]);
+    assert_eq!(ops(&fx, Socket::Voice), vec![11]);
+    assert_eq!(ends(&fx), vec![None]);
+}
+
+#[test]
+fn leave_should_not_send_stop_tracks() {
+    let mut m = joined();
+    m.handle(Input::Command(UserCommand::Leave));
+    let fx = m.handle(Input::Timer(Timer::Linger));
+    assert!(!ops(&fx, Socket::Voice).contains(&13));
 }
 
 #[test]
@@ -823,4 +951,291 @@ fn processing_chosen_before_the_mic_should_apply_once_it_is_published() {
         .is_empty());
     let fx = m.handle(Input::Published(Ok(published())));
     assert!(fx.contains(&Effect::SetProcessing(off)));
+}
+
+// Video: render demand, simulcast layers, parking, watching.
+
+fn show(tiles: &[(&str, u32, u32)], stage: Option<&str>) -> Input {
+    Input::Command(UserCommand::SetVideo(VideoIntent {
+        demand: tiles
+            .iter()
+            .map(|(alias, width, height)| {
+                (
+                    (*alias).to_owned(),
+                    RenderSize {
+                        width: *width,
+                        height: *height,
+                    },
+                )
+            })
+            .collect(),
+        stage: stage.map(str::to_owned),
+    }))
+}
+
+fn sinks(fx: &[Effect]) -> Vec<(String, Option<String>)> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::SetVideoSink { mid, key } => Some((mid.clone(), key.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn rids_pulled(fx: &[Effect]) -> Vec<Option<String>> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::Pull(r) => Some(r.preferred_rid.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn layer_timer(fx: &[Effect]) -> (Timer, std::time::Duration) {
+    fx.iter()
+        .find_map(|e| match e {
+            Effect::ArmTimer {
+                timer: timer @ Timer::Layer { .. },
+                after,
+            } => Some((timer.clone(), *after)),
+            _ => None,
+        })
+        .expect("a layer timer")
+}
+
+fn updates(fx: &[Effect]) -> Vec<LayerUpdate> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::UpdateLayer(u) => Some(u.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+const ANA_CAM: &str = "cam-video-ana";
+
+/// Joined with Ana (user `u-ana`) publishing a simulcast camera.
+fn with_camera() -> CallMachine {
+    let mut m = joined_with_user();
+    let fx = m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![camera("ana", "sfu-ana-cam")],
+    }));
+    assert!(pulls(&fx).is_empty(), "no tile shows it yet");
+    m
+}
+
+/// `with_camera`, shown in a 640x360 grid tile and pulled on `m-cam`.
+fn camera_shown() -> CallMachine {
+    let mut m = with_camera();
+    m.handle(show(&[(ANA_CAM, 640, 360)], None));
+    m.handle(done("sfu-ana-cam", "m-cam"));
+    m
+}
+
+#[test]
+fn a_visible_camera_tile_should_pull_at_its_layer() {
+    let mut m = with_camera();
+    let fx = m.handle(show(&[(ANA_CAM, 640, 360)], None));
+    assert_eq!(pulls(&fx), vec!["sfu-ana-cam"]);
+    assert_eq!(rids_pulled(&fx), vec![Some("h".to_owned())]);
+}
+
+#[test]
+fn a_full_stage_camera_should_pull_the_top_layer() {
+    let mut m = with_camera();
+    let fx = m.handle(show(&[(ANA_CAM, 1600, 900)], Some("ana")));
+    assert_eq!(rids_pulled(&fx), vec![Some("f".to_owned())]);
+}
+
+#[test]
+fn a_pulled_camera_should_route_its_frames_and_go_live() {
+    let mut m = with_camera();
+    m.handle(show(&[(ANA_CAM, 640, 360)], None));
+    let fx = m.handle(done("sfu-ana-cam", "m-cam"));
+    assert_eq!(
+        sinks(&fx),
+        vec![("m-cam".to_owned(), Some(ANA_CAM.to_owned()))]
+    );
+    let roster = last_roster(&fx).expect("roster");
+    assert!(roster.iter().any(|r| r.id == "ana" && r.camera_live));
+    assert!(gains(&fx).is_empty(), "video has no gain");
+}
+
+#[test]
+fn a_hidden_camera_should_drop_frames_and_keep_its_pull() {
+    let mut m = camera_shown();
+    let fx = m.handle(show(&[], None));
+    assert_eq!(sinks(&fx), vec![("m-cam".to_owned(), None)]);
+    assert!(
+        closes(&fx).is_empty(),
+        "video pulls are never closed to re-pull"
+    );
+    assert_eq!(layer_timer(&fx).1, LAYER_DOWNGRADE_DELAY);
+}
+
+#[test]
+fn a_bigger_tile_should_switch_up_after_the_upgrade_delay_then_settle() {
+    let mut m = camera_shown();
+    let fx = m.handle(show(&[(ANA_CAM, 1920, 1080)], Some("ana")));
+    let (timer, after) = layer_timer(&fx);
+    assert_eq!(after, LAYER_UPGRADE_DELAY);
+    assert!(updates(&fx).is_empty(), "waits for the size to settle");
+
+    let fx = m.handle(Input::Timer(timer));
+    assert_eq!(
+        updates(&fx),
+        vec![LayerUpdate {
+            mid: "m-cam".into(),
+            sfu_track_name: "sfu-ana-cam".into(),
+            session_id: "session-ana".into(),
+            rid: "f".into(),
+            switch_now: true,
+        }]
+    );
+    let settle = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::ArmTimer {
+                timer: timer @ Timer::LayerSettle { .. },
+                after,
+            } if *after == LAYER_SWITCH_SETTLE => Some(timer.clone()),
+            _ => None,
+        })
+        .expect("a settle timer");
+    let fx = m.handle(Input::Timer(settle));
+    let settled = updates(&fx);
+    assert_eq!(settled.len(), 1);
+    assert!(!settled[0].switch_now);
+    assert_eq!(settled[0].rid, "f");
+}
+
+#[test]
+fn a_resize_within_a_layer_should_not_switch() {
+    let mut m = camera_shown();
+    let fx = m.handle(show(&[(ANA_CAM, 700, 394)], None));
+    assert!(fx.iter().all(|e| !matches!(
+        e,
+        Effect::ArmTimer {
+            timer: Timer::Layer { .. },
+            ..
+        }
+    )));
+}
+
+#[test]
+fn a_superseded_layer_timer_should_do_nothing() {
+    let mut m = camera_shown();
+    let (up, _) = layer_timer(&m.handle(show(&[(ANA_CAM, 1920, 1080)], None)));
+    m.handle(show(&[(ANA_CAM, 300, 169)], None));
+    assert!(updates(&m.handle(Input::Timer(up))).is_empty());
+}
+
+#[test]
+fn camera_off_should_park_the_pull_and_camera_on_should_show_it_again() {
+    let mut m = camera_shown();
+    let fx = m.handle(Input::Voice(VoiceEvent::StopTracks {
+        participant_id: "ana".into(),
+        names: vec![ANA_CAM.into()],
+    }));
+    assert!(closes(&fx).is_empty(), "parked, not closed");
+    assert_eq!(sinks(&fx), vec![("m-cam".to_owned(), None)]);
+    assert!(m.roster().iter().any(|r| r.id == "ana" && !r.camera_live));
+
+    // Turned on again: the same SFU track, kept alive with black frames.
+    let fx = m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![camera("ana", "sfu-ana-cam")],
+    }));
+    assert!(pulls(&fx).is_empty() && closes(&fx).is_empty());
+    assert_eq!(
+        sinks(&fx),
+        vec![("m-cam".to_owned(), Some(ANA_CAM.to_owned()))]
+    );
+}
+
+#[test]
+fn a_camera_on_a_new_sfu_track_should_be_pulled_afresh() {
+    let mut m = camera_shown();
+    let fx = m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![camera("ana", "sfu-ana-cam-2")],
+    }));
+    assert_eq!(closes(&fx), vec![vec!["m-cam".to_owned()]]);
+    assert_eq!(pulls(&fx), vec!["sfu-ana-cam-2"]);
+}
+
+#[test]
+fn a_share_should_wait_for_watch_then_pull_and_announce_it() {
+    let mut m = joined_with_user();
+    let fx = m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![share("ana", "sfu-ana-share")],
+    }));
+    assert!(pulls(&fx).is_empty(), "screen video is opt-in");
+
+    let fx = m.handle(Input::Command(UserCommand::SetWatched(
+        ["ana".to_owned()].into(),
+    )));
+    assert_eq!(pulls(&fx), vec!["sfu-ana-share"]);
+    assert_eq!(rids_pulled(&fx), vec![None], "a share has one layer");
+    assert_eq!(
+        sends(&fx, Socket::Voice),
+        vec![json!({ "op": 106, "d": {
+            "type": "stream.watch.start", "streamer_user_id": "u-ana",
+        }})]
+    );
+}
+
+#[test]
+fn unwatching_a_share_should_hide_it_and_keep_its_pull() {
+    let mut m = joined_with_user();
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![share("ana", "sfu-ana-share")],
+    }));
+    m.handle(Input::Command(UserCommand::SetWatched(
+        ["ana".to_owned()].into(),
+    )));
+    m.handle(show(&[("screen-video-ana", 1280, 720)], None));
+    let fx = m.handle(done("sfu-ana-share", "m-share"));
+    assert_eq!(
+        sinks(&fx),
+        vec![("m-share".to_owned(), Some("screen-video-ana".to_owned()))]
+    );
+
+    let fx = m.handle(Input::Command(UserCommand::SetWatched(Default::default())));
+    assert_eq!(sinks(&fx), vec![("m-share".to_owned(), None)]);
+    assert!(closes(&fx).is_empty(), "kept until the share ends");
+    assert_eq!(
+        sends(&fx, Socket::Voice)[0]["d"]["type"],
+        "stream.watch.stop"
+    );
+}
+
+#[test]
+fn share_audio_should_be_silent_until_the_share_is_on_stage() {
+    let mut m = joined_with_user();
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![track("ana", "screen-audio-ana", "sfu-ana-sa")],
+    }));
+    let fx = m.handle(done("sfu-ana-sa", "m-sa"));
+    assert_eq!(gains(&fx), vec![("m-sa".to_owned(), 0.0)]);
+    let fx = m.handle(show(&[], Some("ana")));
+    assert_eq!(gains(&fx), vec![("m-sa".to_owned(), 1.0)]);
+}
+
+#[test]
+fn deafen_should_not_touch_video_routes() {
+    let mut m = camera_shown();
+    let fx = m.handle(Input::Command(UserCommand::SetDeafened(true)));
+    assert!(sinks(&fx).is_empty());
+}
+
+#[test]
+fn a_leaving_call_should_ignore_video_intent() {
+    let mut m = with_camera();
+    m.handle(Input::Command(UserCommand::Leave));
+    assert!(m.handle(show(&[(ANA_CAM, 640, 360)], None)).is_empty());
 }

@@ -31,6 +31,10 @@ pub struct Participant {
     pub user_id: Option<String>,
     pub self_mute: Option<bool>,
     pub self_deaf: Option<bool>,
+    /// Camera on.
+    pub self_video: Option<bool>,
+    /// Sharing their screen.
+    pub self_stream: Option<bool>,
 }
 
 /// A room Ready or Resumed `d`.
@@ -53,6 +57,9 @@ pub struct Track {
     pub sfu_track_name: String,
     pub session_id: String,
     pub kind: String,
+    /// A simulcast camera's layers, highest first (`["f","h","q"]`);
+    /// empty for a single layer.
+    pub simulcast_rids: Vec<String>,
 }
 
 pub(crate) fn str_of<'a>(value: &'a Value, key: &str) -> &'a str {
@@ -121,6 +128,8 @@ impl Participant {
                 .map(str::to_owned),
             self_mute: p.get("self_mute").and_then(Value::as_bool),
             self_deaf: p.get("self_deaf").and_then(Value::as_bool),
+            self_video: p.get("self_video").and_then(Value::as_bool),
+            self_stream: p.get("self_stream").and_then(Value::as_bool),
         }
     }
 }
@@ -146,6 +155,14 @@ impl Track {
             sfu_track_name: str_of(t, "sfu_track_name").to_owned(),
             session_id: str_of(t, "session_id").to_owned(),
             kind: str_of(t, "kind").to_owned(),
+            simulcast_rids: t
+                .get("simulcast_rids")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect(),
         }
     }
 
@@ -238,9 +255,18 @@ pub fn speaking(on: bool) -> String {
     json!({ "op": GatewayOp::Speaking.code(), "d": { "speaking": u8::from(on) } }).to_string()
 }
 
-/// Stops our named track (op 13).
-pub fn stop_tracks(track_name: &str) -> String {
-    json!({ "op": GatewayOp::StopTracks.code(), "d": { "track_names": [track_name] } }).to_string()
+/// Watching a share starts or stops (op 106, SCREEN_SHARE.md "Watching");
+/// the server's watcher snapshots follow.
+pub fn watch_event(streamer_user_id: &str, watching: bool) -> String {
+    let kind = if watching {
+        "stream.watch.start"
+    } else {
+        "stream.watch.stop"
+    };
+    json!({ "op": GatewayOp::VoiceAppEvent.code(), "d": {
+        "type": kind, "streamer_user_id": streamer_user_id,
+    }})
+    .to_string()
 }
 
 /// The body for `POST /api/voice/socket-ticket`.

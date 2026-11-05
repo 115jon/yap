@@ -375,6 +375,7 @@ fn roster(client: &mut Client, call: yap_core::store::Effect, speaking: &[&str])
         deafened: false,
         speaking: speaking.contains(&id),
         me: id == ME,
+        ..VoiceMember::default()
     };
     let members = vec![member(ME), member(ALICE), member("user_guest")];
     client.input(Input::Voice {

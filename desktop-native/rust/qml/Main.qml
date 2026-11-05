@@ -80,7 +80,24 @@ ApplicationWindow {
         value: Qt.tint(Theme.ply0, Theme.lineStrong)
     }
 
+    // The call stage's fullscreen: the whole screen, no title bar or shell.
+    property bool wasMaximized: false
+    Connections {
+        target: ShellState
+        function onStageFullscreenChanged() {
+            if (ShellState.stageFullscreen) {
+                window.wasMaximized = window.visibility === Window.Maximized
+                window.showFullScreen()
+            } else if (window.wasMaximized) {
+                window.showMaximized()
+            } else {
+                window.showNormal()
+            }
+        }
+    }
+
     header: TitleBar {
+        visible: !ShellState.stageFullscreen
         title: window.location
         maximized: window.visibility === Window.Maximized
         onMinimizeRequested: window.showMinimized()

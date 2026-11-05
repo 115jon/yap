@@ -1,7 +1,7 @@
 //! [`CallMachine`]: one call as a pure, synchronous state machine. See the
 //! crate docs for the transition table.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::time::Duration;
 
@@ -10,32 +10,41 @@ use yap_protocol::{GatewayOp, VOICE_MOVED_CLOSE_REASON};
 use yap_realtime::StopReason;
 
 use crate::audio::{Playback, Processing};
+use crate::layers::{
+    resolve_quality, select_rid, Quality, RenderSize, LAYER_DOWNGRADE_DELAY, LAYER_SWITCH_SETTLE,
+    LAYER_UPGRADE_DELAY,
+};
 use crate::roster::{Member, Roster};
-use crate::tracks::{Remote, TrackTable};
+use crate::sfu::LayerUpdate;
+use crate::tracks::{Kind, Offer, Remote, TrackTable};
 use crate::vad::{level_percent, Sensitivity, Vad};
 use crate::wire::{self, Bootstrap, IceServer, Participant, RoomState, Track};
 
-/// How long a participant whose voice socket went away has to re-announce
-/// (a voice reconnect: call-socket backoff tops out at 10 s, plus a ticket).
-pub const REANNOUNCE_GRACE: Duration = Duration::from_secs(15);
+/// How long a remote participant's pulls outlive a voice `ClientDisconnect`
+/// for them (`REMOTE_RECONNECT_GRACE_MS`, STATE_MACHINE.md "Reconnect
+/// grace"): VoiceRoom sends one whenever their voice socket reconnects,
+/// before their tracks are offered again.
+pub const REMOTE_RECONNECT_GRACE: Duration = Duration::from_millis(3000);
 
-/// How long Leave waits for its goodbye frames to go out before closing.
-pub const LEAVE_LINGER: Duration = Duration::from_millis(200);
+/// How long a joined leave keeps the sockets open before it disconnects
+/// (`LEAVE_SEND_WINDOW_MS`, STATE_MACHINE.md "Teardown").
+pub const LEAVE_SEND_WINDOW: Duration = Duration::from_millis(100);
 
-/// The call's lifecycle, with the same names and meaning as the web
-/// client's `packages/voice` machine.
+/// The call's phase, with the names and meaning of `packages/voice`
+/// (STATE_MACHINE.md "Phases"; there is no standby here).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallState {
     /// Not started, or over.
     Idle,
-    /// Tickets, sockets, SFU session and push, until all three of room,
-    /// voice socket and media are up for the first time.
+    /// Tickets, sockets, SFU session and push, until the room says Ready.
     Connecting,
-    /// Room and voice sockets ready and media connected.
+    /// The room said Ready for us.
     Joined,
-    /// Joined before; a call socket dropped and is coming back.
+    /// Joined, and the room socket or the peer connection dropped. Roster
+    /// and media are kept.
     Reconnecting,
-    /// Leave was asked: goodbye frames are out, closing shortly.
+    /// A joined leave: local media is released, the sockets stay open for
+    /// the send window, then disconnect.
     Leaving,
 }
 
@@ -76,11 +85,23 @@ pub enum Socket {
     Voice,
 }
 
+/// Where the UI shows remote video, and what is on stage.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VideoIntent {
+    /// Track alias (`cam-video-<pid>`, `screen-video-<pid>`) -> the largest
+    /// size a visible tile renders it at. Absent: nothing shows it, and its
+    /// frames are dropped.
+    pub demand: BTreeMap<String, RenderSize>,
+    /// The participant whose camera or share is focused on stage; their
+    /// share audio is audible (SCREEN_SHARE.md "Watching").
+    pub stage: Option<String>,
+}
+
 /// What the user asks of a running call.
 #[derive(Debug, Clone, PartialEq)]
 pub enum UserCommand {
     SetMuted(bool),
-    /// Deafen: silence the others (remote tracks off) and say so (op 15).
+    /// Deafen: silence the others (remote audio off) and say so (op 15).
     SetDeafened(bool),
     /// The speaking threshold.
     SetSensitivity(Sensitivity),
@@ -88,6 +109,10 @@ pub enum UserCommand {
     SetPlayback(Playback),
     /// The mic's echo cancellation, noise suppression and gain control.
     SetProcessing(Processing),
+    /// Rendered video and the stage.
+    SetVideo(VideoIntent),
+    /// The participants whose shares the user watches (pressed Watch).
+    SetWatched(BTreeSet<String>),
     Leave,
 }
 
@@ -188,10 +213,14 @@ pub enum MediaEvent {
 /// A timer the machine armed, or a periodic one the driver runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Timer {
-    /// `participant`'s re-announce grace ran out.
+    /// `participant`'s reconnect grace ran out.
     Grace { participant: String, token: u64 },
-    /// Leave's goodbye frames had their time.
+    /// A joined leave's send window is over.
     Linger,
+    /// A camera's rendered size held long enough: switch its layer.
+    Layer { track: String, token: u64 },
+    /// A layer switch had time to land: restore the SFU's policy.
+    LayerSettle { track: String, token: u64 },
     /// Every 5 s: log media stats.
     Stats,
     /// Every 45 min: refresh voice credentials.
@@ -233,9 +262,13 @@ pub enum Notice {
     /// The status line ("Getting tickets", "Joining", "Connected",
     /// "Reconnecting").
     Status(&'static str),
-    /// Media connected for the first time (the store announces sidebar
-    /// presence on it).
+    /// The room said Ready for the first time (`joined`): the connect sound
+    /// and the presence join (op 33) go out.
     Connected,
+    /// A second Ready while joined (the room could not resume): the room may
+    /// have dropped our presence, so announce it again (STATE_MACHINE.md,
+    /// transition note 1).
+    Rejoined,
     /// The whole roster.
     Roster(Vec<Member>),
     /// The mic level as the meter shows it, 0..100 (the sensitivity
@@ -294,6 +327,14 @@ pub enum Effect {
     Pull(Remote),
     /// Stop these receive transceivers and close them on the SFU.
     Close(Vec<String>),
+    /// Move a pulled camera to another simulcast layer (`tracks/update`).
+    UpdateLayer(LayerUpdate),
+    /// Route the frames of the video received on `mid` to the UI under
+    /// `key` (its alias), or drop them (`None`).
+    SetVideoSink {
+        mid: String,
+        key: Option<String>,
+    },
     SetMicEnabled(bool),
     /// Play the others (`false` while deafened).
     SetPlayoutEnabled(bool),
@@ -304,6 +345,8 @@ pub enum Effect {
     },
     /// The mic's capture processing.
     SetProcessing(Processing),
+    /// Teardown step 4: stop the mic before any socket closes.
+    StopLocalMedia,
     LogStats,
     /// A diagnostic line.
     Log(String),
@@ -314,6 +357,17 @@ pub enum Effect {
     },
     /// Close everything; the call is over (`Some` = why it failed).
     End(Option<String>),
+}
+
+/// One pulled camera's simulcast layer.
+#[derive(Debug, Clone, Default)]
+struct Layer {
+    /// The layer asked of the SFU.
+    quality: Option<Quality>,
+    /// A switch waiting for the size to settle, and its timer's token.
+    pending: Option<(Quality, u64)>,
+    /// The token of the settle timer of the last switch.
+    settle: u64,
 }
 
 /// One call. Feed it [`Input`]s with [`CallMachine::handle`]; run the
@@ -333,19 +387,31 @@ pub struct CallMachine {
     voice_ready: bool,
     /// VoiceReady was seen before (a later one follows a re-identify).
     reidentified: bool,
-    /// Media connected at least once.
+    /// Media connected at least once (pulls wait for it).
     connected: bool,
+    /// The peer connection is connected now.
+    media_up: bool,
+    status: &'static str,
     muted: bool,
     deafened: bool,
     roster: Option<Roster>,
+    /// The roster last reported.
+    reported: Vec<Member>,
     tracks: TrackTable,
     next_token: u64,
     vad: Vad,
     sensitivity: Sensitivity,
     playback: Playback,
     processing: Processing,
-    /// The gain set on each pulled mid (absent: 1.0).
+    /// The gain set on each pulled audio mid (absent: 1.0).
     gains: HashMap<String, f64>,
+    video: VideoIntent,
+    watched: BTreeSet<String>,
+    /// Watch announcements sent (op 106), by streamer user id.
+    announced_watch: BTreeSet<String>,
+    /// The frame route set on each pulled video mid (absent: none).
+    routes: HashMap<String, String>,
+    layers: HashMap<String, Layer>,
 }
 
 impl CallMachine {
@@ -363,9 +429,12 @@ impl CallMachine {
             voice_ready: false,
             reidentified: false,
             connected: false,
+            media_up: false,
+            status: "",
             muted: false,
             deafened: false,
             roster: None,
+            reported: Vec::new(),
             tracks: TrackTable::default(),
             next_token: 0,
             vad: Vad::default(),
@@ -373,6 +442,11 @@ impl CallMachine {
             playback: Playback::default(),
             processing: Processing::default(),
             gains: HashMap::new(),
+            video: VideoIntent::default(),
+            watched: BTreeSet::new(),
+            announced_watch: BTreeSet::new(),
+            routes: HashMap::new(),
+            layers: HashMap::new(),
         }
     }
 
@@ -385,12 +459,19 @@ impl CallMachine {
         &self.tracks
     }
 
-    /// The roster so far (empty before the tickets).
+    /// The roster so far (empty before the tickets), with whose camera and
+    /// share are live.
     pub fn roster(&self) -> Vec<Member> {
-        self.roster
+        let mut members = self
+            .roster
             .as_ref()
             .map(Roster::snapshot)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        for m in &mut members {
+            m.camera_live = self.tracks.is_live(&camera_alias(&m.id));
+            m.screen_live = self.tracks.is_live(&screen_alias(&m.id));
+        }
+        members
     }
 
     /// Consumes one input; returns the effects to run, in order.
@@ -402,7 +483,10 @@ impl CallMachine {
         match (self.state, input) {
             (CallState::Idle, Input::Start) => self.start(&mut fx),
             (CallState::Idle, _) => {}
-            (CallState::Leaving, Input::Timer(Timer::Linger)) => self.end(&mut fx, None),
+            (CallState::Leaving, Input::Timer(Timer::Linger)) => {
+                self.disconnect(&mut fx);
+                self.end(&mut fx, None);
+            }
             (CallState::Leaving, _) => {}
             (_, Input::Start) => {}
             (_, Input::Tickets(result)) => self.on_tickets(&mut fx, result),
@@ -424,32 +508,65 @@ impl CallMachine {
             (_, Input::Timer(timer)) => self.on_timer(&mut fx, timer),
             (_, Input::MicLevel { rms, at_ms }) => self.on_mic_level(&mut fx, rms, at_ms),
         }
-        // Pull what is waiting once media is up (VOICE_PROTOCOL.md §3.3c).
-        if self.connected
-            && matches!(
-                self.state,
-                CallState::Connecting | CallState::Joined | CallState::Reconnecting
-            )
-        {
-            fx.extend(self.tracks.take_pulls().into_iter().map(Effect::Pull));
-        }
-        if !self.ended {
-            self.sync_gains(&mut fx);
+        if !self.ended && self.state != CallState::Leaving {
+            self.sync_media(&mut fx);
+            self.sync_watch(&mut fx);
+            if self.roster.is_some() && self.roster() != self.reported {
+                self.emit_roster(&mut fx);
+            }
         }
         fx
     }
 
-    /// Sets each pulled track's gain from its owner's volume where it
-    /// differs from what was set (a new mid starts at 1.0).
+    /// Brings pulls, audio gains, frame routes and camera layers in line
+    /// with the offers and the user's intent.
+    fn sync_media(&mut self, fx: &mut Vec<Effect>) {
+        if self.connected {
+            // Pull what is wanted once media is up (VOICE_PROTOCOL.md §3.3c).
+            let (video, watched) = (&self.video, &self.watched);
+            let pulls = self
+                .tracks
+                .take_pulls(|offer| wanted(offer, video, watched));
+            for remote in &pulls {
+                if remote.kind == Kind::Video && is_camera(&remote.track_name) {
+                    let quality = resolve_quality(video.demand.get(&remote.track_name).copied());
+                    self.layers.insert(
+                        remote.track_name.clone(),
+                        Layer {
+                            quality: Some(quality),
+                            ..Layer::default()
+                        },
+                    );
+                }
+            }
+            fx.extend(pulls.into_iter().map(Effect::Pull));
+        }
+        self.sync_gains(fx);
+        self.sync_routes(fx);
+        self.sync_layers(fx);
+    }
+
+    /// Sets each pulled audio track's gain where it differs from what was
+    /// set (a new mid starts at 1.0): its owner's volume, and for share
+    /// audio only while their share or camera is on stage.
     fn sync_gains(&mut self, fx: &mut Vec<Effect>) {
         let (roster, playback, gains) = (&self.roster, &self.playback, &mut self.gains);
         let mut live = HashSet::new();
-        for (owner, mid) in self.tracks.pulled_mids() {
+        for (alias, pull) in self.tracks.pulls() {
+            let Some(mid) = pull.mid.as_deref().filter(|_| pull.kind == Kind::Audio) else {
+                continue;
+            };
+            let owner = pull.participant_id.as_str();
             let user_id = roster
                 .as_ref()
                 .and_then(|r| r.user_id_of(owner))
                 .unwrap_or("");
-            let gain = playback.gain_for(user_id);
+            let audible = !is_share(alias) || self.video.stage.as_deref() == Some(owner);
+            let gain = if audible {
+                playback.gain_for(user_id)
+            } else {
+                0.0
+            };
             live.insert(mid);
             let set = gains.get(mid).copied().unwrap_or(1.0);
             if (set - gain).abs() > f64::EPSILON {
@@ -461,6 +578,94 @@ impl CallMachine {
             }
         }
         gains.retain(|mid, _| live.contains(mid.as_str()));
+    }
+
+    /// Routes a pulled video's frames to the UI while a visible tile shows
+    /// it and it is not parked; otherwise they are dropped.
+    fn sync_routes(&mut self, fx: &mut Vec<Effect>) {
+        let mut live = HashSet::new();
+        for (alias, pull) in self.tracks.pulls() {
+            let Some(mid) = pull.mid.as_deref().filter(|_| pull.kind == Kind::Video) else {
+                continue;
+            };
+            live.insert(mid.to_owned());
+            let owner = pull.participant_id.as_str();
+            let allowed = is_camera(alias)
+                || self.watched.contains(owner)
+                || self.video.stage.as_deref() == Some(owner);
+            let shown = !pull.parked && allowed && self.video.demand.contains_key(alias);
+            let current = self.routes.get(mid).map(String::as_str);
+            let wanted = shown.then_some(alias);
+            if current != wanted {
+                match wanted {
+                    Some(key) => self.routes.insert(mid.to_owned(), key.to_owned()),
+                    None => self.routes.remove(mid),
+                };
+                fx.push(Effect::SetVideoSink {
+                    mid: mid.to_owned(),
+                    key: wanted.map(str::to_owned),
+                });
+            }
+        }
+        self.routes.retain(|mid, _| live.contains(mid));
+    }
+
+    /// Moves each pulled simulcast camera to the layer its largest render
+    /// needs once that need has held for the upgrade or downgrade delay.
+    fn sync_layers(&mut self, fx: &mut Vec<Effect>) {
+        let pulled: HashSet<&str> = self.tracks.pulled_names().into_iter().collect();
+        self.layers
+            .retain(|alias, _| pulled.contains(alias.as_str()));
+        let aliases: Vec<String> = self.layers.keys().cloned().collect();
+        for alias in aliases {
+            let has_layers = self
+                .tracks
+                .offer_of(&alias)
+                .is_some_and(|o| o.simulcast_rids.len() >= 2);
+            if !has_layers || !self.tracks.is_live(&alias) {
+                continue;
+            }
+            let wanted = resolve_quality(self.video.demand.get(&alias).copied());
+            let token = self.next_token + 1;
+            let Some(layer) = self.layers.get_mut(&alias) else {
+                continue;
+            };
+            if layer.quality == Some(wanted) {
+                layer.pending = None;
+                continue;
+            }
+            if layer.pending.is_some_and(|(q, _)| q == wanted) {
+                continue;
+            }
+            let after = if layer.quality.is_some_and(|q| wanted > q) {
+                LAYER_UPGRADE_DELAY
+            } else {
+                LAYER_DOWNGRADE_DELAY
+            };
+            self.next_token = token;
+            layer.pending = Some((wanted, token));
+            fx.push(Effect::ArmTimer {
+                timer: Timer::Layer {
+                    track: alias,
+                    token,
+                },
+                after,
+            });
+        }
+    }
+
+    /// The `tracks/update` for `alias` at its current layer.
+    fn layer_update(&self, alias: &str, switch_now: bool) -> Option<LayerUpdate> {
+        let pull = self.tracks.pull_of(alias)?;
+        let offer = self.tracks.offer_of(alias)?;
+        let quality = self.layers.get(alias)?.quality?;
+        Some(LayerUpdate {
+            mid: pull.mid.clone()?,
+            sfu_track_name: pull.sfu_track_name.clone(),
+            session_id: pull.session_id.clone(),
+            rid: select_rid(quality, &offer.simulcast_rids)?,
+            switch_now,
+        })
     }
 
     /// One level reading: the meter, then speaking (held off while muted).
@@ -498,12 +703,29 @@ impl CallMachine {
         fx.push(Effect::End(reason));
     }
 
-    fn status(fx: &mut Vec<Effect>, status: &'static str) {
-        fx.push(Effect::Notify(Notice::Status(status)));
+    fn set_status(&mut self, fx: &mut Vec<Effect>, status: &'static str) {
+        if self.status != status {
+            self.status = status;
+            fx.push(Effect::Notify(Notice::Status(status)));
+        }
     }
 
-    fn emit_roster(&self, fx: &mut Vec<Effect>) {
-        fx.push(Effect::Notify(Notice::Roster(self.roster())));
+    /// The status line from what is up: "Connected" once room, voice and
+    /// media are all up, "Reconnecting" when one dropped after that.
+    fn refresh_status(&mut self, fx: &mut Vec<Effect>) {
+        let status = if self.room_up && self.voice_ready && self.media_up {
+            "Connected"
+        } else if self.status == "Connected" || self.status == "Reconnecting" {
+            "Reconnecting"
+        } else {
+            "Joining"
+        };
+        self.set_status(fx, status);
+    }
+
+    fn emit_roster(&mut self, fx: &mut Vec<Effect>) {
+        self.reported = self.roster();
+        fx.push(Effect::Notify(Notice::Roster(self.reported.clone())));
     }
 
     fn my_track(&self) -> String {
@@ -512,7 +734,7 @@ impl CallMachine {
 
     fn start(&mut self, fx: &mut Vec<Effect>) {
         self.set_state(fx, CallState::Connecting);
-        Self::status(fx, "Getting tickets");
+        self.set_status(fx, "Getting tickets");
         let (t, slug) = (&self.target, self.target.slug());
         fx.push(Effect::FetchTickets {
             room: wire::ticket_body("room", &t.server_id, &t.channel_id, &slug),
@@ -543,8 +765,7 @@ impl CallMachine {
 
         let t = &self.target;
         let slug = t.slug();
-        Self::status(fx, "Joining");
-        fx.push(Effect::OpenSockets {
+        let sockets = Effect::OpenSockets {
             room: SocketSpec {
                 path: format!("/api/channels/{slug}/ws?v=1"),
                 identify: wire::room_identify(&t.me_name, &t.me_username),
@@ -557,14 +778,17 @@ impl CallMachine {
                 first_ticket: wire::str_of(&replies.voice, "ticket").to_owned(),
                 ticket_body: wire::ticket_body("voice", &t.server_id, &t.channel_id, &slug),
             },
-        });
-        fx.push(Effect::OpenMedia(MediaSpec {
+        };
+        let media = Effect::OpenMedia(MediaSpec {
             ice_servers,
             stream_id: format!("cam-{}", self.me),
             slug,
             participant_id: self.me.clone(),
             voice_token: self.voice_token.clone(),
-        }));
+        });
+        self.set_status(fx, "Joining");
+        fx.push(sockets);
+        fx.push(media);
     }
 
     fn on_published(&mut self, fx: &mut Vec<Effect>, result: Result<Published, String>) {
@@ -602,19 +826,20 @@ impl CallMachine {
         }
     }
 
-    /// Status "Connected" (and Joined) once room, voice and media are all up.
-    fn maybe_joined(&mut self, fx: &mut Vec<Effect>) {
-        if self.connected && self.room_up && self.voice_ready {
-            Self::status(fx, "Connected");
+    /// `connection-restored`: back to joined.
+    fn restored(&mut self, fx: &mut Vec<Effect>) {
+        if self.state == CallState::Reconnecting {
             self.set_state(fx, CallState::Joined);
         }
+        self.refresh_status(fx);
     }
 
-    fn socket_down(&mut self, fx: &mut Vec<Effect>) {
-        Self::status(fx, "Reconnecting");
+    /// `connection-lost`: the room socket or the peer connection dropped.
+    fn lost(&mut self, fx: &mut Vec<Effect>) {
         if self.state == CallState::Joined {
             self.set_state(fx, CallState::Reconnecting);
         }
+        self.refresh_status(fx);
     }
 
     /// Takes a fresh voice token from the room, for the SFU and the voice
@@ -644,12 +869,7 @@ impl CallMachine {
                         Some("The call connection was reset. Join again.".into()),
                     );
                 }
-                if self.room_identified {
-                    fx.push(Effect::Log(
-                        "[voice/room] identified fresh after a drop".into(),
-                    ));
-                }
-                self.room_identified = true;
+                let again = std::mem::replace(&mut self.room_identified, true);
                 self.room_up = true;
                 self.replace_roster(&d);
                 fx.push(Effect::Send(
@@ -657,14 +877,28 @@ impl CallMachine {
                     wire::voice_state(self.muted, self.deafened),
                 ));
                 self.emit_roster(fx);
-                self.maybe_joined(fx);
+                match self.state {
+                    CallState::Connecting => {
+                        self.set_state(fx, CallState::Joined);
+                        fx.push(Effect::Notify(Notice::Connected));
+                    }
+                    CallState::Joined | CallState::Reconnecting if again => {
+                        fx.push(Effect::Log(
+                            "[voice/room] identified fresh after a drop".into(),
+                        ));
+                        self.set_state(fx, CallState::Joined);
+                        fx.push(Effect::Notify(Notice::Rejoined));
+                    }
+                    _ => {}
+                }
+                self.refresh_status(fx);
             }
             RoomEvent::Resumed(d) => {
                 self.room_up = true;
                 self.update_token(fx, &d.voice_token);
                 self.replace_roster(&d);
                 self.emit_roster(fx);
-                self.maybe_joined(fx);
+                self.restored(fx);
             }
             RoomEvent::VoiceState { leave, participant } => {
                 let id = participant.id.as_str();
@@ -676,7 +910,7 @@ impl CallMachine {
                         roster.remove(id);
                     }
                     self.tracks.cancel_grace(id);
-                    let closing = self.tracks.drop_participant(id);
+                    let closing = self.tracks.drop_participant(id, &HashSet::new());
                     close(fx, closing);
                 } else if let Some(roster) = &mut self.roster {
                     roster.upsert(&participant);
@@ -686,17 +920,20 @@ impl CallMachine {
             RoomEvent::Credentials { voice_token } => self.update_token(fx, &voice_token),
             RoomEvent::Disconnected => {
                 self.room_up = false;
-                self.socket_down(fx);
+                self.lost(fx);
             }
             RoomEvent::Stopped(reason) => self.end(fx, Some(stop_message(reason))),
             RoomEvent::Closed => self.end(fx, Some("Room connection closed".into())),
         }
     }
 
+    /// Who left the room is decided by the room alone: a Ready or Resumed
+    /// roster drops the ones it does not list, with their media.
     fn replace_roster(&mut self, d: &RoomState) {
-        if let (Some(roster), Some(list)) = (&mut self.roster, &d.participants) {
-            roster.replace_others(list);
-        }
+        let (Some(roster), Some(list)) = (&mut self.roster, &d.participants) else {
+            return;
+        };
+        roster.replace_others(list);
     }
 
     fn on_voice(&mut self, fx: &mut Vec<Effect>, event: VoiceEvent) {
@@ -709,43 +946,36 @@ impl CallMachine {
                     ));
                     // VoiceReady lists every live track: drop pulls of tracks
                     // that went away during the blip, keep the rest.
-                    let live: HashSet<&str> =
-                        tracks.iter().map(|t| t.sfu_track_name.as_str()).collect();
-                    let closing = self.tracks.keep_live(&live);
+                    let closing = self.tracks.keep_live(&tracks);
                     close(fx, closing);
                 }
                 // Announce (again): a re-identified socket is a new voice
-                // session to everyone else, and so is our speaking bit.
+                // session to everyone else, and so is our speaking bit. The
+                // peer connection kept its publication, so this is all the
+                // republish there is (STATE_MACHINE.md "Reconnect republish").
                 self.announce(fx);
                 if self.vad.speaking() {
                     fx.push(Effect::Send(Socket::Voice, wire::speaking(true)));
                 }
-                for t in &tracks {
-                    self.tracks.cancel_grace(&t.participant_id);
-                }
-                self.tracks.queue(&tracks, "", &self.me);
+                let closing = self.tracks.offer(&tracks, "", &self.me);
+                close(fx, closing);
                 if let Some(roster) = &mut self.roster {
                     for (pid, bit) in &speaking {
                         roster.set_speaking(pid, *bit);
                     }
                 }
                 self.emit_roster(fx);
-                self.maybe_joined(fx);
+                // A watch the voice room forgot with our old socket.
+                self.announced_watch.clear();
+                self.sync_watch(fx);
+                self.restored(fx);
             }
             VoiceEvent::Video {
                 participant_id,
                 tracks,
             } => {
-                for t in &tracks {
-                    let pid = match t.participant_id.as_str() {
-                        "" => participant_id.as_str(),
-                        pid => pid,
-                    };
-                    self.tracks.cancel_grace(pid);
-                }
-                let closing = self.tracks.replace_republished(&tracks, &participant_id);
+                let closing = self.tracks.offer(&tracks, &participant_id, &self.me);
                 close(fx, closing);
-                self.tracks.queue(&tracks, &participant_id, &self.me);
             }
             VoiceEvent::Speaking {
                 participant_id,
@@ -763,25 +993,29 @@ impl CallMachine {
                 participant_id,
                 names,
             } => {
-                let closing = self.tracks.stop(&participant_id, &names);
+                let closing = self.tracks.withdraw(&participant_id, &names);
                 close(fx, closing);
             }
             VoiceEvent::ClientDisconnect { participant_id } => {
-                // Their voice socket is gone, or they re-identified (the
-                // room sends this either way). Keep the row and pulls for a
-                // grace; a Video from them in time cancels it.
+                // Their voice socket reconnects (or they are leaving; the
+                // room says which). Keep their row and pulls for the grace;
+                // speaking clears at once.
                 if participant_id.is_empty() || participant_id == self.me {
                     return;
                 }
                 self.next_token += 1;
                 self.tracks.start_grace(&participant_id, self.next_token);
-                self.tracks.drop_pending_of(&participant_id);
+                if let Some(roster) = &mut self.roster {
+                    if roster.set_speaking(&participant_id, false) {
+                        self.emit_roster(fx);
+                    }
+                }
                 fx.push(Effect::ArmTimer {
                     timer: Timer::Grace {
                         participant: participant_id,
                         token: self.next_token,
                     },
-                    after: REANNOUNCE_GRACE,
+                    after: REMOTE_RECONNECT_GRACE,
                 });
             }
             VoiceEvent::Rejected { message } => self.end(fx, Some(message)),
@@ -797,8 +1031,9 @@ impl CallMachine {
                 ));
             }
             VoiceEvent::Disconnected => {
+                // Not a `connection-lost`: the phase stays.
                 self.voice_ready = false;
-                self.socket_down(fx);
+                self.refresh_status(fx);
             }
             VoiceEvent::Stopped(reason) => self.end(fx, Some(stop_message(reason))),
             VoiceEvent::Closed => self.end(fx, Some("Voice connection closed".into())),
@@ -808,21 +1043,45 @@ impl CallMachine {
     fn on_media(&mut self, fx: &mut Vec<Effect>, event: MediaEvent) {
         match event {
             MediaEvent::State(MediaState::Connected) => {
-                if !self.connected {
-                    self.connected = true;
-                    fx.push(Effect::Notify(Notice::Connected));
-                    Self::status(fx, "Connected");
-                    if self.room_up && self.voice_ready {
-                        self.set_state(fx, CallState::Joined);
-                    }
-                }
+                self.connected = true;
+                self.media_up = true;
+                self.restored(fx);
             }
+            MediaEvent::State(MediaState::Disconnected) => {
+                self.media_up = false;
+                self.lost(fx);
+            }
+            // No SFU session rebuild here (PartyTracks would start a new
+            // session and republish): a failed peer connection ends the call.
             MediaEvent::State(MediaState::Failed) => {
                 self.end(fx, Some("Media connection failed".into()));
             }
             MediaEvent::State(_) => {}
             MediaEvent::Closed => self.end(fx, Some("Media connection ended".into())),
         }
+    }
+
+    /// Announces watch starts and stops (op 106) by the streamer's user id.
+    fn sync_watch(&mut self, fx: &mut Vec<Effect>) {
+        if !self.sockets_open {
+            return;
+        }
+        let Some(roster) = &self.roster else {
+            return;
+        };
+        let now: BTreeSet<String> = self
+            .watched
+            .iter()
+            .filter_map(|pid| roster.user_id_of(pid))
+            .map(str::to_owned)
+            .collect();
+        for user in now.difference(&self.announced_watch) {
+            fx.push(Effect::Send(Socket::Voice, wire::watch_event(user, true)));
+        }
+        for user in self.announced_watch.difference(&now) {
+            fx.push(Effect::Send(Socket::Voice, wire::watch_event(user, false)));
+        }
+        self.announced_watch = now;
     }
 
     fn on_command(&mut self, fx: &mut Vec<Effect>, command: UserCommand) {
@@ -877,52 +1136,88 @@ impl CallMachine {
                     }
                 }
             }
-            UserCommand::Leave => {
-                if !self.sockets_open {
-                    return self.end(fx, None);
-                }
-                // A socket that is not ready queues these and drops them
-                // when it closes.
-                if self.voice_ready {
-                    fx.push(Effect::Send(
-                        Socket::Voice,
-                        wire::stop_tracks(&self.my_track()),
-                    ));
-                }
-                fx.push(Effect::Send(
-                    Socket::Voice,
-                    wire::empty_frame(GatewayOp::ClientDisconnect),
-                ));
-                fx.push(Effect::Send(
-                    Socket::Room,
-                    wire::empty_frame(GatewayOp::ClientDisconnect),
-                ));
-                fx.push(Effect::ArmTimer {
-                    timer: Timer::Linger,
-                    after: LEAVE_LINGER,
-                });
-                self.set_state(fx, CallState::Leaving);
+            UserCommand::SetVideo(video) => self.video = video,
+            UserCommand::SetWatched(watched) => {
+                self.watched = watched;
+                self.sync_watch(fx);
             }
+            UserCommand::Leave => self.leave(fx),
+        }
+    }
+
+    /// The one teardown (STATE_MACHINE.md "Teardown"). Local media first,
+    /// then, after the send window for a joined call (none otherwise), op 11
+    /// on the room socket, then on the voice socket, and the end, which
+    /// closes the room socket, the voice socket and the peer connection in
+    /// that order.
+    fn leave(&mut self, fx: &mut Vec<Effect>) {
+        if !self.sockets_open {
+            return self.end(fx, None);
+        }
+        fx.push(Effect::StopLocalMedia);
+        if matches!(self.state, CallState::Joined | CallState::Reconnecting) {
+            fx.push(Effect::ArmTimer {
+                timer: Timer::Linger,
+                after: LEAVE_SEND_WINDOW,
+            });
+            self.set_state(fx, CallState::Leaving);
+        } else {
+            self.disconnect(fx);
+            self.end(fx, None);
+        }
+    }
+
+    /// `ClientDisconnect` (op 11, `d: {}`) on the room socket, then on the
+    /// voice socket. A socket that is not ready drops it when it closes.
+    fn disconnect(&self, fx: &mut Vec<Effect>) {
+        for socket in [Socket::Room, Socket::Voice] {
+            fx.push(Effect::Send(
+                socket,
+                wire::empty_frame(GatewayOp::ClientDisconnect),
+            ));
         }
     }
 
     fn on_timer(&mut self, fx: &mut Vec<Effect>, timer: Timer) {
         match timer {
             Timer::Grace { participant, token } => {
-                if !self.tracks.expire_grace(&participant, token) {
+                let Some(reoffered) = self.tracks.expire_grace(&participant, token) else {
                     return;
-                }
-                let closing = self.tracks.retire_pulls_of(&participant);
+                };
+                // Their row stays: only the room says who left. What they
+                // did not offer again goes.
+                let closing = self.tracks.drop_participant(&participant, &reoffered);
                 close(fx, closing);
-                // The room keeps a dropped participant through its resume
-                // grace, so drop the row here; a later room update re-adds
-                // it with its known name.
-                if let Some(roster) = &mut self.roster {
-                    roster.remove(&participant);
-                }
-                self.emit_roster(fx);
             }
             Timer::Linger => {}
+            Timer::Layer { track, token } => {
+                let Some(layer) = self.layers.get_mut(&track) else {
+                    return;
+                };
+                let Some((quality, _)) = layer.pending.filter(|(_, t)| *t == token) else {
+                    return;
+                };
+                layer.pending = None;
+                layer.quality = Some(quality);
+                self.next_token += 1;
+                layer.settle = self.next_token;
+                if let Some(update) = self.layer_update(&track, true) {
+                    fx.push(Effect::UpdateLayer(update));
+                    fx.push(Effect::ArmTimer {
+                        timer: Timer::LayerSettle {
+                            track,
+                            token: self.next_token,
+                        },
+                        after: LAYER_SWITCH_SETTLE,
+                    });
+                }
+            }
+            Timer::LayerSettle { track, token } => {
+                let current = self.layers.get(&track).is_some_and(|l| l.settle == token);
+                if let Some(update) = self.layer_update(&track, false).filter(|_| current) {
+                    fx.push(Effect::UpdateLayer(update));
+                }
+            }
             Timer::Stats => {
                 if self.connected {
                     fx.push(Effect::LogStats);
@@ -936,6 +1231,49 @@ impl CallMachine {
                     ));
                 }
             }
+        }
+    }
+}
+
+/// The alias of `pid`'s camera.
+pub fn camera_alias(pid: &str) -> String {
+    format!("cam-video-{pid}")
+}
+
+/// The alias of `pid`'s screen share video.
+pub fn screen_alias(pid: &str) -> String {
+    format!("screen-video-{pid}")
+}
+
+fn is_camera(alias: &str) -> bool {
+    alias.starts_with("cam-")
+}
+
+fn is_share(alias: &str) -> bool {
+    alias.starts_with("screen-")
+}
+
+/// Whether to pull `offer`, and at which layer: audio always (share audio
+/// too: audibility is only its gain); a camera once a visible tile renders
+/// it, at the layer for that size; a share once watched or on stage.
+fn wanted(
+    offer: &Offer,
+    video: &VideoIntent,
+    watched: &BTreeSet<String>,
+) -> Option<Option<String>> {
+    match offer.kind {
+        Kind::Audio => Some(None),
+        Kind::Video if is_camera(&offer.track_name) => {
+            let size = video.demand.get(&offer.track_name)?;
+            Some(select_rid(
+                resolve_quality(Some(*size)),
+                &offer.simulcast_rids,
+            ))
+        }
+        Kind::Video => {
+            let pid = offer.participant_id.as_str();
+            (watched.contains(pid) || video.stage.as_deref() == Some(pid))
+                .then(|| select_rid(Quality::High, &offer.simulcast_rids))
         }
     }
 }

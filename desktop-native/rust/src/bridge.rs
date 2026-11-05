@@ -307,6 +307,26 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "requestDeafen"]
         fn set_deafened_from_ui(self: &Voice, deafened: bool);
+
+        /// Watch (or stop watching) a participant's share.
+        #[qinvokable]
+        fn watch(self: &Voice, participant_id: &QString, watch: bool);
+
+        /// An id for a video surface to report its size under.
+        #[qinvokable]
+        #[cxx_name = "newSurface"]
+        fn new_surface(self: &Voice) -> i32;
+
+        /// Surface `surface` shows `key` at this many device pixels; an
+        /// empty key or a zero size withdraws it.
+        #[qinvokable]
+        #[cxx_name = "reportVideo"]
+        fn report_video(self: &Voice, surface: i32, key: &QString, width: i32, height: i32);
+
+        /// The participant whose camera or share is focused (empty: none).
+        #[qinvokable]
+        #[cxx_name = "setStage"]
+        fn set_stage(self: &Voice, participant_id: &QString);
     }
 
     impl cxx_qt::Initialize for Voice {}
@@ -740,6 +760,26 @@ impl qobject::Voice {
 
     pub fn set_deafened_from_ui(&self, deafened: bool) {
         client::command(Command::SetVoiceDeafened(deafened));
+    }
+
+    pub fn watch(&self, participant_id: &QString, watch: bool) {
+        client::command(Command::WatchStream {
+            participant_id: participant_id.to_string(),
+            watch,
+        });
+    }
+
+    pub fn new_surface(&self) -> i32 {
+        crate::video::new_surface()
+    }
+
+    pub fn report_video(&self, surface: i32, key: &QString, width: i32, height: i32) {
+        let px = |n: i32| u32::try_from(n).unwrap_or(0);
+        crate::video::report(surface, &key.to_string(), px(width), px(height));
+    }
+
+    pub fn set_stage(&self, participant_id: &QString) {
+        crate::video::set_stage(&participant_id.to_string());
     }
 }
 

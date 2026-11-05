@@ -26,9 +26,12 @@ const QML: &[&str] = &[
     "qml/components/PlayDisc.qml",
     "qml/components/PresenceAvatar.qml",
     "qml/components/RailPill.qml",
+    "qml/components/SecondaryKey.qml",
     "qml/components/SelectField.qml",
+    "qml/components/StreamLoading.qml",
     "qml/components/SwitchRow.qml",
     "qml/components/Tooltip.qml",
+    "qml/components/VideoSurface.qml",
     "qml/components/VolumeSlider.qml",
     "qml/components/YapBark.qml",
     "qml/delegates/CategoryLabel.qml",
@@ -70,6 +73,8 @@ const QML: &[&str] = &[
     "qml/screens/Shell/UploadTray.qml",
     "qml/screens/Shell/VoiceSettings.qml",
     "qml/screens/SignIn/SignInView.qml",
+    "qml/screens/Voice/FocusedStage.qml",
+    "qml/screens/Voice/MembersTray.qml",
     "qml/screens/Voice/VoiceView.qml",
 ];
 

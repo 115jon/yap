@@ -140,6 +140,7 @@ fn member(id: &str, speaking: bool) -> VoiceMember {
         deafened: false,
         speaking,
         me: id == "p_me",
+        ..VoiceMember::default()
     }
 }
 
@@ -1011,7 +1012,7 @@ fn first_ready_should_subscribe_without_refetching() {
 }
 
 #[test]
-fn ready_after_a_reconnect_should_refetch_and_resubscribe() {
+fn ready_after_a_reconnect_should_refetch_and_resubscribe_without_voice_presence() {
     let mut client = Client::online();
     client.command(Command::JoinVoice(VOICE.into()));
     client.gateway(GatewayEvent::Closed);
@@ -1032,10 +1033,6 @@ fn ready_after_a_reconnect_should_refetch_and_resubscribe() {
             (
                 op(GatewayOp::ChannelSubscribe),
                 json!({ "channel_id": TEXT })
-            ),
-            (
-                op(GatewayOp::VoiceChannelJoin),
-                json!({ "channel_id": VOICE, "self_mute": false })
             ),
         ]
     );
@@ -1339,7 +1336,8 @@ fn prefs(client: &Client) -> (bool, bool) {
 }
 
 #[test]
-fn connecting_should_send_our_voice_state_to_the_gateway() {
+fn connecting_should_not_send_voice_state_on_the_gateway() {
+    // Mute and deafen go on the room socket only (realtime/VOICE_ROSTER.md).
     let mut client = Client::online();
     client.command(Command::SetVoiceMuted(true));
     let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
@@ -1347,32 +1345,64 @@ fn connecting_should_send_our_voice_state_to_the_gateway() {
         call,
         update: VoiceUpdate::Connected,
     });
-    assert_eq!(
-        voice_frames(&fx),
-        vec![json!({
-            "self_mute": true, "self_deaf": false, "self_video": false,
-            "self_stream": false, "self_stream_audio": false,
-        })]
-    );
+    assert!(voice_frames(&fx).is_empty());
 }
 
 #[test]
-fn toggles_in_a_joined_call_should_reach_the_gateway() {
+fn toggles_in_a_joined_call_should_stay_off_the_gateway() {
     let mut client = Client::online();
     let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
-    // Not before the media path is up.
-    assert!(voice_frames(&client.command(Command::SetVoiceMuted(true))).is_empty());
     client.input(Input::Voice {
         call,
         update: VoiceUpdate::Connected,
     });
     let fx = client.command(Command::SetVoiceDeafened(true));
-    let sent = voice_frames(&fx);
-    assert_eq!(sent.len(), 1);
+    assert!(voice_frames(&fx).is_empty());
+    assert!(fx.contains(&Effect::Voice {
+        call,
+        command: VoiceCommand::SetDeafened(true)
+    }));
+}
+
+#[test]
+fn a_fresh_room_session_should_announce_presence_again() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Connected,
+    });
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Rejoined,
+    });
     assert_eq!(
-        (sent[0]["self_mute"].clone(), sent[0]["self_deaf"].clone()),
-        (json!(true), json!(true))
+        frames(&fx),
+        vec![(
+            op(GatewayOp::VoiceChannelJoin),
+            json!({ "channel_id": VOICE, "self_mute": false })
+        )]
     );
+}
+
+#[test]
+fn watching_a_share_should_reach_the_call() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let fx = client.command(Command::WatchStream {
+        participant_id: "p_ada".into(),
+        watch: true,
+    });
+    assert!(fx.contains(&Effect::Voice {
+        call,
+        command: VoiceCommand::SetWatched(vec!["p_ada".into()])
+    }));
+    assert!(client
+        .command(Command::WatchStream {
+            participant_id: "p_ada".into(),
+            watch: true,
+        })
+        .is_empty());
 }
 
 #[test]
@@ -1541,13 +1571,32 @@ fn voice_connected_should_assert_presence() {
             json!({ "channel_id": VOICE, "self_mute": false })
         )
     );
-    assert_eq!(frames(&fx)[1].0, op(GatewayOp::VoiceStateUpdate));
+    assert_eq!(frames(&fx).len(), 1, "one op 33, no op 15");
+}
+
+#[test]
+fn leaving_before_the_room_answered_should_send_no_presence_leave() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let fx = client.command(Command::LeaveVoice);
+    assert!(fx.contains(&Effect::Voice {
+        call,
+        command: VoiceCommand::Leave
+    }));
+    assert!(frames(&fx).is_empty());
+    assert!(!fx
+        .iter()
+        .any(|e| matches!(e, Effect::View(ViewUpdate::Sound(_)))));
 }
 
 #[test]
 fn leaving_voice_should_stop_the_call_and_clear_presence() {
     let mut client = Client::online();
     let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Connected,
+    });
     let fx = client.command(Command::LeaveVoice);
     assert!(fx.contains(&Effect::Voice {
         call,
@@ -1806,6 +1855,10 @@ fn updates_from_an_old_call_should_be_ignored() {
 fn a_call_that_ends_with_an_error_should_say_why() {
     let mut client = Client::online();
     let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Connected,
+    });
     let fx = client.input(Input::Voice {
         call,
         update: VoiceUpdate::Ended(Some("room socket: closed".into())),
@@ -3379,5 +3432,66 @@ fn our_speaking_bit_should_reach_the_voice_view() {
     assert!(fx.iter().any(|e| matches!(
         e,
         Effect::View(ViewUpdate::Voice(VoiceView { speaking: true, .. }))
+    )));
+}
+
+fn tiles_of(fx: &[Effect]) -> Vec<yap_core::store::view::VoiceTileRow> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::View(ViewUpdate::Tiles(ViewDiff::Insert { rows, .. })) => Some(rows.clone()),
+            Effect::View(ViewUpdate::Tiles(ViewDiff::Reset(rows))) => Some(rows.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+#[test]
+fn the_call_stage_should_get_a_tile_per_person_and_per_share() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let mut ana = member("p_ana", false);
+    ana.user_id = "user_ana".into();
+    ana.video = true;
+    ana.camera_live = true;
+    ana.stream = true;
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Roster(vec![member("p_me", false), ana]),
+    });
+    let tiles = tiles_of(&fx);
+    let summary: Vec<_> = tiles
+        .iter()
+        .map(|t| (t.kind.as_str(), t.video, t.live, t.video_key.as_str()))
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("person", false, false, ""),
+            ("person", true, true, "cam-video-p_ana"),
+            ("screen", true, false, "screen-video-p_ana"),
+        ]
+    );
+    assert!(!tiles[2].watching);
+}
+
+#[test]
+fn watching_should_mark_the_share_tile() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let mut ana = member("p_ana", false);
+    ana.user_id = "user_ana".into();
+    ana.stream = true;
+    client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Roster(vec![member("p_me", false), ana]),
+    });
+    let fx = client.command(Command::WatchStream {
+        participant_id: "p_ana".into(),
+        watch: true,
+    });
+    assert!(views(&fx).iter().any(|v| matches!(
+        v,
+        ViewUpdate::Tiles(ViewDiff::Update { row, .. }) if row.kind == "screen" && row.watching
     )));
 }

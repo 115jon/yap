@@ -11,7 +11,7 @@ set(CMAKE_AUTOMOC ON)
 add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 
 find_package(Qt6 REQUIRED COMPONENTS
-  Core Gui Network Qml Quick QuickControls2 Svg QmlImportScanner)
+  Core Gui Multimedia Network Qml Quick QuickControls2 Svg QmlImportScanner)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -40,10 +40,11 @@ qt_add_executable(YapNative WIN32
   cpp/logfile.cpp cpp/logfile.h
   cpp/mediashell.cpp cpp/mediashell.h
   cpp/toast_win.cpp cpp/toast_win.h
+  cpp/videohub.cpp cpp/videohub.h
   cpp/windowchrome.cpp cpp/windowchrome.h)
 target_link_libraries(YapNative PRIVATE
   yap_native_qml
-  Qt::Gui Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg)
+  Qt::Gui Qt::Multimedia Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg)
 
 # Brand fonts, Phosphor icons and brand SVGs (assets/, built by tools/),
 # embedded as :/fonts, :/icons and :/svg.
@@ -61,10 +62,12 @@ qt_add_resources(YapNative yap_assets
   PREFIX /
   BASE assets
   FILES ${YAP_FONT_PATHS} ${YAP_SVG_PATHS} ${YAP_ICON_PATHS} assets/app/yap-256.png)
-# Avatars and server icons come as PNG, JPEG, WebP or GIF over HTTPS.
+# Avatars and server icons come as PNG, JPEG, WebP or GIF over HTTPS. Call
+# video renders through Qt Multimedia's VideoOutput, whose QVideoSink needs
+# a media backend (Windows Media Foundation; nothing is decoded by it).
 qt_import_plugins(YapNative INCLUDE
   Qt::QSvgPlugin Qt::QGifPlugin Qt::QJpegPlugin Qt::QWebpPlugin
-  Qt::QSchannelBackendPlugin)
+  Qt::QSchannelBackendPlugin Qt::QWindowsMediaPlugin)
 if(WIN32)
   # dwmapi for the title bar; shell32, advapi32 and runtimeobject for the
   # tray, the Run key and WinRT toasts; the rest is what libwebrtc (static)

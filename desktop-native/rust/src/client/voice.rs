@@ -13,7 +13,7 @@ use tokio::sync::watch;
 use yap_core::{config, Api, ApiError, VoiceCommand, VoiceEvents, VoiceMember, VoiceUpdate};
 use yap_voice::{
     run_call, ApiFailure, CallEnv, CallTarget, LibwebrtcEngine, Notice, Playback, Processing,
-    Sensitivity, TicketApi, UserCommand,
+    Sensitivity, TicketApi, UserCommand, VideoIntent,
 };
 
 pub use yap_core::VoiceTarget as Target;
@@ -60,6 +60,7 @@ impl TicketApi for Tickets {
 struct Commands {
     store: UnboundedReceiver<VoiceCommand>,
     audio: watch::Receiver<CallAudio>,
+    video: watch::Receiver<VideoIntent>,
     /// Settings commands not handed out yet.
     pending: VecDeque<UserCommand>,
 }
@@ -68,12 +69,16 @@ impl Commands {
     fn new(store: UnboundedReceiver<VoiceCommand>) -> Self {
         let mut audio = call_audio().subscribe();
         let first = audio.borrow_and_update().clone();
+        let mut video = crate::video::subscribe();
+        let shown = video.borrow_and_update().clone();
         let mut commands = Self {
             store,
             audio,
+            video,
             pending: VecDeque::new(),
         };
         commands.queue(&first);
+        commands.pending.push_back(UserCommand::SetVideo(shown));
         commands
     }
 
@@ -97,8 +102,14 @@ impl yap_voice::Commands for Commands {
                     return command.map(|command| match command {
                         VoiceCommand::SetMuted(muted) => UserCommand::SetMuted(muted),
                         VoiceCommand::SetDeafened(deafened) => UserCommand::SetDeafened(deafened),
+                        VoiceCommand::SetWatched(watched) => {
+                            UserCommand::SetWatched(watched.into_iter().collect())
+                        }
                         VoiceCommand::Leave => UserCommand::Leave,
                     });
+                }
+                Ok(()) = self.video.changed() => {
+                    return Some(UserCommand::SetVideo(self.video.borrow_and_update().clone()));
                 }
                 // The sender is a static: this never ends.
                 Ok(()) = self.audio.changed() => {
@@ -118,6 +129,10 @@ pub async fn run(
     commands: UnboundedReceiver<VoiceCommand>,
     events: VoiceEvents,
 ) {
+    static OUTPUT: std::sync::Once = std::sync::Once::new();
+    OUTPUT.call_once(|| {
+        LibwebrtcEngine::set_video_output(std::sync::Arc::new(crate::video::QtOutput))
+    });
     let cfg = config::get();
     let env = CallEnv {
         engine: LibwebrtcEngine,
@@ -136,6 +151,7 @@ pub async fn run(
         Notice::State(state) => eprintln!("[voice] {state}"),
         Notice::Status(status) => events.send(VoiceUpdate::Status(status.into())),
         Notice::Connected => events.send(VoiceUpdate::Connected),
+        Notice::Rejoined => events.send(VoiceUpdate::Rejoined),
         Notice::MicLevel(level) => crate::audio::set_live_level(Some(level)),
         Notice::Roster(members) => events.send(VoiceUpdate::Roster(
             members
@@ -148,6 +164,10 @@ pub async fn run(
                     deafened: m.deafened,
                     speaking: m.speaking,
                     me: m.me,
+                    video: m.video,
+                    stream: m.stream,
+                    camera_live: m.camera_live,
+                    screen_live: m.screen_live,
                 })
                 .collect(),
         )),

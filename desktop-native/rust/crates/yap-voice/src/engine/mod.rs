@@ -1,7 +1,8 @@
 //! The media side of a call behind one trait: [`MediaEngine`] owns the
 //! audio devices and opens one peer connection per call as a
 //! [`MediaSession`]. [`LibwebrtcEngine`] is production; [`FakeEngine`]
-//! records what it was asked, for tests.
+//! records what it was asked, for tests. Decoded remote video goes to a
+//! [`VideoOutput`] the app installs, frame by frame, off the UI thread.
 
 use std::future::Future;
 
@@ -30,6 +31,31 @@ pub struct LocalOffer {
     pub sdp: String,
     /// The send transceiver's mid.
     pub mid: String,
+}
+
+/// One decoded video frame in I420 (planar Y, then U and V at half size),
+/// borrowed for the length of [`VideoOutput::frame`].
+#[derive(Debug, Clone, Copy)]
+pub struct I420Frame<'a> {
+    pub width: u32,
+    pub height: u32,
+    /// Clockwise degrees to turn it for display (0, 90, 180, 270).
+    pub rotation: u16,
+    pub y: &'a [u8],
+    pub u: &'a [u8],
+    pub v: &'a [u8],
+    pub stride_y: u32,
+    pub stride_u: u32,
+    pub stride_v: u32,
+}
+
+/// Where remote video frames go. Called on a media thread (a tokio worker
+/// fed by WebRTC's decoder), once per frame of each routed track; it must
+/// not block.
+pub trait VideoOutput: Send + Sync + 'static {
+    /// A frame of the track routed under `key` (its alias, e.g.
+    /// `cam-video-<participant>`).
+    fn frame(&self, key: &str, frame: &I420Frame<'_>);
 }
 
 /// Owns the audio devices for the length of a call.
@@ -97,6 +123,14 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
     /// The gain of the remote track on `mid` (1.0 is as sent, 0.0
     /// silent), kept for the track if it has not arrived yet.
     fn set_track_gain(&self, mid: &str, gain: f64);
+
+    /// Routes the frames of the remote video received on `mid` to the
+    /// [`VideoOutput`] under `key`, or stops (`None`: frames are dropped
+    /// before any conversion). Kept for a track that has not arrived yet.
+    fn set_video_sink(&self, mid: &str, key: Option<&str>);
+
+    /// Stops the mic (teardown, before the sockets close).
+    fn stop_local(&self);
 
     /// The mic's cumulative `(totalAudioEnergy, totalSamplesDuration)`
     /// from the send stream, once it has any.

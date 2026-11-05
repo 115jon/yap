@@ -16,7 +16,7 @@ use yap_core::store::time::local_day;
 use yap_core::store::view::{
     ChannelTreeRow, DmRow, DmView, EmojiRow, GifRow, GifStatusView, MeView, MemberListRow,
     MentionRow, MessageRow, ProfileView, ServerRow, UnreadView, UploadRow, VoiceMemberRow,
-    VoicePanelView, VoiceView,
+    VoicePanelView, VoiceTileRow, VoiceView,
 };
 use yap_core::ViewUpdate;
 
@@ -31,6 +31,7 @@ pub struct Rows {
     pub tree: Vec<ChannelTreeRow>,
     pub messages: Vec<MessageRow>,
     pub roster: Vec<VoiceMemberRow>,
+    pub tiles: Vec<VoiceTileRow>,
     pub mentions: Vec<MentionRow>,
     pub dms: Vec<DmRow>,
     pub members: Vec<MemberListRow>,
@@ -74,6 +75,7 @@ pub struct Objects {
     tree: Option<NonNull<m::ChannelTreeModel>>,
     messages: Option<NonNull<m::MessageListModel>>,
     roster: Option<NonNull<m::VoiceRosterModel>>,
+    tiles: Option<NonNull<m::VoiceTileModel>>,
     mentions: Option<NonNull<m::MentionListModel>>,
     dms: Option<NonNull<m::DmListModel>>,
     members: Option<NonNull<m::MemberListModel>>,
@@ -248,6 +250,7 @@ model_slots!(
     ChannelTreeModel => tree,
     MessageListModel => messages,
     VoiceRosterModel => roster,
+    VoiceTileModel => tiles,
     MentionListModel => mentions,
     DmListModel => dms,
     MemberListModel => members,
@@ -402,6 +405,7 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::Channels(diff) => models::apply::<m::ChannelTreeModel>(diff),
         ViewUpdate::Messages(diff) => models::apply::<m::MessageListModel>(*diff),
         ViewUpdate::Roster(diff) => models::apply::<m::VoiceRosterModel>(diff),
+        ViewUpdate::Tiles(diff) => models::apply::<m::VoiceTileModel>(diff),
         ViewUpdate::Mentions(diff) => models::apply::<m::MentionListModel>(diff),
         ViewUpdate::Unread(view) => {
             with::<Chat>(|chat| set_unread(chat, &view));
