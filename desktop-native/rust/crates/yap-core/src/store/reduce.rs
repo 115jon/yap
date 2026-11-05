@@ -12,7 +12,7 @@ use super::state::{
     pending_id, Boot, Divider, MessageLog, Outgoing, Pending, Phase, ServerChannels, Session,
     Startup, State, Typer, VoiceCall, VoicePrefs,
 };
-use super::time::{parse_rfc3339, Stamp};
+use super::time::{is_after, parse_rfc3339, Stamp};
 use super::view::{self, ChannelTreeRow, MessageRow, Row, RowContext, ViewDiff, ViewUpdate};
 use super::view::{MeView, Seat, UnreadView, VoicePanelView, VoiceView};
 use super::{
@@ -37,6 +37,10 @@ pub const MENTION_SUGGESTIONS: usize = 5;
 const EDIT_FAILED: &str =
     "Couldn't save your edit. Your message is unchanged. Try editing it again.";
 const DELETE_FAILED: &str = "Couldn't delete the message. Check your connection and try again.";
+
+/// Permission bits (src/lib/permissions.ts).
+const ADMINISTRATOR: i64 = 1;
+const MANAGE_MESSAGES: i64 = 1 << 10;
 
 fn is_pending(message: &Message) -> bool {
     message.id.starts_with("pending-")
@@ -491,6 +495,22 @@ impl State {
             .map_or_else(|| "Someone".to_owned(), |u| u.label().to_owned())
     }
 
+    /// The open channel, and whether this user may delete others'
+    /// messages in it (useChatArea.ts `canDeleteMessages`; the channel's
+    /// `permissions` are the user's effective ones there).
+    fn emit_active_channel(&self, fx: &mut Effects, id: String, name: String) {
+        fx.view(ViewUpdate::ActiveChannel { id, name });
+        fx.view(ViewUpdate::ManageMessages(self.can_manage_messages()));
+    }
+
+    fn can_manage_messages(&self) -> bool {
+        self.active_channel
+            .as_deref()
+            .and_then(|id| self.find_channel(id))
+            .and_then(|c| c.permissions)
+            .is_some_and(|p| p & ADMINISTRATOR != 0 || p & MANAGE_MESSAGES != 0)
+    }
+
     // Unread
 
     /// The banner and the divider's scalars.
@@ -535,7 +555,7 @@ impl State {
         let newer = self
             .last_message_at
             .get(channel_id)
-            .is_none_or(|last| at > last.as_str());
+            .is_none_or(|last| is_after(at, last));
         if newer && !at.is_empty() {
             self.last_message_at
                 .insert(channel_id.to_owned(), at.to_owned());
@@ -554,7 +574,7 @@ impl State {
         let previous = self.read_states.get(channel_id).cloned();
         if previous
             .as_deref()
-            .is_some_and(|read| read >= mark.as_str())
+            .is_some_and(|read| !is_after(&mark, read))
         {
             return;
         }
@@ -570,21 +590,40 @@ impl State {
         self.sync_badges(fx);
     }
 
-    /// Marks read the unread notifications for messages loaded in the open
-    /// channel: the list is at its end, so they have been seen.
-    fn read_seen_mentions(&mut self, fx: &mut Effects) {
+    /// Marks read the unread notifications for messages in the open channel
+    /// that have been on screen: the list is at its end, which shows the
+    /// rows from the top one it reported, the divider's batch and whatever
+    /// arrived while it was open, not rows far above (useChatArea.ts marks
+    /// only messages that become visible).
+    /// `all` (Mark as read) takes every loaded one.
+    fn read_seen_mentions(&mut self, fx: &mut Effects, all: bool) {
         let Some(log) = &self.messages else {
             return;
+        };
+        let from = [
+            self.divider.as_ref().map(|d| d.message_id.as_str()),
+            self.seen_from.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .filter_map(|id| log.position(id))
+        .min();
+        let seen = |message_id: &str| {
+            let Some(at) = log.position(message_id) else {
+                return false;
+            };
+            all || from.is_some_and(|from| at >= from)
+                || log.at(at).is_some_and(|m| {
+                    self.seen_floor
+                        .as_deref()
+                        .is_none_or(|floor| is_after(&m.created_at, floor))
+                })
         };
         let ids: Vec<String> = self
             .notifications
             .iter()
             .filter(|n| n.channel_id.as_deref() == Some(log.channel_id.as_str()))
-            .filter(|n| {
-                n.message_id
-                    .as_deref()
-                    .is_some_and(|m| log.get(m).is_some())
-            })
+            .filter(|n| n.message_id.as_deref().is_some_and(seen))
             .map(|n| n.id.clone())
             .collect();
         if ids.is_empty() {
@@ -596,10 +635,15 @@ impl State {
     }
 
     /// The open channel shows its end in a focused window: read it, clear
-    /// its seen mentions, lock the divider and drop the banner
-    /// (useChatArea.ts `handleAtBottom`).
-    fn on_seen(&mut self, fx: &mut Effects) {
-        if !(self.focused && self.at_bottom) || self.pending.page.is_some() {
+    /// its seen mentions and drop the banner (useChatArea.ts
+    /// `handleAtBottom`). Coming back into focus there also locks the
+    /// divider (`onReturn`). Not before the read states have answered: the
+    /// divider is not placed yet, and marking would lose it everywhere.
+    fn on_seen(&mut self, fx: &mut Effects, returned: bool) {
+        if !(self.focused && self.at_bottom)
+            || self.pending.page.is_some()
+            || self.pending.read_states.is_some()
+        {
             return;
         }
         let Some(channel) = self.active_channel.clone() else {
@@ -612,13 +656,57 @@ impl State {
         {
             return;
         }
-        if let Some(divider) = self.divider.as_mut().filter(|d| d.banner || !d.locked) {
+        if let Some(divider) = self
+            .divider
+            .as_mut()
+            .filter(|d| d.banner || (returned && !d.locked))
+        {
             divider.banner = false;
-            divider.locked = true;
+            divider.locked |= returned;
             self.emit_unread(fx);
         }
         self.mark_read(fx, &channel, None);
-        self.read_seen_mentions(fx);
+        self.read_seen_mentions(fx, false);
+    }
+
+    /// Where the divider goes in `log`: above the first message after the
+    /// read mark, when the channel has unread messages (useChatArea.ts).
+    fn divider_for(&self, log: &MessageLog) -> Option<Divider> {
+        let read = self
+            .read_states
+            .get(&log.channel_id)
+            .filter(|_| self.has_unread(&log.channel_id))?;
+        let first = log
+            .iter()
+            .position(|m| !is_pending(m) && is_after(&m.created_at, read))?;
+        Some(Divider {
+            message_id: log.at(first)?.id.clone(),
+            count: i64::try_from(log.len() - first).unwrap_or(i64::MAX),
+            banner: true,
+            locked: false,
+        })
+    }
+
+    /// Places the divider in the list already on screen when it has none
+    /// (read states that answered after the rows): the list lands on it
+    /// again, and reports where it is before anything is marked read.
+    fn place_divider(&mut self, fx: &mut Effects) {
+        if self.divider.is_some() {
+            return;
+        }
+        let Some(log) = self
+            .messages
+            .as_ref()
+            .filter(|l| self.active_channel.as_deref() == Some(l.channel_id.as_str()))
+        else {
+            return;
+        };
+        let Some(divider) = self.divider_for(log) else {
+            return;
+        };
+        self.at_bottom = false;
+        self.set_divider(fx, Some(divider));
+        fx.view(ViewUpdate::Reland);
     }
 
     /// Read states and notifications (at sign-in and after a fresh
@@ -765,16 +853,18 @@ impl State {
             Command::LoadOlder => self.load_older(fx),
             Command::SetAtBottom(at_bottom) => {
                 self.at_bottom = at_bottom;
-                self.on_seen(fx);
+                self.on_seen(fx, false);
             }
+            Command::SeenFrom(id) => self.seen_from = Some(id),
             Command::SetFocused(focused) => {
+                let returned = focused && !self.focused;
                 self.focused = focused;
-                self.on_seen(fx);
+                self.on_seen(fx, returned);
             }
             Command::MarkRead => {
                 if let Some(channel) = self.active_channel.clone() {
                     self.mark_read(fx, &channel, None);
-                    self.read_seen_mentions(fx);
+                    self.read_seen_mentions(fx, true);
                     self.set_divider(fx, None);
                 }
             }
@@ -941,10 +1031,7 @@ impl State {
         });
         if let Some((id, name)) = &channel {
             self.active_channel = Some(id.clone());
-            fx.view(ViewUpdate::ActiveChannel {
-                id: id.clone(),
-                name: name.clone(),
-            });
+            self.emit_active_channel(fx, id.clone(), name.clone());
             let mut log = MessageLog::new(id);
             // Unknown until the page answers; it keeps what is older.
             log.has_more_before = true;
@@ -953,8 +1040,10 @@ impl State {
                 log.upsert(message);
             }
             let shown = !log.is_empty();
+            self.seen_floor = log.iter().last().map(|m| m.created_at.clone());
             self.messages = Some(log);
             fx.messages(ViewDiff::Reset(self.message_rows()));
+            self.emit_history(fx);
             if shown {
                 fx.push(Effect::StartupMark("cached content"));
             }
@@ -974,6 +1063,9 @@ impl State {
         if let Some((channel_id, _)) = channel {
             self.load_page(fx, &channel_id);
         }
+        // Before the page answers, so the divider can be placed in the
+        // cached rows (chat-actions.ts loads read states before the channel).
+        self.load_unread(fx);
     }
 
     /// Ends the revalidation once every request it started has answered.
@@ -1036,10 +1128,7 @@ impl State {
             });
         }
         if self.active_channel.take().is_some() {
-            fx.view(ViewUpdate::ActiveChannel {
-                id: String::new(),
-                name: String::new(),
-            });
+            self.emit_active_channel(fx, String::new(), String::new());
         }
         if self.messages.take().is_some() {
             fx.messages(ViewDiff::Reset(Vec::new()));
@@ -1209,8 +1298,9 @@ impl State {
                 fx.view(ViewUpdate::Me(view::me(&me, &self.api_base)));
             }
             session.me = Some(me.clone());
+            // Its read states and notifications were asked for already.
             self.persist(fx, CacheWrite::Me(Box::new(me)));
-            return self.load_unread(fx);
+            return;
         }
         fx.push(Effect::StoreToken(session.token.clone()));
         self.names.insert(me.id.clone(), me.label().to_owned());
@@ -1335,10 +1425,10 @@ impl State {
         self.messages = None;
         self.pending.page = None;
         self.pending.older = None;
-        fx.view(ViewUpdate::ActiveChannel {
-            id: String::new(),
-            name: String::new(),
-        });
+        self.seen_floor = None;
+        self.seen_from = None;
+        self.emit_history(fx);
+        self.emit_active_channel(fx, String::new(), String::new());
         self.clear_typing(fx);
         if self.divider.take().is_some() {
             self.emit_unread(fx);
@@ -1419,8 +1509,9 @@ impl State {
         }
         self.sync_subscriptions(fx, true);
         if let Some((id, name)) = kept {
-            // Only the name can have changed; the messages stay.
-            fx.view(ViewUpdate::ActiveChannel { id, name });
+            // Only the name and permissions can have changed; the
+            // messages stay.
+            self.emit_active_channel(fx, id, name);
             return self.finish_boot(fx);
         }
         match first_text {
@@ -1457,17 +1548,17 @@ impl State {
         }
         self.messages = Some(MessageLog::new(id));
         self.pending.older = None;
+        self.seen_floor = None;
+        self.seen_from = None;
         // Where the list lands is the UI's to report once it has rows.
         self.at_bottom = false;
         if self.divider.take().is_some() {
             self.emit_unread(fx);
         }
-        fx.view(ViewUpdate::ActiveChannel {
-            id: id.to_owned(),
-            name,
-        });
+        self.emit_active_channel(fx, id.to_owned(), name);
         self.clear_typing(fx);
         fx.messages(ViewDiff::Reset(Vec::new()));
+        self.emit_history(fx);
         self.persist_route(fx);
         self.gateway_send(fx, Self::channel_frame(GatewayOp::ChannelSubscribe, id));
         self.load_page(fx, id);
@@ -1518,11 +1609,14 @@ impl State {
         let mut log = MessageLog::new(channel_id);
         log.has_more_before = has_more_before;
         // A refetch keeps the older pages already loaded.
-        let oldest = messages.iter().map(|m| m.created_at.as_str()).min();
+        let oldest = messages
+            .iter()
+            .map(|m| m.created_at.as_str())
+            .min_by_key(|at| parse_rfc3339(at));
         if let (Some(old), Some(oldest)) = (old.as_ref().filter(|_| shown), oldest) {
             let older = old
                 .iter()
-                .filter(|m| !is_pending(m) && m.created_at.as_str() < oldest);
+                .filter(|m| !is_pending(m) && is_after(oldest, &m.created_at));
             for message in older {
                 log.upsert(message.clone());
                 log.has_more_before = old.has_more_before;
@@ -1548,24 +1642,21 @@ impl State {
             let at = newest.created_at.clone();
             self.bump_last_message(channel_id, &at);
         }
-        // Opening with unread messages: the divider goes above the first
-        // one after the read mark (useChatArea.ts).
-        if !shown {
-            let read = self
-                .read_states
-                .get(channel_id)
-                .filter(|_| self.has_unread(channel_id));
-            self.divider = read.and_then(|read| {
-                let first = log
-                    .iter()
-                    .position(|m| m.created_at.as_str() > read.as_str())?;
-                Some(Divider {
-                    message_id: log.at(first)?.id.clone(),
-                    count: i64::try_from(log.len() - first).unwrap_or(i64::MAX),
-                    banner: true,
-                    locked: false,
-                })
-            });
+        // With unread messages the divider goes above the first one after
+        // the read mark (useChatArea.ts), cached rows on screen or not.
+        let placed = match &self.divider {
+            Some(_) => false,
+            None => {
+                self.divider = self.divider_for(&log);
+                self.divider.is_some()
+            }
+        };
+        if self.seen_floor.is_none() {
+            self.seen_floor = log
+                .iter()
+                .rev()
+                .find(|m| !is_pending(m))
+                .map(|m| m.created_at.clone());
         }
         self.messages = Some(log);
         let rows = self.message_rows();
@@ -1576,16 +1667,23 @@ impl State {
         } else {
             fx.messages(ViewDiff::Reset(rows));
         }
-        if !shown && self.divider.is_some() {
+        if placed {
             self.emit_unread(fx);
+            if shown {
+                // The cached rows had landed at the end: land on it again
+                // and hear where the list is before marking it read.
+                self.at_bottom = false;
+                fx.view(ViewUpdate::Reland);
+            }
         }
         self.persist_messages(fx);
         if !std::mem::replace(&mut self.first_page_shown, true) {
             fx.push(Effect::StartupMark("messages shown"));
         }
         self.finish_boot(fx);
+        self.emit_history(fx);
         self.sync_badges(fx);
-        self.on_seen(fx);
+        self.on_seen(fx, false);
     }
 
     /// Asks for the page before the oldest loaded message.
@@ -1605,11 +1703,32 @@ impl State {
             before: Some(format!("{}|{}", first.created_at, first.id)),
         };
         self.pending.older = self.http(fx, request).map(|id| (id, channel_id));
+        self.emit_history(fx);
+    }
+
+    /// Whether an older page is loading and whether there are more, for
+    /// the list's next ask.
+    fn emit_history(&self, fx: &mut Effects) {
+        fx.view(ViewUpdate::History {
+            loading: self.pending.older.is_some(),
+            more: self.messages.as_ref().is_some_and(|l| l.has_more_before),
+        });
+    }
+
+    /// Every answer ends the loading state, whatever it was.
+    fn on_older(
+        &mut self,
+        fx: &mut Effects,
+        channel_id: &str,
+        result: Result<ApiResponse, ApiError>,
+    ) {
+        self.apply_older(fx, channel_id, result);
+        self.emit_history(fx);
     }
 
     /// An older page goes in at the top as one insert; the old first row
     /// may regroup under it.
-    fn on_older(
+    fn apply_older(
         &mut self,
         fx: &mut Effects,
         channel_id: &str,
@@ -1637,7 +1756,8 @@ impl State {
             return;
         };
         let added = log.prepend(page.messages);
-        log.has_more_before = page.has_more_before;
+        // A page with nothing new would ask for the same cursor again.
+        log.has_more_before = page.has_more_before && added > 0;
         if added == 0 {
             return;
         }
@@ -1824,12 +1944,14 @@ impl State {
             return;
         };
         let me = me.id.clone();
-        let ours = self
+        // Our own, or anyone's with MANAGE_MESSAGES (messages.ts DELETE).
+        let manage = self.can_manage_messages();
+        let allowed = self
             .messages
             .as_ref()
             .and_then(|log| log.get(id))
-            .is_some_and(|m| m.author_id == me && !is_pending(m));
-        if !ours {
+            .is_some_and(|m| (manage || m.author_id == me) && !is_pending(m));
+        if !allowed {
             return;
         }
         let Some(message) = self.remove_row(fx, id) else {
@@ -2026,7 +2148,7 @@ impl State {
                 if !known && !notification.is_read {
                     self.notifications.push(notification);
                     if self.focused && self.at_bottom {
-                        self.read_seen_mentions(fx);
+                        self.read_seen_mentions(fx, false);
                     }
                     self.sync_badges(fx);
                 }
@@ -2174,7 +2296,7 @@ impl State {
             let newer = self
                 .read_states
                 .get(&read.channel_id)
-                .is_none_or(|mine| read.last_read_at > *mine);
+                .is_none_or(|mine| is_after(&read.last_read_at, mine));
             if newer {
                 self.read_states.insert(read.channel_id, read.last_read_at);
             }
@@ -2182,7 +2304,9 @@ impl State {
         for last in states.last_messages {
             self.bump_last_message(&last.channel_id, &last.last_message_at);
         }
+        self.place_divider(fx);
         self.sync_badges(fx);
+        self.on_seen(fx, false);
     }
 
     fn on_notifications(&mut self, fx: &mut Effects, result: Result<ApiResponse, ApiError>) {
@@ -2199,8 +2323,12 @@ impl State {
                 self.notifications.push(n);
             }
         }
-        if self.focused && self.at_bottom && self.pending.page.is_none() {
-            self.read_seen_mentions(fx);
+        if self.focused
+            && self.at_bottom
+            && self.pending.page.is_none()
+            && self.pending.read_states.is_none()
+        {
+            self.read_seen_mentions(fx, false);
         }
         self.sync_badges(fx);
     }

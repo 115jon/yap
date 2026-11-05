@@ -426,6 +426,17 @@ pub enum ViewUpdate {
     Messages(Box<ViewDiff<MessageRow>>),
     Roster(ViewDiff<VoiceMemberRow>),
     Unread(UnreadView),
+    /// The divider was placed after the list had already landed (read
+    /// states that answered late): land on it again.
+    Reland,
+    /// Older pages of the open channel: one is loading; there are more.
+    History {
+        loading: bool,
+        more: bool,
+    },
+    /// The open channel lets this user delete others' messages
+    /// (`MANAGE_MESSAGES` or `ADMINISTRATOR` in its `permissions`).
+    ManageMessages(bool),
     Mentions(ViewDiff<MentionRow>),
     /// A short-lived line about something that failed (a toast).
     Notice(String),

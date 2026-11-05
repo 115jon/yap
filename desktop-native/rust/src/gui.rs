@@ -40,6 +40,9 @@ struct Scalars {
     channel: (String, String),
     typing: String,
     unread: UnreadView,
+    /// (loading, more) of older pages.
+    history: (bool, bool),
+    manage_messages: bool,
     voice: VoiceView,
     panel: VoicePanelView,
 }
@@ -159,12 +162,20 @@ impl Slot for Chat {
     }
 
     fn restore(mut self: Pin<&mut Self>) {
-        let (typing, unread) = GUI.with(|gui| {
+        let (typing, unread, history, manage) = GUI.with(|gui| {
             let s = &gui.borrow().scalars;
-            (s.typing.clone(), s.unread.clone())
+            (
+                s.typing.clone(),
+                s.unread.clone(),
+                s.history,
+                s.manage_messages,
+            )
         });
         self.as_mut().set_typing_text(q(&typing));
         set_unread(self.as_mut(), &unread);
+        self.as_mut().set_older_loading(history.0);
+        self.as_mut().set_has_older(history.1);
+        self.as_mut().set_can_manage_messages(manage);
         self.set_today(today());
     }
 }
@@ -296,5 +307,17 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             scalars(|s| s.unread = view);
         }
         ViewUpdate::Notice(text) => with::<Chat>(|chat| chat.notice(q(&text))),
+        ViewUpdate::Reland => with::<Chat>(|chat| chat.reland()),
+        ViewUpdate::History { loading, more } => {
+            with::<Chat>(|mut chat| {
+                chat.as_mut().set_has_older(more);
+                chat.set_older_loading(loading);
+            });
+            scalars(|s| s.history = (loading, more));
+        }
+        ViewUpdate::ManageMessages(manage) => {
+            with::<Chat>(|chat| chat.set_can_manage_messages(manage));
+            scalars(|s| s.manage_messages = manage);
+        }
     }
 }

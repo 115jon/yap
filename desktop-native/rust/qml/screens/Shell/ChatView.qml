@@ -20,9 +20,13 @@ Rectangle {
     // Older pages load once the top is this close (HISTORY_FETCH_PX).
     readonly property int historyFetchPx: 800
     readonly property bool windowActive: Window.active
-    // One older-page request per list growth, once the list has landed.
+    // One older-page request per visit to the top band (or per answer),
+    // once the list has landed.
     property bool olderAsked: false
     property bool landed: false
+    // The user scrolled since the list landed: a late divider must not
+    // move it.
+    property bool userMoved: false
 
     color: Theme.ply0
 
@@ -47,13 +51,22 @@ Rectangle {
     }
 
     function reportPosition() {
+        if (view.count > 0 && root.nearEnd) {
+            // Mentions from the top row on have been seen.
+            const top = view.itemAt(view.width / 2, view.contentY + 1)
+            if (top)
+                Chat.setSeenFrom(top.messageId)
+        }
         Chat.setAtBottom(view.count > 0 && root.nearEnd)
     }
 
     // Opening a channel lands on the divider when there is one, else the end.
     // Twice: the first pass creates the rows around the target, the second
     // places it with their real heights.
+    // Following the end stops meanwhile, so a pending follow cannot undo it.
     function land() {
+        root.landed = false
+        root.stickToEnd = false
         place()
         Qt.callLater(() => {
             place()
@@ -78,8 +91,10 @@ Rectangle {
 
     function jumpTo(id) {
         const index = Chat.indexOfMessage(id)
-        if (index < 0)
+        if (index < 0) {
+            toast.show(qsTr("That message isn't loaded yet. Scroll up to find it."))
             return
+        }
         view.positionViewAtIndex(index, ListView.Center)
         root.highlightId = id
         highlightTimer.restart()
@@ -128,6 +143,7 @@ Rectangle {
 
         function onModelReset() {
             root.landed = false
+            root.userMoved = false
             Qt.callLater(root.land)
         }
 
@@ -140,6 +156,8 @@ Rectangle {
         function onAppended(mine) {
             if (root.stickToEnd || mine)
                 Qt.callLater(() => {
+                    if (!root.stickToEnd && !mine)
+                        return
                     view.positionViewAtEnd()
                     root.updateNearEnd()
                 })
@@ -150,6 +168,14 @@ Rectangle {
         target: Chat
         function onNotice(text) {
             toast.show(text)
+        }
+        function onReland() {
+            if (!root.userMoved)
+                root.land()
+        }
+        function onOlderLoadingChanged() {
+            if (!Chat.olderLoading)
+                root.olderAsked = false
         }
     }
 
@@ -183,6 +209,9 @@ Rectangle {
         onContentHeightChanged: {
             if (root.landed && root.nearEnd)
                 Qt.callLater(() => {
+                    // Unless a jump or a reland moved it meanwhile.
+                    if (!root.landed || !root.nearEnd)
+                        return
                     view.positionViewAtEnd()
                     root.updateNearEnd()
                 })
@@ -190,9 +219,13 @@ Rectangle {
                 root.updateNearEnd()
         }
         onHeightChanged: root.updateNearEnd()
+        onMovementStarted: root.userMoved = true
         onContentYChanged: {
             root.updateNearEnd()
-            if (root.landed && !root.olderAsked && contentY - originY < root.historyFetchPx) {
+            const nearTop = contentY - originY < root.historyFetchPx
+            if (!nearTop)
+                root.olderAsked = false
+            else if (root.landed && !root.olderAsked && Chat.hasOlder && !Chat.olderLoading) {
                 root.olderAsked = true
                 Chat.loadOlder()
             }
@@ -371,7 +404,7 @@ Rectangle {
             text: qsTr("Delete message")
             glyph: "trash"
             danger: true
-            visible: messageMenu.mine
+            visible: messageMenu.mine || Chat.canManageMessages
             height: visible ? implicitHeight : 0
             onTriggered: root.deleteMessage(messageMenu.messageId, messageMenu.author, messageMenu.text, true)
         }

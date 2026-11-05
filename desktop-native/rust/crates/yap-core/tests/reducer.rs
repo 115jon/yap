@@ -354,7 +354,7 @@ fn channels_result_should_open_the_first_text_channel_and_request_its_page() {
         ..label(id, name)
     };
     assert_eq!(
-        views(&fx)[..3],
+        views(&fx)[..5],
         [
             &ViewUpdate::Channels(ViewDiff::Reset(vec![
                 label("cat_fixture_text", "Text"),
@@ -366,7 +366,13 @@ fn channels_result_should_open_the_first_text_channel_and_request_its_page() {
                 id: TEXT.into(),
                 name: "general".into()
             },
+            // The fixture channel's permissions include MANAGE_MESSAGES.
+            &ViewUpdate::ManageMessages(true),
             &ViewUpdate::Messages(Box::new(ViewDiff::Reset(Vec::new()))),
+            &ViewUpdate::History {
+                loading: false,
+                more: false
+            },
         ]
     );
     request_for(&fx, &messages());
@@ -448,7 +454,11 @@ fn first_page_should_project_messages_like_before() {
         views(&fx)[1..],
         [
             &ViewUpdate::Phase(Phase::Ready),
-            &ViewUpdate::Status(String::new())
+            &ViewUpdate::Status(String::new()),
+            &ViewUpdate::History {
+                loading: false,
+                more: true
+            },
         ]
     );
 }
@@ -2029,7 +2039,9 @@ fn cached_boot_should_revalidate_everything_in_one_batch() {
                 server_id: SERVER.into()
             },
             channels(),
-            messages()
+            messages(),
+            ApiRequest::ReadStates,
+            ApiRequest::Notifications,
         ]
     );
 }
@@ -2389,6 +2401,16 @@ impl Client {
     /// Sign-in where read states and notifications answer before the first
     /// page, as they usually do. Returns every effect along the way.
     fn boot_with(reads: Value, notifications: Value, page: Value) -> (Self, Vec<Effect>) {
+        Self::boot_in(channels_with_two_text(), reads, notifications, page)
+    }
+
+    /// [`Self::boot_with`] with this channel tree.
+    fn boot_in(
+        tree: Value,
+        reads: Value,
+        notifications: Value,
+        page: Value,
+    ) -> (Self, Vec<Effect>) {
         let mut client = Self::new();
         let mut all = client.command(Command::UseToken("tok_fixture".into()));
         let me = request_for(&all, &ApiRequest::Me);
@@ -2401,11 +2423,7 @@ impl Client {
         all.extend(client.respond(notes, &ApiRequest::Notifications, notifications));
         let fx = client.respond(servers, &ApiRequest::Servers, fixture("servers-list.json"));
         all.extend(fx.clone());
-        let fx = client.respond(
-            request_for(&fx, &channels()),
-            &channels(),
-            channels_with_two_text(),
-        );
+        let fx = client.respond(request_for(&fx, &channels()), &channels(), tree);
         all.extend(fx.clone());
         all.extend(client.respond(request_for(&fx, &messages()), &messages(), page));
         (client, all)
@@ -2595,7 +2613,31 @@ fn reaching_the_end_should_drop_the_banner_but_keep_the_divider() {
     let (mut client, _) = Client::boot_with(reads, no_notifications(), two_message_page());
     client.command(Command::SetAtBottom(true));
     let divider = client.state.divider().expect("divider");
-    assert!(!divider.banner && divider.locked);
+    assert!(!divider.banner && !divider.locked);
+}
+
+#[test]
+fn returning_to_the_window_at_the_end_should_lock_the_divider() {
+    let reads = read_states(&[(TEXT, A1)], &[(TEXT, A2)]);
+    let (mut client, _) = Client::boot_with(reads, no_notifications(), two_message_page());
+    client.command(Command::SetAtBottom(true));
+    client.command(Command::SetFocused(false));
+    client.command(Command::SetFocused(true));
+    assert!(client.state.divider().expect("divider").locked);
+}
+
+#[test]
+fn messages_away_after_reaching_the_end_focused_should_extend_the_divider() {
+    let reads = read_states(&[(TEXT, A1)], &[(TEXT, A2)]);
+    let (mut client, _) = Client::boot_with(reads, no_notifications(), two_message_page());
+    client.command(Command::SetAtBottom(true));
+    client.command(Command::SetFocused(false));
+    client.dispatch("MESSAGE_CREATE", msg(TEXT, "m3", "user_fixture_alice", A3));
+    let divider = client.state.divider().expect("divider");
+    assert_eq!(
+        (divider.message_id.as_str(), divider.count, divider.banner),
+        ("m2", 2, true)
+    );
 }
 
 #[test]
@@ -2612,6 +2654,8 @@ fn a_message_while_away_should_move_a_seen_divider_to_it() {
     let reads = read_states(&[(TEXT, A1)], &[(TEXT, A2)]);
     let (mut client, _) = Client::boot_with(reads, no_notifications(), two_message_page());
     client.command(Command::SetAtBottom(true));
+    client.command(Command::SetFocused(false));
+    client.command(Command::SetFocused(true));
     client.command(Command::SetFocused(false));
     client.dispatch("MESSAGE_CREATE", msg(TEXT, "m3", "user_fixture_alice", A3));
     let divider = client.state.divider().expect("divider");
@@ -2665,6 +2709,7 @@ fn notifications_read_should_clear_the_count() {
 fn seen_mentions_in_the_open_channel_should_be_marked_read() {
     let notes = json!({ "notifications": [mention("n1", TEXT, "m2")] });
     let (mut client, _) = Client::boot_with(read_states(&[], &[]), notes, two_message_page());
+    client.command(Command::SeenFrom("m1".into()));
     let fx = client.command(Command::SetAtBottom(true));
     request_for(
         &fx,
@@ -3046,4 +3091,246 @@ fn mention_query_should_list_matching_members() {
         .map(|r| r.username)
         .collect();
     assert_eq!(names, vec!["alice", "alicia"]);
+}
+
+// Review fixes: cached boot unread, paging state, seen mentions, delete
+// permissions, timestamps
+
+const FIXTURE_NEWEST: &str = "2026-11-04T12:00:05.000Z";
+
+fn marks(fx: &[Effect]) -> usize {
+    requests(fx)
+        .iter()
+        .filter(|(_, r)| matches!(r, ApiRequest::MarkRead { .. }))
+        .count()
+}
+
+fn relands(fx: &[Effect]) -> usize {
+    views(fx)
+        .into_iter()
+        .filter(|v| matches!(v, ViewUpdate::Reland))
+        .count()
+}
+
+/// The fixture page's newer message is unread.
+fn fixture_unread() -> Value {
+    read_states(
+        &[(TEXT, "2026-11-04T12:00:02.000Z")],
+        &[(TEXT, FIXTURE_NEWEST)],
+    )
+}
+
+#[test]
+fn cached_boot_should_not_mark_read_before_the_read_states_answer() {
+    let (mut client, boot) = Client::launch(Some(snapshot()));
+    // The cached rows landed at the end of a focused window.
+    let mut fx = client.command(Command::SetAtBottom(true));
+    fx.extend(client.respond(
+        request_for(&boot, &messages()),
+        &messages(),
+        fixture("messages-page.json"),
+    ));
+    assert_eq!(marks(&fx), 0, "{fx:#?}");
+}
+
+#[test]
+fn cached_boot_read_states_after_the_page_should_place_the_divider_and_land_again() {
+    let (mut client, boot) = Client::launch(Some(snapshot()));
+    client.command(Command::SetAtBottom(true));
+    client.respond(
+        request_for(&boot, &messages()),
+        &messages(),
+        fixture("messages-page.json"),
+    );
+    let fx = client.respond(
+        request_for(&boot, &ApiRequest::ReadStates),
+        &ApiRequest::ReadStates,
+        fixture_unread(),
+    );
+    let divider = client.state.divider().expect("divider");
+    assert_eq!(
+        (divider.message_id.as_str(), relands(&fx), marks(&fx)),
+        ("msg_fixture_0002", 1, 0)
+    );
+    let row = message_diffs(&fx).into_iter().find_map(|d| match d {
+        ViewDiff::Update { row, .. } if row.divider => Some(row.id.clone()),
+        _ => None,
+    });
+    assert_eq!(row.as_deref(), Some("msg_fixture_0002"));
+    // Once the list reports the end again, it is read.
+    assert_eq!(marks(&client.command(Command::SetAtBottom(true))), 1);
+}
+
+#[test]
+fn cached_boot_read_states_before_the_page_should_place_the_divider_in_the_cached_rows() {
+    let (mut client, boot) = Client::launch(Some(snapshot()));
+    client.command(Command::SetAtBottom(true));
+    let fx = client.respond(
+        request_for(&boot, &ApiRequest::ReadStates),
+        &ApiRequest::ReadStates,
+        fixture_unread(),
+    );
+    assert_eq!((relands(&fx), marks(&fx)), (1, 0));
+    let fx = client.respond(
+        request_for(&boot, &messages()),
+        &messages(),
+        fixture("messages-page.json"),
+    );
+    let divider = client.state.divider().expect("divider");
+    assert_eq!(
+        (divider.message_id.as_str(), relands(&fx), marks(&fx)),
+        ("msg_fixture_0002", 0, 0)
+    );
+}
+
+#[test]
+fn a_cached_session_should_not_ask_for_read_states_again_when_me_answers() {
+    let (mut client, boot) = Client::launch(Some(snapshot()));
+    let fx = client.respond(
+        request_for(&boot, &ApiRequest::Me),
+        &ApiRequest::Me,
+        fixture("user-me.json"),
+    );
+    let asked = requests(&fx)
+        .iter()
+        .any(|(_, r)| matches!(r, ApiRequest::ReadStates | ApiRequest::Notifications));
+    assert!(!asked, "{fx:#?}");
+}
+
+fn history(fx: &[Effect]) -> Vec<(bool, bool)> {
+    views(fx)
+        .into_iter()
+        .filter_map(|v| match v {
+            ViewUpdate::History { loading, more } => Some((*loading, *more)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_failed_older_page_should_end_loading_and_allow_a_retry() {
+    let (mut client, _) = Client::quiet(two_message_page());
+    let fx = client.command(Command::LoadOlder);
+    assert_eq!(history(&fx), vec![(true, true)]);
+    let (id, _) = requests(&fx).pop().expect("older");
+    let fx = client.fail(id, ApiError::Network("offline".into()));
+    assert_eq!(history(&fx), vec![(false, true)]);
+    assert_eq!(requests(&client.command(Command::LoadOlder)).len(), 1);
+}
+
+#[test]
+fn an_older_page_with_nothing_new_should_stop_paging() {
+    let (mut client, _) = Client::quiet(two_message_page());
+    let fx = client.command(Command::LoadOlder);
+    let (id, request) = requests(&fx).pop().expect("older");
+    // The server says there are more, but sent nothing new.
+    let fx = client.respond(id, &request, page_of(Vec::new(), true));
+    assert_eq!(history(&fx), vec![(false, false)]);
+    assert!(requests(&client.command(Command::LoadOlder)).is_empty());
+}
+
+fn notifications_marked(fx: &[Effect]) -> Vec<String> {
+    requests(fx)
+        .into_iter()
+        .find_map(|(_, r)| match r {
+            ApiRequest::MarkNotificationsRead { ids } => Some(ids),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn reaching_the_end_should_not_mark_mentions_above_what_was_on_screen() {
+    let reads = read_states(&[(TEXT, A1)], &[(TEXT, A2)]);
+    let notes = json!({ "notifications": [mention("n1", TEXT, "m1"), mention("n2", TEXT, "m2")] });
+    let (mut client, _) = Client::boot_with(reads, notes, two_message_page());
+    client.command(Command::SeenFrom("m2".into()));
+    let fx = client.command(Command::SetAtBottom(true));
+    assert_eq!(notifications_marked(&fx), vec!["n2".to_owned()]);
+    assert_eq!(client.state.channel_mentions(TEXT), 1);
+}
+
+#[test]
+fn reaching_the_end_should_mark_mentions_from_the_top_row_on_screen() {
+    let reads = read_states(&[(TEXT, A1)], &[(TEXT, A2)]);
+    let notes = json!({ "notifications": [mention("n1", TEXT, "m1"), mention("n2", TEXT, "m2")] });
+    let (mut client, _) = Client::boot_with(reads, notes, two_message_page());
+    client.command(Command::SeenFrom("m1".into()));
+    let fx = client.command(Command::SetAtBottom(true));
+    assert_eq!(
+        notifications_marked(&fx),
+        vec!["n1".to_owned(), "n2".to_owned()]
+    );
+}
+
+#[test]
+fn a_live_mention_at_the_end_should_be_marked_read() {
+    let (mut client, _) = Client::quiet(two_message_page());
+    client.command(Command::SeenFrom("m2".into()));
+    client.command(Command::SetAtBottom(true));
+    client.dispatch("MESSAGE_CREATE", msg(TEXT, "m3", "user_fixture_alice", A3));
+    let fx = client.dispatch("NOTIFICATION_CREATE", mention("n3", TEXT, "m3"));
+    assert_eq!(notifications_marked(&fx), vec!["n3".to_owned()]);
+}
+
+/// The two-text-channel tree with no permissions on any channel.
+fn tree_without_manage() -> Value {
+    let mut tree = channels_with_two_text();
+    for channel in tree["channels"].as_array_mut().expect("channels") {
+        channel
+            .as_object_mut()
+            .expect("channel")
+            .remove("permissions");
+    }
+    tree
+}
+
+#[test]
+fn delete_should_skip_others_messages_without_manage_messages() {
+    let (mut client, boot) = Client::boot_in(
+        tree_without_manage(),
+        read_states(&[], &[]),
+        no_notifications(),
+        own_page(),
+    );
+    assert!(views(&boot).contains(&&ViewUpdate::ManageMessages(false)));
+    let fx = client.command(Command::DeleteMessage("m2".into()));
+    assert!(fx.is_empty(), "{fx:#?}");
+}
+
+#[test]
+fn delete_should_take_others_messages_with_manage_messages() {
+    let (mut client, boot) = Client::quiet(own_page());
+    assert!(views(&boot).contains(&&ViewUpdate::ManageMessages(true)));
+    let fx = client.command(Command::DeleteMessage("m2".into()));
+    request_for(&fx, &delete("m2"));
+}
+
+#[test]
+fn administrator_should_be_able_to_delete_others_messages() {
+    let mut tree = tree_without_manage();
+    tree["channels"][0]["permissions"] = json!(1);
+    let (mut client, _) =
+        Client::boot_in(tree, read_states(&[], &[]), no_notifications(), own_page());
+    let fx = client.command(Command::DeleteMessage("m2".into()));
+    request_for(&fx, &delete("m2"));
+}
+
+#[test]
+fn read_marks_with_a_space_separator_should_compare_as_instants() {
+    // As strings, "2026-11-04T12:20…" sorts after "2026-11-04 12:25…".
+    let reads = read_states(&[(TEXT, "2026-11-04 12:25:00")], &[(TEXT, A2)]);
+    let (client, _) = Client::boot_with(reads, no_notifications(), two_message_page());
+    assert!(client.state.divider().is_none());
+}
+
+#[test]
+fn read_marks_with_an_offset_should_compare_as_instants() {
+    // 12:25 UTC: the newest message, at 12:20 UTC, is read.
+    let reads = read_states(
+        &[(SECOND_TEXT, "2026-11-04T07:25:00-05:00")],
+        &[(SECOND_TEXT, A2)],
+    );
+    let (client, _) = Client::boot_with(reads, no_notifications(), two_message_page());
+    assert!(!client.state.is_unread(SECOND_TEXT));
 }

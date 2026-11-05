@@ -46,6 +46,9 @@ pub enum Command {
     LoadOlder,
     /// Whether the message list is at its newest end.
     SetAtBottom(bool),
+    /// The top-most message on screen (reported with the end): its
+    /// mentions and everything below it have been seen.
+    SeenFrom(String),
     /// Whether the window has focus.
     SetFocused(bool),
     /// Mark the open channel read and drop its "New" divider.

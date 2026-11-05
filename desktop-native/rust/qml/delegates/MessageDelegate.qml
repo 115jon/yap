@@ -25,6 +25,8 @@ Item {
     required property bool grouped
     required property string attachmentNames
     required property bool mine
+    // Ours, or anyone's with MANAGE_MESSAGES (MessageItem.tsx).
+    readonly property bool canDelete: mine || Chat.canManageMessages
     required property string nonce
     required property bool pending
     required property bool failed
@@ -396,7 +398,7 @@ Item {
                     size: 28
                     iconName: "trash"
                     tip: qsTr("Delete")
-                    visible: root.mine && root.shiftHeld
+                    visible: root.canDelete && root.shiftHeld
                     onClicked: root.deleteRequested(root.messageId, root.author, root.body, false)
                 }
                 IconKey {
@@ -404,7 +406,7 @@ Item {
                     size: 28
                     iconName: "more"
                     tip: qsTr("More")
-                    visible: !(root.mine && root.shiftHeld)
+                    visible: !(root.canDelete && root.shiftHeld)
                     onClicked: root.menuRequested(root.messageId, root.author, root.body, root.mine,
                                                   moreKey, moreKey.width - 200, moreKey.height + 4)
                 }

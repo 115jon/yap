@@ -112,11 +112,20 @@ pub mod qobject {
         #[qproperty(QString, unread_since_time, cxx_name = "unreadSinceTime")]
         #[qproperty(QString, unread_since_date, cxx_name = "unreadSinceDate")]
         #[qproperty(i32, unread_since_day, cxx_name = "unreadSinceDay")]
+        // Older pages: one is loading; there are more to load.
+        #[qproperty(bool, older_loading, cxx_name = "olderLoading")]
+        #[qproperty(bool, has_older, cxx_name = "hasOlder")]
+        // Delete is offered on others' messages too (MANAGE_MESSAGES).
+        #[qproperty(bool, can_manage_messages, cxx_name = "canManageMessages")]
         type Chat = super::ChatRust;
 
         /// Something failed that the user should hear about (a toast).
         #[qsignal]
         fn notice(self: Pin<&mut Chat>, text: QString);
+
+        /// The divider was placed after the list had landed: land again.
+        #[qsignal]
+        fn reland(self: Pin<&mut Chat>);
 
         /// Posts to the open channel; `reply_to_id` may be empty.
         #[qinvokable]
@@ -151,6 +160,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "setAtBottom"]
         fn set_at_bottom(self: &Chat, at_bottom: bool);
+
+        /// The top-most message on screen, reported with the end.
+        #[qinvokable]
+        #[cxx_name = "setSeenFrom"]
+        fn set_seen_from(self: &Chat, message_id: &QString);
 
         #[qinvokable]
         #[cxx_name = "setFocused"]
@@ -287,6 +301,9 @@ pub struct ChatRust {
     unread_since_time: QString,
     unread_since_date: QString,
     unread_since_day: i32,
+    older_loading: bool,
+    has_older: bool,
+    can_manage_messages: bool,
 }
 
 #[derive(Default)]
@@ -418,6 +435,10 @@ impl qobject::Chat {
 
     pub fn set_at_bottom(&self, at_bottom: bool) {
         client::command(Command::SetAtBottom(at_bottom));
+    }
+
+    pub fn set_seen_from(&self, message_id: &QString) {
+        client::command(Command::SeenFrom(message_id.to_string()));
     }
 
     pub fn set_focused(&self, focused: bool) {

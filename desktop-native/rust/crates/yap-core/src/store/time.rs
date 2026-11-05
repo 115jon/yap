@@ -74,6 +74,16 @@ fn number(s: &str) -> Option<i64> {
     s.parse().ok()
 }
 
+/// `a` is a later instant than `b`. Both parse as RFC 3339 (the server
+/// mixes `T` and space separators and offsets); unparseable ones fall back
+/// to comparing the strings.
+pub fn is_after(a: &str, b: &str) -> bool {
+    match (parse_rfc3339(a), parse_rfc3339(b)) {
+        (Some(a), Some(b)) => a > b,
+        _ => a > b,
+    }
+}
+
 /// Parses `YYYY-MM-DDTHH:MM:SS[.fff][Z|±HH:MM]` to epoch ms.
 pub fn parse_rfc3339(s: &str) -> Option<i64> {
     let (date, rest) = s.split_once(['T', 't', ' '])?;

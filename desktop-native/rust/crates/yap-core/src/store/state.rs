@@ -6,7 +6,7 @@ use yap_cache::Snapshot;
 use yap_protocol::rest::{Category, Channel, ChannelType, ChannelsResponse, Message, MessagePatch};
 use yap_protocol::rest::{Notification, Server, User};
 
-use super::time::LocalOffset;
+use super::time::{is_after, LocalOffset};
 use super::view::{ChannelTreeRow, MentionRow, ServerRow, VoiceMemberRow};
 use super::{CallId, Occupant, RequestId, SessionId, SignInId, VoiceMember};
 use crate::api::{ApiError, Token};
@@ -313,8 +313,8 @@ pub struct Divider {
     pub count: i64,
     /// The banner shows until the list reaches its end.
     pub banner: bool,
-    /// Seen at the end with the window focused: the next batch that
-    /// arrives while away moves it (useChatArea.ts).
+    /// Seen at the end when the window came back into focus: the next
+    /// batch that arrives while away moves it (useChatArea.ts `onReturn`).
     pub locked: bool,
 }
 
@@ -376,7 +376,7 @@ pub struct State {
     pub(super) typing_text: String,
     /// Bumped by each typing event; only the newest one of a typer clears them.
     pub(super) typing_generation: u64,
-    /// Read marks by channel (ISO 8601; compared as strings like the web).
+    /// Read marks by channel (RFC 3339; compared as instants).
     pub(super) read_states: HashMap<String, String>,
     /// Newest message time by channel.
     pub(super) last_message_at: HashMap<String, String>,
@@ -385,6 +385,11 @@ pub struct State {
     /// Members by server id (mention suggestions, typing names).
     pub(super) members: HashMap<String, Vec<User>>,
     pub(super) divider: Option<Divider>,
+    /// The open channel's newest message time when it loaded: mentions on
+    /// messages after it arrived while it was open (and were seen).
+    pub(super) seen_floor: Option<String>,
+    /// The top-most message on screen, as the list last reported it.
+    pub(super) seen_from: Option<String>,
     /// Sends not yet confirmed, by nonce.
     pub(super) outbox: HashMap<String, Outgoing>,
     pub(super) focused: bool,
@@ -434,6 +439,8 @@ impl State {
             notifications: Vec::new(),
             members: HashMap::new(),
             divider: None,
+            seen_floor: None,
+            seen_from: None,
             outbox: HashMap::new(),
             focused: true,
             at_bottom: false,
@@ -536,7 +543,7 @@ impl State {
             self.last_message_at.get(channel_id),
             self.read_states.get(channel_id),
         ) {
-            (Some(last), Some(read)) => last > read,
+            (Some(last), Some(read)) => is_after(last, read),
             (Some(_), None) => true,
             (None, _) => false,
         }
