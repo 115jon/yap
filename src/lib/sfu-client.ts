@@ -1,3 +1,4 @@
+import { RemoteReconnectGrace } from "@ralph/voice";
 import { markVoice } from "@/lib/voice/latency-marks";
 import { clog } from "./console-logger";
 import { TypedEventEmitter } from "./event-emitter";
@@ -12,7 +13,6 @@ import {
   type VoiceStateDelta,
 } from "./types";
 import {
-  GatewayCloseCode,
   GatewayOp,
   type RepublishRequestPayload,
   VOICE_MOVED_CLOSE_REASON,
@@ -129,6 +129,12 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
   private standby = false;
   private joinedSnapshot: SFUEventMap["joined"] | null = null;
   private readonly deferredRemoteTracks = new Map<string, TrackInfo>();
+  /**
+   * The viewer's latest subscription choice per remote track, kept here so
+   * a PartyTracks session created (or rebuilt) after the choice still gets
+   * it: screen video is pulled only once subscribed.
+   */
+  private readonly remoteTrackSubscriptions = new Map<string, boolean>();
   private partyTracksTransport: PartyTracksClientTransport | null = null;
   private partyTracksMedia: PartyTracksMediaManager | null = null;
   private partyTracksParticipantId: string | null = null;
@@ -155,6 +161,20 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
   private nativeScreenReconnectRequired = false;
   private nativeScreenResetPromise: Promise<void> = Promise.resolve();
   private remoteSpeakingUntil = new Map<string, number>();
+  /**
+   * Remote participants whose voice socket said ClientDisconnect: their
+   * pulls are kept for REMOTE_RECONNECT_GRACE_MS in case they are only
+   * reconnecting (packages/voice/STATE_MACHINE.md, "Reconnect grace").
+   */
+  private readonly remoteReconnectGrace = new RemoteReconnectGrace({
+    timers: {
+      setTimeout: (callback, ms) => setTimeout(callback, ms),
+      clearTimeout: (handle) =>
+        clearTimeout(handle as ReturnType<typeof setTimeout>),
+    },
+    expire: (participantId, reoffered) =>
+      this.dropDisconnectedParticipant(participantId, reoffered),
+  });
   private readonly lastRepublishRequestAt = new Map<string, number>();
   private audioTrackOperation: Promise<void> = Promise.resolve();
   private latencyTimeline: {
@@ -440,12 +460,10 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
         this.voiceGW.updateVoiceToken(event.voiceToken);
         this.partyTracksTransport?.updateVoiceToken(event.voiceToken);
       }
-      if (event.participants) {
-        this.emit("participants-sync", {
-          participants: event.participants,
-          spatialAudioState: event.spatialAudioState,
-        });
-      }
+      this.emit("participants-sync", {
+        participants: event.participants,
+        spatialAudioState: event.spatialAudioState,
+      });
       this.scheduleCredentialRefresh();
       if (!this.voiceGW.isReady) this.connectVoice();
     });
@@ -459,6 +477,13 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
     this.roomGW.on("auth-failed", () => {
       sfuLog.warn("Room socket ticket refused: the session is gone");
       this.emit("auth-failed", undefined as never);
+    });
+    this.roomGW.on("admission-rejected", () => {
+      sfuLog.warn("Room socket admission rejected: the session is gone");
+      // A move ends this session on purpose; the switch takes it from here.
+      if (!this.isLeaving && !this.moved) {
+        this.emit("admission-rejected", undefined as never);
+      }
     });
     this.roomGW.on("voice-move", (move) => {
       sfuLog.info("Moved to another voice channel", {
@@ -492,6 +517,8 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
       this.emit("participant-joined", event);
     });
     this.roomGW.on("participant-left", (event) => {
+      // The room decides who left: no grace for a real leave.
+      this.remoteReconnectGrace.left(event.participantId);
       this.audio.removeParticipantVolume(event.participantId);
       this.partyTracksMedia?.removeParticipant(event.participantId);
       this.remoteSpeakingUntil.delete(event.participantId);
@@ -509,14 +536,6 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
 
   private wireVoiceEvents(): void {
     this.voiceGW.on("error", (event) => {
-      if (
-        event.code === GatewayCloseCode.UnknownOpcode &&
-        event.message.endsWith(`opcode: ${GatewayOp.TrackUnavailable}`)
-      ) {
-        // A voice room older than the track-unavailable report: nothing to do.
-        sfuLog.info("Voice room does not take track-unavailable reports");
-        return;
-      }
       if (event.message === "Voice token expired" || event.code === 4004) {
         sfuLog.warn(
           "Voice token expired; requesting fresh RoomGateway credentials",
@@ -536,7 +555,12 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
       const partyTracks = remoteTracks.filter((track) =>
         Boolean(track.sfu_track_name),
       );
-      this.warnDroppedLegacyTracks(remoteTracks, "VoiceReady");
+      for (const track of remoteTracks) {
+        this.remoteReconnectGrace.offered(
+          track.participant_id,
+          track.track_name,
+        );
+      }
 
       this.emit("voice-ready", { speaking: event.speaking ?? {} });
       // Register local senders before replay pulls enqueue negotiation on the
@@ -563,6 +587,16 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
           .then(() => this.nativeScreenShare.reconnect())
           .catch((error) => {
             sfuLog.warn("Native screen share reconnect failed", error);
+            // The transport stopped the pipeline and nothing retries it:
+            // the share owner falls back or ends the share, as for the
+            // backend's own `connection-failed`.
+            if (this.isLeaving) return;
+            this.emit("native-screen-share-ended", {
+              reason: "connection-failed",
+              detail: `reconnect failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            });
           });
       }
     });
@@ -593,13 +627,14 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
       ) {
         return;
       }
+      this.remoteReconnectGrace.offered(track.participant_id, track.track_name);
       if (!this.partyTracksMedia) {
         if (track.sfu_track_name) {
           this.deferredRemoteTracks.set(track.track_name, track);
         }
         return;
       }
-      this.offerPartyTracksOrDropLegacy([track], "TrackOffered");
+      this.offerPartyTracks([track]);
     });
     this.voiceGW.on("stop-tracks", (event) => {
       for (const trackName of event.track_names) {
@@ -613,24 +648,15 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
           ) || this.partyTracksMedia?.hasRemoteOffer(trackName),
       );
       if (partyTrackNames.length > 0) {
-        this.partyTracksMedia?.stopRemoteTracks(partyTrackNames);
-      }
-      const legacyTrackCount =
-        event.track_names.length - partyTrackNames.length;
-      if (legacyTrackCount > 0) {
-        sfuLog.warn(
-          "Ignoring legacy browser StopTracks; PartyTracks metadata is required",
-          { trackCount: legacyTrackCount },
-        );
+        // Withdrawn, not closed: the alias's next publication reuses the pull.
+        this.partyTracksMedia?.withdrawRemoteTracks(partyTrackNames);
       }
     });
     this.voiceGW.on("client-disconnect", ({ participant_id }) => {
-      for (const [trackName, track] of this.deferredRemoteTracks) {
-        if (track.participant_id === participant_id) {
-          this.deferredRemoteTracks.delete(trackName);
-        }
-      }
-      this.partyTracksMedia?.removeParticipant(participant_id);
+      // VoiceRoom says this on every voice-socket reconnect too, before the
+      // participant's tracks are offered again: keep their media through
+      // the grace (dropDisconnectedParticipant). Speaking stops now.
+      this.remoteReconnectGrace.disconnected(participant_id);
       this.remoteSpeakingUntil.delete(participant_id);
       this.emit("speaking", {
         participantId: participant_id,
@@ -640,6 +666,12 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
     this.voiceGW.on("auth-failed", () => {
       sfuLog.warn("Voice socket ticket refused: the session is gone");
       this.emit("auth-failed", undefined as never);
+    });
+    this.voiceGW.on("admission-rejected", () => {
+      sfuLog.warn("Voice socket admission rejected: the session is gone");
+      if (!this.isLeaving && !this.moved) {
+        this.emit("admission-rejected", undefined as never);
+      }
     });
     this.voiceGW.on("kicked", ({ reason }) => {
       if (this.isLeaving || this.moved) return;
@@ -732,20 +764,8 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
     this.disposePartyTracksMedia();
   }
 
-  private warnDroppedLegacyTracks(tracks: TrackInfo[], source: string): void {
-    const trackCount = tracks.filter((track) => !track.sfu_track_name).length;
-    if (trackCount === 0) return;
-    sfuLog.warn(
-      "Ignoring legacy browser track descriptors; PartyTracks metadata is required",
-      { source, trackCount },
-    );
-  }
-
-  private offerPartyTracksOrDropLegacy(
-    tracks: TrackInfo[],
-    source: string,
-  ): void {
-    this.warnDroppedLegacyTracks(tracks, source);
+  /** Offers the tracks that carry PartyTracks metadata (sfu_track_name). */
+  private offerPartyTracks(tracks: TrackInfo[]): void {
     this.partyTracksMedia?.offerTracks(
       tracks.filter((track) => Boolean(track.sfu_track_name)),
     );
@@ -875,6 +895,9 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
         },
       },
     );
+    for (const [trackName, subscribe] of this.remoteTrackSubscriptions) {
+      this.partyTracksMedia.setRemoteTrackSubscription(trackName, subscribe);
+    }
     this.flushDeferredRemoteTracks();
     this.resolvePartyTracksReadiness();
   }
@@ -1120,6 +1143,23 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
     this.partyTracksMedia?.replayRemoteTracks();
   }
 
+  /**
+   * A remote participant's reconnect grace ran out: drop what they did not
+   * offer again (everything when they did not come back).
+   */
+  private dropDisconnectedParticipant(
+    participantId: string,
+    reoffered: ReadonlySet<string>,
+  ): void {
+    if (this.isLeaving) return;
+    for (const [trackName, track] of this.deferredRemoteTracks) {
+      if (track.participant_id === participantId && !reoffered.has(trackName)) {
+        this.deferredRemoteTracks.delete(trackName);
+      }
+    }
+    this.partyTracksMedia?.removeParticipant(participantId, reoffered);
+  }
+
   public disconnect(reason: SFUDisconnectReason = "unknown"): void {
     if (this.isLeaving) return;
     sfuLog.info("Disconnecting SFU client", {
@@ -1147,6 +1187,7 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
     this.vad.stop();
     this.audio.dispose();
     this.remoteSpeakingUntil.clear();
+    this.remoteReconnectGrace.dispose();
     this.nativeScreenReconnectRequired = false;
     this.nativeScreenResetPromise = Promise.resolve();
     this.participantId = null;
@@ -1182,13 +1223,6 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
     return this.partyTracksMedia.connectionState;
   }
 
-  public sendChatMessage(content: string): void {
-    this.roomGW.send({
-      op: GatewayOp.MessageCreate,
-      d: { channel_id: this.roomSlug, content, nonce: String(Math.random()) },
-    });
-  }
-
   public sendDemoChatMessage(payload: Record<string, unknown>): void {
     this.voiceGW.sendAppEvent({ type: "demo.chat.send", ...payload });
   }
@@ -1199,10 +1233,6 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
 
   public sendVoiceState(state: Record<string, unknown>): void {
     this.roomGW.sendVoiceState(state);
-  }
-
-  public sendMuteUpdate(isMicOn: boolean, isCameraOn: boolean): void {
-    this.roomGW.sendMuteUpdate(isMicOn, isCameraOn);
   }
 
   public sendSpeaking(speaking: number): void {
@@ -1221,24 +1251,12 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
     this.audio.setTrackVolume(participantId, trackName, volume);
   }
 
-  public setParticipantPan(participantId: string, pan: number): void {
-    this.audio.setParticipantPan(participantId, pan);
-  }
-
   public setTrackPan(
     participantId: string,
     trackName: string,
     pan: number,
   ): void {
     this.audio.setTrackPan(participantId, trackName, pan);
-  }
-
-  public applyVolumeToTrack(
-    participantId: string,
-    track: MediaStreamTrack,
-    trackName: string,
-  ): MediaStream {
-    return this.audio.applyVolumeToTrack(participantId, track, trackName);
   }
 
   public attachRemoteAudioTrack(
@@ -1257,15 +1275,22 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
     return this.audio.resumeAudioContext();
   }
 
+  /**
+   * Pulls a remote track while subscribed and stops pulling it otherwise.
+   * Which simulcast layer a pulled camera comes at follows where it is
+   * rendered (see video-layers.ts), not this call.
+   */
   public setRemoteTrackSubscription(
-    participantId: string,
     trackName: string,
     subscribe: boolean,
-    rid?: string,
   ): void {
-    void participantId;
-    void rid;
+    this.remoteTrackSubscriptions.set(trackName, subscribe);
     this.partyTracksMedia?.setRemoteTrackSubscription(trackName, subscribe);
+  }
+
+  /** The RID each simulcast pull asks for, by alias (diagnostics). */
+  public getRemoteVideoLayers(): Record<string, string> {
+    return this.partyTracksMedia?.getRemoteVideoLayers() ?? {};
   }
 
   public unpublishTrack(trackName: string): void {
@@ -1356,12 +1381,6 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
     return this.participantId ? `cam-audio-${this.participantId}` : null;
   }
 
-  public senderHasLiveTrack(track: MediaStreamTrack): boolean {
-    const pc = this.partyTracksPeerConnection;
-    if (!pc || track.readyState === "ended") return false;
-    return pc.getSenders().some((sender) => sender.track === track);
-  }
-
   public async publishTracks(
     stream: MediaStream,
     prefix: string,
@@ -1398,11 +1417,7 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
   }
 
   public pullTracks(tracks: TrackInfo[]): void {
-    if (!this.partyTracksMedia) {
-      this.warnDroppedLegacyTracks(tracks, "PullTracksWithoutPartyTracks");
-      return;
-    }
-    this.offerPartyTracksOrDropLegacy(tracks, "PullTracks");
+    this.offerPartyTracks(tracks);
   }
 
   public replaceTrack(
@@ -1487,10 +1502,6 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
     return this.nativeScreenShare.stopPreview();
   }
 
-  public get previewLoopbackMediaStream(): MediaStream | null {
-    return this.nativeScreenShare.previewStream;
-  }
-
   public async updateSenderEncoding(
     trackName: string,
     encoding: Partial<RTCRtpEncodingParameters>,
@@ -1530,12 +1541,6 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
       participantId: this.participantId ?? "",
       trackNames,
     });
-  }
-
-  public createTrueStereoStream(stream: MediaStream): MediaStream {
-    const audioTrack = stream.getAudioTracks()[0];
-    if (!audioTrack) return stream;
-    return this.audio.createTrueStereoStream(audioTrack);
   }
 
   public getDebugData(): ReturnType<ConnectionStatsMonitor["getDebugData"]> {

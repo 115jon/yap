@@ -121,6 +121,47 @@ class TestPartyTracksTransport implements PartyTracksClientTransport {
 }
 
 describe("SFUClient PartyTracks facade", () => {
+  it.each([
+    ["fails", true],
+    ["comes back", false],
+  ] as const)(
+    "tells the share owner when a native share reconnect %s",
+    async (_label, fails) => {
+      const client = new SFUClient("test-room", {
+        createPartyTracksTransport: vi.fn(() => new TestPartyTracksTransport()),
+      });
+      vi.spyOn(client.voiceGW, "connectVoice").mockImplementation(() => {});
+      emitMediaReady(client);
+      const native = client["nativeScreenShare"];
+      vi.spyOn(native, "active", "get").mockReturnValue(true);
+      vi.spyOn(native, "reset").mockResolvedValue();
+      const reconnect = vi
+        .spyOn(native, "reconnect")
+        .mockImplementation(() =>
+          fails
+            ? Promise.reject(new Error("connect timeout"))
+            : Promise.resolve(),
+        );
+      const ended = vi.fn();
+      client.on("native-screen-share-ended", ended);
+
+      client.voiceGW.emit("disconnected", undefined as never);
+      client.voiceGW.emit("voice-ready", { tracks: [] });
+      await vi.waitFor(() => expect(reconnect).toHaveBeenCalledOnce());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      if (fails) {
+        expect(ended).toHaveBeenCalledExactlyOnceWith({
+          reason: "connection-failed",
+          detail: "reconnect failed: connect timeout",
+        });
+      } else {
+        expect(ended).not.toHaveBeenCalled();
+      }
+      client.disconnect("component-unmount");
+    },
+  );
+
   it("releases an early pending publication as soon as media bootstrap arrives", async () => {
     const transport = new TestPartyTracksTransport();
     const createPartyTracksTransport = vi.fn(() => transport);
@@ -197,7 +238,7 @@ describe("SFUClient PartyTracks facade", () => {
       tracksToQueue: [],
       participants: [],
     });
-    client.roomGW.emit("resumed", {});
+    client.roomGW.emit("resumed", { participants: [] });
 
     // The silent standby publication reaches the SFU...
     const silence = new MockMediaStreamTrack(
@@ -624,6 +665,7 @@ describe("SFUClient PartyTracks facade", () => {
       client.roomGW.emit("resumed", {
         voiceToken: "voice-token-2",
         iceServers: SECOND_ICE_SERVERS,
+        participants: [],
       });
 
       expect(updateVoiceToken).toHaveBeenCalledWith("voice-token-2");
@@ -640,6 +682,111 @@ describe("SFUClient PartyTracks facade", () => {
       client.disconnect("component-unmount");
       vi.useRealTimers();
     }
+  });
+
+  describe("remote reconnect grace", () => {
+    const remoteAudio: TrackInfo = {
+      participant_id: "remote-participant",
+      track_name: "cam-audio-remote-participant",
+      sfu_track_name: "opaque-remote-audio",
+      session_id: "remote-session",
+      kind: "audio",
+    };
+
+    function pulledRemoteAudio() {
+      const transport = new TestPartyTracksTransport();
+      const client = new SFUClient("test-room", {
+        createPartyTracksTransport: () => transport,
+      });
+      vi.spyOn(client.voiceGW, "connectVoice").mockImplementation(() => {});
+      emitMediaReady(client);
+      const remoteTracks: Array<{ action?: string; trackName?: string }> = [];
+      client.on("remote-track", ({ action, trackInfo }) => {
+        remoteTracks.push({ action, trackName: trackInfo.track_name });
+      });
+      client.voiceGW.emit("voice-ready", { tracks: [remoteAudio] });
+      const remote = new MockMediaStreamTrack(
+        "audio",
+      ) as unknown as MediaStreamTrack;
+      transport.remoteTracks.get(remoteAudio.track_name)?.next(remote);
+      expect(remoteTracks).toEqual([
+        { action: "add", trackName: remoteAudio.track_name },
+      ]);
+      return { client, transport, remoteTracks };
+    }
+
+    it("keeps a remote participant's audio while their voice socket reconnects", () => {
+      vi.useFakeTimers();
+      try {
+        const { client, transport, remoteTracks } = pulledRemoteAudio();
+        const onSpeaking = vi.fn();
+        client.on("speaking", onSpeaking);
+
+        client.voiceGW.emit("client-disconnect", {
+          participant_id: remoteAudio.participant_id,
+        });
+        // Speaking stops at once; the audio does not.
+        expect(onSpeaking).toHaveBeenLastCalledWith({
+          participantId: remoteAudio.participant_id,
+          speaking: 0,
+        });
+        vi.advanceTimersByTime(1_000);
+        client.voiceGW.emit("track-offered", remoteAudio);
+        vi.advanceTimersByTime(5_000);
+
+        expect(remoteTracks).toHaveLength(1);
+        // Same publication offered again: the pull just carries on.
+        expect(transport.operationOrder).toEqual([
+          `pull:${remoteAudio.track_name}`,
+        ]);
+        client.disconnect("component-unmount");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("drops a remote participant who does not come back after the grace", () => {
+      vi.useFakeTimers();
+      try {
+        const { client, remoteTracks } = pulledRemoteAudio();
+        client.voiceGW.emit("client-disconnect", {
+          participant_id: remoteAudio.participant_id,
+        });
+        vi.advanceTimersByTime(2_999);
+        expect(remoteTracks).toHaveLength(1);
+        vi.advanceTimersByTime(1);
+        expect(remoteTracks.at(-1)).toEqual({
+          action: "remove",
+          trackName: remoteAudio.track_name,
+        });
+        client.disconnect("component-unmount");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("drops a remote participant at once when the room says they left", () => {
+      vi.useFakeTimers();
+      try {
+        const { client, remoteTracks } = pulledRemoteAudio();
+        client.voiceGW.emit("client-disconnect", {
+          participant_id: remoteAudio.participant_id,
+        });
+        client.roomGW.emit("participant-left", {
+          participantId: remoteAudio.participant_id,
+        });
+        expect(remoteTracks.at(-1)).toEqual({
+          action: "remove",
+          trackName: remoteAudio.track_name,
+        });
+        // The cancelled grace drops nothing later.
+        vi.advanceTimersByTime(5_000);
+        expect(remoteTracks).toHaveLength(2);
+        client.disconnect("component-unmount");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it("turns a remote VoiceGW disconnect into speaking-off", () => {
@@ -739,6 +886,45 @@ describe("SFUClient PartyTracks facade", () => {
 
     expect([...(transports[1]?.pullMetadata.keys() ?? [])]).toEqual([
       "cam-audio-remote",
+    ]);
+    client.disconnect("component-unmount");
+  });
+
+  it("pulls screen video once watched, including a watch chosen before the session", () => {
+    const transports: TestPartyTracksTransport[] = [];
+    const client = new SFUClient("test-room", {
+      createPartyTracksTransport: () => {
+        const transport = new TestPartyTracksTransport();
+        transports.push(transport);
+        return transport;
+      },
+    });
+    vi.spyOn(client.voiceGW, "connectVoice").mockImplementation(() => {});
+    const screen = (sharer: string): TrackInfo => ({
+      participant_id: sharer,
+      track_name: `screen-video-${sharer}`,
+      sfu_track_name: `opaque-screen-${sharer}`,
+      session_id: `session-${sharer}`,
+      kind: "video",
+    });
+
+    // Watch is chosen before the PartyTracks session exists.
+    client.setRemoteTrackSubscription("screen-video-watched", true);
+    emitMediaReady(client, "participant-generation-1", "voice-token-1");
+    client.voiceGW.emit("voice-ready", {
+      tracks: [screen("watched"), screen("unwatched")],
+    });
+    expect([...(transports[0]?.pullMetadata.keys() ?? [])]).toEqual([
+      "screen-video-watched",
+    ]);
+
+    // A new participant generation keeps the viewer's choice.
+    emitMediaReady(client, "participant-generation-2", "voice-token-2");
+    client.voiceGW.emit("voice-ready", {
+      tracks: [screen("watched"), screen("unwatched")],
+    });
+    expect([...(transports[1]?.pullMetadata.keys() ?? [])]).toEqual([
+      "screen-video-watched",
     ]);
     client.disconnect("component-unmount");
   });
@@ -1330,6 +1516,7 @@ describe("SFUClient PartyTracks facade", () => {
         },
       ],
     });
+    // Withdrawn audio is closed (only video is kept for its next publication).
     expect(remoteAudio.stop).toHaveBeenCalledOnce();
     expect(
       send.mock.calls.some(([message]) =>
@@ -1569,21 +1756,5 @@ describe("SFUClient track-unavailable recovery", () => {
     ]);
     client.disconnect("component-unmount");
     clock.mockRestore();
-  });
-
-  it("does not surface an old voice room's unknown-opcode reply as an error", () => {
-    const client = new SFUClient("test-room");
-    const errors = vi.fn();
-    client.on("error", errors);
-    client.voiceGW.emit("error", {
-      code: 4001,
-      message: `Unknown voice opcode: ${GatewayOp.TrackUnavailable}`,
-    });
-    expect(errors).not.toHaveBeenCalled();
-    client.voiceGW.emit("error", {
-      code: 4001,
-      message: "Unknown voice opcode: 99",
-    });
-    expect(errors).toHaveBeenCalledOnce();
   });
 });

@@ -1,5 +1,6 @@
 const SOCKET_TICKET_VERSION = "rt1";
-const SOCKET_PROTOCOL_NAME = "ralph.realtime.v1";
+/** The realtime subprotocol every socket negotiates (the ticket rides beside it). */
+export const SOCKET_PROTOCOL_NAME = "ralph.realtime.v1";
 const SOCKET_TICKET_PROTOCOL_PREFIX = "ralph.ticket.";
 const textEncoder = new TextEncoder();
 const ticketTokenPattern = /^[A-Za-z0-9_-]+$/;
@@ -15,6 +16,11 @@ export interface SocketTicketClaims {
   nonce: string;
   roomSlug: string;
   serverId?: string;
+  /**
+   * The channel a room or voice ticket is for (authenticated tickets). The
+   * room reports its voice roster for this channel to the global gateway.
+   */
+  channelId?: string;
   subject: string;
 }
 
@@ -207,7 +213,10 @@ function isValidClaims(value: SocketTicketClaims): boolean {
     value.subject.length >= 1 &&
     (value.serverId === undefined ||
       (typeof value.serverId === "string" &&
-        roomSlugPattern.test(value.serverId)))
+        roomSlugPattern.test(value.serverId))) &&
+    (value.channelId === undefined ||
+      (typeof value.channelId === "string" &&
+        roomSlugPattern.test(value.channelId)))
   );
 }
 
@@ -224,6 +233,9 @@ function parseClaims(bytes: Uint8Array): SocketTicketClaims | null {
       roomSlug: value.roomSlug as string,
       ...(value.serverId !== undefined
         ? { serverId: value.serverId as string }
+        : {}),
+      ...(value.channelId !== undefined
+        ? { channelId: value.channelId as string }
         : {}),
       subject: value.subject as string,
     };

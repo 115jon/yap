@@ -10,7 +10,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { clog } from "../src/lib/console-logger";
-import { isSupersededVoiceConnection } from "../src/lib/voice/connection-generation";
+import { isSupersededVoiceConnection } from "./connection-lifecycle";
 import {
   buildListenTogetherSnapshot,
   isValidListenTogetherVideoId,
@@ -35,15 +35,9 @@ import {
   type ListenTogetherMutationResult,
 } from "../src/lib/voice/listen-together-state";
 import { getNextVoicePresenceAlarmTime } from "../src/lib/voice-presence";
-import {
-  calculatePermissions,
-  hasPermission,
-  PERMISSIONS,
-} from "../src/lib/permissions";
-import {
-  isLegacySoundboardPlaybackOwnedBy,
-  isSoundboardPlaybackOwnedBy,
-} from "../src/lib/voice/soundboard-playback-id";
+import { PERMISSIONS } from "../src/lib/permissions";
+import { hasServerPermission, isServerMember } from "../src/lib/channel-access";
+import { isSoundboardPlaybackOwnedBy } from "../src/lib/voice/soundboard-playback-id";
 import {
   getSoundboardUploadUrl,
   normalizeSoundboardUploadUrl,
@@ -57,9 +51,6 @@ import {
   decodeVoiceGatewayClientFrame,
   GatewayCloseCode as CloseCode,
   GatewayOp as Op,
-  LEGACY_CLERK_USER_ID_COMPAT,
-  parseGatewayFrame,
-  RETIRED_BROWSER_SFU_OPS,
   VOICE_MOVED_CLOSE_REASON,
   type VoiceClientPayload,
 } from "../src/lib/gateway-protocol";
@@ -67,11 +58,24 @@ import {
   issuePartyTracksSessionCapability,
   verifyPartyTracksSessionCapability,
 } from "./partytracks-proxy";
+import { initRealtimeTicketNonces } from "./realtime-admission";
 import {
-  consumeRealtimeTicketNonce,
-  getRealtimeAdmissionFromHeaders,
-  initRealtimeTicketNonces,
-} from "./realtime-admission";
+  acceptSocket,
+  admitSocket,
+  broadcastToIdentified,
+  isOpcodeAllowed,
+  isSilent,
+  isSpentTicketReason,
+  markSocketHeard,
+  rateLimitedError,
+  readSocketFrame,
+  requestedGatewayVersion,
+  sendFrame,
+  silentAt,
+  SocketRateLimiter,
+  unauthorizedUpgrade,
+  unknownOpcodeError,
+} from "./socket-core";
 import { verifyVoiceToken } from "./voice-token";
 import {
   VOICE_JOIN_GRANT_CHECK_PATH,
@@ -80,10 +84,12 @@ import {
   VOICE_MEDIA_AUTHORIZATION_PATH,
   VoiceJoinGrantStore,
   VoiceJoinGrantWaiters,
-  parseVoiceJoinGrantQuery,
+  parseVoiceMediaAuthorizationQuery,
   parseVoiceJoinGrantUpdate,
   serializeVoiceJoinGrantQuery,
   type VoiceJoinGrantQuery,
+  type VoiceMediaAuthorization,
+  type VoiceMediaTrackRef,
 } from "./voice-join-grant";
 import {
   DemoChatStore,
@@ -114,13 +120,6 @@ interface Env {
 
 // ── Interfaces ──────────────────────────────────────────────────────────────
 
-/**
- * A participant's user id: `user_id`, or `clerk_user_id` in a row only
- * pre-rename code wrote (see migrateParticipantsUserIdColumns).
- * TODO(user-id-rename phase 2): plain `user_id`.
- */
-const PARTICIPANT_USER_ID_SQL = "COALESCE(user_id, clerk_user_id)";
-
 interface VoiceSql {
   exec<T extends Record<string, unknown>>(
     query: string,
@@ -135,6 +134,22 @@ interface TrackInfo {
   session_id: string;
   mid?: string;
   kind: "audio" | "video";
+  /** A simulcast publication's layer RIDs, highest first. */
+  simulcast_rids?: string[];
+}
+
+/** Stored comma-joined; RIDs are alphanumeric (see the Video payload rule). */
+function encodeSimulcastRids(
+  rids: readonly string[] | undefined,
+): string | null {
+  return rids && rids.length > 1 ? rids.join(",") : null;
+}
+
+/** `{ simulcast_rids }` from a stored row, or nothing for a single layer. */
+function withSimulcastRids(value: unknown): { simulcast_rids?: string[] } {
+  if (typeof value !== "string" || !value) return {};
+  const rids = value.split(",").filter(Boolean);
+  return rids.length > 1 ? { simulcast_rids: rids } : {};
 }
 
 interface NativeScreenTrackRow {
@@ -158,23 +173,31 @@ interface VoiceSocketClose {
 /** Close reason (with CloseCode.SessionReplaced) when voice moves device. */
 const VOICE_SESSION_REPLACED_REASON = "Voice moved to another device";
 
+/**
+ * Close code ("Try Again Later") when a voice identify's join grant could not
+ * be verified with the MeetingRoom. Unlike AdmissionRejected, clients retry.
+ */
+const VOICE_JOIN_UNVERIFIED_CLOSE_CODE = 1013;
+
 // WebSocket attachment for voice sessions
 interface VoiceAttachment {
   admission?: {
     accessMode: "authenticated" | "public-demo";
-    connectionGeneration: string;
     serverId?: string;
     subject: string;
   };
   participant_id: string;
   connection_id?: string;
   supports_listen_together_snapshot_events?: boolean;
+  /**
+   * When an unidentified socket was last heard from (accepted, or a
+   * heartbeat). Identified sockets track liveness in participants instead.
+   */
+  last_seen_at?: number;
 }
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
-const VOICE_HEARTBEAT_INTERVAL_MS = 15_000;
-const VOICE_ZOMBIE_TIMEOUT_MS = VOICE_HEARTBEAT_INTERVAL_MS * 6;
 const VOICE_PRUNE_ALARM_INTERVAL_MS = 300_000;
 const DEMO_CHAT_TTL_MS = 10 * 60 * 1000;
 const DEMO_CHAT_MAX_MESSAGES = 75;
@@ -183,14 +206,12 @@ const RADIO_STATION_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_RADIO_STATION_LOOKUPS_PER_ENQUEUE = 5;
 const MAX_SOUNDBOARD_DATA_URL_BYTES = 128 * 1024;
-const LEGACY_SOUNDBOARD_PLAYBACK_OWNER_TTL_MS = 10 * 60 * 1000;
 // Recheck membership on every media request, so this bounded lifetime gives
 // range/retry playback room without weakening revocation.
 const SOUNDBOARD_MEDIA_CAPABILITY_TTL_MS = 60 * 60 * 1000;
 const MAX_SOUNDBOARD_POSITION_SECONDS = 24 * 60 * 60;
 const DEFAULT_SOUNDBOARD_SOUND_IDS = new Set(["ping", "pop", "chime", "tada"]);
-const MAX_VOICE_FRAME_BYTES = 1_000_000;
-const VOICE_WS_RATE_LIMIT_WINDOW_MS = 60_000;
+/** Per-opcode limits per minute (SocketRateLimiter). */
 const VOICE_WS_RATE_LIMITS: Record<number, number> = {
   [Op.SelectProtocol]: 20,
   [Op.Video]: 20,
@@ -222,6 +243,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
   private listenTogetherCommandQueue: Promise<void> = Promise.resolve();
   private nativeScreenOperations = new Map<string, symbol>();
   private voiceJoinGrants: VoiceJoinGrantStore;
+  private readonly rateLimiter: SocketRateLimiter;
   private readonly voiceJoinGrantWaiters = new VoiceJoinGrantWaiters();
   private readonly identifyingSockets = new Set<WebSocket>();
   private voiceJoinGrantWaitMs = VOICE_JOIN_GRANT_WAIT_MS;
@@ -252,6 +274,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     // zombie pruning alarm to falsely evict active users after 90 seconds.
 
     this.initSchema();
+    this.rateLimiter = new SocketRateLimiter(this.sql, VOICE_WS_RATE_LIMITS);
     initRealtimeTicketNonces(this.ctx.storage.sql);
     this.voiceJoinGrants = new VoiceJoinGrantStore(this.sql);
     this.scheduleAlarm();
@@ -266,38 +289,27 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
   }
 
   /**
-   * participants has the user id twice: `user_id`, and `clerk_user_id`, its
-   * pre-rename name, which the previous Worker version reads and writes. The
-   * room writes both (while LEGACY_CLERK_USER_ID_COMPAT is on) and reads
-   * PARTICIPANT_USER_ID_SQL, so a rollback, and the roll-forward after it,
-   * both find every row's user.
-   *
-   * Runs on every start, before anything else touches the table: adds a
-   * missing column (a pre-rename room has no `user_id`), then copies
-   * `clerk_user_id` into `user_id` wherever they differ. Only pre-rename code
-   * makes them differ (rows it inserted, or upserted during a rollback); this
-   * code writes both, so a second start changes nothing.
-   *
-   * TODO(user-id-rename phase 2): drop `clerk_user_id` in a later migration
-   * (see docs/user-id-rename.md), with this method and the dual write.
+   * Drops `clerk_user_id`, the pre-rename name of `user_id`, from a
+   * participants table an older version created. A row only pre-rename code
+   * wrote has its user id there alone, so it is copied into `user_id` first.
+   * The previous version adds the column back if a rollback starts it.
    */
-  private migrateParticipantsUserIdColumns() {
+  private dropParticipantsLegacyUserIdColumn() {
     const columns = new Set<string>();
     for (const row of this.sql.exec<{ name: string }>(
       "PRAGMA table_info(participants)",
     )) {
       columns.add(row.name);
     }
+    if (!columns.has("clerk_user_id")) return;
     if (!columns.has("user_id")) {
       this.sql.exec("ALTER TABLE participants ADD COLUMN user_id TEXT");
-    }
-    if (!columns.has("clerk_user_id")) {
-      this.sql.exec("ALTER TABLE participants ADD COLUMN clerk_user_id TEXT");
     }
     this.sql.exec(
       `UPDATE participants SET user_id = clerk_user_id
        WHERE clerk_user_id IS NOT NULL AND user_id IS NOT clerk_user_id`,
     );
+    this.sql.exec("ALTER TABLE participants DROP COLUMN clerk_user_id");
   }
 
   private initSchema() {
@@ -305,35 +317,16 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       CREATE TABLE IF NOT EXISTS participants (
         id TEXT PRIMARY KEY,
         user_id TEXT,
-        clerk_user_id TEXT,
         native_screen_session_id TEXT,
         last_heartbeat INTEGER DEFAULT 0,
         speaking INTEGER DEFAULT 0,
         connection_id TEXT
       );
     `);
-    this.migrateParticipantsUserIdColumns();
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS soundboard_legacy_playback_owners (
-        playback_id TEXT PRIMARY KEY,
-        owner_id TEXT NOT NULL,
-        created_at INTEGER NOT NULL DEFAULT 0
-      );
-    `);
-    try {
-      this.sql.exec(
-        `ALTER TABLE soundboard_legacy_playback_owners ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;`,
-      );
-    } catch {
-      // Existing Durable Objects already have the timestamp column.
-    }
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS ws_rate_limits (
-        rate_key TEXT PRIMARY KEY,
-        window_start INTEGER NOT NULL,
-        count INTEGER NOT NULL
-      );
-    `);
+    this.dropParticipantsLegacyUserIdColumn();
+    // Owners of `s-<owner>-<sound>` playback ids, which no client sends any
+    // more. A rollback recreates the table (CREATE IF NOT EXISTS).
+    this.sql.exec(`DROP TABLE IF EXISTS soundboard_legacy_playback_owners;`);
     try {
       this.sql.exec(`ALTER TABLE participants ADD COLUMN connection_id TEXT;`);
     } catch {
@@ -357,7 +350,8 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
         session_id TEXT NOT NULL,
         mid TEXT,
         kind TEXT NOT NULL,
-        native_screen_pending INTEGER NOT NULL DEFAULT 0
+        native_screen_pending INTEGER NOT NULL DEFAULT 0,
+        simulcast_rids TEXT
       );
     `);
     try {
@@ -369,6 +363,11 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       this.sql.exec(
         `ALTER TABLE tracks ADD COLUMN native_screen_pending INTEGER NOT NULL DEFAULT 0;`,
       );
+    } catch {
+      // Existing SQLite-backed Durable Objects already have the column.
+    }
+    try {
+      this.sql.exec(`ALTER TABLE tracks ADD COLUMN simulcast_rids TEXT;`);
     } catch {
       // Existing SQLite-backed Durable Objects already have the column.
     }
@@ -461,7 +460,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const gatewayVersion = parseInt(url.searchParams.get("v") ?? "1", 10);
+    const gatewayVersion = requestedGatewayVersion(url);
 
     const match = url.pathname.match(
       /\/api\/(?:channels|room)\/([^/]+)\/voice/,
@@ -472,52 +471,34 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     }
 
     if (url.pathname.endsWith("/voice")) {
-      const admission = getRealtimeAdmissionFromHeaders(request.headers);
-      if (
-        !admission ||
-        admission.audience !== "voice" ||
-        admission.roomSlug !== this.roomSlug
-      ) {
-        return new Response("Unauthorized", { status: 401 });
-      }
-      // Single use: a voice ticket's nonce is spent here, in the object that
-      // accepts the socket (custom-server-entry.ts verified its signature).
-      const consumed = consumeRealtimeTicketNonce(
-        this.ctx.storage.sql,
-        admission,
-      );
-      if (!consumed.ok) {
-        roomLog.warn(`Voice admission refused: ${consumed.reason}`);
-        return new Response("Unauthorized", { status: 401 });
-      }
-
-      const pair = new WebSocketPair();
-      const [client, server] = Object.values(pair);
-      this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({
-        admission: {
-          accessMode: admission.accessMode,
-          connectionGeneration: admission.connectionGeneration,
-          subject: admission.subject,
-          ...(admission.serverId ? { serverId: admission.serverId } : {}),
-        },
+      const admitted = admitSocket(request.headers, this.ctx.storage.sql, {
+        audience: "voice",
+        roomSlug: this.roomSlug,
       });
+      if (!admitted.ok) {
+        if (isSpentTicketReason(admitted.reason)) {
+          roomLog.warn(`Voice admission refused: ${admitted.reason}`);
+        }
+        return unauthorizedUpgrade();
+      }
+      const { admission } = admitted;
 
       log.info(`New connection, gateway_version=${gatewayVersion}`);
-
-      this.sendTo(server, {
-        op: Op.Hello,
-        d: {
-          heartbeat_interval: VOICE_HEARTBEAT_INTERVAL_MS,
-          gateway_version: gatewayVersion,
-        },
-      });
-
-      return new Response(null, {
-        status: 101,
-        headers: { "Sec-WebSocket-Protocol": "ralph.realtime.v1" },
-        webSocket: client,
-      });
+      const accepted = acceptSocket(
+        this.ctx,
+        {
+          admission: {
+            accessMode: admission.accessMode,
+            subject: admission.subject,
+            ...(admission.serverId ? { serverId: admission.serverId } : {}),
+          },
+          last_seen_at: Date.now(),
+        } satisfies Partial<VoiceAttachment>,
+        gatewayVersion,
+      );
+      // The alarm closes this socket if it goes silent before identifying.
+      this.scheduleAlarm();
+      return accepted.response;
     }
 
     if (url.pathname === VOICE_JOIN_GRANT_PATH && request.method === "POST") {
@@ -548,15 +529,22 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       url.pathname === VOICE_MEDIA_AUTHORIZATION_PATH &&
       request.method === "POST"
     ) {
-      const query = parseVoiceJoinGrantQuery(
+      const query = parseVoiceMediaAuthorizationQuery(
         await request.json().catch(() => null),
       );
       if (!query) {
         return Response.json({ authorized: false }, { status: 400 });
       }
-      return Response.json({
-        authorized: await this.waitForVoiceJoinGrant(query),
+      const authorized = await this.waitForVoiceJoinGrant({
+        participantId: query.participantId,
+        subject: query.subject,
       });
+      const answer: VoiceMediaAuthorization = { authorized };
+      if (authorized && query.tracks) {
+        const simulcast = this.publishedSimulcastRids(query.tracks);
+        if (simulcast.length > 0) answer.simulcast = simulcast;
+      }
+      return Response.json(answer);
     }
 
     if (
@@ -566,22 +554,29 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       try {
         const body = (await request.json()) as {
           participant_id?: string;
+          user_id?: string;
         };
 
         const participantId =
           typeof body.participant_id === "string" && body.participant_id.trim()
             ? body.participant_id.trim()
             : "";
+        const userId =
+          typeof body.user_id === "string" && body.user_id.trim()
+            ? body.user_id.trim()
+            : "";
 
-        if (!participantId) {
+        if (!participantId || !userId) {
           return Response.json(
-            { error: "Missing participant id" },
+            { error: "Missing participant or user id" },
             { status: 400 },
           );
         }
 
+        // Only the participant's own user may end it from here.
         const disconnected =
-          await this.disconnectParticipantImmediately(participantId);
+          this.isParticipantOwnedBy(participantId, userId) &&
+          (await this.disconnectParticipantImmediately(participantId));
         return Response.json({ disconnected }, { status: 200 });
       } catch (error) {
         return Response.json(
@@ -595,50 +590,12 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
   }
 
   async webSocketMessage(ws: WebSocket, rawMsg: string | ArrayBuffer) {
-    if (typeof rawMsg !== "string") {
-      this.sendTo(ws, {
-        op: Op.Error,
-        d: {
-          code: CloseCode.InvalidPayload,
-          message: "Text websocket frames are required",
-        },
-      });
+    const read = readSocketFrame(rawMsg);
+    if (!read.ok) {
+      this.sendTo(ws, read.error);
       return;
     }
-    if (rawMsg.length > MAX_VOICE_FRAME_BYTES) {
-      this.sendTo(ws, {
-        op: Op.Error,
-        d: {
-          code: CloseCode.InvalidPayload,
-          message: "Websocket frame is too large",
-        },
-      });
-      return;
-    }
-
-    const parsed = parseGatewayFrame(rawMsg);
-    if (!parsed.ok) {
-      this.sendTo(ws, {
-        op: Op.Error,
-        d: { code: parsed.code, message: parsed.message },
-      });
-      return;
-    }
-    const frame = parsed.frame;
-
-    if (
-      this.isPublicDemoSocket(ws) &&
-      !this.isAllowedPublicDemoOpcode(frame.op)
-    ) {
-      this.sendTo(ws, {
-        op: Op.Error,
-        d: {
-          code: CloseCode.NotAuthenticated,
-          message: "Operation is unavailable in public demo rooms",
-        },
-      });
-      return;
-    }
+    const frame = read.frame;
 
     if (
       this.isAuthenticatedMutatingOpcode(frame.op) &&
@@ -647,32 +604,21 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       return;
     }
 
-    if (RETIRED_BROWSER_SFU_OPS.has(frame.op)) {
-      this.rejectBrowserSfuNegotiation(ws);
+    if (!isOpcodeAllowed("voice", frame.op)) {
+      this.sendTo(ws, unknownOpcodeError("voice", frame.op));
       return;
     }
 
     if (this.isRateLimited(ws, frame.op)) {
-      this.sendTo(ws, {
-        op: Op.Error,
-        d: {
-          code: CloseCode.RateLimited,
-          message: "Operation rate limit exceeded",
-        },
-      });
+      this.sendTo(ws, rateLimitedError());
       return;
     }
 
     const decoded = decodeVoiceGatewayClientFrame(frame);
     if (!decoded.ok) {
       if (decoded.reason === "unknown-op") {
-        this.sendTo(ws, {
-          op: Op.Error,
-          d: {
-            code: CloseCode.UnknownOpcode,
-            message: `Unknown voice opcode: ${frame.op}`,
-          },
-        });
+        // The voice table and the decoder list the same opcodes.
+        this.sendTo(ws, unknownOpcodeError("voice", frame.op));
       } else if (frame.op === Op.SelectProtocol) {
         // As for a valid offer: an unidentified socket hears that first.
         if (this.requireParticipantId(ws)) this.rejectBrowserSfuNegotiation(ws);
@@ -773,7 +719,6 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       const zombies: string[] = [];
 
       this.demoChatStore.pruneExpired(now);
-      this.pruneLegacySoundboardPlaybackOwners(now);
       this.voiceJoinGrants.prune(
         now,
         new Set(
@@ -792,7 +737,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
         const pid = row.id as string;
         const lastActivity = (row.last_heartbeat as number) || 0;
 
-        if (lastActivity && now - lastActivity >= VOICE_ZOMBIE_TIMEOUT_MS) {
+        if (isSilent(lastActivity, now)) {
           log.info(
             `Pruning zombie: ${pid}, last_activity=${Math.round((now - lastActivity) / 1000)}s ago`,
           );
@@ -810,6 +755,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       }
 
       await this.reapParticipantsWithoutJoin(now);
+      this.closeSilentUnidentifiedSockets(now);
 
       // Prune pending reconnects whose grace period expired
       this.advanceListenTogetherIfNeeded(now);
@@ -834,21 +780,16 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     for (const row of this.sql.exec(
       `SELECT last_heartbeat FROM participants WHERE last_heartbeat > 0`,
     )) {
-      deadlines.push((row.last_heartbeat as number) + VOICE_ZOMBIE_TIMEOUT_MS);
+      deadlines.push(silentAt(row.last_heartbeat as number));
+    }
+    for (const ws of this.unidentifiedSockets()) {
+      const lastSeenAt = this.getVoiceAttachment(ws)?.last_seen_at;
+      deadlines.push(silentAt(lastSeenAt ?? now));
     }
     for (const row of this.sql.exec(
       `SELECT MIN(expires_at) as expires_at FROM demo_chat_messages`,
     )) {
       if (row.expires_at) deadlines.push(row.expires_at as number);
-    }
-    for (const row of this.sql.exec(
-      `SELECT MIN(created_at) as created_at FROM soundboard_legacy_playback_owners`,
-    )) {
-      if (typeof row.created_at === "number") {
-        deadlines.push(
-          row.created_at + LEGACY_SOUNDBOARD_PLAYBACK_OWNER_TTL_MS,
-        );
-      }
     }
 
     const listenTogetherDeadline = this.getListenTogetherTrackDeadline(now);
@@ -875,19 +816,11 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
         ...this.sql.exec(`SELECT COUNT(*) as c FROM demo_chat_messages`),
       ][0];
       const demoChatCount = Number(demoChatCountRow?.c ?? 0);
-      const legacyPlaybackOwnerCountRow = [
-        ...this.sql.exec(
-          `SELECT COUNT(*) as c FROM soundboard_legacy_playback_owners`,
-        ),
-      ][0];
-      const legacyPlaybackOwnerCount = Number(
-        legacyPlaybackOwnerCountRow?.c ?? 0,
-      );
       const listenTogetherDeadline = this.getListenTogetherTrackDeadline(now);
       const hasWork =
         participantCount > 0 ||
+        this.unidentifiedSockets().length > 0 ||
         demoChatCount > 0 ||
-        legacyPlaybackOwnerCount > 0 ||
         typeof listenTogetherDeadline === "number";
 
       if (!hasWork) {
@@ -978,7 +911,9 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
   ) {
     for (const ws of this.ctx.getWebSockets()) {
       const attachment = this.getVoiceAttachment(ws);
-      if (attachment?.supports_listen_together_snapshot_events === true) {
+      // Only identified participants hear the room (see broadcast).
+      if (!attachment?.participant_id) continue;
+      if (attachment.supports_listen_together_snapshot_events === true) {
         this.sendTo(ws, {
           op: Op.VoiceAppEvent,
           d: {
@@ -1352,52 +1287,12 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
   }
 
   private isRateLimited(ws: WebSocket, op: number): boolean {
-    const limit = VOICE_WS_RATE_LIMITS[op];
-    if (!limit) return false;
-
     const attachment = this.getVoiceAttachment(ws);
-    const subject = attachment?.admission?.subject;
-    const keys = [
-      `session:${attachment?.participant_id ?? "unidentified"}:${op}`,
-      ...(subject ? [`subject:${subject}:${op}`] : []),
-    ];
-    const now = Date.now();
-    let limited = false;
-
-    for (const key of keys) {
-      const rows = [
-        ...this.sql.exec(
-          "SELECT window_start, count FROM ws_rate_limits WHERE rate_key = ?",
-          key,
-        ),
-      ];
-      const existing = rows[0];
-      if (
-        !existing ||
-        now - Number(existing.window_start) >= VOICE_WS_RATE_LIMIT_WINDOW_MS
-      ) {
-        this.sql.exec(
-          `INSERT INTO ws_rate_limits (rate_key, window_start, count)
-           VALUES (?, ?, 1)
-           ON CONFLICT(rate_key) DO UPDATE SET window_start = excluded.window_start, count = 1`,
-          key,
-          now,
-        );
-        continue;
-      }
-      const count = Number(existing.count) + 1;
-      this.sql.exec(
-        "UPDATE ws_rate_limits SET count = ? WHERE rate_key = ?",
-        count,
-        key,
-      );
-      if (count > limit) limited = true;
-    }
-    this.sql.exec(
-      "DELETE FROM ws_rate_limits WHERE window_start < ?",
-      now - VOICE_WS_RATE_LIMIT_WINDOW_MS,
+    return this.rateLimiter.isLimited(
+      op,
+      attachment?.participant_id,
+      attachment?.admission?.subject,
     );
-    return limited;
   }
 
   /**
@@ -1710,28 +1605,55 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     return participantIds;
   }
 
+  /** Open voice sockets that have not identified (and are not identifying). */
+  private unidentifiedSockets(): WebSocket[] {
+    return this.ctx
+      .getWebSockets()
+      .filter(
+        (ws) =>
+          !this.getParticipantId(ws) &&
+          !this.identifyingSockets.has(ws) &&
+          ws.readyState === WebSocket.OPEN,
+      );
+  }
+
+  /**
+   * Heartbeats are the only liveness signal of an unidentified socket, as
+   * participants' last_heartbeat is for identified ones. One that stops
+   * sending them for VOICE_ZOMBIE_TIMEOUT_MS is closed, so a vanished peer
+   * cannot hold a socket open forever. A live standby socket heartbeats and
+   * stays.
+   */
+  private closeSilentUnidentifiedSockets(now: number): void {
+    for (const ws of this.unidentifiedSockets()) {
+      const attachment = this.getVoiceAttachment(ws);
+      const lastSeenAt = attachment?.last_seen_at;
+      if (typeof lastSeenAt !== "number") {
+        // Accepted before sockets carried last_seen_at: start its clock now.
+        try {
+          ws.serializeAttachment({ ...attachment, last_seen_at: now });
+        } catch {
+          // The socket is already gone.
+        }
+        continue;
+      }
+      if (!isSilent(lastSeenAt, now)) continue;
+      roomLog.info(
+        `Closing unidentified voice socket, silent for ${Math.round((now - lastSeenAt) / 1000)}s`,
+      );
+      this.closeVoiceSocket(ws, {
+        code: CloseCode.SessionTimeout,
+        reason: "Voice socket timed out",
+      });
+    }
+  }
+
   private getVoiceAttachment(ws: WebSocket): VoiceAttachment | null {
     return ws.deserializeAttachment() as VoiceAttachment | null;
   }
 
   private isPublicDemoSocket(ws: WebSocket): boolean {
     return this.getVoiceAttachment(ws)?.admission?.accessMode === "public-demo";
-  }
-
-  private isAllowedPublicDemoOpcode(op: number): boolean {
-    return (
-      op === Op.VoiceIdentify ||
-      op === Op.Heartbeat ||
-      op === Op.SelectProtocol ||
-      op === Op.Video ||
-      op === Op.StopTracks ||
-      op === Op.TracksReady ||
-      op === Op.Speaking ||
-      op === Op.ClientDisconnect ||
-      op === Op.VoiceAppEvent ||
-      op === Op.TrackUnavailable ||
-      RETIRED_BROWSER_SFU_OPS.has(op)
-    );
   }
 
   private async disconnectParticipantImmediately(
@@ -1775,6 +1697,23 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     return true;
   }
 
+  /** Whether an authenticated user owns this participant in the room. */
+  private isParticipantOwnedBy(participantId: string, userId: string): boolean {
+    const rows = [
+      ...this.sql.exec(
+        "SELECT user_id FROM participants WHERE id = ?",
+        participantId,
+      ),
+    ];
+    if (rows.length > 0) return rows[0].user_id === userId;
+
+    const ws = this.getWsByParticipant(participantId);
+    const admission = ws ? this.getVoiceAttachment(ws)?.admission : undefined;
+    return (
+      admission?.accessMode === "authenticated" && admission.subject === userId
+    );
+  }
+
   private getParticipantId(ws: WebSocket): string | undefined {
     const attachment = this.getVoiceAttachment(ws);
     return attachment?.participant_id;
@@ -1806,8 +1745,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       op === Op.Speaking ||
       op === Op.ClientDisconnect ||
       op === Op.VoiceAppEvent ||
-      op === Op.TrackUnavailable ||
-      RETIRED_BROWSER_SFU_OPS.has(op)
+      op === Op.TrackUnavailable
     );
   }
 
@@ -1849,7 +1787,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
   private getUserIdForParticipant(participantId: string): string | null {
     const rows = [
       ...this.sql.exec(
-        `SELECT ${PARTICIPANT_USER_ID_SQL} AS user_id FROM participants WHERE id = ?`,
+        "SELECT user_id FROM participants WHERE id = ?",
         participantId,
       ),
     ];
@@ -1863,7 +1801,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       ...this.sql.exec(
         `SELECT p.id
        FROM participants p
-       WHERE (COALESCE(p.user_id, p.clerk_user_id) = ? OR p.id = ?)
+       WHERE (p.user_id = ? OR p.id = ?)
          AND EXISTS (
            SELECT 1
            FROM tracks t
@@ -1948,7 +1886,30 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       await this.identifyVoiceParticipant(ws, d);
     } finally {
       this.identifyingSockets.delete(ws);
+      // A failed identify leaves an unidentified socket that the alarm must
+      // still watch; the room's last leave may have cleared the alarm.
+      await this.scheduleAlarm();
     }
+  }
+
+  /** The published layers of the given SFU tracks that have several. */
+  private publishedSimulcastRids(
+    tracks: readonly VoiceMediaTrackRef[],
+  ): Array<VoiceMediaTrackRef & { rids: string[] }> {
+    const found: Array<VoiceMediaTrackRef & { rids: string[] }> = [];
+    for (const track of tracks) {
+      const [row] = this.sql.exec<{ simulcast_rids: string | null }>(
+        "SELECT simulcast_rids FROM tracks WHERE session_id = ? AND " +
+          "(sfu_track_name = ? OR (sfu_track_name IS NULL AND track_name = ?)) " +
+          "AND simulcast_rids IS NOT NULL LIMIT 1",
+        track.sessionId,
+        track.trackName,
+        track.trackName,
+      );
+      const { simulcast_rids: rids } = withSimulcastRids(row?.simulcast_rids);
+      if (rids) found.push({ ...track, rids });
+    }
+    return found;
   }
 
   /**
@@ -1960,19 +1921,33 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
   private async waitForVoiceJoinGrant(
     query: VoiceJoinGrantQuery,
   ): Promise<boolean> {
+    return (await this.awaitVoiceJoinVerdict(query)) === "granted";
+  }
+
+  /**
+   * Like waitForVoiceJoinGrant, but tells a refusal apart from a wait that
+   * ended with no grant, no revocation and no answer from the MeetingRoom
+   * (its check failed or is still running): "unverified".
+   */
+  private async awaitVoiceJoinVerdict(
+    query: VoiceJoinGrantQuery,
+  ): Promise<"granted" | "denied" | "unverified"> {
     const state = this.voiceJoinGrants.state(
       query.participantId,
       query.subject,
     );
-    if (state !== "unknown") return state === "granted";
+    if (state !== "unknown") return state === "granted" ? "granted" : "denied";
 
-    void this.confirmVoiceJoinGrant(query).then((confirmed) => {
-      if (!confirmed) return;
+    // undefined while the check runs; null when the MeetingRoom could not say.
+    let checked: boolean | null | undefined;
+    void this.checkVoiceJoinGrant(query).then((answer) => {
+      checked = answer;
+      if (answer !== true) return;
       this.voiceJoinGrants.recordConfirmed(query);
       this.voiceJoinGrantWaiters.notify(query.participantId);
     });
 
-    return this.voiceJoinGrantWaiters.wait(
+    const granted = await this.voiceJoinGrantWaiters.wait(
       query.participantId,
       this.voiceJoinGrantWaitMs,
       () => {
@@ -1983,12 +1958,12 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
         return next === "unknown" ? null : next === "granted";
       },
     );
-  }
-
-  private async confirmVoiceJoinGrant(
-    query: VoiceJoinGrantQuery,
-  ): Promise<boolean> {
-    return (await this.checkVoiceJoinGrant(query)) === true;
+    if (granted) return "granted";
+    const final = this.voiceJoinGrants.state(
+      query.participantId,
+      query.subject,
+    );
+    return final === "unknown" && checked !== false ? "unverified" : "denied";
   }
 
   /**
@@ -2147,13 +2122,28 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     // joined (not standby) in this channel's MeetingRoom before it may see
     // tracks, publish or appear to the voice room.
     const joinWaitStartedAt = Date.now();
-    const joined = await this.waitForVoiceJoinGrant({
+    const verdict = await this.awaitVoiceJoinVerdict({
       participantId: d.participant_id,
       subject: admission.subject,
     });
     const joinWaitMs = Date.now() - joinWaitStartedAt;
     if (ws.readyState !== WebSocket.OPEN || this.getParticipantId(ws)) return;
-    if (!joined) {
+    if (verdict === "unverified") {
+      // The MeetingRoom could not be asked (a failed or slow fetch). Not a
+      // refusal: close with a retryable code so the client reconnects and
+      // identifies again instead of ending the session (AdmissionRejected).
+      roomLog.warn(
+        `VoiceIdentify deferred: participant=${d.participant_id} join could not be verified`,
+      );
+      try {
+        ws.close(
+          VOICE_JOIN_UNVERIFIED_CLOSE_CODE,
+          "Voice channel join could not be verified",
+        );
+      } catch {}
+      return;
+    }
+    if (verdict === "denied") {
       roomLog.warn(
         `VoiceIdentify refused: participant=${d.participant_id} has not joined the channel`,
       );
@@ -2216,18 +2206,15 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     ws.serializeAttachment(attachment);
 
     this.sql.exec(
-      `INSERT INTO participants (id, user_id, clerk_user_id, native_screen_session_id, last_heartbeat, speaking, connection_id)
-       VALUES (?, ?, ?, NULL, ?, 0, ?)
+      `INSERT INTO participants (id, user_id, native_screen_session_id, last_heartbeat, speaking, connection_id)
+       VALUES (?, ?, NULL, ?, 0, ?)
        ON CONFLICT(id) DO UPDATE SET
          user_id = excluded.user_id,
-         clerk_user_id = excluded.clerk_user_id,
          native_screen_session_id = NULL,
          last_heartbeat = excluded.last_heartbeat,
          connection_id = excluded.connection_id`,
       d.participant_id,
       userId ?? null,
-      // TODO(user-id-rename phase 2): stop writing clerk_user_id.
-      LEGACY_CLERK_USER_ID_COMPAT ? (userId ?? null) : null,
       Date.now(),
       connectionId,
     );
@@ -2242,7 +2229,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     const existingTracks: TrackInfo[] = [];
     let staleTrackCount = 0;
     const tCursor = this.sql.exec(
-      "SELECT track_name, participant_id, sfu_track_name, session_id, mid, kind FROM tracks WHERE participant_id != ? AND native_screen_pending = 0",
+      "SELECT track_name, participant_id, sfu_track_name, session_id, mid, kind, simulcast_rids FROM tracks WHERE participant_id != ? AND native_screen_pending = 0",
       d.participant_id,
     );
     for (const row of tCursor) {
@@ -2257,6 +2244,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
         session_id: row.session_id as string,
         mid: (row.mid as string) || undefined,
         kind: row.kind as "audio" | "video",
+        ...withSimulcastRids(row.simulcast_rids),
       });
     }
 
@@ -2306,6 +2294,9 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
   private handleHeartbeat(ws: WebSocket) {
     const pid = this.getParticipantId(ws);
     if (!pid) {
+      // A standby session keeps its socket unidentified until the user joins
+      // (see SFUClient.connectVoice); its heartbeats keep it open.
+      markSocketHeard(ws, "last_seen_at");
       this.sendTo(ws, { op: Op.HeartbeatACK, d: { seq: 0 } });
       return;
     }
@@ -2601,7 +2592,8 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
               "ON CONFLICT(track_name) DO UPDATE SET " +
               "participant_id = excluded.participant_id, " +
               "sfu_track_name = NULL, session_id = excluded.session_id, " +
-              "mid = excluded.mid, kind = excluded.kind, native_screen_pending = 1 " +
+              "mid = excluded.mid, kind = excluded.kind, native_screen_pending = 1, " +
+              "simulcast_rids = NULL " +
               "WHERE tracks.participant_id = excluded.participant_id",
             track.track_name,
             participantId,
@@ -2717,18 +2709,28 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     participantId: string,
     tracks: TrackInfo[],
   ): Promise<void> {
+    const connectionId = this.getVoiceAttachment(ws)?.connection_id;
+    const rejectOwnedTrackName = () => {
+      if (
+        !tracks.some((track) =>
+          this.hasTrackNameConflict(track.track_name, participantId),
+        )
+      ) {
+        return false;
+      }
+      this.sendTo(ws, {
+        op: Op.Error,
+        d: {
+          code: CloseCode.InvalidPayload,
+          message: "Track name is already owned",
+        },
+      });
+      return true;
+    };
+    if (rejectOwnedTrackName()) return;
+
     const sanitizedTracks: TrackInfo[] = [];
     for (const track of tracks) {
-      if (this.hasTrackNameConflict(track.track_name, participantId)) {
-        this.sendTo(ws, {
-          op: Op.Error,
-          d: {
-            code: CloseCode.InvalidPayload,
-            message: "Track name is already owned",
-          },
-        });
-        return;
-      }
       const claims = await verifyPartyTracksSessionCapability(
         track.session_id,
         this.env.CALLS_APP_SECRET,
@@ -2753,24 +2755,36 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
         sfu_track_name: track.sfu_track_name,
         session_id: track.session_id,
         kind: track.kind,
+        ...(track.kind === "video" && encodeSimulcastRids(track.simulcast_rids)
+          ? { simulcast_rids: [...(track.simulcast_rids ?? [])] }
+          : {}),
       });
     }
+
+    // The capability checks above yield. If the participant left (or this
+    // socket was replaced) meanwhile, its tracks were already purged:
+    // recording these now would leave rows nobody owns. Another participant
+    // may also have claimed one of the names meanwhile.
+    if (!this.isCurrentVoiceConnection(ws, participantId, connectionId)) return;
+    if (rejectOwnedTrackName()) return;
 
     for (const track of sanitizedTracks) {
       this.sql.exec(
         "INSERT INTO tracks " +
-          "(track_name, participant_id, sfu_track_name, session_id, mid, kind, native_screen_pending) " +
-          "VALUES (?, ?, ?, ?, NULL, ?, 0) " +
+          "(track_name, participant_id, sfu_track_name, session_id, mid, kind, native_screen_pending, simulcast_rids) " +
+          "VALUES (?, ?, ?, ?, NULL, ?, 0, ?) " +
           "ON CONFLICT(track_name) DO UPDATE SET " +
           "participant_id = excluded.participant_id, " +
           "sfu_track_name = excluded.sfu_track_name, " +
           "session_id = excluded.session_id, mid = NULL, " +
-          "kind = excluded.kind, native_screen_pending = 0",
+          "kind = excluded.kind, native_screen_pending = 0, " +
+          "simulcast_rids = excluded.simulcast_rids",
         track.track_name,
         participantId,
         track.sfu_track_name,
         track.session_id,
         track.kind,
+        encodeSimulcastRids(track.simulcast_rids),
       );
     }
 
@@ -2805,7 +2819,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     for (const trackName of d.track_names) {
       const row = [
         ...this.sql.exec(
-          "SELECT track_name, participant_id, sfu_track_name, session_id, mid, kind " +
+          "SELECT track_name, participant_id, sfu_track_name, session_id, mid, kind, simulcast_rids " +
             "FROM tracks WHERE track_name = ? AND participant_id = ?",
           trackName,
           participantId,
@@ -2874,7 +2888,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     for (const trackName of d.track_names) {
       const row = [
         ...this.sql.exec(
-          "SELECT track_name, participant_id, sfu_track_name, session_id, mid, kind " +
+          "SELECT track_name, participant_id, sfu_track_name, session_id, mid, kind, simulcast_rids " +
             "FROM tracks WHERE track_name = ? AND participant_id = ? " +
             "AND session_id = ? AND sfu_track_name IS NULL " +
             "AND native_screen_pending = 1",
@@ -2945,6 +2959,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       session_id: String(row.session_id),
       ...(typeof row.mid === "string" && row.mid ? { mid: row.mid } : {}),
       kind: row.kind === "audio" ? "audio" : "video",
+      ...withSimulcastRids(row.simulcast_rids),
     };
   }
 
@@ -2954,7 +2969,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
   ): TrackInfo[] {
     return [
       ...this.sql.exec(
-        "SELECT track_name, participant_id, sfu_track_name, session_id, mid, kind " +
+        "SELECT track_name, participant_id, sfu_track_name, session_id, mid, kind, simulcast_rids " +
           "FROM tracks WHERE participant_id = ? AND session_id = ? " +
           "AND sfu_track_name IS NULL ORDER BY CASE kind WHEN 'video' THEN 0 ELSE 1 END, track_name",
         participantId,
@@ -3315,7 +3330,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       try {
         const pRows = [
           ...this.sql.exec<{ user_id: string }>(
-            `SELECT ${PARTICIPANT_USER_ID_SQL} AS user_id FROM participants WHERE id = ?`,
+            "SELECT user_id FROM participants WHERE id = ?",
             pid,
           ),
         ];
@@ -3624,8 +3639,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
           !DEFAULT_SOUNDBOARD_SOUND_IDS.has(soundId))
       )
         return null;
-      if (!this.ownsSoundboardPlayback(playbackId, callerUserId, soundId))
-        return null;
+      if (!isSoundboardPlaybackOwnedBy(playbackId, callerUserId)) return null;
       let outboundMediaUrl = mediaUrl;
       if (mediaUrl?.startsWith(SOUNDBOARD_UPLOAD_PATH)) {
         if (isDmAdmission) {
@@ -3725,12 +3739,11 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
 
     const playbackId = stringField("playback_id", 160);
     const ownsPlayback =
-      !!callerUserId && this.ownsSoundboardPlayback(playbackId, callerUserId);
+      !!callerUserId && isSoundboardPlaybackOwnedBy(playbackId, callerUserId);
     if (isDmAdmission && type === "soundboard.volume-set") return null;
     if (type === "soundboard.stop") {
       if (!ownsPlayback || !playbackId) return null;
       const event = { ...base, server_key: serverKey, playback_id: playbackId };
-      this.deleteLegacySoundboardPlayback(playbackId);
       return event;
     }
     if (type === "soundboard.pause-set") {
@@ -3780,23 +3793,11 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     }
   }
 
-  private async hasServerMembership(
+  private hasServerMembership(
     serverId: string,
     userId: string,
   ): Promise<boolean> {
-    try {
-      const row = await this.env.DB.prepare(
-        `SELECT 1
-           FROM server_members
-          WHERE server_id = ? AND user_id = ?
-          LIMIT 1`,
-      )
-        .bind(serverId, userId)
-        .first();
-      return !!row;
-    } catch {
-      return false;
-    }
+    return isServerMember(this.env.DB, serverId, userId);
   }
 
   private async hasAuthorizedDmSoundboardMedia(
@@ -3882,108 +3883,15 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     }
   }
 
-  private async hasManageServerPermission(
+  private hasManageServerPermission(
     serverId: string,
     userId: string,
   ): Promise<boolean> {
-    try {
-      const { results } = await this.env.DB.prepare(
-        `SELECT r.permissions
-           FROM member_roles mr
-           JOIN roles r ON r.id = mr.role_id AND r.server_id = mr.server_id
-          WHERE mr.server_id = ? AND mr.user_id = ?`,
-      )
-        .bind(serverId, userId)
-        .all<{ permissions: number }>();
-      const permissions = calculatePermissions(
-        (results ?? []).map((row) => Number(row.permissions ?? 0)),
-      );
-      return hasPermission(permissions, PERMISSIONS.MANAGE_SERVER);
-    } catch {
-      return false;
-    }
-  }
-
-  private ownsSoundboardPlayback(
-    playbackId: string,
-    callerUserId: string,
-    soundId?: string,
-  ): boolean {
-    if (isSoundboardPlaybackOwnedBy(playbackId, callerUserId)) return true;
-
-    const trackedOwner = this.getLegacySoundboardPlaybackOwner(playbackId);
-    if (trackedOwner) return trackedOwner === callerUserId;
-
-    if (
-      soundId &&
-      isLegacySoundboardPlaybackOwnedBy(playbackId, callerUserId, soundId)
-    ) {
-      const candidateOwners =
-        this.getLegacySoundboardPlaybackOwners(playbackId);
-      return (
-        candidateOwners.size === 1 &&
-        candidateOwners.has(callerUserId) &&
-        this.trackLegacySoundboardPlayback(playbackId, callerUserId)
-      );
-    }
-
-    const candidateOwners = this.getLegacySoundboardPlaybackOwners(playbackId);
-    if (candidateOwners.size !== 1 || !candidateOwners.has(callerUserId))
-      return false;
-    return this.trackLegacySoundboardPlayback(playbackId, callerUserId);
-  }
-
-  private getLegacySoundboardPlaybackOwners(playbackId: string): Set<string> {
-    const candidateOwners = new Set<string>();
-    for (const row of this.sql.exec(
-      `SELECT id, ${PARTICIPANT_USER_ID_SQL} AS user_id FROM participants`,
-    )) {
-      const participantId = row.id as string;
-      const ownerId = (row.user_id as string | null) || participantId;
-      const ownerPrefix = `s-${ownerId}-`;
-      if (playbackId.slice(0, ownerPrefix.length) === ownerPrefix)
-        candidateOwners.add(ownerId);
-    }
-    return candidateOwners;
-  }
-
-  private getLegacySoundboardPlaybackOwner(playbackId: string): string | null {
-    this.pruneLegacySoundboardPlaybackOwners(Date.now());
-    const rows = [
-      ...this.sql.exec(
-        "SELECT owner_id FROM soundboard_legacy_playback_owners WHERE playback_id = ?",
-        playbackId,
-      ),
-    ];
-    return rows.length > 0 ? (rows[0].owner_id as string) : null;
-  }
-
-  private trackLegacySoundboardPlayback(
-    playbackId: string,
-    ownerId: string,
-  ): boolean {
-    const existingOwner = this.getLegacySoundboardPlaybackOwner(playbackId);
-    if (existingOwner && existingOwner !== ownerId) return false;
-    this.sql.exec(
-      "INSERT OR IGNORE INTO soundboard_legacy_playback_owners (playback_id, owner_id, created_at) VALUES (?, ?, ?)",
-      playbackId,
-      ownerId,
-      Date.now(),
-    );
-    return true;
-  }
-
-  private pruneLegacySoundboardPlaybackOwners(now: number): void {
-    this.sql.exec(
-      "DELETE FROM soundboard_legacy_playback_owners WHERE created_at < ?",
-      now - LEGACY_SOUNDBOARD_PLAYBACK_OWNER_TTL_MS,
-    );
-  }
-
-  private deleteLegacySoundboardPlayback(playbackId: string): void {
-    this.sql.exec(
-      "DELETE FROM soundboard_legacy_playback_owners WHERE playback_id = ?",
-      playbackId,
+    return hasServerPermission(
+      this.env.DB,
+      serverId,
+      userId,
+      PERMISSIONS.MANAGE_SERVER,
     );
   }
 
@@ -4084,7 +3992,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
 
     const tracks = [
       ...this.sql.exec(
-        "SELECT track_name, participant_id, sfu_track_name, session_id, mid, kind " +
+        "SELECT track_name, participant_id, sfu_track_name, session_id, mid, kind, simulcast_rids " +
           "FROM tracks WHERE participant_id = ?",
         participantId,
       ),
@@ -4162,22 +4070,21 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
   }
 
   private sendTo(ws: WebSocket, msg: ServerMsg) {
-    try {
-      ws.send(JSON.stringify(msg));
-    } catch {
-      // ignore
-    }
+    sendFrame(ws, msg);
   }
 
+  /**
+   * Sends to every identified voice socket. An unidentified socket (a
+   * standby session, or a ticket holder that never sent VoiceIdentify) has
+   * not been admitted to the room and hears none of it; VoiceReady gives it
+   * the room's state once it identifies.
+   */
   private broadcast(msg: ServerMsg, excludeWs?: WebSocket) {
-    const data = JSON.stringify(msg);
-    for (const ws of this.ctx.getWebSockets()) {
-      if (ws === excludeWs) continue;
-      try {
-        ws.send(data);
-      } catch {
-        // ignore
-      }
-    }
+    broadcastToIdentified(
+      this.ctx.getWebSockets(),
+      msg,
+      (ws) => !!this.getParticipantId(ws),
+      excludeWs,
+    );
   }
 }

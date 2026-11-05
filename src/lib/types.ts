@@ -67,6 +67,12 @@ export interface TrackInfo {
   session_id: string;
   mid?: string;
   kind: "audio" | "video";
+  /**
+   * RIDs of a simulcast publication's layers, highest first. Absent for a
+   * single-layer publication (audio, screen shares, mobile cameras, older
+   * clients), which is pulled without choosing a layer.
+   */
+  simulcast_rids?: string[];
   track?: MediaStreamTrack;
 }
 
@@ -517,9 +523,20 @@ export interface SFUEventMap {
   };
   /** A call socket's ticket was refused twice: the session is gone. */
   "auth-failed": never;
+  /** A call socket was refused admission (AdmissionRejected): the session is gone. */
+  "admission-rejected": never;
   error: { message: string };
   "audio-resumed": {};
   "voice-reconnected": never;
+  /**
+   * A native screen share could not reconnect after a voice reconnect: its
+   * pipeline is stopped and nothing retries it. Same payload as the
+   * backend's `native-screen-share-ended` (see native-share-ended.ts).
+   */
+  "native-screen-share-ended": {
+    reason: "connection-failed";
+    detail: string;
+  };
   "voice-token-expired": never;
   "app-event": Record<string, unknown>;
 }
