@@ -6,12 +6,14 @@
 //
 //   Files.pickFiles()          the system's multi-select open dialog
 //   Files.clipboardFiles()     files copied in Explorer, or a copied picture
-//                              saved as a PNG (empty when neither)
+//                              saved as a PNG (empty when neither); the
+//                              core deletes the PNG once it is uploaded
 //   Files.downloadPath(name)   a free path in the Downloads folder
 //   Files.openPath(name)       a path in YapNative's cache for opening
 //   Files.reveal(path)         shows the file in Explorer, selected
 //   Files.openMedia(path)      opens a picture or video with its app;
 //                              anything else is only revealed
+//   Files.clearImageCache()    empties the downloaded-images cache (sign-out)
 //
 // Names from messages are untrusted: they are reduced to a plain file
 // name, and nothing but pictures and videos is ever opened.
@@ -33,4 +35,8 @@ public:
   Q_INVOKABLE QString openPath(const QString& name) const;
   Q_INVOKABLE void reveal(const QString& path) const;
   Q_INVOKABLE void openMedia(const QString& path) const;
+  Q_INVOKABLE void clearImageCache();
+
+signals:
+  void imageCacheCleared();
 };

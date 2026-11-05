@@ -54,6 +54,17 @@ const QColor kBadgeRing(11, 11, 13);
 
 HANDLE g_instanceMutex = nullptr;
 
+// The mutex is per Windows session (Local\); the pipe name is global, so it
+// carries the session id too, or a second signed-in user would find the
+// first user's pipe.
+QString pipeName()
+{
+  DWORD session = 0;
+  if (!ProcessIdToSessionId(GetCurrentProcessId(), &session))
+    session = 0;
+  return QString::fromLatin1(kPipe) + QLatin1Char('.') + QString::number(session);
+}
+
 std::wstring wide(const QString& text)
 {
   return text.toStdWString();
@@ -192,7 +203,7 @@ void DesktopShell::showFirstInstance()
   AllowSetForegroundWindow(ASFW_ANY);
   for (int attempt = 0; attempt < 20; ++attempt) {
     QLocalSocket socket;
-    socket.connectToServer(QString::fromLatin1(kPipe));
+    socket.connectToServer(pipeName());
     if (socket.waitForConnected(250)) {
       socket.write("show\n");
       socket.waitForBytesWritten(500);
@@ -215,7 +226,7 @@ void DesktopShell::attach(QQuickWindow* window, QObject* desktop)
   m_server->setSocketOptions(QLocalServer::UserAccessOption);
   connect(m_server, &QLocalServer::newConnection, this,
           &DesktopShell::onInstanceConnected);
-  if (!m_server->listen(QString::fromLatin1(kPipe)))
+  if (!m_server->listen(pipeName()))
     std::fprintf(stderr, "[instance] listen failed: %s\n",
                  qPrintable(m_server->errorString()));
 

@@ -247,8 +247,6 @@ Rectangle {
         Accessible.role: Accessible.ButtonMenu
         Accessible.name: label
         onClicked: caret.menu.visible ? caret.menu.close() : caret.menu.openAbove(caret)
-        // Listing devices takes a moment; start before the click.
-        onHoveredChanged: if (hovered) Audio.refreshDevices()
         contentItem: Item {
             Icon {
                 anchors.centerIn: parent

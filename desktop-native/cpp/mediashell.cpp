@@ -2,8 +2,10 @@
 
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
+#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QMimeData>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QUrl>
 #include <QtGui/QClipboard>
@@ -45,13 +47,25 @@ QString safeName(const QString& name)
   out = out.trimmed().left(120);
   if (out.isEmpty() || out.startsWith(QLatin1Char('.')))
     out.prepend(QStringLiteral("attachment"));
-  static const QStringList reserved = {
-    QStringLiteral("CON"), QStringLiteral("PRN"), QStringLiteral("AUX"),
-    QStringLiteral("NUL"), QStringLiteral("COM1"), QStringLiteral("LPT1")
-  };
-  if (reserved.contains(QFileInfo(out).baseName().toUpper()))
+  // Windows' device names, whatever the extension (COM1-9, LPT1-9 and
+  // their superscript forms included).
+  static const QRegularExpression reserved(
+    QStringLiteral(R"(^(CON|PRN|AUX|NUL|COM[1-9\x{B9}\x{B2}\x{B3}]|LPT[1-9\x{B9}\x{B2}\x{B3}])$)"),
+    QRegularExpression::CaseInsensitiveOption);
+  if (reserved.match(QFileInfo(out).baseName()).hasMatch())
     out.prepend(QLatin1Char('_'));
   return out;
+}
+
+// Deletes files in %LOCALAPPDATA%\YapNative\cache\<sub> older than a day.
+void pruneOld(const QString& sub)
+{
+  const QDateTime cutoff = QDateTime::currentDateTime().addDays(-1);
+  const QDir dir(cacheDir(sub));
+  for (const QFileInfo& file : dir.entryInfoList(QDir::Files)) {
+    if (file.lastModified() < cutoff)
+      QFile::remove(file.absoluteFilePath());
+  }
 }
 
 // `dir/name`, or `dir/name (n).ext` when that is taken.
@@ -92,6 +106,14 @@ HWND ownerWindow()
 MediaShell::MediaShell(QObject* parent)
   : QObject(parent)
 {
+  // Pasted pictures and "Open original" copies are throwaways.
+  pruneOld(QStringLiteral("paste"));
+  pruneOld(QStringLiteral("open"));
+}
+
+void MediaShell::clearImageCache()
+{
+  emit imageCacheCleared();
 }
 
 QStringList MediaShell::pickFiles(const QString& title)

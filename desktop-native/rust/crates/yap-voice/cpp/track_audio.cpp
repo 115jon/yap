@@ -8,9 +8,18 @@
 // (engine/webrtc.rs). That class and its base livekit_ffi::MediaStreamTrack
 // (webrtc-sys 0.3.52, include/livekit/media_stream_track.h) have no
 // virtual functions, so the object starts with MediaStreamTrack's data: a
-// shared_ptr to the runtime, then the WebRTC track. The track id is
-// checked against the one Rust read through the crate before anything is
-// called on the track.
+// shared_ptr to the runtime, then the WebRTC track. The guard is the
+// static_assert on the layout plus the exact pins of webrtc-sys and
+// libwebrtc in Cargo.toml. Before the track is used, kind() and then id()
+// (both virtual calls on the WebRTC track: nothing about the livekit
+// object can be checked without going through that pointer) must match
+// what Rust read through the crate; a null livekit object or track is
+// refused first.
+//
+// Thread: Rust calls set_track_gain from a tokio worker, not WebRTC's
+// signaling thread. SetVolume and SetAudioProcessingOptions are only
+// correct there on the release prebuilt, where RTC_DCHECK(signaling
+// thread) compiles away; a debug WebRTC build would trip it.
 
 #include <cstddef>
 #include <memory>

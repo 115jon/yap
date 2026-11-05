@@ -78,7 +78,6 @@ impl State {
             .iter()
             .any(|r| r.emoji == emoji && r.users.contains(&me));
         let add = !mine;
-        self.react_row(fx, message_id, emoji, &me, add);
         let request = ApiRequest::React {
             channel_id,
             message_id: message_id.to_owned(),
@@ -89,11 +88,14 @@ impl State {
             let change = ReactionChange {
                 message_id: message_id.to_owned(),
                 emoji: emoji.to_owned(),
-                user_id: me,
+                user_id: me.clone(),
                 added: add,
             };
             self.pending.reactions.insert(id, change);
         }
+        // After the change is pending: the cache holds the chip back until
+        // the server answers.
+        self.react_row(fx, message_id, emoji, &me, add);
     }
 
     /// Applies one reaction change to the open channel's row.
@@ -126,7 +128,8 @@ impl State {
         result: Result<ApiResponse, ApiError>,
     ) {
         match result {
-            Ok(_) => {}
+            // Confirmed: the cache may take the chip now.
+            Ok(_) => self.persist_messages(fx),
             Err(error) if error.is_unauthorized() => self.fail(fx, &error),
             Err(_) => self.react_row(
                 fx,

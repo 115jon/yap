@@ -71,6 +71,15 @@ protected:
     if (n == 0 || n > sizeof token)
       return QNetworkAccessManager::createRequest(op, request, data);
     QNetworkRequest authed(request);
+    // Qt copies the request, headers included, onto a redirect: only the
+    // API's own origin may see the bearer, so a redirect elsewhere fails.
+    authed.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                        QNetworkRequest::SameOriginRedirectPolicy);
+    // Private images stay out of the disk cache (and out of the next
+    // account's reach): never stored, never read back.
+    authed.setAttribute(QNetworkRequest::CacheSaveControlAttribute, false);
+    authed.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
+                        QNetworkRequest::AlwaysNetwork);
     authed.setRawHeader("Authorization", QByteArray("Bearer ") + QByteArray(token, int(n)));
     return QNetworkAccessManager::createRequest(op, authed, data);
   }
@@ -83,6 +92,9 @@ protected:
 class CachedNetworkFactory : public QQmlNetworkAccessManagerFactory
 {
 public:
+  // Emptied on sign-out (MediaShell::clearImageCache).
+  MediaShell* shell = nullptr;
+
   QNetworkAccessManager* create(QObject* parent) override
   {
     auto* manager = new MediaNetworkAccessManager(parent);
@@ -92,6 +104,10 @@ public:
       cache->setCacheDirectory(base + QStringLiteral("/YapNative/cache/images"));
       cache->setMaximumCacheSize(512 * 1024 * 1024);
       manager->setCache(cache);
+      // The cache lives in the manager's thread: the queued call runs there.
+      if (shell)
+        QObject::connect(shell, &MediaShell::imageCacheCleared, cache,
+                         &QNetworkDiskCache::clear);
     }
     return manager;
   }
@@ -157,11 +173,12 @@ int main(int argc, char* argv[])
   auto* shell = new DesktopShell(&app);
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "DesktopShell", shell);
   auto* files = new MediaShell(&app);
+  static CachedNetworkFactory networkFactory;
+  networkFactory.shell = files;
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "Files", files);
 
   QQmlApplicationEngine engine;
   // Not owned by the engine; it outlives it here.
-  static CachedNetworkFactory networkFactory;
   engine.setNetworkAccessManagerFactory(&networkFactory);
   engine.addImageProvider(QStringLiteral("icon"), new IconProvider);
   engine.addImageProvider(QStringLiteral("dither"), new DitherProvider);

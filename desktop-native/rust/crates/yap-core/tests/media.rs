@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 use yap_core::store::view::MessageRole;
 use yap_core::store::{
-    reduce, ApiRequest, ApiResponse, Command, Dispatch, Effect, GatewayEvent, Input, RequestId,
-    State, UploadFile, UploadStatus, ViewDiff, ViewUpdate,
+    reduce, ApiRequest, ApiResponse, CacheWrite, Command, Dispatch, Effect, GatewayEvent, Input,
+    RequestId, State, UploadFile, UploadStatus, ViewDiff, ViewUpdate,
 };
 use yap_core::ApiError;
 use yap_protocol::rest::{GifAsset, GifItem, GifPage, UploadedFile};
@@ -15,6 +15,7 @@ const BASE: &str = "https://api.fixture.invalid";
 const TEXT: &str = "chan_fixture_text";
 const ME: &str = "user_fixture_me";
 const MSG: &str = "msg_fixture_0001";
+const SECOND_TEXT: &str = "chan_fixture_text_two";
 
 fn fixture(name: &str) -> Value {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -251,6 +252,46 @@ fn a_refused_reaction_should_be_rolled_back() {
         }),
     );
     assert!(client.reactions(MSG).is_empty());
+}
+
+/// Every cached message log written in `fx` that holds a reaction on `MSG`.
+fn cached_with_reaction(fx: &[Effect]) -> bool {
+    fx.iter().any(|e| {
+        matches!(e, Effect::CacheWrite { write: CacheWrite::Messages { messages, .. }, .. }
+            if messages.iter().any(|m| m.id == MSG && !m.reactions.is_empty()))
+    })
+}
+
+#[test]
+fn an_unconfirmed_reaction_should_not_reach_the_cache_after_leaving_the_channel() {
+    let mut client = Client::online();
+    let mut written = client.command(Command::ToggleReaction {
+        message_id: MSG.into(),
+        emoji: "🔥".into(),
+    });
+    let (id, _) = find(&written, |r| matches!(r, ApiRequest::React { .. }));
+    written.extend(client.command(Command::SelectChannel(SECOND_TEXT.into())));
+    written.extend(client.answer(
+        id,
+        Err(ApiError::Http {
+            status: 403,
+            message: "no".into(),
+        }),
+    ));
+    assert!(!cached_with_reaction(&written), "{written:#?}");
+}
+
+#[test]
+fn a_confirmed_reaction_should_reach_the_cache() {
+    let mut client = Client::online();
+    let fx = client.command(Command::ToggleReaction {
+        message_id: MSG.into(),
+        emoji: "🔥".into(),
+    });
+    let (id, _) = find(&fx, |r| matches!(r, ApiRequest::React { .. }));
+    assert!(!cached_with_reaction(&fx), "{fx:#?}");
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    assert!(cached_with_reaction(&fx), "{fx:#?}");
 }
 
 #[test]

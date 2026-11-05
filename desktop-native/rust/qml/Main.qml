@@ -53,6 +53,15 @@ ApplicationWindow {
             DesktopShell.setAutostart(Desktop.openOnStartup)
         }
     }
+    // Private images are never cached, but older copies may be: the next
+    // account must not see them.
+    Connections {
+        target: Session
+        function onPhaseChanged() {
+            if (Session.phase === Session.SignedOut)
+                Files.clearImageCache()
+        }
+    }
     Connections {
         target: DesktopShell
         function onToastActivated(channelId, serverId) {

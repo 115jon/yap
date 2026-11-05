@@ -13,7 +13,7 @@ reqwest = { workspace = true, features = ["multipart", "stream"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util"] }
 yap-cache.workspace = true
 yap-protocol.workspace = true
 

@@ -878,11 +878,21 @@ impl State {
         );
     }
 
-    /// The open channel's newest window.
+    /// The open channel's newest window. Not while a reaction on one of its
+    /// messages is unconfirmed: the optimistic chip must not reach the
+    /// cache, where a refusal after leaving the channel could not undo it.
     fn persist_messages(&self, fx: &mut Effects) {
         let Some(log) = &self.messages else {
             return;
         };
+        if self
+            .pending
+            .reactions
+            .values()
+            .any(|change| log.get(&change.message_id).is_some())
+        {
+            return;
+        }
         let sent: Vec<&Message> = log.iter().filter(|m| !is_pending(m)).collect();
         let skip = sent.len().saturating_sub(yap_cache::MESSAGE_WINDOW);
         self.persist(

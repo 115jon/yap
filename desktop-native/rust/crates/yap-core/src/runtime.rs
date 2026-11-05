@@ -7,7 +7,7 @@
 //! inputs, so a slow request no longer holds up dispatches or other commands.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -471,7 +471,13 @@ impl Runner {
                 let task = tokio::spawn(async move {
                     let path = std::path::PathBuf::from(path);
                     let target = format!("/api/channels/{channel_id}/messages/upload");
+                    let pasted = is_pasted_copy(&path).then(|| path.clone());
                     let result = upload(&api, &target, path, name, content_type, id, &inbox).await;
+                    // A pasted picture is a temp copy; a failed upload keeps
+                    // it for the retry (startup prunes what is left).
+                    if let (Some(copy), true) = (pasted, result.is_ok()) {
+                        let _ = tokio::fs::remove_file(copy).await;
+                    }
                     let result = result.and_then(|body| {
                         serde_json::from_value(body)
                             .map(ApiResponse::Uploaded)
@@ -558,6 +564,18 @@ impl Runner {
     }
 }
 
+/// A picture pasted from the clipboard, which the shell saved under
+/// `YapNative/cache/paste/` (cpp/mediashell.cpp). Nothing else is deleted.
+fn is_pasted_copy(path: &Path) -> bool {
+    let parts: Vec<_> = path.components().rev().skip(1).take(3).collect();
+    matches!(
+        parts.as_slice(),
+        [paste, cache, app] if paste.as_os_str() == "paste"
+            && cache.as_os_str() == "cache"
+            && app.as_os_str() == "YapNative"
+    )
+}
+
 /// Chunks an upload is streamed in; progress is reported per chunk.
 const UPLOAD_CHUNK: usize = 64 * 1024;
 
@@ -608,22 +626,10 @@ async fn upload(
     api.upload(target, form).await
 }
 
-/// Fetches `url` and writes it to `dest`, creating its folder.
+/// Fetches `url` into `dest`, creating its folder (at most 25 MB).
 async fn download(api: &Api, url: &str, dest: String) -> Result<(), crate::api::ApiError> {
-    let bytes = api.download(url).await?;
-    let written = tokio::task::spawn_blocking(move || {
-        let dest = PathBuf::from(dest);
-        if let Some(dir) = dest.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(dest, bytes)
-    })
-    .await;
-    match written {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(error)) => Err(crate::api::ApiError::Network(error.to_string())),
-        Err(error) => Err(crate::api::ApiError::Network(error.to_string())),
-    }
+    api.download(url, Path::new(&dest), crate::api::MAX_DOWNLOAD_BYTES)
+        .await
 }
 
 /// One device sign-in; reports the code, then the outcome.
@@ -725,4 +731,20 @@ pub fn spawn(
         actor(state, runner, inbox_rx).await;
     });
     commands
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_shells_paste_folder_counts_as_a_pasted_copy() {
+        let pasted = r"C:\Users\a\AppData\Local\YapNative\cache\paste\image-1.png";
+        let picked = r"C:\Users\a\Pictures\image-1.png";
+        let lookalike = r"C:\Users\a\cache\paste\image-1.png";
+        assert_eq!(
+            [pasted, picked, lookalike].map(|p| is_pasted_copy(Path::new(p))),
+            [cfg!(windows), false, false]
+        );
+    }
 }

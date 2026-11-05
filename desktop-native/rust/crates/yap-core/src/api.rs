@@ -2,10 +2,13 @@
 
 use std::error::Error as _;
 use std::fmt;
+use std::path::Path;
 use std::sync::Arc;
 
+use futures_util::StreamExt as _;
 use reqwest::{Client, Method, RequestBuilder, StatusCode};
 use serde_json::Value;
+use tokio::io::AsyncWriteExt as _;
 
 use crate::config;
 
@@ -65,6 +68,31 @@ impl ApiError {
 
 /// How long an upload or a download may take (the client default is 30 s).
 const UPLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// The largest file a download may write (the upload limit).
+pub const MAX_DOWNLOAD_BYTES: u64 = 25 * 1024 * 1024;
+
+fn too_large() -> ApiError {
+    ApiError::Decode("file is too large to download (over 25 MB)".into())
+}
+
+/// Writes the response body to `dest` chunk by chunk, refusing more than
+/// `cap` bytes (a missing or wrong Content-Length does not get past this).
+async fn write_body(response: reqwest::Response, dest: &Path, cap: u64) -> Result<(), ApiError> {
+    let io = |error: std::io::Error| ApiError::Network(error.to_string());
+    let mut file = tokio::fs::File::create(dest).await.map_err(io)?;
+    let mut stream = response.bytes_stream();
+    let mut written = 0u64;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| ApiError::network(&error))?;
+        written += chunk.len() as u64;
+        if written > cap {
+            return Err(too_large());
+        }
+        file.write_all(&chunk).await.map_err(io)?;
+    }
+    file.flush().await.map_err(io)
+}
 
 /// `url` is on the API (`{api_base}/api/...`), so it may carry the session.
 /// Compared as a prefix up to the path, so `https://yap.example.evil` or a
@@ -183,9 +211,11 @@ impl Api {
         self.send(builder).await
     }
 
-    /// The bytes at `url`. The session goes along only when `url` is the
+    /// Streams `url` into the file `dest` (its folder is created), at most
+    /// `cap` bytes; a longer body is refused, and no partial file is left
+    /// behind on any failure. The session goes along only when `url` is the
     /// API's own (attachments and emoji need it; nothing else may see it).
-    pub async fn download(&self, url: &str) -> Result<Vec<u8>, ApiError> {
+    pub async fn download(&self, url: &str, dest: &Path, cap: u64) -> Result<(), ApiError> {
         let cfg = config::get();
         let builder = if is_api_url(&cfg.api_base, url) {
             self.http
@@ -210,11 +240,18 @@ impl Api {
                 message: "download failed".into(),
             });
         }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| ApiError::network(&error))?;
-        Ok(bytes.to_vec())
+        if response.content_length().is_some_and(|length| length > cap) {
+            return Err(too_large());
+        }
+        let io = |error: std::io::Error| ApiError::Network(error.to_string());
+        if let Some(dir) = dest.parent() {
+            tokio::fs::create_dir_all(dir).await.map_err(io)?;
+        }
+        let result = write_body(response, dest, cap).await;
+        if result.is_err() {
+            let _ = tokio::fs::remove_file(dest).await;
+        }
+        result
     }
 
     /// A single-use, 60 s ticket for one realtime socket.

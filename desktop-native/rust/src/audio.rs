@@ -157,6 +157,8 @@ pub struct AudioRust {
     user_id: String,
     settings: VoiceSettings,
     devices: AudioDevices,
+    /// A device listing is running; a second request joins it.
+    refreshing: bool,
 }
 
 fn string_list(items: impl IntoIterator<Item = String>) -> QStringList {
@@ -312,11 +314,15 @@ impl qobject::Audio {
         self.set_peers_revision(revision);
     }
 
-    pub fn refresh_devices(self: Pin<&mut Self>) {
+    pub fn refresh_devices(mut self: Pin<&mut Self>) {
+        if std::mem::replace(&mut self.as_mut().rust_mut().refreshing, true) {
+            return;
+        }
         let qt = self.qt_thread();
         std::thread::spawn(move || {
             let devices = LibwebrtcEngine.devices();
             let _ = qt.queue(move |mut audio| {
+                audio.as_mut().rust_mut().refreshing = false;
                 // Unchanged lists keep the menus' rows as they are.
                 if audio.rust().devices != devices {
                     audio.as_mut().rust_mut().devices = devices;
