@@ -4,10 +4,13 @@ use std::collections::HashMap;
 
 use yap_cache::Snapshot;
 use yap_protocol::rest::{Category, Channel, ChannelType, ChannelsResponse, Message, MessagePatch};
-use yap_protocol::rest::{Notification, Server, User};
+use yap_protocol::rest::{DmChannel, Member, Notification, Server, User};
 
 use super::time::{is_after, LocalOffset};
-use super::view::{ChannelTreeRow, MentionRow, ServerRow, VoiceMemberRow};
+use super::view::{
+    ChannelTreeRow, DmRow, DmView, MemberListRow, MentionRow, ProfileView, ServerRow,
+    VoiceMemberRow,
+};
 use super::{CallId, Occupant, RequestId, SessionId, SignInId, VoiceMember};
 use crate::api::{ApiError, Token};
 
@@ -261,6 +264,12 @@ pub(super) struct Projection {
     pub tree: Vec<ChannelTreeRow>,
     pub roster: Vec<VoiceMemberRow>,
     pub mentions: Vec<MentionRow>,
+    pub dms: Vec<DmRow>,
+    pub members: Vec<MemberListRow>,
+    /// Unread DMs, as last emitted.
+    pub dm_unread: i64,
+    pub profile: ProfileView,
+    pub dm: DmView,
 }
 
 /// The request id each slot is waiting for. A result for any other id is stale.
@@ -288,6 +297,11 @@ pub(super) struct Pending {
     pub edits: HashMap<RequestId, Message>,
     /// request → the message the delete removed
     pub deletes: HashMap<RequestId, Message>,
+    pub dms: Option<RequestId>,
+    /// (request, user id) of the DM being opened
+    pub open_dm: Option<(RequestId, String)>,
+    /// (request, user id) of the popout's profile
+    pub profile: Option<(RequestId, String)>,
 }
 
 /// A message this client posted that the server has not confirmed. Its row
@@ -324,6 +338,52 @@ pub struct Typer {
     pub user_id: String,
     pub name: String,
     pub generation: u64,
+}
+
+/// Who is connected and as what (chat-gateway.ts `PRESENCE_LIST`,
+/// `PRESENCE_UPDATE`). Everyone is offline until the first list arrives.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Presence {
+    /// A list has arrived: anyone missing from `live` is offline.
+    pub listed: bool,
+    /// User id → `online`, `idle` or `dnd`, for people connected now.
+    pub live: HashMap<String, &'static str>,
+    /// User id → the custom status a live update carried (`None`: cleared).
+    pub custom: HashMap<String, Option<String>>,
+}
+
+/// A status as the UI shows it: `online`, `idle`, `dnd`, or `None` for
+/// offline (and invisible).
+pub fn live_status(status: Option<&str>) -> Option<&'static str> {
+    match status {
+        Some("online") => Some("online"),
+        Some("idle") => Some("idle"),
+        Some("dnd") => Some("dnd"),
+        _ => None,
+    }
+}
+
+impl Presence {
+    /// `online`, `idle`, `dnd` or `offline`.
+    /// Nobody is online before the first list: a REST row's `status` is
+    /// the chosen one, not whether they are connected (the web's
+    /// `onlineUsers` starts empty too). `_fallback` is kept for the
+    /// callers' symmetry with [`Self::custom_status`].
+    pub fn of(&self, user_id: &str, _fallback: Option<&str>) -> &'static str {
+        if !self.listed {
+            return "offline";
+        }
+        self.live.get(user_id).copied().unwrap_or("offline")
+    }
+
+    /// The live custom status when an update carried one, else `fallback`.
+    pub fn custom_status(&self, user_id: &str, fallback: Option<&str>) -> String {
+        let value = match self.custom.get(user_id) {
+            Some(live) => live.as_deref(),
+            None => fallback,
+        };
+        value.unwrap_or_default().trim().to_owned()
+    }
 }
 
 /// The sign-in chain (me + servers, then channels, then the first page).
@@ -382,8 +442,16 @@ pub struct State {
     pub(super) last_message_at: HashMap<String, String>,
     /// Unread notifications; `mention` and `reply` ones are the badges.
     pub(super) notifications: Vec<Notification>,
-    /// Members by server id (mention suggestions, typing names).
-    pub(super) members: HashMap<String, Vec<User>>,
+    /// Members by server id, with their roles (the member panel, mention
+    /// suggestions, typing names).
+    pub(super) members: HashMap<String, Vec<Member>>,
+    /// Home (the DM list) is shown instead of a server.
+    pub(super) home: bool,
+    /// DM channels, newest first (as `/api/dms` sorts them; new ones go on top).
+    pub(super) dms: Vec<DmChannel>,
+    pub(super) presence: Presence,
+    /// The user whose popout is open, and their full profile once fetched.
+    pub(super) profile: Option<(String, Option<User>)>,
     pub(super) divider: Option<Divider>,
     /// The open channel's newest message time when it loaded: mentions on
     /// messages after it arrived while it was open (and were seen).
@@ -438,6 +506,10 @@ impl State {
             last_message_at: HashMap::new(),
             notifications: Vec::new(),
             members: HashMap::new(),
+            home: false,
+            dms: Vec::new(),
+            presence: Presence::default(),
+            profile: None,
             divider: None,
             seen_floor: None,
             seen_from: None,
@@ -597,6 +669,60 @@ impl State {
     /// The voice channel whose view is open.
     pub fn voice_view(&self) -> Option<&str> {
         self.voice_view.as_deref()
+    }
+
+    /// Home (the DM list) is shown.
+    pub fn home(&self) -> bool {
+        self.home
+    }
+
+    pub fn dms(&self) -> &[DmChannel] {
+        &self.dms
+    }
+
+    pub fn dm(&self, channel_id: &str) -> Option<&DmChannel> {
+        self.dms.iter().find(|dm| dm.id == channel_id)
+    }
+
+    pub fn presence(&self) -> &Presence {
+        &self.presence
+    }
+
+    /// A server's members, once loaded.
+    pub fn members(&self, server_id: &str) -> Option<&[Member]> {
+        self.members.get(server_id).map(Vec::as_slice)
+    }
+
+    /// The user whose popout is open.
+    pub fn profile_user(&self) -> Option<&str> {
+        self.profile.as_ref().map(|(id, _)| id.as_str())
+    }
+
+    /// Unread DM, mention and reply notifications of a DM (DMListPanel.tsx).
+    pub fn dm_mentions(&self, channel_id: &str) -> i64 {
+        let n = self
+            .notifications
+            .iter()
+            .filter(|n| {
+                !n.is_read
+                    && n.server_id.is_none()
+                    && n.channel_id.as_deref() == Some(channel_id)
+                    && matches!(n.kind.as_str(), "dm" | "mention" | "reply")
+            })
+            .count();
+        i64::try_from(n).unwrap_or(i64::MAX)
+    }
+
+    /// Unread notifications outside servers in a channel (the rail's DM key).
+    pub(super) fn dm_notifications(&self, channel_id: &str) -> i64 {
+        let n = self
+            .notifications
+            .iter()
+            .filter(|n| {
+                !n.is_read && n.server_id.is_none() && n.channel_id.as_deref() == Some(channel_id)
+            })
+            .count();
+        i64::try_from(n).unwrap_or(i64::MAX)
     }
 
     /// A channel from any loaded server.

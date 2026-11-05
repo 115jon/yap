@@ -11,14 +11,15 @@ use std::ptr::NonNull;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cxx_qt_lib::QString;
+use cxx_qt_lib::{QList, QStringList};
 use yap_core::store::time::local_day;
 use yap_core::store::view::{
-    ChannelTreeRow, MeView, MentionRow, MessageRow, ServerRow, UnreadView, VoiceMemberRow,
-    VoicePanelView, VoiceView,
+    ChannelTreeRow, DmRow, DmView, MeView, MemberListRow, MentionRow, MessageRow, ProfileView,
+    ServerRow, UnreadView, VoiceMemberRow, VoicePanelView, VoiceView,
 };
 use yap_core::ViewUpdate;
 
-use crate::bridge::qobject::{Chat, Nav, Session, Voice};
+use crate::bridge::qobject::{Chat, Nav, Profile, Session, Voice};
 use crate::client;
 use crate::models::{self, qobject as m};
 
@@ -30,6 +31,8 @@ pub struct Rows {
     pub messages: Vec<MessageRow>,
     pub roster: Vec<VoiceMemberRow>,
     pub mentions: Vec<MentionRow>,
+    pub dms: Vec<DmRow>,
+    pub members: Vec<MemberListRow>,
 }
 
 /// The last scalar values for the singletons that may not exist yet.
@@ -45,6 +48,10 @@ struct Scalars {
     manage_messages: bool,
     voice: VoiceView,
     panel: VoicePanelView,
+    home: bool,
+    dm: DmView,
+    dm_unread: i64,
+    profile: ProfileView,
 }
 
 /// The live QObjects. Each registers from its constructor and clears its
@@ -54,11 +61,14 @@ pub struct Objects {
     nav: Option<NonNull<Nav>>,
     chat: Option<NonNull<Chat>>,
     voice: Option<NonNull<Voice>>,
+    profile: Option<NonNull<Profile>>,
     servers: Option<NonNull<m::ServerListModel>>,
     tree: Option<NonNull<m::ChannelTreeModel>>,
     messages: Option<NonNull<m::MessageListModel>>,
     roster: Option<NonNull<m::VoiceRosterModel>>,
     mentions: Option<NonNull<m::MentionListModel>>,
+    dms: Option<NonNull<m::DmListModel>>,
+    members: Option<NonNull<m::MemberListModel>>,
 }
 
 #[derive(Default)]
@@ -140,16 +150,22 @@ impl Slot for Nav {
     }
 
     fn restore(mut self: Pin<&mut Self>) {
-        let (connected, server, channel, panel) = GUI.with(|gui| {
+        let (connected, server, channel, panel, home, dm, unread) = GUI.with(|gui| {
             let s = &gui.borrow().scalars;
             (
                 s.connected,
                 s.server.clone(),
                 s.channel.clone(),
                 s.panel.clone(),
+                s.home,
+                s.dm.clone(),
+                s.dm_unread,
             )
         });
         self.as_mut().set_connected(connected);
+        self.as_mut().set_home(home);
+        self.as_mut().set_dm_unread(int(unread));
+        set_dm(self.as_mut(), &dm);
         set_server(self.as_mut(), &server.0, &server.1);
         set_panel(self.as_mut(), &panel);
         set_channel(self, &channel.0, &channel.1);
@@ -191,6 +207,17 @@ impl Slot for Voice {
     }
 }
 
+impl Slot for Profile {
+    fn slot(objects: &mut Objects) -> &mut Option<NonNull<Self>> {
+        &mut objects.profile
+    }
+
+    fn restore(self: Pin<&mut Self>) {
+        let profile = GUI.with(|gui| gui.borrow().scalars.profile.clone());
+        set_profile(self, &profile);
+    }
+}
+
 macro_rules! model_slots {
     ($($model:ident => $field:ident),* $(,)?) => {$(
         impl Slot for m::$model {
@@ -207,7 +234,47 @@ model_slots!(
     MessageListModel => messages,
     VoiceRosterModel => roster,
     MentionListModel => mentions,
+    DmListModel => dms,
+    MemberListModel => members,
 );
+
+fn int(n: i64) -> i32 {
+    i32::try_from(n).unwrap_or(i32::MAX)
+}
+
+fn string_list(items: &[String]) -> QStringList {
+    let mut list = QList::<QString>::default();
+    for item in items {
+        list.append(q(item));
+    }
+    QStringList::from(&list)
+}
+
+fn set_dm(mut nav: Pin<&mut Nav>, dm: &DmView) {
+    nav.as_mut().set_dm_username(q(&dm.username));
+    nav.set_dm_user_id(q(&dm.user_id));
+}
+
+fn set_profile(mut profile: Pin<&mut Profile>, view: &ProfileView) {
+    profile.as_mut().set_name(q(&view.name));
+    profile.as_mut().set_username(q(&view.username));
+    profile.as_mut().set_avatar(q(&view.avatar));
+    profile.as_mut().set_initials(q(&view.initials));
+    profile.as_mut().set_presence(q(&view.presence));
+    profile.as_mut().set_custom_status(q(&view.custom_status));
+    profile.as_mut().set_pronouns(q(&view.pronouns));
+    profile.as_mut().set_bio(q(&view.bio));
+    profile.as_mut().set_banner(q(&view.banner));
+    profile.as_mut().set_banner_color(q(&view.banner_color));
+    profile
+        .as_mut()
+        .set_role_colors(string_list(&view.role_colors));
+    profile
+        .as_mut()
+        .set_role_names(string_list(&view.role_names));
+    profile.as_mut().set_me(view.me);
+    profile.set_user_id(q(&view.user_id));
+}
 
 fn set_unread(mut chat: Pin<&mut Chat>, view: &UnreadView) {
     let int = |n: i64| i32::try_from(n).unwrap_or(i32::MAX);
@@ -318,6 +385,24 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::ManageMessages(manage) => {
             with::<Chat>(|chat| chat.set_can_manage_messages(manage));
             scalars(|s| s.manage_messages = manage);
+        }
+        ViewUpdate::Home(home) => {
+            with::<Nav>(|nav| nav.set_home(home));
+            scalars(|s| s.home = home);
+        }
+        ViewUpdate::ActiveDm(dm) => {
+            with::<Nav>(|nav| set_dm(nav, &dm));
+            scalars(|s| s.dm = dm);
+        }
+        ViewUpdate::DmUnread(count) => {
+            with::<Nav>(|nav| nav.set_dm_unread(int(count)));
+            scalars(|s| s.dm_unread = count);
+        }
+        ViewUpdate::Dms(diff) => models::apply::<m::DmListModel>(diff),
+        ViewUpdate::Members(diff) => models::apply::<m::MemberListModel>(diff),
+        ViewUpdate::Profile(view) => {
+            with::<Profile>(|profile| set_profile(profile, &view));
+            scalars(|s| s.profile = *view);
         }
     }
 }

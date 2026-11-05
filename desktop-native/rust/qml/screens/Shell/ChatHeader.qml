@@ -2,10 +2,11 @@ import QtQuick
 import com.yap.native
 
 // The text channel header (ChatHeader.tsx): 48, px-4. The title key (the
-// channel glyph at 20 in ink-3, Bricolage 18/800) opens the channel's
-// details; on the right pins, notifications and members (40 px muted keys
-// behind a seam), then the underline search field with its "/" key. The
-// panels these open come later, so the keys only take hover for now.
+// channel glyph at 20 in ink-3, Bricolage 18/800; in a DM the mention glyph,
+// the name, a 16 px seam and the @handle in 13 ink-3) opens the details;
+// on the right pins, notifications and members (40 px muted keys behind a
+// seam), then the underline search field with its "/" key. Members toggles
+// the member panel; pins, notifications and search come later.
 Item {
     id: root
 
@@ -21,7 +22,7 @@ Item {
         color: titleHover.hovered ? Theme.tint1 : "transparent"
         Behavior on color { ColorAnimation { duration: Theme.dur1 } }
         Accessible.role: Accessible.Button
-        Accessible.name: qsTr("Channel details")
+        Accessible.name: Nav.dmUsername.length > 0 ? qsTr("Conversation details") : qsTr("Channel details")
         Row {
             id: titleRow
             x: 8
@@ -30,7 +31,7 @@ Item {
             Icon {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: Nav.activeChannelId.length > 0
-                name: "textChannel"
+                name: Nav.dmUsername.length > 0 ? "mention" : "textChannel"
                 size: Theme.iconLg
                 color: titleHover.hovered ? Theme.ink2 : Theme.ink3
             }
@@ -39,6 +40,20 @@ Item {
                 text: Nav.activeChannelName
                 color: Theme.ink1
                 font: Theme.type.columnTitle
+            }
+            Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: Nav.dmUsername.length > 0
+                width: 1
+                height: 16
+                color: Theme.lineStrong
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: Nav.dmUsername.length > 0
+                text: "@" + Nav.dmUsername
+                color: Theme.ink3
+                font: Theme.type.description
             }
         }
         HoverHandler { id: titleHover }
@@ -70,7 +85,15 @@ Item {
             rightPadding: 8
             IconKey { iconName: "pin"; tone: "muted"; tipSide: "bottom"; tip: qsTr("Pinned messages") }
             IconKey { iconName: "bell"; tone: "muted"; tipSide: "bottom"; tip: qsTr("Notifications") }
-            IconKey { iconName: "members"; tone: "muted"; tipSide: "bottom"; tip: qsTr("Show members") }
+            IconKey {
+                iconName: "members"
+                tone: ShellState.showMembers ? "toggled" : "muted"
+                tipSide: "bottom"
+                tip: ShellState.showMembers ? qsTr("Hide members") : qsTr("Show members")
+                Accessible.checkable: true
+                Accessible.checked: ShellState.showMembers
+                onClicked: ShellState.showMembers = !ShellState.showMembers
+            }
             Rectangle {
                 width: 1
                 height: 40

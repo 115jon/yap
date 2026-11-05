@@ -978,6 +978,7 @@ fn first_ready_should_subscribe_without_refetching() {
         ops,
         [
             op(GatewayOp::ServerSubscribe),
+            op(GatewayOp::ServerSubscribe),
             op(GatewayOp::ChannelSubscribe)
         ]
     );
@@ -998,6 +999,10 @@ fn ready_after_a_reconnect_should_refetch_and_resubscribe() {
             (
                 op(GatewayOp::ServerSubscribe),
                 json!({ "server_id": SERVER })
+            ),
+            (
+                op(GatewayOp::ServerSubscribe),
+                json!({ "server_id": "srv_fixture_two" })
             ),
             (
                 op(GatewayOp::ChannelSubscribe),
@@ -1023,6 +1028,7 @@ fn resumed_after_a_reconnect_should_resubscribe_without_refetching() {
     assert_eq!(
         ops,
         [
+            op(GatewayOp::ServerSubscribe),
             op(GatewayOp::ServerSubscribe),
             op(GatewayOp::ChannelSubscribe)
         ]
@@ -2042,6 +2048,7 @@ fn cached_boot_should_revalidate_everything_in_one_batch() {
             messages(),
             ApiRequest::ReadStates,
             ApiRequest::Notifications,
+            ApiRequest::Dms,
         ]
     );
 }

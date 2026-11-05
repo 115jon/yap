@@ -12,15 +12,9 @@ Rectangle {
 
     // ui/led.tsx LED_INK by presence (UserPanel.tsx PRESENCE_LED).
     readonly property string presence: Session.meStatus.length > 0 ? Session.meStatus : "online"
-    readonly property color presenceLed: presence === "idle" ? Theme.statusIdle
-        : presence === "dnd" ? Theme.statusDnd
-        : presence === "offline" ? Theme.statusOffline : Theme.statusOnline
-    readonly property color presenceInk: presence === "idle" ? Theme.warningInk
-        : presence === "dnd" ? Theme.dangerInk
-        : presence === "offline" ? Theme.ink3 : Theme.successInk
-    readonly property string presenceWord: presence === "idle" ? qsTr("Idle")
-        : presence === "dnd" ? qsTr("Do not disturb")
-        : presence === "offline" ? qsTr("Invisible") : qsTr("Online")
+    readonly property color presenceLed: Theme.presenceLed(presence)
+    readonly property color presenceInk: Theme.presenceInk(presence)
+    readonly property string presenceWord: presence === "offline" ? qsTr("Invisible") : Theme.presenceWord(presence)
 
     implicitHeight: 64
     color: Theme.ply1
@@ -65,6 +59,7 @@ Rectangle {
             Led {
                 anchors.centerIn: parent
                 size: 8
+                lit: root.presence !== "offline"
                 color: root.presenceLed
             }
         }
@@ -119,22 +114,13 @@ Rectangle {
         }
 
         HoverHandler { id: identityHover }
-        TapHandler { id: identityTap; onTapped: menu.open() }
+        TapHandler { id: identityTap; onTapped: account.openAbove(identity) }
         Tooltip {
-            visible: identityHover.hovered && !menu.visible
+            visible: identityHover.hovered && !account.visible
             text: qsTr("View profile · %1").arg(Session.meCustomStatus.length > 0 ? root.presenceWord + ": " + Session.meCustomStatus : root.presenceWord)
         }
 
-        MenuPanel {
-            id: menu
-            y: -height - 8
-            MenuRow {
-                glyph: "logout"
-                text: qsTr("Sign out")
-                danger: true
-                onTriggered: Session.signOut()
-            }
-        }
+        AccountPopout { id: account }
     }
 
     Row {

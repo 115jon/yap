@@ -1,6 +1,8 @@
 //! The reducer: one arm per input, emitting effects in the order the old
 //! sequential core performed them, so the UI sees the same updates.
 
+mod social;
+
 use std::time::Duration;
 
 use serde::Serialize;
@@ -320,6 +322,7 @@ impl State {
     fn sync_badges(&mut self, fx: &mut Effects) {
         self.sync_servers(fx);
         self.sync_tree(fx);
+        self.sync_dms(fx);
     }
 
     /// The voice channel the roster model shows: the open voice view, else
@@ -403,6 +406,7 @@ impl State {
         }
         self.sync_roster(fx);
         self.sync_tree(fx);
+        self.sync_members(fx);
     }
 
     /// Opens a voice channel's view (its landing; the call once joined).
@@ -457,6 +461,7 @@ impl State {
         }
         self.sync_roster(fx);
         self.sync_tree(fx);
+        self.sync_members(fx);
     }
 
     fn active_server_name(&self) -> String {
@@ -475,6 +480,7 @@ impl State {
             self.typing_text.clone_from(&text);
             fx.view(ViewUpdate::Typing(text));
         }
+        self.sync_members(fx);
     }
 
     fn clear_typing(&mut self, fx: &mut Effects) {
@@ -491,7 +497,14 @@ impl State {
         self.active_server
             .as_ref()
             .and_then(|server| self.members.get(server))
-            .and_then(|list| list.iter().find(|u| u.id == user_id))
+            .and_then(|list| list.iter().find(|m| m.user.id == user_id))
+            .map(|m| &m.user)
+            .or_else(|| {
+                self.dms
+                    .iter()
+                    .map(|dm| &dm.recipient)
+                    .find(|u| u.id == user_id)
+            })
             .map_or_else(|| "Someone".to_owned(), |u| u.label().to_owned())
     }
 
@@ -714,24 +727,22 @@ impl State {
     fn load_unread(&mut self, fx: &mut Effects) {
         self.pending.read_states = self.http(fx, ApiRequest::ReadStates);
         self.pending.notifications = self.http(fx, ApiRequest::Notifications);
+        self.pending.dms = self.http(fx, ApiRequest::Dms);
     }
 
     fn mention_query(&mut self, fx: &mut Effects, query: Option<String>) {
-        let list = self
-            .active_server
-            .as_ref()
-            .and_then(|server| self.members.get(server));
-        let rows = match (query, list) {
-            (Some(query), Some(list)) => {
+        let rows = match query {
+            Some(query) => {
                 let query = query.to_lowercase();
-                let hits: Vec<&User> = list
-                    .iter()
+                let hits: Vec<&User> = self
+                    .mention_candidates()
+                    .into_iter()
                     .filter(|u| u.username.to_lowercase().contains(&query))
                     .take(MENTION_SUGGESTIONS)
                     .collect();
                 view::mention_rows(&hits, &self.api_base)
             }
-            _ => Vec::new(),
+            None => Vec::new(),
         };
         for diff in view::ordered_diff(&self.view.mentions, &rows) {
             fx.view(ViewUpdate::Mentions(diff));
@@ -752,6 +763,10 @@ impl State {
     }
 
     fn persist_route(&self, fx: &mut Effects) {
+        // Home is not stored: the next launch opens the last server.
+        if self.home {
+            return;
+        }
         self.persist(
             fx,
             CacheWrite::Route {
@@ -826,7 +841,19 @@ impl State {
                 self.end_session(fx, true);
             }
             Command::SelectServer(id) => self.select_server(fx, id),
+            Command::SelectHome => self.select_home(fx),
             Command::SelectChannel(id) => self.select_channel(fx, &id),
+            Command::OpenDm(user_id) => self.open_dm(fx, &user_id),
+            Command::SetStatus {
+                status,
+                custom_status,
+            } => self.set_presence(fx, &status, custom_status),
+            Command::ShowProfile(user_id) => self.show_profile(fx, user_id),
+            Command::HideProfile(user_id) => {
+                if self.profile_user() == Some(user_id.as_str()) {
+                    self.show_profile(fx, None);
+                }
+            }
             Command::Send {
                 content,
                 reply_to_id,
@@ -1139,6 +1166,7 @@ impl State {
         self.last_message_at.clear();
         self.notifications.clear();
         self.members.clear();
+        self.clear_social(fx);
         self.outbox.clear();
         self.at_bottom = false;
         if self.divider.take().is_some() {
@@ -1254,6 +1282,16 @@ impl State {
         }
         if let Some(server_id) = pending.members.remove(&id) {
             return self.on_members(fx, server_id, result);
+        }
+        if pending.dms == Some(id) {
+            pending.dms = None;
+            return self.on_dms(fx, result);
+        }
+        if let Some((_, user_id)) = pending.open_dm.take_if(|(slot, _)| *slot == id) {
+            return self.on_dm_opened(fx, &user_id, result);
+        }
+        if let Some((_, user_id)) = pending.profile.take_if(|(slot, _)| *slot == id) {
+            return self.on_profile(fx, &user_id, result);
         }
         if let Some(read) = pending.reads.remove(&id) {
             return self.on_marked(fx, read, result);
@@ -1388,9 +1426,19 @@ impl State {
         match keep {
             // Revalidating the cached server: its channels were requested
             // with everything else, so only its name can have changed.
-            Some(id) if self.refreshing => {
+            // Home stays where it is.
+            Some(id) if self.refreshing || self.home => {
                 let name = self.active_server_name();
                 fx.view(ViewUpdate::ActiveServer { id, name });
+            }
+            None if self.home => {
+                // The server behind Home went away: the next one takes its
+                // place without leaving Home.
+                self.active_server = self.servers.first().map(|s| s.id.clone());
+                let id = self.active_server.clone().unwrap_or_default();
+                let name = self.active_server_name();
+                fx.view(ViewUpdate::ActiveServer { id, name });
+                self.sync_members(fx);
             }
             Some(id) => self.select_server(fx, id),
             None => match self.servers.first().map(|s| s.id.clone()) {
@@ -1429,6 +1477,7 @@ impl State {
         self.seen_from = None;
         self.emit_history(fx);
         self.emit_active_channel(fx, String::new(), String::new());
+        self.emit_active_dm(fx);
         self.clear_typing(fx);
         if self.divider.take().is_some() {
             self.emit_unread(fx);
@@ -1443,6 +1492,13 @@ impl State {
         if self.active_server.as_deref() != Some(id.as_str()) {
             self.close_voice_panel(fx);
         }
+        self.leave_home(fx);
+        // A DM does not carry over into the server: nothing is open until
+        // its channels answer.
+        if let Some(dm) = self.active_channel.clone().filter(|c| self.dm(c).is_some()) {
+            self.gateway_send(fx, Self::channel_frame(GatewayOp::ChannelUnsubscribe, &dm));
+            self.clear_channel(fx);
+        }
         self.active_server = Some(id.clone());
         fx.view(ViewUpdate::ActiveServer {
             id: id.clone(),
@@ -1456,7 +1512,7 @@ impl State {
         self.pending.channels = self.http(fx, request).map(|req| (req, id));
     }
 
-    /// A server's members, once per session (mention suggestions).
+    /// A server's members, once per session; dispatches keep them current.
     fn request_members(&mut self, fx: &mut Effects, server_id: &str) {
         let asked = self.pending.members.values().any(|s| s == server_id);
         if asked || self.members.contains_key(server_id) {
@@ -1508,6 +1564,10 @@ impl State {
             self.reset_tree(fx);
         }
         self.sync_subscriptions(fx, true);
+        if self.home {
+            // A tree that answered after Home opened: kept, not shown.
+            return self.finish_boot(fx);
+        }
         if let Some((id, name)) = kept {
             // Only the name and permissions can have changed; the
             // messages stay.
@@ -1528,15 +1588,27 @@ impl State {
         if self.signed_in().is_none() {
             return;
         }
+        if self.dm(id).is_some() {
+            return self.select_dm(fx, id);
+        }
         let Some(channel) = self.find_channel(id) else {
             return;
         };
-        match channel.channel_type {
-            ChannelType::Voice => return self.open_voice_panel(fx, id),
-            ChannelType::Text => {}
-            ChannelType::Dm | ChannelType::Other => return,
-        }
+        let kind = channel.channel_type;
         let name = channel.name.clone();
+        if matches!(kind, ChannelType::Dm | ChannelType::Other) {
+            return;
+        }
+        // A server channel leaves Home.
+        self.leave_home(fx);
+        match kind {
+            ChannelType::Voice => self.open_voice_panel(fx, id),
+            _ => self.open_text(fx, id, name),
+        }
+    }
+
+    /// Opens a text channel or a DM: subscribe, an empty list, the page.
+    fn open_text(&mut self, fx: &mut Effects, id: &str, name: String) {
         self.close_voice_panel(fx);
         if let Some(previous) = self.active_channel.replace(id.to_owned()) {
             if previous != id {
@@ -1556,6 +1628,7 @@ impl State {
             self.emit_unread(fx);
         }
         self.emit_active_channel(fx, id.to_owned(), name);
+        self.emit_active_dm(fx);
         self.clear_typing(fx);
         fx.messages(ViewDiff::Reset(Vec::new()));
         self.emit_history(fx);
@@ -1564,6 +1637,7 @@ impl State {
         self.load_page(fx, id);
         // The open channel stops showing as unread.
         self.sync_badges(fx);
+        self.sync_members(fx);
     }
 
     /// Fetches the newest page of a channel; the result replaces the list.
@@ -2061,9 +2135,11 @@ impl State {
     /// (Re)subscribes the gateway to what is on screen; `voice` also
     /// re-asserts the call's voice presence.
     fn sync_subscriptions(&self, fx: &mut Effects, voice: bool) {
-        if let Some(server) = &self.active_server {
+        // Every server (chat-gateway.ts): presence, member and profile
+        // events fan out to a server's subscribers.
+        for server in &self.servers {
             let subscribe = ServerSubscribe {
-                server_id: server.clone(),
+                server_id: server.id.clone(),
             };
             self.gateway_send(fx, frame(GatewayOp::ServerSubscribe, &subscribe));
         }
@@ -2092,6 +2168,8 @@ impl State {
                 current.gateway.ready = true;
                 let reconnect = std::mem::replace(&mut current.gateway.was_ready, true);
                 self.set_connected(fx, true);
+                // A fresh gateway session starts online: say otherwise.
+                self.send_status(fx);
                 self.sync_subscriptions(fx, true);
                 // A fresh session after a drop (Resume failed or was not
                 // possible): events during the gap are lost, so refetch what
@@ -2237,6 +2315,13 @@ impl State {
                 }
                 self.sync_voice_channels(fx);
             }
+            Dispatch::PresenceUpdate(update) => self.on_presence(fx, update),
+            Dispatch::PresenceList(list) => self.on_presence_list(fx, list),
+            Dispatch::MemberAdd(add) => self.on_member_add(fx, *add),
+            Dispatch::MemberRemove(remove) => self.on_member_remove(fx, remove),
+            Dispatch::MemberUpdate(update) => self.on_member_update(fx, update),
+            Dispatch::DmCreate(dm) => self.add_dm(fx, *dm),
+            Dispatch::ProfileUpdate(update) => self.on_profile_update(fx, &update),
         }
     }
 
@@ -2247,9 +2332,17 @@ impl State {
     fn on_message_create(&mut self, fx: &mut Effects, message: Message) {
         self.remember_author(&message);
         let channel = message.channel_id.clone();
+        if self.find_channel(&channel).is_none()
+            && self.dm(&channel).is_none()
+            && self.pending.dms.is_none()
+        {
+            self.pending.dms = self.http(fx, ApiRequest::Dms);
+        }
         let at = message.created_at.clone();
         let mine = self.me().is_some_and(|me| me.id == message.author_id);
-        if self.typing.iter().any(|t| t.user_id == message.author_id) {
+        // Typers are the open channel's: a post elsewhere leaves them.
+        let here = self.active_channel.as_deref() == Some(channel.as_str());
+        if here && self.typing.iter().any(|t| t.user_id == message.author_id) {
             self.typing.retain(|t| t.user_id != message.author_id);
             self.emit_typing(fx);
         }
@@ -2344,13 +2437,15 @@ impl State {
             Ok(_) => return,
             Err(error) => return self.fail(fx, &error),
         };
-        let users: Vec<User> = members.into_iter().map(|m| m.user).collect();
-        for user in &users {
+        for member in &members {
+            let user = &member.user;
             self.names
                 .entry(user.id.clone())
                 .or_insert_with(|| user.label().to_owned());
         }
-        self.members.insert(server_id, users);
+        self.members.insert(server_id, members);
+        self.sync_members(fx);
+        self.emit_profile(fx);
     }
 
     /// Another server's tree: kept for its unread pill (and shown if it is

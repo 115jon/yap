@@ -13,6 +13,8 @@ Item {
     id: root
 
     property string channelName
+    // A DM: the prompt names the person ("Message @Ada").
+    property bool dm: false
     // The message being replied to (empty: none).
     property string replyToId
     property string replyToName
@@ -234,7 +236,8 @@ Item {
                 id: input
                 focus: true
                 wrapMode: TextArea.Wrap
-                placeholderText: root.channelName.length > 0 ? qsTr("Message #%1").arg(root.channelName) : qsTr("Message")
+                placeholderText: root.channelName.length === 0 ? qsTr("Message")
+                    : root.dm ? qsTr("Message @%1").arg(root.channelName) : qsTr("Message #%1").arg(root.channelName)
                 placeholderTextColor: Theme.ink3
                 color: Theme.ink1
                 selectionColor: Theme.selection

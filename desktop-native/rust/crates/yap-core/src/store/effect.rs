@@ -5,7 +5,8 @@ use std::time::Duration;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use yap_protocol::rest::{
-    ChannelsResponse, Member, Message, MessagePatch, Notification, ReadStates, Server, User,
+    ChannelsResponse, DmChannel, Member, Message, MessagePatch, Notification, ProfileResponse,
+    ReadStates, Server, User,
 };
 use yap_protocol::Frame;
 
@@ -133,6 +134,22 @@ pub enum ApiRequest {
     Members {
         server_id: String,
     },
+    /// Every DM channel, newest first.
+    Dms,
+    /// Opens (or creates) the DM with a user.
+    OpenDm {
+        user_id: String,
+    },
+    /// The chosen status and custom status (`None` clears it), stored and
+    /// broadcast as `PRESENCE_UPDATE`.
+    SetPresence {
+        status: String,
+        custom_status: Option<String>,
+    },
+    /// A user's full profile, for the popout.
+    Profile {
+        user_id: String,
+    },
 }
 
 /// A page of messages, oldest first.
@@ -156,6 +173,9 @@ pub enum ApiResponse {
     ReadStates(ReadStates),
     Notifications(Vec<Notification>),
     Members(Vec<Member>),
+    Dms(Vec<DmChannel>),
+    Dm(Box<DmChannel>),
+    Profile(Box<User>),
     /// A call whose body the store does not read.
     Done,
 }
@@ -179,23 +199,15 @@ fn take(value: &mut Value, key: &str) -> Value {
         .unwrap_or(Value::Null)
 }
 
-/// Percent-encodes a query value (RFC 3986 unreserved characters stay).
-fn query_value(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            out.push(char::from(byte));
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    out
-}
+use super::view::query_value;
 
 impl ApiRequest {
     pub fn method(&self) -> Method {
         match self {
-            Self::SendMessage { .. } | Self::Typing { .. } => Method::Post,
+            Self::SendMessage { .. }
+            | Self::Typing { .. }
+            | Self::OpenDm { .. }
+            | Self::SetPresence { .. } => Method::Post,
             Self::MarkRead { .. } => Method::Put,
             Self::EditMessage { .. } | Self::MarkNotificationsRead { .. } => Method::Patch,
             Self::DeleteMessage { .. } => Method::Delete,
@@ -205,7 +217,9 @@ impl ApiRequest {
             | Self::Messages { .. }
             | Self::ReadStates
             | Self::Notifications
-            | Self::Members { .. } => Method::Get,
+            | Self::Members { .. }
+            | Self::Dms
+            | Self::Profile { .. } => Method::Get,
         }
     }
 
@@ -232,6 +246,9 @@ impl ApiRequest {
             Self::Notifications => "/api/notifications?limit=100&unread=true".into(),
             Self::MarkNotificationsRead { .. } => "/api/notifications".into(),
             Self::Members { server_id } => format!("/api/servers/{server_id}/members"),
+            Self::Dms | Self::OpenDm { .. } => "/api/dms".into(),
+            Self::SetPresence { .. } => "/api/presence".into(),
+            Self::Profile { user_id } => format!("/api/users/{user_id}/profile"),
         }
     }
 
@@ -257,6 +274,11 @@ impl ApiRequest {
             } => json!({ "message_id": message_id, "content": content }),
             Self::DeleteMessage { message_id, .. } => json!({ "message_id": message_id }),
             Self::MarkNotificationsRead { ids } => json!({ "ids": ids }),
+            Self::OpenDm { user_id } => json!({ "target_user_id": user_id }),
+            Self::SetPresence {
+                status,
+                custom_status,
+            } => json!({ "status": status, "custom_status": custom_status }),
             Self::Typing { .. } | Self::MarkRead { .. } => json!({}),
             Self::Me
             | Self::Servers
@@ -264,7 +286,9 @@ impl ApiRequest {
             | Self::Messages { .. }
             | Self::ReadStates
             | Self::Notifications
-            | Self::Members { .. } => Value::Null,
+            | Self::Members { .. }
+            | Self::Dms
+            | Self::Profile { .. } => Value::Null,
         }
     }
 
@@ -307,7 +331,17 @@ impl ApiRequest {
                 ApiResponse::Notifications(lenient_list(take(&mut body, "notifications")))
             }
             Self::Members { .. } => ApiResponse::Members(lenient_list(body)),
+            Self::Dms => ApiResponse::Dms(lenient_list(body)),
+            Self::OpenDm { .. } => ApiResponse::Dm(Box::new(
+                serde_json::from_value(body).map_err(|e| ApiError::Decode(format!("dm: {e}")))?,
+            )),
+            Self::Profile { .. } => {
+                let profile: ProfileResponse = serde_json::from_value(body)
+                    .map_err(|e| ApiError::Decode(format!("profile: {e}")))?;
+                ApiResponse::Profile(Box::new(profile.user))
+            }
             Self::DeleteMessage { .. }
+            | Self::SetPresence { .. }
             | Self::Typing { .. }
             | Self::MarkRead { .. }
             | Self::MarkNotificationsRead { .. } => ApiResponse::Done,

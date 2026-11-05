@@ -5,11 +5,11 @@
 use std::collections::HashSet;
 use std::hash::Hash;
 
-use yap_protocol::rest::{Channel, ChannelType, Message, Server, User};
+use yap_protocol::rest::{Channel, ChannelType, DmChannel, Member, Message, Role, Server, User};
 
 use std::collections::HashMap;
 
-use super::state::{Outgoing, Phase, ServerChannels, VoiceCall};
+use super::state::{Outgoing, Phase, Presence, ServerChannels, Typer, VoiceCall};
 use super::time::{parse_rfc3339, LocalOffset, Stamp};
 use super::{Occupant, VoiceMember};
 
@@ -143,6 +143,22 @@ impl AsCell for TreeKind {
     }
 }
 
+/// What a member panel row is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MemberKind {
+    Label,
+    Member,
+}
+
+impl AsCell for MemberKind {
+    fn cell(&self) -> Cell<'_> {
+        Cell::Str(match self {
+            Self::Label => "label",
+            Self::Member => "member",
+        })
+    }
+}
+
 rows! {
     /// One key on the server rail.
     pub struct ServerRow / ServerRole {
@@ -245,6 +261,55 @@ rows! {
     }
     key(row) -> String { row.id.clone() }
 
+    /// One conversation in the home DM list. The rail shows the unread ones
+    /// as avatar keys (`rail` is the order among them, -1 when read).
+    pub struct DmRow / DmRole {
+        id: String => Id "channelId",
+        user_id: String => UserId "userId",
+        name: String => Name "name",
+        username: String => Username "username",
+        avatar: String => Avatar "avatar",
+        initials: String => Initials "initials",
+        /// `online`, `idle`, `dnd` or `offline`.
+        presence: String => Presence "presence",
+        custom_status: String => CustomStatus "customStatus",
+        /// Newer messages than the read mark (never the open one).
+        unread: bool => Unread "unread",
+        /// Unread DM, mention and reply notifications (DMListPanel.tsx).
+        mentions: i64 => Mentions "mentions",
+        /// Position among the unread DMs on the rail, or -1.
+        rail: i64 => Rail "rail",
+        /// The rail key's count: unread notifications, at least 1.
+        rail_count: i64 => RailCount "railCount",
+    }
+    key(row) -> String { row.id.clone() }
+
+    /// One row of the member panel: a group label, or a member under it.
+    pub struct MemberListRow / MemberRole {
+        kind: MemberKind => Kind "kind",
+        /// `role:<name>` or `offline` for labels, the user id for members.
+        id: String => Id "itemId",
+        user_id: String => UserId "userId",
+        /// The group name, or the member's display name.
+        name: String => Name "name",
+        /// Labels: members in the group.
+        count: i64 => Count "count",
+        avatar: String => Avatar "avatar",
+        initials: String => Initials "initials",
+        presence: String => Presence "presence",
+        custom_status: String => CustomStatus "customStatus",
+        /// The highest role's colour (`#rrggbb`) for online members, else empty.
+        color: String => Color "roleColor",
+        online: bool => Online "online",
+        owner: bool => Owner "owner",
+        me: bool => Me "me",
+        typing: bool => Typing "typing",
+        /// In the voice channel you are in: their LED sits in the gutter.
+        in_call: bool => InCall "inCall",
+        speaking: bool => Speaking "speaking",
+    }
+    key(row) -> (MemberKind, String) { (row.kind, row.id.clone()) }
+
     /// One mention suggestion in the composer.
     pub struct MentionRow / MentionRole {
         id: String => Id "userId",
@@ -345,6 +410,98 @@ pub fn ordered_diff<R: Row>(old: &[R], new: &[R]) -> Vec<ViewDiff<R>> {
     out
 }
 
+/// Like [`ordered_diff`], but a row that moved is removed and inserted
+/// again instead of resetting the list: the rows that keep their relative
+/// order (a longest increasing run) stay put. For lists whose rows change
+/// places (people moving between the online and offline groups).
+pub fn moving_diff<R: Row>(old: &[R], new: &[R]) -> Vec<ViewDiff<R>> {
+    let new_index: HashMap<R::Key, usize> =
+        new.iter().enumerate().map(|(i, r)| (r.key(), i)).collect();
+    let old_keys: HashSet<R::Key> = old.iter().map(Row::key).collect();
+    if new_index.len() != new.len() || old_keys.len() != old.len() {
+        return vec![ViewDiff::Reset(new.to_vec())];
+    }
+    // Old rows that are kept, as their new positions; the longest increasing
+    // run of them stays, every other kept row moves.
+    let kept: Vec<(usize, usize)> = old
+        .iter()
+        .enumerate()
+        .filter_map(|(i, r)| new_index.get(&r.key()).map(|&j| (i, j)))
+        .collect();
+    let positions: Vec<usize> = kept.iter().map(|&(_, j)| j).collect();
+    let stable: HashSet<R::Key> = longest_increasing(&positions)
+        .into_iter()
+        .map(|k| old[kept[k].0].key())
+        .collect();
+
+    let mut out: Vec<ViewDiff<R>> = Vec::new();
+    let (mut i, mut j, mut at) = (0, 0, 0);
+    loop {
+        match (old.get(i), new.get(j)) {
+            (None, None) => break,
+            (Some(o), _) if !stable.contains(&o.key()) => {
+                match out.last_mut() {
+                    Some(ViewDiff::Remove { at: last, count }) if *last == at => *count += 1,
+                    _ => out.push(ViewDiff::Remove { at, count: 1 }),
+                }
+                i += 1;
+            }
+            (_, Some(n)) if !stable.contains(&n.key()) => {
+                match out.last_mut() {
+                    Some(ViewDiff::Insert { at: last, rows }) if *last + rows.len() == at => {
+                        rows.push(n.clone());
+                    }
+                    _ => out.push(ViewDiff::Insert {
+                        at,
+                        rows: vec![n.clone()],
+                    }),
+                }
+                (j, at) = (j + 1, at + 1);
+            }
+            // Both stable, so the same row: stable rows keep their order.
+            (Some(o), Some(n)) => {
+                let roles = o.changed(n);
+                if !roles.is_empty() {
+                    out.push(ViewDiff::Update {
+                        at,
+                        row: n.clone(),
+                        roles,
+                    });
+                }
+                (i, j, at) = (i + 1, j + 1, at + 1);
+            }
+            // A stable row is in both lists, so one side cannot run out
+            // while the other still holds one.
+            _ => return vec![ViewDiff::Reset(new.to_vec())],
+        }
+    }
+    out
+}
+
+/// Indices into `values` of one longest strictly increasing subsequence.
+fn longest_increasing(values: &[usize]) -> Vec<usize> {
+    // tails[k]: the index of the smallest tail of an increasing run of k + 1.
+    let mut tails: Vec<usize> = Vec::new();
+    let mut previous: Vec<Option<usize>> = vec![None; values.len()];
+    for (i, &v) in values.iter().enumerate() {
+        let k = tails.partition_point(|&t| values[t] < v);
+        previous[i] = k.checked_sub(1).map(|p| tails[p]);
+        if k == tails.len() {
+            tails.push(i);
+        } else {
+            tails[k] = i;
+        }
+    }
+    let mut run = Vec::with_capacity(tails.len());
+    let mut cursor = tails.last().copied();
+    while let Some(i) = cursor {
+        run.push(i);
+        cursor = previous[i];
+    }
+    run.reverse();
+    run
+}
+
 /// The signed-in user, as the rail and the call show them.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MeView {
@@ -356,6 +513,38 @@ pub struct MeView {
     /// `online`, `idle`, `dnd` or `offline` (invisible).
     pub status: String,
     pub custom_status: String,
+}
+
+/// The open user popout (UserProfilePopover.tsx), empty when none is.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ProfileView {
+    pub user_id: String,
+    pub name: String,
+    pub username: String,
+    pub avatar: String,
+    pub initials: String,
+    pub presence: String,
+    pub custom_status: String,
+    pub pronouns: String,
+    pub bio: String,
+    /// The banner picture (absolute), or empty.
+    pub banner: String,
+    /// The banner colour (`#rrggbb`), or empty for the theme's accent tint.
+    pub banner_color: String,
+    /// Non-default roles in the shown server, highest first: names and
+    /// colours (`#rrggbb` or empty) pairwise.
+    pub role_names: Vec<String>,
+    pub role_colors: Vec<String>,
+    /// The signed-in user's own card.
+    pub me: bool,
+}
+
+/// The open DM's recipient, for the header and the title; empty in a
+/// server channel.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DmView {
+    pub user_id: String,
+    pub username: String,
 }
 
 /// The call, as the sidebar shows it. Empty ids and `false` when not in one;
@@ -440,6 +629,16 @@ pub enum ViewUpdate {
     Mentions(ViewDiff<MentionRow>),
     /// A short-lived line about something that failed (a toast).
     Notice(String),
+    /// Home (DMs) is shown instead of a server.
+    Home(bool),
+    /// The open DM, or the default when a server channel (or nothing) is open.
+    ActiveDm(DmView),
+    Dms(ViewDiff<DmRow>),
+    /// How many DMs are unread: the rail shows three, the Home key counts
+    /// the rest (ChatPageClient.tsx `homeBadgeCount`).
+    DmUnread(i64),
+    Members(ViewDiff<MemberListRow>),
+    Profile(Box<ProfileView>),
 }
 
 /// Messages from the same author within this window share one header.
@@ -448,8 +647,38 @@ pub const GROUP_WINDOW_MS: i64 = 5 * 60 * 1000;
 pub(super) fn absolute_url(api_base: &str, url: Option<&str>) -> String {
     match url.unwrap_or_default() {
         url if url.starts_with('/') => format!("{api_base}{url}"),
+        url if is_google_avatar(url) => {
+            format!("{api_base}/api/proxy-media?url={}", query_value(url))
+        }
         url => url.to_owned(),
     }
+}
+
+/// Google profile pictures go through the media proxy, as the web's
+/// `getAuthAssetUrl` sends them (their host rate-limits hotlinks).
+fn is_google_avatar(url: &str) -> bool {
+    let Some(rest) = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    host.to_ascii_lowercase()
+        .ends_with(".googleusercontent.com")
+}
+
+/// Percent-encodes a query value (RFC 3986 unreserved characters stay).
+pub(super) fn query_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
 /// Up to two letters: the first of the first two words, upper-cased.
@@ -874,6 +1103,224 @@ pub(super) fn message_row(
     }
 }
 
+/// A DM's badges.
+pub(super) struct DmBadge {
+    /// Newer messages than the read mark (never the open DM).
+    pub unread: bool,
+    /// The same, the open DM included (the rail's list).
+    pub has_unread: bool,
+    pub mentions: i64,
+    pub notifications: i64,
+}
+
+/// The home DM list in `/api/dms` order, and how many of them are unread
+/// (ChatPageClient.tsx `unreadDms`).
+pub(super) fn dm_rows(
+    dms: &[DmChannel],
+    api_base: &str,
+    presence: &Presence,
+    badge_of: impl Fn(&str) -> DmBadge,
+) -> (Vec<DmRow>, i64) {
+    let mut rail = 0;
+    let rows = dms
+        .iter()
+        .map(|dm| {
+            let user = &dm.recipient;
+            let badge = badge_of(&dm.id);
+            let name = match user.label() {
+                "" if !dm.name.is_empty() => dm.name.as_str(),
+                "" => "Unknown",
+                label => label,
+            };
+            let rank = if badge.has_unread {
+                rail += 1;
+                rail - 1
+            } else {
+                -1
+            };
+            DmRow {
+                id: dm.id.clone(),
+                user_id: user.id.clone(),
+                name: name.to_owned(),
+                username: user.username.clone(),
+                avatar: absolute_url(api_base, user.avatar_url.as_deref()),
+                initials: initials(name),
+                presence: presence.of(&user.id, user.status.as_deref()).to_owned(),
+                custom_status: presence.custom_status(&user.id, user.custom_status.as_deref()),
+                unread: badge.unread,
+                mentions: badge.mentions,
+                rail: rank,
+                rail_count: badge.notifications.max(1),
+            }
+        })
+        .collect();
+    (rows, rail)
+}
+
+/// What the member panel needs beyond the members.
+pub(super) struct MemberContext<'a> {
+    pub api_base: &'a str,
+    pub me_id: &'a str,
+    pub owner_id: Option<&'a str>,
+    pub presence: &'a Presence,
+    pub typing: &'a [Typer],
+    /// Who is in the voice channel you are in.
+    pub call: &'a [Seat],
+}
+
+/// MemberList.tsx `compareMembersByRole`: highest role first, then the
+/// username (case-folded, like `localeCompare`).
+fn by_role(a: &Member, b: &Member) -> std::cmp::Ordering {
+    let rank = |m: &Member| m.highest_role().map_or(-1, |r| r.position);
+    rank(b)
+        .cmp(&rank(a))
+        .then_with(|| {
+            a.user
+                .username
+                .to_lowercase()
+                .cmp(&b.user.username.to_lowercase())
+        })
+        .then_with(|| a.user.username.cmp(&b.user.username))
+}
+
+fn label_row(id: String, name: &str, count: usize, online: bool) -> MemberListRow {
+    MemberListRow {
+        kind: MemberKind::Label,
+        id,
+        user_id: String::new(),
+        name: name.to_owned(),
+        count: i64::try_from(count).unwrap_or(i64::MAX),
+        avatar: String::new(),
+        initials: String::new(),
+        presence: String::new(),
+        custom_status: String::new(),
+        color: String::new(),
+        online,
+        owner: false,
+        me: false,
+        typing: false,
+        in_call: false,
+        speaking: false,
+    }
+}
+
+/// The member panel (MemberList.tsx `groups`): online members grouped by
+/// their highest non-default role (else "Online"), the groups in the order
+/// their first member sorts, then everyone offline. A label heads each
+/// group with its count.
+pub(super) fn member_list_rows(members: &[Member], ctx: &MemberContext<'_>) -> Vec<MemberListRow> {
+    let is_online =
+        |m: &&Member| ctx.presence.of(&m.user.id, m.user.status.as_deref()) != "offline";
+    let (mut online, mut offline): (Vec<&Member>, Vec<&Member>) =
+        members.iter().partition(is_online);
+    online.sort_by(|a, b| by_role(a, b));
+    offline.sort_by(|a, b| by_role(a, b));
+
+    let mut groups: Vec<(&str, Vec<&Member>)> = Vec::new();
+    for member in online {
+        let name = member
+            .highest_role()
+            .filter(|r| !r.is_default)
+            .map_or("Online", |r| r.name.as_str());
+        match groups.iter_mut().find(|(n, _)| *n == name) {
+            Some((_, list)) => list.push(member),
+            None => groups.push((name, vec![member])),
+        }
+    }
+    let mut rows = Vec::with_capacity(members.len() + groups.len() + 1);
+    for (name, list) in &groups {
+        rows.push(label_row(format!("role:{name}"), name, list.len(), true));
+        rows.extend(list.iter().map(|m| member_row(m, true, ctx)));
+    }
+    if !offline.is_empty() {
+        rows.push(label_row(
+            "offline".to_owned(),
+            "Offline",
+            offline.len(),
+            false,
+        ));
+        rows.extend(offline.iter().map(|m| member_row(m, false, ctx)));
+    }
+    rows
+}
+
+fn member_row(m: &Member, online: bool, ctx: &MemberContext<'_>) -> MemberListRow {
+    let user = &m.user;
+    let name = user.label();
+    let me = !ctx.me_id.is_empty() && user.id == ctx.me_id;
+    let seat = ctx.call.iter().find(|s| s.key == user.id);
+    MemberListRow {
+        kind: MemberKind::Member,
+        id: user.id.clone(),
+        user_id: user.id.clone(),
+        name: name.to_owned(),
+        count: 0,
+        avatar: absolute_url(ctx.api_base, user.avatar_url.as_deref()),
+        initials: initials(name),
+        presence: if online {
+            ctx.presence.of(&user.id, user.status.as_deref()).to_owned()
+        } else {
+            "offline".to_owned()
+        },
+        custom_status: ctx
+            .presence
+            .custom_status(&user.id, user.custom_status.as_deref()),
+        color: m
+            .highest_role()
+            .filter(|_| online)
+            .and_then(|r| r.color.clone())
+            .unwrap_or_default(),
+        online,
+        owner: ctx.owner_id.is_some_and(|owner| owner == user.id),
+        me,
+        // Offline people show typing only when it is you (MemberItem).
+        typing: (online || me) && ctx.typing.iter().any(|t| t.user_id == user.id),
+        in_call: seat.is_some(),
+        speaking: seat.is_some_and(|s| s.speaking && !s.muted),
+    }
+}
+
+/// The popout for `user`: what is known of them (the full profile once
+/// fetched) and the roles they have in the shown server.
+pub(super) fn profile_view(
+    user: &User,
+    roles: &[Role],
+    me_id: &str,
+    presence: &Presence,
+    api_base: &str,
+) -> ProfileView {
+    let name = user.label();
+    let mut custom: Vec<&Role> = roles.iter().filter(|r| !r.is_default).collect();
+    custom.sort_by_key(|r| std::cmp::Reverse(r.position));
+    let trimmed = |v: &Option<String>| v.as_deref().unwrap_or_default().trim().to_owned();
+    ProfileView {
+        user_id: user.id.clone(),
+        name: name.to_owned(),
+        username: user.username.clone(),
+        avatar: absolute_url(api_base, user.avatar_url.as_deref()),
+        initials: initials(name),
+        presence: presence.of(&user.id, user.status.as_deref()).to_owned(),
+        custom_status: presence.custom_status(&user.id, user.custom_status.as_deref()),
+        pronouns: trimmed(&user.pronouns),
+        bio: trimmed(&user.bio),
+        banner: match user.banner_url.as_deref() {
+            Some(url) if !url.is_empty() => absolute_url(api_base, Some(url)),
+            _ => String::new(),
+        },
+        banner_color: user
+            .profile_banner_color
+            .clone()
+            .filter(|c| c.starts_with('#'))
+            .unwrap_or_default(),
+        role_names: custom.iter().map(|r| r.name.clone()).collect(),
+        role_colors: custom
+            .iter()
+            .map(|r| r.color.clone().unwrap_or_default())
+            .collect(),
+        me: !me_id.is_empty() && user.id == me_id,
+    }
+}
+
 pub(super) fn mention_rows(users: &[&User], api_base: &str) -> Vec<MentionRow> {
     users
         .iter()
@@ -983,6 +1430,55 @@ mod tests {
     fn ordered_diff_should_be_empty_when_nothing_changed() {
         let rows = [member("a", false)];
         assert!(ordered_diff(&rows, &rows).is_empty());
+    }
+
+    fn replay_moving(old: &[VoiceMemberRow], new: &[VoiceMemberRow]) -> Vec<VoiceMemberRow> {
+        let mut rows = old.to_vec();
+        for diff in moving_diff(old, new) {
+            assert!(!matches!(diff, ViewDiff::Reset(_)), "{diff:?}");
+            assert!(diff.apply(&mut rows));
+        }
+        rows
+    }
+
+    #[test]
+    fn moving_diff_should_move_a_row_without_a_reset() {
+        let old = [member("a", false), member("b", false), member("c", false)];
+        let new = [member("b", false), member("c", false), member("a", true)];
+        assert_eq!(replay_moving(&old, &new), new);
+    }
+
+    #[test]
+    fn moving_diff_should_reproduce_a_shuffle_with_inserts_and_removes() {
+        let old = [
+            member("a", false),
+            member("b", false),
+            member("c", false),
+            member("d", false),
+        ];
+        let new = [
+            member("d", false),
+            member("x", false),
+            member("b", true),
+            member("a", false),
+        ];
+        assert_eq!(replay_moving(&old, &new), new);
+    }
+
+    #[test]
+    fn moving_diff_should_keep_the_longest_run_in_place() {
+        let old = [member("a", false), member("b", false), member("c", false)];
+        let new = [member("c", false), member("a", false), member("b", false)];
+        assert_eq!(
+            moving_diff(&old, &new),
+            vec![
+                ViewDiff::Insert {
+                    at: 0,
+                    rows: vec![member("c", false)],
+                },
+                ViewDiff::Remove { at: 3, count: 1 },
+            ]
+        );
     }
 
     #[test]

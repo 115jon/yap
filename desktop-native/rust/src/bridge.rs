@@ -14,6 +14,8 @@ pub mod qobject {
     unsafe extern "C++" {
         include!("cxx-qt-lib/qstring.h");
         type QString = cxx_qt_lib::QString;
+        include!("cxx-qt-lib/qstringlist.h");
+        type QStringList = cxx_qt_lib::QStringList;
     }
 
     /// Which top-level screen shows.
@@ -64,6 +66,12 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "signOut"]
         fn sign_out(self: &Session);
+
+        /// The status picker: `online`, `idle`, `dnd` or `offline`
+        /// (Invisible), and the custom status (empty clears it).
+        #[qinvokable]
+        #[cxx_name = "setStatus"]
+        fn choose_status(self: &Session, status: &QString, custom_status: &QString);
     }
 
     impl cxx_qt::Threading for Session {}
@@ -82,6 +90,13 @@ pub mod qobject {
         #[qproperty(QString, voice_panel_id, cxx_name = "voicePanelId")]
         #[qproperty(QString, voice_panel_name, cxx_name = "voicePanelName")]
         #[qproperty(i32, voice_panel_count, cxx_name = "voicePanelCount")]
+        /// Home (the DM list) instead of a server.
+        #[qproperty(bool, home)]
+        /// The open DM's recipient; empty in a server channel.
+        #[qproperty(QString, dm_user_id, cxx_name = "dmUserId")]
+        #[qproperty(QString, dm_username, cxx_name = "dmUsername")]
+        /// Unread DMs: the rail shows three, the Home key counts the rest.
+        #[qproperty(i32, dm_unread, cxx_name = "dmUnread")]
         type Nav = super::NavRust;
 
         #[qinvokable]
@@ -92,6 +107,16 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "selectChannel"]
         fn select_channel(self: &Nav, id: &QString);
+
+        /// Home with no conversation open.
+        #[qinvokable]
+        #[cxx_name = "selectHome"]
+        fn select_home(self: &Nav);
+
+        /// The DM with a user, created when there is none.
+        #[qinvokable]
+        #[cxx_name = "openDm"]
+        fn open_dm(self: &Nav, user_id: &QString);
     }
 
     impl cxx_qt::Initialize for Nav {}
@@ -225,6 +250,39 @@ pub mod qobject {
     }
 
     impl cxx_qt::Initialize for Voice {}
+
+    extern "RustQt" {
+        /// The user popout: who it shows, filled in as their profile loads.
+        #[qobject]
+        #[qml_element]
+        #[qml_singleton]
+        #[qproperty(QString, user_id, cxx_name = "userId")]
+        #[qproperty(QString, name)]
+        #[qproperty(QString, username)]
+        #[qproperty(QString, avatar)]
+        #[qproperty(QString, initials)]
+        #[qproperty(QString, presence)]
+        #[qproperty(QString, custom_status, cxx_name = "customStatus")]
+        #[qproperty(QString, pronouns)]
+        #[qproperty(QString, bio)]
+        #[qproperty(QString, banner)]
+        /// `#rrggbb`, or empty for the accent tint.
+        #[qproperty(QString, banner_color, cxx_name = "bannerColor")]
+        /// Roles in the shown server, highest first, with their colours.
+        #[qproperty(QStringList, role_names, cxx_name = "roleNames")]
+        #[qproperty(QStringList, role_colors, cxx_name = "roleColors")]
+        #[qproperty(bool, me)]
+        type Profile = super::ProfileRust;
+
+        #[qinvokable]
+        fn show(self: &Profile, user_id: &QString);
+
+        /// Closes the popout if it still shows `user_id`.
+        #[qinvokable]
+        fn close(self: &Profile, user_id: &QString);
+    }
+
+    impl cxx_qt::Initialize for Profile {}
 }
 
 use core::pin::Pin;
@@ -233,7 +291,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cxx_qt::Threading;
-use cxx_qt_lib::QString;
+use cxx_qt_lib::{QString, QStringList};
 use yap_core::store::time::format_rfc3339;
 use yap_core::{Phase, ViewUpdate};
 
@@ -289,6 +347,10 @@ pub struct NavRust {
     voice_panel_id: QString,
     voice_panel_name: QString,
     voice_panel_count: i32,
+    home: bool,
+    dm_user_id: QString,
+    dm_username: QString,
+    dm_unread: i32,
 }
 
 #[derive(Default)]
@@ -371,6 +433,14 @@ impl qobject::Session {
     pub fn sign_out(&self) {
         client::command(Command::SignOut);
     }
+
+    pub fn choose_status(&self, status: &QString, custom_status: &QString) {
+        let custom = custom_status.to_string();
+        client::command(Command::SetStatus {
+            status: status.to_string(),
+            custom_status: (!custom.trim().is_empty()).then_some(custom),
+        });
+    }
 }
 
 impl qobject::Nav {
@@ -380,6 +450,42 @@ impl qobject::Nav {
 
     pub fn select_channel(&self, id: &QString) {
         client::command(Command::SelectChannel(id.to_string()));
+    }
+
+    pub fn select_home(&self) {
+        client::command(Command::SelectHome);
+    }
+
+    pub fn open_dm(&self, user_id: &QString) {
+        client::command(Command::OpenDm(user_id.to_string()));
+    }
+}
+
+#[derive(Default)]
+pub struct ProfileRust {
+    user_id: QString,
+    name: QString,
+    username: QString,
+    avatar: QString,
+    initials: QString,
+    presence: QString,
+    custom_status: QString,
+    pronouns: QString,
+    bio: QString,
+    banner: QString,
+    banner_color: QString,
+    role_names: QStringList,
+    role_colors: QStringList,
+    me: bool,
+}
+
+impl qobject::Profile {
+    pub fn show(&self, user_id: &QString) {
+        client::command(Command::ShowProfile(Some(user_id.to_string())));
+    }
+
+    pub fn close(&self, user_id: &QString) {
+        client::command(Command::HideProfile(user_id.to_string()));
     }
 }
 
@@ -510,4 +616,9 @@ macro_rules! registered {
     )*};
 }
 
-registered!(Nav => NavRust, Chat => ChatRust, Voice => VoiceRust);
+registered!(
+    Nav => NavRust,
+    Chat => ChatRust,
+    Voice => VoiceRust,
+    Profile => ProfileRust,
+);

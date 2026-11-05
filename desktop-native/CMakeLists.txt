@@ -56,7 +56,10 @@ qt_add_resources(YapNative yap_assets
   PREFIX /
   BASE assets
   FILES ${YAP_FONT_PATHS} ${YAP_SVG_PATHS} ${YAP_ICON_PATHS})
-qt_import_plugins(YapNative INCLUDE Qt::QSvgPlugin)
+# Avatars and server icons come as PNG, JPEG, WebP or GIF over HTTPS.
+qt_import_plugins(YapNative INCLUDE
+  Qt::QSvgPlugin Qt::QGifPlugin Qt::QJpegPlugin Qt::QWebpPlugin
+  Qt::QSchannelBackendPlugin)
 if(WIN32)
   # dwmapi for the title bar; the rest is what libwebrtc (static) needs.
   target_link_libraries(YapNative PRIVATE

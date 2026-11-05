@@ -18,12 +18,15 @@ const QML: &[&str] = &[
     "qml/components/MenuRow.qml",
     "qml/components/MessageEditor.qml",
     "qml/components/NotchedKey.qml",
+    "qml/components/PresenceAvatar.qml",
     "qml/components/RailPill.qml",
     "qml/components/Tooltip.qml",
     "qml/components/YapBark.qml",
     "qml/delegates/CategoryLabel.qml",
     "qml/delegates/ChannelRow.qml",
+    "qml/delegates/DmRow.qml",
     "qml/delegates/LandingMember.qml",
+    "qml/delegates/MemberEntry.qml",
     "qml/delegates/MemberRow.qml",
     "qml/delegates/MessageDelegate.qml",
     "qml/delegates/ServerIcon.qml",
@@ -31,6 +34,7 @@ const QML: &[&str] = &[
     "qml/delegates/VoiceTile.qml",
     "qml/screens/Boot/BootView.qml",
     "qml/screens/SignIn/SignInView.qml",
+    "qml/screens/Shell/AccountPopout.qml",
     "qml/screens/Shell/AccountRow.qml",
     "qml/screens/Shell/CallPanel.qml",
     "qml/screens/Shell/ChannelSidebar.qml",
@@ -39,6 +43,11 @@ const QML: &[&str] = &[
     "qml/screens/Shell/Composer.qml",
     "qml/screens/Shell/ConnectionStrip.qml",
     "qml/screens/Shell/DeleteDialog.qml",
+    "qml/screens/Shell/DmSidebar.qml",
+    "qml/screens/Shell/HomeLanding.qml",
+    "qml/screens/Shell/MemberPanel.qml",
+    "qml/screens/Shell/ProfileCard.qml",
+    "qml/screens/Shell/ProfilePopout.qml",
     "qml/screens/Shell/ServerRail.qml",
     "qml/screens/Shell/Shell.qml",
     "qml/screens/Shell/UnreadBanner.qml",
@@ -46,12 +55,10 @@ const QML: &[&str] = &[
 ];
 
 fn main() {
-    let files = QML
-        .iter()
-        .map(|path| QmlFile::from(*path))
-        .chain(std::iter::once(
-            QmlFile::from("qml/theme/Theme.qml").singleton(true),
-        ));
+    let files = QML.iter().map(|path| QmlFile::from(*path)).chain([
+        QmlFile::from("qml/theme/Theme.qml").singleton(true),
+        QmlFile::from("qml/screens/Shell/ShellState.qml").singleton(true),
+    ]);
     CxxQtBuilder::new_qml_module(QmlModule::new("com.yap.native").qml_files(files))
         .files(["src/bridge.rs", "src/models.rs"])
         .build();

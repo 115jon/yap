@@ -80,7 +80,9 @@ pub struct SocketTicket {
 // Users, servers, channels
 
 /// A user (`GET /api/users/me` returns one for the signed-in account).
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+/// Member lists, DM recipients and `GET /api/users/:id/profile` carry the
+/// profile fields too; elsewhere they are absent.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct User {
     pub id: String,
     #[serde(default)]
@@ -90,6 +92,15 @@ pub struct User {
     pub avatar_display: Option<Value>,
     pub status: Option<String>,
     pub custom_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bio: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pronouns: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub banner_url: Option<String>,
+    /// `#rrggbb`, when the user picked a banner colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_banner_color: Option<String>,
 }
 
 /// The signed-in user.
@@ -300,9 +311,78 @@ impl Notification {
     }
 }
 
+/// A server role. Member lists send `is_default` as a bool, some
+/// dispatches as SQLite's 0 or 1.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Role {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    /// `#rrggbb`; absent or empty when the role has no colour.
+    pub color: Option<String>,
+    #[serde(default)]
+    pub position: i64,
+    #[serde(default, deserialize_with = "bool_or_int")]
+    pub is_default: bool,
+}
+
+fn bool_or_int<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    Ok(match Value::deserialize(deserializer)? {
+        Value::Bool(value) => value,
+        Value::Number(n) => n.as_i64().is_some_and(|n| n != 0),
+        _ => false,
+    })
+}
+
+/// Decodes each list element that fits and skips the rest.
+fn lenient_list<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(
+    deserializer: D,
+) -> Result<Vec<T>, D::Error> {
+    Ok(match Value::deserialize(deserializer)? {
+        Value::Array(items) => items
+            .into_iter()
+            .filter_map(|item| serde_json::from_value(item).ok())
+            .collect(),
+        _ => Vec::new(),
+    })
+}
+
 /// One server member (`GET /api/servers/:id/members` is a bare array).
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct Member {
+    pub user: User,
+    /// Highest position first, as the server sorts them.
+    #[serde(default, deserialize_with = "lenient_list")]
+    pub roles: Vec<Role>,
+}
+
+impl Member {
+    /// The role with the highest position (MemberList.tsx `getHighestRole`).
+    pub fn highest_role(&self) -> Option<&Role> {
+        self.roles.iter().reduce(|best, role| {
+            if role.position > best.position {
+                role
+            } else {
+                best
+            }
+        })
+    }
+}
+
+/// A direct message channel (`GET /api/dms`, `POST /api/dms`,
+/// `DM_CHANNEL_CREATE`): the other person is `recipient`.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct DmChannel {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    pub created_at: Option<String>,
+    pub recipient: User,
+}
+
+/// `GET /api/users/:id/profile`: the full user (mutuals are not read yet).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ProfileResponse {
     pub user: User,
 }
 

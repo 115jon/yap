@@ -5,7 +5,7 @@ import com.yap.native
 // The tree panel (ChannelSidebar.tsx): the 48 px server header with its
 // chevron and theme banner, then the Talk Tree (channels under silkscreen
 // branch labels, everyone in each voice channel under it), the call strip
-// and the account row.
+// and the account row. At Home the DM list takes the header and the tree.
 Rectangle {
     id: root
 
@@ -24,6 +24,7 @@ Rectangle {
     // menu is not wired yet, so it only takes hover.
     Rectangle {
         id: header
+        visible: !Nav.home
         width: parent.width - 1
         height: Theme.header
         color: headerHover.hovered ? Theme.tint1 : "transparent"
@@ -86,6 +87,7 @@ Rectangle {
 
     ListView {
         id: list
+        visible: !Nav.home
         anchors.top: header.bottom
         anchors.bottom: callPanel.top
         anchors.left: parent.left
@@ -108,6 +110,14 @@ Rectangle {
             callId: Voice.channelId
             onSelected: channelId => Nav.selectChannel(channelId)
         }
+    }
+
+    // Home: the DM list in the same column.
+    DmSidebar {
+        visible: Nav.home
+        anchors.top: parent.top
+        anchors.bottom: callPanel.top
+        width: parent.width - 1
     }
 
     CallPanel {

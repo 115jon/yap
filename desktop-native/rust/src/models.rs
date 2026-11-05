@@ -60,6 +60,20 @@ pub mod qobject {
         #[qml_element]
         #[qml_singleton]
         type MentionListModel = super::MentionListModelRust;
+
+        /// The home DM list (and the rail's unread DMs).
+        #[qobject]
+        #[base = QAbstractListModel]
+        #[qml_element]
+        #[qml_singleton]
+        type DmListModel = super::DmListModelRust;
+
+        /// The member panel: group labels and members.
+        #[qobject]
+        #[base = QAbstractListModel]
+        #[qml_element]
+        #[qml_singleton]
+        type MemberListModel = super::MemberListModelRust;
     }
 
     impl cxx_qt::Initialize for ServerListModel {}
@@ -67,6 +81,8 @@ pub mod qobject {
     impl cxx_qt::Initialize for MessageListModel {}
     impl cxx_qt::Initialize for VoiceRosterModel {}
     impl cxx_qt::Initialize for MentionListModel {}
+    impl cxx_qt::Initialize for DmListModel {}
+    impl cxx_qt::Initialize for MemberListModel {}
 
     // Messages: scroll anchoring around appends.
     extern "RustQt" {
@@ -128,6 +144,24 @@ pub mod qobject {
             bottom_right: &QModelIndex,
             roles: &QVector_i32,
         );
+        #[inherit]
+        #[qsignal]
+        #[cxx_name = "dataChanged"]
+        fn data_changed(
+            self: Pin<&mut DmListModel>,
+            top_left: &QModelIndex,
+            bottom_right: &QModelIndex,
+            roles: &QVector_i32,
+        );
+        #[inherit]
+        #[qsignal]
+        #[cxx_name = "dataChanged"]
+        fn data_changed(
+            self: Pin<&mut MemberListModel>,
+            top_left: &QModelIndex,
+            bottom_right: &QModelIndex,
+            roles: &QVector_i32,
+        );
     }
 
     unsafe extern "RustQt" {
@@ -162,6 +196,15 @@ pub mod qobject {
         #[inherit]
         fn index(
             self: &MentionListModel,
+            row: i32,
+            column: i32,
+            parent: &QModelIndex,
+        ) -> QModelIndex;
+        #[inherit]
+        fn index(self: &DmListModel, row: i32, column: i32, parent: &QModelIndex) -> QModelIndex;
+        #[inherit]
+        fn index(
+            self: &MemberListModel,
             row: i32,
             column: i32,
             parent: &QModelIndex,
@@ -295,8 +338,30 @@ pub mod qobject {
             last: i32,
         );
         #[inherit]
+        #[cxx_name = "beginInsertRows"]
+        unsafe fn begin_insert_rows(
+            self: Pin<&mut DmListModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
+        #[cxx_name = "beginInsertRows"]
+        unsafe fn begin_insert_rows(
+            self: Pin<&mut MemberListModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
         #[cxx_name = "endInsertRows"]
         unsafe fn end_insert_rows(self: Pin<&mut MentionListModel>);
+        #[inherit]
+        #[cxx_name = "endInsertRows"]
+        unsafe fn end_insert_rows(self: Pin<&mut DmListModel>);
+        #[inherit]
+        #[cxx_name = "endInsertRows"]
+        unsafe fn end_insert_rows(self: Pin<&mut MemberListModel>);
         #[inherit]
         #[cxx_name = "beginRemoveRows"]
         unsafe fn begin_remove_rows(
@@ -306,14 +371,48 @@ pub mod qobject {
             last: i32,
         );
         #[inherit]
+        #[cxx_name = "beginRemoveRows"]
+        unsafe fn begin_remove_rows(
+            self: Pin<&mut DmListModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
+        #[cxx_name = "beginRemoveRows"]
+        unsafe fn begin_remove_rows(
+            self: Pin<&mut MemberListModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
         #[cxx_name = "endRemoveRows"]
         unsafe fn end_remove_rows(self: Pin<&mut MentionListModel>);
+        #[inherit]
+        #[cxx_name = "endRemoveRows"]
+        unsafe fn end_remove_rows(self: Pin<&mut DmListModel>);
+        #[inherit]
+        #[cxx_name = "endRemoveRows"]
+        unsafe fn end_remove_rows(self: Pin<&mut MemberListModel>);
         #[inherit]
         #[cxx_name = "beginResetModel"]
         unsafe fn begin_reset_model(self: Pin<&mut MentionListModel>);
         #[inherit]
+        #[cxx_name = "beginResetModel"]
+        unsafe fn begin_reset_model(self: Pin<&mut DmListModel>);
+        #[inherit]
+        #[cxx_name = "beginResetModel"]
+        unsafe fn begin_reset_model(self: Pin<&mut MemberListModel>);
+        #[inherit]
         #[cxx_name = "endResetModel"]
         unsafe fn end_reset_model(self: Pin<&mut MentionListModel>);
+        #[inherit]
+        #[cxx_name = "endResetModel"]
+        unsafe fn end_reset_model(self: Pin<&mut DmListModel>);
+        #[inherit]
+        #[cxx_name = "endResetModel"]
+        unsafe fn end_reset_model(self: Pin<&mut MemberListModel>);
     }
 
     extern "RustQt" {
@@ -370,12 +469,34 @@ pub mod qobject {
         fn data(self: &MentionListModel, index: &QModelIndex, role: i32) -> QVariant;
         #[qinvokable]
         #[cxx_override]
+        fn data(self: &DmListModel, index: &QModelIndex, role: i32) -> QVariant;
+        #[qinvokable]
+        #[cxx_override]
+        fn data(self: &MemberListModel, index: &QModelIndex, role: i32) -> QVariant;
+        #[qinvokable]
+        #[cxx_override]
         #[cxx_name = "roleNames"]
         fn role_names(self: &MentionListModel) -> QHash_i32_QByteArray;
         #[qinvokable]
         #[cxx_override]
+        #[cxx_name = "roleNames"]
+        fn role_names(self: &DmListModel) -> QHash_i32_QByteArray;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "roleNames"]
+        fn role_names(self: &MemberListModel) -> QHash_i32_QByteArray;
+        #[qinvokable]
+        #[cxx_override]
         #[cxx_name = "rowCount"]
         fn row_count(self: &MentionListModel, parent: &QModelIndex) -> i32;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "rowCount"]
+        fn row_count(self: &DmListModel, parent: &QModelIndex) -> i32;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "rowCount"]
+        fn row_count(self: &MemberListModel, parent: &QModelIndex) -> i32;
     }
 }
 
@@ -384,7 +505,8 @@ use core::pin::Pin;
 use cxx_qt_lib::QVector;
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
 use yap_core::store::view::{
-    Cell, ChannelTreeRow, MentionRow, MessageRow, Row, ServerRow, VoiceMemberRow,
+    Cell, ChannelTreeRow, DmRow, MemberListRow, MentionRow, MessageRow, Row, ServerRow,
+    VoiceMemberRow,
 };
 use yap_core::ViewDiff;
 
@@ -544,6 +666,8 @@ list_model!(
     roster
 );
 list_model!(MentionListModel, MentionListModelRust, MentionRow, mentions);
+list_model!(DmListModel, DmListModelRust, DmRow, dms);
+list_model!(MemberListModel, MemberListModelRust, MemberListRow, members);
 
 impl ListModel for qobject::ServerListModel {
     type Row = ServerRow;
@@ -563,6 +687,16 @@ impl ListModel for qobject::VoiceRosterModel {
 impl ListModel for qobject::MentionListModel {
     type Row = MentionRow;
     list_model_ops!(MentionRow, mentions);
+}
+
+impl ListModel for qobject::DmListModel {
+    type Row = DmRow;
+    list_model_ops!(DmRow, dms);
+}
+
+impl ListModel for qobject::MemberListModel {
+    type Row = MemberListRow;
+    list_model_ops!(MemberListRow, members);
 }
 
 impl ListModel for qobject::MessageListModel {

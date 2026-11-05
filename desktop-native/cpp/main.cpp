@@ -6,7 +6,10 @@
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QWindow>
+#include <QtNetwork/QNetworkAccessManager>
+#include <QtNetwork/QNetworkDiskCache>
 #include <QtQml/QQmlApplicationEngine>
+#include <QtQml/QQmlNetworkAccessManagerFactory>
 #include <QtQuick/QQuickWindow>
 #include <QtQuickControls2/QQuickStyle>
 
@@ -36,6 +39,27 @@ static void registerFonts()
   if (count == 0)
     std::fprintf(stderr, "[fonts] no brand fonts in the binary\n");
 }
+
+// Every network image QML loads (avatars, icons, banners) goes through a
+// disk cache next to the snapshot cache, apart from the installed app's
+// folders. Avatars are public (`/api/avatars/*`, no token); their ETag
+// revalidates a cached copy.
+class CachedNetworkFactory : public QQmlNetworkAccessManagerFactory
+{
+public:
+  QNetworkAccessManager* create(QObject* parent) override
+  {
+    auto* manager = new QNetworkAccessManager(parent);
+    const QString base = qEnvironmentVariable("LOCALAPPDATA");
+    if (!base.isEmpty()) {
+      auto* cache = new QNetworkDiskCache(manager);
+      cache->setCacheDirectory(base + QStringLiteral("/YapNative/cache/images"));
+      cache->setMaximumCacheSize(128 * 1024 * 1024);
+      manager->setCache(cache);
+    }
+    return manager;
+  }
+};
 
 static bool reducedMotion()
 {
@@ -69,6 +93,9 @@ int main(int argc, char* argv[])
   app.installNativeEventFilter(chrome);
 
   QQmlApplicationEngine engine;
+  // Not owned by the engine; it outlives it here.
+  static CachedNetworkFactory networkFactory;
+  engine.setNetworkAccessManagerFactory(&networkFactory);
   engine.addImageProvider(QStringLiteral("icon"), new IconProvider);
   engine.addImageProvider(QStringLiteral("dither"), new DitherProvider);
   QObject::connect(

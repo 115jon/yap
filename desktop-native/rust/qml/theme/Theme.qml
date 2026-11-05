@@ -129,6 +129,21 @@ QtObject {
     readonly property color statusIdle: idle
     readonly property color statusDnd: dangerFill
     readonly property color statusOffline: inkOff
+
+    // Presence (UserPanel.tsx PRESENCE_LED): the LED, its ink for words,
+    // and the label. `offline` is an unlit LED.
+    function presenceLed(presence) {
+        return presence === "idle" ? statusIdle : presence === "dnd" ? statusDnd
+            : presence === "offline" ? statusOffline : statusOnline
+    }
+    function presenceInk(presence) {
+        return presence === "idle" ? warningInk : presence === "dnd" ? dangerInk
+            : presence === "offline" ? ink3 : successInk
+    }
+    function presenceWord(presence) {
+        return presence === "idle" ? qsTr("Idle") : presence === "dnd" ? qsTr("Do not disturb")
+            : presence === "offline" ? qsTr("Offline") : qsTr("Online")
+    }
     readonly property color badge: t.badge
     readonly property color badgeInk: t.onBadge
 
@@ -261,6 +276,8 @@ QtObject {
         readonly property font occupant: Qt.font({ family: "Yap Geist Medium", pixelSize: 13, weight: Font.Medium })
         readonly property font caption: Qt.font({ family: "Yap Geist", pixelSize: 12, weight: Font.Normal })
         readonly property font captionStrong: Qt.font({ family: "Yap Geist Medium", pixelSize: 12, weight: Font.Medium })
+        readonly property font profileName: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 18, weight: Font.DemiBold })
+        readonly property font panelTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 14, weight: Font.DemiBold })
         // Silkscreen: condensed 500 on dark grounds, wide 600 on light.
         readonly property font silk: theme.lightGround
             ? Qt.font({ family: "Yap Martian Num SemiBold", pixelSize: 11, weight: Font.DemiBold, letterSpacing: 1.1, capitalization: Font.AllUppercase })

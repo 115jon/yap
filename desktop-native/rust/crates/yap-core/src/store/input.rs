@@ -2,10 +2,11 @@
 
 use serde_json::Value;
 use yap_protocol::payload::{
-    MessageDeleteEvent, NotificationsRead, TypingStartEvent, VoiceChannelStateUpdate,
-    VoiceChannelStates,
+    GuildMemberAdd, GuildMemberRemove, GuildMemberUpdate, MessageDeleteEvent, NotificationsRead,
+    PresenceList, PresenceUpdateEvent, TypingStartEvent, UserProfileUpdate,
+    VoiceChannelStateUpdate, VoiceChannelStates,
 };
-use yap_protocol::rest::{Message, MessagePatch, Notification, ReadState};
+use yap_protocol::rest::{DmChannel, Message, MessagePatch, Notification, ReadState};
 
 use yap_cache::Snapshot;
 
@@ -21,7 +22,23 @@ pub enum Command {
     UseToken(String),
     SignOut,
     SelectServer(String),
+    /// Home: the DM list instead of a server, no conversation open.
+    SelectHome,
+    /// A text channel, a voice channel's view, or a DM.
     SelectChannel(String),
+    /// Opens the DM with a user, creating it when there is none.
+    OpenDm(String),
+    /// The chosen status (`online`, `idle`, `dnd`, `offline` = invisible)
+    /// and custom status (`None` clears it).
+    SetStatus {
+        status: String,
+        custom_status: Option<String>,
+    },
+    /// Opens a user's popout; `None` closes it.
+    ShowProfile(Option<String>),
+    /// Closes the popout if it still shows this user (a closing card must
+    /// not empty the one that opened after it).
+    HideProfile(String),
     /// Post to the open channel. The UI stamps the nonce and the local send
     /// time (the store has no clock or randomness), so the pending row can
     /// show at once and the echo can find it.
@@ -136,6 +153,14 @@ pub enum Dispatch {
     VoiceChannelStates(VoiceChannelStates),
     /// One voice channel's roster changed.
     VoiceChannelState(VoiceChannelStateUpdate),
+    PresenceUpdate(PresenceUpdateEvent),
+    /// Everyone connected (after a channel subscribe).
+    PresenceList(PresenceList),
+    MemberAdd(Box<GuildMemberAdd>),
+    MemberRemove(GuildMemberRemove),
+    MemberUpdate(GuildMemberUpdate),
+    DmCreate(Box<DmChannel>),
+    ProfileUpdate(Box<UserProfileUpdate>),
 }
 
 impl Dispatch {
@@ -162,6 +187,15 @@ impl Dispatch {
             "VOICE_CHANNEL_STATES" => Self::VoiceChannelStates(serde_json::from_value(data).ok()?),
             "VOICE_CHANNEL_STATE_UPDATE" => {
                 Self::VoiceChannelState(serde_json::from_value(data).ok()?)
+            }
+            "PRESENCE_UPDATE" => Self::PresenceUpdate(serde_json::from_value(data).ok()?),
+            "PRESENCE_LIST" => Self::PresenceList(serde_json::from_value(data).ok()?),
+            "GUILD_MEMBER_ADD" => Self::MemberAdd(Box::new(serde_json::from_value(data).ok()?)),
+            "GUILD_MEMBER_REMOVE" => Self::MemberRemove(serde_json::from_value(data).ok()?),
+            "GUILD_MEMBER_UPDATE" => Self::MemberUpdate(serde_json::from_value(data).ok()?),
+            "DM_CHANNEL_CREATE" => Self::DmCreate(Box::new(serde_json::from_value(data).ok()?)),
+            "USER_PROFILE_UPDATE" => {
+                Self::ProfileUpdate(Box::new(serde_json::from_value(data).ok()?))
             }
             _ => return None,
         })

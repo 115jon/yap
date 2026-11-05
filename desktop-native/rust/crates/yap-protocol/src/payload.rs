@@ -120,6 +120,114 @@ pub struct ChannelRef {
     pub channel_id: String,
 }
 
+/// PresenceUpdate (op 26), client to server: the user's chosen status
+/// (`online`, `idle`, `dnd`, or `offline` for invisible).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PresenceStatus {
+    pub status: String,
+}
+
+/// A field that may be absent (unchanged), `null` (cleared) or a value.
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<T>>, D::Error> {
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// `PRESENCE_UPDATE` dispatch data. `custom_status` comes only with the
+/// REST status change: absent leaves the known one, `null` clears it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PresenceUpdateEvent {
+    pub user_id: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default, deserialize_with = "present")]
+    pub custom_status: Option<Option<String>>,
+}
+
+/// One connected user in a [`PresenceList`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PresenceEntry {
+    pub user_id: String,
+    pub status: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub custom_status: Option<Option<String>>,
+}
+
+/// `PRESENCE_LIST` dispatch data (after every channel subscribe): everyone
+/// connected. Older servers send only `user_ids`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct PresenceList {
+    pub users: Option<Vec<PresenceEntry>>,
+    #[serde(default)]
+    pub user_ids: Vec<String>,
+}
+
+/// `GUILD_MEMBER_ADD` dispatch data.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct GuildMemberAdd {
+    pub server_id: String,
+    pub user: crate::rest::User,
+    #[serde(default)]
+    pub roles: Vec<crate::rest::Role>,
+}
+
+/// `GUILD_MEMBER_REMOVE` dispatch data.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct GuildMemberRemove {
+    pub server_id: String,
+    pub user_id: String,
+}
+
+/// `GUILD_MEMBER_UPDATE` dispatch data: the member's roles now.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct GuildMemberUpdate {
+    pub server_id: String,
+    pub user_id: String,
+    pub roles: Option<Vec<crate::rest::Role>>,
+}
+
+/// `USER_PROFILE_UPDATE` dispatch data: the fields present changed.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct UserProfileUpdate {
+    pub user_id: String,
+    pub username: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub display_name: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    pub avatar_url: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    pub banner_url: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    pub profile_banner_color: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    pub bio: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    pub pronouns: Option<Option<String>>,
+}
+
+impl UserProfileUpdate {
+    /// Applies the fields this update carries to `user`.
+    pub fn apply(&self, user: &mut crate::rest::User) {
+        if let Some(username) = &self.username {
+            user.username.clone_from(username);
+        }
+        let fields = [
+            (&self.display_name, &mut user.display_name),
+            (&self.avatar_url, &mut user.avatar_url),
+            (&self.banner_url, &mut user.banner_url),
+            (&self.profile_banner_color, &mut user.profile_banner_color),
+            (&self.bio, &mut user.bio),
+            (&self.pronouns, &mut user.pronouns),
+        ];
+        for (update, field) in fields {
+            if let Some(value) = update {
+                field.clone_from(value);
+            }
+        }
+    }
+}
+
 /// ServerSubscribe (op 35).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ServerSubscribe {

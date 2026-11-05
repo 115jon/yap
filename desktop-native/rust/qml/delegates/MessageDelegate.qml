@@ -51,6 +51,8 @@ Item {
     // Opens the message menu at (x, y) in `anchor`'s coordinates.
     signal menuRequested(string id, string author, string text, bool mine, Item anchor, real x, real y)
     signal jumpRequested(string id)
+    // The author's avatar or name: their profile, next to `anchor`.
+    signal profileRequested(string userId, Item anchor)
     signal editSaved(string id, string text)
     signal editCancelled()
     signal retryRequested(string nonce)
@@ -206,12 +208,21 @@ Item {
     }
 
     Avatar {
+        id: authorAvatar
         visible: !root.grouped
         x: 16
         y: root.headerTop + 2
         size: 40
         initials: root.initials
         source: root.avatar
+        Accessible.role: Accessible.Button
+        Accessible.name: qsTr("View %1's profile").arg(root.author)
+        MouseArea {
+            anchors.fill: parent
+            enabled: !root.pending && !root.failed
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.profileRequested(root.authorId, authorAvatar)
+        }
     }
 
     Text {
@@ -237,6 +248,11 @@ Item {
             text: root.author
             color: Theme.ink1
             font: Theme.type.author
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.profileRequested(root.authorId, authorAvatar)
+            }
         }
         Text {
             anchors.baseline: authorText.baseline

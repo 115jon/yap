@@ -104,13 +104,18 @@ impl Fixture {
                     .iter()
                     .map(|&(id, username, display)| Member {
                         user: user(id, username, display),
+                        roles: Vec::new(),
                     })
                     .collect(),
             ),
+            ApiRequest::Dms => ApiResponse::Dms(Vec::new()),
             ApiRequest::DeleteMessage { .. }
             | ApiRequest::Typing { .. }
             | ApiRequest::MarkRead { .. }
-            | ApiRequest::MarkNotificationsRead { .. } => ApiResponse::Done,
+            | ApiRequest::MarkNotificationsRead { .. }
+            | ApiRequest::SetPresence { .. }
+            | ApiRequest::OpenDm { .. }
+            | ApiRequest::Profile { .. } => ApiResponse::Done,
         }
     }
 }
@@ -124,6 +129,7 @@ fn user(id: &str, username: &str, display_name: Option<&str>) -> User {
         avatar_display: None,
         status: None,
         custom_status: None,
+        ..User::default()
     }
 }
 

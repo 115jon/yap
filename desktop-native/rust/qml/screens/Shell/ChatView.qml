@@ -257,6 +257,7 @@ Rectangle {
             onDeleteRequested: (id, author, text, confirm) => root.deleteMessage(id, author, text, confirm)
             onMenuRequested: (id, author, text, mine, anchor, x, y) => messageMenu.openFor(id, author, text, mine, anchor, x, y)
             onJumpRequested: id => root.jumpTo(id)
+            onProfileRequested: (userId, anchor) => ShellState.showProfile(userId, anchor, "right")
             onRetryRequested: nonce => Chat.retrySend(nonce)
             onDiscardRequested: (nonce, text) => {
                 Chat.discardSend(nonce)
@@ -356,6 +357,7 @@ Rectangle {
         anchors.margins: 16
         anchors.topMargin: 0
         channelName: Nav.activeChannelName
+        dm: Nav.dmUsername.length > 0
         enabled: Nav.activeChannelId.length > 0
         replyToId: root.replyToId
         replyToName: root.replyToName
