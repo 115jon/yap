@@ -126,11 +126,25 @@ impl Fixture {
             | ApiRequest::UpdateProfile(_)
             | ApiRequest::DeleteBanner
             | ApiRequest::RevokeShare { .. } => ApiResponse::Done,
+            // No pins, no windows; a thread is empty.
+            ApiRequest::Threads(request) => ApiResponse::Threads(
+                request
+                    .decode(serde_json::Value::Array(Vec::new()))
+                    .unwrap_or(crate::store::ThreadResponse::Done),
+            ),
+            // No servers to create or join here: the dialogs show the error.
+            ApiRequest::Invites(_) => ApiResponse::Done,
             // Empty lists; every action succeeds.
             ApiRequest::Admin(request) => ApiResponse::Admin(
                 request
                     .decode(serde_json::Value::Null)
                     .unwrap_or(crate::store::AdminResponse::Done),
+            ),
+            ApiRequest::Search(_) => ApiResponse::Search(Box::default()),
+            ApiRequest::Friends(request) => ApiResponse::Friends(
+                request
+                    .decode(serde_json::Value::Null)
+                    .unwrap_or(crate::store::FriendsResponse::Done),
             ),
             ApiRequest::Sessions => ApiResponse::Sessions(Vec::new()),
             ApiRequest::Shares => ApiResponse::Shares(Vec::new()),
@@ -210,6 +224,7 @@ fn blank_message() -> Message {
         nonce: None,
         content_revision: None,
         kind: None,
+        reply_count: 0,
     }
 }
 

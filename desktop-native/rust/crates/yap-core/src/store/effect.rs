@@ -251,6 +251,14 @@ pub enum ApiRequest {
     KovaAccounts,
     /// Server and channel administration.
     Admin(super::AdminRequest),
+    /// Threads, pins and jump windows.
+    Threads(super::ThreadRequest),
+    /// Message search in a server or a DM.
+    Search(super::SearchRequest),
+    /// `/api/friends`.
+    Friends(super::FriendsRequest),
+    /// Creating and joining servers.
+    Invites(super::InviteRequest),
 }
 
 /// A page of messages, oldest first.
@@ -287,6 +295,10 @@ pub enum ApiResponse {
     /// Linked provider ids.
     KovaAccounts(Vec<String>),
     Admin(super::AdminResponse),
+    Threads(super::ThreadResponse),
+    Search(Box<crate::search::SearchResponse>),
+    Friends(super::FriendsResponse),
+    Invites(super::InviteResponse),
     /// A call whose body the store does not read.
     Done,
 }
@@ -321,6 +333,10 @@ impl ApiRequest {
     pub fn method(&self) -> Method {
         match self {
             Self::Admin(request) => request.method(),
+            Self::Threads(request) => request.method(),
+            Self::Search(request) => request.method(),
+            Self::Friends(request) => request.method(),
+            Self::Invites(request) => request.method(),
             Self::SendMessage { .. }
             | Self::Typing { .. }
             | Self::OpenDm { .. }
@@ -351,6 +367,10 @@ impl ApiRequest {
     pub fn path(&self) -> String {
         match self {
             Self::Admin(request) => request.path(),
+            Self::Threads(request) => request.path(),
+            Self::Search(request) => request.path(),
+            Self::Friends(request) => request.path(),
+            Self::Invites(request) => request.path(),
             Self::Me => "/api/users/me".into(),
             Self::Servers => "/api/servers".into(),
             Self::Channels { server_id } => format!("/api/servers/{server_id}/channels"),
@@ -426,6 +446,10 @@ impl ApiRequest {
     pub fn body(&self) -> Value {
         match self {
             Self::Admin(request) => request.body(),
+            Self::Threads(request) => request.body(),
+            Self::Search(_) => Value::Null,
+            Self::Friends(request) => request.body(),
+            Self::Invites(request) => request.body(),
             Self::SendMessage {
                 content,
                 reply_to_id,
@@ -501,6 +525,10 @@ impl ApiRequest {
     pub fn decode(&self, mut body: Value) -> Result<ApiResponse, ApiError> {
         Ok(match self {
             Self::Admin(request) => ApiResponse::Admin(request.decode(body)?),
+            Self::Threads(request) => ApiResponse::Threads(request.decode(body)?),
+            Self::Search(request) => ApiResponse::Search(Box::new(request.decode(body)?)),
+            Self::Friends(request) => ApiResponse::Friends(request.decode(body)?),
+            Self::Invites(request) => ApiResponse::Invites(request.decode(body)?),
             Self::Me => ApiResponse::Me(Box::new(
                 serde_json::from_value(body).map_err(|e| ApiError::Decode(format!("me: {e}")))?,
             )),

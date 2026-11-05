@@ -98,6 +98,15 @@ pub struct MessageDeleteEvent {
     pub channel_id: Option<String>,
 }
 
+/// `MESSAGE_UNPIN` dispatch data (message.service.ts `unpinMessage`:
+/// `{id, channel_id, is_pinned: false}`). `MESSAGE_PIN` carries the whole
+/// message instead (pins.ts).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct MessageUnpinEvent {
+    pub id: String,
+    pub channel_id: Option<String>,
+}
+
 /// `REACTION_ADD` / `REACTION_REMOVE` dispatch data (message.service.ts).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ReactionEvent {
@@ -185,6 +194,13 @@ pub struct GuildMemberAdd {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct GuildMemberRemove {
     pub server_id: String,
+    pub user_id: String,
+}
+
+/// `RELATIONSHIP_REMOVE` dispatch data (social.service.ts
+/// `removeRelationship`, `blockUser`): the other person is gone from the list.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct RelationshipRemove {
     pub user_id: String,
 }
 

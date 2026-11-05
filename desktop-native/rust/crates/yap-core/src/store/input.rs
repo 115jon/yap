@@ -3,11 +3,13 @@
 use serde_json::Value;
 use yap_protocol::payload::{
     ChannelDeleteEvent, ChannelUpdateEvent, GuildDelete, GuildMemberAdd, GuildMemberRemove,
-    GuildMemberUpdate, MessageDeleteEvent, NotificationsRead, PresenceList, PresenceUpdateEvent,
-    ReactionEvent, TypingStartEvent, UserProfileUpdate, VoiceChannelStateUpdate,
-    VoiceChannelStates,
+    GuildMemberUpdate, MessageDeleteEvent, MessageUnpinEvent, NotificationsRead, PresenceList,
+    PresenceUpdateEvent, ReactionEvent, RelationshipRemove, TypingStartEvent, UserProfileUpdate,
+    VoiceChannelStateUpdate, VoiceChannelStates,
 };
-use yap_protocol::rest::{DmChannel, Message, MessagePatch, Notification, ReadState, Server};
+use yap_protocol::rest::{
+    DmChannel, Message, MessagePatch, Notification, ReadState, Relationship, Server,
+};
 
 use yap_cache::Snapshot;
 
@@ -160,6 +162,29 @@ pub enum Command {
     },
     /// Server settings, channel settings and the tree's management.
     Admin(super::AdminCommand),
+    /// Shows a message (useChatArea.ts `handleJumpToMessage`): its channel
+    /// opens first when another one is open (as `OpenChannel`); a loaded
+    /// message is highlighted, anything else replaces the list with the
+    /// window around it (`around=`), detached from the newest end.
+    JumpToMessage {
+        channel_id: String,
+        message_id: String,
+    },
+    /// The detached list is near its end: load the page after it
+    /// (`handleLoadAfter`).
+    LoadNewer,
+    /// "Jump to present": the newest page again (`handleJumpToPresent`).
+    JumpToPresent,
+    /// The thread panel.
+    Thread(super::ThreadCommand),
+    /// The pins panel, and pinning.
+    Pins(super::PinsCommand),
+    /// Message search (the search panel).
+    Search(super::SearchCommand),
+    /// Friends and relationships.
+    Friends(super::FriendsCommand),
+    /// Create a server, the invite landing and links into the app.
+    Invites(super::InviteCommand),
 }
 
 /// What the profile editor saves. Colours are `#RRGGBB` or `None` (Auto);
@@ -286,6 +311,12 @@ pub enum Dispatch {
     MemberUpdate(GuildMemberUpdate),
     DmCreate(Box<DmChannel>),
     ProfileUpdate(Box<UserProfileUpdate>),
+    /// A message was pinned: the whole message (pins.ts).
+    MessagePin(Box<Message>),
+    MessageUnpin(MessageUnpinEvent),
+    /// A relationship was made or changed (`RELATIONSHIP_ADD`).
+    RelationshipAdd(Box<Relationship>),
+    RelationshipRemove(RelationshipRemove),
 }
 
 impl Dispatch {
@@ -333,6 +364,12 @@ impl Dispatch {
             "USER_PROFILE_UPDATE" => {
                 Self::ProfileUpdate(Box::new(serde_json::from_value(data).ok()?))
             }
+            "MESSAGE_PIN" => Self::MessagePin(Box::new(serde_json::from_value(data).ok()?)),
+            "MESSAGE_UNPIN" => Self::MessageUnpin(serde_json::from_value(data).ok()?),
+            "RELATIONSHIP_ADD" => {
+                Self::RelationshipAdd(Box::new(serde_json::from_value(data).ok()?))
+            }
+            "RELATIONSHIP_REMOVE" => Self::RelationshipRemove(serde_json::from_value(data).ok()?),
             _ => return None,
         })
     }

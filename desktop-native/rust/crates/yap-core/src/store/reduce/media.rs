@@ -66,7 +66,14 @@ impl State {
             return;
         };
         let me = me.id.clone();
-        let Some(message) = self.messages.as_ref().and_then(|log| log.get(message_id)) else {
+        // A thread reply the open list has not loaded reacts too; its
+        // chip arrives with the echo.
+        let Some(message) = self
+            .messages
+            .as_ref()
+            .and_then(|log| log.get(message_id))
+            .or_else(|| self.panels.thread.log.get(message_id))
+        else {
             return;
         };
         if message.id.starts_with("pending-") || emoji.is_empty() {

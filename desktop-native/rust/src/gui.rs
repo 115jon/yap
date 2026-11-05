@@ -18,6 +18,7 @@ use yap_core::store::view::{
     MemberListRow, MentionRow, MessageRow, ProfileView, ServerRow, SettingsView, UnreadView,
     UploadRow, VoiceMemberRow, VoicePanelView, VoiceTileRow, VoiceView,
 };
+use yap_core::store::PanelsView;
 use yap_core::ViewUpdate;
 
 use crate::bridge::qobject::{Chat, Nav, Profile, Session, Voice};
@@ -38,6 +39,9 @@ pub struct Rows {
     pub uploads: Vec<UploadRow>,
     pub gifs: Vec<GifRow>,
     pub emoji: Vec<EmojiRow>,
+    /// The open thread and the pins panel.
+    pub thread: Vec<MessageRow>,
+    pub pins: Vec<MessageRow>,
 }
 
 /// The last scalar values for the singletons that may not exist yet.
@@ -62,6 +66,10 @@ struct Scalars {
     gifs: GifStatusView,
     settings: SettingsView,
     admin: AdminView,
+    panels: PanelsView,
+    /// (loading, more) of newer pages (a detached list).
+    newer: (bool, bool),
+    friends: yap_core::store::FriendsView,
 }
 
 /// The live QObjects. Each registers from its constructor and clears its
@@ -71,6 +79,10 @@ pub struct Objects {
     pub(crate) desktop: Option<NonNull<crate::desktop::qobject::Desktop>>,
     pub(crate) settings: Option<NonNull<crate::settings::qobject::Settings>>,
     pub(crate) admin: Option<NonNull<crate::admin::qobject::Admin>>,
+    pub(crate) panels: Option<NonNull<crate::panels::qobject::Panels>>,
+    pub(crate) search: Option<NonNull<crate::search::qobject::Search>>,
+    pub(crate) friends: Option<NonNull<crate::friends::qobject::Friends>>,
+    pub(crate) invites: Option<NonNull<crate::invites::qobject::Invites>>,
     nav: Option<NonNull<Nav>>,
     chat: Option<NonNull<Chat>>,
     voice: Option<NonNull<Voice>>,
@@ -86,6 +98,8 @@ pub struct Objects {
     uploads: Option<NonNull<m::UploadListModel>>,
     gifs: Option<NonNull<m::GifListModel>>,
     emoji: Option<NonNull<m::EmojiGridModel>>,
+    thread: Option<NonNull<m::ThreadMessageModel>>,
+    pins: Option<NonNull<m::PinnedMessageModel>>,
 }
 
 #[derive(Default)]
@@ -168,6 +182,35 @@ pub(crate) fn admin_view() -> AdminView {
     GUI.with(|gui| gui.borrow().scalars.admin.clone())
 }
 
+/// Keeps the panels' view for a `Panels` object QML creates later.
+pub(crate) fn keep_panels(view: PanelsView) {
+    scalars(|s| s.panels = view);
+}
+
+pub(crate) fn panels_view() -> PanelsView {
+    GUI.with(|gui| gui.borrow().scalars.panels.clone())
+}
+
+/// What a message link needs: the open server (`None` at Home or in a
+/// DM) and the open channel.
+pub(crate) fn link_route() -> (Option<String>, String) {
+    GUI.with(|gui| {
+        let s = &gui.borrow().scalars;
+        let dm = s.home || !s.dm.user_id.is_empty();
+        let server = Some(s.server.0.clone()).filter(|id| !dm && !id.is_empty());
+        (server, s.channel.0.clone())
+    })
+}
+
+/// Keeps the friends view for a `Friends` object QML creates later.
+pub(crate) fn keep_friends(view: yap_core::store::FriendsView) {
+    scalars(|s| s.friends = view);
+}
+
+pub(crate) fn friends_view() -> yap_core::store::FriendsView {
+    GUI.with(|gui| gui.borrow().scalars.friends.clone())
+}
+
 fn q(text: &str) -> QString {
     QString::from(text)
 }
@@ -213,7 +256,7 @@ impl Slot for Chat {
     }
 
     fn restore(mut self: Pin<&mut Self>) {
-        let (typing, unread, history, manage, uploads, gifs) = GUI.with(|gui| {
+        let (typing, unread, history, manage, uploads, gifs, newer) = GUI.with(|gui| {
             let s = &gui.borrow().scalars;
             (
                 s.typing.clone(),
@@ -222,8 +265,11 @@ impl Slot for Chat {
                 s.manage_messages,
                 s.uploads,
                 s.gifs.clone(),
+                s.newer,
             )
         });
+        self.as_mut().set_newer_loading(newer.0);
+        self.as_mut().set_has_newer(newer.1);
         set_uploads(self.as_mut(), uploads);
         set_gifs(self.as_mut(), &gifs);
         self.as_mut().set_typing_text(q(&typing));
@@ -279,6 +325,8 @@ model_slots!(
     UploadListModel => uploads,
     GifListModel => gifs,
     EmojiGridModel => emoji,
+    ThreadMessageModel => thread,
+    PinnedMessageModel => pins,
 );
 
 fn int(n: i64) -> i32 {
@@ -479,6 +527,9 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         }
         ViewUpdate::Settings(view) => crate::settings::on_view(*view),
         ViewUpdate::Admin(view) => crate::admin::on_view(*view),
+        ViewUpdate::Search(view) => crate::search::on_view(*view),
+        ViewUpdate::Friends(view) => crate::friends::on_view(*view),
+        ViewUpdate::Invites(view) => crate::invites::on_view(*view),
         ViewUpdate::Toast(toast) => crate::desktop::on_toast(&toast),
         ViewUpdate::Sound(sound) => crate::sound::play(sound),
         ViewUpdate::Badge(badge) => crate::desktop::on_badge(badge),
@@ -495,6 +546,17 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::MediaAuth(token) => crate::media::set_token(token),
         ViewUpdate::Saved { path, open } => {
             with::<Chat>(|chat| chat.saved(q(&path), open));
+        }
+        ViewUpdate::ThreadMessages(diff) => models::apply::<m::ThreadMessageModel>(*diff),
+        ViewUpdate::PinnedMessages(diff) => models::apply::<m::PinnedMessageModel>(*diff),
+        ViewUpdate::Panels(view) => crate::panels::on_view(*view),
+        ViewUpdate::JumpTo(id) => with::<Chat>(|chat| chat.jumped(q(&id))),
+        ViewUpdate::Newer { loading, more } => {
+            with::<Chat>(|mut chat| {
+                chat.as_mut().set_has_newer(more);
+                chat.set_newer_loading(loading);
+            });
+            scalars(|s| s.newer = (loading, more));
         }
     }
 }

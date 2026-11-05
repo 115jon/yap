@@ -617,6 +617,15 @@ pub struct Message {
     /// `"call"` for a DM call record.
     #[serde(rename = "type")]
     pub kind: Option<String>,
+    /// Messages that reply to this one, its thread (message.service.ts
+    /// `formatMessageRow`; 0 when absent).
+    #[serde(default, deserialize_with = "count")]
+    pub reply_count: i64,
+}
+
+/// A count that may be absent or `null`.
+fn count<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
+    Ok(Option::<i64>::deserialize(deserializer)?.unwrap_or(0))
 }
 
 /// `MESSAGE_UPDATE` dispatch data when it is partial (an edit, or embeds that
@@ -809,6 +818,32 @@ pub struct DmChannel {
     pub recipient: User,
 }
 
+/// One relationship (`GET /api/friends`, `RELATIONSHIP_ADD`;
+/// social.service.ts `listRelationships`): the other person and what they
+/// are to the signed-in user.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct Relationship {
+    pub user: User,
+    /// 0 friend, 1 blocked (by us), 2 incoming request, 3 outgoing request.
+    #[serde(rename = "type")]
+    pub kind: i64,
+}
+
+impl Relationship {
+    pub const FRIEND: i64 = 0;
+    pub const BLOCKED: i64 = 1;
+    pub const INCOMING: i64 = 2;
+    pub const OUTGOING: i64 = 3;
+}
+
+/// `POST /api/friends`: `{user, type}`; `type` 0 when it accepted their
+/// request (friends.ts:63), 3 when it sent one.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct FriendRequestSent {
+    #[serde(rename = "type", default)]
+    pub kind: Option<i64>,
+}
+
 /// `GET /api/users/:id/profile`: the full user (mutuals are not read yet).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ProfileResponse {
@@ -840,6 +875,51 @@ pub struct Invite {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct CreatedInvite {
     pub code: String,
+}
+
+/// `GET /api/invites/:code` (social.service.ts `getInviteInfo`,
+/// InviteClient.tsx `InvitePreview`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct InvitePreview {
+    #[serde(default)]
+    pub code: String,
+    pub server: InviteServer,
+    #[serde(default)]
+    pub inviter: InviteInviter,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct InviteServer {
+    pub id: String,
+    pub name: String,
+    pub icon_url: Option<String>,
+    #[serde(default)]
+    pub member_count: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct InviteInviter {
+    #[serde(default)]
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+/// `POST /api/invites/:code/join`: `{joined: true, server}` or
+/// `{already_member: true, server}`; `server` is the stored row.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct JoinedInvite {
+    #[serde(default)]
+    pub joined: bool,
+    #[serde(default)]
+    pub already_member: bool,
+    /// `None` when missing or not a server row.
+    #[serde(default, deserialize_with = "lenient_server")]
+    pub server: Option<Server>,
+}
+
+fn lenient_server<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Server>, D::Error> {
+    Ok(Option::<Value>::deserialize(deserializer)?.and_then(|v| serde_json::from_value(v).ok()))
 }
 
 /// One ban (`GET /api/servers/:id/bans`).

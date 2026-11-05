@@ -6,11 +6,37 @@ import com.yap.native
 // the name, a 16 px seam and the @handle in 13 ink-3) opens the details;
 // on the right pins, notifications and members (40 px muted keys behind a
 // seam), then the underline search field with its "/" key. Members toggles
-// the member panel; pins, notifications and search come later.
+// the member panel and pins the pins panel; notifications and search come
+// later.
 Item {
     id: root
 
     implicitHeight: Theme.header
+
+    readonly property string searchTip: Nav.dmUsername.length > 0 ? qsTr("Search this conversation") : qsTr("Search messages")
+
+    // Opens the search panel, with typing to hand over.
+    function openSearch(text) {
+        Search.open(text, Date.now())
+        ShellState.searchOpen = true
+    }
+
+    // "/" opens search when nothing editable has focus (the hint on the
+    // field); typing "/" in the composer still starts a command.
+    Shortcut {
+        sequence: "/"
+        context: Qt.WindowShortcut
+        enabled: root.visible && !ShellState.searchOpen
+            && !(Window.activeFocusItem && "cursorPosition" in Window.activeFocusItem)
+        onActivated: root.openSearch("")
+    }
+    Connections {
+        target: ShellState
+        function onSearchOpenChanged() {
+            if (!ShellState.searchOpen)
+                Search.close()
+        }
+    }
 
     Rectangle {
         id: title
@@ -83,7 +109,24 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 4
             rightPadding: 8
-            IconKey { iconName: "pin"; tone: "muted"; tipSide: "bottom"; tip: qsTr("Pinned messages") }
+            // useChatArea.ts `handleTogglePins`: pins take the thread's place.
+            IconKey {
+                readonly property bool open: ShellState.sidePanel === "pins"
+                iconName: "pin"
+                tone: open ? "toggled" : "muted"
+                tipSide: "bottom"
+                tip: qsTr("Pinned messages")
+                Accessible.checkable: true
+                Accessible.checked: open
+                onClicked: {
+                    if (open) {
+                        ShellState.pinsOpen = false
+                        return
+                    }
+                    ShellState.threadId = ""
+                    ShellState.pinsOpen = true
+                }
+            }
             IconKey { iconName: "bell"; tone: "muted"; tipSide: "bottom"; tip: qsTr("Notifications") }
             IconKey {
                 iconName: "members"
@@ -101,14 +144,36 @@ Item {
             }
         }
 
-        // C1 underline field: no box, a 2 px line-field rule, "/" key.
+        // C1 underline field: no box, a 2 px line-field rule that turns
+        // accent on focus, the "/" key. It opens the search panel, whose own
+        // input takes the typing (typed here, it is handed over); while the
+        // panel is open it collapses to a pressed key (ChatHeader.tsx).
         Item {
+            id: searchField
             anchors.verticalCenter: parent.verticalCenter
             width: 224
             height: 38
-            visible: root.width >= 720
+            visible: root.width >= 720 && !ShellState.searchOpen
+            activeFocusOnTab: true
             Accessible.role: Accessible.Button
-            Accessible.name: qsTr("Search messages")
+            Accessible.name: root.searchTip
+            Accessible.onPressAction: root.openSearch("")
+            Keys.onPressed: event => {
+                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
+                    event.accepted = true
+                    root.openSearch("")
+                } else if (event.text.length > 0 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127
+                        && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier))) {
+                    event.accepted = true
+                    root.openSearch(event.text === "/" ? "" : event.text)
+                }
+            }
+            TapHandler { onTapped: root.openSearch("") }
+            Tooltip {
+                visible: searchHover.hovered
+                text: root.searchTip
+                side: "bottom"
+            }
             Row {
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width
@@ -147,10 +212,28 @@ Item {
                 anchors.bottom: parent.bottom
                 width: parent.width
                 height: 2
-                color: searchHover.hovered ? Theme.ink2 : Theme.lineField
+                color: searchField.activeFocus ? Theme.focus : searchHover.hovered ? Theme.ink2 : Theme.lineField
                 Behavior on color { ColorAnimation { duration: Theme.dur1 } }
             }
-            HoverHandler { id: searchHover }
+            HoverHandler { id: searchHover; cursorShape: Qt.PointingHandCursor }
+        }
+        // The pressed key while the panel is open (its field is the input),
+        // and the search key of a narrow header.
+        IconKey {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: ShellState.searchOpen || root.width < 720
+            iconName: "search"
+            tone: ShellState.searchOpen ? "toggled" : "muted"
+            tipSide: "bottom"
+            tip: root.searchTip
+            Accessible.checkable: true
+            Accessible.checked: ShellState.searchOpen
+            onClicked: {
+                if (ShellState.searchOpen)
+                    ShellState.searchOpen = false
+                else
+                    root.openSearch("")
+            }
         }
     }
 

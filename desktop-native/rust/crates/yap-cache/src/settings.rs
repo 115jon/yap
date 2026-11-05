@@ -5,6 +5,7 @@
 //! schema change. The shape follows the desktop app's
 //! `desktop-settings.json` and `.window-state.json`.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,7 @@ pub const SETTINGS_FILE: &str = "desktop-settings.json";
 pub const WINDOW_STATE_FILE: &str = "window-state.json";
 pub const EMOJI_FILE: &str = "emoji-prefs.json";
 pub const APPEARANCE_FILE: &str = "appearance.json";
+pub const SEARCH_FILE: &str = "search-recent.json";
 
 /// The theme picked on this device (next-themes' `theme` key on the web):
 /// a theme id or `system`. App-wide, like the web's origin storage.
@@ -181,6 +183,20 @@ pub fn load_emoji(dir: &Path) -> EmojiPrefs {
 
 pub fn save_emoji(dir: &Path, prefs: &EmojiPrefs) -> Result<(), CacheError> {
     write(&dir.join(EMOJI_FILE), prefs)
+}
+
+/// Recent message searches by scope key (`s:<server>`, `c:<channel>`;
+/// localStorage `rm:search-recent:<scope>` on the web), each entry as the
+/// web stores it. Empty when missing or unreadable.
+pub fn load_search_recents(dir: &Path) -> BTreeMap<String, Vec<serde_json::Value>> {
+    read(&dir.join(SEARCH_FILE)).unwrap_or_default()
+}
+
+pub fn save_search_recents(
+    dir: &Path,
+    recents: &BTreeMap<String, Vec<serde_json::Value>>,
+) -> Result<(), CacheError> {
+    write(&dir.join(SEARCH_FILE), recents)
 }
 
 #[cfg(test)]

@@ -26,6 +26,10 @@ Rectangle {
     // One older-page request per visit to the top band (or per answer),
     // once the list has landed.
     property bool olderAsked: false
+    // The same for newer pages of a jump's window.
+    property bool newerAsked: false
+    // A jumped-to message the next landing centres and highlights.
+    property string jumpTarget
     property bool landed: false
     // The user scrolled since the list landed: a late divider must not
     // move it.
@@ -74,12 +78,24 @@ Rectangle {
         Qt.callLater(() => {
             place()
             root.landed = view.count > 0
+            if (root.jumpTarget.length > 0) {
+                root.highlightId = root.jumpTarget
+                root.jumpTarget = ""
+                highlightTimer.restart()
+            }
             updateNearEnd()
             reportPosition()
         })
     }
 
     function place() {
+        if (root.jumpTarget.length > 0) {
+            const target = Chat.indexOfMessage(root.jumpTarget)
+            if (target >= 0) {
+                view.positionViewAtIndex(target, ListView.Center)
+                return
+            }
+        }
         const divider = Chat.dividerId.length > 0 ? Chat.indexOfMessage(Chat.dividerId) : -1
         if (divider < 0) {
             view.positionViewAtEnd()
@@ -92,15 +108,31 @@ Rectangle {
             view.contentY = Math.max(view.originY, view.contentY - 32)
     }
 
+    // A reply quote or a pin: loaded or not, the core brings it in and
+    // answers with `jumped`.
     function jumpTo(id) {
-        const index = Chat.indexOfMessage(id)
-        if (index < 0) {
-            toast.show(qsTr("That message isn't loaded yet. Scroll up to find it."))
-            return
-        }
-        view.positionViewAtIndex(index, ListView.Center)
-        root.highlightId = id
-        highlightTimer.restart()
+        Chat.jumpToMessage(Nav.activeChannelId, id)
+    }
+
+    // ChatArea.tsx `handleThread`: the thread takes the pins' place.
+    function openThread(id) {
+        ShellState.pinsOpen = false
+        ShellState.threadId = id
+    }
+
+    // Pin always confirms; unpin skips it with Shift (MessageItem.tsx
+    // `handlePinToggle`).
+    function setPin(id, author, text, pin, confirm) {
+        if (pin || confirm)
+            pinDialog.ask(id, author, text, pin)
+        else
+            Panels.setPinned(id, false)
+    }
+
+    // Only from the click: the link goes on the clipboard.
+    function copyLink(id) {
+        clipboard.copyText(Chat.messageLink(id))
+        toast.show(qsTr("Message link copied"))
     }
 
     function startEdit(id) {
@@ -122,6 +154,8 @@ Rectangle {
 
     // Only web and mail links leave the app (message text is untrusted).
     function openLink(url) {
+        if (Invites.openLink(url))
+            return
         if (/^(https?:|mailto:)/i.test(url))
             Qt.openUrlExternally(url)
     }
@@ -164,8 +198,9 @@ Rectangle {
             Qt.callLater(root.land)
         }
 
+        // A jump's window grows at its end without following it.
         function onAboutToAppend() {
-            root.stickToEnd = root.nearEnd
+            root.stickToEnd = root.nearEnd && !Chat.hasNewer
         }
 
         // Follow new messages when already at the end, and always after
@@ -193,6 +228,14 @@ Rectangle {
         function onOlderLoadingChanged() {
             if (!Chat.olderLoading)
                 root.olderAsked = false
+        }
+        function onNewerLoadingChanged() {
+            if (!Chat.newerLoading)
+                root.newerAsked = false
+        }
+        function onJumped(id) {
+            root.jumpTarget = id
+            Qt.callLater(root.land)
         }
         function onSaved(path, open) {
             if (open)
@@ -230,10 +273,10 @@ Rectangle {
         // A row at the end that grows (a failed-send line, an edit, a late
         // layout) keeps the list at its end if it was there.
         onContentHeightChanged: {
-            if (root.landed && root.nearEnd)
+            if (root.landed && root.nearEnd && !Chat.hasNewer)
                 Qt.callLater(() => {
                     // Unless a jump or a reland moved it meanwhile.
-                    if (!root.landed || !root.nearEnd)
+                    if (!root.landed || !root.nearEnd || Chat.hasNewer)
                         return
                     view.positionViewAtEnd()
                     root.updateNearEnd()
@@ -251,6 +294,14 @@ Rectangle {
             else if (root.landed && !root.olderAsked && Chat.hasOlder && !Chat.olderLoading) {
                 root.olderAsked = true
                 Chat.loadOlder()
+            }
+            // A jump's window loads what follows near its end.
+            const nearBottom = originY + contentHeight - contentY - height < root.historyFetchPx
+            if (!nearBottom)
+                root.newerAsked = false
+            else if (root.landed && !root.newerAsked && Chat.hasNewer && !Chat.newerLoading) {
+                root.newerAsked = true
+                Chat.loadNewer()
             }
         }
 
@@ -278,7 +329,14 @@ Rectangle {
             }
             onEditCancelled: root.endEdit()
             onDeleteRequested: (id, author, text, confirm) => root.deleteMessage(id, author, text, confirm)
-            onMenuRequested: (id, author, text, mine, anchor, x, y) => messageMenu.openFor(id, author, text, mine, anchor, x, y)
+            onMenuRequested: (id, author, text, mine, anchor, x, y) => {
+                messageMenu.replyCount = row.replyCount
+                messageMenu.pinned = row.pinned
+                messageMenu.openFor(id, author, text, mine, anchor, x, y)
+            }
+            onThreadRequested: id => root.openThread(id)
+            onPinRequested: (id, author, text, pin, confirm) => root.setPin(id, author, text, pin, confirm)
+            onLinkRequested: id => root.copyLink(id)
             onJumpRequested: id => root.jumpTo(id)
             onProfileRequested: (userId, anchor) => ShellState.showProfile(userId, anchor, "right")
             onRetryRequested: nonce => Chat.retrySend(nonce)
@@ -365,6 +423,60 @@ Rectangle {
         }
     }
 
+    // ChatJumpToPresent.tsx: while reading a jump's window, a ply-3 float
+    // (line edge) 8 above the list's foot; it fades and rises 4 px in.
+    Rectangle {
+        id: present
+        readonly property bool shown: Chat.hasNewer
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: typingLine.y - height - 8 + (shown ? 0 : 4)
+        z: 2
+        visible: opacity > 0
+        opacity: shown ? 1 : 0
+        width: presentRow.implicitWidth + 24
+        height: Theme.keySm
+        radius: Theme.radius
+        color: Theme.ply3
+        border.width: 1
+        border.color: Theme.line
+        scale: presentTap.pressed ? Theme.scalePress : 1
+        Behavior on opacity { NumberAnimation { duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+        Behavior on y { NumberAnimation { duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+        Accessible.role: Accessible.Button
+        Accessible.name: qsTr("Jump to present")
+        Row {
+            id: presentRow
+            anchors.centerIn: parent
+            spacing: 6
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("Jump to present")
+                color: Theme.ink1
+                font: Theme.type.controlSm
+            }
+            Icon {
+                anchors.verticalCenter: parent.verticalCenter
+                name: "chevronDown"
+                size: Theme.iconSm
+                color: Theme.ink1
+            }
+        }
+        Rectangle {
+            anchors.fill: parent
+            radius: Theme.radius
+            color: Theme.ink1
+            opacity: presentTap.pressed ? 0.14 : presentTap.containsMouse ? 0.08 : 0
+        }
+        MouseArea {
+            id: presentTap
+            anchors.fill: parent
+            enabled: present.shown
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: Chat.jumpToPresent()
+        }
+    }
+
     // "Name is typing…"; the core drops each name 8 s after their last ping
     // or when they post.
     Item {
@@ -412,6 +524,8 @@ Rectangle {
         property string author
         property string text
         property bool mine
+        property int replyCount
+        property bool pinned
         function openFor(id, author, text, mine, anchor, x, y) {
             messageId = id
             messageMenu.author = author
@@ -436,6 +550,24 @@ Rectangle {
             visible: messageMenu.mine
             height: visible ? implicitHeight : 0
             onTriggered: root.startEdit(messageMenu.messageId)
+        }
+        MenuRow {
+            text: messageMenu.replyCount > 0 ? qsTr("View thread") : qsTr("Create thread")
+            glyph: "thread"
+            onTriggered: root.openThread(messageMenu.messageId)
+        }
+        MenuRow {
+            text: messageMenu.pinned ? qsTr("Unpin message") : qsTr("Pin message")
+            glyph: "pin"
+            visible: Panels.canPin
+            height: visible ? implicitHeight : 0
+            onTriggered: root.setPin(messageMenu.messageId, messageMenu.author, messageMenu.text, !messageMenu.pinned, true)
+        }
+        MenuRule {}
+        MenuRow {
+            text: qsTr("Copy message link")
+            glyph: "link"
+            onTriggered: root.copyLink(messageMenu.messageId)
         }
         MenuRow {
             text: qsTr("Delete message")
@@ -517,4 +649,12 @@ Rectangle {
         onConfirmed: id => Chat.deleteMessage(id)
         onClosed: composer.focusInput()
     }
+
+    PinDialog {
+        id: pinDialog
+        onConfirmed: (id, pin) => Panels.setPinned(id, pin)
+        onClosed: composer.focusInput()
+    }
+
+    ClipboardText { id: clipboard }
 }

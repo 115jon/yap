@@ -306,7 +306,7 @@ struct OverrideForm {
 }
 
 /// An image file a server icon can be (OverviewPage.tsx `ICON_TYPES`).
-fn icon_content_type(path: &str) -> Option<&'static str> {
+pub(crate) fn icon_content_type(path: &str) -> Option<&'static str> {
     let ext = std::path::Path::new(path)
         .extension()?
         .to_string_lossy()

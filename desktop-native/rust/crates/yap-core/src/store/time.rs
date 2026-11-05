@@ -203,9 +203,36 @@ pub fn local_day(utc_ms: i64, offset: LocalOffset) -> i64 {
     (utc_ms + i64::from(offset.at(utc_ms)) * 1000).div_euclid(MS_PER_DAY)
 }
 
+/// (year, month 1-12, day 1-31) of a local day number ([`local_day`]).
+pub fn civil_date(day: i64) -> (i64, i64, i64) {
+    civil_from_days(day)
+}
+
+/// The local day number of a calendar date (no validation).
+pub fn day_number(year: i64, month: i64, day: i64) -> i64 {
+    days_from_civil(year, month, day)
+}
+
+/// The UTC instant (epoch ms) of a local day's midnight, as
+/// `new Date(y, m, d)` gives it.
+pub fn local_midnight(day: i64, offset: LocalOffset) -> i64 {
+    let local = day * MS_PER_DAY;
+    let guess = local - i64::from(offset.at(local)) * 1000;
+    local - i64::from(offset.at(guess)) * 1000
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_midnight_should_shift_by_the_offset() {
+        let day = day_number(2026, 10, 2);
+        assert_eq!(
+            format_rfc3339(local_midnight(day, LocalOffset(|_| -5 * 3600))),
+            "2026-10-02T05:00:00.000Z"
+        );
+    }
 
     #[test]
     fn parse_should_read_utc_with_milliseconds() {

@@ -42,11 +42,18 @@ Item {
     required property string replyInitials
     required property string replyText
     required property bool replyPlaceholder
+    // Replies to this message (the thread chip) and its pin.
+    required property int replyCount
+    required property bool pinned
     // Today's local day number (`Chat.today`).
     required property int today
     // The list's edit target and jump highlight (message ids, or empty).
     required property string editingId
     required property string highlightId
+    // The thread keys and a clickable chip (off inside the thread panel).
+    property bool threadActions: true
+    // Drawn under the row, inside its height (the thread root's seam).
+    property Component foot: null
 
     signal replyRequested(string id, string author, string text)
     signal editRequested(string id)
@@ -68,6 +75,12 @@ Item {
     signal downloadRequested(var item)
     signal videoOpened(var item)
     signal linkOpened(string url)
+    // View or create this message's thread.
+    signal threadRequested(string id)
+    // Pin (or unpin); `confirm` false: Shift was held, skip the dialog.
+    signal pinRequested(string id, string author, string text, bool pin, bool confirm)
+    // Copy this message's link (the Shift bar's link key).
+    signal linkRequested(string id)
 
     readonly property var mediaItems: attachments.length > 0 ? JSON.parse(attachments) : []
     readonly property var reactionChips: reactions.length > 0 ? JSON.parse(reactions) : []
@@ -125,16 +138,37 @@ Item {
     }
 
     implicitHeight: extras.y + extras.height
-        + (failedLine.visible ? failedLine.height + 2 : 0) + 2
+        + (failedLine.visible ? failedLine.height + 2 : 0) + 2 + footSlot.height
     opacity: dim ? 0.6 : 1
 
-    // The row ground: mention or jump highlight in accent-tint, hover tint-1.
+    // The row ground: a mention in accent-tint, hover tint-1.
     Rectangle {
         y: root.dividerHeight
         width: parent.width
-        height: parent.height - root.dividerHeight
-        color: root.mentioned || root.highlightId === root.messageId ? Theme.accentTint
+        height: parent.height - root.dividerHeight - footSlot.height
+        color: root.mentioned ? Theme.accentTint
              : hover.hovered ? Theme.tint1 : "transparent"
+    }
+    // The jump highlight (MessageItem.tsx `data-highlight`): accent-tint at
+    // once, then a 300 ms fade when it lets go.
+    Rectangle {
+        id: jumpTint
+        y: root.dividerHeight
+        width: parent.width
+        height: parent.height - root.dividerHeight - footSlot.height
+        color: Theme.accentTint
+        opacity: 0
+        visible: opacity > 0
+        states: State {
+            name: "on"
+            when: root.highlightId.length > 0 && root.highlightId === root.messageId
+            PropertyChanges { jumpTint.opacity: 1 }
+        }
+        transitions: Transition {
+            from: "on"
+            to: ""
+            OpacityAnimator { target: jumpTint; duration: 300; easing.type: Easing.OutCubic }
+        }
     }
 
     HoverHandler { id: hover }
@@ -301,6 +335,18 @@ Item {
             color: Theme.ink3
             font: Theme.type.numSm
         }
+        // Pinned (MessageItem.tsx): the Fill pin at 12 in ink-3.
+        Icon {
+            visible: root.pinned
+            anchors.verticalCenter: authorText.verticalCenter
+            name: "pin"
+            variant: "active"
+            size: Theme.iconXs
+            color: Theme.ink3
+            Accessible.ignored: false
+            Accessible.role: Accessible.StaticText
+            Accessible.name: qsTr("Pinned")
+        }
     }
 
     TextEdit {
@@ -326,6 +372,8 @@ Item {
         onLinkActivated: link => {
             if (link === "spoiler:")
                 root.revealed = true
+            else if (Invites.openLink(link))
+                return
             else if (/^(https?:|mailto:)/i.test(link))
                 Qt.openUrlExternally(link)
         }
@@ -408,6 +456,60 @@ Item {
                 onAddRequested: anchor => root.reactionPickerRequested(root.messageId, anchor)
             }
         }
+        // The thread summary (MessageItem.tsx): 28 high on tint-1, 4 above;
+        // the thread glyph, "N replies", a chevron.
+        Loader {
+            active: root.replyCount > 0
+            visible: active
+            sourceComponent: Item {
+                width: chip.width
+                height: chip.height + 4
+                Rectangle {
+                    id: chip
+                    y: 4
+                    width: chipRow.implicitWidth + 16
+                    height: 28
+                    radius: Theme.radius
+                    color: Theme.tint1
+                    scale: chipTap.pressed ? Theme.scalePressIcon : 1
+                    Accessible.role: Accessible.Button
+                    Accessible.name: chipLabel.text
+                    Row {
+                        id: chipRow
+                        x: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 6
+                        Icon {
+                            anchors.verticalCenter: parent.verticalCenter
+                            name: "thread"
+                            size: Theme.iconSm
+                            color: chipTap.containsMouse ? Theme.ink1 : Theme.ink2
+                        }
+                        Text {
+                            id: chipLabel
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.replyCount === 1 ? qsTr("1 reply") : qsTr("%1 replies").arg(root.replyCount)
+                            color: chipTap.containsMouse ? Theme.ink1 : Theme.ink2
+                            font: Theme.type.captionStrong
+                        }
+                        Icon {
+                            anchors.verticalCenter: parent.verticalCenter
+                            name: "chevronRight"
+                            size: Theme.iconXs
+                            color: Theme.ink3
+                        }
+                    }
+                    MouseArea {
+                        id: chipTap
+                        anchors.fill: parent
+                        enabled: root.threadActions
+                        hoverEnabled: true
+                        cursorShape: root.threadActions ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        onClicked: root.threadRequested(root.messageId)
+                    }
+                }
+            }
+        }
     }
 
     // A send that failed: "Not sent." then Retry · Delete (MessageItem.tsx).
@@ -446,6 +548,15 @@ Item {
             text: qsTr("Delete")
             onActivated: root.discardRequested(root.nonce, root.body)
         }
+    }
+
+    Loader {
+        id: footSlot
+        y: extras.y + extras.height + (failedLine.visible ? failedLine.height + 2 : 0) + 2
+        width: parent.width
+        height: item ? item.implicitHeight : 0
+        active: root.foot !== null
+        sourceComponent: root.foot
     }
 
     // The hover bar (MessageItem.tsx): -16 from the top, 24 from the
@@ -504,6 +615,36 @@ Item {
                 }
                 Rectangle {
                     visible: !root.shiftHeld
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 1
+                    height: 16
+                    color: Theme.line
+                }
+                // Shift: the power keys (MessageItem.tsx): link, pin, thread.
+                IconKey {
+                    size: 28
+                    iconName: "link"
+                    tip: qsTr("Copy message link")
+                    visible: root.shiftHeld
+                    onClicked: root.linkRequested(root.messageId)
+                }
+                IconKey {
+                    size: 28
+                    iconName: "pin"
+                    tone: root.pinned ? "toggled" : "ghost"
+                    tip: root.pinned ? qsTr("Unpin message") : qsTr("Pin message")
+                    visible: root.shiftHeld && Panels.canPin
+                    onClicked: root.pinRequested(root.messageId, root.author, root.body, !root.pinned, false)
+                }
+                IconKey {
+                    size: 28
+                    iconName: "thread"
+                    tip: root.replyCount > 0 ? qsTr("View thread") : qsTr("Create thread")
+                    visible: root.shiftHeld && root.threadActions
+                    onClicked: root.threadRequested(root.messageId)
+                }
+                Rectangle {
+                    visible: root.shiftHeld
                     anchors.verticalCenter: parent.verticalCenter
                     width: 1
                     height: 16

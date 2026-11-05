@@ -102,6 +102,20 @@ pub mod qobject {
         #[qml_element]
         #[qml_singleton]
         type EmojiGridModel = super::EmojiGridModelRust;
+
+        /// The open thread: its root, then the replies (`MessageRow`s).
+        #[qobject]
+        #[base = QAbstractListModel]
+        #[qml_element]
+        #[qml_singleton]
+        type ThreadMessageModel = super::ThreadMessageModelRust;
+
+        /// The pins panel, newest first (`MessageRow`s).
+        #[qobject]
+        #[base = QAbstractListModel]
+        #[qml_element]
+        #[qml_singleton]
+        type PinnedMessageModel = super::PinnedMessageModelRust;
     }
 
     impl cxx_qt::Initialize for ServerListModel {}
@@ -115,6 +129,8 @@ pub mod qobject {
     impl cxx_qt::Initialize for UploadListModel {}
     impl cxx_qt::Initialize for GifListModel {}
     impl cxx_qt::Initialize for EmojiGridModel {}
+    impl cxx_qt::Initialize for ThreadMessageModel {}
+    impl cxx_qt::Initialize for PinnedMessageModel {}
 
     // Messages: scroll anchoring around appends.
     extern "RustQt" {
@@ -737,8 +753,129 @@ pub mod qobject {
         #[cxx_name = "rowCount"]
         fn row_count(self: &EmojiGridModel, parent: &QModelIndex) -> i32;
     }
-}
+    // The thread's and the pins' models (the same members as above).
+    unsafe extern "RustQt" {
+        #[inherit]
+        #[qsignal]
+        #[cxx_name = "dataChanged"]
+        fn data_changed(
+            self: Pin<&mut ThreadMessageModel>,
+            top_left: &QModelIndex,
+            bottom_right: &QModelIndex,
+            roles: &QVector_i32,
+        );
+        #[inherit]
+        #[qsignal]
+        #[cxx_name = "dataChanged"]
+        fn data_changed(
+            self: Pin<&mut PinnedMessageModel>,
+            top_left: &QModelIndex,
+            bottom_right: &QModelIndex,
+            roles: &QVector_i32,
+        );
+        #[inherit]
+        fn index(
+            self: &ThreadMessageModel,
+            row: i32,
+            column: i32,
+            parent: &QModelIndex,
+        ) -> QModelIndex;
+        #[inherit]
+        fn index(
+            self: &PinnedMessageModel,
+            row: i32,
+            column: i32,
+            parent: &QModelIndex,
+        ) -> QModelIndex;
+    }
 
+    // # Safety: each begin_* must be followed by its end_*.
+    extern "RustQt" {
+        #[inherit]
+        #[cxx_name = "beginInsertRows"]
+        unsafe fn begin_insert_rows(
+            self: Pin<&mut ThreadMessageModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
+        #[cxx_name = "endInsertRows"]
+        unsafe fn end_insert_rows(self: Pin<&mut ThreadMessageModel>);
+        #[inherit]
+        #[cxx_name = "beginRemoveRows"]
+        unsafe fn begin_remove_rows(
+            self: Pin<&mut ThreadMessageModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
+        #[cxx_name = "endRemoveRows"]
+        unsafe fn end_remove_rows(self: Pin<&mut ThreadMessageModel>);
+        #[inherit]
+        #[cxx_name = "beginResetModel"]
+        unsafe fn begin_reset_model(self: Pin<&mut ThreadMessageModel>);
+        #[inherit]
+        #[cxx_name = "endResetModel"]
+        unsafe fn end_reset_model(self: Pin<&mut ThreadMessageModel>);
+
+        #[inherit]
+        #[cxx_name = "beginInsertRows"]
+        unsafe fn begin_insert_rows(
+            self: Pin<&mut PinnedMessageModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
+        #[cxx_name = "endInsertRows"]
+        unsafe fn end_insert_rows(self: Pin<&mut PinnedMessageModel>);
+        #[inherit]
+        #[cxx_name = "beginRemoveRows"]
+        unsafe fn begin_remove_rows(
+            self: Pin<&mut PinnedMessageModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
+        #[cxx_name = "endRemoveRows"]
+        unsafe fn end_remove_rows(self: Pin<&mut PinnedMessageModel>);
+        #[inherit]
+        #[cxx_name = "beginResetModel"]
+        unsafe fn begin_reset_model(self: Pin<&mut PinnedMessageModel>);
+        #[inherit]
+        #[cxx_name = "endResetModel"]
+        unsafe fn end_reset_model(self: Pin<&mut PinnedMessageModel>);
+    }
+
+    extern "RustQt" {
+        #[qinvokable]
+        #[cxx_override]
+        fn data(self: &ThreadMessageModel, index: &QModelIndex, role: i32) -> QVariant;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "roleNames"]
+        fn role_names(self: &ThreadMessageModel) -> QHash_i32_QByteArray;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "rowCount"]
+        fn row_count(self: &ThreadMessageModel, parent: &QModelIndex) -> i32;
+
+        #[qinvokable]
+        #[cxx_override]
+        fn data(self: &PinnedMessageModel, index: &QModelIndex, role: i32) -> QVariant;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "roleNames"]
+        fn role_names(self: &PinnedMessageModel) -> QHash_i32_QByteArray;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "rowCount"]
+        fn row_count(self: &PinnedMessageModel, parent: &QModelIndex) -> i32;
+    }
+}
 use core::pin::Pin;
 
 use cxx_qt_lib::QVector;
@@ -911,6 +1048,13 @@ list_model!(MemberListModel, MemberListModelRust, MemberListRow, members);
 list_model!(UploadListModel, UploadListModelRust, UploadRow, uploads);
 list_model!(GifListModel, GifListModelRust, GifRow, gifs);
 list_model!(EmojiGridModel, EmojiGridModelRust, EmojiRow, emoji);
+list_model!(
+    ThreadMessageModel,
+    ThreadMessageModelRust,
+    MessageRow,
+    thread
+);
+list_model!(PinnedMessageModel, PinnedMessageModelRust, MessageRow, pins);
 
 impl ListModel for qobject::ServerListModel {
     type Row = ServerRow;
@@ -960,6 +1104,16 @@ impl ListModel for qobject::GifListModel {
 impl ListModel for qobject::EmojiGridModel {
     type Row = EmojiRow;
     list_model_ops!(EmojiRow, emoji);
+}
+
+impl ListModel for qobject::ThreadMessageModel {
+    type Row = MessageRow;
+    list_model_ops!(MessageRow, thread);
+}
+
+impl ListModel for qobject::PinnedMessageModel {
+    type Row = MessageRow;
+    list_model_ops!(MessageRow, pins);
 }
 
 impl ListModel for qobject::MessageListModel {

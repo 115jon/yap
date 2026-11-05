@@ -6,7 +6,8 @@ import com.yap.native
 
 // The user popout (UserProfilePopover.tsx): the profile card 8 px beside
 // what opened it, kept 12 px inside the window. Someone else's card has
-// Message (the DM, created when needed) and, when known, About me and
+// Message (the DM, created when needed) with the friend actions
+// (ProfileFriendActions) and, when known, About me and
 // their roles in the shown server. With Manage roles the roles row ends in
 // an Add a role key: a menu of the server's roles, each checked while the
 // member has it, that gives or takes it at once (rolled back with the
@@ -31,6 +32,9 @@ T.Popup {
         side = where
         shownId = userId
         Profile.show(userId)
+        // UserProfilePopover.tsx loads the relationships for someone else.
+        if (userId !== Session.meId)
+            Friends.refresh()
         if (Admin.canManageRoles && !Nav.home)
             Admin.load(Nav.activeServerId, "roles")
         open()
@@ -77,14 +81,13 @@ T.Popup {
         Accessible.role: Accessible.Dialog
         Accessible.name: qsTr("User profile for %1").arg(Profile.username)
 
-        // Message: the primary key across the card.
-        NotchedKey {
+        // Message and the friend actions (ProfileActionRow).
+        ProfileFriendActions {
             visible: !Profile.me && Profile.userId.length > 0
-            width: parent.width
-            large: false
-            ground: Theme.ply3
-            text: qsTr("Message")
-            onClicked: {
+            userId: Profile.userId
+            username: Profile.username
+            name: Profile.name
+            onMessageRequested: {
                 Nav.openDm(Profile.userId)
                 popup.close()
             }

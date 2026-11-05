@@ -19,6 +19,16 @@ QtObject {
 
     property bool showMembers: true
 
+    // The right-hand panels (ChatArea.tsx): one shows at a time, in this
+    // order: search, then the thread (its root message id), then pins,
+    // then members. The thread belongs to the open channel.
+    property bool searchOpen: false
+    property string threadId: ""
+    property bool pinsOpen: false
+    readonly property string sidePanel: searchOpen ? "search"
+        : threadId.length > 0 ? "thread"
+        : pinsOpen ? "pins" : ""
+
     // The call stage (VoiceGrid.tsx `focusedId`): the tile on stage, the
     // participant whose camera or share it is (their share audio is
     // audible; set by the stage while the tile exists), and fullscreen.
@@ -72,6 +82,8 @@ QtObject {
     signal deleteCategoryRequested(string categoryId, string name)
     signal kickRequested(string userId, string name)
     signal banRequested(string userId, string name)
+    // The rail's Create a server (JoinHost opens it).
+    signal createServerRequested()
     // `at` is a point in `anchor`.
     signal memberMenuRequested(string userId, string name, Item anchor, point at)
 

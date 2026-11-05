@@ -44,7 +44,10 @@ MenuPanel {
         height: visible ? implicitHeight : 0
         text: qsTr("Copy link")
         glyph: "link"
-        onTriggered: clipboard.copyText(Admin.webOrigin + "/chat/" + Nav.activeServerId + "/" + menu.itemId)
+        onTriggered: {
+            clipboard.copyText(Admin.webOrigin + "/chat/" + Nav.activeServerId + "/" + menu.itemId)
+            Chat.notice(qsTr("Channel link copied"))
+        }
     }
     MenuRule { visible: menu.onChannel; height: visible ? implicitHeight : 0 }
     MenuRow {

@@ -2,9 +2,13 @@
 //! sequential core performed them, so the UI sees the same updates.
 
 mod admin;
+mod friends;
+mod invites;
 mod media;
+mod search;
 mod settings;
 mod social;
+mod threads;
 
 use std::time::Duration;
 
@@ -79,6 +83,10 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
     }
     state.sync_settings(&mut fx);
     state.sync_admin(&mut fx);
+    state.sync_panels(&mut fx);
+    state.sync_search(&mut fx);
+    state.sync_friends(&mut fx);
+    state.sync_invites(&mut fx);
     fx.0
 }
 
@@ -208,6 +216,7 @@ impl State {
         let (_, message) = self.messages.as_mut()?.remove(id)?;
         fx.messages(ViewDiff::Remove { at, count: 1 });
         self.emit_message_changes(fx, at, [below, None]);
+        self.bump_reply_count(fx, message.reply_to_id.as_deref(), -1);
         Some(message)
     }
 
@@ -225,6 +234,7 @@ impl State {
             .unwrap_or(log.len());
         // The row at `at` moves down one and may regroup under the new one.
         let shifted = self.message_row_at(at);
+        let parent = message.reply_to_id.clone();
         if let Some(log) = self.messages.as_mut() {
             log.insert_sorted(message);
         }
@@ -235,6 +245,7 @@ impl State {
             });
         }
         self.emit_message_changes(fx, at, [None, shifted]);
+        self.bump_reply_count(fx, parent.as_deref(), 1);
     }
 
     /// The open channel's row at `index`, grouped against the one above.
@@ -765,6 +776,7 @@ impl State {
         if !(self.focused && self.at_bottom)
             || self.pending.page.is_some()
             || self.pending.read_states.is_some()
+            || self.detached()
         {
             return;
         }
@@ -837,6 +849,7 @@ impl State {
         self.pending.read_states = self.http(fx, ApiRequest::ReadStates);
         self.pending.notifications = self.http(fx, ApiRequest::Notifications);
         self.pending.dms = self.http(fx, ApiRequest::Dms);
+        self.load_friends(fx, false);
     }
 
     fn mention_query(&mut self, fx: &mut Effects, query: Option<String>) {
@@ -889,7 +902,8 @@ impl State {
     /// messages is unconfirmed: the optimistic chip must not reach the
     /// cache, where a refusal after leaving the channel could not undo it.
     fn persist_messages(&self, fx: &mut Effects) {
-        let Some(log) = &self.messages else {
+        // A jump's window is not the newest one.
+        let Some(log) = self.messages.as_ref().filter(|log| !log.has_more_after) else {
             return;
         };
         if self
@@ -1121,6 +1135,17 @@ impl State {
                 self.set_voice_prefs(fx, prefs);
             }
             Command::Admin(command) => self.on_admin(fx, command),
+            Command::JumpToMessage {
+                channel_id,
+                message_id,
+            } => self.jump_to_message(fx, &channel_id, &message_id),
+            Command::LoadNewer => self.load_newer(fx),
+            Command::JumpToPresent => self.jump_to_present(fx),
+            Command::Thread(command) => self.on_thread(fx, command),
+            Command::Pins(command) => self.on_pins(fx, command),
+            Command::Search(command) => self.on_search(fx, command),
+            Command::Friends(command) => self.on_friends(fx, command),
+            Command::Invites(command) => self.on_invites(fx, command),
         }
     }
 
@@ -1329,6 +1354,10 @@ impl State {
     fn end_session(&mut self, fx: &mut Effects, revoke: bool) {
         self.clear_settings();
         self.clear_admin();
+        self.clear_panels();
+        self.clear_search();
+        self.clear_friends();
+        self.clear_invites();
         self.leave_voice(fx);
         self.close_voice_panel(fx);
         self.voice_channels.clear();
@@ -1456,6 +1485,10 @@ impl State {
         let mut answer = Some(result);
         if self.route_settings_http(fx, id, &mut answer)
             || self.route_admin_http(fx, id, &mut answer)
+            || self.route_thread_http(fx, id, &mut answer)
+            || self.route_search_http(fx, id, &mut answer)
+            || self.route_friends_http(fx, id, &mut answer)
+            || self.route_invites_http(fx, id, &mut answer)
         {
             return;
         }
@@ -1907,11 +1940,11 @@ impl State {
             return;
         }
         // A refetch of what is on screen (the cached window, or a refetch
-        // after a reconnect) changes only the rows that differ.
-        let shown = self
-            .messages
-            .as_ref()
-            .is_some_and(|log| log.channel_id == channel_id && !log.is_empty());
+        // after a reconnect) changes only the rows that differ. A jump's
+        // window is replaced whole.
+        let shown = self.messages.as_ref().is_some_and(|log| {
+            log.channel_id == channel_id && !log.is_empty() && !log.has_more_after
+        });
         let before = if shown {
             self.message_rows()
         } else {
@@ -1996,6 +2029,7 @@ impl State {
         self.emit_history(fx);
         self.sync_badges(fx);
         self.on_seen(fx, false);
+        self.after_page_jump(fx, channel_id);
     }
 
     /// Asks for the page before the oldest loaded message.
@@ -2146,6 +2180,11 @@ impl State {
             return false;
         }
         let me = me.clone();
+        // A send from a jump's window goes back to the newest page, where
+        // its row shows (the web appends it to the window instead).
+        if self.detached() {
+            self.jump_to_present(fx);
+        }
         let reply_to_id = reply_to_id.filter(|id| !id.is_empty());
         let reply_to = reply_to_id
             .as_deref()
@@ -2174,6 +2213,7 @@ impl State {
             nonce: Some(nonce.clone()),
             content_revision: None,
             kind: None,
+            reply_count: 0,
         };
         self.outbox.insert(
             nonce.clone(),
@@ -2398,6 +2438,12 @@ impl State {
         let before = log
             .position(&message.id)
             .map(|i| [self.message_row_at(i), self.message_row_at(i + 1)]);
+        // A jump's window does not reach the end: a new message belongs to
+        // a page it has not loaded yet.
+        if before.is_none() && log.has_more_after {
+            return;
+        }
+        let parent = message.reply_to_id.clone();
         let Some(log) = &mut self.messages else {
             return;
         };
@@ -2412,6 +2458,7 @@ impl State {
                         rows: vec![row],
                     });
                 }
+                self.bump_reply_count(fx, parent.as_deref(), 1);
             }
         }
     }
@@ -2486,6 +2533,7 @@ impl State {
 
     fn on_dispatch(&mut self, fx: &mut Effects, dispatch: Dispatch) {
         let active = self.active_channel.clone().unwrap_or_default();
+        self.panels_dispatch(&dispatch);
         match dispatch {
             Dispatch::MessageCreate(message) => self.on_message_create(fx, *message),
             Dispatch::MessageUpdate(message) => {
@@ -2553,11 +2601,14 @@ impl State {
                 };
                 // The row below moves up into `at` and may regroup.
                 let below = self.message_row_at(at + 1);
-                if let Some(log) = &mut self.messages {
-                    log.remove(&delete.id);
-                }
+                let removed = self
+                    .messages
+                    .as_mut()
+                    .and_then(|log| log.remove(&delete.id));
                 fx.messages(ViewDiff::Remove { at, count: 1 });
                 self.emit_message_changes(fx, at, [below, None]);
+                let parent = removed.and_then(|(_, message)| message.reply_to_id);
+                self.bump_reply_count(fx, parent.as_deref(), -1);
                 self.persist_messages(fx);
             }
             Dispatch::TypingStart(typing) => {
@@ -2638,7 +2689,17 @@ impl State {
             Dispatch::MemberRemove(remove) => self.on_member_remove(fx, remove),
             Dispatch::MemberUpdate(update) => self.on_member_update(fx, update),
             Dispatch::DmCreate(dm) => self.add_dm(fx, *dm),
-            Dispatch::ProfileUpdate(update) => self.on_profile_update(fx, &update),
+            Dispatch::MessagePin(message) => {
+                let id = message.id.clone();
+                self.on_pin_dispatch(fx, &id, true, Some(*message));
+            }
+            Dispatch::MessageUnpin(unpin) => self.on_pin_dispatch(fx, &unpin.id, false, None),
+            Dispatch::ProfileUpdate(update) => {
+                self.on_friend_profile(&update);
+                self.on_profile_update(fx, &update);
+            }
+            Dispatch::RelationshipAdd(relationship) => self.on_relationship_add(*relationship),
+            Dispatch::RelationshipRemove(remove) => self.on_relationship_remove(&remove.user_id),
         }
     }
 

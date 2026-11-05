@@ -37,6 +37,9 @@ constexpr wchar_t kRunKey[] =
   L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr wchar_t kRunValue[] = L"YapNative";
 constexpr wchar_t kDisplayName[] = L"Yap Native";
+// Our deep-link scheme's key (yap_core::links::SCHEME_KEY). Never
+// Software\Classes\yap, the installed app's.
+constexpr wchar_t kSchemeKey[] = L"Software\\Classes\\yap-native";
 constexpr wchar_t kTrayClass[] = L"YapNativeTrayWindow";
 
 constexpr UINT kTrayMessage = WM_APP + 1;
@@ -110,6 +113,22 @@ void registerAumid()
   if (!icon.isEmpty())
     set(L"IconUri", wide(icon));
   RegCloseKey(key);
+}
+
+// The REG_SZ at HKCU `key` `name` (empty: the default value), or a null
+// string when it is missing.
+QString readRegString(const std::wstring& key, const std::wstring& name)
+{
+  DWORD size = 0;
+  const wchar_t* value = name.empty() ? nullptr : name.c_str();
+  if (RegGetValueW(HKEY_CURRENT_USER, key.c_str(), value, RRF_RT_REG_SZ,
+                   nullptr, nullptr, &size) != ERROR_SUCCESS)
+    return QString();
+  std::wstring buffer(size / sizeof(wchar_t) + 1, L'\0');
+  if (RegGetValueW(HKEY_CURRENT_USER, key.c_str(), value, RRF_RT_REG_SZ,
+                   nullptr, buffer.data(), &size) != ERROR_SUCCESS)
+    return QString();
+  return QString::fromWCharArray(buffer.c_str());
 }
 
 LRESULT CALLBACK trayProc(HWND hwnd, UINT message, WPARAM wParam,
@@ -197,15 +216,23 @@ bool DesktopShell::takeInstanceLock()
   return false;
 }
 
-void DesktopShell::showFirstInstance()
+void DesktopShell::showFirstInstance(const QStringList& args)
 {
   // Let the first instance take the foreground when it reveals itself.
   AllowSetForegroundWindow(ASFW_ANY);
+  // One line each: "show", then "arg <argument>" (the first instance
+  // decides which are links).
+  QByteArray message("show\n");
+  for (QString arg : args) {
+    arg.remove(QLatin1Char('\r')).remove(QLatin1Char('\n'));
+    if (!arg.isEmpty())
+      message += "arg " + arg.toUtf8() + '\n';
+  }
   for (int attempt = 0; attempt < 20; ++attempt) {
     QLocalSocket socket;
     socket.connectToServer(pipeName());
     if (socket.waitForConnected(250)) {
-      socket.write("show\n");
+      socket.write(message);
       socket.waitForBytesWritten(500);
       socket.disconnectFromServer();
       std::fprintf(stderr, "[instance] already running; asked it to show\n");
@@ -328,12 +355,76 @@ void DesktopShell::onInstanceConnected()
     connect(socket, &QLocalSocket::disconnected, socket,
             &QObject::deleteLater);
     connect(socket, &QLocalSocket::readyRead, this, [this, socket] {
-      if (socket->readAll().contains("show")) {
-        std::fprintf(stderr, "[instance] launched again; revealing\n");
-        reveal();
+      while (socket->canReadLine()) {
+        const QByteArray line = socket->readLine().trimmed();
+        if (line == "show") {
+          std::fprintf(stderr, "[instance] launched again; revealing\n");
+          reveal();
+        } else if (line.startsWith("arg ")) {
+          openArg(QString::fromUtf8(line.mid(4)));
+        }
       }
     });
   }
+}
+
+void DesktopShell::setLinkHandler(QObject* links)
+{
+  m_links = links;
+}
+
+void DesktopShell::openArg(const QString& arg)
+{
+  if (!m_links)
+    return;
+  bool link = false;
+  QMetaObject::invokeMethod(m_links, "openArg", Qt::DirectConnection,
+                            Q_RETURN_ARG(bool, link), Q_ARG(QString, arg));
+  if (link) {
+    std::fprintf(stderr, "[link] opened from the command line\n");
+    reveal();
+  }
+}
+
+void DesktopShell::registerUrlScheme()
+{
+  if (!m_links)
+    return;
+  const QString exe =
+    QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
+  QString lines;
+  QMetaObject::invokeMethod(m_links, "schemeRegistration", Qt::DirectConnection,
+                            Q_RETURN_ARG(QString, lines), Q_ARG(QString, exe));
+  // Only ever our own key, whatever the list says.
+  const QString root = QString::fromWCharArray(kSchemeKey);
+  int written = 0;
+  for (const QString& line : lines.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+    const QStringList parts = line.split(QLatin1Char('\t'));
+    if (parts.size() != 3)
+      continue;
+    const QString& key = parts[0];
+    if (key.compare(root, Qt::CaseInsensitive) != 0 &&
+        !key.startsWith(root + QLatin1Char('\\'), Qt::CaseInsensitive))
+      continue;
+    const std::wstring wkey = wide(key);
+    const std::wstring wname = wide(parts[1]);
+    const QString current = readRegString(wkey, wname);
+    if (!current.isNull() && current == parts[2])
+      continue;
+    HKEY handle = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, wkey.c_str(), 0, nullptr, 0,
+                        KEY_SET_VALUE, nullptr, &handle,
+                        nullptr) != ERROR_SUCCESS)
+      continue;
+    const std::wstring data = wide(parts[2]);
+    if (RegSetValueExW(handle, wname.empty() ? nullptr : wname.c_str(), 0,
+                       REG_SZ, reinterpret_cast<const BYTE*>(data.c_str()),
+                       static_cast<DWORD>((data.size() + 1) *
+                                          sizeof(wchar_t))) == ERROR_SUCCESS)
+      ++written;
+    RegCloseKey(handle);
+  }
+  std::fprintf(stderr, "[scheme] yap-native: %d value(s) written\n", written);
 }
 
 quintptr DesktopShell::windowHandle() const

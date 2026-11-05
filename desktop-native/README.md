@@ -148,20 +148,61 @@ the decisions.
   first, then every category, empty ones included).
 - The GIF picker (KLIPY via `/api/gifs`: trending, search, GIFs, stickers
   and memes, paging), sending through `/messages/gif` at once.
+- Threads, pins and jumps (`store/threads.rs`, `qml/screens/Panels`): the
+  thread chip and panel (root, replies, its own reply field, live replies,
+  edits and reactions, reply counts), pin and unpin with the confirm and
+  the pinned glyph (Manage messages or more; anyone in a DM), the pins panel
+  with `MESSAGE_PIN` / `MESSAGE_UNPIN`, `Chat.jumpToMessage` with `around=`,
+  the detached window (newer pages, Jump to present, no read marks until
+  the end), and Copy message link.
+- Message search (`yap-core` `search.rs`, `store/search.rs`,
+  `qml/screens/Panels/Search*`): the header field (`/` focuses it) opens
+  the search panel; the web's grammar (`from:`, `mentions:`, `in:`,
+  `has:`, `before:`, `after:`, `during:`, `pinned:`, quoted values) as
+  chips with suggestions and keyboard picks, sort, paging, results grouped
+  by channel with highlighted excerpts, recent searches
+  (`search-recent.json`), and a result jumps to its message. Server search
+  in a server, channel search in a DM.
+- Friends as the web has them (`qml/screens/Friends`, `store/friends.rs`):
+  Home with no DM open is the Friends view (Online, All, Pending split into
+  Incoming and Sent, Blocked; Add friend by username with the web's copy;
+  Accept, Ignore, Cancel and Remove with their confirms; a row opens the
+  DM), the Friends row and the Home key count incoming requests, and the
+  profile card's Add friend, Accept, Decline, Cancel request, Remove friend,
+  Block (with its strip) and Unblock. `/api/friends` loads at sign-in and
+  after a fresh gateway session; `RELATIONSHIP_ADD` / `_REMOVE` keep it
+  current.
+- Creating and joining servers (`qml/screens/Join`, the store in
+  `store/reduce/invites.rs`, links in `yap-core` `links.rs`): the rail's +
+  opens Create a server (icon uploaded first, then `POST /api/servers`;
+  the new server joins the rail and opens). Invite links open the invite
+  landing as a dialog (preview, Accept invite, joined, already a member,
+  invalid or expired, errors with Try again): from a deep link, or a click
+  on our site's `/invite/<code>` link in a message or embed. Our site's
+  channel and message links open in the app. Copy link in the tree's
+  channel menu copies `<site>/chat/<server>/<channel>` as the web does.
+  There is no Leave server: the API has no way to leave yet (as on the
+  web).
+- Deep links on our own scheme, `yap-native://invite/<code>` and
+  `yap-native://chat/<server>/<channel>[?message=<id>]`, registered per
+  user at startup under `HKCU\Software\Classes\yap-native` (only the
+  values that differ are written). A link on the command line, or one a
+  second launch hands over, opens in the running app.
 
 The shell has its own identity, apart from the installed Yap app: AUMID
 and single-instance name `com.115jon.yap.native` (registered under
 `HKCU\Software\Classes\AppUserModelId` only), Run value `YapNative` (off
 unless "Open on startup" is on), data and logs under
-`%LOCALAPPDATA%\YapNative`, and no `yap://` registration.
+`%LOCALAPPDATA%\YapNative`, and its own `yap-native://` scheme (never
+`yap://`).
 
 ## Not yet
 
 Camera backgrounds, the stream watcher list and stream
 volume, input volume, a mic test outside a call, inline video playback, clips in the GIF picker,
 GIF favorites and categories, stickers, emoji generation, the reaction details
-modal, remove-embeds, embed players (WebView2), jumping to
-messages that are not loaded (`around=`), `yap://` deep links, toast buttons (reply, mark read)
+modal, remove-embeds, embed players (WebView2), the member list's threads
+tab, Leave server (no API), toast buttons (reply, mark read)
 and avatars, call rings, the taskbar thumbnail toolbar and auto-update. In
 settings: avatar crop and the recent-avatar picker, display name styles,
 collectibles, username changes, sign-out and session revoke from the page,

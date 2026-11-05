@@ -140,6 +140,10 @@ pub mod qobject {
         // Older pages: one is loading; there are more to load.
         #[qproperty(bool, older_loading, cxx_name = "olderLoading")]
         #[qproperty(bool, has_older, cxx_name = "hasOlder")]
+        // A jump's window short of the newest end (detached): newer pages
+        // exist; one is loading. `hasNewer` shows Jump to present.
+        #[qproperty(bool, has_newer, cxx_name = "hasNewer")]
+        #[qproperty(bool, newer_loading, cxx_name = "newerLoading")]
         // Delete is offered on others' messages too (MANAGE_MESSAGES).
         #[qproperty(bool, can_manage_messages, cxx_name = "canManageMessages")]
         // The composer tray: finished uploads (sent with the next message)
@@ -271,6 +275,35 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "indexOfMessage"]
         fn index_of_message(self: &Chat, id: &QString) -> i32;
+
+        /// Shows a message: its channel (and server) opens first; a loaded
+        /// message is brought into view, anything else loads the window
+        /// around it. Then `jumped` names it. Search results, deep links,
+        /// pins and reply quotes all come here.
+        #[qinvokable]
+        #[cxx_name = "jumpToMessage"]
+        fn jump_to_message(self: &Chat, channel_id: &QString, message_id: &QString);
+
+        /// The message to centre and highlight (accent tint, then a 300 ms
+        /// fade), once its row is in `MessageListModel`.
+        #[qsignal]
+        fn jumped(self: Pin<&mut Chat>, message_id: QString);
+
+        /// The detached list is near its end: load the page after it.
+        #[qinvokable]
+        #[cxx_name = "loadNewer"]
+        fn load_newer(self: &Chat);
+
+        /// "Jump to present": the newest page again.
+        #[qinvokable]
+        #[cxx_name = "jumpToPresent"]
+        fn jump_to_present(self: &Chat);
+
+        /// The web link to a message of the open channel ("Copy message
+        /// link"): `{origin}/chat/{server or @me}/{channel}?message={id}`.
+        #[qinvokable]
+        #[cxx_name = "messageLink"]
+        fn message_link(self: &Chat, message_id: &QString) -> QString;
     }
 
     impl cxx_qt::Initialize for Chat {}
@@ -517,6 +550,8 @@ pub struct ChatRust {
     unread_since_day: i32,
     older_loading: bool,
     has_older: bool,
+    has_newer: bool,
+    newer_loading: bool,
     can_manage_messages: bool,
     uploads_ready: i32,
     uploads_busy: i32,
@@ -675,7 +710,7 @@ fn next_nonce(now: Duration) -> String {
 }
 
 /// A fresh nonce and the local send time, as the composer stamps a send.
-fn stamp() -> (String, String) {
+pub(crate) fn stamp() -> (String, String) {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
@@ -818,6 +853,33 @@ impl qobject::Chat {
                 .map(|r| QString::from(r.id.as_str()))
                 .unwrap_or_default()
         })
+    }
+
+    pub fn jump_to_message(&self, channel_id: &QString, message_id: &QString) {
+        client::command(Command::JumpToMessage {
+            channel_id: channel_id.to_string(),
+            message_id: message_id.to_string(),
+        });
+    }
+
+    pub fn load_newer(&self) {
+        client::command(Command::LoadNewer);
+    }
+
+    pub fn jump_to_present(&self) {
+        client::command(Command::JumpToPresent);
+    }
+
+    pub fn message_link(&self, message_id: &QString) -> QString {
+        let (server, channel) = gui::link_route();
+        let origin = &yap_core::config::get().api_base;
+        let link = yap_core::store::message_link(
+            origin,
+            server.as_deref(),
+            &channel,
+            &message_id.to_string(),
+        );
+        QString::from(link.as_str())
     }
 
     pub fn index_of_message(&self, id: &QString) -> i32 {

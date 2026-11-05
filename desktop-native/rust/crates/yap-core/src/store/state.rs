@@ -107,6 +107,9 @@ pub struct MessageLog {
     pub channel_id: String,
     /// The server has older messages than the first one here.
     pub has_more_before: bool,
+    /// The server has newer messages than the last one here: a jump's
+    /// window, detached from the newest end (useChatArea.ts isDetached).
+    pub has_more_after: bool,
     messages: Vec<Message>,
     index: HashMap<String, usize>,
 }
@@ -133,6 +136,11 @@ impl MessageLog {
 
     pub fn get(&self, id: &str) -> Option<&Message> {
         self.index.get(id).map(|&i| &self.messages[i])
+    }
+
+    /// A message to change in place (fields that keep its position).
+    pub fn get_mut(&mut self, id: &str) -> Option<&mut Message> {
+        self.index.get(id).map(|&i| &mut self.messages[i])
     }
 
     /// The message at a list position.
@@ -345,6 +353,8 @@ pub(super) struct Projection {
     pub gifs: Vec<GifRow>,
     pub settings: SettingsView,
     pub admin: AdminView,
+    pub search: super::search::SearchView,
+    pub friends: super::FriendsView,
 }
 
 /// One step of a profile save, run in order; a failure stops the rest.
@@ -461,6 +471,10 @@ pub(super) struct Pending {
     pub settings: SettingsPending,
     /// Server and channel administration.
     pub admin: HashMap<RequestId, super::admin::AdminOp>,
+    /// The search in flight (a newer one replaces it).
+    pub search: Option<super::search::SearchPending>,
+    /// Friends and relationships.
+    pub friends: HashMap<RequestId, super::friends::FriendsOp>,
 }
 
 /// An optimistic reaction add or remove, undone if the server refuses.
@@ -707,6 +721,12 @@ pub struct State {
     pub(super) toasted: Toasted,
     pub(super) settings: SettingsState,
     pub(super) admin: super::AdminState,
+    /// Threads, pins and jumps.
+    pub(super) panels: super::threads::PanelsState,
+    pub(super) search: super::SearchState,
+    /// Relationships (friends, requests, blocked).
+    pub(super) friends: super::FriendsState,
+    pub(super) invites: super::InviteState,
     pub(super) view: Projection,
     pub(super) pending: Pending,
     pub(super) boot: Option<Boot>,
@@ -763,6 +783,10 @@ impl State {
             toasted: Toasted::default(),
             settings: SettingsState::default(),
             admin: super::AdminState::default(),
+            panels: Default::default(),
+            search: super::SearchState::default(),
+            friends: super::FriendsState::default(),
+            invites: super::InviteState::default(),
             view: Projection::default(),
             pending: Pending::default(),
             boot: None,

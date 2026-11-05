@@ -37,7 +37,7 @@ Rectangle {
 
             // Home: the two-tone mark lifts the tile to tint-2 (tint-3 when
             // selected; the art would vanish on primary-fill). Its count is
-            // the unread DMs the rail has no room for.
+            // the unread DMs the rail has no room for, plus friend requests.
             Item {
                 width: parent.width
                 height: Theme.railTile
@@ -77,7 +77,9 @@ Rectangle {
                 CountBadge {
                     x: homeTile.x + homeTile.width - width + 6
                     y: homeTile.y + homeTile.height - height + 6
-                    count: root.dmOverflow
+                    // ChatPageClient.tsx `homeBadgeCount`: the overflow DMs plus
+                    // incoming friend requests.
+                    count: Friends.homeBadge
                     ring: 2
                     ground: Theme.ply0
                 }
@@ -170,7 +172,7 @@ Rectangle {
         footer: Item {
             width: list.width
             height: Theme.railTile + 8
-            // Create server: an outlined tile (not wired yet).
+            // Create server: an outlined tile; opens Create a server.
             Rectangle {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
@@ -180,15 +182,18 @@ Rectangle {
                 color: "transparent"
                 border.width: 2
                 border.color: Theme.lineStrong
+                scale: addTap.pressed ? Theme.scalePressIcon : 1
                 Accessible.role: Accessible.Button
                 Accessible.name: qsTr("Create server")
+                Accessible.onPressAction: ShellState.createServerRequested()
                 Icon {
                     anchors.centerIn: parent
                     name: "add"
                     size: Theme.iconLg
                     color: addHover.hovered ? Theme.ink1 : Theme.ink2
                 }
-                HoverHandler { id: addHover }
+                HoverHandler { id: addHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { id: addTap; onTapped: ShellState.createServerRequested() }
             }
         }
     }

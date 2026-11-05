@@ -9,7 +9,8 @@
 //
 // Its identity is its own everywhere. The installed Yap app owns
 // com.115jon.yap, the Run value "Yap", the yap:// scheme and its folders;
-// none of them is read or written here.
+// none of them is read or written here. Deep links use our own
+// yap-native:// (HKCU\Software\Classes\yap-native only).
 //
 // QML (import Yap.Chrome):
 //   DesktopShell.badgeCount / badgeDot / badgeTooltip   (bind from Desktop)
@@ -21,6 +22,7 @@
 #include <QtCore/QPointer>
 #include <QtCore/QRect>
 #include <QtCore/QString>
+#include <QtCore/QStringList>
 #include <QtCore/QTimer>
 
 class QLocalServer;
@@ -43,9 +45,19 @@ public:
   // True for the first instance (it holds a named mutex from then on).
   // Needs no Qt, so it can run before the log file starts.
   static bool takeInstanceLock();
-  // A later instance: asks the first to show its window. Needs a
+  // A later instance: asks the first to show its window and hands it this
+  // command line's arguments (a yap-native:// link among them). Needs a
   // QCoreApplication; the caller exits after it.
-  static void showFirstInstance();
+  static void showFirstInstance(const QStringList& args);
+
+  // The Rust `Invites` object: arguments from later instances go to its
+  // `openArg`, and `registerUrlScheme` asks it for the registration.
+  void setLinkHandler(QObject* links);
+  // Writes the per-user yap-native:// registration (HKCU) where it differs
+  // from what `Invites.schemeRegistration` asks for. Idempotent.
+  void registerUrlScheme();
+  // Hands one command-line argument to the link handler.
+  void openArg(const QString& arg);
 
   // The main window and the Rust `Desktop` object: restores the saved rect,
   // creates the tray icon, listens for later instances, and shows the
@@ -94,6 +106,7 @@ private:
 
   QPointer<QQuickWindow> m_window;
   QPointer<QObject> m_desktop;
+  QPointer<QObject> m_links;
   QLocalServer* m_server = nullptr;
 
   // The hidden window that receives the tray icon's messages.

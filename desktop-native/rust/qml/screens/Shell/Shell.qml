@@ -5,7 +5,7 @@ import com.yap.native
 
 // The signed-in shell: server rail, the tree panel (or the DM list at
 // Home), then the open conversation: its messages, a voice channel's view,
-// or the Home landing. The member panel docks on the right at 1024 px and
+// or Friends at Home. The member panel docks on the right at 1024 px and
 // up (useMediaQuery.ts lg; DESIGN.md's 1280 is stale) and is a right sheet
 // below that. The user popout opens from any row through ShellState.
 RowLayout {
@@ -13,8 +13,11 @@ RowLayout {
 
     readonly property bool chatShown: Nav.voicePanelId.length === 0 && Nav.activeChannelId.length > 0
     readonly property bool docked: width >= 1024
-    readonly property bool membersShown: ShellState.showMembers && chatShown
+    // Search, a thread or pins take the members' place (ChatArea.tsx).
+    readonly property bool panelShown: ShellState.sidePanel.length > 0 && chatShown
+    readonly property bool membersShown: ShellState.showMembers && chatShown && !panelShown
     readonly property bool sheetWanted: membersShown && !docked
+    readonly property bool panelSheetWanted: panelShown && !docked
 
     // Closing the sheet for a layout change (the chat went away, the window
     // widened) keeps the preference; only a dismissal turns it off.
@@ -27,6 +30,48 @@ RowLayout {
             sheet.close()
         }
     }
+
+    // Like sheetWanted, for the side panels' sheet.
+    property bool closingPanelForLayout: false
+    onPanelSheetWantedChanged: {
+        if (panelSheetWanted) {
+            panelSheet.open()
+        } else if (panelSheet.visible) {
+            closingPanelForLayout = true
+            panelSheet.close()
+        }
+    }
+
+    function closeSidePanel() {
+        if (ShellState.sidePanel === "search")
+            ShellState.searchOpen = false
+        else if (ShellState.sidePanel === "thread")
+            ShellState.threadId = ""
+        else if (ShellState.sidePanel === "pins")
+            ShellState.pinsOpen = false
+    }
+
+    // A thread belongs to its channel.
+    Connections {
+        target: Nav
+        function onActiveChannelIdChanged() { ShellState.threadId = "" }
+    }
+
+    Component {
+        id: searchPanel
+        SearchPanel { onCloseRequested: root.closeSidePanel() }
+    }
+    Component {
+        id: threadPanel
+        ThreadPanel { onCloseRequested: root.closeSidePanel() }
+    }
+    Component {
+        id: pinsPanel
+        PinsPanel { onCloseRequested: root.closeSidePanel() }
+    }
+    readonly property Component sidePanelComponent: ShellState.sidePanel === "search" ? searchPanel
+        : ShellState.sidePanel === "thread" ? threadPanel
+        : ShellState.sidePanel === "pins" ? pinsPanel : null
 
     spacing: 0
 
@@ -66,9 +111,11 @@ RowLayout {
             anchors.fill: parent
             visible: Nav.voicePanelId.length === 0 && (!Nav.home || Nav.activeChannelId.length > 0)
         }
-        HomeLanding {
+        // Home with no conversation open: Friends (it loads as it opens).
+        Loader {
             anchors.fill: parent
-            visible: Nav.home && Nav.activeChannelId.length === 0 && Nav.voicePanelId.length === 0
+            active: Nav.home && Nav.activeChannelId.length === 0 && Nav.voicePanelId.length === 0
+            sourceComponent: FriendsView {}
         }
         Loader {
             anchors.fill: parent
@@ -91,6 +138,60 @@ RowLayout {
         MemberPanel {
             anchors.fill: parent
             anchors.leftMargin: 1
+        }
+    }
+
+    // Docked side panel: a 360 px ply-1 column with a seam on its left.
+    Rectangle {
+        visible: root.panelShown && root.docked
+        Layout.fillHeight: true
+        Layout.preferredWidth: 360
+        color: Theme.ply1
+        Rectangle {
+            width: 1
+            height: parent.height
+            color: Theme.line
+        }
+        Loader {
+            anchors.fill: parent
+            anchors.leftMargin: 1
+            active: root.panelShown && root.docked
+            sourceComponent: root.sidePanelComponent
+        }
+    }
+
+    // Below 1024: the side panel as a right sheet (ply-3), like members.
+    T.Drawer {
+        id: panelSheet
+        edge: Qt.RightEdge
+        width: 360
+        height: root.height
+        y: 0
+        modal: true
+        interactive: false
+        onClosed: {
+            if (!root.closingPanelForLayout)
+                root.closeSidePanel()
+            root.closingPanelForLayout = false
+        }
+        enter: Transition {
+            NumberAnimation { property: "position"; to: 1; duration: Theme.dur4; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
+        }
+        exit: Transition {
+            NumberAnimation { property: "position"; to: 0; duration: Theme.dur4Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
+        }
+        background: Rectangle {
+            color: Theme.ply3
+            Rectangle {
+                width: 1
+                height: parent.height
+                color: Theme.lineStrong
+            }
+        }
+        T.Overlay.modal: Rectangle { color: Theme.scrim }
+        contentItem: Loader {
+            active: panelSheet.visible && root.panelShown
+            sourceComponent: root.sidePanelComponent
         }
     }
 
@@ -172,6 +273,12 @@ RowLayout {
 
     // Server and channel settings, the create, invite and confirm dialogs.
     AdminHost {
+        Layout.preferredWidth: 0
+        Layout.preferredHeight: 0
+    }
+
+    // Create a server and the invite landing.
+    JoinHost {
         Layout.preferredWidth: 0
         Layout.preferredHeight: 0
     }

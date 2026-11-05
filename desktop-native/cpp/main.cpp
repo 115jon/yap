@@ -159,7 +159,7 @@ int main(int argc, char* argv[])
   QGuiApplication app(argc, argv);
   // A second launch shows the first instance's window and exits.
   if (!first) {
-    DesktopShell::showFirstInstance();
+    DesktopShell::showFirstInstance(app.arguments().mid(1));
     return 0;
   }
   QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/app/yap-256.png")));
@@ -220,8 +220,15 @@ int main(int argc, char* argv[])
     // captionless. The shell restores the saved rect and shows it (or
     // keeps it in the tray on an autostart launch with start minimized).
     chrome->attach(window);
+    // Deep links: our own yap-native:// (registered per user where it
+    // differs), from this command line and from later instances.
+    shell->setLinkHandler(
+      engine.singletonInstance<QObject*>("com.yap.native", "Invites"));
     shell->attach(window, engine.singletonInstance<QObject*>(
                             "com.yap.native", "Desktop"));
+    shell->registerUrlScheme();
+    for (const QString& arg : app.arguments().mid(1))
+      shell->openArg(arg);
     // First frame on screen: printed for the cold-start measurement.
     QObject::connect(
       window, &QQuickWindow::frameSwapped, window,

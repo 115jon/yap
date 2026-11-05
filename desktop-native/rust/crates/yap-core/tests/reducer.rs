@@ -464,6 +464,8 @@ fn first_page_should_project_messages_like_before() {
             reply_initials: String::new(),
             reply_text: String::new(),
             reply_placeholder: false,
+            reply_count: 0,
+            pinned: false,
         }
     );
     assert!(list[0].attachments.contains(r#""name":"notes.txt""#));
@@ -2134,6 +2136,7 @@ fn cached_boot_should_revalidate_everything_in_one_batch() {
             ApiRequest::ReadStates,
             ApiRequest::Notifications,
             ApiRequest::Dms,
+            ApiRequest::Friends(yap_core::store::FriendsRequest::List),
         ]
     );
 }
@@ -2954,9 +2957,10 @@ fn a_reply_send_should_quote_the_parent_at_once() {
         nonce: "n1".into(),
         sent_at: A3.into(),
     });
+    // Then the parent's reply count moves (an update of its row).
     assert!(matches!(
         message_diffs(&fx)[..],
-        [ViewDiff::Insert { rows, .. }] if rows[0].reply_id == "m1"
+        [ViewDiff::Insert { rows, .. }, ..] if rows[0].reply_id == "m1"
     ));
 }
 

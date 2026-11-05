@@ -4,8 +4,8 @@ import com.yap.native
 
 // The tree panel at Home (DMSidebar.tsx): the 48 px header with the
 // conversation finder, the "Direct messages" branch label on the row-name
-// edge, then one row per DM in /api/dms order (new ones on top). Friends
-// and Shop come later.
+// edge, then one row per DM in /api/dms order (new ones on top). Above it,
+// the Friends row (the Shop row is not in this build).
 Item {
     id: root
 
@@ -71,10 +71,65 @@ Item {
 
         header: Item {
             width: list.width - list.leftMargin
-            height: 16 + 24 + 2
+            height: 8 + Theme.treeRow + 16 + 24 + 2
+            // Friends (DMSidebar.tsx NavRow): selected while no DM is open,
+            // with the incoming requests' count.
+            Rectangle {
+                id: friendsRow
+                y: 8
+                width: parent.width
+                height: Theme.treeRow
+                radius: Theme.radius
+                readonly property bool selected: Nav.activeChannelId.length === 0
+                color: selected ? Theme.tint2 : friendsHover.hovered ? Theme.tint1 : "transparent"
+                Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+                activeFocusOnTab: true
+                Accessible.role: Accessible.Button
+                Accessible.name: Friends.pending > 0 ? qsTr("Friends, %n pending request(s)", "", Friends.pending) : qsTr("Friends")
+                Accessible.selected: selected
+                Keys.onReturnPressed: Nav.selectHome()
+                Keys.onSpacePressed: Nav.selectHome()
+                HoverHandler { id: friendsHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: Nav.selectHome() }
+                Icon {
+                    id: friendsGlyph
+                    x: 8 + 2
+                    anchors.verticalCenter: parent.verticalCenter
+                    name: "members"
+                    variant: friendsRow.selected ? "active" : "idle"
+                    size: Theme.iconSm
+                    color: friendsRow.selected ? Theme.ink1 : Theme.ink3
+                }
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8 + 28
+                    anchors.right: friendsBadge.left
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Friends")
+                    elide: Text.ElideRight
+                    color: friendsRow.selected || friendsHover.hovered ? Theme.ink1 : Theme.ink2
+                    font: Theme.type.row
+                }
+                CountBadge {
+                    id: friendsBadge
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    count: Friends.pending
+                }
+                Rectangle {
+                    anchors.fill: parent
+                    visible: friendsRow.activeFocus
+                    color: "transparent"
+                    radius: Theme.radius
+                    border.width: 2
+                    border.color: Theme.focus
+                }
+            }
             Text {
                 x: 8 + 28
-                y: 16
+                y: 8 + Theme.treeRow + 16
                 height: 24
                 verticalAlignment: Text.AlignVCenter
                 text: qsTr("Direct messages")

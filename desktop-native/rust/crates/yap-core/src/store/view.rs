@@ -260,6 +260,10 @@ rows! {
         reply_text: String => ReplyText "replyText",
         /// `reply_text` is a placeholder ("(no content)"), not the parent text.
         reply_placeholder: bool => ReplyPlaceholder "replyPlaceholder",
+        /// Replies to this message (the thread chip shows when above 0).
+        reply_count: i64 => ReplyCount "replyCount",
+        /// Pinned in its channel (the pin glyph by the time).
+        pinned: bool => Pinned "pinned",
     }
     key(row) -> String { row.id.clone() }
 
@@ -1043,6 +1047,12 @@ pub enum ViewUpdate {
     /// Server and channel administration, and what the user may do in the
     /// shown server.
     Admin(Box<AdminView>),
+    /// The search panel.
+    Search(Box<super::SearchView>),
+    /// Relationships: the Friends view, the badges and the profile card's state.
+    Friends(Box<super::FriendsView>),
+    /// Creating and joining servers, and links into the app.
+    Invites(Box<super::invites::InviteView>),
     /// A native toast. The shell drops it when notifications are off.
     Toast(Box<ToastView>),
     /// A UI sound. The shell drops it when sounds are off.
@@ -1066,6 +1076,21 @@ pub enum ViewUpdate {
     Saved {
         path: String,
         open: bool,
+    },
+    /// The open thread's rows: its root, then the replies.
+    ThreadMessages(Box<ViewDiff<MessageRow>>),
+    /// The pins panel's rows, newest first.
+    PinnedMessages(Box<ViewDiff<MessageRow>>),
+    /// The thread and pins panels' scalars.
+    Panels(Box<super::PanelsView>),
+    /// Bring this message of the open channel into view and highlight it
+    /// (a jump; after a window replaced the list, in the same batch).
+    JumpTo(String),
+    /// Newer pages of a detached list: one is loading; there are more
+    /// (the list is not at the channel's newest end).
+    Newer {
+        loading: bool,
+        more: bool,
     },
 }
 
@@ -1674,6 +1699,8 @@ pub(super) fn message_row(
         reply_initials: reply.map(|_| initials(reply_name)).unwrap_or_default(),
         reply_text,
         reply_placeholder,
+        reply_count: message.reply_count.max(0),
+        pinned: message.is_pinned,
     }
 }
 
