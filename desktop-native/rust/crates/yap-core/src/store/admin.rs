@@ -33,6 +33,11 @@ pub enum AdminCommand {
     DeleteServer {
         confirm: String,
     },
+    /// The server menu's Leave server (not the owner): leave it, and drop
+    /// it as `GUILD_DELETE` does.
+    LeaveServer {
+        server_id: String,
+    },
     SetInvitesPaused(bool),
     /// Server settings → Invites → New invite link (max age in seconds).
     CreateInvite {
@@ -160,6 +165,11 @@ pub enum AdminRequest {
         patch: Value,
     },
     DeleteServer {
+        server_id: String,
+    },
+    /// `DELETE /api/servers/{id}/members/@me`: `{left: true}`; an owner
+    /// gets 403 `{error, code}`.
+    LeaveServer {
         server_id: String,
     },
     /// Server settings → Invites: `{channel_id?, max_age?, max_uses?,
@@ -316,6 +326,7 @@ impl AdminRequest {
             | Self::Reorder { .. } => Method::Patch,
             Self::SetMemberRoles { .. } | Self::PutOverride { .. } => Method::Put,
             Self::DeleteServer { .. }
+            | Self::LeaveServer { .. }
             | Self::RevokeInvite { .. }
             | Self::DeleteRole { .. }
             | Self::Unban { .. }
@@ -357,6 +368,7 @@ impl AdminRequest {
             Self::Kick { server_id, user_id } => {
                 format!("{}/members/{}", servers(server_id), query_value(user_id))
             }
+            Self::LeaveServer { server_id } => format!("{}/members/@me", servers(server_id)),
             Self::SetMemberRoles {
                 server_id, user_id, ..
             } => format!(
@@ -500,6 +512,7 @@ impl AdminRequest {
             | Self::AuditLogs { .. }
             | Self::Overrides { .. }
             | Self::DeleteServer { .. }
+            | Self::LeaveServer { .. }
             | Self::RevokeInvite { .. }
             | Self::DeleteRole { .. }
             | Self::Kick { .. }
@@ -531,6 +544,7 @@ impl AdminRequest {
                 AdminResponse::Channel(serde_json::from_value(body).ok().map(Box::new))
             }
             Self::DeleteServer { .. }
+            | Self::LeaveServer { .. }
             | Self::RevokeInvite { .. }
             | Self::UpdateRole { .. }
             | Self::DeleteRole { .. }
@@ -617,6 +631,9 @@ pub(super) enum AdminThen {
         patch: Value,
     },
     ServerDeleted {
+        server_id: String,
+    },
+    ServerLeft {
         server_id: String,
     },
     InvitesPaused {

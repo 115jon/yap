@@ -1665,3 +1665,94 @@ fn the_role_groups_should_follow_the_web_order() {
         ]
     );
 }
+
+// Leave server
+
+fn leave_request() -> ApiRequest {
+    admin(AdminRequest::LeaveServer {
+        server_id: "srv_fixture_two".into(),
+    })
+}
+
+#[test]
+fn leave_server_should_delete_our_own_membership() {
+    let request = AdminRequest::LeaveServer {
+        server_id: "srv_fixture_two".into(),
+    };
+    assert_eq!(
+        (request.method(), request.path(), request.body()),
+        (
+            Method::Delete,
+            "/api/servers/srv_fixture_two/members/@me".into(),
+            Value::Null
+        )
+    );
+}
+
+#[test]
+fn a_member_should_leave_and_the_server_should_go_from_the_rail() {
+    let mut client = Client::owner();
+    client.command(AdminCommand::LeaveServer {
+        server_id: "srv_fixture_two".into(),
+    });
+    client.respond(&leave_request(), json!({ "left": true }));
+    let ids: Vec<&str> = client.servers.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, [SERVER]);
+}
+
+#[test]
+fn the_owner_should_not_be_offered_a_leave() {
+    let mut client = Client::owner();
+    let fx = client.command(AdminCommand::LeaveServer {
+        server_id: SERVER.into(),
+    });
+    assert!(!fx.iter().any(|e| matches!(
+        e,
+        Effect::Http {
+            request: ApiRequest::Admin(AdminRequest::LeaveServer { .. }),
+            ..
+        }
+    )));
+}
+
+#[test]
+fn an_owner_refusal_should_show_the_routes_sentence() {
+    let mut client = Client::owner();
+    client.command(AdminCommand::LeaveServer {
+        server_id: "srv_fixture_two".into(),
+    });
+    client.answer(
+        |r| matches!(r, ApiRequest::Admin(AdminRequest::LeaveServer { .. })),
+        |_| {
+            Err(ApiError::Http {
+                status: 403,
+                message:
+                    "Server owners can't leave. Transfer ownership or delete the server instead."
+                        .into(),
+            })
+        },
+    );
+    assert_eq!(
+        client.act("leave-server").error,
+        "Server owners can't leave. Transfer ownership or delete the server instead."
+    );
+    assert_eq!(client.servers.len(), 2);
+}
+
+#[test]
+fn a_missing_route_should_say_leaving_is_not_available_yet() {
+    for status in [404, 405] {
+        let mut client = Client::owner();
+        client.command(AdminCommand::LeaveServer {
+            server_id: "srv_fixture_two".into(),
+        });
+        client.answer(
+            |r| matches!(r, ApiRequest::Admin(AdminRequest::LeaveServer { .. })),
+            |_| Err(http_error(status)),
+        );
+        assert_eq!(
+            client.act("leave-server").error,
+            "Leaving servers isn't available yet. Try again after Yap updates."
+        );
+    }
+}

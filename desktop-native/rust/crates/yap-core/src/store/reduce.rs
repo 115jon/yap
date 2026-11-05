@@ -2,6 +2,7 @@
 //! sequential core performed them, so the UI sees the same updates.
 
 mod admin;
+mod apps;
 mod friends;
 mod invites;
 mod media;
@@ -68,6 +69,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
         Input::Gateway { session, event } => state.on_gateway(&mut fx, session, event),
         Input::Voice { call, update } => state.on_voice(&mut fx, call, update),
         Input::UploadProgress { id, sent } => state.on_upload_progress(&mut fx, id, sent),
+        Input::Audio(event) => state.on_audio(&mut fx, event),
         Input::TypingExpired {
             user_id,
             generation,
@@ -87,6 +89,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
     state.sync_search(&mut fx);
     state.sync_friends(&mut fx);
     state.sync_invites(&mut fx);
+    state.sync_apps(&mut fx);
     fx.0
 }
 
@@ -1145,6 +1148,7 @@ impl State {
             Command::Pins(command) => self.on_pins(fx, command),
             Command::Search(command) => self.on_search(fx, command),
             Command::Friends(command) => self.on_friends(fx, command),
+            Command::Apps(command) => self.on_apps(fx, command),
             Command::Invites(command) => self.on_invites(fx, command),
         }
     }
@@ -1489,6 +1493,7 @@ impl State {
             || self.route_search_http(fx, id, &mut answer)
             || self.route_friends_http(fx, id, &mut answer)
             || self.route_invites_http(fx, id, &mut answer)
+            || self.route_apps_http(fx, id, &mut answer)
         {
             return;
         }
@@ -1578,6 +1583,7 @@ impl State {
             Ok(other) => return self.me_failed(fx, &unexpected(&other)),
             Err(error) => return self.me_failed(fx, &error),
         };
+        self.apps_on_me(&me);
         let Some(session) = &mut self.session else {
             return;
         };
@@ -2937,7 +2943,8 @@ impl State {
             return;
         };
         let target = VoiceTarget {
-            server_id,
+            server_id: server_id.clone(),
+            me_id: me.id.clone(),
             channel_id: channel_id.clone(),
             me_name: me.label().to_owned(),
             me_username: me.username.clone(),
@@ -2966,6 +2973,7 @@ impl State {
         }
         self.voice = Some(VoiceCall {
             id: call,
+            server_id,
             channel_id,
             status: "Connecting".into(),
             roster: Vec::new(),
@@ -2987,7 +2995,15 @@ impl State {
     /// leave sound and sends the presence leave (op 34); one the room never
     /// answered just goes.
     fn leave_voice(&mut self, fx: &mut Effects) {
+        // The leave sound goes before the leave (auto-soundboard.ts).
+        if let (Some(frame), Some(call)) = (self.apps_leave_frame(), self.voice.as_ref()) {
+            fx.push(Effect::Voice {
+                call: call.id,
+                command: VoiceCommand::SendApp(frame),
+            });
+        }
         if let Some(call) = self.voice.take() {
+            self.apps_call_ended(fx);
             if call.joined {
                 fx.view(ViewUpdate::Sound(Sound::Disconnect));
             }
@@ -3130,10 +3146,17 @@ impl State {
                 let join = Self::voice_join_frame(current);
                 self.gateway_send(fx, join);
             }
+            VoiceUpdate::VoiceReady { participant_id } => {
+                return self.on_apps_voice_ready(fx, participant_id);
+            }
+            VoiceUpdate::App { event, now_ms } => {
+                return self.on_app_event(fx, *event, now_ms);
+            }
             VoiceUpdate::Ended(error) => {
                 // A forced end: the leave sound and presence leave only if
                 // the room had said Ready.
                 if let Some(ended) = self.voice.take() {
+                    self.apps_call_ended(fx);
                     if ended.joined {
                         fx.view(ViewUpdate::Sound(Sound::Disconnect));
                         self.gateway_send(fx, Self::voice_leave_frame(&ended.channel_id));

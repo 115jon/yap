@@ -10,6 +10,7 @@
 //! belong to, with the same rule.
 
 mod admin;
+pub mod apps;
 mod effect;
 mod friends;
 mod input;
@@ -72,6 +73,8 @@ pub struct SignInId(pub u64);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VoiceTarget {
     pub server_id: String,
+    /// The signed-in user (soundboard playback ids, activities).
+    pub me_id: String,
     pub channel_id: String,
     pub me_name: String,
     pub me_username: String,
@@ -93,6 +96,10 @@ pub enum VoiceCommand {
     SetShareAudio(bool),
     /// The share's quality preset id.
     SetShareQuality(String),
+    /// A voice app event (op 106) frame to send.
+    SendApp(String),
+    /// Our own soundboard clip is audible (op 5 SOUNDSHARE).
+    SetSoundboardSpeaking(bool),
     Leave,
 }
 
@@ -174,6 +181,17 @@ pub enum VoiceUpdate {
     ShareEnded {
         stop_sound: bool,
         error: Option<String>,
+    },
+    /// The voice socket is ready (first time or after a re-identify);
+    /// `participant_id` is ours.
+    VoiceReady {
+        participant_id: String,
+    },
+    /// A voice app event (op 106), stamped with the wall clock it arrived
+    /// at (Listen Together and soundboard timing).
+    App {
+        event: Box<yap_protocol::voice_app::AppEvent>,
+        now_ms: i64,
     },
     /// The call is over; the error text if it failed.
     Ended(Option<String>),

@@ -7,8 +7,14 @@ what YapNative needs to match it.
 Progress, 2026-11-05: 1.6 (pins), 1.7 (threads, with the member list's
 Threads tab and edits, deletes and reactions on thread-only replies) and
 1.8 (search) are done; 3.5 and 3.6 are done, their lists built a page at a
-time. The channel details' Media, Links and Files tabs and Leave server are
-still open. README.md has the detail.
+time. The channel details' Media, Links and Files tabs are still open.
+README.md has the detail.
+
+Progress, 2026-11-05 (phase 4A): 1.12 (soundboard with join and leave
+sounds), 2.1 (Listen Together, music only), 2.12 (activities: Daily Word;
+Warp Rush not built), 3.7 (soundboard upload and delete; edit not built)
+and Leave server (`DELETE /api/servers/{id}/members/@me`, not yet on prod)
+are done. See "Phase 4A" at the end.
 
 Read alongside:
 
@@ -545,3 +551,20 @@ in Tier 1, because it unlocks most of Tiers 2-3 as panels at once.
   profile is untested.
 - Auto-update channel for YapNative: reuse GitHub `latest.json` with a new
   target, or a separate feed.
+
+## Phase 4A: voice apps and Leave server
+
+| Feature                              | Native                                                                                                              | Wire                                                                                                                                                     | Status                                                                                     |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Soundboard play, stop, pause, volume | `yap-protocol` `voice_app.rs` (types, the room's sanitizers), `yap-core` `store/reduce/apps.rs`, `crates/yap-audio` | op 106 `soundboard.play`, `.stop`, `.pause-set`, `.volume-set`, `.catalog-updated`, `.server-mute-set` (in)                                              | live-tested                                                                                |
+| Built-in tones                       | `yap-audio` tones (the web's oscillator and ramp)                                                                   | `sound_id` `ping`/`pop`/`chime`/`tada`                                                                                                                   | live-tested                                                                                |
+| Server sounds                        | catalog, upload, delete                                                                                             | GET/DELETE `/api/servers/{id}/soundboard`, POST `/api/channels/{id}/messages/upload` (`purpose=soundboard`), GET `/api/soundboard/uploads/{id}` (bearer) | catalog live; upload and delete tests only                                                 |
+| Join and leave sounds                | store (`trigger_map`, the web's normalising), Settings → Soundboard                                                 | PATCH `/api/users/me` `{sound_settings}`, `automatic_event`, `max_duration_seconds` ≤ 3                                                                  | tests only                                                                                 |
+| SOUNDSHARE speaking flag             | `yap-voice` op 5 flags                                                                                              | op 5 bit 1                                                                                                                                               | tests                                                                                      |
+| Listen Together                      | store (`lt_plan`, drift 750 ms), `yap-audio` stream (Range, retry plan, loudness)                                   | op 106 `listen_together.*`; GET `/api/listen-together/search`, POST `.../resolve`, GET `.../stream` (`sessionId` = our participant)                      | live-tested (search, play now, the stream in sync, seek, pause, clear); resolve tests only |
+| Activities, Daily Word               | `yap-core` `wordle.rs` (the game, the word list), store                                                             | op 106 `activity.start`/`.leave`, `wordle.progress`; GET `/api/wordle/today?date=`                                                                       | live-tested                                                                                |
+| Leave server                         | admin store, server menu                                                                                            | DELETE `/api/servers/{id}/members/@me` → `{left: true}`; 403 `{error, code}` for the owner; 404/405 before the deploy                                    | request shape and tests only                                                               |
+
+Not built: MyInstants, radio, favorites, local custom sounds, sound
+editing, per-person soundboard mute, Listen Together radio and collections,
+recently played, Wordle stats and the per-day saved board, Warp Rush.

@@ -7,6 +7,8 @@
 //! settings dialog's side of the core [`settings`].
 
 mod admin;
+mod apps;
+mod apps_audio;
 mod audio;
 mod bridge;
 mod camera;

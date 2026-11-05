@@ -164,13 +164,14 @@ impl Track {
     }
 }
 
-/// VoiceReady's `speaking` map: participant -> speaking (bit 0).
+/// VoiceReady's `speaking` map: participant -> speaking (any flag, as the
+/// web reads it: the microphone or the soundboard).
 pub fn speaking_map(d: &Value) -> Vec<(String, bool)> {
     d.get("speaking")
         .and_then(Value::as_object)
         .into_iter()
         .flatten()
-        .map(|(pid, bits)| (pid.clone(), bits.as_i64().unwrap_or(0) & 1 == 1))
+        .map(|(pid, bits)| (pid.clone(), bits.as_i64().unwrap_or(0) != 0))
         .collect()
 }
 
@@ -276,7 +277,15 @@ pub fn stop_tracks(names: &[&str]) -> String {
 
 /// Our speaking flags (op 5): bit 0 is MICROPHONE (`src/lib/types.ts`).
 pub fn speaking(on: bool) -> String {
-    json!({ "op": GatewayOp::Speaking.code(), "d": { "speaking": u8::from(on) } }).to_string()
+    speaking_flags(u8::from(on))
+}
+
+/// `SpeakingFlags.SOUNDSHARE`: our own soundboard clip is playing.
+pub const SPEAKING_SOUNDSHARE: u8 = 1 << 1;
+
+/// Op 5 with every flag (MICROPHONE, SOUNDSHARE).
+pub fn speaking_flags(flags: u8) -> String {
+    json!({ "op": GatewayOp::Speaking.code(), "d": { "speaking": flags } }).to_string()
 }
 
 /// Watching a share starts or stops (op 106, SCREEN_SHARE.md "Watching");

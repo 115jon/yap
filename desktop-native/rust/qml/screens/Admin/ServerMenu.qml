@@ -6,7 +6,7 @@ import com.yap.native
 // and Create category. The web's other rows (Server boost, Create event,
 // App directory, Notification and Privacy settings, Edit Per-server
 // Profile, Hide muted channels) do nothing yet there either, so they show
-// disabled. There is no Leave server: the API has no way to leave yet.
+// disabled. Members (not the owner) get Leave server, with a confirm.
 MenuPanel {
     id: menu
 
@@ -79,5 +79,14 @@ MenuPanel {
         text: qsTr("Hide muted channels")
         glyph: "eyeOff"
         enabled: false
+    }
+    MenuRule { visible: !Admin.isOwner; height: visible ? implicitHeight : 0 }
+    MenuRow {
+        visible: !Admin.isOwner
+        height: visible ? implicitHeight : 0
+        text: qsTr("Leave server")
+        glyph: "logout"
+        danger: true
+        onTriggered: ShellState.leaveServerRequested()
     }
 }

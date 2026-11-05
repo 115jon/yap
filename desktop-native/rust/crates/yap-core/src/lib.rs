@@ -22,10 +22,12 @@ pub mod settings;
 pub mod shell;
 pub mod store;
 pub mod synth;
+pub mod wordle;
 
 pub use api::{Api, ApiError, Token};
 pub use runtime::{
-    shutdown, spawn, started_at, GatewayEvents, GatewayHandle, Realtime, Sink, VoiceEvents,
+    shutdown, spawn, started_at, AudioEvents, AudioHandle, GatewayEvents, GatewayHandle, Realtime,
+    Sink, VoiceEvents,
 };
 pub use store::{
     Command, LocalOffset, Occupant, Phase, UploadFile, ViewDiff, ViewUpdate, VoiceCommand,

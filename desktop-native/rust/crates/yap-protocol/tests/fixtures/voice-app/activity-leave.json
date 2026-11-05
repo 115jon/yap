@@ -1,0 +1,10 @@
+{
+  "op": 106,
+  "d": {
+    "type": "activity.leave",
+    "userId": "u_peer",
+    "participant_id": "p_peer",
+    "channelId": "ch_v",
+    "sent_at": 1762350000001
+  }
+}

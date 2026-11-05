@@ -1,0 +1,16 @@
+{
+  "op": 106,
+  "d": {
+    "type": "soundboard.play",
+    "participant_id": "p_peer",
+    "user_id": "u_peer",
+    "server_key": "srv_1",
+    "playback_id": "sb1:6:u_peer:auto:join:1:chime",
+    "sound_id": "chime",
+    "automatic_event": "join",
+    "max_duration_seconds": 3,
+    "name": "Chime",
+    "volume": 1,
+    "sent_at": 1762350000000
+  }
+}

@@ -101,6 +101,36 @@ pub trait Realtime: Send + 'static {
         commands: UnboundedReceiver<VoiceCommand>,
         events: VoiceEvents,
     );
+
+    /// Starts the local player (soundboard clips, the Listen Together
+    /// stream) once; its reports go to `events`. The default has no player.
+    fn spawn_audio(&self, http: reqwest::Client, events: AudioEvents) -> AudioHandle {
+        let _ = (http, events);
+        AudioHandle::none()
+    }
+}
+
+/// Commands for the local player, each with the session for our media.
+pub struct AudioHandle {
+    pub commands: Option<UnboundedSender<(Option<Token>, crate::store::apps::AudioCommand)>>,
+}
+
+impl AudioHandle {
+    pub fn none() -> Self {
+        Self { commands: None }
+    }
+}
+
+/// How the local player reports to the store.
+#[derive(Clone)]
+pub struct AudioEvents {
+    inbox: UnboundedSender<Input>,
+}
+
+impl AudioEvents {
+    pub fn send(&self, event: crate::store::apps::AudioEvent) {
+        let _ = self.inbox.send(Input::Audio(event));
+    }
 }
 
 pub struct GatewayHandle {
@@ -220,6 +250,8 @@ pub struct Runner {
     /// Answers requests locally instead of the network (`YAP_FIXTURE`).
     fixture: Option<Fixture>,
     fixture_serial: u64,
+    /// The local player, once an `Audio` effect started it.
+    audio: Option<AudioHandle>,
     /// Where the snapshot cache lives; `None` runs without one.
     cache_path: Option<PathBuf>,
     /// The writer thread, once `LoadSnapshot` started it.
@@ -252,6 +284,7 @@ impl Runner {
             batch: Vec::new(),
             fixture: None,
             fixture_serial: 0,
+            audio: None,
             cache_path: None,
             cache: None,
         }
@@ -334,12 +367,12 @@ impl Runner {
                     content_type: None,
                 })),
             }),
-            Effect::Download { id, .. } | Effect::ProfileUpload { id, .. } => {
-                self.send(Input::Http {
-                    id: *id,
-                    result: Ok(ApiResponse::Done),
-                })
-            }
+            Effect::Download { id, .. }
+            | Effect::ProfileUpload { id, .. }
+            | Effect::SoundUpload { id, .. } => self.send(Input::Http {
+                id: *id,
+                result: Ok(ApiResponse::Done),
+            }),
             Effect::CancelUpload(_)
             | Effect::GatewaySend(_)
             | Effect::GatewayDisconnect
@@ -351,7 +384,8 @@ impl Runner {
             | Effect::Voice { .. }
             | Effect::VoiceForget(_)
             | Effect::CacheWrite { .. }
-            | Effect::CacheClear { .. } => {}
+            | Effect::CacheClear { .. }
+            | Effect::Audio { .. } => {}
             Effect::View(_) | Effect::Later { .. } | Effect::StartupMark(_) => return false,
         }
         true
@@ -535,6 +569,40 @@ impl Runner {
                     let _ = inbox.send(Input::Http { id, result });
                 });
             }
+            Effect::SoundUpload {
+                id,
+                token,
+                channel_id,
+                path,
+                name,
+                content_type,
+                fields,
+            } => {
+                let api = Api::new(self.http.clone(), token);
+                let inbox = self.inbox.clone();
+                tokio::spawn(async move {
+                    let target = format!("/api/channels/{channel_id}/messages/upload");
+                    let result = sound_upload(&api, &target, path, name, content_type, fields)
+                        .await
+                        .and_then(|body| {
+                            serde_json::from_value(body)
+                                .map(ApiResponse::Uploaded)
+                                .map_err(|e| crate::api::ApiError::Decode(format!("upload: {e}")))
+                        });
+                    let _ = inbox.send(Input::Http { id, result });
+                });
+            }
+            Effect::Audio { token, command } => {
+                if self.audio.is_none() {
+                    let events = AudioEvents {
+                        inbox: self.inbox.clone(),
+                    };
+                    self.audio = Some(self.realtime.spawn_audio(self.http.clone(), events));
+                }
+                if let Some(commands) = self.audio.as_ref().and_then(|a| a.commands.as_ref()) {
+                    let _ = commands.send((token, command));
+                }
+            }
             Effect::StartupMark(mark) => {
                 if !self.startup_marks.contains(&mark) {
                     self.startup_marks.push(mark);
@@ -673,6 +741,31 @@ async fn upload(
         }
     };
     let form = reqwest::multipart::Form::new().part("file", part);
+    api.upload(target, form).await
+}
+
+/// Posts a soundboard sound: the file as `file` plus the form `fields`
+/// (SoundboardPicker.tsx `handleUpload`), up to the 50 MB soundboard limit.
+async fn sound_upload(
+    api: &Api,
+    target: &str,
+    path: String,
+    name: String,
+    content_type: String,
+    fields: Vec<(String, String)>,
+) -> Result<Value, crate::api::ApiError> {
+    check_size(Path::new(&path), crate::store::apps::MAX_UPLOAD_BYTES).await?;
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|error| crate::api::ApiError::Network(error.to_string()))?;
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name(name)
+        .mime_str(&content_type)
+        .map_err(|_| crate::api::ApiError::Decode("bad content type".into()))?;
+    let mut form = reqwest::multipart::Form::new().part("file", part);
+    for (key, value) in fields {
+        form = form.text(key, value);
+    }
     api.upload(target, form).await
 }
 

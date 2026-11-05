@@ -299,6 +299,8 @@ impl MessageLog {
 #[derive(Debug, Clone, PartialEq)]
 pub struct VoiceCall {
     pub id: CallId,
+    /// The server the call is in (the soundboard's server key).
+    pub server_id: String,
     pub channel_id: String,
     pub status: String,
     /// The roster as the voice session reports it.
@@ -355,6 +357,7 @@ pub(super) struct Projection {
     pub admin: AdminView,
     pub search: super::search::SearchView,
     pub friends: super::FriendsView,
+    pub apps: super::apps::AppsView,
 }
 
 /// One step of a profile save, run in order; a failure stops the rest.
@@ -476,6 +479,8 @@ pub(super) struct Pending {
     pub search: Option<super::search::SearchPending>,
     /// Friends and relationships.
     pub friends: HashMap<RequestId, super::friends::FriendsOp>,
+    /// The voice apps.
+    pub apps: HashMap<RequestId, super::apps::AppsOp>,
 }
 
 /// An optimistic reaction add or remove, undone if the server refuses.
@@ -728,6 +733,7 @@ pub struct State {
     /// Relationships (friends, requests, blocked).
     pub(super) friends: super::FriendsState,
     pub(super) invites: super::InviteState,
+    pub(super) apps: super::apps::AppsState,
     pub(super) view: Projection,
     pub(super) pending: Pending,
     pub(super) boot: Option<Boot>,
@@ -788,6 +794,7 @@ impl State {
             search: super::SearchState::default(),
             friends: super::FriendsState::default(),
             invites: super::InviteState::default(),
+            apps: super::apps::AppsState::new(),
             view: Projection::default(),
             pending: Pending::default(),
             boot: None,

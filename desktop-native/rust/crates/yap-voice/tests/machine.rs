@@ -1671,3 +1671,115 @@ fn a_voice_close_1013_should_reidentify_and_reannounce_without_ending() {
     assert_eq!(announced[0]["op"], 12);
     assert_eq!(announced[0]["d"]["tracks"][0]["participant_id"], ME);
 }
+
+// ── Voice app events (op 106) ─────────────────────────────────────────────
+
+#[test]
+fn an_app_event_should_be_handed_to_the_owner_as_it_came() {
+    let mut m = joined();
+    let d = json!({ "type": "soundboard.stop", "server_key": "srv", "playback_id": "x" });
+    let fx = m.handle(Input::Voice(VoiceEvent::App(d.clone())));
+    assert_eq!(fx, vec![Effect::Notify(Notice::App(d))]);
+}
+
+#[test]
+fn voice_ready_should_tell_the_owner_our_participant() {
+    let mut m = CallMachine::new(target());
+    m.handle(Input::Start);
+    m.handle(Input::Admitted(Ok(admission())));
+    m.handle(Input::Published(Ok(published())));
+    let fx = m.handle(voice_ready(Vec::new()));
+    assert!(fx.contains(&Effect::Notify(Notice::VoiceReady {
+        participant_id: ME.into()
+    })));
+}
+
+#[test]
+fn send_app_should_go_out_on_the_voice_socket() {
+    let mut m = joined();
+    let frame = r#"{"op":106,"d":{"type":"listen_together.state.request"}}"#;
+    let fx = m.handle(Input::Command(UserCommand::SendApp(frame.into())));
+    assert_eq!(fx, vec![Effect::Send(Socket::Voice, frame.into())]);
+}
+
+#[test]
+fn send_app_while_the_voice_socket_reconnects_should_queue_and_flush_on_ready() {
+    let mut m = joined();
+    m.handle(Input::Voice(VoiceEvent::Disconnected));
+    let first = r#"{"op":106,"d":{"type":"soundboard.play","n":1}}"#;
+    let second = r#"{"op":106,"d":{"type":"soundboard.play","n":2}}"#;
+    for frame in [first, second] {
+        let fx = m.handle(Input::Command(UserCommand::SendApp(frame.into())));
+        assert!(sends(&fx, Socket::Voice).is_empty());
+    }
+    let fx = m.handle(voice_ready(vec![track("ana", "mic-ana", "sfu-ana")]));
+    let frames: Vec<&Effect> = fx
+        .iter()
+        .filter(|e| matches!(e, Effect::Send(Socket::Voice, f) if f.contains("soundboard.play")))
+        .collect();
+    assert_eq!(
+        frames,
+        vec![
+            &Effect::Send(Socket::Voice, first.into()),
+            &Effect::Send(Socket::Voice, second.into())
+        ]
+    );
+    // Sent once: a later ready has nothing left to flush.
+    m.handle(Input::Voice(VoiceEvent::Disconnected));
+    let fx = m.handle(voice_ready(vec![track("ana", "mic-ana", "sfu-ana")]));
+    assert!(!fx
+        .iter()
+        .any(|e| matches!(e, Effect::Send(Socket::Voice, f) if f.contains("soundboard.play"))));
+}
+
+#[test]
+fn the_app_queue_should_hold_32_and_drop_on_leave() {
+    let mut m = joined();
+    m.handle(Input::Voice(VoiceEvent::Disconnected));
+    for n in 0..40 {
+        m.handle(Input::Command(UserCommand::SendApp(format!(
+            r#"{{"op":106,"d":{{"type":"soundboard.stop","n":{n}}}}}"#
+        ))));
+    }
+    let fx = m.handle(voice_ready(Vec::new()));
+    let queued: Vec<i64> = sends(&fx, Socket::Voice)
+        .iter()
+        .filter(|frame| frame["op"] == 106)
+        .filter_map(|frame| frame["d"]["n"].as_i64())
+        .collect();
+    // The newest 32 survive, in order.
+    assert_eq!(queued, (8..40).collect::<Vec<i64>>());
+
+    m.handle(Input::Voice(VoiceEvent::Disconnected));
+    m.handle(Input::Command(UserCommand::SendApp(
+        r#"{"op":106,"d":{"type":"soundboard.stop","n":99}}"#.into(),
+    )));
+    m.handle(Input::Command(UserCommand::Leave));
+    let fx = m.handle(voice_ready(Vec::new()));
+    assert!(sends(&fx, Socket::Voice)
+        .iter()
+        .all(|frame| frame["op"] != 106));
+}
+
+#[test]
+fn our_soundboard_clip_should_set_the_soundshare_flag() {
+    let mut m = joined();
+    let fx = m.handle(Input::Command(UserCommand::SetSoundboardSpeaking(true)));
+    assert_eq!(
+        sends(&fx, Socket::Voice),
+        vec![json!({ "op": 5, "d": { "speaking": 2 } })]
+    );
+    let fx = m.handle(Input::Command(UserCommand::SetSoundboardSpeaking(false)));
+    assert_eq!(
+        sends(&fx, Socket::Voice),
+        vec![json!({ "op": 5, "d": { "speaking": 0 } })]
+    );
+}
+
+#[test]
+fn a_repeated_soundboard_flag_should_send_nothing() {
+    let mut m = joined();
+    m.handle(Input::Command(UserCommand::SetSoundboardSpeaking(true)));
+    let fx = m.handle(Input::Command(UserCommand::SetSoundboardSpeaking(true)));
+    assert!(sends(&fx, Socket::Voice).is_empty());
+}

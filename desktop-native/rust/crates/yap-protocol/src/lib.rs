@@ -10,6 +10,7 @@ pub mod frame;
 pub mod opcode;
 pub mod payload;
 pub mod rest;
+pub mod voice_app;
 
 pub use frame::Frame;
 pub use opcode::{

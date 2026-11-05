@@ -1,7 +1,7 @@
 //! [`CallMachine`]: one call as a pure, synchronous state machine. See the
 //! crate docs for the transition table.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::time::Duration;
 
@@ -140,6 +140,12 @@ pub enum UserCommand {
     SetShareAudio(bool),
     /// The share's quality preset (`setQuality`).
     SetShareQuality(String),
+    /// A voice app event (op 106) to send, as its frame text. It waits for
+    /// the voice socket when that is reconnecting.
+    SendApp(String),
+    /// Our own soundboard clip is playing (or not): op 5's SOUNDSHARE flag
+    /// (`vad.setSoundboardSpeaking`).
+    SetSoundboardSpeaking(bool),
     Leave,
 }
 
@@ -208,6 +214,8 @@ pub enum VoiceEvent {
     ClientDisconnect {
         participant_id: String,
     },
+    /// Op 106: a voice app event (soundboard, Listen Together, activities).
+    App(Value),
     /// An Error 4008 or 4010: this session must stop.
     Rejected {
         message: String,
@@ -322,6 +330,12 @@ pub enum Notice {
     Camera { on: bool, error: Option<String> },
     /// Our share started, changed or ended.
     Share(ShareNotice),
+    /// The voice socket is ready (VoiceReady), the first time or after a
+    /// re-identify: app events can go out. `participant_id` is ours (the
+    /// voice session id the Listen Together stream asks for).
+    VoiceReady { participant_id: String },
+    /// A voice app event (op 106) arrived.
+    App(Value),
 }
 
 /// How to open one call socket.
@@ -514,7 +528,16 @@ pub struct CallMachine {
     layers: HashMap<String, Layer>,
     camera: Camera,
     share: Share,
+    /// Our own soundboard clip is audible (op 5 SOUNDSHARE).
+    soundboard_speaking: bool,
+    /// Op 106 frames sent while the voice socket was not ready (joining or
+    /// reconnecting), flushed on the next VoiceReady; dropped on leave.
+    app_queue: VecDeque<String>,
 }
+
+/// Frames held for a voice socket that is not ready (the oldest go first
+/// when it stays down).
+const APP_QUEUE_MAX: usize = 32;
 
 impl CallMachine {
     pub fn new(target: CallTarget) -> Self {
@@ -552,6 +575,8 @@ impl CallMachine {
             layers: HashMap::new(),
             camera: Camera::default(),
             share: Share::default(),
+            soundboard_speaking: false,
+            app_queue: VecDeque::new(),
         }
     }
 
@@ -785,18 +810,34 @@ impl CallMachine {
         if self.published.is_none() || self.muted {
             return;
         }
-        if let Some(speaking) = self.vad.update(rms, self.sensitivity.threshold(), at_ms) {
-            self.set_speaking(fx, speaking);
+        if self
+            .vad
+            .update(rms, self.sensitivity.threshold(), at_ms)
+            .is_some()
+        {
+            self.send_speaking(fx);
         }
     }
 
-    /// Our speaking bit: our row, and op 5 for the others.
-    fn set_speaking(&mut self, fx: &mut Vec<Effect>, speaking: bool) {
+    /// Op 5's flags as they are now: the microphone (the VAD) and our own
+    /// soundboard clip (`refreshSpeakingState`).
+    fn speaking_flags(&self) -> u8 {
+        u8::from(self.vad.speaking())
+            | if self.soundboard_speaking {
+                wire::SPEAKING_SOUNDSHARE
+            } else {
+                0
+            }
+    }
+
+    /// Our row and op 5 from the current flags.
+    fn send_speaking(&mut self, fx: &mut Vec<Effect>) {
+        let flags = self.speaking_flags();
         if let Some(roster) = &mut self.roster {
-            roster.set_speaking(&self.me, speaking);
+            roster.set_speaking(&self.me, flags != 0);
         }
         if self.voice_ready {
-            fx.push(Effect::Send(Socket::Voice, wire::speaking(speaking)));
+            fx.push(Effect::Send(Socket::Voice, wire::speaking_flags(flags)));
         }
         self.emit_roster(fx);
     }
@@ -809,6 +850,7 @@ impl CallMachine {
     }
 
     fn end(&mut self, fx: &mut Vec<Effect>, reason: Option<String>) {
+        self.app_queue.clear();
         self.set_state(fx, CallState::Idle);
         self.ended = true;
         fx.push(Effect::End(reason));
@@ -1137,9 +1179,18 @@ impl CallMachine {
                 // peer connection kept its publication, so this is all the
                 // republish there is (STATE_MACHINE.md "Reconnect republish").
                 self.announce(fx);
-                if self.vad.speaking() {
-                    fx.push(Effect::Send(Socket::Voice, wire::speaking(true)));
+                let flags = self.speaking_flags();
+                if flags != 0 {
+                    fx.push(Effect::Send(Socket::Voice, wire::speaking_flags(flags)));
                 }
+                // Op 106 frames held while the socket was down go out now,
+                // after the announce, before the apps react to the notice.
+                for frame in std::mem::take(&mut self.app_queue) {
+                    fx.push(Effect::Send(Socket::Voice, frame));
+                }
+                fx.push(Effect::Notify(Notice::VoiceReady {
+                    participant_id: self.me.clone(),
+                }));
                 let closing = self.tracks.offer(&tracks, "", &self.me);
                 close(fx, closing);
                 if let Some(roster) = &mut self.roster {
@@ -1201,6 +1252,7 @@ impl CallMachine {
                     after: REMOTE_RECONNECT_GRACE,
                 });
             }
+            VoiceEvent::App(d) => fx.push(Effect::Notify(Notice::App(d))),
             VoiceEvent::Rejected { message } => self.end(fx, Some(message)),
             VoiceEvent::IdentifyRejected => {
                 // Expired voice token: the room's Resumed reply carries a
@@ -1278,11 +1330,12 @@ impl CallMachine {
                     roster.set_my_mute(muted);
                 }
                 if muted && self.vad.reset() {
+                    let flags = self.speaking_flags();
                     if let Some(roster) = &mut self.roster {
-                        roster.set_speaking(&self.me, false);
+                        roster.set_speaking(&self.me, flags != 0);
                     }
                     if self.voice_ready {
-                        fx.push(Effect::Send(Socket::Voice, wire::speaking(false)));
+                        fx.push(Effect::Send(Socket::Voice, wire::speaking_flags(flags)));
                     }
                 }
                 if self.sockets_open {
@@ -1323,6 +1376,24 @@ impl CallMachine {
             UserCommand::StopShare => self.stop_share(fx),
             UserCommand::SetShareAudio(on) => self.set_share_audio(fx, on),
             UserCommand::SetShareQuality(quality) => self.set_share_quality(fx, quality),
+            UserCommand::SendApp(frame) => {
+                if self.voice_ready {
+                    fx.push(Effect::Send(Socket::Voice, frame));
+                } else if self.sockets_open {
+                    // The voice socket is joining or reconnecting: hold the
+                    // frame for its VoiceReady instead of losing it.
+                    if self.app_queue.len() >= APP_QUEUE_MAX {
+                        self.app_queue.pop_front();
+                    }
+                    self.app_queue.push_back(frame);
+                }
+            }
+            UserCommand::SetSoundboardSpeaking(on) => {
+                if self.soundboard_speaking != on {
+                    self.soundboard_speaking = on;
+                    self.send_speaking(fx);
+                }
+            }
             UserCommand::Leave => self.leave(fx),
         }
     }
@@ -1426,6 +1497,7 @@ impl CallMachine {
     /// closes the room socket, the voice socket and the peer connection in
     /// that order.
     fn leave(&mut self, fx: &mut Vec<Effect>) {
+        self.app_queue.clear();
         if !self.sockets_open {
             return self.end(fx, None);
         }

@@ -243,9 +243,16 @@ fn choice(id: &str) -> Option<String> {
     (id != DEFAULT_DEVICE).then(|| id.to_owned())
 }
 
-/// Switches the ADM's devices off the GUI thread (its calls block).
+/// Switches the ADM's devices off the GUI thread (its calls block). The
+/// output's name also goes to the soundboard and Listen Together player.
 fn choose_devices(s: &VoiceSettings) {
     let (input, output) = (choice(&s.input_device_id), choice(&s.output_device_id));
+    crate::apps_audio::set_output_device(
+        output
+            .as_ref()
+            .map(|_| s.output_device_label.clone())
+            .filter(|label| !label.is_empty()),
+    );
     std::thread::spawn(move || {
         if let Some(line) = LibwebrtcEngine.choose_devices(input, output) {
             eprintln!("{line}");

@@ -14,12 +14,27 @@ Rectangle {
     readonly property bool joined: Voice.channelId.length > 0 && Voice.channelId === Nav.voicePanelId
     readonly property int count: Nav.voicePanelCount
     readonly property bool focused: joined && ShellState.focusedTile.length > 0
+    // Our activity in this call (Daily Word takes the stage's place).
+    readonly property string activity: joined ? (JSON.parse(Apps.state || "{}").activity ?? "") : ""
+    // When a popover last closed, so its key's click does not reopen it.
+    property double popoverClosedAt: 0
+
+    function togglePopover(loader, key) {
+        if (Date.now() - popoverClosedAt < 300)
+            return
+        loader.active = true
+        if (loader.status === Loader.Ready)
+            loader.item.openAt(key)
+    }
 
     color: Theme.ply0
 
     // The stage and fullscreen belong to this call's view.
     onJoinedChanged: {
         if (!joined) {
+            soundboardPopup.item?.close()
+            listenPopup.item?.close()
+            activitiesPopup.item?.close()
             ShellState.focusedTile = ""
             ShellState.stageFullscreen = false
         }
@@ -277,7 +292,7 @@ Rectangle {
 
     Flickable {
         id: stage
-        visible: root.joined && !root.focused
+        visible: root.joined && !root.focused && root.activity !== "wordle"
         anchors.fill: body
         anchors.margins: 16
         readonly property var fit: root.fitGrid(width, height, tiles.count)
@@ -343,9 +358,22 @@ Rectangle {
         width: parent.width
     }
 
+    Loader {
+        anchors.fill: body
+        active: root.activity === "wordle" && !root.focused
+        sourceComponent: WordleStage {}
+    }
+
+    NowPlayingCard {
+        id: nowPlaying
+        anchors.bottom: dock.top
+        width: parent.width
+        visible: root.joined && now !== null
+    }
+
     MembersTray {
         id: tray
-        anchors.bottom: dock.top
+        anchors.bottom: nowPlaying.top
         width: parent.width
         height: root.focused ? implicitHeight : 0
         visible: root.focused
@@ -406,6 +434,30 @@ Rectangle {
                 Accessible.checked: Voice.sharing
                 onClicked: ShellState.toggleShare()
             }
+            IconKey {
+                id: soundboardKey
+                size: 48
+                iconName: "soundboard"
+                tone: soundboardPopup.item?.opened ? "toggled" : "rest"
+                tip: qsTr("Soundboard")
+                onClicked: root.togglePopover(soundboardPopup, soundboardKey)
+            }
+            IconKey {
+                id: listenKey
+                size: 48
+                iconName: "music"
+                tone: listenPopup.item?.opened ? "toggled" : "rest"
+                tip: qsTr("Listen Together")
+                onClicked: root.togglePopover(listenPopup, listenKey)
+            }
+            IconKey {
+                id: activitiesKey
+                size: 48
+                iconName: "activities"
+                tone: root.activity.length > 0 ? "live" : activitiesPopup.item?.opened ? "toggled" : "rest"
+                tip: qsTr("Activities")
+                onClicked: root.togglePopover(activitiesPopup, activitiesKey)
+            }
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 width: 1
@@ -456,6 +508,25 @@ Rectangle {
             iconName: ShellState.stageFullscreen ? "minimize" : "maximize"
             tip: ShellState.stageFullscreen ? qsTr("Exit fullscreen") : qsTr("Fullscreen")
             onClicked: ShellState.stageFullscreen = !ShellState.stageFullscreen
+        }
+    }
+
+    Loader {
+        id: soundboardPopup
+        active: false
+        sourceComponent: SoundboardPicker { onClosed: root.popoverClosedAt = Date.now() }
+    }
+    Loader {
+        id: listenPopup
+        active: false
+        sourceComponent: ListenPanel { onClosed: root.popoverClosedAt = Date.now() }
+    }
+    Loader {
+        id: activitiesPopup
+        active: false
+        sourceComponent: ActivitiesDialog {
+            people: root.count
+            onClosed: root.popoverClosedAt = Date.now()
         }
     }
 }

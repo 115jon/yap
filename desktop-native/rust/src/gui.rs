@@ -70,6 +70,7 @@ struct Scalars {
     /// (loading, more) of newer pages (a detached list).
     newer: (bool, bool),
     friends: yap_core::store::FriendsView,
+    apps: yap_core::store::apps::AppsView,
 }
 
 /// The live QObjects. Each registers from its constructor and clears its
@@ -83,6 +84,7 @@ pub struct Objects {
     pub(crate) search: Option<NonNull<crate::search::qobject::Search>>,
     pub(crate) friends: Option<NonNull<crate::friends::qobject::Friends>>,
     pub(crate) invites: Option<NonNull<crate::invites::qobject::Invites>>,
+    pub(crate) apps: Option<NonNull<crate::apps::qobject::Apps>>,
     nav: Option<NonNull<Nav>>,
     chat: Option<NonNull<Chat>>,
     voice: Option<NonNull<Voice>>,
@@ -209,6 +211,15 @@ pub(crate) fn keep_friends(view: yap_core::store::FriendsView) {
 
 pub(crate) fn friends_view() -> yap_core::store::FriendsView {
     GUI.with(|gui| gui.borrow().scalars.friends.clone())
+}
+
+/// Keeps the apps view for an `Apps` object QML creates later.
+pub(crate) fn keep_apps(view: yap_core::store::apps::AppsView) {
+    scalars(|s| s.apps = view);
+}
+
+pub(crate) fn apps_view() -> yap_core::store::apps::AppsView {
+    GUI.with(|gui| gui.borrow().scalars.apps.clone())
 }
 
 fn q(text: &str) -> QString {
@@ -529,6 +540,7 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::Admin(view) => crate::admin::on_view(*view),
         ViewUpdate::Search(view) => crate::search::on_view(*view),
         ViewUpdate::Friends(view) => crate::friends::on_view(*view),
+        ViewUpdate::Apps(view) => crate::apps::on_view(*view),
         ViewUpdate::Invites(view) => crate::invites::on_view(*view),
         ViewUpdate::Toast(toast) => crate::desktop::on_toast(&toast),
         ViewUpdate::Sound(sound) => crate::sound::play(sound),

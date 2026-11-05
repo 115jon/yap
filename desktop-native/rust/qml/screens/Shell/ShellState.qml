@@ -91,6 +91,7 @@ QtObject {
     signal deleteCategoryRequested(string categoryId, string name)
     signal kickRequested(string userId, string name)
     signal banRequested(string userId, string name)
+    signal leaveServerRequested()
     // The rail's Create a server (JoinHost opens it).
     signal createServerRequested()
     // `at` is a point in `anchor`.

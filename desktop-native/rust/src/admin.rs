@@ -75,6 +75,11 @@ pub mod qobject {
         #[cxx_name = "deleteServer"]
         fn delete_server(self: &Admin, confirm: &QString);
 
+        /// The server menu's Leave server (members, not the owner).
+        #[qinvokable]
+        #[cxx_name = "leaveServer"]
+        fn leave_server(self: &Admin, server_id: &QString);
+
         #[qinvokable]
         #[cxx_name = "setInvitesPaused"]
         fn set_invites_paused(self: &Admin, paused: bool);
@@ -402,6 +407,12 @@ impl qobject::Admin {
     pub fn delete_server(&self, confirm: &QString) {
         send(AdminCommand::DeleteServer {
             confirm: text(confirm),
+        });
+    }
+
+    pub fn leave_server(&self, server_id: &QString) {
+        send(AdminCommand::LeaveServer {
+            server_id: text(server_id),
         });
     }
 

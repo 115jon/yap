@@ -220,6 +220,10 @@ pub struct User {
     pub media_content_filter: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
+    /// The synced join and leave sounds and the soundboard volume
+    /// (`GET /api/users/me` only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sound_settings: Option<Value>,
 }
 
 /// The signed-in user.

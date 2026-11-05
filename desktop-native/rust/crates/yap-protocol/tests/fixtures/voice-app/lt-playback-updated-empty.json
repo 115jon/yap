@@ -1,0 +1,20 @@
+{
+  "op": 106,
+  "d": {
+    "type": "listen_together.playback.updated",
+    "room_slug": "voice-srv_1-ch_v",
+    "snapshot": {
+      "roomSlug": "voice-srv_1-ch_v",
+      "revision": 9,
+      "paused": true,
+      "currentEntryId": null,
+      "anchorPositionMs": 0,
+      "anchorUpdatedAt": 1762350000000,
+      "lastUpdatedAt": 1762350000000,
+      "queue": [],
+      "currentEntry": null,
+      "positionMs": 0,
+      "durationMs": null
+    }
+  }
+}

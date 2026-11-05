@@ -12,7 +12,8 @@ use std::sync::{Arc, OnceLock};
 use cxx_qt_lib::{QDateTime, QTimeZone};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use yap_core::{
-    Api, GatewayEvents, GatewayHandle, LocalOffset, Realtime, VoiceCommand, VoiceEvents,
+    Api, AudioHandle, GatewayEvents, GatewayHandle, LocalOffset, Realtime, VoiceCommand,
+    VoiceEvents,
 };
 
 pub use yap_core::{Command, Sink};
@@ -35,6 +36,10 @@ impl Realtime for NativeRealtime {
         events: VoiceEvents,
     ) {
         tokio::spawn(voice::run(api, http, target, commands, events));
+    }
+
+    fn spawn_audio(&self, http: reqwest::Client, events: yap_core::AudioEvents) -> AudioHandle {
+        crate::apps_audio::spawn(http, events)
     }
 }
 

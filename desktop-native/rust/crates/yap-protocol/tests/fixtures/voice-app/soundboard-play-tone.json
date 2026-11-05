@@ -1,0 +1,14 @@
+{
+  "op": 106,
+  "d": {
+    "type": "soundboard.play",
+    "participant_id": "p_peer",
+    "user_id": "u_peer",
+    "server_key": "srv_1",
+    "playback_id": "sb1:6:u_peer:ping",
+    "sound_id": "ping",
+    "name": "Ping",
+    "volume": 0.64,
+    "sent_at": 1762350000000
+  }
+}

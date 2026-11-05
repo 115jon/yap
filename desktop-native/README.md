@@ -189,8 +189,34 @@ the decisions.
   on our site's `/invite/<code>` link in a message or embed. Our site's
   channel and message links open in the app. Copy link in the tree's
   channel menu copies `<site>/chat/<server>/<channel>` as the web does.
-  There is no Leave server: the API has no way to leave yet (as on the
-  web).
+  Leave server is on the server menu for members (not the owner), with a
+  confirm: `DELETE /api/servers/{id}/members/@me`, then the server goes as
+  on `GUILD_DELETE`. Until the route is deployed, a 404 or 405 says leaving
+  isn't available yet; the owner's 403 shows the route's own sentence.
+- Voice apps in a call (op 106, `yap-protocol` `voice_app.rs`; the store's
+  `store/apps.rs` and `store/reduce/apps.rs`; QML `screens/Apps`):
+  - The soundboard from the stage bar: the four built-in tones and the
+    server's sounds, play for everyone, preview, the playing rows (pause and
+    volume for our own, stop for any), upload (Attach files or owner; audio
+    only, 50 MB, `purpose=soundboard`) and delete (our own, or Manage
+    server). Clips play locally on every client when the room relays them,
+    ours too, never published into the call, as on the web; our own audible
+    clip sets op 5's SOUNDSHARE flag. Volume is the clip's volume times the
+    soundboard volume setting. Join and leave sounds per server or for all
+    servers (Settings, Soundboard), synced to `sound_settings`, at most 3 s.
+  - The local player is `crates/yap-audio`: symphonia decoding (mp3, AAC/m4a,
+    Vorbis, FLAC, WAV, WebM/MKV; Opus through the libopus inside libwebrtc),
+    a 48 kHz mixer and `waveOut` on the voice output device.
+  - Listen Together: search or a YouTube/Spotify link, queue (append, play
+    next, play now), play, pause, seek, skip, remove, clear; the now-playing
+    card. The stream (`/api/listen-together/stream`, mp4, Range, the web's
+    retry plan) follows the room's anchor and seeks when it drifts more than
+    750 ms. Loudness presets as the web's (compressor and limiter,
+    approximated; LIBRARIES.md).
+  - Activities: the dialog and Daily Word (Wordle) with the NYT puzzle
+    (`/api/wordle/today?date=` in New York's date), hard mode, hints, reveal,
+    and everyone's progress (`wordle.progress`). Warp Rush is listed but not
+    built.
 - Deep links on our own scheme, `yap-native://invite/<code>` and
   `yap-native://chat/<server>/<channel>[?message=<id>]`, registered per
   user at startup under `HKCU\Software\Classes\yap-native` (only the
@@ -206,15 +232,19 @@ unless "Open on startup" is on), data and logs under
 
 ## Not yet
 
+Soundboard: MyInstants, radio, favorites, local custom sounds, editing a
+sound, per-person and per-server soundboard mute controls. Listen Together:
+radio stations, collections and paging, recently played. Wordle progress is
+kept for the session only (the web keeps it per day). Warp Rush.
 Camera backgrounds, the stream watcher list and stream
 volume, input volume, a mic test outside a call, inline video playback, clips in the GIF picker,
 GIF favorites and categories, stickers, emoji generation, the reaction details
 modal, remove-embeds, embed players (WebView2), the channel details' Media,
-Links and Files tabs, Leave server (no API), toast buttons (reply, mark read)
+Links and Files tabs, toast buttons (reply, mark read)
 and avatars, call rings, the taskbar thumbnail toolbar and auto-update. In
 settings: avatar crop and the recent-avatar picker, display name styles,
 collectibles, username changes, sign-out and session revoke from the page,
-server profiles, soundboard join and leave sounds, call keybinds, custom
+server profiles, call keybinds, custom
 sounds, spatial audio, hardware acceleration and the game capture switch.
 
 ## Build (Windows)

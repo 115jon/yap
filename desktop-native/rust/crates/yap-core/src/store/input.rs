@@ -17,7 +17,7 @@ use super::{ApiResponse, CallId, RequestId, SessionId, SignInId, VoiceUpdate};
 use crate::api::{ApiError, Token};
 
 /// What the UI asks for.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Start,
     StartSignIn,
@@ -185,6 +185,8 @@ pub enum Command {
     Friends(super::FriendsCommand),
     /// Create a server, the invite landing and links into the app.
     Invites(super::InviteCommand),
+    /// The soundboard, Listen Together and activities.
+    Apps(super::apps::AppsCommand),
 }
 
 /// What the profile editor saves. Colours are `#RRGGBB` or `None` (Auto);
@@ -244,6 +246,8 @@ pub enum Input {
         id: RequestId,
         sent: u64,
     },
+    /// The local player's report.
+    Audio(super::apps::AudioEvent),
     /// One typer's timeout; only the newest event of theirs clears them.
     TypingExpired {
         user_id: String,

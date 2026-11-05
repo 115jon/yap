@@ -46,6 +46,14 @@ Item {
                 qsTr("%1 will be removed from this server. They can rejoin with an invite.").arg(name),
                 qsTr("Kick"), false, false, () => Admin.kick(userId))
         }
+        function onLeaveServerRequested() {
+            const serverId = Nav.activeServerId
+            if (serverId.length === 0)
+                return
+            host.dialog(confirm)?.ask("leave-server", qsTr("Leave %1").arg(Nav.activeServerName),
+                qsTr("You'll lose access to this server's channels until someone invites you again."),
+                qsTr("Leave server"), false, false, () => Admin.leaveServer(serverId))
+        }
         function onBanRequested(userId, name) {
             host.dialog(confirm)?.ask("ban:" + userId, qsTr("Ban member"),
                 qsTr("%1 will be removed from this server and can't rejoin until unbanned.").arg(name),

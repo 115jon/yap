@@ -581,3 +581,131 @@ Recommendation:
 - Static Qt:
   - vcpkg qtbase port: https://github.com/microsoft/vcpkg/tree/master/ports/qtbase
   - community static builds (unverified): https://github.com/cncherisher/buildQt
+
+## 9. Local playback: soundboard, tones and Listen Together (`yap-audio`)
+
+The web plays soundboard clips with `new Audio(url)`, the built-in tones with
+a Web Audio oscillator and the Listen Together stream with an audio element
+behind two `DynamicsCompressorNode`s. All of it is local to each client, not
+published into the call. `crates/yap-audio` does the same natively. Versions
+and dates come from the crates.io API on 2026-11-05.
+
+| area       | pick                                                                                                                                                              | runner-up / rejected                                                                                                                                                   |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Decoding   | `symphonia` 0.5.5 (2025-10-11; MPL-2.0; pure Rust), features `mp3`, `aac`, `isomp4`, `ogg`, `vorbis`, `wav`, `pcm`, `flac`, `mkv`                                 | 0.6.1 (2026-08-13) has a new API; move when the crate is ready for it. FFmpeg bindings: a large C dependency to build `/MT`                                            |
+| Opus       | `extern "C"` to `opus_decoder_create` / `opus_decode_float` / `opus_decoder_destroy`, resolved from the libopus inside LiveKit's `webrtc.lib` (feature `libopus`) | `audiopus` / `opus` crates build or link a second libopus (duplicate symbols next to `webrtc.lib`)                                                                     |
+| Resampling | `rubato` 5.0.1 (2026-10-01; MIT/Apache), the synchronous FFT resampler (`Fft`, `FixedSync::Input`, 1024-frame chunks)                                             | linear or cubic interpolation: audible aliasing and treble loss on 44.1 → 48 kHz music                                                                                 |
+| Output     | `waveOut` through `windows-sys` 0.61 (as `src/sound.rs`), one thread, four 20 ms buffers (80 ms), 48 kHz stereo 16-bit                                            | `cpal` (WASAPI): more code and threads for the same shared-mode result. WASAPI directly: only needed for exclusive mode or lower latency, which playback does not need |
+
+### 9.1 Decoder: symphonia
+
+- Maintained (0.5.5 in 2025-10, 0.6.x through 2026-08) and pure Rust, so
+  it compiles with the workspace's `+crt-static` and needs no C toolchain.
+- The features are exactly what clips and the stream use:
+  - `mp3`: most uploads.
+  - `aac` + `isomp4`: m4a uploads and the stream's preferred `format=mp4`.
+  - `ogg` + `vorbis`.
+  - `mkv`: WebM, which demuxes the stream's `format=webm` Opus.
+  - `wav` + `pcm`, and `flac`.
+  - `adpcm` and `alac` are off.
+- Symphonia has no Opus decoder. Its Ogg and MKV demuxers produce Opus
+  packets (with `OpusHead` as extra data); `yap-audio` decodes them with
+  libopus.
+
+### 9.2 Opus path
+
+- With `--features libopus` the crate declares the three libopus symbols
+  and links nothing itself. The app turns the feature on. The final exe
+  links `webrtc.lib` (through `yap-voice`), which carries libopus. The
+  symbols were checked in `win-x64-release-webrtc-a545de4`.
+- Mono and stereo only (mapping family 0). The pre-skip from `OpusHead` is
+  dropped at the start. After a seek there is no 80 ms pre-roll.
+- Without the feature, an Opus clip fails with a `Failed` event. An Opus
+  stream counts as unsupported, which triggers the web's one format switch
+  (`webm` → `mp4`) before `PLAYBACK_SRC_NOT_SUPPORTED`.
+
+### 9.3 Resampler: rubato
+
+- Every source is resampled to the 48 kHz mix rate. YouTube's AAC is 44.1
+  kHz, so the stream path resamples most of the time.
+- `Fft` is band-limited (no audible aliasing) and fixed-ratio, and rubato is
+  the most used and tested resampler crate.
+- Clips go through `process_all`, which trims the filter delay. The stream
+  uses the chunked API and drops the delay itself, so positions line up.
+- Source rates outside 8-192 kHz are refused (a header claiming 1 Hz or
+  655 kHz would defeat the length cap). A decoded clip keeps at most 60 s and
+  at most 60 s x 48 kHz source frames, and at most three clips decode at once.
+
+### 9.4 Output path
+
+- One `yap-audio` thread mixes 20 ms blocks and writes them to `waveOut`
+  with an event callback. Four buffers keep the latency at 80 ms.
+- The device closes after 2 s with nothing audible and reopens on the next
+  play.
+- `set_output_device` matches the endpoint name against `waveOut`'s
+  31-character names: exact first, then by prefix, case-insensitively. No
+  match falls back to `WAVE_MAPPER`.
+- The final mix is soft clipped: identity up to 0.8, then a tanh shoulder
+  towards 0.98. Overlapping clips never wrap or hard clip.
+- Known limit: the output stays on the device it opened. A change of the
+  system default device mid-stream is not followed until the device closes
+  (2 s idle) and reopens on the next play. Choosing a device in the voice
+  settings reopens it at once.
+
+### 9.5 Loudness and tones (approximations)
+
+- **Tones:** ported exactly.
+  - The oscillator is a sine. Pop is a band-limited triangle built from odd
+    harmonics up to Nyquist, as Web Audio builds it.
+  - The gain starts at the volume, ramps exponentially to 0.001 at the
+    duration, and the tone stops there.
+  - Changing a tone's volume scales its envelope. The web instead holds the
+    new volume flat.
+- **Compressor static curve:** Chromium's `DynamicsCompressorKernel`.
+  - The soft knee, with `k` found by the same 15-step bisection.
+  - The constant ratio above `threshold + knee`.
+  - The automatic makeup gain `(1 / curve(1.0))^0.6` that every
+    `DynamicsCompressorNode` adds. That makeup is why the web's -1 dB
+    "limiter" lets a 0 dBFS input out at about -0.4 dBFS. The port keeps
+    that behaviour.
+- **Envelope:** a peak detector that holds peaks and decays with the release
+  time. The gain follows it down with the attack time. Chromium's 6 ms
+  look-ahead, its adaptive release curve and its 32-frame updates are not
+  reproduced, so transients can overshoot for a few samples. The soft clip
+  catches them.
+- **Preset values** are copied from `listen-together-audio.ts`.
+  - The limiter is ratio 20, knee 0, attack 1 ms, release 100 ms, threshold
+    = ceiling.
+  - Off, every stage is identity, as `applySettings` does.
+  - Parameter changes apply at once, with the makeup gain ramped over
+    20 ms, instead of the web's 30 ms `setTargetAtTime`.
+
+### 9.6 Stream fetching
+
+- HTTP Range in aligned 512 KB chunks, with `reqwest` on a one-worker tokio
+  runtime that the engine owns. Each read prefetches the next two chunks,
+  and the last eight stay cached.
+- Symphonia's mp4 reader scans every top-level atom of a seekable source.
+  So a fragmented YouTube m4a costs about one request per 512 KB before the
+  first sample plays; the prefetch pipelines those requests. UNVERIFIED
+  against production tracks.
+- Decoding runs on its own thread and keeps about 3 s of PCM queued ahead of
+  the mixer. A seek clears the queue and issues a new Range.
+- Recovery is `planListenTogetherPlaybackRecovery`, with its codes and copy:
+  - 401/403: fail with `PLAYBACK_SESSION`.
+  - 429/503: retry after Retry-After or 20 s × 2^n, capped at 60 s.
+  - Network errors: retry after 3 s × 2^n.
+  - Both retry 3 times.
+  - Other ≥ 400, or media the decoder rejects: switch container once.
+    Then fail with `PLAYBACK_UNAVAILABLE` / `PLAYBACK_SRC_NOT_SUPPORTED`.
+
+Sources:
+
+- https://crates.io/crates/symphonia (0.5.5, 0.6.1)
+- https://github.com/pdeljanov/Symphonia
+- https://crates.io/crates/rubato (5.0.1)
+- https://github.com/HEnquist/rubato
+- https://webaudio.github.io/web-audio-api/#DynamicsCompressorNode
+- Chromium `third_party/blink/renderer/platform/audio/dynamics_compressor_kernel.cc`
+- https://www.rfc-editor.org/rfc/rfc7845 (OpusHead, pre-skip)
+- https://learn.microsoft.com/windows/win32/api/mmeapi/ns-mmeapi-waveoutcapsw (`szPname[32]`)

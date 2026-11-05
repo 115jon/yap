@@ -1051,6 +1051,8 @@ pub enum ViewUpdate {
     Search(Box<super::SearchView>),
     /// Relationships: the Friends view, the badges and the profile card's state.
     Friends(Box<super::FriendsView>),
+    /// The soundboard, Listen Together and activities.
+    Apps(Box<super::apps::AppsView>),
     /// Creating and joining servers, and links into the app.
     Invites(Box<super::invites::InviteView>),
     /// A native toast. The shell drops it when notifications are off.

@@ -667,7 +667,7 @@ fn voice_event(event: Event) -> Option<VoiceEvent> {
         }),
         Event::Frame(GatewayOp::Speaking, d) => Some(VoiceEvent::Speaking {
             participant_id: pid(&d),
-            speaking: d.get("speaking").and_then(Value::as_i64).unwrap_or(0) & 1 == 1,
+            speaking: d.get("speaking").and_then(Value::as_i64).unwrap_or(0) != 0,
         }),
         Event::Frame(GatewayOp::StopTracks, d) => Some(VoiceEvent::StopTracks {
             participant_id: pid(&d),
@@ -676,6 +676,7 @@ fn voice_event(event: Event) -> Option<VoiceEvent> {
         Event::Frame(GatewayOp::ClientDisconnect, d) => Some(VoiceEvent::ClientDisconnect {
             participant_id: pid(&d),
         }),
+        Event::Frame(GatewayOp::VoiceAppEvent, d) => Some(VoiceEvent::App(d)),
         Event::Frame(GatewayOp::Error, d) => {
             eprintln!("[voice] voice error {d}");
             let code = d.get("code").and_then(Value::as_i64).unwrap_or(0);

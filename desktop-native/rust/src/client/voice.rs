@@ -124,6 +124,10 @@ impl yap_voice::Commands for Commands {
                         VoiceCommand::SetShareQuality(quality) => {
                             UserCommand::SetShareQuality(quality)
                         }
+                        VoiceCommand::SendApp(frame) => UserCommand::SendApp(frame),
+                        VoiceCommand::SetSoundboardSpeaking(on) => {
+                            UserCommand::SetSoundboardSpeaking(on)
+                        }
                         VoiceCommand::Leave => UserCommand::Leave,
                     });
                 }
@@ -174,6 +178,14 @@ fn share_update(notice: ShareNotice) -> VoiceUpdate {
     }
 }
 
+/// The wall clock in epoch ms (app events are stamped with it; the store
+/// has no clock).
+pub fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+}
+
 /// Runs one call until it is left or ends; reports through `events`.
 pub async fn run(
     api: Api,
@@ -209,6 +221,17 @@ pub async fn run(
         Notice::MicLevel(level) => crate::audio::set_live_level(Some(level)),
         Notice::Camera { on, error } => events.send(VoiceUpdate::Camera { on, error }),
         Notice::Share(notice) => events.send(share_update(notice)),
+        Notice::VoiceReady { participant_id } => {
+            events.send(VoiceUpdate::VoiceReady { participant_id });
+        }
+        Notice::App(d) => {
+            if let Some(event) = yap_protocol::voice_app::AppEvent::decode(&d) {
+                events.send(VoiceUpdate::App {
+                    event: Box::new(event),
+                    now_ms: now_ms(),
+                });
+            }
+        }
         Notice::Roster(members) => events.send(VoiceUpdate::Roster(
             members
                 .into_iter()

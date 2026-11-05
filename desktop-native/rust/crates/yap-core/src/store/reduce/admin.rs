@@ -397,6 +397,7 @@ impl State {
             }
             AdminCommand::SaveServer(draft) => self.save_server(fx, *draft),
             AdminCommand::DeleteServer { confirm } => self.delete_server(fx, &confirm),
+            AdminCommand::LeaveServer { server_id } => self.leave_server(fx, server_id),
             AdminCommand::SetInvitesPaused(on) => self.set_invites_paused(fx, on),
             AdminCommand::CreateInvite {
                 channel_id,
@@ -733,6 +734,22 @@ impl State {
             "delete-server",
             request,
             AdminThen::ServerDeleted { server_id },
+        );
+    }
+
+    /// The server menu's Leave server: anyone but the owner.
+    fn leave_server(&mut self, fx: &mut Effects, server_id: String) {
+        if self.server(&server_id).is_none() || self.access(&server_id).owner {
+            return;
+        }
+        let request = AdminRequest::LeaveServer {
+            server_id: server_id.clone(),
+        };
+        self.admin_act(
+            fx,
+            "leave-server",
+            request,
+            AdminThen::ServerLeft { server_id },
         );
     }
 
@@ -1188,7 +1205,7 @@ impl State {
                 }
                 self.after_server_change(fx, &server_id);
             }
-            AdminThen::ServerDeleted { server_id } => {
+            AdminThen::ServerDeleted { server_id } | AdminThen::ServerLeft { server_id } => {
                 self.act_done(key);
                 return self.drop_server(fx, &server_id);
             }
@@ -1321,6 +1338,9 @@ impl State {
             }
             AdminThen::ServerSaved { .. } => "save the server settings".to_owned(),
             AdminThen::ServerDeleted { .. } => "delete this server".to_owned(),
+            AdminThen::ServerLeft { .. } => {
+                return self.act_fail(key, leave_error(error));
+            }
             AdminThen::InvitesPaused { server_id, before } => {
                 let paused = self
                     .server(server_id)
@@ -1864,6 +1884,22 @@ fn override_rows(
     };
     rows.sort_by_key(rank);
     rows
+}
+
+/// Why Leave server failed. The route answers 403 with its own sentence
+/// (the owner case); a 404 or 405 means this server has no such route yet
+/// (it is newer than the deployed API).
+fn leave_error(error: &ApiError) -> String {
+    match error {
+        ApiError::Http {
+            status: 404 | 405, ..
+        } => "Leaving servers isn't available yet. Try again after Yap updates.".into(),
+        ApiError::Http {
+            status: 403,
+            message,
+        } if !message.trim().is_empty() && message != "request failed" => message.trim().to_owned(),
+        _ => describe_api_error(error, "leave this server"),
+    }
 }
 
 #[cfg(test)]

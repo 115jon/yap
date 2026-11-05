@@ -105,6 +105,24 @@ pub enum Effect {
         path: String,
         content_type: String,
     },
+    /// Upload a soundboard sound: multipart `file` plus `fields`
+    /// (`purpose=soundboard`, name, emoji, volume) to the channel's upload
+    /// route. Answered by `Input::Http` with `ApiResponse::Uploaded`.
+    SoundUpload {
+        id: RequestId,
+        token: Token,
+        channel_id: String,
+        path: String,
+        name: String,
+        content_type: String,
+        fields: Vec<(String, String)>,
+    },
+    /// Tell the local player (soundboard clips, the Listen Together
+    /// stream). `token` fetches our own media.
+    Audio {
+        token: Option<Token>,
+        command: super::apps::AudioCommand,
+    },
 }
 
 /// Which profile image an upload replaces.
@@ -259,6 +277,8 @@ pub enum ApiRequest {
     Friends(super::FriendsRequest),
     /// Creating and joining servers.
     Invites(super::InviteRequest),
+    /// The soundboard, Listen Together and the Wordle puzzle.
+    Apps(super::apps::AppsRequest),
 }
 
 /// A page of messages, oldest first.
@@ -299,6 +319,7 @@ pub enum ApiResponse {
     Search(Box<crate::search::SearchResponse>),
     Friends(super::FriendsResponse),
     Invites(super::InviteResponse),
+    Apps(super::apps::AppsResponse),
     /// A call whose body the store does not read.
     Done,
 }
@@ -337,6 +358,7 @@ impl ApiRequest {
             Self::Search(request) => request.method(),
             Self::Friends(request) => request.method(),
             Self::Invites(request) => request.method(),
+            Self::Apps(request) => request.method(),
             Self::SendMessage { .. }
             | Self::Typing { .. }
             | Self::OpenDm { .. }
@@ -371,6 +393,7 @@ impl ApiRequest {
             Self::Search(request) => request.path(),
             Self::Friends(request) => request.path(),
             Self::Invites(request) => request.path(),
+            Self::Apps(request) => request.path(),
             Self::Me => "/api/users/me".into(),
             Self::Servers => "/api/servers".into(),
             Self::Channels { server_id } => format!("/api/servers/{server_id}/channels"),
@@ -450,6 +473,7 @@ impl ApiRequest {
             Self::Search(_) => Value::Null,
             Self::Friends(request) => request.body(),
             Self::Invites(request) => request.body(),
+            Self::Apps(request) => request.body(),
             Self::SendMessage {
                 content,
                 reply_to_id,
@@ -529,6 +553,7 @@ impl ApiRequest {
             Self::Search(request) => ApiResponse::Search(Box::new(request.decode(body)?)),
             Self::Friends(request) => ApiResponse::Friends(request.decode(body)?),
             Self::Invites(request) => ApiResponse::Invites(request.decode(body)?),
+            Self::Apps(request) => ApiResponse::Apps(request.decode(body)?),
             Self::Me => ApiResponse::Me(Box::new(
                 serde_json::from_value(body).map_err(|e| ApiError::Decode(format!("me: {e}")))?,
             )),

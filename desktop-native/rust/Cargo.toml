@@ -6,6 +6,7 @@ members = [
     "crates/yap-protocol",
     "crates/yap-realtime",
     "crates/yap-voice",
+    "crates/yap-audio",
 ]
 
 [workspace.package]
@@ -27,6 +28,7 @@ yap-core = { path = "crates/yap-core" }
 yap-protocol = { path = "crates/yap-protocol" }
 yap-realtime = { path = "crates/yap-realtime" }
 yap-voice = { path = "crates/yap-voice" }
+yap-audio = { path = "crates/yap-audio" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "warn"
@@ -60,6 +62,7 @@ yap-core.workspace = true
 yap-protocol.workspace = true
 yap-realtime.workspace = true
 yap-voice.workspace = true
+yap-audio = { workspace = true, features = ["libopus"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Media_Audio"] }
