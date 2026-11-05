@@ -7,7 +7,9 @@ import com.yap.native
 // typing dots) cut out of ply-0, the name in their highest role's colour
 // while online, a crown for the owner, and the custom status under it.
 // Offline rows sit at half opacity until hovered. Someone in your voice
-// channel gets their talk LED in the row's left gutter.
+// channel gets their talk LED in the row's left gutter. A nameplate
+// covers the row behind them (its still; the webm plays while hovered),
+// edged in its palette, and the name drops its role colour.
 Item {
     id: root
 
@@ -27,6 +29,9 @@ Item {
     required property bool typing
     required property bool inCall
     required property bool speaking
+    // The avatar decoration (APNG) and the nameplate JSON, or empty.
+    required property string deco
+    required property string plate
     property color ground: Theme.ply0
     signal profileRequested(string userId, Item anchor)
     // A right click at `at` (in the row): the member's menu.
@@ -82,6 +87,21 @@ Item {
         Behavior on color { ColorAnimation { duration: Theme.dur1 } }
 
         HoverHandler { id: hover; enabled: !root.label; cursorShape: Qt.PointingHandCursor }
+
+        NameplateLayer {
+            anchors.fill: parent
+            visible: root.plate.length > 0
+            plate: root.plate
+            playing: hover.hovered
+        }
+        Rectangle {
+            anchors.fill: parent
+            visible: root.plate.length > 0
+            radius: Theme.radius
+            color: "transparent"
+            border.width: 1
+            border.color: visible ? JSON.parse(root.plate).border : "transparent"
+        }
         TapHandler {
             enabled: !root.label
             onTapped: root.profileRequested(root.userId, face)
@@ -110,6 +130,7 @@ Item {
             presence: root.presence
             typing: root.typing
             ground: root.ground
+            deco: root.deco
         }
 
         Column {
@@ -127,7 +148,8 @@ Item {
                     textFormat: Text.PlainText
                     text: root.name
                     elide: Text.ElideRight
-                    color: root.roleColor.length > 0 ? root.roleColor : hover.hovered ? Theme.ink1 : Theme.ink2
+                    color: root.roleColor.length > 0 && root.plate.length === 0 ? root.roleColor
+                        : hover.hovered || root.plate.length > 0 ? Theme.ink1 : Theme.ink2
                     font: Theme.type.row
                 }
                 Icon {

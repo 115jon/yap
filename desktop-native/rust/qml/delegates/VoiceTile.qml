@@ -25,6 +25,8 @@ Item {
     required property string participantId
     required property string name
     required property string avatar
+    // The person's avatar decoration (APNG), or empty.
+    required property string deco
     required property bool muted
     required property bool deafened
     required property bool speaking
@@ -190,6 +192,7 @@ Item {
         size: root.tray ? 40 : root.solo ? 80 : 64
         initials: root.name
         source: root.avatar
+        deco: root.deco
     }
 
     // Speaking: a 2 px talk outline outside the tile (people only).

@@ -222,7 +222,7 @@ pub(super) fn reactions_json(reactions: &[Reaction], ctx: &RowContext<'_>) -> St
 
 /// Hosts whose media only load through `/api/proxy-media` (X, TikTok,
 /// Instagram; proxy-media.ts allowlist).
-fn needs_proxy(url: &str) -> bool {
+pub(super) fn needs_proxy(url: &str) -> bool {
     host_of(url).is_some_and(|host| {
         matches!(
             host.as_str(),
@@ -236,7 +236,7 @@ fn needs_proxy(url: &str) -> bool {
 }
 
 /// An embed picture's URL: http(s) only, proxied where the web proxies it.
-fn embed_image_url(url: &str, page: &str, api_base: &str) -> String {
+pub(super) fn embed_image_url(url: &str, page: &str, api_base: &str) -> String {
     if !is_web_url(url) {
         return String::new();
     }
@@ -431,11 +431,18 @@ fn is_hex_colour(value: &str) -> bool {
         .is_some_and(|hex| matches!(hex.len(), 3 | 6) && hex.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
-/// Every embed the message carries, in order (MessageItem.tsx draws all).
-pub fn embeds_json(embeds: &[Embed], api_base: &str) -> String {
+/// Every embed the message carries, in order (MessageItem.tsx draws all):
+/// providers and media as [`super::embeds`] shapes them, link cards here.
+pub fn embeds_json(
+    embeds: &[Embed],
+    api_base: &str,
+    hydrations: &super::super::embeds::Hydrations,
+) -> String {
     let items: Vec<Value> = embeds
         .iter()
-        .filter_map(|e| embed_json(e, api_base))
+        .filter_map(|e| {
+            super::embeds::embed_value(e, api_base, hydrations).or_else(|| embed_json(e, api_base))
+        })
         .collect();
     if items.is_empty() {
         return String::new();

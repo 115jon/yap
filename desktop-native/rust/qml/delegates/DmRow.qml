@@ -16,6 +16,8 @@ Rectangle {
     required property string initials
     required property string presence
     required property string customStatus
+    // The recipient's avatar decoration (APNG), or empty.
+    required property string deco
     required property bool unread
     required property int mentions
     required property bool active
@@ -50,6 +52,7 @@ Rectangle {
         size: 24
         initials: row.initials
         source: row.avatar
+        deco: row.deco
         presence: row.presence
         ground: Theme.ply1
         overhang: 4

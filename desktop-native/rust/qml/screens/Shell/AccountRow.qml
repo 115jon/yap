@@ -19,8 +19,34 @@ Rectangle {
     readonly property color presenceInk: Theme.presenceInk(presence)
     readonly property string presenceWord: presence === "offline" ? qsTr("Invisible") : Theme.presenceWord(presence)
 
+    // Over a nameplate the keys take its ink, as the web's controls do
+    // (UserPanel.tsx nameplateInk/caretStyle): dark over a light accent,
+    // else near-white; muted keeps the danger ink, lightened on a dark one.
+    readonly property var plateInfo: Session.mePlate.length > 0 ? JSON.parse(Session.mePlate) : null
+    readonly property bool onPlate: plateInfo !== null
+    readonly property bool plateLight: onPlate && plateInfo.light === true
+    readonly property color plateInk: !onPlate ? "transparent" : plateLight ? "#162033" : "#f8fafc"
+    readonly property color plateInkQuiet: !onPlate ? "transparent"
+        : plateLight ? Qt.rgba(0x16 / 255, 0x20 / 255, 0x33 / 255, 0.78)
+        : Qt.rgba(0xf8 / 255, 0xfa / 255, 0xfc / 255, 0.84)
+    readonly property color plateInkOff: !onPlate ? "transparent"
+        : plateLight ? Theme.mutedState
+        : Qt.tint("#ffffff", Qt.rgba(Theme.mutedState.r, Theme.mutedState.g, Theme.mutedState.b, 0.35))
+
     implicitHeight: 64
     color: Theme.ply1
+
+    // Our nameplate behind the row (UserPanel.tsx); it plays while hovered.
+    NameplateLayer {
+        anchors.fill: parent
+        anchors.topMargin: 1
+        visible: Session.mePlate.length > 0
+        plate: Session.mePlate
+        playing: rowHover.hovered
+        identityFade: true
+        ground: Theme.ply1
+    }
+    HoverHandler { id: rowHover }
 
     Rectangle { width: parent.width; height: 1; color: Theme.line }
 
@@ -50,6 +76,7 @@ Rectangle {
             size: 40
             initials: Session.meId.length > 0 ? Session.meName : "?"
             source: Session.meAvatar
+            deco: Session.meDeco
             // rm-speak: a 2 px talk ring at -2 px, opacity only.
             Rectangle {
                 anchors.fill: parent
@@ -148,26 +175,33 @@ Rectangle {
 
         IconKey {
             iconName: "mic"
+            plateInk: Voice.muted ? root.plateInkOff : root.plateInk
             tone: Voice.muted ? "off" : "ghost"
             tip: Voice.muted ? qsTr("Unmute") : qsTr("Mute")
             onClicked: Voice.requestMute(!Voice.muted)
         }
         DeviceCaret {
+            plateInk: root.plateInk
+            plateMuted: root.plateInkQuiet
             label: qsTr("Input settings")
             menu: inputMenu
         }
         IconKey {
             iconName: "deafen"
+            plateInk: Voice.deafened ? root.plateInkOff : root.plateInk
             tone: Voice.deafened ? "off" : "ghost"
             tip: Voice.deafened ? qsTr("Undeafen") : qsTr("Deafen")
             onClicked: Voice.requestDeafen(!Voice.deafened)
         }
         DeviceCaret {
+            plateInk: root.plateInk
+            plateMuted: root.plateInkQuiet
             label: qsTr("Output settings")
             menu: outputMenu
         }
         IconKey {
             iconName: "settings"
+            plateInk: root.plateInk
             tip: qsTr("User settings")
             onClicked: SettingsNav.show("account", "")
         }

@@ -265,6 +265,13 @@ pub struct UserProfileUpdate {
     /// Sent only to the user's own sessions.
     #[serde(default, deserialize_with = "present")]
     pub media_content_filter: Option<Option<String>>,
+    /// The serialized avatar display (crop and collectibles), as stored.
+    #[serde(default, deserialize_with = "present")]
+    pub avatar_display: Option<Option<Value>>,
+    #[serde(default, deserialize_with = "present")]
+    pub nameplate_url: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    pub nameplate_content_type: Option<Option<String>>,
 }
 
 impl UserProfileUpdate {
@@ -288,6 +295,11 @@ impl UserProfileUpdate {
             (&self.banner_content_type, &mut user.banner_content_type),
             (&self.theme_preference, &mut user.theme_preference),
             (&self.media_content_filter, &mut user.media_content_filter),
+            (&self.nameplate_url, &mut user.nameplate_url),
+            (
+                &self.nameplate_content_type,
+                &mut user.nameplate_content_type,
+            ),
         ];
         for (update, field) in fields {
             if let Some(value) = update {
@@ -296,6 +308,9 @@ impl UserProfileUpdate {
         }
         if let Some(sync) = &self.theme_sync_enabled {
             user.theme_sync_enabled = Some(sync.clone());
+        }
+        if let Some(display) = &self.avatar_display {
+            user.avatar_display.clone_from(display);
         }
     }
 }

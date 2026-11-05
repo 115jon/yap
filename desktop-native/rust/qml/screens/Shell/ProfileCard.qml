@@ -1,4 +1,6 @@
 import QtQuick
+import QtQuick.Effects
+import Yap.Media
 import com.yap.native
 
 // The profile card, popover size (ProfileCard.tsx): a 96 px banner (the
@@ -10,6 +12,12 @@ import com.yap.native
 // under it (actions, sections). A profile theme (`surfaceColor`,
 // `accentColor`, `#RRGGBB`) paints the card and the banner fallback, with
 // ink that reads on it; empty follows the app theme.
+//
+// Collectibles (ProfileSurfaceShell.tsx): the avatar wears its decoration
+// (round crop, the APNG at 124 %), the profile effect plays over the card
+// (one pass, then its still; `effectPlayback: "loop"` for the shop's
+// stage), and a frame draws around it, its back art under the card and its
+// front art over it, overhanging by the frame's footprint.
 Rectangle {
     id: root
 
@@ -25,6 +33,16 @@ Rectangle {
     property string surfaceColor
     property string accentColor
     property Component statusLine: null
+    // Collectibles: the decoration's APNG and the effect and frame JSON.
+    property string deco: ""
+    property string effect: ""
+    property string frame: ""
+    property string effectPlayback: "once"
+    property bool animate: true
+
+    readonly property var frameInfo: frame.length > 0 ? JSON.parse(frame) : null
+    // The frame box: the card plus the frame's footprint, in card pixels.
+    readonly property real frameOuter: frameInfo ? width / Math.max(0.1, 1 - 2 * frameInfo.side) : width
 
     readonly property bool themed: surfaceColor.length > 0
     readonly property bool lightSurface: themed && (0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b) > 0.5
@@ -39,6 +57,17 @@ Rectangle {
     color: themed ? surfaceColor : Theme.ply3
     border.width: 1
     border.color: Theme.lineStrong
+
+    ProfileFrameLayer {
+        visible: root.frameInfo !== null
+        x: -root.frameInfo?.side * root.frameOuter || 0
+        y: -root.frameInfo?.top * root.frameOuter || 0
+        width: root.frameOuter
+        height: root.height + (root.frameInfo ? (root.frameInfo.top + root.frameInfo.bottom) * root.frameOuter : 0)
+        z: -1
+        frame: root.frame
+        order: "back"
+    }
 
     Rectangle {
         id: bannerArea
@@ -95,11 +124,39 @@ Rectangle {
                     id: picture
                     anchors.fill: parent
                     source: root.avatar
-                    visible: status === Image.Ready
+                    visible: status === Image.Ready && root.deco.length === 0
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                     sourceSize.width: 144
                     sourceSize.height: 144
+                }
+                // Decorated: the face crops round under the ring art.
+                Loader {
+                    anchors.fill: parent
+                    active: root.deco.length > 0 && picture.status === Image.Ready
+                    sourceComponent: Item {
+                        Rectangle {
+                            id: roundMask
+                            anchors.fill: parent
+                            radius: width / 2
+                            visible: false
+                            layer.enabled: true
+                        }
+                        MultiEffect {
+                            anchors.fill: parent
+                            source: picture
+                            maskEnabled: true
+                            maskSource: roundMask
+                        }
+                    }
+                }
+                AnimatedPicture {
+                    visible: root.deco.length > 0
+                    anchors.centerIn: parent
+                    width: Math.round(72 * 1.24)
+                    height: width
+                    source: root.deco
+                    playing: root.animate && !Theme.reducedMotion
                 }
             }
         }
@@ -179,5 +236,24 @@ Rectangle {
         x: 16
         width: parent.width - 32
         spacing: 16
+    }
+
+    ProfileEffectLayer {
+        anchors.fill: parent
+        anchors.margins: 1
+        visible: root.effect.length > 0
+        effect: root.effect
+        playback: root.effectPlayback
+        playing: root.animate && root.visible
+    }
+
+    ProfileFrameLayer {
+        visible: root.frameInfo !== null
+        x: -root.frameInfo?.side * root.frameOuter || 0
+        y: -root.frameInfo?.top * root.frameOuter || 0
+        width: root.frameOuter
+        height: root.height + (root.frameInfo ? (root.frameInfo.top + root.frameInfo.bottom) * root.frameOuter : 0)
+        frame: root.frame
+        order: "front"
     }
 }

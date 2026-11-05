@@ -1,0 +1,17 @@
+[package]
+name = "yap-anim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Animated picture decoding for the native client: APNG (avatar decorations, profile effects) and animated WebP (X GIFs), which Qt's image plugins cannot animate. Frames come out composited, scaled and premultiplied, ready for a QImage."
+
+[dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png", "webp"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+png = "0.18"
+
+[lints]
+workspace = true

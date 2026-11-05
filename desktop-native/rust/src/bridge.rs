@@ -45,6 +45,12 @@ pub mod qobject {
         /// `online`, `idle`, `dnd` or `offline`.
         #[qproperty(QString, me_status, cxx_name = "meStatus")]
         #[qproperty(QString, me_custom_status, cxx_name = "meCustomStatus")]
+        /// Our avatar decoration (APNG URL), or empty.
+        #[qproperty(QString, me_deco, cxx_name = "meDeco")]
+        /// Our nameplate as JSON `{still, motion, border}`, or empty.
+        #[qproperty(QString, me_plate, cxx_name = "mePlate")]
+        /// Our stored avatar display (JSON), or empty.
+        #[qproperty(QString, me_display, cxx_name = "meDisplay")]
         type Session = super::SessionRust;
 
         /// Starts the core (once).
@@ -457,6 +463,11 @@ pub mod qobject {
         #[qproperty(QStringList, role_names, cxx_name = "roleNames")]
         #[qproperty(QStringList, role_colors, cxx_name = "roleColors")]
         #[qproperty(bool, me)]
+        /// The avatar decoration (APNG URL), or empty.
+        #[qproperty(QString, deco)]
+        /// The profile effect and frame as JSON, or empty.
+        #[qproperty(QString, effect)]
+        #[qproperty(QString, frame)]
         type Profile = super::ProfileRust;
 
         #[qinvokable]
@@ -514,6 +525,9 @@ pub struct SessionRust {
     me_initials: QString,
     me_status: QString,
     me_custom_status: QString,
+    me_deco: QString,
+    me_plate: QString,
+    me_display: QString,
 }
 
 impl Drop for SessionRust {
@@ -689,6 +703,9 @@ pub struct ProfileRust {
     role_names: QStringList,
     role_colors: QStringList,
     me: bool,
+    deco: QString,
+    effect: QString,
+    frame: QString,
 }
 
 impl qobject::Profile {

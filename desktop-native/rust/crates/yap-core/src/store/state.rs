@@ -358,6 +358,7 @@ pub(super) struct Projection {
     pub search: super::search::SearchView,
     pub friends: super::FriendsView,
     pub apps: super::apps::AppsView,
+    pub shop: super::shop::ShopView,
 }
 
 /// One step of a profile save, run in order; a failure stops the rest.
@@ -481,6 +482,10 @@ pub(super) struct Pending {
     pub friends: HashMap<RequestId, super::friends::FriendsOp>,
     /// The voice apps.
     pub apps: HashMap<RequestId, super::apps::AppsOp>,
+    /// The shop.
+    pub shop: HashMap<RequestId, super::shop::ShopOp>,
+    /// TikTok and Instagram lookups.
+    pub embeds: super::embeds::Pending,
 }
 
 /// An optimistic reaction add or remove, undone if the server refuses.
@@ -734,6 +739,10 @@ pub struct State {
     pub(super) friends: super::FriendsState,
     pub(super) invites: super::InviteState,
     pub(super) apps: super::apps::AppsState,
+    /// The collectibles shop.
+    pub(super) shop: super::shop::ShopState,
+    /// TikTok and Instagram lookups, by link.
+    pub(super) hydrations: super::embeds::Hydrations,
     pub(super) view: Projection,
     pub(super) pending: Pending,
     pub(super) boot: Option<Boot>,
@@ -795,6 +804,8 @@ impl State {
             friends: super::FriendsState::default(),
             invites: super::InviteState::default(),
             apps: super::apps::AppsState::new(),
+            shop: Default::default(),
+            hydrations: Default::default(),
             view: Projection::default(),
             pending: Pending::default(),
             boot: None,

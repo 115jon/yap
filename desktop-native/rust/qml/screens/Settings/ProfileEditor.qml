@@ -37,6 +37,8 @@ T.Popup {
         || avatarPath.length > 0 || removeAvatar
         || bannerPath.length > 0 || removeBanner
     readonly property string error: localError.length > 0 ? localError : Settings.profileError
+    // What the profile wears (collectibles apply at once, not on Save).
+    readonly property var worn: Session.meDisplay.length > 0 ? (JSON.parse(Session.meDisplay).collectibles ?? {}) : ({})
     readonly property string shownAvatar: removeAvatar ? "" : avatarPath.length > 0 ? "file:///" + avatarPath : Settings.avatar
     readonly property string shownBanner: removeBanner ? "" : bannerPath.length > 0 ? "file:///" + bannerPath : Settings.banner
 
@@ -457,10 +459,26 @@ T.Popup {
                         width: parent.width
                         title: qsTr("Collectibles")
                         description: qsTr("Decorations from your collection.")
-                        SettingsRow { custom: true; rowId: "profile-decoration"; label: qsTr("Avatar decoration"); layout: "inline"; ComingLater {} }
-                        SettingsRow { custom: true; rowId: "profile-effect"; label: qsTr("Profile effect"); layout: "inline"; ComingLater {} }
-                        SettingsRow { custom: true; rowId: "profile-frame"; label: qsTr("Profile frame"); layout: "inline"; ComingLater {} }
-                        SettingsRow { custom: true; rowId: "profile-nameplate"; label: qsTr("Nameplate"); layout: "inline"; ComingLater {} }
+                        SettingsRow {
+                            custom: true; rowId: "profile-decoration"; label: qsTr("Avatar decoration"); layout: "inline"
+                            description: editor.worn.avatarDecoration?.name ?? qsTr("No decoration")
+                            CollectibleKeys { kind: "avatar_decoration"; on: editor.worn.avatarDecoration !== undefined }
+                        }
+                        SettingsRow {
+                            custom: true; rowId: "profile-effect"; label: qsTr("Profile effect"); layout: "inline"
+                            description: editor.worn.profileEffect?.name ?? qsTr("No effect")
+                            CollectibleKeys { kind: "profile_effect"; on: editor.worn.profileEffect !== undefined }
+                        }
+                        SettingsRow {
+                            custom: true; rowId: "profile-frame"; label: qsTr("Profile frame"); layout: "inline"
+                            description: editor.worn.profileFrame?.name ?? qsTr("No frame")
+                            CollectibleKeys { kind: "profile_frame"; on: editor.worn.profileFrame !== undefined }
+                        }
+                        SettingsRow {
+                            custom: true; rowId: "profile-nameplate"; label: qsTr("Nameplate"); layout: "inline"
+                            description: editor.worn.nameplate?.name ?? qsTr("No nameplate")
+                            CollectibleKeys { kind: "nameplate"; on: editor.worn.nameplate !== undefined }
+                        }
                     }
                 }
             }
@@ -566,5 +584,31 @@ T.Popup {
             color: Theme.ink3
             font: Theme.type.numSm
         }
+    }
+
+    // A collectible row's keys: Change (Choose when the slot is empty)
+    // opens the slot's picker; Remove empties it at once.
+    component CollectibleKeys: Row {
+        id: keys
+        required property string kind
+        property bool on: false
+        spacing: 8
+        KitButton {
+            size: "sm"
+            variant: "secondary"
+            text: keys.on ? qsTr("Change") : qsTr("Choose")
+            onClicked: picker.show(keys.kind)
+        }
+        KitButton {
+            visible: keys.on
+            size: "sm"
+            variant: "ghost"
+            text: qsTr("Remove")
+            onClicked: Shop.remove(keys.kind)
+        }
+    }
+
+    CollectiblePicker {
+        id: picker
     }
 }

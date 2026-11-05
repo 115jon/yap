@@ -10,6 +10,7 @@
 pub mod admin;
 pub mod api;
 pub mod auth;
+pub mod collectibles;
 pub mod config;
 pub mod emoji;
 pub mod fixture;

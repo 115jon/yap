@@ -279,6 +279,10 @@ pub enum ApiRequest {
     Invites(super::InviteRequest),
     /// The soundboard, Listen Together and the Wordle puzzle.
     Apps(super::apps::AppsRequest),
+    /// The collectibles shop.
+    Shop(super::shop::ShopRequest),
+    /// A TikTok or Instagram lookup.
+    Embeds(super::embeds::EmbedsRequest),
 }
 
 /// A page of messages, oldest first.
@@ -320,6 +324,9 @@ pub enum ApiResponse {
     Friends(super::FriendsResponse),
     Invites(super::InviteResponse),
     Apps(super::apps::AppsResponse),
+    Shop(super::shop::ShopResponse),
+    /// A lookup's payload, as served.
+    Embeds(Value),
     /// A call whose body the store does not read.
     Done,
 }
@@ -359,6 +366,8 @@ impl ApiRequest {
             Self::Friends(request) => request.method(),
             Self::Invites(request) => request.method(),
             Self::Apps(request) => request.method(),
+            Self::Shop(request) => request.method(),
+            Self::Embeds(request) => request.method(),
             Self::SendMessage { .. }
             | Self::Typing { .. }
             | Self::OpenDm { .. }
@@ -394,6 +403,8 @@ impl ApiRequest {
             Self::Friends(request) => request.path(),
             Self::Invites(request) => request.path(),
             Self::Apps(request) => request.path(),
+            Self::Shop(request) => request.path(),
+            Self::Embeds(request) => request.path(),
             Self::Me => "/api/users/me".into(),
             Self::Servers => "/api/servers".into(),
             Self::Channels { server_id } => format!("/api/servers/{server_id}/channels"),
@@ -474,6 +485,8 @@ impl ApiRequest {
             Self::Friends(request) => request.body(),
             Self::Invites(request) => request.body(),
             Self::Apps(request) => request.body(),
+            Self::Shop(request) => request.body(),
+            Self::Embeds(_) => Value::Null,
             Self::SendMessage {
                 content,
                 reply_to_id,
@@ -554,6 +567,8 @@ impl ApiRequest {
             Self::Friends(request) => ApiResponse::Friends(request.decode(body)?),
             Self::Invites(request) => ApiResponse::Invites(request.decode(body)?),
             Self::Apps(request) => ApiResponse::Apps(request.decode(body)?),
+            Self::Shop(request) => ApiResponse::Shop(request.decode(body)?),
+            Self::Embeds(_) => ApiResponse::Embeds(body),
             Self::Me => ApiResponse::Me(Box::new(
                 serde_json::from_value(body).map_err(|e| ApiError::Decode(format!("me: {e}")))?,
             )),

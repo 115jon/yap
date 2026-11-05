@@ -120,11 +120,20 @@ RowLayout {
             anchors.fill: parent
             visible: Nav.voicePanelId.length === 0 && (!Nav.home || Nav.activeChannelId.length > 0)
         }
-        // Home with no conversation open: Friends (it loads as it opens).
+        // Home with no conversation open: Friends (it loads as it opens),
+        // or the shop from the sidebar's Shop row.
         Loader {
             anchors.fill: parent
             active: Nav.home && Nav.activeChannelId.length === 0 && Nav.voicePanelId.length === 0
-            sourceComponent: FriendsView {}
+            sourceComponent: ShellState.shopOpen ? shopView : friendsView
+        }
+        Component {
+            id: friendsView
+            FriendsView {}
+        }
+        Component {
+            id: shopView
+            ShopView {}
         }
         Loader {
             anchors.fill: parent

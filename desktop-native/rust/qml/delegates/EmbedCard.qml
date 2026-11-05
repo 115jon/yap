@@ -1,25 +1,34 @@
 import QtQuick
 import com.yap.native
 
-// One link preview (LinkEmbed.tsx), from the row's `embeds` role:
-//   card    ply-2 with a seam, 12 px in, 8 px between: the header (6 px
-//           dot in the embed's colour, the site, the open key), the title
-//           (14/600 accent ink), up to three lines of description, then
-//           the picture: beside it at 80 x 80 ("thumbnail", 400 wide) or
-//           under it at most 300 high ("large", 520 wide). Players
-//           (YouTube, video, rich) show their thumbnail with the play
-//           disc; it opens the link (no web views here).
-//   image   bare media inside 640 x 400 (direct links): opens the viewer.
-//   video   a direct video file: the play disc opens it externally.
-//   status  "Unavailable": the deleted or private post card.
+// One embed (LinkEmbed.tsx), from the row's `embeds` role, by `kind`
+// (store/view/embeds.rs):
+//   card      ply-2 with a seam, 12 px in, 8 px between: the header (6 px
+//             dot in the embed's colour, the site, the open key), the
+//             title (14/600 accent ink), up to three lines of description,
+//             then the picture: beside it at 80 x 80 ("thumbnail", 400
+//             wide) or under it at most 300 high ("large", 520 wide).
+//   youtube   YouTubeEmbed: the player in place (WebView2) on click.
+//   spotify   SpotifyEmbed: Spotify's player in place on click.
+//   social    TikTok and Instagram (SocialEmbed): proxied media plays here.
+//   x         XEmbed: the post, its media grid, quote and counts.
+//   image     bare media inside 640 x 400 (direct links): the viewer.
+//   video     a direct video file, played here (EmbedVideo).
+//   fallback  a direct link whose media did not load: name and host.
+//   videocard a page's video: its thumbnail opens the page (VideoEmbed).
+//   rich      a rich player: in place when its host is allowed.
+//   status    gone, restricted, failed or loading (EmbedStatus.tsx).
 Item {
     id: root
 
     required property var embed
     property int maxWidth: 640
+    // The chat list: players hide and pause outside it.
+    property Item clipTo: null
 
     signal openLink(string url)
     signal openImage(var images, int index)
+    signal expandVideo(string source, int position)
 
     readonly property string kind: embed.kind
     implicitWidth: loader.item ? loader.item.width : 0
@@ -29,7 +38,54 @@ Item {
         id: loader
         sourceComponent: root.kind === "image" ? bare
             : root.kind === "video" ? video
-            : root.kind === "status" ? status : card
+            : root.kind === "fallback" ? fallback
+            : root.kind === "status" ? status
+            : root.kind === "youtube" ? youtube
+            : root.kind === "spotify" ? spotify
+            : root.kind === "social" ? social
+            : root.kind === "x" ? xpost
+            : card
+    }
+
+    Component {
+        id: youtube
+        YouTubeEmbed {
+            embed: root.embed
+            maxWidth: root.maxWidth
+            clipTo: root.clipTo
+            onOpenLink: url => root.openLink(url)
+        }
+    }
+    Component {
+        id: spotify
+        SpotifyEmbed {
+            embed: root.embed
+            maxWidth: root.maxWidth
+            clipTo: root.clipTo
+            onOpenLink: url => root.openLink(url)
+        }
+    }
+    Component {
+        id: social
+        SocialEmbed {
+            embed: root.embed
+            maxWidth: root.maxWidth
+            clipTo: root.clipTo
+            onOpenLink: url => root.openLink(url)
+            onOpenImage: (images, index) => root.openImage(images, index)
+            onExpandVideo: (source, position) => root.expandVideo(source, position)
+        }
+    }
+    Component {
+        id: xpost
+        XEmbed {
+            embed: root.embed
+            maxWidth: root.maxWidth
+            clipTo: root.clipTo
+            onOpenLink: url => root.openLink(url)
+            onOpenImage: (images, index) => root.openImage(images, index)
+            onExpandVideo: (source, position) => root.expandVideo(source, position)
+        }
     }
 
     // The header row: dot, site, and the open key.
@@ -187,7 +243,7 @@ Item {
                         ? root.embed.h / root.embed.w : 1 / 1.91
                     visible: frame.large
                     width: parent.width
-                    height: Math.min(root.embed.play ? 560 : 300, Math.round(width * aspect))
+                    height: Math.min(root.embed.maxH ?? (root.embed.play ? 560 : 300), Math.round(width * aspect))
                     radius: Theme.radius
                     color: root.embed.play ? "#000000" : Theme.tint1
                     clip: true
@@ -201,7 +257,7 @@ Item {
                     }
                     PlayDisc {
                         anchors.centerIn: parent
-                        visible: root.embed.play
+                        visible: root.embed.play && !richPlayer.playing
                         hovered: pictureHover.containsMouse
                     }
                     MouseArea {
@@ -209,9 +265,30 @@ Item {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.embed.play
-                            ? root.openLink(root.embed.url)
-                            : root.openImage([{ url: root.embed.image, name: root.embed.title, size: "", kind: "image" }], 0)
+                        onClicked: (root.embed.player ?? "").length > 0
+                            ? richPlayer.playing = true
+                            : root.embed.play
+                                ? root.openLink(root.embed.url)
+                                : root.openImage([{ url: root.embed.image, name: root.embed.title, size: "", kind: "image" }], 0)
+                    }
+                    // RichEmbed: the player in place, when its host is allowed.
+                    Loader {
+                        id: richPlayer
+                        property bool playing: false
+                        anchors.fill: parent
+                        sourceComponent: richPlayer.playing ? richComponent : null
+                        Component {
+                            id: richComponent
+                            WebPlayer {
+                                url: root.embed.player
+                                link: root.embed.url
+                                poster: root.embed.image
+                                label: root.embed.title
+                                clipTo: root.clipTo
+                                Component.onCompleted: activate()
+                                onReleased: richPlayer.playing = false
+                            }
+                        }
                     }
                     Accessible.role: Accessible.Button
                     Accessible.name: root.embed.play
@@ -251,106 +328,105 @@ Item {
         }
     }
 
+    // A direct video file (DirectMediaEmbed): played here, fitted into
+    // 640 x 400 at its own aspect (16:9 until known). A file that does not
+    // play turns into the fallback card.
     Component {
         id: video
+        Loader {
+            // The file's own size from the server, else what its first frame
+            // said (getDirectMediaBox), else 16:9 at the full 640.
+            readonly property var seen: ShellState.mediaSize(root.embed.src)
+            readonly property real w0: root.embed.w > 0 && root.embed.h > 0 ? root.embed.w : seen ? seen.w : 0
+            readonly property real h0: root.embed.w > 0 && root.embed.h > 0 ? root.embed.h : seen ? seen.h : 0
+            readonly property real ratio: w0 > 0 && h0 > 0 ? w0 / h0 : 16 / 9
+            readonly property real boxW: Math.min(root.maxWidth, 640, w0 > 0 ? w0 : 640, 400 * ratio)
+            property bool broken: false
+            width: broken ? item.width : Math.round(boxW)
+            height: broken ? item.height : Math.round(boxW / ratio)
+            sourceComponent: broken ? fallback : player
+            Component {
+                id: player
+                EmbedVideo {
+                    source: root.embed.src
+                    aspect: parent ? parent.ratio : 16 / 9
+                    durationHint: root.embed.duration
+                    name: root.embed.name
+                    clipTo: root.clipTo
+                    preview: true
+                    onSizeKnown: (w, h) => ShellState.rememberSize(root.embed.src, w, h)
+                    onExpandRequested: (source, position) => root.expandVideo(source, position)
+                    onFailed: parent.broken = true
+                }
+            }
+        }
+    }
+
+    // DirectMediaFallback: compact, a 40 px tile, the file name and host.
+    Component {
+        id: fallback
         Rectangle {
             width: Math.min(root.maxWidth, 400)
-            height: Math.round(width * 9 / 16)
+            height: 64
             radius: Theme.radius
-            color: "#000000"
+            color: Theme.ply2
             border.width: 1
             border.color: Theme.line
-            Accessible.role: Accessible.Button
-            Accessible.name: qsTr("Play %1").arg(root.embed.name)
-            PlayDisc {
-                anchors.centerIn: parent
-                hovered: directHover.containsMouse
-            }
-            Text {
+            Accessible.role: Accessible.Link
+            Accessible.name: root.embed.name ?? root.embed.url
+            Rectangle {
+                id: brokenTile
                 x: 12
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 10
-                width: parent.width - 24
-                textFormat: Text.PlainText
-                text: root.embed.host
-                elide: Text.ElideRight
-                color: "#b4b4ba"
-                font: Theme.type.caption
+                anchors.verticalCenter: parent.verticalCenter
+                width: 40
+                height: 40
+                radius: Theme.radius
+                color: Theme.tint2
+                Icon {
+                    anchors.centerIn: parent
+                    name: "imageBroken"
+                    size: Theme.iconLg
+                    color: Theme.ink2
+                }
             }
-            MouseArea {
-                id: directHover
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.openLink(root.embed.url)
+            Column {
+                anchors.left: brokenTile.right
+                anchors.leftMargin: 12
+                anchors.right: parent.right
+                anchors.rightMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                Text {
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    text: root.embed.name ?? ""
+                    elide: Text.ElideRight
+                    color: Theme.accentInk
+                    font.family: Theme.type.row.family
+                    font.pixelSize: Theme.type.row.pixelSize
+                    font.weight: Theme.type.row.weight
+                    font.underline: fallbackHover.hovered
+                }
+                Text {
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    text: root.embed.host ?? ""
+                    elide: Text.ElideRight
+                    color: Theme.ink3
+                    font: Theme.type.caption
+                }
             }
+            HoverHandler { id: fallbackHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: root.openLink(root.embed.url) }
         }
     }
 
     Component {
         id: status
-        Rectangle {
-            width: Math.min(root.maxWidth, 400)
-            height: statusBody.implicitHeight + 24
-            radius: Theme.radius
-            color: Theme.ply2
-            border.width: 1
-            border.color: Theme.line
-            Column {
-                id: statusBody
-                x: 12
-                y: 12
-                width: parent.width - 24
-                spacing: 8
-                Header {
-                    provider: root.embed.provider
-                    colour: ""
-                    openTip: root.embed.open
-                    url: root.embed.url
-                }
-                Row {
-                    spacing: 12
-                    width: parent.width
-                    Rectangle {
-                        width: 40
-                        height: 40
-                        radius: Theme.radius
-                        color: Theme.tint1
-                        Icon {
-                            anchors.centerIn: parent
-                            name: "linkBroken"
-                            size: Theme.iconLg
-                            color: Theme.ink3
-                        }
-                    }
-                    Column {
-                        width: parent.width - 52
-                        spacing: 2
-                        Text {
-                            textFormat: Text.PlainText
-                            text: root.embed.label
-                            color: Theme.ink1
-                            font: Theme.type.silk
-                        }
-                        Text {
-                            width: parent.width
-                            textFormat: Text.PlainText
-                            text: root.embed.text
-                            wrapMode: Text.Wrap
-                            color: Theme.ink2
-                            font: Theme.type.description
-                        }
-                        Text {
-                            width: parent.width
-                            textFormat: Text.PlainText
-                            text: root.embed.short
-                            elide: Text.ElideRight
-                            color: Theme.ink3
-                            font: Theme.type.caption
-                        }
-                    }
-                }
-            }
+        EmbedStatusCard {
+            embed: root.embed
+            maxWidth: root.maxWidth
+            onOpenLink: url => root.openLink(url)
+            onRetry: Embeds.retry(root.embed.provider.toLowerCase(), root.embed.url)
         }
     }
 }

@@ -277,6 +277,9 @@ fn me_should_store_the_token_show_me_and_connect_the_gateway() {
         initials: "FM".into(),
         status: "online".into(),
         custom_status: String::new(),
+        deco: String::new(),
+        plate: String::new(),
+        display: String::new(),
     }))));
     assert!(fx.iter().any(
         |e| matches!(e, Effect::GatewayConnect { user_id, .. } if user_id == "user_fixture_me")
@@ -466,6 +469,7 @@ fn first_page_should_project_messages_like_before() {
             reply_placeholder: false,
             reply_count: 0,
             pinned: false,
+            deco: String::new(),
         }
     );
     assert!(list[0].attachments.contains(r#""name":"notes.txt""#));

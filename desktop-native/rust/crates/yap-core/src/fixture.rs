@@ -48,6 +48,8 @@ impl Fixture {
     pub fn respond(self, request: &ApiRequest, now_ms: i64, serial: u64) -> ApiResponse {
         match request {
             ApiRequest::Apps(_) => ApiResponse::Done,
+            // No shop or lookups offline: they fail like a dead network.
+            ApiRequest::Shop(_) | ApiRequest::Embeds(_) => ApiResponse::Done,
             ApiRequest::Me => ApiResponse::Me(Box::new(user(ME, "me", Some("Fixture Me")))),
             ApiRequest::Servers => ApiResponse::Servers(vec![Server {
                 id: SERVER.into(),

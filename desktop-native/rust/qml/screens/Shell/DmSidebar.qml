@@ -5,9 +5,28 @@ import com.yap.native
 // The tree panel at Home (DMSidebar.tsx): the 48 px header with the
 // conversation finder, the "Direct messages" branch label on the row-name
 // edge, then one row per DM in /api/dms order (new ones on top). Above it,
-// the Friends row (the Shop row is not in this build).
+// the Friends and Shop rows (NavRow). Shop opens the collectibles shop in
+// place of Home's Friends view.
 Item {
     id: root
+
+    function openFriends() {
+        ShellState.shopOpen = false
+        Nav.selectHome()
+    }
+    function openShop() {
+        ShellState.shopOpen = true
+        Nav.selectHome()
+    }
+
+    // Opening a conversation leaves the shop.
+    Connections {
+        target: Nav
+        function onActiveChannelIdChanged() {
+            if (Nav.activeChannelId.length > 0)
+                ShellState.shopOpen = false
+        }
+    }
 
     Item {
         id: header
@@ -71,7 +90,7 @@ Item {
 
         header: Item {
             width: list.width - list.leftMargin
-            height: 8 + Theme.treeRow + 16 + 24 + 2
+            height: 8 + Theme.treeRow + 2 + Theme.treeRow + 16 + 24 + 2
             // Friends (DMSidebar.tsx NavRow): selected while no DM is open,
             // with the incoming requests' count.
             Rectangle {
@@ -80,17 +99,17 @@ Item {
                 width: parent.width
                 height: Theme.treeRow
                 radius: Theme.radius
-                readonly property bool selected: Nav.activeChannelId.length === 0
+                readonly property bool selected: Nav.activeChannelId.length === 0 && !ShellState.shopOpen
                 color: selected ? Theme.tint2 : friendsHover.hovered ? Theme.tint1 : "transparent"
                 Behavior on color { ColorAnimation { duration: Theme.dur1 } }
                 activeFocusOnTab: true
                 Accessible.role: Accessible.Button
                 Accessible.name: Friends.pending > 0 ? qsTr("Friends, %n pending request(s)", "", Friends.pending) : qsTr("Friends")
                 Accessible.selected: selected
-                Keys.onReturnPressed: Nav.selectHome()
-                Keys.onSpacePressed: Nav.selectHome()
+                Keys.onReturnPressed: root.openFriends()
+                Keys.onSpacePressed: root.openFriends()
                 HoverHandler { id: friendsHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: Nav.selectHome() }
+                TapHandler { onTapped: root.openFriends() }
                 Icon {
                     id: friendsGlyph
                     x: 8 + 2
@@ -127,9 +146,55 @@ Item {
                     border.color: Theme.focus
                 }
             }
+            // Shop (DMSidebar.tsx NavRow "shop").
+            Rectangle {
+                id: shopRow
+                y: 8 + Theme.treeRow + 2
+                width: parent.width
+                height: Theme.treeRow
+                radius: Theme.radius
+                readonly property bool selected: Nav.activeChannelId.length === 0 && ShellState.shopOpen
+                color: selected ? Theme.tint2 : shopHover.hovered ? Theme.tint1 : "transparent"
+                Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+                activeFocusOnTab: true
+                Accessible.role: Accessible.Button
+                Accessible.name: qsTr("Shop")
+                Accessible.selected: selected
+                Keys.onReturnPressed: root.openShop()
+                Keys.onSpacePressed: root.openShop()
+                HoverHandler { id: shopHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: root.openShop() }
+                Icon {
+                    x: 8 + 2
+                    anchors.verticalCenter: parent.verticalCenter
+                    name: "shop"
+                    variant: shopRow.selected ? "active" : "idle"
+                    size: Theme.iconSm
+                    color: shopRow.selected ? Theme.ink1 : Theme.ink3
+                }
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8 + 28
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Shop")
+                    elide: Text.ElideRight
+                    color: shopRow.selected || shopHover.hovered ? Theme.ink1 : Theme.ink2
+                    font: Theme.type.row
+                }
+                Rectangle {
+                    anchors.fill: parent
+                    visible: shopRow.activeFocus
+                    color: "transparent"
+                    radius: Theme.radius
+                    border.width: 2
+                    border.color: Theme.focus
+                }
+            }
             Text {
                 x: 8 + 28
-                y: 8 + Theme.treeRow + 16
+                y: 8 + Theme.treeRow + 2 + Theme.treeRow + 16
                 height: 24
                 verticalAlignment: Text.AlignVCenter
                 text: qsTr("Direct messages")

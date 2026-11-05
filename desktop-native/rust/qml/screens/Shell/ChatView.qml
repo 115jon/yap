@@ -639,6 +639,19 @@ Rectangle {
         onClosed: composer.focusInput()
     }
 
+    // Full Screen on a chat video.
+    VideoViewer {
+        id: videoViewer
+        onClosed: composer.focusInput()
+    }
+    Connections {
+        target: ShellState
+        function onVideoViewerRequested(source, position) {
+            if (root.visible)
+                videoViewer.show(source, position)
+        }
+    }
+
     // The picker behind a message's react keys.
     EmojiPicker {
         id: reactionPicker

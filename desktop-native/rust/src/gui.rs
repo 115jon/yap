@@ -71,6 +71,7 @@ struct Scalars {
     newer: (bool, bool),
     friends: yap_core::store::FriendsView,
     apps: yap_core::store::apps::AppsView,
+    shop: yap_core::store::shop::ShopView,
 }
 
 /// The live QObjects. Each registers from its constructor and clears its
@@ -83,6 +84,7 @@ pub struct Objects {
     pub(crate) panels: Option<NonNull<crate::panels::qobject::Panels>>,
     pub(crate) search: Option<NonNull<crate::search::qobject::Search>>,
     pub(crate) friends: Option<NonNull<crate::friends::qobject::Friends>>,
+    pub(crate) shop: Option<NonNull<crate::shop::qobject::Shop>>,
     pub(crate) invites: Option<NonNull<crate::invites::qobject::Invites>>,
     pub(crate) apps: Option<NonNull<crate::apps::qobject::Apps>>,
     nav: Option<NonNull<Nav>>,
@@ -205,6 +207,15 @@ pub(crate) fn link_route() -> (Option<String>, String) {
 }
 
 /// Keeps the friends view for a `Friends` object QML creates later.
+/// Keeps the shop view for a `Shop` object QML creates later.
+pub(crate) fn keep_shop(view: yap_core::store::shop::ShopView) {
+    scalars(|s| s.shop = view);
+}
+
+pub(crate) fn shop_view() -> yap_core::store::shop::ShopView {
+    GUI.with(|gui| gui.borrow().scalars.shop.clone())
+}
+
 pub(crate) fn keep_friends(view: yap_core::store::FriendsView) {
     scalars(|s| s.friends = view);
 }
@@ -375,6 +386,9 @@ fn set_profile(mut profile: Pin<&mut Profile>, view: &ProfileView) {
         .as_mut()
         .set_role_names(string_list(&view.role_names));
     profile.as_mut().set_me(view.me);
+    profile.as_mut().set_deco(q(&view.deco));
+    profile.as_mut().set_effect(q(&view.effect));
+    profile.as_mut().set_frame(q(&view.frame));
     profile.set_user_id(q(&view.user_id));
 }
 
@@ -451,6 +465,9 @@ fn set_me(mut session: Pin<&mut Session>, me: &MeView) {
     session.as_mut().set_me_initials(q(&me.initials));
     session.as_mut().set_me_status(q(&me.status));
     session.as_mut().set_me_custom_status(q(&me.custom_status));
+    session.as_mut().set_me_deco(q(&me.deco));
+    session.as_mut().set_me_plate(q(&me.plate));
+    session.as_mut().set_me_display(q(&me.display));
     session.set_me_id(q(&me.id));
 }
 
@@ -540,6 +557,7 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::Admin(view) => crate::admin::on_view(*view),
         ViewUpdate::Search(view) => crate::search::on_view(*view),
         ViewUpdate::Friends(view) => crate::friends::on_view(*view),
+        ViewUpdate::Shop(view) => crate::shop::on_view(*view),
         ViewUpdate::Apps(view) => crate::apps::on_view(*view),
         ViewUpdate::Invites(view) => crate::invites::on_view(*view),
         ViewUpdate::Toast(toast) => crate::desktop::on_toast(&toast),

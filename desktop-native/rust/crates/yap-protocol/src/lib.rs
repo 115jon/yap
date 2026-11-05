@@ -6,6 +6,7 @@
 //! honest: the `opcode_parity` test reads `opcodes.ts`, and the fixtures in
 //! `packages/protocol/fixtures` are decoded by `tests/fixtures.rs`.
 
+pub mod collectibles;
 pub mod frame;
 pub mod opcode;
 pub mod payload;

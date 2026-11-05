@@ -8,6 +8,9 @@ T.AbstractButton {
 
     required property string label
     required property DeviceMenu menu
+    // Over a nameplate (the account row): the plate's ink, lighter at rest.
+    property color plateInk: "transparent"
+    property color plateMuted: "transparent"
 
     implicitWidth: 10
     implicitHeight: 40
@@ -21,7 +24,8 @@ T.AbstractButton {
             anchors.centerIn: parent
             name: "chevronDown"
             size: 10
-            color: caret.hovered || caret.menu.visible ? Theme.ink1 : Theme.ink3
+            color: caret.plateInk.a > 0 ? (caret.hovered || caret.menu.visible ? caret.plateInk : caret.plateMuted)
+                : caret.hovered || caret.menu.visible ? Theme.ink1 : Theme.ink3
         }
     }
     background: Rectangle {

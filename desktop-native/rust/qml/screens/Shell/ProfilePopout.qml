@@ -78,6 +78,10 @@ T.Popup {
         customStatus: Profile.customStatus
         banner: Profile.banner
         bannerColor: Profile.bannerColor
+        deco: Profile.deco
+        effect: Profile.effect
+        frame: Profile.frame
+        animate: popup.visible
         Accessible.role: Accessible.Dialog
         Accessible.name: qsTr("User profile for %1").arg(Profile.username)
 

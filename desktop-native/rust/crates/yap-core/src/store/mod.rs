@@ -12,11 +12,13 @@
 mod admin;
 pub mod apps;
 mod effect;
+pub mod embeds;
 mod friends;
 mod input;
 pub mod invites;
 mod reduce;
 mod search;
+pub mod shop;
 mod state;
 mod threads;
 pub mod time;

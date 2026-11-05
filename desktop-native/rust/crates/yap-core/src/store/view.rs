@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use super::state::{Outgoing, Phase, Presence, ServerChannels, Typer, VoiceCall};
 use super::time::{parse_rfc3339, LocalOffset, Stamp};
 use super::{Occupant, VoiceMember, VoiceShare};
+use crate::collectibles;
 use crate::shell::{BadgeView, Sound, ToastView};
 
 /// One role value, borrowed from a row.
@@ -264,6 +265,8 @@ rows! {
         reply_count: i64 => ReplyCount "replyCount",
         /// Pinned in its channel (the pin glyph by the time).
         pinned: bool => Pinned "pinned",
+        /// The author's avatar decoration (APNG), or empty.
+        deco: String => Deco "deco",
     }
     key(row) -> String { row.id.clone() }
 
@@ -308,6 +311,8 @@ rows! {
         video_key: String => VideoKey "videoKey",
         /// A share the user pressed Watch on.
         watching: bool => Watching "watching",
+        /// The person's avatar decoration (APNG), or empty.
+        deco: String => Deco "deco",
     }
     key(row) -> String { row.id.clone() }
 
@@ -331,6 +336,8 @@ rows! {
         rail: i64 => Rail "rail",
         /// The rail key's count: unread notifications, at least 1.
         rail_count: i64 => RailCount "railCount",
+        /// The recipient's avatar decoration (APNG), or empty.
+        deco: String => Deco "deco",
     }
     key(row) -> String { row.id.clone() }
 
@@ -357,6 +364,10 @@ rows! {
         /// In the voice channel you are in: their LED sits in the gutter.
         in_call: bool => InCall "inCall",
         speaking: bool => Speaking "speaking",
+        /// The avatar decoration (APNG), or empty.
+        deco: String => Deco "deco",
+        /// The nameplate as JSON `{still, motion, border}`, or empty.
+        plate: String => Plate "plate",
     }
     key(row) -> (MemberKind, String) { (row.kind, row.id.clone()) }
 
@@ -420,6 +431,7 @@ rows! {
     key(row) -> String { row.id.clone() }
 }
 
+pub mod embeds;
 pub mod media;
 
 /// One change to a list model. Indices are positions after every earlier
@@ -614,6 +626,12 @@ pub struct MeView {
     /// `online`, `idle`, `dnd` or `offline` (invisible).
     pub status: String,
     pub custom_status: String,
+    /// The avatar decoration (APNG), or empty.
+    pub deco: String,
+    /// The nameplate as JSON `{still, motion, border}`, or empty.
+    pub plate: String,
+    /// The stored avatar display (JSON), for the shop's previews.
+    pub display: String,
 }
 
 /// The open user popout (UserProfilePopover.tsx), empty when none is.
@@ -638,6 +656,12 @@ pub struct ProfileView {
     pub role_colors: Vec<String>,
     /// The signed-in user's own card.
     pub me: bool,
+    /// The avatar decoration (APNG), or empty.
+    pub deco: String,
+    /// The profile effect and frame as JSON ([`crate::collectibles`]), or
+    /// empty.
+    pub effect: String,
+    pub frame: String,
 }
 
 /// The open DM's recipient, for the header and the title; empty in a
@@ -1051,6 +1075,8 @@ pub enum ViewUpdate {
     Search(Box<super::SearchView>),
     /// Relationships: the Friends view, the badges and the profile card's state.
     Friends(Box<super::FriendsView>),
+    /// The collectibles shop and pickers.
+    Shop(Box<super::shop::ShopView>),
     /// The soundboard, Listen Together and activities.
     Apps(Box<super::apps::AppsView>),
     /// Creating and joining servers, and links into the app.
@@ -1182,6 +1208,16 @@ pub(super) fn me(user: &User, api_base: &str) -> MeView {
             .unwrap_or_default()
             .trim()
             .to_owned(),
+        deco: collectibles::decoration_url(user.avatar_display.as_ref()),
+        plate: plate_json(user),
+        display: user
+            .avatar_display
+            .as_ref()
+            .map(|d| match d {
+                serde_json::Value::String(text) => text.clone(),
+                other => other.to_string(),
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -1200,6 +1236,8 @@ pub(super) struct Seat {
     pub video: bool,
     pub speaking: bool,
     pub me: bool,
+    /// Their avatar decoration, filled in by the store.
+    pub deco: String,
 }
 
 /// Who is in `channel_id`: the gateway's occupants, with speaking (and our
@@ -1239,6 +1277,7 @@ pub(super) fn seats(
                         video,
                         speaking: member.is_some_and(|m| m.speaking),
                         me,
+                        deco: String::new(),
                     }
                 })
                 .collect();
@@ -1292,6 +1331,7 @@ fn call_seat(m: &VoiceMember, key: String, call: &VoiceCall) -> Seat {
         video: if m.me { call.camera } else { m.video },
         speaking: m.speaking,
         me: m.me,
+        deco: String::new(),
     }
 }
 
@@ -1508,6 +1548,7 @@ pub(super) fn tile_rows(seats: &[Seat], call: &VoiceCall) -> Vec<VoiceTileRow> {
                 key("cam-video")
             },
             watching: false,
+            deco: s.deco.clone(),
         };
         // Our own share shows its capture as sent (VoiceGrid's local
         // stream tile), live as soon as the share is.
@@ -1569,6 +1610,8 @@ pub(super) struct RowContext<'a> {
     pub divider: Option<&'a str>,
     /// Display names by user id (reaction tooltips).
     pub names: &'a HashMap<String, String>,
+    /// TikTok and Instagram lookups.
+    pub hydrations: &'a super::embeds::Hydrations,
 }
 
 /// `\w` as JavaScript reads it without the `u` flag.
@@ -1683,7 +1726,7 @@ pub(super) fn message_row(
         grouped: grouped(previous, message, ctx.offset) && ctx.divider != Some(message.id.as_str()),
         attachments: media::attachments_json(&message.attachments, ctx.api_base),
         reactions: media::reactions_json(&message.reactions, ctx),
-        embeds: media::embeds_json(&message.embeds, ctx.api_base),
+        embeds: media::embeds_json(&message.embeds, ctx.api_base, ctx.hydrations),
         mine,
         nonce: message.nonce.clone().filter(|_| mine).unwrap_or_default(),
         pending: outgoing.is_some_and(|o| !o.failed),
@@ -1703,6 +1746,7 @@ pub(super) fn message_row(
         reply_placeholder,
         reply_count: message.reply_count.max(0),
         pinned: message.is_pinned,
+        deco: collectibles::decoration_url(author.and_then(|a| a.avatar_display.as_ref())),
     }
 }
 
@@ -1756,6 +1800,7 @@ pub(super) fn dm_rows(
                 mentions: badge.mentions,
                 rail: rank,
                 rail_count: badge.notifications.max(1),
+                deco: collectibles::decoration_url(user.avatar_display.as_ref()),
             }
         })
         .collect();
@@ -1806,6 +1851,8 @@ fn label_row(id: String, name: &str, count: usize, online: bool) -> MemberListRo
         typing: false,
         in_call: false,
         speaking: false,
+        deco: String::new(),
+        plate: String::new(),
     }
 }
 
@@ -1882,6 +1929,8 @@ fn member_row(m: &Member, online: bool, ctx: &MemberContext<'_>) -> MemberListRo
         typing: (online || me) && ctx.typing.iter().any(|t| t.user_id == user.id),
         in_call: seat.is_some(),
         speaking: seat.is_some_and(|s| s.speaking && !s.muted),
+        deco: collectibles::decoration_url(user.avatar_display.as_ref()),
+        plate: plate_json(user),
     }
 }
 
@@ -1923,7 +1972,32 @@ pub(super) fn profile_view(
             .map(|r| r.color.clone().unwrap_or_default())
             .collect(),
         me: !me_id.is_empty() && user.id == me_id,
+        deco: collectibles::decoration_url(user.avatar_display.as_ref()),
+        effect: non_null(collectibles::effect_json(user.avatar_display.as_ref())),
+        frame: non_null(collectibles::frame_json(user.avatar_display.as_ref())),
     }
+}
+
+fn non_null(value: serde_json::Value) -> String {
+    if value.is_null() {
+        String::new()
+    } else {
+        value.to_string()
+    }
+}
+
+/// A user's nameplate for a row, or empty.
+pub fn plate_json(user: &User) -> String {
+    let plate = collectibles::plate(
+        user.avatar_display.as_ref(),
+        user.nameplate_url.as_deref(),
+        user.nameplate_content_type.as_deref(),
+        &user.id,
+    );
+    if plate.still.is_empty() && plate.motion.is_empty() {
+        return String::new();
+    }
+    serde_json::to_string(&plate).unwrap_or_default()
 }
 
 pub(super) fn mention_rows(users: &[&User], api_base: &str) -> Vec<MentionRow> {

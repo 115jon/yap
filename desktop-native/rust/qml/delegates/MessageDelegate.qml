@@ -45,6 +45,8 @@ Item {
     // Replies to this message (the thread chip) and its pin.
     required property int replyCount
     required property bool pinned
+    // The author's avatar decoration (APNG), or empty.
+    required property string deco
     // Today's local day number (`Chat.today`).
     required property int today
     // The list's edit target and jump highlight (message ids, or empty).
@@ -122,13 +124,19 @@ Item {
     // Pending rows dim only after 400 ms, so a quick echo never flickers.
     property bool dim: false
 
+    // Read by PoolWatch in the embeds, which the list's attached signals
+    // do not reach.
+    property bool rowPooled: false
+
     // A pooled row must not carry a selection, a revealed spoiler or the
     // dim into the row it is reused for.
     ListView.onPooled: {
         bodyText.deselect()
         revealed = false
         dim = false
+        rowPooled = true
     }
+    ListView.onReused: rowPooled = false
     onPendingChanged: if (!pending) dim = false
 
     Timer {
@@ -292,6 +300,7 @@ Item {
         size: 40
         initials: root.initials
         source: root.avatar
+        deco: root.deco
         Accessible.role: Accessible.Button
         Accessible.name: qsTr("View %1's profile").arg(root.author)
         MouseArea {
@@ -433,8 +442,10 @@ Item {
                     y: 8
                     embed: embedSlot.modelData
                     maxWidth: extras.width
+                    clipTo: root.ListView.view
                     onOpenLink: url => root.linkOpened(url)
                     onOpenImage: (images, index) => root.imageOpened(images, index)
+                    onExpandVideo: (source, position) => ShellState.videoViewerRequested(source, position)
                 }
             }
         }

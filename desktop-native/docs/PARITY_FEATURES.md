@@ -16,6 +16,11 @@ Warp Rush not built), 3.7 (soundboard upload and delete; edit not built)
 and Leave server (`DELETE /api/servers/{id}/members/@me`, not yet on prod)
 are done. See "Phase 4A" at the end.
 
+Progress, 2026-11-05 (phase 4B): 1.1 (WebView2 host for embed players; no
+session hand-off, the players need none), 1.2 (rich embeds and players)
+and the collectibles half of 2.13 (rendering, the shop, the editor's
+pickers) are done. See "Phase 4B" at the end.
+
 Read alongside:
 
 - [../FEASIBILITY.md](../FEASIBILITY.md): auth, gateway basics, REST basics.
@@ -568,3 +573,27 @@ in Tier 1, because it unlocks most of Tiers 2-3 as panels at once.
 Not built: MyInstants, radio, favorites, local custom sounds, sound
 editing, per-person soundboard mute, Listen Together radio and collections,
 recently played, Wordle stats and the per-day saved board, Warp Rush.
+
+## Phase 4B: embeds, collectibles and the shop
+
+| Feature                            | Native                                                                                | Wire                                                                                 | Status                                                                                          |
+| ---------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| Chat video player                  | `EmbedVideo.qml` (Qt Multimedia, Media Foundation)                                    | the file or `/api/proxy-media` (synthetic 206)                                       | live: direct mp4, TikTok and X through the proxy; seek on a direct mp4                          |
+| YouTube                            | `YouTubeEmbed.qml`, `WebPlayer.qml`, `cpp/webembed.*`, `src/webembed.rs`              | iframe `{video.url}?autoplay=1&rel=0` in the host page                               | live (plays)                                                                                    |
+| Spotify                            | `SpotifyEmbed.qml`, WebView2                                                          | iframe `/embed/{type}/{id}?utm_source=generator`, 80 or 152 high                     | live (player loads; its own play key not driven: the test harness cannot click inside WebView2) |
+| TikTok                             | `SocialEmbed.qml`, store `embeds` hydration                                           | GET `/api/tiktok-video?videoUrl=`, proxied media; player `tiktok.com/player/v1/{id}` | live (hydrated, plays); player fallback tests only                                              |
+| Instagram                          | `SocialEmbed.qml`                                                                     | GET `/api/instagram-video?videoUrl=`, proxied media                                  | live (the reel tried resolves to a picture on the server, as on the web); video tests only      |
+| X media and GIFs                   | `XEmbed.qml`, `XMediaGrid.qml`, `XGifTile.qml`, `AnimatedPicture`                     | proxied `video.twimg.com` / `pbs.twimg.com`, `gif.fxtwitter.com/*.webp`              | live (video plays, the GIF animates)                                                            |
+| Direct media, video and rich cards | `EmbedCard.qml`                                                                       | `embed.direct`, `video.kind = direct`                                                | live (direct mp4); rich players tests only                                                      |
+| Avatar decorations                 | `Avatar.qml`, `cpp/animatedpicture.*`, `yap-anim`                                     | `avatar_display.collectibles.avatarDecoration.imageUrl` (APNG)                       | live (messages, member list, account row, profile)                                              |
+| Nameplates                         | `NameplateLayer.qml`, `MemberEntry.qml`, `AccountRow.qml`                             | `nameplate_url`, `avatar_display…nameplate`                                          | live (still); webm motion not supported (LIBRARIES.md §10)                                      |
+| Profile effects and frames         | `ProfileEffectLayer.qml`, `ProfileFrameLayer.qml`, `ProfileCard.qml`                  | `profileEffect.effects[]` (APNG layers), `profileFrame.layers[]`                     | live in the shop's previews; on a profile tests only                                            |
+| Live updates                       | store `on_profile_update` (members, DMs, me, the open channel's authors, voice tiles) | `USER_PROFILE_UPDATE` with `avatar_display`, `nameplate_*`                           | live                                                                                            |
+| Shop                               | `store/shop.rs`, `qml/screens/Shop`                                                   | GET `/api/collectibles/catalog`, PATCH `/api/collectibles/apply` (409 retried once)  | live (browse, detail, equip, remove)                                                            |
+| Editor pickers                     | `ProfileEditor.qml` Collectibles rows, `CollectiblePicker.qml`                        | as the shop                                                                          | tests only                                                                                      |
+
+Not built: video attachments in place (they need the bearer header; still
+the system player), webm nameplate motion, the catalog in the snapshot
+cache (it reloads per session, 30-minute freshness), bundles, the GIF
+favourite star on X media, carousel drag, keyboard carousel focus, the
+remove-embeds control, X's link-card chip styling beyond a label.

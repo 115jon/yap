@@ -187,6 +187,10 @@ pub enum Command {
     Invites(super::InviteCommand),
     /// The soundboard, Listen Together and activities.
     Apps(super::apps::AppsCommand),
+    /// The collectibles shop and pickers.
+    Shop(super::shop::ShopCommand),
+    /// A TikTok or Instagram card asks for its media.
+    Embeds(super::embeds::EmbedsCommand),
 }
 
 /// What the profile editor saves. Colours are `#RRGGBB` or `None` (Auto);

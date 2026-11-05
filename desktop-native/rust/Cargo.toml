@@ -7,6 +7,7 @@ members = [
     "crates/yap-realtime",
     "crates/yap-voice",
     "crates/yap-audio",
+    "crates/yap-anim",
 ]
 
 [workspace.package]
@@ -29,6 +30,7 @@ yap-protocol = { path = "crates/yap-protocol" }
 yap-realtime = { path = "crates/yap-realtime" }
 yap-voice = { path = "crates/yap-voice" }
 yap-audio = { path = "crates/yap-audio" }
+yap-anim = { path = "crates/yap-anim" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "warn"
@@ -63,9 +65,22 @@ yap-protocol.workspace = true
 yap-realtime.workspace = true
 yap-voice.workspace = true
 yap-audio = { workspace = true, features = ["libopus"] }
+yap-anim.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Media_Audio"] }
+# WebView2 for iframe embeds (YouTube, Spotify, TikTok's player). The
+# version Tauri's desktop app uses (desktop/src-tauri/Cargo.lock); it links
+# WebView2LoaderStatic.lib, so no loader DLL ships.
+webview2-com = "=0.38.2"
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.61"
 
 [build-dependencies]
 cxx-qt-build = "0.10"

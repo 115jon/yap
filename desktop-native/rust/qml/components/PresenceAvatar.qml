@@ -15,6 +15,9 @@ Item {
     property string presence: ""
     property color ground: Theme.ply0
     property bool typing: false
+    // The avatar decoration (APNG), or empty.
+    property string deco: ""
+    property bool decoPlaying: true
     // How far the notch reaches past the corner.
     property int overhang: 2
 
@@ -28,6 +31,8 @@ Item {
         size: root.size
         initials: root.initials
         source: root.source
+        deco: root.deco
+        decoPlaying: root.decoPlaying
     }
 
     Rectangle {

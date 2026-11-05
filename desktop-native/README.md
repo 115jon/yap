@@ -126,10 +126,39 @@ the decisions.
 - Twemoji everywhere: message text (native emoji, `:shortcode:`, custom
   `<:name:id>`), reactions and the picker, from `emoji-datasource-twitter`
   16.0.0 (`assets/emoji`, `yap-core` `emoji.rs`, CC-BY 4.0 graphics).
-- Link previews from `embeds` (cards with site, title, description,
-  thumbnail or large picture; YouTube and other players as a thumbnail
-  with a play disc that opens the link; direct media bare; unavailable
-  posts), including `MESSAGE_UPDATE` arrivals and the revision rule.
+- Link embeds as LinkEmbed.tsx draws them (`store/view/embeds.rs`,
+  `qml/embeds`), including `MESSAGE_UPDATE` arrivals and the revision rule:
+  - link cards (site, title, description, thumbnail or large picture);
+    unavailable, restricted, failed and loading posts (EmbedStatus, with
+    Try again);
+  - direct images (the viewer) and direct video files, played in place;
+  - TikTok and Instagram: the portrait card (author, carousel, likes,
+    comments, views, caption, the sound chip), refreshed through
+    `/api/tiktok-video` and `/api/instagram-video` once per link and played
+    through `/api/proxy-media`; TikTok falls back to its own player;
+  - X posts: author, folding text, the 1-4 media grid (pictures to the
+    viewer, videos in place, GIFs as the animated WebP from
+    gif.fxtwitter.com, else the mp4 looping), "From <domain>", the quoted
+    post and the counts;
+  - YouTube, Spotify and allowed rich players as web players (WebView2) in
+    place, one at a time, after a click.
+- Chat video (`EmbedVideo.qml`, Qt Multimedia on Media Foundation): the
+  poster and duration badge until clicked, then play/pause/replay, the
+  scrub band, time, mute and volume, Full Screen (the video viewer); it
+  pauses when scrolled away and is released when its row is hidden.
+- Collectibles (`yap-core` `collectibles.rs`): avatar decorations (APNG,
+  decoded natively) on message, member, DM, voice and account avatars, the
+  profile card and the shop; nameplates behind member and account rows;
+  profile effects (one pass on a profile, the loop in the shop) and frames
+  on the profile card. `USER_PROFILE_UPDATE` updates every copy, the open
+  channel's messages included.
+- The shop (`store/shop.rs`, `qml/screens/Shop`): the DM sidebar's Shop row
+  opens it in place of Friends. Featured (hero, collections, a rail per
+  collection), the four type tabs with counts, collection pages, search,
+  cards (art on your own avatar or name, "Free" and the struck source
+  price, colour dots), the detail dialog (live preview on you, variants,
+  Equip and Remove through `PATCH /api/collectibles/apply`, a 409 retried
+  once). The profile editor's Collectibles rows open a picker per slot.
 - Server administration as the web does it (`qml/screens/Admin`, the rules
   in `yap-core` `admin.rs`, the store in `store/reduce/admin.rs`): the
   server header menu, Server settings on the shared workbench (Overview
@@ -237,13 +266,15 @@ sound, per-person and per-server soundboard mute controls. Listen Together:
 radio stations, collections and paging, recently played. Wordle progress is
 kept for the session only (the web keeps it per day). Warp Rush.
 Camera backgrounds, the stream watcher list and stream
-volume, input volume, a mic test outside a call, inline video playback, clips in the GIF picker,
+volume, input volume, a mic test outside a call, inline playback of video
+attachments (they need the session header; they still open in the system
+player), webm nameplate motion (the still shows), clips in the GIF picker,
 GIF favorites and categories, stickers, emoji generation, the reaction details
-modal, remove-embeds, embed players (WebView2), the channel details' Media,
+modal, remove-embeds, the channel details' Media,
 Links and Files tabs, toast buttons (reply, mark read)
 and avatars, call rings, the taskbar thumbnail toolbar and auto-update. In
 settings: avatar crop and the recent-avatar picker, display name styles,
-collectibles, username changes, sign-out and session revoke from the page,
+bundles (none in the catalog), username changes, sign-out and session revoke from the page,
 server profiles, call keybinds, custom
 sounds, spatial audio, hardware acceleration and the game capture switch.
 

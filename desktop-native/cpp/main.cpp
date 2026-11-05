@@ -18,6 +18,7 @@
 
 #include <cstdio>
 
+#include "animatedpicture.h"
 #include "camera.h"
 #include "desktopshell.h"
 #include "ditherprovider.h"
@@ -26,6 +27,7 @@
 #include "mediashell.h"
 #include "shareprovider.h"
 #include "videohub.h"
+#include "webembed.h"
 #include "windowchrome.h"
 
 #ifdef Q_OS_WIN
@@ -187,6 +189,10 @@ int main(int argc, char* argv[])
   // pattern, no device opened).
   auto* camera = new CameraCapture(&app);
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "Camera", camera);
+  // APNG and animated WebP (decorations, effects, X GIFs), and the web
+  // players (WebView2).
+  qmlRegisterType<AnimatedPicture>("Yap.Media", 1, 0, "AnimatedPicture");
+  qmlRegisterType<WebEmbed>("Yap.Media", 1, 0, "WebEmbed");
 
   QQmlApplicationEngine engine;
   // Not owned by the engine; it outlives it here.
@@ -208,6 +214,10 @@ int main(int argc, char* argv[])
       theme->setProperty("themeId", id);
     theme->setProperty("reducedMotion", reducedMotion());
   }
+  // YAP_EMBED_MUTED=1 starts every chat player muted (test runs).
+  if (QObject* state =
+        engine.singletonInstance<QObject*>("com.yap.native", "ShellState"))
+    state->setProperty("mediaMuted", qEnvironmentVariableIntValue("YAP_EMBED_MUTED") != 0);
 
   engine.loadFromModule("com.yap.native", "Main");
 

@@ -7,6 +7,7 @@
 //! settings dialog's side of the core [`settings`].
 
 mod admin;
+mod anim;
 mod apps;
 mod apps_audio;
 mod audio;
@@ -24,5 +25,8 @@ mod picker;
 mod search;
 mod settings;
 mod share;
+mod shop;
 mod sound;
 mod video;
+#[cfg(windows)]
+mod webembed;

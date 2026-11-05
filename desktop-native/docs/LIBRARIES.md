@@ -709,3 +709,32 @@ Sources:
 - Chromium `third_party/blink/renderer/platform/audio/dynamics_compressor_kernel.cc`
 - https://www.rfc-editor.org/rfc/rfc7845 (OpusHead, pre-skip)
 - https://learn.microsoft.com/windows/win32/api/mmeapi/ns-mmeapi-waveoutcapsw (`szPname[32]`)
+
+## 10. Embeds and collectibles: video, web players, APNG (phase 4B)
+
+Versions from the crates already in the lock or the registry cache on
+2026-11-05.
+
+| area                   | pick                                                                                                                                                             | why / rejected                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat video             | Qt Multimedia `MediaPlayer` + `VideoOutput` on Windows Media Foundation (the only backend in the static Qt 6.6.3)                                                | Plays mp4 (H.264/AAC) from a URL with seeking, including `/api/proxy-media`'s synthetic 206 ranges (live: TikTok, X, a direct mp4). No seekable `QIODevice` was needed: Media Foundation's own HTTP source does the ranges.                                                                                                                                                                                                                                                                        |
+| webm (nameplates)      | the still frame                                                                                                                                                  | Media Foundation's media engine plays the VP9 webm on this PC (probed through WinRT `MediaPlayer`: 448x84, seekable), but Qt's backend opens sources through `IMFSourceResolver`, which has no webm byte-stream handler: the player sits in `LoadingMedia` forever, with no error. libvpx (inside libwebrtc) plus a matroska demuxer into `VideoHub` would work but is a decoder pipeline for a hover effect; the web itself shows the still at rest. `NameplateLayer` plays only non-webm motion. |
+| APNG and animated WebP | `image` 0.25.10 (`png`, `webp` features, no defaults) in the new `yap-anim` crate, behind `src/anim.rs` and the `AnimatedPicture` item (`cpp/animatedpicture.*`) | Qt's PNG reader shows only APNG's default image; decorations and effects are APNG. One decoder for both formats: frames composited, scaled to the drawn size (never up), premultiplied, delays clamped as browsers do. Decoded on the thread pool; a shared 96 MB cache keyed by URL and size; frames tick only while playing, on screen and with the app active. Qt's `qwebp` could animate WebP too, but one path is simpler.                                                                    |
+| Web players            | `webview2-com` =0.38.2 (Tauri's version, `windows` 0.61, already in the lock)                                                                                    | The web's iframes need a browser. Each player is a WebView2 controller in a child window of ours, placed every rendered frame over its QML item and clipped to the chat list; hidden under popups. The loader is linked statically from `WebView2LoaderStatic.lib` (no DLL; `webview2-com-sys`'s own binding would import `WebView2Loader.dll`).                                                                                                                                                   |
+
+WebView2 details:
+
+- Profile in `%LOCALAPPDATA%\YapNative\WebView2`; `--autoplay-policy=no-user-gesture-required`.
+- The player is an iframe with the web's sandbox inside a host page served
+  from the virtual host `player.yapnative.local` (written to the profile's
+  `player` folder). A top-level YouTube embed fails with error 153 (no
+  embedding page); framed, it plays.
+- Top-level navigation is limited to that page and the desktop CSP's
+  `frame-src` hosts; anything else, and every new window, opens in the
+  system browser. Dev tools, host objects, web messages, script dialogs,
+  zoom and the context menu are off.
+- One player at a time: opening another closes the previous one (it shows
+  its poster again). Created on click only; a hidden or pooled row closes
+  its player. No WebView2 runtime, a failed creation or a crashed page
+  opens the link in the browser instead.
+- `YAP_EMBED_MUTED=1` mutes every player for test runs.

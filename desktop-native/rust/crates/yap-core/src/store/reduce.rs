@@ -3,11 +3,13 @@
 
 mod admin;
 mod apps;
+mod embeds;
 mod friends;
 mod invites;
 mod media;
 mod search;
 mod settings;
+mod shop;
 mod social;
 mod threads;
 
@@ -187,6 +189,7 @@ impl State {
             outbox: &self.outbox,
             divider: self.divider.as_ref().map(|d| d.message_id.as_str()),
             names: &self.names,
+            hydrations: &self.hydrations,
         }
     }
 
@@ -432,7 +435,18 @@ impl State {
             .voice
             .as_ref()
             .map(|call| view::tile_rows(&self.seats(&call.channel_id), call))
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .map(|mut tile| {
+                if tile.kind == "person" {
+                    tile.deco = self
+                        .known_user(&tile.member_id)
+                        .map(|u| crate::collectibles::decoration_url(u.avatar_display.as_ref()))
+                        .unwrap_or_default();
+                }
+                tile
+            })
+            .collect::<Vec<_>>();
         for diff in view::ordered_diff(&self.view.tiles, &tiles) {
             fx.view(ViewUpdate::Tiles(diff));
         }
@@ -1149,6 +1163,8 @@ impl State {
             Command::Search(command) => self.on_search(fx, command),
             Command::Friends(command) => self.on_friends(fx, command),
             Command::Apps(command) => self.on_apps(fx, command),
+            Command::Shop(command) => self.on_shop(fx, command),
+            Command::Embeds(command) => self.on_embeds(fx, command),
             Command::Invites(command) => self.on_invites(fx, command),
         }
     }
@@ -1362,6 +1378,7 @@ impl State {
         self.clear_search();
         self.clear_friends();
         self.clear_invites();
+        self.clear_shop();
         self.leave_voice(fx);
         self.close_voice_panel(fx);
         self.voice_channels.clear();
@@ -1494,6 +1511,8 @@ impl State {
             || self.route_friends_http(fx, id, &mut answer)
             || self.route_invites_http(fx, id, &mut answer)
             || self.route_apps_http(fx, id, &mut answer)
+            || self.route_shop_http(fx, id, &mut answer)
+            || self.route_embeds_http(fx, id, &mut answer)
         {
             return;
         }

@@ -159,7 +159,7 @@ impl State {
 
     /// A user as the lists know them: you, a member of any server, a DM
     /// recipient, or an author in the open channel.
-    fn known_user(&self, id: &str) -> Option<&User> {
+    pub(in crate::store) fn known_user(&self, id: &str) -> Option<&User> {
         if let Some(me) = self.me().filter(|me| me.id == id) {
             return Some(me);
         }
@@ -551,7 +551,35 @@ impl State {
             let name = user.label().to_owned();
             self.names.insert(id.to_owned(), name);
         }
+        // Their messages in the open channel wear the new look at once
+        // (the web reads authors from the member list).
+        let authored: Vec<(usize, String)> = self
+            .messages
+            .as_ref()
+            .map(|log| {
+                log.iter()
+                    .enumerate()
+                    .filter(|(_, m)| m.author_id == id)
+                    .map(|(i, m)| (i, m.id.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !authored.is_empty() {
+            let indices: Vec<usize> = authored.iter().map(|(i, _)| *i).collect();
+            self.touch_rows(fx, &indices, |state| {
+                let Some(log) = state.messages.as_mut() else {
+                    return;
+                };
+                for (_, message_id) in &authored {
+                    if let Some(author) = log.get_mut(message_id).and_then(|m| m.author.as_mut()) {
+                        update.apply(author);
+                    }
+                }
+            });
+        }
         self.sync_social(fx);
+        self.sync_roster(fx);
+        self.sync_shop(fx);
     }
 
     // The popout

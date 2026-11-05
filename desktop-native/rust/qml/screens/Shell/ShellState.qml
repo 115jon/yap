@@ -113,6 +113,28 @@ QtObject {
             peerMenuRequested(userId, name, anchor, at)
     }
 
+    // Home shows the collectibles shop instead of Friends (DMSidebar's
+    // Shop row); opening a conversation or Friends leaves it.
+    property bool shopOpen: false
+
+    // Chat video (EmbedVideo): the volume and mute every player shares
+    // this session. `mediaMuted` (YAP_EMBED_MUTED=1, set by main.cpp)
+    // starts every player muted for test runs.
+    property bool mediaMuted: false
+    property bool videoMuted: false
+    property real videoVolume: 1
+    // One thing plays at a time (a chat video or a web player): each takes a
+    // fresh number from `newVideoId()` when it starts and sets it here; every
+    // other player sees the change and pauses or closes.
+    property int activeVideo: 0
+    property int videoSerial: 0
+    function newVideoId() {
+        videoSerial += 1
+        return videoSerial
+    }
+    // The video viewer (Full Screen on a chat video).
+    signal videoViewerRequested(string source, int position)
+
     // Bumped on every change below, so bindings that ask re-run.
     property int mediaVersion: 0
     property var sizes: ({})

@@ -224,6 +224,12 @@ pub struct User {
     /// (`GET /api/users/me` only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sound_settings: Option<Value>,
+    /// The equipped nameplate: its animated webm, else its still PNG
+    /// (collectibles/apply.ts), with the matching content type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nameplate_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nameplate_content_type: Option<String>,
 }
 
 /// The signed-in user.
@@ -377,6 +383,12 @@ pub struct EmbedAuthor {
     pub url: Option<String>,
     #[serde(rename = "iconURL", default, skip_serializing_if = "Option::is_none")]
     pub icon_url: Option<String>,
+    #[serde(
+        rename = "isVerified",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub is_verified: Option<bool>,
 }
 
 /// An embed's site (`EmbedProvider`).
@@ -417,6 +429,10 @@ pub struct EmbedMedia {
     pub content_type: Option<String>,
     #[serde(default)]
     pub is_gif: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alt_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_seconds: Option<f64>,
 }
 
 /// An embed's player or file (`EmbedVideo`).
@@ -431,6 +447,86 @@ pub struct EmbedVideo {
     /// `direct` (a file) or `player` (an iframe page).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    #[serde(
+        rename = "contentType",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub content_type: Option<String>,
+    #[serde(
+        rename = "durationSeconds",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub duration_seconds: Option<f64>,
+}
+
+/// Engagement counts of a social post (`EmbedMetrics`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct EmbedMetrics {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replies: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retweets: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub likes: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impressions: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comments: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub views: Option<f64>,
+}
+
+/// A post's sound (`EmbedAudio`): TikTok's music, Instagram's audio.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedAudio {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artwork_url: Option<String>,
+}
+
+/// The link card an X post carries (`EmbedExternalCard`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct EmbedExternalCard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+}
+
+/// The post an X post quotes or reposts.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferencedTweet {
+    #[serde(rename = "type", default)]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_description: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub author: Option<EmbedAuthor>,
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "lenient_list"
+    )]
+    pub media: Vec<EmbedMedia>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
 }
 
 /// An embed's footer line.
@@ -508,6 +604,30 @@ pub struct Embed {
     pub footer: Option<EmbedFooter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub metrics: Option<EmbedMetrics>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub audio: Option<EmbedAudio>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub external_card: Option<EmbedExternalCard>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub referenced_tweet: Option<ReferencedTweet>,
 }
 
 /// `POST /api/channels/:id/messages/upload` and `.../messages/gif` (201):
@@ -805,6 +925,13 @@ fn lenient_list<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(
             .collect(),
         _ => Vec::new(),
     })
+}
+
+/// [`lenient_list`] for sibling modules.
+pub(crate) fn lenient_vec<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(
+    deserializer: D,
+) -> Result<Vec<T>, D::Error> {
+    lenient_list(deserializer)
 }
 
 /// One server member (`GET /api/servers/:id/members` is a bare array).
