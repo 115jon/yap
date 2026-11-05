@@ -5,8 +5,8 @@
 //! variable is set.
 
 use yap_protocol::rest::{
-    Attachment, Category, Channel, ChannelType, ChannelsResponse, Member, Message, MessagePatch,
-    ReadStates, Server, User,
+    Attachment, Category, Channel, ChannelType, ChannelsResponse, GifPage, Member, Message,
+    MessagePatch, Reaction, ReadStates, Server, UploadedFile, User,
 };
 
 use crate::store::time::{format_rfc3339, parse_rfc3339};
@@ -74,6 +74,7 @@ impl Fixture {
                 content,
                 reply_to_id,
                 nonce,
+                ..
             } => ApiResponse::Sent(Some(Box::new(Message {
                 id: format!("msg_fixture_sent_{serial}"),
                 channel_id: channel_id.clone(),
@@ -115,7 +116,17 @@ impl Fixture {
             | ApiRequest::MarkNotificationsRead { .. }
             | ApiRequest::SetPresence { .. }
             | ApiRequest::OpenDm { .. }
-            | ApiRequest::Profile { .. } => ApiResponse::Done,
+            | ApiRequest::Profile { .. }
+            | ApiRequest::React { .. }
+            | ApiRequest::GifShare { .. } => ApiResponse::Done,
+            ApiRequest::Gifs { .. } => ApiResponse::Gifs(GifPage::default()),
+            ApiRequest::GifUpload { source_url, .. } => ApiResponse::Uploaded(UploadedFile {
+                id: format!("att_fixture_gif_{serial}"),
+                file_url: source_url.clone(),
+                file_name: "gif.gif".into(),
+                file_size: 0,
+                content_type: Some("image/gif".into()),
+            }),
         }
     }
 }
@@ -285,12 +296,14 @@ pub fn messages(count: usize) -> Vec<Message> {
         }
         let (id, username, display) = AUTHORS[author];
         let attachments = if rng.below(40) == 0 {
+            // The app icon, so a scroll test lays out real pictures offline.
             vec![Attachment {
                 id: Some(format!("att_fixture_{n}")),
                 filename: format!("capture-{n}.png"),
                 content_type: Some("image/png".into()),
-                url: None,
+                url: Some("qrc:/app/yap-256.png".into()),
                 size_bytes: Some(1024),
+                ..Attachment::default()
             }]
         } else {
             Vec::new()
@@ -304,6 +317,16 @@ pub fn messages(count: usize) -> Vec<Message> {
             created_at: format_rfc3339(at),
             updated_at: (rng.below(30) == 0).then(|| format_rfc3339(at + 30_000)),
             attachments,
+            reactions: if rng.below(12) == 0 {
+                vec![Reaction {
+                    emoji: ["👍", "❤️", "😂", "🔥"][rng.below(4) as usize].into(),
+                    count: 2,
+                    me: false,
+                    users: vec![ME.into(), "user_fixture_alice".into()],
+                }]
+            } else {
+                Vec::new()
+            },
             ..blank_message()
         });
     }

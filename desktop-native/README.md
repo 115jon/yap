@@ -41,6 +41,31 @@ the decisions.
   `waveOut`), and a rotating log file. The switches sit in the account
   row's settings menu until a settings screen exists.
 
+- Media in messages as the web draws it: pictures (one fitted in 640 x 400,
+  or the 2-10 tile grid; GIFs animate; sensitive ones blurred behind
+  "Show media"), the image viewer (zoom, pan, previous/next, open the
+  original, download), video as a poster key that opens the system player,
+  file cards that save to Downloads. Attachments load with the session as a
+  bearer header added by the image loader (`cpp/main.cpp`,
+  `src/media.rs`), never as a URL token.
+- Uploads: the + key (system file dialog), Ctrl+V with copied files or a
+  picture, drag and drop onto the chat; the tray with real progress,
+  cancel, retry, the sensitive toggle and the web's 25 MB limit and error
+  copy; captions, and attachments-only sends.
+- Reactions (chips, mine by `users`, tooltips, toggle, `REACTION_ADD` /
+  `_REMOVE` live, rollback on failure), the hover bar's quick reactions
+  (recents, then thumbs up, heart, joy) and the emoji picker (sections,
+  search, recents, skin tone, kept in `emoji-prefs.json`).
+- Twemoji everywhere: message text (native emoji, `:shortcode:`, custom
+  `<:name:id>`), reactions and the picker, from `emoji-datasource-twitter`
+  16.0.0 (`assets/emoji`, `yap-core` `emoji.rs`, CC-BY 4.0 graphics).
+- Link previews from `embeds` (cards with site, title, description,
+  thumbnail or large picture; YouTube and other players as a thumbnail
+  with a play disc that opens the link; direct media bare; unavailable
+  posts), including `MESSAGE_UPDATE` arrivals and the revision rule.
+- The GIF picker (KLIPY via `/api/gifs`: trending, search, GIFs, stickers
+  and memes, paging), sending through `/messages/gif` at once.
+
 The shell has its own identity, apart from the installed Yap app: AUMID
 and single-instance name `com.115jon.yap.native` (registered under
 `HKCU\Software\Classes\AppUserModelId` only), Run value `YapNative` (off
@@ -49,7 +74,9 @@ unless "Open on startup" is on), data and logs under
 
 ## Not yet
 
-Video and screen share, device picker, attachments preview, embeds, reactions, jumping to
+Video and screen share, device picker, inline video playback, clips in the GIF picker,
+GIF favorites and categories, stickers, emoji generation, the reaction details
+modal, remove-embeds, embed players (WebView2), jumping to
 messages that are not loaded (`around=`), `yap://` deep links, toast buttons (reply, mark read)
 and avatars, call rings, the taskbar thumbnail toolbar and auto-update.
 

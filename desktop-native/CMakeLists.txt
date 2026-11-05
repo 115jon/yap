@@ -38,6 +38,7 @@ qt_add_executable(YapNative WIN32
   cpp/ditherprovider.cpp cpp/ditherprovider.h
   cpp/iconprovider.cpp cpp/iconprovider.h
   cpp/logfile.cpp cpp/logfile.h
+  cpp/mediashell.cpp cpp/mediashell.h
   cpp/toast_win.cpp cpp/toast_win.h
   cpp/windowchrome.cpp cpp/windowchrome.h)
 target_link_libraries(YapNative PRIVATE

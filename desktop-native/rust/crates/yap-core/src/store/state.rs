@@ -3,13 +3,14 @@
 use std::collections::{HashMap, HashSet};
 
 use yap_cache::Snapshot;
+use yap_protocol::rest::Reaction;
 use yap_protocol::rest::{Category, Channel, ChannelType, ChannelsResponse, Message, MessagePatch};
-use yap_protocol::rest::{DmChannel, Member, Notification, Server, User};
+use yap_protocol::rest::{DmChannel, GifItem, Member, Notification, Server, UploadedFile, User};
 
 use super::time::{is_after, LocalOffset};
 use super::view::{
-    ChannelTreeRow, DmRow, DmView, MemberListRow, MentionRow, ProfileView, ServerRow,
-    VoiceMemberRow,
+    ChannelTreeRow, DmRow, DmView, GifRow, MemberListRow, MentionRow, ProfileView, ServerRow,
+    UploadRow, VoiceMemberRow,
 };
 use super::{CallId, Occupant, RequestId, SessionId, SignInId, VoiceMember};
 use crate::api::{ApiError, Token};
@@ -160,9 +161,14 @@ impl MessageLog {
 
     /// Applies the fields a partial update carries; returns the position, or
     /// `None` if the message is not loaded.
+    /// An update older than the stored revision is dropped (chat-reducer.ts
+    /// `UPDATE_MESSAGE`; a missing revision counts as 0).
     pub fn patch(&mut self, patch: &MessagePatch) -> Option<usize> {
         let &i = self.index.get(&patch.id)?;
         let message = &mut self.messages[i];
+        if patch.content_revision.unwrap_or(0) < message.content_revision.unwrap_or(0) {
+            return None;
+        }
         if let Some(content) = &patch.content {
             message.content.clone_from(content);
         }
@@ -174,6 +180,46 @@ impl MessageLog {
         }
         if patch.content_revision.is_some() {
             message.content_revision = patch.content_revision;
+        }
+        Some(i)
+    }
+
+    /// Adds or removes one user's reaction (chat-reducer.ts `ADD_REACTION`,
+    /// `REMOVE_REACTION`): matched by the exact emoji string; an add that
+    /// is already there or a remove that is not changes nothing. Returns the
+    /// position when the message changed.
+    pub fn react(&mut self, id: &str, emoji: &str, user_id: &str, add: bool) -> Option<usize> {
+        let &i = self.index.get(id)?;
+        let reactions = &mut self.messages[i].reactions;
+        let found = reactions.iter().position(|r| r.emoji == emoji);
+        match (found, add) {
+            (Some(at), true) => {
+                let reaction = &mut reactions[at];
+                if reaction.users.iter().any(|u| u == user_id) {
+                    return None;
+                }
+                reaction.users.push(user_id.to_owned());
+                reaction.count = i64::try_from(reaction.users.len()).unwrap_or(i64::MAX);
+            }
+            (None, true) => reactions.push(Reaction {
+                emoji: emoji.to_owned(),
+                count: 1,
+                me: false,
+                users: vec![user_id.to_owned()],
+            }),
+            (Some(at), false) => {
+                let reaction = &mut reactions[at];
+                let before = reaction.users.len();
+                reaction.users.retain(|u| u != user_id);
+                if reaction.users.len() == before {
+                    return None;
+                }
+                reaction.count = i64::try_from(reaction.users.len()).unwrap_or(i64::MAX);
+                if reaction.count <= 0 {
+                    reactions.remove(at);
+                }
+            }
+            (None, false) => return None,
         }
         Some(i)
     }
@@ -273,6 +319,11 @@ pub(super) struct Projection {
     pub dm: DmView,
     /// The tray badge, as last emitted.
     pub badge: BadgeView,
+    /// The composer tray of the open channel.
+    pub uploads: Vec<UploadRow>,
+    /// (ready, busy) uploads of the open channel, as last emitted.
+    pub upload_counts: (i64, i64),
+    pub gifs: Vec<GifRow>,
 }
 
 /// The request id each slot is waiting for. A result for any other id is stale.
@@ -305,6 +356,64 @@ pub(super) struct Pending {
     pub open_dm: Option<(RequestId, String)>,
     /// (request, user id) of the popout's profile
     pub profile: Option<(RequestId, String)>,
+    /// request → the reaction change to undo if it fails
+    pub reactions: HashMap<RequestId, ReactionChange>,
+    /// request → local id of the upload
+    pub uploads: HashMap<RequestId, String>,
+    /// request → nonce of the send waiting for its GIF
+    pub gif_uploads: HashMap<RequestId, String>,
+    /// The GIF page being fetched (true: the next page, false: a new query).
+    pub gifs: Option<(RequestId, bool)>,
+    /// request → (file name shown, open it when saved)
+    pub downloads: HashMap<RequestId, (String, bool)>,
+}
+
+/// An optimistic reaction add or remove, undone if the server refuses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReactionChange {
+    pub message_id: String,
+    pub emoji: String,
+    pub user_id: String,
+    pub added: bool,
+}
+
+/// Where a composer upload stands.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UploadStatus {
+    /// Bytes sent so far.
+    Uploading(u64),
+    Done(UploadedFile),
+    /// The error copy (api-errors.ts `describeApiError`).
+    Failed(String),
+}
+
+/// One file in the composer tray (useMessageInput.ts `pendingUploads` and
+/// `uploadedFiles`), tied to the channel it was added in.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Upload {
+    /// Chosen by the UI.
+    pub local_id: String,
+    pub channel_id: String,
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    pub content_type: String,
+    /// Marked sensitive (sent in `nsfw_attachment_ids`).
+    pub nsfw: bool,
+    pub request: Option<RequestId>,
+    pub status: UploadStatus,
+}
+
+/// The GIF picker's results (GifPickerModal.tsx), one query at a time.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GifBrowse {
+    pub query: String,
+    /// `gifs`, `stickers` or `memes`.
+    pub media_type: String,
+    pub items: Vec<GifItem>,
+    pub next: Option<String>,
+    pub loading: bool,
+    pub error: String,
 }
 
 /// A message this client posted that the server has not confirmed. Its row
@@ -314,6 +423,11 @@ pub struct Outgoing {
     /// The pending row as shown (`pending-<nonce>`, local time).
     pub message: Message,
     pub failed: bool,
+    /// Uploaded files the message links (`attachment_ids`).
+    pub attachment_ids: Vec<String>,
+    pub nsfw_ids: Vec<String>,
+    /// A GIF pick that still has to be registered as an attachment.
+    pub gif: Option<GifItem>,
 }
 
 /// The row id of a pending send.
@@ -477,6 +591,9 @@ pub struct State {
     pub(super) seen_from: Option<String>,
     /// Sends not yet confirmed, by nonce.
     pub(super) outbox: HashMap<String, Outgoing>,
+    /// Composer uploads, every channel's, in the order they were added.
+    pub(super) uploads: Vec<Upload>,
+    pub(super) gifs: GifBrowse,
     pub(super) focused: bool,
     pub(super) at_bottom: bool,
     pub(super) voice: Option<VoiceCall>,
@@ -535,6 +652,8 @@ impl State {
             seen_floor: None,
             seen_from: None,
             outbox: HashMap::new(),
+            uploads: Vec::new(),
+            gifs: GifBrowse::default(),
             focused: true,
             at_bottom: false,
             voice: None,
@@ -624,6 +743,16 @@ impl State {
     /// Sends not yet confirmed, by nonce.
     pub fn outbox(&self) -> &HashMap<String, Outgoing> {
         &self.outbox
+    }
+
+    /// Composer uploads of every channel.
+    pub fn uploads(&self) -> &[Upload] {
+        &self.uploads
+    }
+
+    /// The GIF picker's results.
+    pub fn gifs(&self) -> &GifBrowse {
+        &self.gifs
     }
 
     /// A channel has messages newer than its read mark (ChannelSidebar.tsx;

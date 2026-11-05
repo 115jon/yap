@@ -1,12 +1,15 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
+import Yap.Chrome
 import com.yap.native
 
 // One text channel: header, live message list, typing line, composer.
 // The list reports when it shows its end (read marks), asks for older
 // pages near its top, and lands on the "New" divider when it opens with
-// unread messages. Reply and edit targets live here, by message id.
+// unread messages. Reply and edit targets live here, by message id, and
+// so do the media surfaces: the image viewer, the reaction picker, files
+// dropped on the chat, and downloads.
 Rectangle {
     id: root
 
@@ -117,6 +120,20 @@ Rectangle {
         composer.focusInput()
     }
 
+    // Only web and mail links leave the app (message text is untrusted).
+    function openLink(url) {
+        if (/^(https?:|mailto:)/i.test(url))
+            Qt.openUrlExternally(url)
+    }
+
+    // A file card saves to Downloads; a video opens in the system player.
+    function saveFile(item) {
+        Chat.download(item.url, Files.downloadPath(item.name), false)
+    }
+    function openVideo(item) {
+        Chat.download(item.url, Files.openPath(item.name), true)
+    }
+
     function deleteMessage(id, author, text, confirm) {
         if (confirm)
             deleteDialog.ask(id, author, text)
@@ -176,6 +193,12 @@ Rectangle {
         function onOlderLoadingChanged() {
             if (!Chat.olderLoading)
                 root.olderAsked = false
+        }
+        function onSaved(path, open) {
+            if (open)
+                Files.openMedia(path)
+            else
+                Files.reveal(path)
         }
     }
 
@@ -263,6 +286,18 @@ Rectangle {
                 Chat.discardSend(nonce)
                 composer.restore(text)
             }
+            onReactionToggled: (id, emoji) => {
+                Chat.toggleReaction(id, emoji)
+                Emoji.remember(emoji)
+            }
+            onReactionPickerRequested: (id, anchor) => {
+                reactionPicker.messageId = id
+                reactionPicker.openAt(anchor, true)
+            }
+            onImageOpened: (images, index) => viewer.show(images, index)
+            onDownloadRequested: item => root.saveFile(item)
+            onVideoOpened: item => root.openVideo(item)
+            onLinkOpened: url => root.openLink(url)
         }
 
         ScrollBar.vertical: ScrollBar {
@@ -410,6 +445,71 @@ Rectangle {
             height: visible ? implicitHeight : 0
             onTriggered: root.deleteMessage(messageMenu.messageId, messageMenu.author, messageMenu.text, true)
         }
+    }
+
+    // Files dragged over the chat (DragDropOverlay.tsx): a dashed line-strong
+    // frame 16 px in, "Drop to upload" and the size limit.
+    DropArea {
+        id: drop
+        anchors.fill: parent
+        enabled: Nav.activeChannelId.length > 0
+        keys: ["text/uri-list"]
+        onDropped: event => {
+            const paths = event.urls.map(u => decodeURIComponent(String(u).replace(/^file:\/\/\//, "")))
+                .filter(p => p.length > 0 && !/^[a-z]+:\/\//i.test(p))
+            if (paths.length > 0)
+                Chat.addFiles(paths)
+            event.acceptProposedAction()
+            composer.focusInput()
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            visible: drop.containsDrag
+            color: Theme.scrim
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 16
+                radius: Theme.radius
+                color: "transparent"
+                border.width: 2
+                border.color: Theme.lineStrong
+            }
+            Column {
+                anchors.centerIn: parent
+                spacing: 8
+                Icon {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    name: "upload"
+                    size: Theme.icon2xl
+                    color: Theme.ink1
+                }
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: qsTr("Drop to upload")
+                    color: Theme.ink1
+                    font: Theme.type.sectionTitle
+                }
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: qsTr("Files can be up to 25 MB.")
+                    color: Theme.ink2
+                    font: Theme.type.description
+                }
+            }
+        }
+    }
+
+    ImageViewer {
+        id: viewer
+        onClosed: composer.focusInput()
+    }
+
+    // The picker behind a message's react keys.
+    EmojiPicker {
+        id: reactionPicker
+        property string messageId
+        onPicked: value => Chat.toggleReaction(messageId, value)
     }
 
     DeleteDialog {

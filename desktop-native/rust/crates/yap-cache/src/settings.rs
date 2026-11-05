@@ -13,6 +13,17 @@ use crate::CacheError;
 
 pub const SETTINGS_FILE: &str = "desktop-settings.json";
 pub const WINDOW_STATE_FILE: &str = "window-state.json";
+pub const EMOJI_FILE: &str = "emoji-prefs.json";
+
+/// The emoji picker's memory (localStorage `chat:emoji:recents:v1` and
+/// `chat:emoji:skin-tone:v1` on the web): recent picks, most recent first
+/// (native emoji or custom `<:name:id>` tokens), and the skin tone 0-5.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct EmojiPrefs {
+    pub recents: Vec<String>,
+    pub skin_tone: u8,
+}
 
 /// The shell's switches, with the desktop app's defaults
 /// (`desktop_settings.rs`). Missing fields take their default, unknown ones
@@ -99,6 +110,15 @@ pub fn save_window_state(dir: &Path, state: &WindowState) -> Result<(), CacheErr
     write(&dir.join(WINDOW_STATE_FILE), state)
 }
 
+/// The picker's memory in `dir`; empty when missing or unreadable.
+pub fn load_emoji(dir: &Path) -> EmojiPrefs {
+    read(&dir.join(EMOJI_FILE)).unwrap_or_default()
+}
+
+pub fn save_emoji(dir: &Path, prefs: &EmojiPrefs) -> Result<(), CacheError> {
+    write(&dir.join(EMOJI_FILE), prefs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,6 +179,17 @@ mod tests {
         };
         save_window_state(dir.path(), &state).expect("save");
         assert_eq!(load_window_state(dir.path()), Some(state));
+    }
+
+    #[test]
+    fn emoji_prefs_round_trip() {
+        let dir = tempfile::tempdir().expect("dir");
+        let prefs = EmojiPrefs {
+            recents: vec!["🔥".into(), "<:yap:1>".into()],
+            skin_tone: 3,
+        };
+        save_emoji(dir.path(), &prefs).expect("save");
+        assert_eq!(load_emoji(dir.path()), prefs);
     }
 
     #[test]

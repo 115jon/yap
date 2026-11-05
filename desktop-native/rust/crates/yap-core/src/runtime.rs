@@ -23,9 +23,11 @@ use crate::auth::{self, TokenStore};
 use crate::config;
 use crate::fixture::Fixture;
 use crate::store::{
-    reduce, CallId, Command, Dispatch, Effect, GatewayEvent, Input, LocalOffset, SessionId,
-    SignInEvent, SignInId, State, ViewUpdate, VoiceCommand, VoiceMember, VoiceTarget, VoiceUpdate,
+    reduce, ApiResponse, CallId, Command, Dispatch, Effect, GatewayEvent, Input, LocalOffset,
+    RequestId, SessionId, SignInEvent, SignInId, State, ViewUpdate, VoiceCommand, VoiceMember,
+    VoiceTarget, VoiceUpdate,
 };
+use yap_protocol::rest::UploadedFile;
 
 /// Where [`ViewUpdate`]s go, one batch at a time, in order (the bridge
 /// queues each batch onto the Qt thread).
@@ -210,6 +212,8 @@ pub struct Runner {
     gateway: Option<GatewayHandle>,
     calls: HashMap<CallId, UnboundedSender<VoiceCommand>>,
     sign_in: Option<JoinHandle<()>>,
+    /// Uploads in flight, so a cancel can stop them.
+    uploads: HashMap<RequestId, JoinHandle<()>>,
     startup_marks: Vec<&'static str>,
     /// View updates since the last flush.
     batch: Vec<ViewUpdate>,
@@ -243,6 +247,7 @@ impl Runner {
             gateway: None,
             calls: HashMap::new(),
             sign_in: None,
+            uploads: HashMap::new(),
             startup_marks: Vec::new(),
             batch: Vec::new(),
             fixture: None,
@@ -318,7 +323,22 @@ impl Runner {
                     });
                 }
             }
-            Effect::GatewaySend(_)
+            Effect::Upload { id, name, .. } => self.send(Input::Http {
+                id: *id,
+                result: Ok(ApiResponse::Uploaded(UploadedFile {
+                    id: format!("att_fixture_upload_{}", id.0),
+                    file_url: format!("/api/attachments/fixture/{}/{name}", id.0),
+                    file_name: name.clone(),
+                    file_size: 0,
+                    content_type: None,
+                })),
+            }),
+            Effect::Download { id, .. } => self.send(Input::Http {
+                id: *id,
+                result: Ok(ApiResponse::Done),
+            }),
+            Effect::CancelUpload(_)
+            | Effect::GatewaySend(_)
             | Effect::GatewayDisconnect
             | Effect::StoreToken(_)
             | Effect::ClearToken
@@ -437,6 +457,48 @@ impl Runner {
             Effect::VoiceForget(call) => {
                 self.calls.remove(&call);
             }
+            Effect::Upload {
+                id,
+                token,
+                channel_id,
+                path,
+                name,
+                content_type,
+            } => {
+                self.uploads.retain(|_, task| !task.is_finished());
+                let api = Api::new(self.http.clone(), token);
+                let inbox = self.inbox.clone();
+                let task = tokio::spawn(async move {
+                    let path = std::path::PathBuf::from(path);
+                    let target = format!("/api/channels/{channel_id}/messages/upload");
+                    let result = upload(&api, &target, path, name, content_type, id, &inbox).await;
+                    let result = result.and_then(|body| {
+                        serde_json::from_value(body)
+                            .map(ApiResponse::Uploaded)
+                            .map_err(|e| crate::api::ApiError::Decode(format!("upload: {e}")))
+                    });
+                    let _ = inbox.send(Input::Http { id, result });
+                });
+                self.uploads.insert(id, task);
+            }
+            Effect::CancelUpload(id) => {
+                if let Some(task) = self.uploads.remove(&id) {
+                    task.abort();
+                }
+            }
+            Effect::Download {
+                id,
+                token,
+                url,
+                dest,
+            } => {
+                let api = Api::new(self.http.clone(), token);
+                let inbox = self.inbox.clone();
+                tokio::spawn(async move {
+                    let result = download(&api, &url, dest).await.map(|()| ApiResponse::Done);
+                    let _ = inbox.send(Input::Http { id, result });
+                });
+            }
             Effect::StartupMark(mark) => {
                 if !self.startup_marks.contains(&mark) {
                     self.startup_marks.push(mark);
@@ -493,6 +555,74 @@ impl Runner {
         if let Some(task) = self.sign_in.take() {
             task.abort();
         }
+    }
+}
+
+/// Chunks an upload is streamed in; progress is reported per chunk.
+const UPLOAD_CHUNK: usize = 64 * 1024;
+
+/// Progress reports are at least this far apart (bytes, as thousandths).
+const PROGRESS_STEP: u64 = 10;
+
+/// Reads the file and posts it as multipart `file`, reporting the bytes
+/// handed to the connection as they go.
+async fn upload(
+    api: &Api,
+    target: &str,
+    path: PathBuf,
+    name: String,
+    content_type: String,
+    id: RequestId,
+    inbox: &UnboundedSender<Input>,
+) -> Result<Value, crate::api::ApiError> {
+    use futures_util::StreamExt;
+    let read = tokio::task::spawn_blocking(move || std::fs::read(path)).await;
+    let bytes = match read {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(error)) => return Err(crate::api::ApiError::Network(error.to_string())),
+        Err(error) => return Err(crate::api::ApiError::Network(error.to_string())),
+    };
+    let total = bytes.len() as u64;
+    let chunks: Vec<Vec<u8>> = bytes.chunks(UPLOAD_CHUNK).map(<[u8]>::to_vec).collect();
+    let progress = inbox.clone();
+    let mut sent = 0u64;
+    let mut reported = 0u64;
+    let stream = futures_util::stream::iter(chunks).map(move |chunk| {
+        sent += chunk.len() as u64;
+        let step = sent.saturating_mul(1000) / total.max(1);
+        if step >= reported + PROGRESS_STEP || sent == total {
+            reported = step;
+            let _ = progress.send(Input::UploadProgress { id, sent });
+        }
+        Ok::<_, std::io::Error>(chunk)
+    });
+    let body = reqwest::Body::wrap_stream(stream);
+    let part = reqwest::multipart::Part::stream_with_length(body, total).file_name(name);
+    let part = match part.mime_str(&content_type) {
+        Ok(part) => part,
+        Err(_) => {
+            return Err(crate::api::ApiError::Decode("bad content type".into()));
+        }
+    };
+    let form = reqwest::multipart::Form::new().part("file", part);
+    api.upload(target, form).await
+}
+
+/// Fetches `url` and writes it to `dest`, creating its folder.
+async fn download(api: &Api, url: &str, dest: String) -> Result<(), crate::api::ApiError> {
+    let bytes = api.download(url).await?;
+    let written = tokio::task::spawn_blocking(move || {
+        let dest = PathBuf::from(dest);
+        if let Some(dir) = dest.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(dest, bytes)
+    })
+    .await;
+    match written {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(crate::api::ApiError::Network(error.to_string())),
+        Err(error) => Err(crate::api::ApiError::Network(error.to_string())),
     }
 }
 

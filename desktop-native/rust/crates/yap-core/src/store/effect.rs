@@ -5,8 +5,8 @@ use std::time::Duration;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use yap_protocol::rest::{
-    ChannelsResponse, DmChannel, Member, Message, MessagePatch, Notification, ProfileResponse,
-    ReadStates, Server, User,
+    ChannelsResponse, DmChannel, GifPage, Member, Message, MessagePatch, Notification,
+    ProfileResponse, ReadStates, Server, UploadedFile, User,
 };
 use yap_protocol::Frame;
 
@@ -76,6 +76,26 @@ pub enum Effect {
     },
     /// Log `[startup] <mark> after N ms` (once per mark; the reducer decides).
     StartupMark(&'static str),
+    /// Upload one file as multipart `file`. Reports `Input::UploadProgress`
+    /// while it goes, then `Input::Http` with `ApiResponse::Uploaded`.
+    Upload {
+        id: RequestId,
+        token: Token,
+        channel_id: String,
+        path: String,
+        name: String,
+        content_type: String,
+    },
+    /// Stop an upload; it never answers.
+    CancelUpload(RequestId),
+    /// Save `url` to the file `dest`; the session goes along only to the
+    /// API's own media. Answered by `Input::Http` (`Done`).
+    Download {
+        id: RequestId,
+        token: Token,
+        url: String,
+        dest: String,
+    },
 }
 
 /// An HTTP method.
@@ -108,6 +128,38 @@ pub enum ApiRequest {
         content: String,
         reply_to_id: Option<String>,
         nonce: String,
+        /// Uploaded files to link, and which of them are sensitive.
+        attachment_ids: Vec<String>,
+        nsfw_attachment_ids: Vec<String>,
+    },
+    /// Adds (PUT) or removes (DELETE) the user's reaction.
+    React {
+        channel_id: String,
+        message_id: String,
+        emoji: String,
+        add: bool,
+    },
+    /// A page of the GIF picker: trending (empty query) or a search, the
+    /// next page after `next`.
+    Gifs {
+        query: String,
+        media_type: String,
+        next: Option<String>,
+        customer_id: String,
+    },
+    /// Registers a picked GIF as an attachment (the server keeps the URL).
+    GifUpload {
+        channel_id: String,
+        source_url: String,
+        filename: String,
+        content_type: String,
+        provider: String,
+        size_bytes: u64,
+    },
+    /// Tells Klipy a GIF was shared (best effort, as the web does).
+    GifShare {
+        id: String,
+        query: String,
     },
     EditMessage {
         channel_id: String,
@@ -176,6 +228,9 @@ pub enum ApiResponse {
     Dms(Vec<DmChannel>),
     Dm(Box<DmChannel>),
     Profile(Box<User>),
+    /// A file (or a GIF pick) the next message can link.
+    Uploaded(UploadedFile),
+    Gifs(GifPage),
     /// A call whose body the store does not read.
     Done,
 }
@@ -207,8 +262,11 @@ impl ApiRequest {
             Self::SendMessage { .. }
             | Self::Typing { .. }
             | Self::OpenDm { .. }
-            | Self::SetPresence { .. } => Method::Post,
+            | Self::SetPresence { .. }
+            | Self::GifUpload { .. } => Method::Post,
             Self::MarkRead { .. } => Method::Put,
+            Self::React { add: true, .. } => Method::Put,
+            Self::React { add: false, .. } => Method::Delete,
             Self::EditMessage { .. } | Self::MarkNotificationsRead { .. } => Method::Patch,
             Self::DeleteMessage { .. } => Method::Delete,
             Self::Me
@@ -219,7 +277,9 @@ impl ApiRequest {
             | Self::Notifications
             | Self::Members { .. }
             | Self::Dms
-            | Self::Profile { .. } => Method::Get,
+            | Self::Profile { .. }
+            | Self::Gifs { .. }
+            | Self::GifShare { .. } => Method::Get,
         }
     }
 
@@ -249,6 +309,41 @@ impl ApiRequest {
             Self::Dms | Self::OpenDm { .. } => "/api/dms".into(),
             Self::SetPresence { .. } => "/api/presence".into(),
             Self::Profile { user_id } => format!("/api/users/{user_id}/profile"),
+            Self::React { channel_id, .. } => format!("/api/channels/{channel_id}/reactions"),
+            Self::Gifs {
+                query,
+                media_type,
+                next,
+                customer_id,
+            } => {
+                let mut path = format!(
+                    "/api/gifs?mode=search&provider=klipy&limit=24&mediaType={}&contentFilter=high",
+                    query_value(media_type)
+                );
+                if !customer_id.is_empty() {
+                    path.push_str(&format!("&customerId={}", query_value(customer_id)));
+                }
+                if !query.is_empty() {
+                    path.push_str(&format!("&q={}", query_value(query)));
+                }
+                if let Some(next) = next {
+                    path.push_str(&format!("&next={}", query_value(next)));
+                }
+                path
+            }
+            Self::GifUpload { channel_id, .. } => {
+                format!("/api/channels/{channel_id}/messages/gif")
+            }
+            Self::GifShare { id, query } => {
+                let mut path = format!(
+                    "/api/gifs?mode=register-share&provider=klipy&id={}",
+                    query_value(id)
+                );
+                if !query.is_empty() {
+                    path.push_str(&format!("&q={}", query_value(query)));
+                }
+                path
+            }
         }
     }
 
@@ -259,14 +354,39 @@ impl ApiRequest {
                 content,
                 reply_to_id,
                 nonce,
+                attachment_ids,
+                nsfw_attachment_ids,
                 ..
             } => {
                 let mut body = json!({ "content": content, "nonce": nonce });
                 if let Some(reply) = reply_to_id {
                     body["reply_to_id"] = json!(reply);
                 }
+                if !attachment_ids.is_empty() {
+                    body["attachment_ids"] = json!(attachment_ids);
+                }
+                if !nsfw_attachment_ids.is_empty() {
+                    body["nsfw_attachment_ids"] = json!(nsfw_attachment_ids);
+                }
                 body
             }
+            Self::React {
+                message_id, emoji, ..
+            } => json!({ "message_id": message_id, "emoji": emoji }),
+            Self::GifUpload {
+                source_url,
+                filename,
+                content_type,
+                provider,
+                size_bytes,
+                ..
+            } => json!({
+                "source_url": source_url,
+                "filename": filename,
+                "content_type": content_type,
+                "provider": provider,
+                "size_bytes": size_bytes,
+            }),
             Self::EditMessage {
                 message_id,
                 content,
@@ -288,7 +408,9 @@ impl ApiRequest {
             | Self::Notifications
             | Self::Members { .. }
             | Self::Dms
-            | Self::Profile { .. } => Value::Null,
+            | Self::Profile { .. }
+            | Self::Gifs { .. }
+            | Self::GifShare { .. } => Value::Null,
         }
     }
 
@@ -340,7 +462,16 @@ impl ApiRequest {
                     .map_err(|e| ApiError::Decode(format!("profile: {e}")))?;
                 ApiResponse::Profile(Box::new(profile.user))
             }
+            Self::GifUpload { .. } => ApiResponse::Uploaded(
+                serde_json::from_value(body)
+                    .map_err(|e| ApiError::Decode(format!("gif upload: {e}")))?,
+            ),
+            Self::Gifs { .. } => ApiResponse::Gifs(
+                serde_json::from_value(body).map_err(|e| ApiError::Decode(format!("gifs: {e}")))?,
+            ),
             Self::DeleteMessage { .. }
+            | Self::React { .. }
+            | Self::GifShare { .. }
             | Self::SetPresence { .. }
             | Self::Typing { .. }
             | Self::MarkRead { .. }

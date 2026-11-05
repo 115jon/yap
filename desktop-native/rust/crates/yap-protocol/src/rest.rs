@@ -175,8 +175,9 @@ pub struct ChannelsResponse {
 
 // Messages
 
-/// A message attachment.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+/// A message attachment. `url` is relative (`/api/attachments/...`, needs
+/// the session) for uploads and absolute for GIF-picker picks.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct Attachment {
     pub id: Option<String>,
     #[serde(default)]
@@ -184,6 +185,227 @@ pub struct Attachment {
     pub content_type: Option<String>,
     pub url: Option<String>,
     pub size_bytes: Option<u64>,
+    /// Used when `url` is absent (attachment-url.ts `getAttachmentUrl`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_key: Option<String>,
+    /// Marked sensitive by the sender (blurred under the high filter).
+    #[serde(default, deserialize_with = "bool_or_int")]
+    pub is_nsfw: bool,
+}
+
+/// One emoji's reactions on a message. `emoji` is the native character
+/// (skin tone applied) or a custom `<:name:id>` token.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct Reaction {
+    pub emoji: String,
+    #[serde(default)]
+    pub count: i64,
+    #[serde(default)]
+    pub me: bool,
+    /// Who reacted; the web highlights a chip when this has the viewer.
+    #[serde(default)]
+    pub users: Vec<String>,
+}
+
+/// An embed's author (`EmbedAuthor`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct EmbedAuthor {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(rename = "iconURL", default, skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+}
+
+/// An embed's site (`EmbedProvider`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct EmbedProvider {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// An embed picture with its size when the server read it.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct EmbedImage {
+    #[serde(default)]
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
+}
+
+/// One picture or clip of an embed (`EmbedMedia`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedMedia {
+    #[serde(rename = "type", default)]
+    pub kind: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    #[serde(default)]
+    pub is_gif: bool,
+}
+
+/// An embed's player or file (`EmbedVideo`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct EmbedVideo {
+    #[serde(default)]
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
+    /// `direct` (a file) or `player` (an iframe page).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// An embed's footer line.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct EmbedFooter {
+    #[serde(default)]
+    pub text: String,
+    #[serde(rename = "iconURL", default, skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+}
+
+/// A link preview the server unfurled (`EmbedInfo`, src/lib/types.ts). Only
+/// what the cards draw is kept; the rest is ignored.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Embed {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub url: String,
+    /// `link`, `image`, `video` or `rich`.
+    #[serde(rename = "type", default)]
+    pub kind: String,
+    #[serde(default)]
+    pub unavailable: bool,
+    #[serde(default)]
+    pub restricted: bool,
+    /// The link is the media itself: drawn bare, without a card.
+    #[serde(default)]
+    pub direct: bool,
+    /// `large` (under the text) or `thumbnail` (beside it); absent is large.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_layout: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_description: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub author: Option<EmbedAuthor>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub provider: Option<EmbedProvider>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub thumbnail: Option<EmbedImage>,
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "lenient_list"
+    )]
+    pub media: Vec<EmbedMedia>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub video: Option<EmbedVideo>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub footer: Option<EmbedFooter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
+}
+
+/// `POST /api/channels/:id/messages/upload` and `.../messages/gif` (201):
+/// the attachment, not yet linked to a message.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct UploadedFile {
+    pub id: String,
+    #[serde(default)]
+    pub file_url: String,
+    #[serde(default)]
+    pub file_name: String,
+    #[serde(default)]
+    pub file_size: u64,
+    pub content_type: Option<String>,
+}
+
+/// One rendition of a picker GIF (`GifPickerAsset`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GifAsset {
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub width: f64,
+    #[serde(default)]
+    pub height: f64,
+    #[serde(default)]
+    pub size_bytes: u64,
+    #[serde(default)]
+    pub content_type: String,
+}
+
+/// One GIF picker result (`GifPickerItem`): `preview` for the grid, `send`
+/// for the message.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GifItem {
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    /// `klipy`, `tenor` or `external`.
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub alt_text: Option<String>,
+    #[serde(default)]
+    pub preview: GifAsset,
+    #[serde(default)]
+    pub send: GifAsset,
+    #[serde(default)]
+    pub media_type: Option<String>,
+}
+
+/// `GET /api/gifs?mode=search…`: a page and the cursor of the next one.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct GifPage {
+    #[serde(default, deserialize_with = "lenient_list")]
+    pub results: Vec<GifItem>,
+    pub next: Option<String>,
 }
 
 /// The message a reply quotes (`reply_to`): the server sends the first 200
@@ -208,8 +430,7 @@ fn lenient<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(
     Ok(serde_json::from_value(value).ok())
 }
 
-/// A chat message. `embeds` and `reactions` stay untyped until a client
-/// renders them.
+/// A chat message. Reactions and embeds that do not decode are skipped.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Message {
     pub id: String,
@@ -230,10 +451,10 @@ pub struct Message {
     pub updated_at: Option<String>,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
-    #[serde(default)]
-    pub reactions: Vec<Value>,
-    #[serde(default)]
-    pub embeds: Vec<Value>,
+    #[serde(default, deserialize_with = "lenient_list")]
+    pub reactions: Vec<Reaction>,
+    #[serde(default, deserialize_with = "lenient_list")]
+    pub embeds: Vec<Embed>,
     pub nonce: Option<String>,
     pub content_revision: Option<i64>,
     /// `"call"` for a DM call record.
@@ -251,8 +472,25 @@ pub struct MessagePatch {
     pub channel_id: Option<String>,
     pub content: Option<String>,
     pub updated_at: Option<String>,
-    pub embeds: Option<Vec<Value>>,
+    /// `Some([])` clears them; `None` leaves them.
+    #[serde(default, deserialize_with = "lenient_some_list")]
+    pub embeds: Option<Vec<Embed>>,
     pub content_revision: Option<i64>,
+}
+
+/// Like [`lenient_list`], but a present field is `Some` (even when empty).
+fn lenient_some_list<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(
+    deserializer: D,
+) -> Result<Option<Vec<T>>, D::Error> {
+    Ok(match Value::deserialize(deserializer)? {
+        Value::Array(items) => Some(
+            items
+                .into_iter()
+                .filter_map(|item| serde_json::from_value(item).ok())
+                .collect(),
+        ),
+        _ => None,
+    })
 }
 
 /// `GET /api/channels/:id/messages`. `hasMoreBefore` is absent in `after` mode.

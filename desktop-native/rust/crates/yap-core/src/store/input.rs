@@ -3,7 +3,7 @@
 use serde_json::Value;
 use yap_protocol::payload::{
     GuildMemberAdd, GuildMemberRemove, GuildMemberUpdate, MessageDeleteEvent, NotificationsRead,
-    PresenceList, PresenceUpdateEvent, TypingStartEvent, UserProfileUpdate,
+    PresenceList, PresenceUpdateEvent, ReactionEvent, TypingStartEvent, UserProfileUpdate,
     VoiceChannelStateUpdate, VoiceChannelStates,
 };
 use yap_protocol::rest::{DmChannel, Message, MessagePatch, Notification, ReadState};
@@ -77,6 +77,41 @@ pub enum Command {
     SetFocused(bool),
     /// Mark the open channel read and drop its "New" divider.
     MarkRead,
+    /// Adds the user's reaction, or removes it when it is there.
+    ToggleReaction {
+        message_id: String,
+        emoji: String,
+    },
+    /// Files for the open channel's composer tray; each starts uploading.
+    AddUploads(Vec<UploadFile>),
+    /// Cancels an upload, or removes its tile.
+    RemoveUpload(String),
+    RetryUpload(String),
+    /// Marks a finished upload as sensitive (or not).
+    SetUploadSensitive {
+        local_id: String,
+        nsfw: bool,
+    },
+    /// A new GIF picker query (empty: trending) for a media type.
+    GifSearch {
+        query: String,
+        media_type: String,
+    },
+    /// The next page of the GIF picker.
+    GifMore,
+    /// Sends a GIF picker tile (its row id) to the open channel at once.
+    SendGif {
+        gif_id: String,
+        reply_to_id: Option<String>,
+        nonce: String,
+        sent_at: String,
+    },
+    /// Saves a file to `dest` (chosen by the UI); `open` it afterwards.
+    Download {
+        url: String,
+        dest: String,
+        open: bool,
+    },
     /// The `@` query in the composer, or `None` when no suggestion list is open.
     MentionQuery(Option<String>),
     JoinVoice(String),
@@ -84,6 +119,16 @@ pub enum Command {
     SetVoiceMuted(bool),
     /// Deafen (or not). Like mute, it is kept between calls.
     SetVoiceDeafened(bool),
+}
+
+/// A file the user picked, pasted or dropped, as the UI read it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UploadFile {
+    pub local_id: String,
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    pub content_type: String,
 }
 
 /// Everything [`super::reduce`] consumes.
@@ -109,6 +154,11 @@ pub enum Input {
     Voice {
         call: CallId,
         update: VoiceUpdate,
+    },
+    /// An upload's bytes sent so far.
+    UploadProgress {
+        id: RequestId,
+        sent: u64,
     },
     /// One typer's timeout; only the newest event of theirs clears them.
     TypingExpired {
@@ -148,6 +198,8 @@ pub enum Dispatch {
     /// A partial update: only the fields present changed.
     MessagePatch(MessagePatch),
     MessageDelete(MessageDeleteEvent),
+    ReactionAdd(ReactionEvent),
+    ReactionRemove(ReactionEvent),
     TypingStart(TypingStartEvent),
     ReadStateUpdate(ReadState),
     NotificationCreate(Box<Notification>),
@@ -185,6 +237,8 @@ impl Dispatch {
             }
             "MESSAGE_UPDATE" => Self::MessagePatch(serde_json::from_value(data).ok()?),
             "MESSAGE_DELETE" => Self::MessageDelete(serde_json::from_value(data).ok()?),
+            "REACTION_ADD" => Self::ReactionAdd(serde_json::from_value(data).ok()?),
+            "REACTION_REMOVE" => Self::ReactionRemove(serde_json::from_value(data).ok()?),
             "TYPING_START" => Self::TypingStart(serde_json::from_value(data).ok()?),
             "READ_STATE_UPDATE" => Self::ReadStateUpdate(serde_json::from_value(data).ok()?),
             "NOTIFICATION_CREATE" => {

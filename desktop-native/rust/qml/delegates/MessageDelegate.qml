@@ -6,8 +6,10 @@ import com.yap.native
 // every row has 2 px vertical padding. A grouped message (same author, a
 // few minutes later) drops the avatar and name and shows its time in the
 // gutter on hover. Above the header: the "New" divider (24) and a reply's
-// quoted line (20) with its guide stroke from the avatar. Every value is a
-// MessageListModel role, already formatted.
+// quoted line (20) with its guide stroke from the avatar. Under the body:
+// link previews, attachments, then the reactions. Every value is a
+// MessageListModel role, already formatted; media roles are JSON, parsed
+// only when present, and their views are only built then.
 Item {
     id: root
 
@@ -23,7 +25,9 @@ Item {
     required property int day
     required property bool edited
     required property bool grouped
-    required property string attachmentNames
+    required property string attachments
+    required property string reactions
+    required property string embeds
     required property bool mine
     // Ours, or anyone's with MANAGE_MESSAGES (MessageItem.tsx).
     readonly property bool canDelete: mine || Chat.canManageMessages
@@ -57,6 +61,39 @@ Item {
     signal editCancelled()
     signal retryRequested(string nonce)
     signal discardRequested(string nonce, string text)
+    signal reactionToggled(string id, string emoji)
+    // The emoji picker, to react to this message.
+    signal reactionPickerRequested(string id, Item anchor)
+    signal imageOpened(var images, int index)
+    signal downloadRequested(var item)
+    signal videoOpened(var item)
+    signal linkOpened(string url)
+
+    readonly property var mediaItems: attachments.length > 0 ? JSON.parse(attachments) : []
+    readonly property var reactionChips: reactions.length > 0 ? JSON.parse(reactions) : []
+    readonly property var embedItems: embeds.length > 0 && !editing ? JSON.parse(embeds) : []
+    // An attachments-only message carries a single space.
+    readonly property bool hasText: body.trim().length > 0
+    // Twemoji in the body. Qt 6.6 rich text draws only pictures that are
+    // already loaded (one still loading is kept as empty), so they load
+    // off screen first and the body swaps them in once all have settled.
+    readonly property var inlineImages: {
+        const out = []
+        const re = /<img src="([^"]+)"/g
+        let m
+        while ((m = re.exec(html)) !== null)
+            out.push(m[1])
+        return out
+    }
+    readonly property bool imagesReady: {
+        let settled = 0
+        for (let i = 0; i < preload.count; ++i) {
+            const image = preload.itemAt(i)
+            if (image && image.settled)
+                ++settled
+        }
+        return settled >= inlineImages.length
+    }
 
     readonly property string dayText: day === today ? qsTr("Today at %1").arg(time) : date + " · " + time
     readonly property bool editing: editingId.length > 0 && editingId === messageId
@@ -65,7 +102,7 @@ Item {
     readonly property int padTop: dividerHeight + (grouped ? 2 : 16 + 2)
     readonly property int headerTop: padTop + (hasReply ? 20 : 0)
     readonly property bool shiftHeld: (hover.point.modifiers & Qt.ShiftModifier) !== 0
-    readonly property Item bodyItem: editing && editor.item ? editor.item : bodyText
+    readonly property Item bodyItem: editing && editor.item ? editor : bodyText
 
     // ||Spoilers|| show once clicked.
     property bool revealed: false
@@ -87,8 +124,7 @@ Item {
         onTriggered: root.dim = true
     }
 
-    implicitHeight: bodyItem.y + bodyItem.height
-        + (attachments.visible ? attachments.height + 4 : 0)
+    implicitHeight: extras.y + extras.height
         + (failedLine.visible ? failedLine.height + 2 : 0) + 2
     opacity: dim ? 0.6 : 1
 
@@ -160,14 +196,14 @@ Item {
             y: 10
             width: 1
             height: root.headerTop + 2 - root.padTop - 10
-            color: replyHover.hovered ? Theme.lineStrong : Theme.guide
+            color: replyHover.containsMouse ? Theme.lineStrong : Theme.guide
         }
         Rectangle {
             x: 36
             y: 10
             width: 28
             height: 1
-            color: replyHover.hovered ? Theme.lineStrong : Theme.guide
+            color: replyHover.containsMouse ? Theme.lineStrong : Theme.guide
         }
         Row {
             id: replyLine
@@ -195,14 +231,19 @@ Item {
                 text: root.replyText
                 elide: Text.ElideRight
                 maximumLineCount: 1
-                color: replyHover.hovered ? Theme.ink2 : Theme.ink3
+                color: replyHover.containsMouse ? Theme.ink2 : Theme.ink3
                 font.family: Theme.type.caption.family
                 font.pixelSize: Theme.type.caption.pixelSize
                 font.italic: root.replyPlaceholder
             }
         }
-        HoverHandler { id: replyHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: root.jumpRequested(root.replyId) }
+        MouseArea {
+            id: replyHover
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.jumpRequested(root.replyId)
+        }
         Accessible.role: Accessible.Button
         Accessible.name: qsTr("Reply to %1: %2").arg(root.replyAuthor).arg(root.replyText)
     }
@@ -264,7 +305,8 @@ Item {
 
     TextEdit {
         id: bodyText
-        visible: !root.editing
+        visible: !root.editing && root.hasText
+        height: root.hasText ? implicitHeight : 0
         x: 68
         y: root.grouped ? root.headerTop : meta.y + Theme.type.authorLine
         width: root.width - x - 24
@@ -273,7 +315,8 @@ Item {
         wrapMode: TextEdit.Wrap
         // yap-core markdown.rs: the web's grammar as Qt rich text.
         textFormat: TextEdit.RichText
-        text: Theme.richText(root.html, root.revealed)
+        text: Theme.richText(root.imagesReady ? root.html
+            : root.html.replace(/<img [^>]*>/g, "&#8195;&#8202;"), root.revealed)
         color: Theme.ink1
         selectionColor: Theme.selection
         selectedTextColor: Theme.ink1
@@ -292,6 +335,18 @@ Item {
         }
     }
 
+    Repeater {
+        id: preload
+        model: root.inlineImages
+        Image {
+            required property string modelData
+            readonly property bool settled: status === Image.Ready || status === Image.Error
+            visible: false
+            asynchronous: true
+            source: modelData
+        }
+    }
+
     // The inline editor replaces the body while this row is edited.
     Loader {
         id: editor
@@ -306,33 +361,51 @@ Item {
         }
     }
 
-    // File chip (until the embed file card): 28 high, glyph plus name.
-    Rectangle {
-        id: attachments
-        visible: root.attachmentNames.length > 0
+    // Previews, attachments and reactions, in that order (MessageItem.tsx).
+    Column {
+        id: extras
         x: 68
-        y: root.bodyItem.y + root.bodyItem.height + 4
-        height: 28
-        width: attachmentRow.implicitWidth + 16
-        radius: Theme.radius
-        color: Theme.tint1
-        border.width: 1
-        border.color: Theme.line
-        Row {
-            id: attachmentRow
-            anchors.centerIn: parent
-            spacing: 6
-            Icon {
-                anchors.verticalCenter: parent.verticalCenter
-                name: "file"
-                size: Theme.iconSm
-                color: Theme.ink3
+        y: root.bodyItem.y + root.bodyItem.height
+        width: root.width - x - 24
+
+        Repeater {
+            model: root.embedItems
+            Item {
+                id: embedSlot
+                required property var modelData
+                width: card.implicitWidth
+                height: card.implicitHeight + 8
+                EmbedCard {
+                    id: card
+                    y: 8
+                    embed: embedSlot.modelData
+                    maxWidth: extras.width
+                    onOpenLink: url => root.linkOpened(url)
+                    onOpenImage: (images, index) => root.imageOpened(images, index)
+                }
             }
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.attachmentNames
-                color: Theme.ink2
-                font: Theme.type.description
+        }
+        Loader {
+            active: root.mediaItems.length > 0
+            visible: active
+            sourceComponent: MessageMedia {
+                items: root.mediaItems
+                maxWidth: extras.width
+                onOpenImage: (images, index) => root.imageOpened(images, index)
+                onOpenVideo: item => root.videoOpened(item)
+                onDownload: item => root.downloadRequested(item)
+            }
+        }
+        Loader {
+            active: root.reactionChips.length > 0
+            visible: active
+            width: extras.width
+            sourceComponent: ReactionStrip {
+                width: extras.width
+                chips: root.reactionChips
+                rowHovered: hover.hovered && !root.pending && !root.failed
+                onToggled: emoji => root.reactionToggled(root.messageId, emoji)
+                onAddRequested: anchor => root.reactionPickerRequested(root.messageId, anchor)
             }
         }
     }
@@ -342,7 +415,7 @@ Item {
         id: failedLine
         visible: root.failed
         x: 68
-        y: (attachments.visible ? attachments.y + attachments.height : root.bodyItem.y + root.bodyItem.height) + 2
+        y: extras.y + extras.height + 2
         height: 20
         spacing: 6
         Icon {
@@ -396,7 +469,53 @@ Item {
                 id: actions
                 anchors.centerIn: parent
                 spacing: 2
-                IconKey { size: 28; iconName: "react"; tip: qsTr("Add reaction") }
+                // Quick reactions: recents, then thumbs up, heart, joy.
+                Repeater {
+                    model: root.shiftHeld ? [] : JSON.parse(Emoji.quick)
+                    Item {
+                        id: quick
+                        required property var modelData
+                        width: 28
+                        height: 28
+                        Accessible.role: Accessible.Button
+                        Accessible.name: qsTr("React with %1").arg(":" + quick.modelData.s + ":")
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: Theme.radius
+                            color: quickTap.pressed ? Theme.tint3 : quickTap.containsMouse ? Theme.tint2 : "transparent"
+                        }
+                        Image {
+                            anchors.centerIn: parent
+                            width: 18
+                            height: 18
+                            sourceSize: Qt.size(36, 36)
+                            asynchronous: true
+                            source: quick.modelData.u
+                        }
+                        Tooltip { visible: quickTap.containsMouse; text: ":" + quick.modelData.s + ":" }
+                        MouseArea {
+                            id: quickTap
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.reactionToggled(root.messageId, quick.modelData.e)
+                        }
+                    }
+                }
+                Rectangle {
+                    visible: !root.shiftHeld
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 1
+                    height: 16
+                    color: Theme.line
+                }
+                IconKey {
+                    id: reactKey
+                    size: 28
+                    iconName: "react"
+                    tip: qsTr("Add reaction")
+                    onClicked: root.reactionPickerRequested(root.messageId, reactKey)
+                }
                 IconKey {
                     size: 28
                     iconName: "reply"

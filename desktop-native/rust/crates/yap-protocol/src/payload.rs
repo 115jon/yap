@@ -98,6 +98,15 @@ pub struct MessageDeleteEvent {
     pub channel_id: Option<String>,
 }
 
+/// `REACTION_ADD` / `REACTION_REMOVE` dispatch data (message.service.ts).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ReactionEvent {
+    pub message_id: String,
+    pub channel_id: Option<String>,
+    pub user_id: String,
+    pub emoji: String,
+}
+
 /// `TYPING_START` dispatch data.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct TypingStartEvent {

@@ -9,6 +9,8 @@
 #include <QtGui/QWindow>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkDiskCache>
+#include <QtNetwork/QNetworkReply>
+#include <QtNetwork/QNetworkRequest>
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlNetworkAccessManagerFactory>
 #include <QtQuick/QQuickWindow>
@@ -20,6 +22,7 @@
 #include "ditherprovider.h"
 #include "iconprovider.h"
 #include "logfile.h"
+#include "mediashell.h"
 #include "windowchrome.h"
 
 #ifdef Q_OS_WIN
@@ -43,21 +46,51 @@ static void registerFonts()
     std::fprintf(stderr, "[fonts] no brand fonts in the binary\n");
 }
 
-// Every network image QML loads (avatars, icons, banners) goes through a
-// disk cache next to the snapshot cache, apart from the installed app's
-// folders. Avatars are public (`/api/avatars/*`, no token); their ETag
-// revalidates a cached copy.
+// The session for an image URL, from the Rust core (src/media.rs): the
+// token's length when the URL is the API's own attachment or custom emoji
+// (0 for anything else, which never gets it). Writes at most `cap` bytes.
+extern "C" size_t yap_media_auth(const char* url, size_t len, char* out, size_t cap);
+
+// Attachments and custom emoji images are private (`/api/attachments/*`
+// answers 404 without the session): the loader adds the bearer to exactly
+// those requests, so URLs and the disk cache never hold the token.
+class MediaNetworkAccessManager : public QNetworkAccessManager
+{
+public:
+  using QNetworkAccessManager::QNetworkAccessManager;
+
+protected:
+  QNetworkReply* createRequest(Operation op, const QNetworkRequest& request,
+                               QIODevice* data) override
+  {
+    if (op != GetOperation)
+      return QNetworkAccessManager::createRequest(op, request, data);
+    const QByteArray url = request.url().toEncoded();
+    char token[1024];
+    const size_t n = yap_media_auth(url.constData(), size_t(url.size()), token, sizeof token);
+    if (n == 0 || n > sizeof token)
+      return QNetworkAccessManager::createRequest(op, request, data);
+    QNetworkRequest authed(request);
+    authed.setRawHeader("Authorization", QByteArray("Bearer ") + QByteArray(token, int(n)));
+    return QNetworkAccessManager::createRequest(op, authed, data);
+  }
+};
+
+// Every network image QML loads (avatars, icons, banners, attachments,
+// emoji, embeds, GIFs) goes through a disk cache next to the snapshot
+// cache, apart from the installed app's folders. Avatars are public
+// (`/api/avatars/*`, no token); their ETag revalidates a cached copy.
 class CachedNetworkFactory : public QQmlNetworkAccessManagerFactory
 {
 public:
   QNetworkAccessManager* create(QObject* parent) override
   {
-    auto* manager = new QNetworkAccessManager(parent);
+    auto* manager = new MediaNetworkAccessManager(parent);
     const QString base = qEnvironmentVariable("LOCALAPPDATA");
     if (!base.isEmpty()) {
       auto* cache = new QNetworkDiskCache(manager);
       cache->setCacheDirectory(base + QStringLiteral("/YapNative/cache/images"));
-      cache->setMaximumCacheSize(128 * 1024 * 1024);
+      cache->setMaximumCacheSize(512 * 1024 * 1024);
       manager->setCache(cache);
     }
     return manager;
@@ -123,6 +156,8 @@ int main(int argc, char* argv[])
   app.installNativeEventFilter(chrome);
   auto* shell = new DesktopShell(&app);
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "DesktopShell", shell);
+  auto* files = new MediaShell(&app);
+  qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "Files", files);
 
   QQmlApplicationEngine engine;
   // Not owned by the engine; it outlives it here.

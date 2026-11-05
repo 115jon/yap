@@ -1,6 +1,7 @@
 //! The reducer: one arm per input, emitting effects in the order the old
 //! sequential core performed them, so the UI sees the same updates.
 
+mod media;
 mod social;
 
 use std::time::Duration;
@@ -60,6 +61,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
         Input::SignIn { attempt, event } => state.on_sign_in(&mut fx, attempt, event),
         Input::Gateway { session, event } => state.on_gateway(&mut fx, session, event),
         Input::Voice { call, update } => state.on_voice(&mut fx, call, update),
+        Input::UploadProgress { id, sent } => state.on_upload_progress(&mut fx, id, sent),
         Input::TypingExpired {
             user_id,
             generation,
@@ -183,6 +185,7 @@ impl State {
             offset: self.local_offset,
             outbox: &self.outbox,
             divider: self.divider.as_ref().map(|d| d.message_id.as_str()),
+            names: &self.names,
         }
     }
 
@@ -607,9 +610,11 @@ impl State {
     /// The open channel, and whether this user may delete others'
     /// messages in it (useChatArea.ts `canDeleteMessages`; the channel's
     /// `permissions` are the user's effective ones there).
-    fn emit_active_channel(&self, fx: &mut Effects, id: String, name: String) {
+    fn emit_active_channel(&mut self, fx: &mut Effects, id: String, name: String) {
         fx.view(ViewUpdate::ActiveChannel { id, name });
         fx.view(ViewUpdate::ManageMessages(self.can_manage_messages()));
+        // The tray shows the open channel's uploads.
+        self.sync_uploads(fx);
     }
 
     fn can_manage_messages(&self) -> bool {
@@ -996,6 +1001,24 @@ impl State {
                 }
             }
             Command::MentionQuery(query) => self.mention_query(fx, query),
+            Command::ToggleReaction { message_id, emoji } => {
+                self.toggle_reaction(fx, &message_id, &emoji);
+            }
+            Command::AddUploads(files) => self.add_uploads(fx, files),
+            Command::RemoveUpload(id) => self.remove_upload(fx, &id),
+            Command::RetryUpload(id) => self.retry_upload(fx, &id),
+            Command::SetUploadSensitive { local_id, nsfw } => {
+                self.set_upload_sensitive(fx, &local_id, nsfw);
+            }
+            Command::GifSearch { query, media_type } => self.gif_search(fx, &query, &media_type),
+            Command::GifMore => self.gif_more(fx),
+            Command::SendGif {
+                gif_id,
+                reply_to_id,
+                nonce,
+                sent_at,
+            } => self.send_gif(fx, &gif_id, reply_to_id, nonce, sent_at),
+            Command::Download { url, dest, open } => self.download(fx, &url, &dest, open),
             Command::JoinVoice(id) => self.join_voice(fx, id),
             Command::LeaveVoice => self.leave_voice(fx),
             // useVoiceSettingsStore.ts: unmuting while deafened undeafens;
@@ -1135,6 +1158,7 @@ impl State {
         });
         self.names.insert(me.id.clone(), me.label().to_owned());
         fx.view(ViewUpdate::Me(view::me(&me, &self.api_base)));
+        fx.view(ViewUpdate::MediaAuth(Some(token.clone())));
         self.session = Some(Session {
             id: session,
             token,
@@ -1228,6 +1252,7 @@ impl State {
         self.replace_session(fx);
         self.set_phase(fx, Phase::Loading);
         self.set_status(fx, "Signing in…");
+        fx.view(ViewUpdate::MediaAuth(Some(token.clone())));
         self.session = Some(Session {
             id: SessionId(self.next_id()),
             token,
@@ -1248,6 +1273,7 @@ impl State {
         self.voice_prefs = VoicePrefs::default();
         self.voice_error.clear();
         if let Some(session) = self.session.take() {
+            fx.view(ViewUpdate::MediaAuth(None));
             fx.push(Effect::GatewayDisconnect);
             if session.me.is_some() {
                 fx.view(ViewUpdate::Me(MeView::default()));
@@ -1284,6 +1310,7 @@ impl State {
         self.toasted = shell::Toasted::default();
         self.sync_tray_badge(fx);
         self.outbox.clear();
+        self.clear_media(fx);
         self.at_bottom = false;
         if self.divider.take().is_some() {
             self.emit_unread(fx);
@@ -1419,7 +1446,22 @@ impl State {
             return self.on_deleted(fx, message, result);
         }
         if let Some(nonce) = pending.sends.remove(&id) {
-            self.on_sent(fx, &nonce, result);
+            return self.on_sent(fx, &nonce, result);
+        }
+        if let Some(change) = pending.reactions.remove(&id) {
+            return self.on_reacted(fx, change, result);
+        }
+        if let Some(local_id) = pending.uploads.remove(&id) {
+            return self.on_uploaded(fx, &local_id, result);
+        }
+        if let Some(nonce) = pending.gif_uploads.remove(&id) {
+            return self.on_gif_uploaded(fx, &nonce, result);
+        }
+        if let Some((_, more)) = pending.gifs.take_if(|(slot, _)| *slot == id) {
+            return self.on_gifs(fx, more, result);
+        }
+        if let Some(download) = pending.downloads.remove(&id) {
+            self.on_downloaded(fx, download, result);
         }
         // Anything else is stale (a newer request replaced it, or the
         // session ended) or fire-and-forget (typing).
@@ -1986,11 +2028,50 @@ impl State {
         let Some(channel_id) = self.active_channel.clone() else {
             return;
         };
-        let Some((_, me)) = self.signed_in() else {
+        if self.signed_in().is_none() || nonce.is_empty() || self.outbox.contains_key(&nonce) {
             return;
+        }
+        let (attachments, ids, nsfw) = self.take_ready_uploads(&channel_id);
+        if content.is_empty() && attachments.is_empty() {
+            return;
+        }
+        // An attachments-only message sends a single space (useMessageInput.ts).
+        let content = if content.is_empty() { " " } else { content };
+        if self.queue_send(
+            fx,
+            content,
+            reply_to_id,
+            nonce.clone(),
+            sent_at,
+            attachments,
+        ) {
+            if let Some(out) = self.outbox.get_mut(&nonce) {
+                out.attachment_ids = ids;
+                out.nsfw_ids = nsfw;
+            }
+            self.sync_uploads(fx);
+            self.post(fx, &nonce);
+        }
+    }
+
+    /// The pending row and its outbox entry; `false` when nothing is open.
+    fn queue_send(
+        &mut self,
+        fx: &mut Effects,
+        content: &str,
+        reply_to_id: Option<String>,
+        nonce: String,
+        sent_at: String,
+        attachments: Vec<yap_protocol::rest::Attachment>,
+    ) -> bool {
+        let Some(channel_id) = self.active_channel.clone() else {
+            return false;
         };
-        if content.is_empty() || nonce.is_empty() || self.outbox.contains_key(&nonce) {
-            return;
+        let Some((_, me)) = self.signed_in() else {
+            return false;
+        };
+        if nonce.is_empty() || self.outbox.contains_key(&nonce) {
+            return false;
         }
         let me = me.clone();
         let reply_to_id = reply_to_id.filter(|id| !id.is_empty());
@@ -2015,7 +2096,7 @@ impl State {
             is_pinned: false,
             created_at: sent_at,
             updated_at: None,
-            attachments: Vec::new(),
+            attachments,
             reactions: Vec::new(),
             embeds: Vec::new(),
             nonce: Some(nonce.clone()),
@@ -2027,21 +2108,30 @@ impl State {
             Outgoing {
                 message: message.clone(),
                 failed: false,
+                attachment_ids: Vec::new(),
+                nsfw_ids: Vec::new(),
+                gif: None,
             },
         );
         self.upsert_if_open(fx, message);
-        self.post(fx, &nonce);
+        true
     }
 
     fn post(&mut self, fx: &mut Effects, nonce: &str) {
         let Some(out) = self.outbox.get(nonce) else {
             return;
         };
+        // A GIF pick registers its attachment first; that answer posts.
+        if out.gif.is_some() {
+            return self.upload_gif(fx, nonce);
+        }
         let request = ApiRequest::SendMessage {
             channel_id: out.message.channel_id.clone(),
             content: out.message.content.clone(),
             reply_to_id: out.message.reply_to_id.clone(),
             nonce: nonce.to_owned(),
+            attachment_ids: out.attachment_ids.clone(),
+            nsfw_attachment_ids: out.nsfw_ids.clone(),
         };
         if let Some(id) = self.http(fx, request) {
             self.pending.sends.insert(id, nonce.to_owned());
@@ -2383,6 +2473,8 @@ impl State {
                 self.notifications.clear();
                 self.sync_badges(fx);
             }
+            Dispatch::ReactionAdd(event) => self.on_reaction_event(fx, &event, true),
+            Dispatch::ReactionRemove(event) => self.on_reaction_event(fx, &event, false),
             Dispatch::MessageDelete(delete) => {
                 let here = delete.channel_id.as_deref().is_none_or(|c| c == active);
                 let Some(at) = self

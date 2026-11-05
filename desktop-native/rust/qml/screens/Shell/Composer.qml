@@ -1,14 +1,17 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
+import Yap.Chrome
 import com.yap.native
 
 // The composer (MessageInput.tsx): the reply indicator, then the plate:
-// ply-2 with a line-field seam and flush 48 px slots at both ends (attach;
-// GIF, stickers, emoji), the text between at 15/22 with 13 px vertical
-// padding. Enter sends, Shift+Enter adds a line, Up in an empty composer
+// ply-2 with a line-field seam, the upload tray on top, then flush 48 px
+// slots at both ends (attach; GIF, stickers, emoji) with the text between
+// at 15/22 with 13 px vertical padding. Enter sends (text, finished
+// uploads, or both), Shift+Enter adds a line, Up in an empty composer
 // edits your last message, Esc drops the reply. `@` opens member
-// suggestions above it. The pickers are not wired yet.
+// suggestions above it. Ctrl+V with files or a picture on the clipboard
+// uploads them; the + key opens the file dialog. Stickers are not wired.
 Item {
     id: root
 
@@ -34,6 +37,22 @@ Item {
     property double typingSentAt: 0
 
     function focusInput() {
+        input.forceActiveFocus()
+    }
+
+    // The + key: the system's file dialog.
+    function pickFiles() {
+        const paths = Files.pickFiles(qsTr("Upload attachments"))
+        if (paths.length > 0)
+            Chat.addFiles(paths)
+        input.forceActiveFocus()
+    }
+
+    // Inserts at the cursor (an emoji from the picker).
+    function insertText(text) {
+        const at = input.cursorPosition
+        input.insert(at, text)
+        input.cursorPosition = at + text.length
         input.forceActiveFocus()
     }
 
@@ -71,6 +90,19 @@ Item {
     }
 
     implicitHeight: (replyBar.visible ? replyBar.height : 0) + plate.height
+
+    EmojiPicker {
+        id: emojiPicker
+        onPicked: value => root.insertText(value)
+        onClosed: input.forceActiveFocus()
+    }
+
+    GifPicker {
+        id: gifPicker
+        replyToId: root.replyToId
+        onSent: root.cancelReply()
+        onClosed: input.forceActiveFocus()
+    }
 
     // Mention suggestions (MentionAutocomplete.tsx): up to five members,
     // over the list, Up/Down to move, Enter or Tab to insert, Esc to close.
@@ -210,28 +242,36 @@ Item {
         id: plate
         y: replyBar.visible ? replyBar.height - 1 : 0
         width: parent.width
-        height: Math.max(48, Math.min(200, input.implicitHeight + 2))
+        height: tray.implicitHeight + Math.max(48, Math.min(200, input.implicitHeight + 2))
         radius: Theme.radius
         color: Theme.ply2
         border.width: 1
         border.color: input.activeFocus ? Theme.ink1 : Theme.lineField
         clip: true
 
+        UploadTray {
+            id: tray
+            width: parent.width
+            height: implicitHeight
+        }
+
         IconKey {
             id: attach
             x: 1
-            y: 1
+            y: tray.height + 1
             size: 46
             glyph: Theme.iconXl
             square: true
             iconName: "add"
             tip: qsTr("Add attachment")
+            onClicked: root.pickFiles()
         }
 
         ScrollView {
             anchors.left: attach.right
             anchors.right: slots.left
-            height: parent.height
+            y: tray.height
+            height: parent.height - tray.height
             TextArea {
                 id: input
                 focus: true
@@ -262,14 +302,26 @@ Item {
 
                 function submit() {
                     const text = input.text.trim()
-                    if (text.length > 0)
-                        root.send(text, root.replyToId)
+                    // Finished uploads go even without text (a single space).
+                    if (text.length === 0 && Chat.uploadsReady === 0)
+                        return
+                    root.send(text, root.replyToId)
                     input.clear()
                     root.typingSentAt = 0
                 }
 
                 Keys.onPressed: event => {
                     const plain = !(event.modifiers & Qt.ShiftModifier)
+                    // Paste with files or a picture uploads them (the text,
+                    // if any, is not pasted then, as on the web).
+                    if (event.matches(StandardKey.Paste)) {
+                        const files = Files.clipboardFiles()
+                        if (files.length > 0) {
+                            Chat.addFiles(files)
+                            event.accepted = true
+                            return
+                        }
+                    }
                     if (root.mentionOpen) {
                         const n = suggestions.count
                         if (event.key === Qt.Key_Down || event.key === Qt.Key_Up) {
@@ -309,24 +361,56 @@ Item {
             id: slots
             anchors.right: parent.right
             anchors.rightMargin: 1
-            y: 1
+            y: tray.height + 1
             // GIF: a silkscreen word in a 48 high slot, at least 44 wide.
             Item {
+                id: gifKey
                 width: Math.max(44, gifText.implicitWidth + 16)
                 height: 46
                 Accessible.role: Accessible.Button
                 Accessible.name: qsTr("Open GIF picker")
+                Rectangle {
+                    anchors.fill: parent
+                    color: gifPicker.visible ? Theme.tint2 : gifHover.hovered ? Theme.tint1 : "transparent"
+                }
                 Text {
                     id: gifText
                     anchors.centerIn: parent
                     text: "GIF"
-                    color: gifHover.hovered ? Theme.ink1 : Theme.ink2
+                    color: gifHover.hovered || gifPicker.visible ? Theme.ink1 : Theme.ink2
                     font: Theme.type.silk
                 }
-                HoverHandler { id: gifHover }
+                Tooltip { visible: gifHover.hovered; text: qsTr("Open GIF picker") }
+                HoverHandler { id: gifHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler {
+                    onTapped: {
+                        if (gifPicker.visible) {
+                            gifPicker.close()
+                        } else {
+                            emojiPicker.close()
+                            gifPicker.openAt(gifKey)
+                        }
+                    }
+                }
             }
             IconKey { size: 46; glyph: Theme.iconXl; square: true; iconName: "sticker"; tip: qsTr("Open sticker picker") }
-            IconKey { size: 46; glyph: Theme.iconXl; square: true; iconName: "emoji"; tip: qsTr("Open emoji picker") }
+            IconKey {
+                id: emojiKey
+                size: 46
+                glyph: Theme.iconXl
+                square: true
+                iconName: "emoji"
+                tip: qsTr("Open emoji picker")
+                tone: emojiPicker.visible ? "toggled" : "ghost"
+                onClicked: {
+                    if (emojiPicker.visible) {
+                        emojiPicker.close()
+                    } else {
+                        gifPicker.close()
+                        emojiPicker.openAt(emojiKey, true)
+                    }
+                }
+            }
         }
     }
 }

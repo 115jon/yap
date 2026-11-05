@@ -1,0 +1,209 @@
+//! The emoji picker's grid and the quick reactions (EmojiPicker.tsx,
+//! message-reaction-recents.ts): "Recently used", then the native
+//! categories, nine to a row; or one "Results" section while searching.
+//! Pure functions of the query, the skin tone and the recents; the UI
+//! owns those (they are kept in `emoji-prefs.json`).
+
+use serde_json::{json, Value};
+
+use crate::emoji::{self, EmojiCell};
+use crate::store::view::media::emoji_image;
+use crate::store::view::EmojiRow;
+
+/// Cells per grid row (420 px panel, 40 px rail, 40 px cells).
+pub const COLUMNS: usize = 9;
+
+/// Recents kept, most recent first (emoji.ts `MAX_RECENTS`).
+pub const MAX_RECENTS: usize = 36;
+
+/// Quick reactions shown in the hover bar.
+pub const QUICK_REACTIONS: usize = 3;
+
+/// What fills the quick reactions after the recents.
+const QUICK_FALLBACK: [&str; 5] = ["thumbsup", "heart", "joy", "tada", "fire"];
+
+/// One recent: a native emoji re-toned to the current skin (by its
+/// shortcode, as the web re-resolves it), or a custom `<:name:id>` token.
+fn recent_cell(value: &str, tone: u8, api_base: &str) -> Option<Value> {
+    if value.starts_with("<:") {
+        let (url, label) = emoji_image(value, api_base);
+        let name = label.trim_matches(':').to_owned();
+        return (!url.is_empty()).then(|| cell_json(value, &url, &name, &name));
+    }
+    let cell = emoji::lookup_native(value)?;
+    let toned = emoji::by_shortcode(&cell.shortcode, tone).unwrap_or(cell);
+    Some(native_json(&toned))
+}
+
+fn cell_json(value: &str, url: &str, shortcode: &str, name: &str) -> Value {
+    json!({ "e": value, "u": url, "s": shortcode, "n": name })
+}
+
+fn native_json(cell: &EmojiCell) -> Value {
+    cell_json(&cell.native, &cell.image_url(), &cell.shortcode, &cell.name)
+}
+
+fn header(id: &str, label: &str, section: &str) -> EmojiRow {
+    EmojiRow {
+        id: id.to_owned(),
+        kind: "header".to_owned(),
+        label: label.to_owned(),
+        section: section.to_owned(),
+        cells: String::new(),
+    }
+}
+
+fn cell_rows(section: &str, cells: Vec<Value>, out: &mut Vec<EmojiRow>) {
+    for (i, chunk) in cells.chunks(COLUMNS).enumerate() {
+        out.push(EmojiRow {
+            id: format!("{section}:{i}"),
+            kind: "cells".to_owned(),
+            label: String::new(),
+            section: section.to_owned(),
+            cells: Value::Array(chunk.to_vec()).to_string(),
+        });
+    }
+}
+
+/// The grid: search results for a non-empty `query`, else recents and
+/// every category.
+pub fn rows(query: &str, tone: u8, recents: &[String], api_base: &str) -> Vec<EmojiRow> {
+    let mut out = Vec::new();
+    let query = query.trim();
+    if !query.is_empty() {
+        let found: Vec<Value> = emoji::search(query, tone).iter().map(native_json).collect();
+        if found.is_empty() {
+            out.push(header(
+                "results",
+                &format!("No emoji matched \"{query}\"."),
+                "results",
+            ));
+        } else {
+            out.push(header(
+                "results",
+                &format!("Results ({})", found.len()),
+                "results",
+            ));
+            cell_rows("results", found, &mut out);
+        }
+        return out;
+    }
+    let recent: Vec<Value> = recents
+        .iter()
+        .filter_map(|value| recent_cell(value, tone, api_base))
+        .collect();
+    if !recent.is_empty() {
+        out.push(header("recent", "Recently used", "recent"));
+        cell_rows("recent", recent, &mut out);
+    }
+    for (i, category) in emoji::categories().iter().enumerate() {
+        out.push(header(&category.id, &category.label, &category.id));
+        let cells = emoji::category_cells(i, tone)
+            .iter()
+            .map(native_json)
+            .collect();
+        cell_rows(&category.id, cells, &mut out);
+    }
+    out
+}
+
+/// `value` first, without its older copy, capped (emoji.ts `pushRecent`).
+pub fn push_recent(recents: &mut Vec<String>, value: &str) {
+    if value.is_empty() {
+        return;
+    }
+    // Natives are kept by shortcode identity: a re-toned pick replaces it.
+    let key = |v: &str| {
+        emoji::lookup_native(v)
+            .map(|c| c.shortcode)
+            .unwrap_or_else(|| v.to_owned())
+    };
+    let wanted = key(value);
+    recents.retain(|v| key(v) != wanted);
+    recents.insert(0, value.to_owned());
+    recents.truncate(MAX_RECENTS);
+}
+
+/// The hover bar's quick reactions: recents, then the fallbacks, deduped,
+/// as JSON `[{e, u, s, n}]`.
+pub fn quick_reactions(recents: &[String], tone: u8, api_base: &str) -> String {
+    let mut seen = Vec::new();
+    let mut out = Vec::new();
+    let fallbacks = QUICK_FALLBACK.iter().filter_map(|code| {
+        let cell = emoji::by_shortcode(code, tone)?;
+        Some(cell.native)
+    });
+    for value in recents.iter().cloned().chain(fallbacks) {
+        let Some(cell) = recent_cell(&value, tone, api_base) else {
+            continue;
+        };
+        let key = cell["s"].as_str().unwrap_or_default().to_owned();
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        out.push(cell);
+        if out.len() == QUICK_REACTIONS {
+            break;
+        }
+    }
+    Value::Array(out).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_full_grid_should_start_with_the_first_category() {
+        let rows = rows("", 0, &[], "");
+        assert_eq!(
+            (rows[0].kind.as_str(), rows[0].section.as_str()),
+            ("header", "people")
+        );
+    }
+
+    #[test]
+    fn recents_should_come_first() {
+        let rows = rows("", 0, &["🔥".to_owned()], "");
+        assert_eq!(rows[0].label, "Recently used");
+    }
+
+    #[test]
+    fn rows_should_hold_at_most_nine_cells() {
+        let rows = rows("", 0, &[], "");
+        let widest = rows
+            .iter()
+            .filter(|r| r.kind == "cells")
+            .map(|r| serde_json::from_str::<Vec<Value>>(&r.cells).map_or(0, |c| c.len()))
+            .max();
+        assert_eq!(widest, Some(COLUMNS));
+    }
+
+    #[test]
+    fn a_search_without_hits_should_say_so() {
+        let rows = rows("zzzzqqq", 0, &[], "");
+        assert_eq!(rows[0].label, "No emoji matched \"zzzzqqq\".");
+    }
+
+    #[test]
+    fn push_recent_should_move_a_repeat_to_the_front() {
+        let mut recents = vec!["😂".to_owned(), "🔥".to_owned()];
+        push_recent(&mut recents, "🔥");
+        assert_eq!(recents, ["🔥", "😂"]);
+    }
+
+    #[test]
+    fn quick_reactions_should_fill_from_the_fallbacks() {
+        let quick: Vec<Value> = serde_json::from_str(&quick_reactions(&[], 0, "")).expect("json");
+        let codes: Vec<&str> = quick.iter().filter_map(|c| c["s"].as_str()).collect();
+        assert_eq!(codes, ["thumbsup", "heart", "joy"]);
+    }
+
+    #[test]
+    fn quick_reactions_should_prefer_recents() {
+        let quick: Vec<Value> =
+            serde_json::from_str(&quick_reactions(&["🔥".to_owned()], 0, "")).expect("json");
+        assert_eq!(quick[0]["s"], "fire");
+    }
+}

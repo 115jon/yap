@@ -74,6 +74,27 @@ pub mod qobject {
         #[qml_element]
         #[qml_singleton]
         type MemberListModel = super::MemberListModelRust;
+
+        /// The composer tray: the open channel's uploads.
+        #[qobject]
+        #[base = QAbstractListModel]
+        #[qml_element]
+        #[qml_singleton]
+        type UploadListModel = super::UploadListModelRust;
+
+        /// The GIF picker's tiles.
+        #[qobject]
+        #[base = QAbstractListModel]
+        #[qml_element]
+        #[qml_singleton]
+        type GifListModel = super::GifListModelRust;
+
+        /// The emoji picker's rows.
+        #[qobject]
+        #[base = QAbstractListModel]
+        #[qml_element]
+        #[qml_singleton]
+        type EmojiGridModel = super::EmojiGridModelRust;
     }
 
     impl cxx_qt::Initialize for ServerListModel {}
@@ -83,6 +104,9 @@ pub mod qobject {
     impl cxx_qt::Initialize for MentionListModel {}
     impl cxx_qt::Initialize for DmListModel {}
     impl cxx_qt::Initialize for MemberListModel {}
+    impl cxx_qt::Initialize for UploadListModel {}
+    impl cxx_qt::Initialize for GifListModel {}
+    impl cxx_qt::Initialize for EmojiGridModel {}
 
     // Messages: scroll anchoring around appends.
     extern "RustQt" {
@@ -162,6 +186,33 @@ pub mod qobject {
             bottom_right: &QModelIndex,
             roles: &QVector_i32,
         );
+        #[inherit]
+        #[qsignal]
+        #[cxx_name = "dataChanged"]
+        fn data_changed(
+            self: Pin<&mut UploadListModel>,
+            top_left: &QModelIndex,
+            bottom_right: &QModelIndex,
+            roles: &QVector_i32,
+        );
+        #[inherit]
+        #[qsignal]
+        #[cxx_name = "dataChanged"]
+        fn data_changed(
+            self: Pin<&mut GifListModel>,
+            top_left: &QModelIndex,
+            bottom_right: &QModelIndex,
+            roles: &QVector_i32,
+        );
+        #[inherit]
+        #[qsignal]
+        #[cxx_name = "dataChanged"]
+        fn data_changed(
+            self: Pin<&mut EmojiGridModel>,
+            top_left: &QModelIndex,
+            bottom_right: &QModelIndex,
+            roles: &QVector_i32,
+        );
     }
 
     unsafe extern "RustQt" {
@@ -209,6 +260,18 @@ pub mod qobject {
             column: i32,
             parent: &QModelIndex,
         ) -> QModelIndex;
+        #[inherit]
+        fn index(
+            self: &UploadListModel,
+            row: i32,
+            column: i32,
+            parent: &QModelIndex,
+        ) -> QModelIndex;
+        #[inherit]
+        fn index(self: &GifListModel, row: i32, column: i32, parent: &QModelIndex) -> QModelIndex;
+        #[inherit]
+        fn index(self: &EmojiGridModel, row: i32, column: i32, parent: &QModelIndex)
+            -> QModelIndex;
     }
 
     // # Safety (all below): each begin_* must be followed by its end_*.
@@ -354,6 +417,30 @@ pub mod qobject {
             last: i32,
         );
         #[inherit]
+        #[cxx_name = "beginInsertRows"]
+        unsafe fn begin_insert_rows(
+            self: Pin<&mut UploadListModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
+        #[cxx_name = "beginInsertRows"]
+        unsafe fn begin_insert_rows(
+            self: Pin<&mut GifListModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
+        #[cxx_name = "beginInsertRows"]
+        unsafe fn begin_insert_rows(
+            self: Pin<&mut EmojiGridModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
         #[cxx_name = "endInsertRows"]
         unsafe fn end_insert_rows(self: Pin<&mut MentionListModel>);
         #[inherit]
@@ -362,6 +449,15 @@ pub mod qobject {
         #[inherit]
         #[cxx_name = "endInsertRows"]
         unsafe fn end_insert_rows(self: Pin<&mut MemberListModel>);
+        #[inherit]
+        #[cxx_name = "endInsertRows"]
+        unsafe fn end_insert_rows(self: Pin<&mut UploadListModel>);
+        #[inherit]
+        #[cxx_name = "endInsertRows"]
+        unsafe fn end_insert_rows(self: Pin<&mut GifListModel>);
+        #[inherit]
+        #[cxx_name = "endInsertRows"]
+        unsafe fn end_insert_rows(self: Pin<&mut EmojiGridModel>);
         #[inherit]
         #[cxx_name = "beginRemoveRows"]
         unsafe fn begin_remove_rows(
@@ -387,6 +483,30 @@ pub mod qobject {
             last: i32,
         );
         #[inherit]
+        #[cxx_name = "beginRemoveRows"]
+        unsafe fn begin_remove_rows(
+            self: Pin<&mut UploadListModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
+        #[cxx_name = "beginRemoveRows"]
+        unsafe fn begin_remove_rows(
+            self: Pin<&mut GifListModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
+        #[cxx_name = "beginRemoveRows"]
+        unsafe fn begin_remove_rows(
+            self: Pin<&mut EmojiGridModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
         #[cxx_name = "endRemoveRows"]
         unsafe fn end_remove_rows(self: Pin<&mut MentionListModel>);
         #[inherit]
@@ -395,6 +515,15 @@ pub mod qobject {
         #[inherit]
         #[cxx_name = "endRemoveRows"]
         unsafe fn end_remove_rows(self: Pin<&mut MemberListModel>);
+        #[inherit]
+        #[cxx_name = "endRemoveRows"]
+        unsafe fn end_remove_rows(self: Pin<&mut UploadListModel>);
+        #[inherit]
+        #[cxx_name = "endRemoveRows"]
+        unsafe fn end_remove_rows(self: Pin<&mut GifListModel>);
+        #[inherit]
+        #[cxx_name = "endRemoveRows"]
+        unsafe fn end_remove_rows(self: Pin<&mut EmojiGridModel>);
         #[inherit]
         #[cxx_name = "beginResetModel"]
         unsafe fn begin_reset_model(self: Pin<&mut MentionListModel>);
@@ -405,6 +534,15 @@ pub mod qobject {
         #[cxx_name = "beginResetModel"]
         unsafe fn begin_reset_model(self: Pin<&mut MemberListModel>);
         #[inherit]
+        #[cxx_name = "beginResetModel"]
+        unsafe fn begin_reset_model(self: Pin<&mut UploadListModel>);
+        #[inherit]
+        #[cxx_name = "beginResetModel"]
+        unsafe fn begin_reset_model(self: Pin<&mut GifListModel>);
+        #[inherit]
+        #[cxx_name = "beginResetModel"]
+        unsafe fn begin_reset_model(self: Pin<&mut EmojiGridModel>);
+        #[inherit]
         #[cxx_name = "endResetModel"]
         unsafe fn end_reset_model(self: Pin<&mut MentionListModel>);
         #[inherit]
@@ -413,6 +551,15 @@ pub mod qobject {
         #[inherit]
         #[cxx_name = "endResetModel"]
         unsafe fn end_reset_model(self: Pin<&mut MemberListModel>);
+        #[inherit]
+        #[cxx_name = "endResetModel"]
+        unsafe fn end_reset_model(self: Pin<&mut UploadListModel>);
+        #[inherit]
+        #[cxx_name = "endResetModel"]
+        unsafe fn end_reset_model(self: Pin<&mut GifListModel>);
+        #[inherit]
+        #[cxx_name = "endResetModel"]
+        unsafe fn end_reset_model(self: Pin<&mut EmojiGridModel>);
     }
 
     extern "RustQt" {
@@ -475,6 +622,15 @@ pub mod qobject {
         fn data(self: &MemberListModel, index: &QModelIndex, role: i32) -> QVariant;
         #[qinvokable]
         #[cxx_override]
+        fn data(self: &UploadListModel, index: &QModelIndex, role: i32) -> QVariant;
+        #[qinvokable]
+        #[cxx_override]
+        fn data(self: &GifListModel, index: &QModelIndex, role: i32) -> QVariant;
+        #[qinvokable]
+        #[cxx_override]
+        fn data(self: &EmojiGridModel, index: &QModelIndex, role: i32) -> QVariant;
+        #[qinvokable]
+        #[cxx_override]
         #[cxx_name = "roleNames"]
         fn role_names(self: &MentionListModel) -> QHash_i32_QByteArray;
         #[qinvokable]
@@ -487,6 +643,18 @@ pub mod qobject {
         fn role_names(self: &MemberListModel) -> QHash_i32_QByteArray;
         #[qinvokable]
         #[cxx_override]
+        #[cxx_name = "roleNames"]
+        fn role_names(self: &UploadListModel) -> QHash_i32_QByteArray;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "roleNames"]
+        fn role_names(self: &GifListModel) -> QHash_i32_QByteArray;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "roleNames"]
+        fn role_names(self: &EmojiGridModel) -> QHash_i32_QByteArray;
+        #[qinvokable]
+        #[cxx_override]
         #[cxx_name = "rowCount"]
         fn row_count(self: &MentionListModel, parent: &QModelIndex) -> i32;
         #[qinvokable]
@@ -497,6 +665,18 @@ pub mod qobject {
         #[cxx_override]
         #[cxx_name = "rowCount"]
         fn row_count(self: &MemberListModel, parent: &QModelIndex) -> i32;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "rowCount"]
+        fn row_count(self: &UploadListModel, parent: &QModelIndex) -> i32;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "rowCount"]
+        fn row_count(self: &GifListModel, parent: &QModelIndex) -> i32;
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "rowCount"]
+        fn row_count(self: &EmojiGridModel, parent: &QModelIndex) -> i32;
     }
 }
 
@@ -505,8 +685,8 @@ use core::pin::Pin;
 use cxx_qt_lib::QVector;
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
 use yap_core::store::view::{
-    Cell, ChannelTreeRow, DmRow, MemberListRow, MentionRow, MessageRow, Row, ServerRow,
-    VoiceMemberRow,
+    Cell, ChannelTreeRow, DmRow, EmojiRow, GifRow, MemberListRow, MentionRow, MessageRow, Row,
+    ServerRow, UploadRow, VoiceMemberRow,
 };
 use yap_core::ViewDiff;
 
@@ -668,6 +848,9 @@ list_model!(
 list_model!(MentionListModel, MentionListModelRust, MentionRow, mentions);
 list_model!(DmListModel, DmListModelRust, DmRow, dms);
 list_model!(MemberListModel, MemberListModelRust, MemberListRow, members);
+list_model!(UploadListModel, UploadListModelRust, UploadRow, uploads);
+list_model!(GifListModel, GifListModelRust, GifRow, gifs);
+list_model!(EmojiGridModel, EmojiGridModelRust, EmojiRow, emoji);
 
 impl ListModel for qobject::ServerListModel {
     type Row = ServerRow;
@@ -697,6 +880,21 @@ impl ListModel for qobject::DmListModel {
 impl ListModel for qobject::MemberListModel {
     type Row = MemberListRow;
     list_model_ops!(MemberListRow, members);
+}
+
+impl ListModel for qobject::UploadListModel {
+    type Row = UploadRow;
+    list_model_ops!(UploadRow, uploads);
+}
+
+impl ListModel for qobject::GifListModel {
+    type Row = GifRow;
+    list_model_ops!(GifRow, gifs);
+}
+
+impl ListModel for qobject::EmojiGridModel {
+    type Row = EmojiRow;
+    list_model_ops!(EmojiRow, emoji);
 }
 
 impl ListModel for qobject::MessageListModel {

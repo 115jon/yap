@@ -443,7 +443,9 @@ fn first_page_should_project_messages_like_before() {
             day: 20_761,
             edited: true,
             grouped: false,
-            attachment_names: "notes.txt".into(),
+            attachments: list[0].attachments.clone(),
+            reactions: list[0].reactions.clone(),
+            embeds: String::new(),
             mine: false,
             nonce: String::new(),
             pending: false,
@@ -458,6 +460,8 @@ fn first_page_should_project_messages_like_before() {
             reply_placeholder: false,
         }
     );
+    assert!(list[0].attachments.contains(r#""name":"notes.txt""#));
+    assert!(list[0].reactions.contains(r#""count":1"#));
     assert!(fx.contains(&Effect::StartupMark("messages shown")));
     assert_eq!(
         views(&fx)[1..],
@@ -618,8 +622,12 @@ fn partial_update_without_content_should_keep_the_content() {
     let fx = client.gateway(GatewayEvent::Dispatch(dispatch(
         "dispatch-message-update-partial.json",
     )));
-    // Embeds are not shown yet: nothing on screen changes.
-    assert!(views(&fx).is_empty(), "{fx:#?}");
+    // Only the embeds role changes.
+    let Some(ViewDiff::Update { roles, row, .. }) = message_diffs(&fx).first().copied() else {
+        panic!("{fx:#?}");
+    };
+    assert_eq!(roles.as_slice(), [MessageRole::Embeds]);
+    assert!(row.embeds.contains("https://example.com/fixture"));
     let log = client.state.messages().expect("log");
     let message = log.get("msg_fixture_0002").expect("message");
     assert_eq!(message.content, "hello from the fixture");
@@ -788,6 +796,8 @@ fn post(content: &str, nonce: &str) -> ApiRequest {
         content: content.into(),
         reply_to_id: None,
         nonce: nonce.into(),
+        attachment_ids: Vec::new(),
+        nsfw_attachment_ids: Vec::new(),
     }
 }
 
@@ -838,6 +848,8 @@ fn send_should_carry_reply_to_id() {
         content: "yes".into(),
         reply_to_id: Some("msg_fixture_0001".into()),
         nonce: "n1".into(),
+        attachment_ids: Vec::new(),
+        nsfw_attachment_ids: Vec::new(),
     };
     assert_eq!(request.body()["reply_to_id"], json!("msg_fixture_0001"));
 }

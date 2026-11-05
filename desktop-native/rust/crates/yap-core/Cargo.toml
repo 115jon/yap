@@ -7,8 +7,9 @@ publish.workspace = true
 description = "Yap client core: typed state store (pure reducer), effect runner, REST and auth. No Qt."
 
 [dependencies]
+futures-util = "0.3.34"
 keyring.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["multipart", "stream"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

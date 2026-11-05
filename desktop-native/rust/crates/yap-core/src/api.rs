@@ -63,6 +63,29 @@ impl ApiError {
     }
 }
 
+/// How long an upload or a download may take (the client default is 30 s).
+const UPLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// `url` is on the API (`{api_base}/api/...`), so it may carry the session.
+/// Compared as a prefix up to the path, so `https://yap.example.evil` or a
+/// userinfo trick never matches.
+pub fn is_api_url(api_base: &str, url: &str) -> bool {
+    let base = api_base.trim_end_matches('/');
+    !base.is_empty()
+        && url
+            .strip_prefix(base)
+            .is_some_and(|rest| rest.starts_with("/api/"))
+}
+
+/// The session for a media URL the image loader is about to fetch: only
+/// the API's attachments and custom emoji images need (and get) it.
+pub fn media_needs_auth(api_base: &str, url: &str) -> bool {
+    let base = api_base.trim_end_matches('/');
+    url.strip_prefix(base).is_some_and(|rest| {
+        rest.starts_with("/api/attachments/") || rest.starts_with("/api/emojis/assets/")
+    })
+}
+
 /// The shared HTTP client. Fails only if the TLS backend cannot start.
 pub fn http_client() -> reqwest::Result<Client> {
     Client::builder()
@@ -145,6 +168,53 @@ impl Api {
             builder.json(body)
         };
         self.send(builder).await
+    }
+
+    /// `POST path` with a multipart body (uploads can take minutes).
+    pub async fn upload(
+        &self,
+        path: &str,
+        form: reqwest::multipart::Form,
+    ) -> Result<Value, ApiError> {
+        let builder = self
+            .request(Method::POST, path)
+            .multipart(form)
+            .timeout(UPLOAD_TIMEOUT);
+        self.send(builder).await
+    }
+
+    /// The bytes at `url`. The session goes along only when `url` is the
+    /// API's own (attachments and emoji need it; nothing else may see it).
+    pub async fn download(&self, url: &str) -> Result<Vec<u8>, ApiError> {
+        let cfg = config::get();
+        let builder = if is_api_url(&cfg.api_base, url) {
+            self.http
+                .get(url)
+                .bearer_auth(self.token.as_str())
+                .header("X-Publishable-Key", &cfg.publishable_key)
+        } else {
+            self.http.get(url)
+        };
+        let response = builder
+            .timeout(UPLOAD_TIMEOUT)
+            .send()
+            .await
+            .map_err(|error| ApiError::network(&error))?;
+        let status = response.status();
+        if status == StatusCode::UNAUTHORIZED {
+            return Err(ApiError::Unauthorized);
+        }
+        if !status.is_success() {
+            return Err(ApiError::Http {
+                status: status.as_u16(),
+                message: "download failed".into(),
+            });
+        }
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|error| ApiError::network(&error))?;
+        Ok(bytes.to_vec())
     }
 
     /// A single-use, 60 s ticket for one realtime socket.

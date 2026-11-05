@@ -14,10 +14,12 @@ const QML: &[&str] = &[
     "qml/components/KeyButton.qml",
     "qml/components/Led.qml",
     "qml/components/LinkText.qml",
+    "qml/components/MediaTile.qml",
     "qml/components/MenuPanel.qml",
     "qml/components/MenuRow.qml",
     "qml/components/MessageEditor.qml",
     "qml/components/NotchedKey.qml",
+    "qml/components/PlayDisc.qml",
     "qml/components/PresenceAvatar.qml",
     "qml/components/RailPill.qml",
     "qml/components/Tooltip.qml",
@@ -25,10 +27,13 @@ const QML: &[&str] = &[
     "qml/delegates/CategoryLabel.qml",
     "qml/delegates/ChannelRow.qml",
     "qml/delegates/DmRow.qml",
+    "qml/delegates/EmbedCard.qml",
     "qml/delegates/LandingMember.qml",
     "qml/delegates/MemberEntry.qml",
     "qml/delegates/MemberRow.qml",
     "qml/delegates/MessageDelegate.qml",
+    "qml/delegates/MessageMedia.qml",
+    "qml/delegates/ReactionStrip.qml",
     "qml/delegates/ServerIcon.qml",
     "qml/delegates/TreeRow.qml",
     "qml/delegates/VoiceTile.qml",
@@ -44,13 +49,17 @@ const QML: &[&str] = &[
     "qml/screens/Shell/ConnectionStrip.qml",
     "qml/screens/Shell/DeleteDialog.qml",
     "qml/screens/Shell/DmSidebar.qml",
+    "qml/screens/Shell/EmojiPicker.qml",
+    "qml/screens/Shell/GifPicker.qml",
     "qml/screens/Shell/HomeLanding.qml",
+    "qml/screens/Shell/ImageViewer.qml",
     "qml/screens/Shell/MemberPanel.qml",
     "qml/screens/Shell/ProfileCard.qml",
     "qml/screens/Shell/ProfilePopout.qml",
     "qml/screens/Shell/ServerRail.qml",
     "qml/screens/Shell/Shell.qml",
     "qml/screens/Shell/UnreadBanner.qml",
+    "qml/screens/Shell/UploadTray.qml",
     "qml/screens/Voice/VoiceView.qml",
 ];
 
@@ -60,6 +69,11 @@ fn main() {
         QmlFile::from("qml/screens/Shell/ShellState.qml").singleton(true),
     ]);
     CxxQtBuilder::new_qml_module(QmlModule::new("com.yap.native").qml_files(files))
-        .files(["src/bridge.rs", "src/desktop.rs", "src/models.rs"])
+        .files([
+            "src/bridge.rs",
+            "src/desktop.rs",
+            "src/models.rs",
+            "src/picker.rs",
+        ])
         .build();
 }

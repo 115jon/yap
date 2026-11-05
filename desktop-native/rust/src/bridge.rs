@@ -142,7 +142,65 @@ pub mod qobject {
         #[qproperty(bool, has_older, cxx_name = "hasOlder")]
         // Delete is offered on others' messages too (MANAGE_MESSAGES).
         #[qproperty(bool, can_manage_messages, cxx_name = "canManageMessages")]
+        // The composer tray: finished uploads (sent with the next message)
+        // and ones still going.
+        #[qproperty(i32, uploads_ready, cxx_name = "uploadsReady")]
+        #[qproperty(i32, uploads_busy, cxx_name = "uploadsBusy")]
+        // The GIF picker: a page is loading, more exist, the error line,
+        // and each column's height (thousandths of the width) and tiles.
+        #[qproperty(bool, gif_loading, cxx_name = "gifLoading")]
+        #[qproperty(bool, gif_more, cxx_name = "gifMore")]
+        #[qproperty(QString, gif_error, cxx_name = "gifError")]
+        #[qproperty(i32, gif_units0, cxx_name = "gifUnits0")]
+        #[qproperty(i32, gif_units1, cxx_name = "gifUnits1")]
+        #[qproperty(i32, gif_count0, cxx_name = "gifCount0")]
+        #[qproperty(i32, gif_count1, cxx_name = "gifCount1")]
         type Chat = super::ChatRust;
+
+        /// A download landed at `path`; `open` it (else reveal it).
+        #[qsignal]
+        fn saved(self: Pin<&mut Chat>, path: QString, open: bool);
+
+        /// Adds the user's reaction, or removes it when it is there.
+        #[qinvokable]
+        #[cxx_name = "toggleReaction"]
+        fn toggle_reaction(self: &Chat, message_id: &QString, emoji: &QString);
+
+        /// Local files for the open channel's tray (picked, pasted, dropped).
+        #[qinvokable]
+        #[cxx_name = "addFiles"]
+        fn add_files(self: &Chat, paths: &QStringList);
+
+        /// Cancels an upload or removes its tile.
+        #[qinvokable]
+        #[cxx_name = "removeUpload"]
+        fn remove_upload(self: &Chat, id: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "retryUpload"]
+        fn retry_upload(self: &Chat, id: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "setUploadSensitive"]
+        fn set_upload_sensitive(self: &Chat, id: &QString, nsfw: bool);
+
+        /// A GIF picker query (empty: trending) for `gifs`, `stickers` or `memes`.
+        #[qinvokable]
+        #[cxx_name = "searchGifs"]
+        fn search_gifs(self: &Chat, query: &QString, media_type: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "moreGifs"]
+        fn more_gifs(self: &Chat);
+
+        /// Sends a GIF tile (`GifListModel.gifId`) to the open channel.
+        #[qinvokable]
+        #[cxx_name = "sendGif"]
+        fn send_gif(self: &Chat, gif_id: &QString, reply_to_id: &QString);
+
+        /// Saves `url` to `dest` (a path from `Files`); `open` afterwards.
+        #[qinvokable]
+        fn download(self: &Chat, url: &QString, dest: &QString, open: bool);
 
         /// Something failed that the user should hear about (a toast).
         #[qsignal]
@@ -291,7 +349,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cxx_qt::Threading;
-use cxx_qt_lib::{QString, QStringList};
+use cxx_qt_lib::{QList, QString, QStringList};
 use yap_core::store::time::format_rfc3339;
 use yap_core::{Phase, ViewUpdate};
 
@@ -366,6 +424,15 @@ pub struct ChatRust {
     older_loading: bool,
     has_older: bool,
     can_manage_messages: bool,
+    uploads_ready: i32,
+    uploads_busy: i32,
+    gif_loading: bool,
+    gif_more: bool,
+    gif_error: QString,
+    gif_units0: i32,
+    gif_units1: i32,
+    gif_count0: i32,
+    gif_count1: i32,
 }
 
 #[derive(Default)]
@@ -497,18 +564,91 @@ fn next_nonce(now: Duration) -> String {
     format!("native-{:x}-{n:x}", now.as_nanos())
 }
 
+/// A fresh nonce and the local send time, as the composer stamps a send.
+fn stamp() -> (String, String) {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let ms = i64::try_from(now.as_millis()).unwrap_or(i64::MAX);
+    (next_nonce(now), format_rfc3339(ms))
+}
+
+fn optional(text: &QString) -> Option<String> {
+    let text = text.to_string();
+    (!text.is_empty()).then_some(text)
+}
+
 impl qobject::Chat {
     pub fn send_message(&self, text: &QString, reply_to_id: &QString) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        let ms = i64::try_from(now.as_millis()).unwrap_or(i64::MAX);
-        let reply = reply_to_id.to_string();
+        let (nonce, sent_at) = stamp();
         client::command(Command::Send {
             content: text.to_string(),
-            reply_to_id: (!reply.is_empty()).then_some(reply),
-            nonce: next_nonce(now),
-            sent_at: format_rfc3339(ms),
+            reply_to_id: optional(reply_to_id),
+            nonce,
+            sent_at,
+        });
+    }
+
+    pub fn toggle_reaction(&self, message_id: &QString, emoji: &QString) {
+        client::command(Command::ToggleReaction {
+            message_id: message_id.to_string(),
+            emoji: emoji.to_string(),
+        });
+    }
+
+    pub fn add_files(&self, paths: &QStringList) {
+        let paths: Vec<String> = QList::<QString>::from(paths)
+            .iter()
+            .map(|p| p.to_string())
+            .filter(|p| !p.is_empty())
+            .collect();
+        let files = crate::media::upload_files(&paths);
+        if !files.is_empty() {
+            client::command(Command::AddUploads(files));
+        }
+    }
+
+    pub fn remove_upload(&self, id: &QString) {
+        client::command(Command::RemoveUpload(id.to_string()));
+    }
+
+    pub fn retry_upload(&self, id: &QString) {
+        client::command(Command::RetryUpload(id.to_string()));
+    }
+
+    pub fn set_upload_sensitive(&self, id: &QString, nsfw: bool) {
+        client::command(Command::SetUploadSensitive {
+            local_id: id.to_string(),
+            nsfw,
+        });
+    }
+
+    pub fn search_gifs(&self, query: &QString, media_type: &QString) {
+        client::command(Command::GifSearch {
+            query: query.to_string(),
+            media_type: media_type.to_string(),
+        });
+    }
+
+    pub fn more_gifs(&self) {
+        client::command(Command::GifMore);
+    }
+
+    pub fn send_gif(&self, gif_id: &QString, reply_to_id: &QString) {
+        let (nonce, sent_at) = stamp();
+        client::command(Command::SendGif {
+            gif_id: gif_id.to_string(),
+            reply_to_id: optional(reply_to_id),
+            nonce,
+            sent_at,
+        });
+    }
+
+    pub fn download(&self, url: &QString, dest: &QString, open: bool) {
+        client::command(Command::Download {
+            url: url.to_string(),
+            dest: dest.to_string(),
+            open,
         });
     }
 

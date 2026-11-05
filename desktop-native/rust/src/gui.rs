@@ -14,8 +14,9 @@ use cxx_qt_lib::QString;
 use cxx_qt_lib::{QList, QStringList};
 use yap_core::store::time::local_day;
 use yap_core::store::view::{
-    ChannelTreeRow, DmRow, DmView, MeView, MemberListRow, MentionRow, MessageRow, ProfileView,
-    ServerRow, UnreadView, VoiceMemberRow, VoicePanelView, VoiceView,
+    ChannelTreeRow, DmRow, DmView, EmojiRow, GifRow, GifStatusView, MeView, MemberListRow,
+    MentionRow, MessageRow, ProfileView, ServerRow, UnreadView, UploadRow, VoiceMemberRow,
+    VoicePanelView, VoiceView,
 };
 use yap_core::ViewUpdate;
 
@@ -33,6 +34,9 @@ pub struct Rows {
     pub mentions: Vec<MentionRow>,
     pub dms: Vec<DmRow>,
     pub members: Vec<MemberListRow>,
+    pub uploads: Vec<UploadRow>,
+    pub gifs: Vec<GifRow>,
+    pub emoji: Vec<EmojiRow>,
 }
 
 /// The last scalar values for the singletons that may not exist yet.
@@ -52,6 +56,9 @@ struct Scalars {
     dm: DmView,
     dm_unread: i64,
     profile: ProfileView,
+    /// (ready, busy) uploads of the open channel.
+    uploads: (i64, i64),
+    gifs: GifStatusView,
 }
 
 /// The live QObjects. Each registers from its constructor and clears its
@@ -70,6 +77,9 @@ pub struct Objects {
     mentions: Option<NonNull<m::MentionListModel>>,
     dms: Option<NonNull<m::DmListModel>>,
     members: Option<NonNull<m::MemberListModel>>,
+    uploads: Option<NonNull<m::UploadListModel>>,
+    gifs: Option<NonNull<m::GifListModel>>,
+    emoji: Option<NonNull<m::EmojiGridModel>>,
 }
 
 #[derive(Default)]
@@ -179,15 +189,19 @@ impl Slot for Chat {
     }
 
     fn restore(mut self: Pin<&mut Self>) {
-        let (typing, unread, history, manage) = GUI.with(|gui| {
+        let (typing, unread, history, manage, uploads, gifs) = GUI.with(|gui| {
             let s = &gui.borrow().scalars;
             (
                 s.typing.clone(),
                 s.unread.clone(),
                 s.history,
                 s.manage_messages,
+                s.uploads,
+                s.gifs.clone(),
             )
         });
+        set_uploads(self.as_mut(), uploads);
+        set_gifs(self.as_mut(), &gifs);
         self.as_mut().set_typing_text(q(&typing));
         set_unread(self.as_mut(), &unread);
         self.as_mut().set_older_loading(history.0);
@@ -237,6 +251,9 @@ model_slots!(
     MentionListModel => mentions,
     DmListModel => dms,
     MemberListModel => members,
+    UploadListModel => uploads,
+    GifListModel => gifs,
+    EmojiGridModel => emoji,
 );
 
 fn int(n: i64) -> i32 {
@@ -275,6 +292,21 @@ fn set_profile(mut profile: Pin<&mut Profile>, view: &ProfileView) {
         .set_role_names(string_list(&view.role_names));
     profile.as_mut().set_me(view.me);
     profile.set_user_id(q(&view.user_id));
+}
+
+fn set_uploads(mut chat: Pin<&mut Chat>, (ready, busy): (i64, i64)) {
+    chat.as_mut().set_uploads_ready(int(ready));
+    chat.set_uploads_busy(int(busy));
+}
+
+fn set_gifs(mut chat: Pin<&mut Chat>, view: &GifStatusView) {
+    chat.as_mut().set_gif_more(view.more);
+    chat.as_mut().set_gif_error(q(&view.error));
+    chat.as_mut().set_gif_units0(int(view.units[0]));
+    chat.as_mut().set_gif_units1(int(view.units[1]));
+    chat.as_mut().set_gif_count0(int(view.counts[0]));
+    chat.as_mut().set_gif_count1(int(view.counts[1]));
+    chat.set_gif_loading(view.loading);
 }
 
 fn set_unread(mut chat: Pin<&mut Chat>, view: &UnreadView) {
@@ -408,5 +440,19 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::Toast(toast) => crate::desktop::on_toast(&toast),
         ViewUpdate::Sound(sound) => crate::sound::play(sound),
         ViewUpdate::Badge(badge) => crate::desktop::on_badge(badge),
+        ViewUpdate::Uploads(diff) => models::apply::<m::UploadListModel>(diff),
+        ViewUpdate::UploadCounts { ready, busy } => {
+            with::<Chat>(|chat| set_uploads(chat, (ready, busy)));
+            scalars(|s| s.uploads = (ready, busy));
+        }
+        ViewUpdate::Gifs(diff) => models::apply::<m::GifListModel>(diff),
+        ViewUpdate::GifStatus(view) => {
+            with::<Chat>(|chat| set_gifs(chat, &view));
+            scalars(|s| s.gifs = view);
+        }
+        ViewUpdate::MediaAuth(token) => crate::media::set_token(token),
+        ViewUpdate::Saved { path, open } => {
+            with::<Chat>(|chat| chat.saved(q(&path), open));
+        }
     }
 }

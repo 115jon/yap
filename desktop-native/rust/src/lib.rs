@@ -7,5 +7,7 @@ mod bridge;
 mod client;
 mod desktop;
 mod gui;
+mod media;
 mod models;
+mod picker;
 mod sound;

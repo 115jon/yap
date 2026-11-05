@@ -224,7 +224,12 @@ rows! {
         edited: bool => Edited "edited",
         /// Same author as the row above, within the group window.
         grouped: bool => Grouped "grouped",
-        attachment_names: String => AttachmentNames "attachmentNames",
+        /// The attachments as JSON (`[]` when none; see [`media`]).
+        attachments: String => Attachments "attachments",
+        /// The reaction chips as JSON, empty when none.
+        reactions: String => Reactions "reactions",
+        /// The link previews as JSON, empty when none.
+        embeds: String => Embeds "embeds",
         /// Sent by the signed-in user.
         mine: bool => Mine "mine",
         /// The send nonce of a row this client posted, else empty.
@@ -311,6 +316,55 @@ rows! {
     }
     key(row) -> (MemberKind, String) { (row.kind, row.id.clone()) }
 
+    /// One file in the composer tray (AttachmentList.tsx).
+    pub struct UploadRow / UploadRole {
+        id: String => Id "uploadId",
+        name: String => Name "name",
+        /// `1.2 MB` (formatFileSize).
+        size: String => Size "sizeText",
+        /// `image`, `video` or `file`.
+        kind: String => Kind "kind",
+        /// A `file:` URL of the picture for images, else empty.
+        preview: String => Preview "preview",
+        /// `uploading`, `done` or `failed`.
+        state: String => State "uploadState",
+        /// Sent so far, in thousandths.
+        progress: i64 => Progress "progress",
+        error: String => Error "error",
+        nsfw: bool => Nsfw "nsfw",
+    }
+    key(row) -> String { row.id.clone() }
+
+    /// One GIF picker tile, placed in a two-column masonry (round-robin,
+    /// as GifPickerModal.tsx fills it). `top` is the sum of the heights
+    /// above it in its column, in thousandths of the column width.
+    pub struct GifRow / GifRole {
+        id: String => Id "gifId",
+        title: String => Title "title",
+        /// What the tile shows (an image; video previews fall back to `send`).
+        preview: String => Preview "preview",
+        /// Height over width, in thousandths.
+        aspect: i64 => Aspect "aspect",
+        column: i64 => Column "column",
+        /// Tiles above it in its column (for the gaps).
+        above: i64 => Above "above",
+        top: i64 => Top "offset",
+    }
+    key(row) -> String { row.id.clone() }
+
+    /// One emoji picker row: a section label, or up to nine cells.
+    pub struct EmojiRow / EmojiRole {
+        id: String => Id "rowId",
+        /// `header` or `cells`.
+        kind: String => Kind "kind",
+        label: String => Label "label",
+        /// The category id (`recent`, `people`, ...) or `results`.
+        section: String => Section "section",
+        /// JSON `[{e: value, u: image, s: shortcode, n: name}]`.
+        cells: String => Cells "cells",
+    }
+    key(row) -> String { row.id.clone() }
+
     /// One mention suggestion in the composer.
     pub struct MentionRow / MentionRole {
         id: String => Id "userId",
@@ -321,6 +375,8 @@ rows! {
     }
     key(row) -> String { row.id.clone() }
 }
+
+pub mod media;
 
 /// One change to a list model. Indices are positions after every earlier
 /// diff of the same batch has been applied.
@@ -646,6 +702,37 @@ pub enum ViewUpdate {
     Sound(Sound),
     /// The tray badge changed.
     Badge(BadgeView),
+    /// The open channel's composer tray.
+    Uploads(ViewDiff<UploadRow>),
+    /// Uploads of the open channel: finished (sent with the next message)
+    /// and still going.
+    UploadCounts {
+        ready: i64,
+        busy: i64,
+    },
+    Gifs(ViewDiff<GifRow>),
+    GifStatus(GifStatusView),
+    /// The session the image loader sends with media from the API (`None`
+    /// when signed out). Never printed.
+    MediaAuth(Option<crate::api::Token>),
+    /// A download finished: where it went, and whether to open it.
+    Saved {
+        path: String,
+        open: bool,
+    },
+}
+
+/// The GIF picker's state besides its tiles.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GifStatusView {
+    pub loading: bool,
+    /// A next page exists.
+    pub more: bool,
+    pub error: String,
+    /// Each column's height in thousandths of the column width, and its
+    /// tile count (QML adds the gaps).
+    pub units: [i64; 2],
+    pub counts: [i64; 2],
 }
 
 /// Messages from the same author within this window share one header.
@@ -975,6 +1062,8 @@ pub(super) struct RowContext<'a> {
     pub outbox: &'a HashMap<String, Outgoing>,
     /// The message the "New" divider sits above.
     pub divider: Option<&'a str>,
+    /// Display names by user id (reaction tooltips).
+    pub names: &'a HashMap<String, String>,
 }
 
 /// `\w` as JavaScript reads it without the `u` flag.
@@ -1051,12 +1140,6 @@ pub(super) fn message_row(
     let stamp = parse_rfc3339(&message.created_at)
         .map(|ms| Stamp::new(ms, ctx.offset))
         .unwrap_or_default();
-    let attachment_names = message
-        .attachments
-        .iter()
-        .map(|a| a.filename.as_str())
-        .collect::<Vec<_>>()
-        .join("  ·  ");
     let outgoing = message
         .nonce
         .as_deref()
@@ -1081,7 +1164,11 @@ pub(super) fn message_row(
         initials: initials(author_name),
         avatar: absolute_url(ctx.api_base, author.and_then(|a| a.avatar_url.as_deref())),
         body: message.content.clone(),
-        html: crate::markdown::to_html(&message.content, message.updated_at.is_some()),
+        html: crate::markdown::to_html_with(
+            &message.content,
+            message.updated_at.is_some(),
+            ctx.api_base,
+        ),
         created_at: message.created_at.clone(),
         time: stamp.time,
         date: stamp.date,
@@ -1089,7 +1176,9 @@ pub(super) fn message_row(
         edited: message.updated_at.is_some(),
         // The divider always starts a new header.
         grouped: grouped(previous, message, ctx.offset) && ctx.divider != Some(message.id.as_str()),
-        attachment_names,
+        attachments: media::attachments_json(&message.attachments, ctx.api_base),
+        reactions: media::reactions_json(&message.reactions, ctx),
+        embeds: media::embeds_json(&message.embeds, ctx.api_base),
         mine,
         nonce: message.nonce.clone().filter(|_| mine).unwrap_or_default(),
         pending: outgoing.is_some_and(|o| !o.failed),
