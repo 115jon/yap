@@ -55,7 +55,8 @@ import type { CallTarget } from "./tickets";
 // - ScreenShare serializes starting and stopping a share (Android's
 //   MediaProjection capture) and Android's own Stop.
 // - RemoteReconnectGrace keeps a participant whose voice socket reconnects
-//   (VoiceRoom says ClientDisconnect first) for 3 s instead of dropping
+//   for 3 s after a ClientDisconnect (VoiceRoom holds their tracks without
+//   one, but sends one if the hold runs out first) instead of dropping
 //   their audio; only the room socket decides who left.
 //
 // The sockets and the PartyTracks media session are CallConnection's.
@@ -297,6 +298,10 @@ export class CallSession {
         },
         peerState: (state) => this.onPeerState(state),
         remoteTrack: (event) => this.onRemoteTrack(event),
+        videoFlow: () =>
+          this.video.refreshFlows((track) =>
+            this.connection.videoFlowOf(track),
+          ),
         giveUp: (reason) => this.fail(GIVE_UP_MESSAGE[reason]),
       }),
     );
@@ -381,9 +386,9 @@ export class CallSession {
     return guarded as unknown as ConnectionEvents;
   }
 
-  /** The app is in front again: retry now, or probe the open sockets. */
-  wake(): void {
-    if (this.voice.isLive) this.connection.wake();
+  /** The app is in front again (or the network is back): see CallConnection.wake. */
+  wake(options: { readonly networkChanged?: boolean } = {}): void {
+    if (this.voice.isLive) this.connection.wake(options);
   }
 
   leave(): void {
