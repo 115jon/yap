@@ -18,7 +18,7 @@
 
 use std::time::Duration;
 
-use yap_protocol::GatewayCloseCode;
+use yap_protocol::{GatewayCloseCode, VOICE_JOIN_UNVERIFIED_CLOSE_CODE};
 
 /// The voice room closes an evicted socket with `1000` and this reason when
 /// the same participant identifies again elsewhere.
@@ -100,12 +100,18 @@ pub enum CloseAction {
 }
 
 /// The close-code table (`realtime-socket.ts:197-202` plus 4006/4004).
+/// The voice room's 1013 (join not verified yet, or a voice ticket bound to
+/// another participant) is a plain retry: the next attempt asks for a fresh
+/// ticket, bound to the participant the identify names (ADMISSION.md).
 pub fn close_action(code: Option<u16>, reason: &str) -> CloseAction {
     let Some(code) = code else {
         return CloseAction::Retry;
     };
     if code == 1000 && reason == REPLACED_REASON {
         return CloseAction::StopReplaced;
+    }
+    if code == VOICE_JOIN_UNVERIFIED_CLOSE_CODE {
+        return CloseAction::Retry;
     }
     match GatewayCloseCode::try_from(i64::from(code)) {
         Ok(GatewayCloseCode::SessionReplaced) => CloseAction::StopReplaced,
@@ -149,6 +155,7 @@ mod tests {
             (Some(4008), "x", CloseAction::StopAdmissionRejected),
             (Some(4006), "x", CloseAction::RetryFresh),
             (Some(4004), "x", CloseAction::RetryAfterTokenRefresh),
+            (Some(1013), "x", CloseAction::Retry),
             (Some(4009), "x", CloseAction::Retry),
         ];
         for (code, reason, action) in cases {

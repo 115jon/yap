@@ -13,6 +13,8 @@ where the two differ:
   ends, the remote reconnect grace, voice-state deltas, the publication reconciler.
 - `packages/voice/SCREEN_SHARE.md`: track names, watching a share, keepalive park and reuse.
 - `packages/voice/DEVICES.md`: device choice, fallback and output routing.
+- `realtime/ADMISSION.md`: the call sockets' tickets, the voice token and TURN, from one
+  `POST /api/voice/admission` per join (section 1).
 - `realtime/SOCKET_CORE.md`: which opcodes each socket accepts. A frame on the wrong
   socket gets `4001 "Unknown opcode"`.
 - `realtime/VOICE_ROSTER.md`: the room object owns sidebar voice occupancy; op 33/34/15
@@ -65,71 +67,40 @@ You need the room socket even for audio only: the VoiceRoom will not identify yo
 and the proxy will not let you pull, until the MeetingRoom has a non-standby Identify
 from you (section 2.4).
 
-## 1. Socket tickets and media bootstrap
+## 1. Call admission (tickets, voice token, TURN)
 
-`POST /api/voice/socket-ticket`. Auth headers are already established (Bearer Kova
-token + `X-Publishable-Key`; `src/lib/voice/socket-ticket-client.ts:51-55`).
-Send `Content-Type: application/json`.
+`realtime/ADMISSION.md` is the contract: request and response, ticket claims, what each socket does
+with an admitted ticket, the client flow and the errors. Read it there; this section only records how
+the native client follows it (2026-11-05). The deprecated two-request flow on
+`POST /api/voice/socket-ticket` (`audience: "room" | "voice"`, `media_bootstrap`) is not used any more,
+with no fallback. The chat gateway keeps `socket-ticket` with `{"audience":"global"}`, as ADMISSION.md says
+(`crates/yap-core/src/api.rs` `gateway_ticket`).
 
-### 1.1 Body (server voice channel)
+Native specifics:
 
-The body is the same for both audiences. Only `audience` changes
-(`apps/mobile/src/features/voice/tickets.ts:53-60`, `src/lib/voice/socket-ticket-client.ts:146-154`):
-
-```json
-{ "audience": "room",  "channelId": "<channelId>", "serverId": "<serverId>", "roomSlug": "voice-<serverId>-<channelId>" }
-{ "audience": "voice", "channelId": "<channelId>", "serverId": "<serverId>", "roomSlug": "voice-<serverId>-<channelId>" }
-```
-
-How the server reads the fields (`src/server/routes/socket-ticket.ts`):
-
-- `audience`: must be `"global" | "room" | "voice"`, else 400 `INVALID_AUDIENCE` (`:89-97`, `:506-510`).
-- `channelId`: **required** for an authenticated room or voice ticket. Without it the
-  request takes the public-demo path (`:99-113`) and fails off-origin (`:396-403`).
-  The channel must be visible to the user (else 403, `:280-288`), of type `voice` (`:324-331`),
-  and the user needs CONNECT (else 403 `CONNECT_DENIED`, `:346-378`).
-- `serverId`: optional. If sent, it must match the channel's server (else 403 `SERVER_MISMATCH`, `:333-344`).
-- `roomSlug`: **ignored for server channels**. The server derives it with
-  `buildVoiceChannelRoomSlug(serverId, channelId)` (`:380-385`). It only matters for `dm-call-*` slugs (`:290-310`).
-- `moveGrant`: optional, for moderator moves only (`:349-370`). Skip it.
-
-### 1.2 Response
-
-```json
-{
-  "access_mode": "authenticated",
-  "audience": "room",
-  "expires_at": 1730000000000,
-  "room_slug": "voice-<s>-<c>",
-  "ticket": "rt1.<payload>.<sig>",
-  "media_bootstrap": {
-    "participant_id": "<uuid>",
-    "voice_token": "<token>",
-    "ice_servers": [
-      {
-        "urls": ["turn:...:3478?transport=udp", "turn:...:443?transport=tcp"],
-        "username": "...",
-        "credential": "..."
-      }
-    ]
-  }
-}
-```
-
-(`src/server/routes/socket-ticket.ts:157-164`, `:241-245`)
-
-- `media_bootstrap` is present **only for `audience: "room"`** (`:142-155`). The voice ticket has none.
-- `participant_id` is the room ticket's nonce, `crypto.randomUUID()` (`:118`, `:242`). The MeetingRoom
-  uses that nonce as your participant id (`realtime/realtime-admission.ts:54`, `realtime/meeting-room.ts:2876`).
-- `voice_token` format: `${participantId}:${roomSlug}:${issuedAtMs}:${subject}.${base64(HMAC-SHA256)}`
-  (`realtime/voice-token.ts:34-50`). It is valid for **60 min** (`realtime/voice-token.ts:1`, `:76-79`).
-  Treat it as opaque.
-- `ice_servers`: `[{urls: string[], username?, credential?}]` (`realtime/meeting-room/turn-credentials.ts:1-5`).
-  This is Cloudflare TURN, filtered to `:3478?transport=udp`, `:443?transport=tcp` and `stun:` URLs, at most 2 entries
-  (`:64-83`). The fallback is `[{urls:["stun:stun.cloudflare.com:3478"]}]` (`:19-21`). Clients also fall back to that STUN
-  server if the list is empty (`src/lib/voice/partytracks-transport.ts:19-21,122-126`).
-- A ticket is **single use, with a 60 s TTL** (`src/server/routes/socket-ticket.ts:39`). Its nonce is spent
-  on the WebSocket upgrade (`realtime/voice-room.ts:483-492`). Every reconnect needs a fresh ticket.
+- **Join** (`CallMachine::start`, `driver.rs` `admit`): one `POST /api/voice/admission`
+  `{channelId, serverId, roomSlug, sockets:["room","voice"], media:true}`
+  (`VoiceAdmissionRequest::join`). From the reply: `room_ticket`, `voice_ticket` and `media`
+  (`participant_id`, `voice_token`, `ice_servers`; no ICE servers falls back to
+  `stun:stun.cloudflare.com:3478`). A reply missing a ticket or `media` ends the call ("The call admission
+  was incomplete."). Both sockets open at once, with the voice socket's op 100 built from `media`.
+  The room's Identify gets no MediaReady and a Ready without credentials; the client does not read them.
+- **Reconnects** (`driver.rs` `call_tickets`): each socket asks for its own ticket alone, minting nothing.
+  Room: `{..., sockets:["room"], media:false}`. Voice: `{..., sockets:["voice"], media:false,
+participantId:<ours>}`. The participant is fixed for the call, so the voice binding is fixed too. The
+  Resume reply (op 9) carries no credentials and the held ones stay. Each request logs
+  `[voice/room] admission: sockets=room` or `[voice/voice] admission: sockets=voice bound` (never the reply).
+- **Credential refresh**: `CREDENTIAL_REFRESH` (45 min) after each voice token arrives (the admission, then
+  each op 40 reply), the machine sends op 40 on the room socket and arms again. A fresh token goes to the
+  SFU's `Authorization` header (`SetVoiceToken`) and to the next op 100. A voice 4004 still sends op 40 at once.
+- **1013** (`VOICE_JOIN_UNVERIFIED_CLOSE_CODE`): a plain retry in `yap-realtime`'s close table. The voice
+  socket reconnects on a fresh ticket bound to our participant and identifies again; the machine sees a voice
+  drop and a VoiceReady, and re-announces. 4008 and 4010 still stop the call.
+- **Not followed**: prefetch, standby promotion and `moveGrant` (the native client has none of them). A room
+  Resume refused with 4006 does Identify on the same socket, as ADMISSION.md says, but a Ready for a new
+  participant ends the call ("The call connection was reset. Join again."), because the native client does
+  not rebuild its SFU session. The 401 retry after an app-token refresh is whatever `yap-core`'s `Api` does
+  for every request.
 
 ### 1.3 WebSocket handshake (both sockets)
 
@@ -193,8 +164,11 @@ Text frames carry JSON `{"op": <int>, "d": <object>}` (`packages/protocol/src/co
    (`realtime/meeting-room.ts:2877-2884`). The server overrides the profile fields with stored ones (`:2931-2937`).
    `platform`: unknown values fall back to `"web"` (`:2929`). Whether `"desktop"` is accepted is UNVERIFIED; mobile sends `"mobile"`
    (`apps/mobile/src/features/voice/session.ts:262`).
-3. Receive **MediaReady** (op 41) `{participant_id, ice_servers, voice_token}` (`realtime/meeting-room.ts:2911-2918`).
-4. Receive **Ready** (op 2) `{participant_id, ice_servers, participants: VoiceState[], heartbeat_interval, voice_token, spatial_audio_state}`
+3. On an admission ticket with `media: "issued"` (the join) no MediaReady comes. On a `held` ticket (a reconnect)
+   an Identify is a new participant and gets **MediaReady** (op 41) `{participant_id, ice_servers, voice_token}`
+   first (ADMISSION.md).
+4. Receive **Ready** (op 2) `{participant_id, participants: VoiceState[], heartbeat_interval, spatial_audio_state}`, plus
+   `ice_servers` and `voice_token` only when the ticket was `held`
    (`:3007-3019`). The roster excludes you (`apps/mobile/src/features/voice/session.ts:666`). VoiceState carries
    `{id, user_id, name, username, display_name, avatar_url, self_mute, self_deaf, ...}` (`apps/mobile/src/features/voice/protocol.ts:50-61`).
    Map a track's `participant_id` to the roster entry whose `id` matches.
@@ -217,7 +191,7 @@ Text frames carry JSON `{"op": <int>, "d": <object>}` (`packages/protocol/src/co
 6. Server events after that: VoiceStateUpdate (op 15) `{participant, action:"join"|"leave"|"update"}`, and
    ProfileUpdate (op 16) (`apps/mobile/src/features/voice/protocol.ts:89-100`).
 7. Voice-token refresh: send `{"op":40,"d":{}}`. The reply is **Resumed** (op 9) `{voice_token, ice_servers, participants}`
-   (`realtime/meeting-room.ts:3397-3417`). The web client refreshes every 45 min (`src/lib/sfu-client.ts:44,912-925`).
+   (`realtime/meeting-room.ts:3397-3417`). Web and mobile send it 45 min after the token arrived (ADMISSION.md).
    Use the new token on the next PartyTracks request and VoiceIdentify (`apps/mobile/src/features/voice/transport.ts:103-105`).
 8. Leave: send `{"op":11,"d":{}}`, then close (`apps/mobile/src/features/voice/gateways.ts:142-150`,
    `realtime/meeting-room.ts:1101-1103`). This revokes your grant, and the VoiceRoom drops you (`realtime/voice-room.ts:533-542`).
@@ -225,13 +199,13 @@ Text frames carry JSON `{"op": <int>, "d": <object>}` (`packages/protocol/src/co
 ### 2.4 Voice socket (`/voice`, VoiceRoom)
 
 1. Receive Hello.
-2. Send VoiceIdentify (op 100) with the room ticket's bootstrap credentials (`src/lib/voice/gateways/voice-gateway.ts:314-346`;
+2. Send VoiceIdentify (op 100) with the admission's `media` credentials (`src/lib/voice/gateways/voice-gateway.ts:314-346`;
    schema `packages/protocol/src/client-payloads.ts:228-233`):
    ```json
    {
      "op": 100,
      "d": {
-       "participant_id": "<media_bootstrap.participant_id>",
+       "participant_id": "<media.participant_id>",
        "voice_token": "<voice_token>"
      }
    }
@@ -341,7 +315,7 @@ proxy re-sets it to JSON after it rewrites the body (`realtime/partytracks-proxy
 
 **(a) Create a session**: `POST {prefix}/sessions/new?`, no body
 (`node_modules/partytracks/dist/client/index.js:601-608`). Response: `{"sessionId":"<capability>", ...}`. Then create
-`RTCPeerConnection({iceServers: media_bootstrap.ice_servers, bundlePolicy: "max-bundle"})` (`:611-614`). If you pass ICE servers,
+`RTCPeerConnection({iceServers: media.ice_servers, bundlePolicy: "max-bundle"})` (`:611-614`). If you pass ICE servers,
 PartyTracks skips `GET {prefix}/generate-ice-servers` (`:608`). The web client always passes them (`src/lib/voice/partytracks-transport.ts:132-136`).
 
 **(b) Push the microphone (client offers)** (`node_modules/partytracks/dist/client/index.js:257-307,318-331`):
@@ -437,19 +411,19 @@ with a new `trackName` and re-announce (`src/lib/sfu-client.ts:848-875`, `apps/m
   (`src/lib/sfu-client.ts:293-307,819`). This is optional.
 - The capture side relies on the platform's echo cancellation, noise suppression, and AGC (`apps/mobile/src/features/voice/engine.ts:16`).
   A native client should enable libwebrtc's APM.
-- ICE: use `media_bootstrap.ice_servers` (TURN UDP/TCP plus STUN). One session, BUNDLE (`max-bundle`). TURN credentials last
-  48 h (`realtime/meeting-room/turn-credentials.ts:23,95-101`). The ticket and Ready send the same list.
+- ICE: use the admission's `media.ice_servers` (TURN UDP/TCP plus STUN). One session, BUNDLE (`max-bundle`). TURN credentials last
+  48 h (`realtime/meeting-room/turn-credentials.ts:23,95-101`). Op 40's Resumed sends a fresh list.
 
 ## 6. Minimal native client sequence
 
 1. Compute `roomSlug = "voice-<serverId>-<channelId>"`.
-2. `POST /api/voice/socket-ticket` `{audience:"room", channelId, serverId, roomSlug}`. Keep `ticket` and `media_bootstrap`
-   (`participant_id`, `voice_token`, `ice_servers`).
-3. `POST /api/voice/socket-ticket` `{audience:"voice", ...same}`. Keep `ticket`. Do this in parallel with step 2. Use the ticket within 60 s.
+2. `POST /api/voice/admission` `{channelId, serverId, roomSlug, sockets:["room","voice"], media:true}`. Keep
+   `room_ticket`, `voice_ticket` and `media` (`participant_id`, `voice_token`, `ice_servers`).
+3. Use both tickets within 60 s (section 1).
 4. Open the room socket `wss://<api>/api/channels/<roomSlug>/ws?v=1` with subprotocols `["ralph.realtime.v1","ralph.ticket.<roomTicket>"]`
    and a permitted `Origin`. On Hello, start `{"op":3}` every `heartbeat_interval` ms and send Identify (op 0, no `standby`).
 5. Open the voice socket `.../voice?v=1` with the voice ticket. On Hello, start heartbeats and send VoiceIdentify (op 100)
-   `{participant_id, voice_token}` from the bootstrap.
+   `{participant_id, voice_token}` from `media`.
 6. In parallel: `POST {prefix}/sessions/new`, giving `myCap`. Build the peer connection from `ice_servers`
    (`max-bundle`). Capture the mic, `addTransceiver(sendonly)`, create the offer, `POST sessions/<myCap>/tracks/new`
    (`location:"local"`, UUID `trackName`), then set the answer.
@@ -463,8 +437,10 @@ with a new `trackName` and re-announce (`src/lib/sfu-client.ts:848-875`, `apps/m
 10. On StopTracks (op 13) or ClientDisconnect (op 11), stop the named or participant's pulls (optionally
     `PUT tracks/close`).
 11. Optionally send Speaking (op 5) `{speaking:1|0}` from a local VAD.
-12. Every 45 min, send room op 40. On Resumed (op 9), swap in the new `voice_token` for the PartyTracks `Authorization` header.
-13. On peer-connection failure, repeat steps 6 and 8 with the new capability. On socket drop (not 4008/4010), get a new ticket for that socket,
+12. 45 min after each voice token arrives, send room op 40. On Resumed (op 9), swap in the new `voice_token` for the PartyTracks
+    `Authorization` header.
+13. On peer-connection failure, repeat steps 6 and 8 with the new capability. On socket drop (not 4008/4010; a voice 1013 is a drop),
+    get a new ticket for that socket alone (section 1),
     reconnect, and re-identify. The room socket may Resume (op 7, `{session_id: participant_id, seq_ack}`) (`src/lib/voice/gateways/room-gateway.ts:169-182`).
     The voice socket re-identifies and VoiceReady replays the tracks (`src/lib/voice/gateways/voice-gateway.ts:46-51`).
 14. Leave (STATE_MACHINE.md "Teardown"): stop the mic; for a joined call wait the 100 ms send window;
@@ -477,7 +453,7 @@ with a new `trackName` and re-announce (`src/lib/sfu-client.ts:848-875`, `apps/m
 - **Global chat gateway presence** (`/api/gateway`, VoiceChannelJoin op 33 / Leave op 34): since `realtime/VOICE_ROSTER.md`
   the room object puts you in the sidebar on its own; op 33/34 only set a hint channel and may trigger a roster pull.
   The native client still sends one op 33 when the room says Ready and op 34 on a joined leave, as the web does.
-- Ticket prefetch on hover (`src/lib/voice/socket-ticket-client.ts:97-155`). Move grants (`moveGrant`, VoiceMove op 42).
+- Admission prefetch on hover (`src/lib/voice/voice-admission-client.ts`, ADMISSION.md "Prefetch"). Move grants (`moveGrant`, VoiceMove op 42).
 - Standby / pre-warm (`standby: true`, `promote_standby`) (`src/lib/sfu-client.ts:933-950,1111-1121`).
 - Speaking / VAD (op 5). It is cosmetic for others.
 - TrackUnavailable (op 109) / RepublishRequest (op 110) self-healing. Recommended later.

@@ -1,15 +1,18 @@
 //! `CallMachine` table tests: typed inputs in, effects out. No network, no
 //! WebRTC.
 
+use std::time::Duration;
+
 use serde_json::{json, Value};
+use yap_protocol::rest::{VoiceAdmission, VoiceAdmissionRequest};
 use yap_realtime::StopReason;
 use yap_voice::layers::{LAYER_DOWNGRADE_DELAY, LAYER_SWITCH_SETTLE, LAYER_UPGRADE_DELAY};
 use yap_voice::wire::{Participant, RoomState, Track};
 use yap_voice::{
     CallMachine, CallState, CallTarget, CameraPublished, Effect, Input, Kind, LayerUpdate,
     MediaEvent, MediaState, Member, Notice, Playback, Processing, Published, RenderSize, RoomEvent,
-    Sensitivity, Socket, TicketReplies, Timer, UserCommand, VideoIntent, VoiceEvent,
-    LEAVE_SEND_WINDOW, REMOTE_RECONNECT_GRACE, SILENCE_DELAY_MS,
+    Sensitivity, Socket, SocketSpec, Timer, UserCommand, VideoIntent, VoiceEvent,
+    CREDENTIAL_REFRESH, LEAVE_SEND_WINDOW, REMOTE_RECONNECT_GRACE, SILENCE_DELAY_MS,
 };
 
 const ME: &str = "me-1";
@@ -23,14 +26,24 @@ fn target() -> CallTarget {
     }
 }
 
-fn tickets() -> TicketReplies {
-    TicketReplies {
-        room: json!({ "ticket": "room-t", "media_bootstrap": {
+/// The join's `POST /api/voice/admission` reply.
+fn admission_json() -> Value {
+    json!({
+        "access_mode": "authenticated", "room_slug": "voice-s1-c1", "expires_at": 1,
+        "participant_id": ME, "room_ticket": "room-t", "voice_ticket": "voice-t",
+        "media": {
             "participant_id": ME, "voice_token": "tok-1",
             "ice_servers": [{ "urls": ["turn:t.example:3478"], "username": "u", "credential": "p" }],
-        }}),
-        voice: json!({ "ticket": "voice-t" }),
-    }
+        },
+    })
+}
+
+fn admission_of(value: Value) -> VoiceAdmission {
+    serde_json::from_value(value).expect("an admission")
+}
+
+fn admission() -> VoiceAdmission {
+    admission_of(admission_json())
 }
 
 fn published() -> Published {
@@ -154,6 +167,20 @@ fn states(fx: &[Effect]) -> Vec<CallState> {
         .collect()
 }
 
+/// The credential refreshes armed: (timer, delay).
+fn refreshes(fx: &[Effect]) -> Vec<(Timer, Duration)> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::ArmTimer { timer, after }
+                if matches!(timer, Timer::RefreshCredentials { .. }) =>
+            {
+                Some((timer.clone(), *after))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn ends(fx: &[Effect]) -> Vec<Option<String>> {
     fx.iter()
         .filter_map(|e| match e {
@@ -185,7 +212,7 @@ fn names(roster: &[Member]) -> Vec<(&str, &str)> {
 fn joined() -> CallMachine {
     let mut m = CallMachine::new(target());
     m.handle(Input::Start);
-    m.handle(Input::Tickets(Ok(tickets())));
+    m.handle(Input::Admitted(Ok(admission())));
     m.handle(Input::Published(Ok(published())));
     m.handle(Input::Room(RoomEvent::Ready(room_state(&[participant(
         "ana",
@@ -198,8 +225,12 @@ fn joined() -> CallMachine {
     m
 }
 
+fn json_of(request: &VoiceAdmissionRequest) -> Value {
+    serde_json::to_value(request).expect("serializes")
+}
+
 #[test]
-fn start_should_fetch_both_tickets() {
+fn start_should_request_one_admission_for_both_sockets_and_media() {
     let mut m = CallMachine::new(target());
     let fx = m.handle(Input::Start);
     assert_eq!(
@@ -207,23 +238,102 @@ fn start_should_fetch_both_tickets() {
         vec![
             Effect::Notify(Notice::State(CallState::Connecting)),
             Effect::Notify(Notice::Status("Getting tickets")),
-            Effect::FetchTickets {
-                room: json!({ "audience": "room", "channelId": "c1", "serverId": "s1", "roomSlug": "voice-s1-c1" }),
-                voice: json!({ "audience": "voice", "channelId": "c1", "serverId": "s1", "roomSlug": "voice-s1-c1" }),
-            },
+            Effect::RequestAdmission(VoiceAdmissionRequest::join("s1", "c1", "voice-s1-c1")),
         ]
+    );
+    let Effect::RequestAdmission(request) = &fx[2] else {
+        unreachable!()
+    };
+    assert_eq!(
+        json_of(request),
+        json!({
+            "channelId": "c1", "serverId": "s1", "roomSlug": "voice-s1-c1",
+            "sockets": ["room", "voice"], "media": true,
+        })
+    );
+}
+
+/// The effects of a joined admission.
+fn admitted() -> Vec<Effect> {
+    let mut m = CallMachine::new(target());
+    m.handle(Input::Start);
+    m.handle(Input::Admitted(Ok(admission())))
+}
+
+fn open_sockets(fx: &[Effect]) -> (&SocketSpec, &SocketSpec) {
+    fx.iter()
+        .find_map(|e| match e {
+            Effect::OpenSockets { room, voice } => Some((&**room, &**voice)),
+            _ => None,
+        })
+        .expect("OpenSockets")
+}
+
+#[test]
+fn each_socket_should_reconnect_on_an_admission_for_its_own_ticket() {
+    let fx = admitted();
+    let (room, voice) = open_sockets(&fx);
+    assert_eq!(
+        json_of(&room.reconnect),
+        json!({
+            "channelId": "c1", "serverId": "s1", "roomSlug": "voice-s1-c1",
+            "sockets": ["room"], "media": false,
+        })
+    );
+    assert_eq!(
+        json_of(&voice.reconnect),
+        json!({
+            "channelId": "c1", "serverId": "s1", "roomSlug": "voice-s1-c1",
+            "sockets": ["voice"], "media": false, "participantId": ME,
+        })
     );
 }
 
 #[test]
-fn tickets_should_open_sockets_then_media() {
+fn the_admission_should_arm_the_credential_refresh_for_45_minutes() {
+    let fx = admitted();
+    assert_eq!(CREDENTIAL_REFRESH, Duration::from_secs(45 * 60));
+    assert_eq!(refreshes(&fx).len(), 1);
+    assert_eq!(refreshes(&fx)[0].1, CREDENTIAL_REFRESH);
+}
+
+#[test]
+fn an_admission_without_media_should_end_the_call() {
     let mut m = CallMachine::new(target());
     m.handle(Input::Start);
-    let fx = m.handle(Input::Tickets(Ok(tickets())));
+    let mut held = admission_json();
+    held.as_object_mut().expect("object").remove("media");
+    let fx = m.handle(Input::Admitted(Ok(admission_of(held))));
+    assert_eq!(
+        ends(&fx),
+        vec![Some("The call admission was incomplete.".into())]
+    );
+    assert!(!fx.iter().any(|e| matches!(e, Effect::OpenSockets { .. })));
+}
+
+#[test]
+fn an_admission_without_the_voice_ticket_should_end_the_call() {
+    let mut m = CallMachine::new(target());
+    m.handle(Input::Start);
+    let mut partial = admission_json();
+    partial
+        .as_object_mut()
+        .expect("object")
+        .remove("voice_ticket");
+    let fx = m.handle(Input::Admitted(Ok(admission_of(partial))));
+    assert_eq!(
+        ends(&fx),
+        vec![Some("The call admission was incomplete.".into())]
+    );
+}
+
+#[test]
+fn admission_should_open_sockets_then_media() {
+    let mut m = CallMachine::new(target());
+    m.handle(Input::Start);
+    let fx = m.handle(Input::Admitted(Ok(admission())));
     assert_eq!(fx[0], Effect::Notify(Notice::Status("Joining")));
-    let Effect::OpenSockets { room, voice } = &fx[1] else {
-        panic!("expected OpenSockets, got {:?}", fx[1]);
-    };
+    let (room, voice) = open_sockets(&fx);
     assert_eq!(room.path, "/api/channels/voice-s1-c1/ws?v=1");
     assert_eq!(room.first_ticket, "room-t");
     assert_eq!(room.identify["op"], 0);
@@ -234,9 +344,13 @@ fn tickets_should_open_sockets_then_media() {
         voice.identify,
         json!({ "op": 100, "d": { "participant_id": ME, "voice_token": "tok-1" } })
     );
-    let Effect::OpenMedia(media) = &fx[2] else {
-        panic!("expected OpenMedia, got {:?}", fx[2]);
-    };
+    let media = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::OpenMedia(media) => Some(media),
+            _ => None,
+        })
+        .expect("OpenMedia");
     assert_eq!(media.stream_id, "cam-me-1");
     assert_eq!(media.ice_servers[0].urls, vec!["turn:t.example:3478"]);
     assert_eq!(media.ice_servers[0].password, "p");
@@ -246,7 +360,7 @@ fn tickets_should_open_sockets_then_media() {
 fn join_should_announce_on_voice_ready_and_pull_only_after_media_connects() {
     let mut m = CallMachine::new(target());
     m.handle(Input::Start);
-    m.handle(Input::Tickets(Ok(tickets())));
+    m.handle(Input::Admitted(Ok(admission())));
     let fx = m.handle(Input::Published(Ok(published())));
     assert_eq!(names(&last_roster(&fx).expect("roster")), vec![(ME, "Jon")]);
 
@@ -655,7 +769,7 @@ fn joined_leave_should_stop_media_wait_the_send_window_then_disconnect() {
 fn leave_before_the_room_is_ready_should_disconnect_at_once() {
     let mut m = CallMachine::new(target());
     m.handle(Input::Start);
-    m.handle(Input::Tickets(Ok(tickets())));
+    m.handle(Input::Admitted(Ok(admission())));
     m.handle(Input::Published(Ok(published())));
     let fx = m.handle(Input::Command(UserCommand::Leave));
     assert_eq!(fx[0], Effect::StopLocalMedia);
@@ -705,7 +819,7 @@ fn deafen_before_publish_should_apply_once_published() {
     let mut m = CallMachine::new(target());
     m.handle(Input::Start);
     m.handle(Input::Command(UserCommand::SetDeafened(true)));
-    m.handle(Input::Tickets(Ok(tickets())));
+    m.handle(Input::Admitted(Ok(admission())));
     let fx = m.handle(Input::Published(Ok(published())));
     assert!(fx.contains(&Effect::SetPlayoutEnabled(false)));
 }
@@ -739,11 +853,16 @@ fn pull_finishing_after_its_track_retired_should_close_its_mid() {
 }
 
 #[test]
-fn ticket_failure_should_end_with_its_reason() {
+fn admission_failure_should_end_with_its_reason() {
     let mut m = CallMachine::new(target());
     m.handle(Input::Start);
-    let fx = m.handle(Input::Tickets(Err("room ticket: session expired".into())));
-    assert_eq!(ends(&fx), vec![Some("room ticket: session expired".into())]);
+    let fx = m.handle(Input::Admitted(Err(
+        "call admission: session expired".into()
+    )));
+    assert_eq!(
+        ends(&fx),
+        vec![Some("call admission: session expired".into())]
+    );
 }
 
 #[test]
@@ -944,7 +1063,7 @@ fn processing_should_apply_to_the_published_mic() {
 fn processing_chosen_before_the_mic_should_apply_once_it_is_published() {
     let mut m = CallMachine::new(target());
     m.handle(Input::Start);
-    m.handle(Input::Tickets(Ok(tickets())));
+    m.handle(Input::Admitted(Ok(admission())));
     let off = Processing::from_settings(false, true, false);
     assert!(m
         .handle(Input::Command(UserCommand::SetProcessing(off)))
@@ -1401,7 +1520,7 @@ fn camera_off_during_the_push_should_leave_it_parked() {
 fn camera_before_the_mic_is_published_should_wait_for_it() {
     let mut m = CallMachine::new(target());
     m.handle(Input::Start);
-    m.handle(Input::Tickets(Ok(tickets())));
+    m.handle(Input::Admitted(Ok(admission())));
     let fx = m.handle(Input::Command(UserCommand::SetCamera(true)));
     assert!(!publishes_camera(&fx));
     let fx = m.handle(Input::Published(Ok(published())));
@@ -1447,4 +1566,108 @@ fn camera_on_should_not_announce_the_mic_again() {
     m.handle(Input::Command(UserCommand::SetCamera(true)));
     let fx = m.handle(camera_published("cam-sfu-1"));
     assert_eq!(ops(&fx, Socket::Voice), vec![12]);
+}
+
+/// A joined call, and the credential refresh its admission armed.
+fn joined_with_refresh() -> (CallMachine, Timer) {
+    let mut m = CallMachine::new(target());
+    m.handle(Input::Start);
+    let armed = refreshes(&m.handle(Input::Admitted(Ok(admission()))));
+    m.handle(Input::Published(Ok(published())));
+    m.handle(Input::Room(RoomEvent::Ready(room_state(&[]))));
+    m.handle(voice_ready(Vec::new()));
+    m.handle(connected());
+    (m, armed[0].0.clone())
+}
+
+#[test]
+fn the_refresh_timer_should_send_op_40_on_the_room_and_arm_again() {
+    let (mut m, timer) = joined_with_refresh();
+    let fx = m.handle(Input::Timer(timer));
+    assert_eq!(ops(&fx, Socket::Room), vec![40]);
+    assert!(ops(&fx, Socket::Voice).is_empty());
+    let again = refreshes(&fx);
+    assert_eq!(again.len(), 1);
+    assert_eq!(again[0].1, CREDENTIAL_REFRESH);
+}
+
+#[test]
+fn a_fresh_token_should_go_to_the_sfu_and_restart_the_refresh_from_its_arrival() {
+    let (mut m, first) = joined_with_refresh();
+    let fx = m.handle(Input::Room(RoomEvent::Credentials {
+        voice_token: "tok-2".into(),
+    }));
+    assert!(fx.contains(&Effect::SetVoiceToken("tok-2".into())));
+    assert!(fx.contains(&Effect::SetVoiceIdentify(json!({
+        "op": 100, "d": { "participant_id": ME, "voice_token": "tok-2" }
+    }))));
+    let rearmed = refreshes(&fx);
+    assert_eq!(rearmed.len(), 1);
+    assert_eq!(rearmed[0].1, CREDENTIAL_REFRESH);
+    // The timer armed for the old token no longer refreshes.
+    assert!(ops(&m.handle(Input::Timer(first)), Socket::Room).is_empty());
+    assert_eq!(
+        ops(&m.handle(Input::Timer(rearmed[0].0.clone())), Socket::Room),
+        vec![40]
+    );
+}
+
+#[test]
+fn the_same_token_again_should_not_restart_the_refresh() {
+    let (mut m, _) = joined_with_refresh();
+    let fx = m.handle(Input::Room(RoomEvent::Credentials {
+        voice_token: "tok-1".into(),
+    }));
+    assert!(refreshes(&fx).is_empty());
+    assert!(!fx.iter().any(|e| matches!(e, Effect::SetVoiceToken(_))));
+}
+
+#[test]
+fn a_ready_or_resumed_without_credentials_should_keep_the_admission_token() {
+    let (mut m, _) = joined_with_refresh();
+    let ready = m.handle(Input::Room(RoomEvent::Ready(room_state(&[]))));
+    m.handle(Input::Room(RoomEvent::Disconnected));
+    let resumed = m.handle(Input::Room(RoomEvent::Resumed(RoomState {
+        participant_id: String::new(),
+        participants: Some(Vec::new()),
+        voice_token: String::new(),
+    })));
+    for fx in [ready, resumed] {
+        assert!(!fx
+            .iter()
+            .any(|e| matches!(e, Effect::SetVoiceToken(_) | Effect::SetVoiceIdentify(_))));
+        assert!(refreshes(&fx).is_empty());
+    }
+    assert_eq!(m.state(), CallState::Joined);
+}
+
+#[test]
+fn the_admission_token_should_identify_the_voice_socket_and_open_media() {
+    let fx = admitted();
+    let (_, voice) = open_sockets(&fx);
+    assert_eq!(voice.identify["d"]["voice_token"], "tok-1");
+    let media = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::OpenMedia(media) => Some(media),
+            _ => None,
+        })
+        .expect("OpenMedia");
+    assert_eq!(media.voice_token, "tok-1");
+    assert_eq!(media.participant_id, ME);
+}
+
+#[test]
+fn a_voice_close_1013_should_reidentify_and_reannounce_without_ending() {
+    // 1013 reaches the machine as a voice drop (yap-realtime retries it on a
+    // fresh bound ticket), then a VoiceReady for the same participant.
+    let mut m = joined();
+    let fx = m.handle(Input::Voice(VoiceEvent::Disconnected));
+    assert!(ends(&fx).is_empty());
+    assert_eq!(m.state(), CallState::Joined);
+    let fx = m.handle(voice_ready(vec![track("ana", "mic-ana", "sfu-ana")]));
+    assert!(ends(&fx).is_empty());
+    let announced = sends(&fx, Socket::Voice);
+    assert_eq!(announced[0]["op"], 12);
+    assert_eq!(announced[0]["d"]["tracks"][0]["participant_id"], ME);
 }

@@ -6,7 +6,7 @@ use yap_voice::wire::{Participant, RoomState};
 use yap_voice::{
     CallMachine, CallTarget, Effect, Input, MediaEvent, MediaState, Notice, Published, RoomEvent,
     ShareCaptured, ShareEncoding, ShareEnd, ShareNotice, SharePublished, ShareQuality,
-    ShareRequest, Socket, SourceKind, TicketReplies, UserCommand, VoiceEvent,
+    ShareRequest, Socket, SourceKind, UserCommand, VoiceEvent,
 };
 
 const ME: &str = "me-1";
@@ -19,12 +19,11 @@ fn joined() -> CallMachine {
         me_username: "jon".into(),
     });
     m.handle(Input::Start);
-    m.handle(Input::Tickets(Ok(TicketReplies {
-        room: json!({ "ticket": "room-t", "media_bootstrap": {
-            "participant_id": ME, "voice_token": "tok-1", "ice_servers": [],
-        }}),
-        voice: json!({ "ticket": "voice-t" }),
-    })));
+    m.handle(Input::Admitted(Ok(serde_json::from_value(json!({
+        "room_ticket": "room-t", "voice_ticket": "voice-t", "participant_id": ME,
+        "media": { "participant_id": ME, "voice_token": "tok-1", "ice_servers": [] },
+    }))
+    .expect("admission"))));
     m.handle(Input::Published(Ok(Published {
         session_id: "cap-1".into(),
         sfu_track_name: "my-sfu".into(),
@@ -447,12 +446,11 @@ fn a_share_before_the_mic_is_published_should_wait_for_it() {
         me_username: "jon".into(),
     });
     m.handle(Input::Start);
-    m.handle(Input::Tickets(Ok(TicketReplies {
-        room: json!({ "ticket": "room-t", "media_bootstrap": {
-            "participant_id": ME, "voice_token": "tok-1", "ice_servers": [],
-        }}),
-        voice: json!({ "ticket": "voice-t" }),
-    })));
+    m.handle(Input::Admitted(Ok(serde_json::from_value(json!({
+        "room_ticket": "room-t", "voice_ticket": "voice-t", "participant_id": ME,
+        "media": { "participant_id": ME, "voice_token": "tok-1", "ice_servers": [] },
+    }))
+    .expect("admission"))));
     let fx = m.handle(start("window-7", false));
     assert!(captures(&fx).is_empty());
     let fx = m.handle(Input::Published(Ok(Published {

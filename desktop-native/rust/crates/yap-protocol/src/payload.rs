@@ -359,13 +359,15 @@ pub struct MediaReady {
     pub voice_token: String,
 }
 
-/// Ready (op 2) on a room socket.
+/// Ready (op 2) on a room socket. On a room ticket whose admission minted
+/// the credentials (`media: "issued"`) it carries no `voice_token` and no
+/// `ice_servers`; an Identify on a `held` ticket carries both.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct RoomReady {
     pub participant_id: String,
     #[serde(default)]
     pub ice_servers: Vec<IceServer>,
-    pub voice_token: String,
+    pub voice_token: Option<String>,
     /// The roster, excluding the receiver.
     #[serde(default)]
     pub participants: Vec<VoiceState>,
@@ -373,7 +375,9 @@ pub struct RoomReady {
     pub spatial_audio_state: Option<Value>,
 }
 
-/// Resumed (op 9) on a room socket: the reply to a credentials refresh (op 40).
+/// Resumed (op 9) on a room socket. The reply to a credentials refresh
+/// (op 40) carries a fresh `voice_token` and `ice_servers`; the reply to a
+/// Resume (op 7) on an admission ticket carries neither (keep the held ones).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Resumed {
     pub voice_token: Option<String>,

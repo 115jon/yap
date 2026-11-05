@@ -13,8 +13,8 @@ use tokio::sync::watch;
 use yap_core::VoiceShare;
 use yap_core::{config, Api, ApiError, VoiceCommand, VoiceEvents, VoiceMember, VoiceUpdate};
 use yap_voice::{
-    run_call, ApiFailure, CallEnv, CallTarget, LibwebrtcEngine, Notice, Playback, Processing,
-    Sensitivity, ShareEnd, ShareInfo, ShareNotice, ShareRequest, SourceKind, TicketApi,
+    run_call, AdmissionApi, ApiFailure, CallEnv, CallTarget, LibwebrtcEngine, Notice, Playback,
+    Processing, Sensitivity, ShareEnd, ShareInfo, ShareNotice, ShareRequest, SourceKind,
     UserCommand, VideoIntent,
 };
 
@@ -42,14 +42,14 @@ pub fn set_call_audio(audio: CallAudio) {
     });
 }
 
-/// Socket tickets through the signed-in API.
+/// Call admission (`realtime/ADMISSION.md`) through the signed-in API.
 #[derive(Clone)]
-struct Tickets(Api);
+struct Admission(Api);
 
-impl TicketApi for Tickets {
-    async fn socket_ticket(&self, body: Value) -> Result<Value, ApiFailure> {
+impl AdmissionApi for Admission {
+    async fn admission(&self, body: Value) -> Result<Value, ApiFailure> {
         self.0
-            .post("/api/voice/socket-ticket", &body)
+            .post("/api/voice/admission", &body)
             .await
             .map_err(|error| ApiFailure {
                 unauthorized: matches!(error, ApiError::Unauthorized),
@@ -189,7 +189,7 @@ pub async fn run(
     let cfg = config::get();
     let env = CallEnv {
         engine: LibwebrtcEngine,
-        tickets: Tickets(api),
+        admission: Admission(api),
         capturer: yap_capture::Capturer,
         http,
         api_base: cfg.api_base.clone(),

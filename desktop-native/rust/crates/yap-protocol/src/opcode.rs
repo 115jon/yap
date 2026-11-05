@@ -247,5 +247,13 @@ pub const HEARTBEAT_FRAME: &str = r#"{"op":3}"#;
 /// to another channel, on both call sockets.
 pub const VOICE_MOVED_CLOSE_REASON: &str = "Moved to another voice channel";
 
+/// WebSocket close code ("Try Again Later") the voice room closes with when
+/// a VoiceIdentify's join grant could not be verified, or names another
+/// participant than the voice ticket is bound to (`realtime/voice-room.ts`
+/// `VOICE_JOIN_UNVERIFIED_CLOSE_CODE`, ADMISSION.md). Not a gateway code: no
+/// Error frame comes first. Retryable with a fresh voice ticket bound to the
+/// participant the client is now.
+pub const VOICE_JOIN_UNVERIFIED_CLOSE_CODE: u16 = 1013;
+
 /// Used when a Hello carries no interval.
 pub const DEFAULT_HEARTBEAT_INTERVAL_MS: u64 = 45_000;

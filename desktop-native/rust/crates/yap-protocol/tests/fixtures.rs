@@ -5,11 +5,13 @@ use std::path::PathBuf;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use yap_protocol::payload::{
-    ChatReady, Dispatch, GatewayError, Hello, MediaReady, MessageDeleteEvent, RoomReady, Speaking,
-    StopTracks, TrackKind, TypingStartEvent, Video, VoiceAction, VoiceReady, VoiceStateUpdate,
+    ChatReady, Dispatch, GatewayError, Hello, MediaReady, MessageDeleteEvent, Resumed, RoomReady,
+    Speaking, StopTracks, TrackKind, TypingStartEvent, Video, VoiceAction, VoiceReady,
+    VoiceStateUpdate,
 };
 use yap_protocol::rest::{
-    ChannelType, ChannelsResponse, Message, MessagePage, MessagePatch, SocketTicket,
+    CallSocket, ChannelType, ChannelsResponse, Message, MessagePage, MessagePatch, SocketTicket,
+    VoiceAdmission, VoiceAdmissionRequest,
 };
 use yap_protocol::{Frame, GatewayCloseCode, GatewayOp};
 
@@ -109,7 +111,7 @@ fn typing_start_should_decode_user_and_channel() {
 fn room_ready_should_decode_roster_and_credentials() {
     let ready: RoomReady = payload("room-ready.json", GatewayOp::Ready);
     assert_eq!(ready.participant_id, "pid_fixture_me");
-    assert_eq!(ready.voice_token, "tok_fixture");
+    assert_eq!(ready.voice_token.as_deref(), Some("tok_fixture"));
     assert_eq!(ready.participants.len(), 2);
     assert_eq!(ready.participants[1].self_mute, Some(true));
     assert_eq!(ready.participants[1].self_deaf, None);
@@ -204,14 +206,103 @@ fn channels_response_should_decode_channels_and_categories() {
 }
 
 #[test]
-fn socket_ticket_should_decode_media_bootstrap() {
+fn socket_ticket_should_decode_the_ticket() {
     let ticket: SocketTicket = rest("socket-ticket-room.json");
     assert_eq!(ticket.ticket, "tok_fixture_ticket");
-    let media = ticket.media_bootstrap.expect("media bootstrap");
+}
+
+#[test]
+fn admitted_room_ready_should_decode_without_credentials() {
+    let ready: RoomReady = payload("room-ready-admitted.json", GatewayOp::Ready);
+    assert_eq!(ready.participant_id, "pid_fixture_me");
+    assert_eq!(ready.voice_token, None);
+    assert!(ready.ice_servers.is_empty());
+    assert_eq!(ready.participants.len(), 1);
+}
+
+#[test]
+fn held_room_resumed_should_decode_without_credentials() {
+    let resumed: Resumed = payload("room-resumed-held.json", GatewayOp::Resumed);
+    assert_eq!(resumed.voice_token, None);
+    assert_eq!(resumed.ice_servers, None);
+    assert_eq!(resumed.participants.map(|p| p.len()), Some(1));
+}
+
+#[test]
+fn join_admission_should_decode_both_tickets_and_media() {
+    let admission: VoiceAdmission = rest("voice-admission.json");
+    assert_eq!(
+        admission.ticket(CallSocket::Room),
+        Some("tok_fixture_room_ticket")
+    );
+    assert_eq!(
+        admission.ticket(CallSocket::Voice),
+        Some("tok_fixture_voice_ticket")
+    );
+    let media = admission.media.expect("media");
+    assert_eq!(media.participant_id, "pid_fixture_me");
     assert_eq!(media.voice_token, "tok_fixture");
     assert_eq!(
         media.ice_servers[0].credential.as_deref(),
         Some("cred_fixture")
+    );
+}
+
+#[test]
+fn room_reconnect_admission_should_carry_only_the_room_ticket() {
+    let admission: VoiceAdmission = rest("voice-admission-room.json");
+    assert_eq!(
+        admission.ticket(CallSocket::Room),
+        Some("tok_fixture_room_ticket")
+    );
+    assert_eq!(admission.ticket(CallSocket::Voice), None);
+    assert_eq!(admission.media, None);
+    assert_eq!(admission.participant_id, None);
+}
+
+#[test]
+fn voice_reconnect_admission_should_carry_only_the_voice_ticket() {
+    let admission: VoiceAdmission = rest("voice-admission-voice.json");
+    assert_eq!(admission.ticket(CallSocket::Room), None);
+    assert_eq!(
+        admission.ticket(CallSocket::Voice),
+        Some("tok_fixture_voice_ticket")
+    );
+    assert_eq!(admission.participant_id.as_deref(), Some("pid_fixture_me"));
+}
+
+fn request_json(request: &VoiceAdmissionRequest) -> Value {
+    serde_json::to_value(request).expect("serializes")
+}
+
+const SERVER: &str = "srv_fixture";
+const CHANNEL: &str = "chan_fixture_voice";
+const SLUG: &str = "voice-srv_fixture-chan_fixture_voice";
+
+#[test]
+fn join_admission_request_should_match_the_fixture() {
+    let request = VoiceAdmissionRequest::join(SERVER, CHANNEL, SLUG);
+    assert_eq!(
+        request_json(&request),
+        rest::<Value>("voice-admission-request-join.json")
+    );
+}
+
+#[test]
+fn room_reconnect_request_should_match_the_fixture() {
+    let request = VoiceAdmissionRequest::room_reconnect(SERVER, CHANNEL, SLUG);
+    assert_eq!(
+        request_json(&request),
+        rest::<Value>("voice-admission-request-room.json")
+    );
+}
+
+#[test]
+fn voice_reconnect_request_should_match_the_fixture() {
+    let request = VoiceAdmissionRequest::voice_reconnect(SERVER, CHANNEL, SLUG, "pid_fixture_me");
+    assert_eq!(
+        request_json(&request),
+        rest::<Value>("voice-admission-request-voice.json")
     );
 }
 

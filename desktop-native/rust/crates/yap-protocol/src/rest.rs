@@ -6,29 +6,21 @@ use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-// Socket tickets and media bootstrap
+// Socket tickets, call admission and media bootstrap
 
-/// Which socket a ticket is for.
+/// Which socket a `POST /api/voice/socket-ticket` ticket is for. Only the
+/// chat gateway asks there now (`global`); the call sockets get theirs from
+/// [`VoiceAdmissionRequest`] (`realtime/ADMISSION.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TicketAudience {
     Global,
-    Room,
-    Voice,
 }
 
-/// Body of `POST /api/voice/socket-ticket`. A server voice channel needs
-/// `channelId` (the server derives the room slug itself).
+/// Body of `POST /api/voice/socket-ticket` (the chat gateway's ticket).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SocketTicketRequest {
     pub audience: TicketAudience,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub channel_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub room_slug: Option<String>,
 }
 
 /// One ICE (STUN/TURN) server. The wire allows `urls` as a string or a list.
@@ -55,8 +47,9 @@ fn string_or_list<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Stri
     }
 }
 
-/// Room-ticket credentials for joining media.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+/// The participant's media credentials: an admission's `media` (the same
+/// object the deprecated `media_bootstrap` was).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MediaBootstrap {
     pub participant_id: String,
     pub voice_token: String,
@@ -64,8 +57,116 @@ pub struct MediaBootstrap {
     pub ice_servers: Vec<IceServer>,
 }
 
-/// Response of `POST /api/voice/socket-ticket`. A ticket is single use with a
-/// 60 s TTL; `media_bootstrap` is present only for the `room` audience.
+/// A call socket an admission issues a ticket for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CallSocket {
+    /// `MeetingRoom`, `/api/channels/:slug/ws`.
+    Room,
+    /// `VoiceRoom`, `/api/channels/:slug/voice`.
+    Voice,
+}
+
+/// Body of `POST /api/voice/admission` (`realtime/ADMISSION.md` "Request"):
+/// the call sockets' tickets and, with `media`, the voice token and TURN,
+/// from one Kova check.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceAdmissionRequest {
+    pub channel_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_id: Option<String>,
+    /// The server derives it for server channels; sent as the web sends it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room_slug: Option<String>,
+    /// Which tickets to issue: non-empty, no repeats.
+    pub sockets: Vec<CallSocket>,
+    /// Mint the voice token and TURN for the room ticket's participant.
+    /// Only with [`CallSocket::Room`].
+    pub media: bool,
+    /// Only when `media` is false: the participant the client already is,
+    /// which binds the voice ticket.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub participant_id: Option<String>,
+}
+
+impl VoiceAdmissionRequest {
+    fn new(server_id: &str, channel_id: &str, room_slug: &str, sockets: Vec<CallSocket>) -> Self {
+        Self {
+            channel_id: channel_id.to_owned(),
+            server_id: Some(server_id.to_owned()),
+            room_slug: Some(room_slug.to_owned()),
+            sockets,
+            media: false,
+            participant_id: None,
+        }
+    }
+
+    /// A join (Client flow 1): both tickets and the media credentials.
+    pub fn join(server_id: &str, channel_id: &str, room_slug: &str) -> Self {
+        Self {
+            media: true,
+            ..Self::new(
+                server_id,
+                channel_id,
+                room_slug,
+                vec![CallSocket::Room, CallSocket::Voice],
+            )
+        }
+    }
+
+    /// A room socket reconnect (Client flow 3): the room ticket alone,
+    /// minting nothing.
+    pub fn room_reconnect(server_id: &str, channel_id: &str, room_slug: &str) -> Self {
+        Self::new(server_id, channel_id, room_slug, vec![CallSocket::Room])
+    }
+
+    /// A voice socket reconnect (Client flow 4): the voice ticket alone,
+    /// bound to `participant_id`.
+    pub fn voice_reconnect(
+        server_id: &str,
+        channel_id: &str,
+        room_slug: &str,
+        participant_id: &str,
+    ) -> Self {
+        Self {
+            participant_id: Some(participant_id.to_owned()),
+            ..Self::new(server_id, channel_id, room_slug, vec![CallSocket::Voice])
+        }
+    }
+}
+
+/// Response of `POST /api/voice/admission`. Each ticket is present when its
+/// socket was asked for, is single use, and expires at `expires_at` (issue
+/// time plus 60 s). Tickets are opaque: the client never reads their claims.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VoiceAdmission {
+    pub access_mode: Option<String>,
+    pub room_slug: Option<String>,
+    /// Epoch milliseconds.
+    pub expires_at: Option<i64>,
+    /// With `media`, the room ticket's nonce (the id the room's Ready
+    /// carries); otherwise the `participantId` sent, if any.
+    pub participant_id: Option<String>,
+    pub room_ticket: Option<String>,
+    pub voice_ticket: Option<String>,
+    /// Present when `media` was asked for.
+    pub media: Option<MediaBootstrap>,
+}
+
+impl VoiceAdmission {
+    /// The ticket issued for `socket`, if it was asked for.
+    pub fn ticket(&self, socket: CallSocket) -> Option<&str> {
+        match socket {
+            CallSocket::Room => self.room_ticket.as_deref(),
+            CallSocket::Voice => self.voice_ticket.as_deref(),
+        }
+        .filter(|ticket| !ticket.is_empty())
+    }
+}
+
+/// Response of `POST /api/voice/socket-ticket` (the chat gateway's ticket).
+/// Single use with a 60 s TTL.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct SocketTicket {
     pub ticket: String,
@@ -74,7 +175,6 @@ pub struct SocketTicket {
     /// Epoch milliseconds.
     pub expires_at: Option<i64>,
     pub room_slug: Option<String>,
-    pub media_bootstrap: Option<MediaBootstrap>,
 }
 
 // Users, servers, channels

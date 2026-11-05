@@ -22,15 +22,15 @@
 //!
 //! | From | Input | To | Effects |
 //! | --- | --- | --- | --- |
-//! | idle | `Start` | connecting | status "Getting tickets", fetch both tickets |
-//! | connecting | tickets | connecting | status "Joining", open both sockets, open media and push the mic |
+//! | idle | `Start` | connecting | status "Getting tickets", request the admission (both tickets and the media credentials, `realtime/ADMISSION.md`) |
+//! | connecting | admitted | connecting | status "Joining", arm the credential refresh, open both sockets, open media and push the mic |
 //! | connecting | mic published | connecting | roster (just us) |
 //! | connecting | last of room Ready, VoiceReady, media connected | joined | status "Connected" (media connected also sends `Connected` once) |
 //! | joined | room or voice socket dropped | reconnecting | status "Reconnecting" |
 //! | reconnecting | room Ready/Resumed or VoiceReady, with all three up again | joined | status "Connected" |
 //! | connecting, joined, reconnecting | `Leave` (or commands closed) | leaving | op 13 for our track (if the voice socket is ready), op 11 on voice, op 11 on room, arm a 200 ms linger |
 //! | leaving | linger fired | idle | end (left) |
-//! | connecting, joined, reconnecting | ticket or media failure, socket stopped (4008, 4010, expired session), Error 4008/4010 on voice, socket task gone, media failed or ended, fresh room participant after a failed resume | idle | end (with the reason) |
+//! | connecting, joined, reconnecting | admission (or an incomplete one) or media failure, socket stopped (4008, 4010, expired session), Error 4008/4010 on voice, socket task gone, media failed or ended, fresh room participant after a failed resume | idle | end (with the reason) |
 //!
 //! `idle` after an end is final: a new call is a new machine. In
 //! `leaving` and after an end every input other than the linger is
@@ -40,7 +40,15 @@
 //!
 //! - Room Ready/Resumed replace the others in the roster from
 //!   `participants` (full states carry names; they are remembered). Ready
-//!   sends our voice state (op 15); Resumed takes a fresh voice token.
+//!   sends our voice state (op 15). Neither carries credentials on an
+//!   admission ticket; the op 9 answering op 40 does, and a fresh voice
+//!   token re-arms the refresh.
+//! - [`CREDENTIAL_REFRESH`] after each voice token arrives (the admission,
+//!   then each op 40 reply), op 40 asks the room for a fresh one; the new
+//!   token goes to the SFU and the next voice identify.
+//! - Each socket reconnects on a ticket of its own: an admission asking for
+//!   that socket alone, minting nothing (the voice one bound to our
+//!   participant). A voice close 1013 is one more such reconnect.
 //! - Op 15 `leave` drops the row, its pulls and its grace at once; any
 //!   other op 15 adds or updates the row, with the remembered name when the
 //!   delta has none.
@@ -93,7 +101,7 @@ pub mod wire;
 
 pub use audio::{peer_gain, resolve, AudioDevice, AudioDevices, Playback, Processing, MAX_VOLUME};
 pub use camera::{push_camera_frame, CameraFrame, PixelFormat};
-pub use driver::{run_call, ApiFailure, CallEnv, Commands, TicketApi};
+pub use driver::{run_call, AdmissionApi, ApiFailure, CallEnv, Commands};
 pub use engine::{
     FakeEngine, FakeOp, FakeSession, I420Frame, LocalOffer, MediaEngine, MediaError, MediaSession,
     VideoOutput,
@@ -105,8 +113,8 @@ pub use layers::{Quality, RenderSize};
 pub use machine::{
     camera_alias, screen_alias, screen_audio_alias, stop_message, CallMachine, CallState,
     CallTarget, CameraPublished, Effect, Input, MediaEvent, MediaSpec, MediaState, Notice,
-    Published, RoomEvent, Socket, SocketSpec, TicketReplies, Timer, UserCommand, VideoIntent,
-    VoiceEvent, LEAVE_SEND_WINDOW, REMOTE_RECONNECT_GRACE,
+    Published, RoomEvent, Socket, SocketSpec, Timer, UserCommand, VideoIntent, VoiceEvent,
+    CREDENTIAL_REFRESH, LEAVE_SEND_WINDOW, REMOTE_RECONNECT_GRACE,
 };
 pub use roster::{Member, Roster};
 pub use sfu::{LayerUpdate, Pulled, Pushed, Sfu};

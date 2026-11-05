@@ -254,12 +254,14 @@ impl Api {
         result
     }
 
-    /// A single-use, 60 s ticket for one realtime socket.
-    pub async fn socket_ticket(&self, audience: &str) -> Result<String, ApiError> {
+    /// A single-use, 60 s ticket for the chat gateway (`/api/gateway`). It
+    /// stays on `socket-ticket` with the `global` audience; the call sockets
+    /// get theirs from `POST /api/voice/admission` (`realtime/ADMISSION.md`).
+    pub async fn gateway_ticket(&self) -> Result<String, ApiError> {
         let body = self
             .post(
                 "/api/voice/socket-ticket",
-                &serde_json::json!({ "audience": audience }),
+                &serde_json::json!({ "audience": "global" }),
             )
             .await?;
         body.get("ticket")

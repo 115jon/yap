@@ -497,6 +497,41 @@ async fn voice_should_identify_again_after_a_drop() {
 }
 
 #[tokio::test]
+async fn close_1013_should_identify_again_on_a_fresh_ticket() {
+    let server = Server::new().await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (tickets, count) = counting_tickets();
+    let _conn = Connection::spawn(server.config(Reconnect::Reidentify), tickets, tx);
+    let first = server.accept().await;
+    assert!(first.protocols.contains("ralph.ticket.t1"));
+    let mut ws = first.ws;
+    hello(&mut ws, 60_000).await;
+    assert_eq!(json_frame(&mut ws).await, voice_identify("v1"));
+    let close = CloseFrame {
+        code: CloseCode::from(1013),
+        reason: "Voice ticket is for another participant".into(),
+    };
+    ws.close(Some(close)).await.unwrap();
+    event(&mut rx, |e| {
+        matches!(
+            e,
+            Event::Disconnected {
+                code: Some(1013),
+                ..
+            }
+        )
+    })
+    .await;
+
+    let again = server.accept().await;
+    assert!(again.protocols.contains("ralph.ticket.t2"));
+    let mut ws = again.ws;
+    hello(&mut ws, 60_000).await;
+    assert_eq!(json_frame(&mut ws).await, voice_identify("v1"));
+    assert_eq!(count.load(Ordering::SeqCst), 2, "one fresh ticket");
+}
+
+#[tokio::test]
 async fn a_refused_voice_token_should_ask_for_a_fresh_one() {
     let server = Server::new().await;
     let (conn, mut rx) = spawn(&server, Reconnect::Reidentify);

@@ -6,6 +6,7 @@ use std::fmt;
 use std::time::Duration;
 
 use serde_json::Value;
+use yap_protocol::rest::{VoiceAdmission, VoiceAdmissionRequest};
 use yap_protocol::{GatewayOp, VOICE_MOVED_CLOSE_REASON};
 use yap_realtime::StopReason;
 
@@ -39,13 +40,18 @@ pub const REMOTE_RECONNECT_GRACE: Duration = Duration::from_millis(3000);
 /// (`LEAVE_SEND_WINDOW_MS`, STATE_MACHINE.md "Teardown").
 pub const LEAVE_SEND_WINDOW: Duration = Duration::from_millis(100);
 
+/// How long after a voice token arrives the room is asked for a fresh one
+/// (op 40): web and mobile refresh 45 minutes into the token's hour
+/// (ADMISSION.md "Room socket, op 40").
+pub const CREDENTIAL_REFRESH: Duration = Duration::from_secs(45 * 60);
+
 /// The call's phase, with the names and meaning of `packages/voice`
 /// (STATE_MACHINE.md "Phases"; there is no standby here).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallState {
     /// Not started, or over.
     Idle,
-    /// Tickets, sockets, SFU session and push, until the room says Ready.
+    /// Admission, sockets, SFU session and push, until the room says Ready.
     Connecting,
     /// The room said Ready for us.
     Joined,
@@ -135,13 +141,6 @@ pub enum UserCommand {
     /// The share's quality preset (`setQuality`).
     SetShareQuality(String),
     Leave,
-}
-
-/// Both ticket replies (`POST /api/voice/socket-ticket`).
-#[derive(Debug, Clone, PartialEq)]
-pub struct TicketReplies {
-    pub room: Value,
-    pub voice: Value,
 }
 
 /// Our mic, published to the SFU.
@@ -252,16 +251,18 @@ pub enum Timer {
     LayerSettle { track: String, token: u64 },
     /// Every 5 s: log media stats.
     Stats,
-    /// Every 45 min: refresh voice credentials.
-    RefreshCredentials,
+    /// [`CREDENTIAL_REFRESH`] after the voice token `token` counts arrived:
+    /// ask the room for a fresh one (op 40).
+    RefreshCredentials { token: u64 },
 }
 
 /// Everything the machine consumes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Input {
     Start,
-    /// The two tickets, or why they could not be had.
-    Tickets(Result<TicketReplies, String>),
+    /// The join's admission (both tickets and the media credentials), or
+    /// why it could not be had.
+    Admitted(Result<VoiceAdmission, String>),
     /// The mic is published, or why media could not start.
     Published(Result<Published, String>),
     Room(RoomEvent),
@@ -329,10 +330,11 @@ pub struct SocketSpec {
     /// The path under the API base, e.g. `/api/channels/<slug>/ws?v=1`.
     pub path: String,
     pub identify: Value,
-    /// The ticket fetched at join (single use).
+    /// The join admission's ticket for this socket (single use).
     pub first_ticket: String,
-    /// The body for a fresh ticket on each reconnect.
-    pub ticket_body: Value,
+    /// The admission that asks for this socket's ticket alone, minting
+    /// nothing, on each reconnect (ADMISSION.md "Client flow" 3 and 4).
+    pub reconnect: VoiceAdmissionRequest,
 }
 
 /// How to open media and publish the mic.
@@ -350,15 +352,13 @@ pub struct MediaSpec {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
     Notify(Notice),
-    /// Fetch both tickets, answer with [`Input::Tickets`].
-    FetchTickets {
-        room: Value,
-        voice: Value,
-    },
-    /// Open both sockets.
+    /// `POST /api/voice/admission` for the join; answer with
+    /// [`Input::Admitted`].
+    RequestAdmission(VoiceAdmissionRequest),
+    /// Open both sockets (boxed: the specs dwarf every other effect).
     OpenSockets {
-        room: SocketSpec,
-        voice: SocketSpec,
+        room: Box<SocketSpec>,
+        voice: Box<SocketSpec>,
     },
     /// Open media, create the SFU session and push the mic; answer with
     /// [`Input::Published`] (socket events wait until then).
@@ -477,6 +477,8 @@ pub struct CallMachine {
     ended: bool,
     me: String,
     voice_token: String,
+    /// The token of the armed credential refresh (a newer token re-arms it).
+    refresh: u64,
     published: Option<Published>,
     sockets_open: bool,
     /// The room was identified once (a later Ready is a fresh session).
@@ -522,6 +524,7 @@ impl CallMachine {
             ended: false,
             me: String::new(),
             voice_token: String::new(),
+            refresh: 0,
             published: None,
             sockets_open: false,
             room_identified: false,
@@ -561,7 +564,7 @@ impl CallMachine {
         &self.tracks
     }
 
-    /// The roster so far (empty before the tickets), with whose camera and
+    /// The roster so far (empty before the admission), with whose camera and
     /// share are live.
     pub fn roster(&self) -> Vec<Member> {
         let mut members = self
@@ -591,7 +594,7 @@ impl CallMachine {
             }
             (CallState::Leaving, _) => {}
             (_, Input::Start) => {}
-            (_, Input::Tickets(result)) => self.on_tickets(&mut fx, result),
+            (_, Input::Admitted(result)) => self.on_admitted(&mut fx, result),
             (_, Input::Published(result)) => self.on_published(&mut fx, result),
             (_, Input::CameraPublished(result)) => self.on_camera_published(&mut fx, result),
             (_, Input::ShareCaptured { token, result }) => {
@@ -844,28 +847,35 @@ impl CallMachine {
         self.set_state(fx, CallState::Connecting);
         self.set_status(fx, "Getting tickets");
         let (t, slug) = (&self.target, self.target.slug());
-        fx.push(Effect::FetchTickets {
-            room: wire::ticket_body("room", &t.server_id, &t.channel_id, &slug),
-            voice: wire::ticket_body("voice", &t.server_id, &t.channel_id, &slug),
-        });
+        fx.push(Effect::RequestAdmission(VoiceAdmissionRequest::join(
+            &t.server_id,
+            &t.channel_id,
+            &slug,
+        )));
     }
 
-    fn on_tickets(&mut self, fx: &mut Vec<Effect>, result: Result<TicketReplies, String>) {
+    /// The join's admission: the credentials come from its `media`, not
+    /// from the room (its Ready carries none, and no MediaReady comes).
+    fn on_admitted(&mut self, fx: &mut Vec<Effect>, result: Result<VoiceAdmission, String>) {
         if self.sockets_open {
             return;
         }
-        let replies = match result {
-            Ok(replies) => replies,
+        let admission = match result {
+            Ok(admission) => admission,
             Err(error) => return self.end(fx, Some(error)),
         };
-        let Some(bootstrap) = Bootstrap::from_room_ticket(&replies.room) else {
-            return self.end(fx, Some("room ticket without media bootstrap".into()));
+        let (Some(room_ticket), Some(voice_ticket), Some(media)) = (
+            admission.room_ticket.filter(|t| !t.is_empty()),
+            admission.voice_ticket.filter(|t| !t.is_empty()),
+            admission.media.as_ref(),
+        ) else {
+            return self.end(fx, Some("The call admission was incomplete.".into()));
         };
         let Bootstrap {
             participant_id: me,
             voice_token,
             ice_servers,
-        } = bootstrap;
+        } = Bootstrap::from_media(media);
         self.me = me;
         self.voice_token = voice_token;
         self.roster = Some(Roster::new(&self.me, &self.target.me_name));
@@ -874,18 +884,29 @@ impl CallMachine {
         let t = &self.target;
         let slug = t.slug();
         let sockets = Effect::OpenSockets {
-            room: SocketSpec {
+            room: Box::new(SocketSpec {
                 path: format!("/api/channels/{slug}/ws?v=1"),
                 identify: wire::room_identify(&t.me_name, &t.me_username),
-                first_ticket: wire::str_of(&replies.room, "ticket").to_owned(),
-                ticket_body: wire::ticket_body("room", &t.server_id, &t.channel_id, &slug),
-            },
-            voice: SocketSpec {
+                first_ticket: room_ticket,
+                reconnect: VoiceAdmissionRequest::room_reconnect(
+                    &t.server_id,
+                    &t.channel_id,
+                    &slug,
+                ),
+            }),
+            voice: Box::new(SocketSpec {
                 path: format!("/api/channels/{slug}/voice?v=1"),
                 identify: wire::voice_identify(&self.me, &self.voice_token),
-                first_ticket: wire::str_of(&replies.voice, "ticket").to_owned(),
-                ticket_body: wire::ticket_body("voice", &t.server_id, &t.channel_id, &slug),
-            },
+                first_ticket: voice_ticket,
+                // The participant never changes in a call (a fresh one ends
+                // it), so the binding is fixed.
+                reconnect: VoiceAdmissionRequest::voice_reconnect(
+                    &t.server_id,
+                    &t.channel_id,
+                    &slug,
+                    &self.me,
+                ),
+            }),
         };
         let media = Effect::OpenMedia(MediaSpec {
             ice_servers,
@@ -897,6 +918,8 @@ impl CallMachine {
         self.set_status(fx, "Joining");
         fx.push(sockets);
         fx.push(media);
+        // The token arrived just now.
+        self.arm_refresh(fx);
     }
 
     fn on_published(&mut self, fx: &mut Vec<Effect>, result: Result<Published, String>) {
@@ -992,7 +1015,8 @@ impl CallMachine {
     }
 
     /// Takes a fresh voice token from the room, for the SFU and the voice
-    /// socket's next identify.
+    /// socket's next identify, and refreshes it again in
+    /// [`CREDENTIAL_REFRESH`].
     fn update_token(&mut self, fx: &mut Vec<Effect>, token: &str) {
         if !token.is_empty() && token != self.voice_token {
             token.clone_into(&mut self.voice_token);
@@ -1001,7 +1025,20 @@ impl CallMachine {
                 &self.me,
                 &self.voice_token,
             )));
+            self.arm_refresh(fx);
         }
+    }
+
+    /// (Re)arms the credential refresh; an older one fires as a no-op.
+    fn arm_refresh(&mut self, fx: &mut Vec<Effect>) {
+        self.next_token += 1;
+        self.refresh = self.next_token;
+        fx.push(Effect::ArmTimer {
+            timer: Timer::RefreshCredentials {
+                token: self.refresh,
+            },
+            after: CREDENTIAL_REFRESH,
+        });
     }
 
     fn on_room(&mut self, fx: &mut Vec<Effect>, event: RoomEvent) {
@@ -1462,12 +1499,15 @@ impl CallMachine {
                     fx.push(Effect::LogStats);
                 }
             }
-            Timer::RefreshCredentials => {
-                if self.sockets_open {
+            Timer::RefreshCredentials { token } => {
+                if self.sockets_open && token == self.refresh {
                     fx.push(Effect::Send(
                         Socket::Room,
                         wire::empty_frame(GatewayOp::RefreshVoiceCredentials),
                     ));
+                    // Asked again later if this reply never brings a token
+                    // (as mobile does); a token that arrives re-arms it.
+                    self.arm_refresh(fx);
                 }
             }
         }

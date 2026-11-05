@@ -14,13 +14,14 @@ use serde_json::Value;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, Interval, MissedTickBehavior};
+use yap_protocol::rest::{CallSocket, VoiceAdmission, VoiceAdmissionRequest};
 use yap_protocol::{GatewayCloseCode, GatewayOp};
 use yap_realtime::{Config, Connection, Event, Policy, Reconnect, TicketError, TicketFuture};
 
 use crate::engine::{MediaEngine, MediaSession};
 use crate::machine::{
     CallMachine, CallTarget, CameraPublished, Effect, Input, MediaEvent, MediaSpec, Notice,
-    Published, RoomEvent, Socket, SocketSpec, TicketReplies, Timer, UserCommand, VoiceEvent,
+    Published, RoomEvent, Socket, SocketSpec, Timer, UserCommand, VoiceEvent,
 };
 use crate::sfu::{LayerUpdate, Sfu, Signaling};
 use crate::share::{ShareCaptured, ShareCapturer, ShareEncoding, SharePublished};
@@ -28,7 +29,7 @@ use crate::tracks::Remote;
 use crate::vad::{EnergyMeter, VAD_TICK};
 use crate::wire::{self, Participant, RoomState, Track};
 
-/// A failed API request, as the ticket endpoint reports it.
+/// A failed API request, as the admission endpoint reports it.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]
 pub struct ApiFailure {
@@ -37,9 +38,10 @@ pub struct ApiFailure {
     pub message: String,
 }
 
-/// `POST /api/voice/socket-ticket` with the signed-in session.
-pub trait TicketApi: Clone + Send + Sync + 'static {
-    fn socket_ticket(&self, body: Value) -> impl Future<Output = Result<Value, ApiFailure>> + Send;
+/// `POST /api/voice/admission` with the signed-in session
+/// (`realtime/ADMISSION.md`): the JSON body in, the JSON reply out.
+pub trait AdmissionApi: Clone + Send + Sync + 'static {
+    fn admission(&self, body: Value) -> impl Future<Output = Result<Value, ApiFailure>> + Send;
 }
 
 /// Where user commands come from. `None` (closed) counts as Leave.
@@ -56,7 +58,8 @@ impl Commands for UnboundedReceiver<UserCommand> {
 /// What a call runs on.
 pub struct CallEnv<E, T, S> {
     pub engine: E,
-    pub tickets: T,
+    /// The call sockets' tickets and the media credentials.
+    pub admission: T,
     /// Screen share capture.
     pub capturer: S,
     pub http: reqwest::Client,
@@ -76,7 +79,7 @@ pub async fn run_call<E, T, S, C, N>(
 ) -> Option<String>
 where
     E: MediaEngine,
-    T: TicketApi,
+    T: AdmissionApi,
     S: ShareCapturer,
     C: Commands,
     N: Fn(Notice) + Sync,
@@ -191,7 +194,7 @@ async fn recv<T>(rx: &mut Option<UnboundedReceiver<T>>) -> Option<T> {
     }
 }
 
-impl<'a, E: MediaEngine, T: TicketApi, S: ShareCapturer> Io<'a, E, T, S> {
+impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
     fn new(
         env: &'a CallEnv<E, T, S>,
         share_events: UnboundedSender<ShareEvent<S::Capture>>,
@@ -226,22 +229,22 @@ impl<'a, E: MediaEngine, T: TicketApi, S: ShareCapturer> Io<'a, E, T, S> {
         notify: &N,
     ) -> Option<String> {
         let mut queue: VecDeque<Effect> = machine.handle(Input::Start).into();
-        let mut periodic: Option<(Interval, Interval)> = None;
+        let mut stats: Option<Interval> = None;
         let mut level = tokio::time::interval(VAD_TICK);
         level.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut commands_open = true;
         loop {
-            // Effects run in order. Tickets and media are awaited here, so
-            // socket events wait in their channels until the mic is
-            // published (VOICE_PROTOCOL.md §6). The ticket fetch listens
-            // for commands meanwhile: a Leave drops it before any socket opens.
+            // Effects run in order. The admission and media are awaited
+            // here, so socket events wait in their channels until the mic
+            // is published (VOICE_PROTOCOL.md §6). The admission listens for
+            // commands meanwhile: a Leave drops it before any socket opens.
             while let Some(effect) = queue.pop_front() {
-                if let Effect::FetchTickets { room, voice } = effect {
-                    let fetch = self.fetch_tickets(room, voice);
+                if let Effect::RequestAdmission(request) = effect {
+                    let fetch = self.admit(request);
                     tokio::pin!(fetch);
-                    let tickets = loop {
+                    let admitted = loop {
                         tokio::select! {
-                            tickets = &mut fetch => break Some(tickets),
+                            admission = &mut fetch => break Some(admission),
                             command = commands.recv(), if commands_open => {
                                 let command = command.unwrap_or_else(|| {
                                     commands_open = false;
@@ -256,8 +259,8 @@ impl<'a, E: MediaEngine, T: TicketApi, S: ShareCapturer> Io<'a, E, T, S> {
                             }
                         }
                     };
-                    if let Some(tickets) = tickets {
-                        queue.extend(machine.handle(Input::Tickets(tickets)));
+                    if let Some(admission) = admitted {
+                        queue.extend(machine.handle(Input::Admitted(admission)));
                     }
                     continue;
                 }
@@ -267,13 +270,7 @@ impl<'a, E: MediaEngine, T: TicketApi, S: ShareCapturer> Io<'a, E, T, S> {
                     Applied::End(reason) => return reason,
                 }
             }
-            let (stats, refresh) = periodic.get_or_insert_with(|| {
-                let refresh = Duration::from_secs(45 * 60);
-                (
-                    tokio::time::interval(Duration::from_secs(5)),
-                    tokio::time::interval_at(Instant::now() + refresh, refresh),
-                )
-            });
+            let stats = stats.get_or_insert_with(|| tokio::time::interval(Duration::from_secs(5)));
             let next_timer = self.timers.iter().map(|(at, _)| *at).min();
             let input = tokio::select! {
                 event = recv(&mut inbox.room) => match event {
@@ -338,7 +335,6 @@ impl<'a, E: MediaEngine, T: TicketApi, S: ShareCapturer> Io<'a, E, T, S> {
                     None => continue,
                 },
                 _ = stats.tick() => Input::Timer(Timer::Stats),
-                _ = refresh.tick() => Input::Timer(Timer::RefreshCredentials),
             };
             queue.extend(machine.handle(input));
         }
@@ -352,10 +348,10 @@ impl<'a, E: MediaEngine, T: TicketApi, S: ShareCapturer> Io<'a, E, T, S> {
     ) -> Applied {
         match effect {
             Effect::Notify(notice) => notify(notice),
-            Effect::FetchTickets { room, voice } => {
-                return Applied::Input(Input::Tickets(self.fetch_tickets(room, voice).await));
+            Effect::RequestAdmission(request) => {
+                return Applied::Input(Input::Admitted(self.admit(request).await));
             }
-            Effect::OpenSockets { room, voice } => self.open_sockets(room, voice, inbox),
+            Effect::OpenSockets { room, voice } => self.open_sockets(*room, *voice, inbox),
             Effect::OpenMedia(spec) => {
                 let result = self.open_media(spec, inbox).await;
                 return Applied::Input(Input::Published(result.map_err(|e| format!("{e:#}"))));
@@ -511,12 +507,11 @@ impl<'a, E: MediaEngine, T: TicketApi, S: ShareCapturer> Io<'a, E, T, S> {
         });
     }
 
-    async fn fetch_tickets(&self, room: Value, voice: Value) -> Result<TicketReplies, String> {
-        let api = &self.env.tickets;
-        let (room, voice) = tokio::join!(api.socket_ticket(room), api.socket_ticket(voice));
-        let room = room.map_err(|e| format!("room ticket: {e}"))?;
-        let voice = voice.map_err(|e| format!("voice ticket: {e}"))?;
-        Ok(TicketReplies { room, voice })
+    /// The join's admission: both tickets and the media credentials.
+    async fn admit(&self, request: VoiceAdmissionRequest) -> Result<VoiceAdmission, String> {
+        request_admission(&self.env.admission, "voice", &request)
+            .await
+            .map_err(|e| format!("call admission: {e}"))
     }
 
     /// Both sockets. They live in this call, so a new call never sees an
@@ -537,7 +532,13 @@ impl<'a, E: MediaEngine, T: TicketApi, S: ShareCapturer> Io<'a, E, T, S> {
         let (voice_tx, voice_rx) = mpsc::unbounded_channel();
         self.room = Some(Connection::spawn(
             config("voice/room", &room, Reconnect::Resume, GatewayOp::Ready),
-            call_tickets(env.tickets.clone(), room.first_ticket, room.ticket_body),
+            call_tickets(
+                env.admission.clone(),
+                "voice/room",
+                CallSocket::Room,
+                room.first_ticket,
+                room.reconnect,
+            ),
             room_tx,
         ));
         self.voice = Some(Connection::spawn(
@@ -547,7 +548,13 @@ impl<'a, E: MediaEngine, T: TicketApi, S: ShareCapturer> Io<'a, E, T, S> {
                 Reconnect::Reidentify,
                 GatewayOp::VoiceReady,
             ),
-            call_tickets(env.tickets.clone(), voice.first_ticket, voice.ticket_body),
+            call_tickets(
+                env.admission.clone(),
+                "voice/voice",
+                CallSocket::Voice,
+                voice.first_ticket,
+                voice.reconnect,
+            ),
             voice_tx,
         ));
         inbox.room = Some(room_rx);
@@ -689,34 +696,75 @@ fn voice_event(event: Event) -> Option<VoiceEvent> {
     }
 }
 
-/// Tickets for one call socket: the one fetched at join first, then a fresh
-/// one per reconnect (tickets are single use).
-fn call_tickets<T: TicketApi>(
+/// One `POST /api/voice/admission`, logged by what it asks for (never what
+/// it returns: tickets and tokens stay out of the logs).
+async fn request_admission<T: AdmissionApi>(
+    api: &T,
+    label: &str,
+    request: &VoiceAdmissionRequest,
+) -> Result<VoiceAdmission, ApiFailure> {
+    let sockets: Vec<&str> = request
+        .sockets
+        .iter()
+        .map(|socket| match socket {
+            CallSocket::Room => "room",
+            CallSocket::Voice => "voice",
+        })
+        .collect();
+    eprintln!(
+        "[{label}] admission: sockets={}{}{}",
+        sockets.join("+"),
+        if request.media { " media" } else { "" },
+        if request.participant_id.is_some() {
+            " bound"
+        } else {
+            ""
+        },
+    );
+    let body = serde_json::to_value(request).map_err(|e| ApiFailure {
+        unauthorized: false,
+        message: format!("admission body: {e}"),
+    })?;
+    let reply = api.admission(body).await?;
+    // The serde error would quote the offending value; keep it out.
+    serde_json::from_value(reply).map_err(|_| ApiFailure {
+        unauthorized: false,
+        message: "admission response unreadable".into(),
+    })
+}
+
+/// Tickets for one call socket: the join admission's first, then one
+/// admission per reconnect asking for this socket's ticket alone
+/// (`reconnect`; tickets are single use).
+fn call_tickets<T: AdmissionApi>(
     api: T,
+    label: &'static str,
+    socket: CallSocket,
     first: String,
-    body: Value,
+    reconnect: VoiceAdmissionRequest,
 ) -> impl FnMut() -> TicketFuture + Send + 'static {
     let mut first = Some(first).filter(|t| !t.is_empty());
     move || {
         let first = first.take();
         let api = api.clone();
-        let body = body.clone();
+        let reconnect = reconnect.clone();
         Box::pin(async move {
             if let Some(ticket) = first {
                 return Ok(ticket);
             }
-            let reply = api.socket_ticket(body).await.map_err(|e| {
-                if e.unauthorized {
-                    TicketError::Unauthorized
-                } else {
-                    TicketError::Failed(e.message)
-                }
-            })?;
-            reply
-                .get("ticket")
-                .and_then(Value::as_str)
+            let admission = request_admission(&api, label, &reconnect)
+                .await
+                .map_err(|e| {
+                    if e.unauthorized {
+                        TicketError::Unauthorized
+                    } else {
+                        TicketError::Failed(e.message)
+                    }
+                })?;
+            admission
+                .ticket(socket)
                 .map(str::to_owned)
-                .ok_or_else(|| TicketError::Failed("socket ticket missing".into()))
+                .ok_or_else(|| TicketError::Failed("admission without the socket's ticket".into()))
         })
     }
 }
@@ -1020,6 +1068,7 @@ mod tests {
     use std::sync::{Arc, Mutex, PoisonError};
 
     use anyhow::anyhow;
+    use serde_json::json;
 
     use super::*;
     use crate::engine::{FakeEngine, FakeOp};
@@ -1118,14 +1167,212 @@ mod tests {
         }
     }
 
-    /// Ticket replies that never come.
+    /// An admission reply that never comes.
     #[derive(Clone)]
-    struct StuckTickets;
+    struct StuckAdmission;
 
-    impl TicketApi for StuckTickets {
-        async fn socket_ticket(&self, _: Value) -> Result<Value, ApiFailure> {
+    impl AdmissionApi for StuckAdmission {
+        async fn admission(&self, _: Value) -> Result<Value, ApiFailure> {
             std::future::pending().await
         }
+    }
+
+    /// Records each admission body and answers with the next reply (the
+    /// last one again once they run out).
+    #[derive(Clone, Default)]
+    struct RecordedAdmission {
+        bodies: Arc<Mutex<Vec<Value>>>,
+        replies: Arc<Mutex<VecDeque<Result<Value, ApiFailure>>>>,
+    }
+
+    impl RecordedAdmission {
+        fn answering(replies: Vec<Result<Value, ApiFailure>>) -> Self {
+            Self {
+                bodies: Arc::default(),
+                replies: Arc::new(Mutex::new(replies.into())),
+            }
+        }
+
+        fn bodies(&self) -> Vec<Value> {
+            self.bodies
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+        }
+    }
+
+    impl AdmissionApi for RecordedAdmission {
+        async fn admission(&self, body: Value) -> Result<Value, ApiFailure> {
+            self.bodies
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(body);
+            let mut replies = self.replies.lock().unwrap_or_else(PoisonError::into_inner);
+            match replies.len() {
+                0 => Err(ApiFailure {
+                    unauthorized: false,
+                    message: "no reply".into(),
+                }),
+                1 => replies[0].clone(),
+                _ => replies.pop_front().expect("non-empty"),
+            }
+        }
+    }
+
+    fn target() -> CallTarget {
+        CallTarget {
+            server_id: "s1".into(),
+            channel_id: "c1".into(),
+            me_name: "Jon".into(),
+            me_username: "jon".into(),
+        }
+    }
+
+    fn env<T: AdmissionApi>(
+        engine: &FakeEngine,
+        admission: T,
+    ) -> CallEnv<FakeEngine, T, crate::share::NoCapture> {
+        CallEnv {
+            engine: engine.clone(),
+            admission,
+            capturer: crate::share::NoCapture,
+            http: reqwest::Client::new(),
+            api_base: "https://api.invalid".into(),
+            origin: "https://api.invalid".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_join_should_make_one_admission_request_for_both_sockets_and_media() {
+        let engine = FakeEngine::new();
+        let api = RecordedAdmission::answering(vec![Err(ApiFailure {
+            unauthorized: false,
+            message: "refused".into(),
+        })]);
+        let (_commands, rx) = mpsc::unbounded_channel();
+        let ended = tokio::time::timeout(
+            Duration::from_secs(5),
+            run_call(env(&engine, api.clone()), target(), rx, |_| {}),
+        )
+        .await
+        .expect("ends");
+        assert_eq!(ended, Some("call admission: refused".into()));
+        assert_eq!(
+            api.bodies(),
+            vec![json!({
+                "channelId": "c1", "serverId": "s1", "roomSlug": "voice-s1-c1",
+                "sockets": ["room", "voice"], "media": true,
+            })]
+        );
+        assert_eq!(engine.ops(), vec![FakeOp::Release]);
+    }
+
+    #[tokio::test]
+    async fn an_admission_without_media_should_end_before_any_socket_opens() {
+        let engine = FakeEngine::new();
+        let api = RecordedAdmission::answering(vec![Ok(json!({
+            "room_ticket": "room-t", "voice_ticket": "voice-t", "participant_id": "me-1",
+        }))]);
+        let (_commands, rx) = mpsc::unbounded_channel();
+        let ended = tokio::time::timeout(
+            Duration::from_secs(5),
+            run_call(env(&engine, api.clone()), target(), rx, |_| {}),
+        )
+        .await
+        .expect("ends");
+        assert_eq!(ended, Some("The call admission was incomplete.".into()));
+        assert_eq!(api.bodies().len(), 1);
+        assert_eq!(engine.ops(), vec![FakeOp::Release]);
+    }
+
+    async fn ticket(
+        source: &mut (impl FnMut() -> TicketFuture + Send),
+    ) -> Result<String, TicketError> {
+        source().await
+    }
+
+    #[tokio::test]
+    async fn the_room_socket_should_take_the_join_ticket_then_one_room_admission_per_reconnect() {
+        let api = RecordedAdmission::answering(vec![Ok(json!({ "room_ticket": "room-2" }))]);
+        let reconnect = VoiceAdmissionRequest::room_reconnect("s1", "c1", "voice-s1-c1");
+        let mut source = call_tickets(
+            api.clone(),
+            "voice/room",
+            CallSocket::Room,
+            "room-1".into(),
+            reconnect,
+        );
+        assert_eq!(ticket(&mut source).await, Ok("room-1".into()));
+        assert!(
+            api.bodies().is_empty(),
+            "the join's ticket needs no request"
+        );
+        assert_eq!(ticket(&mut source).await, Ok("room-2".into()));
+        assert_eq!(ticket(&mut source).await, Ok("room-2".into()));
+        let room_only = json!({
+            "channelId": "c1", "serverId": "s1", "roomSlug": "voice-s1-c1",
+            "sockets": ["room"], "media": false,
+        });
+        assert_eq!(api.bodies(), vec![room_only.clone(), room_only]);
+    }
+
+    #[tokio::test]
+    async fn the_voice_socket_should_reconnect_on_a_ticket_bound_to_its_participant() {
+        // A 1013 (or any drop) on the voice socket comes back here.
+        let api = RecordedAdmission::answering(vec![Ok(json!({
+            "voice_ticket": "voice-2", "participant_id": "me-1",
+        }))]);
+        let reconnect = VoiceAdmissionRequest::voice_reconnect("s1", "c1", "voice-s1-c1", "me-1");
+        let mut source = call_tickets(
+            api.clone(),
+            "voice/voice",
+            CallSocket::Voice,
+            "voice-1".into(),
+            reconnect,
+        );
+        assert_eq!(ticket(&mut source).await, Ok("voice-1".into()));
+        assert_eq!(ticket(&mut source).await, Ok("voice-2".into()));
+        assert_eq!(
+            api.bodies(),
+            vec![json!({
+                "channelId": "c1", "serverId": "s1", "roomSlug": "voice-s1-c1",
+                "sockets": ["voice"], "media": false, "participantId": "me-1",
+            })]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_reconnect_admission_without_the_ticket_should_fail_the_attempt() {
+        let api = RecordedAdmission::answering(vec![Ok(json!({ "voice_ticket": "voice-2" }))]);
+        let reconnect = VoiceAdmissionRequest::room_reconnect("s1", "c1", "voice-s1-c1");
+        let mut source = call_tickets(
+            api,
+            "voice/room",
+            CallSocket::Room,
+            String::new(),
+            reconnect,
+        );
+        assert!(matches!(
+            ticket(&mut source).await,
+            Err(TicketError::Failed(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_refused_reconnect_admission_should_count_as_unauthorized() {
+        let api = RecordedAdmission::answering(vec![Err(ApiFailure {
+            unauthorized: true,
+            message: "401".into(),
+        })]);
+        let reconnect = VoiceAdmissionRequest::room_reconnect("s1", "c1", "voice-s1-c1");
+        let mut source = call_tickets(
+            api,
+            "voice/room",
+            CallSocket::Room,
+            String::new(),
+            reconnect,
+        );
+        assert_eq!(ticket(&mut source).await, Err(TicketError::Unauthorized));
     }
 
     #[tokio::test]
@@ -1133,7 +1380,7 @@ mod tests {
         let engine = FakeEngine::new();
         let env = CallEnv {
             engine: engine.clone(),
-            tickets: StuckTickets,
+            admission: StuckAdmission,
             capturer: crate::share::NoCapture,
             http: reqwest::Client::new(),
             api_base: "https://api.invalid".into(),

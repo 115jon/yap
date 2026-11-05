@@ -2,9 +2,10 @@
 //! the machine reads, and the frames it sends. Pure; no I/O.
 
 use serde_json::{json, Value};
+use yap_protocol::rest::MediaBootstrap;
 use yap_protocol::{Frame, GatewayOp};
 
-/// An ICE server from the room ticket's `media_bootstrap`.
+/// An ICE server from the admission's `media`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IceServer {
     pub urls: Vec<String>,
@@ -12,7 +13,7 @@ pub struct IceServer {
     pub password: String,
 }
 
-/// What the room ticket's `media_bootstrap` grants.
+/// What the admission's `media` grants.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bootstrap {
     pub participant_id: String,
@@ -75,44 +76,30 @@ fn member_name(value: &Value) -> Option<String> {
 }
 
 impl Bootstrap {
-    /// Reads `media_bootstrap` from the room ticket reply. Without ICE
-    /// servers it falls back to Cloudflare's STUN.
-    pub fn from_room_ticket(room: &Value) -> Option<Self> {
-        let bootstrap = room.get("media_bootstrap")?;
-        let ice_servers: Vec<IceServer> = bootstrap
-            .get("ice_servers")
-            .and_then(Value::as_array)
-            .map(|list| {
-                list.iter()
-                    .map(|s| IceServer {
-                        urls: s
-                            .get("urls")
-                            .and_then(Value::as_array)
-                            .map(|u| {
-                                u.iter()
-                                    .filter_map(Value::as_str)
-                                    .map(str::to_owned)
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
-                        username: str_of(s, "username").to_owned(),
-                        password: str_of(s, "credential").to_owned(),
-                    })
-                    .collect()
+    /// Reads the admission's `media`. Without ICE servers it falls back to
+    /// Cloudflare's STUN.
+    pub fn from_media(media: &MediaBootstrap) -> Self {
+        let mut ice_servers: Vec<IceServer> = media
+            .ice_servers
+            .iter()
+            .map(|s| IceServer {
+                urls: s.urls.clone(),
+                username: s.username.clone().unwrap_or_default(),
+                password: s.credential.clone().unwrap_or_default(),
             })
-            .filter(|list: &Vec<IceServer>| !list.is_empty())
-            .unwrap_or_else(|| {
-                vec![IceServer {
-                    urls: vec!["stun:stun.cloudflare.com:3478".into()],
-                    username: String::new(),
-                    password: String::new(),
-                }]
+            .collect();
+        if ice_servers.is_empty() {
+            ice_servers.push(IceServer {
+                urls: vec!["stun:stun.cloudflare.com:3478".into()],
+                username: String::new(),
+                password: String::new(),
             });
-        Some(Self {
-            participant_id: str_of(bootstrap, "participant_id").to_owned(),
-            voice_token: str_of(bootstrap, "voice_token").to_owned(),
+        }
+        Self {
+            participant_id: media.participant_id.clone(),
+            voice_token: media.voice_token.clone(),
             ice_servers,
-        })
+        }
     }
 }
 
@@ -304,9 +291,4 @@ pub fn watch_event(streamer_user_id: &str, watching: bool) -> String {
         "type": kind, "streamer_user_id": streamer_user_id,
     }})
     .to_string()
-}
-
-/// The body for `POST /api/voice/socket-ticket`.
-pub fn ticket_body(audience: &str, server_id: &str, channel_id: &str, slug: &str) -> Value {
-    json!({ "audience": audience, "channelId": channel_id, "serverId": server_id, "roomSlug": slug })
 }

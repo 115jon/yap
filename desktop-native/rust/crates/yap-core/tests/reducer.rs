@@ -1494,7 +1494,7 @@ fn a_failed_call_should_say_why_on_the_voice_view_until_the_next_join() {
     let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
     let fx = client.input(Input::Voice {
         call,
-        update: VoiceUpdate::Ended(Some("room ticket: 503".into())),
+        update: VoiceUpdate::Ended(Some("call admission: 503".into())),
     });
     assert!(fx.iter().any(|e| matches!(
         e,
@@ -1505,7 +1505,7 @@ fn a_failed_call_should_say_why_on_the_voice_view_until_the_next_join() {
     let fx = client.input(Input::Voice {
         call,
         update: VoiceUpdate::Ended(Some(
-            "room ticket: error sending request for url (https://x/api/voice/socket-ticket)".into(),
+            "call admission: error sending request for url (https://x/api/voice/admission)".into(),
         )),
     });
     assert!(fx.iter().any(|e| matches!(
@@ -1516,7 +1516,7 @@ fn a_failed_call_should_say_why_on_the_voice_view_until_the_next_join() {
     let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
     let fx = client.input(Input::Voice {
         call,
-        update: VoiceUpdate::Ended(Some("room ticket: HTTP 403 CONNECT_DENIED".into())),
+        update: VoiceUpdate::Ended(Some("call admission: HTTP 403 CONNECT_DENIED".into())),
     });
     assert!(fx.iter().any(|e| matches!(
         e,

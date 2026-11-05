@@ -50,7 +50,7 @@ pub async fn run(
     };
     let tickets = move || -> yap_realtime::TicketFuture {
         let api = api.clone();
-        Box::pin(async move { api.socket_ticket("global").await.map_err(ticket_error) })
+        Box::pin(async move { api.gateway_ticket().await.map_err(ticket_error) })
     };
     let (tx, mut rx) = mpsc::unbounded_channel();
     // Dropped on return, which closes the socket.
