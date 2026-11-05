@@ -8,15 +8,15 @@
 
 use std::cmp::Reverse;
 
-use yap_protocol::rest::Message;
+use yap_protocol::rest::{Message, MessagePatch};
 
 use super::{is_pending, Effects};
 use crate::admin::{has_any_permission, member_permissions, perm};
 use crate::api::ApiError;
 use crate::settings::describe_api_error;
 use crate::store::state::{pending_id, MessageLog, Outgoing, State};
-use crate::store::threads::{PanelOp, PanelsView, ThreadState};
-use crate::store::time::parse_rfc3339;
+use crate::store::threads::{PanelOp, PanelsView, ThreadListRow, ThreadListState, ThreadState};
+use crate::store::time::{parse_rfc3339, relative_time};
 use crate::store::view::{self, Load, MessageRow, RowContext, ViewDiff, ViewUpdate};
 use crate::store::{
     ApiRequest, ApiResponse, Dispatch, PinsCommand, RequestId, ThreadCommand, ThreadRequest,
@@ -82,7 +82,40 @@ impl State {
                 nonce,
                 sent_at,
             } => self.send_thread_reply(fx, content.trim(), nonce, sent_at),
+            ThreadCommand::List { now_ms } => self.load_thread_list(fx, now_ms),
         }
+    }
+
+    /// MemberList.tsx `loadTabData` for "threads": afresh each time the
+    /// tab shows; a newer ask replaces one in flight.
+    fn load_thread_list(&mut self, fx: &mut Effects, now_ms: i64) {
+        let Some(channel_id) = self.active_channel.clone() else {
+            return;
+        };
+        self.panels
+            .pending
+            .retain(|_, op| !matches!(op, PanelOp::ChannelThreads { .. }));
+        self.panels.threads = ThreadListState {
+            channel_id: channel_id.clone(),
+            now_ms,
+            load: Load::Loading,
+        };
+        let request = ThreadRequest::ChannelThreads {
+            channel_id: channel_id.clone(),
+        };
+        self.panel_request(fx, request, PanelOp::ChannelThreads { channel_id });
+    }
+
+    fn on_thread_list(&mut self, channel_id: &str, result: Result<ThreadResponse, ApiError>) {
+        let list = &mut self.panels.threads;
+        if list.channel_id != channel_id {
+            return;
+        }
+        list.load = match result {
+            Ok(ThreadResponse::ChannelThreads(threads)) => Load::Ready(threads),
+            Ok(_) => Load::Ready(Vec::new()),
+            Err(error) => Load::Failed(describe_api_error(&error, "load threads")),
+        };
     }
 
     fn forget_thread_requests(&mut self) {
@@ -306,6 +339,67 @@ impl State {
         full: Option<Message>,
     ) {
         self.apply_pin(fx, id, pinned, full);
+    }
+
+    // The thread's own copies (a reply the open list has not loaded is
+    // edited, deleted and reacted to from the panel all the same)
+
+    /// A message of the open thread, while it belongs to the open channel.
+    pub(super) fn thread_message(&self, id: &str) -> Option<&Message> {
+        let thread = &self.panels.thread;
+        let open = !thread.root_id.is_empty()
+            && self.active_channel.as_deref() == Some(thread.channel_id.as_str());
+        open.then(|| thread.log.get(id)).flatten()
+    }
+
+    /// An edit at once, or its answer, on the thread's copy.
+    pub(super) fn patch_thread_copy(&mut self, patch: &MessagePatch) {
+        if self.panels.thread.log.patch(patch).is_some() {
+            self.panels.thread_dirty = true;
+        }
+    }
+
+    /// A refused edit puts the thread's copy back as it was.
+    pub(super) fn restore_thread_copy(&mut self, original: &Message) {
+        let log = &mut self.panels.thread.log;
+        if log.get(&original.id).is_some() {
+            log.upsert(original.clone());
+            self.panels.thread_dirty = true;
+        }
+    }
+
+    /// A delete at once: the reply leaves the thread (the root stays, as
+    /// for a live delete). `true` when a reply went.
+    pub(super) fn drop_thread_copy(&mut self, id: &str) -> bool {
+        let thread = &mut self.panels.thread;
+        if id == thread.root_id || thread.log.remove(id).is_none() {
+            return false;
+        }
+        self.panels.thread_dirty = true;
+        true
+    }
+
+    /// A refused delete: a reply of the open thread goes back in by time.
+    /// `true` when it went back.
+    pub(super) fn put_back_thread_copy(&mut self, message: &Message) -> bool {
+        let thread = &mut self.panels.thread;
+        let ours = !thread.root_id.is_empty()
+            && thread.channel_id == message.channel_id
+            && message.reply_to_id.as_deref() == Some(thread.root_id.as_str());
+        if !ours || thread.log.get(&message.id).is_some() {
+            return false;
+        }
+        thread.log.insert_sorted(message.clone());
+        self.panels.thread_dirty = true;
+        true
+    }
+
+    /// One reaction change on the thread's copy (the optimistic chip, or
+    /// its undo); the gateway echo then finds it there and changes nothing.
+    pub(super) fn react_thread_copy(&mut self, id: &str, emoji: &str, user: &str, add: bool) {
+        if self.panels.thread.log.react(id, emoji, user, add).is_some() {
+            self.panels.thread_dirty = true;
+        }
     }
 
     // Reply counts
@@ -577,6 +671,7 @@ impl State {
                 root_id,
             } => self.on_thread_loaded(&channel_id, &root_id, result),
             PanelOp::Pins { channel_id } => self.on_pins_loaded(&channel_id, result),
+            PanelOp::ChannelThreads { channel_id } => self.on_thread_list(&channel_id, result),
             PanelOp::SetPin { message, pinned } => {
                 if result.is_err() {
                     let id = message.id.clone();
@@ -820,9 +915,35 @@ impl State {
             .unwrap_or_default()
     }
 
+    /// The Threads tab's rows (MemberList.tsx `ThreadsTabContent`).
+    fn thread_list_rows(&self) -> Vec<ThreadListRow> {
+        let list = &self.panels.threads;
+        let Some(threads) = list.load.ready() else {
+            return Vec::new();
+        };
+        threads
+            .iter()
+            .map(|thread| {
+                let author = thread.author.label();
+                ThreadListRow {
+                    id: thread.id.clone(),
+                    author: author.to_owned(),
+                    initials: view::initials(author),
+                    avatar: view::absolute_url(&self.api_base, thread.author.avatar_url.as_deref()),
+                    content: thread.content.clone(),
+                    replies: thread.reply_count,
+                    last_reply: parse_rfc3339(&thread.last_reply_at)
+                        .map(|at| relative_time(at, list.now_ms, self.local_offset))
+                        .unwrap_or_default(),
+                }
+            })
+            .collect()
+    }
+
     fn panels_view(&self) -> PanelsView {
         let thread = &self.panels.thread;
         let pins = &self.panels.pins;
+        let list = &self.panels.threads;
         PanelsView {
             can_pin: self.can_pin(),
             thread_root_id: thread.root_id.clone(),
@@ -834,6 +955,9 @@ impl State {
                 .load
                 .ready()
                 .map_or(0, |l| i64::try_from(l.len()).unwrap_or(i64::MAX)),
+            threads_loading: list.load.is_loading(),
+            threads_error: list.load.error().to_owned(),
+            threads: self.thread_list_rows(),
         }
     }
 
@@ -908,6 +1032,7 @@ impl State {
         let panels = &mut self.panels;
         panels.thread = ThreadState::default();
         panels.pins = Default::default();
+        panels.threads = Default::default();
         panels.jump = Default::default();
         panels.pending.clear();
         panels.thread_dirty = true;

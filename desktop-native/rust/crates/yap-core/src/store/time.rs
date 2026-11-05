@@ -192,6 +192,27 @@ pub fn local_date(utc_ms: i64, offset: LocalOffset, long: bool) -> String {
     format!("{} {day}, {year}", names[(month - 1) as usize])
 }
 
+/// How long ago, as the member list's tabs say it (MemberList.tsx
+/// `formatRelativeTime`): `Just now`, `5m ago`, `3h ago`, `2d ago`, then the
+/// local month and day (`Nov 5`). A time in the future reads as just now.
+pub fn relative_time(utc_ms: i64, now_ms: i64, offset: LocalOffset) -> String {
+    let minutes = (now_ms - utc_ms).div_euclid(60_000);
+    let hours = minutes / 60;
+    let days = hours / 24;
+    if minutes < 1 {
+        "Just now".to_owned()
+    } else if minutes < 60 {
+        format!("{minutes}m ago")
+    } else if hours < 24 {
+        format!("{hours}h ago")
+    } else if days < 7 {
+        format!("{days}d ago")
+    } else {
+        let (_, month, day) = civil_from_days(local_day(utc_ms, offset));
+        format!("{} {day}", MONTHS[(month - 1) as usize])
+    }
+}
+
 /// A local date and time: `Nov 5, 2026, 3:04 PM`.
 pub fn local_date_time(utc_ms: i64, offset: LocalOffset) -> String {
     let stamp = Stamp::new(utc_ms, offset);
@@ -224,6 +245,33 @@ pub fn local_midnight(day: i64, offset: LocalOffset) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const NOW: i64 = 1_793_880_000_000; // 2026-11-05T12:00:00Z
+
+    #[test]
+    fn relative_time_under_a_minute_should_be_just_now() {
+        assert_eq!(
+            relative_time(NOW - 59_000, NOW, LocalOffset::UTC),
+            "Just now"
+        );
+    }
+
+    #[test]
+    fn relative_time_should_count_minutes_then_hours_then_days() {
+        let said: Vec<String> = [5 * 60_000, 3 * 3_600_000, 2 * MS_PER_DAY]
+            .iter()
+            .map(|ago| relative_time(NOW - ago, NOW, LocalOffset::UTC))
+            .collect();
+        assert_eq!(said, ["5m ago", "3h ago", "2d ago"]);
+    }
+
+    #[test]
+    fn relative_time_after_a_week_should_be_the_local_month_and_day() {
+        assert_eq!(
+            relative_time(NOW - 8 * MS_PER_DAY, NOW, LocalOffset::UTC),
+            "Oct 28"
+        );
+    }
 
     #[test]
     fn local_midnight_should_shift_by_the_offset() {

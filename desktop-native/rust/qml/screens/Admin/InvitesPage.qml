@@ -17,6 +17,7 @@ Column {
     readonly property var server: model.server
     readonly property var invites: model.invites
     readonly property var list: invites.items ?? []
+    readonly property var blank: ({ code: "", link: "", channel: "", inviter: "", inviterAvatar: "", inviterInitials: "", uses: "", temporary: false, expiresMs: 0 })
     readonly property var schema: JSON.parse(Admin.schema())
     readonly property var pause: model.acts["pause"] ?? { busy: false, error: "" }
     readonly property var creatingAct: model.acts["invite"] ?? { busy: false, error: "", done: 0 }
@@ -256,10 +257,13 @@ Column {
             title: qsTr("No active invite links")
             message: qsTr("Create a link to let people join %1.").arg(root.server.name)
         }
-        Repeater {
-            model: root.list
+        // Built a page at a time as the page scrolls.
+        PagedRows {
+            total: root.list.length
+            wanted: root.host.nearEnd
             delegate: InviteRow {
-                required property var modelData
+                required property int index
+                readonly property var modelData: root.list[index] ?? root.blank
                 width: root.width
                 invite: modelData
                 paused: root.server.invitesPaused

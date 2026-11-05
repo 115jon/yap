@@ -73,5 +73,5 @@ Workbench {
     Component { id: rolesPage; RolesPage { host: root; model: root.model } }
     Component { id: invitesPage; InvitesPage { host: root; model: root.model } }
     Component { id: bansPage; BansPage { host: root; model: root.model } }
-    Component { id: auditPage; AuditPage { model: root.model } }
+    Component { id: auditPage; AuditPage { host: root; model: root.model } }
 }

@@ -22,8 +22,8 @@ pub mod time;
 pub mod view;
 
 pub use threads::{
-    message_link, uri_component, PanelsView, PinsCommand, ThreadCommand, ThreadRequest,
-    ThreadResponse,
+    message_link, uri_component, PanelsView, PinsCommand, ThreadCommand, ThreadListRow,
+    ThreadRequest, ThreadResponse,
 };
 
 pub use admin::{

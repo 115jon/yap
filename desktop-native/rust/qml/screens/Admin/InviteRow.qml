@@ -12,8 +12,8 @@ Item {
     required property var invite
     required property bool paused
     required property real now
-    // The page keeps which row's confirm is open (rows are rebuilt with
-    // every admin state change).
+    // The page keeps which invite's confirm is open (a row shows whichever
+    // invite is at its place in the list).
     required property bool armed
     required property var model
 
@@ -24,6 +24,9 @@ Item {
     readonly property var revoking: model.acts["revoke:" + invite.code] ?? { busy: false, error: "", done: 0 }
     readonly property string remaining: invite.expiresMs > 0 ? Admin.remaining(invite.expiresMs, now) : ""
     property bool copied: false
+    readonly property string code: invite.code
+    // "Copied" belongs to the invite, not the row's place.
+    onCodeChanged: copied = false
 
     implicitHeight: 12 + top.height + (confirm.active ? confirm.height : 0) + (rowError.visible ? rowError.height : 0) + 12
     Accessible.role: Accessible.ListItem

@@ -73,6 +73,9 @@ T.Popup {
             selected(id)
     }
     function toTop() { body.contentY = 0 }
+    // The page is scrolled to within 480 px of its end: long lists
+    // (PagedRows) build their next rows.
+    readonly property bool nearEnd: body.contentHeight - body.contentY - body.height < 480
 
     parent: T.Overlay.overlay
     // Centred under the title bar, which the web keeps above overlays.

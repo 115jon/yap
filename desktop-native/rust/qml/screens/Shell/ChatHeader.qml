@@ -15,10 +15,35 @@ Item {
 
     readonly property string searchTip: Nav.dmUsername.length > 0 ? qsTr("Search this conversation") : qsTr("Search messages")
 
+    // ChatHeader.tsx `onToggleChannelDetails`.
+    function toggleDetails() {
+        ShellState.showDetails = !ShellState.showDetails
+    }
+
+    // The control that had focus when search opened; it gets it back when
+    // the panel closes (SearchPanel.tsx restores focus to its opener).
+    property Item returnFocus: null
+
     // Opens the search panel, with typing to hand over.
     function openSearch(text) {
+        if (!ShellState.searchOpen)
+            root.returnFocus = root.Window.activeFocusItem
         Search.open(text, Date.now())
         ShellState.searchOpen = true
+    }
+
+    // After the panel has gone: unless focus went into another field
+    // meanwhile, back to the opener, else to the header's search field.
+    function restoreFocus() {
+        const opener = root.returnFocus
+        root.returnFocus = null
+        const now = root.Window.activeFocusItem
+        if (now && now.visible && "cursorPosition" in now)
+            return
+        if (opener && opener.visible && opener.enabled)
+            opener.forceActiveFocus(Qt.OtherFocusReason)
+        else if (searchField.visible)
+            searchField.forceActiveFocus(Qt.OtherFocusReason)
     }
 
     // "/" opens search when nothing editable has focus (the hint on the
@@ -33,8 +58,10 @@ Item {
     Connections {
         target: ShellState
         function onSearchOpenChanged() {
-            if (!ShellState.searchOpen)
+            if (!ShellState.searchOpen) {
                 Search.close()
+                Qt.callLater(root.restoreFocus)
+            }
         }
     }
 
@@ -45,10 +72,20 @@ Item {
         height: 32
         width: titleRow.implicitWidth + 16
         radius: Theme.radius
-        color: titleHover.hovered ? Theme.tint1 : "transparent"
+        color: ShellState.showDetails ? Theme.tint2 : titleHover.hovered ? Theme.tint1 : "transparent"
         Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+        activeFocusOnTab: true
         Accessible.role: Accessible.Button
         Accessible.name: Nav.dmUsername.length > 0 ? qsTr("Conversation details") : qsTr("Channel details")
+        Accessible.checkable: true
+        Accessible.checked: ShellState.showDetails
+        Accessible.onPressAction: root.toggleDetails()
+        Keys.onPressed: event => {
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
+                event.accepted = true
+                root.toggleDetails()
+            }
+        }
         Row {
             id: titleRow
             x: 8
@@ -84,7 +121,22 @@ Item {
                 font: Theme.type.description
             }
         }
-        HoverHandler { id: titleHover }
+        HoverHandler { id: titleHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: root.toggleDetails() }
+        Tooltip {
+            visible: titleHover.hovered
+            text: ShellState.showDetails ? qsTr("Hide details") : qsTr("Channel details")
+            side: "bottom"
+        }
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -2
+            visible: title.activeFocus
+            color: "transparent"
+            radius: Theme.radius
+            border.width: 2
+            border.color: Theme.focus
+        }
     }
 
     Text {

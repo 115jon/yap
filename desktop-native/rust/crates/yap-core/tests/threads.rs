@@ -852,3 +852,286 @@ fn the_window_answer_should_decode_both_flags() {
         ))
     ));
 }
+
+// The thread's own replies: edit, delete and react from the panel when the
+// open list has not loaded them
+
+/// Thread m1 open with m2 (also in the list) and r9, ours and in the
+/// thread only.
+fn thread_only_reply() -> Client {
+    let mut client = Client::online(three(), 0);
+    client.open_thread(
+        "m1",
+        vec![reply(A, "m2", ME, 1, "m1"), reply(A, "r9", ME, 9, "m1")],
+    );
+    client
+}
+
+fn edit_of(id: &str, content: &str) -> ApiRequest {
+    ApiRequest::EditMessage {
+        channel_id: A.into(),
+        message_id: id.into(),
+        content: content.into(),
+    }
+}
+
+fn edit(id: &str, content: &str) -> Command {
+    Command::EditMessage {
+        message_id: id.into(),
+        content: content.into(),
+    }
+}
+
+fn delete_of(id: &str) -> ApiRequest {
+    ApiRequest::DeleteMessage {
+        channel_id: A.into(),
+        message_id: id.into(),
+    }
+}
+
+fn thumbs_up(id: &str) -> Command {
+    Command::ToggleReaction {
+        message_id: id.into(),
+        emoji: "+1".into(),
+    }
+}
+
+fn thread_row<'a>(client: &'a Client, id: &str) -> Option<&'a MessageRow> {
+    client.seen.thread.iter().find(|r| r.id == id)
+}
+
+#[test]
+fn editing_a_thread_only_reply_should_patch_it_on_the_server() {
+    let mut client = thread_only_reply();
+    client.command(edit("r9", "fixed"));
+    assert!(client.asked_for(&edit_of("r9", "fixed")));
+}
+
+#[test]
+fn editing_a_thread_only_reply_should_show_at_once() {
+    let mut client = thread_only_reply();
+    client.command(edit("r9", "fixed"));
+    assert_eq!(
+        thread_row(&client, "r9").map(|r| r.body.as_str()),
+        Some("fixed")
+    );
+}
+
+#[test]
+fn a_refused_thread_edit_should_put_the_old_text_back() {
+    let mut client = thread_only_reply();
+    client.command(edit("r9", "fixed"));
+    client.fail(&edit_of("r9", "fixed"), 500);
+    assert_eq!(
+        thread_row(&client, "r9").map(|r| r.body.as_str()),
+        Some("text of r9")
+    );
+}
+
+#[test]
+fn a_refused_thread_edit_should_not_add_the_reply_to_the_list() {
+    let mut client = thread_only_reply();
+    client.command(edit("r9", "fixed"));
+    client.fail(&edit_of("r9", "fixed"), 500);
+    assert_eq!(Client::ids(&client.seen.rows), ["m1", "m2", "m3"]);
+}
+
+#[test]
+fn another_persons_thread_reply_should_not_be_edited() {
+    let mut client = Client::online(three(), 0);
+    client.open_thread("m1", vec![reply(A, "r8", ALICE, 8, "m1")]);
+    client.command(edit("r8", "mine now"));
+    assert!(!client.asked_for(&edit_of("r8", "mine now")));
+}
+
+#[test]
+fn deleting_a_thread_only_reply_should_delete_it_on_the_server() {
+    let mut client = thread_only_reply();
+    client.command(Command::DeleteMessage("r9".into()));
+    assert!(client.asked_for(&delete_of("r9")));
+}
+
+#[test]
+fn deleting_a_thread_only_reply_should_take_it_out_of_the_thread() {
+    let mut client = thread_only_reply();
+    client.command(Command::DeleteMessage("r9".into()));
+    assert_eq!(Client::ids(&client.seen.thread), ["m1", "m2"]);
+}
+
+#[test]
+fn deleting_a_thread_only_reply_should_lower_the_roots_count_once() {
+    let mut root = msg(A, "m1", ALICE, 0);
+    root["reply_count"] = json!(2);
+    let mut client = Client::online(vec![root, reply(A, "m2", ME, 1, "m1")], 0);
+    client.open_thread(
+        "m1",
+        vec![reply(A, "m2", ME, 1, "m1"), reply(A, "r9", ME, 9, "m1")],
+    );
+    client.command(Command::DeleteMessage("r9".into()));
+    client.dispatch("MESSAGE_DELETE", json!({ "id": "r9", "channel_id": A }));
+    assert_eq!(client.row("m1").reply_count, 1);
+}
+
+#[test]
+fn a_refused_thread_delete_should_put_the_reply_back() {
+    let mut client = thread_only_reply();
+    client.command(Command::DeleteMessage("r9".into()));
+    client.fail(&delete_of("r9"), 500);
+    assert_eq!(Client::ids(&client.seen.thread), ["m1", "m2", "r9"]);
+}
+
+#[test]
+fn a_refused_thread_delete_should_leave_the_list_alone() {
+    let mut client = thread_only_reply();
+    client.command(Command::DeleteMessage("r9".into()));
+    client.fail(&delete_of("r9"), 500);
+    assert_eq!(Client::ids(&client.seen.rows), ["m1", "m2", "m3"]);
+}
+
+#[test]
+fn another_persons_thread_reply_should_need_manage_messages_to_delete() {
+    let mut client = Client::online(three(), 0);
+    client.open_thread("m1", vec![reply(A, "r8", ALICE, 8, "m1")]);
+    client.command(Command::DeleteMessage("r8".into()));
+    assert!(!client.asked_for(&delete_of("r8")));
+}
+
+#[test]
+fn a_thread_reaction_should_show_at_once() {
+    let mut client = thread_only_reply();
+    client.command(thumbs_up("r9"));
+    assert!(thread_row(&client, "r9").is_some_and(|r| r.reactions.contains("+1")));
+}
+
+#[test]
+fn a_thread_reaction_echo_should_change_nothing() {
+    let mut client = thread_only_reply();
+    client.command(thumbs_up("r9"));
+    let shown = thread_row(&client, "r9").map(|r| r.reactions.clone());
+    client.dispatch(
+        "REACTION_ADD",
+        json!({ "message_id": "r9", "channel_id": A, "user_id": ME, "emoji": "+1" }),
+    );
+    assert_eq!(
+        thread_row(&client, "r9").map(|r| r.reactions.clone()),
+        shown
+    );
+}
+
+#[test]
+fn a_refused_thread_reaction_should_be_taken_back() {
+    let mut client = thread_only_reply();
+    client.command(thumbs_up("r9"));
+    let react = ApiRequest::React {
+        channel_id: A.into(),
+        message_id: "r9".into(),
+        emoji: "+1".into(),
+        add: true,
+    };
+    client.fail(&react, 500);
+    assert!(thread_row(&client, "r9").is_some_and(|r| !r.reactions.contains("+1")));
+}
+
+// The member list's Threads tab
+
+fn thread_list(channel: &str) -> ApiRequest {
+    threads(ThreadRequest::ChannelThreads {
+        channel_id: channel.into(),
+    })
+}
+
+/// 2026-11-04T13:00:00Z.
+const ONE_PM: i64 = 1_793_797_200_000;
+
+fn list_threads() -> Command {
+    Command::Thread(ThreadCommand::List { now_ms: ONE_PM })
+}
+
+fn summary(id: &str, replies: i64, last_minute: u32) -> Value {
+    json!({
+        "id": id, "content": format!("starter {id}"),
+        "author": { "id": ALICE, "username": "alice", "display_name": "Alice A", "avatar_url": "/a.png" },
+        "reply_count": replies,
+        "last_reply_at": format!("2026-11-04 12:{last_minute:02}:00"),
+        "created_at": "2026-11-04 12:00:00",
+    })
+}
+
+#[test]
+fn the_threads_tab_should_ask_for_the_channels_threads() {
+    let request = ThreadRequest::ChannelThreads {
+        channel_id: A.into(),
+    };
+    assert_eq!(
+        (request.method(), request.path()),
+        (Method::Get, "/api/channels/chan_a/threads".into())
+    );
+}
+
+#[test]
+fn showing_the_threads_tab_should_load_the_open_channels_threads() {
+    let mut client = Client::online(three(), 0);
+    client.command(list_threads());
+    assert!(client.asked_for(&thread_list(A)));
+}
+
+#[test]
+fn the_threads_tab_should_show_each_starter_with_its_replies() {
+    let mut client = Client::online(three(), 0);
+    client.command(list_threads());
+    client.respond(
+        &thread_list(A),
+        json!({ "threads": [summary("m1", 3, 30)] }),
+    );
+    let row = &client.seen.panels.threads[0];
+    assert_eq!(
+        (
+            row.author.as_str(),
+            row.initials.as_str(),
+            row.avatar.as_str(),
+            row.replies,
+            row.last_reply.as_str()
+        ),
+        (
+            "Alice A",
+            "AA",
+            "https://api.fixture.invalid/a.png",
+            3,
+            "30m ago"
+        )
+    );
+}
+
+#[test]
+fn the_threads_tab_should_be_loading_while_it_asks() {
+    let mut client = Client::online(three(), 0);
+    client.command(list_threads());
+    assert!(client.seen.panels.threads_loading);
+}
+
+#[test]
+fn a_failed_threads_tab_should_say_why() {
+    let mut client = Client::online(three(), 0);
+    client.command(list_threads());
+    client.fail(&thread_list(A), 500);
+    assert_eq!(
+        client.seen.panels.threads_error,
+        "Unable to load threads. Try again in a moment."
+    );
+}
+
+#[test]
+fn an_answer_for_another_channel_should_not_fill_the_threads_tab() {
+    let mut client = Client::online(three(), 0);
+    client.command(list_threads());
+    client.command(Command::OpenChannel {
+        server_id: Some(SERVER.into()),
+        channel_id: B.into(),
+    });
+    client.command(list_threads());
+    client.respond(
+        &thread_list(A),
+        json!({ "threads": [summary("m1", 3, 30)] }),
+    );
+    assert!(client.seen.panels.threads.is_empty());
+}

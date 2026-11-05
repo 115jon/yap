@@ -13,8 +13,9 @@
 use std::collections::HashMap;
 
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use serde_json::{json, Value};
-use yap_protocol::rest::Message;
+use yap_protocol::rest::{Message, ThreadSummary};
 
 use super::state::MessageLog;
 use super::view::{Load, MessageRow};
@@ -37,6 +38,10 @@ pub enum ThreadCommand {
         nonce: String,
         sent_at: String,
     },
+    /// The member list's Threads tab was shown (MemberList.tsx fetches
+    /// `/threads` every time the tab opens): the open channel's threads
+    /// load afresh. `now_ms` dates their last replies ("5m ago").
+    List { now_ms: i64 },
 }
 
 /// The pins panel's intents.
@@ -62,6 +67,9 @@ pub enum ThreadRequest {
     },
     /// `GET /api/channels/{id}/pins`, newest first (pins.ts).
     Pins { channel_id: String },
+    /// `GET /api/channels/{id}/threads`: the channel's thread starters by
+    /// latest reply (threads.ts; the web sends no `limit`, so 30).
+    ChannelThreads { channel_id: String },
     /// `PUT /api/channels/{id}/pins` with `{message_id, pinned}` (pins.ts).
     SetPin {
         channel_id: String,
@@ -88,6 +96,7 @@ pub enum ThreadResponse {
         replies: Vec<Message>,
     },
     Pins(Vec<Message>),
+    ChannelThreads(Vec<ThreadSummary>),
     /// An `around` or `after` page, oldest first. `after` pages carry no
     /// `hasMoreBefore` (messages.ts), which reads as `false`.
     Window {
@@ -143,9 +152,11 @@ impl ThreadRequest {
     pub fn method(&self) -> Method {
         match self {
             Self::SetPin { .. } => Method::Put,
-            Self::Thread { .. } | Self::Pins { .. } | Self::Around { .. } | Self::After { .. } => {
-                Method::Get
-            }
+            Self::Thread { .. }
+            | Self::Pins { .. }
+            | Self::ChannelThreads { .. }
+            | Self::Around { .. }
+            | Self::After { .. } => Method::Get,
         }
     }
 
@@ -161,6 +172,7 @@ impl ThreadRequest {
             Self::Pins { channel_id } | Self::SetPin { channel_id, .. } => {
                 format!("/api/channels/{channel_id}/pins")
             }
+            Self::ChannelThreads { channel_id } => format!("/api/channels/{channel_id}/threads"),
             Self::Around {
                 channel_id,
                 message_id,
@@ -180,9 +192,11 @@ impl ThreadRequest {
             Self::SetPin {
                 message_id, pinned, ..
             } => json!({ "message_id": message_id, "pinned": pinned }),
-            Self::Thread { .. } | Self::Pins { .. } | Self::Around { .. } | Self::After { .. } => {
-                Value::Null
-            }
+            Self::Thread { .. }
+            | Self::Pins { .. }
+            | Self::ChannelThreads { .. }
+            | Self::Around { .. }
+            | Self::After { .. } => Value::Null,
         }
     }
 
@@ -197,6 +211,9 @@ impl ThreadRequest {
                 }
             }
             Self::Pins { .. } => ThreadResponse::Pins(lenient(body)),
+            Self::ChannelThreads { .. } => {
+                ThreadResponse::ChannelThreads(lenient(take(&mut body, "threads")))
+            }
             Self::SetPin { .. } => ThreadResponse::Done,
             // A bare array (older servers) is a window with nothing more.
             Self::Around { .. } | Self::After { .. } if body.is_array() => ThreadResponse::Window {
@@ -245,6 +262,9 @@ pub(super) enum PanelOp {
     Pins {
         channel_id: String,
     },
+    ChannelThreads {
+        channel_id: String,
+    },
     /// The message as it was, to put back if the server refuses.
     SetPin {
         message: Box<Message>,
@@ -277,6 +297,15 @@ pub struct PinsState {
     pub load: Load<Vec<Message>>,
 }
 
+/// The member list's Threads tab: the open channel's thread starters.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ThreadListState {
+    pub channel_id: String,
+    /// When the tab asked (for "5m ago").
+    pub now_ms: i64,
+    pub load: Load<Vec<ThreadSummary>>,
+}
+
 /// A jump waiting for its channel to open: (channel, message).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct JumpState {
@@ -290,6 +319,7 @@ pub struct JumpState {
 pub struct PanelsState {
     pub thread: ThreadState,
     pub pins: PinsState,
+    pub threads: ThreadListState,
     pub jump: JumpState,
     pub(super) pending: HashMap<RequestId, PanelOp>,
     /// The thread's or the pins' messages changed since their rows were
@@ -321,4 +351,25 @@ pub struct PanelsView {
     /// A failed load shows the empty state, as on the web (`loadPins`).
     pub pins_loading: bool,
     pub pins_count: i64,
+    /// The Threads tab (MemberList.tsx `ThreadsTabContent`): loading, the
+    /// error copy (empty otherwise) and its rows.
+    pub threads_loading: bool,
+    pub threads_error: String,
+    pub threads: Vec<ThreadListRow>,
+}
+
+/// One thread on the Threads tab: the starter's author, up to 200
+/// characters of it, its reply count and when the last reply came.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadListRow {
+    pub id: String,
+    pub author: String,
+    pub initials: String,
+    /// Absolute, or empty.
+    pub avatar: String,
+    pub content: String,
+    pub replies: i64,
+    /// "Just now", "5m ago", … or "Nov 5".
+    pub last_reply: String,
 }

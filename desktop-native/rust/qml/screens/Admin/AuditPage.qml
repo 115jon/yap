@@ -5,14 +5,18 @@ import com.yap.native
 // Server settings → Audit log (AuditLogTab.tsx): entries as sentences
 // ("Native Spike updated role Moderator") with targets by name (the id in
 // a tooltip), permission changes as a + / − list, the reason and the local
-// time. Never a raw id or bitfield in the text.
+// time. Never a raw id or bitfield in the text. The server sends the 50
+// newest (the web asks for no more); rows build a page at a time as the
+// page scrolls.
 Column {
     id: root
 
+    required property var host
     required property var model
 
     readonly property var audit: model.audit
     readonly property var list: audit.items ?? []
+    readonly property var blank: ({ actor: "", verb: "", target: null, details: [], reason: "", when: "", actorInitials: "", actorAvatar: "" })
 
     spacing: 40
     Component.onCompleted: Admin.load(model.server.id, "audit")
@@ -41,11 +45,13 @@ Column {
         title: qsTr("Recent activity")
         description: qsTr("Administrative actions taken in this server.")
 
-        Repeater {
-            model: root.list
+        PagedRows {
+            total: root.list.length
+            wanted: root.host.nearEnd
             delegate: Item {
                 id: entry
-                required property var modelData
+                required property int index
+                readonly property var modelData: root.list[index] ?? root.blank
                 readonly property var target: modelData.target
 
                 width: root.width

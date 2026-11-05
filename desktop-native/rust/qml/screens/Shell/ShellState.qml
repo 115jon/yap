@@ -18,6 +18,10 @@ QtObject {
     id: state
 
     property bool showMembers: true
+    // Channel details (ChatArea.tsx `showChannelDetails`, the header's
+    // title key): the member panel at 360 with its header and tabs. A
+    // channel change closes them.
+    property bool showDetails: false
 
     // The right-hand panels (ChatArea.tsx): one shows at a time, in this
     // order: search, then the thread (its root message id), then pins,

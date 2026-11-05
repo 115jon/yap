@@ -24,6 +24,12 @@ pub mod qobject {
         #[qproperty(i32, thread_replies, cxx_name = "threadReplies")]
         #[qproperty(bool, pins_loading, cxx_name = "pinsLoading")]
         #[qproperty(i32, pins_count, cxx_name = "pinsCount")]
+        /// The member list's Threads tab.
+        #[qproperty(bool, threads_loading, cxx_name = "threadsLoading")]
+        #[qproperty(QString, threads_error, cxx_name = "threadsError")]
+        /// Its rows as JSON: `[{id, author, initials, avatar, content,
+        /// replies, lastReply}]`.
+        #[qproperty(QString, threads)]
         type Panels = super::PanelsRust;
 
         /// Shows the thread of a message in the open channel.
@@ -49,6 +55,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "setPinned"]
         fn set_pinned(self: &Panels, message_id: &QString, pinned: bool);
+
+        /// The Threads tab showed: the open channel's threads load afresh.
+        #[qinvokable]
+        #[cxx_name = "listThreads"]
+        fn list_threads(self: &Panels, now_ms: f64);
     }
 
     impl cxx_qt::Initialize for Panels {}
@@ -71,6 +82,9 @@ pub struct PanelsRust {
     thread_replies: i32,
     pins_loading: bool,
     pins_count: i32,
+    threads_loading: bool,
+    threads_error: QString,
+    threads: QString,
 }
 
 fn int(n: i64) -> i32 {
@@ -88,7 +102,13 @@ fn apply(mut object: Pin<&mut qobject::Panels>, view: &PanelsView) {
         .set_thread_error(QString::from(view.thread_error.as_str()));
     object.as_mut().set_thread_replies(int(view.thread_replies));
     object.as_mut().set_pins_loading(view.pins_loading);
-    object.set_pins_count(int(view.pins_count));
+    object.as_mut().set_pins_count(int(view.pins_count));
+    object.as_mut().set_threads_loading(view.threads_loading);
+    object
+        .as_mut()
+        .set_threads_error(QString::from(view.threads_error.as_str()));
+    let rows = serde_json::to_string(&view.threads).unwrap_or_else(|_| "[]".to_owned());
+    object.set_threads(QString::from(rows.as_str()));
 }
 
 /// The store's panels view changed.
@@ -141,6 +161,13 @@ impl qobject::Panels {
 
     pub fn open_pins(&self) {
         client::command(Command::Pins(PinsCommand::Open));
+    }
+
+    pub fn list_threads(&self, now_ms: f64) {
+        // `Date.now()`: whole epoch milliseconds.
+        client::command(Command::Thread(ThreadCommand::List {
+            now_ms: now_ms as i64,
+        }));
     }
 
     pub fn set_pinned(&self, message_id: &QString, pinned: bool) {

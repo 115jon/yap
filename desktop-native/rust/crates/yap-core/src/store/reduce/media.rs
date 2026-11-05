@@ -66,13 +66,14 @@ impl State {
             return;
         };
         let me = me.id.clone();
-        // A thread reply the open list has not loaded reacts too; its
-        // chip arrives with the echo.
+        // A thread reply the open list has not loaded reacts too, at once
+        // in the panel; the echo then reconciles nothing (react is
+        // idempotent), and a refusal takes the chip back.
         let Some(message) = self
             .messages
             .as_ref()
             .and_then(|log| log.get(message_id))
-            .or_else(|| self.panels.thread.log.get(message_id))
+            .or_else(|| self.thread_message(message_id))
         else {
             return;
         };
@@ -103,6 +104,7 @@ impl State {
         // After the change is pending: the cache holds the chip back until
         // the server answers.
         self.react_row(fx, message_id, emoji, &me, add);
+        self.react_thread_copy(message_id, emoji, &me, add);
     }
 
     /// Applies one reaction change to the open channel's row.
@@ -138,13 +140,16 @@ impl State {
             // Confirmed: the cache may take the chip now.
             Ok(_) => self.persist_messages(fx),
             Err(error) if error.is_unauthorized() => self.fail(fx, &error),
-            Err(_) => self.react_row(
-                fx,
-                &change.message_id,
-                &change.emoji,
-                &change.user_id,
-                !change.added,
-            ),
+            Err(_) => {
+                let ReactionChange {
+                    message_id,
+                    emoji,
+                    user_id,
+                    added,
+                } = &change;
+                self.react_row(fx, message_id, emoji, user_id, !added);
+                self.react_thread_copy(message_id, emoji, user_id, !added);
+            }
         }
     }
 

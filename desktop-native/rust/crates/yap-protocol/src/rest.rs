@@ -628,6 +628,24 @@ fn count<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
     Ok(Option::<i64>::deserialize(deserializer)?.unwrap_or(0))
 }
 
+/// A thread starter in `GET /api/channels/{id}/threads` (`{threads}`,
+/// message.service.ts `fetchChannelThreads`): a message with replies, its
+/// content cut to 200 characters, newest reply first.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct ThreadSummary {
+    pub id: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub author: User,
+    #[serde(default, deserialize_with = "count")]
+    pub reply_count: i64,
+    #[serde(default)]
+    pub last_reply_at: String,
+    #[serde(default)]
+    pub created_at: String,
+}
+
 /// `MESSAGE_UPDATE` dispatch data when it is partial (an edit, or embeds that
 /// arrived after a link unfurl): only `id` is guaranteed, and a field that is
 /// absent did not change. A full update carries `author` and decodes as

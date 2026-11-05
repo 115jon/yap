@@ -451,8 +451,9 @@ pub(super) struct Pending {
     pub reads: HashMap<RequestId, (String, Option<String>, String)>,
     /// request → the message as it was before the edit
     pub edits: HashMap<RequestId, Message>,
-    /// request → the message the delete removed
-    pub deletes: HashMap<RequestId, Message>,
+    /// request → the message the delete removed, and whether it was in the
+    /// open list (a thread-only reply goes back to the thread alone)
+    pub deletes: HashMap<RequestId, (Message, bool)>,
     pub dms: Option<RequestId>,
     /// (request, user id) of the DM being opened
     pub open_dm: Option<(RequestId, String)>,

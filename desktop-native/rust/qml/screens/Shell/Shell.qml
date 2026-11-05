@@ -15,7 +15,7 @@ RowLayout {
     readonly property bool docked: width >= 1024
     // Search, a thread or pins take the members' place (ChatArea.tsx).
     readonly property bool panelShown: ShellState.sidePanel.length > 0 && chatShown
-    readonly property bool membersShown: ShellState.showMembers && chatShown && !panelShown
+    readonly property bool membersShown: (ShellState.showMembers || ShellState.showDetails) && chatShown && !panelShown
     readonly property bool sheetWanted: membersShown && !docked
     readonly property bool panelSheetWanted: panelShown && !docked
 
@@ -51,10 +51,19 @@ RowLayout {
             ShellState.pinsOpen = false
     }
 
-    // A thread belongs to its channel.
+    // A thread and the details belong to their channel.
     Connections {
         target: Nav
-        function onActiveChannelIdChanged() { ShellState.threadId = "" }
+        function onActiveChannelIdChanged() {
+            ShellState.threadId = ""
+            ShellState.showDetails = false
+        }
+    }
+
+    // Dismissing the members (sheet or close key) closes the details too.
+    function closeMembers() {
+        ShellState.showDetails = false
+        ShellState.showMembers = false
     }
 
     Component {
@@ -128,7 +137,7 @@ RowLayout {
     Rectangle {
         visible: root.membersShown && root.docked
         Layout.fillHeight: true
-        Layout.preferredWidth: 240
+        Layout.preferredWidth: ShellState.showDetails ? 360 : 240
         color: Theme.ply0
         Rectangle {
             width: 1
@@ -138,6 +147,7 @@ RowLayout {
         MemberPanel {
             anchors.fill: parent
             anchors.leftMargin: 1
+            details: ShellState.showDetails
         }
     }
 
@@ -200,14 +210,14 @@ RowLayout {
     T.Drawer {
         id: sheet
         edge: Qt.RightEdge
-        width: 320
+        width: ShellState.showDetails ? 360 : 320
         height: root.height
         y: 0
         modal: true
         interactive: false
         onClosed: {
             if (!root.closingForLayout)
-                ShellState.showMembers = false
+                root.closeMembers()
             root.closingForLayout = false
         }
         // Templates drawers move only through these (drawer ease, 250 ms).
@@ -227,8 +237,10 @@ RowLayout {
         }
         T.Overlay.modal: Rectangle { color: Theme.scrim }
         contentItem: Item {
+            // In details the panel draws its own header instead.
             Item {
                 id: sheetHeader
+                visible: !ShellState.showDetails
                 width: parent.width
                 height: Theme.header
                 Text {
@@ -248,7 +260,7 @@ RowLayout {
                     tone: "muted"
                     tip: qsTr("Close")
                     tipSide: "bottom"
-                    onClicked: ShellState.showMembers = false
+                    onClicked: root.closeMembers()
                 }
                 Rectangle {
                     anchors.bottom: parent.bottom
@@ -259,8 +271,9 @@ RowLayout {
             }
             MemberPanel {
                 ground: Theme.ply3
-                anchors.top: sheetHeader.bottom
-                anchors.topMargin: 8
+                details: ShellState.showDetails
+                anchors.top: ShellState.showDetails ? parent.top : sheetHeader.bottom
+                anchors.topMargin: ShellState.showDetails ? 0 : 8
                 anchors.bottom: parent.bottom
                 width: parent.width
             }

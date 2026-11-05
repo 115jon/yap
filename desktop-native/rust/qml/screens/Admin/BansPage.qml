@@ -13,8 +13,9 @@ Column {
 
     readonly property var bans: model.bans
     readonly property var list: bans.items ?? []
-    // The row whose Unban confirm is open: kept here, since the rows are
-    // rebuilt whenever the admin state changes.
+    readonly property var blank: ({ userId: "", name: "", initials: "", avatar: "", reason: "", meta: "" })
+    // The row whose Unban confirm is open: kept by user, since a row
+    // shows whichever ban is at its place in the list.
     property string armedId: ""
 
     function dismiss() {
@@ -53,11 +54,14 @@ Column {
         title: qsTr("Banned members")
         description: qsTr("They can't rejoin, even with an invite, until you unban them.")
 
-        Repeater {
-            model: root.list
+        // Built a page at a time as the page scrolls.
+        PagedRows {
+            total: root.list.length
+            wanted: root.host.nearEnd
             delegate: Item {
                 id: row
-                required property var modelData
+                required property int index
+                readonly property var modelData: root.list[index] ?? root.blank
                 readonly property var unbanning: root.model.acts["unban:" + modelData.userId] ?? { busy: false, error: "" }
                 readonly property bool armed: root.armedId === modelData.userId
 

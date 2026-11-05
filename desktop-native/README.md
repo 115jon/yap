@@ -136,7 +136,9 @@ the decisions.
   with the icon, name, share switches and the owner's Delete server; Roles
   with the editor and the web's permission groups; Invites with pause, the
   create form, countdowns, copy and revoke; Bans with unban; the Audit
-  log as sentences), Channel settings (name, topic, public sharing, and the
+  log as sentences, the 50 newest as on the web; the API pages by `page`,
+  not `before`, so there is no Load more), with long lists built a page at
+  a time as the page scrolls (`PagedRows`), Channel settings (name, topic, public sharing, and the
   Deny / Inherit / Allow overrides per role and member), Create channel and
   Create category, the tree's channel, category and sidebar menus with
   delete confirms, drag to reorder within a group, Kick and Ban (with a
@@ -150,7 +152,12 @@ the decisions.
   and memes, paging), sending through `/messages/gif` at once.
 - Threads, pins and jumps (`store/threads.rs`, `qml/screens/Panels`): the
   thread chip and panel (root, replies, its own reply field, live replies,
-  edits and reactions, reply counts), pin and unpin with the confirm and
+  edits and reactions, reply counts; edit, delete and reactions on a reply
+  the open list has not loaded, at once and undone on a refusal, with the
+  list's endpoints and permissions), the channel details (the header's
+  title key: the member panel at 360 with Members and Threads tabs; the
+  Threads tab lists `/threads` with each starter, its reply count and last
+  reply, and opens its thread), pin and unpin with the confirm and
   the pinned glyph (Manage messages or more; anyone in a DM), the pins panel
   with `MESSAGE_PIN` / `MESSAGE_UNPIN`, `Chat.jumpToMessage` with `around=`,
   the detached window (newer pages, Jump to present, no read marks until
@@ -162,7 +169,8 @@ the decisions.
   chips with suggestions and keyboard picks, sort, paging, results grouped
   by channel with highlighted excerpts, recent searches
   (`search-recent.json`), and a result jumps to its message. Server search
-  in a server, channel search in a DM.
+  in a server, channel search in a DM. Closing the panel gives focus back
+  to the control that opened it.
 - Friends as the web has them (`qml/screens/Friends`, `store/friends.rs`):
   Home with no DM open is the Friends view (Online, All, Pending split into
   Incoming and Sent, Blocked; Add friend by username with the web's copy;
@@ -201,8 +209,8 @@ unless "Open on startup" is on), data and logs under
 Camera backgrounds, the stream watcher list and stream
 volume, input volume, a mic test outside a call, inline video playback, clips in the GIF picker,
 GIF favorites and categories, stickers, emoji generation, the reaction details
-modal, remove-embeds, embed players (WebView2), the member list's threads
-tab, Leave server (no API), toast buttons (reply, mark read)
+modal, remove-embeds, embed players (WebView2), the channel details' Media,
+Links and Files tabs, Leave server (no API), toast buttons (reply, mark read)
 and avatars, call rings, the taskbar thumbnail toolbar and auto-update. In
 settings: avatar crop and the recent-avatar picker, display name styles,
 collectibles, username changes, sign-out and session revoke from the page,

@@ -4,6 +4,12 @@ Status: read-only mapping, 2026-11-04, branch `spike/qt-desktop`. What the curre
 Yap desktop app (web UI in Tauri + CEF) does, how it does it on the wire, and
 what YapNative needs to match it.
 
+Progress, 2026-11-05: 1.6 (pins), 1.7 (threads, with the member list's
+Threads tab and edits, deletes and reactions on thread-only replies) and
+1.8 (search) are done; 3.5 and 3.6 are done, their lists built a page at a
+time. The channel details' Media, Links and Files tabs and Leave server are
+still open. README.md has the detail.
+
 Read alongside:
 
 - [../FEASIBILITY.md](../FEASIBILITY.md): auth, gateway basics, REST basics.

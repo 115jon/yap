@@ -2283,10 +2283,13 @@ impl State {
             return;
         };
         let me = me.id.clone();
+        // A thread reply the open list has not loaded edits too (the same
+        // PATCH; only its author may).
         let Some(original) = self
             .messages
             .as_ref()
             .and_then(|log| log.get(id))
+            .or_else(|| self.thread_message(id))
             .filter(|m| m.author_id == me && !is_pending(m))
             .cloned()
         else {
@@ -2331,7 +2334,10 @@ impl State {
             Ok(_) => {}
             Err(error) if error.is_unauthorized() => self.fail(fx, &error),
             Err(_) => {
-                self.upsert_if_open(fx, original);
+                self.restore_thread_copy(&original);
+                if self.position_of(&original.id).is_some() {
+                    self.upsert_if_open(fx, original);
+                }
                 fx.view(ViewUpdate::Notice(EDIT_FAILED.to_owned()));
             }
         }
@@ -2344,40 +2350,52 @@ impl State {
             return;
         };
         let me = me.id.clone();
-        // Our own, or anyone's with MANAGE_MESSAGES (messages.ts DELETE).
+        // Our own, or anyone's with MANAGE_MESSAGES (messages.ts DELETE);
+        // a thread reply the open list has not loaded too.
         let manage = self.can_manage_messages();
-        let allowed = self
+        let Some(message) = self
             .messages
             .as_ref()
             .and_then(|log| log.get(id))
-            .is_some_and(|m| (manage || m.author_id == me) && !is_pending(m));
-        if !allowed {
-            return;
-        }
-        let Some(message) = self.remove_row(fx, id) else {
+            .or_else(|| self.thread_message(id))
+            .filter(|m| (manage || m.author_id == me) && !is_pending(m))
+            .cloned()
+        else {
             return;
         };
-        self.persist_messages(fx);
+        let listed = self.remove_row(fx, id).is_some();
+        if listed {
+            self.persist_messages(fx);
+        }
+        if self.drop_thread_copy(id) && !listed {
+            // The list's copy would have moved its parent's count.
+            self.bump_reply_count(fx, message.reply_to_id.as_deref(), -1);
+        }
         let request = ApiRequest::DeleteMessage {
             channel_id: message.channel_id.clone(),
             message_id: id.to_owned(),
         };
         if let Some(request) = self.http(fx, request) {
-            self.pending.deletes.insert(request, message);
+            self.pending.deletes.insert(request, (message, listed));
         }
     }
 
     fn on_deleted(
         &mut self,
         fx: &mut Effects,
-        message: Message,
+        (message, listed): (Message, bool),
         result: Result<ApiResponse, ApiError>,
     ) {
         match result {
             Ok(_) => {}
             Err(error) if error.is_unauthorized() => self.fail(fx, &error),
             Err(_) => {
-                self.insert_row_sorted(fx, message);
+                if self.put_back_thread_copy(&message) && !listed {
+                    self.bump_reply_count(fx, message.reply_to_id.as_deref(), 1);
+                }
+                if listed {
+                    self.insert_row_sorted(fx, message);
+                }
                 fx.view(ViewUpdate::Notice(DELETE_FAILED.to_owned()));
             }
         }
@@ -2388,6 +2406,7 @@ impl State {
         if patch.channel_id.is_some() && patch.channel_id.as_deref() != active {
             return;
         }
+        self.patch_thread_copy(patch);
         let Some(at) = self.position_of(&patch.id) else {
             return;
         };
