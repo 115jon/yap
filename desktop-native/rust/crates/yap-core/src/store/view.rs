@@ -2,6 +2,7 @@
 //! that keep a model in step with the store, and the scalar values the UI
 //! binds. The bridge maps rows to Qt roles; it never parses or derives.
 
+use serde::Serialize;
 use std::collections::HashSet;
 use std::hash::Hash;
 
@@ -690,6 +691,126 @@ pub struct UnreadView {
     pub since_day: i64,
 }
 
+/// Something the settings dialog loads on demand.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Load<T> {
+    /// Not asked for yet.
+    #[default]
+    Idle,
+    Loading,
+    Ready(T),
+    /// The error copy (`describeApiError`).
+    Failed(String),
+}
+
+impl<T> Load<T> {
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading)
+    }
+
+    pub fn ready(&self) -> Option<&T> {
+        match self {
+            Self::Ready(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn error(&self) -> &str {
+        match self {
+            Self::Failed(error) => error,
+            _ => "",
+        }
+    }
+
+    /// `idle`, `loading`, `ready` or `error`.
+    pub fn state(&self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Loading => "loading",
+            Self::Ready(_) => "ready",
+            Self::Failed(_) => "error",
+        }
+    }
+}
+
+/// One signed-in device (SessionsPanel.tsx `SessionItem`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRow {
+    pub id: String,
+    /// "Desktop · Desktop client".
+    pub title: String,
+    /// "Austin, US", or "Unknown location".
+    pub location: String,
+    pub mobile: bool,
+    pub current: bool,
+    /// When it was last used (epoch ms), if known.
+    pub last_active_ms: Option<i64>,
+}
+
+/// One shared message link (PrivacyPanel.tsx `ShareItem`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShareRow {
+    pub id: String,
+    /// The public page (`{api}/share/{token}`).
+    pub url: String,
+    pub author: String,
+    pub content: String,
+    /// As stored; the shown status also needs the clock (expiry).
+    pub status: String,
+    pub revoked: bool,
+    pub created_at: String,
+    pub expires_at: Option<String>,
+    pub expires_ms: Option<i64>,
+    pub views: i64,
+}
+
+/// Everything the settings dialog shows that the store owns: the account
+/// as the server has it, what was loaded for the panels, and how each save
+/// is going.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SettingsView {
+    /// The stored display name (empty: none, the username shows).
+    pub display_name: String,
+    pub name: String,
+    pub username: String,
+    pub initials: String,
+    pub avatar: String,
+    /// The avatar is an upload (`/api/avatars/…`), so it can be removed.
+    pub custom_avatar: bool,
+    pub status: String,
+    pub custom_status: String,
+    pub pronouns: String,
+    pub bio: String,
+    pub banner: String,
+    /// `#RRGGBB`, or empty for Auto.
+    pub banner_color: String,
+    pub accent_color: String,
+    pub background_color: String,
+    pub theme_preference: String,
+    pub theme_sync: bool,
+    pub media_filter: String,
+    pub created_at: String,
+    /// Kova: the email (empty: none on file) and the sign-in methods.
+    pub email: Load<String>,
+    pub sign_in_methods: Load<String>,
+    pub sessions: Load<Vec<SessionRow>>,
+    pub shares: Load<Vec<ShareRow>>,
+    pub display_name_saving: bool,
+    pub display_name_error: String,
+    pub profile_saving: bool,
+    pub profile_error: String,
+    /// Counts finished profile saves ("Changes saved").
+    pub profile_saved: u64,
+    /// The level being saved, if one is.
+    pub media_filter_saving: String,
+    pub media_filter_error: String,
+    pub revoking_share: String,
+    /// (share id, error copy) of the last failed revoke.
+    pub share_error: (String, String),
+}
+
 /// Updates for the Qt side: typed scalars and one diff stream per model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewUpdate {
@@ -745,6 +866,7 @@ pub enum ViewUpdate {
     DmUnread(i64),
     Members(ViewDiff<MemberListRow>),
     Profile(Box<ProfileView>),
+    Settings(Box<SettingsView>),
     /// A native toast. The shell drops it when notifications are off.
     Toast(Box<ToastView>),
     /// A UI sound. The shell drops it when sounds are off.

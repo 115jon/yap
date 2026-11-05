@@ -135,9 +135,14 @@ impl Api {
     }
 
     fn request(&self, method: Method, path: &str) -> RequestBuilder {
+        self.request_at(method, &config::get().api_base, path)
+    }
+
+    /// A request to `base` (the API, or Kova's auth server) with the session.
+    fn request_at(&self, method: Method, base: &str, path: &str) -> RequestBuilder {
         let cfg = config::get();
         self.http
-            .request(method, format!("{}{}", cfg.api_base, path))
+            .request(method, format!("{base}{path}"))
             .bearer_auth(self.token.as_str())
             .header("X-Publishable-Key", &cfg.publishable_key)
     }
@@ -181,6 +186,28 @@ impl Api {
         path: &str,
         body: &Value,
     ) -> Result<Value, ApiError> {
+        self.call_at(method, &config::get().api_base, path, body)
+            .await
+    }
+
+    /// [`Api::call`] on Kova's auth server.
+    pub async fn call_kova(
+        &self,
+        method: crate::store::Method,
+        path: &str,
+        body: &Value,
+    ) -> Result<Value, ApiError> {
+        self.call_at(method, &config::get().kova_auth_url, path, body)
+            .await
+    }
+
+    async fn call_at(
+        &self,
+        method: crate::store::Method,
+        base: &str,
+        path: &str,
+        body: &Value,
+    ) -> Result<Value, ApiError> {
         use crate::store::Method as M;
         let method = match method {
             M::Get => Method::GET,
@@ -189,7 +216,7 @@ impl Api {
             M::Patch => Method::PATCH,
             M::Delete => Method::DELETE,
         };
-        let builder = self.request(method, path);
+        let builder = self.request_at(method, base, path);
         let builder = if body.is_null() {
             builder
         } else {

@@ -2,6 +2,7 @@
 //! sequential core performed them, so the UI sees the same updates.
 
 mod media;
+mod settings;
 mod social;
 
 use std::time::Duration;
@@ -75,6 +76,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
             }
         }
     }
+    state.sync_settings(&mut fx);
     fx.0
 }
 
@@ -1032,6 +1034,14 @@ impl State {
                 sent_at,
             } => self.send_gif(fx, &gif_id, reply_to_id, nonce, sent_at),
             Command::Download { url, dest, open } => self.download(fx, &url, &dest, open),
+            Command::LoadAccount => self.load_account(fx),
+            Command::LoadSessions => self.load_sessions(fx),
+            Command::LoadShares => self.load_shares(fx),
+            Command::RevokeShare(share_id) => self.revoke_share(fx, share_id),
+            Command::SaveDisplayName(name) => self.save_display_name(fx, &name),
+            Command::SaveProfile(draft) => self.save_profile(fx, &draft),
+            Command::SetMediaFilter(level) => self.set_media_filter(fx, &level),
+            Command::SaveTheme { theme, sync } => self.save_theme(fx, theme, sync),
             Command::JoinVoice(id) => self.join_voice(fx, id),
             Command::WatchStream {
                 participant_id,
@@ -1313,6 +1323,7 @@ impl State {
     }
 
     fn end_session(&mut self, fx: &mut Effects, revoke: bool) {
+        self.clear_settings();
         self.leave_voice(fx);
         self.close_voice_panel(fx);
         self.voice_channels.clear();
@@ -1437,6 +1448,13 @@ impl State {
         id: RequestId,
         result: Result<ApiResponse, ApiError>,
     ) {
+        let mut answer = Some(result);
+        if self.route_settings_http(fx, id, &mut answer) {
+            return;
+        }
+        let Some(result) = answer else {
+            return;
+        };
         let pending = &mut self.pending;
         if pending.me == Some(id) {
             pending.me = None;

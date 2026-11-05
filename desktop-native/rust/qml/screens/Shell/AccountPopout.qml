@@ -87,6 +87,14 @@ T.Popup {
                 width: parent.width
                 visible: !popup.statusView
                 AccountRowKey {
+                    glyph: "edit"
+                    text: qsTr("Edit profile")
+                    onTriggered: {
+                        popup.close()
+                        SettingsNav.profileEditorRequested()
+                    }
+                }
+                AccountRowKey {
                     glyphItem: Component {
                         Led {
                             size: 10

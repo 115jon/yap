@@ -3,10 +3,10 @@ import QtQuick.Templates as T
 import com.yap.native
 
 // A device select (SettingsSelect on the FieldPlate recipe): ply-2, a 1 px
-// line-field edge (ink-2 on hover, ink-1 plus the ring on focus), 40 high,
-// the chosen name and a caret. It opens the list as radio rows under it;
-// the first entry is the system default, named after it with a "Default"
-// hint (`firstIsDefault: false` for a plain list of options).
+// line-field edge (ink-2 on hover, ink-1 plus the ring on focus), 40 high
+// (48 `large`), the chosen name and a caret. It opens the list as radio
+// rows under it; the first entry is the system default, named after it
+// with a "Default" hint (`firstIsDefault: false` for a plain list).
 T.AbstractButton {
     id: control
 
@@ -16,6 +16,8 @@ T.AbstractButton {
     // The default's name when the system did not give one.
     property string fallback: ""
     property bool firstIsDefault: true
+    // The 48 px legend-plate control of a settings field row.
+    property bool large: false
     readonly property int currentIndex: Math.max(0, ids.indexOf(current))
 
     signal picked(string id)
@@ -26,7 +28,7 @@ T.AbstractButton {
     }
 
     implicitWidth: 360
-    implicitHeight: 40
+    implicitHeight: large ? Theme.controlLg : Theme.control
     leftPadding: 16
     rightPadding: 40
     focusPolicy: Qt.StrongFocus

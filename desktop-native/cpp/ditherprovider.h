@@ -7,6 +7,8 @@
 //   bark/<rest|closed|half|open>/<rgb>      Yappy, 32 x 32 (accent dither)
 //   voice/<frame rgb>/<light rgb>           the level meter, 27 x 20
 //   dots/<coverage 0-100>/<rgb>/<w>/<h>     a 4x4 Bayer tile over w x h
+//   ramp/<from>/<to>/<lift>/<rgb>/<w>/<h>   an 8x8 Bayer ramp (percentages):
+//                                           DitherRule, DitherRamp
 
 #include <QtQuick/QQuickImageProvider>
 

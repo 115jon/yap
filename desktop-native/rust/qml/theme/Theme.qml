@@ -273,6 +273,8 @@ QtObject {
         readonly property font row: Qt.font({ family: "Yap Geist Medium", pixelSize: 14, weight: Font.Medium })
         readonly property font rowUnread: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 14, weight: Font.DemiBold })
         readonly property font description: Qt.font({ family: "Yap Geist", pixelSize: 13, weight: Font.Normal })
+        // A settings row's label (primitives.tsx: 15/500).
+        readonly property font setting: Qt.font({ family: "Yap Geist Medium", pixelSize: 15, weight: Font.Medium })
         readonly property font occupant: Qt.font({ family: "Yap Geist Medium", pixelSize: 13, weight: Font.Medium })
         readonly property font caption: Qt.font({ family: "Yap Geist", pixelSize: 12, weight: Font.Normal })
         readonly property font captionStrong: Qt.font({ family: "Yap Geist Medium", pixelSize: 12, weight: Font.Medium })

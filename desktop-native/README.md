@@ -90,8 +90,23 @@ the decisions.
   Windows toasts for messages, mentions, replies and DMs (click opens the
   channel), the taskbar flash, the saved window rect, start minimized and
   open on startup, the web's UI sounds (`synth.rs`, played through
-  `waveOut`), and a rotating log file. The switches sit in the account
-  row's settings menu until a settings screen exists.
+  `waveOut`), and a rotating log file.
+- User settings, the web's Studio workbench (`qml/screens/Settings`): the
+  numbered nav (01 You, 02 Calls, 03 App), search that lands on rows
+  (the map, search and rules are `yap-core` `settings.rs`), the poster
+  page, rule cards and the preview rails; the settings key opens it, the
+  device menus open Voice & video. Account: display name (saved to the
+  account), username, email and sign-in methods from Kova. The profile
+  editor (account card or Account): avatar and banner uploads, banner,
+  background and accent colours, custom status, pronouns and bio, with the
+  live card and the unsaved bar. Sessions (list), Privacy (media filter,
+  which the GIF search follows; shared links with copy, open and revoke),
+  Voice & video (the old voice popup, plus camera, preview and quality),
+  Soundboard volume, Keybinds, Appearance (the seven themes in
+  `appearance.json`, synced to the account when "Use this theme on all my
+  devices" is on, and the preview sheet), Notifications (desktop alerts,
+  sound volume and each sound category, Test) and Desktop app (startup and
+  closing, the version). What this build cannot do shows "Coming later".
 
 - Media in messages as the web draws it: pictures (one fitted in 640 x 400,
   or the 2-10 tile grid; GIFs animate; sensitive ones blurred behind
@@ -131,7 +146,11 @@ volume, input volume, a mic test outside a call, inline video playback, clips in
 GIF favorites and categories, stickers, emoji generation, the reaction details
 modal, remove-embeds, embed players (WebView2), jumping to
 messages that are not loaded (`around=`), `yap://` deep links, toast buttons (reply, mark read)
-and avatars, call rings, the taskbar thumbnail toolbar and auto-update.
+and avatars, call rings, the taskbar thumbnail toolbar and auto-update. In
+settings: avatar crop and the recent-avatar picker, display name styles,
+collectibles, username changes, sign-out and session revoke from the page,
+server profiles, soundboard join and leave sounds, call keybinds, custom
+sounds, spatial audio, hardware acceleration and the game capture switch.
 
 ## Build (Windows)
 
@@ -170,6 +189,7 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_FAKE_CAMERA`          | unset                     | `1`: a test pattern stands in for every camera                                                                                      |
 | `YAP_SHARE_ONLY_OURS`      | unset                     | `1`: share stills and captures only of our own windows (or one titled "Yap Native Share Test"); other windows listed without titles |
 | `YAP_FAKE_SHARE_AUDIO`     | unset                     | `1`: share audio is a 440 Hz tone, never a loopback                                                                                 |
+| `YAP_PICK_FILES`           | unset                     | `a.png;b.png`: returned by the file picker instead of showing it (tests)                                                            |
 
 The defaults mirror `src/lib/site-defaults.ts`.
 
@@ -188,9 +208,10 @@ uvx --from fonttools --with brotli python -I tools/build-fonts.py
 node tools/build-icons.mjs
 ```
 
-- `Theme.qml` holds every token for the six themes; `YAP_THEME` picks one
-  (`dark`, `light`, `miku-dark`, `miku-light`, `spiderman-dark`,
-  `spiderman-light`). Type roles are `Theme.type.*` font values.
+- `Theme.qml` holds every token for the six themes. Settings → Appearance
+  picks one (or `system`), kept in `appearance.json`; `YAP_THEME` (`dark`,
+  `light`, `miku-dark`, `miku-light`, `spiderman-dark`, `spiderman-light`)
+  overrides it for a run. Type roles are `Theme.type.*` font values.
 - `Icon { name: "mic"; variant: "off"; size: 20; color: Theme.ink2 }` draws
   through `cpp/iconprovider.cpp` (`image://icon/<concept>/<variant>/<rgb>`),
   which composites the slash and rotation as `Icon.tsx` does.

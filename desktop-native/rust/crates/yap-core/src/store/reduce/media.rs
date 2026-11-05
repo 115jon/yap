@@ -348,11 +348,15 @@ impl State {
 
     fn fetch_gifs(&mut self, fx: &mut Effects, more: bool) {
         let customer_id = self.me().map(|me| me.id.clone()).unwrap_or_default();
+        let content_filter = crate::settings::media_filter(
+            self.me().and_then(|me| me.media_content_filter.as_deref()),
+        );
         let request = ApiRequest::Gifs {
             query: self.gifs.query.clone(),
             media_type: self.gifs.media_type.clone(),
             next: if more { self.gifs.next.clone() } else { None },
             customer_id,
+            content_filter: content_filter.to_owned(),
         };
         if let Some(id) = self.http(fx, request) {
             self.pending.gifs = Some((id, more));

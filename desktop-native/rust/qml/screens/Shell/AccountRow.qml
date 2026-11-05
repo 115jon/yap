@@ -7,8 +7,9 @@ import com.yap.native
 // ink; the handle while hovered), then mic and deafen (quiet dock keys
 // with their device carets) and settings. Mic and deafen work before and
 // during a call; they are kept between calls. The carets open the device
-// menus; both they and the settings menu lead to the voice settings. The
-// avatar wears the speaking ring (rm-speak) while you talk.
+// menus, which lead to Settings → Voice & video; the settings key opens
+// Settings on Account. The avatar wears the speaking ring (rm-speak) while
+// you talk.
 Rectangle {
     id: root
 
@@ -162,76 +163,21 @@ Rectangle {
             label: qsTr("Output settings")
             menu: outputMenu
         }
-        // Settings: the Studio settings shell comes later; until then the
-        // key opens the desktop switches.
         IconKey {
-            id: settingsKey
             iconName: "settings"
-            tone: settingsMenu.visible ? "toggled" : "ghost"
-            tip: settingsMenu.visible ? "" : qsTr("User settings")
-            onClicked: settingsMenu.visible
-                ? settingsMenu.close()
-                : settingsMenu.popup(settingsKey, settingsKey.width - settingsMenu.implicitWidth, -settingsMenu.implicitHeight - 4)
-        }
-    }
-
-    // DesktopPanel.tsx (startup and closing) and NotificationsPanel.tsx
-    // (desktop notifications, sound effects), in their labels.
-    MenuPanel {
-        id: settingsMenu
-        implicitWidth: 248
-        MenuRow {
-            text: qsTr("Voice settings")
-            glyph: "mic"
-            onTriggered: voiceSettings.open()
-        }
-        MenuRule {}
-        MenuRow {
-            text: qsTr("Open on startup")
-            glyph: "power"
-            switchable: true
-            on: Desktop.openOnStartup
-            onTriggered: Desktop.setSetting("openOnStartup", !Desktop.openOnStartup)
-        }
-        MenuRow {
-            text: qsTr("Start minimized")
-            glyph: "minimize"
-            switchable: true
-            on: Desktop.startMinimized
-            onTriggered: Desktop.setSetting("startMinimized", !Desktop.startMinimized)
-        }
-        MenuRow {
-            text: qsTr("Close to tray")
-            glyph: "window"
-            switchable: true
-            on: Desktop.closeToTray
-            onTriggered: Desktop.setSetting("closeToTray", !Desktop.closeToTray)
-        }
-        MenuRow {
-            text: qsTr("Desktop notifications")
-            glyph: "bell"
-            switchable: true
-            on: Desktop.notifications
-            onTriggered: Desktop.setSetting("notifications", !Desktop.notifications)
-        }
-        MenuRow {
-            text: qsTr("Sound effects")
-            glyph: "speaker"
-            switchable: true
-            on: Desktop.sounds
-            onTriggered: Desktop.setSetting("sounds", !Desktop.sounds)
+            tip: qsTr("User settings")
+            onClicked: SettingsNav.show("account", "")
         }
     }
 
     DeviceMenu {
         id: inputMenu
         mode: "input"
-        onVoiceSettings: voiceSettings.open()
+        onVoiceSettings: SettingsNav.show("voice", "microphone")
     }
     DeviceMenu {
         id: outputMenu
         mode: "output"
-        onVoiceSettings: voiceSettings.open()
+        onVoiceSettings: SettingsNav.show("voice", "speaker")
     }
-    VoiceSettings { id: voiceSettings }
 }

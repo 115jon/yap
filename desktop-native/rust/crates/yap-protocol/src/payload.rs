@@ -213,6 +213,19 @@ pub struct UserProfileUpdate {
     pub bio: Option<Option<String>>,
     #[serde(default, deserialize_with = "present")]
     pub pronouns: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    pub profile_accent_color: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    pub profile_background_color: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    pub banner_content_type: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    pub theme_preference: Option<Option<String>>,
+    /// Sent to every member as `true`/`false`.
+    pub theme_sync_enabled: Option<Value>,
+    /// Sent only to the user's own sessions.
+    #[serde(default, deserialize_with = "present")]
+    pub media_content_filter: Option<Option<String>>,
 }
 
 impl UserProfileUpdate {
@@ -228,11 +241,22 @@ impl UserProfileUpdate {
             (&self.profile_banner_color, &mut user.profile_banner_color),
             (&self.bio, &mut user.bio),
             (&self.pronouns, &mut user.pronouns),
+            (&self.profile_accent_color, &mut user.profile_accent_color),
+            (
+                &self.profile_background_color,
+                &mut user.profile_background_color,
+            ),
+            (&self.banner_content_type, &mut user.banner_content_type),
+            (&self.theme_preference, &mut user.theme_preference),
+            (&self.media_content_filter, &mut user.media_content_filter),
         ];
         for (update, field) in fields {
             if let Some(value) = update {
                 field.clone_from(value);
             }
+        }
+        if let Some(sync) = &self.theme_sync_enabled {
+            user.theme_sync_enabled = Some(sync.clone());
         }
     }
 }

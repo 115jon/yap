@@ -5,8 +5,8 @@ use std::time::Duration;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use yap_protocol::rest::{
-    ChannelsResponse, DmChannel, GifPage, Member, Message, MessagePatch, Notification,
-    ProfileResponse, ReadStates, Server, UploadedFile, User,
+    ChannelsResponse, DmChannel, GifPage, KovaAccount, KovaSession, Member, Message, MessagePatch,
+    Notification, ProfileResponse, ReadStates, Server, SessionInfo, ShareItem, UploadedFile, User,
 };
 use yap_protocol::Frame;
 
@@ -96,6 +96,34 @@ pub enum Effect {
         url: String,
         dest: String,
     },
+    /// Upload a profile picture or banner as multipart `file`. Answered by
+    /// `Input::Http` (`Done`).
+    ProfileUpload {
+        id: RequestId,
+        token: Token,
+        asset: ProfileAsset,
+        path: String,
+        content_type: String,
+    },
+}
+
+/// Which profile image an upload replaces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileAsset {
+    /// `POST /api/avatar-upload`, keeping the avatar's collectibles
+    /// (`avatar_display`, serialized) when there are any.
+    Avatar { display: Option<String> },
+    /// `POST /api/profile-assets/manage` with `kind=banner`.
+    Banner,
+}
+
+impl ProfileAsset {
+    pub fn path(&self) -> &'static str {
+        match self {
+            Self::Avatar { .. } => "/api/avatar-upload",
+            Self::Banner => "/api/profile-assets/manage",
+        }
+    }
 }
 
 /// An HTTP method.
@@ -146,6 +174,8 @@ pub enum ApiRequest {
         media_type: String,
         next: Option<String>,
         customer_id: String,
+        /// The account's media filter (`high` unless chosen otherwise).
+        content_filter: String,
     },
     /// Registers a picked GIF as an attachment (the server keeps the URL).
     GifUpload {
@@ -202,6 +232,20 @@ pub enum ApiRequest {
     Profile {
         user_id: String,
     },
+    /// Changes to the signed-in profile (`PATCH /api/update-profile`); the
+    /// body is the patch as the web sends it.
+    UpdateProfile(Value),
+    /// Drop the banner (`DELETE /api/profile-assets/manage`).
+    DeleteBanner,
+    Sessions,
+    Shares,
+    RevokeShare {
+        share_id: String,
+    },
+    /// Kova's own session (on the auth server): the account's email.
+    KovaSession,
+    /// Kova's linked sign-in methods (on the auth server).
+    KovaAccounts,
 }
 
 /// A page of messages, oldest first.
@@ -231,6 +275,12 @@ pub enum ApiResponse {
     /// A file (or a GIF pick) the next message can link.
     Uploaded(UploadedFile),
     Gifs(GifPage),
+    Sessions(Vec<SessionInfo>),
+    Shares(Vec<ShareItem>),
+    /// The account's email, when Kova has one.
+    KovaEmail(Option<String>),
+    /// Linked provider ids.
+    KovaAccounts(Vec<String>),
     /// A call whose body the store does not read.
     Done,
 }
@@ -257,6 +307,11 @@ fn take(value: &mut Value, key: &str) -> Value {
 use super::view::query_value;
 
 impl ApiRequest {
+    /// Kova's auth server answers this, not the Yap API.
+    pub fn on_kova(&self) -> bool {
+        matches!(self, Self::KovaSession | Self::KovaAccounts)
+    }
+
     pub fn method(&self) -> Method {
         match self {
             Self::SendMessage { .. }
@@ -264,6 +319,9 @@ impl ApiRequest {
             | Self::OpenDm { .. }
             | Self::SetPresence { .. }
             | Self::GifUpload { .. } => Method::Post,
+            Self::UpdateProfile(_) => Method::Patch,
+            Self::DeleteBanner | Self::RevokeShare { .. } => Method::Delete,
+            Self::Sessions | Self::Shares | Self::KovaSession | Self::KovaAccounts => Method::Get,
             Self::MarkRead { .. } => Method::Put,
             Self::React { add: true, .. } => Method::Put,
             Self::React { add: false, .. } => Method::Delete,
@@ -309,16 +367,25 @@ impl ApiRequest {
             Self::Dms | Self::OpenDm { .. } => "/api/dms".into(),
             Self::SetPresence { .. } => "/api/presence".into(),
             Self::Profile { user_id } => format!("/api/users/{user_id}/profile"),
+            Self::UpdateProfile(_) => "/api/update-profile".into(),
+            Self::DeleteBanner => "/api/profile-assets/manage".into(),
+            Self::Sessions => "/api/sessions".into(),
+            Self::Shares => "/api/shares".into(),
+            Self::RevokeShare { share_id } => format!("/api/shares/{}", query_value(share_id)),
+            Self::KovaSession => "/api/auth/get-session".into(),
+            Self::KovaAccounts => "/api/auth/list-accounts".into(),
             Self::React { channel_id, .. } => format!("/api/channels/{channel_id}/reactions"),
             Self::Gifs {
                 query,
                 media_type,
                 next,
                 customer_id,
+                content_filter,
             } => {
                 let mut path = format!(
-                    "/api/gifs?mode=search&provider=klipy&limit=24&mediaType={}&contentFilter=high",
-                    query_value(media_type)
+                    "/api/gifs?mode=search&provider=klipy&limit=24&mediaType={}&contentFilter={}",
+                    query_value(media_type),
+                    query_value(content_filter)
                 );
                 if !customer_id.is_empty() {
                     path.push_str(&format!("&customerId={}", query_value(customer_id)));
@@ -400,6 +467,13 @@ impl ApiRequest {
                 custom_status,
             } => json!({ "status": status, "custom_status": custom_status }),
             Self::Typing { .. } | Self::MarkRead { .. } => json!({}),
+            Self::UpdateProfile(patch) => patch.clone(),
+            Self::DeleteBanner => json!({ "kind": "banner" }),
+            Self::Sessions
+            | Self::Shares
+            | Self::RevokeShare { .. }
+            | Self::KovaSession
+            | Self::KovaAccounts => Value::Null,
             Self::Me
             | Self::Servers
             | Self::Channels { .. }
@@ -469,6 +543,24 @@ impl ApiRequest {
             Self::Gifs { .. } => ApiResponse::Gifs(
                 serde_json::from_value(body).map_err(|e| ApiError::Decode(format!("gifs: {e}")))?,
             ),
+            Self::Sessions => ApiResponse::Sessions(lenient_list(take(&mut body, "sessions"))),
+            Self::Shares => ApiResponse::Shares(lenient_list(take(&mut body, "shares"))),
+            // `null` when Kova has no session for the token.
+            Self::KovaSession => ApiResponse::KovaEmail(
+                serde_json::from_value::<KovaSession>(body)
+                    .ok()
+                    .and_then(|session| session.user.email)
+                    .filter(|email| !email.is_empty()),
+            ),
+            Self::KovaAccounts => ApiResponse::KovaAccounts(
+                lenient_list::<KovaAccount>(body)
+                    .into_iter()
+                    .map(|account| account.provider_id)
+                    .collect(),
+            ),
+            Self::UpdateProfile(_) | Self::DeleteBanner | Self::RevokeShare { .. } => {
+                ApiResponse::Done
+            }
             Self::DeleteMessage { .. }
             | Self::React { .. }
             | Self::GifShare { .. }

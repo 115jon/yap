@@ -14,6 +14,58 @@ use crate::CacheError;
 pub const SETTINGS_FILE: &str = "desktop-settings.json";
 pub const WINDOW_STATE_FILE: &str = "window-state.json";
 pub const EMOJI_FILE: &str = "emoji-prefs.json";
+pub const APPEARANCE_FILE: &str = "appearance.json";
+
+/// The theme picked on this device (next-themes' `theme` key on the web):
+/// a theme id or `system`. App-wide, like the web's origin storage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AppearancePrefs {
+    pub theme: String,
+}
+
+impl Default for AppearancePrefs {
+    fn default() -> Self {
+        Self {
+            theme: "dark".into(),
+        }
+    }
+}
+
+/// The sound effect switches and volumes (useSoundSettingsStore). The
+/// master switch is [`DesktopSettings::sounds`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SoundPrefs {
+    /// 0-100, for every UI sound.
+    pub sound_volume: u8,
+    /// Mentions, replies and DMs.
+    pub notifications: bool,
+    pub voice_join_leave: bool,
+    pub self_connect_disconnect: bool,
+    pub mute_deafen: bool,
+    pub screen_share: bool,
+    pub stream_watcher_activity: bool,
+    pub message_received: bool,
+    /// 0-100, soundboard playback.
+    pub soundboard_volume: u8,
+}
+
+impl Default for SoundPrefs {
+    fn default() -> Self {
+        Self {
+            sound_volume: 100,
+            notifications: true,
+            voice_join_leave: true,
+            self_connect_disconnect: true,
+            mute_deafen: true,
+            screen_share: true,
+            stream_watcher_activity: true,
+            message_received: true,
+            soundboard_volume: 100,
+        }
+    }
+}
 
 /// The emoji picker's memory (localStorage `chat:emoji:recents:v1` and
 /// `chat:emoji:skin-tone:v1` on the web): recent picks, most recent first
@@ -41,6 +93,8 @@ pub struct DesktopSettings {
     pub desktop_notifications: bool,
     /// UI sounds (useSoundSettingsStore `soundsEnabled`).
     pub sounds: bool,
+    /// Which sounds play, and how loud.
+    pub sound_settings: SoundPrefs,
 }
 
 impl Default for DesktopSettings {
@@ -51,6 +105,7 @@ impl Default for DesktopSettings {
             close_to_tray: true,
             desktop_notifications: true,
             sounds: true,
+            sound_settings: SoundPrefs::default(),
         }
     }
 }
@@ -108,6 +163,15 @@ pub fn load_window_state(dir: &Path) -> Option<WindowState> {
 
 pub fn save_window_state(dir: &Path, state: &WindowState) -> Result<(), CacheError> {
     write(&dir.join(WINDOW_STATE_FILE), state)
+}
+
+/// The theme picked on this device; the default when missing or unreadable.
+pub fn load_appearance(dir: &Path) -> AppearancePrefs {
+    read(&dir.join(APPEARANCE_FILE)).unwrap_or_default()
+}
+
+pub fn save_appearance(dir: &Path, prefs: &AppearancePrefs) -> Result<(), CacheError> {
+    write(&dir.join(APPEARANCE_FILE), prefs)
 }
 
 /// The picker's memory in `dir`; empty when missing or unreadable.
@@ -179,6 +243,53 @@ mod tests {
         };
         save_window_state(dir.path(), &state).expect("save");
         assert_eq!(load_window_state(dir.path()), Some(state));
+    }
+
+    #[test]
+    fn sound_prefs_default_to_every_sound_at_full_volume() {
+        let s = SoundPrefs::default();
+        assert_eq!((s.sound_volume, s.soundboard_volume), (100, 100));
+    }
+
+    #[test]
+    fn sound_prefs_round_trip_inside_the_settings_file() {
+        let dir = tempfile::tempdir().expect("dir");
+        let settings = DesktopSettings {
+            sound_settings: SoundPrefs {
+                sound_volume: 40,
+                mute_deafen: false,
+                ..SoundPrefs::default()
+            },
+            ..DesktopSettings::default()
+        };
+        save_settings(dir.path(), &settings).expect("save");
+        assert_eq!(load_settings(dir.path()), settings);
+    }
+
+    #[test]
+    fn an_older_settings_file_gets_default_sound_prefs() {
+        let dir = tempfile::tempdir().expect("dir");
+        std::fs::write(dir.path().join(SETTINGS_FILE), r#"{"sounds": false}"#).expect("write");
+        assert_eq!(
+            load_settings(dir.path()).sound_settings,
+            SoundPrefs::default()
+        );
+    }
+
+    #[test]
+    fn appearance_defaults_to_midnight() {
+        let dir = tempfile::tempdir().expect("dir");
+        assert_eq!(load_appearance(dir.path()).theme, "dark");
+    }
+
+    #[test]
+    fn appearance_round_trips() {
+        let dir = tempfile::tempdir().expect("dir");
+        let prefs = AppearancePrefs {
+            theme: "miku-light".into(),
+        };
+        save_appearance(dir.path(), &prefs).expect("save");
+        assert_eq!(load_appearance(dir.path()), prefs);
     }
 
     #[test]

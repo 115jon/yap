@@ -1,0 +1,172 @@
+pragma ComponentBehavior: Bound
+import QtQuick
+import com.yap.native
+
+// Sessions (SessionsPanel.tsx): this device, then every other one, from
+// `/api/sessions`; placeholder rows while they load, the error with Try
+// again when they don't. The list is shown here, not changed.
+Column {
+    id: root
+
+    readonly property var sessions: JSON.parse(Settings.sessions)
+    readonly property var current: sessions.filter(session => session.current)
+    readonly property var others: sessions.filter(session => !session.current)
+    readonly property bool loadingFirst: Settings.sessionsState === "loading" && sessions.length === 0
+    readonly property bool failed: Settings.sessionsState === "error"
+
+    spacing: 40
+    Component.onCompleted: Settings.loadSessions()
+
+    SettingsCard {
+        width: parent.width
+        sectionId: "this-device"
+        SettingsRow {
+            rowId: "current-session"
+            layout: "block"
+            hideLabel: true
+            Column {
+                width: parent.width
+                spacing: 12
+                Skeleton { visible: root.loadingFirst }
+                Column {
+                    visible: root.failed
+                    width: parent.width
+                    spacing: 8
+                    RowError { above: 0; text: Settings.sessionsError }
+                    KitButton {
+                        size: "sm"
+                        iconName: "refresh"
+                        text: qsTr("Try again")
+                        loading: Settings.sessionsState === "loading"
+                        onClicked: Settings.loadSessions()
+                    }
+                }
+                Repeater {
+                    model: root.failed ? [] : root.current
+                    delegate: SessionItem {}
+                }
+                Item {
+                    visible: !root.loadingFirst && !root.failed && root.current.length === 0
+                    width: parent.width
+                    height: 32
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("We couldn't find this device's session.")
+                        color: Theme.ink2
+                        font: Theme.type.description
+                    }
+                    KitButton {
+                        anchors.right: parent.right
+                        size: "sm"
+                        iconName: "refresh"
+                        text: qsTr("Reload")
+                        onClicked: Settings.loadSessions()
+                    }
+                }
+            }
+        }
+    }
+
+    SettingsCard {
+        width: parent.width
+        sectionId: "other-devices"
+        SettingsRow {
+            rowId: "other-sessions"
+            layout: "block"
+            hideLabel: true
+            Column {
+                width: parent.width
+                Skeleton { visible: root.loadingFirst }
+                Text {
+                    visible: !root.loadingFirst && (root.failed || root.others.length === 0)
+                    width: parent.width
+                    text: root.failed ? qsTr("Your other devices show here once your sessions load.")
+                        : qsTr("No other devices are signed in.")
+                    wrapMode: Text.Wrap
+                    color: Theme.ink2
+                    font: Theme.type.description
+                }
+                Repeater {
+                    model: root.failed ? [] : root.others
+                    delegate: Column {
+                        id: other
+                        required property var modelData
+                        required property int index
+                        width: parent.width
+                        Rectangle {
+                            visible: other.index > 0
+                            width: parent.width
+                            height: 1
+                            color: Theme.line
+                        }
+                        Item { width: 1; height: other.index > 0 ? 12 : 0 }
+                        SessionItem { modelData: other.modelData }
+                        Item { width: 1; height: 12 }
+                    }
+                }
+            }
+        }
+    }
+
+    // A device: a 40 px tint-2 key with its glyph, its name over where and
+    // when it was last used.
+    component SessionItem: Row {
+        id: session
+        required property var modelData
+        width: parent ? parent.width : 0
+        spacing: 12
+        Accessible.role: Accessible.ListItem
+        Accessible.name: session.modelData.title + ", " + session.modelData.detail
+        Rectangle {
+            width: 40
+            height: 40
+            radius: Theme.radius
+            color: Theme.tint2
+            Icon {
+                anchors.centerIn: parent
+                name: session.modelData.mobile ? "mobile" : "monitor"
+                size: Theme.iconMd
+                color: Theme.ink1
+            }
+        }
+        Column {
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width - 52
+            Text {
+                width: parent.width
+                text: session.modelData.title
+                elide: Text.ElideRight
+                color: Theme.ink1
+                font: Theme.type.setting
+            }
+            Text {
+                width: parent.width
+                text: session.modelData.detail
+                elide: Text.ElideRight
+                color: Theme.ink2
+                font: Theme.type.description
+            }
+        }
+    }
+
+    // Placeholder rows at the real row height, still.
+    component Skeleton: Column {
+        width: parent ? parent.width : 0
+        spacing: 12
+        Accessible.role: Accessible.StaticText
+        Accessible.name: qsTr("Loading sessions")
+        Repeater {
+            model: 2
+            delegate: Row {
+                spacing: 12
+                Rectangle { width: 40; height: 40; radius: Theme.radius; color: Theme.tint1 }
+                Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 6
+                    Rectangle { width: 160; height: 16; radius: 1; color: Theme.tint1 }
+                    Rectangle { width: 224; height: 12; radius: 1; color: Theme.tint1 }
+                }
+            }
+        }
+    }
+}

@@ -142,6 +142,28 @@ QImage dots(int coveragePercent, const QColor& ink, int w, int h)
   return image;
 }
 
+// ui/dither.tsx bayerRampMask: coverage eased from `from` at the leading
+// edge to `to` at the trailing one, lifted mid-height by `lift`.
+QImage ramp(double from, double to, double lift, const QColor& ink, int cols,
+            int rows)
+{
+  cols = std::max(1, cols);
+  rows = std::max(1, rows);
+  QImage image = canvas(cols, rows);
+  paint(
+    image,
+    [&](int x, int y) {
+      const double v = rows > 1 ? y / double(rows - 1) : 0.5;
+      const double mid = 1 - std::abs(v - 0.5) * 2;
+      const double u = cols > 1 ? x / double(cols - 1) : 0;
+      const double run = from + (to - from) * (1 - std::pow(1 - u, 1.6));
+      const double cov = std::clamp(run + lift * mid * run, 0.0, 1.0);
+      return bayerLit(x, y, cov);
+    },
+    ink);
+  return image;
+}
+
 } // namespace
 
 DitherProvider::DitherProvider()
@@ -162,6 +184,10 @@ QImage DitherProvider::requestImage(const QString& id, QSize* size,
   else if (kind == QLatin1String("dots"))
     image = dots(parts.value(1).toInt(), color(parts.value(2)),
                  parts.value(3).toInt(), parts.value(4).toInt());
+  else if (kind == QLatin1String("ramp"))
+    image = ramp(parts.value(1).toInt() / 100.0, parts.value(2).toInt() / 100.0,
+                 parts.value(3).toInt() / 100.0, color(parts.value(4)),
+                 parts.value(5).toInt(), parts.value(6).toInt());
   else
     image = canvas(1, 1);
   if (size)

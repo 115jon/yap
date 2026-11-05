@@ -16,18 +16,18 @@ mod state;
 pub mod time;
 pub mod view;
 
-pub use effect::{ApiRequest, ApiResponse, CacheWrite, Effect, Method, Page};
-pub use input::{Command, Dispatch, GatewayEvent, Input, SignInEvent, UploadFile};
+pub use effect::{ApiRequest, ApiResponse, CacheWrite, Effect, Method, Page, ProfileAsset};
+pub use input::{Command, Dispatch, GatewayEvent, Input, ProfileDraft, SignInEvent, UploadFile};
 pub use reduce::reduce;
 pub use state::{
     live_status, pending_id, Divider, GatewayStatus, GifBrowse, MessageLog, Outgoing, Phase,
-    Presence, ReactionChange, ServerChannels, Session, State, Typer, Upload, UploadStatus,
-    VoiceCall, VoicePrefs,
+    Presence, ProfileStep, ReactionChange, ServerChannels, Session, SettingsState, State, Typer,
+    Upload, UploadStatus, VoiceCall, VoicePrefs,
 };
 pub use time::LocalOffset;
 pub use view::{
-    DmRow, DmView, EmojiRow, GifRow, GifStatusView, MemberListRow, MentionRow, ProfileView, Row,
-    UnreadView, UploadRow, ViewDiff, ViewUpdate,
+    DmRow, DmView, EmojiRow, GifRow, GifStatusView, Load, MemberListRow, MentionRow, ProfileView,
+    Row, SessionRow, SettingsView, ShareRow, UnreadView, UploadRow, ViewDiff, ViewUpdate,
 };
 pub use yap_cache::Snapshot;
 

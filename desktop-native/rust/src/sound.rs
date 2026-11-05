@@ -2,7 +2,8 @@
 //! and played through `waveOut` on a short-lived thread, so sounds overlap
 //! like Web Audio voices. The web engine's gates apply: the sounds switch,
 //! the per-group rate limit, and the per-group voice cap (the oldest voice
-//! is cut, as `SoundEngine` fades it). Volume is the default 100 (unity).
+//! is cut, as `SoundEngine` fades it), each sound's category switch, and
+//! the volume from the settings.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,13 +13,11 @@ use std::time::{Duration, Instant};
 use yap_core::shell::{Sound, SoundGate};
 use yap_core::synth;
 
-/// The 0-100 volume setting; the settings screen will own it.
-const VOLUME: u8 = 100;
-
 #[derive(Default)]
 struct Mixer {
     gate: SoundGate,
-    rendered: HashMap<Sound, Arc<Vec<i16>>>,
+    /// Rendered once per sound and volume.
+    rendered: HashMap<(Sound, u8), Arc<Vec<i16>>>,
     /// Playing voices per group, oldest first: (voice id, `HWAVEOUT`).
     voices: HashMap<&'static str, VecDeque<(u64, usize)>>,
 }
@@ -32,14 +31,27 @@ fn lock() -> std::sync::MutexGuard<'static, Mixer> {
     mixer().lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn pcm(sound: Sound) -> Vec<i16> {
-    synth::pcm16(&synth::render(sound, synth::volume_to_gain(VOLUME)))
+fn pcm(sound: Sound, volume: u8) -> Vec<i16> {
+    synth::pcm16(&synth::render(sound, synth::volume_to_gain(volume)))
 }
 
-/// Plays `sound` unless the sounds switch is off or its group is inside
-/// its rate limit. Never blocks the caller.
+/// Plays `sound` unless the sounds switch or its category is off, or its
+/// group is inside its rate limit. Never blocks the caller.
 pub fn play(sound: Sound) {
-    if !crate::desktop::current().sounds {
+    let settings = crate::desktop::current();
+    if !settings.sounds || !sound.enabled_in(&settings.sound_settings) {
+        return;
+    }
+    start(sound, settings.sound_settings.sound_volume);
+}
+
+/// The Test key: plays whatever the switches say (`bypassToggles`).
+pub fn play_test(sound: Sound) {
+    start(sound, crate::desktop::current().sound_settings.sound_volume);
+}
+
+fn start(sound: Sound, volume: u8) {
+    if volume == 0 {
         return;
     }
     let samples = {
@@ -51,8 +63,8 @@ pub fn play(sound: Sound) {
         Arc::clone(
             mixer
                 .rendered
-                .entry(sound)
-                .or_insert_with(|| Arc::new(pcm(sound))),
+                .entry((sound, volume))
+                .or_insert_with(|| Arc::new(pcm(sound, volume))),
         )
     };
     let spec = sound.spec();

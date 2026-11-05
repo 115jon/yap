@@ -118,7 +118,14 @@ impl Fixture {
             | ApiRequest::OpenDm { .. }
             | ApiRequest::Profile { .. }
             | ApiRequest::React { .. }
-            | ApiRequest::GifShare { .. } => ApiResponse::Done,
+            | ApiRequest::GifShare { .. }
+            | ApiRequest::UpdateProfile(_)
+            | ApiRequest::DeleteBanner
+            | ApiRequest::RevokeShare { .. } => ApiResponse::Done,
+            ApiRequest::Sessions => ApiResponse::Sessions(Vec::new()),
+            ApiRequest::Shares => ApiResponse::Shares(Vec::new()),
+            ApiRequest::KovaSession => ApiResponse::KovaEmail(None),
+            ApiRequest::KovaAccounts => ApiResponse::KovaAccounts(Vec::new()),
             ApiRequest::Gifs { .. } => ApiResponse::Gifs(GifPage::default()),
             ApiRequest::GifUpload { source_url, .. } => ApiResponse::Uploaded(UploadedFile {
                 id: format!("att_fixture_gif_{serial}"),

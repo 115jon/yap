@@ -201,12 +201,40 @@ pub struct User {
     /// `#rrggbb`, when the user picked a banner colour.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_banner_color: Option<String>,
+    /// The profile card's accent and background (`#RRGGBB`). The server
+    /// stores its default pair for people who never picked colours.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_accent_color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_background_color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub banner_content_type: Option<String>,
+    /// The synced theme (`dark`, `miku-light`, …, `system`), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_preference: Option<String>,
+    /// `true`/`false` or `1`/`0`, as the endpoints send it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_sync_enabled: Option<Value>,
+    /// `high`, `medium`, `low` or `off` (the GIF search filter).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_content_filter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
 }
 
 /// The signed-in user.
 pub type Me = User;
 
 impl User {
+    /// Theme sync is on (`theme_sync_enabled` is `true` or `1`).
+    pub fn theme_sync(&self) -> bool {
+        match &self.theme_sync_enabled {
+            Some(Value::Bool(on)) => *on,
+            Some(Value::Number(n)) => n.as_i64() == Some(1),
+            _ => false,
+        }
+    }
+
     /// `display_name`, else `username` (what the UI shows).
     pub fn label(&self) -> &str {
         match self.display_name.as_deref() {
@@ -744,6 +772,75 @@ pub struct DmChannel {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ProfileResponse {
     pub user: User,
+}
+
+// Settings
+
+/// One row of `GET /api/sessions` (`{ sessions: [...] }`). The server only
+/// knows the session making the call today, but the shape allows more.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SessionInfo {
+    pub id: String,
+    /// Epoch ms, or an ISO string.
+    pub last_active_at: Option<Value>,
+    pub is_current: bool,
+    pub activity: Option<SessionActivity>,
+}
+
+/// What the session's client reported about itself, when anything.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SessionActivity {
+    pub is_mobile: bool,
+    pub browser_name: Option<String>,
+    pub device_type: Option<String>,
+    pub city: Option<String>,
+    pub country: Option<String>,
+}
+
+/// One shared message link from `GET /api/shares` (`{ shares: [...] }`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ShareItem {
+    pub id: String,
+    pub token: String,
+    pub content: String,
+    pub author: ShareAuthor,
+    pub created_at: String,
+    pub expires_at: Option<String>,
+    pub revoked_at: Option<String>,
+    /// `active`, `revoked`, `deleted` or `expired`.
+    pub status: String,
+    pub view_count: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ShareAuthor {
+    pub username: String,
+    pub display_name: Option<String>,
+}
+
+/// Kova's `GET /api/auth/get-session`: only the user's email is read.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct KovaSession {
+    pub user: KovaUser,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct KovaUser {
+    pub email: Option<String>,
+}
+
+/// One row of Kova's `GET /api/auth/list-accounts`: a linked provider
+/// (`credential` for email and password).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct KovaAccount {
+    pub provider_id: String,
 }
 
 // Device sign-in (Kova)

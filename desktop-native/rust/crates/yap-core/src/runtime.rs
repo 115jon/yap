@@ -334,10 +334,12 @@ impl Runner {
                     content_type: None,
                 })),
             }),
-            Effect::Download { id, .. } => self.send(Input::Http {
-                id: *id,
-                result: Ok(ApiResponse::Done),
-            }),
+            Effect::Download { id, .. } | Effect::ProfileUpload { id, .. } => {
+                self.send(Input::Http {
+                    id: *id,
+                    result: Ok(ApiResponse::Done),
+                })
+            }
             Effect::CancelUpload(_)
             | Effect::GatewaySend(_)
             | Effect::GatewayDisconnect
@@ -379,9 +381,12 @@ impl Runner {
                 tokio::spawn(async move {
                     // The semaphore is never closed, so a permit always comes.
                     let _permit = slots.acquire_owned().await;
-                    let body = api
-                        .call(request.method(), &request.path(), &request.body())
-                        .await;
+                    let (method, path, body) = (request.method(), request.path(), request.body());
+                    let body = if request.on_kova() {
+                        api.call_kova(method, &path, &body).await
+                    } else {
+                        api.call(method, &path, &body).await
+                    };
                     let result = body.and_then(|body| request.decode(body));
                     let _ = inbox.send(Input::Http { id, result });
                 });
@@ -507,6 +512,22 @@ impl Runner {
                     let _ = inbox.send(Input::Http { id, result });
                 });
             }
+            Effect::ProfileUpload {
+                id,
+                token,
+                asset,
+                path,
+                content_type,
+            } => {
+                let api = Api::new(self.http.clone(), token);
+                let inbox = self.inbox.clone();
+                tokio::spawn(async move {
+                    let result = profile_upload(&api, asset, path, content_type)
+                        .await
+                        .map(|_| ApiResponse::Done);
+                    let _ = inbox.send(Input::Http { id, result });
+                });
+            }
             Effect::StartupMark(mark) => {
                 if !self.startup_marks.contains(&mark) {
                     self.startup_marks.push(mark);
@@ -626,6 +647,37 @@ async fn upload(
     };
     let form = reqwest::multipart::Form::new().part("file", part);
     api.upload(target, form).await
+}
+
+/// Posts a profile picture or banner: the file as `file`, with `kind` for a
+/// banner and the kept collectibles for an avatar.
+async fn profile_upload(
+    api: &Api,
+    asset: crate::store::ProfileAsset,
+    path: String,
+    content_type: String,
+) -> Result<Value, crate::api::ApiError> {
+    use crate::store::ProfileAsset;
+    let name = Path::new(&path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "image".into());
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|error| crate::api::ApiError::Network(error.to_string()))?;
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name(name)
+        .mime_str(&content_type)
+        .map_err(|_| crate::api::ApiError::Decode("bad content type".into()))?;
+    let mut form = reqwest::multipart::Form::new();
+    match &asset {
+        ProfileAsset::Banner => form = form.text("kind", "banner"),
+        ProfileAsset::Avatar {
+            display: Some(display),
+        } => form = form.text("avatar_display", display.clone()),
+        ProfileAsset::Avatar { display: None } => {}
+    }
+    api.upload(asset.path(), form.part("file", part)).await
 }
 
 /// Fetches `url` into `dest`, creating its folder (at most 25 MB).

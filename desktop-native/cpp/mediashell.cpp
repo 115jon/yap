@@ -118,6 +118,10 @@ void MediaShell::clearImageCache()
 
 QStringList MediaShell::pickFiles(const QString& title)
 {
+  // Tests: YAP_PICK_FILES ("a.png;b.png") stands in for the dialog.
+  const QString picked = qEnvironmentVariable("YAP_PICK_FILES");
+  if (!picked.isEmpty())
+    return picked.split(QLatin1Char(';'), Qt::SkipEmptyParts);
   QStringList paths;
 #ifdef Q_OS_WIN
   IFileOpenDialog* dialog = nullptr;

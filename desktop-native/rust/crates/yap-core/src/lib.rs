@@ -15,6 +15,7 @@ pub mod fixture;
 pub mod markdown;
 pub mod picker;
 pub mod runtime;
+pub mod settings;
 pub mod shell;
 pub mod store;
 pub mod synth;

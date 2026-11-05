@@ -169,6 +169,25 @@ RowLayout {
     ProfilePopout { id: profile }
     PeerMenu { id: peerMenu }
 
+    // User settings, the profile editor over it (or alone, from the
+    // account card) and the theme preview sheet.
+    SettingsDialog {}
+    ProfileEditor { id: profileEditor }
+    ThemePreviewSheet {}
+    Connections {
+        target: SettingsNav
+        function onProfileEditorRequested() { profileEditor.open() }
+    }
+    Connections {
+        target: Session
+        function onPhaseChanged() {
+            if (Session.phase !== Session.Ready) {
+                SettingsNav.close()
+                profileEditor.close()
+            }
+        }
+    }
+
     Connections {
         target: ShellState
         function onProfileRequested(userId, anchor, side) {

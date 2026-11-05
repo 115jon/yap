@@ -7,7 +7,9 @@ import com.yap.native
 // 18/600, "@handle · pronouns" at 13 ink-2 and the status line (LED,
 // label, custom status). `statusLine` replaces that line (the account
 // card's custom-status field). Children go in the 16 px inset column
-// under it (actions, sections).
+// under it (actions, sections). A profile theme (`surfaceColor`,
+// `accentColor`, `#RRGGBB`) paints the card and the banner fallback, with
+// ink that reads on it; empty follows the app theme.
 Rectangle {
     id: root
 
@@ -20,14 +22,21 @@ Rectangle {
     property string customStatus
     property string banner
     property string bannerColor
+    property string surfaceColor
+    property string accentColor
     property Component statusLine: null
+
+    readonly property bool themed: surfaceColor.length > 0
+    readonly property bool lightSurface: themed && (0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b) > 0.5
+    readonly property color ink: !themed ? Theme.ink1 : lightSurface ? "#0b0b0d" : "#f2f2f3"
+    readonly property color subInk: !themed ? Theme.ink2 : lightSurface ? "#4a4a52" : "#b4b4ba"
     default property alias content: inset.data
 
     implicitWidth: 340
     implicitHeight: 1 + bannerArea.height - 40 + identity.height
         + (inset.implicitHeight > 0 ? 16 + inset.implicitHeight : 0) + 16
     radius: Theme.radius
-    color: Theme.ply3
+    color: themed ? surfaceColor : Theme.ply3
     border.width: 1
     border.color: Theme.lineStrong
 
@@ -37,7 +46,8 @@ Rectangle {
         y: 1
         width: parent.width - 2
         height: 96
-        color: root.bannerColor.length > 0 ? root.bannerColor : Theme.accentTint
+        color: root.bannerColor.length > 0 ? root.bannerColor
+            : root.accentColor.length > 0 ? root.accentColor : Theme.accentTint
         Image {
             anchors.fill: parent
             visible: root.banner.length > 0 && status === Image.Ready
@@ -100,7 +110,7 @@ Rectangle {
                 width: parent.width
                 text: root.name
                 elide: Text.ElideRight
-                color: Theme.ink1
+                color: root.ink
                 font: Theme.type.profileName
                 Accessible.role: Accessible.Heading
             }
@@ -109,7 +119,7 @@ Rectangle {
                 text: root.pronouns.length > 0 ? "@" + root.username + "  ·  " + root.pronouns : "@" + root.username
                 visible: root.username.length > 0
                 wrapMode: Text.WrapAnywhere
-                color: Theme.ink2
+                color: root.subInk
                 font: Theme.type.description
             }
             Loader {
@@ -134,7 +144,7 @@ Rectangle {
                     id: word
                     anchors.verticalCenter: parent.verticalCenter
                     text: Theme.presenceWord(root.presence)
-                    color: Theme.ink2
+                    color: root.subInk
                     font: Theme.type.description
                 }
                 Text {
@@ -150,7 +160,7 @@ Rectangle {
                     width: Math.min(implicitWidth, parent.width - 16 - word.width - 24)
                     text: root.customStatus
                     elide: Text.ElideRight
-                    color: Theme.ink1
+                    color: root.ink
                     font: Theme.type.description
                 }
             }

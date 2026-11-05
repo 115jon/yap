@@ -198,8 +198,9 @@ int main(int argc, char* argv[])
     &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
     [] { QCoreApplication::exit(-1); }, Qt::QueuedConnection);
 
-  // Theme before the first binding evaluates: YAP_THEME for now, a setting
-  // later (assigning Theme.themeId at runtime re-themes everything).
+  // Theme before the first binding evaluates: YAP_THEME, if set. Main.qml
+  // then binds it to the saved choice (Settings.theme), which starts from
+  // YAP_THEME too; assigning Theme.themeId re-themes everything.
   if (QObject* theme =
         engine.singletonInstance<QObject*>("com.yap.native", "Theme")) {
     const QString id = qEnvironmentVariable("YAP_THEME");

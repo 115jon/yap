@@ -248,6 +248,18 @@ impl Sound {
             max_voices,
         }
     }
+
+    /// Whether its category switch is on (`SOUND_SPECS[id].category`).
+    pub fn enabled_in(self, prefs: &yap_cache::settings::SoundPrefs) -> bool {
+        match self {
+            Sound::VoiceJoin | Sound::VoiceLeave => prefs.voice_join_leave,
+            Sound::Mute | Sound::Unmute | Sound::Deafen | Sound::Undeafen => prefs.mute_deafen,
+            Sound::Notification => prefs.notifications,
+            Sound::Message => prefs.message_received,
+            Sound::Connect | Sound::Disconnect => prefs.self_connect_disconnect,
+            Sound::ScreenShareStart | Sound::ScreenShareStop => prefs.screen_share,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

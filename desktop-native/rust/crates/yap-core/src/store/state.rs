@@ -1,17 +1,19 @@
 //! The typed client state. Only [`super::reduce`] mutates it.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use yap_cache::Snapshot;
 use yap_protocol::rest::Reaction;
 use yap_protocol::rest::{Category, Channel, ChannelType, ChannelsResponse, Message, MessagePatch};
 use yap_protocol::rest::{DmChannel, GifItem, Member, Notification, Server, UploadedFile, User};
+use yap_protocol::rest::{SessionInfo, ShareItem};
 
 use super::time::{is_after, LocalOffset};
 use super::view::{
-    ChannelTreeRow, DmRow, DmView, GifRow, MemberListRow, MentionRow, ProfileView, ServerRow,
-    UploadRow, VoiceMemberRow, VoiceTileRow,
+    ChannelTreeRow, DmRow, DmView, GifRow, Load, MemberListRow, MentionRow, ProfileView, ServerRow,
+    SettingsView, UploadRow, VoiceMemberRow, VoiceTileRow,
 };
+use super::ProfileAsset;
 use super::{CallId, Occupant, RequestId, SessionId, SignInId, VoiceMember};
 use crate::api::{ApiError, Token};
 use crate::shell::{BadgeView, Toasted};
@@ -341,6 +343,78 @@ pub(super) struct Projection {
     /// (ready, busy) uploads of the open channel, as last emitted.
     pub upload_counts: (i64, i64),
     pub gifs: Vec<GifRow>,
+    pub settings: SettingsView,
+}
+
+/// One step of a profile save, run in order; a failure stops the rest.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProfileStep {
+    /// `PATCH /api/update-profile`, then the custom status when it changed
+    /// (`Some(None)` clears it).
+    Patch {
+        patch: serde_json::Value,
+        custom_status: Option<Option<String>>,
+    },
+    Upload {
+        asset: ProfileAsset,
+        path: String,
+        content_type: String,
+    },
+    DeleteBanner,
+    /// Read the profile back.
+    Refresh,
+}
+
+impl ProfileStep {
+    /// Completes "Unable to …" when the step fails (SettingsAccountTab.tsx).
+    pub fn action(&self) -> &'static str {
+        match self {
+            Self::Patch { .. } => "save your profile",
+            Self::Upload {
+                asset: ProfileAsset::Avatar { .. },
+                ..
+            } => "upload your avatar",
+            Self::Upload { .. } => "upload your banner",
+            Self::DeleteBanner => "remove your banner",
+            Self::Refresh => "refresh your profile",
+        }
+    }
+}
+
+/// What the settings dialog loaded and is saving.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SettingsState {
+    pub email: Load<String>,
+    pub sign_in_methods: Load<String>,
+    pub sessions: Load<Vec<SessionInfo>>,
+    pub shares: Load<Vec<ShareItem>>,
+    pub display_name_saving: bool,
+    pub display_name_error: String,
+    /// The name being saved, applied once the server takes it.
+    pub display_name_draft: Option<String>,
+    /// The profile save's steps still to run (the running one is first).
+    pub profile_steps: VecDeque<ProfileStep>,
+    pub profile_error: String,
+    pub profile_saved: u64,
+    /// (level being saved, the level before it).
+    pub media_filter_saving: Option<(String, Option<String>)>,
+    pub media_filter_error: String,
+    pub revoking_share: Option<String>,
+    pub share_error: (String, String),
+}
+
+/// The settings dialog's requests in flight.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct SettingsPending {
+    pub email: Option<RequestId>,
+    pub methods: Option<RequestId>,
+    pub sessions: Option<RequestId>,
+    pub shares: Option<RequestId>,
+    pub display_name: Option<RequestId>,
+    pub profile_step: Option<RequestId>,
+    pub theme: Option<RequestId>,
+    pub media_filter: Option<RequestId>,
+    pub revoke: Option<RequestId>,
 }
 
 /// The request id each slot is waiting for. A result for any other id is stale.
@@ -383,6 +457,7 @@ pub(super) struct Pending {
     pub gifs: Option<(RequestId, bool)>,
     /// request → (file name shown, open it when saved)
     pub downloads: HashMap<RequestId, (String, bool)>,
+    pub settings: SettingsPending,
 }
 
 /// An optimistic reaction add or remove, undone if the server refuses.
@@ -627,6 +702,7 @@ pub struct State {
     pub(super) wanted_channel: Option<String>,
     /// Messages that were toasted (the notification for one does not toast).
     pub(super) toasted: Toasted,
+    pub(super) settings: SettingsState,
     pub(super) view: Projection,
     pub(super) pending: Pending,
     pub(super) boot: Option<Boot>,
@@ -681,6 +757,7 @@ impl State {
             tree_server: None,
             wanted_channel: None,
             toasted: Toasted::default(),
+            settings: SettingsState::default(),
             view: Projection::default(),
             pending: Pending::default(),
             boot: None,

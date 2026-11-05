@@ -20,6 +20,15 @@ pub mod qobject {
         #[qproperty(bool, open_on_startup, cxx_name = "openOnStartup")]
         #[qproperty(bool, notifications)]
         #[qproperty(bool, sounds)]
+        /// The sound effect switches and volumes (NotificationsPanel.tsx).
+        #[qproperty(i32, sound_volume, cxx_name = "soundVolume")]
+        #[qproperty(bool, sound_notifications, cxx_name = "soundNotifications")]
+        #[qproperty(bool, sound_voice_join_leave, cxx_name = "soundVoiceJoinLeave")]
+        #[qproperty(bool, sound_connect, cxx_name = "soundConnect")]
+        #[qproperty(bool, sound_mute, cxx_name = "soundMute")]
+        #[qproperty(bool, sound_screen_share, cxx_name = "soundScreenShare")]
+        #[qproperty(bool, sound_stream_viewers, cxx_name = "soundStreamViewers")]
+        #[qproperty(i32, soundboard_volume, cxx_name = "soundboardVolume")]
         /// Unread notifications (capped at 99); 0 with `badgeDot` or nothing.
         #[qproperty(i32, badge_count, cxx_name = "badgeCount")]
         #[qproperty(bool, badge_dot, cxx_name = "badgeDot")]
@@ -40,10 +49,22 @@ pub mod qobject {
         );
 
         /// Changes one setting (`closeToTray`, `startMinimized`,
-        /// `openOnStartup`, `notifications`, `sounds`) and saves it.
+        /// `openOnStartup`, `notifications`, `sounds`, or a sound category:
+        /// `soundNotifications`, `soundVoiceJoinLeave`, `soundConnect`,
+        /// `soundMute`, `soundScreenShare`, `soundStreamViewers`) and saves it.
         #[qinvokable]
         #[cxx_name = "setSetting"]
         fn set_setting(self: Pin<&mut Desktop>, key: &QString, value: bool);
+
+        /// `soundVolume` or `soundboardVolume`, 0-100, saved.
+        #[qinvokable]
+        #[cxx_name = "setVolume"]
+        fn set_volume(self: Pin<&mut Desktop>, key: &QString, value: i32);
+
+        /// Plays the notification chime whatever the switches say (Test).
+        #[qinvokable]
+        #[cxx_name = "playTestSound"]
+        fn play_test_sound(self: &Desktop);
 
         /// Opens a channel or DM by id (a toast click); `server_id` may be
         /// empty.
@@ -96,6 +117,14 @@ pub struct DesktopRust {
     open_on_startup: bool,
     notifications: bool,
     sounds: bool,
+    sound_volume: i32,
+    sound_notifications: bool,
+    sound_voice_join_leave: bool,
+    sound_connect: bool,
+    sound_mute: bool,
+    sound_screen_share: bool,
+    sound_stream_viewers: bool,
+    soundboard_volume: i32,
     badge_count: i32,
     badge_dot: bool,
     badge_tooltip: QString,
@@ -160,7 +189,43 @@ fn apply_settings(mut desktop: Pin<&mut qobject::Desktop>, s: DesktopSettings) {
     desktop.as_mut().set_start_minimized(s.start_minimized);
     desktop.as_mut().set_open_on_startup(s.open_on_startup);
     desktop.as_mut().set_notifications(s.desktop_notifications);
+    let sound = s.sound_settings;
+    desktop
+        .as_mut()
+        .set_sound_volume(i32::from(sound.sound_volume));
+    desktop
+        .as_mut()
+        .set_sound_notifications(sound.notifications);
+    desktop
+        .as_mut()
+        .set_sound_voice_join_leave(sound.voice_join_leave);
+    desktop
+        .as_mut()
+        .set_sound_connect(sound.self_connect_disconnect);
+    desktop.as_mut().set_sound_mute(sound.mute_deafen);
+    desktop.as_mut().set_sound_screen_share(sound.screen_share);
+    desktop
+        .as_mut()
+        .set_sound_stream_viewers(sound.stream_watcher_activity);
+    desktop
+        .as_mut()
+        .set_soundboard_volume(i32::from(sound.soundboard_volume));
     desktop.set_sounds(s.sounds);
+}
+
+/// Saves `next` as the settings and shows it.
+fn store(mut desktop: Pin<&mut qobject::Desktop>, next: DesktopSettings) {
+    let dir = with_shared(|s| {
+        s.settings = next;
+        s.dir.clone()
+    });
+    if let Some(dir) = dir {
+        if let Err(error) = settings::save_settings(&dir, &next) {
+            eprintln!("[desktop] settings not saved: {error}");
+        }
+    }
+    apply_settings(desktop.as_mut(), next);
+    apply_badge(desktop);
 }
 
 /// The core's badge changed.
@@ -238,28 +303,47 @@ fn parse_rects(text: &str) -> Vec<Rect> {
 }
 
 impl qobject::Desktop {
-    pub fn set_setting(mut self: Pin<&mut Self>, key: &QString, value: bool) {
+    pub fn set_setting(self: Pin<&mut Self>, key: &QString, value: bool) {
         let key = key.to_string();
-        let (next, dir) = with_shared(|s| {
-            let mut next = s.settings;
-            match key.as_str() {
-                "closeToTray" => next.close_to_tray = value,
-                "startMinimized" => next.start_minimized = value,
-                "openOnStartup" => next.open_on_startup = value,
-                "notifications" => next.desktop_notifications = value,
-                "sounds" => next.sounds = value,
-                _ => eprintln!("[desktop] unknown setting {key}"),
+        let mut next = current();
+        let sound = &mut next.sound_settings;
+        let field = match key.as_str() {
+            "closeToTray" => &mut next.close_to_tray,
+            "startMinimized" => &mut next.start_minimized,
+            "openOnStartup" => &mut next.open_on_startup,
+            "notifications" => &mut next.desktop_notifications,
+            "sounds" => &mut next.sounds,
+            "soundNotifications" => &mut sound.notifications,
+            "soundVoiceJoinLeave" => &mut sound.voice_join_leave,
+            "soundConnect" => &mut sound.self_connect_disconnect,
+            "soundMute" => &mut sound.mute_deafen,
+            "soundScreenShare" => &mut sound.screen_share,
+            "soundStreamViewers" => &mut sound.stream_watcher_activity,
+            _ => {
+                eprintln!("[desktop] unknown setting {key}");
+                return;
             }
-            s.settings = next;
-            (next, s.dir.clone())
-        });
-        if let Some(dir) = dir {
-            if let Err(error) = settings::save_settings(&dir, &next) {
-                eprintln!("[desktop] settings not saved: {error}");
+        };
+        *field = value;
+        store(self, next);
+    }
+
+    pub fn set_volume(self: Pin<&mut Self>, key: &QString, value: i32) {
+        let volume = u8::try_from(value.clamp(0, 100)).unwrap_or(100);
+        let mut next = current();
+        match key.to_string().as_str() {
+            "soundVolume" => next.sound_settings.sound_volume = volume,
+            "soundboardVolume" => next.sound_settings.soundboard_volume = volume,
+            other => {
+                eprintln!("[desktop] unknown volume {other}");
+                return;
             }
         }
-        apply_settings(self.as_mut(), next);
-        apply_badge(self);
+        store(self, next);
+    }
+
+    pub fn play_test_sound(&self) {
+        crate::sound::play_test(yap_core::shell::Sound::Notification);
     }
 
     pub fn open_channel(&self, channel_id: &QString, server_id: &QString) {

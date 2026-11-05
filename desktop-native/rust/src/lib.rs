@@ -3,7 +3,8 @@
 //! [`bridge`], list models in [`models`], and the GUI-thread state they
 //! share in [`gui`]. The voice settings are [`audio`]; remote video between
 //! the call and the UI is [`video`], our camera's frames into it
-//! [`camera`], and the share picker's sources and pictures [`share`].
+//! [`camera`], the share picker's sources and pictures [`share`], and the
+//! settings dialog's side of the core [`settings`].
 
 mod audio;
 mod bridge;
@@ -14,6 +15,7 @@ mod gui;
 mod media;
 mod models;
 mod picker;
+mod settings;
 mod share;
 mod sound;
 mod video;

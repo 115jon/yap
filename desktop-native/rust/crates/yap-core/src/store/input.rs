@@ -137,6 +137,44 @@ pub enum Command {
     SetVoiceShareAudio(bool),
     /// The share's quality preset.
     SetVoiceShareQuality(String),
+    /// Settings → Account: the email and sign-in methods from Kova.
+    LoadAccount,
+    /// Settings → Sessions.
+    LoadSessions,
+    /// Settings → Privacy: the shared message links.
+    LoadShares,
+    /// Revoke a shared message link.
+    RevokeShare(String),
+    /// Settings → Account → Display name (empty clears it).
+    SaveDisplayName(String),
+    /// The profile editor's Save.
+    SaveProfile(Box<ProfileDraft>),
+    /// The media filter level (`high`, `medium`, `low`, `off`).
+    SetMediaFilter(String),
+    /// Save the theme to the account (useAppearanceTheme `persistAppearance`):
+    /// `sync` off clears the saved theme.
+    SaveTheme {
+        theme: Option<String>,
+        sync: bool,
+    },
+}
+
+/// What the profile editor saves. Colours are `#RRGGBB` or `None` (Auto);
+/// a picked image is a local file.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProfileDraft {
+    pub pronouns: String,
+    pub bio: String,
+    pub custom_status: String,
+    pub accent_color: Option<String>,
+    pub background_color: Option<String>,
+    pub banner_color: Option<String>,
+    /// A new avatar (path, content type).
+    pub avatar: Option<(String, String)>,
+    pub remove_avatar: bool,
+    /// A new banner (path, content type).
+    pub banner: Option<(String, String)>,
+    pub remove_banner: bool,
 }
 
 /// A file the user picked, pasted or dropped, as the UI read it.

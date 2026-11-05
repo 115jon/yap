@@ -69,6 +69,16 @@ ApplicationWindow {
         }
     }
 
+    // The theme picked in Settings (or synced from the account); "system"
+    // follows the OS light or dark scheme.
+    Binding {
+        target: Theme
+        property: "themeId"
+        value: Settings.theme === "system"
+            ? (Qt.styleHints.colorScheme === Qt.Light ? "light" : "dark")
+            : Settings.theme
+    }
+
     Binding {
         target: WindowChrome
         property: "dark"
