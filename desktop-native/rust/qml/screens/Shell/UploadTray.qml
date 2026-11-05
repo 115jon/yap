@@ -84,6 +84,7 @@ Item {
                         Text {
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
+                            textFormat: Text.PlainText
                             text: tile.name
                             wrapMode: Text.WrapAnywhere
                             maximumLineCount: 2
@@ -115,6 +116,7 @@ Item {
                         Text {
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
+                            textFormat: Text.PlainText
                             text: tile.name
                             elide: Text.ElideMiddle
                             color: Theme.ink1
@@ -171,6 +173,7 @@ Item {
                         Text {
                             id: sizeLabel
                             anchors.centerIn: parent
+                            textFormat: Text.PlainText
                             text: tile.sizeText
                             color: Theme.ink2
                             font: Theme.type.numSm

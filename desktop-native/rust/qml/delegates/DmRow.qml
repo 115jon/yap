@@ -73,6 +73,7 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         Text {
             width: parent.width
+            textFormat: Text.PlainText
             text: row.name
             elide: Text.ElideRight
             color: row.active || hover.hovered || row.unread ? Theme.ink1 : Theme.ink2
@@ -81,6 +82,7 @@ Rectangle {
         Text {
             width: parent.width
             visible: row.customStatus.length > 0
+            textFormat: Text.PlainText
             text: row.customStatus
             elide: Text.ElideRight
             color: Theme.ink3

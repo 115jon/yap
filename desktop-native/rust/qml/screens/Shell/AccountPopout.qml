@@ -212,6 +212,7 @@ T.Popup {
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         width: Math.min(implicitWidth, line.width - 24)
+                        textFormat: Text.PlainText
                         text: Session.meCustomStatus.length > 0 ? Session.meCustomStatus : qsTr("Set a custom status")
                         elide: Text.ElideRight
                         color: Session.meCustomStatus.length > 0 ? Theme.ink1 : Theme.ink3
@@ -315,6 +316,7 @@ T.Popup {
             anchors.right: trail.left
             anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: key.text
             elide: Text.ElideRight
             color: key.danger ? Theme.dangerInk : key.quiet ? Theme.ink2 : Theme.ink1

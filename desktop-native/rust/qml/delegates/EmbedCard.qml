@@ -56,6 +56,7 @@ Item {
             anchors.right: openKey.left
             anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: head.provider
             elide: Text.ElideRight
             color: Theme.ink2
@@ -110,6 +111,7 @@ Item {
                         Text {
                             visible: root.embed.author.length > 0
                             width: parent.width
+                            textFormat: Text.PlainText
                             text: root.embed.author
                             elide: Text.ElideRight
                             color: Theme.ink1
@@ -119,6 +121,7 @@ Item {
                             id: title
                             visible: text.length > 0
                             width: parent.width
+                            textFormat: Text.PlainText
                             text: root.embed.title
                             wrapMode: Text.Wrap
                             maximumLineCount: 2
@@ -219,6 +222,7 @@ Item {
                 Text {
                     visible: text.length > 0
                     width: parent.width
+                    textFormat: Text.PlainText
                     text: root.embed.footer
                     elide: Text.ElideRight
                     color: Theme.ink3
@@ -267,6 +271,7 @@ Item {
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 10
                 width: parent.width - 24
+                textFormat: Text.PlainText
                 text: root.embed.host
                 elide: Text.ElideRight
                 color: "#b4b4ba"
@@ -322,12 +327,14 @@ Item {
                         width: parent.width - 52
                         spacing: 2
                         Text {
+                            textFormat: Text.PlainText
                             text: root.embed.label
                             color: Theme.ink1
                             font: Theme.type.silk
                         }
                         Text {
                             width: parent.width
+                            textFormat: Text.PlainText
                             text: root.embed.text
                             wrapMode: Text.Wrap
                             color: Theme.ink2
@@ -335,6 +342,7 @@ Item {
                         }
                         Text {
                             width: parent.width
+                            textFormat: Text.PlainText
                             text: root.embed.short
                             elide: Text.ElideRight
                             color: Theme.ink3

@@ -15,6 +15,7 @@ Item {
 
     Text {
         id: label
+        textFormat: Text.PlainText
         x: 12
         width: parent.width - 24
         anchors.verticalCenter: parent.verticalCenter

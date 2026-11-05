@@ -98,6 +98,7 @@ Rectangle {
             Text {
                 id: moreText
                 anchors.centerIn: parent
+                textFormat: Text.PlainText
                 text: "+" + root.more
                 color: Theme.ink1
                 font: Theme.type.num

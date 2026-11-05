@@ -74,11 +74,13 @@ Column {
                         width: parent.width
                         spacing: 4
                         Text {
+                            textFormat: Text.PlainText
                             text: entry.modelData.actor
                             color: Theme.ink1
                             font: Theme.type.occupant
                         }
                         Text {
+                            textFormat: Text.PlainText
                             text: entry.modelData.verb
                             color: Theme.ink2
                             font: Theme.type.description
@@ -86,6 +88,7 @@ Column {
                         Text {
                             id: targetText
                             visible: entry.target !== null
+                            textFormat: Text.PlainText
                             text: entry.target ? entry.target.label : ""
                             color: entry.target && entry.target.named ? Theme.ink1 : Theme.ink2
                             font: entry.target && entry.target.code ? Theme.type.code
@@ -114,6 +117,7 @@ Column {
                                 visible: detail.modelData.type === "perm"
                                 width: 12
                                 horizontalAlignment: Text.AlignHCenter
+                                textFormat: Text.PlainText
                                 text: detail.modelData.sign ?? ""
                                 color: detail.modelData.sign === "+" ? Theme.successInk : Theme.dangerInk
                                 font: Theme.type.occupant
@@ -124,6 +128,7 @@ Column {
                                 wrapMode: Text.Wrap
                                 color: Theme.ink2
                                 font: Theme.type.description
+                                textFormat: Text.PlainText
                                 text: detail.modelData.type === "perm" ? detail.modelData.name
                                     : detail.modelData.type === "list" ? detail.modelData.label + ": " + detail.modelData.items.join(", ")
                                     : detail.modelData.text
@@ -133,12 +138,14 @@ Column {
                     Text {
                         visible: entry.modelData.reason.length > 0
                         width: parent.width
+                        textFormat: Text.PlainText
                         text: qsTr("Reason: %1").arg(entry.modelData.reason)
                         wrapMode: Text.Wrap
                         color: Theme.ink2
                         font: Theme.type.description
                     }
                     Text {
+                        textFormat: Text.PlainText
                         text: entry.modelData.when
                         color: Theme.ink3
                         font: Theme.type.caption

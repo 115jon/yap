@@ -26,6 +26,7 @@ Item {
             id: legend
             x: 4
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: root.label
             color: slot.activeFocus ? Theme.ink1 : Theme.ink2
             font: Theme.type.silk
@@ -43,6 +44,7 @@ Item {
             id: hintText
             x: 4
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: root.hint
             color: Theme.ink3
             font: Theme.type.silk

@@ -82,6 +82,7 @@ Rectangle {
                 visible: bar.error.length > 0
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width
+                textFormat: Text.PlainText
                 text: bar.error
                 elide: Text.ElideRight
                 color: Theme.dangerInk

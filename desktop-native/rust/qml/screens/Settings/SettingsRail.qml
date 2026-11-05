@@ -64,6 +64,7 @@ Loader {
                 readonly property string rowId: "mic-test"
                 Text {
                     width: parent.width
+                    textFormat: Text.PlainText
                     text: SettingsNav.desc("mic-test")
                     wrapMode: Text.Wrap
                     color: Theme.ink2
@@ -77,6 +78,7 @@ Loader {
                 }
                 Text {
                     width: parent.width
+                    textFormat: Text.PlainText
                     text: !Audio.levelLive ? qsTr("Join a voice channel to see your level.")
                         : Voice.muted ? qsTr("Unmute to see your level.")
                         : qsTr("Talk to see your level.")
@@ -97,6 +99,7 @@ Loader {
                         height: 33
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
+                            textFormat: Text.PlainText
                             text: item.modelData[0]
                             color: Theme.ink2
                             font: Theme.type.caption
@@ -106,6 +109,7 @@ Loader {
                             anchors.verticalCenter: parent.verticalCenter
                             width: Math.min(implicitWidth, parent.width - 120)
                             horizontalAlignment: Text.AlignRight
+                            textFormat: Text.PlainText
                             text: item.modelData[1]
                             elide: Text.ElideRight
                             color: Theme.ink1
@@ -163,12 +167,14 @@ Loader {
                             Column {
                                 width: parent.width - 44
                                 Text {
+                                    textFormat: Text.PlainText
                                     text: line.modelData.who
                                     color: Theme.lightGround ? Qt.darker(line.modelData.color, 1.4) : line.modelData.color
                                     font: Theme.type.rowUnread
                                 }
                                 Text {
                                     width: parent.width
+                                    textFormat: Text.PlainText
                                     text: line.modelData.text
                                     wrapMode: Text.Wrap
                                     color: Theme.ink1
@@ -254,6 +260,7 @@ Loader {
                 }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
                     text: alert.soundOn ? qsTr("Plays a chime at %1% volume.").arg(Desktop.soundVolume)
                         : Desktop.sounds ? qsTr("No chime: notification sounds are off.")
                         : qsTr("No chime: sound effects are off.")
@@ -278,6 +285,7 @@ Loader {
         }
         Text {
             id: bio
+            textFormat: Text.PlainText
             width: parent.width
             wrapMode: Text.Wrap
             maximumLineCount: 12

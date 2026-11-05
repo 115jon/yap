@@ -88,6 +88,7 @@ PlateDialog {
             Text {
                 anchors.centerIn: parent
                 visible: tile.showsServer && !serverIcon.visible
+                textFormat: Text.PlainText
                 text: dialog.landing ? dialog.landing.serverInitial : ""
                 color: Theme.accentInk
                 font: Theme.type.railInitial
@@ -119,6 +120,7 @@ PlateDialog {
                 }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
                     text: dialog.landing ? dialog.landing.members : ""
                     color: Theme.ink3
                     font: Theme.type.silk

@@ -122,6 +122,7 @@ Column {
             anchors.right: deleteKey.left
             anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: root.creating ? qsTr("New role") : root.role.name
             elide: Text.ElideRight
             color: Theme.ink1

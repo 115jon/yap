@@ -20,6 +20,7 @@ T.Button {
     Accessible.name: text
 
     contentItem: Text {
+        textFormat: Text.PlainText
         text: control.text
         font: control.font
         color: Theme.ink1

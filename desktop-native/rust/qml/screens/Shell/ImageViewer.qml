@@ -198,6 +198,7 @@ Popup {
                     Text {
                         id: nameText
                         width: parent.width
+                        textFormat: Text.PlainText
                         text: root.current && root.current.name.length > 0 ? root.current.name : qsTr("Image")
                         elide: Text.ElideMiddle
                         color: Theme.ink1
@@ -208,6 +209,7 @@ Popup {
                         readonly property string pixels: hit.shown.status === Image.Ready
                             ? qsTr("%1×%2").arg(hit.shown.implicitWidth).arg(hit.shown.implicitHeight) : ""
                         width: parent.width
+                        textFormat: Text.PlainText
                         text: [root.current ? root.current.size : "", pixels].filter(s => s.length > 0).join(" · ")
                             + (root.many ? "  " + qsTr("%1 of %2").arg(root.index + 1).arg(root.images.length) : "")
                         elide: Text.ElideRight

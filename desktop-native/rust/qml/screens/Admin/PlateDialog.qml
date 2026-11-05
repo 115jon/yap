@@ -58,6 +58,7 @@ T.Popup {
             visible: dialog.kicker.length > 0
             width: parent.width
             bottomPadding: 8
+            textFormat: Text.PlainText
             text: dialog.kicker
             elide: Text.ElideRight
             color: Theme.ink3
@@ -65,6 +66,7 @@ T.Popup {
         }
         Text {
             width: parent.width
+            textFormat: Text.PlainText
             text: dialog.title
             wrapMode: Text.Wrap
             color: Theme.ink1
@@ -84,6 +86,7 @@ T.Popup {
             visible: dialog.description.length > 0
             width: parent.width
             topPadding: 8
+            textFormat: Text.PlainText
             text: dialog.description
             wrapMode: Text.Wrap
             color: Theme.ink2

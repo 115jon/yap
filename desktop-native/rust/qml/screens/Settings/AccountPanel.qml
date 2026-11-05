@@ -132,6 +132,7 @@ Column {
                     visible: Settings.displayNameError.length > 0
                     topPadding: 4
                     width: parent.width
+                    textFormat: Text.PlainText
                     text: Settings.displayNameError
                     wrapMode: Text.Wrap
                     color: Theme.dangerInk
@@ -177,6 +178,7 @@ Column {
     }
 
     component ValueText: Text {
+        textFormat: Text.PlainText
         width: Math.min(implicitWidth, 320)
         elide: Text.ElideRight
         color: Theme.ink2

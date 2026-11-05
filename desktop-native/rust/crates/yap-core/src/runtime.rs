@@ -612,6 +612,25 @@ const UPLOAD_CHUNK: usize = 64 * 1024;
 /// Progress reports are at least this far apart (bytes, as thousandths).
 const PROGRESS_STEP: u64 = 10;
 
+/// The largest profile picture, banner or server icon the server takes
+/// (`MAX_IMAGE_SIZE`, src/lib/image-validation.ts).
+const MAX_IMAGE_UPLOAD_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Refuses a file over `cap` before reading it, as the server's 413 would
+/// (`describe_error` words it "The file is too large.").
+async fn check_size(path: &Path, cap: u64) -> Result<(), crate::api::ApiError> {
+    let meta = tokio::fs::metadata(path)
+        .await
+        .map_err(|error| crate::api::ApiError::Network(error.to_string()))?;
+    if meta.len() > cap {
+        return Err(crate::api::ApiError::Http {
+            status: 413,
+            message: "file is too large".into(),
+        });
+    }
+    Ok(())
+}
+
 /// Reads the file and posts it as multipart `file`, reporting the bytes
 /// handed to the connection as they go.
 async fn upload(
@@ -624,6 +643,7 @@ async fn upload(
     inbox: &UnboundedSender<Input>,
 ) -> Result<Value, crate::api::ApiError> {
     use futures_util::StreamExt;
+    check_size(&path, crate::store::view::media::MAX_UPLOAD_BYTES).await?;
     let read = tokio::task::spawn_blocking(move || std::fs::read(path)).await;
     let bytes = match read {
         Ok(Ok(bytes)) => bytes,
@@ -669,6 +689,7 @@ async fn profile_upload(
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "image".into());
+    check_size(Path::new(&path), MAX_IMAGE_UPLOAD_BYTES).await?;
     let bytes = tokio::fs::read(&path)
         .await
         .map_err(|error| crate::api::ApiError::Network(error.to_string()))?;

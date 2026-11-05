@@ -79,6 +79,7 @@ Rectangle {
             anchors.right: chevron.left
             anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: Nav.activeServerName
             elide: Text.ElideRight
             color: Theme.ink1

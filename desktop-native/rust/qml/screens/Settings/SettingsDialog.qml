@@ -280,6 +280,7 @@ T.Popup {
                                     spacing: 12
                                     Text {
                                         anchors.verticalCenter: parent.verticalCenter
+                                        textFormat: Text.PlainText
                                         text: String(group.index + 1).padStart(2, "0")
                                         color: Theme.ink1
                                         font: Theme.type.silk
@@ -287,6 +288,7 @@ T.Popup {
                                     }
                                     Text {
                                         anchors.verticalCenter: parent.verticalCenter
+                                        textFormat: Text.PlainText
                                         text: group.modelData.title
                                         color: Theme.ink3
                                         font: Theme.type.silk
@@ -318,6 +320,7 @@ T.Popup {
                         spacing: 4
                         Text {
                             width: parent.width
+                            textFormat: Text.PlainText
                             text: qsTr("No settings match “%1”").arg(SettingsNav.trimmed)
                             wrapMode: Text.Wrap
                             color: Theme.ink1
@@ -363,6 +366,7 @@ T.Popup {
                     anchors.right: closeKey.left
                     anchors.rightMargin: 12
                     anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
                     text: dialog.noHits ? qsTr("No matches") : dialog.shown.title
                     elide: Text.ElideRight
                     color: Theme.ink1
@@ -425,6 +429,7 @@ T.Popup {
                         width: Math.min(parent.width, 760)
                         Text {
                             width: parent.width
+                            textFormat: Text.PlainText
                             text: (dialog.groupIndex >= 0
                                 ? String(dialog.groupIndex + 1).padStart(2, "0") + " " + SettingsNav.schema.groups[dialog.groupIndex].title + " · " : "")
                                 + dialog.shown.title
@@ -434,6 +439,7 @@ T.Popup {
                         Item { width: 1; height: 8 }
                         Text {
                             width: parent.width
+                            textFormat: Text.PlainText
                             text: dialog.shown.headline
                             wrapMode: Text.Wrap
                             color: Theme.ink1
@@ -448,6 +454,7 @@ T.Popup {
                         Text {
                             visible: SettingsNav.trimmed.length === 0
                             width: Math.min(parent.width, 500)
+                            textFormat: Text.PlainText
                             text: SettingsNav.schema.ledes[dialog.shownId] ?? ""
                             wrapMode: Text.Wrap
                             color: Theme.ink2
@@ -462,6 +469,7 @@ T.Popup {
                             readonly property int count: SettingsNav.hitsOn(dialog.shownId).length
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
+                                textFormat: Text.PlainText
                                 text: parent.count === 1
                                     ? qsTr("1 match for “%1” on this page").arg(SettingsNav.trimmed)
                                     : qsTr("%1 matches for “%2” on this page").arg(parent.count).arg(SettingsNav.trimmed)
@@ -522,6 +530,7 @@ T.Popup {
                         Text {
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
+                            textFormat: Text.PlainText
                             text: qsTr("No settings match “%1”").arg(SettingsNav.trimmed)
                             wrapMode: Text.Wrap
                             color: Theme.ink1
@@ -677,6 +686,7 @@ T.Popup {
                     anchors.right: count.left
                     anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
                     text: leaf.def.title
                     elide: Text.ElideRight
                     color: leaf.current || button.hovered ? Theme.ink1 : Theme.ink2
@@ -695,6 +705,7 @@ T.Popup {
                     Text {
                         id: countText
                         anchors.centerIn: parent
+                        textFormat: Text.PlainText
                         text: leaf.hits.length
                         color: leaf.hits.length > 0 ? Theme.accentInk : Theme.ink3
                         font: Theme.type.numSm
@@ -740,6 +751,7 @@ T.Popup {
                     Text {
                         visible: hitKey.sectioned
                         width: hitKey.width - 48
+                        textFormat: Text.PlainText
                         text: hitKey.modelData.section
                         elide: Text.ElideRight
                         color: Theme.ink3
@@ -753,6 +765,7 @@ T.Popup {
             leftPadding: 40
             topPadding: 4
             bottomPadding: 4
+            textFormat: Text.PlainText
             text: qsTr("%1 more on this page").arg(leaf.hits.length - 4)
             color: Theme.ink3
             font: Theme.type.caption

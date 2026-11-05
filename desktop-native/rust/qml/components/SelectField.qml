@@ -39,6 +39,7 @@ T.AbstractButton {
     onClicked: list.visible ? list.close() : list.popup(control, 0, control.height + 4)
 
     contentItem: Text {
+        textFormat: Text.PlainText
         text: control.nameAt(control.currentIndex)
         elide: Text.ElideRight
         verticalAlignment: Text.AlignVCenter

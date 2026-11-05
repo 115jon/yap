@@ -31,6 +31,7 @@ Rectangle {
                 color: root.callLive ? Theme.talk : Theme.idle
             }
             Text {
+                textFormat: Text.PlainText
                 text: root.callLive ? qsTr("Voice connected") : (Voice.status || qsTr("Connecting"))
                 color: root.callLive ? Theme.successInk : Theme.warningInk
                 font: Theme.type.silk
@@ -38,6 +39,7 @@ Rectangle {
         }
         Text {
             width: parent.width
+            textFormat: Text.PlainText
             text: Voice.channelName + (Nav.activeServerId.length > 0 ? " / " + Nav.activeServerName : "")
             elide: Text.ElideRight
             color: Theme.ink2

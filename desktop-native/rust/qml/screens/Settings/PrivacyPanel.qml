@@ -117,6 +117,7 @@ Column {
                 Text {
                     visible: Settings.sharesState === "ready" && list.visibleShares.length === 0
                     width: parent.width
+                    textFormat: Text.PlainText
                     text: root.filter === "current" ? qsTr("No live links. Share a message from its menu to make one.")
                         : qsTr("You haven't shared any messages yet.")
                     wrapMode: Text.Wrap
@@ -154,6 +155,7 @@ Column {
             spacing: 8
             Text {
                 anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
                 text: tab.text
                 color: tab.on || tab.hovered ? Theme.ink1 : Theme.ink2
                 font: Theme.type.controlSm
@@ -167,6 +169,7 @@ Column {
                 Text {
                     id: countText
                     anchors.centerIn: parent
+                    textFormat: Text.PlainText
                     text: tab.count
                     color: Theme.ink2
                     font: Theme.type.numSm
@@ -239,6 +242,7 @@ Column {
                 width: parent.width - (keys.visible ? keys.width + 16 : 0)
                 Text {
                     width: parent.width
+                    textFormat: Text.PlainText
                     text: share.modelData.author
                     elide: Text.ElideRight
                     color: Theme.ink1
@@ -247,6 +251,7 @@ Column {
                 Text {
                     width: parent.width
                     topPadding: 2
+                    textFormat: Text.PlainText
                     text: share.modelData.content.length > 0 ? share.modelData.content : qsTr("(Attachment only)")
                     wrapMode: Text.Wrap
                     maximumLineCount: 2
@@ -324,6 +329,7 @@ Column {
     }
 
     component Meta: Text {
+        textFormat: Text.PlainText
         height: 20
         verticalAlignment: Text.AlignVCenter
         color: Theme.ink2

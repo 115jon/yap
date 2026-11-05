@@ -56,12 +56,14 @@ Flow {
                     visible: chip.modelData.url.length === 0
                     width: Math.min(implicitWidth, 80)
                     elide: Text.ElideRight
+                    textFormat: Text.PlainText
                     text: chip.modelData.label
                     color: chip.ink
                     font: Theme.type.caption
                 }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
                     text: chip.modelData.count
                     color: chip.ink
                     font: Theme.type.kbd

@@ -34,19 +34,35 @@ SidePanelFrame {
     adornment: Text {
         visible: root.ready
         anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
         text: root.repliesText
         color: Theme.ink3
         font: Theme.type.caption
     }
 
-    Component.onCompleted: load()
-    Component.onDestruction: Panels.closeThread()
+    // The docked column and the sheet swap at 1024 px: the new panel picks
+    // up the thread the old one had open, and its half-typed reply.
+    Component.onCompleted: {
+        replyField.text = ShellState.threadDraft
+        if (ShellState.threadId.length > 0 && Panels.threadRootId === ShellState.threadId
+            && Panels.threadError.length === 0)
+            return
+        load()
+    }
+    // Only a dismissal closes the thread: ShellState.threadId is cleared by
+    // then, while a layout swap or another panel taking the column leaves it.
+    Component.onDestruction: {
+        if (ShellState.threadId.length === 0)
+            Panels.closeThread()
+    }
 
     Connections {
         target: ShellState
         function onThreadIdChanged() {
-            if (ShellState.threadId.length > 0)
+            if (ShellState.threadId.length > 0) {
+                replyField.text = ""
                 root.load()
+            }
         }
     }
 
@@ -66,6 +82,7 @@ SidePanelFrame {
                 x: 16
                 topPadding: 12
                 bottomPadding: 4
+                textFormat: Text.PlainText
                 text: root.repliesText
                 color: Theme.ink3
                 font: Theme.type.caption
@@ -206,6 +223,7 @@ SidePanelFrame {
                 }
                 Text {
                     width: parent.width - Theme.iconSm - 8
+                    textFormat: Text.PlainText
                     text: Panels.threadError
                     wrapMode: Text.Wrap
                     color: Theme.dangerInk
@@ -272,6 +290,7 @@ SidePanelFrame {
                 leftPadding: 0
                 rightPadding: 0
                 Accessible.name: qsTr("Reply to thread")
+                onTextChanged: ShellState.threadDraft = text
                 Keys.onReturnPressed: event => {
                     if (event.modifiers & Qt.ShiftModifier) {
                         event.accepted = false

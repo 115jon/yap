@@ -68,6 +68,7 @@ Rectangle {
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
                 text: Nav.voicePanelName
                 color: Theme.ink1
                 font: Theme.type.columnTitle
@@ -90,6 +91,7 @@ Rectangle {
             Text {
                 visible: root.focused
                 anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
                 text: ShellState.stageLabel
                 color: Theme.ink1
                 font.family: "Yap Bricolage Key Bold"
@@ -159,6 +161,7 @@ Rectangle {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.Wrap
+                textFormat: Text.PlainText
                 text: Nav.voicePanelName
                 color: Theme.ink1
                 font: Theme.type.dialogTitle
@@ -170,6 +173,7 @@ Rectangle {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.Wrap
+                textFormat: Text.PlainText
                 text: root.count === 0 ? qsTr("No one's here yet. Join and the others will see you in the channel.")
                     : root.count === 1 ? qsTr("1 person is in voice.")
                     : qsTr("%1 people are in voice.").arg(root.count)
@@ -210,6 +214,7 @@ Rectangle {
                     height: 32
                     leftPadding: 8
                     verticalAlignment: Text.AlignVCenter
+                    textFormat: Text.PlainText
                     text: qsTr("and %1 more").arg(root.count - 6)
                     color: Theme.ink3
                     font: Theme.type.caption
@@ -236,6 +241,7 @@ Rectangle {
             Text {
                 width: Math.min(implicitWidth, 420)
                 wrapMode: Text.Wrap
+                textFormat: Text.PlainText
                 text: Voice.error
                 color: Theme.dangerInk
                 font: Theme.type.description

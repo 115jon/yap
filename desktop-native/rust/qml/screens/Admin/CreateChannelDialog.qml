@@ -113,6 +113,7 @@ PlateDialog {
         spacing: 4
         Text {
             visible: dialog.nameError.length > 0
+            textFormat: Text.PlainText
             text: dialog.nameError
             color: Theme.dangerInk
             font: Theme.type.caption
@@ -120,6 +121,7 @@ PlateDialog {
             Accessible.name: text
         }
         Text {
+            textFormat: Text.PlainText
             text: dialog.categoryName.length > 0 ? qsTr("In %1").arg(dialog.categoryName) : qsTr("Not in a category")
             color: Theme.ink3
             font: Theme.type.description
@@ -210,6 +212,7 @@ PlateDialog {
                     }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
+                        textFormat: Text.PlainText
                         text: card.label
                         color: Theme.ink1
                         font: Theme.type.row
@@ -217,6 +220,7 @@ PlateDialog {
                 }
                 Text {
                     width: parent.width
+                    textFormat: Text.PlainText
                     text: card.description
                     wrapMode: Text.Wrap
                     color: Theme.ink2

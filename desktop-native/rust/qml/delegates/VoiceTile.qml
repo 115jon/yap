@@ -112,6 +112,7 @@ Item {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             elide: Text.ElideRight
+            textFormat: Text.PlainText
             text: qsTr("%1 is sharing").arg(root.ownerName)
             color: Theme.ink1
             font: Theme.type.captionStrong
@@ -167,6 +168,7 @@ Item {
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
                 text: root.previewPaused ? qsTr("Resume") : qsTr("Pause")
                 color: "white"
                 font: Theme.type.captionStrong
@@ -230,6 +232,7 @@ Item {
                 width: Math.max(0, Math.min(implicitWidth, root.width - (root.tray ? 8 : 48) - 12 - 12
                     - (root.screen ? 18 : 0) - (root.muted ? 18 : 0) - (root.deafened ? 18 : 0)))
                 // A share is named for its owner (TileNameplate's ownerName).
+                textFormat: Text.PlainText
                 text: root.me && !root.screen ? qsTr("%1 (you)").arg(root.name) : root.name
                 elide: Text.ElideRight
                 color: root.overMedia ? "white" : Theme.ink1

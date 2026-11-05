@@ -127,6 +127,7 @@ Rectangle {
                     color: Theme.tint1
                     Text {
                         anchors.centerIn: parent
+                        textFormat: Text.PlainText
                         text: "+" + root.dmOverflow
                         color: moreHover.hovered ? Theme.ink1 : Theme.ink2
                         font: Theme.type.kbd
@@ -238,6 +239,7 @@ Rectangle {
             Text {
                 anchors.centerIn: parent
                 visible: picture.status !== Image.Ready
+                textFormat: Text.PlainText
                 text: key.initials.charAt(0)
                 color: key.open ? Theme.primaryFillInk : Theme.ink2
                 font: Theme.type.railInitial

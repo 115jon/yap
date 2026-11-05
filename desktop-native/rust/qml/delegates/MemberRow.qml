@@ -115,6 +115,7 @@ Item {
         anchors.right: glyphs.left
         anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
         text: root.name
         elide: Text.ElideRight
         color: root.speaking || root.me || hover.hovered ? Theme.ink1 : Theme.ink2

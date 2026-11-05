@@ -670,12 +670,12 @@ impl State {
         let patch = Value::Object(patch);
         match draft.icon {
             Some((path, content_type)) => {
-                if !self.act_start("overview") {
-                    return;
-                }
                 let Some(token) = self.session.as_ref().map(|s| s.token.clone()) else {
                     return;
                 };
+                if !self.act_start("overview") {
+                    return;
+                }
                 let id = RequestId(self.next_id());
                 fx.push(Effect::ProfileUpload {
                     id,

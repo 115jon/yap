@@ -147,6 +147,7 @@ Popup {
                         Text {
                             id: tabText
                             anchors.centerIn: parent
+                            textFormat: Text.PlainText
                             text: tab.modelData.text
                             color: tab.active ? Theme.ink1 : Theme.ink2
                             font: Theme.type.captionStrong
@@ -246,6 +247,7 @@ Popup {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
             visible: Chat.gifCount0 === 0
+            textFormat: Text.PlainText
             text: Chat.gifError.length > 0 ? Chat.gifError
                 : Chat.gifLoading ? qsTr("Loading KLIPY %1…").arg(root.label)
                 : search.text.trim().length > 0 ? qsTr("No %1 found for \"%2\".").arg(root.label).arg(search.text.trim())
@@ -266,6 +268,7 @@ Popup {
             }
             Text {
                 anchors.centerIn: parent
+                textFormat: Text.PlainText
                 text: Chat.gifCount0 > 0 && Chat.gifError.length > 0 ? Chat.gifError : qsTr("Powered by KLIPY")
                 color: Theme.ink3
                 font: Theme.type.silk

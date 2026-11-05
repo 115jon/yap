@@ -115,6 +115,12 @@ T.Popup {
 
     contentItem: FocusScope {
         Keys.onEscapePressed: event => {
+            // Escape in a text field belongs to the field, not the workbench.
+            const focused = Window.activeFocusItem
+            if (focused !== null && "cursorPosition" in focused) {
+                event.accepted = false
+                return
+            }
             event.accepted = true
             bench.stepBack()
         }
@@ -153,6 +159,7 @@ T.Popup {
                     anchors.verticalCenter: parent.verticalCenter
                     Text {
                         width: parent.width
+                        textFormat: Text.PlainText
                         text: bench.title
                         elide: Text.ElideRight
                         color: Theme.ink1
@@ -162,6 +169,7 @@ T.Popup {
                     Text {
                         visible: bench.subtitle.length > 0
                         width: parent.width
+                        textFormat: Text.PlainText
                         text: bench.subtitle
                         elide: Text.ElideRight
                         color: Theme.ink3
@@ -246,6 +254,7 @@ T.Popup {
                                     anchors.right: parent.right
                                     anchors.rightMargin: 8
                                     anchors.verticalCenter: parent.verticalCenter
+                                    textFormat: Text.PlainText
                                     text: navRow.modelData.label
                                     elide: Text.ElideRight
                                     color: navRow.current || navRow.hovered ? Theme.ink1 : Theme.ink2
@@ -287,6 +296,7 @@ T.Popup {
                     anchors.right: closeKey.left
                     anchors.rightMargin: 12
                     anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
                     text: bench.pageTitle
                     elide: Text.ElideRight
                     color: Theme.ink1

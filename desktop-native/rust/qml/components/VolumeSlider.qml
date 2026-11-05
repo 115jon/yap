@@ -29,6 +29,7 @@ T.Slider {
     Text {
         x: control.leftPadding
         y: 6
+        textFormat: Text.PlainText
         text: control.label
         color: Theme.ink3
         font: Theme.type.captionStrong
@@ -37,6 +38,7 @@ T.Slider {
         anchors.right: parent.right
         anchors.rightMargin: control.rightPadding
         y: 6
+        textFormat: Text.PlainText
         text: qsTr("%1%").arg(Math.round(control.value))
         color: Theme.ink1
         font: Theme.type.numSm

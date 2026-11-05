@@ -84,6 +84,7 @@ Rectangle {
                 Text {
                     anchors.centerIn: parent
                     visible: picture.status !== Image.Ready
+                    textFormat: Text.PlainText
                     text: root.initials.charAt(0)
                     color: Theme.ink1
                     font.family: "Yap Bricolage Key ExtraBold"
@@ -108,6 +109,7 @@ Rectangle {
             spacing: 4
             Text {
                 width: parent.width
+                textFormat: Text.PlainText
                 text: root.name
                 elide: Text.ElideRight
                 color: root.ink
@@ -116,6 +118,7 @@ Rectangle {
             }
             Text {
                 width: parent.width
+                textFormat: Text.PlainText
                 text: root.pronouns.length > 0 ? "@" + root.username + "  ·  " + root.pronouns : "@" + root.username
                 visible: root.username.length > 0
                 wrapMode: Text.WrapAnywhere
@@ -143,6 +146,7 @@ Rectangle {
                 Text {
                     id: word
                     anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
                     text: Theme.presenceWord(root.presence)
                     color: root.subInk
                     font: Theme.type.description
@@ -158,6 +162,7 @@ Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: root.customStatus.length > 0
                     width: Math.min(implicitWidth, parent.width - 16 - word.width - 24)
+                    textFormat: Text.PlainText
                     text: root.customStatus
                     elide: Text.ElideRight
                     color: root.ink

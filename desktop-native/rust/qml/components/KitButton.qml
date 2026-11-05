@@ -60,6 +60,7 @@ T.Button {
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
                 text: control.text
                 font: control.font
                 color: control.ink

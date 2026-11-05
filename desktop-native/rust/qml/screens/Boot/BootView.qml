@@ -64,6 +64,7 @@ Item {
                 }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
                     text: "0" + (root.step + 1) + " / 03"
                     color: Theme.ink3
                     font: Theme.type.silk
@@ -73,6 +74,7 @@ Item {
                 topPadding: 12
                 width: parent.width
                 wrapMode: Text.Wrap
+                textFormat: Text.PlainText
                 text: root.lines[root.step].line
                 color: Theme.ink1
                 font.family: "Yap Bricolage Title"
@@ -87,6 +89,7 @@ Item {
                 topPadding: 8
                 width: parent.width
                 wrapMode: Text.Wrap
+                textFormat: Text.PlainText
                 text: root.lines[root.step].detail
                 color: Theme.ink2
                 font: Theme.type.description

@@ -279,6 +279,7 @@ Popup {
                     Text {
                         width: parent.width
                         horizontalAlignment: Text.AlignHCenter
+                        textFormat: Text.PlainText
                         text: root.apps ? qsTr("No open apps to share") : qsTr("No screens found")
                         color: Theme.ink1
                         font: Theme.type.panelTitle
@@ -387,6 +388,7 @@ Popup {
                     spacing: 2
                     Text {
                         width: parent.width
+                        textFormat: Text.PlainText
                         text: root.picked ? root.picked.name : qsTr("Select a source")
                         elide: Text.ElideRight
                         color: root.picked ? Theme.ink1 : Theme.ink3
@@ -394,6 +396,7 @@ Popup {
                     }
                     Text {
                         visible: root.picked !== null
+                        textFormat: Text.PlainText
                         text: root.presetLine()
                         color: Theme.ink3
                         font: Theme.type.caption
@@ -437,6 +440,7 @@ Popup {
         Keys.onRightPressed: ShellState.shareTab = "screens"
         contentItem: Text {
             id: tabLabel
+            textFormat: Text.PlainText
             text: tab.text
             verticalAlignment: Text.AlignVCenter
             color: tab.current || tab.hovered ? Theme.ink1 : Theme.ink2

@@ -105,6 +105,7 @@ T.Popup {
             }
             Text {
                 width: parent.width
+                textFormat: Text.PlainText
                 text: Profile.bio
                 wrapMode: Text.Wrap
                 maximumLineCount: 12
@@ -152,6 +153,7 @@ T.Popup {
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
+                                textFormat: Text.PlainText
                                 text: chip.modelData
                                 color: Theme.ink1
                                 font: Theme.type.captionStrong

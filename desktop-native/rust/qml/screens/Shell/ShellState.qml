@@ -24,6 +24,11 @@ QtObject {
     // then members. The thread belongs to the open channel.
     property bool searchOpen: false
     property string threadId: ""
+    // The thread's half-typed reply, kept while its panel is rebuilt (the
+    // docked column and the sheet swap at 1024 px); another thread or none
+    // starts it empty.
+    property string threadDraft: ""
+    onThreadIdChanged: threadDraft = ""
     property bool pinsOpen: false
     readonly property string sidePanel: searchOpen ? "search"
         : threadId.length > 0 ? "thread"

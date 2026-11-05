@@ -164,6 +164,7 @@ PlateDialog {
     Text {
         visible: dialog.shownError.length > 0
         width: parent.width
+        textFormat: Text.PlainText
         text: dialog.shownError
         wrapMode: Text.Wrap
         color: Theme.dangerInk
@@ -194,6 +195,7 @@ PlateDialog {
         Text {
             visible: dialog.nameError.length > 0
             width: parent.width
+            textFormat: Text.PlainText
             text: dialog.nameError
             color: Theme.dangerInk
             font: Theme.type.caption

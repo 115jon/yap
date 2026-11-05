@@ -8,6 +8,8 @@ Text {
 
     signal activated()
 
+    textFormat: Text.PlainText
+
     color: Theme.accentInk
     font.family: Theme.type.captionStrong.family
     font.pixelSize: Theme.type.captionStrong.pixelSize

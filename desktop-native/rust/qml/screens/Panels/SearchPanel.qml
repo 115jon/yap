@@ -120,6 +120,7 @@ SidePanelFrame {
         width: 0
         height: 0
         opacity: 0
+        textFormat: Text.PlainText
         text: root.view.announcement ?? ""
         Accessible.role: Accessible.StaticText
         Accessible.name: text
@@ -245,12 +246,14 @@ SidePanelFrame {
                     spacing: 4
                     Text {
                         anchors.baseline: resultWord.baseline
+                        textFormat: Text.PlainText
                         text: Number(root.view.total ?? 0).toLocaleString(Qt.locale(), "f", 0)
                         color: Theme.ink2
                         font: Theme.type.num
                     }
                     Text {
                         id: resultWord
+                        textFormat: Text.PlainText
                         text: root.view.total === 1 ? qsTr("result") : qsTr("results")
                         color: Theme.ink3
                         font: Theme.type.caption

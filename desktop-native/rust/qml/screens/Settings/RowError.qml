@@ -40,6 +40,7 @@ Rectangle {
             x: 36
             y: 8
             width: parent.width - 48
+            textFormat: Text.PlainText
             text: root.text
             wrapMode: Text.Wrap
             color: Theme.dangerInk

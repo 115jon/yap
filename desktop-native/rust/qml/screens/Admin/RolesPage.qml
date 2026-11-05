@@ -95,6 +95,7 @@ Item {
             height: 32
             Text {
                 anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
                 text: root.list.length === 1 ? qsTr("1 role") : qsTr("%1 roles").arg(root.list.length)
                 color: Theme.ink2
                 font: Theme.type.description
@@ -184,6 +185,7 @@ Item {
             anchors.right: everyone.left
             anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: row.name
             elide: Text.ElideRight
             color: row.current || row.hovered ? Theme.ink1 : Theme.ink2

@@ -153,6 +153,7 @@ Column {
             y: 8
             width: parent.width - 48
             wrapMode: Text.Wrap
+            textFormat: Text.PlainText
             text: qsTr("You blocked %1. They can't message you or send requests.").arg(root.name)
             color: Theme.ink2
             font: Theme.type.description

@@ -132,12 +132,14 @@ Column {
                 spacing: 2
                 Text {
                     width: parent.width
+                    textFormat: Text.PlainText
                     text: video.modelData.name
                     elide: Text.ElideMiddle
                     color: Theme.ink1
                     font: Theme.type.captionStrong
                 }
                 Text {
+                    textFormat: Text.PlainText
                     text: video.modelData.size.length > 0
                         ? qsTr("%1 · Opens in your video player").arg(video.modelData.size)
                         : qsTr("Opens in your video player")
@@ -215,6 +217,7 @@ Column {
                 spacing: 2
                 Text {
                     width: parent.width
+                    textFormat: Text.PlainText
                     text: card.modelData.name
                     elide: Text.ElideMiddle
                     color: Theme.accentInk
@@ -224,6 +227,7 @@ Column {
                 }
                 Text {
                     visible: text.length > 0
+                    textFormat: Text.PlainText
                     text: card.modelData.size
                     color: Theme.ink3
                     font: Theme.type.caption

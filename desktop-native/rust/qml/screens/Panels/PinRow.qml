@@ -76,6 +76,7 @@ Item {
             Text {
                 id: name
                 width: Math.min(implicitWidth, parent.width - stamp.implicitWidth - 8)
+                textFormat: Text.PlainText
                 text: root.author
                 elide: Text.ElideRight
                 color: Theme.ink1
@@ -84,6 +85,7 @@ Item {
             Text {
                 id: stamp
                 anchors.baseline: name.baseline
+                textFormat: Text.PlainText
                 text: root.day === root.today ? root.time : root.date
                 color: Theme.ink3
                 font: Theme.type.caption

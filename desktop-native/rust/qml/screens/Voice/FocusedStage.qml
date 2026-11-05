@@ -90,6 +90,7 @@ Item {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 elide: Text.ElideRight
+                textFormat: Text.PlainText
                 text: root.tile.name
                 color: Theme.ink1
                 font.family: "Yap Bricolage Key Bold"

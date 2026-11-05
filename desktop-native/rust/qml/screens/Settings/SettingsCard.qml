@@ -50,6 +50,7 @@ Column {
         height: 12 + 14
         Text {
             y: 12
+            textFormat: Text.PlainText
             text: card.legend
             color: Theme.ink3
             font: Theme.type.silk
@@ -67,6 +68,7 @@ Column {
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
                 text: card.index
                 color: Theme.ink3
                 font: Theme.type.silk
@@ -77,6 +79,7 @@ Column {
         visible: card.desc.length > 0
         topPadding: 12
         width: Math.min(parent.width, 560)
+        textFormat: Text.PlainText
         text: card.desc
         wrapMode: Text.Wrap
         color: Theme.ink2

@@ -27,6 +27,7 @@ Row {
     }
     Text {
         anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
         text: root.text
         color: root.plain || root.ledState === "off" ? Theme.ink2
             : root.ledState === "live" ? Theme.liveInk

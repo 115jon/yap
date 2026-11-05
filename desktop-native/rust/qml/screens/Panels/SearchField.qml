@@ -165,6 +165,7 @@ Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
                     width: parent.width
                     visible: input.text.length === 0 && !input.inputMethodComposing
+                    textFormat: Text.PlainText
                     text: root.view.placeholder ?? ""
                     elide: Text.ElideRight
                     color: Theme.ink3

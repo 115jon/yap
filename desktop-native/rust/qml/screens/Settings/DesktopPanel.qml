@@ -45,6 +45,7 @@ Column {
                 spacing: 12
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
                     text: "v" + Settings.version
                     color: Theme.ink2
                     font: Theme.type.num

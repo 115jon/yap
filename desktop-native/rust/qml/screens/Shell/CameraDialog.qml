@@ -224,6 +224,7 @@ Popup {
             Text {
                 visible: text.length > 0
                 width: parent.width
+                textFormat: Text.PlainText
                 text: root.problemText(root.problem)
                 wrapMode: Text.Wrap
                 color: Theme.dangerInk
@@ -307,6 +308,7 @@ Popup {
             Text {
                 visible: root.offersTurnOn && !Voice.cameraOn && root.blocker.length > 0
                 anchors.right: parent.right
+                textFormat: Text.PlainText
                 text: root.blocker
                 color: Theme.ink3
                 font: Theme.type.caption
@@ -321,6 +323,7 @@ Popup {
         width: parent.width
         spacing: 6
         Text {
+            textFormat: Text.PlainText
             text: parent.label
             color: Theme.ink2
             font: Theme.type.captionStrong
@@ -328,6 +331,7 @@ Popup {
         Text {
             visible: text.length > 0
             width: parent.width
+            textFormat: Text.PlainText
             text: parent.description
             wrapMode: Text.Wrap
             color: Theme.ink3
@@ -355,6 +359,7 @@ Popup {
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
                 text: key.text
                 font: key.font
                 color: key.onMedia ? "white" : Theme.primaryFillInk

@@ -248,6 +248,7 @@ T.Popup {
                         }
                         Text {
                             width: parent.width
+                            textFormat: Text.PlainText
                             text: editor.bio.trim()
                             wrapMode: Text.Wrap
                             color: preview.ink
@@ -551,6 +552,7 @@ T.Popup {
                 }
                 Text {
                     visible: area.text.length === 0
+                    textFormat: Text.PlainText
                     text: counted.placeholder
                     color: Theme.ink3
                     font: Theme.type.description
@@ -559,6 +561,7 @@ T.Popup {
         }
         Text {
             anchors.right: parent.right
+            textFormat: Text.PlainText
             text: counted.value.length + "/" + counted.max
             color: Theme.ink3
             font: Theme.type.numSm

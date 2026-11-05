@@ -41,6 +41,7 @@ Rectangle {
         }
         Text {
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: key.label
             color: key.ink
             font: Theme.type.silk

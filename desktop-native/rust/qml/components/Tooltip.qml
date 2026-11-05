@@ -28,6 +28,7 @@ T.ToolTip {
     closePolicy: T.Popup.NoAutoClose
 
     contentItem: Text {
+        textFormat: Text.PlainText
         text: control.text
         color: Theme.ply0
         font: Theme.type.captionStrong

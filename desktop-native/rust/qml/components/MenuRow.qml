@@ -42,6 +42,7 @@ T.MenuItem {
         }
         Text {
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: control.text
             color: control.danger ? Theme.dangerInk : control.enabled ? Theme.ink1 : Theme.ink3
             font: Theme.type.row

@@ -30,6 +30,7 @@ Item {
             x: 16
             anchors.verticalCenter: parent.verticalCenter
             width: Math.min(implicitWidth, header.width - 16 - tail.width - 8 - adornmentSlot.width)
+            textFormat: Text.PlainText
             text: root.title
             elide: Text.ElideRight
             color: Theme.ink1

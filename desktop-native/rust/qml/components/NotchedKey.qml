@@ -28,6 +28,7 @@ T.Button {
         spacing: 12
         Text {
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: control.text
             font: control.font
             color: control.enabled ? Theme.primaryFillInk : Theme.ink3

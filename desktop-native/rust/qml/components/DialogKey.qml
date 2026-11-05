@@ -15,6 +15,7 @@ Button {
     Keys.onReturnPressed: key.clicked()
 
     contentItem: Text {
+        textFormat: Text.PlainText
         text: key.text
         font: key.font
         color: key.primary ? Theme.primaryFillInk : Theme.ink1

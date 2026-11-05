@@ -39,6 +39,7 @@ Item {
         anchors.right: stateSlot.left
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
         text: root.name
         elide: Text.ElideRight
         color: Theme.ink1

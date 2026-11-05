@@ -49,6 +49,7 @@ Item {
                     id: message
                     width: parent.fits ? parent.width - keys.width - 16 : parent.width
                     y: parent.fits ? (parent.height - height) / 2 : 0
+                    textFormat: Text.PlainText
                     text: root.consequence
                     wrapMode: Text.Wrap
                     color: Theme.ink1

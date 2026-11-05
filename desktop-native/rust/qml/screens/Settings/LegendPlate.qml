@@ -41,6 +41,7 @@ Item {
             Text {
                 visible: root.note.length > 0
                 width: parent.width
+                textFormat: Text.PlainText
                 text: root.note
                 wrapMode: Text.Wrap
                 color: Theme.ink2
@@ -58,6 +59,7 @@ Item {
             id: title
             x: 4
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: root.legend
             color: Theme.ink2
             font: Theme.type.silk

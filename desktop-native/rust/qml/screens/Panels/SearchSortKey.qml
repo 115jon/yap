@@ -18,6 +18,7 @@ T.Button {
 
     contentItem: Text {
         id: label
+        textFormat: Text.PlainText
         text: control.text
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter

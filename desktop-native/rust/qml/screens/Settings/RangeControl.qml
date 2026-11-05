@@ -93,6 +93,7 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         width: 48
         horizontalAlignment: Text.AlignRight
+        textFormat: Text.PlainText
         text: Math.round(slider.value) + root.unit
         color: root.enabled ? Theme.ink1 : Theme.ink3
         font: Theme.type.num

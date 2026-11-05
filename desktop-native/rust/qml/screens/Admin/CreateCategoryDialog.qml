@@ -54,6 +54,7 @@ PlateDialog {
     }
     Text {
         visible: dialog.nameError.length > 0
+        textFormat: Text.PlainText
         text: dialog.nameError
         color: Theme.dangerInk
         font: Theme.type.caption

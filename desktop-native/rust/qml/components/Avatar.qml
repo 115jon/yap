@@ -21,6 +21,7 @@ Rectangle {
     Text {
         anchors.centerIn: parent
         visible: picture.status !== Image.Ready
+        textFormat: Text.PlainText
         text: root.initials.charAt(0).toUpperCase()
         color: Theme.ink1
         font.family: "Yap Bricolage Key ExtraBold"

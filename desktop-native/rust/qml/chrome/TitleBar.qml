@@ -61,6 +61,7 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         horizontalAlignment: Text.AlignHCenter
         elide: Text.ElideRight
+        textFormat: Text.PlainText
         text: bar.title
         color: Theme.ink3
         font: Theme.type.captionStrong

@@ -57,6 +57,7 @@ Rectangle {
         anchors.right: gear.visible ? gear.left : badge.visible ? badge.left : parent.right
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
         text: row.name
         elide: Text.ElideRight
         color: row.active || hover.hovered || row.unread ? Theme.ink1 : Theme.ink2

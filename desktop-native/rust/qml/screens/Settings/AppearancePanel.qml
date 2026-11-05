@@ -130,6 +130,7 @@ Column {
                             y: thumb.height + 6
                             width: parent.width
                             leftPadding: 2
+                            textFormat: Text.PlainText
                             text: tile.modelData.label
                             elide: Text.ElideRight
                             color: tile.on ? Theme.ink1 : Theme.ink2

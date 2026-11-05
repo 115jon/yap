@@ -43,6 +43,7 @@ Item {
         anchors.centerIn: parent
         width: Math.min(implicitWidth, root.width - 24)
         visible: root.settled
+        textFormat: Text.PlainText
         text: root.name.length > 0 ? qsTr("Waiting for %1's stream").arg(root.name) : qsTr("Waiting for the stream")
         elide: Text.ElideRight
         horizontalAlignment: Text.AlignHCenter

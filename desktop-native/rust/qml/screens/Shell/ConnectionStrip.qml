@@ -48,6 +48,7 @@ Rectangle {
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
                 text: root.dropped ? qsTr("Reconnecting") : qsTr("Back online")
                 color: root.dropped ? Theme.warningInk : Theme.successInk
                 font: Theme.type.silk
@@ -55,6 +56,7 @@ Rectangle {
         }
         Text {
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: root.dropped
                   ? qsTr("The chat link dropped. Keep reading and sending; new messages catch up when it's back.")
                   : qsTr("Live again. New messages are in.")

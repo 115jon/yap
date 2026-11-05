@@ -286,6 +286,17 @@ fn empty_invite_should_not_be_a_link() {
 }
 
 #[test]
+fn an_overlong_invite_code_should_not_be_a_link() {
+    let long = "a".repeat(65);
+    assert_eq!(
+        parse_link(&format!("yap-native://invite/{long}"), SITE),
+        None
+    );
+    assert_eq!(invite_code(&long, SITE), None);
+    assert_eq!(invite_code(&"a".repeat(64), SITE), Some("a".repeat(64)));
+}
+
+#[test]
 fn channel_link_should_name_the_server_and_channel() {
     assert_eq!(
         parse_link("https://yap.fixture.invalid/chat/srv/chan", SITE),

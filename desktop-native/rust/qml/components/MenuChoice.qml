@@ -36,6 +36,7 @@ T.MenuItem {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             width: control.availableWidth - Theme.iconSm - 12 - (hintText.visible ? hintText.implicitWidth + 12 : 0)
+            textFormat: Text.PlainText
             text: control.text
             elide: Text.ElideRight
             color: Theme.ink1
@@ -45,6 +46,7 @@ T.MenuItem {
             id: hintText
             anchors.verticalCenter: parent.verticalCenter
             visible: control.hint.length > 0
+            textFormat: Text.PlainText
             text: control.hint
             color: Theme.ink3
             font: Theme.type.numSm

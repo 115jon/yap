@@ -80,6 +80,7 @@ Column {
                 Text {
                     visible: !root.loadingFirst && (root.failed || root.others.length === 0)
                     width: parent.width
+                    textFormat: Text.PlainText
                     text: root.failed ? qsTr("Your other devices show here once your sessions load.")
                         : qsTr("No other devices are signed in.")
                     wrapMode: Text.Wrap
@@ -134,6 +135,7 @@ Column {
             width: parent.width - 52
             Text {
                 width: parent.width
+                textFormat: Text.PlainText
                 text: session.modelData.title
                 elide: Text.ElideRight
                 color: Theme.ink1
@@ -141,6 +143,7 @@ Column {
             }
             Text {
                 width: parent.width
+                textFormat: Text.PlainText
                 text: session.modelData.detail
                 elide: Text.ElideRight
                 color: Theme.ink2

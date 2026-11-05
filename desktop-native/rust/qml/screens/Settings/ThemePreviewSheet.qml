@@ -132,6 +132,7 @@ T.Drawer {
                             }
                             Text {
                                 width: option.width - 16
+                                textFormat: Text.PlainText
                                 text: option.modelData.label
                                 elide: Text.ElideRight
                                 color: Theme.ink1

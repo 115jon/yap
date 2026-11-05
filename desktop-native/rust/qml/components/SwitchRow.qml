@@ -29,6 +29,7 @@ T.AbstractButton {
         spacing: 2
         Text {
             width: parent.width
+            textFormat: Text.PlainText
             text: control.text
             wrapMode: Text.Wrap
             color: Theme.ink1
@@ -37,6 +38,7 @@ T.AbstractButton {
         Text {
             width: parent.width
             visible: control.description.length > 0
+            textFormat: Text.PlainText
             text: control.description
             wrapMode: Text.Wrap
             color: Theme.ink3

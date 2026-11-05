@@ -84,6 +84,7 @@ Column {
                     anchors.rightMargin: 12
                     Text {
                         width: parent.width
+                        textFormat: Text.PlainText
                         text: row.modelData.name
                         elide: Text.ElideRight
                         color: Theme.ink1
@@ -92,6 +93,7 @@ Column {
                     Text {
                         visible: row.modelData.reason.length > 0
                         width: parent.width
+                        textFormat: Text.PlainText
                         text: row.modelData.reason
                         wrapMode: Text.Wrap
                         color: Theme.ink2
@@ -99,6 +101,7 @@ Column {
                     }
                     Text {
                         width: parent.width
+                        textFormat: Text.PlainText
                         text: row.modelData.meta
                         elide: Text.ElideRight
                         color: Theme.ink3

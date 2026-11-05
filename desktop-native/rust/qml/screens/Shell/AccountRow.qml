@@ -89,6 +89,7 @@ Rectangle {
             Text {
                 id: nameText
                 width: parent.width
+                textFormat: Text.PlainText
                 text: Session.meName
                 elide: Text.ElideRight
                 color: Theme.ink1
@@ -109,6 +110,7 @@ Rectangle {
                         width: parent.width
                         height: 16
                         verticalAlignment: Text.AlignVCenter
+                        textFormat: Text.PlainText
                         text: Session.meCustomStatus.length > 0 ? Session.meCustomStatus : root.presenceWord
                         elide: Text.ElideRight
                         color: Session.meCustomStatus.length > 0 ? Theme.ink2 : root.presenceInk
@@ -118,6 +120,7 @@ Rectangle {
                         width: parent.width
                         height: 16
                         verticalAlignment: Text.AlignVCenter
+                        textFormat: Text.PlainText
                         text: Session.meUsername
                         elide: Text.ElideRight
                         color: Theme.ink3

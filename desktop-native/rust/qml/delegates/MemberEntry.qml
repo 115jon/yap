@@ -53,6 +53,7 @@ Item {
             anchors.right: number.left
             anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: root.name
             elide: Text.ElideRight
             color: Theme.ink3
@@ -63,6 +64,7 @@ Item {
             anchors.right: parent.right
             anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: root.count
             color: Theme.ink3
             font: Theme.type.numSm
@@ -122,6 +124,7 @@ Item {
                 Text {
                     id: nameText
                     width: Math.min(implicitWidth, parent.width - (crown.visible ? crown.width + 6 : 0))
+                    textFormat: Text.PlainText
                     text: root.name
                     elide: Text.ElideRight
                     color: root.roleColor.length > 0 ? root.roleColor : hover.hovered ? Theme.ink1 : Theme.ink2
@@ -144,6 +147,7 @@ Item {
             Text {
                 width: parent.width
                 visible: root.customStatus.length > 0
+                textFormat: Text.PlainText
                 text: root.customStatus
                 elide: Text.ElideRight
                 color: Theme.ink3

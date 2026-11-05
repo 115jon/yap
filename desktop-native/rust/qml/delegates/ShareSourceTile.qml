@@ -105,6 +105,7 @@ T.AbstractButton {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width - 24
+                textFormat: Text.PlainText
                 text: root.name
                 elide: Text.ElideRight
                 color: Theme.ink1

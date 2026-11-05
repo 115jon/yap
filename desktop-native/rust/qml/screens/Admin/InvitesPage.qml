@@ -108,6 +108,7 @@ Column {
         }
         Text {
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: root.notice
             color: Theme.successInk
             font: Theme.type.description

@@ -161,6 +161,7 @@ Item {
                     x: 36
                     anchors.verticalCenter: parent.verticalCenter
                     width: parent.width - x - handle.width - 20
+                    textFormat: Text.PlainText
                     text: suggestion.name
                     elide: Text.ElideRight
                     color: Theme.ink1
@@ -171,6 +172,7 @@ Item {
                     anchors.right: parent.right
                     anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
                     text: "@" + suggestion.username
                     color: Theme.ink3
                     font: Theme.type.caption
@@ -212,6 +214,7 @@ Item {
             Text {
                 id: replyName
                 anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
                 text: root.replyToName
                 color: Theme.ink1
                 font: Theme.type.captionStrong

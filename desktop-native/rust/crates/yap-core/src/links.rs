@@ -69,9 +69,14 @@ fn query_param(query: &str, key: &str) -> Option<String> {
     })
 }
 
+/// The longest invite code taken: far past any the server makes, short of
+/// a paste or argument being passed to the API whole.
+const MAX_CODE_LEN: usize = 64;
+
 /// An invite code as the server stores them: letters, digits, `-`, `_`.
 fn is_code(text: &str) -> bool {
     !text.is_empty()
+        && text.len() <= MAX_CODE_LEN
         && text
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))

@@ -75,6 +75,7 @@ Item {
             width: parent.width - 32
             height: Math.max(16, implicitHeight)
             wrapMode: Text.Wrap
+            textFormat: Text.PlainText
             text: root.status.message
             color: root.status.kind === "error" ? Theme.dangerInk : Theme.successInk
             font: Theme.type.caption

@@ -75,6 +75,7 @@ Rectangle {
             Text {
                 visible: area.text.length === 0
                 width: parent.width
+                textFormat: Text.PlainText
                 text: root.placeholder
                 wrapMode: Text.Wrap
                 color: Theme.ink3

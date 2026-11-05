@@ -29,6 +29,7 @@ Rectangle {
         id: label
         anchors.centerIn: parent
         anchors.verticalCenterOffset: root.outline ? 0 : -1
+        textFormat: Text.PlainText
         text: root.text
         color: root.outline ? Theme.ink2 : Theme.ink1
         font: Theme.type.kbd

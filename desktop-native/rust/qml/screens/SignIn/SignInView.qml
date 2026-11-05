@@ -26,6 +26,7 @@ Rectangle {
         }
         Text {
             Layout.topMargin: 12
+            textFormat: Text.PlainText
             text: root.waiting ? qsTr("Approve this device") : qsTr("Sign in")
             color: Theme.ink1
             font: Theme.type.headline
@@ -34,6 +35,7 @@ Rectangle {
             Layout.topMargin: 12
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
             text: root.waiting
                   ? "Open the link in a browser where you're signed in to Yap, check the code matches, and approve it."
                   : "You'll get a code to approve in your browser. Nothing to type here."
@@ -61,6 +63,7 @@ Rectangle {
                     border.color: Theme.lineField
                     Text {
                         anchors.centerIn: parent
+                        textFormat: Text.PlainText
                         text: cap.modelData
                         color: root.hasCode ? Theme.ink1 : Theme.inkOff
                         font: Theme.type.deviceCode
@@ -84,6 +87,7 @@ Rectangle {
                 }
             }
             Text {
+                textFormat: Text.PlainText
                 text: root.hasCode ? qsTr("Waiting for approval") : qsTr("Getting a code")
                 color: Theme.ink3
                 font: Theme.type.silk
@@ -117,6 +121,7 @@ Rectangle {
             Layout.topMargin: 16
             Layout.fillWidth: true
             visible: Session.status.length > 0
+            textFormat: Text.PlainText
             text: Session.status
             wrapMode: Text.WordWrap
             color: Theme.dangerInk
@@ -127,6 +132,7 @@ Rectangle {
         Text {
             Layout.topMargin: 40
             visible: !root.waiting
+            textFormat: Text.PlainText
             text: tokenRow.visible ? "Hide token sign-in" : "Developer: use a session token"
             color: devHover.hovered ? Theme.ink2 : Theme.ink3
             font: Theme.type.caption

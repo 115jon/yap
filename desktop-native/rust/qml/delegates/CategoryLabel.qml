@@ -37,6 +37,7 @@ Item {
         height: Theme.branchLabel
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
+        textFormat: Text.PlainText
         text: root.name
         color: Theme.ink3
         font: Theme.type.silk

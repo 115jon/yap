@@ -410,6 +410,7 @@ Rectangle {
         Accessible.name: toastText.text
         Text {
             id: toastText
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             width: parent.width - 32
             wrapMode: Text.Wrap
@@ -490,6 +491,7 @@ Rectangle {
             anchors.leftMargin: 16
             anchors.verticalCenter: parent.verticalCenter
             visible: Chat.typingText.length > 0
+            textFormat: Text.PlainText
             text: Chat.typingText
             color: Theme.ink3
             font: Theme.type.caption

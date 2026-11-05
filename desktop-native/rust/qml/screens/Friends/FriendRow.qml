@@ -75,6 +75,7 @@ Rectangle {
         Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
         Text {
             width: parent.width
+            textFormat: Text.PlainText
             text: row.person.name
             elide: Text.ElideRight
             color: hover.hovered ? Theme.ink1 : Theme.ink2
@@ -83,6 +84,7 @@ Rectangle {
         Text {
             width: parent.width
             visible: row.person.statusLine.length > 0
+            textFormat: Text.PlainText
             text: row.person.statusLine
             elide: Text.ElideRight
             color: Theme.ink3

@@ -127,6 +127,7 @@ Item {
                 id: legend
                 x: 4
                 anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
                 text: row.shownLabel
                 color: controlSlot.activeFocus ? Theme.ink1 : Theme.ink2
                 font: Theme.type.silk
@@ -153,6 +154,7 @@ Item {
             visible: row.field && row.shownDesc.length > 0
             y: controlSlot.y + controlSlot.height + 8
             width: Math.min(parent.width, 520)
+            textFormat: Text.PlainText
             text: row.shownDesc
             wrapMode: Text.Wrap
             color: Theme.ink2

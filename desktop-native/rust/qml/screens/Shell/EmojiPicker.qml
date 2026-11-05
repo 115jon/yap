@@ -252,6 +252,7 @@ Popup {
                     anchors.verticalCenter: parent.verticalCenter
                     width: parent.width - 12
                     elide: Text.ElideRight
+                    textFormat: Text.PlainText
                     text: gridRow.label
                     color: Theme.ink3
                     font: Theme.type.captionStrong
@@ -324,6 +325,7 @@ Popup {
                 anchors.rightMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
                 elide: Text.ElideRight
+                textFormat: Text.PlainText
                 text: root.hovered ? root.hovered.n : qsTr("Pick an emoji")
                 color: root.hovered ? Theme.ink1 : Theme.ink3
                 font: Theme.type.occupant
@@ -333,6 +335,7 @@ Popup {
                 anchors.right: parent.right
                 anchors.rightMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
                 text: root.hovered ? ":" + root.hovered.s + ":" : ""
                 color: Theme.ink3
                 font: Theme.type.numSm
@@ -378,6 +381,7 @@ Popup {
                             anchors.left: toneGlyph.right
                             anchors.leftMargin: 8
                             anchors.verticalCenter: parent.verticalCenter
+                            textFormat: Text.PlainText
                             text: root.tones[toneRow.index].label
                             color: Theme.ink1
                             font: Theme.type.row

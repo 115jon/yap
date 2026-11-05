@@ -96,6 +96,7 @@ Column {
     Text {
         visible: root.showHint
         leftPadding: 100
+        textFormat: Text.PlainText
         text: root.selected.desc
         color: Theme.ink3
         font: Theme.type.caption
@@ -131,6 +132,7 @@ Column {
         Accessible.name: text
         contentItem: Text {
             id: label
+            textFormat: Text.PlainText
             text: chip.text
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter

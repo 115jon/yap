@@ -2438,12 +2438,14 @@ impl State {
         let before = log
             .position(&message.id)
             .map(|i| [self.message_row_at(i), self.message_row_at(i + 1)]);
+        let parent = message.reply_to_id.clone();
         // A jump's window does not reach the end: a new message belongs to
         // a page it has not loaded yet.
         if before.is_none() && log.has_more_after {
+            // The row is not loaded, but a loaded parent's count is.
+            self.bump_reply_count(fx, parent.as_deref(), 1);
             return;
         }
-        let parent = message.reply_to_id.clone();
         let Some(log) = &mut self.messages else {
             return;
         };
@@ -2772,7 +2774,8 @@ impl State {
             }
         }
         self.upsert_if_open(fx, message);
-        if self.active_channel.as_deref() == Some(channel.as_str()) {
+        // A jump's window has not reached the new message: unseen, not read.
+        if self.active_channel.as_deref() == Some(channel.as_str()) && !self.detached() {
             self.mark_read(fx, &channel, Some(&at));
         }
         self.sync_badges(fx);

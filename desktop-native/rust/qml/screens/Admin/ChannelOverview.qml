@@ -94,6 +94,7 @@ Column {
                 width: parent.width
                 topPadding: 6
                 horizontalAlignment: Text.AlignRight
+                textFormat: Text.PlainText
                 text: qsTr("%1 / %2").arg(root.description.length).arg(1024)
                 color: Theme.ink3
                 font: Theme.type.numSm

@@ -60,6 +60,7 @@ Item {
                 width: parent.width - 44
                 Text {
                     width: parent.width
+                    textFormat: Text.PlainText
                     text: row.invite.code
                     elide: Text.ElideRight
                     color: Theme.ink1
@@ -70,6 +71,7 @@ Item {
                     elide: Text.ElideRight
                     color: Theme.ink3
                     font: Theme.type.caption
+                    textFormat: Text.PlainText
                     text: [
                         row.invite.channel,
                         qsTr("by %1").arg(row.invite.inviter),

@@ -182,6 +182,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         Text {
                             width: parent.width
+                            textFormat: Text.PlainText
                             text: entry.modelData.name
                             elide: Text.ElideRight
                             color: Theme.ink1
@@ -189,6 +190,7 @@ Item {
                         }
                         Text {
                             width: parent.width
+                            textFormat: Text.PlainText
                             text: (entry.modelData.targetType === "role" ? qsTr("Role") : qsTr("Member"))
                                 + (entry.modelData.dirty ? qsTr(" · Unsaved") : "")
                             color: Theme.ink3
@@ -240,6 +242,7 @@ Item {
                             x: 38
                             width: parent.width - 46
                             anchors.verticalCenter: parent.verticalCenter
+                            textFormat: Text.PlainText
                             text: rolePick.modelData.name
                             elide: Text.ElideRight
                             color: Theme.ink1
@@ -283,6 +286,7 @@ Item {
                             x: 38
                             width: parent.width - 46
                             anchors.verticalCenter: parent.verticalCenter
+                            textFormat: Text.PlainText
                             text: memberPick.modelData.name
                             elide: Text.ElideRight
                             color: Theme.ink1

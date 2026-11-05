@@ -80,6 +80,7 @@ Column {
                         }
                     }
                     contentItem: Text {
+                        textFormat: Text.PlainText
                         text: cell.modelData.label
                         elide: Text.ElideRight
                         horizontalAlignment: Text.AlignHCenter
@@ -106,6 +107,7 @@ Column {
             Text {
                 id: badge
                 anchors.centerIn: parent
+                textFormat: Text.PlainText
                 text: root.chosen?.badge ?? ""
                 color: Theme.ink2
                 font: Theme.type.silk
@@ -114,6 +116,7 @@ Column {
         Text {
             width: Math.min(implicitWidth, root.width)
             topPadding: 2
+            textFormat: Text.PlainText
             text: root.chosen?.desc ?? ""
             wrapMode: Text.Wrap
             color: Theme.ink2

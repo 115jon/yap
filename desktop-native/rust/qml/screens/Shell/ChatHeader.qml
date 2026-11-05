@@ -63,6 +63,7 @@ Item {
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
                 text: Nav.activeChannelName
                 color: Theme.ink1
                 font: Theme.type.columnTitle
@@ -77,6 +78,7 @@ Item {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: Nav.dmUsername.length > 0
+                textFormat: Text.PlainText
                 text: "@" + Nav.dmUsername
                 color: Theme.ink3
                 font: Theme.type.description
@@ -92,6 +94,7 @@ Item {
         anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
         visible: Session.status.length > 0
+        textFormat: Text.PlainText
         text: Session.status
         elide: Text.ElideRight
         color: Theme.ink3

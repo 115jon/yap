@@ -49,6 +49,7 @@ Item {
         Text {
             anchors.centerIn: parent
             visible: picture.status !== Image.Ready
+            textFormat: Text.PlainText
             text: entry.initials
             color: entry.active ? Theme.primaryFillInk : Theme.ink2
             font: Theme.type.railInitial

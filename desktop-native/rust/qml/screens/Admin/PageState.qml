@@ -24,6 +24,7 @@ Column {
     Text {
         width: parent.width
         horizontalAlignment: Text.AlignHCenter
+        textFormat: Text.PlainText
         text: root.title
         wrapMode: Text.Wrap
         color: Theme.ink1
@@ -33,6 +34,7 @@ Column {
         width: Math.min(parent.width, 440)
         anchors.horizontalCenter: parent.horizontalCenter
         horizontalAlignment: Text.AlignHCenter
+        textFormat: Text.PlainText
         text: root.message
         wrapMode: Text.Wrap
         color: Theme.ink2

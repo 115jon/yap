@@ -32,6 +32,7 @@ Rectangle {
     Text {
         id: digits
         anchors.centerIn: parent
+        textFormat: Text.PlainText
         text: badge.label
         color: Theme.badgeInk
         font: Theme.type.kbd

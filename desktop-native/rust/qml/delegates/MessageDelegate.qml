@@ -254,6 +254,7 @@ Item {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 width: Math.min(implicitWidth, 160)
+                textFormat: Text.PlainText
                 text: root.replyAuthor
                 elide: Text.ElideRight
                 color: Theme.ink2
@@ -262,6 +263,7 @@ Item {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 width: Math.max(0, Math.min(implicitWidth, root.width - 68 - 24 - x))
+                textFormat: Text.PlainText
                 text: root.replyText
                 elide: Text.ElideRight
                 maximumLineCount: 1
@@ -307,6 +309,7 @@ Item {
         width: 40
         y: bodyText.y + 4
         horizontalAlignment: Text.AlignRight
+        textFormat: Text.PlainText
         text: root.time
         color: Theme.ink3
         font: Theme.type.numSm
@@ -320,6 +323,7 @@ Item {
         spacing: 8
         Text {
             id: authorText
+            textFormat: Text.PlainText
             text: root.author
             color: Theme.ink1
             font: Theme.type.author
@@ -331,6 +335,7 @@ Item {
         }
         Text {
             anchors.baseline: authorText.baseline
+            textFormat: Text.PlainText
             text: root.dayText
             color: Theme.ink3
             font: Theme.type.numSm
@@ -488,6 +493,7 @@ Item {
                         Text {
                             id: chipLabel
                             anchors.verticalCenter: parent.verticalCenter
+                            textFormat: Text.PlainText
                             text: root.replyCount === 1 ? qsTr("1 reply") : qsTr("%1 replies").arg(root.replyCount)
                             color: chipTap.containsMouse ? Theme.ink1 : Theme.ink2
                             font: Theme.type.captionStrong

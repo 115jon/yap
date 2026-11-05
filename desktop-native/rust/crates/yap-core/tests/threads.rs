@@ -741,6 +741,22 @@ fn a_detached_list_should_not_append_live_messages() {
 }
 
 #[test]
+fn a_live_message_in_a_detached_window_should_not_mark_read() {
+    let mut client = detached();
+    let before = client.mark_reads();
+    client.dispatch("MESSAGE_CREATE", msg(A, "m4", ALICE, 30));
+    assert_eq!(client.mark_reads(), before);
+}
+
+#[test]
+fn a_live_reply_in_a_detached_window_should_bump_a_loaded_parent() {
+    let mut client = detached();
+    assert_eq!(client.row("old5").reply_count, 0);
+    client.dispatch("MESSAGE_CREATE", reply(A, "m4", ALICE, 30, "old5"));
+    assert!(client.row("old5").reply_count == 1 && !client.seen.rows.iter().any(|r| r.id == "m4"));
+}
+
+#[test]
 fn a_detached_window_should_not_reach_the_cache() {
     let mut client = detached();
     let edit = json!({ "id": "old5", "channel_id": A, "content": "changed" });

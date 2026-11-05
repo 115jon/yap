@@ -95,6 +95,7 @@ Rectangle {
                         }
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
+                            textFormat: Text.PlainText
                             text: key.modelData.label
                             color: parent.ink
                             font: key.chosen ? Theme.type.rowUnread : Theme.type.row

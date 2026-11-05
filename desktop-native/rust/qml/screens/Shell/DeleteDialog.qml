@@ -79,6 +79,7 @@ Popup {
                 width: parent.width - 24
                 spacing: 2
                 Text {
+                    textFormat: Text.PlainText
                     text: root.author
                     color: Theme.ink1
                     font: Theme.type.author
@@ -130,6 +131,7 @@ Popup {
         font: Theme.type.controlSm
         Keys.onReturnPressed: key.clicked()
         contentItem: Text {
+            textFormat: Text.PlainText
             text: key.text
             font: key.font
             color: key.danger ? Theme.dangerFillInk : Theme.ink1

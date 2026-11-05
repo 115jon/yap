@@ -81,6 +81,7 @@ Flow {
                 contentItem: Column {
                     spacing: 12
                     Text {
+                        textFormat: Text.PlainText
                         text: qsTr("Custom %1").arg(root.name)
                         color: Theme.ink1
                         font: Theme.type.occupant

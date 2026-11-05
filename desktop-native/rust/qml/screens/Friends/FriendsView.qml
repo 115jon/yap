@@ -20,11 +20,26 @@ Rectangle {
 
     readonly property var model: JSON.parse(Friends.state)
     readonly property bool narrow: width < 560
-    readonly property var branches: tab === "pending"
-        ? [{ id: "incoming", label: qsTr("Incoming"), rows: model.incoming ?? [] },
-           { id: "sent", label: qsTr("Sent"), rows: model.sent ?? [] }].filter(b => b.rows.length > 0)
-        : [{ id: tab, label: listLabel(tab), rows: rowsOf(tab) }]
+    // The tab's rows. Every state change parses `model` afresh, and a new
+    // array would rebuild every row in the Repeaters; this one is replaced
+    // only when the rows shown differ (as SearchPanel.parse does).
+    property var branches: []
+    property string branchesKey: ""
     readonly property int shown: branches.reduce((n, b) => n + b.rows.length, 0)
+
+    function syncBranches() {
+        const next = tab === "pending"
+            ? [{ id: "incoming", label: qsTr("Incoming"), rows: model.incoming ?? [] },
+               { id: "sent", label: qsTr("Sent"), rows: model.sent ?? [] }].filter(b => b.rows.length > 0)
+            : [{ id: tab, label: listLabel(tab), rows: rowsOf(tab) }]
+        const key = JSON.stringify(next)
+        if (key !== branchesKey) {
+            branchesKey = key
+            branches = next
+        }
+    }
+    onModelChanged: syncBranches()
+    onTabChanged: syncBranches()
 
     function rowsOf(t) {
         return t === "online" ? model.online ?? []
@@ -44,7 +59,10 @@ Rectangle {
     }
 
     color: Theme.ply0
-    Component.onCompleted: Friends.load()
+    Component.onCompleted: {
+        syncBranches()
+        Friends.load()
+    }
 
     Item {
         id: header
@@ -195,12 +213,14 @@ Rectangle {
                             spacing: 8
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
+                                textFormat: Text.PlainText
                                 text: branch.modelData.label
                                 color: Theme.ink3
                                 font: Theme.type.silk
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
+                                textFormat: Text.PlainText
                                 text: branch.modelData.rows.length
                                 color: Theme.ink3
                                 font: Theme.type.numSm
@@ -250,6 +270,7 @@ Rectangle {
             Text {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
+                textFormat: Text.PlainText
                 text: root.tab === "online" ? qsTr("No friends online")
                     : root.tab === "all" ? qsTr("No friends yet")
                     : root.tab === "pending" ? qsTr("No pending requests")
@@ -336,6 +357,7 @@ Rectangle {
             spacing: 6
             Text {
                 anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
                 text: tabKey.text
                 color: tabKey.on || tabKey.hovered ? Theme.ink1 : Theme.ink2
                 font: Theme.type.controlSm

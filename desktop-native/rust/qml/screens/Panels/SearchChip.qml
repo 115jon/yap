@@ -29,6 +29,7 @@ Rectangle {
         spacing: 4
         Text {
             anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
             text: root.chip.key + ":"
             color: Theme.ink3
             font: Theme.type.caption
@@ -50,6 +51,7 @@ Rectangle {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             width: Math.min(implicitWidth, 220 - 8 - 2 - 20 - 8 - x)
+            textFormat: Text.PlainText
             text: root.chip.value
             elide: Text.ElideRight
             color: Theme.ink1

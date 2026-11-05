@@ -13,6 +13,7 @@ Button {
     rightPadding: 20
     font: Theme.type.control
     contentItem: Text {
+        textFormat: Text.PlainText
         text: control.text
         font: control.font
         color: control.primary ? Theme.primaryFillInk : Theme.ink1

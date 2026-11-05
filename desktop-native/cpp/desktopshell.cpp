@@ -4,6 +4,7 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
 #include <QtCore/QStringList>
 #include <QtGui/QFont>
@@ -15,6 +16,7 @@
 #include <QtNetwork/QLocalSocket>
 #include <QtQuick/QQuickWindow>
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <utility>
@@ -41,6 +43,9 @@ constexpr wchar_t kDisplayName[] = L"Yap Native";
 // Software\Classes\yap, the installed app's.
 constexpr wchar_t kSchemeKey[] = L"Software\\Classes\\yap-native";
 constexpr wchar_t kTrayClass[] = L"YapNativeTrayWindow";
+// A forwarded argument longer than this is not a link we made: dropped at
+// both ends of the pipe hand-off, and by openArg for our own command line.
+constexpr int kMaxArgBytes = 4096;
 
 constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT kTrayId = 1;
@@ -225,8 +230,9 @@ void DesktopShell::showFirstInstance(const QStringList& args)
   QByteArray message("show\n");
   for (QString arg : args) {
     arg.remove(QLatin1Char('\r')).remove(QLatin1Char('\n'));
-    if (!arg.isEmpty())
-      message += "arg " + arg.toUtf8() + '\n';
+    const QByteArray bytes = arg.toUtf8();
+    if (!bytes.isEmpty() && bytes.size() <= kMaxArgBytes)
+      message += "arg " + bytes + '\n';
   }
   for (int attempt = 0; attempt < 20; ++attempt) {
     QLocalSocket socket;
@@ -360,7 +366,7 @@ void DesktopShell::onInstanceConnected()
         if (line == "show") {
           std::fprintf(stderr, "[instance] launched again; revealing\n");
           reveal();
-        } else if (line.startsWith("arg ")) {
+        } else if (line.startsWith("arg ") && line.size() - 4 <= kMaxArgBytes) {
           openArg(QString::fromUtf8(line.mid(4)));
         }
       }
@@ -375,7 +381,7 @@ void DesktopShell::setLinkHandler(QObject* links)
 
 void DesktopShell::openArg(const QString& arg)
 {
-  if (!m_links)
+  if (!m_links || arg.toUtf8().size() > kMaxArgBytes)
     return;
   bool link = false;
   QMetaObject::invokeMethod(m_links, "openArg", Qt::DirectConnection,
@@ -397,6 +403,32 @@ void DesktopShell::registerUrlScheme()
                             Q_RETURN_ARG(QString, lines), Q_ARG(QString, exe));
   // Only ever our own key, whatever the list says.
   const QString root = QString::fromWCharArray(kSchemeKey);
+  // An isolated run (a `--config` argument) must not take the scheme from
+  // another build that is still there: leave a registration whose
+  // executable exists and is not this one.
+  const QStringList args = QCoreApplication::arguments();
+  const bool isolated =
+    std::any_of(args.cbegin(), args.cend(), [](const QString& a) {
+      return a == QLatin1String("--config") ||
+             a.startsWith(QLatin1String("--config="));
+    });
+  if (isolated) {
+    // The open command is `"<exe>" "%1"`: its quoted first token.
+    QString other = readRegString(
+                      wide(root + QLatin1String("\\shell\\open\\command")), L"")
+                      .trimmed();
+    if (other.startsWith(QLatin1Char('"')))
+      other = other.mid(1, other.indexOf(QLatin1Char('"'), 1) - 1);
+    else
+      other = other.section(QLatin1Char(' '), 0, 0);
+    if (!other.isEmpty() && QFileInfo::exists(other) &&
+        QDir::cleanPath(other).compare(QDir::cleanPath(exe),
+                                       Qt::CaseInsensitive) != 0) {
+      std::fprintf(stderr, "[scheme] yap-native: isolated run, keeping the "
+                           "existing registration\n");
+      return;
+    }
+  }
   int written = 0;
   for (const QString& line : lines.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
     const QStringList parts = line.split(QLatin1Char('\t'));

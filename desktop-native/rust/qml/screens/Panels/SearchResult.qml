@@ -88,6 +88,7 @@ Rectangle {
                 Text {
                     id: time
                     anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
                     text: root.result.time
                     color: Theme.ink3
                     font: Theme.type.num
