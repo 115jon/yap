@@ -11,6 +11,8 @@ import com.yap.native
 Item {
     id: root
 
+    // The Yap user id, for their call menu (right click).
+    property string userId
     required property string name
     required property string avatar
     required property bool muted
@@ -33,6 +35,12 @@ Item {
     Accessible.role: Accessible.ListItem
     Accessible.name: [name, me ? qsTr("you") : "", speaking ? qsTr("speaking") : "",
                       muted ? qsTr("muted") : "", deafened ? qsTr("deafened") : ""].filter(s => s.length > 0).join(", ")
+
+    TapHandler {
+        enabled: !root.me && root.userId.length > 0
+        acceptedButtons: Qt.RightButton
+        onTapped: eventPoint => ShellState.showPeerMenu(root.userId, root.name, root, eventPoint.position)
+    }
 
     // Guides: up, tick, down.
     Rectangle {

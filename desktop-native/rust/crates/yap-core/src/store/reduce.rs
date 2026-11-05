@@ -455,6 +455,7 @@ impl State {
                 status: call.status.clone(),
                 muted: call.muted,
                 deafened: call.deafened,
+                speaking: call.roster.iter().any(|m| m.me && m.speaking),
                 error: String::new(),
             },
             None => VoiceView {

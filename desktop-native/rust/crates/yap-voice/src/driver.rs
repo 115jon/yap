@@ -11,7 +11,7 @@ use anyhow::Result;
 use serde_json::Value;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
-use tokio::time::{Instant, Interval};
+use tokio::time::{Instant, Interval, MissedTickBehavior};
 use yap_protocol::{GatewayCloseCode, GatewayOp};
 use yap_realtime::{Config, Connection, Event, Policy, Reconnect, TicketError, TicketFuture};
 
@@ -22,6 +22,7 @@ use crate::machine::{
 };
 use crate::sfu::{Sfu, Signaling};
 use crate::tracks::Remote;
+use crate::vad::{EnergyMeter, VAD_TICK};
 use crate::wire::{self, Participant, RoomState, Track};
 
 /// A failed API request, as the ticket endpoint reports it.
@@ -114,6 +115,10 @@ struct Io<'a, E: MediaEngine, T> {
     jobs: Option<UnboundedSender<Job>>,
     worker: Option<JoinHandle<()>>,
     timers: Vec<(Instant, Timer)>,
+    /// The mic level between two reads of the energy counters.
+    meter: EnergyMeter,
+    /// The VAD's clock.
+    started: Instant,
 }
 
 enum Applied {
@@ -141,7 +146,15 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
             jobs: None,
             worker: None,
             timers: Vec::new(),
+            meter: EnergyMeter::default(),
+            started: Instant::now(),
         }
+    }
+
+    /// The mic level since the last read, once the mic is published.
+    async fn mic_level(&mut self) -> Option<f64> {
+        let (energy, duration) = self.session.as_ref()?.mic_energy().await?;
+        self.meter.read(energy, duration)
     }
 
     async fn run<C: Commands, N: Fn(Notice) + Sync>(
@@ -153,6 +166,8 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
     ) -> Option<String> {
         let mut queue: VecDeque<Effect> = machine.handle(Input::Start).into();
         let mut periodic: Option<(Interval, Interval)> = None;
+        let mut level = tokio::time::interval(VAD_TICK);
+        level.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut commands_open = true;
         loop {
             // Effects run in order. Tickets and media are awaited here, so
@@ -242,6 +257,13 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
                     }
                     continue;
                 },
+                _ = level.tick(), if self.session.is_some() => match self.mic_level().await {
+                    Some(rms) => Input::MicLevel {
+                        rms,
+                        at_ms: u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    },
+                    None => continue,
+                },
                 _ = stats.tick() => Input::Timer(Timer::Stats),
                 _ = refresh.tick() => Input::Timer(Timer::RefreshCredentials),
             };
@@ -296,7 +318,23 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
                     session.set_playout_enabled(enabled);
                 }
             }
+            Effect::SetProcessing(processing) => {
+                if let Some(session) = &self.session {
+                    match session.set_processing(processing) {
+                        Ok(()) => eprintln!("[voice] processing {processing:?}"),
+                        Err(error) => eprintln!("[voice] processing refused: {error}"),
+                    }
+                }
+            }
+            Effect::SetTrackGain { mid, gain } => {
+                if let Some(session) = &self.session {
+                    session.set_track_gain(&mid, gain);
+                }
+            }
             Effect::LogStats => {
+                if let Some(line) = self.env.engine.check_devices() {
+                    eprintln!("{line}");
+                }
                 if let Some(session) = &self.session {
                     match session.stats().await {
                         Ok(line) => eprintln!("{line}"),

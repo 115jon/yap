@@ -27,6 +27,17 @@ the decisions.
   call; real mic and speakers with echo cancellation, a participant grid,
   mute and deafen (kept between calls), leave. Interoperates with the web
   client. Wire details are in [VOICE_PROTOCOL.md](VOICE_PROTOCOL.md).
+- Voice controls as on the web: device menus on the mic and headphone
+  carets (system default first; switching applies at once in a call, an
+  unplugged choice falls back to the default), the output volume, the
+  per-user "User volume" (0-200 %) and "Mute" on a right click of a call
+  tile or Talk Tree leaf, our own speaking LED and rings with op 5 from
+  the web's VAD hysteresis and sensitivity (auto or a manual marker), and
+  Voice settings: microphone, input profile, noise suppression, echo
+  cancellation, high fidelity, the live level meter, speaker and output
+  volume. Kept per user in `%LOCALAPPDATA%\YapNative\voice-settings.json`.
+  Remote volume and live APM options go through
+  `crates/yap-voice/cpp/track_audio.cpp` (calls the crate does not expose).
 - The Talk Tree: everyone in every voice channel of the server
   (`VOICE_CHANNEL_STATES` / `_UPDATE`), with guides, the lit path to you,
   speaking LEDs and mute/deafen glyphs.
@@ -74,7 +85,7 @@ unless "Open on startup" is on), data and logs under
 
 ## Not yet
 
-Video and screen share, device picker, inline video playback, clips in the GIF picker,
+Video and screen share, input volume, a mic test outside a call, inline video playback, clips in the GIF picker,
 GIF favorites and categories, stickers, emoji generation, the reaction details
 modal, remove-embeds, embed players (WebView2), jumping to
 messages that are not loaded (`around=`), `yap://` deep links, toast buttons (reply, mark read)

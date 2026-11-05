@@ -30,6 +30,13 @@ RowLayout {
 
     spacing: 0
 
+    // The voice settings follow the signed-in user.
+    Component.onCompleted: Audio.setUser(Session.meId)
+    Connections {
+        target: Session
+        function onMeIdChanged() { Audio.setUser(Session.meId) }
+    }
+
     ServerRail {
         Layout.fillHeight: true
         Layout.preferredWidth: Theme.rail
@@ -147,11 +154,15 @@ RowLayout {
     }
 
     ProfilePopout { id: profile }
+    PeerMenu { id: peerMenu }
 
     Connections {
         target: ShellState
         function onProfileRequested(userId, anchor, side) {
             profile.openFor(userId, anchor, side)
+        }
+        function onPeerMenuRequested(userId, name, anchor, at) {
+            peerMenu.openFor(userId, name, anchor, at.x, at.y)
         }
     }
 }

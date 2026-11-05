@@ -55,15 +55,25 @@
 //! - `SetMuted` toggles the mic track and sends op 15.
 //! - `SetDeafened` turns every remote track off (new ones too) and sends
 //!   op 15 with `self_deaf`; the mic is left as it is.
+//! - Every [`VAD_TICK`] the driver reads the mic level ([`Input::MicLevel`]):
+//!   it goes out as [`Notice::MicLevel`] for the meter, and through the
+//!   web's hysteresis ([`Vad`], threshold from `SetSensitivity`) into our
+//!   roster row and op 5 `{speaking: 1|0}`. Muting turns speaking off.
+//! - After every input each pulled track's gain follows its owner's volume
+//!   (`SetPlayback`: output volume times the per-user volume, keyed by Yap
+//!   user id); only changes go out, as `SetTrackGain`.
 
+mod audio;
 mod driver;
 mod engine;
 mod machine;
 mod roster;
 mod sfu;
 mod tracks;
+mod vad;
 pub mod wire;
 
+pub use audio::{peer_gain, resolve, AudioDevice, AudioDevices, Playback, Processing, MAX_VOLUME};
 pub use driver::{run_call, ApiFailure, CallEnv, Commands, TicketApi};
 pub use engine::{
     FakeEngine, FakeOp, FakeSession, LocalOffer, MediaEngine, MediaError, MediaSession,
@@ -78,3 +88,6 @@ pub use machine::{
 pub use roster::{Member, Roster};
 pub use sfu::{Pulled, Pushed, Sfu};
 pub use tracks::{Remote, TrackTable};
+pub use vad::{
+    level_percent, EnergyMeter, Sensitivity, Vad, AUTO_THRESHOLD, SILENCE_DELAY_MS, VAD_TICK,
+};

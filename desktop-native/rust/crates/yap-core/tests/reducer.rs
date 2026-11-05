@@ -1783,6 +1783,7 @@ fn voice_view_should_name_the_channel_and_go_live_when_connected() {
         live: true,
         muted: false,
         deafened: false,
+        speaking: false,
         error: String::new(),
     }))));
 }
@@ -3365,4 +3366,18 @@ fn read_marks_with_an_offset_should_compare_as_instants() {
     );
     let (client, _) = Client::boot_with(reads, no_notifications(), two_message_page());
     assert!(!client.state.is_unread(SECOND_TEXT));
+}
+
+#[test]
+fn our_speaking_bit_should_reach_the_voice_view() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Roster(vec![member("p_me", true), member("p_ana", false)]),
+    });
+    assert!(fx.iter().any(|e| matches!(
+        e,
+        Effect::View(ViewUpdate::Voice(VoiceView { speaking: true, .. }))
+    )));
 }

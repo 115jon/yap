@@ -1,0 +1,203 @@
+//! What we hear and which devices we use: the per-user volumes and the
+//! output volume as gains for remote tracks, and the device choice
+//! resolved against what the system lists. Pure; the engine applies it.
+
+use std::collections::HashMap;
+
+/// The highest per-user or output volume, in percent (ContextMenuItems
+/// `Slider` max, AudioDeviceMenu output max).
+pub const MAX_VOLUME: u16 = 200;
+
+/// What we hear of the others (useVoiceSettingsStore `outputVolume` and
+/// `peerSettings[userId].volume` / `.muted`). Gains are linear,
+/// `volume / 100`, as the web's GainNodes take them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Playback {
+    /// The output volume as a gain, 0.0..=2.0.
+    pub output: f64,
+    /// Per Yap user id: that person's gain, 0.0..=2.0 (0 while "Mute" is
+    /// on for them).
+    pub peers: HashMap<String, f64>,
+}
+
+impl Default for Playback {
+    fn default() -> Self {
+        Self {
+            output: 1.0,
+            peers: HashMap::new(),
+        }
+    }
+}
+
+impl Playback {
+    /// The gain for someone's audio; people without a setting (or not
+    /// named yet) are at 100%.
+    pub fn gain_for(&self, user_id: &str) -> f64 {
+        let peer = if user_id.is_empty() {
+            1.0
+        } else {
+            self.peers.get(user_id).copied().unwrap_or(1.0)
+        };
+        (self.output * peer).clamp(0.0, 4.0)
+    }
+}
+
+/// A percentage volume (0..=200) and the "Mute" switch as one gain.
+pub fn peer_gain(volume: u16, muted: bool) -> f64 {
+    if muted {
+        0.0
+    } else {
+        f64::from(volume.min(MAX_VOLUME)) / 100.0
+    }
+}
+
+/// The mic's capture processing (WebRTC's APM, as the browser's
+/// `getUserMedia` constraints are on the web).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Processing {
+    pub echo_cancellation: bool,
+    pub noise_suppression: bool,
+    pub auto_gain_control: bool,
+}
+
+impl Default for Processing {
+    /// All on, as the device track opens.
+    fn default() -> Self {
+        Self {
+            echo_cancellation: true,
+            noise_suppression: true,
+            auto_gain_control: true,
+        }
+    }
+}
+
+impl Processing {
+    /// The settings as the web resolves them (`resolveCaptureAudioProcessing`
+    /// without RNNoise): high fidelity turns everything off; otherwise the
+    /// two switches, with gain control always on.
+    pub fn from_settings(
+        noise_suppression: bool,
+        echo_cancellation: bool,
+        high_fidelity: bool,
+    ) -> Self {
+        if high_fidelity {
+            return Self {
+                echo_cancellation: false,
+                noise_suppression: false,
+                auto_gain_control: false,
+            };
+        }
+        Self {
+            echo_cancellation,
+            noise_suppression,
+            auto_gain_control: true,
+        }
+    }
+}
+
+/// An input or output device as the platform lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioDevice {
+    /// Stable across hot-plug (the endpoint id on Windows).
+    pub id: String,
+    pub name: String,
+}
+
+/// Both device lists, and the system default of each (`None` if the
+/// platform does not say).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AudioDevices {
+    pub inputs: Vec<AudioDevice>,
+    pub outputs: Vec<AudioDevice>,
+    pub default_input: Option<AudioDevice>,
+    pub default_output: Option<AudioDevice>,
+}
+
+/// The device to open: the chosen one while it is plugged in, otherwise
+/// the system default (the web falls back to "default" the same way when
+/// a saved device is gone). `None` chooses the default.
+pub fn resolve<'a>(
+    choice: Option<&'a str>,
+    available: &'a [AudioDevice],
+    default: Option<&'a AudioDevice>,
+) -> Option<&'a str> {
+    choice
+        .filter(|id| available.iter().any(|d| d.id == *id))
+        .or_else(|| default.map(|d| d.id.as_str()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn device(id: &str) -> AudioDevice {
+        AudioDevice {
+            id: id.into(),
+            name: format!("Device {id}"),
+        }
+    }
+
+    #[test]
+    fn gain_should_multiply_output_and_peer_volume() {
+        let playback = Playback {
+            output: 1.5,
+            peers: HashMap::from([("u1".to_owned(), 0.5)]),
+        };
+        assert!((playback.gain_for("u1") - 0.75).abs() < 1e-9);
+    }
+
+    #[test]
+    fn gain_should_be_the_output_volume_for_unknown_people() {
+        let playback = Playback {
+            output: 0.8,
+            ..Playback::default()
+        };
+        assert!((playback.gain_for("") - 0.8).abs() < 1e-9);
+    }
+
+    #[test]
+    fn peer_gain_should_be_zero_while_muted() {
+        assert_eq!(peer_gain(150, true), 0.0);
+    }
+
+    #[test]
+    fn peer_gain_should_cap_at_two_hundred_percent() {
+        assert_eq!(peer_gain(500, false), 2.0);
+    }
+
+    #[test]
+    fn high_fidelity_should_turn_all_processing_off() {
+        assert_eq!(
+            Processing::from_settings(true, true, true),
+            Processing {
+                echo_cancellation: false,
+                noise_suppression: false,
+                auto_gain_control: false,
+            }
+        );
+    }
+
+    #[test]
+    fn processing_should_keep_gain_control_on_without_high_fidelity() {
+        let p = Processing::from_settings(false, true, false);
+        assert!(p.auto_gain_control && p.echo_cancellation && !p.noise_suppression);
+    }
+
+    #[test]
+    fn resolve_should_keep_a_plugged_in_choice() {
+        let list = [device("a"), device("b")];
+        assert_eq!(resolve(Some("b"), &list, Some(&list[0])), Some("b"));
+    }
+
+    #[test]
+    fn resolve_should_fall_back_to_the_default_when_the_choice_is_unplugged() {
+        let list = [device("a")];
+        assert_eq!(resolve(Some("gone"), &list, Some(&list[0])), Some("a"));
+    }
+
+    #[test]
+    fn resolve_should_use_the_default_without_a_choice() {
+        let list = [device("a"), device("b")];
+        assert_eq!(resolve(None, &list, Some(&list[1])), Some("b"));
+    }
+}

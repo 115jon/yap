@@ -134,6 +134,14 @@ impl Roster {
         self.rows.remove(id);
     }
 
+    /// A participant's Yap user id, once a full state named it.
+    pub fn user_id_of(&self, id: &str) -> Option<&str> {
+        self.rows
+            .get(id)
+            .map(|row| row.user_id.as_str())
+            .filter(|user_id| !user_id.is_empty())
+    }
+
     /// Sets a row's speaking bit; `false` if there is no such row.
     pub fn set_speaking(&mut self, id: &str, speaking: bool) -> bool {
         match self.rows.get_mut(id) {

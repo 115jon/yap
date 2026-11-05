@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Templates as T
 import com.yap.native
 
 // The account row (UserPanel.tsx): 64 high, pl-3 pr-1, gap 4. A 40 px
@@ -6,7 +7,9 @@ import com.yap.native
 // Bricolage 15/700 name over the status word (silkscreen in the LED's
 // ink; the handle while hovered), then mic and deafen (quiet dock keys
 // with their device carets) and settings. Mic and deafen work before and
-// during a call; they are kept between calls.
+// during a call; they are kept between calls. The carets open the device
+// menus; both they and the settings menu lead to the voice settings. The
+// avatar wears the speaking ring (rm-speak) while you talk.
 Rectangle {
     id: root
 
@@ -47,6 +50,17 @@ Rectangle {
             size: 40
             initials: Session.meId.length > 0 ? Session.meName : "?"
             source: Session.meAvatar
+            // rm-speak: a 2 px talk ring at -2 px, opacity only.
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: -2
+                color: "transparent"
+                radius: Theme.radius
+                border.width: 2
+                border.color: Theme.talk
+                opacity: Voice.speaking && !Voice.muted ? 1 : 0
+                Behavior on opacity { OpacityAnimator { duration: Voice.speaking ? Theme.speakOn : Theme.speakOff } }
+            }
         }
         // Presence: an 8 px LED in a 14 px square cut out of the panel ply.
         Rectangle {
@@ -135,14 +149,20 @@ Rectangle {
             tip: Voice.muted ? qsTr("Unmute") : qsTr("Mute")
             onClicked: Voice.requestMute(!Voice.muted)
         }
-        DeviceCaret { label: qsTr("Input device") }
+        DeviceCaret {
+            label: qsTr("Input settings")
+            menu: inputMenu
+        }
         IconKey {
             iconName: "deafen"
             tone: Voice.deafened ? "off" : "ghost"
             tip: Voice.deafened ? qsTr("Undeafen") : qsTr("Deafen")
             onClicked: Voice.requestDeafen(!Voice.deafened)
         }
-        DeviceCaret { label: qsTr("Output device") }
+        DeviceCaret {
+            label: qsTr("Output settings")
+            menu: outputMenu
+        }
         // Settings: the Studio settings shell comes later; until then the
         // key opens the desktop switches.
         IconKey {
@@ -161,6 +181,12 @@ Rectangle {
     MenuPanel {
         id: settingsMenu
         implicitWidth: 248
+        MenuRow {
+            text: qsTr("Voice settings")
+            glyph: "mic"
+            onTriggered: voiceSettings.open()
+        }
+        MenuRule {}
         MenuRow {
             text: qsTr("Open on startup")
             glyph: "power"
@@ -198,18 +224,45 @@ Rectangle {
         }
     }
 
-    component DeviceCaret: Item {
+    DeviceMenu {
+        id: inputMenu
+        mode: "input"
+        onVoiceSettings: voiceSettings.open()
+    }
+    DeviceMenu {
+        id: outputMenu
+        mode: "output"
+        onVoiceSettings: voiceSettings.open()
+    }
+    VoiceSettings { id: voiceSettings }
+
+    // A 10 x 40 caret beside a dock key; it opens (and closes) its menu.
+    component DeviceCaret: T.AbstractButton {
+        id: caret
         required property string label
-        width: 10
-        height: 40
-        Accessible.role: Accessible.Button
+        required property DeviceMenu menu
+        implicitWidth: 10
+        implicitHeight: 40
+        focusPolicy: Qt.StrongFocus
+        Accessible.role: Accessible.ButtonMenu
         Accessible.name: label
-        Icon {
-            anchors.centerIn: parent
-            name: "chevronDown"
-            size: 10
-            color: caretHover.hovered ? Theme.ink1 : Theme.ink3
+        onClicked: caret.menu.visible ? caret.menu.close() : caret.menu.openAbove(caret)
+        // Listing devices takes a moment; start before the click.
+        onHoveredChanged: if (hovered) Audio.refreshDevices()
+        contentItem: Item {
+            Icon {
+                anchors.centerIn: parent
+                name: "chevronDown"
+                size: 10
+                color: caret.hovered || caret.menu.visible ? Theme.ink1 : Theme.ink3
+            }
         }
-        HoverHandler { id: caretHover }
+        background: Rectangle {
+            radius: Theme.radius
+            color: "transparent"
+            border.width: 2
+            border.color: Theme.focus
+            visible: caret.visualFocus
+        }
     }
 }

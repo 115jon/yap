@@ -10,11 +10,13 @@ description = "Yap voice calls: a pure call state machine with its roster and tr
 default = ["libwebrtc"]
 # The production media engine. Off, the crate builds and tests without
 # linking WebRTC (`cargo test -p yap-voice --no-default-features`).
-libwebrtc = ["dep:libwebrtc"]
+libwebrtc = ["dep:libwebrtc", "dep:cc", "dep:webrtc-sys-build"]
 
 [dependencies]
 anyhow = "1.0.104"
-libwebrtc = { version = "0.3.55", optional = true }
+# Pinned: cpp/track_audio.cpp relies on the webrtc-sys 0.3.52 track layout
+# this version brings in.
+libwebrtc = { version = "=0.3.55", optional = true }
 reqwest.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -22,6 +24,10 @@ tokio.workspace = true
 uuid = { version = "1.29.0", features = ["v4"] }
 yap-protocol.workspace = true
 yap-realtime.workspace = true
+
+[build-dependencies]
+cc = { version = "1.11.0", optional = true }
+webrtc-sys-build = { version = "=0.3.21", optional = true }
 
 [lints]
 workspace = true

@@ -6,11 +6,12 @@ use std::sync::{Arc, Mutex, PoisonError};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use super::{LocalOffer, MediaEngine, MediaError, MediaSession};
+use crate::audio::Processing;
 use crate::machine::MediaState;
 use crate::wire::IceServer;
 
 /// One call made on a [`FakeEngine`] or its session.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FakeOp {
     Open { ice_servers: usize },
     PublishMic { stream_id: String },
@@ -20,6 +21,8 @@ pub enum FakeOp {
     CloseMids(Vec<String>),
     SetMicEnabled(bool),
     SetPlayoutEnabled(bool),
+    SetTrackGain { mid: String, gain: f64 },
+    SetProcessing(Processing),
     Stats,
     Close,
     Release,
@@ -30,6 +33,8 @@ struct Shared {
     ops: Vec<FakeOp>,
     states: Option<UnboundedSender<MediaState>>,
     fail_open: bool,
+    /// What `mic_energy` answers.
+    energy: Option<(f64, f64)>,
 }
 
 /// Records calls; clones share the record.
@@ -63,6 +68,14 @@ impl FakeEngine {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .fail_open = true;
+    }
+
+    /// Sets the mic's cumulative energy counters `mic_energy` reports.
+    pub fn set_mic_energy(&self, total_energy: f64, total_duration: f64) {
+        self.shared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .energy = Some((total_energy, total_duration));
     }
 
     /// Everything called so far, in order.
@@ -165,6 +178,28 @@ impl MediaSession for FakeSession {
 
     fn set_playout_enabled(&self, enabled: bool) {
         record(&self.shared, FakeOp::SetPlayoutEnabled(enabled));
+    }
+
+    fn set_processing(&self, processing: Processing) -> Result<(), MediaError> {
+        record(&self.shared, FakeOp::SetProcessing(processing));
+        Ok(())
+    }
+
+    fn set_track_gain(&self, mid: &str, gain: f64) {
+        record(
+            &self.shared,
+            FakeOp::SetTrackGain {
+                mid: mid.to_owned(),
+                gain,
+            },
+        );
+    }
+
+    async fn mic_energy(&self) -> Option<(f64, f64)> {
+        self.shared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .energy
     }
 
     async fn stats(&self) -> Result<String, MediaError> {

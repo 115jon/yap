@@ -288,6 +288,8 @@ pub mod qobject {
         #[qproperty(bool, live)]
         #[qproperty(bool, muted)]
         #[qproperty(bool, deafened)]
+        /// We are speaking (lights our avatar ring and LEDs).
+        #[qproperty(bool, speaking)]
         /// Why the last call failed; empty once a join starts.
         #[qproperty(QString, error)]
         type Voice = super::VoiceRust;
@@ -443,6 +445,7 @@ pub struct VoiceRust {
     live: bool,
     muted: bool,
     deafened: bool,
+    speaking: bool,
     error: QString,
 }
 

@@ -74,14 +74,14 @@ pub fn app_dir() -> Option<PathBuf> {
     Some(PathBuf::from(base).join("YapNative"))
 }
 
-fn read<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
+pub(crate) fn read<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     let text = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&text).ok()
 }
 
 /// Writes through a temporary file and a rename, so a crash never leaves
 /// half a file.
-fn write<T: Serialize>(path: &Path, value: &T) -> Result<(), CacheError> {
+pub(crate) fn write<T: Serialize>(path: &Path, value: &T) -> Result<(), CacheError> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }

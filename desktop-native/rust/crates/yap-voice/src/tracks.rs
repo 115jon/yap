@@ -214,6 +214,13 @@ impl TrackTable {
         self.pulled.keys().map(String::as_str).collect()
     }
 
+    /// (owner participant, receive mid) of every pull that worked.
+    pub fn pulled_mids(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.pulled
+            .values()
+            .filter_map(|p| Some((p.owner.as_str(), p.mid.as_deref()?)))
+    }
+
     /// Tracks waiting for media.
     pub fn pending(&self) -> &[Remote] {
         &self.pending

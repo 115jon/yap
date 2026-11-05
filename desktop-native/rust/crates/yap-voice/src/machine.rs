@@ -1,7 +1,7 @@
 //! [`CallMachine`]: one call as a pure, synchronous state machine. See the
 //! crate docs for the transition table.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::time::Duration;
 
@@ -9,8 +9,10 @@ use serde_json::Value;
 use yap_protocol::{GatewayOp, VOICE_MOVED_CLOSE_REASON};
 use yap_realtime::StopReason;
 
+use crate::audio::{Playback, Processing};
 use crate::roster::{Member, Roster};
 use crate::tracks::{Remote, TrackTable};
+use crate::vad::{level_percent, Sensitivity, Vad};
 use crate::wire::{self, Bootstrap, IceServer, Participant, RoomState, Track};
 
 /// How long a participant whose voice socket went away has to re-announce
@@ -75,11 +77,17 @@ pub enum Socket {
 }
 
 /// What the user asks of a running call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum UserCommand {
     SetMuted(bool),
     /// Deafen: silence the others (remote tracks off) and say so (op 15).
     SetDeafened(bool),
+    /// The speaking threshold.
+    SetSensitivity(Sensitivity),
+    /// The output volume and per-user volumes.
+    SetPlayback(Playback),
+    /// The mic's echo cancellation, noise suppression and gain control.
+    SetProcessing(Processing),
     Leave,
 }
 
@@ -208,10 +216,17 @@ pub enum Input {
     },
     Command(UserCommand),
     Timer(Timer),
+    /// The mic level on the VAD's 0..100 scale, read every
+    /// [`crate::VAD_TICK`] once the mic is published; `at_ms` is a
+    /// monotonic clock.
+    MicLevel {
+        rms: f64,
+        at_ms: u64,
+    },
 }
 
 /// What the machine reports to its owner.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Notice {
     /// The state changed.
     State(CallState),
@@ -223,6 +238,9 @@ pub enum Notice {
     Connected,
     /// The whole roster.
     Roster(Vec<Member>),
+    /// The mic level as the meter shows it, 0..100 (the sensitivity
+    /// slider's scale), with each reading.
+    MicLevel(f64),
 }
 
 /// How to open one call socket.
@@ -279,6 +297,13 @@ pub enum Effect {
     SetMicEnabled(bool),
     /// Play the others (`false` while deafened).
     SetPlayoutEnabled(bool),
+    /// The gain of the remote track received on `mid` (1.0 until set).
+    SetTrackGain {
+        mid: String,
+        gain: f64,
+    },
+    /// The mic's capture processing.
+    SetProcessing(Processing),
     LogStats,
     /// A diagnostic line.
     Log(String),
@@ -315,6 +340,12 @@ pub struct CallMachine {
     roster: Option<Roster>,
     tracks: TrackTable,
     next_token: u64,
+    vad: Vad,
+    sensitivity: Sensitivity,
+    playback: Playback,
+    processing: Processing,
+    /// The gain set on each pulled mid (absent: 1.0).
+    gains: HashMap<String, f64>,
 }
 
 impl CallMachine {
@@ -337,6 +368,11 @@ impl CallMachine {
             roster: None,
             tracks: TrackTable::default(),
             next_token: 0,
+            vad: Vad::default(),
+            sensitivity: Sensitivity::default(),
+            playback: Playback::default(),
+            processing: Processing::default(),
+            gains: HashMap::new(),
         }
     }
 
@@ -386,6 +422,7 @@ impl CallMachine {
             }
             (_, Input::Command(command)) => self.on_command(&mut fx, command),
             (_, Input::Timer(timer)) => self.on_timer(&mut fx, timer),
+            (_, Input::MicLevel { rms, at_ms }) => self.on_mic_level(&mut fx, rms, at_ms),
         }
         // Pull what is waiting once media is up (VOICE_PROTOCOL.md §3.3c).
         if self.connected
@@ -396,7 +433,56 @@ impl CallMachine {
         {
             fx.extend(self.tracks.take_pulls().into_iter().map(Effect::Pull));
         }
+        if !self.ended {
+            self.sync_gains(&mut fx);
+        }
         fx
+    }
+
+    /// Sets each pulled track's gain from its owner's volume where it
+    /// differs from what was set (a new mid starts at 1.0).
+    fn sync_gains(&mut self, fx: &mut Vec<Effect>) {
+        let (roster, playback, gains) = (&self.roster, &self.playback, &mut self.gains);
+        let mut live = HashSet::new();
+        for (owner, mid) in self.tracks.pulled_mids() {
+            let user_id = roster
+                .as_ref()
+                .and_then(|r| r.user_id_of(owner))
+                .unwrap_or("");
+            let gain = playback.gain_for(user_id);
+            live.insert(mid);
+            let set = gains.get(mid).copied().unwrap_or(1.0);
+            if (set - gain).abs() > f64::EPSILON {
+                gains.insert(mid.to_owned(), gain);
+                fx.push(Effect::SetTrackGain {
+                    mid: mid.to_owned(),
+                    gain,
+                });
+            }
+        }
+        gains.retain(|mid, _| live.contains(mid.as_str()));
+    }
+
+    /// One level reading: the meter, then speaking (held off while muted).
+    fn on_mic_level(&mut self, fx: &mut Vec<Effect>, rms: f64, at_ms: u64) {
+        fx.push(Effect::Notify(Notice::MicLevel(level_percent(rms))));
+        if self.published.is_none() || self.muted {
+            return;
+        }
+        if let Some(speaking) = self.vad.update(rms, self.sensitivity.threshold(), at_ms) {
+            self.set_speaking(fx, speaking);
+        }
+    }
+
+    /// Our speaking bit: our row, and op 5 for the others.
+    fn set_speaking(&mut self, fx: &mut Vec<Effect>, speaking: bool) {
+        if let Some(roster) = &mut self.roster {
+            roster.set_speaking(&self.me, speaking);
+        }
+        if self.voice_ready {
+            fx.push(Effect::Send(Socket::Voice, wire::speaking(speaking)));
+        }
+        self.emit_roster(fx);
     }
 
     fn set_state(&mut self, fx: &mut Vec<Effect>, state: CallState) {
@@ -493,6 +579,9 @@ impl CallMachine {
                 }
                 if self.deafened {
                     fx.push(Effect::SetPlayoutEnabled(false));
+                }
+                if self.processing != Processing::default() {
+                    fx.push(Effect::SetProcessing(self.processing));
                 }
                 self.emit_roster(fx);
                 // Only if the voice socket was ready first (the driver holds
@@ -626,8 +715,11 @@ impl CallMachine {
                     close(fx, closing);
                 }
                 // Announce (again): a re-identified socket is a new voice
-                // session to everyone else.
+                // session to everyone else, and so is our speaking bit.
                 self.announce(fx);
+                if self.vad.speaking() {
+                    fx.push(Effect::Send(Socket::Voice, wire::speaking(true)));
+                }
                 for t in &tracks {
                     self.tracks.cancel_grace(&t.participant_id);
                 }
@@ -743,6 +835,14 @@ impl CallMachine {
                 if let Some(roster) = &mut self.roster {
                     roster.set_my_mute(muted);
                 }
+                if muted && self.vad.reset() {
+                    if let Some(roster) = &mut self.roster {
+                        roster.set_speaking(&self.me, false);
+                    }
+                    if self.voice_ready {
+                        fx.push(Effect::Send(Socket::Voice, wire::speaking(false)));
+                    }
+                }
                 if self.sockets_open {
                     fx.push(Effect::Send(
                         Socket::Room,
@@ -766,6 +866,16 @@ impl CallMachine {
                     ));
                 }
                 self.emit_roster(fx);
+            }
+            UserCommand::SetSensitivity(sensitivity) => self.sensitivity = sensitivity,
+            UserCommand::SetPlayback(playback) => self.playback = playback,
+            UserCommand::SetProcessing(processing) => {
+                if processing != self.processing {
+                    self.processing = processing;
+                    if self.published.is_some() {
+                        fx.push(Effect::SetProcessing(processing));
+                    }
+                }
             }
             UserCommand::Leave => {
                 if !self.sockets_open {

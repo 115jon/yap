@@ -233,6 +233,11 @@ pub fn announce(me: &str, track_name: &str, sfu_track_name: &str, session_id: &s
     .to_string()
 }
 
+/// Our speaking flags (op 5): bit 0 is MICROPHONE (`src/lib/types.ts`).
+pub fn speaking(on: bool) -> String {
+    json!({ "op": GatewayOp::Speaking.code(), "d": { "speaking": u8::from(on) } }).to_string()
+}
+
 /// Stops our named track (op 13).
 pub fn stop_tracks(track_name: &str) -> String {
     json!({ "op": GatewayOp::StopTracks.code(), "d": { "track_names": [track_name] } }).to_string()

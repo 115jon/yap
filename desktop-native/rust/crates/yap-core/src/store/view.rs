@@ -615,6 +615,8 @@ pub struct VoiceView {
     pub live: bool,
     pub muted: bool,
     pub deafened: bool,
+    /// We are speaking (our call row's bit, from the mic level).
+    pub speaking: bool,
     /// Why the last call failed (shown on the landing); empty otherwise.
     pub error: String,
 }

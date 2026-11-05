@@ -6,8 +6,8 @@ use yap_realtime::StopReason;
 use yap_voice::wire::{Participant, RoomState, Track};
 use yap_voice::{
     CallMachine, CallState, CallTarget, Effect, Input, MediaEvent, MediaState, Member, Notice,
-    Published, RoomEvent, Socket, TicketReplies, Timer, UserCommand, VoiceEvent, LEAVE_LINGER,
-    REANNOUNCE_GRACE,
+    Playback, Processing, Published, RoomEvent, Sensitivity, Socket, TicketReplies, Timer,
+    UserCommand, VoiceEvent, LEAVE_LINGER, REANNOUNCE_GRACE, SILENCE_DELAY_MS,
 };
 
 const ME: &str = "me-1";
@@ -646,4 +646,181 @@ fn mute_then_unmute_should_toggle_our_roster_row() {
     let fx = m.handle(Input::Command(UserCommand::SetMuted(false)));
     assert_eq!(me_muted(&fx), Some(false));
     assert!(fx.contains(&Effect::SetMicEnabled(true)));
+}
+
+fn level(rms: f64, at_ms: u64) -> Input {
+    Input::MicLevel { rms, at_ms }
+}
+
+fn speaking_sends(fx: &[Effect]) -> Vec<i64> {
+    sends(fx, Socket::Voice)
+        .iter()
+        .filter(|f| f["op"] == 5)
+        .map(|f| f["d"]["speaking"].as_i64().expect("speaking"))
+        .collect()
+}
+
+fn me_speaking(fx: &[Effect]) -> Option<bool> {
+    last_roster(fx)?.iter().find(|r| r.me).map(|r| r.speaking)
+}
+
+fn gains(fx: &[Effect]) -> Vec<(String, f64)> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::SetTrackGain { mid, gain } => Some((mid.clone(), *gain)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A joined call where `ana` is Yap user `u-ana` (mic on mid `m-ana`).
+fn joined_with_user() -> CallMachine {
+    let mut m = joined();
+    let mut ana = participant("ana", Some("Ana"));
+    ana.user_id = Some("u-ana".into());
+    m.handle(Input::Room(RoomEvent::VoiceState {
+        leave: false,
+        participant: ana,
+    }));
+    m
+}
+
+fn playback(output: f64, peers: &[(&str, f64)]) -> Input {
+    Input::Command(UserCommand::SetPlayback(Playback {
+        output,
+        peers: peers.iter().map(|(u, g)| ((*u).to_owned(), *g)).collect(),
+    }))
+}
+
+#[test]
+fn a_mic_level_should_report_the_meter_position() {
+    let mut m = joined();
+    let fx = m.handle(level(1.0, 0));
+    assert!(fx.contains(&Effect::Notify(Notice::MicLevel(60.0))));
+}
+
+#[test]
+fn speech_should_light_our_row_and_send_speaking_on() {
+    let mut m = joined();
+    let fx = m.handle(level(10.0, 0));
+    assert_eq!(
+        (speaking_sends(&fx), me_speaking(&fx)),
+        (vec![1], Some(true))
+    );
+}
+
+#[test]
+fn speaking_should_go_off_after_the_silence_delay() {
+    let mut m = joined();
+    m.handle(level(10.0, 0));
+    assert!(speaking_sends(&m.handle(level(0.1, 50))).is_empty());
+    let fx = m.handle(level(0.1, 50 + SILENCE_DELAY_MS));
+    assert_eq!(
+        (speaking_sends(&fx), me_speaking(&fx)),
+        (vec![0], Some(false))
+    );
+}
+
+#[test]
+fn a_level_below_the_manual_threshold_should_not_count_as_speech() {
+    let mut m = joined();
+    m.handle(Input::Command(UserCommand::SetSensitivity(Sensitivity {
+        auto: false,
+        db: -10.0,
+    })));
+    assert!(speaking_sends(&m.handle(level(10.0, 0))).is_empty());
+}
+
+#[test]
+fn muting_should_turn_speaking_off_at_once() {
+    let mut m = joined();
+    m.handle(level(10.0, 0));
+    let fx = m.handle(Input::Command(UserCommand::SetMuted(true)));
+    assert_eq!(
+        (speaking_sends(&fx), me_speaking(&fx)),
+        (vec![0], Some(false))
+    );
+}
+
+#[test]
+fn speech_while_muted_should_not_be_sent() {
+    let mut m = joined();
+    m.handle(Input::Command(UserCommand::SetMuted(true)));
+    assert!(speaking_sends(&m.handle(level(10.0, 0))).is_empty());
+}
+
+#[test]
+fn a_reidentified_voice_socket_should_hear_that_we_are_speaking() {
+    let mut m = joined();
+    m.handle(level(10.0, 0));
+    m.handle(Input::Voice(VoiceEvent::Disconnected));
+    let fx = m.handle(voice_ready(vec![track("ana", "mic-ana", "sfu-ana")]));
+    assert_eq!(speaking_sends(&fx), vec![1]);
+}
+
+#[test]
+fn a_user_volume_should_set_the_gain_of_their_track() {
+    let mut m = joined_with_user();
+    let fx = m.handle(playback(1.0, &[("u-ana", 0.5)]));
+    assert_eq!(gains(&fx), vec![("m-ana".to_owned(), 0.5)]);
+}
+
+#[test]
+fn the_output_volume_should_scale_every_track() {
+    let mut m = joined_with_user();
+    let fx = m.handle(playback(2.0, &[("u-ana", 0.75)]));
+    assert_eq!(gains(&fx), vec![("m-ana".to_owned(), 1.5)]);
+}
+
+#[test]
+fn an_unchanged_gain_should_not_be_set_again() {
+    let mut m = joined_with_user();
+    m.handle(playback(1.0, &[("u-ana", 0.0)]));
+    assert!(gains(&m.handle(level(1.0, 0))).is_empty());
+}
+
+#[test]
+fn a_volume_should_apply_once_the_room_names_the_user() {
+    let mut m = joined();
+    m.handle(playback(1.0, &[("u-ana", 0.0)]));
+    let mut ana = participant("ana", None);
+    ana.user_id = Some("u-ana".into());
+    let fx = m.handle(Input::Room(RoomEvent::VoiceState {
+        leave: false,
+        participant: ana,
+    }));
+    assert_eq!(gains(&fx), vec![("m-ana".to_owned(), 0.0)]);
+}
+
+#[test]
+fn a_volume_should_apply_to_a_track_pulled_later() {
+    let mut m = joined_with_user();
+    m.handle(playback(1.0, &[("u-ana", 1.5)]));
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![track("ana", "mic-ana", "sfu-ana-2")],
+    }));
+    let fx = m.handle(done("sfu-ana-2", "m-ana-2"));
+    assert_eq!(gains(&fx), vec![("m-ana-2".to_owned(), 1.5)]);
+}
+
+#[test]
+fn processing_should_apply_to_the_published_mic() {
+    let mut m = joined();
+    let studio = Processing::from_settings(false, false, true);
+    let fx = m.handle(Input::Command(UserCommand::SetProcessing(studio)));
+    assert!(fx.contains(&Effect::SetProcessing(studio)));
+}
+
+#[test]
+fn processing_chosen_before_the_mic_should_apply_once_it_is_published() {
+    let mut m = CallMachine::new(target());
+    m.handle(Input::Start);
+    m.handle(Input::Tickets(Ok(tickets())));
+    let off = Processing::from_settings(false, true, false);
+    assert!(m
+        .handle(Input::Command(UserCommand::SetProcessing(off)))
+        .is_empty());
+    let fx = m.handle(Input::Published(Ok(published())));
+    assert!(fx.contains(&Effect::SetProcessing(off)));
 }

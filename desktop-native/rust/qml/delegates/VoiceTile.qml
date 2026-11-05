@@ -5,10 +5,13 @@ import com.yap.native
 // 1 px line seam and 2 px corners, the 64 px avatar (80 on a single tile),
 // the speaking ring (2 px talk outside the tile, opacity only), and the
 // bottom-left nameplate: LED, Bricolage 13/700 name, state glyphs. With no
-// media under it, the nameplate needs no chip.
+// media under it, the nameplate needs no chip. A right click opens their
+// call menu (volume, mute) for anyone but you.
 Item {
     id: root
 
+    // The Yap user id (or the participant id before the room names them).
+    required property string memberId
     required property string name
     required property string avatar
     required property bool muted
@@ -19,6 +22,12 @@ Item {
 
     Accessible.role: Accessible.ListItem
     Accessible.name: name
+
+    TapHandler {
+        enabled: !root.me
+        acceptedButtons: Qt.RightButton
+        onTapped: eventPoint => ShellState.showPeerMenu(root.memberId, root.name, root, eventPoint.position)
+    }
 
     Rectangle {
         anchors.fill: parent

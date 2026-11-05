@@ -13,6 +13,7 @@
 
 mod db;
 pub mod settings;
+pub mod voice;
 mod writer;
 
 use std::path::PathBuf;

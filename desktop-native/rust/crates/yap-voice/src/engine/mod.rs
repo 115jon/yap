@@ -7,6 +7,7 @@ use std::future::Future;
 
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use crate::audio::Processing;
 use crate::machine::MediaState;
 use crate::wire::IceServer;
 
@@ -45,6 +46,13 @@ pub trait MediaEngine: Send + Sync + 'static {
     /// Gives the devices back. Called once when a call ends, even if
     /// [`MediaEngine::open`] failed.
     fn release(&self);
+
+    /// Follows the device choice while a call runs: a chosen device that
+    /// was unplugged falls back to the default, and "Default" follows a
+    /// new system default. Returns a log line when it switched.
+    fn check_devices(&self) -> Option<String> {
+        None
+    }
 }
 
 /// One peer connection to the SFU. Clones share it.
@@ -82,6 +90,17 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
     /// Plays or silences every remote track, including ones that arrive
     /// later.
     fn set_playout_enabled(&self, enabled: bool);
+
+    /// The mic's capture processing; `Err` says why it was refused.
+    fn set_processing(&self, processing: Processing) -> Result<(), MediaError>;
+
+    /// The gain of the remote track on `mid` (1.0 is as sent, 0.0
+    /// silent), kept for the track if it has not arrived yet.
+    fn set_track_gain(&self, mid: &str, gain: f64);
+
+    /// The mic's cumulative `(totalAudioEnergy, totalSamplesDuration)`
+    /// from the send stream, once it has any.
+    fn mic_energy(&self) -> impl Future<Output = Option<(f64, f64)>> + Send;
 
     /// One line of media stats for the log.
     fn stats(&self) -> impl Future<Output = Result<String, MediaError>> + Send;

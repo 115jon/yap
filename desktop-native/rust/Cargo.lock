@@ -2596,12 +2596,14 @@ name = "yap-voice"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cc",
  "libwebrtc",
  "reqwest 0.13.5",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
  "uuid",
+ "webrtc-sys-build",
  "yap-protocol",
  "yap-realtime",
 ]
