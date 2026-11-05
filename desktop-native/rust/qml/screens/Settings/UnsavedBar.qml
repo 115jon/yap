@@ -15,6 +15,7 @@ Rectangle {
     property bool saving: false
     property string error
     property bool saveDisabled: false
+    property string saveLabel: qsTr("Save changes")
 
     signal reset()
     signal save()
@@ -104,7 +105,7 @@ Rectangle {
             KitButton {
                 variant: "primary"
                 ground: Theme.ply3
-                text: qsTr("Save changes")
+                text: bar.saveLabel
                 loading: bar.saving
                 enabled: !bar.saveDisabled
                 onClicked: if (!bar.saving) bar.save()

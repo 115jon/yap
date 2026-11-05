@@ -168,6 +168,13 @@ RowLayout {
 
     ProfilePopout { id: profile }
     PeerMenu { id: peerMenu }
+    MemberMenu { id: memberMenu }
+
+    // Server and channel settings, the create, invite and confirm dialogs.
+    AdminHost {
+        Layout.preferredWidth: 0
+        Layout.preferredHeight: 0
+    }
 
     // User settings, the profile editor over it (or alone, from the
     // account card) and the theme preview sheet.
@@ -195,6 +202,9 @@ RowLayout {
         }
         function onPeerMenuRequested(userId, name, anchor, at) {
             peerMenu.openFor(userId, name, anchor, at.x, at.y)
+        }
+        function onMemberMenuRequested(userId, name, anchor, at) {
+            memberMenu.openFor(userId, name, anchor, at.x, at.y)
         }
     }
 }

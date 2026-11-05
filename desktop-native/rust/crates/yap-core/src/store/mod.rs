@@ -9,6 +9,7 @@
 //! Gateway, voice and sign-in inputs carry the session, call or attempt they
 //! belong to, with the same rule.
 
+mod admin;
 mod effect;
 mod input;
 mod reduce;
@@ -16,6 +17,10 @@ mod state;
 pub mod time;
 pub mod view;
 
+pub use admin::{
+    Act, AdminCommand, AdminList, AdminRequest, AdminResponse, AdminState, OverrideDraft,
+    ServerDraft,
+};
 pub use effect::{ApiRequest, ApiResponse, CacheWrite, Effect, Method, Page, ProfileAsset};
 pub use input::{Command, Dispatch, GatewayEvent, Input, ProfileDraft, SignInEvent, UploadFile};
 pub use reduce::reduce;

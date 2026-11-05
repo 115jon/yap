@@ -6,6 +6,7 @@
 //! [`camera`], the share picker's sources and pictures [`share`], and the
 //! settings dialog's side of the core [`settings`].
 
+mod admin;
 mod audio;
 mod bridge;
 mod camera;

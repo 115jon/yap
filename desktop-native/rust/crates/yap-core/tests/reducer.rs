@@ -358,10 +358,14 @@ fn channels_result_should_open_the_first_text_channel_and_request_its_page() {
         lit: 0,
         unread: false,
         mentions: 0,
+        manage: false,
+        category: String::new(),
     };
-    let channel = |id: &str, name: &str, voice| ChannelTreeRow {
+    // Members have not answered: no Manage channels yet.
+    let channel = |id: &str, name: &str, voice, category: &str| ChannelTreeRow {
         kind: TreeKind::Channel,
         voice,
+        category: category.into(),
         ..label(id, name)
     };
     assert_eq!(
@@ -369,9 +373,9 @@ fn channels_result_should_open_the_first_text_channel_and_request_its_page() {
         [
             &ViewUpdate::Channels(ViewDiff::Reset(vec![
                 label("cat_fixture_text", "Text"),
-                channel(TEXT, "general", false),
+                channel(TEXT, "general", false, "cat_fixture_text"),
                 label("cat_fixture_voice", "Voice"),
-                channel(VOICE, "lounge", true),
+                channel(VOICE, "lounge", true, "cat_fixture_voice"),
             ])),
             &ViewUpdate::ActiveChannel {
                 id: TEXT.into(),

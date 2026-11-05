@@ -170,6 +170,34 @@ impl Stamp {
     }
 }
 
+const LONG_MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+/// A local date: `Nov 5, 2026`, or `November 5, 2026` when `long`.
+pub fn local_date(utc_ms: i64, offset: LocalOffset, long: bool) -> String {
+    let (year, month, day) = civil_from_days(local_day(utc_ms, offset));
+    let names = if long { &LONG_MONTHS } else { &MONTHS };
+    format!("{} {day}, {year}", names[(month - 1) as usize])
+}
+
+/// A local date and time: `Nov 5, 2026, 3:04 PM`.
+pub fn local_date_time(utc_ms: i64, offset: LocalOffset) -> String {
+    let stamp = Stamp::new(utc_ms, offset);
+    format!("{}, {}", local_date(utc_ms, offset, false), stamp.time)
+}
+
 /// Today's local day number, for [`Stamp::day`].
 pub fn local_day(utc_ms: i64, offset: LocalOffset) -> i64 {
     (utc_ms + i64::from(offset.at(utc_ms)) * 1000).div_euclid(MS_PER_DAY)
@@ -214,6 +242,21 @@ mod tests {
             (stamp.time.as_str(), stamp.date.as_str()),
             ("12:07 AM", "Nov 4")
         );
+    }
+
+    #[test]
+    fn date_time_should_read_like_the_audit_log() {
+        let ms = parse_rfc3339("2026-11-04 23:22:59").unwrap_or_default();
+        assert_eq!(
+            local_date_time(ms, LocalOffset(|_| -6 * 3600)),
+            "Nov 4, 2026, 5:22 PM"
+        );
+    }
+
+    #[test]
+    fn long_date_should_spell_the_month() {
+        let ms = parse_rfc3339("2026-11-04T14:27:30.654Z").unwrap_or_default();
+        assert_eq!(local_date(ms, LocalOffset::UTC, true), "November 4, 2026");
     }
 
     #[test]

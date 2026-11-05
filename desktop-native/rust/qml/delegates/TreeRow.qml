@@ -3,7 +3,9 @@ import QtQuick
 import com.yap.native
 
 // One row of ChannelTreeModel: a category label, a channel, or someone in a
-// voice channel (a Talk Tree leaf under it).
+// voice channel (a Talk Tree leaf under it). Labels and channels open their
+// menu on a right click; a channel the user may manage has the gear, and
+// with Manage channels in the server it can be dragged within its group.
 Loader {
     id: cell
 
@@ -24,10 +26,18 @@ Loader {
     required property int lit
     required property bool unread
     required property int mentions
+    required property bool manage
+    required property string categoryId
     // The open channel (text, or a voice channel's view) and the joined call.
     required property string activeId
     required property string callId
     signal selected(string id)
+    // A right click at `at` (in the row).
+    signal menuRequested(Item row, point at)
+    signal settingsRequested()
+    // A drag of this channel: where the pointer is (scene), and its end.
+    signal dragMoved(point scene)
+    signal dragEnded(bool dropped)
 
     sourceComponent: kind === "label" ? labelRow : kind === "member" ? memberRow : channelRow
 
@@ -37,6 +47,7 @@ Loader {
             width: cell.width
             name: cell.name
             first: cell.index === 0
+            onMenuRequested: (row, at) => cell.menuRequested(row, at)
         }
     }
 
@@ -70,7 +81,13 @@ Loader {
             joined: cell.itemId === cell.callId
             unread: cell.unread
             mentions: cell.mentions
+            manage: cell.manage
+            draggable: cell.manage && Admin.canManageChannels
             onSelected: cell.selected(cell.itemId)
+            onMenuRequested: (row, at) => cell.menuRequested(row, at)
+            onSettingsRequested: cell.settingsRequested()
+            onDragMoved: scene => cell.dragMoved(scene)
+            onDragEnded: dropped => cell.dragEnded(dropped)
         }
     }
 }

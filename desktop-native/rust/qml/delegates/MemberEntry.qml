@@ -29,6 +29,8 @@ Item {
     required property bool speaking
     property color ground: Theme.ply0
     signal profileRequested(string userId, Item anchor)
+    // A right click at `at` (in the row): the member's menu.
+    signal menuRequested(string userId, string name, Item anchor, point at)
 
     readonly property bool label: kind === "label"
     readonly property int gap: label ? (index === 0 ? 8 : 16) : 0
@@ -81,6 +83,11 @@ Item {
         TapHandler {
             enabled: !root.label
             onTapped: root.profileRequested(root.userId, face)
+        }
+        TapHandler {
+            enabled: !root.label
+            acceptedButtons: Qt.RightButton
+            onTapped: eventPoint => root.menuRequested(root.userId, root.name, member, eventPoint.position)
         }
 
         Led {

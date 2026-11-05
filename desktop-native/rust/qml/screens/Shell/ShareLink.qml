@@ -6,7 +6,12 @@ import com.yap.native
 Item {
     Connections {
         target: ShellState
-        function onShareDialogRequested() { picker.openPicker() }
+        function onShareToggleRequested() {
+            if (Voice.sharing)
+                Voice.stopShare()
+            else
+                picker.openPicker()
+        }
     }
     Connections {
         target: Voice

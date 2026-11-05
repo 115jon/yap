@@ -26,7 +26,15 @@ Item {
     }
     Connections {
         target: ShellState
-        function onCameraDialogRequested() { dialog.openFor(true) }
+        function onCameraToggleRequested() {
+            if (!Camera.hasCamera)
+                return
+            const on = Voice.cameraOn || Voice.cameraWanted
+            if (on || !Audio.alwaysPreviewVideo)
+                Voice.setCamera(!on)
+            else
+                dialog.openFor(true)
+        }
         function onCameraSettingsRequested() { dialog.openFor(false) }
     }
     Connections {

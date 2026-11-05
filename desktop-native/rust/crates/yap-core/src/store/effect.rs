@@ -115,6 +115,8 @@ pub enum ProfileAsset {
     Avatar { display: Option<String> },
     /// `POST /api/profile-assets/manage` with `kind=banner`.
     Banner,
+    /// `POST /api/servers/icon-upload`; answers with the icon's URL.
+    ServerIcon,
 }
 
 impl ProfileAsset {
@@ -122,6 +124,7 @@ impl ProfileAsset {
         match self {
             Self::Avatar { .. } => "/api/avatar-upload",
             Self::Banner => "/api/profile-assets/manage",
+            Self::ServerIcon => "/api/servers/icon-upload",
         }
     }
 }
@@ -246,6 +249,8 @@ pub enum ApiRequest {
     KovaSession,
     /// Kova's linked sign-in methods (on the auth server).
     KovaAccounts,
+    /// Server and channel administration.
+    Admin(super::AdminRequest),
 }
 
 /// A page of messages, oldest first.
@@ -281,6 +286,7 @@ pub enum ApiResponse {
     KovaEmail(Option<String>),
     /// Linked provider ids.
     KovaAccounts(Vec<String>),
+    Admin(super::AdminResponse),
     /// A call whose body the store does not read.
     Done,
 }
@@ -314,6 +320,7 @@ impl ApiRequest {
 
     pub fn method(&self) -> Method {
         match self {
+            Self::Admin(request) => request.method(),
             Self::SendMessage { .. }
             | Self::Typing { .. }
             | Self::OpenDm { .. }
@@ -343,6 +350,7 @@ impl ApiRequest {
 
     pub fn path(&self) -> String {
         match self {
+            Self::Admin(request) => request.path(),
             Self::Me => "/api/users/me".into(),
             Self::Servers => "/api/servers".into(),
             Self::Channels { server_id } => format!("/api/servers/{server_id}/channels"),
@@ -417,6 +425,7 @@ impl ApiRequest {
     /// The JSON body (`Null` for a GET).
     pub fn body(&self) -> Value {
         match self {
+            Self::Admin(request) => request.body(),
             Self::SendMessage {
                 content,
                 reply_to_id,
@@ -491,6 +500,7 @@ impl ApiRequest {
     /// Decodes a success body into the response for this request.
     pub fn decode(&self, mut body: Value) -> Result<ApiResponse, ApiError> {
         Ok(match self {
+            Self::Admin(request) => ApiResponse::Admin(request.decode(body)?),
             Self::Me => ApiResponse::Me(Box::new(
                 serde_json::from_value(body).map_err(|e| ApiError::Decode(format!("me: {e}")))?,
             )),

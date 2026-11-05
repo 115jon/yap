@@ -130,6 +130,22 @@ the decisions.
   thumbnail or large picture; YouTube and other players as a thumbnail
   with a play disc that opens the link; direct media bare; unavailable
   posts), including `MESSAGE_UPDATE` arrivals and the revision rule.
+- Server administration as the web does it (`qml/screens/Admin`, the rules
+  in `yap-core` `admin.rs`, the store in `store/reduce/admin.rs`): the
+  server header menu, Server settings on the shared workbench (Overview
+  with the icon, name, share switches and the owner's Delete server; Roles
+  with the editor and the web's permission groups; Invites with pause, the
+  create form, countdowns, copy and revoke; Bans with unban; the Audit
+  log as sentences), Channel settings (name, topic, public sharing, and the
+  Deny / Inherit / Allow overrides per role and member), Create channel and
+  Create category, the tree's channel, category and sidebar menus with
+  delete confirms, drag to reorder within a group, Kick and Ban (with a
+  reason) on a member's menu, and role assignment on the profile card.
+  Pages and actions follow the user's permissions (their roles' bits, and
+  the channel's own `permissions`), and `GUILD_UPDATE` / `GUILD_DELETE` /
+  `CHANNEL_UPDATE` / `CHANNEL_DELETE` keep the tree and the open settings
+  current. The tree groups channels as the web does (loose text and voice
+  first, then every category, empty ones included).
 - The GIF picker (KLIPY via `/api/gifs`: trending, search, GIFs, stickers
   and memes, paging), sending through `/messages/gif` at once.
 

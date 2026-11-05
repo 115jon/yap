@@ -1,14 +1,19 @@
 pragma Singleton
 import QtQuick
-import Yap.Chrome
-import com.yap.native
 
 // Shell-wide UI state that is not the core's: whether the member panel is
 // shown (on by default, as the web's `showMembers`), and requests for the
-// user popout and someone's call menu (volume, mute), which the shell owns
-// so any row can open them. Also what
-// media rows remember between reuses: decoded picture sizes (so a row
-// lays out at once the next time) and the sensitive media shown.
+// user popout, someone's call menu (volume, mute), the camera and share
+// keys and the server administration dialogs, which the shell owns so any
+// row can open them. Also what media rows remember between reuses: decoded
+// picture sizes (so a row lays out at once the next time) and the
+// sensitive media shown.
+//
+// Pure state: it imports nothing of com.yap.native. A composite singleton
+// that imports its own module depends on every other composite singleton
+// in it, so two that both import it form a cycle (Qt warns "Cyclic
+// dependency detected"). SettingsNav is the one that does; the keys' logic
+// lives where the Rust objects are (CameraLink, ShareLink).
 QtObject {
     id: state
 
@@ -32,35 +37,43 @@ QtObject {
         focusedTile = focusedTile === tileId ? "" : tileId
     }
 
-    // The camera key (camera-toggle.ts): off goes off at once; on opens the
-    // Camera dialog first while "Preview before turning on camera" is set.
-    signal cameraDialogRequested()
+    // The camera key (camera-toggle.ts, CameraLink): off goes off at
+    // once; on opens the Camera dialog first while "Preview before turning
+    // on camera" is set.
+    signal cameraToggleRequested()
     // The Camera dialog without the offer to turn it on (a caret menu row).
     signal cameraSettingsRequested()
 
     function toggleCamera() {
-        if (!Camera.hasCamera)
-            return
-        const on = Voice.cameraOn || Voice.cameraWanted
-        if (on || !Audio.alwaysPreviewVideo)
-            Voice.setCamera(!on)
-        else
-            cameraDialogRequested()
+        cameraToggleRequested()
     }
 
-    // The share key (VoiceControls.tsx): sharing stops the share; otherwise
-    // the picker opens, on the tab last shared from (this session).
-    signal shareDialogRequested()
+    // The share key (VoiceControls.tsx, ShareLink): sharing stops the
+    // share; otherwise the picker opens, on the tab last shared from (this
+    // session).
+    signal shareToggleRequested()
     property string shareTab: "applications"
     // Our share's own tile: its preview paused (ParticipantCard's Pause).
     property bool sharePreviewPaused: false
 
     function toggleShare() {
-        if (Voice.sharing)
-            Voice.stopShare()
-        else
-            shareDialogRequested()
+        shareToggleRequested()
     }
+
+    // Server administration (AdminHost opens these): server settings on a
+    // page, channel settings, the create dialogs, the invite dialog, and
+    // the confirms for deletes and moderation.
+    signal serverSettingsRequested(string page)
+    signal channelSettingsRequested(string channelId)
+    signal createChannelRequested(string categoryId)
+    signal createCategoryRequested()
+    signal inviteRequested()
+    signal deleteChannelRequested(string channelId, string name, bool voice)
+    signal deleteCategoryRequested(string categoryId, string name)
+    signal kickRequested(string userId, string name)
+    signal banRequested(string userId, string name)
+    // `at` is a point in `anchor`.
+    signal memberMenuRequested(string userId, string name, Item anchor, point at)
 
     // `side`: where the card opens next to `anchor`: right, left or top.
     signal profileRequested(string userId, Item anchor, string side)

@@ -9,6 +9,7 @@ Item {
 
     required property string name
     required property bool first
+    signal menuRequested(Item row, point at)
 
     // The list puts 2 px between rows; the gap above makes up the rest.
     height: Theme.branchLabel + (first ? 8 : 14)
@@ -21,6 +22,10 @@ Item {
         name: "chevronDown"
         size: Theme.iconXs
         color: Theme.ink3
+    }
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: eventPoint => root.menuRequested(root, eventPoint.position)
     }
     Text {
         id: label

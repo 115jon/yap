@@ -30,6 +30,7 @@ Item {
             width: list.width
             ground: root.ground
             onProfileRequested: (userId, anchor) => ShellState.showProfile(userId, anchor, root.profileSide)
+            onMenuRequested: (userId, name, anchor, at) => ShellState.memberMenuRequested(userId, name, anchor, at)
         }
 
         ScrollBar.vertical: ScrollBar {

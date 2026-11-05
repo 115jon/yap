@@ -2,11 +2,12 @@
 
 use serde_json::Value;
 use yap_protocol::payload::{
-    GuildMemberAdd, GuildMemberRemove, GuildMemberUpdate, MessageDeleteEvent, NotificationsRead,
-    PresenceList, PresenceUpdateEvent, ReactionEvent, TypingStartEvent, UserProfileUpdate,
-    VoiceChannelStateUpdate, VoiceChannelStates,
+    ChannelDeleteEvent, ChannelUpdateEvent, GuildDelete, GuildMemberAdd, GuildMemberRemove,
+    GuildMemberUpdate, MessageDeleteEvent, NotificationsRead, PresenceList, PresenceUpdateEvent,
+    ReactionEvent, TypingStartEvent, UserProfileUpdate, VoiceChannelStateUpdate,
+    VoiceChannelStates,
 };
-use yap_protocol::rest::{DmChannel, Message, MessagePatch, Notification, ReadState};
+use yap_protocol::rest::{DmChannel, Message, MessagePatch, Notification, ReadState, Server};
 
 use yap_cache::Snapshot;
 
@@ -157,6 +158,8 @@ pub enum Command {
         theme: Option<String>,
         sync: bool,
     },
+    /// Server settings, channel settings and the tree's management.
+    Admin(super::AdminCommand),
 }
 
 /// What the profile editor saves. Colours are `#RRGGBB` or `None` (Auto);
@@ -262,8 +265,15 @@ pub enum Dispatch {
     NotificationsRead(NotificationsRead),
     /// Every notification was cleared.
     NotificationsClear,
-    /// The server list changed (`USER_SERVERS_UPDATE`, `GUILD_UPDATE`, `GUILD_DELETE`).
+    /// The server list changed (`USER_SERVERS_UPDATE`, or a `GUILD_UPDATE`
+    /// whose body does not decode).
     ServersChanged,
+    /// A server's settings changed: the server as stored now.
+    GuildUpdate(Box<Server>),
+    GuildDelete(GuildDelete),
+    /// A channel was created or changed, or the tree must be refetched.
+    ChannelUpdate(Box<ChannelUpdateEvent>),
+    ChannelDelete(ChannelDeleteEvent),
     /// Who is in each voice channel (after a subscribe): replaces them all.
     VoiceChannelStates(VoiceChannelStates),
     /// One voice channel's roster changed.
@@ -302,7 +312,14 @@ impl Dispatch {
             }
             "NOTIFICATIONS_READ" => Self::NotificationsRead(serde_json::from_value(data).ok()?),
             "NOTIFICATIONS_CLEAR" => Self::NotificationsClear,
-            "USER_SERVERS_UPDATE" | "GUILD_DELETE" | "GUILD_UPDATE" => Self::ServersChanged,
+            "USER_SERVERS_UPDATE" => Self::ServersChanged,
+            "GUILD_UPDATE" => match serde_json::from_value::<Server>(data) {
+                Ok(server) => Self::GuildUpdate(Box::new(server)),
+                Err(_) => Self::ServersChanged,
+            },
+            "GUILD_DELETE" => Self::GuildDelete(serde_json::from_value(data).ok()?),
+            "CHANNEL_UPDATE" => Self::ChannelUpdate(Box::new(serde_json::from_value(data).ok()?)),
+            "CHANNEL_DELETE" => Self::ChannelDelete(serde_json::from_value(data).ok()?),
             "VOICE_CHANNEL_STATES" => Self::VoiceChannelStates(serde_json::from_value(data).ok()?),
             "VOICE_CHANNEL_STATE_UPDATE" => {
                 Self::VoiceChannelState(serde_json::from_value(data).ok()?)

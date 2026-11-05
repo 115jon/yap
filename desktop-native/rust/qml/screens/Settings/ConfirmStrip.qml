@@ -42,12 +42,13 @@ Item {
             spacing: 12
             Item {
                 width: parent.width
-                height: Math.max(message.height, keys.height)
                 readonly property bool fits: message.implicitWidth + keys.width + 16 <= width
+                // Too long for one line beside the keys: they go under it.
+                height: fits ? Math.max(message.height, keys.height) : message.height + 12 + keys.height
                 Text {
                     id: message
                     width: parent.fits ? parent.width - keys.width - 16 : parent.width
-                    anchors.verticalCenter: parent.fits ? parent.verticalCenter : undefined
+                    y: parent.fits ? (parent.height - height) / 2 : 0
                     text: root.consequence
                     wrapMode: Text.Wrap
                     color: Theme.ink1

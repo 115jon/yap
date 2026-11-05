@@ -14,9 +14,9 @@ use cxx_qt_lib::QString;
 use cxx_qt_lib::{QList, QStringList};
 use yap_core::store::time::local_day;
 use yap_core::store::view::{
-    ChannelTreeRow, DmRow, DmView, EmojiRow, GifRow, GifStatusView, MeView, MemberListRow,
-    MentionRow, MessageRow, ProfileView, ServerRow, SettingsView, UnreadView, UploadRow,
-    VoiceMemberRow, VoicePanelView, VoiceTileRow, VoiceView,
+    AdminView, ChannelTreeRow, DmRow, DmView, EmojiRow, GifRow, GifStatusView, MeView,
+    MemberListRow, MentionRow, MessageRow, ProfileView, ServerRow, SettingsView, UnreadView,
+    UploadRow, VoiceMemberRow, VoicePanelView, VoiceTileRow, VoiceView,
 };
 use yap_core::ViewUpdate;
 
@@ -61,6 +61,7 @@ struct Scalars {
     uploads: (i64, i64),
     gifs: GifStatusView,
     settings: SettingsView,
+    admin: AdminView,
 }
 
 /// The live QObjects. Each registers from its constructor and clears its
@@ -69,6 +70,7 @@ struct Scalars {
 pub struct Objects {
     pub(crate) desktop: Option<NonNull<crate::desktop::qobject::Desktop>>,
     pub(crate) settings: Option<NonNull<crate::settings::qobject::Settings>>,
+    pub(crate) admin: Option<NonNull<crate::admin::qobject::Admin>>,
     nav: Option<NonNull<Nav>>,
     chat: Option<NonNull<Chat>>,
     voice: Option<NonNull<Voice>>,
@@ -155,6 +157,15 @@ pub(crate) fn keep_settings(view: SettingsView) {
 
 pub(crate) fn settings_view() -> SettingsView {
     GUI.with(|gui| gui.borrow().scalars.settings.clone())
+}
+
+/// Keeps the admin view for an `Admin` object QML creates later.
+pub(crate) fn keep_admin(view: AdminView) {
+    scalars(|s| s.admin = view);
+}
+
+pub(crate) fn admin_view() -> AdminView {
+    GUI.with(|gui| gui.borrow().scalars.admin.clone())
 }
 
 fn q(text: &str) -> QString {
@@ -467,6 +478,7 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             scalars(|s| s.profile = *view);
         }
         ViewUpdate::Settings(view) => crate::settings::on_view(*view),
+        ViewUpdate::Admin(view) => crate::admin::on_view(*view),
         ViewUpdate::Toast(toast) => crate::desktop::on_toast(&toast),
         ViewUpdate::Sound(sound) => crate::sound::play(sound),
         ViewUpdate::Badge(badge) => crate::desktop::on_badge(badge),

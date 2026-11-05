@@ -196,6 +196,29 @@ pub struct GuildMemberUpdate {
     pub roles: Option<Vec<crate::rest::Role>>,
 }
 
+/// `CHANNEL_UPDATE` dispatch data: the channel as stored (without the
+/// viewer's `permissions`), or only the server (and sometimes the channel
+/// id) when the tree or an override changed and the list must be fetched.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ChannelUpdateEvent {
+    pub server_id: Option<String>,
+    pub channel: Option<crate::rest::Channel>,
+    pub id: Option<String>,
+}
+
+/// `CHANNEL_DELETE` dispatch data.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ChannelDeleteEvent {
+    pub id: String,
+    pub server_id: Option<String>,
+}
+
+/// `GUILD_DELETE` dispatch data.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct GuildDelete {
+    pub id: String,
+}
+
 /// `USER_PROFILE_UPDATE` dispatch data: the fields present changed.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct UserProfileUpdate {

@@ -10,8 +10,8 @@ use yap_protocol::rest::{SessionInfo, ShareItem};
 
 use super::time::{is_after, LocalOffset};
 use super::view::{
-    ChannelTreeRow, DmRow, DmView, GifRow, Load, MemberListRow, MentionRow, ProfileView, ServerRow,
-    SettingsView, UploadRow, VoiceMemberRow, VoiceTileRow,
+    AdminView, ChannelTreeRow, DmRow, DmView, GifRow, Load, MemberListRow, MentionRow, ProfileView,
+    ServerRow, SettingsView, UploadRow, VoiceMemberRow, VoiceTileRow,
 };
 use super::ProfileAsset;
 use super::{CallId, Occupant, RequestId, SessionId, SignInId, VoiceMember};
@@ -344,6 +344,7 @@ pub(super) struct Projection {
     pub upload_counts: (i64, i64),
     pub gifs: Vec<GifRow>,
     pub settings: SettingsView,
+    pub admin: AdminView,
 }
 
 /// One step of a profile save, run in order; a failure stops the rest.
@@ -458,6 +459,8 @@ pub(super) struct Pending {
     /// request → (file name shown, open it when saved)
     pub downloads: HashMap<RequestId, (String, bool)>,
     pub settings: SettingsPending,
+    /// Server and channel administration.
+    pub admin: HashMap<RequestId, super::admin::AdminOp>,
 }
 
 /// An optimistic reaction add or remove, undone if the server refuses.
@@ -703,6 +706,7 @@ pub struct State {
     /// Messages that were toasted (the notification for one does not toast).
     pub(super) toasted: Toasted,
     pub(super) settings: SettingsState,
+    pub(super) admin: super::AdminState,
     pub(super) view: Projection,
     pub(super) pending: Pending,
     pub(super) boot: Option<Boot>,
@@ -758,6 +762,7 @@ impl State {
             wanted_channel: None,
             toasted: Toasted::default(),
             settings: SettingsState::default(),
+            admin: super::AdminState::default(),
             view: Projection::default(),
             pending: Pending::default(),
             boot: None,

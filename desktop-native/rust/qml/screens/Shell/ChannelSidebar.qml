@@ -3,13 +3,50 @@ import QtQuick
 import com.yap.native
 
 // The tree panel (ChannelSidebar.tsx): the 48 px server header with its
-// chevron and theme banner, then the Talk Tree (channels under silkscreen
-// branch labels, everyone in each voice channel under it), the call strip
-// and the account row. At Home the DM list takes the header and the tree.
+// chevron and theme banner (it opens the server menu), then the Talk Tree
+// (channels under silkscreen branch labels, everyone in each voice channel
+// under it), the call strip and the account row. At Home the DM list takes
+// the header and the tree. Right clicks open the channel, category and
+// sidebar menus; with Manage channels a channel drags within its group,
+// an accent line marking where it lands.
 Rectangle {
     id: root
 
     color: Theme.ply1
+
+    // A channel being dragged, and the row it would land on.
+    property string dragId: ""
+    property string dragCategory: ""
+    property bool dragVoice: false
+    property string dropId: ""
+    property real dropY: -1
+
+    function dragTo(scene) {
+        const at = list.mapFromItem(null, scene.x, scene.y)
+        const index = list.indexAt(list.width / 2, at.y + list.contentY)
+        const target = index >= 0 ? list.itemAtIndex(index) : null
+        // One group: a category, or the loose text or voice channels.
+        const sameGroup = target && target.kind === "channel" && target.categoryId === dragCategory
+            && (dragCategory.length > 0 || target.voice === dragVoice)
+        if (sameGroup && target.itemId !== dragId) {
+            const from = list.indexOfId(dragId)
+            const dragged = from >= 0 ? list.itemAtIndex(from) : null
+            dropId = target.itemId
+            // Below the dragged row it lands after the target, above it before.
+            dropY = target.y + (dragged && target.y > dragged.y ? target.height : 0)
+        } else {
+            dropId = ""
+            dropY = -1
+        }
+    }
+    function endDrag() {
+        if (dragId.length > 0 && dropId.length > 0)
+            Admin.moveChannel(dragId, dropId)
+        dragId = ""
+        dragCategory = ""
+        dropId = ""
+        dropY = -1
+    }
 
     // Seam to the chat column.
     Rectangle {
@@ -20,17 +57,21 @@ Rectangle {
         z: 1
     }
 
-    // Server header: Bricolage 17/800, chevron on the far edge. The server
-    // menu is not wired yet, so it only takes hover.
+    // Server header: Bricolage 17/800, chevron on the far edge; it opens
+    // the server menu under it.
     Rectangle {
         id: header
         visible: !Nav.home
         width: parent.width - 1
         height: Theme.header
-        color: headerHover.hovered ? Theme.tint1 : "transparent"
+        color: serverMenu.visible ? Theme.tint2 : headerHover.hovered ? Theme.tint1 : "transparent"
         Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+        activeFocusOnTab: true
         Accessible.role: Accessible.Button
         Accessible.name: qsTr("Open server menu")
+        Accessible.onPressAction: serverMenu.popup(header, 8, header.height + 4)
+        Keys.onReturnPressed: serverMenu.popup(header, 8, header.height + 4)
+        Keys.onSpacePressed: serverMenu.popup(header, 8, header.height + 4)
 
         Text {
             anchors.left: parent.left
@@ -53,7 +94,15 @@ Rectangle {
             size: Theme.iconSm
             color: Theme.ink2
         }
-        HoverHandler { id: headerHover }
+        HoverHandler { id: headerHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: serverMenu.visible ? serverMenu.close() : serverMenu.popup(header, 8, header.height + 4) }
+        Rectangle {
+            anchors.fill: parent
+            visible: header.activeFocus
+            color: "transparent"
+            border.width: 2
+            border.color: Theme.focus
+        }
 
         Rectangle {
             anchors.bottom: parent.bottom
@@ -102,15 +151,72 @@ Rectangle {
         clip: true
         model: ChannelTreeModel
         boundsBehavior: Flickable.StopAtBounds
+        // A channel drag owns the pointer; the list does not scroll under it.
+        interactive: root.dragId.length === 0
         reuseItems: true
 
+        // The id of a row the list has created, for the drop line.
+        function indexOfId(id) {
+            for (let i = 0; i < count; ++i) {
+                const item = itemAtIndex(i)
+                if (item && item.itemId === id)
+                    return i
+            }
+            return -1
+        }
+
         delegate: TreeRow {
+            id: treeRow
             width: list.width - list.leftMargin
             activeId: Nav.voicePanelId.length > 0 ? Nav.voicePanelId : Nav.activeChannelId
             callId: Voice.channelId
             onSelected: channelId => Nav.selectChannel(channelId)
+            onSettingsRequested: ShellState.channelSettingsRequested(treeRow.itemId)
+            onMenuRequested: (row, at) => {
+                if (treeRow.kind === "channel")
+                    treeMenu.openFor("channel", treeRow.itemId, treeRow.name, treeRow.voice, treeRow.categoryId, treeRow.manage, row, at.x, at.y)
+                // The loose groups' labels are not categories: no menu.
+                else if (treeRow.kind === "label" && !treeRow.itemId.startsWith("__"))
+                    treeMenu.openFor("category", treeRow.itemId, treeRow.name, false, "", treeRow.manage, row, at.x, at.y)
+            }
+            onDragMoved: scene => {
+                if (root.dragId !== treeRow.itemId) {
+                    root.dragId = treeRow.itemId
+                    root.dragCategory = treeRow.categoryId
+                    root.dragVoice = treeRow.voice
+                }
+                root.dragTo(scene)
+            }
+            onDragEnded: root.endDrag()
+        }
+
+        // Where a dragged channel lands (in content coordinates).
+        Rectangle {
+            visible: root.dropY >= 0
+            x: 0
+            y: root.dropY - 1
+            z: 2
+            width: list.width - list.leftMargin
+            height: 2
+            color: Theme.accentInk
         }
     }
+
+    // The sidebar's own menu, from a right click on the tree off its rows.
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: eventPoint => {
+            if (Nav.home)
+                return
+            const at = list.mapFromItem(root, eventPoint.position.x, eventPoint.position.y)
+            const inside = at.y >= 0 && at.y <= list.height && at.x >= 0 && at.x <= list.width
+            if (inside && list.indexAt(at.x + list.contentX, at.y + list.contentY) < 0)
+                treeMenu.openFor("sidebar", "", "", false, "", false, list, at.x, at.y)
+        }
+    }
+
+    ServerMenu { id: serverMenu }
+    TreeMenu { id: treeMenu }
 
     // Home: the DM list in the same column.
     DmSidebar {

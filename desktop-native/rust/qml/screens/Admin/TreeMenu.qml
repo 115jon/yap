@@ -1,0 +1,122 @@
+import QtQuick
+import com.yap.native
+
+// The tree's right-click menus (ChannelSidebar.tsx `useSidebarContextMenus`):
+//   channel   Copy link; Mute channel and Notification settings (disabled,
+//             as on the web); with Manage channels on it, Edit channel and
+//             Duplicate channel; with it server-wide, Create text channel;
+//             Delete channel; Copy channel ID
+//   category  Create channel, Copy ID, Delete category
+//   sidebar   Create channel and Create category, Invite to server, Copy ID
+// Copies happen only from the click.
+MenuPanel {
+    id: menu
+
+    property string kind: "sidebar"
+    property string itemId
+    property string name
+    property bool voice: false
+    property string categoryId
+    // Manage channels on this channel (or server-wide).
+    property bool manage: false
+
+    function openFor(what, id, label, isVoice, category, canManage, anchor, x, y) {
+        kind = what
+        itemId = id
+        name = label
+        voice = isVoice
+        categoryId = category
+        manage = canManage
+        popup(anchor, x, y)
+    }
+
+    readonly property bool onChannel: kind === "channel"
+    readonly property bool onCategory: kind === "category"
+    readonly property bool onSidebar: kind === "sidebar"
+    readonly property bool manageAll: Admin.canManageChannels
+
+    implicitWidth: 248
+
+    ClipboardText { id: clipboard }
+
+    MenuRow {
+        visible: menu.onChannel
+        height: visible ? implicitHeight : 0
+        text: qsTr("Copy link")
+        glyph: "link"
+        onTriggered: clipboard.copyText(Admin.webOrigin + "/chat/" + Nav.activeServerId + "/" + menu.itemId)
+    }
+    MenuRule { visible: menu.onChannel; height: visible ? implicitHeight : 0 }
+    MenuRow {
+        visible: menu.onChannel
+        height: visible ? implicitHeight : 0
+        text: qsTr("Mute channel")
+        glyph: "speakerOff"
+        enabled: false
+    }
+    MenuRow {
+        visible: menu.onChannel
+        height: visible ? implicitHeight : 0
+        text: qsTr("Notification settings")
+        glyph: "bell"
+        enabled: false
+    }
+    MenuRule { visible: menu.onChannel && (menu.manage || menu.manageAll); height: visible ? implicitHeight : 0 }
+    MenuRow {
+        visible: menu.onChannel && menu.manage
+        height: visible ? implicitHeight : 0
+        text: qsTr("Edit channel")
+        glyph: "settings"
+        onTriggered: ShellState.channelSettingsRequested(menu.itemId)
+    }
+    MenuRow {
+        visible: menu.onChannel && menu.manage
+        height: visible ? implicitHeight : 0
+        text: qsTr("Duplicate channel")
+        glyph: "copy"
+        onTriggered: Admin.createChannel(menu.name + "-copy", menu.voice, menu.categoryId)
+    }
+    MenuRow {
+        visible: (menu.onChannel || menu.onCategory || menu.onSidebar) && menu.manageAll
+        height: visible ? implicitHeight : 0
+        text: menu.onChannel ? qsTr("Create text channel") : qsTr("Create channel")
+        glyph: "add"
+        onTriggered: ShellState.createChannelRequested(menu.onSidebar ? "" : menu.onCategory ? menu.itemId : menu.categoryId)
+    }
+    MenuRow {
+        visible: menu.onSidebar && menu.manageAll
+        height: visible ? implicitHeight : 0
+        text: qsTr("Create category")
+        glyph: "folderAdd"
+        onTriggered: ShellState.createCategoryRequested()
+    }
+    MenuRow {
+        visible: menu.onSidebar
+        height: visible ? implicitHeight : 0
+        text: qsTr("Invite to server")
+        glyph: "invite"
+        onTriggered: ShellState.inviteRequested()
+    }
+    MenuRow {
+        visible: menu.onChannel && menu.manage
+        height: visible ? implicitHeight : 0
+        text: qsTr("Delete channel")
+        glyph: "trash"
+        danger: true
+        onTriggered: ShellState.deleteChannelRequested(menu.itemId, menu.name, menu.voice)
+    }
+    MenuRule {}
+    MenuRow {
+        text: menu.onChannel ? qsTr("Copy channel ID") : qsTr("Copy ID")
+        glyph: "copy"
+        onTriggered: clipboard.copyText(menu.onSidebar ? Nav.activeServerId : menu.itemId)
+    }
+    MenuRow {
+        visible: menu.onCategory && menu.manageAll
+        height: visible ? implicitHeight : 0
+        text: qsTr("Delete category")
+        glyph: "trash"
+        danger: true
+        onTriggered: ShellState.deleteCategoryRequested(menu.itemId, menu.name)
+    }
+}

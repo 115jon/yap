@@ -54,6 +54,10 @@ impl Fixture {
                 owner_id: Some(ME.into()),
                 icon_url: None,
                 created_at: None,
+                invites_paused: None,
+                allow_public_shares: None,
+                show_source_in_shares: None,
+                allow_share_indexing: None,
             }]),
             ApiRequest::Channels { .. } => ApiResponse::Channels(channels()),
             // All of it on the first page, so a scroll test has the whole
@@ -122,6 +126,12 @@ impl Fixture {
             | ApiRequest::UpdateProfile(_)
             | ApiRequest::DeleteBanner
             | ApiRequest::RevokeShare { .. } => ApiResponse::Done,
+            // Empty lists; every action succeeds.
+            ApiRequest::Admin(request) => ApiResponse::Admin(
+                request
+                    .decode(serde_json::Value::Null)
+                    .unwrap_or(crate::store::AdminResponse::Done),
+            ),
             ApiRequest::Sessions => ApiResponse::Sessions(Vec::new()),
             ApiRequest::Shares => ApiResponse::Shares(Vec::new()),
             ApiRequest::KovaSession => ApiResponse::KovaEmail(None),
@@ -162,6 +172,7 @@ fn channels() -> ChannelsResponse {
         position: 0,
         created_at: None,
         permissions: None,
+        allow_public_shares: None,
     };
     let category = |id: &str, name: &str, rank| Category {
         id: id.into(),

@@ -522,9 +522,16 @@ impl Runner {
                 let api = Api::new(self.http.clone(), token);
                 let inbox = self.inbox.clone();
                 tokio::spawn(async move {
-                    let result = profile_upload(&api, asset, path, content_type)
-                        .await
-                        .map(|_| ApiResponse::Done);
+                    let icon = asset == crate::store::ProfileAsset::ServerIcon;
+                    let result = profile_upload(&api, asset, path, content_type).await.map(
+                        |body| match body.get("url").and_then(Value::as_str) {
+                            // The server icon's URL goes into the settings save.
+                            Some(url) if icon => ApiResponse::Admin(
+                                crate::store::AdminResponse::IconUrl(url.to_owned()),
+                            ),
+                            _ => ApiResponse::Done,
+                        },
+                    );
                     let _ = inbox.send(Input::Http { id, result });
                 });
             }
@@ -675,7 +682,7 @@ async fn profile_upload(
         ProfileAsset::Avatar {
             display: Some(display),
         } => form = form.text("avatar_display", display.clone()),
-        ProfileAsset::Avatar { display: None } => {}
+        ProfileAsset::Avatar { display: None } | ProfileAsset::ServerIcon => {}
     }
     api.upload(asset.path(), form.part("file", part)).await
 }

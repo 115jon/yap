@@ -202,6 +202,12 @@ rows! {
         unread: bool => Unread "unread",
         /// Channels: unread mentions and replies.
         mentions: i64 => Mentions "mentions",
+        /// Channels: the user may edit it (Manage channels in the server
+        /// or on the channel); labels: in the server.
+        manage: bool => Manage "manage",
+        /// Channels: their category id (empty for none), the group a drag
+        /// reorders within.
+        category: String => Category "categoryId",
     }
     key(row) -> (TreeKind, String) { (row.kind, row.id.clone()) }
 
@@ -733,6 +739,173 @@ impl<T> Load<T> {
     }
 }
 
+impl<T: Serialize> Serialize for Load<T> {
+    /// `{state, error, items}`: `items` is `null` until it is ready.
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut out = serializer.serialize_struct("Load", 3)?;
+        out.serialize_field("state", self.state())?;
+        out.serialize_field("error", self.error())?;
+        out.serialize_field("items", &self.ready())?;
+        out.end()
+    }
+}
+
+/// A role (RoleManagement.tsx, the override picker, the profile card).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleRow {
+    pub id: String,
+    pub name: String,
+    /// `#rrggbb`, or empty for none.
+    pub color: String,
+    pub permissions: i64,
+    pub position: i64,
+    pub is_default: bool,
+}
+
+/// One invite link (InvitesTab.tsx `InviteRow`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteRow {
+    pub code: String,
+    pub link: String,
+    /// `#general`, or empty for the server default.
+    pub channel: String,
+    pub inviter: String,
+    pub inviter_avatar: String,
+    pub inviter_initials: String,
+    /// "2 of 10 uses".
+    pub uses: String,
+    pub temporary: bool,
+    /// When it expires (epoch ms), or 0 for never.
+    pub expires_ms: i64,
+}
+
+/// One ban (BansPage.tsx `BanRow`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BanRow {
+    pub user_id: String,
+    pub name: String,
+    pub avatar: String,
+    pub initials: String,
+    pub reason: String,
+    /// "Banned by Jon on Nov 5, 2026".
+    pub meta: String,
+}
+
+/// One audit log entry (AuditLogTab.tsx `AuditRow`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditRow {
+    pub id: String,
+    pub actor: String,
+    pub actor_avatar: String,
+    pub actor_initials: String,
+    #[serde(flatten)]
+    pub entry: crate::admin::AuditEntry,
+    pub reason: String,
+    /// "Nov 5, 2026, 3:04 PM".
+    pub when: String,
+}
+
+/// One channel permission override (ChannelPermissionsTab.tsx).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverrideRow {
+    pub target_id: String,
+    /// `role` or `user`.
+    pub target_type: String,
+    pub name: String,
+    pub color: String,
+    pub avatar: String,
+    pub initials: String,
+    /// The server's @everyone: always listed, never removed.
+    pub is_default: bool,
+    /// What the server has (0 and 0 for @everyone with none stored).
+    pub allow: i64,
+    pub deny: i64,
+    /// The server stores it (else only @everyone shows unstored).
+    pub saved: bool,
+}
+
+/// A member, for the override picker and the profile card's roles.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberOption {
+    pub id: String,
+    pub name: String,
+    pub avatar: String,
+    pub initials: String,
+    pub role_ids: Vec<String>,
+}
+
+/// The open server settings' server.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminServerView {
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub initials: String,
+    pub invites_paused: bool,
+    pub allow_public_shares: bool,
+    pub show_source_in_shares: bool,
+    pub allow_share_indexing: bool,
+    pub access: crate::admin::ServerAccess,
+    /// The pages this user sees, in order.
+    pub pages: Vec<&'static str>,
+}
+
+/// The open channel settings' channel.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminChannelView {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub voice: bool,
+    /// `#general`, or the voice channel's name.
+    pub label: String,
+    /// `inherit`, `allow` or `deny`.
+    pub public_shares: &'static str,
+    /// "Text channel, created November 5, 2026."
+    pub created: String,
+}
+
+/// A pickable channel or category (invite channel, create channel).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct NamedOption {
+    pub id: String,
+    pub name: String,
+}
+
+/// Server and channel administration, as the UI shows it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminView {
+    /// What the user may do in the shown server.
+    pub access: crate::admin::ServerAccess,
+    pub server: Option<AdminServerView>,
+    pub roles: Load<Vec<RoleRow>>,
+    pub invites: Load<Vec<InviteRow>>,
+    pub bans: Load<Vec<BanRow>>,
+    pub audit: Load<Vec<AuditRow>>,
+    pub channel: Option<AdminChannelView>,
+    pub overrides: Load<Vec<OverrideRow>>,
+    /// The lists' server's members.
+    pub members: Vec<MemberOption>,
+    /// The open server's text channels.
+    pub text_channels: Vec<NamedOption>,
+    /// The shown server's categories.
+    pub categories: Vec<NamedOption>,
+    pub acts: std::collections::BTreeMap<String, super::Act>,
+    pub created_invite: String,
+    pub created_invite_link: String,
+    pub created_role: String,
+}
+
 /// One signed-in device (SessionsPanel.tsx `SessionItem`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -867,6 +1040,9 @@ pub enum ViewUpdate {
     Members(ViewDiff<MemberListRow>),
     Profile(Box<ProfileView>),
     Settings(Box<SettingsView>),
+    /// Server and channel administration, and what the user may do in the
+    /// shown server.
+    Admin(Box<AdminView>),
     /// A native toast. The shell drops it when notifications are off.
     Toast(Box<ToastView>),
     /// A UI sound. The shell drops it when sounds are off.
@@ -1134,14 +1310,18 @@ fn plain_row(kind: TreeKind, id: &str, name: &str) -> ChannelTreeRow {
         lit: 0,
         unread: false,
         mentions: 0,
+        manage: false,
+        category: String::new(),
     }
 }
 
-fn channel_row(channel: &Channel, (unread, mentions): Badge) -> ChannelTreeRow {
+fn channel_row(channel: &Channel, (unread, mentions): Badge, manage_all: bool) -> ChannelTreeRow {
     ChannelTreeRow {
         voice: channel.channel_type == ChannelType::Voice,
         unread,
         mentions,
+        manage: crate::admin::can_manage_channel(manage_all, channel.permissions),
+        category: channel.category_id.clone().unwrap_or_default(),
         ..plain_row(TreeKind::Channel, &channel.id, &channel.name)
     }
 }
@@ -1177,38 +1357,70 @@ fn member_rows(channel_id: &str, seats: &[Seat]) -> Vec<ChannelTreeRow> {
         .collect()
 }
 
-/// Category labels, channels, and under every voice channel the people in
-/// it. A label starts the first run of channels with a named category.
-/// `seats_of` lists a voice channel's people, `badge_of` a channel's badge.
+/// Label ids of the web's two groups for channels without a category.
+pub const UNCATEGORIZED_TEXT: &str = "__uncategorized_text__";
+pub const UNCATEGORIZED_VOICE: &str = "__uncategorized_voice__";
+
+/// The tree as the web groups it (ChannelSidebar.tsx
+/// `groupChannelsByCategory`): channels without a category first, text then
+/// voice, each under its own label; then every category by rank, empty ones
+/// included, its channels by position. Under every voice channel, the people
+/// in it. `seats_of` lists a voice channel's people, `badge_of` a channel's
+/// badge; `manage_all`: the user has Manage channels in the server.
 pub(super) fn tree_rows(
     list: Option<&ServerChannels>,
     seats_of: impl Fn(&str) -> Vec<Seat>,
     badge_of: impl Fn(&str) -> Badge,
+    manage_all: bool,
 ) -> Vec<ChannelTreeRow> {
     let Some(list) = list else {
         return Vec::new();
     };
-    let mut rows = Vec::with_capacity(list.channels.len() + list.categories.len());
-    let mut category: Option<&str> = None;
-    // Row keys must stay unique for `ordered_diff`: one label per category,
-    // even if its channels are not contiguous.
-    let mut labelled: HashSet<&str> = HashSet::new();
-    for channel in &list.channels {
-        let current = channel.category_id.as_deref();
-        if current != category {
-            category = current;
-            let name = list.category_name(channel);
-            if !name.is_empty() && labelled.insert(current.unwrap_or_default()) {
-                rows.push(plain_row(
-                    TreeKind::Label,
-                    current.unwrap_or_default(),
-                    name,
-                ));
-            }
+    fn by_position(mut channels: Vec<&Channel>) -> Vec<&Channel> {
+        channels.sort_by_key(|c| c.position);
+        channels
+    }
+    let loose = |kind: ChannelType| {
+        by_position(
+            list.channels
+                .iter()
+                .filter(|c| c.category_id.is_none() && c.channel_type == kind)
+                .collect(),
+        )
+    };
+    let mut groups: Vec<(&str, &str, bool, Vec<&Channel>)> = Vec::new();
+    for (id, name, kind) in [
+        (UNCATEGORIZED_TEXT, "TEXT CHANNELS", ChannelType::Text),
+        (UNCATEGORIZED_VOICE, "VOICE CHANNELS", ChannelType::Voice),
+    ] {
+        let channels = loose(kind);
+        if !channels.is_empty() {
+            groups.push((id, name, false, channels));
         }
-        rows.push(channel_row(channel, badge_of(&channel.id)));
-        if channel.channel_type == ChannelType::Voice {
-            rows.extend(member_rows(&channel.id, &seats_of(&channel.id)));
+    }
+    let mut categories: Vec<_> = list.categories.iter().collect();
+    categories.sort_by_key(|c| c.rank);
+    for category in categories {
+        let channels = by_position(
+            list.channels
+                .iter()
+                .filter(|c| c.category_id.as_deref() == Some(category.id.as_str()))
+                .collect(),
+        );
+        groups.push((&category.id, &category.name, true, channels));
+    }
+    let mut rows = Vec::with_capacity(list.channels.len() + groups.len());
+    for (id, name, real, channels) in groups {
+        rows.push(ChannelTreeRow {
+            // The two loose groups have no menu (they are not categories).
+            manage: real && manage_all,
+            ..plain_row(TreeKind::Label, id, name)
+        });
+        for channel in channels {
+            rows.push(channel_row(channel, badge_of(&channel.id), manage_all));
+            if channel.channel_type == ChannelType::Voice {
+                rows.extend(member_rows(&channel.id, &seats_of(&channel.id)));
+            }
         }
     }
     rows

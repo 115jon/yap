@@ -1,6 +1,7 @@
 //! The reducer: one arm per input, emitting effects in the order the old
 //! sequential core performed them, so the UI sees the same updates.
 
+mod admin;
 mod media;
 mod settings;
 mod social;
@@ -77,6 +78,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
         }
     }
     state.sync_settings(&mut fx);
+    state.sync_admin(&mut fx);
     fx.0
 }
 
@@ -307,6 +309,7 @@ impl State {
             list,
             |id| self.seats(id),
             |id| (self.is_unread(id), self.channel_mentions(id)),
+            self.tree_manage_all(),
         )
     }
 
@@ -1117,6 +1120,7 @@ impl State {
                 prefs.deafened = deafened;
                 self.set_voice_prefs(fx, prefs);
             }
+            Command::Admin(command) => self.on_admin(fx, command),
         }
     }
 
@@ -1324,6 +1328,7 @@ impl State {
 
     fn end_session(&mut self, fx: &mut Effects, revoke: bool) {
         self.clear_settings();
+        self.clear_admin();
         self.leave_voice(fx);
         self.close_voice_panel(fx);
         self.voice_channels.clear();
@@ -1449,7 +1454,9 @@ impl State {
         result: Result<ApiResponse, ApiError>,
     ) {
         let mut answer = Some(result);
-        if self.route_settings_http(fx, id, &mut answer) {
+        if self.route_settings_http(fx, id, &mut answer)
+            || self.route_admin_http(fx, id, &mut answer)
+        {
             return;
         }
         let Some(result) = answer else {
@@ -2580,6 +2587,10 @@ impl State {
                     });
                 }
             }
+            Dispatch::GuildUpdate(server) => self.on_guild_update(fx, *server),
+            Dispatch::GuildDelete(delete) => self.on_guild_delete(fx, &delete.id),
+            Dispatch::ChannelUpdate(update) => self.on_channel_update(fx, *update),
+            Dispatch::ChannelDelete(delete) => self.on_channel_delete(fx, delete),
             Dispatch::ServersChanged => {
                 if self.signed_in().is_some() {
                     self.pending.servers = self.http(fx, ApiRequest::Servers);

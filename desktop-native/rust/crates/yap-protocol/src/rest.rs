@@ -252,6 +252,32 @@ pub struct Server {
     pub owner_id: Option<String>,
     pub icon_url: Option<String>,
     pub created_at: Option<String>,
+    /// Every invite link is off until a manager resumes them.
+    #[serde(
+        default,
+        deserialize_with = "opt_bool_or_int",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub invites_paused: Option<bool>,
+    /// The public message share switches (Server settings → Overview).
+    #[serde(
+        default,
+        deserialize_with = "opt_bool_or_int",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub allow_public_shares: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "opt_bool_or_int",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub show_source_in_shares: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "opt_bool_or_int",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub allow_share_indexing: Option<bool>,
 }
 
 /// Channel kind. Anything else decodes as [`ChannelType::Other`].
@@ -279,6 +305,9 @@ pub struct Channel {
     pub position: i64,
     pub created_at: Option<String>,
     pub permissions: Option<i64>,
+    /// The channel's public share override; `None` follows the server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_public_shares: Option<bool>,
 }
 
 /// A channel category.
@@ -712,6 +741,18 @@ pub struct Role {
     pub position: i64,
     #[serde(default, deserialize_with = "bool_or_int")]
     pub is_default: bool,
+    /// The bitmask (src/lib/permissions.ts); 0 when a payload leaves it out.
+    #[serde(default)]
+    pub permissions: i64,
+}
+
+/// `true`/`false`, SQLite's 0/1, or absent/`null` (`None`).
+fn opt_bool_or_int<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<bool>, D::Error> {
+    Ok(match Option::<Value>::deserialize(deserializer)? {
+        Some(Value::Bool(value)) => Some(value),
+        Some(Value::Number(n)) => Some(n.as_i64().is_some_and(|n| n != 0)),
+        _ => None,
+    })
 }
 
 fn bool_or_int<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
@@ -772,6 +813,74 @@ pub struct DmChannel {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ProfileResponse {
     pub user: User,
+}
+
+// Server administration (server settings, channel settings)
+
+/// One invite link (`GET /api/servers/:id/invites`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct Invite {
+    pub code: String,
+    pub channel_id: Option<String>,
+    pub channel_name: Option<String>,
+    #[serde(default)]
+    pub inviter_id: String,
+    pub inviter: Option<User>,
+    /// `None` or 0: no limit.
+    pub max_uses: Option<i64>,
+    #[serde(default)]
+    pub uses: i64,
+    #[serde(default, deserialize_with = "bool_or_int")]
+    pub temporary: bool,
+    pub expires_at: Option<String>,
+    pub created_at: Option<String>,
+}
+
+/// What `POST /api/servers/:id/invites` answers.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct CreatedInvite {
+    pub code: String,
+}
+
+/// One ban (`GET /api/servers/:id/bans`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct Ban {
+    pub user_id: String,
+    pub username: Option<String>,
+    pub avatar_url: Option<String>,
+    pub reason: Option<String>,
+    pub banned_by_username: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+/// One audit log entry (`GET /api/servers/:id/audit-logs`, newest first).
+/// `created_at` may be SQLite's `YYYY-MM-DD HH:MM:SS` (UTC).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct AuditLog {
+    pub id: String,
+    #[serde(default)]
+    pub actor_id: String,
+    pub actor: Option<User>,
+    #[serde(default)]
+    pub action_type: String,
+    pub target_id: Option<String>,
+    pub changes: Option<Value>,
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+/// A channel permission override (`GET /api/channels/:id/permissions`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct PermissionOverride {
+    pub target_id: String,
+    /// `role` or `user`.
+    pub target_type: String,
+    #[serde(default)]
+    pub allow: i64,
+    #[serde(default)]
+    pub deny: i64,
 }
 
 // Settings

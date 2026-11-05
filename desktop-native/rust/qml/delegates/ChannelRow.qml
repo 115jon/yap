@@ -5,7 +5,10 @@ import com.yap.native
 // a 16 px ink-3 glyph centred in a 20 px slot, Geist 14/500. Idle is ink-2,
 // hover tint-1 / ink-1, selected tint-2 / ink-1; the joined call's glyph is
 // lit in `path`. Unread is ink-1 at 600 with a 2x8 ink-1 pill at the panel
-// edge (the row sits 8 px in); mentions add a count chip at the end.
+// edge (the row sits 8 px in); mentions add a count chip at the end. A
+// channel the user may manage shows the settings gear on hover (the web's
+// ROW_ACTIONS, over the trailing edge); a right click opens its menu; with
+// `draggable` a drag of 5 px or more picks it up.
 Rectangle {
     id: row
 
@@ -15,7 +18,13 @@ Rectangle {
     property bool joined: false
     property bool unread: false
     property int mentions: 0
+    property bool manage: false
+    property bool draggable: false
     signal selected()
+    signal menuRequested(Item row, point at)
+    signal settingsRequested()
+    signal dragMoved(point scene)
+    signal dragEnded(bool dropped)
 
     height: Theme.treeRow
     radius: Theme.radius
@@ -45,7 +54,7 @@ Rectangle {
     Text {
         anchors.left: parent.left
         anchors.leftMargin: 8 + 20 + 8
-        anchors.right: badge.visible ? badge.left : parent.right
+        anchors.right: gear.visible ? gear.left : badge.visible ? badge.left : parent.right
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
         text: row.name
@@ -55,11 +64,40 @@ Rectangle {
     }
     CountBadge {
         id: badge
+        visible: count > 0 && !gear.visible
         anchors.right: parent.right
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
         count: row.mentions
     }
-    HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+    IconKey {
+        id: gear
+        z: 1
+        visible: row.manage && (hover.hovered || hovered) && !drag.active
+        anchors.right: parent.right
+        anchors.rightMargin: 4
+        anchors.verticalCenter: parent.verticalCenter
+        size: 24
+        iconName: "settings"
+        tone: "muted"
+        tip: qsTr("Channel settings")
+        onClicked: row.settingsRequested()
+    }
+    HoverHandler { id: hover; cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.PointingHandCursor }
     TapHandler { onTapped: row.selected() }
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: eventPoint => row.menuRequested(row, eventPoint.position)
+    }
+    DragHandler {
+        id: drag
+        target: null
+        enabled: row.draggable
+        dragThreshold: 5
+        yAxis.enabled: true
+        xAxis.enabled: false
+        onCentroidChanged: if (active) row.dragMoved(centroid.scenePosition)
+        onActiveChanged: if (!active) row.dragEnded(true)
+    }
+    opacity: drag.active ? 0.5 : 1
 }
