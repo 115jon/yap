@@ -23,6 +23,14 @@ pub const CAMERA_QUALITIES: [&str; 5] = ["480p30", "720p30", "720p60", "1080p30"
 /// The default camera profile (`DEFAULT_CAMERA_QUALITY_ID`).
 pub const DEFAULT_CAMERA_QUALITY: &str = "720p30";
 
+/// The screen share presets (`STREAMING_PROFILES` ids).
+pub const SHARE_QUALITIES: [&str; 8] = [
+    "720p30", "720p60", "1080p30", "1080p60", "1440p30", "1440p60", "4k30", "4k60",
+];
+
+/// The default share preset (`screenShareQuality`).
+pub const DEFAULT_SHARE_QUALITY: &str = "720p30";
+
 /// The highest per-user and output volume, in percent.
 pub const MAX_VOLUME: u16 = 200;
 
@@ -73,6 +81,10 @@ pub struct VoiceSettings {
     /// "Preview before turning on camera": the camera key opens the Camera
     /// dialog first.
     pub always_preview_video: bool,
+    /// The share picker's last quality, one of [`SHARE_QUALITIES`].
+    pub screen_share_quality: String,
+    /// The share picker's "Include audio".
+    pub screen_share_with_audio: bool,
     pub input_profile: InputProfile,
     pub noise_suppression: bool,
     pub echo_cancellation: bool,
@@ -97,6 +109,8 @@ impl Default for VoiceSettings {
             video_device_label: String::new(),
             camera_quality: DEFAULT_CAMERA_QUALITY.into(),
             always_preview_video: true,
+            screen_share_quality: DEFAULT_SHARE_QUALITY.into(),
+            screen_share_with_audio: true,
             input_profile: InputProfile::Standard,
             noise_suppression: true,
             echo_cancellation: true,
@@ -120,6 +134,9 @@ impl VoiceSettings {
         };
         if !CAMERA_QUALITIES.contains(&self.camera_quality.as_str()) {
             self.camera_quality = DEFAULT_CAMERA_QUALITY.into();
+        }
+        if !SHARE_QUALITIES.contains(&self.screen_share_quality.as_str()) {
+            self.screen_share_quality = DEFAULT_SHARE_QUALITY.into();
         }
         for id in [
             &mut self.input_device_id,
@@ -208,6 +225,25 @@ mod tests {
         }
         .normalized();
         assert_eq!(s.camera_quality, "720p30");
+    }
+
+    #[test]
+    fn share_defaults_should_keep_the_web_names_and_values() {
+        let json = serde_json::to_value(VoiceSettings::default()).expect("json");
+        assert_eq!(
+            (&json["screenShareQuality"], &json["screenShareWithAudio"]),
+            (&serde_json::json!("720p30"), &serde_json::json!(true))
+        );
+    }
+
+    #[test]
+    fn an_unknown_share_quality_should_fall_back_to_720p30() {
+        let s = VoiceSettings {
+            screen_share_quality: "480p30".into(),
+            ..VoiceSettings::default()
+        }
+        .normalized();
+        assert_eq!(s.screen_share_quality, "720p30");
     }
 
     #[test]

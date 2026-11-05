@@ -126,7 +126,7 @@ unless "Open on startup" is on), data and logs under
 
 ## Not yet
 
-Publishing a screen share, camera backgrounds, the stream watcher list and stream
+Camera backgrounds, the stream watcher list and stream
 volume, input volume, a mic test outside a call, inline video playback, clips in the GIF picker,
 GIF favorites and categories, stickers, emoji generation, the reaction details
 modal, remove-embeds, embed players (WebView2), jumping to
@@ -160,14 +160,16 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 ./build/Release/YapNative.exe
 ```
 
-| env var                    | default                   | meaning                                          |
-| -------------------------- | ------------------------- | ------------------------------------------------ |
-| `YAP_API_URL`              | `https://yap.115jon.com`  | API and gateway                                  |
-| `YAP_KOVA_AUTH_URL`        | `https://auth.115jon.com` | Kova                                             |
-| `YAP_KOVA_PUBLISHABLE_KEY` | Yap's live key            | Kova app                                         |
-| `YAP_GATEWAY_ORIGIN`       | `YAP_API_URL`             | `Origin` sent on realtime sockets                |
-| `YAP_TOKEN`                | none                      | use this session instead of the credential store |
-| `YAP_FAKE_CAMERA`          | unset                     | `1`: a test pattern stands in for every camera   |
+| env var                    | default                   | meaning                                                                                                                             |
+| -------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `YAP_API_URL`              | `https://yap.115jon.com`  | API and gateway                                                                                                                     |
+| `YAP_KOVA_AUTH_URL`        | `https://auth.115jon.com` | Kova                                                                                                                                |
+| `YAP_KOVA_PUBLISHABLE_KEY` | Yap's live key            | Kova app                                                                                                                            |
+| `YAP_GATEWAY_ORIGIN`       | `YAP_API_URL`             | `Origin` sent on realtime sockets                                                                                                   |
+| `YAP_TOKEN`                | none                      | use this session instead of the credential store                                                                                    |
+| `YAP_FAKE_CAMERA`          | unset                     | `1`: a test pattern stands in for every camera                                                                                      |
+| `YAP_SHARE_ONLY_OURS`      | unset                     | `1`: share stills and captures only of our own windows (or one titled "Yap Native Share Test"); other windows listed without titles |
+| `YAP_FAKE_SHARE_AUDIO`     | unset                     | `1`: share audio is a 440 Hz tone, never a loopback                                                                                 |
 
 The defaults mirror `src/lib/site-defaults.ts`.
 

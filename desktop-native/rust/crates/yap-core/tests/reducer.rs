@@ -3549,3 +3549,115 @@ fn a_camera_capture_failure_should_turn_it_off_with_the_reason() {
     let fx = client.command(Command::SetVoiceCamera(true));
     assert_eq!(last_voice_view(&fx).camera_error, "");
 }
+
+fn share(audio: bool) -> yap_core::VoiceShare {
+    yap_core::VoiceShare {
+        source_id: "window-7".into(),
+        source_name: "Yap Native Share Test".into(),
+        window: true,
+        quality: "1080p30".into(),
+        audio,
+    }
+}
+
+fn sounds(fx: &[Effect]) -> Vec<yap_core::shell::Sound> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::View(ViewUpdate::Sound(s)) => Some(*s),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn go_live_should_reach_the_call_and_wait_for_it() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let fx = client.command(Command::StartVoiceShare(share(true)));
+    assert!(fx.contains(&Effect::Voice {
+        call,
+        command: VoiceCommand::StartShare(share(true)),
+    }));
+    let view = last_voice_view(&fx);
+    assert_eq!((view.share_pending, view.sharing), (true, false));
+}
+
+#[test]
+fn a_started_share_should_play_the_start_sound_and_show_our_stream_tile() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Roster(vec![member("p_me", false)]),
+    });
+    client.command(Command::StartVoiceShare(share(true)));
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::ShareStarted(share(true)),
+    });
+    assert_eq!(sounds(&fx), vec![yap_core::shell::Sound::ScreenShareStart]);
+    let view = last_voice_view(&fx);
+    assert!(view.sharing && !view.share_pending && view.share.audio);
+    let tile = tiles_of(&fx)
+        .into_iter()
+        .find(|t| t.kind == "screen")
+        .expect("our share tile");
+    assert_eq!(
+        (tile.me, tile.live, tile.video_key.as_str()),
+        (true, true, "local-screen")
+    );
+}
+
+#[test]
+fn stopping_a_live_share_should_play_the_stop_sound_and_clear_it() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    client.command(Command::StartVoiceShare(share(false)));
+    client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::ShareStarted(share(false)),
+    });
+    let fx = client.command(Command::StopVoiceShare);
+    assert!(fx.contains(&Effect::Voice {
+        call,
+        command: VoiceCommand::StopShare,
+    }));
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::ShareEnded {
+            stop_sound: true,
+            error: None,
+        },
+    });
+    assert_eq!(sounds(&fx), vec![yap_core::shell::Sound::ScreenShareStop]);
+    assert!(!last_voice_view(&fx).sharing);
+}
+
+#[test]
+fn a_failed_share_should_keep_the_reason_until_the_next_one() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    client.command(Command::StartVoiceShare(share(false)));
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::ShareEnded {
+            stop_sound: false,
+            error: Some("gone".into()),
+        },
+    });
+    let view = last_voice_view(&fx);
+    assert_eq!(
+        (view.share_pending, view.share_error.as_str()),
+        (false, "gone")
+    );
+    let fx = client.command(Command::StartVoiceShare(share(false)));
+    assert_eq!(last_voice_view(&fx).share_error, "");
+}
+
+#[test]
+fn share_audio_outside_a_share_should_do_nothing() {
+    let mut client = Client::online();
+    voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let fx = client.command(Command::SetVoiceShareAudio(false));
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Voice { .. })));
+}

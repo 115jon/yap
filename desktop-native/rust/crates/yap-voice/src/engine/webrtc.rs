@@ -10,7 +10,16 @@
 //! Camera: one send-only VP8 transceiver with the web's three simulcast
 //! encodings, fed by `crate::camera` (captured frames while live, the
 //! keepalive's black frames while parked). A stale park pushes a fresh
-//! transceiver; the old one is detached, not closed.
+//! transceiver; the old one is retired, not closed: it keeps its track but
+//! nothing feeds it any more. (Not `set_track(None)`: webrtc-sys 0.3.52's
+//! `RtpSender::set_track` dereferences the null track and crashes.)
+//!
+//! Share: one send-only VP8 transceiver with a single encoding at the
+//! preset's caps, fed by `crate::share` (captured frames while live, the
+//! last one repeated while the source is still, the keepalive's black
+//! frames while parked), and an Opus transceiver for the source's audio fed
+//! from a `NativeAudioSource`. Stopping parks the video for the next share
+//! and retires the audio.
 //!
 //! Video: each routed remote video track gets a `NativeVideoStream` (a
 //! WebRTC sink with a one-frame queue: a slow consumer sees the newest frame,
@@ -32,6 +41,8 @@ use libwebrtc::video_track::RtcVideoTrack;
 use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
 
+use libwebrtc::audio_source::native::NativeAudioSource;
+use libwebrtc::audio_source::AudioSourceOptions;
 use libwebrtc::media_stream_track::MediaStreamTrack;
 use libwebrtc::peer_connection::{
     AnswerOptions, OfferOptions, PeerConnection, PeerConnectionState,
@@ -41,7 +52,7 @@ use libwebrtc::peer_connection_factory::{
     IceServer as RtcIceServer, PeerConnectionFactory, RtcConfiguration,
 };
 use libwebrtc::prelude::RtcAudioTrack;
-use libwebrtc::rtp_parameters::{RtpCodecCapability, RtpEncodingParameters};
+use libwebrtc::rtp_parameters::{DegradationPreference, RtpCodecCapability, RtpEncodingParameters};
 use libwebrtc::rtp_sender::RtpSender;
 use libwebrtc::rtp_transceiver::{RtpTransceiver, RtpTransceiverDirection, RtpTransceiverInit};
 use libwebrtc::session_description::{SdpType, SessionDescription};
@@ -56,6 +67,8 @@ use crate::audio::{resolve, AudioDevice, AudioDevices, Processing};
 use crate::camera::live::{set_sink, Keepalive};
 use crate::layers::CAMERA_SIMULCAST;
 use crate::machine::MediaState;
+use crate::share::live::{set_audio as set_share_audio, set_sink as set_share_sink, Refresher};
+use crate::share::{ShareEncoding, SHARE_AUDIO_CHANNELS, SHARE_AUDIO_RATE};
 use crate::wire::IceServer;
 
 /// One process-wide factory: it owns the platform ADM.
@@ -289,6 +302,14 @@ fn video_output() -> &'static RwLock<Option<Arc<dyn VideoOutput>>> {
     &OUTPUT
 }
 
+/// The installed video output (our share's preview goes there too).
+pub(crate) fn installed_video_output() -> Option<Arc<dyn VideoOutput>> {
+    video_output()
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+}
+
 /// How often a routed track logs its frame rate and size.
 const VIDEO_STATS_EVERY: Duration = Duration::from_secs(5);
 
@@ -462,6 +483,43 @@ struct CameraSend {
     keepalive: Keepalive,
 }
 
+/// Our share's video send side.
+struct ScreenSend {
+    source: NativeVideoSource,
+    transceiver: RtpTransceiver,
+    refresher: Refresher,
+}
+
+/// Our share's audio send side, while the share carries audio.
+struct ScreenAudioSend {
+    track: RtcAudioTrack,
+    transceiver: RtpTransceiver,
+}
+
+/// The share's one encoding, and its degradation preference: `detail`
+/// keeps the resolution, `motion` the frame rate (what Chrome derives from
+/// the track's `contentHint`).
+fn apply_screen_encoding(sender: &RtpSender, encoding: &ShareEncoding) {
+    let mut parameters = sender.parameters();
+    if parameters.encodings.is_empty() {
+        parameters.encodings.push(RtpEncodingParameters::default());
+    }
+    for e in &mut parameters.encodings {
+        e.active = true;
+        e.max_bitrate = Some(encoding.max_bitrate);
+        e.max_framerate = Some(encoding.max_framerate);
+        e.scale_resolution_down_by = Some(1.0);
+    }
+    parameters.set_degradation_preference(if encoding.detail {
+        DegradationPreference::MaintainResolution
+    } else {
+        DegradationPreference::MaintainFramerate
+    });
+    if let Err(error) = sender.set_parameters(parameters) {
+        eprintln!("[share] encoding refused: {error:?}");
+    }
+}
+
 /// The highest rate any capture profile runs at.
 const CAMERA_MAX_FPS: f64 = 60.0;
 
@@ -502,8 +560,11 @@ pub struct LibwebrtcSession {
     mic: RtcAudioTrack,
     sender: Arc<Mutex<Option<RtpSender>>>,
     camera: Arc<Mutex<Option<CameraSend>>>,
-    /// Camera transceivers a fresh push replaced, detached until the call
-    /// ends (closing one renegotiates; see PartyTracks `republishTrack`).
+    screen: Arc<Mutex<Option<ScreenSend>>>,
+    screen_audio: Arc<Mutex<Option<ScreenAudioSend>>>,
+    /// Camera, share and share audio transceivers a fresh push replaced,
+    /// kept, unfed, until the call ends (closing one renegotiates; see
+    /// PartyTracks `republishTrack`).
     retired: Arc<Mutex<Vec<RtpTransceiver>>>,
     remotes: Arc<Mutex<Remotes>>,
 }
@@ -573,6 +634,8 @@ impl MediaEngine for LibwebrtcEngine {
                 mic,
                 sender: Arc::new(Mutex::new(None)),
                 camera: Arc::new(Mutex::new(None)),
+                screen: Arc::new(Mutex::new(None)),
+                screen_audio: Arc::new(Mutex::new(None)),
                 retired: Arc::new(Mutex::new(Vec::new())),
                 remotes,
             },
@@ -694,9 +757,7 @@ impl MediaSession for LibwebrtcSession {
     async fn publish_camera(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
         if let Some(old) = lock(&self.camera).take() {
             set_sink(None);
-            if old.transceiver.sender().set_track(None).is_err() {
-                eprintln!("[camera] could not detach the old transceiver");
-            }
+            // Its keepalive goes with it: the old sender gets no frames.
             lock(&self.retired).push(old.transceiver);
         }
         // The size is a hint for the adapter; frames bring their own.
@@ -780,6 +841,160 @@ impl MediaSession for LibwebrtcSession {
             .is_some_and(|camera| camera.keepalive.stale())
     }
 
+    async fn publish_screen(
+        &self,
+        stream_id: &str,
+        encoding: &ShareEncoding,
+    ) -> Result<LocalOffer, MediaError> {
+        if let Some(old) = lock(&self.screen).take() {
+            set_share_sink(None);
+            // Its refresher goes with it: the old sender gets no frames.
+            lock(&self.retired).push(old.transceiver);
+        }
+        // A screencast source (`getDisplayMedia` tracks are); the size is a
+        // hint, frames bring their own.
+        let source = NativeVideoSource::new(
+            VideoResolution {
+                width: 1920,
+                height: 1080,
+            },
+            true,
+        );
+        let track = factory().create_video_track("screen-video", source.clone());
+        let transceiver = self
+            .pc
+            .add_transceiver(
+                MediaStreamTrack::Video(track),
+                RtpTransceiverInit {
+                    direction: RtpTransceiverDirection::SendOnly,
+                    stream_ids: vec![stream_id.to_owned()],
+                    send_encodings: vec![RtpEncodingParameters {
+                        active: true,
+                        max_bitrate: Some(encoding.max_bitrate),
+                        max_framerate: Some(encoding.max_framerate),
+                        scale_resolution_down_by: Some(1.0),
+                        ..RtpEncodingParameters::default()
+                    }],
+                },
+            )
+            .map_err(err("add share transceiver"))?;
+        if transceiver.set_codec_preferences(vp8_first()).is_err() {
+            eprintln!("[share] codec preferences refused; libwebrtc's order stands");
+        }
+        apply_screen_encoding(&transceiver.sender(), encoding);
+        *lock(&self.screen) = Some(ScreenSend {
+            refresher: Refresher::start(source.clone()),
+            source,
+            transceiver: transceiver.clone(),
+        });
+        let offer = self
+            .pc
+            .create_offer(OfferOptions::default())
+            .await
+            .map_err(err("share offer"))?;
+        self.pc
+            .set_local_description(offer.clone())
+            .await
+            .map_err(err("local share offer"))?;
+        let mid = transceiver
+            .mid()
+            .ok_or_else(|| MediaError("share transceiver without a mid".into()))?;
+        Ok(LocalOffer {
+            sdp: offer.to_string(),
+            mid,
+        })
+    }
+
+    fn set_screen_encoding(&self, encoding: &ShareEncoding) {
+        if let Some(screen) = lock(&self.screen).as_ref() {
+            apply_screen_encoding(&screen.transceiver.sender(), encoding);
+        }
+    }
+
+    fn set_screen_live(&self, live: bool) {
+        let screen = lock(&self.screen);
+        if let Some(screen) = screen.as_ref() {
+            screen.refresher.park(!live);
+            set_share_sink(live.then(|| screen.source.clone()));
+        } else if !live {
+            set_share_sink(None);
+        }
+    }
+
+    fn screen_stale(&self) -> bool {
+        lock(&self.screen)
+            .as_ref()
+            .is_some_and(|screen| screen.refresher.stale())
+    }
+
+    async fn publish_screen_audio(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
+        self.retire_screen_audio();
+        // No processing: the source's audio as it plays. Unbuffered, so
+        // `push_screen_audio` hands 10 ms frames straight to the track.
+        let source = NativeAudioSource::new(
+            AudioSourceOptions::default(),
+            SHARE_AUDIO_RATE,
+            SHARE_AUDIO_CHANNELS,
+            0,
+        );
+        let track = factory().create_audio_track("screen-audio", source.clone());
+        let transceiver = self
+            .pc
+            .add_transceiver(
+                MediaStreamTrack::Audio(track.clone()),
+                RtpTransceiverInit {
+                    direction: RtpTransceiverDirection::SendOnly,
+                    stream_ids: vec![stream_id.to_owned()],
+                    send_encodings: vec![],
+                },
+            )
+            .map_err(err("add share audio transceiver"))?;
+        let opus: Vec<_> = factory()
+            .get_rtp_sender_capabilities(MediaType::Audio)
+            .codecs
+            .into_iter()
+            .filter(|c| c.mime_type.eq_ignore_ascii_case("audio/opus"))
+            .collect();
+        let _ = transceiver.set_codec_preferences(opus);
+        set_share_audio(Some(source));
+        *lock(&self.screen_audio) = Some(ScreenAudioSend {
+            track,
+            transceiver: transceiver.clone(),
+        });
+        let offer = self
+            .pc
+            .create_offer(OfferOptions::default())
+            .await
+            .map_err(err("share audio offer"))?;
+        self.pc
+            .set_local_description(offer.clone())
+            .await
+            .map_err(err("local share audio offer"))?;
+        let mid = transceiver
+            .mid()
+            .ok_or_else(|| MediaError("share audio transceiver without a mid".into()))?;
+        Ok(LocalOffer {
+            sdp: offer.to_string(),
+            mid,
+        })
+    }
+
+    fn retire_screen_audio(&self) {
+        // Nothing feeds its source any more, so the sender sends nothing;
+        // disabled too, in case anything did.
+        set_share_audio(None);
+        if let Some(old) = lock(&self.screen_audio).take() {
+            old.track.set_enabled(false);
+            lock(&self.retired).push(old.transceiver);
+        }
+    }
+
+    fn set_screen_audio_enabled(&self, enabled: bool) {
+        if let Some(audio) = lock(&self.screen_audio).as_ref() {
+            audio.track.set_enabled(enabled);
+        }
+    }
+
     fn set_mic_enabled(&self, enabled: bool) {
         self.mic.set_enabled(enabled);
         MIC_LIVE.store(enabled, Ordering::Relaxed);
@@ -835,7 +1050,11 @@ impl MediaSession for LibwebrtcSession {
 
     fn stop_local(&self) {
         set_sink(None);
+        set_share_sink(None);
+        set_share_audio(None);
         lock(&self.camera).take();
+        lock(&self.screen).take();
+        lock(&self.screen_audio).take();
         self.mic.set_enabled(false);
         MIC_LIVE.store(false, Ordering::Relaxed);
         let f = factory();
@@ -881,6 +1100,19 @@ impl MediaSession for LibwebrtcSession {
                         if o.active { "" } else { " off" },
                     );
                 }
+                RtcStats::OutboundRtp(out) if out.outbound.frame_width > 0 => {
+                    let o = &out.outbound;
+                    line += &format!(
+                        " out[{}]={}B {}x{}@{:.0} {} limit={:?}",
+                        o.mid,
+                        out.sent.bytes_sent,
+                        o.frame_width,
+                        o.frame_height,
+                        o.frames_per_second,
+                        o.encoder_implementation,
+                        o.quality_limitation_reason,
+                    );
+                }
                 RtcStats::OutboundRtp(out) => {
                     line += &format!(" out[{}]={}B", out.outbound.mid, out.sent.bytes_sent);
                 }
@@ -904,7 +1136,11 @@ impl MediaSession for LibwebrtcSession {
 
     fn close(&self) {
         set_sink(None);
+        set_share_sink(None);
+        set_share_audio(None);
         lock(&self.camera).take();
+        lock(&self.screen).take();
+        lock(&self.screen_audio).take();
         lock(&self.retired).clear();
         lock(&self.remotes).clear();
         *lock(&self.sender) = None;

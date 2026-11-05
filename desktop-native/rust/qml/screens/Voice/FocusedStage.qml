@@ -16,7 +16,9 @@ Item {
     required property var tile
 
     readonly property bool screen: tile.kind === "screen"
+    // Our own share's preview can be paused (the tile's Pause).
     readonly property bool showsVideo: tile.video && tile.videoKey.length > 0
+        && !(screen && tile.me && ShellState.sharePreviewPaused)
     readonly property bool hasFrame: media.item !== null && media.item.hasFrame
 
     // RestoreNone: when the stage moves to another tile, the old slot must not
@@ -26,9 +28,11 @@ Item {
     Binding {
         target: ShellState
         property: "stageLabel"
-        value: root.screen ? qsTr("%1's Stream").arg(root.tile.name) : root.tile.name
+        value: !root.screen ? root.tile.name
+            : root.tile.me ? qsTr("Your stream") : qsTr("%1's Stream").arg(root.tile.name)
         restoreMode: Binding.RestoreNone
     }
+    Binding { target: ShellState; property: "stageName"; value: root.tile.name; restoreMode: Binding.RestoreNone }
     Binding { target: ShellState; property: "stageAvatar"; value: root.tile.avatar; restoreMode: Binding.RestoreNone }
     Binding { target: ShellState; property: "stageLive"; value: root.showsVideo; restoreMode: Binding.RestoreNone }
     Binding { target: ShellState; property: "stageRemoteStream"; value: root.screen && !root.tile.me; restoreMode: Binding.RestoreNone }

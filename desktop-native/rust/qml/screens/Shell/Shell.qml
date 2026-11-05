@@ -42,6 +42,11 @@ RowLayout {
         Layout.preferredWidth: 0
         Layout.preferredHeight: 0
     }
+    // The screen share picker.
+    ShareLink {
+        Layout.preferredWidth: 0
+        Layout.preferredHeight: 0
+    }
 
     ServerRail {
         visible: !ShellState.stageFullscreen

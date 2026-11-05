@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use super::state::{Outgoing, Phase, Presence, ServerChannels, Typer, VoiceCall};
 use super::time::{parse_rfc3339, LocalOffset, Stamp};
-use super::{Occupant, VoiceMember};
+use super::{Occupant, VoiceMember, VoiceShare};
 use crate::shell::{BadgeView, Sound, ToastView};
 
 /// One role value, borrowed from a row.
@@ -657,6 +657,13 @@ pub struct VoiceView {
     pub camera: bool,
     /// Why the camera could not go on; empty otherwise.
     pub camera_error: String,
+    /// A share was asked for and is not live yet (its capture runs).
+    pub share_pending: bool,
+    /// Sharing (`self_stream`), and the live share (default when not).
+    pub sharing: bool,
+    pub share: VoiceShare,
+    /// Why the last share failed; empty otherwise.
+    pub share_error: String,
 }
 
 /// The open voice channel (its landing or the call), empty when none.
@@ -893,9 +900,9 @@ pub(super) fn seats(
                             .iter()
                             .find(|m| if me { m.me } else { m.user_id == o.user_id })
                     });
-                    let (muted, deafened, video) = match call.filter(|_| me) {
-                        Some(c) => (c.muted, c.deafened, c.camera),
-                        None => (o.muted, o.deafened, o.video),
+                    let (muted, deafened, video, live) = match call.filter(|_| me) {
+                        Some(c) => (c.muted, c.deafened, c.camera, c.share.is_some()),
+                        None => (o.muted, o.deafened, o.video, o.stream),
                     };
                     Seat {
                         key: o.user_id.clone(),
@@ -903,7 +910,7 @@ pub(super) fn seats(
                         avatar: absolute_url(api_base, Some(&o.avatar_url)),
                         muted,
                         deafened,
-                        live: o.stream,
+                        live,
                         video,
                         speaking: member.is_some_and(|m| m.speaking),
                         me,
@@ -956,7 +963,7 @@ fn call_seat(m: &VoiceMember, key: String, call: &VoiceCall) -> Seat {
         avatar: String::new(),
         muted,
         deafened,
-        live: false,
+        live: m.me && call.share.is_some(),
         video: if m.me { call.camera } else { m.video },
         speaking: m.speaking,
         me: m.me,
@@ -1089,6 +1096,10 @@ pub(super) fn tree_rows(
 /// pulled track; the tile mirrors it as the web's local preview does).
 pub const LOCAL_CAMERA_KEY: &str = "local-camera";
 
+/// The video key our own share's preview shows under (the capture after
+/// its conversion, as sent).
+pub const LOCAL_SCREEN_KEY: &str = "local-screen";
+
 /// The call stage: a tile per seat, in seat order, each person followed by
 /// their share when they have one (useVoiceChannel.ts `gridItems`). Video
 /// state comes from the call's member for the seat.
@@ -1137,7 +1148,13 @@ pub(super) fn tile_rows(seats: &[Seat], call: &VoiceCall) -> Vec<VoiceTileRow> {
             },
             watching: false,
         };
-        let sharing = !s.me && (s.live || member.is_some_and(|m| m.stream));
+        // Our own share shows its capture as sent (VoiceGrid's local
+        // stream tile), live as soon as the share is.
+        let sharing = if s.me {
+            call.share.is_some()
+        } else {
+            s.live || member.is_some_and(|m| m.stream)
+        };
         let share = sharing.then(|| VoiceTileRow {
             id: format!("screen:{}", s.key),
             kind: "screen".into(),
@@ -1145,9 +1162,17 @@ pub(super) fn tile_rows(seats: &[Seat], call: &VoiceCall) -> Vec<VoiceTileRow> {
             deafened: false,
             speaking: false,
             video: true,
-            live: remote && member.is_some_and(|m| m.screen_live),
-            video_key: key("screen-video"),
-            watching: call.watched.contains(&pid),
+            live: if s.me {
+                true
+            } else {
+                remote && member.is_some_and(|m| m.screen_live)
+            },
+            video_key: if s.me {
+                LOCAL_SCREEN_KEY.to_owned()
+            } else {
+                key("screen-video")
+            },
+            watching: !s.me && call.watched.contains(&pid),
             ..person.clone()
         });
         rows.push(person);

@@ -129,6 +129,14 @@ pub enum Command {
     /// The camera capture failed before it could go out: off, with the
     /// reason (`missing`, `busy` or `unknown`).
     VoiceCameraFailed(String),
+    /// Share a source in the call (the picker's Go live).
+    StartVoiceShare(super::VoiceShare),
+    /// Stop sharing.
+    StopVoiceShare,
+    /// The share's audio on or off.
+    SetVoiceShareAudio(bool),
+    /// The share's quality preset.
+    SetVoiceShareQuality(String),
 }
 
 /// A file the user picked, pasted or dropped, as the UI read it.

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Templates as T
 import QtMultimedia
 import com.yap.native
 
@@ -7,7 +8,9 @@ import com.yap.native
 // stage) and 2 px corners. A camera that is on shows its video cropped to
 // the tile, a watched share letterboxed on black; until the first frame a
 // spinner stands in. An unwatched share shows "<name> is sharing" and
-// Watch. Anyone without media gets the 64 px avatar (80 alone). The
+// Watch. Our own share shows its capture as sent, with Pause / Resume for
+// the preview at the top left (on hover). Anyone without media gets the
+// 64 px avatar (80 alone). The
 // nameplate sits bottom-left: LED, Bricolage 13/700 name, state glyphs, on a
 // black/60 chip over media. A person's speaking ring is a 2 px talk outline
 // outside the tile. Click puts the tile on stage (or takes it off); right
@@ -35,15 +38,18 @@ Item {
     property bool tray: false
     readonly property bool focused: ShellState.focusedTile === tileId
     readonly property bool screen: kind === "screen"
+    // Our own share, and its preview paused.
+    readonly property bool ownShare: screen && me
+    readonly property bool previewPaused: ownShare && ShellState.sharePreviewPaused
     // The tile on stage keeps only its avatar in the tray.
     readonly property bool showsVideo: video && videoKey.length > 0 && !(tray && focused)
-        && (!screen || watching || focused)
-    readonly property bool watchPrompt: screen && !watching && !focused && !tray
+        && (!screen || me || watching || focused) && !previewPaused
+    readonly property bool watchPrompt: screen && !me && !watching && !focused && !tray
     readonly property bool overMedia: showsVideo && surface.item !== null && surface.item.hasFrame
     readonly property string ownerName: name
 
     Accessible.role: Accessible.Button
-    Accessible.name: screen ? qsTr("%1's stream").arg(name) : name
+    Accessible.name: ownShare ? qsTr("Your stream") : screen ? qsTr("%1's stream").arg(name) : name
     Accessible.onPressAction: ShellState.toggleFocus(tileId)
 
     TapHandler {
@@ -118,8 +124,64 @@ Item {
         }
     }
 
+    // Our share's preview, paused to save resources.
+    Column {
+        visible: root.previewPaused
+        anchors.centerIn: parent
+        spacing: 8
+        Icon {
+            anchors.horizontalCenter: parent.horizontalCenter
+            name: "eyeOff"
+            size: Theme.iconLg
+            color: Theme.ink3
+        }
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: qsTr("Preview paused")
+            color: Theme.ink2
+            font: Theme.type.captionStrong
+        }
+    }
+
+    // Our share: pause or resume its preview (shown on hover or focus).
+    T.AbstractButton {
+        id: previewKey
+        visible: root.ownShare && !root.tray && (hover.hovered || visualFocus)
+        x: 8
+        y: 8
+        implicitWidth: previewRow.implicitWidth + 16
+        implicitHeight: 24
+        focusPolicy: Qt.StrongFocus
+        Accessible.role: Accessible.Button
+        Accessible.name: root.previewPaused ? qsTr("Resume preview") : qsTr("Pause preview")
+        onClicked: ShellState.sharePreviewPaused = !ShellState.sharePreviewPaused
+        contentItem: Row {
+            id: previewRow
+            x: 8
+            spacing: 6
+            Icon {
+                anchors.verticalCenter: parent.verticalCenter
+                name: root.previewPaused ? "eye" : "eyeOff"
+                size: Theme.iconXs
+                color: "white"
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.previewPaused ? qsTr("Resume") : qsTr("Pause")
+                color: "white"
+                font: Theme.type.captionStrong
+            }
+        }
+        background: Rectangle {
+            radius: Theme.radius
+            color: Qt.rgba(0, 0, 0, previewKey.down ? 0.75 : previewKey.hovered ? 0.7 : 0.6)
+            border.width: previewKey.visualFocus ? 2 : 0
+            border.color: Theme.focus
+        }
+    }
+
     Avatar {
-        visible: !root.showsVideo && !root.watchPrompt
+        visible: !root.showsVideo && !root.watchPrompt && !root.previewPaused
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: root.tray ? undefined : parent.verticalCenter
         y: root.tray ? 8 : 0
@@ -167,7 +229,8 @@ Item {
                 // Room for the chip's padding, the LED and the glyphs.
                 width: Math.max(0, Math.min(implicitWidth, root.width - (root.tray ? 8 : 48) - 12 - 12
                     - (root.screen ? 18 : 0) - (root.muted ? 18 : 0) - (root.deafened ? 18 : 0)))
-                text: root.me ? qsTr("%1 (you)").arg(root.name) : root.name
+                // A share is named for its owner (TileNameplate's ownerName).
+                text: root.me && !root.screen ? qsTr("%1 (you)").arg(root.name) : root.name
                 elide: Text.ElideRight
                 color: root.overMedia ? "white" : Theme.ink1
                 font.family: "Yap Bricolage Key Bold"

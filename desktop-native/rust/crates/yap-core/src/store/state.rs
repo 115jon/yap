@@ -307,6 +307,12 @@ pub struct VoiceCall {
     /// Why the camera could not go on (`missing`, `busy`, `unknown`, or the
     /// call's error); empty otherwise.
     pub camera_error: String,
+    /// The share asked for, until it ends.
+    pub share_wanted: Option<super::VoiceShare>,
+    /// The share that is live (`self_stream`).
+    pub share: Option<super::VoiceShare>,
+    /// Why the last share failed; empty otherwise.
+    pub share_error: String,
 }
 
 /// Mic and deafen, kept between calls and in the snapshot cache (the

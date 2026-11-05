@@ -22,6 +22,8 @@ QtObject {
     property bool stageFullscreen: false
     // What the stage header says about it ("Linus's Stream", Live).
     property string stageLabel: ""
+    // Whose it is: their name (the avatar's initials) and picture.
+    property string stageName: ""
     property string stageAvatar: ""
     property bool stageLive: false
     property bool stageRemoteStream: false
@@ -44,6 +46,20 @@ QtObject {
             Voice.setCamera(!on)
         else
             cameraDialogRequested()
+    }
+
+    // The share key (VoiceControls.tsx): sharing stops the share; otherwise
+    // the picker opens, on the tab last shared from (this session).
+    signal shareDialogRequested()
+    property string shareTab: "applications"
+    // Our share's own tile: its preview paused (ParticipantCard's Pause).
+    property bool sharePreviewPaused: false
+
+    function toggleShare() {
+        if (Voice.sharing)
+            Voice.stopShare()
+        else
+            shareDialogRequested()
     }
 
     // `side`: where the card opens next to `anchor`: right, left or top.

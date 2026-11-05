@@ -168,6 +168,14 @@ fn voices(sound: Sound) -> Vec<Voice> {
             tone(0.0, 784.0, 0.15, 0.1, 0.2),
         ],
         Sound::Disconnect => glide(0.0, 523.0, 330.0, 0.2, 0.12, 0.25, 0.3),
+        Sound::ScreenShareStart => vec![
+            tone(0.0, 660.0, 0.08, 0.08, 0.0),
+            tone(0.0, 880.0, 0.12, 0.08, 0.1),
+        ],
+        Sound::ScreenShareStop => vec![
+            tone(0.0, 880.0, 0.08, 0.08, 0.0),
+            tone(0.0, 660.0, 0.12, 0.08, 0.1),
+        ],
     }
 }
 

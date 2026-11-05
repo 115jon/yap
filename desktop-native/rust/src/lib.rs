@@ -2,7 +2,8 @@
 //! singletons. Domain objects (`Session`, `Nav`, `Chat`, `Voice`) live in
 //! [`bridge`], list models in [`models`], and the GUI-thread state they
 //! share in [`gui`]. The voice settings are [`audio`]; remote video between
-//! the call and the UI is [`video`], our camera's frames into it [`camera`].
+//! the call and the UI is [`video`], our camera's frames into it
+//! [`camera`], and the share picker's sources and pictures [`share`].
 
 mod audio;
 mod bridge;
@@ -13,5 +14,6 @@ mod gui;
 mod media;
 mod models;
 mod picker;
+mod share;
 mod sound;
 mod video;

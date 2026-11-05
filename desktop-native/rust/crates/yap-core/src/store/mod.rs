@@ -65,7 +65,29 @@ pub enum VoiceCommand {
     SetWatched(Vec<String>),
     /// Our camera on or off.
     SetCamera(bool),
+    /// Share a source (always a new capture; the latest request wins).
+    StartShare(VoiceShare),
+    StopShare,
+    /// The share's audio on or off.
+    SetShareAudio(bool),
+    /// The share's quality preset id.
+    SetShareQuality(String),
     Leave,
+}
+
+/// A screen share as asked for, or as it is live.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VoiceShare {
+    /// `monitor-<index>` or `window-<hwnd>`.
+    pub source_id: String,
+    pub source_name: String,
+    /// The source is a window (else a monitor).
+    pub window: bool,
+    /// A preset id (`1080p30`).
+    pub quality: String,
+    /// Asked: send the source's audio. Live: the share carries it
+    /// (`self_stream_audio`).
+    pub audio: bool,
 }
 
 /// One participant in a call, as the voice session reports it.
@@ -119,6 +141,17 @@ pub enum VoiceUpdate {
     /// Our camera is on or off now; `error` says why turning it on failed.
     Camera {
         on: bool,
+        error: Option<String>,
+    },
+    /// Our share went live (the start sound plays).
+    ShareStarted(VoiceShare),
+    /// Our live share moved to a new capture, or its audio or quality
+    /// changed.
+    ShareUpdated(VoiceShare),
+    /// Our share is over. `stop_sound`: a live share the user stopped;
+    /// `error` when it failed.
+    ShareEnded {
+        stop_sound: bool,
         error: Option<String>,
     },
     /// The call is over; the error text if it failed.

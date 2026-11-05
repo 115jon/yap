@@ -455,6 +455,10 @@ impl State {
                 camera_wanted: call.camera_wanted,
                 camera: call.camera,
                 camera_error: call.camera_error.clone(),
+                share_pending: call.share.is_none() && call.share_wanted.is_some(),
+                share: call.share.clone().unwrap_or_default(),
+                sharing: call.share.is_some(),
+                share_error: call.share_error.clone(),
             },
             None => VoiceView {
                 muted: prefs.muted,
@@ -1034,6 +1038,32 @@ impl State {
                 watch,
             } => self.watch_stream(fx, participant_id, watch),
             Command::LeaveVoice => self.leave_voice(fx),
+            Command::StartVoiceShare(share) => {
+                self.voice_share(fx, |call| {
+                    call.share_wanted = Some(share.clone());
+                    call.share_error.clear();
+                    Some(VoiceCommand::StartShare(share))
+                });
+            }
+            Command::StopVoiceShare => {
+                self.voice_share(fx, |call| {
+                    call.share_wanted.take().map(|_| VoiceCommand::StopShare)
+                });
+            }
+            Command::SetVoiceShareAudio(on) => {
+                self.voice_share(fx, |call| {
+                    let wanted = call.share_wanted.as_mut()?;
+                    wanted.audio = on;
+                    Some(VoiceCommand::SetShareAudio(on))
+                });
+            }
+            Command::SetVoiceShareQuality(quality) => {
+                self.voice_share(fx, |call| {
+                    let wanted = call.share_wanted.as_mut()?;
+                    wanted.quality.clone_from(&quality);
+                    Some(VoiceCommand::SetShareQuality(quality))
+                });
+            }
             Command::SetVoiceCamera(on) => self.set_voice_camera(fx, on, None),
             Command::VoiceCameraFailed(reason) => {
                 self.set_voice_camera(fx, false, Some(reason));
@@ -2834,6 +2864,9 @@ impl State {
             camera_wanted: false,
             camera: false,
             camera_error: String::new(),
+            share_wanted: None,
+            share: None,
+            share_error: String::new(),
         });
         self.emit_voice(fx);
     }
@@ -2874,6 +2907,27 @@ impl State {
             });
             self.sync_roster(fx);
         }
+    }
+
+    /// A share command in the call (SCREEN_SHARE.md: commands only change
+    /// what is wanted; the call takes the steps). `change` updates the
+    /// call's wanted share and names the command, if any.
+    fn voice_share(
+        &mut self,
+        fx: &mut Effects,
+        change: impl FnOnce(&mut VoiceCall) -> Option<VoiceCommand>,
+    ) {
+        let Some(call) = self.voice.as_mut() else {
+            return;
+        };
+        let Some(command) = change(call) else {
+            return;
+        };
+        fx.push(Effect::Voice {
+            call: call.id,
+            command,
+        });
+        self.emit_voice(fx);
     }
 
     /// The camera toggle: the call pushes it (or resumes its kept track),
@@ -2936,6 +2990,19 @@ impl State {
                     current.camera_wanted = false;
                     current.camera_error = error;
                 }
+            }
+            VoiceUpdate::ShareStarted(share) => {
+                fx.view(ViewUpdate::Sound(Sound::ScreenShareStart));
+                current.share = Some(share);
+            }
+            VoiceUpdate::ShareUpdated(share) => current.share = Some(share),
+            VoiceUpdate::ShareEnded { stop_sound, error } => {
+                if stop_sound {
+                    fx.view(ViewUpdate::Sound(Sound::ScreenShareStop));
+                }
+                current.share = None;
+                current.share_wanted = None;
+                current.share_error = error.unwrap_or_default();
             }
             VoiceUpdate::Connected => {
                 // `joined`: the connect sound and one presence join (op 33),

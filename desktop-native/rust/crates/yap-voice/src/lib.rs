@@ -67,6 +67,13 @@
 //!   keepalive (black frames each second), sends op 13 for
 //!   `cam-video-<pid>` and `self_video: false`. A parked camera is never
 //!   announced, a re-identify announces a live one again.
+//! - `StartShare` / `StopShare` / `SetShareAudio` / `SetShareQuality` run
+//!   our screen share by SCREEN_SHARE.md (browser path, one step at a
+//!   time, latest request wins): the app's [`ShareCapturer`] captures, the
+//!   share publishes `screen-video-<pid>` (one VP8 layer at the preset's
+//!   caps, parked and resumed between shares like the camera) and, with
+//!   source audio, `screen-audio-<pid>`; op 12 announces them and op 15
+//!   says `self_stream` / `self_stream_audio`. See `machine/share.rs`.
 //! - After every input each pulled track's gain follows its owner's volume
 //!   (`SetPlayback`: output volume times the per-user volume, keyed by Yap
 //!   user id); only changes go out, as `SetTrackGain`.
@@ -79,6 +86,7 @@ pub mod layers;
 mod machine;
 mod roster;
 mod sfu;
+mod share;
 mod tracks;
 mod vad;
 pub mod wire;
@@ -95,13 +103,19 @@ pub use engine::{LibwebrtcEngine, LibwebrtcSession};
 pub use layers::{CameraEncoding, CAMERA_SIMULCAST};
 pub use layers::{Quality, RenderSize};
 pub use machine::{
-    camera_alias, screen_alias, stop_message, CallMachine, CallState, CallTarget, CameraPublished,
-    Effect, Input, MediaEvent, MediaSpec, MediaState, Notice, Published, RoomEvent, Socket,
-    SocketSpec, TicketReplies, Timer, UserCommand, VideoIntent, VoiceEvent, LEAVE_SEND_WINDOW,
-    REMOTE_RECONNECT_GRACE,
+    camera_alias, screen_alias, screen_audio_alias, stop_message, CallMachine, CallState,
+    CallTarget, CameraPublished, Effect, Input, MediaEvent, MediaSpec, MediaState, Notice,
+    Published, RoomEvent, Socket, SocketSpec, TicketReplies, Timer, UserCommand, VideoIntent,
+    VoiceEvent, LEAVE_SEND_WINDOW, REMOTE_RECONNECT_GRACE,
 };
 pub use roster::{Member, Roster};
 pub use sfu::{LayerUpdate, Pulled, Pushed, Sfu};
+pub use share::{
+    push_screen_audio, push_screen_frame, CaptureEnded, NoCapture, ScreenFrame, ShareCaptured,
+    ShareCapturer, ShareEncoding, ShareEnd, ShareInfo, ShareNotice, SharePublished, ShareQuality,
+    ShareRequest, SourceKind, DEFAULT_SHARE_QUALITY, LOCAL_SCREEN_KEY, SHARE_AUDIO_CHANNELS,
+    SHARE_AUDIO_RATE, SHARE_QUALITIES,
+};
 pub use tracks::{Kind, Offer, Pull, Remote, TrackTable};
 pub use vad::{
     level_percent, EnergyMeter, Sensitivity, Vad, AUTO_THRESHOLD, SILENCE_DELAY_MS, VAD_TICK,

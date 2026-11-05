@@ -25,5 +25,5 @@ pub use runtime::{
 };
 pub use store::{
     Command, LocalOffset, Occupant, Phase, UploadFile, ViewDiff, ViewUpdate, VoiceCommand,
-    VoiceMember, VoiceTarget, VoiceUpdate,
+    VoiceMember, VoiceShare, VoiceTarget, VoiceUpdate,
 };

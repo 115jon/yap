@@ -24,6 +24,7 @@
 #include "iconprovider.h"
 #include "logfile.h"
 #include "mediashell.h"
+#include "shareprovider.h"
 #include "videohub.h"
 #include "windowchrome.h"
 
@@ -192,6 +193,7 @@ int main(int argc, char* argv[])
   engine.setNetworkAccessManagerFactory(&networkFactory);
   engine.addImageProvider(QStringLiteral("icon"), new IconProvider);
   engine.addImageProvider(QStringLiteral("dither"), new DitherProvider);
+  engine.addImageProvider(QStringLiteral("share"), new ShareProvider);
   QObject::connect(
     &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
     [] { QCoreApplication::exit(-1); }, Qt::QueuedConnection);

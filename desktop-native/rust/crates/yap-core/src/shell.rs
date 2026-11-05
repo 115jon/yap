@@ -210,10 +210,12 @@ pub enum Sound {
     Message,
     Connect,
     Disconnect,
+    ScreenShareStart,
+    ScreenShareStop,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 10] = [
+    pub const ALL: [Sound; 12] = [
         Sound::VoiceJoin,
         Sound::VoiceLeave,
         Sound::Mute,
@@ -224,6 +226,8 @@ impl Sound {
         Sound::Message,
         Sound::Connect,
         Sound::Disconnect,
+        Sound::ScreenShareStart,
+        Sound::ScreenShareStop,
     ];
 
     /// `SOUND_SPECS[id]`: the rate-limit group, the shortest gap between
@@ -236,6 +240,7 @@ impl Sound {
             Sound::Notification => ("notification", 700, 1),
             Sound::Message => ("message", 350, 2),
             Sound::Connect | Sound::Disconnect => ("self", 250, 1),
+            Sound::ScreenShareStart | Sound::ScreenShareStop => ("screen", 250, 1),
         };
         SoundSpec {
             group,

@@ -202,4 +202,10 @@ impl Roster {
             row.video = video;
         }
     }
+
+    pub fn set_my_stream(&mut self, stream: bool) {
+        if let Some(row) = self.rows.get_mut(&self.me) {
+            row.stream = stream;
+        }
+    }
 }

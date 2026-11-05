@@ -16,9 +16,18 @@ use crate::layers::{
 };
 use crate::roster::{Member, Roster};
 use crate::sfu::LayerUpdate;
+use crate::share::{
+    ShareCaptured, ShareEncoding, ShareNotice, SharePublished, ShareQuality, ShareRequest,
+};
 use crate::tracks::{Kind, Offer, Remote, TrackTable};
 use crate::vad::{level_percent, Sensitivity, Vad};
-use crate::wire::{self, Announced, Bootstrap, IceServer, Participant, RoomState, Track};
+use crate::wire::{
+    self, Announced, Bootstrap, IceServer, Participant, RoomState, SelfState, Track,
+};
+
+mod share;
+
+use share::Share;
 
 /// How long a remote participant's pulls outlive a voice `ClientDisconnect`
 /// for them (`REMOTE_RECONNECT_GRACE_MS`, STATE_MACHINE.md "Reconnect
@@ -117,6 +126,14 @@ pub enum UserCommand {
     /// keepalive, so on again resumes the same track (SCREEN_SHARE.md
     /// "Keepalive park and reuse").
     SetCamera(bool),
+    /// Share a source (SCREEN_SHARE.md `start`): always a new capture.
+    StartShare(ShareRequest),
+    /// Stop sharing (`stop`).
+    StopShare,
+    /// The share's audio on or off (`setAudio`).
+    SetShareAudio(bool),
+    /// The share's quality preset (`setQuality`).
+    SetShareQuality(String),
     Leave,
 }
 
@@ -252,6 +269,17 @@ pub enum Input {
     Media(MediaEvent),
     /// The camera push (or resume) finished, or why it failed.
     CameraPublished(Result<CameraPublished, String>),
+    /// The share capture `token` started, or why it could not.
+    ShareCaptured {
+        token: u64,
+        result: Result<ShareCaptured, String>,
+    },
+    /// The share capture `token`'s source went away by itself.
+    ShareCaptureEnded {
+        token: u64,
+    },
+    /// The share's publish finished, or why it failed.
+    SharePublished(Result<SharePublished, String>),
     /// A pull finished; `mid` if it worked.
     PullDone {
         sfu_track_name: String,
@@ -291,6 +319,8 @@ pub enum Notice {
     /// Our camera is on (published and announced) or off; `error` says
     /// why turning it on failed.
     Camera { on: bool, error: Option<String> },
+    /// Our share started, changed or ended.
+    Share(ShareNotice),
 }
 
 /// How to open one call socket.
@@ -349,6 +379,36 @@ pub enum Effect {
     },
     /// Send camera frames (`true`) or the keepalive's black frames.
     SetCameraLive(bool),
+    /// Start capturing a share source; answer with [`Input::ShareCaptured`]
+    /// (and [`Input::ShareCaptureEnded`] when its source goes away).
+    StartShareCapture {
+        token: u64,
+        request: ShareRequest,
+    },
+    /// Release that capture (nothing if it is gone already).
+    ReleaseShareCapture(u64),
+    /// A new box and frame rate for that capture.
+    SetShareCaptureQuality {
+        token: u64,
+        quality: ShareQuality,
+    },
+    /// Push our share's video, or resume the track it kept, and push its
+    /// audio when `audio` (or retire audio a previous capture had);
+    /// serialized with pulls. Answer with [`Input::SharePublished`].
+    PublishShare {
+        stream_id: String,
+        encoding: ShareEncoding,
+        audio: bool,
+    },
+    /// Park the share's video on the keepalive and retire its audio
+    /// (serialized with pulls).
+    UnpublishShare,
+    /// Send captured share frames (`true`) or nothing new.
+    SetShareLive(bool),
+    /// The share sender's caps and content hint, in place.
+    SetShareEncoding(ShareEncoding),
+    /// The share audio track on or off, in place.
+    SetShareAudioEnabled(bool),
     /// Stop these receive transceivers and close them on the SFU.
     Close(Vec<String>),
     /// Move a pulled camera to another simulcast layer (`tracks/update`).
@@ -451,6 +511,7 @@ pub struct CallMachine {
     routes: HashMap<String, String>,
     layers: HashMap<String, Layer>,
     camera: Camera,
+    share: Share,
 }
 
 impl CallMachine {
@@ -487,6 +548,7 @@ impl CallMachine {
             routes: HashMap::new(),
             layers: HashMap::new(),
             camera: Camera::default(),
+            share: Share::default(),
         }
     }
 
@@ -532,6 +594,11 @@ impl CallMachine {
             (_, Input::Tickets(result)) => self.on_tickets(&mut fx, result),
             (_, Input::Published(result)) => self.on_published(&mut fx, result),
             (_, Input::CameraPublished(result)) => self.on_camera_published(&mut fx, result),
+            (_, Input::ShareCaptured { token, result }) => {
+                self.on_share_captured(&mut fx, token, result);
+            }
+            (_, Input::ShareCaptureEnded { token }) => self.on_share_capture_ended(&mut fx, token),
+            (_, Input::SharePublished(result)) => self.on_share_published(&mut fx, result),
             (_, Input::Room(event)) => self.on_room(&mut fx, event),
             (_, Input::Voice(event)) => self.on_voice(&mut fx, event),
             (_, Input::Media(event)) => self.on_media(&mut fx, event),
@@ -855,6 +922,7 @@ impl CallMachine {
                     self.announce(fx);
                 }
                 self.publish_camera(fx);
+                self.drive_share(fx);
             }
             Err(error) => self.end(fx, Some(error)),
         }
@@ -881,6 +949,7 @@ impl CallMachine {
             ),
         ));
         self.announce_camera(fx);
+        self.announce_share(fx, None);
     }
 
     /// Our camera's op 12, while it is on.
@@ -1213,13 +1282,24 @@ impl CallMachine {
                 self.sync_watch(fx);
             }
             UserCommand::SetCamera(on) => self.set_camera(fx, on),
+            UserCommand::StartShare(request) => self.start_share(fx, request),
+            UserCommand::StopShare => self.stop_share(fx),
+            UserCommand::SetShareAudio(on) => self.set_share_audio(fx, on),
+            UserCommand::SetShareQuality(quality) => self.set_share_quality(fx, quality),
             UserCommand::Leave => self.leave(fx),
         }
     }
 
     /// Our voice state (op 15) as it is now.
     fn voice_state(&self) -> String {
-        wire::voice_state(self.muted, self.deafened, self.camera.on)
+        let share = self.share.live();
+        wire::voice_state(SelfState {
+            muted: self.muted,
+            deafened: self.deafened,
+            video: self.camera.on,
+            stream: share.is_some(),
+            stream_audio: share.is_some_and(|s| s.audio),
+        })
     }
 
     /// The camera toggle (useVoiceChannel.ts `toggleCamera`). On pushes it,
@@ -1312,6 +1392,7 @@ impl CallMachine {
         if !self.sockets_open {
             return self.end(fx, None);
         }
+        self.release_shares(fx);
         fx.push(Effect::StopLocalMedia);
         if matches!(self.state, CallState::Joined | CallState::Reconnecting) {
             fx.push(Effect::ArmTimer {
@@ -1401,6 +1482,11 @@ pub fn camera_alias(pid: &str) -> String {
 /// The alias of `pid`'s screen share video.
 pub fn screen_alias(pid: &str) -> String {
     format!("screen-video-{pid}")
+}
+
+/// The alias of `pid`'s screen share audio.
+pub fn screen_audio_alias(pid: &str) -> String {
+    format!("screen-audio-{pid}")
 }
 
 fn is_camera(alias: &str) -> bool {

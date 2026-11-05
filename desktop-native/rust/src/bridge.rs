@@ -298,6 +298,18 @@ pub mod qobject {
         /// Why the camera could not go on: `missing`, `busy`, `unknown`, or
         /// the call's error; empty otherwise.
         #[qproperty(QString, camera_error, cxx_name = "cameraError")]
+        /// A share was asked for and its capture is starting.
+        #[qproperty(bool, share_pending, cxx_name = "sharePending")]
+        /// Sharing (`self_stream`): the live share's source, kind, preset
+        /// and whether it carries audio (`self_stream_audio`).
+        #[qproperty(bool, sharing)]
+        #[qproperty(QString, share_source_id, cxx_name = "shareSourceId")]
+        #[qproperty(QString, share_source_name, cxx_name = "shareSourceName")]
+        #[qproperty(bool, share_window, cxx_name = "shareWindow")]
+        #[qproperty(QString, share_quality, cxx_name = "shareQuality")]
+        #[qproperty(bool, share_audio, cxx_name = "shareAudio")]
+        /// Why the last share failed; empty otherwise.
+        #[qproperty(QString, share_error, cxx_name = "shareError")]
         type Voice = super::VoiceRust;
 
         #[qinvokable]
@@ -328,6 +340,42 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "cameraFailed"]
         fn camera_failed(self: &Voice, reason: &QString);
+
+        /// What can be shared, as JSON: `[{id, name, kind, appName, ours}]`
+        /// (`get_screen_sources`). Monitors first, our own windows last.
+        #[qinvokable]
+        #[cxx_name = "shareSources"]
+        fn share_sources(self: &Voice) -> QString;
+
+        /// Thumbnails and capture only for our own windows
+        /// (`YAP_SHARE_ONLY_OURS=1`, for tests).
+        #[qinvokable]
+        #[cxx_name = "shareOnlyOurs"]
+        fn share_only_ours(self: &Voice) -> bool;
+
+        /// Go live with a picked source (`window`: a window, else a screen).
+        #[qinvokable]
+        #[cxx_name = "startShare"]
+        fn start_share(
+            self: &Voice,
+            source_id: &QString,
+            source_name: &QString,
+            window: bool,
+            quality: &QString,
+            audio: bool,
+        );
+
+        #[qinvokable]
+        #[cxx_name = "stopShare"]
+        fn stop_share(self: &Voice);
+
+        #[qinvokable]
+        #[cxx_name = "changeShareAudio"]
+        fn change_share_audio(self: &Voice, on: bool);
+
+        #[qinvokable]
+        #[cxx_name = "changeShareQuality"]
+        fn change_share_quality(self: &Voice, quality: &QString);
 
         /// An id for a video surface to report its size under.
         #[qinvokable]
@@ -487,6 +535,14 @@ pub struct VoiceRust {
     camera_wanted: bool,
     camera_on: bool,
     camera_error: QString,
+    share_pending: bool,
+    sharing: bool,
+    share_source_id: QString,
+    share_source_name: QString,
+    share_window: bool,
+    share_quality: QString,
+    share_audio: bool,
+    share_error: QString,
 }
 
 /// View updates waiting for the Qt thread, and whether a closure that will
@@ -795,6 +851,43 @@ impl qobject::Voice {
 
     pub fn camera_failed(&self, reason: &QString) {
         client::command(Command::VoiceCameraFailed(reason.to_string()));
+    }
+
+    pub fn share_sources(&self) -> QString {
+        QString::from(crate::share::sources_json().as_str())
+    }
+
+    pub fn share_only_ours(&self) -> bool {
+        yap_capture::only_ours()
+    }
+
+    pub fn start_share(
+        &self,
+        source_id: &QString,
+        source_name: &QString,
+        window: bool,
+        quality: &QString,
+        audio: bool,
+    ) {
+        client::command(Command::StartVoiceShare(yap_core::VoiceShare {
+            source_id: source_id.to_string(),
+            source_name: source_name.to_string(),
+            window,
+            quality: quality.to_string(),
+            audio,
+        }));
+    }
+
+    pub fn stop_share(&self) {
+        client::command(Command::StopVoiceShare);
+    }
+
+    pub fn change_share_audio(&self, on: bool) {
+        client::command(Command::SetVoiceShareAudio(on));
+    }
+
+    pub fn change_share_quality(&self, quality: &QString) {
+        client::command(Command::SetVoiceShareQuality(quality.to_string()));
     }
 
     pub fn new_surface(&self) -> i32 {

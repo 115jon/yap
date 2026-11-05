@@ -34,6 +34,7 @@ Rectangle {
         if (!focused) {
             ShellState.stageParticipant = ""
             ShellState.stageLabel = ""
+            ShellState.stageName = ""
             ShellState.stageAvatar = ""
             ShellState.stageLive = false
             ShellState.stageRemoteStream = false
@@ -83,7 +84,7 @@ Rectangle {
                 visible: root.focused
                 anchors.verticalCenter: parent.verticalCenter
                 size: 20
-                initials: ShellState.stageLabel
+                initials: ShellState.stageName
                 source: ShellState.stageAvatar
             }
             Text {
@@ -351,8 +352,8 @@ Rectangle {
     }
 
     // The stage bar (VoiceControls.tsx): ply-1 with a top seam, 48 px
-    // square keys in the dock recipe (ui/dock.ts): mic, deafen, camera, a
-    // divider, then Leave, the one solid danger fill.
+    // square keys in the dock recipe (ui/dock.ts): mic, deafen, camera,
+    // share, a divider, then Leave, the one solid danger fill.
     Rectangle {
         id: dock
         anchors.bottom: parent.bottom
@@ -389,6 +390,15 @@ Rectangle {
                 Accessible.checkable: true
                 Accessible.checked: Voice.cameraOn
                 onClicked: ShellState.toggleCamera()
+            }
+            IconKey {
+                size: 48
+                iconName: "screenShare"
+                tone: Voice.sharing ? "live" : "rest"
+                tip: Voice.sharing ? qsTr("Stop sharing") : qsTr("Share screen")
+                Accessible.checkable: true
+                Accessible.checked: Voice.sharing
+                onClicked: ShellState.toggleShare()
             }
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter

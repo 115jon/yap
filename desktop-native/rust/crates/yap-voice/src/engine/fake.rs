@@ -8,24 +8,53 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use super::{LocalOffer, MediaEngine, MediaError, MediaSession};
 use crate::audio::Processing;
 use crate::machine::MediaState;
+use crate::share::ShareEncoding;
 use crate::wire::IceServer;
 
 /// One call made on a [`FakeEngine`] or its session.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FakeOp {
-    Open { ice_servers: usize },
-    PublishMic { stream_id: String },
-    ApplyAnswer { sdp: String, what: &'static str },
+    Open {
+        ice_servers: usize,
+    },
+    PublishMic {
+        stream_id: String,
+    },
+    ApplyAnswer {
+        sdp: String,
+        what: &'static str,
+    },
     StartCapture,
-    AnswerOffer { sdp: String },
+    AnswerOffer {
+        sdp: String,
+    },
     CloseMids(Vec<String>),
-    PublishCamera { stream_id: String },
+    PublishCamera {
+        stream_id: String,
+    },
     SetCameraLive(bool),
+    PublishScreen {
+        stream_id: String,
+        encoding: ShareEncoding,
+    },
+    SetScreenEncoding(ShareEncoding),
+    SetScreenLive(bool),
+    PublishScreenAudio {
+        stream_id: String,
+    },
+    RetireScreenAudio,
+    SetScreenAudioEnabled(bool),
     SetMicEnabled(bool),
     SetPlayoutEnabled(bool),
-    SetTrackGain { mid: String, gain: f64 },
+    SetTrackGain {
+        mid: String,
+        gain: f64,
+    },
     SetProcessing(Processing),
-    SetVideoSink { mid: String, key: Option<String> },
+    SetVideoSink {
+        mid: String,
+        key: Option<String>,
+    },
     StopLocal,
     Stats,
     Close,
@@ -41,6 +70,8 @@ struct Shared {
     energy: Option<(f64, f64)>,
     /// What `camera_stale` answers.
     camera_stale: bool,
+    /// What `screen_stale` answers.
+    screen_stale: bool,
 }
 
 /// Records calls; clones share the record.
@@ -90,6 +121,14 @@ impl FakeEngine {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .camera_stale = stale;
+    }
+
+    /// Makes `screen_stale` say the parked share's track may be gone.
+    pub fn set_screen_stale(&self, stale: bool) {
+        self.shared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .screen_stale = stale;
     }
 
     /// Everything called so far, in order.
@@ -212,6 +251,60 @@ impl MediaSession for FakeSession {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .camera_stale
+    }
+
+    async fn publish_screen(
+        &self,
+        stream_id: &str,
+        encoding: &ShareEncoding,
+    ) -> Result<LocalOffer, MediaError> {
+        record(
+            &self.shared,
+            FakeOp::PublishScreen {
+                stream_id: stream_id.to_owned(),
+                encoding: *encoding,
+            },
+        );
+        Ok(LocalOffer {
+            sdp: "fake-screen-offer".into(),
+            mid: "2".into(),
+        })
+    }
+
+    fn set_screen_encoding(&self, encoding: &ShareEncoding) {
+        record(&self.shared, FakeOp::SetScreenEncoding(*encoding));
+    }
+
+    fn set_screen_live(&self, live: bool) {
+        record(&self.shared, FakeOp::SetScreenLive(live));
+    }
+
+    fn screen_stale(&self) -> bool {
+        self.shared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .screen_stale
+    }
+
+    async fn publish_screen_audio(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
+        record(
+            &self.shared,
+            FakeOp::PublishScreenAudio {
+                stream_id: stream_id.to_owned(),
+            },
+        );
+        Ok(LocalOffer {
+            sdp: "fake-screen-audio-offer".into(),
+            mid: "3".into(),
+        })
+    }
+
+    fn retire_screen_audio(&self) {
+        record(&self.shared, FakeOp::RetireScreenAudio);
+    }
+
+    fn set_screen_audio_enabled(&self, enabled: bool) {
+        record(&self.shared, FakeOp::SetScreenAudioEnabled(enabled));
     }
 
     fn set_mic_enabled(&self, enabled: bool) {

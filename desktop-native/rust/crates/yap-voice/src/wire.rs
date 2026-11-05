@@ -232,11 +232,23 @@ pub fn voice_identify(me: &str, voice_token: &str) -> Value {
     json!({ "op": GatewayOp::VoiceIdentify.code(), "d": { "participant_id": me, "voice_token": voice_token } })
 }
 
-/// Our voice state (op 15 C->S); `video` is the camera being on.
-pub fn voice_state(muted: bool, deafened: bool, video: bool) -> String {
+/// Our voice state (op 15 C->S).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SelfState {
+    pub muted: bool,
+    pub deafened: bool,
+    /// The camera is on.
+    pub video: bool,
+    /// Sharing (`self_stream`), and the share carries audio.
+    pub stream: bool,
+    pub stream_audio: bool,
+}
+
+/// Our voice state as op 15 sends it.
+pub fn voice_state(state: SelfState) -> String {
     json!({ "op": GatewayOp::VoiceStateUpdate as u16, "d": {
-        "self_mute": muted, "self_deaf": deafened, "self_video": video,
-        "self_stream": false, "self_stream_audio": false,
+        "self_mute": state.muted, "self_deaf": state.deafened, "self_video": state.video,
+        "self_stream": state.stream, "self_stream_audio": state.stream_audio,
     }})
     .to_string()
 }
@@ -244,7 +256,7 @@ pub fn voice_state(muted: bool, deafened: bool, video: bool) -> String {
 /// One of our publications as op 12 announces it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Announced<'a> {
-    /// The alias (`cam-audio-<pid>`, `cam-video-<pid>`).
+    /// The alias (`cam-audio-<pid>`, `cam-video-<pid>`, `screen-video-<pid>`).
     pub track_name: &'a str,
     pub sfu_track_name: &'a str,
     /// Our session capability.

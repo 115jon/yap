@@ -69,6 +69,15 @@ Rectangle {
                 label: qsTr("Camera settings")
                 menu: cameraMenu
             }
+            IconKey {
+                size: 40
+                iconName: "screenShare"
+                tone: Voice.sharing ? "live" : "rest"
+                tip: Voice.sharing ? qsTr("Stop sharing") : qsTr("Share screen")
+                Accessible.checkable: true
+                Accessible.checked: Voice.sharing
+                onClicked: ShellState.toggleShare()
+            }
         }
         IconKey {
             id: leave

@@ -1,10 +1,12 @@
 //! [`run_call`]: the async shell around a [`CallMachine`]. It turns socket,
 //! media, pull and timer events into machine inputs and runs the effects
 //! that come back: the two `yap_realtime` connections, the SFU, the media
-//! engine and one worker that serializes pulls and closes.
+//! engine and one worker that serializes pulls and closes. Share captures
+//! run on the app's [`ShareCapturer`], started off the async runtime.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -21,6 +23,7 @@ use crate::machine::{
     Published, RoomEvent, Socket, SocketSpec, TicketReplies, Timer, UserCommand, VoiceEvent,
 };
 use crate::sfu::{LayerUpdate, Sfu, Signaling};
+use crate::share::{ShareCaptured, ShareCapturer, ShareEncoding, SharePublished};
 use crate::tracks::Remote;
 use crate::vad::{EnergyMeter, VAD_TICK};
 use crate::wire::{self, Participant, RoomState, Track};
@@ -51,9 +54,11 @@ impl Commands for UnboundedReceiver<UserCommand> {
 }
 
 /// What a call runs on.
-pub struct CallEnv<E, T> {
+pub struct CallEnv<E, T, S> {
     pub engine: E,
     pub tickets: T,
+    /// Screen share capture.
+    pub capturer: S,
     pub http: reqwest::Client,
     /// The Yap API base, e.g. `https://yap.115jon.com`.
     pub api_base: String,
@@ -63,8 +68,8 @@ pub struct CallEnv<E, T> {
 
 /// Runs one call until it is left or ends. Reports through `notify`;
 /// returns why it failed (`None`: left). The engine is released at the end.
-pub async fn run_call<E, T, C, N>(
-    env: CallEnv<E, T>,
+pub async fn run_call<E, T, S, C, N>(
+    env: CallEnv<E, T, S>,
     target: CallTarget,
     mut commands: C,
     notify: N,
@@ -72,11 +77,13 @@ pub async fn run_call<E, T, C, N>(
 where
     E: MediaEngine,
     T: TicketApi,
+    S: ShareCapturer,
     C: Commands,
     N: Fn(Notice) + Sync,
 {
-    let mut io = Io::new(&env);
-    let mut inbox = Inbox::default();
+    let (share_events, shares) = mpsc::unbounded_channel();
+    let mut io = Io::new(&env, share_events);
+    let mut inbox = Inbox::new(shares);
     let reason = io
         .run(CallMachine::new(target), &mut inbox, &mut commands, &notify)
         .await;
@@ -97,6 +104,14 @@ enum Job {
     PublishCamera {
         stream_id: String,
     },
+    /// Push (or resume) our share's video and push or drop its audio.
+    PublishShare {
+        stream_id: String,
+        encoding: ShareEncoding,
+        audio: bool,
+    },
+    /// Park the share's video and drop its audio.
+    UnpublishShare,
 }
 
 /// What the worker reports back.
@@ -105,20 +120,46 @@ enum Done {
     /// (SFU track name, mid if the pull worked).
     Pull(String, Option<String>),
     Camera(Result<CameraPublished, String>),
+    Share(Result<SharePublished, String>),
+}
+
+/// A share capture's news, from the blocking start or the capture itself.
+enum ShareEvent<C> {
+    Started {
+        token: u64,
+        result: Result<(C, ShareCaptured), String>,
+    },
+    Ended(u64),
 }
 
 /// Event sources that appear as the call opens.
-#[derive(Default)]
-struct Inbox {
+struct Inbox<C> {
+    shares: UnboundedReceiver<ShareEvent<C>>,
     room: Option<UnboundedReceiver<Event>>,
     voice: Option<UnboundedReceiver<Event>>,
     media: Option<UnboundedReceiver<crate::machine::MediaState>>,
     pulls: Option<UnboundedReceiver<Done>>,
 }
 
+impl<C> Inbox<C> {
+    fn new(shares: UnboundedReceiver<ShareEvent<C>>) -> Self {
+        Self {
+            shares,
+            room: None,
+            voice: None,
+            media: None,
+            pulls: None,
+        }
+    }
+}
+
 /// What the effects act on.
-struct Io<'a, E: MediaEngine, T> {
-    env: &'a CallEnv<E, T>,
+struct Io<'a, E: MediaEngine, T, S: ShareCapturer> {
+    env: &'a CallEnv<E, T, S>,
+    /// Running share captures by token; dropping one releases it. Behind a
+    /// lock only so `Io` stays `Sync` across awaits (captures need not be).
+    captures: Mutex<HashMap<u64, S::Capture>>,
+    share_events: UnboundedSender<ShareEvent<S::Capture>>,
     room: Option<Connection>,
     voice: Option<Connection>,
     session: Option<E::Session>,
@@ -138,6 +179,10 @@ enum Applied {
     End(Option<String>),
 }
 
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// Waits on an event source that may not be open yet (then: forever).
 async fn recv<T>(rx: &mut Option<UnboundedReceiver<T>>) -> Option<T> {
     match rx {
@@ -146,10 +191,15 @@ async fn recv<T>(rx: &mut Option<UnboundedReceiver<T>>) -> Option<T> {
     }
 }
 
-impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
-    fn new(env: &'a CallEnv<E, T>) -> Self {
+impl<'a, E: MediaEngine, T: TicketApi, S: ShareCapturer> Io<'a, E, T, S> {
+    fn new(
+        env: &'a CallEnv<E, T, S>,
+        share_events: UnboundedSender<ShareEvent<S::Capture>>,
+    ) -> Self {
         Self {
             env,
+            captures: Mutex::new(HashMap::new()),
+            share_events,
             room: None,
             voice: None,
             session: None,
@@ -171,7 +221,7 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
     async fn run<C: Commands, N: Fn(Notice) + Sync>(
         &mut self,
         mut machine: CallMachine,
-        inbox: &mut Inbox,
+        inbox: &mut Inbox<S::Capture>,
         commands: &mut C,
         notify: &N,
     ) -> Option<String> {
@@ -247,10 +297,21 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
                 done = recv(&mut inbox.pulls) => match done {
                     Some(Done::Pull(sfu_track_name, mid)) => Input::PullDone { sfu_track_name, mid },
                     Some(Done::Camera(result)) => Input::CameraPublished(result),
+                    Some(Done::Share(result)) => Input::SharePublished(result),
                     None => {
                         inbox.pulls = None;
                         continue;
                     }
+                },
+                Some(event) = inbox.shares.recv() => match event {
+                    ShareEvent::Started { token, result } => Input::ShareCaptured {
+                        token,
+                        result: result.map(|(capture, captured)| {
+                            lock(&self.captures).insert(token, capture);
+                            captured
+                        }),
+                    },
+                    ShareEvent::Ended(token) => Input::ShareCaptureEnded { token },
                 },
                 command = commands.recv(), if commands_open => match command {
                     Some(command) => Input::Command(command),
@@ -286,7 +347,7 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
     async fn apply<N: Fn(Notice)>(
         &mut self,
         effect: Effect,
-        inbox: &mut Inbox,
+        inbox: &mut Inbox<S::Capture>,
         notify: &N,
     ) -> Applied {
         match effect {
@@ -325,6 +386,42 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
             Effect::SetCameraLive(live) => {
                 if let Some(session) = &self.session {
                     session.set_camera_live(live);
+                }
+            }
+            Effect::StartShareCapture { token, request } => self.start_capture(token, request),
+            Effect::ReleaseShareCapture(token) => {
+                if lock(&self.captures).remove(&token).is_some() {
+                    eprintln!("[share] released capture {token}");
+                }
+            }
+            Effect::SetShareCaptureQuality { token, quality } => {
+                if let Some(capture) = lock(&self.captures).get(&token) {
+                    self.env.capturer.set_quality(capture, quality);
+                }
+            }
+            Effect::PublishShare {
+                stream_id,
+                encoding,
+                audio,
+            } => self.job(Job::PublishShare {
+                stream_id,
+                encoding,
+                audio,
+            }),
+            Effect::UnpublishShare => self.job(Job::UnpublishShare),
+            Effect::SetShareLive(live) => {
+                if let Some(session) = &self.session {
+                    session.set_screen_live(live);
+                }
+            }
+            Effect::SetShareEncoding(encoding) => {
+                if let Some(session) = &self.session {
+                    session.set_screen_encoding(&encoding);
+                }
+            }
+            Effect::SetShareAudioEnabled(enabled) => {
+                if let Some(session) = &self.session {
+                    session.set_screen_audio_enabled(enabled);
                 }
             }
             Effect::SetVideoSink { mid, key } => {
@@ -384,6 +481,36 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
         }
     }
 
+    /// Starts a share capture off the runtime (window and device setup
+    /// blocks); its result and a later end come back as share events.
+    fn start_capture(&self, token: u64, request: crate::share::ShareRequest) {
+        let capturer = self.env.capturer.clone();
+        let events = self.share_events.clone();
+        tokio::task::spawn_blocking(move || {
+            let ended = {
+                let events = events.clone();
+                Box::new(move || {
+                    let _ = events.send(ShareEvent::Ended(token));
+                })
+            };
+            let result = capturer.start(&request, ended);
+            match &result {
+                Ok((_, captured)) => eprintln!(
+                    "[share] capturing {} ({}){}",
+                    request.source_id,
+                    request.quality,
+                    if captured.has_audio {
+                        " with audio"
+                    } else {
+                        ""
+                    }
+                ),
+                Err(error) => eprintln!("[share] capture of {} failed: {error}", request.source_id),
+            }
+            let _ = events.send(ShareEvent::Started { token, result });
+        });
+    }
+
     async fn fetch_tickets(&self, room: Value, voice: Value) -> Result<TicketReplies, String> {
         let api = &self.env.tickets;
         let (room, voice) = tokio::join!(api.socket_ticket(room), api.socket_ticket(voice));
@@ -394,7 +521,7 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
 
     /// Both sockets. They live in this call, so a new call never sees an
     /// old call's frames, and dropping them closes them.
-    fn open_sockets(&mut self, room: SocketSpec, voice: SocketSpec, inbox: &mut Inbox) {
+    fn open_sockets(&mut self, room: SocketSpec, voice: SocketSpec, inbox: &mut Inbox<S::Capture>) {
         let env = self.env;
         let config = |label, spec: &SocketSpec, reconnect, ready_op| Config {
             label,
@@ -428,7 +555,11 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
     }
 
     /// Opens media, creates our SFU session and pushes the mic (§3.3b).
-    async fn open_media(&mut self, spec: MediaSpec, inbox: &mut Inbox) -> Result<Published> {
+    async fn open_media(
+        &mut self,
+        spec: MediaSpec,
+        inbox: &mut Inbox<S::Capture>,
+    ) -> Result<Published> {
         let (session, states) = self.env.engine.open(&spec.ice_servers)?;
         inbox.media = Some(states);
         self.session = Some(session.clone());
@@ -471,6 +602,7 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
     /// Closes the sockets, stops the worker, drops remote tracks and closes
     /// the peer connection.
     fn teardown(&mut self) {
+        lock(&self.captures).clear();
         self.room = None;
         self.voice = None;
         self.jobs = None;
@@ -600,6 +732,8 @@ async fn pull_worker<S: MediaSession, G: Signaling>(
 ) {
     // Our camera's SFU track, kept while the camera is off.
     let mut camera: Option<CameraPublished> = None;
+    // Our share's video SFU track (kept between shares) and audio track.
+    let mut share = ShareTracks::default();
     while let Some(job) = jobs.recv().await {
         match job {
             Job::Pull(remote) => {
@@ -641,6 +775,41 @@ async fn pull_worker<S: MediaSession, G: Signaling>(
                     Err(error) => eprintln!("[camera] publish failed: {error}"),
                 }
                 let _ = done.send(Done::Camera(result));
+            }
+            Job::PublishShare {
+                stream_id,
+                encoding,
+                audio,
+            } => {
+                let result = publish_share(
+                    &session,
+                    &sfu,
+                    &session_id,
+                    &stream_id,
+                    &encoding,
+                    audio,
+                    &mut share,
+                )
+                .await
+                .map_err(|error| format!("{error:#}"));
+                match &result {
+                    Ok(p) => eprintln!(
+                        "[share] published video {}{}",
+                        p.video_sfu_track,
+                        p.audio_sfu_track
+                            .as_deref()
+                            .map(|a| format!(", audio {a}"))
+                            .unwrap_or_default()
+                    ),
+                    Err(error) => eprintln!("[share] publish failed: {error}"),
+                }
+                let _ = done.send(Done::Share(result));
+            }
+            Job::UnpublishShare => {
+                session.set_screen_live(false);
+                session.retire_screen_audio();
+                share.audio = None;
+                eprintln!("[share] withdrawn; video parked");
             }
             Job::Close(mids) => match close(&session, &sfu, &session_id, &mids).await {
                 Ok(()) => eprintln!("[voice] closed {} transceiver(s)", mids.len()),
@@ -685,6 +854,75 @@ async fn publish_camera<S: MediaSession, G: Signaling>(
     };
     *kept = Some(published.clone());
     Ok(published)
+}
+
+/// Our share's SFU tracks in the worker.
+#[derive(Default)]
+struct ShareTracks {
+    /// The video track, kept (parked) between shares.
+    video: Option<String>,
+    /// The audio track while the share carries audio.
+    audio: Option<String>,
+}
+
+/// Pushes one local track the session just offered (we offer, a new UUID
+/// track name, the SFU answers).
+async fn push_local<S: MediaSession, G: Signaling>(
+    session: &S,
+    sfu: &G,
+    session_id: &str,
+    offer: crate::engine::LocalOffer,
+    what: &'static str,
+) -> Result<String> {
+    let track_name = uuid::Uuid::new_v4().to_string();
+    let answer = sfu
+        .push(session_id, &offer.sdp, &offer.mid, &track_name)
+        .await?;
+    session.apply_answer(&answer, what).await?;
+    Ok(track_name)
+}
+
+/// Our share on the SFU (PartyTracks `publishStream` under `screen`): the
+/// video resumes the SFU track a previous share kept unless its keepalive
+/// stalled (then a fresh push), with this share's caps; audio is pushed when
+/// the capture carries it, and dropped when a new capture does not.
+async fn publish_share<S: MediaSession, G: Signaling>(
+    session: &S,
+    sfu: &G,
+    session_id: &str,
+    stream_id: &str,
+    encoding: &ShareEncoding,
+    audio: bool,
+    tracks: &mut ShareTracks,
+) -> Result<SharePublished> {
+    let video = match tracks.video.clone().filter(|_| !session.screen_stale()) {
+        Some(kept) => {
+            session.set_screen_encoding(encoding);
+            kept
+        }
+        None => {
+            let offer = session.publish_screen(stream_id, encoding).await?;
+            let name = push_local(session, sfu, session_id, offer, "share answer").await?;
+            tracks.video = Some(name.clone());
+            name
+        }
+    };
+    match (audio, tracks.audio.is_some()) {
+        (true, false) => {
+            let offer = session.publish_screen_audio(stream_id).await?;
+            let name = push_local(session, sfu, session_id, offer, "share audio answer").await?;
+            tracks.audio = Some(name);
+        }
+        (false, true) => {
+            session.retire_screen_audio();
+            tracks.audio = None;
+        }
+        _ => {}
+    }
+    Ok(SharePublished {
+        video_sfu_track: video,
+        audio_sfu_track: tracks.audio.clone(),
+    })
 }
 
 /// Stops receive transceivers and tells the SFU (§3.3d: we offer).
@@ -841,6 +1079,7 @@ mod tests {
         let env = CallEnv {
             engine: engine.clone(),
             tickets: StuckTickets,
+            capturer: crate::share::NoCapture,
             http: reqwest::Client::new(),
             api_base: "https://api.invalid".into(),
             origin: "https://api.invalid".into(),

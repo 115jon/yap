@@ -56,6 +56,10 @@ pub mod qobject {
         #[qproperty(QString, camera_quality, cxx_name = "cameraQuality")]
         /// The camera key opens the Camera dialog first.
         #[qproperty(bool, always_preview_video, cxx_name = "alwaysPreviewVideo")]
+        /// The share picker's last quality (`720p30` ... `4k60`) and its
+        /// "Include audio".
+        #[qproperty(QString, screen_share_quality, cxx_name = "screenShareQuality")]
+        #[qproperty(bool, screen_share_with_audio, cxx_name = "screenShareWithAudio")]
         type Audio = super::AudioRust;
 
         /// Loads the settings of this user (empty: signed out).
@@ -125,6 +129,12 @@ pub mod qobject {
         #[cxx_name = "changeAlwaysPreviewVideo"]
         fn set_always_preview_video_from_ui(self: Pin<&mut Audio>, on: bool);
 
+        /// Keeps the picker's choice for the next share
+        /// (`setScreenShareDefaults`).
+        #[qinvokable]
+        #[cxx_name = "changeScreenShareDefaults"]
+        fn set_screen_share_defaults(self: Pin<&mut Audio>, quality: &QString, with_audio: bool);
+
         /// Copies the call's latest mic level into `level`.
         #[qinvokable]
         fn sample(self: Pin<&mut Audio>);
@@ -178,6 +188,8 @@ pub struct AudioRust {
     camera_label: QString,
     camera_quality: QString,
     always_preview_video: bool,
+    screen_share_quality: QString,
+    screen_share_with_audio: bool,
 
     dir: Option<PathBuf>,
     user_id: String,
@@ -269,6 +281,10 @@ impl qobject::Audio {
             .set_camera_quality(QString::from(s.camera_quality.as_str()));
         self.as_mut()
             .set_always_preview_video(s.always_preview_video);
+        self.as_mut()
+            .set_screen_share_quality(QString::from(s.screen_share_quality.as_str()));
+        self.as_mut()
+            .set_screen_share_with_audio(s.screen_share_with_audio);
         self.show_devices();
     }
 
@@ -486,6 +502,16 @@ impl qobject::Audio {
 
     pub fn set_always_preview_video_from_ui(self: Pin<&mut Self>, on: bool) {
         self.edit(|s| s.always_preview_video = on);
+    }
+
+    pub fn set_screen_share_defaults(self: Pin<&mut Self>, quality: &QString, with_audio: bool) {
+        let quality = quality.to_string();
+        if voice::SHARE_QUALITIES.contains(&quality.as_str()) {
+            self.edit(|s| {
+                s.screen_share_quality = quality;
+                s.screen_share_with_audio = with_audio;
+            });
+        }
     }
 
     pub fn sample(mut self: Pin<&mut Self>) {

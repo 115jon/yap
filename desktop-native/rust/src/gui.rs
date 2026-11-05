@@ -350,6 +350,16 @@ fn set_voice(mut voice: Pin<&mut Voice>, view: &VoiceView) {
     voice.as_mut().set_camera_wanted(view.camera_wanted);
     voice.as_mut().set_camera_on(view.camera);
     voice.as_mut().set_camera_error(q(&view.camera_error));
+    voice.as_mut().set_share_pending(view.share_pending);
+    voice.as_mut().set_share_source_id(q(&view.share.source_id));
+    voice
+        .as_mut()
+        .set_share_source_name(q(&view.share.source_name));
+    voice.as_mut().set_share_window(view.share.window);
+    voice.as_mut().set_share_quality(q(&view.share.quality));
+    voice.as_mut().set_share_audio(view.share.audio);
+    voice.as_mut().set_share_error(q(&view.share_error));
+    voice.as_mut().set_sharing(view.sharing);
     voice.set_channel_id(q(&view.channel_id));
 }
 

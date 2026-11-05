@@ -10,10 +10,12 @@ use std::sync::OnceLock;
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::watch;
+use yap_core::VoiceShare;
 use yap_core::{config, Api, ApiError, VoiceCommand, VoiceEvents, VoiceMember, VoiceUpdate};
 use yap_voice::{
     run_call, ApiFailure, CallEnv, CallTarget, LibwebrtcEngine, Notice, Playback, Processing,
-    Sensitivity, TicketApi, UserCommand, VideoIntent,
+    Sensitivity, ShareEnd, ShareInfo, ShareNotice, ShareRequest, SourceKind, TicketApi,
+    UserCommand, VideoIntent,
 };
 
 pub use yap_core::VoiceTarget as Target;
@@ -106,6 +108,22 @@ impl yap_voice::Commands for Commands {
                             UserCommand::SetWatched(watched.into_iter().collect())
                         }
                         VoiceCommand::SetCamera(on) => UserCommand::SetCamera(on),
+                        VoiceCommand::StartShare(share) => UserCommand::StartShare(ShareRequest {
+                            source_id: share.source_id,
+                            source_name: share.source_name,
+                            kind: if share.window {
+                                SourceKind::Window
+                            } else {
+                                SourceKind::Monitor
+                            },
+                            quality: share.quality,
+                            audio: share.audio,
+                        }),
+                        VoiceCommand::StopShare => UserCommand::StopShare,
+                        VoiceCommand::SetShareAudio(on) => UserCommand::SetShareAudio(on),
+                        VoiceCommand::SetShareQuality(quality) => {
+                            UserCommand::SetShareQuality(quality)
+                        }
                         VoiceCommand::Leave => UserCommand::Leave,
                     });
                 }
@@ -117,6 +135,40 @@ impl yap_voice::Commands for Commands {
                     let audio = self.audio.borrow_and_update().clone();
                     self.queue(&audio);
                 }
+            }
+        }
+    }
+}
+
+/// A live share as the store keeps it.
+fn store_share(info: ShareInfo) -> VoiceShare {
+    VoiceShare {
+        source_id: info.request.source_id,
+        source_name: info.request.source_name,
+        window: info.request.kind == SourceKind::Window,
+        quality: info.request.quality,
+        audio: info.audio,
+    }
+}
+
+/// The share's notices as store updates (the stop sound only for a live
+/// share the user stopped, as the web plays it).
+fn share_update(notice: ShareNotice) -> VoiceUpdate {
+    match notice {
+        ShareNotice::Started(info) => VoiceUpdate::ShareStarted(store_share(info)),
+        ShareNotice::Updated(info) => VoiceUpdate::ShareUpdated(store_share(info)),
+        ShareNotice::Ended {
+            reason,
+            announced,
+            error,
+        } => {
+            eprintln!(
+                "[share] ended ({reason}{})",
+                if announced { "" } else { ", unannounced" }
+            );
+            VoiceUpdate::ShareEnded {
+                stop_sound: announced && reason == ShareEnd::Stopped,
+                error,
             }
         }
     }
@@ -138,6 +190,7 @@ pub async fn run(
     let env = CallEnv {
         engine: LibwebrtcEngine,
         tickets: Tickets(api),
+        capturer: yap_capture::Capturer,
         http,
         api_base: cfg.api_base.clone(),
         origin: cfg.gateway_origin.clone(),
@@ -155,6 +208,7 @@ pub async fn run(
         Notice::Rejoined => events.send(VoiceUpdate::Rejoined),
         Notice::MicLevel(level) => crate::audio::set_live_level(Some(level)),
         Notice::Camera { on, error } => events.send(VoiceUpdate::Camera { on, error }),
+        Notice::Share(notice) => events.send(share_update(notice)),
         Notice::Roster(members) => events.send(VoiceUpdate::Roster(
             members
                 .into_iter()

@@ -10,6 +10,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::audio::Processing;
 use crate::machine::MediaState;
+use crate::share::ShareEncoding;
 use crate::wire::IceServer;
 
 mod fake;
@@ -17,6 +18,8 @@ mod fake;
 mod webrtc;
 
 pub use fake::{FakeEngine, FakeOp, FakeSession};
+#[cfg(feature = "libwebrtc")]
+pub(crate) use webrtc::installed_video_output as video_output;
 #[cfg(feature = "libwebrtc")]
 pub use webrtc::{LibwebrtcEngine, LibwebrtcSession};
 
@@ -114,8 +117,8 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
     /// Adds our camera as a send-only VP8 transceiver in `stream_id` with
     /// the camera simulcast encodings ([`crate::CAMERA_SIMULCAST`]), parked
     /// on the keepalive, and sets and returns the local offer. A camera
-    /// pushed before is detached first (its transceiver stays, sending
-    /// nothing, as PartyTracks' `republishTrack` leaves it).
+    /// pushed before is retired first (its transceiver stays, fed nothing,
+    /// so it sends nothing, as PartyTracks' `republishTrack` leaves it).
     fn publish_camera(
         &self,
         stream_id: &str,
@@ -131,6 +134,41 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
     /// The parked camera's keepalive stalled long enough that the SFU may
     /// have dropped its track: it must be pushed afresh.
     fn camera_stale(&self) -> bool;
+
+    /// Adds our share as a send-only VP8 transceiver in `stream_id` with
+    /// one encoding capped as `encoding` says, parked on the keepalive, and
+    /// sets and returns the local offer. A share pushed before is retired
+    /// first, as the camera's is.
+    fn publish_screen(
+        &self,
+        stream_id: &str,
+        encoding: &ShareEncoding,
+    ) -> impl Future<Output = Result<LocalOffer, MediaError>> + Send;
+
+    /// The share's caps and content hint, in place (`setParameters`).
+    fn set_screen_encoding(&self, encoding: &ShareEncoding);
+
+    /// Captured share frames (`true`) or the keepalive's black frames.
+    fn set_screen_live(&self, live: bool);
+
+    /// The parked share's keepalive stalled long enough that the SFU may
+    /// have dropped its track: it must be pushed afresh.
+    fn screen_stale(&self) -> bool;
+
+    /// Adds the share's audio (48 kHz stereo, fed by
+    /// [`crate::push_screen_audio`]) as a send-only Opus transceiver in
+    /// `stream_id`, and sets and returns the local offer.
+    fn publish_screen_audio(
+        &self,
+        stream_id: &str,
+    ) -> impl Future<Output = Result<LocalOffer, MediaError>> + Send;
+
+    /// Retires the share's audio: nothing feeds it any more and its
+    /// transceiver stays, sending nothing.
+    fn retire_screen_audio(&self);
+
+    /// The share audio track on or off (in place: off sends silence).
+    fn set_screen_audio_enabled(&self, enabled: bool);
 
     fn set_mic_enabled(&self, enabled: bool);
 
@@ -150,7 +188,8 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
     /// before any conversion). Kept for a track that has not arrived yet.
     fn set_video_sink(&self, mid: &str, key: Option<&str>);
 
-    /// Stops the mic and the camera (teardown, before the sockets close).
+    /// Stops the mic, the camera and the share (teardown, before the
+    /// sockets close).
     fn stop_local(&self);
 
     /// The mic's cumulative `(totalAudioEnergy, totalSamplesDuration)`
