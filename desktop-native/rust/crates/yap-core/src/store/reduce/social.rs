@@ -109,7 +109,7 @@ impl State {
 
     /// The voice channel you are in: the call's, else where the gateway
     /// lists you (MemberList.tsx `findCallChannelId`).
-    fn call_channel(&self) -> Option<&str> {
+    pub(super) fn call_channel(&self) -> Option<&str> {
         if let Some(call) = &self.voice {
             return Some(&call.channel_id);
         }
@@ -412,6 +412,7 @@ impl State {
             status,
             custom_status,
         } = update;
+        self.presence.reported.insert(user_id.clone());
         self.apply_presence(&user_id, &status, custom_status.clone());
         // Our own status changed on another device: the account row follows.
         let me = self

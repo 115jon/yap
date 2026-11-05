@@ -76,13 +76,22 @@ fn request_for(fx: &[Effect], wanted: &ApiRequest) -> RequestId {
         .unwrap_or_else(|| panic!("no {wanted:?} in {fx:#?}"))
 }
 
+/// The UI model updates, without the shell's (toasts, sounds, the badge),
+/// which `tests/shell.rs` covers.
 fn views(fx: &[Effect]) -> Vec<&ViewUpdate> {
     fx.iter()
         .filter_map(|e| match e {
-            Effect::View(update) => Some(update),
+            Effect::View(update) if !is_shell(update) => Some(update),
             _ => None,
         })
         .collect()
+}
+
+fn is_shell(update: &ViewUpdate) -> bool {
+    matches!(
+        update,
+        ViewUpdate::Toast(_) | ViewUpdate::Sound(_) | ViewUpdate::Badge(_)
+    )
 }
 
 fn message_diffs(fx: &[Effect]) -> Vec<&ViewDiff<MessageRow>> {
@@ -592,7 +601,11 @@ fn message_create_in_another_channel_should_not_touch_the_list() {
     let data = message_in(SECOND_TEXT, "msg_elsewhere");
     let create = Dispatch::decode("MESSAGE_CREATE", data).expect("decodes");
     let fx = client.gateway(GatewayEvent::Dispatch(create));
-    assert!(fx.is_empty(), "{fx:#?}");
+    assert!(
+        fx.iter()
+            .all(|e| matches!(e, Effect::View(update) if is_shell(update))),
+        "{fx:#?}"
+    );
     assert_eq!(client.message_count(), 2);
 }
 

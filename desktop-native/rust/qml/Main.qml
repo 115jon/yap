@@ -29,6 +29,37 @@ ApplicationWindow {
 
     Component.onCompleted: Session.start()
 
+    // Close to tray (the desktop app's default), else quit.
+    onClosing: close => {
+        if (Desktop.closeToTray) {
+            close.accepted = false
+            DesktopShell.hideToTray()
+        } else {
+            DesktopShell.quit()
+        }
+    }
+
+    // The tray badge (cleared by Desktop while notifications are off).
+    Binding { target: DesktopShell; property: "badgeCount"; value: Desktop.badgeCount }
+    Binding { target: DesktopShell; property: "badgeDot"; value: Desktop.badgeDot }
+    Binding { target: DesktopShell; property: "badgeTooltip"; value: Desktop.badgeTooltip }
+
+    Connections {
+        target: Desktop
+        function onToast(title, summary, body, channelId, serverId) {
+            DesktopShell.showToast(title, summary, body, channelId, serverId)
+        }
+        function onOpenOnStartupChanged() {
+            DesktopShell.setAutostart(Desktop.openOnStartup)
+        }
+    }
+    Connections {
+        target: DesktopShell
+        function onToastActivated(channelId, serverId) {
+            Desktop.openChannel(channelId, serverId)
+        }
+    }
+
     Binding {
         target: WindowChrome
         property: "dark"

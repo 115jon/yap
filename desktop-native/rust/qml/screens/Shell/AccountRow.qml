@@ -143,10 +143,58 @@ Rectangle {
             onClicked: Voice.requestDeafen(!Voice.deafened)
         }
         DeviceCaret { label: qsTr("Output device") }
-        // Settings: the Studio settings shell comes later.
+        // Settings: the Studio settings shell comes later; until then the
+        // key opens the desktop switches.
         IconKey {
+            id: settingsKey
             iconName: "settings"
-            tip: qsTr("User settings")
+            tone: settingsMenu.visible ? "toggled" : "ghost"
+            tip: settingsMenu.visible ? "" : qsTr("User settings")
+            onClicked: settingsMenu.visible
+                ? settingsMenu.close()
+                : settingsMenu.popup(settingsKey, settingsKey.width - settingsMenu.implicitWidth, -settingsMenu.implicitHeight - 4)
+        }
+    }
+
+    // DesktopPanel.tsx (startup and closing) and NotificationsPanel.tsx
+    // (desktop notifications, sound effects), in their labels.
+    MenuPanel {
+        id: settingsMenu
+        implicitWidth: 248
+        MenuRow {
+            text: qsTr("Open on startup")
+            glyph: "power"
+            switchable: true
+            on: Desktop.openOnStartup
+            onTriggered: Desktop.setSetting("openOnStartup", !Desktop.openOnStartup)
+        }
+        MenuRow {
+            text: qsTr("Start minimized")
+            glyph: "minimize"
+            switchable: true
+            on: Desktop.startMinimized
+            onTriggered: Desktop.setSetting("startMinimized", !Desktop.startMinimized)
+        }
+        MenuRow {
+            text: qsTr("Close to tray")
+            glyph: "window"
+            switchable: true
+            on: Desktop.closeToTray
+            onTriggered: Desktop.setSetting("closeToTray", !Desktop.closeToTray)
+        }
+        MenuRow {
+            text: qsTr("Desktop notifications")
+            glyph: "bell"
+            switchable: true
+            on: Desktop.notifications
+            onTriggered: Desktop.setSetting("notifications", !Desktop.notifications)
+        }
+        MenuRow {
+            text: qsTr("Sound effects")
+            glyph: "speaker"
+            switchable: true
+            on: Desktop.sounds
+            onTriggered: Desktop.setSetting("sounds", !Desktop.sounds)
         }
     }
 

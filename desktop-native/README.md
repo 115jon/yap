@@ -32,11 +32,26 @@ the decisions.
   speaking LEDs and mute/deafen glyphs.
 - The account row, the connection strip, and messages through the web's
   Markdown grammar (`yap-core` `markdown.rs`) as Qt rich text.
+- The desktop shell, as the desktop app does it (`cpp/desktopshell.*`,
+  `yap-core` `shell.rs`): one instance (a second launch shows the first),
+  the tray icon with the unread badge, "Show" and "Quit", close to tray,
+  Windows toasts for messages, mentions, replies and DMs (click opens the
+  channel), the taskbar flash, the saved window rect, start minimized and
+  open on startup, the web's UI sounds (`synth.rs`, played through
+  `waveOut`), and a rotating log file. The switches sit in the account
+  row's settings menu until a settings screen exists.
+
+The shell has its own identity, apart from the installed Yap app: AUMID
+and single-instance name `com.115jon.yap.native` (registered under
+`HKCU\Software\Classes\AppUserModelId` only), Run value `YapNative` (off
+unless "Open on startup" is on), data and logs under
+`%LOCALAPPDATA%\YapNative`, and no `yap://` registration.
 
 ## Not yet
 
-Video and screen share, device picker, attachments preview, embeds, reactions, DMs, jumping to
-messages that are not loaded (`around=`), OS notifications, tray, single instance and auto-update.
+Video and screen share, device picker, attachments preview, embeds, reactions, jumping to
+messages that are not loaded (`around=`), `yap://` deep links, toast buttons (reply, mark read)
+and avatars, call rings, the taskbar thumbnail toolbar and auto-update.
 
 ## Build (Windows)
 
@@ -107,9 +122,14 @@ CMakeLists.txt        exe, static Qt plugin imports, cxx-qt crate import
 cpp/main.cpp          QGuiApplication, fonts, icon provider, theme, startup timing
 cpp/windowchrome.*    custom title bar: caption removal, hit testing, snap layouts
 cpp/iconprovider.*    Phosphor icons, tinted and cached per size and colour
+cpp/desktopshell.*    one instance, tray and badge, toasts, Run key, window rect
+cpp/toast_win.*       WinRT toasts (WRL, no Qt headers)
+cpp/logfile.*         stderr tee into %LOCALAPPDATA%\YapNative\logs, rotated
 assets/, tools/       generated fonts, icons and brand SVGs, and their scripts
 rust/src/bridge.rs    YapClient QObject (properties, invokables, signals)
 rust/src/client/      core: config, api (REST), auth (device flow), gateway,
                       socket (room/voice sockets), sfu (partytracks), voice (calls)
+rust/src/desktop.rs   Desktop QObject: shell settings, badge, toasts, window rect
+rust/src/sound.rs     UI sounds through waveOut
 rust/qml/             UI: Main, SignInView, ServerRail, ChannelSidebar, ChatView, ...
 ```

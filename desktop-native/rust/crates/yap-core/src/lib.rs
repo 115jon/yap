@@ -13,7 +13,9 @@ pub mod config;
 pub mod fixture;
 pub mod markdown;
 pub mod runtime;
+pub mod shell;
 pub mod store;
+pub mod synth;
 
 pub use api::{Api, ApiError, Token};
 pub use runtime::{

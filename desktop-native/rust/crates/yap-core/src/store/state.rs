@@ -1,6 +1,6 @@
 //! The typed client state. Only [`super::reduce`] mutates it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use yap_cache::Snapshot;
 use yap_protocol::rest::{Category, Channel, ChannelType, ChannelsResponse, Message, MessagePatch};
@@ -13,6 +13,7 @@ use super::view::{
 };
 use super::{CallId, Occupant, RequestId, SessionId, SignInId, VoiceMember};
 use crate::api::{ApiError, Token};
+use crate::shell::{BadgeView, Toasted};
 
 /// Which top-level screen the UI shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -270,6 +271,8 @@ pub(super) struct Projection {
     pub dm_unread: i64,
     pub profile: ProfileView,
     pub dm: DmView,
+    /// The tray badge, as last emitted.
+    pub badge: BadgeView,
 }
 
 /// The request id each slot is waiting for. A result for any other id is stale.
@@ -350,6 +353,8 @@ pub struct Presence {
     pub live: HashMap<String, &'static str>,
     /// User id → the custom status a live update carried (`None`: cleared).
     pub custom: HashMap<String, Option<String>>,
+    /// Users a `PRESENCE_UPDATE` named since sign-in (offline ones too).
+    pub reported: HashSet<String>,
 }
 
 /// A status as the UI shows it: `online`, `idle`, `dnd`, or `None` for
@@ -374,6 +379,18 @@ impl Presence {
             return "offline";
         }
         self.live.get(user_id).copied().unwrap_or("offline")
+    }
+
+    /// A DM recipient's status (DMListPanel.tsx shows `recipient.status`):
+    /// before any list, the last update about them, else the status
+    /// `/api/dms` sent. At Home with no conversation open the server sends
+    /// no list (it answers `ChannelSubscribe` only), so this is what the web
+    /// shows there too. Once a list arrived, the same as [`Self::of`].
+    pub fn of_recipient(&self, user_id: &str, rest: Option<&str>) -> &'static str {
+        if self.listed || self.reported.contains(user_id) {
+            return self.live.get(user_id).copied().unwrap_or("offline");
+        }
+        live_status(rest).unwrap_or("offline")
     }
 
     /// The live custom status when an update carried one, else `fallback`.
@@ -472,6 +489,10 @@ pub struct State {
     pub(super) voice_view: Option<String>,
     /// The server whose channel tree is shown (the last one that loaded).
     pub(super) tree_server: Option<String>,
+    /// A channel to open once its server's tree answers (a toast click).
+    pub(super) wanted_channel: Option<String>,
+    /// Messages that were toasted (the notification for one does not toast).
+    pub(super) toasted: Toasted,
     pub(super) view: Projection,
     pub(super) pending: Pending,
     pub(super) boot: Option<Boot>,
@@ -522,6 +543,8 @@ impl State {
             voice_channels: HashMap::new(),
             voice_view: None,
             tree_server: None,
+            wanted_channel: None,
+            toasted: Toasted::default(),
             view: Projection::default(),
             pending: Pending::default(),
             boot: None,

@@ -33,8 +33,12 @@ cxx_qt_import_qml_module(yap_native_qml
 
 qt_add_executable(YapNative WIN32
   cpp/main.cpp
+  cpp/app.rc
+  cpp/desktopshell.cpp cpp/desktopshell.h
   cpp/ditherprovider.cpp cpp/ditherprovider.h
   cpp/iconprovider.cpp cpp/iconprovider.h
+  cpp/logfile.cpp cpp/logfile.h
+  cpp/toast_win.cpp cpp/toast_win.h
   cpp/windowchrome.cpp cpp/windowchrome.h)
 target_link_libraries(YapNative PRIVATE
   yap_native_qml
@@ -55,15 +59,17 @@ list(TRANSFORM YAP_ICON_FILES PREPEND assets/ OUTPUT_VARIABLE YAP_ICON_PATHS)
 qt_add_resources(YapNative yap_assets
   PREFIX /
   BASE assets
-  FILES ${YAP_FONT_PATHS} ${YAP_SVG_PATHS} ${YAP_ICON_PATHS})
+  FILES ${YAP_FONT_PATHS} ${YAP_SVG_PATHS} ${YAP_ICON_PATHS} assets/app/yap-256.png)
 # Avatars and server icons come as PNG, JPEG, WebP or GIF over HTTPS.
 qt_import_plugins(YapNative INCLUDE
   Qt::QSvgPlugin Qt::QGifPlugin Qt::QJpegPlugin Qt::QWebpPlugin
   Qt::QSchannelBackendPlugin)
 if(WIN32)
-  # dwmapi for the title bar; the rest is what libwebrtc (static) needs.
+  # dwmapi for the title bar; shell32, advapi32 and runtimeobject for the
+  # tray, the Run key and WinRT toasts; the rest is what libwebrtc (static)
+  # needs.
   target_link_libraries(YapNative PRIVATE
-    dwmapi msdmo wmcodecdspuuid dmoguids crypt32 iphlpapi ole32 secur32
+    dwmapi shell32 user32 advapi32 runtimeobject msdmo wmcodecdspuuid dmoguids crypt32 iphlpapi ole32 secur32
     winmm ws2_32 strmiids d3d11 gdi32 dxgi shcore userenv dbghelp)
 endif()
 

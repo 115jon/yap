@@ -60,6 +60,6 @@ fn main() {
         QmlFile::from("qml/screens/Shell/ShellState.qml").singleton(true),
     ]);
     CxxQtBuilder::new_qml_module(QmlModule::new("com.yap.native").qml_files(files))
-        .files(["src/bridge.rs", "src/models.rs"])
+        .files(["src/bridge.rs", "src/desktop.rs", "src/models.rs"])
         .build();
 }

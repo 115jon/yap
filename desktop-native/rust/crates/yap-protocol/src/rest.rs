@@ -302,6 +302,28 @@ pub struct Notification {
     pub message_id: Option<String>,
     #[serde(default)]
     pub is_read: bool,
+    /// Who mentioned, replied or wrote (the toast's title).
+    #[serde(default)]
+    pub from_user: Option<NotificationUser>,
+    /// The message text (the toast's body).
+    #[serde(default)]
+    pub content: Option<String>,
+    /// Denormalized for display (the toast's summary).
+    #[serde(default)]
+    pub server_name: Option<String>,
+    #[serde(default)]
+    pub channel_name: Option<String>,
+}
+
+/// The author a notification carries.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct NotificationUser {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
 }
 
 impl Notification {

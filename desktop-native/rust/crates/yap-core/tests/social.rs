@@ -823,16 +823,40 @@ fn a_post_in_another_channel_should_not_clear_the_typer() {
     assert!(client.member(ALICE).typing);
 }
 
-#[test]
-fn nobody_should_show_online_before_the_presence_list() {
+/// Signed in again, at Home, before any `PRESENCE_LIST` (the server sends
+/// one only on `ChannelSubscribe`).
+fn home_without_a_presence_list(status: &str) -> Client {
     let mut client = Client::online();
     client.command(Command::SignOut);
     client.command(Command::UseToken("tok_fixture".into()));
     client.respond(&ApiRequest::Me, fixture("user-me.json"));
     client.respond(
         &ApiRequest::Dms,
-        json!([dm(DM, user(ALICE, "alice", Some("Alice"), "online"))]),
+        json!([dm(DM, user(ALICE, "alice", Some("Alice"), status))]),
     );
+    client
+}
+
+#[test]
+fn dm_presence_should_show_the_rest_status_before_the_presence_list() {
+    let client = home_without_a_presence_list("dnd");
+    assert_eq!(client.dms[0].presence, "dnd");
+}
+
+#[test]
+fn dm_presence_should_follow_updates_before_the_presence_list() {
+    let mut client = home_without_a_presence_list("online");
+    client.dispatch(
+        "PRESENCE_UPDATE",
+        json!({ "user_id": ALICE, "status": "offline" }),
+    );
+    assert_eq!(client.dms[0].presence, "offline");
+}
+
+#[test]
+fn dm_presence_should_follow_the_presence_list_once_it_arrives() {
+    let mut client = home_without_a_presence_list("online");
+    client.dispatch("PRESENCE_LIST", json!({ "users": [] }));
     assert_eq!(client.dms[0].presence, "offline");
 }
 

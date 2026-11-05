@@ -5,6 +5,7 @@
 #include <QtCore/QElapsedTimer>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QIcon>
 #include <QtGui/QWindow>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkDiskCache>
@@ -15,8 +16,10 @@
 
 #include <cstdio>
 
+#include "desktopshell.h"
 #include "ditherprovider.h"
 #include "iconprovider.h"
+#include "logfile.h"
 #include "windowchrome.h"
 
 #ifdef Q_OS_WIN
@@ -73,14 +76,41 @@ static bool reducedMotion()
 #endif
 }
 
+// Qt's messages go to stderr (and so into the log file) whatever the
+// subsystem; Windows would otherwise send them to the debugger only.
+static void qtMessage(QtMsgType type, const QMessageLogContext&,
+                      const QString& message)
+{
+  static const char* const kinds[] = { "debug", "warning", "critical",
+                                       "fatal", "info" };
+  const int kind = int(type);
+  std::fprintf(stderr, "[qt] %s: %s\n",
+               kind >= 0 && kind < 5 ? kinds[kind] : "message",
+               qPrintable(message));
+}
+
 int main(int argc, char* argv[])
 {
   QElapsedTimer startup;
   startup.start();
+  DesktopShell::setProcessIdentity();
+  // Only the first instance owns the log file; a later one only hands over.
+  const bool first = DesktopShell::takeInstanceLock();
+  if (first)
+    logfile::start();
+  qInstallMessageHandler(qtMessage);
 
-  QGuiApplication::setApplicationName(QStringLiteral("Yap Native"));
-  QGuiApplication::setOrganizationName(QStringLiteral("Yap"));
+  // No organization: Qt's own caches (QML, pipeline) then go to
+  // %LOCALAPPDATA%\YapNative\cache. With an organization "Yap" they went to
+  // %LOCALAPPDATA%\Yap\..., the installed app's folder.
+  QGuiApplication::setApplicationName(QStringLiteral("YapNative"));
   QGuiApplication app(argc, argv);
+  // A second launch shows the first instance's window and exits.
+  if (!first) {
+    DesktopShell::showFirstInstance();
+    return 0;
+  }
+  QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/app/yap-256.png")));
   QQuickStyle::setStyle(QStringLiteral("Basic"));
   // Glyph-cache text instead of distance fields: crisper at 11-15 px and
   // closer to Chromium's DirectWrite output. YAP_TEXT=qt for the other.
@@ -91,6 +121,8 @@ int main(int argc, char* argv[])
   auto* chrome = new WindowChrome(&app);
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "WindowChrome", chrome);
   app.installNativeEventFilter(chrome);
+  auto* shell = new DesktopShell(&app);
+  qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "DesktopShell", shell);
 
   QQmlApplicationEngine engine;
   // Not owned by the engine; it outlives it here.
@@ -120,9 +152,11 @@ int main(int argc, char* argv[])
   if (auto* window =
         qobject_cast<QQuickWindow*>(engine.rootObjects().first())) {
     // Main.qml leaves the window hidden, so the first paint is already
-    // captionless.
+    // captionless. The shell restores the saved rect and shows it (or
+    // keeps it in the tray on an autostart launch with start minimized).
     chrome->attach(window);
-    window->show();
+    shell->attach(window, engine.singletonInstance<QObject*>(
+                            "com.yap.native", "Desktop"));
     // First frame on screen: printed for the cold-start measurement.
     QObject::connect(
       window, &QQuickWindow::frameSwapped, window,

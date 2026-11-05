@@ -12,6 +12,7 @@
 //! dedicated thread and coalesces writes (write-behind).
 
 mod db;
+pub mod settings;
 mod writer;
 
 use std::path::PathBuf;

@@ -28,6 +28,13 @@ pub enum Command {
     SelectChannel(String),
     /// Opens the DM with a user, creating it when there is none.
     OpenDm(String),
+    /// Opens a channel or DM by id from anywhere, switching servers first
+    /// when it is in another one (a toast click). `server_id` is the toast's
+    /// hint, used when no loaded tree has the channel.
+    OpenChannel {
+        channel_id: String,
+        server_id: Option<String>,
+    },
     /// The chosen status (`online`, `idle`, `dnd`, `offline` = invisible)
     /// and custom status (`None` clears it).
     SetStatus {
@@ -143,7 +150,7 @@ pub enum Dispatch {
     MessageDelete(MessageDeleteEvent),
     TypingStart(TypingStartEvent),
     ReadStateUpdate(ReadState),
-    NotificationCreate(Notification),
+    NotificationCreate(Box<Notification>),
     NotificationsRead(NotificationsRead),
     /// Every notification was cleared.
     NotificationsClear,
@@ -180,7 +187,9 @@ impl Dispatch {
             "MESSAGE_DELETE" => Self::MessageDelete(serde_json::from_value(data).ok()?),
             "TYPING_START" => Self::TypingStart(serde_json::from_value(data).ok()?),
             "READ_STATE_UPDATE" => Self::ReadStateUpdate(serde_json::from_value(data).ok()?),
-            "NOTIFICATION_CREATE" => Self::NotificationCreate(serde_json::from_value(data).ok()?),
+            "NOTIFICATION_CREATE" => {
+                Self::NotificationCreate(Box::new(serde_json::from_value(data).ok()?))
+            }
             "NOTIFICATIONS_READ" => Self::NotificationsRead(serde_json::from_value(data).ok()?),
             "NOTIFICATIONS_CLEAR" => Self::NotificationsClear,
             "USER_SERVERS_UPDATE" | "GUILD_DELETE" | "GUILD_UPDATE" => Self::ServersChanged,

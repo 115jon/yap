@@ -16,13 +16,14 @@ use super::state::{
 };
 use super::time::{is_after, parse_rfc3339, Stamp};
 use super::view::{self, ChannelTreeRow, MessageRow, Row, RowContext, ViewDiff, ViewUpdate};
-use super::view::{MeView, Seat, UnreadView, VoicePanelView, VoiceView};
+use super::view::{MeView, MemberKind, MemberRole, Seat, UnreadView, VoicePanelView, VoiceView};
 use super::{
     ApiRequest, ApiResponse, CacheWrite, CallId, Command, Dispatch, Effect, GatewayEvent, Input,
     Occupant, Page, RequestId, SessionId, SignInEvent, SignInId, Snapshot, VoiceCommand,
     VoiceTarget, VoiceUpdate,
 };
 use crate::api::{ApiError, Token};
+use crate::shell::{self, Sound};
 use yap_protocol::payload::{ClientVoiceState, VoiceChannelMember};
 
 const SESSION_ENDED: &str = "Your session ended. Sign in again.";
@@ -323,6 +324,66 @@ impl State {
         self.sync_servers(fx);
         self.sync_tree(fx);
         self.sync_dms(fx);
+        self.sync_tray_badge(fx);
+    }
+
+    /// The tray badge (desktop-notifications.ts): unread notifications,
+    /// else a dot while any DM or server channel has unread messages.
+    fn sync_tray_badge(&mut self, fx: &mut Effects) {
+        let notifications = self.notifications.iter().filter(|n| !n.is_read).count();
+        let any_unread = self.last_message_at.keys().any(|id| self.has_unread(id));
+        let badge = shell::badge(notifications, any_unread);
+        if badge != self.view.badge {
+            self.view.badge = badge.clone();
+            fx.view(ViewUpdate::Badge(badge));
+        }
+    }
+
+    /// A server channel's name and its server's name, from any loaded tree.
+    fn channel_and_server(&self, id: &str) -> Option<(&str, Option<&str>)> {
+        self.channels.iter().find_map(|(server_id, list)| {
+            let channel = list.get(id)?;
+            let server = self
+                .servers
+                .iter()
+                .find(|s| s.id == *server_id)
+                .map(|s| s.name.as_str());
+            Some((channel.name.as_str(), server))
+        })
+    }
+
+    /// The server whose tree holds a channel.
+    fn server_of(&self, channel_id: &str) -> Option<String> {
+        self.channels
+            .iter()
+            .find(|(_, list)| list.get(channel_id).is_some())
+            .map(|(server_id, _)| server_id.clone())
+    }
+
+    /// A toast click: the DM, or the channel in its server (switching
+    /// servers first when it is another one).
+    fn open_channel(&mut self, fx: &mut Effects, id: &str, hint: Option<String>) {
+        if self.signed_in().is_none() || id.is_empty() {
+            return;
+        }
+        if self.dm(id).is_some() {
+            return self.select_dm(fx, id);
+        }
+        let hint = hint
+            .filter(|s| !s.is_empty())
+            .filter(|s| self.servers.iter().any(|known| known.id == *s));
+        match self.server_of(id).or(hint) {
+            Some(server)
+                if !self.home && self.active_server.as_deref() == Some(server.as_str()) =>
+            {
+                self.select_channel(fx, id);
+            }
+            Some(server) => {
+                self.wanted_channel = Some(id.to_owned());
+                self.select_server(fx, server);
+            }
+            None => {}
+        }
     }
 
     /// The voice channel the roster model shows: the open voice view, else
@@ -406,7 +467,42 @@ impl State {
         }
         self.sync_roster(fx);
         self.sync_tree(fx);
-        self.sync_members(fx);
+        self.sync_member_call(fx);
+    }
+
+    /// The call changed (who is in it, who speaks, mute): only the member
+    /// rows whose LED or in-call mark changed are updated. Neither moves a
+    /// row, so the list is not rebuilt, and a speaking change of someone the
+    /// panel does not show emits nothing.
+    fn sync_member_call(&mut self, fx: &mut Effects) {
+        let seats = self
+            .call_channel()
+            .map(|id| self.seats(id))
+            .unwrap_or_default();
+        for (at, row) in self.view.members.iter_mut().enumerate() {
+            if row.kind != MemberKind::Member {
+                continue;
+            }
+            let seat = seats.iter().find(|s| s.key == row.user_id);
+            let in_call = seat.is_some();
+            let speaking = seat.is_some_and(|s| s.speaking && !s.muted);
+            let mut roles = Vec::new();
+            if row.in_call != in_call {
+                row.in_call = in_call;
+                roles.push(MemberRole::InCall);
+            }
+            if row.speaking != speaking {
+                row.speaking = speaking;
+                roles.push(MemberRole::Speaking);
+            }
+            if !roles.is_empty() {
+                fx.view(ViewUpdate::Members(ViewDiff::Update {
+                    at,
+                    row: row.clone(),
+                    roles,
+                }));
+            }
+        }
     }
 
     /// Opens a voice channel's view (its landing; the call once joined).
@@ -843,6 +939,10 @@ impl State {
             Command::SelectServer(id) => self.select_server(fx, id),
             Command::SelectHome => self.select_home(fx),
             Command::SelectChannel(id) => self.select_channel(fx, &id),
+            Command::OpenChannel {
+                channel_id,
+                server_id,
+            } => self.open_channel(fx, &channel_id, server_id),
             Command::OpenDm(user_id) => self.open_dm(fx, &user_id),
             Command::SetStatus {
                 status,
@@ -901,6 +1001,11 @@ impl State {
             // useVoiceSettingsStore.ts: unmuting while deafened undeafens;
             // a mute change outside deafen is the one to come back to.
             Command::SetVoiceMuted(muted) => {
+                // useVoiceChannel.ts `toggleMic`, in or out of a call.
+                if muted != self.voice_prefs.muted {
+                    let sound = if muted { Sound::Mute } else { Sound::Unmute };
+                    fx.view(ViewUpdate::Sound(sound));
+                }
                 let mut prefs = self.voice_prefs;
                 if !muted {
                     prefs.deafened = false;
@@ -914,6 +1019,14 @@ impl State {
             // Deafening mutes too and remembers the mic; undeafening puts
             // it back.
             Command::SetVoiceDeafened(deafened) => {
+                if deafened != self.voice_prefs.deafened {
+                    let sound = if deafened {
+                        Sound::Deafen
+                    } else {
+                        Sound::Undeafen
+                    };
+                    fx.view(ViewUpdate::Sound(sound));
+                }
                 let mut prefs = self.voice_prefs;
                 if deafened && !prefs.deafened {
                     prefs.muted_before_deafen = prefs.muted;
@@ -1167,6 +1280,9 @@ impl State {
         self.notifications.clear();
         self.members.clear();
         self.clear_social(fx);
+        self.wanted_channel = None;
+        self.toasted = shell::Toasted::default();
+        self.sync_tray_badge(fx);
         self.outbox.clear();
         self.at_bottom = false;
         if self.divider.take().is_some() {
@@ -1566,6 +1682,14 @@ impl State {
         self.sync_subscriptions(fx, true);
         if self.home {
             // A tree that answered after Home opened: kept, not shown.
+            return self.finish_boot(fx);
+        }
+        let wanted = self
+            .wanted_channel
+            .take()
+            .filter(|id| self.find_channel(id).is_some());
+        if let Some(id) = wanted {
+            self.select_channel(fx, &id);
             return self.finish_boot(fx);
         }
         if let Some((id, name)) = kept {
@@ -2223,8 +2347,25 @@ impl State {
             }
             Dispatch::NotificationCreate(notification) => {
                 let known = self.notifications.iter().any(|n| n.id == notification.id);
-                if !known && !notification.is_read {
-                    self.notifications.push(notification);
+                if known {
+                    return;
+                }
+                fx.view(ViewUpdate::Sound(Sound::Notification));
+                let message_id = notification.message_id.as_deref().unwrap_or_default();
+                let channel_id = notification.channel_id.as_deref().unwrap_or_default();
+                if !self.toasted.contains(message_id)
+                    && shell::should_notify(
+                        channel_id,
+                        self.active_channel.as_deref(),
+                        self.focused,
+                    )
+                {
+                    let toast = shell::notification_toast(&notification);
+                    self.toasted.note(&toast.message_id);
+                    fx.view(ViewUpdate::Toast(Box::new(toast)));
+                }
+                if !notification.is_read {
+                    self.notifications.push(*notification);
                     if self.focused && self.at_bottom {
                         self.read_seen_mentions(fx, false);
                     }
@@ -2307,6 +2448,20 @@ impl State {
                 self.sync_voice_channels(fx);
             }
             Dispatch::VoiceChannelState(update) => {
+                let me = self.me().map(|me| me.id.clone()).unwrap_or_default();
+                let sound = {
+                    let prev = self
+                        .voice_channels
+                        .get(&update.channel_id)
+                        .into_iter()
+                        .flatten()
+                        .map(|o| o.user_id.as_str());
+                    let next = update.members.iter().map(|m| m.user_id.as_str());
+                    shell::voice_presence_sound(prev, next, &me)
+                };
+                if let Some(sound) = sound {
+                    fx.view(ViewUpdate::Sound(sound));
+                }
                 if update.members.is_empty() {
                     self.voice_channels.remove(&update.channel_id);
                 } else {
@@ -2351,6 +2506,30 @@ impl State {
             .messages
             .as_ref()
             .is_some_and(|log| log.channel_id == channel && log.get(&message.id).is_none());
+        // useChatArea.ts: a knock for someone else's message in the open
+        // channel, focused or not.
+        if open && !mine {
+            fx.view(ViewUpdate::Sound(Sound::Message));
+        }
+        // chat-gateway.ts: a server message that does not mention you
+        // toasts unless you are looking at its channel; mentions toast
+        // through their notification.
+        let targets_me = self
+            .me()
+            .is_some_and(|me| shell::targets_user(&message, me));
+        if self.dm(&channel).is_none()
+            && !mine
+            && !targets_me
+            && shell::should_notify(&channel, self.active_channel.as_deref(), self.focused)
+        {
+            let (name, server) = self
+                .channel_and_server(&channel)
+                .map_or((None, None), |(name, server)| (Some(name), server));
+            let mut toast = shell::message_toast(&message, name, server);
+            toast.server_id = self.server_of(&channel).unwrap_or_default();
+            self.toasted.note(&toast.message_id);
+            fx.view(ViewUpdate::Toast(Box::new(toast)));
+        }
         if open && !mine && !self.focused {
             match self.divider.as_mut().filter(|d| !d.locked) {
                 Some(divider) => {
@@ -2554,6 +2733,7 @@ impl State {
 
     fn leave_voice(&mut self, fx: &mut Effects) {
         if let Some(call) = self.voice.take() {
+            fx.view(ViewUpdate::Sound(Sound::Disconnect));
             fx.push(Effect::Voice {
                 call: call.id,
                 command: VoiceCommand::Leave,
@@ -2603,7 +2783,9 @@ impl State {
             VoiceUpdate::Connected => {
                 // Sidebar presence for everyone else (VOICE_PROTOCOL.md §7),
                 // then our mute and deafen.
-                current.joined = true;
+                if !std::mem::replace(&mut current.joined, true) {
+                    fx.view(ViewUpdate::Sound(Sound::Connect));
+                }
                 let join = Self::voice_join_frame(current);
                 let state = Self::voice_state_frame(current);
                 self.gateway_send(fx, join);
@@ -2611,6 +2793,7 @@ impl State {
             }
             VoiceUpdate::Ended(error) => {
                 if let Some(ended) = self.voice.take() {
+                    fx.view(ViewUpdate::Sound(Sound::Disconnect));
                     fx.push(Effect::VoiceForget(ended.id));
                     self.gateway_send(fx, Self::voice_leave_frame(&ended.channel_id));
                 }

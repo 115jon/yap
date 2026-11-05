@@ -5,5 +5,7 @@
 
 mod bridge;
 mod client;
+mod desktop;
 mod gui;
 mod models;
+mod sound;

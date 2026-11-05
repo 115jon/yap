@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use super::state::{Outgoing, Phase, Presence, ServerChannels, Typer, VoiceCall};
 use super::time::{parse_rfc3339, LocalOffset, Stamp};
 use super::{Occupant, VoiceMember};
+use crate::shell::{BadgeView, Sound, ToastView};
 
 /// One role value, borrowed from a row.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -639,6 +640,12 @@ pub enum ViewUpdate {
     DmUnread(i64),
     Members(ViewDiff<MemberListRow>),
     Profile(Box<ProfileView>),
+    /// A native toast. The shell drops it when notifications are off.
+    Toast(Box<ToastView>),
+    /// A UI sound. The shell drops it when sounds are off.
+    Sound(Sound),
+    /// The tray badge changed.
+    Badge(BadgeView),
 }
 
 /// Messages from the same author within this window share one header.
@@ -1145,7 +1152,9 @@ pub(super) fn dm_rows(
                 username: user.username.clone(),
                 avatar: absolute_url(api_base, user.avatar_url.as_deref()),
                 initials: initials(name),
-                presence: presence.of(&user.id, user.status.as_deref()).to_owned(),
+                presence: presence
+                    .of_recipient(&user.id, user.status.as_deref())
+                    .to_owned(),
                 custom_status: presence.custom_status(&user.id, user.custom_status.as_deref()),
                 unread: badge.unread,
                 mentions: badge.mentions,

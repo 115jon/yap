@@ -58,6 +58,7 @@ struct Scalars {
 /// slot from its destructor, both on the GUI thread.
 #[derive(Default)]
 pub struct Objects {
+    pub(crate) desktop: Option<NonNull<crate::desktop::qobject::Desktop>>,
     nav: Option<NonNull<Nav>>,
     chat: Option<NonNull<Chat>>,
     voice: Option<NonNull<Voice>>,
@@ -404,5 +405,8 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             with::<Profile>(|profile| set_profile(profile, &view));
             scalars(|s| s.profile = *view);
         }
+        ViewUpdate::Toast(toast) => crate::desktop::on_toast(&toast),
+        ViewUpdate::Sound(sound) => crate::sound::play(sound),
+        ViewUpdate::Badge(badge) => crate::desktop::on_badge(badge),
     }
 }
