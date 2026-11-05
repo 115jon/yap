@@ -63,6 +63,8 @@ pub enum VoiceCommand {
     SetDeafened(bool),
     /// The participants whose shares the user watches.
     SetWatched(Vec<String>),
+    /// Our camera on or off.
+    SetCamera(bool),
     Leave,
 }
 
@@ -114,6 +116,11 @@ pub enum VoiceUpdate {
     Rejoined,
     /// The whole roster, in a stable order.
     Roster(Vec<VoiceMember>),
+    /// Our camera is on or off now; `error` says why turning it on failed.
+    Camera {
+        on: bool,
+        error: Option<String>,
+    },
     /// The call is over; the error text if it failed.
     Ended(Option<String>),
 }

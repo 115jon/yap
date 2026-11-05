@@ -124,6 +124,11 @@ pub enum Command {
         participant_id: String,
         watch: bool,
     },
+    /// Our camera on or off in the call (useVoiceChannel.ts `toggleCamera`).
+    SetVoiceCamera(bool),
+    /// The camera capture failed before it could go out: off, with the
+    /// reason (`missing`, `busy` or `unknown`).
+    VoiceCameraFailed(String),
 }
 
 /// A file the user picked, pasted or dropped, as the UI read it.

@@ -189,6 +189,8 @@ rows! {
         deafened: bool => Deafened "deafened",
         /// Members: screen sharing.
         live: bool => Live "live",
+        /// Members: camera on (`self_video`).
+        video: bool => Video "video",
         /// Members: first and last leaf of their channel's branch.
         first: bool => First "first",
         last: bool => Last "last",
@@ -290,7 +292,8 @@ rows! {
         /// Its frames are pulled and arriving.
         live: bool => Live "live",
         /// The key its frames come under (`cam-video-<pid>`,
-        /// `screen-video-<pid>`); empty for our own tile.
+        /// `screen-video-<pid>`); our own camera's preview is
+        /// [`LOCAL_CAMERA_KEY`].
         video_key: String => VideoKey "videoKey",
         /// A share the user pressed Watch on.
         watching: bool => Watching "watching",
@@ -649,6 +652,11 @@ pub struct VoiceView {
     pub speaking: bool,
     /// Why the last call failed (shown on the landing); empty otherwise.
     pub error: String,
+    /// The camera is wanted (capturing), and on (published).
+    pub camera_wanted: bool,
+    pub camera: bool,
+    /// Why the camera could not go on; empty otherwise.
+    pub camera_error: String,
 }
 
 /// The open voice channel (its landing or the call), empty when none.
@@ -856,6 +864,8 @@ pub(super) struct Seat {
     pub muted: bool,
     pub deafened: bool,
     pub live: bool,
+    /// Camera on.
+    pub video: bool,
     pub speaking: bool,
     pub me: bool,
 }
@@ -883,9 +893,9 @@ pub(super) fn seats(
                             .iter()
                             .find(|m| if me { m.me } else { m.user_id == o.user_id })
                     });
-                    let (muted, deafened) = match call.filter(|_| me) {
-                        Some(c) => (c.muted, c.deafened),
-                        None => (o.muted, o.deafened),
+                    let (muted, deafened, video) = match call.filter(|_| me) {
+                        Some(c) => (c.muted, c.deafened, c.camera),
+                        None => (o.muted, o.deafened, o.video),
                     };
                     Seat {
                         key: o.user_id.clone(),
@@ -894,6 +904,7 @@ pub(super) fn seats(
                         muted,
                         deafened,
                         live: o.stream,
+                        video,
                         speaking: member.is_some_and(|m| m.speaking),
                         me,
                     }
@@ -946,6 +957,7 @@ fn call_seat(m: &VoiceMember, key: String, call: &VoiceCall) -> Seat {
         muted,
         deafened,
         live: false,
+        video: if m.me { call.camera } else { m.video },
         speaking: m.speaking,
         me: m.me,
     }
@@ -987,6 +999,7 @@ fn plain_row(kind: TreeKind, id: &str, name: &str) -> ChannelTreeRow {
         avatar: String::new(),
         deafened: false,
         live: false,
+        video: false,
         first: false,
         last: false,
         lit: 0,
@@ -1018,6 +1031,7 @@ fn member_rows(channel_id: &str, seats: &[Seat]) -> Vec<ChannelTreeRow> {
             avatar: seat.avatar.clone(),
             deafened: seat.deafened,
             live: seat.live,
+            video: seat.video,
             first: i == 0,
             last: i + 1 == seats.len(),
             lit: match you {
@@ -1071,6 +1085,10 @@ pub(super) fn tree_rows(
     rows
 }
 
+/// The video key our own camera's preview shows under (the capture, not a
+/// pulled track; the tile mirrors it as the web's local preview does).
+pub const LOCAL_CAMERA_KEY: &str = "local-camera";
+
 /// The call stage: a tile per seat, in seat order, each person followed by
 /// their share when they have one (useVoiceChannel.ts `gridItems`). Video
 /// state comes from the call's member for the seat.
@@ -1093,6 +1111,11 @@ pub(super) fn tile_rows(seats: &[Seat], call: &VoiceCall) -> Vec<VoiceTileRow> {
                 String::new()
             }
         };
+        let video = if s.me {
+            call.camera
+        } else {
+            member.is_some_and(|m| m.video)
+        };
         let person = VoiceTileRow {
             id: format!("person:{}", s.key),
             kind: "person".into(),
@@ -1105,9 +1128,13 @@ pub(super) fn tile_rows(seats: &[Seat], call: &VoiceCall) -> Vec<VoiceTileRow> {
             deafened: s.deafened,
             speaking: s.speaking,
             me: s.me,
-            video: member.is_some_and(|m| m.video),
+            video,
             live: remote && member.is_some_and(|m| m.camera_live),
-            video_key: key("cam-video"),
+            video_key: if s.me {
+                LOCAL_CAMERA_KEY.to_owned()
+            } else {
+                key("cam-video")
+            },
             watching: false,
         };
         let sharing = !s.me && (s.live || member.is_some_and(|m| m.stream));

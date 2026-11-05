@@ -30,8 +30,29 @@ the decisions.
   `realtime/VOICE_ROSTER.md`): 3 s reconnect grace, the web's teardown order,
   and nothing sent on the wrong socket. The wire details and the remaining
   differences are in [VOICE_PROTOCOL.md](VOICE_PROTOCOL.md).
-- Watching video (no publishing yet): other people's cameras and screen
-  shares, as the web's stage shows them.
+- Our camera, as the web publishes it: the camera key in the stage bar
+  and the call strip (with a device caret), the Camera dialog (preview,
+  camera, capture quality, "Preview before turning on camera", which the
+  key honours), our tile mirrored, and the camera glyph on Talk Tree
+  leaves (`self_video`).
+  - Capture: Qt Multimedia (`QCamera` into a `QVideoSink`, `cpp/camera.cpp`)
+    at the closest native format to the quality (uncompressed first) and
+    at most its frame rate. Each frame goes to the preview as it is and,
+    while the call publishes, through one libyuv conversion into the
+    encoder's I420 buffer (`crates/yap-voice/src/camera.rs`,
+    `cpp/camera_i420.cpp`). Device choice follows `DEVICES.md`: by id,
+    then by name (the refreshed id is saved); an unplugged camera falls
+    back to the default without touching the saved one and is opened
+    again when it is back. Errors as the web words them (no camera, in
+    use by another app).
+  - Publish: one send-only VP8 transceiver with the web's simulcast
+    (`f`/`h`/`q`, `video-layers.ts`), announced with `simulcast_rids`;
+    op 15 `self_video`. Off keeps the SFU track on black keepalive frames
+    and turning it on again resumes that track (VOICE_PROTOCOL.md).
+  - `YAP_FAKE_CAMERA=1`: a moving test pattern instead of any device (no
+    `QCamera` is created), through the same frame path.
+- Watching video: other people's cameras and screen shares, as the web's
+  stage shows them.
   - Tiles: camera video cropped to the tile, the avatar otherwise, speaking
     rings, and a spinner until the first frame.
   - Shares: a share tile with "is sharing" and Watch stream, then the stream
@@ -105,7 +126,7 @@ unless "Open on startup" is on), data and logs under
 
 ## Not yet
 
-Publishing camera or screen share, the stream watcher list and stream
+Publishing a screen share, camera backgrounds, the stream watcher list and stream
 volume, input volume, a mic test outside a call, inline video playback, clips in the GIF picker,
 GIF favorites and categories, stickers, emoji generation, the reaction details
 modal, remove-embeds, embed players (WebView2), jumping to
@@ -146,6 +167,7 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_KOVA_PUBLISHABLE_KEY` | Yap's live key            | Kova app                                         |
 | `YAP_GATEWAY_ORIGIN`       | `YAP_API_URL`             | `Origin` sent on realtime sockets                |
 | `YAP_TOKEN`                | none                      | use this session instead of the credential store |
+| `YAP_FAKE_CAMERA`          | unset                     | `1`: a test pattern stands in for every camera   |
 
 The defaults mirror `src/lib/site-defaults.ts`.
 
@@ -185,6 +207,7 @@ cpp/desktopshell.*    one instance, tray and badge, toasts, Run key, window rect
 cpp/toast_win.*       WinRT toasts (WRL, no Qt headers)
 cpp/logfile.*         stderr tee into %LOCALAPPDATA%\YapNative\logs, rotated
 cpp/videohub.*        remote call video into QVideoSinks (VideoHub singleton)
+cpp/camera.*          our camera: devices, QCamera or the test pattern, frames out
 assets/, tools/       generated fonts, icons and brand SVGs, and their scripts
 rust/src/bridge.rs    YapClient QObject (properties, invokables, signals)
 rust/src/client/      core: config, api (REST), auth (device flow), gateway,

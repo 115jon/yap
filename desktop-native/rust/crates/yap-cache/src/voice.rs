@@ -17,6 +17,12 @@ pub const VOICE_FILE: &str = "voice-settings.json";
 /// The device id meaning "the system default".
 pub const DEFAULT_DEVICE: &str = "default";
 
+/// The camera capture profiles (`CAMERA_QUALITY_PROFILES` ids).
+pub const CAMERA_QUALITIES: [&str; 5] = ["480p30", "720p30", "720p60", "1080p30", "1080p60"];
+
+/// The default camera profile (`DEFAULT_CAMERA_QUALITY_ID`).
+pub const DEFAULT_CAMERA_QUALITY: &str = "720p30";
+
 /// The highest per-user and output volume, in percent.
 pub const MAX_VOLUME: u16 = 200;
 
@@ -59,6 +65,14 @@ pub struct VoiceSettings {
     pub input_device_label: String,
     pub output_device_id: String,
     pub output_device_label: String,
+    /// A camera id, or [`DEFAULT_DEVICE`].
+    pub video_device_id: String,
+    pub video_device_label: String,
+    /// One of [`CAMERA_QUALITIES`].
+    pub camera_quality: String,
+    /// "Preview before turning on camera": the camera key opens the Camera
+    /// dialog first.
+    pub always_preview_video: bool,
     pub input_profile: InputProfile,
     pub noise_suppression: bool,
     pub echo_cancellation: bool,
@@ -79,6 +93,10 @@ impl Default for VoiceSettings {
             input_device_label: String::new(),
             output_device_id: DEFAULT_DEVICE.into(),
             output_device_label: String::new(),
+            video_device_id: DEFAULT_DEVICE.into(),
+            video_device_label: String::new(),
+            camera_quality: DEFAULT_CAMERA_QUALITY.into(),
+            always_preview_video: true,
             input_profile: InputProfile::Standard,
             noise_suppression: true,
             echo_cancellation: true,
@@ -100,7 +118,14 @@ impl VoiceSettings {
         } else {
             -50.0
         };
-        for id in [&mut self.input_device_id, &mut self.output_device_id] {
+        if !CAMERA_QUALITIES.contains(&self.camera_quality.as_str()) {
+            self.camera_quality = DEFAULT_CAMERA_QUALITY.into();
+        }
+        for id in [
+            &mut self.input_device_id,
+            &mut self.output_device_id,
+            &mut self.video_device_id,
+        ] {
             if id.is_empty() {
                 *id = DEFAULT_DEVICE.into();
             }
@@ -174,6 +199,33 @@ pub fn save_voice(dir: &Path, user_id: &str, settings: &VoiceSettings) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unknown_camera_quality_should_fall_back_to_720p30() {
+        let s = VoiceSettings {
+            camera_quality: "4k120".into(),
+            ..VoiceSettings::default()
+        }
+        .normalized();
+        assert_eq!(s.camera_quality, "720p30");
+    }
+
+    #[test]
+    fn camera_settings_should_keep_the_web_names() {
+        let json = serde_json::to_value(VoiceSettings::default()).expect("json");
+        assert_eq!(
+            (
+                &json["videoDeviceId"],
+                &json["cameraQuality"],
+                &json["alwaysPreviewVideo"]
+            ),
+            (
+                &serde_json::json!("default"),
+                &serde_json::json!("720p30"),
+                &serde_json::json!(true)
+            )
+        );
+    }
 
     #[test]
     fn defaults_should_match_the_web() {

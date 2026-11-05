@@ -352,6 +352,7 @@ fn channels_result_should_open_the_first_text_channel_and_request_its_page() {
         avatar: String::new(),
         deafened: false,
         live: false,
+        video: false,
         first: false,
         last: false,
         lit: 0,
@@ -1834,6 +1835,7 @@ fn voice_view_should_name_the_channel_and_go_live_when_connected() {
         deafened: false,
         speaking: false,
         error: String::new(),
+        ..VoiceView::default()
     }))));
 }
 
@@ -3467,7 +3469,7 @@ fn the_call_stage_should_get_a_tile_per_person_and_per_share() {
     assert_eq!(
         summary,
         [
-            ("person", false, false, ""),
+            ("person", false, false, "local-camera"),
             ("person", true, true, "cam-video-p_ana"),
             ("screen", true, false, "screen-video-p_ana"),
         ]
@@ -3494,4 +3496,56 @@ fn watching_should_mark_the_share_tile() {
         v,
         ViewUpdate::Tiles(ViewDiff::Update { row, .. }) if row.kind == "screen" && row.watching
     )));
+}
+
+fn last_voice_view(fx: &[Effect]) -> VoiceView {
+    fx.iter()
+        .rev()
+        .find_map(|e| match e {
+            Effect::View(ViewUpdate::Voice(v)) => Some(v.clone()),
+            _ => None,
+        })
+        .expect("a voice view")
+}
+
+#[test]
+fn camera_toggle_should_reach_the_call_and_show_once_it_is_on() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let fx = client.command(Command::SetVoiceCamera(true));
+    assert!(fx.contains(&Effect::Voice {
+        call,
+        command: VoiceCommand::SetCamera(true),
+    }));
+    let view = last_voice_view(&fx);
+    assert_eq!((view.camera_wanted, view.camera), (true, false));
+
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Camera {
+            on: true,
+            error: None,
+        },
+    });
+    assert!(last_voice_view(&fx).camera);
+}
+
+#[test]
+fn a_camera_capture_failure_should_turn_it_off_with_the_reason() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    client.command(Command::SetVoiceCamera(true));
+    let fx = client.command(Command::VoiceCameraFailed("busy".into()));
+    assert!(fx.contains(&Effect::Voice {
+        call,
+        command: VoiceCommand::SetCamera(false),
+    }));
+    let view = last_voice_view(&fx);
+    assert_eq!(
+        (view.camera_wanted, view.camera_error.as_str()),
+        (false, "busy")
+    );
+    // Trying again clears it.
+    let fx = client.command(Command::SetVoiceCamera(true));
+    assert_eq!(last_voice_view(&fx).camera_error, "");
 }

@@ -111,6 +111,27 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
         mids: &[String],
     ) -> impl Future<Output = Result<String, MediaError>> + Send;
 
+    /// Adds our camera as a send-only VP8 transceiver in `stream_id` with
+    /// the camera simulcast encodings ([`crate::CAMERA_SIMULCAST`]), parked
+    /// on the keepalive, and sets and returns the local offer. A camera
+    /// pushed before is detached first (its transceiver stays, sending
+    /// nothing, as PartyTracks' `republishTrack` leaves it).
+    fn publish_camera(
+        &self,
+        stream_id: &str,
+    ) -> impl Future<Output = Result<LocalOffer, MediaError>> + Send;
+
+    /// The layers our camera's sender negotiated, highest first, when it
+    /// negotiated more than one (`negotiatedSimulcastRids`).
+    fn camera_rids(&self) -> Vec<String>;
+
+    /// Camera frames (`true`) or the keepalive's black frames.
+    fn set_camera_live(&self, live: bool);
+
+    /// The parked camera's keepalive stalled long enough that the SFU may
+    /// have dropped its track: it must be pushed afresh.
+    fn camera_stale(&self) -> bool;
+
     fn set_mic_enabled(&self, enabled: bool);
 
     /// Plays or silences every remote track, including ones that arrive
@@ -129,7 +150,7 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
     /// before any conversion). Kept for a track that has not arrived yet.
     fn set_video_sink(&self, mid: &str, key: Option<&str>);
 
-    /// Stops the mic (teardown, before the sockets close).
+    /// Stops the mic and the camera (teardown, before the sockets close).
     fn stop_local(&self);
 
     /// The mic's cumulative `(totalAudioEnergy, totalSamplesDuration)`

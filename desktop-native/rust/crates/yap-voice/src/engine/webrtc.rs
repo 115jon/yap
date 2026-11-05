@@ -7,6 +7,11 @@
 //! switches at once (stop, select, init, start). Two track calls the crate
 //! lacks (remote volume, live APM options) go through `cpp/track_audio.cpp`.
 //!
+//! Camera: one send-only VP8 transceiver with the web's three simulcast
+//! encodings, fed by `crate::camera` (captured frames while live, the
+//! keepalive's black frames while parked). A stale park pushes a fresh
+//! transceiver; the old one is detached, not closed.
+//!
 //! Video: each routed remote video track gets a `NativeVideoStream` (a
 //! WebRTC sink with a one-frame queue: a slow consumer sees the newest frame,
 //! never a backlog) pumped by a tokio task that hands I420 planes to the
@@ -36,15 +41,20 @@ use libwebrtc::peer_connection_factory::{
     IceServer as RtcIceServer, PeerConnectionFactory, RtcConfiguration,
 };
 use libwebrtc::prelude::RtcAudioTrack;
+use libwebrtc::rtp_parameters::{RtpCodecCapability, RtpEncodingParameters};
 use libwebrtc::rtp_sender::RtpSender;
-use libwebrtc::rtp_transceiver::{RtpTransceiverDirection, RtpTransceiverInit};
+use libwebrtc::rtp_transceiver::{RtpTransceiver, RtpTransceiverDirection, RtpTransceiverInit};
 use libwebrtc::session_description::{SdpType, SessionDescription};
 use libwebrtc::stats::RtcStats;
+use libwebrtc::video_source::native::NativeVideoSource;
+use libwebrtc::video_source::VideoResolution;
 use libwebrtc::MediaType;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use super::{I420Frame, LocalOffer, MediaEngine, MediaError, MediaSession, VideoOutput};
 use crate::audio::{resolve, AudioDevice, AudioDevices, Processing};
+use crate::camera::live::{set_sink, Keepalive};
+use crate::layers::CAMERA_SIMULCAST;
 use crate::machine::MediaState;
 use crate::wire::IceServer;
 
@@ -445,13 +455,56 @@ impl Remotes {
     }
 }
 
-/// One peer connection, the mic track and its sender, and the remote
-/// tracks it keeps alive.
+/// Our camera's send side: its source, transceiver and keepalive.
+struct CameraSend {
+    source: NativeVideoSource,
+    transceiver: RtpTransceiver,
+    keepalive: Keepalive,
+}
+
+/// The highest rate any capture profile runs at.
+const CAMERA_MAX_FPS: f64 = 60.0;
+
+/// The camera simulcast encodings in libwebrtc's terms. A layer the web
+/// leaves uncapped gets the highest profile rate: the capture is paced to
+/// the chosen profile already, and libwebrtc otherwise holds the source to
+/// the lowest cap it is given (every layer at `q`'s 15 fps).
+fn camera_encodings() -> Vec<RtpEncodingParameters> {
+    CAMERA_SIMULCAST
+        .iter()
+        .map(|layer| RtpEncodingParameters {
+            rid: layer.rid.to_owned(),
+            active: true,
+            scale_resolution_down_by: Some(layer.scale_down_by),
+            max_bitrate: layer.max_bitrate,
+            max_framerate: layer.max_framerate.or(Some(CAMERA_MAX_FPS)),
+            ..RtpEncodingParameters::default()
+        })
+        .collect()
+}
+
+/// The video codecs with VP8 first, as Chrome offers them (the web sets no
+/// preference; the SFU answers with the first it takes). The rest keep
+/// their order, RTX and FEC included.
+fn vp8_first() -> Vec<RtpCodecCapability> {
+    let mut codecs = factory()
+        .get_rtp_sender_capabilities(MediaType::Video)
+        .codecs;
+    codecs.sort_by_key(|c| !c.mime_type.eq_ignore_ascii_case("video/vp8"));
+    codecs
+}
+
+/// One peer connection, the mic track and its sender, the camera, and the
+/// remote tracks it keeps alive.
 #[derive(Clone)]
 pub struct LibwebrtcSession {
     pc: PeerConnection,
     mic: RtcAudioTrack,
     sender: Arc<Mutex<Option<RtpSender>>>,
+    camera: Arc<Mutex<Option<CameraSend>>>,
+    /// Camera transceivers a fresh push replaced, detached until the call
+    /// ends (closing one renegotiates; see PartyTracks `republishTrack`).
+    retired: Arc<Mutex<Vec<RtpTransceiver>>>,
     remotes: Arc<Mutex<Remotes>>,
 }
 
@@ -519,6 +572,8 @@ impl MediaEngine for LibwebrtcEngine {
                 pc,
                 mic,
                 sender: Arc::new(Mutex::new(None)),
+                camera: Arc::new(Mutex::new(None)),
+                retired: Arc::new(Mutex::new(Vec::new())),
                 remotes,
             },
             states,
@@ -636,6 +691,95 @@ impl MediaSession for LibwebrtcSession {
         Ok(offer.to_string())
     }
 
+    async fn publish_camera(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
+        if let Some(old) = lock(&self.camera).take() {
+            set_sink(None);
+            if old.transceiver.sender().set_track(None).is_err() {
+                eprintln!("[camera] could not detach the old transceiver");
+            }
+            lock(&self.retired).push(old.transceiver);
+        }
+        // The size is a hint for the adapter; frames bring their own.
+        let source = NativeVideoSource::new(
+            VideoResolution {
+                width: 1280,
+                height: 720,
+            },
+            false,
+        );
+        let track = factory().create_video_track("cam-video", source.clone());
+        let transceiver = self
+            .pc
+            .add_transceiver(
+                MediaStreamTrack::Video(track),
+                RtpTransceiverInit {
+                    direction: RtpTransceiverDirection::SendOnly,
+                    stream_ids: vec![stream_id.to_owned()],
+                    send_encodings: camera_encodings(),
+                },
+            )
+            .map_err(err("add camera transceiver"))?;
+        if transceiver.set_codec_preferences(vp8_first()).is_err() {
+            eprintln!("[camera] codec preferences refused; libwebrtc's order stands");
+        }
+        *lock(&self.camera) = Some(CameraSend {
+            keepalive: Keepalive::start(source.clone()),
+            source,
+            transceiver: transceiver.clone(),
+        });
+        let offer = self
+            .pc
+            .create_offer(OfferOptions::default())
+            .await
+            .map_err(err("camera offer"))?;
+        self.pc
+            .set_local_description(offer.clone())
+            .await
+            .map_err(err("local camera offer"))?;
+        let mid = transceiver
+            .mid()
+            .ok_or_else(|| MediaError("camera transceiver without a mid".into()))?;
+        Ok(LocalOffer {
+            sdp: offer.to_string(),
+            mid,
+        })
+    }
+
+    fn camera_rids(&self) -> Vec<String> {
+        let camera = lock(&self.camera);
+        let Some(camera) = camera.as_ref() else {
+            return Vec::new();
+        };
+        let rids: Vec<String> = camera
+            .transceiver
+            .sender()
+            .parameters()
+            .encodings
+            .into_iter()
+            .map(|e| e.rid)
+            .filter(|rid| !rid.is_empty())
+            .collect();
+        if rids.len() > 1 {
+            rids
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn set_camera_live(&self, live: bool) {
+        let camera = lock(&self.camera);
+        if let Some(camera) = camera.as_ref() {
+            camera.keepalive.park(!live);
+            set_sink(live.then(|| camera.source.clone()));
+        }
+    }
+
+    fn camera_stale(&self) -> bool {
+        lock(&self.camera)
+            .as_ref()
+            .is_some_and(|camera| camera.keepalive.stale())
+    }
+
     fn set_mic_enabled(&self, enabled: bool) {
         self.mic.set_enabled(enabled);
         MIC_LIVE.store(enabled, Ordering::Relaxed);
@@ -690,6 +834,8 @@ impl MediaSession for LibwebrtcSession {
     }
 
     fn stop_local(&self) {
+        set_sink(None);
+        lock(&self.camera).take();
         self.mic.set_enabled(false);
         MIC_LIVE.store(false, Ordering::Relaxed);
         let f = factory();
@@ -720,6 +866,21 @@ impl MediaSession for LibwebrtcSession {
         let mut line = String::from("[voice] stats");
         for stat in stats {
             match stat {
+                RtcStats::OutboundRtp(out) if !out.outbound.rid.is_empty() => {
+                    let o = &out.outbound;
+                    line += &format!(
+                        " out[{}/{}]={}B {}x{}@{:.0} {} limit={:?}{}",
+                        o.mid,
+                        o.rid,
+                        out.sent.bytes_sent,
+                        o.frame_width,
+                        o.frame_height,
+                        o.frames_per_second,
+                        o.encoder_implementation,
+                        o.quality_limitation_reason,
+                        if o.active { "" } else { " off" },
+                    );
+                }
                 RtcStats::OutboundRtp(out) => {
                     line += &format!(" out[{}]={}B", out.outbound.mid, out.sent.bytes_sent);
                 }
@@ -742,6 +903,9 @@ impl MediaSession for LibwebrtcSession {
     }
 
     fn close(&self) {
+        set_sink(None);
+        lock(&self.camera).take();
+        lock(&self.retired).clear();
         lock(&self.remotes).clear();
         *lock(&self.sender) = None;
         self.pc.close();

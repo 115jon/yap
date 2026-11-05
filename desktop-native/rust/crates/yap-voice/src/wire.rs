@@ -232,22 +232,47 @@ pub fn voice_identify(me: &str, voice_token: &str) -> Value {
     json!({ "op": GatewayOp::VoiceIdentify.code(), "d": { "participant_id": me, "voice_token": voice_token } })
 }
 
-/// Our voice state (op 15 C->S).
-pub fn voice_state(muted: bool, deafened: bool) -> String {
+/// Our voice state (op 15 C->S); `video` is the camera being on.
+pub fn voice_state(muted: bool, deafened: bool, video: bool) -> String {
     json!({ "op": GatewayOp::VoiceStateUpdate as u16, "d": {
-        "self_mute": muted, "self_deaf": deafened, "self_video": false,
+        "self_mute": muted, "self_deaf": deafened, "self_video": video,
         "self_stream": false, "self_stream_audio": false,
     }})
     .to_string()
 }
 
-/// Our mic publication (op 12).
-pub fn announce(me: &str, track_name: &str, sfu_track_name: &str, session_id: &str) -> String {
-    json!({ "op": GatewayOp::Video as u16, "d": { "tracks": [{
-        "participant_id": me, "track_name": track_name, "sfu_track_name": sfu_track_name,
-        "session_id": session_id, "kind": "audio",
-    }]}})
-    .to_string()
+/// One of our publications as op 12 announces it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Announced<'a> {
+    /// The alias (`cam-audio-<pid>`, `cam-video-<pid>`).
+    pub track_name: &'a str,
+    pub sfu_track_name: &'a str,
+    /// Our session capability.
+    pub session_id: &'a str,
+    /// `audio` or `video`.
+    pub kind: &'a str,
+    /// The layers a simulcast camera negotiated, highest first; empty for
+    /// one layer (left out of the frame, as the web leaves it out).
+    pub simulcast_rids: &'a [String],
+}
+
+/// One publication (op 12), one per frame as the web sends them.
+pub fn announce(me: &str, track: &Announced<'_>) -> String {
+    let mut info = json!({
+        "participant_id": me, "track_name": track.track_name,
+        "sfu_track_name": track.sfu_track_name, "session_id": track.session_id,
+        "kind": track.kind,
+    });
+    if !track.simulcast_rids.is_empty() {
+        info["simulcast_rids"] = json!(track.simulcast_rids);
+    }
+    json!({ "op": GatewayOp::Video as u16, "d": { "tracks": [info] } }).to_string()
+}
+
+/// We stopped offering these aliases (op 13 C->S), as the web's
+/// `onPublicationStopped` says it.
+pub fn stop_tracks(names: &[&str]) -> String {
+    json!({ "op": GatewayOp::StopTracks.code(), "d": { "track_names": names } }).to_string()
 }
 
 /// Our speaking flags (op 5): bit 0 is MICROPHONE (`src/lib/types.ts`).

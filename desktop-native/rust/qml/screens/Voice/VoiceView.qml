@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import Yap.Chrome
 import com.yap.native
 
 // A voice channel's view. Before you join (voice/VoiceLanding.tsx): the
@@ -350,8 +351,8 @@ Rectangle {
     }
 
     // The stage bar (VoiceControls.tsx): ply-1 with a top seam, 48 px
-    // square keys in the dock recipe (ui/dock.ts), a divider, then Leave,
-    // the one solid danger fill.
+    // square keys in the dock recipe (ui/dock.ts): mic, deafen, camera, a
+    // divider, then Leave, the one solid danger fill.
     Rectangle {
         id: dock
         anchors.bottom: parent.bottom
@@ -376,6 +377,18 @@ Rectangle {
                 tone: Voice.deafened ? "off" : "rest"
                 tip: Voice.deafened ? qsTr("Undeafen") : qsTr("Deafen")
                 onClicked: Voice.requestDeafen(!Voice.deafened)
+            }
+            IconKey {
+                size: 48
+                iconName: "camera"
+                tone: Voice.cameraOn ? "live" : "rest"
+                enabled: Camera.hasCamera
+                opacity: enabled ? 1 : 0.45
+                tip: !Camera.hasCamera ? qsTr("No camera detected")
+                    : Voice.cameraOn ? qsTr("Turn off camera") : qsTr("Turn on camera")
+                Accessible.checkable: true
+                Accessible.checked: Voice.cameraOn
+                onClicked: ShellState.toggleCamera()
             }
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter

@@ -347,6 +347,9 @@ fn set_voice(mut voice: Pin<&mut Voice>, view: &VoiceView) {
     voice.as_mut().set_deafened(view.deafened);
     voice.as_mut().set_speaking(view.speaking);
     voice.as_mut().set_error(q(&view.error));
+    voice.as_mut().set_camera_wanted(view.camera_wanted);
+    voice.as_mut().set_camera_on(view.camera);
+    voice.as_mut().set_camera_error(q(&view.camera_error));
     voice.set_channel_id(q(&view.channel_id));
 }
 

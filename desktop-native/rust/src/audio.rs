@@ -48,6 +48,14 @@ pub mod qobject {
         #[qproperty(bool, level_live, cxx_name = "levelLive")]
         /// Bumped when any per-user setting changes (bind to it).
         #[qproperty(i32, peers_revision, cxx_name = "peersRevision")]
+        /// The chosen camera (`default` or a camera id) and its name as it
+        /// was picked; the list itself is the `Camera` singleton's.
+        #[qproperty(QString, camera_device, cxx_name = "cameraDevice")]
+        #[qproperty(QString, camera_label, cxx_name = "cameraLabel")]
+        /// `480p30`, `720p30`, `720p60`, `1080p30` or `1080p60`.
+        #[qproperty(QString, camera_quality, cxx_name = "cameraQuality")]
+        /// The camera key opens the Camera dialog first.
+        #[qproperty(bool, always_preview_video, cxx_name = "alwaysPreviewVideo")]
         type Audio = super::AudioRust;
 
         /// Loads the settings of this user (empty: signed out).
@@ -103,6 +111,20 @@ pub mod qobject {
         #[cxx_name = "setPeerMuted"]
         fn set_peer_muted(self: Pin<&mut Audio>, user_id: &QString, muted: bool);
 
+        /// Picks a camera (`default` or an id, with its name). Also how a
+        /// refreshed id for the same camera is written back.
+        #[qinvokable]
+        #[cxx_name = "selectCamera"]
+        fn select_camera(self: Pin<&mut Audio>, id: &QString, label: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "changeCameraQuality"]
+        fn set_camera_quality_from_ui(self: Pin<&mut Audio>, quality: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "changeAlwaysPreviewVideo"]
+        fn set_always_preview_video_from_ui(self: Pin<&mut Audio>, on: bool);
+
         /// Copies the call's latest mic level into `level`.
         #[qinvokable]
         fn sample(self: Pin<&mut Audio>);
@@ -152,6 +174,10 @@ pub struct AudioRust {
     level: f64,
     level_live: bool,
     peers_revision: i32,
+    camera_device: QString,
+    camera_label: QString,
+    camera_quality: QString,
+    always_preview_video: bool,
 
     dir: Option<PathBuf>,
     user_id: String,
@@ -235,6 +261,14 @@ impl qobject::Audio {
         self.as_mut().set_high_fidelity(s.stream_high_fidelity);
         self.as_mut().set_auto_sensitivity(s.auto_sensitivity);
         self.as_mut().set_sensitivity(s.sensitivity);
+        self.as_mut()
+            .set_camera_device(QString::from(s.video_device_id.as_str()));
+        self.as_mut()
+            .set_camera_label(QString::from(s.video_device_label.as_str()));
+        self.as_mut()
+            .set_camera_quality(QString::from(s.camera_quality.as_str()));
+        self.as_mut()
+            .set_always_preview_video(s.always_preview_video);
         self.show_devices();
     }
 
@@ -428,6 +462,30 @@ impl qobject::Audio {
 
     pub fn set_peer_muted(self: Pin<&mut Self>, user_id: &QString, muted: bool) {
         self.edit_peer(user_id, |p| p.muted = muted);
+    }
+
+    pub fn select_camera(self: Pin<&mut Self>, id: &QString, label: &QString) {
+        let (id, label) = (id.to_string(), label.to_string());
+        if id == self.rust().settings.video_device_id
+            && label == self.rust().settings.video_device_label
+        {
+            return;
+        }
+        self.edit(|s| {
+            s.video_device_id = id;
+            s.video_device_label = label;
+        });
+    }
+
+    pub fn set_camera_quality_from_ui(self: Pin<&mut Self>, quality: &QString) {
+        let quality = quality.to_string();
+        if voice::CAMERA_QUALITIES.contains(&quality.as_str()) {
+            self.edit(|s| s.camera_quality = quality);
+        }
+    }
+
+    pub fn set_always_preview_video_from_ui(self: Pin<&mut Self>, on: bool) {
+        self.edit(|s| s.always_preview_video = on);
     }
 
     pub fn sample(mut self: Pin<&mut Self>) {

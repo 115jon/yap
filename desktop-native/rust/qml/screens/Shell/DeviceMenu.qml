@@ -1,19 +1,26 @@
 import QtQuick
+import Yap.Chrome
 import com.yap.native
 
-// The menu behind a mic or headphone caret (AudioDeviceMenu.tsx): the
-// title, the devices as radio rows (the system default first), the output
-// volume for speakers, then "Voice settings". It opens above its caret and
-// stays anchored there as the list fills in.
+// The menu behind a mic, headphone or camera caret (AudioDeviceMenu.tsx):
+// the title, the devices as radio rows (the system default first), the
+// output volume for speakers, then the settings row. It opens above its
+// caret and stays anchored there as the list fills in.
 MenuPanel {
     id: root
 
-    // "input" or "output".
+    // "input", "output" or "camera".
     required property string mode
     readonly property bool input: mode === "input"
-    readonly property list<string> ids: input ? Audio.inputIds : Audio.outputIds
-    readonly property list<string> names: input ? Audio.inputNames : Audio.outputNames
-    readonly property string current: input ? Audio.inputDevice : Audio.outputDevice
+    readonly property bool camera: mode === "camera"
+    readonly property list<string> ids: camera ? ["default"].concat(Camera.deviceIds)
+        : input ? Audio.inputIds : Audio.outputIds
+    readonly property list<string> names: camera ? [""].concat(Camera.deviceNames)
+        : input ? Audio.inputNames : Audio.outputNames
+    readonly property string current: camera ? Audio.cameraDevice
+        : input ? Audio.inputDevice : Audio.outputDevice
+    readonly property string defaultName: camera ? qsTr("Default camera")
+        : input ? qsTr("Default microphone") : qsTr("Default speaker")
 
     signal voiceSettings()
 
@@ -24,10 +31,24 @@ MenuPanel {
         open()
     }
 
-    implicitWidth: 240
-    onAboutToShow: Audio.refreshDevices()
+    function pick(id, name) {
+        if (camera)
+            Audio.selectCamera(id, id === "default" ? "" : name)
+        else if (input)
+            Audio.selectInput(id)
+        else
+            Audio.selectOutput(id)
+    }
 
-    MenuLabel { text: root.input ? qsTr("Input settings") : qsTr("Output settings") }
+    implicitWidth: 240
+    onAboutToShow: {
+        if (!camera)
+            Audio.refreshDevices()
+    }
+
+    MenuLabel {
+        text: root.camera ? qsTr("Camera") : root.input ? qsTr("Input settings") : qsTr("Output settings")
+    }
 
     Instantiator {
         model: root.ids
@@ -37,10 +58,10 @@ MenuPanel {
             readonly property string name: root.names[index] ?? ""
             text: index > 0 ? name
                 : name.length > 0 ? name
-                : root.input ? qsTr("Default microphone") : qsTr("Default speaker")
+                : root.defaultName
             hint: index === 0 ? qsTr("Default") : ""
             selected: modelData === root.current || (index === 0 && root.ids.indexOf(root.current) < 0)
-            onTriggered: root.input ? Audio.selectInput(modelData) : Audio.selectOutput(modelData)
+            onTriggered: root.pick(modelData, name)
         }
         onObjectAdded: (index, object) => root.insertItem(index + 1, object)
         onObjectRemoved: (index, object) => root.removeItem(object)
@@ -48,19 +69,19 @@ MenuPanel {
 
     MenuRule {}
     VolumeSlider {
-        visible: !root.input
+        visible: root.mode === "output"
         height: visible ? implicitHeight : 0
         label: qsTr("Output volume")
         value: Audio.outputVolume
         onMoved: Audio.changeOutputVolume(Math.round(value))
     }
     MenuRule {
-        visible: !root.input
+        visible: root.mode === "output"
         height: visible ? implicitHeight : 0
     }
     MenuRow {
-        text: qsTr("Voice settings")
-        glyph: "settings"
+        text: root.camera ? qsTr("Camera settings") : qsTr("Voice settings")
+        glyph: root.camera ? "camera" : "settings"
         onTriggered: root.voiceSettings()
     }
 }

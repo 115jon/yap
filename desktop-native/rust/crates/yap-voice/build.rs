@@ -1,8 +1,10 @@
-//! With the `libwebrtc` feature: compiles `cpp/track_audio.cpp` against the
-//! same prebuilt WebRTC headers and defines `webrtc-sys` uses.
+//! With the `libwebrtc` feature: compiles `cpp/track_audio.cpp` and
+//! `cpp/camera_i420.cpp` against the same prebuilt WebRTC headers and
+//! defines `webrtc-sys` uses.
 
 fn main() {
     println!("cargo:rerun-if-changed=cpp/track_audio.cpp");
+    println!("cargo:rerun-if-changed=cpp/camera_i420.cpp");
     println!("cargo:rerun-if-env-changed=LK_CUSTOM_WEBRTC");
     #[cfg(feature = "libwebrtc")]
     webrtc_shim();
@@ -20,8 +22,10 @@ fn webrtc_shim() {
     build
         .cpp(true)
         .file("cpp/track_audio.cpp")
+        .file("cpp/camera_i420.cpp")
         .include(&include)
         .include(include.join("third_party/abseil-cpp"))
+        .include(include.join("third_party/libyuv/include"))
         .define("WEBRTC_APM_DEBUG_DUMP", "0");
     for (name, value) in webrtc_sys_build::webrtc_defines() {
         build.define(&name, value.as_deref());

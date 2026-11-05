@@ -19,6 +19,8 @@ Item {
     required property bool deafened
     required property bool speaking
     required property bool live
+    // Camera on (`self_video`).
+    property bool video: false
     required property bool me
     required property bool first
     required property bool last
@@ -127,6 +129,13 @@ Item {
         Icon {
             visible: root.live
             name: "screenShare"
+            size: 14
+            color: Theme.liveInk
+        }
+        Icon {
+            visible: root.video
+            name: "camera"
+            variant: "active"
             size: 14
             color: Theme.liveInk
         }

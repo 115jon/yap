@@ -105,6 +105,7 @@ impl yap_voice::Commands for Commands {
                         VoiceCommand::SetWatched(watched) => {
                             UserCommand::SetWatched(watched.into_iter().collect())
                         }
+                        VoiceCommand::SetCamera(on) => UserCommand::SetCamera(on),
                         VoiceCommand::Leave => UserCommand::Leave,
                     });
                 }
@@ -153,6 +154,7 @@ pub async fn run(
         Notice::Connected => events.send(VoiceUpdate::Connected),
         Notice::Rejoined => events.send(VoiceUpdate::Rejoined),
         Notice::MicLevel(level) => crate::audio::set_live_level(Some(level)),
+        Notice::Camera { on, error } => events.send(VoiceUpdate::Camera { on, error }),
         Notice::Roster(members) => events.send(VoiceUpdate::Roster(
             members
                 .into_iter()

@@ -59,11 +59,20 @@
 //!   it goes out as [`Notice::MicLevel`] for the meter, and through the
 //!   web's hysteresis ([`Vad`], threshold from `SetSensitivity`) into our
 //!   roster row and op 5 `{speaking: 1|0}`. Muting turns speaking off.
+//! - `SetCamera(true)` pushes our camera once the mic is published (one
+//!   send-only VP8 transceiver, simulcast `f`/`h`/`q` as
+//!   [`CAMERA_SIMULCAST`]), or resumes the SFU track it kept; when that
+//!   lands it goes live, is announced (op 12 with `simulcast_rids`) and
+//!   op 15 says `self_video: true`. `SetCamera(false)` parks it on the
+//!   keepalive (black frames each second), sends op 13 for
+//!   `cam-video-<pid>` and `self_video: false`. A parked camera is never
+//!   announced, a re-identify announces a live one again.
 //! - After every input each pulled track's gain follows its owner's volume
 //!   (`SetPlayback`: output volume times the per-user volume, keyed by Yap
 //!   user id); only changes go out, as `SetTrackGain`.
 
 mod audio;
+mod camera;
 mod driver;
 mod engine;
 pub mod layers;
@@ -75,6 +84,7 @@ mod vad;
 pub mod wire;
 
 pub use audio::{peer_gain, resolve, AudioDevice, AudioDevices, Playback, Processing, MAX_VOLUME};
+pub use camera::{push_camera_frame, CameraFrame, PixelFormat};
 pub use driver::{run_call, ApiFailure, CallEnv, Commands, TicketApi};
 pub use engine::{
     FakeEngine, FakeOp, FakeSession, I420Frame, LocalOffer, MediaEngine, MediaError, MediaSession,
@@ -82,11 +92,12 @@ pub use engine::{
 };
 #[cfg(feature = "libwebrtc")]
 pub use engine::{LibwebrtcEngine, LibwebrtcSession};
+pub use layers::{CameraEncoding, CAMERA_SIMULCAST};
 pub use layers::{Quality, RenderSize};
 pub use machine::{
-    camera_alias, screen_alias, stop_message, CallMachine, CallState, CallTarget, Effect, Input,
-    MediaEvent, MediaSpec, MediaState, Notice, Published, RoomEvent, Socket, SocketSpec,
-    TicketReplies, Timer, UserCommand, VideoIntent, VoiceEvent, LEAVE_SEND_WINDOW,
+    camera_alias, screen_alias, stop_message, CallMachine, CallState, CallTarget, CameraPublished,
+    Effect, Input, MediaEvent, MediaSpec, MediaState, Notice, Published, RoomEvent, Socket,
+    SocketSpec, TicketReplies, Timer, UserCommand, VideoIntent, VoiceEvent, LEAVE_SEND_WINDOW,
     REMOTE_RECONNECT_GRACE,
 };
 pub use roster::{Member, Roster};

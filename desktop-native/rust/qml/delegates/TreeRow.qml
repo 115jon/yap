@@ -18,6 +18,7 @@ Loader {
     required property string avatar
     required property bool deafened
     required property bool live
+    required property bool video
     required property bool first
     required property bool last
     required property int lit
@@ -51,6 +52,7 @@ Loader {
             deafened: cell.deafened
             speaking: cell.speaking
             live: cell.live
+            video: cell.video
             me: cell.me
             first: cell.first
             last: cell.last

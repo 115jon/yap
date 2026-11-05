@@ -242,6 +242,15 @@ impl Sfu {
 
 /// The SFU calls the pull worker makes; [`Sfu`] in production.
 pub(crate) trait Signaling: Clone + Send + Sync + 'static {
+    /// Pushes one local track; returns the SFU's answer.
+    fn push(
+        &self,
+        session: &str,
+        offer_sdp: &str,
+        mid: &str,
+        track_name: &str,
+    ) -> impl Future<Output = Result<String>> + Send;
+
     fn pull(
         &self,
         session: &str,
@@ -271,6 +280,18 @@ pub(crate) trait Signaling: Clone + Send + Sync + 'static {
 }
 
 impl Signaling for Sfu {
+    async fn push(
+        &self,
+        session: &str,
+        offer_sdp: &str,
+        mid: &str,
+        track_name: &str,
+    ) -> Result<String> {
+        Ok(Sfu::push(self, session, offer_sdp, mid, track_name)
+            .await?
+            .answer_sdp)
+    }
+
     fn pull(
         &self,
         session: &str,

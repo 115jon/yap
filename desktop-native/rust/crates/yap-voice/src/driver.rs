@@ -17,8 +17,8 @@ use yap_realtime::{Config, Connection, Event, Policy, Reconnect, TicketError, Ti
 
 use crate::engine::{MediaEngine, MediaSession};
 use crate::machine::{
-    CallMachine, CallTarget, Effect, Input, MediaEvent, MediaSpec, Notice, Published, RoomEvent,
-    Socket, SocketSpec, TicketReplies, Timer, UserCommand, VoiceEvent,
+    CallMachine, CallTarget, CameraPublished, Effect, Input, MediaEvent, MediaSpec, Notice,
+    Published, RoomEvent, Socket, SocketSpec, TicketReplies, Timer, UserCommand, VoiceEvent,
 };
 use crate::sfu::{LayerUpdate, Sfu, Signaling};
 use crate::tracks::Remote;
@@ -93,10 +93,19 @@ enum Job {
     Close(Vec<String>),
     /// Switch a pulled camera's simulcast layer (no renegotiation).
     Update(LayerUpdate),
+    /// Push our camera, or resume the track it kept.
+    PublishCamera {
+        stream_id: String,
+    },
 }
 
-/// (SFU track name, mid if the pull worked).
-type PullDone = (String, Option<String>);
+/// What the worker reports back.
+#[derive(Debug, PartialEq)]
+enum Done {
+    /// (SFU track name, mid if the pull worked).
+    Pull(String, Option<String>),
+    Camera(Result<CameraPublished, String>),
+}
 
 /// Event sources that appear as the call opens.
 #[derive(Default)]
@@ -104,7 +113,7 @@ struct Inbox {
     room: Option<UnboundedReceiver<Event>>,
     voice: Option<UnboundedReceiver<Event>>,
     media: Option<UnboundedReceiver<crate::machine::MediaState>>,
-    pulls: Option<UnboundedReceiver<PullDone>>,
+    pulls: Option<UnboundedReceiver<Done>>,
 }
 
 /// What the effects act on.
@@ -236,7 +245,8 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
                     None => MediaEvent::Closed,
                 }),
                 done = recv(&mut inbox.pulls) => match done {
-                    Some((sfu_track_name, mid)) => Input::PullDone { sfu_track_name, mid },
+                    Some(Done::Pull(sfu_track_name, mid)) => Input::PullDone { sfu_track_name, mid },
+                    Some(Done::Camera(result)) => Input::CameraPublished(result),
                     None => {
                         inbox.pulls = None;
                         continue;
@@ -311,6 +321,12 @@ impl<'a, E: MediaEngine, T: TicketApi> Io<'a, E, T> {
             Effect::Pull(remote) => self.job(Job::Pull(remote)),
             Effect::Close(mids) => self.job(Job::Close(mids)),
             Effect::UpdateLayer(layer) => self.job(Job::Update(layer)),
+            Effect::PublishCamera { stream_id } => self.job(Job::PublishCamera { stream_id }),
+            Effect::SetCameraLive(live) => {
+                if let Some(session) = &self.session {
+                    session.set_camera_live(live);
+                }
+            }
             Effect::SetVideoSink { mid, key } => {
                 if let Some(session) = &self.session {
                     session.set_video_sink(&mid, key.as_deref());
@@ -573,15 +589,17 @@ fn call_tickets<T: TicketApi>(
     }
 }
 
-/// Runs pulls and closes one at a time (each renegotiates the one peer
-/// connection).
+/// Runs pulls, closes and the camera push one at a time (each renegotiates
+/// the one peer connection).
 async fn pull_worker<S: MediaSession, G: Signaling>(
     session: S,
     sfu: G,
     session_id: String,
     mut jobs: UnboundedReceiver<Job>,
-    done: UnboundedSender<PullDone>,
+    done: UnboundedSender<Done>,
 ) {
+    // Our camera's SFU track, kept while the camera is off.
+    let mut camera: Option<CameraPublished> = None;
     while let Some(job) = jobs.recv().await {
         match job {
             Job::Pull(remote) => {
@@ -604,7 +622,25 @@ async fn pull_worker<S: MediaSession, G: Signaling>(
                         None
                     }
                 };
-                let _ = done.send((remote.sfu_track_name, mid));
+                let _ = done.send(Done::Pull(remote.sfu_track_name, mid));
+            }
+            Job::PublishCamera { stream_id } => {
+                let result = publish_camera(&session, &sfu, &session_id, &stream_id, &mut camera)
+                    .await
+                    .map_err(|error| format!("{error:#}"));
+                match &result {
+                    Ok(p) => eprintln!(
+                        "[camera] published {} (layers {})",
+                        p.sfu_track_name,
+                        if p.simulcast_rids.is_empty() {
+                            "single".to_owned()
+                        } else {
+                            p.simulcast_rids.join(",")
+                        }
+                    ),
+                    Err(error) => eprintln!("[camera] publish failed: {error}"),
+                }
+                let _ = done.send(Done::Camera(result));
             }
             Job::Close(mids) => match close(&session, &sfu, &session_id, &mids).await {
                 Ok(()) => eprintln!("[voice] closed {} transceiver(s)", mids.len()),
@@ -621,6 +657,34 @@ async fn pull_worker<S: MediaSession, G: Signaling>(
             },
         }
     }
+}
+
+/// Our camera on the SFU (PartyTracks `publishStream` for `cam` video):
+/// the SFU track a camera that went off kept, unless its keepalive stalled
+/// long enough that the SFU may have dropped it; otherwise a fresh push
+/// (we offer, a new UUID track name, the SFU answers).
+async fn publish_camera<S: MediaSession, G: Signaling>(
+    session: &S,
+    sfu: &G,
+    session_id: &str,
+    stream_id: &str,
+    kept: &mut Option<CameraPublished>,
+) -> Result<CameraPublished> {
+    if let Some(kept) = kept.as_ref().filter(|_| !session.camera_stale()) {
+        return Ok(kept.clone());
+    }
+    let offer = session.publish_camera(stream_id).await?;
+    let track_name = uuid::Uuid::new_v4().to_string();
+    let answer = sfu
+        .push(session_id, &offer.sdp, &offer.mid, &track_name)
+        .await?;
+    session.apply_answer(&answer, "camera answer").await?;
+    let published = CameraPublished {
+        sfu_track_name: track_name,
+        simulcast_rids: session.camera_rids(),
+    };
+    *kept = Some(published.clone());
+    Ok(published)
 }
 
 /// Stops receive transceivers and tells the SFU (§3.3d: we offer).
@@ -705,6 +769,11 @@ mod tests {
     }
 
     impl Signaling for FakeSfu {
+        async fn push(&self, _: &str, offer_sdp: &str, mid: &str, _: &str) -> Result<String> {
+            self.log(format!("push {mid} {offer_sdp}"));
+            Ok("sfu-camera-answer".into())
+        }
+
         async fn update_layer(&self, _: &str, layer: &LayerUpdate) -> Result<()> {
             self.log(format!("update {} {}", layer.mid, layer.rid));
             Ok(())
@@ -823,8 +892,8 @@ mod tests {
         assert_eq!(
             finished,
             vec![
-                ("a".to_owned(), Some("mid-a".to_owned())),
-                ("b".to_owned(), Some("mid-b".to_owned())),
+                Done::Pull("a".to_owned(), Some("mid-a".to_owned())),
+                Done::Pull("b".to_owned(), Some("mid-b".to_owned())),
             ]
         );
         assert_eq!(
@@ -842,5 +911,44 @@ mod tests {
             sdp: "sfu-close-answer".into(),
             what: "close answer",
         }));
+    }
+    #[tokio::test]
+    async fn camera_should_push_once_then_resume_its_kept_track() {
+        let engine = FakeEngine::new();
+        let (session, _states) = engine.open(&[]).expect("fake open");
+        let sfu = FakeSfu::default();
+        let (jobs, jobs_rx) = mpsc::unbounded_channel();
+        let (done_tx, mut done) = mpsc::unbounded_channel();
+        let worker = tokio::spawn(pull_worker(
+            session,
+            sfu.clone(),
+            "cap".into(),
+            jobs_rx,
+            done_tx,
+        ));
+        let publish = || Job::PublishCamera {
+            stream_id: "cam-me".into(),
+        };
+        jobs.send(publish()).expect("worker alive");
+        jobs.send(publish()).expect("worker alive");
+        // A stalled keepalive: the SFU may have dropped it, so push anew.
+        let first = done.recv().await.expect("first");
+        let second = done.recv().await.expect("second");
+        engine.set_camera_stale(true);
+        jobs.send(publish()).expect("worker alive");
+        let third = done.recv().await.expect("third");
+        drop(jobs);
+        worker.await.expect("worker ran");
+
+        let name = |d: &Done| match d {
+            Done::Camera(Ok(p)) => p.sfu_track_name.clone(),
+            other => panic!("not a camera result: {other:?}"),
+        };
+        assert_eq!(name(&first), name(&second));
+        assert_ne!(name(&first), name(&third));
+        assert_eq!(
+            sfu.calls(),
+            vec!["push 1 fake-camera-offer", "push 1 fake-camera-offer"]
+        );
     }
 }

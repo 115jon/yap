@@ -8,6 +8,7 @@ import com.yap.native
 //   tone "rest"   tint-1, ink-1                  (dock rest)
 //   tone "off"    muted-state tint and ink, the glyph's off partner
 //   tone "toggled" tint-2, ink-1
+//   tone "live"   live tint and ink, the Fill glyph (camera on, sharing)
 // 24/28 keys take a 16 px glyph, 32 an 18, 40 a 20, 48 a 24.
 T.Button {
     id: control
@@ -15,13 +16,14 @@ T.Button {
     required property string iconName
     property string tone: "ghost"
     property int size: 40
-    property string iconVariant: tone === "off" ? "off" : "idle"
+    property string iconVariant: tone === "off" ? "off" : tone === "live" ? "active" : "idle"
     property string tip: ""
     property bool square: false
     property string tipSide: "top"
 
     property int glyph: size >= 48 ? Theme.iconXl : size >= 40 ? Theme.iconLg : size >= 32 ? Theme.iconMd : Theme.iconSm
     readonly property color ink: tone === "off" ? Theme.mutedState
+        : tone === "live" ? Theme.liveInk
         : tone === "rest" || tone === "toggled" || hovered || down ? Theme.ink1
         : tone === "muted" ? Theme.ink3 : Theme.ink2
 
@@ -53,6 +55,7 @@ T.Button {
     background: Rectangle {
         radius: control.square ? 0 : Theme.radius
         color: control.tone === "off" ? Theme.mutedStateTint
+             : control.tone === "live" ? Theme.liveTint
              : control.tone === "rest" ? Theme.tint1
              : control.tone === "toggled" ? Theme.tint2
              : "transparent"

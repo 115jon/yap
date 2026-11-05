@@ -18,7 +18,7 @@ use crate::roster::{Member, Roster};
 use crate::sfu::LayerUpdate;
 use crate::tracks::{Kind, Offer, Remote, TrackTable};
 use crate::vad::{level_percent, Sensitivity, Vad};
-use crate::wire::{self, Bootstrap, IceServer, Participant, RoomState, Track};
+use crate::wire::{self, Announced, Bootstrap, IceServer, Participant, RoomState, Track};
 
 /// How long a remote participant's pulls outlive a voice `ClientDisconnect`
 /// for them (`REMOTE_RECONNECT_GRACE_MS`, STATE_MACHINE.md "Reconnect
@@ -113,6 +113,10 @@ pub enum UserCommand {
     SetVideo(VideoIntent),
     /// The participants whose shares the user watches (pressed Watch).
     SetWatched(BTreeSet<String>),
+    /// Our camera on or off. Off keeps its SFU track alive on the
+    /// keepalive, so on again resumes the same track (SCREEN_SHARE.md
+    /// "Keepalive park and reuse").
+    SetCamera(bool),
     Leave,
 }
 
@@ -129,6 +133,14 @@ pub struct Published {
     /// Our SFU session capability (opaque; never shown).
     pub session_id: String,
     pub sfu_track_name: String,
+}
+
+/// Our camera, pushed to the SFU (or resumed on the track it kept).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CameraPublished {
+    pub sfu_track_name: String,
+    /// The layers the sender negotiated, highest first; empty for one.
+    pub simulcast_rids: Vec<String>,
 }
 
 /// A room socket event.
@@ -238,6 +250,8 @@ pub enum Input {
     Room(RoomEvent),
     Voice(VoiceEvent),
     Media(MediaEvent),
+    /// The camera push (or resume) finished, or why it failed.
+    CameraPublished(Result<CameraPublished, String>),
     /// A pull finished; `mid` if it worked.
     PullDone {
         sfu_track_name: String,
@@ -274,6 +288,9 @@ pub enum Notice {
     /// The mic level as the meter shows it, 0..100 (the sensitivity
     /// slider's scale), with each reading.
     MicLevel(f64),
+    /// Our camera is on (published and announced) or off; `error` says
+    /// why turning it on failed.
+    Camera { on: bool, error: Option<String> },
 }
 
 /// How to open one call socket.
@@ -325,6 +342,13 @@ pub enum Effect {
     /// Pull a remote track (serialized with closes); answer with
     /// [`Input::PullDone`].
     Pull(Remote),
+    /// Push our camera, or resume the SFU track a camera that went off
+    /// kept (serialized with pulls); answer with [`Input::CameraPublished`].
+    PublishCamera {
+        stream_id: String,
+    },
+    /// Send camera frames (`true`) or the keepalive's black frames.
+    SetCameraLive(bool),
     /// Stop these receive transceivers and close them on the SFU.
     Close(Vec<String>),
     /// Move a pulled camera to another simulcast layer (`tracks/update`).
@@ -357,6 +381,20 @@ pub enum Effect {
     },
     /// Close everything; the call is over (`Some` = why it failed).
     End(Option<String>),
+}
+
+/// Our camera publication.
+#[derive(Debug, Clone, Default)]
+struct Camera {
+    /// The user wants it on.
+    wanted: bool,
+    /// A push or resume is in flight.
+    pushing: bool,
+    /// The SFU track, once pushed. Kept while the camera is off.
+    published: Option<CameraPublished>,
+    /// Sending camera frames and announced. Off: parked on the keepalive,
+    /// never announced.
+    on: bool,
 }
 
 /// One pulled camera's simulcast layer.
@@ -412,6 +450,7 @@ pub struct CallMachine {
     /// The frame route set on each pulled video mid (absent: none).
     routes: HashMap<String, String>,
     layers: HashMap<String, Layer>,
+    camera: Camera,
 }
 
 impl CallMachine {
@@ -447,6 +486,7 @@ impl CallMachine {
             announced_watch: BTreeSet::new(),
             routes: HashMap::new(),
             layers: HashMap::new(),
+            camera: Camera::default(),
         }
     }
 
@@ -491,6 +531,7 @@ impl CallMachine {
             (_, Input::Start) => {}
             (_, Input::Tickets(result)) => self.on_tickets(&mut fx, result),
             (_, Input::Published(result)) => self.on_published(&mut fx, result),
+            (_, Input::CameraPublished(result)) => self.on_camera_published(&mut fx, result),
             (_, Input::Room(event)) => self.on_room(&mut fx, event),
             (_, Input::Voice(event)) => self.on_voice(&mut fx, event),
             (_, Input::Media(event)) => self.on_media(&mut fx, event),
@@ -813,16 +854,55 @@ impl CallMachine {
                 if self.voice_ready {
                     self.announce(fx);
                 }
+                self.publish_camera(fx);
             }
             Err(error) => self.end(fx, Some(error)),
         }
     }
 
+    /// Announces our publications (op 12): the mic, and the camera while it
+    /// is on (a parked camera is never announced).
     fn announce(&self, fx: &mut Vec<Effect>) {
-        if let Some(p) = &self.published {
-            let frame =
-                wire::announce(&self.me, &self.my_track(), &p.sfu_track_name, &p.session_id);
-            fx.push(Effect::Send(Socket::Voice, frame));
+        let Some(p) = &self.published else {
+            return;
+        };
+        let mic = self.my_track();
+        fx.push(Effect::Send(
+            Socket::Voice,
+            wire::announce(
+                &self.me,
+                &Announced {
+                    track_name: &mic,
+                    sfu_track_name: &p.sfu_track_name,
+                    session_id: &p.session_id,
+                    kind: "audio",
+                    simulcast_rids: &[],
+                },
+            ),
+        ));
+        self.announce_camera(fx);
+    }
+
+    /// Our camera's op 12, while it is on.
+    fn announce_camera(&self, fx: &mut Vec<Effect>) {
+        let Some(p) = &self.published else {
+            return;
+        };
+        if let Some(camera) = self.camera.published.as_ref().filter(|_| self.camera.on) {
+            let alias = camera_alias(&self.me);
+            fx.push(Effect::Send(
+                Socket::Voice,
+                wire::announce(
+                    &self.me,
+                    &Announced {
+                        track_name: &alias,
+                        sfu_track_name: &camera.sfu_track_name,
+                        session_id: &p.session_id,
+                        kind: "video",
+                        simulcast_rids: &camera.simulcast_rids,
+                    },
+                ),
+            ));
         }
     }
 
@@ -872,10 +952,7 @@ impl CallMachine {
                 let again = std::mem::replace(&mut self.room_identified, true);
                 self.room_up = true;
                 self.replace_roster(&d);
-                fx.push(Effect::Send(
-                    Socket::Room,
-                    wire::voice_state(self.muted, self.deafened),
-                ));
+                fx.push(Effect::Send(Socket::Room, self.voice_state()));
                 self.emit_roster(fx);
                 match self.state {
                     CallState::Connecting => {
@@ -1103,10 +1180,7 @@ impl CallMachine {
                     }
                 }
                 if self.sockets_open {
-                    fx.push(Effect::Send(
-                        Socket::Room,
-                        wire::voice_state(muted, self.deafened),
-                    ));
+                    fx.push(Effect::Send(Socket::Room, self.voice_state()));
                 }
                 self.emit_roster(fx);
             }
@@ -1119,10 +1193,7 @@ impl CallMachine {
                     roster.set_my_deaf(deafened);
                 }
                 if self.sockets_open {
-                    fx.push(Effect::Send(
-                        Socket::Room,
-                        wire::voice_state(self.muted, deafened),
-                    ));
+                    fx.push(Effect::Send(Socket::Room, self.voice_state()));
                 }
                 self.emit_roster(fx);
             }
@@ -1141,8 +1212,95 @@ impl CallMachine {
                 self.watched = watched;
                 self.sync_watch(fx);
             }
+            UserCommand::SetCamera(on) => self.set_camera(fx, on),
             UserCommand::Leave => self.leave(fx),
         }
+    }
+
+    /// Our voice state (op 15) as it is now.
+    fn voice_state(&self) -> String {
+        wire::voice_state(self.muted, self.deafened, self.camera.on)
+    }
+
+    /// The camera toggle (useVoiceChannel.ts `toggleCamera`). On pushes it,
+    /// or resumes the track it kept; it counts as on once that lands. Off
+    /// parks it on the keepalive at once: StopTracks (op 13) for its alias
+    /// and `self_video: false`.
+    fn set_camera(&mut self, fx: &mut Vec<Effect>, on: bool) {
+        self.camera.wanted = on;
+        if on {
+            self.publish_camera(fx);
+        } else if self.camera.on {
+            self.camera.on = false;
+            fx.push(Effect::SetCameraLive(false));
+            if self.voice_ready {
+                let alias = camera_alias(&self.me);
+                fx.push(Effect::Send(Socket::Voice, wire::stop_tracks(&[&alias])));
+            }
+            self.camera_changed(fx, None);
+        }
+    }
+
+    /// Starts the push or resume a wanted camera needs, once the mic is
+    /// published (its push opened the peer connection).
+    fn publish_camera(&mut self, fx: &mut Vec<Effect>) {
+        let camera = &mut self.camera;
+        if !camera.wanted || camera.on || camera.pushing || self.published.is_none() {
+            return;
+        }
+        camera.pushing = true;
+        fx.push(Effect::PublishCamera {
+            stream_id: format!("cam-{}", self.me),
+        });
+    }
+
+    fn on_camera_published(
+        &mut self,
+        fx: &mut Vec<Effect>,
+        result: Result<CameraPublished, String>,
+    ) {
+        if !std::mem::replace(&mut self.camera.pushing, false) {
+            return;
+        }
+        match result {
+            Ok(published) => {
+                self.camera.published = Some(published);
+                if !self.camera.wanted {
+                    // Turned off while it was pushed: it stays parked.
+                    return;
+                }
+                self.camera.on = true;
+                fx.push(Effect::SetCameraLive(true));
+                // One op 12 for this publication; a voice socket that is
+                // not ready announces everything on its VoiceReady.
+                if self.voice_ready {
+                    self.announce_camera(fx);
+                }
+                self.camera_changed(fx, None);
+            }
+            Err(error) => {
+                self.camera.wanted = false;
+                fx.push(Effect::Log(format!(
+                    "[voice] camera publish failed: {error}"
+                )));
+                self.camera_changed(fx, Some(error));
+            }
+        }
+    }
+
+    /// Our camera state, out to the room (op 15), our row and the UI.
+    fn camera_changed(&mut self, fx: &mut Vec<Effect>, error: Option<String>) {
+        if let Some(roster) = &mut self.roster {
+            roster.set_my_video(self.camera.on);
+        }
+        if self.sockets_open {
+            fx.push(Effect::Send(Socket::Room, self.voice_state()));
+        }
+        fx.push(Effect::Notify(Notice::Camera {
+            on: self.camera.on,
+            error,
+        }));
+        self.emit_roster(fx);
     }
 
     /// The one teardown (STATE_MACHINE.md "Teardown"). Local media first,

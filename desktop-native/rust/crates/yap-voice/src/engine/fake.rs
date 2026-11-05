@@ -19,6 +19,8 @@ pub enum FakeOp {
     StartCapture,
     AnswerOffer { sdp: String },
     CloseMids(Vec<String>),
+    PublishCamera { stream_id: String },
+    SetCameraLive(bool),
     SetMicEnabled(bool),
     SetPlayoutEnabled(bool),
     SetTrackGain { mid: String, gain: f64 },
@@ -37,6 +39,8 @@ struct Shared {
     fail_open: bool,
     /// What `mic_energy` answers.
     energy: Option<(f64, f64)>,
+    /// What `camera_stale` answers.
+    camera_stale: bool,
 }
 
 /// Records calls; clones share the record.
@@ -78,6 +82,14 @@ impl FakeEngine {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .energy = Some((total_energy, total_duration));
+    }
+
+    /// Makes `camera_stale` say the parked camera's track may be gone.
+    pub fn set_camera_stale(&self, stale: bool) {
+        self.shared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .camera_stale = stale;
     }
 
     /// Everything called so far, in order.
@@ -172,6 +184,34 @@ impl MediaSession for FakeSession {
     async fn close_mids(&self, mids: &[String]) -> Result<String, MediaError> {
         record(&self.shared, FakeOp::CloseMids(mids.to_vec()));
         Ok("fake-close-offer".into())
+    }
+
+    async fn publish_camera(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
+        record(
+            &self.shared,
+            FakeOp::PublishCamera {
+                stream_id: stream_id.to_owned(),
+            },
+        );
+        Ok(LocalOffer {
+            sdp: "fake-camera-offer".into(),
+            mid: "1".into(),
+        })
+    }
+
+    fn camera_rids(&self) -> Vec<String> {
+        ["f", "h", "q"].map(str::to_owned).to_vec()
+    }
+
+    fn set_camera_live(&self, live: bool) {
+        record(&self.shared, FakeOp::SetCameraLive(live));
+    }
+
+    fn camera_stale(&self) -> bool {
+        self.shared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .camera_stale
     }
 
     fn set_mic_enabled(&self, enabled: bool) {

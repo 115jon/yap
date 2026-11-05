@@ -195,4 +195,11 @@ impl Roster {
             row.deafened = deafened;
         }
     }
+
+    /// Our camera is on (what we send as `self_video`).
+    pub fn set_my_video(&mut self, video: bool) {
+        if let Some(row) = self.rows.get_mut(&self.me) {
+            row.video = video;
+        }
+    }
 }

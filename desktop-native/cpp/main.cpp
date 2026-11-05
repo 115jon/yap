@@ -18,6 +18,7 @@
 
 #include <cstdio>
 
+#include "camera.h"
 #include "desktopshell.h"
 #include "ditherprovider.h"
 #include "iconprovider.h"
@@ -181,6 +182,10 @@ int main(int argc, char* argv[])
   // window closes.
   auto* video = new VideoHub;
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "VideoHub", video);
+  // Our camera, for the call and the preview (YAP_FAKE_CAMERA=1: the test
+  // pattern, no device opened).
+  auto* camera = new CameraCapture(&app);
+  qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "Camera", camera);
 
   QQmlApplicationEngine engine;
   // Not owned by the engine; it outlives it here.

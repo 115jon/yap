@@ -292,6 +292,12 @@ pub mod qobject {
         #[qproperty(bool, speaking)]
         /// Why the last call failed; empty once a join starts.
         #[qproperty(QString, error)]
+        /// The camera is wanted (the capture runs) and on (published).
+        #[qproperty(bool, camera_wanted, cxx_name = "cameraWanted")]
+        #[qproperty(bool, camera_on, cxx_name = "cameraOn")]
+        /// Why the camera could not go on: `missing`, `busy`, `unknown`, or
+        /// the call's error; empty otherwise.
+        #[qproperty(QString, camera_error, cxx_name = "cameraError")]
         type Voice = super::VoiceRust;
 
         #[qinvokable]
@@ -311,6 +317,17 @@ pub mod qobject {
         /// Watch (or stop watching) a participant's share.
         #[qinvokable]
         fn watch(self: &Voice, participant_id: &QString, watch: bool);
+
+        /// Our camera on or off in the call.
+        #[qinvokable]
+        #[cxx_name = "setCamera"]
+        fn set_camera_from_ui(self: &Voice, on: bool);
+
+        /// The capture failed (`missing`, `busy`, `unknown`): the camera
+        /// goes off with that reason.
+        #[qinvokable]
+        #[cxx_name = "cameraFailed"]
+        fn camera_failed(self: &Voice, reason: &QString);
 
         /// An id for a video surface to report its size under.
         #[qinvokable]
@@ -467,6 +484,9 @@ pub struct VoiceRust {
     deafened: bool,
     speaking: bool,
     error: QString,
+    camera_wanted: bool,
+    camera_on: bool,
+    camera_error: QString,
 }
 
 /// View updates waiting for the Qt thread, and whether a closure that will
@@ -767,6 +787,14 @@ impl qobject::Voice {
             participant_id: participant_id.to_string(),
             watch,
         });
+    }
+
+    pub fn set_camera_from_ui(&self, on: bool) {
+        client::command(Command::SetVoiceCamera(on));
+    }
+
+    pub fn camera_failed(&self, reason: &QString) {
+        client::command(Command::VoiceCameraFailed(reason.to_string()));
     }
 
     pub fn new_surface(&self) -> i32 {

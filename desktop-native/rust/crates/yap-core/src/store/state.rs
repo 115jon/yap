@@ -300,6 +300,13 @@ pub struct VoiceCall {
     pub joined: bool,
     /// Participants whose shares the user watches.
     pub watched: std::collections::BTreeSet<String>,
+    /// The user turned the camera on (it captures); `camera` once it is
+    /// published and announced.
+    pub camera_wanted: bool,
+    pub camera: bool,
+    /// Why the camera could not go on (`missing`, `busy`, `unknown`, or the
+    /// call's error); empty otherwise.
+    pub camera_error: String,
 }
 
 /// Mic and deafen, kept between calls and in the snapshot cache (the

@@ -6,7 +6,7 @@ import com.yap.native
 // line-field edge (ink-2 on hover, ink-1 plus the ring on focus), 40 high,
 // the chosen name and a caret. It opens the list as radio rows under it;
 // the first entry is the system default, named after it with a "Default"
-// hint.
+// hint (`firstIsDefault: false` for a plain list of options).
 T.AbstractButton {
     id: control
 
@@ -15,13 +15,14 @@ T.AbstractButton {
     property string current: ""
     // The default's name when the system did not give one.
     property string fallback: ""
+    property bool firstIsDefault: true
     readonly property int currentIndex: Math.max(0, ids.indexOf(current))
 
     signal picked(string id)
 
     function nameAt(index) {
         const name = names[index] ?? ""
-        return index === 0 && name.length === 0 ? fallback : name
+        return control.firstIsDefault && index === 0 && name.length === 0 ? fallback : name
     }
 
     implicitWidth: 360
@@ -67,7 +68,7 @@ T.AbstractButton {
                 required property int index
                 required property string modelData
                 text: control.nameAt(index)
-                hint: index === 0 ? qsTr("Default") : ""
+                hint: control.firstIsDefault && index === 0 ? qsTr("Default") : ""
                 selected: index === control.currentIndex
                 onTriggered: control.picked(modelData)
             }

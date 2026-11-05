@@ -1,5 +1,7 @@
 pragma Singleton
 import QtQuick
+import Yap.Chrome
+import com.yap.native
 
 // Shell-wide UI state that is not the core's: whether the member panel is
 // shown (on by default, as the web's `showMembers`), and requests for the
@@ -26,6 +28,22 @@ QtObject {
 
     function toggleFocus(tileId) {
         focusedTile = focusedTile === tileId ? "" : tileId
+    }
+
+    // The camera key (camera-toggle.ts): off goes off at once; on opens the
+    // Camera dialog first while "Preview before turning on camera" is set.
+    signal cameraDialogRequested()
+    // The Camera dialog without the offer to turn it on (a caret menu row).
+    signal cameraSettingsRequested()
+
+    function toggleCamera() {
+        if (!Camera.hasCamera)
+            return
+        const on = Voice.cameraOn || Voice.cameraWanted
+        if (on || !Audio.alwaysPreviewVideo)
+            Voice.setCamera(!on)
+        else
+            cameraDialogRequested()
     }
 
     // `side`: where the card opens next to `anchor`: right, left or top.

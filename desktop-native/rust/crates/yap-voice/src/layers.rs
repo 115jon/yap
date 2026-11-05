@@ -7,6 +7,40 @@
 
 use std::time::Duration;
 
+/// One encoding our camera is pushed with (`CAMERA_SIMULCAST_ENCODINGS`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CameraEncoding {
+    pub rid: &'static str,
+    pub scale_down_by: f64,
+    /// Bits per second; `None` keeps libwebrtc's default for the size.
+    pub max_bitrate: Option<u64>,
+    pub max_framerate: Option<f64>,
+}
+
+/// The camera's simulcast encodings, highest first, as the web pushes them:
+/// the top layer keeps the encoder's default bitrate for the capture size,
+/// the lower two are capped so a grid of tiles stays cheap.
+pub const CAMERA_SIMULCAST: [CameraEncoding; 3] = [
+    CameraEncoding {
+        rid: "f",
+        scale_down_by: 1.0,
+        max_bitrate: None,
+        max_framerate: None,
+    },
+    CameraEncoding {
+        rid: "h",
+        scale_down_by: 2.0,
+        max_bitrate: Some(500_000),
+        max_framerate: None,
+    },
+    CameraEncoding {
+        rid: "q",
+        scale_down_by: 4.0,
+        max_bitrate: Some(150_000),
+        max_framerate: Some(15.0),
+    },
+];
+
 /// A simulcast layer, by quality.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Quality {

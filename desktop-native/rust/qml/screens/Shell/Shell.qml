@@ -37,6 +37,12 @@ RowLayout {
         function onMeIdChanged() { Audio.setUser(Session.meId) }
     }
 
+    // The camera's capture, its saved choice and the Camera dialog.
+    CameraLink {
+        Layout.preferredWidth: 0
+        Layout.preferredHeight: 0
+    }
+
     ServerRail {
         visible: !ShellState.stageFullscreen
         Layout.fillHeight: true

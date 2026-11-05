@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Templates as T
 import com.yap.native
 
 // The account row (UserPanel.tsx): 64 high, pl-3 pr-1, gap 4. A 40 px
@@ -235,32 +234,4 @@ Rectangle {
         onVoiceSettings: voiceSettings.open()
     }
     VoiceSettings { id: voiceSettings }
-
-    // A 10 x 40 caret beside a dock key; it opens (and closes) its menu.
-    component DeviceCaret: T.AbstractButton {
-        id: caret
-        required property string label
-        required property DeviceMenu menu
-        implicitWidth: 10
-        implicitHeight: 40
-        focusPolicy: Qt.StrongFocus
-        Accessible.role: Accessible.ButtonMenu
-        Accessible.name: label
-        onClicked: caret.menu.visible ? caret.menu.close() : caret.menu.openAbove(caret)
-        contentItem: Item {
-            Icon {
-                anchors.centerIn: parent
-                name: "chevronDown"
-                size: 10
-                color: caret.hovered || caret.menu.visible ? Theme.ink1 : Theme.ink3
-            }
-        }
-        background: Rectangle {
-            radius: Theme.radius
-            color: "transparent"
-            border.width: 2
-            border.color: Theme.focus
-            visible: caret.visualFocus
-        }
-    }
 }

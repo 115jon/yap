@@ -452,6 +452,9 @@ impl State {
                 deafened: call.deafened,
                 speaking: call.roster.iter().any(|m| m.me && m.speaking),
                 error: String::new(),
+                camera_wanted: call.camera_wanted,
+                camera: call.camera,
+                camera_error: call.camera_error.clone(),
             },
             None => VoiceView {
                 muted: prefs.muted,
@@ -1031,6 +1034,10 @@ impl State {
                 watch,
             } => self.watch_stream(fx, participant_id, watch),
             Command::LeaveVoice => self.leave_voice(fx),
+            Command::SetVoiceCamera(on) => self.set_voice_camera(fx, on, None),
+            Command::VoiceCameraFailed(reason) => {
+                self.set_voice_camera(fx, false, Some(reason));
+            }
             // useVoiceSettingsStore.ts: unmuting while deafened undeafens;
             // a mute change outside deafen is the one to come back to.
             Command::SetVoiceMuted(muted) => {
@@ -2824,6 +2831,9 @@ impl State {
             deafened: prefs.deafened,
             joined: false,
             watched: Default::default(),
+            camera_wanted: false,
+            camera: false,
+            camera_error: String::new(),
         });
         self.emit_voice(fx);
     }
@@ -2866,6 +2876,26 @@ impl State {
         }
     }
 
+    /// The camera toggle: the call pushes it (or resumes its kept track),
+    /// and reports back when it is on. A capture failure turns it off with
+    /// the reason; a new toggle clears it.
+    fn set_voice_camera(&mut self, fx: &mut Effects, on: bool, error: Option<String>) {
+        let Some(call) = self.voice.as_mut() else {
+            return;
+        };
+        let reason = error.unwrap_or_default();
+        if call.camera_wanted == on && call.camera_error == reason {
+            return;
+        }
+        call.camera_wanted = on;
+        call.camera_error = reason;
+        fx.push(Effect::Voice {
+            call: call.id,
+            command: VoiceCommand::SetCamera(on),
+        });
+        self.emit_voice(fx);
+    }
+
     /// New mic and deafen: kept, stored, sent to the call and, once it is
     /// up, to the gateway.
     fn set_voice_prefs(&mut self, fx: &mut Effects, prefs: VoicePrefs) {
@@ -2900,6 +2930,13 @@ impl State {
         match update {
             VoiceUpdate::Status(status) => current.status = status,
             VoiceUpdate::Roster(roster) => current.roster = roster,
+            VoiceUpdate::Camera { on, error } => {
+                current.camera = on;
+                if let Some(error) = error {
+                    current.camera_wanted = false;
+                    current.camera_error = error;
+                }
+            }
             VoiceUpdate::Connected => {
                 // `joined`: the connect sound and one presence join (op 33),
                 // as the web sends once the room join completes. Mute and

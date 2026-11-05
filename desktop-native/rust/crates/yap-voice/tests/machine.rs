@@ -6,10 +6,10 @@ use yap_realtime::StopReason;
 use yap_voice::layers::{LAYER_DOWNGRADE_DELAY, LAYER_SWITCH_SETTLE, LAYER_UPGRADE_DELAY};
 use yap_voice::wire::{Participant, RoomState, Track};
 use yap_voice::{
-    CallMachine, CallState, CallTarget, Effect, Input, Kind, LayerUpdate, MediaEvent, MediaState,
-    Member, Notice, Playback, Processing, Published, RenderSize, RoomEvent, Sensitivity, Socket,
-    TicketReplies, Timer, UserCommand, VideoIntent, VoiceEvent, LEAVE_SEND_WINDOW,
-    REMOTE_RECONNECT_GRACE, SILENCE_DELAY_MS,
+    CallMachine, CallState, CallTarget, CameraPublished, Effect, Input, Kind, LayerUpdate,
+    MediaEvent, MediaState, Member, Notice, Playback, Processing, Published, RenderSize, RoomEvent,
+    Sensitivity, Socket, TicketReplies, Timer, UserCommand, VideoIntent, VoiceEvent,
+    LEAVE_SEND_WINDOW, REMOTE_RECONNECT_GRACE, SILENCE_DELAY_MS,
 };
 
 const ME: &str = "me-1";
@@ -1238,4 +1238,191 @@ fn a_leaving_call_should_ignore_video_intent() {
     let mut m = with_camera();
     m.handle(Input::Command(UserCommand::Leave));
     assert!(m.handle(show(&[(ANA_CAM, 640, 360)], None)).is_empty());
+}
+
+fn camera_published(sfu: &str) -> Input {
+    Input::CameraPublished(Ok(CameraPublished {
+        sfu_track_name: sfu.into(),
+        simulcast_rids: ["f", "h", "q"].map(str::to_owned).to_vec(),
+    }))
+}
+
+fn camera_notices(fx: &[Effect]) -> Vec<(bool, Option<String>)> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::Notify(Notice::Camera { on, error }) => Some((*on, error.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn publishes_camera(fx: &[Effect]) -> bool {
+    fx.iter()
+        .any(|e| matches!(e, Effect::PublishCamera { stream_id } if stream_id == "cam-me-1"))
+}
+
+/// The op 12 frames for our camera alias.
+fn camera_announces(fx: &[Effect]) -> Vec<Value> {
+    sends(fx, Socket::Voice)
+        .into_iter()
+        .filter(|f| f["op"] == 12 && f["d"]["tracks"][0]["track_name"] == "cam-video-me-1")
+        .collect()
+}
+
+fn self_video(fx: &[Effect]) -> Vec<bool> {
+    sends(fx, Socket::Room)
+        .iter()
+        .filter(|f| f["op"] == 15)
+        .map(|f| f["d"]["self_video"].as_bool().expect("self_video"))
+        .collect()
+}
+
+/// A joined call whose camera is on, on SFU track `cam-sfu-1`.
+fn camera_on() -> CallMachine {
+    let mut m = joined();
+    m.handle(Input::Command(UserCommand::SetCamera(true)));
+    m.handle(camera_published("cam-sfu-1"));
+    m
+}
+
+#[test]
+fn camera_on_should_push_then_announce_its_layers_and_self_video() {
+    let mut m = joined();
+    let fx = m.handle(Input::Command(UserCommand::SetCamera(true)));
+    assert!(publishes_camera(&fx));
+    // Not on until the push lands.
+    assert!(camera_notices(&fx).is_empty());
+
+    let fx = m.handle(camera_published("cam-sfu-1"));
+    assert!(fx.contains(&Effect::SetCameraLive(true)));
+    let announce = camera_announces(&fx);
+    assert_eq!(announce.len(), 1);
+    let track = &announce[0]["d"]["tracks"][0];
+    assert_eq!(
+        (track["kind"].as_str(), track["sfu_track_name"].as_str()),
+        (Some("video"), Some("cam-sfu-1"))
+    );
+    assert_eq!(track["simulcast_rids"], json!(["f", "h", "q"]));
+    assert_eq!(self_video(&fx), vec![true]);
+    assert_eq!(camera_notices(&fx), vec![(true, None)]);
+    let me = last_roster(&fx)
+        .expect("roster")
+        .into_iter()
+        .find(|m| m.me)
+        .expect("me");
+    assert!(me.video);
+}
+
+#[test]
+fn camera_off_should_park_it_and_say_so() {
+    let mut m = camera_on();
+    let fx = m.handle(Input::Command(UserCommand::SetCamera(false)));
+    assert!(fx.contains(&Effect::SetCameraLive(false)));
+    let stops: Vec<Value> = sends(&fx, Socket::Voice)
+        .into_iter()
+        .filter(|f| f["op"] == 13)
+        .collect();
+    assert_eq!(stops.len(), 1);
+    assert_eq!(stops[0]["d"]["track_names"], json!(["cam-video-me-1"]));
+    assert_eq!(self_video(&fx), vec![false]);
+    assert_eq!(camera_notices(&fx), vec![(false, None)]);
+    // Parked: never closed, so no close effect.
+    assert!(closes(&fx).is_empty());
+}
+
+#[test]
+fn camera_on_again_should_announce_the_kept_track() {
+    let mut m = camera_on();
+    m.handle(Input::Command(UserCommand::SetCamera(false)));
+    let fx = m.handle(Input::Command(UserCommand::SetCamera(true)));
+    assert!(publishes_camera(&fx));
+    let fx = m.handle(camera_published("cam-sfu-1"));
+    let announce = camera_announces(&fx);
+    assert_eq!(
+        announce[0]["d"]["tracks"][0]["sfu_track_name"],
+        json!("cam-sfu-1")
+    );
+    assert_eq!(self_video(&fx), vec![true]);
+}
+
+#[test]
+fn a_parked_camera_should_not_be_announced_on_reidentify() {
+    let mut m = camera_on();
+    m.handle(Input::Command(UserCommand::SetCamera(false)));
+    m.handle(Input::Voice(VoiceEvent::Disconnected));
+    let fx = m.handle(voice_ready(vec![track("ana", "mic-ana", "sfu-ana")]));
+    assert!(camera_announces(&fx).is_empty());
+    // The mic still is.
+    assert_eq!(ops(&fx, Socket::Voice).first(), Some(&12));
+}
+
+#[test]
+fn a_live_camera_should_be_announced_again_on_reidentify() {
+    let mut m = camera_on();
+    m.handle(Input::Voice(VoiceEvent::Disconnected));
+    let fx = m.handle(voice_ready(vec![track("ana", "mic-ana", "sfu-ana")]));
+    assert_eq!(camera_announces(&fx).len(), 1);
+}
+
+#[test]
+fn camera_off_during_the_push_should_leave_it_parked() {
+    let mut m = joined();
+    m.handle(Input::Command(UserCommand::SetCamera(true)));
+    m.handle(Input::Command(UserCommand::SetCamera(false)));
+    let fx = m.handle(camera_published("cam-sfu-1"));
+    assert!(camera_announces(&fx).is_empty());
+    assert!(!fx.contains(&Effect::SetCameraLive(true)));
+    assert!(self_video(&fx).is_empty());
+}
+
+#[test]
+fn camera_before_the_mic_is_published_should_wait_for_it() {
+    let mut m = CallMachine::new(target());
+    m.handle(Input::Start);
+    m.handle(Input::Tickets(Ok(tickets())));
+    let fx = m.handle(Input::Command(UserCommand::SetCamera(true)));
+    assert!(!publishes_camera(&fx));
+    let fx = m.handle(Input::Published(Ok(published())));
+    assert!(publishes_camera(&fx));
+}
+
+#[test]
+fn a_failed_camera_push_should_turn_it_off_with_the_reason() {
+    let mut m = joined();
+    m.handle(Input::Command(UserCommand::SetCamera(true)));
+    let fx = m.handle(Input::CameraPublished(Err("SFU push: HTTP 500".into())));
+    assert_eq!(
+        camera_notices(&fx),
+        vec![(false, Some("SFU push: HTTP 500".into()))]
+    );
+    assert_eq!(self_video(&fx), vec![false]);
+    // A later toggle tries again.
+    let fx = m.handle(Input::Command(UserCommand::SetCamera(true)));
+    assert!(publishes_camera(&fx));
+}
+
+#[test]
+fn mute_should_keep_self_video_as_it_is() {
+    let mut m = camera_on();
+    let fx = m.handle(Input::Command(UserCommand::SetMuted(true)));
+    assert_eq!(self_video(&fx), vec![true]);
+}
+
+#[test]
+fn a_camera_that_lands_during_a_voice_blip_should_be_announced_once_on_ready() {
+    let mut m = joined();
+    m.handle(Input::Voice(VoiceEvent::Disconnected));
+    m.handle(Input::Command(UserCommand::SetCamera(true)));
+    let fx = m.handle(camera_published("cam-sfu-1"));
+    assert!(sends(&fx, Socket::Voice).is_empty());
+    let fx = m.handle(voice_ready(vec![track("ana", "mic-ana", "sfu-ana")]));
+    assert_eq!(camera_announces(&fx).len(), 1);
+}
+
+#[test]
+fn camera_on_should_not_announce_the_mic_again() {
+    let mut m = joined();
+    m.handle(Input::Command(UserCommand::SetCamera(true)));
+    let fx = m.handle(camera_published("cam-sfu-1"));
+    assert_eq!(ops(&fx, Socket::Voice), vec![12]);
 }
