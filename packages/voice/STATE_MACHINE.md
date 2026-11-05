@@ -1,7 +1,7 @@
 # Voice session state machine
 
 This is the contract every Yap voice client follows: the web client (through
-`@ralph/voice`), the Expo app (once it adopts this package) and the native
+`@ralph/voice`), the Expo app (`apps/mobile`, also through it) and the native
 Rust client. `src/state-machine.ts` is the same table as code; the two must
 agree. Device choice, fallback, persistence and output routing are in
 [DEVICES.md](DEVICES.md); screen sharing and watching shares are in
@@ -119,7 +119,11 @@ ends only choose its **plan**:
 - _leave trigger_: the automatic soundboard leave sound, sent as a
   `VoiceAppEvent` (op 106) on the voice socket. This is why the sockets stay
   open for the **send window** (100 ms, `LEAVE_SEND_WINDOW_MS`) before the
-  client disconnects.
+  client disconnects. A platform with no leave trigger (the Expo app) passes
+  `leaveTrigger: false`: no trigger and a send window of 0 in every row, so
+  the client disconnects within the teardown, in the same turn as the app's
+  own release of the call (a phone's call service and audio session), and
+  the OS cannot suspend it in between with the room still holding it.
 - _release client_: when the platform stops exposing the client (web: the
   hook's `sfu` value that stats and call surfaces read).
 - _`left`_: the app is told the session is over (web: `onLeft`). It fires
@@ -211,7 +215,10 @@ reconnect, resume or rejoin on its own.
 
 A voice-token rejection (4004 in an `Error` frame on the voice socket) is
 not an end: the client asks the room socket for fresh credentials
-(`RefreshVoiceCredentials`, op 40). A failed resume (4006 SessionInvalid on
+(`RefreshVoiceCredentials`, op 40). Credentials come from the join's one
+admission request (`realtime/ADMISSION.md`); a room `Ready` or `Resumed`
+after that carries none, so the client keeps them and refreshes them with op
+40 45 minutes after they arrived. A failed resume (4006 SessionInvalid on
 the room socket) is not an end either: the room socket identifies again and
 the next `Ready` re-syncs the roster (`joined` while joined).
 
@@ -223,8 +230,10 @@ nothing on the wire. The sockets reconnect on their own backoff
 teardown from `reconnecting` is a joined teardown (leave trigger, presence
 leave, send window).
 
-After the voice socket is ready again (`VoiceReady`, op 101) the client
-re-announces its publications (`Video`, op 12) or, if the media session has
+Each socket's reconnect asks `/api/voice/admission` for its own ticket only
+(`sockets: ["room"]` or `["voice"]`, `media: false`): one request, no new
+credentials. After the voice socket is ready again (`VoiceReady`, op 101)
+the client re-announces its publications (`Video`, op 12) or, if the media session has
 none, republishes its local tracks through a
 [connection reset](#reconnect-republish) of the publication reconciler.
 
@@ -473,7 +482,8 @@ create a row.
 
 ## What this package does not change
 
-Nothing on the wire: the ticket flow, `media_bootstrap`, gateway ops 0, 2,
-7, 9, 11, 12, 13, 15, 33, 34, 40, 100 and 101, close codes 4004, 4006, 4008
+Nothing on the wire: the ticket flow (since replaced by one admission
+request per join, `realtime/ADMISSION.md`), `media_bootstrap`, gateway ops
+0, 2, 7, 9, 11, 12, 13, 15, 33, 34, 40, 100 and 101, close codes 4004, 4006, 4008
 and 4010, and PartyTracks request bodies are exactly as before. The package
 only decides when the existing messages are sent.

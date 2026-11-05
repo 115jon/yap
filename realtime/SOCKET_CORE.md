@@ -10,11 +10,16 @@ lists below.
 
 ## Roles
 
-| Role   | Durable Object                   | Upgrade path                | Ticket audience |
-| ------ | -------------------------------- | --------------------------- | --------------- |
-| global | `MeetingRoom` `"global-gateway"` | `/api/gateway`              | `global`        |
-| room   | `MeetingRoom` named by its slug  | `/api/channels/:slug/ws`    | `room`          |
-| voice  | `VoiceRoom` named by its slug    | `/api/channels/:slug/voice` | `voice`         |
+| Role   | Durable Object                   | Upgrade path                | Ticket audience | Ticket from                                  |
+| ------ | -------------------------------- | --------------------------- | --------------- | -------------------------------------------- |
+| global | `MeetingRoom` `"global-gateway"` | `/api/gateway`              | `global`        | `POST /api/voice/socket-ticket`              |
+| room   | `MeetingRoom` named by its slug  | `/api/channels/:slug/ws`    | `room`          | `POST /api/voice/admission` (`room_ticket`)  |
+| voice  | `VoiceRoom` named by its slug    | `/api/channels/:slug/voice` | `voice`         | `POST /api/voice/admission` (`voice_ticket`) |
+
+One admission request returns both call tickets and the participant's voice
+credentials; [ADMISSION.md](./ADMISSION.md) is the contract. The room and
+voice audiences of `/api/voice/socket-ticket` still work for clients up to
+v3.12.0 and mobile-v0.5.1 and are deprecated.
 
 The room's slug decides a `MeetingRoom`'s role. A room that has not learned
 its slug yet (no socket admitted since its storage was written) accepts both
@@ -27,7 +32,10 @@ For each upgrade:
 1. **Admission.** The worker (`custom-server-entry.ts`) verifies the ticket's
    HMAC and forwards its claims as `x-ralph-realtime-*` headers. The object
    checks that the audience and room match. A mismatch returns 401, and the
-   nonce is not spent there.
+   nonce is not spent there. Admission tickets also carry `media` (room) and
+   `participant` (voice), forwarded as `x-ralph-realtime-media` and
+   `x-ralph-realtime-bound-participant`; what the objects do with them is in
+   ADMISSION.md.
 2. **Single use.** The object spends the nonce in its
    `realtime_ticket_nonce_uses` table. If the nonce is already spent or the
    ticket has expired, the upgrade gets 401.
@@ -150,10 +158,11 @@ releases send the same set):
 **Mobile** (`apps/mobile/src`, mobile-v0.1.0 through main):
 
 - global (`features/realtime/gateway.ts`): 0, 3, 15, 26, 27, 28, 33, 34, 35,
-  36, 39.
+  36, 39. Main no longer sends 15 (the mute/deafen mirror) and sends 33 once
+  per room `Ready` instead of every 30 s; released builds still send both.
 - room (`features/voice/gateways.ts`): 0, 3, 7, 11, 15, 40.
-- voice (`features/voice/gateways.ts`, `features/voice/session.ts`): 100, 3,
-  5, 11, 12, 13, 106, 109.
+- voice (`features/voice/gateways.ts`, `features/voice/connection.ts`): 100,
+  3, 5, 11, 12, 13, 106, 109.
 
 **Native client spec** (`desktop-native/VOICE_PROTOCOL.md` on
 `spike/qt-desktop`):
