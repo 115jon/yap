@@ -226,8 +226,11 @@ fn register_class() -> windows::core::Result<()> {
 }
 
 fn user_data_folder() -> String {
-    let base = std::env::var("LOCALAPPDATA").unwrap_or_default();
-    format!("{base}\\YapNative\\WebView2")
+    yap_cache::profile::data_root()
+        .unwrap_or_default()
+        .join("WebView2")
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn fail_waiting(waiting: Vec<u64>) {

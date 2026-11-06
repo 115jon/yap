@@ -42,6 +42,7 @@ qt_add_executable(YapNative WIN32
   cpp/iconprovider.cpp cpp/iconprovider.h
   cpp/logfile.cpp cpp/logfile.h
   cpp/mediashell.cpp cpp/mediashell.h
+  cpp/profile.cpp cpp/profile.h
   cpp/shareprovider.cpp cpp/shareprovider.h
   cpp/toast_win.cpp cpp/toast_win.h
   cpp/videohub.cpp cpp/videohub.h

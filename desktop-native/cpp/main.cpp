@@ -26,6 +26,7 @@
 #include "iconprovider.h"
 #include "logfile.h"
 #include "mediashell.h"
+#include "profile.h"
 #include "shareprovider.h"
 #include "videohub.h"
 #include "webembed.h"
@@ -105,10 +106,10 @@ public:
   QNetworkAccessManager* create(QObject* parent) override
   {
     auto* manager = new MediaNetworkAccessManager(parent);
-    const QString base = qEnvironmentVariable("LOCALAPPDATA");
-    if (!base.isEmpty()) {
+    const QString root = QString::fromStdWString(profile::dataRoot());
+    if (!root.isEmpty()) {
       auto* cache = new QNetworkDiskCache(manager);
-      cache->setCacheDirectory(base + QStringLiteral("/YapNative/cache/images"));
+      cache->setCacheDirectory(root + QStringLiteral("/cache/images"));
       cache->setMaximumCacheSize(512 * 1024 * 1024);
       manager->setCache(cache);
       // The cache lives in the manager's thread: the queued call runs there.
@@ -158,8 +159,11 @@ int main(int argc, char* argv[])
 
   // No organization: Qt's own caches (QML, pipeline) then go to
   // %LOCALAPPDATA%\YapNative\cache. With an organization "Yap" they went to
-  // %LOCALAPPDATA%\Yap\..., the installed app's folder.
-  QGuiApplication::setApplicationName(QStringLiteral("YapNative"));
+  // %LOCALAPPDATA%\Yap\..., the installed app's folder. A named profile
+  // suffixes the name ("YapNative-jon"), so its caches are its own too.
+  QGuiApplication::setApplicationName(
+    QStringLiteral("YapNative") +
+    QString::fromStdWString(profile::suffix(L'-')));
   QGuiApplication app(argc, argv);
   // A second launch shows the first instance's window and exits.
   if (!first) {

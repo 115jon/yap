@@ -343,6 +343,7 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_KOVA_PUBLISHABLE_KEY` | Yap's live key            | Kova app                                                                                                                            |
 | `YAP_GATEWAY_ORIGIN`       | `YAP_API_URL`             | `Origin` sent on realtime sockets                                                                                                   |
 | `YAP_TOKEN`                | none                      | use this session instead of the credential store                                                                                    |
+| `YAP_PROFILE`              | unset                     | a profile name (`[a-z0-9-]{1,32}`; also `--profile <name>`): a second, separate copy of the app, see "Profiles"                     |
 | `YAP_FAKE_CAMERA`          | unset                     | `1`: a test pattern stands in for every camera                                                                                      |
 | `YAP_SHARE_ONLY_OURS`      | unset                     | `1`: share stills and captures only of our own windows (or one titled "Yap Native Share Test"); other windows listed without titles |
 | `YAP_FAKE_SHARE_AUDIO`     | unset                     | `1`: share audio is a 440 Hz tone, never a loopback                                                                                 |
@@ -354,6 +355,37 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_TRACE_MEDIA_IO`       | unset                     | `1`: log each loopback relay request (range, status, length)                                                                        |
 
 The defaults mirror `src/lib/site-defaults.ts`.
+
+## Profiles
+
+`YAP_PROFILE=<name>`, or `--profile <name>` (or `--profile=<name>`) on the
+command line, runs a named profile: a second copy of the app, signed in on
+its own, that never touches the default one or another profile. This is how
+you run it as yourself while agents drive a test copy. The switch wins over
+the variable. A name is `[a-z0-9-]{1,32}`; anything else (including a bad
+`--profile` value) is ignored and the default profile runs. With no profile
+nothing changes.
+
+```powershell
+./YapNative.exe --profile jon          # or: $env:YAP_PROFILE = "jon"
+```
+
+| what                    | default profile                           | profile `<name>`                                         |
+| ----------------------- | ----------------------------------------- | -------------------------------------------------------- |
+| data folder (cache, settings, sounds, logs, WebView2) | `%LOCALAPPDATA%\YapNative` | `%LOCALAPPDATA%\YapNative\profiles\<name>` |
+| credential              | Credential Manager, service `com.115jon.yap.native-spike` | the same service with `:<name>` appended |
+| instance lock and pipe  | `...native.instance`, `...native.<session>` | `...native.instance.<name>`, `...native.<name>.<session>` |
+| AUMID (toasts)          | `com.115jon.yap.native`, "Yap Native"     | `com.115jon.yap.native.<name>`, "Yap Native (`<name>`)"  |
+| tray window class       | `YapNativeTrayWindow`                     | `YapNativeTrayWindow-<name>`                             |
+| tray tooltip, title     | "Yap Native", the location                | "Yap Native (`<name>`)", the location with `(<name>)`    |
+| Run (autostart) value   | `YapNative`                               | `YapNative-<name>`, launching with `--profile <name>`    |
+| `yap-native://` scheme  | registered                                | never registered                                         |
+| Qt `applicationName`    | `YapNative`                               | `YapNative-<name>` (Qt's own cache folders)              |
+
+Two profiles can run at once; a second launch of the same profile shows the
+first one's window. `YAP_TOKEN`, when set, overrides the credential for any
+profile, so leave it unset for a signed-in profile. The profile rules live in
+`cpp/profile.*` and `rust/crates/yap-cache/src/profile.rs` and must agree.
 
 ## Assets and theme
 

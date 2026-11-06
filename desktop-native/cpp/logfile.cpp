@@ -1,5 +1,7 @@
 #include "logfile.h"
 
+#include "profile.h"
+
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -20,11 +22,10 @@ constexpr int kKeep = 5;
 
 fs::path logDir()
 {
-  wchar_t base[MAX_PATH];
-  const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH);
-  if (n == 0 || n >= MAX_PATH)
+  const std::wstring root = profile::dataRoot();
+  if (root.empty())
     return {};
-  return fs::path(base) / L"YapNative" / L"logs";
+  return fs::path(root) / L"logs";
 }
 
 fs::path logFile(const fs::path& dir, int index)
