@@ -713,15 +713,30 @@ impl Runner {
 }
 
 /// A picture pasted from the clipboard, which the shell saved under
-/// `YapNative/cache/paste/` (cpp/mediashell.cpp). Nothing else is deleted.
+/// `YapNative/cache/paste/` (`YapNative/profiles/<name>/cache/paste/` for a
+/// named profile; cpp/mediashell.cpp). Nothing else is deleted.
 fn is_pasted_copy(path: &Path) -> bool {
-    let parts: Vec<_> = path.components().rev().skip(1).take(3).collect();
-    matches!(
-        parts.as_slice(),
-        [paste, cache, app] if paste.as_os_str() == "paste"
-            && cache.as_os_str() == "cache"
-            && app.as_os_str() == "YapNative"
-    )
+    let parts: Vec<_> = path.components().rev().skip(1).take(5).collect();
+    let is_app = |c: &std::path::Component| c.as_os_str() == "YapNative";
+    match parts.as_slice() {
+        [paste, cache, rest @ ..]
+            if paste.as_os_str() == "paste" && cache.as_os_str() == "cache" =>
+        {
+            match rest {
+                [app, ..] if is_app(app) => true,
+                [name, profiles, app, ..] => {
+                    profiles.as_os_str() == "profiles"
+                        && is_app(app)
+                        && name
+                            .as_os_str()
+                            .to_str()
+                            .is_some_and(yap_cache::profile::is_valid)
+                }
+                _ => false,
+            }
+        }
+        _ => false,
+    }
 }
 
 /// Chunks an upload is streamed in; progress is reported per chunk.
@@ -967,9 +982,14 @@ mod tests {
         let pasted = r"C:\Users\a\AppData\Local\YapNative\cache\paste\image-1.png";
         let picked = r"C:\Users\a\Pictures\image-1.png";
         let lookalike = r"C:\Users\a\cache\paste\image-1.png";
+        let profiled = r"C:\Users\a\AppData\Local\YapNative\profiles\jon\cache\paste\image-1.png";
+        let bad_profile =
+            r"C:\Users\a\AppData\Local\YapNative\profiles\Jon\cache\paste\image-1.png";
+        let stranger = r"C:\Users\a\AppData\Local\Other\profiles\jon\cache\paste\image-1.png";
         assert_eq!(
-            [pasted, picked, lookalike].map(|p| is_pasted_copy(Path::new(p))),
-            [cfg!(windows), false, false]
+            [pasted, picked, lookalike, profiled, bad_profile, stranger]
+                .map(|p| is_pasted_copy(Path::new(p))),
+            [cfg!(windows), false, false, cfg!(windows), false, false]
         );
     }
 }

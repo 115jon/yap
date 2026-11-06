@@ -13,6 +13,7 @@
 
 pub mod catalog;
 mod db;
+pub mod profile;
 pub mod settings;
 pub mod voice;
 mod writer;
@@ -92,14 +93,9 @@ pub enum Write {
     Voice(VoicePrefs),
 }
 
-/// `%LOCALAPPDATA%\YapNative\cache\snapshot.db`, apart from the installed
-/// Yap app's folders. `None` without `LOCALAPPDATA`.
+/// `%LOCALAPPDATA%\YapNative\cache\snapshot.db` (under the profile's folder
+/// for a named profile, see [`profile`]), apart from the installed Yap app's
+/// folders. `None` without `LOCALAPPDATA`.
 pub fn default_path() -> Option<PathBuf> {
-    let base = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty())?;
-    Some(
-        PathBuf::from(base)
-            .join("YapNative")
-            .join("cache")
-            .join("snapshot.db"),
-    )
+    Some(profile::data_root()?.join("cache").join("snapshot.db"))
 }

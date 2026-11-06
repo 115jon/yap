@@ -156,8 +156,17 @@ pub trait TokenStore: Send + Sync + 'static {
 /// taking precedence for development.
 pub struct Keyring;
 
+/// The credential's service name: a named profile (`YAP_PROFILE`) gets its own
+/// entry, `:<name>` after the default one's, so profiles never share a login.
+fn service() -> String {
+    format!(
+        "{KEYRING_SERVICE}{}",
+        yap_cache::profile::credential_suffix(yap_cache::profile::current())
+    )
+}
+
 fn entry() -> Option<keyring::Entry> {
-    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).ok()
+    keyring::Entry::new(&service(), KEYRING_USER).ok()
 }
 
 impl TokenStore for Keyring {

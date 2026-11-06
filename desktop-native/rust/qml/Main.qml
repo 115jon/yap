@@ -25,7 +25,9 @@ ApplicationWindow {
     minimumWidth: 940
     minimumHeight: 560
     color: Theme.ply0
-    title: location
+    // A named profile shows in the title, so two windows are easy to tell
+    // apart: "#general - Yap HQ (jon)".
+    title: DesktopShell.profile.length > 0 ? location + " (" + DesktopShell.profile + ")" : location
 
     Component.onCompleted: Session.start()
 
@@ -108,7 +110,7 @@ ApplicationWindow {
 
     header: TitleBar {
         visible: !ShellState.stageFullscreen
-        title: window.location
+        title: window.title
         maximized: window.visibility === Window.Maximized
         onMinimizeRequested: window.showMinimized()
         onCloseRequested: window.close()

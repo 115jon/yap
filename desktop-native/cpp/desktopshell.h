@@ -10,10 +10,13 @@
 // Its identity is its own everywhere. The installed Yap app owns
 // com.115jon.yap, the Run value "Yap", the yap:// scheme and its folders;
 // none of them is read or written here. Deep links use our own
-// yap-native:// (HKCU\Software\Classes\yap-native only).
+// yap-native:// (HKCU\Software\Classes\yap-native only, and only the
+// default profile registers it). A named profile (profile.h) suffixes every
+// name that identifies the app, so two profiles run side by side.
 //
 // QML (import Yap.Chrome):
 //   DesktopShell.badgeCount / badgeDot / badgeTooltip   (bind from Desktop)
+//   DesktopShell.profile                                "" or the profile name
 //   DesktopShell.showToast(title, summary, body, channelId, serverId)
 //   DesktopShell.toastActivated(channelId, serverId)
 //   DesktopShell.setAutostart(on), reveal(), hideToTray(), quit()
@@ -34,6 +37,8 @@ class DesktopShell : public QObject
   Q_PROPERTY(int badgeCount READ badgeCount WRITE setBadgeCount NOTIFY badgeChanged)
   Q_PROPERTY(bool badgeDot READ badgeDot WRITE setBadgeDot NOTIFY badgeChanged)
   Q_PROPERTY(QString badgeTooltip READ badgeTooltip WRITE setBadgeTooltip NOTIFY badgeChanged)
+  // The named profile (YAP_PROFILE / --profile), "" for the default one.
+  Q_PROPERTY(QString profile READ profile CONSTANT)
 
 public:
   explicit DesktopShell(QObject* parent = nullptr);
@@ -70,12 +75,14 @@ public:
   bool badgeDot() const { return m_badgeDot; }
   void setBadgeDot(bool dot);
   QString badgeTooltip() const { return m_badgeTooltip; }
+  QString profile() const;
   void setBadgeTooltip(const QString& tooltip);
 
   Q_INVOKABLE void showToast(const QString& title, const QString& summary,
                              const QString& body, const QString& channelId,
                              const QString& serverId);
-  // Writes or removes the HKCU Run value "YapNative". False on failure.
+  // Writes or removes the HKCU Run value "YapNative" ("YapNative-<profile>"
+  // for a named profile). False on failure.
   Q_INVOKABLE bool setAutostart(bool enabled);
   // Shows, restores and foregrounds the window.
   Q_INVOKABLE void reveal();

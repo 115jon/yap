@@ -132,11 +132,11 @@ pub struct WindowState {
     pub maximized: bool,
 }
 
-/// `%LOCALAPPDATA%\YapNative`, apart from the installed Yap app's folders.
-/// `None` without `LOCALAPPDATA`.
+/// `%LOCALAPPDATA%\YapNative` (`YapNative\profiles\<name>` for a named
+/// profile), apart from the installed Yap app's folders. `None` without
+/// `LOCALAPPDATA`.
 pub fn app_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty())?;
-    Some(PathBuf::from(base).join("YapNative"))
+    crate::profile::data_root()
 }
 
 pub(crate) fn read<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {

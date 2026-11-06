@@ -21,6 +21,7 @@
 #include <string>
 #include <utility>
 
+#include "profile.h"
 #include "toast_win.h"
 
 #include <windows.h>
@@ -30,19 +31,23 @@
 namespace {
 
 // This app's identity. Never the installed app's (com.115jon.yap, "Yap").
-constexpr wchar_t kAumid[] = L"com.115jon.yap.native";
-constexpr wchar_t kAumidKey[] =
+// A named profile (profile.h) suffixes every name below with the profile, so
+// two profiles never share an instance, a toast identity or a Run value; the
+// functions after this block build them.
+constexpr wchar_t kAumidBase[] = L"com.115jon.yap.native";
+constexpr wchar_t kAumidKeyBase[] =
   L"Software\\Classes\\AppUserModelId\\com.115jon.yap.native";
-constexpr wchar_t kMutex[] = L"Local\\com.115jon.yap.native.instance";
+constexpr wchar_t kMutexBase[] = L"Local\\com.115jon.yap.native.instance";
 constexpr char kPipe[] = "com.115jon.yap.native";
 constexpr wchar_t kRunKey[] =
   L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-constexpr wchar_t kRunValue[] = L"YapNative";
-constexpr wchar_t kDisplayName[] = L"Yap Native";
+constexpr wchar_t kRunValueBase[] = L"YapNative";
+constexpr wchar_t kTrayClassBase[] = L"YapNativeTrayWindow";
+// The app's name in the tray and the tray menu; a profile adds its own.
+constexpr wchar_t kAppName[] = L"Yap Native";
 // Our deep-link scheme's key (yap_core::links::SCHEME_KEY). Never
 // Software\Classes\yap, the installed app's.
 constexpr wchar_t kSchemeKey[] = L"Software\\Classes\\yap-native";
-constexpr wchar_t kTrayClass[] = L"YapNativeTrayWindow";
 // A forwarded argument longer than this is not a link we made: dropped at
 // both ends of the pipe hand-off, and by openArg for our own command line.
 constexpr int kMaxArgBytes = 4096;
@@ -62,6 +67,32 @@ const QColor kBadgeRing(11, 11, 13);
 
 HANDLE g_instanceMutex = nullptr;
 
+std::wstring aumid()
+{
+  return kAumidBase + profile::suffix(L'.');
+}
+
+std::wstring aumidKey()
+{
+  return kAumidKeyBase + profile::suffix(L'.');
+}
+
+std::wstring mutexName()
+{
+  return kMutexBase + profile::suffix(L'.');
+}
+
+// "YapNative", or "YapNative-<name>".
+std::wstring runValue()
+{
+  return kRunValueBase + profile::suffix(L'-');
+}
+
+std::wstring trayClass()
+{
+  return kTrayClassBase + profile::suffix(L'-');
+}
+
 // The mutex is per Windows session (Local\); the pipe name is global, so it
 // carries the session id too, or a second signed-in user would find the
 // first user's pipe.
@@ -70,7 +101,9 @@ QString pipeName()
   DWORD session = 0;
   if (!ProcessIdToSessionId(GetCurrentProcessId(), &session))
     session = 0;
-  return QString::fromLatin1(kPipe) + QLatin1Char('.') + QString::number(session);
+  return QString::fromLatin1(kPipe) +
+         QString::fromStdWString(profile::suffix(L'.')) + QLatin1Char('.') +
+         QString::number(session);
 }
 
 std::wstring wide(const QString& text)
@@ -78,10 +111,23 @@ std::wstring wide(const QString& text)
   return text.toStdWString();
 }
 
+// The tray tooltip with the profile in it: "Yap Native (jon) - 3 unread
+// notifications". The default profile's tooltip is unchanged.
+QString trayTooltip(const QString& tooltip)
+{
+  if (profile::name().empty())
+    return tooltip;
+  const QString app = QString::fromWCharArray(kAppName);
+  const QString named = QString::fromStdWString(profile::displayName());
+  return tooltip.startsWith(app)
+           ? named + tooltip.mid(app.size())
+           : tooltip + QLatin1String(" (") +
+               QString::fromStdWString(profile::name()) + QLatin1Char(')');
+}
+
 QString appDir()
 {
-  const QString base = qEnvironmentVariable("LOCALAPPDATA");
-  return base.isEmpty() ? QString() : base + QStringLiteral("/YapNative");
+  return QString::fromStdWString(profile::dataRoot());
 }
 
 // The toast icon Windows shows for this AUMID: the app mark, written once
@@ -99,13 +145,13 @@ QString toastIconPath()
   return QDir::toNativeSeparators(path);
 }
 
-// HKCU\Software\Classes\AppUserModelId\com.115jon.yap.native: the name and
-// icon toasts show, so an unpackaged app can raise them without a Start
-// menu shortcut. Only this key is written.
+// HKCU\Software\Classes\AppUserModelId\com.115jon.yap.native[.<profile>]:
+// the name and icon toasts show, so an unpackaged app can raise them without
+// a Start menu shortcut. Only this key is written.
 void registerAumid()
 {
   HKEY key = nullptr;
-  if (RegCreateKeyExW(HKEY_CURRENT_USER, kAumidKey, 0, nullptr, 0,
+  if (RegCreateKeyExW(HKEY_CURRENT_USER, aumidKey().c_str(), 0, nullptr, 0,
                       KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
     return;
   auto set = [key](const wchar_t* name, const std::wstring& value) {
@@ -113,7 +159,7 @@ void registerAumid()
                    reinterpret_cast<const BYTE*>(value.c_str()),
                    static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
   };
-  set(L"DisplayName", kDisplayName);
+  set(L"DisplayName", profile::displayName());
   const QString icon = toastIconPath();
   if (!icon.isEmpty())
     set(L"IconUri", wide(icon));
@@ -204,14 +250,19 @@ DesktopShell::~DesktopShell()
     DestroyWindow(reinterpret_cast<HWND>(m_trayHwnd));
 }
 
+QString DesktopShell::profile() const
+{
+  return QString::fromStdWString(profile::name());
+}
+
 void DesktopShell::setProcessIdentity()
 {
-  SetCurrentProcessExplicitAppUserModelID(kAumid);
+  SetCurrentProcessExplicitAppUserModelID(aumid().c_str());
 }
 
 bool DesktopShell::takeInstanceLock()
 {
-  HANDLE mutex = CreateMutexW(nullptr, FALSE, kMutex);
+  HANDLE mutex = CreateMutexW(nullptr, FALSE, mutexName().c_str());
   // No mutex at all (access denied, say) proves nothing: run.
   if (!mutex || GetLastError() != ERROR_ALREADY_EXISTS) {
     g_instanceMutex = mutex; // held for the life of the process
@@ -394,7 +445,9 @@ void DesktopShell::openArg(const QString& arg)
 
 void DesktopShell::registerUrlScheme()
 {
-  if (!m_links)
+  // Only the default profile owns the scheme: it opens the default
+  // profile's window, never a named one.
+  if (!m_links || !profile::name().empty())
     return;
   const QString exe =
     QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
@@ -505,15 +558,18 @@ bool DesktopShell::setAutostart(bool enabled)
   LONG result;
   if (enabled) {
     // desktop `build_windows_startup_command`: the quoted path, --autostart.
+    // A named profile restarts as itself.
     const std::wstring command =
       L"\"" +
       wide(QDir::toNativeSeparators(QCoreApplication::applicationFilePath())) +
-      L"\" --autostart";
+      L"\" --autostart" +
+      (profile::name().empty() ? std::wstring()
+                               : L" --profile " + profile::name());
     result = RegSetValueExW(
-      key, kRunValue, 0, REG_SZ, reinterpret_cast<const BYTE*>(command.c_str()),
+      key, runValue().c_str(), 0, REG_SZ, reinterpret_cast<const BYTE*>(command.c_str()),
       static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
   } else {
-    result = RegDeleteValueW(key, kRunValue);
+    result = RegDeleteValueW(key, runValue().c_str());
     if (result == ERROR_FILE_NOT_FOUND)
       result = ERROR_SUCCESS;
   }
@@ -531,18 +587,19 @@ void DesktopShell::createTray()
   WNDCLASSW wc{};
   wc.lpfnWndProc = trayProc;
   wc.hInstance = instance;
-  wc.lpszClassName = kTrayClass;
+  const std::wstring className = trayClass();
+  wc.lpszClassName = className.c_str();
   RegisterClassW(&wc);
   // A hidden top-level window (not message-only: the tray menu needs a
   // window that can take the foreground).
-  HWND hwnd = CreateWindowExW(0, kTrayClass, L"", WS_POPUP, 0, 0, 0, 0,
+  HWND hwnd = CreateWindowExW(0, className.c_str(), L"", WS_POPUP, 0, 0, 0, 0,
                               nullptr, nullptr, instance, nullptr);
   if (!hwnd)
     return;
   SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
   m_trayHwnd = quintptr(hwnd);
   m_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
-  m_badgeTooltip = QString::fromWCharArray(kDisplayName);
+  m_badgeTooltip = QString::fromWCharArray(kAppName);
   updateTrayIcon();
 }
 
@@ -584,7 +641,7 @@ void DesktopShell::updateTrayIcon()
   data.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_SHOWTIP;
   data.uCallbackMessage = kTrayMessage;
   data.hIcon = icon;
-  const std::wstring tip = wide(m_badgeTooltip.left(127));
+  const std::wstring tip = wide(trayTooltip(m_badgeTooltip).left(127));
   wcsncpy_s(data.szTip, tip.c_str(), _TRUNCATE);
   if (!m_trayAdded) {
     m_trayAdded = Shell_NotifyIconW(NIM_ADD, &data);
@@ -597,7 +654,8 @@ void DesktopShell::updateTrayIcon()
     DestroyIcon(reinterpret_cast<HICON>(m_icon));
   m_icon = quintptr(icon);
   std::fprintf(stderr, "[tray] badge count=%d dot=%d tip=\"%s\"\n",
-               m_badgeCount, int(m_badgeDot), qPrintable(m_badgeTooltip));
+               m_badgeCount, int(m_badgeDot),
+               qPrintable(trayTooltip(m_badgeTooltip)));
 }
 
 void DesktopShell::showTrayMenu()
@@ -605,7 +663,8 @@ void DesktopShell::showTrayMenu()
   const HWND hwnd = reinterpret_cast<HWND>(m_trayHwnd);
   HMENU menu = CreatePopupMenu();
   // tray.rs: "Show Yap" and "Quit", under this app's own name.
-  AppendMenuW(menu, MF_STRING, kMenuShow, L"Show Yap Native");
+  AppendMenuW(menu, MF_STRING, kMenuShow,
+              (L"Show " + profile::displayName()).c_str());
   AppendMenuW(menu, MF_STRING, kMenuQuit, L"Quit");
   POINT at;
   GetCursorPos(&at);
@@ -705,7 +764,7 @@ void DesktopShell::showToast(const QString& title, const QString& summary,
   QPointer<DesktopShell> self(this);
   const QString channel = channelId;
   const QString server = serverId;
-  const bool shown = toast::show(kAumid, content, [self, channel, server] {
+  const bool shown = toast::show(aumid(), content, [self, channel, server] {
     // A WinRT thread: hop to the GUI thread.
     QMetaObject::invokeMethod(
       qApp,

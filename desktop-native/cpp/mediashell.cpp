@@ -1,5 +1,7 @@
 #include "mediashell.h"
 
+#include "profile.h"
+
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -25,13 +27,14 @@
 
 namespace {
 
-// %LOCALAPPDATA%\YapNative\cache\<sub>, created on demand.
+// %LOCALAPPDATA%\YapNative\cache\<sub> (under profiles\<name> for a named
+// profile), created on demand.
 QString cacheDir(const QString& sub)
 {
-  QString base = qEnvironmentVariable("LOCALAPPDATA");
-  if (base.isEmpty())
-    base = QDir::tempPath();
-  const QString dir = base + QStringLiteral("/YapNative/cache/") + sub;
+  const QString root = QString::fromStdWString(profile::dataRoot());
+  const QString base =
+    root.isEmpty() ? QDir::tempPath() + QStringLiteral("/YapNative") : root;
+  const QString dir = base + QStringLiteral("/cache/") + sub;
   QDir().mkpath(dir);
   return dir;
 }
