@@ -84,17 +84,37 @@
 //!   says `self_stream` / `self_stream_audio`. See `machine/share.rs`.
 //! - After every input each pulled track's gain follows its owner's volume
 //!   (`SetPlayback`: output volume times the per-user volume, keyed by Yap
-//!   user id); only changes go out, as `SetTrackGain`.
+//!   user id); only changes go out, as `SetTrackGain`. While we hear the
+//!   room spatially ([`SpatialLocal::hears`]) a voice track's gain also
+//!   takes its owner's distance gain, and its pan goes out as
+//!   `SetTrackPan` ([`spatial`]).
+//! - The room's spatial state comes with Ready, Resumed and op 15
+//!   (`spatial_audio_state`). Ready (and a standby's promotion) sends ours,
+//!   as `useSpatialAudioSync` does: op 15 with `spatial_audio_enabled`,
+//!   `spatial_audio_high_fidelity` and the room's state with our
+//!   `enabled`; so does a change of `SetSpatial`.
+//!
+//! # Audio path
+//!
+//! [`LibwebrtcEngine`] runs the call's audio itself (`engine/pipeline.rs`):
+//! WASAPI capture, WebRTC's APM, RNNoise ([`dsp::denoise`]) and a
+//! `NativeAudioSource` for the mic; each remote audio track's decoded audio
+//! into a stereo mix with its gain and pan ([`dsp::mix`]), played through
+//! WASAPI and handed to the same APM as the echo canceller's far end.
+//! `YAP_ADM_AUDIO=1` falls back to libwebrtc's own device module (mixed
+//! playout, no RNNoise or panning).
 
 mod audio;
 mod camera;
 mod driver;
+pub mod dsp;
 mod engine;
 pub mod layers;
 mod machine;
 mod roster;
 mod sfu;
 mod share;
+pub mod spatial;
 mod tracks;
 mod vad;
 pub mod wire;
@@ -126,6 +146,7 @@ pub use share::{
     ShareRequest, SourceKind, DEFAULT_SHARE_QUALITY, LOCAL_SCREEN_KEY, SHARE_AUDIO_CHANNELS,
     SHARE_AUDIO_RATE, SHARE_QUALITIES,
 };
+pub use spatial::{SpatialLocal, SpatialState};
 pub use tracks::{Kind, Offer, Pull, Remote, TrackTable};
 pub use vad::{
     level_percent, EnergyMeter, Sensitivity, Vad, AUTO_THRESHOLD, SILENCE_DELAY_MS, VAD_TICK,

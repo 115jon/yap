@@ -4,9 +4,10 @@ import Yap.Chrome
 import com.yap.native
 
 // Voice & video (VoiceVideoPanel.tsx, CameraCard.tsx). Input: microphone,
-// input profile. Processing (set by the profile unless it is Custom):
-// automatic sensitivity, the sensitivity marker over the live level, noise
-// suppression, echo cancellation, high fidelity. Output: speaker and
+// input volume, input profile. Processing (set by the profile unless it is
+// Custom): automatic sensitivity, the sensitivity marker over the live
+// level, noise suppression (RNNoise), WebRTC noise suppression, echo
+// cancellation, high fidelity, spatial audio. Output: speaker and
 // volume. Camera: the preview, camera, capture quality and "Preview before
 // turning on camera". Everything applies at once, in a call too, and is
 // kept per user (`voice-settings.json`).
@@ -55,8 +56,14 @@ Column {
         }
         SettingsRow {
             rowId: "input-volume"
-            layout: "inline"
-            ComingLater {}
+            layout: "block"
+            RangeControl {
+                width: parent.width
+                to: 200
+                value: Audio.inputVolume
+                accessibleName: SettingsNav.label("input-volume")
+                onMoved: value => Audio.changeInputVolume(value)
+            }
         }
         SettingsRow {
             rowId: "input-profile"
@@ -105,8 +112,22 @@ Column {
                 onMoved: Audio.changeSensitivity(Math.round(value) - 100)
             }
         }
-        SwitchSetting {
+        SettingsRow {
             rowId: "noise-suppression"
+            disabled: !root.custom
+            SelectField {
+                width: 240
+                enabled: root.custom
+                text: SettingsNav.label("noise-suppression")
+                firstIsDefault: false
+                ids: ["none", "rnnoise"]
+                names: [qsTr("Off"), qsTr("RNNoise")]
+                current: Audio.noiseReduction
+                onPicked: id => Audio.changeNoiseReduction(id)
+            }
+        }
+        SwitchSetting {
+            rowId: "browser-noise-suppression"
             disabled: !root.custom
             checked: Audio.noiseSuppression
             onToggled: Audio.setSwitch("noiseSuppression", !Audio.noiseSuppression)
@@ -123,10 +144,11 @@ Column {
             checked: Audio.highFidelity
             onToggled: Audio.setSwitch("highFidelity", !Audio.highFidelity)
         }
-        SettingsRow {
+        SwitchSetting {
             rowId: "spatial-audio"
-            layout: "inline"
-            ComingLater {}
+            disabled: !root.custom
+            checked: Audio.spatialAudio
+            onToggled: Audio.setSwitch("spatialAudio", !Audio.spatialAudio)
         }
     }
 

@@ -315,8 +315,16 @@ pub const PANELS: &[PanelDef] = &[
                     row(
                         "noise-suppression",
                         "Noise suppression",
-                        "Reduces background noise with WebRTC's suppressor.",
+                        "Reduces background noise with RNNoise.",
                         &["rnnoise", "background noise", "denoise", "fan"],
+                    ),
+                    // The web's "Browser noise suppression": here WebRTC's
+                    // own suppressor does the browser's job.
+                    row(
+                        "browser-noise-suppression",
+                        "WebRTC noise suppression",
+                        "Uses WebRTC's built-in noise suppression.",
+                        &["noise", "background"],
                     ),
                     row(
                         "echo-cancellation",

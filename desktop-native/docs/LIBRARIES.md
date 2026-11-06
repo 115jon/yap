@@ -26,6 +26,7 @@ Claims marked UNVERIFIED were not checked against this build.
 | Emoji         | Twemoji PNGs from `emoji-datasource-twitter@16.0.0`, the same URLs the web uses, plus a disk cache. Native emoji matched from `@emoji-mart/data`       | Vendor the 64px sheet in qrc                                                        |
 | Images        | `QQmlNetworkAccessManagerFactory` + `QNetworkDiskCache` for public media; Rust fetch for authenticated media                                           | `QQuickAsyncImageProvider` backed by Rust                                           |
 | Long-tail web | `wry` 0.57 `build_as_child` on a child HWND (it uses `webview2-com` and links `WebView2LoaderStatic.lib`)                                              | `webview2-com` 0.39 directly                                                        |
+| Call audio    | Own path (§11): WASAPI mic and speaker, libwebrtc's standalone APM, `nnnoiseless` 0.5.2 for RNNoise, our per-track stereo mix                          | libwebrtc's ADM (mixed playout, no hook after its APM)                              |
 | Qt            | Keep 6.6.3 for the parity sprint. Build a static **Qt 6.12 LTS** (6.12.1 is due 2026-11-12) in parallel, then switch                                   | Stay on 6.6.3 (EOL, no fixes)                                                       |
 
 ## 1. Fonts
@@ -838,3 +839,49 @@ WebView2 details:
   its player. No WebView2 runtime, a failed creation or a crashed page
   opens the link in the browser instead.
 - `YAP_EMBED_MUTED=1` mutes every player for test runs.
+
+## 11. Call audio: RNNoise and the own audio path (`yap-voice`, batch N6a)
+
+The web publishes the mic through the browser's processing (AEC, NS, AGC as
+`getUserMedia` constraints), then RNNoise in an AudioWorklet
+(`@sapphi-red/web-noise-suppressor` 0.3.5, Xiph's RNNoise built to WASM),
+and plays each peer through a `StereoPannerNode` for spatial audio. libwebrtc's
+platform audio device module (ADM) has neither hook: it mixes every remote
+track into one playout and runs its APM between the mic and the encoder with
+no callback after it. So the call runs its audio itself
+(`crates/yap-voice/src/engine/pipeline.rs`); the ADM only lists devices.
+Versions and dates from crates.io on 2026-11-06.
+
+| area           | pick                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | runner-up / rejected                                                                                                                                                                                                                                                        |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RNNoise        | `nnnoiseless` 0.5.2 (BSD-3-Clause; pure Rust; `default-features = false`, so only `easyfft` and `once_cell` come in), `DenoiseState` on 480-sample frames                                                                                                                                                                                                                                                                                                                                                                                                       | Xiph's C `rnnoise` through `cc` (`rnnoise-c` is deprecated in favour of nnnoiseless): a C build to keep `/MT` for no gain. RNNoise 0.2's larger model: the web's WASM carries the original model, which is the one nnnoiseless ports, so both clients suppress the same way |
+| Echo, NS, AGC  | `libwebrtc::native::apm::AudioProcessingModule` (already in libwebrtc 0.3.55): WebRTC's own AEC3, NS, AGC2 and high-pass, one instance fed both the mic (`ProcessStream`) and what we play (`ProcessReverseStream`)                                                                                                                                                                                                                                                                                                                                             | Keep the ADM's internal APM and add RNNoise in an `AudioTransport` wrapper: the wrapper only sees the raw mic, before the APM, so RNNoise would run before echo cancellation (its non-linear gain breaks AEC's echo path model) and the web runs it after                   |
+| Mic in         | WASAPI shared mode, event driven, 48 kHz mono 16-bit with `AUTOCONVERTPCM` (`windows` 0.61, as yap-capture's loopback), by the ADM's endpoint id or the default communications endpoint                                                                                                                                                                                                                                                                                                                                                                         | `cpal`: an extra layer with no endpoint-id API matching the ADM's ids; the ADM's own recording: no hook after its APM                                                                                                                                                       |
+| Mic to encoder | `NativeAudioSource` (unbuffered, `capture_frame(..).now_or_never()`, as the share audio)                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | -                                                                                                                                                                                                                                                                           |
+| Remote audio   | `NativeAudioStream::with_options` per remote audio track (48 kHz stereo, at most 20 queued frames) into our own mixer (`src/dsp/mix.rs`): per-track gain and the `StereoPannerNode` pan law (mono law for a track whose channels are equal, two-channel law for stereo), ramped over a frame; the queue primed at 40 ms and held at 30-60 ms against clock drift by resampling a frame from 477 or 483 samples (linear, 0.625 %), cut only past 120 ms; a look-ahead-free soft limiter on the sum (-3 dBFS, ratio 20, 1 ms / 100 ms, soft clip under -0.2 dBFS) | Per-track gain inside libwebrtc (`SetVolume`, what the ADM path does): scalar only, no pan. A custom audio decoder factory or mixer source: fixed inside webrtc-sys's factory, so it means forking webrtc-sys                                                               |
+| Speaker out    | WASAPI shared mode, event driven, 48 kHz stereo 16-bit, kept 30 ms ahead, threads at MMCSS "Pro Audio" (`AvSetMmThreadCharacteristicsW`); the same frame goes to the APM's far end, its delay hint the queued audio plus `GetStreamLatency` and the device period of both clients                                                                                                                                                                                                                                                                               | The ADM's playout with our mix injected: its APM takes the far end from its own mixer before our frame exists, so the echo canceller would hear the unpanned mix                                                                                                            |
+
+Why the far end matters: AEC removes what it is told was played. Here the
+render thread hands the APM exactly the frame it writes to the speaker, so a
+panned or re-gained mix is cancelled as played. The libwebrtc-feature test
+`engine::pipeline::tests::the_echo_canceller_should_remove_what_the_speaker_played`
+runs a far-end talker through the mixer and back into the mic 40 ms late at
+half level: about 50 dB of it is removed; with echo cancellation off it
+passes unchanged.
+
+Costs (this machine): RNNoise takes 34 µs per 10 ms frame in a release build
+(`cargo test --release -p yap-voice --no-default-features --lib -- dsp::denoise
+--nocapture`; 1.2 ms in debug), about 0.3 % of one core; the call's stats line
+(`[voice] stats ... audio[...]`) reports both per frame every 5 s, and
+`PARITY_FEATURES.md` has the in-call process CPU with RNNoise on and off.
+
+Escape hatch: `YAP_ADM_AUDIO=1` puts the call back on the ADM (its recording,
+APM and mixed playout; no RNNoise, no panning). The path also falls back by
+itself: when WASAPI refuses a present device three times in a row (it will
+not open as 48 kHz 16-bit), the next call and the rest of the process use
+the ADM, which opens devices in their own mix format. Not mid-call, since
+the call's tracks were made for one path; the failing call shows its stall
+banner instead. A missing device does not fall back (the ADM would find
+none either). Krisp is not offered: the web
+only knows its browser SDK and reports it unsupported, so the select lists
+Off and RNNoise only, as the web's does.

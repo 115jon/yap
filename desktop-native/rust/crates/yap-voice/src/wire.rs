@@ -5,6 +5,8 @@ use serde_json::{json, Value};
 use yap_protocol::rest::MediaBootstrap;
 use yap_protocol::{Frame, GatewayOp};
 
+use crate::spatial::SpatialState;
+
 /// An ICE server from the admission's `media`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IceServer {
@@ -272,6 +274,32 @@ pub fn voice_state(state: SelfState) -> String {
         "self_stream": state.stream, "self_stream_audio": state.stream_audio,
     }})
     .to_string()
+}
+
+/// The room's spatial state in a Ready, Resumed or op 15 `d`, if it carries
+/// one (`spatial_audio_state`).
+pub fn spatial_of(d: &Value) -> Option<SpatialState> {
+    d.get("spatial_audio_state")
+        .filter(|v| !v.is_null())
+        .and_then(SpatialState::from_value)
+}
+
+/// Our spatial switches and the room's state (op 15 C->S,
+/// `useSpatialAudioSync`).
+pub fn spatial_state(enabled: bool, high_fidelity: bool, state: &SpatialState) -> String {
+    json!({ "op": GatewayOp::VoiceStateUpdate as u16, "d": {
+        "spatial_audio_enabled": enabled,
+        "spatial_audio_high_fidelity": high_fidelity,
+        "spatial_audio_state": state.to_value(),
+    }})
+    .to_string()
+}
+
+/// Now, in epoch milliseconds (`Date.now()`; the server stamps its own).
+pub fn now_ms() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_millis() as f64)
 }
 
 /// One of our publications as op 12 announces it.

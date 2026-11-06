@@ -49,6 +49,8 @@ Item {
     required property bool pinned
     // The author's avatar decoration (APNG), or empty.
     required property string deco
+    // The author's display-name style (JSON), or empty.
+    required property string nameStyle
     // Today's local day number (`Chat.today`).
     required property int today
     // The list's edit target and jump highlight (message ids, or empty).
@@ -390,16 +392,17 @@ Item {
         x: 68
         y: root.headerTop
         spacing: 8
-        Text {
+        // The name in its 20 px line box with CSS's half-leading
+        // (leading-5), as the web sets it, not at the box's top; in the
+        // author's own style when they have one (ProfileDisplayName).
+        DisplayName {
             id: authorText
-            // The name in its 20 px line box with CSS's half-leading
-            // (leading-5), as the web sets it, not at the box's top.
             height: Theme.type.authorLine
-            verticalAlignment: Text.AlignVCenter
-            textFormat: Text.PlainText
             text: root.author
+            nameStyle: root.nameStyle
             color: root.authorInk
             font: Theme.type.author
+            ground: root.mentioned ? Theme.accentTint : Theme.ply0
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
@@ -440,8 +443,12 @@ Item {
         // yap-core markdown.rs: the web's grammar as Qt rich text.
         textFormat: TextEdit.RichText
         // The web's 22 px line box (text-ui-base 15/22).
-        text: "<div style=\"line-height:22px\">" + Theme.richText(root.imagesReady ? root.html
-            : root.html.replace(/<img [^>]*>/g, "&#8195;&#8202;"), root.revealed, root.mentioned) + "</div>"
+        text: "<div style=\"line-height:22px\">" + Theme.richText(Theme.underlineLink(root.imagesReady ? root.html
+            : root.html.replace(/<img [^>]*>/g, "&#8195;&#8202;"), hotLink), root.revealed, root.mentioned) + "</div>"
+        // The hovered link, underlined (kept while the pointer is on it:
+        // re-setting the text clears `hoveredLink` until the next move).
+        property string hotLink: ""
+        onHoveredLinkChanged: if (hoveredLink.length > 0) hotLink = hoveredLink
         color: Theme.ink1
         selectionColor: Theme.selection
         selectedTextColor: Theme.ink1
@@ -451,6 +458,8 @@ Item {
         onLinkActivated: link => {
             if (link === "spoiler:")
                 root.revealed = true
+            else if (link.startsWith("user:"))
+                root.profileRequested(link.slice(5), bodyText)
             else if (Invites.openLink(link))
                 return
             else if (/^(https?:|mailto:)/i.test(link))
@@ -458,7 +467,12 @@ Item {
         }
 
         HoverHandler {
+            id: bodyHover
             cursorShape: bodyText.hoveredLink.length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
+            onHoveredChanged: if (!hovered) bodyText.hotLink = ""
+            // Off a link (but still on the text): drop the underline.
+            onPointChanged: if (bodyText.hoveredLink.length === 0 && bodyText.hotLink.length > 0
+                && bodyText.linkAt(point.position.x, point.position.y).length === 0) bodyText.hotLink = ""
         }
     }
 

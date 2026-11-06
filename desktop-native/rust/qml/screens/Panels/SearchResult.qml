@@ -76,14 +76,16 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width - 48
                 spacing: 8
-                Text {
+                // SearchResultItem.tsx: the author in their own style.
+                DisplayName {
                     anchors.verticalCenter: parent.verticalCenter
                     width: Math.min(implicitWidth, parent.width - time.implicitWidth - 32)
-                    textFormat: Text.PlainText
                     text: root.result.name
-                    elide: Text.ElideRight
+                    nameStyle: root.result.nameStyle ?? ""
                     color: root.result.color.length > 0 ? root.result.color : Theme.ink1
-                    font: Theme.type.occupant
+                    // text-ui-sm font-semibold.
+                    font: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 13, weight: Font.DemiBold })
+                    ground: root.ground
                 }
                 Text {
                     id: time

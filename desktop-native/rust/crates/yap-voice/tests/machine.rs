@@ -11,8 +11,8 @@ use yap_voice::wire::{Participant, RoomState, Track};
 use yap_voice::{
     CallMachine, CallState, CallTarget, CameraPublished, Effect, Input, Kind, LayerUpdate,
     MediaEvent, MediaState, Member, Notice, Playback, Processing, Published, RenderSize, RoomEvent,
-    Sensitivity, Socket, SocketSpec, Timer, UserCommand, VideoIntent, VoiceEvent,
-    CREDENTIAL_REFRESH, LEAVE_SEND_WINDOW, REMOTE_RECONNECT_GRACE, SILENCE_DELAY_MS,
+    Sensitivity, Socket, SocketSpec, SpatialLocal, SpatialState, Timer, UserCommand, VideoIntent,
+    VoiceEvent, CREDENTIAL_REFRESH, LEAVE_SEND_WINDOW, REMOTE_RECONNECT_GRACE, SILENCE_DELAY_MS,
 };
 
 const ME: &str = "me-1";
@@ -370,7 +370,8 @@ fn join_should_announce_on_voice_ready_and_pull_only_after_media_connects() {
         Some("Ana"),
     )]))));
     assert_eq!(sends(&fx, Socket::Room)[0]["d"]["self_mute"], false);
-    assert_eq!(ops(&fx, Socket::Room), vec![15]);
+    // Our voice state, then our spatial switches (useSpatialAudioSync).
+    assert_eq!(ops(&fx, Socket::Room), vec![15, 15]);
     // The room's Ready is `joined` (STATE_MACHINE.md): before media is up.
     assert_eq!(states(&fx), vec![CallState::Joined]);
     assert!(fx.contains(&Effect::Notify(Notice::Connected)));
@@ -416,7 +417,7 @@ fn a_second_ready_while_joined_should_rejoin_without_a_connect() {
     )]))));
     assert!(fx.contains(&Effect::Notify(Notice::Rejoined)));
     assert!(!fx.contains(&Effect::Notify(Notice::Connected)));
-    assert_eq!(ops(&fx, Socket::Room), vec![15]);
+    assert_eq!(ops(&fx, Socket::Room), vec![15, 15]);
 }
 
 #[test]
@@ -1262,7 +1263,7 @@ fn a_volume_should_apply_to_a_track_pulled_later() {
 #[test]
 fn processing_should_apply_to_the_published_mic() {
     let mut m = joined();
-    let studio = Processing::from_settings(false, false, true);
+    let studio = Processing::from_settings(false, false, true, false);
     let fx = m.handle(Input::Command(UserCommand::SetProcessing(studio)));
     assert!(fx.contains(&Effect::SetProcessing(studio)));
 }
@@ -1272,7 +1273,7 @@ fn processing_chosen_before_the_mic_should_apply_once_it_is_published() {
     let mut m = CallMachine::new(target());
     m.handle(Input::Start);
     m.handle(Input::Admitted(Ok(admission())));
-    let off = Processing::from_settings(false, true, false);
+    let off = Processing::from_settings(false, true, false, false);
     assert!(m
         .handle(Input::Command(UserCommand::SetProcessing(off)))
         .is_empty());
@@ -2384,4 +2385,159 @@ fn inbound_audio_should_stall_only_while_someone_speaks() {
     assert!(stalled);
     let fx = m.handle(stats(40_000, 9_000, 900));
     assert!(fx.contains(&Effect::Notify(Notice::InboundAudioStalled(false))));
+}
+
+fn device_stats(at_ms: u64, mic_failed: bool, speaker_failed: bool) -> Input {
+    let Input::Stats { mut stats, at_ms } = stats(at_ms, at_ms, at_ms) else {
+        unreachable!("stats() builds Input::Stats");
+    };
+    stats.mic_device_failed = mic_failed;
+    stats.speaker_device_failed = speaker_failed;
+    Input::Stats { stats, at_ms }
+}
+
+#[test]
+fn a_failing_mic_device_should_raise_the_mic_banner_until_it_works() {
+    let mut m = joined();
+    m.handle(device_stats(0, false, false));
+    let raised = m.handle(device_stats(5_000, true, false));
+    let cleared = m.handle(device_stats(10_000, false, false));
+    assert!(
+        raised.contains(&Effect::Notify(Notice::MicStalled(true)))
+            && cleared.contains(&Effect::Notify(Notice::MicStalled(false)))
+    );
+}
+
+#[test]
+fn a_failing_speaker_device_should_raise_the_inbound_banner_once() {
+    let mut m = joined();
+    m.handle(device_stats(0, false, false));
+    let first = m.handle(device_stats(5_000, false, true));
+    let again = m.handle(device_stats(10_000, false, true));
+    let raised = |fx: &[Effect]| fx.contains(&Effect::Notify(Notice::InboundAudioStalled(true)));
+    assert!(raised(&first) && !raised(&again));
+}
+
+// Spatial audio: the room's placement, our switches, pans and distance.
+
+fn pans(fx: &[Effect]) -> Vec<(String, f64)> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::SetTrackPan { mid, pan } => Some((mid.clone(), *pan)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn spatial_room(enabled: bool) -> Input {
+    Input::Room(RoomEvent::Spatial(SpatialState {
+        enabled,
+        ..SpatialState::default()
+    }))
+}
+
+fn spatial_local(enabled: bool, high_fidelity: bool) -> Input {
+    Input::Command(UserCommand::SetSpatial(SpatialLocal {
+        enabled,
+        high_fidelity,
+        user_id: "u-me".into(),
+    }))
+}
+
+#[test]
+fn ready_should_send_our_spatial_switches_with_the_rooms_state() {
+    let mut m = CallMachine::new(target());
+    m.handle(Input::Start);
+    m.handle(Input::Admitted(Ok(admission())));
+    m.handle(Input::Published(Ok(published())));
+    m.handle(spatial_room(true));
+    let fx = m.handle(Input::Room(RoomEvent::Ready(room_state(&[]))));
+    let spatial = &sends(&fx, Socket::Room)[1]["d"];
+    assert_eq!(
+        (
+            &spatial["spatial_audio_enabled"],
+            &spatial["spatial_audio_high_fidelity"],
+            &spatial["spatial_audio_state"]["enabled"],
+            &spatial["spatial_audio_state"]["placementMode"],
+        ),
+        (&json!(false), &json!(false), &json!(false), &json!("arc"))
+    );
+}
+
+#[test]
+fn turning_spatial_audio_on_should_go_out_in_op_15() {
+    let mut m = joined();
+    let fx = m.handle(spatial_local(true, true));
+    let spatial = &sends(&fx, Socket::Room)[0]["d"];
+    assert_eq!(
+        (
+            &spatial["spatial_audio_enabled"],
+            &spatial["spatial_audio_high_fidelity"],
+            &spatial["spatial_audio_state"]["enabled"],
+        ),
+        (&json!(true), &json!(true), &json!(true))
+    );
+}
+
+#[test]
+fn the_same_switches_again_should_send_nothing() {
+    let mut m = joined();
+    m.handle(spatial_local(true, true));
+    assert!(sends(&m.handle(spatial_local(true, true)), Socket::Room).is_empty());
+}
+
+#[test]
+fn hearing_the_room_spatially_should_pan_and_attenuate_the_voice() {
+    let mut m = joined_with_user();
+    m.handle(spatial_room(true));
+    let fx = m.handle(spatial_local(true, true));
+    // We sit first on the default arc (left), Ana second (centre): right
+    // of us, and some metres away.
+    let pan = pans(&fx);
+    assert_eq!(pan.len(), 1);
+    assert!(pan[0].0 == "m-ana" && pan[0].1 > 0.3, "{pan:?}");
+    let gain = gains(&fx);
+    assert!(gain[0].1 < 1.0 && gain[0].1 >= 0.32, "{gain:?}");
+}
+
+#[test]
+fn spatial_audio_should_need_high_fidelity() {
+    let mut m = joined_with_user();
+    m.handle(spatial_local(true, false));
+    assert!(pans(&m.handle(spatial_room(true))).is_empty());
+}
+
+#[test]
+fn deafening_should_centre_the_voices_again() {
+    let mut m = joined_with_user();
+    m.handle(spatial_local(true, true));
+    m.handle(spatial_room(true));
+    let fx = m.handle(Input::Command(UserCommand::SetDeafened(true)));
+    assert_eq!(pans(&fx), vec![("m-ana".to_owned(), 0.0)]);
+}
+
+#[test]
+fn share_audio_should_never_be_panned() {
+    let mut m = joined_with_user();
+    m.handle(spatial_local(true, true));
+    m.handle(spatial_room(true));
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![track("ana", "screen-audio-ana", "sfu-ana-share")],
+    }));
+    let fx = m.handle(done("sfu-ana-share", "m-ana-share"));
+    assert!(pans(&fx).iter().all(|(mid, _)| mid != "m-ana-share"));
+}
+
+#[test]
+fn a_new_placement_should_be_sent_for_the_room() {
+    let mut m = joined();
+    let fx = m.handle(Input::Command(UserCommand::SetSpatialRoom(SpatialState {
+        room_size: 80.0,
+        ..SpatialState::default()
+    })));
+    assert_eq!(
+        sends(&fx, Socket::Room)[0]["d"]["spatial_audio_state"]["roomSize"],
+        json!(80.0)
+    );
 }

@@ -1,11 +1,16 @@
-//! The production engine: libwebrtc's platform audio device module (real
-//! mic and speakers, with WebRTC's APM: echo cancellation, noise
-//! suppression, gain control) and one peer connection per call.
+//! The production engine: one peer connection per call, with the call's
+//! own audio path (`pipeline.rs`: WASAPI mic and speaker, WebRTC's APM,
+//! RNNoise, a per-track stereo mix the echo canceller hears as its far
+//! end). libwebrtc's platform audio device module lists the devices; with
+//! `YAP_ADM_AUDIO=1` it also records and plays, as it did before the own
+//! path (mixed playout: no panning, no RNNoise).
 //!
 //! Devices: the choice ([`LibwebrtcEngine::choose_devices`]) is kept for the
-//! process and applied by endpoint id whenever the ADM is up; in a call it
-//! switches at once (stop, select, init, start). Two track calls the crate
-//! lacks (remote volume, live APM options) go through `cpp/track_audio.cpp`.
+//! process and resolved by endpoint id against the ADM's lists whenever it
+//! is up; in a call it switches at once (the own path reopens that side;
+//! the ADM stops, selects, inits and starts). Two track calls the crate
+//! lacks (remote volume, live APM options) go through `cpp/track_audio.cpp`
+//! for the ADM path.
 //!
 //! Camera: one send-only VP8 transceiver with the web's three simulcast
 //! encodings, fed by `crate::camera` (captured frames while live, the
@@ -43,6 +48,7 @@ use tokio::task::JoinHandle;
 
 use libwebrtc::audio_source::native::NativeAudioSource;
 use libwebrtc::audio_source::AudioSourceOptions;
+use libwebrtc::audio_stream::native::{NativeAudioStream, NativeAudioStreamOptions};
 use libwebrtc::media_stream_track::MediaStreamTrack;
 use libwebrtc::peer_connection::{
     AnswerOptions, OfferOptions, PeerConnection, PeerConnectionState,
@@ -62,12 +68,15 @@ use libwebrtc::video_source::VideoResolution;
 use libwebrtc::MediaType;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
+use super::pipeline::{self, pipeline};
 use super::{
     I420Frame, LocalOffer, MediaEngine, MediaError, MediaSession, MediaStats, OutboundVideo,
     VideoOutput,
 };
 use crate::audio::{resolve, AudioDevice, AudioDevices, Processing};
 use crate::camera::live::{set_sink, Keepalive};
+use crate::dsp::mix::Stream;
+use crate::dsp::RATE;
 use crate::layers::CAMERA_SIMULCAST;
 use crate::machine::MediaState;
 use crate::share::live::{
@@ -245,6 +254,34 @@ fn apply(f: &PeerConnectionFactory, sel: &mut Selection) -> Option<String> {
         &list.inputs,
         list.default_input.as_ref(),
     );
+    if pipeline::enabled() {
+        // The own path opens the endpoints itself; the ADM records and
+        // plays nothing.
+        let output = resolve(
+            sel.output.as_deref(),
+            &list.outputs,
+            list.default_output.as_ref(),
+        );
+        let changed =
+            (input, output) != (sel.applied_input.as_deref(), sel.applied_output.as_deref());
+        if !changed {
+            return None;
+        }
+        let (input, output) = (input.map(str::to_owned), output.map(str::to_owned));
+        let line = format!(
+            "[voice] devices: input {}; output {}",
+            input
+                .as_deref()
+                .map_or_else(|| "default".to_owned(), |id| name(&list.inputs, id)),
+            output
+                .as_deref()
+                .map_or_else(|| "default".to_owned(), |id| name(&list.outputs, id)),
+        );
+        pipeline().set_devices(input.clone(), output.clone());
+        sel.applied_input = input;
+        sel.applied_output = output;
+        return Some(line);
+    }
     if let Some(id) = input.filter(|id| sel.applied_input.as_deref() != Some(*id)) {
         let running = f.recording_is_initialized()
             || (CALL_OPEN.load(Ordering::Relaxed) && MIC_LIVE.load(Ordering::Relaxed));
@@ -403,12 +440,49 @@ async fn pump_video(track: RtcVideoTrack, key: String) {
     }
 }
 
-/// The remote tracks (the ADM mixes and plays the audio ones), by receive
-/// mid, and the video routes.
+/// One remote audio track in the own path's mix: its stream there, and the
+/// task feeding it the track's decoded audio.
+struct Playing {
+    stream: Arc<Stream>,
+    pump: JoinHandle<()>,
+}
+
+impl Drop for Playing {
+    fn drop(&mut self) {
+        self.pump.abort();
+    }
+}
+
+/// Feeds one remote audio track's decoded audio (48 kHz stereo) to its
+/// stream in the mix until aborted (dropping the `NativeAudioStream`
+/// removes its sink from the track).
+async fn pump_audio(track: RtcAudioTrack, stream: Arc<Stream>) {
+    // At most 200 ms waiting here; the mix trims its own queue further.
+    // Two channels whatever the track carries (the sink remixes to what it
+    // was opened with): the mix tells a mono track by its equal channels.
+    let mut frames = NativeAudioStream::with_options(
+        track,
+        RATE as i32,
+        2,
+        NativeAudioStreamOptions {
+            queue_size_frames: Some(20),
+        },
+    );
+    while let Some(frame) = frames.next().await {
+        stream.push(&frame.data, frame.num_channels as usize);
+    }
+}
+
+/// The remote tracks (the own path mixes the audio ones, or the ADM does),
+/// by receive mid, and the video routes.
 struct Remotes {
     tracks: Vec<(Option<String>, MediaStreamTrack)>,
     /// Gains set by mid, also for tracks that have not arrived yet.
     gains: HashMap<String, f64>,
+    /// Pans set by mid (own path), also for tracks that have not arrived.
+    pans: HashMap<String, f64>,
+    /// Audio mid -> its stream in the own path's mix.
+    playing: HashMap<String, Playing>,
     /// Deafened: remote audio tracks are disabled, new ones included.
     silenced: bool,
     /// Video mid -> the output key its frames go to, also for tracks that
@@ -425,6 +499,8 @@ impl Remotes {
         Self {
             tracks: Vec::new(),
             gains: HashMap::new(),
+            pans: HashMap::new(),
+            playing: HashMap::new(),
             silenced: false,
             routes: HashMap::new(),
             pumps: HashMap::new(),
@@ -438,8 +514,27 @@ impl Remotes {
                 if self.silenced {
                     track.set_enabled(false);
                 }
-                if let Some(gain) = mid.as_ref().and_then(|m| self.gains.get(m)) {
-                    if !set_volume(audio, *gain) {
+                let gain = mid.as_ref().and_then(|m| self.gains.get(m)).copied();
+                if pipeline::enabled() {
+                    let stream = pipeline().add_stream();
+                    stream.set_gain(gain.unwrap_or(1.0));
+                    stream.set_pan(
+                        mid.as_ref()
+                            .and_then(|m| self.pans.get(m))
+                            .copied()
+                            .unwrap_or(0.0),
+                    );
+                    let pump = self
+                        .runtime
+                        .spawn(pump_audio(audio.clone(), Arc::clone(&stream)));
+                    // A track without a mid cannot be addressed; it still
+                    // plays, at its first gain.
+                    let key = mid
+                        .clone()
+                        .unwrap_or_else(|| format!("no-mid-{}", audio.id()));
+                    self.playing.insert(key, Playing { stream, pump });
+                } else if let Some(gain) = gain {
+                    if !set_volume(audio, gain) {
                         eprintln!("[voice] track volume refused for a new track");
                     }
                 }
@@ -487,11 +582,13 @@ impl Remotes {
         }
     }
 
-    /// Forgets these mids: their gains, routes, pumps and tracks.
+    /// Forgets these mids: their gains, pans, routes, pumps and tracks.
     fn forget(&mut self, mids: &[String]) {
         for mid in mids {
             self.route(mid, None);
             self.gains.remove(mid);
+            self.pans.remove(mid);
+            self.playing.remove(mid);
         }
         self.tracks
             .retain(|(mid, _)| !mid.as_ref().is_some_and(|m| mids.contains(m)));
@@ -501,6 +598,7 @@ impl Remotes {
         for (_, pump) in self.pumps.drain() {
             pump.abort();
         }
+        self.playing.clear();
         self.routes.clear();
         self.tracks.clear();
     }
@@ -586,6 +684,15 @@ fn vp8_first() -> Vec<RtpCodecCapability> {
     codecs
 }
 
+/// The own path's mic: an unbuffered 48 kHz mono source the capture thread
+/// feeds, already processed (the source's own options stay off), and its
+/// track.
+fn own_mic() -> RtcAudioTrack {
+    let source = NativeAudioSource::new(AudioSourceOptions::default(), RATE, 1, 0);
+    pipeline().set_mic(Some(source.clone()));
+    factory().create_audio_track("mic", source)
+}
+
 /// One peer connection, the mic track and its sender, the camera, and the
 /// remote tracks it keeps alive.
 #[derive(Clone)]
@@ -620,6 +727,11 @@ impl MediaEngine for LibwebrtcEngine {
         ice_servers: &[IceServer],
     ) -> Result<(LibwebrtcSession, UnboundedReceiver<MediaState>), MediaError> {
         let f = factory();
+        if !CALL_OPEN.load(Ordering::Relaxed) {
+            // No call runs: a fallback to the ADM takes effect here, never
+            // midway through one.
+            pipeline::settle_path();
+        }
         if !f.acquire_platform_adm() {
             return Err(MediaError("no audio device".into()));
         }
@@ -634,6 +746,15 @@ impl MediaEngine for LibwebrtcEngine {
         }
         MIC_LIVE.store(false, Ordering::Relaxed);
         CALL_OPEN.store(true, Ordering::Relaxed);
+        if pipeline::enabled() {
+            // The ADM only lists; the own path records and plays.
+            f.set_adm_recording_enabled(false);
+            f.set_adm_playout_enabled(false);
+            let mic = own_mic();
+            pipeline().start_render();
+            pipeline().start_capture();
+            return Self::connect(f, ice_servers, Some(mic), true);
+        }
         // Both directions through the real devices. Recording is off by
         // default (synthetic mode), and while it is off WebRTC's own
         // Init/StartRecording calls do nothing. It must be on before the
@@ -650,6 +771,11 @@ impl MediaEngine for LibwebrtcEngine {
         ice_servers: &[IceServer],
     ) -> Result<(LibwebrtcSession, UnboundedReceiver<MediaState>), MediaError> {
         let f = factory();
+        if !CALL_OPEN.load(Ordering::Relaxed) {
+            // No call runs: a fallback to the ADM takes effect here, never
+            // midway through one.
+            pipeline::settle_path();
+        }
         if !f.acquire_platform_adm() {
             return Err(MediaError("no audio device".into()));
         }
@@ -666,7 +792,12 @@ impl MediaEngine for LibwebrtcEngine {
         // Hidden: no recording (the mic stays closed) until the promotion
         // enables the device track; playout is ready.
         f.set_adm_recording_enabled(false);
-        f.set_adm_playout_enabled(true);
+        if pipeline::enabled() {
+            f.set_adm_playout_enabled(false);
+            pipeline().start_render();
+        } else {
+            f.set_adm_playout_enabled(true);
+        }
         Self::connect(f, ice_servers, None, true)
     }
 
@@ -680,6 +811,9 @@ impl MediaEngine for LibwebrtcEngine {
     fn release(&self) {
         CALL_OPEN.store(false, Ordering::Relaxed);
         MIC_LIVE.store(false, Ordering::Relaxed);
+        if pipeline::enabled() {
+            pipeline().stop();
+        }
         let f = factory();
         f.release_platform_adm();
         if !f.is_platform_adm_active() {
@@ -811,7 +945,13 @@ impl MediaSession for LibwebrtcSession {
         // Not a silent `NativeAudioSource`: LiveKit's WebRTC marks a send
         // stream made for one as external for good, and an external stream
         // never gets device audio, not even after `set_track` to the mic.
-        let track = factory().create_device_audio_track("mic");
+        let track = if pipeline::enabled() {
+            // The own path's source: nothing feeds it until the promotion
+            // starts the mic.
+            own_mic()
+        } else {
+            factory().create_device_audio_track("mic")
+        };
         track.set_enabled(false);
         *lock(&self.standby) = Some(track);
         self.push_mic(stream_id).await
@@ -824,6 +964,14 @@ impl MediaSession for LibwebrtcSession {
         let mic = lock(&self.standby)
             .take()
             .ok_or_else(|| MediaError("the standby pushed no mic".into()))?;
+        if pipeline::enabled() {
+            mic.set_enabled(true);
+            MIC_LIVE.store(true, Ordering::Relaxed);
+            *lock(&self.mic) = Some(mic);
+            pipeline().start_capture();
+            eprintln!("[voice] standby mic promoted (own audio path)");
+            return Ok(());
+        }
         let f = factory();
         // Windows' built-in AEC refuses to record before playout runs, and a
         // standby has pulled nothing yet, so nothing has started playout.
@@ -874,6 +1022,9 @@ impl MediaSession for LibwebrtcSession {
     }
 
     fn start_capture(&self) {
+        if pipeline::enabled() {
+            return;
+        }
         let f = factory();
         if !f.recording_is_initialized() {
             let ok = f.init_recording() && f.start_recording();
@@ -1206,6 +1357,9 @@ impl MediaSession for LibwebrtcSession {
     }
 
     fn set_playout_enabled(&self, enabled: bool) {
+        if pipeline::enabled() && self.sender_session {
+            pipeline().set_playout(enabled);
+        }
         let mut remotes = lock(&self.remotes);
         remotes.silenced = !enabled;
         for (_, track) in &remotes.tracks {
@@ -1216,6 +1370,13 @@ impl MediaSession for LibwebrtcSession {
     }
 
     fn set_processing(&self, processing: Processing) -> Result<(), MediaError> {
+        if pipeline::enabled() {
+            pipeline().set_processing(processing);
+            return Ok(());
+        }
+        if processing.noise_reduction {
+            eprintln!("[voice] RNNoise needs the own audio path (YAP_ADM_AUDIO is set)");
+        }
         let Some(mic) = lock(&self.mic).clone() else {
             return Ok(());
         };
@@ -1242,6 +1403,12 @@ impl MediaSession for LibwebrtcSession {
     fn set_track_gain(&self, mid: &str, gain: f64) {
         let mut remotes = lock(&self.remotes);
         remotes.gains.insert(mid.to_owned(), gain);
+        if pipeline::enabled() {
+            if let Some(playing) = remotes.playing.get(mid) {
+                playing.stream.set_gain(gain);
+            }
+            return;
+        }
         for (track_mid, track) in &remotes.tracks {
             if let (Some(_), MediaStreamTrack::Audio(audio)) =
                 (track_mid.as_deref().filter(|m| *m == mid), track)
@@ -1250,6 +1417,14 @@ impl MediaSession for LibwebrtcSession {
                     eprintln!("[voice] track volume refused on {mid}");
                 }
             }
+        }
+    }
+
+    fn set_track_pan(&self, mid: &str, pan: f64) {
+        let mut remotes = lock(&self.remotes);
+        remotes.pans.insert(mid.to_owned(), pan);
+        if let Some(playing) = remotes.playing.get(mid) {
+            playing.stream.set_pan(pan);
         }
     }
 
@@ -1273,6 +1448,10 @@ impl MediaSession for LibwebrtcSession {
         };
         mic.set_enabled(false);
         MIC_LIVE.store(false, Ordering::Relaxed);
+        if pipeline::enabled() {
+            pipeline().stop_capture();
+            return;
+        }
         let f = factory();
         if f.recording_is_initialized() {
             f.stop_recording();
@@ -1379,6 +1558,11 @@ impl MediaSession for LibwebrtcSession {
                 }
                 _ => {}
             }
+        }
+        if pipeline::enabled() && self.sender_session {
+            line += " ";
+            line += &pipeline().stats();
+            (out.mic_device_failed, out.speaker_device_failed) = pipeline().failing();
         }
         if let Some((rtt, remote)) = pair {
             out.round_trip = (rtt > 0.0).then_some(rtt);

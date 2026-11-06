@@ -15,4 +15,10 @@ namespace logfile {
 // Call first thing in main, before anything writes to stderr.
 void start();
 
+// Ends the log for a process about to end without its teardown: closes
+// this process's ends of the pipe, so the pump reads to the end, and waits
+// (at most `timeoutMs`) for it to write the last lines out. Later stderr
+// output is dropped. A no-op without start().
+void finish(unsigned timeoutMs);
+
 } // namespace logfile

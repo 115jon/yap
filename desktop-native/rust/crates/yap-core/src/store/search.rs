@@ -246,6 +246,8 @@ pub struct ResultRow {
     pub name: String,
     /// The role colour, unless the name has its own style.
     pub color: String,
+    /// The name's style (`view::name_style`), or empty.
+    pub name_style: String,
     pub avatar: String,
     pub initials: String,
     pub time: String,

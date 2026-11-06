@@ -29,6 +29,8 @@ pub const TOKENS: &[&str] = &[
     "%QUOTEBAR%",
     "%MENTION%",
     "%MENTIONBG%",
+    "%MENTIONOFF%",
+    "%MENTIONOFFBG%",
     "%SPOILERFG%",
     "%SPOILERBG%",
     "%EDITED%",
@@ -55,6 +57,28 @@ pub fn to_html(source: &str, edited: bool) -> String {
 /// empty `api_base` they stay text (Qt cannot fall back when an image fails,
 /// as the web does).
 pub fn to_html_with(source: &str, edited: bool, api_base: &str) -> String {
+    to_html_resolving(source, edited, api_base, &|_| Some(String::new()))
+}
+
+/// What the inline renderer needs beyond the text.
+struct Cx<'a> {
+    api_base: &'a str,
+    /// The user id behind an `@username`, when it names a member.
+    resolve: &'a dyn Fn(&str) -> Option<String>,
+}
+
+/// [`to_html_with`], with `@username` resolved through `resolve`
+/// (MentionBadge.tsx): a member's mention is a `user:<id>` link on the
+/// accent tint (underlined on hover, opening the profile); `None` is the
+/// inert tint-1 chip in ink-2; an empty id keeps the plain accent chip.
+pub fn to_html_resolving(
+    source: &str,
+    edited: bool,
+    api_base: &str,
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> String {
+    let cx = Cx { api_base, resolve };
+    let api_base = &cx;
     let mut out = String::with_capacity(source.len() + 64);
     let mut rest = source;
     while let Some(start) = rest.find("```") {
@@ -82,7 +106,7 @@ pub fn to_html_with(source: &str, edited: bool, api_base: &str) -> String {
 }
 
 /// Text outside code fences: quote runs, then inline.
-fn text_block(text: &str, api_base: &str, out: &mut String) {
+fn text_block(text: &str, api_base: &Cx, out: &mut String) {
     if text.is_empty() {
         return;
     }
@@ -285,7 +309,7 @@ fn plain_into(text: &str, out: &mut String) {
     }
 }
 
-fn wrap(open: &str, inner: &str, api_base: &str, out: &mut String) {
+fn wrap(open: &str, inner: &str, api_base: &Cx, out: &mut String) {
     out.push_str("<span style=\"");
     out.push_str(open);
     out.push_str("\">");
@@ -293,7 +317,7 @@ fn wrap(open: &str, inner: &str, api_base: &str, out: &mut String) {
     out.push_str("</span>");
 }
 
-fn inline(text: &str, api_base: &str, out: &mut String) {
+fn inline(text: &str, api_base: &Cx, out: &mut String) {
     let mut plain = 0;
     let mut i = 0;
     let mut before: Option<char> = None;
@@ -341,18 +365,37 @@ fn inline(text: &str, api_base: &str, out: &mut String) {
             Token::Link(label, url) => link(url, label, out),
             Token::Url(url) => link(url, url, out),
             Token::Mention(name) => {
-                out.push_str(
-                    "<span style=\"font-family:'Yap Geist Medium'; color:%MENTION%; \
-                     background-color:%MENTIONBG%\">",
-                );
+                let id = (api_base.resolve)(name);
+                match &id {
+                    // No member list to ask: the plain accent chip.
+                    Some(id) if id.is_empty() => out.push_str(
+                        "<span style=\"font-family:'Yap Geist Medium'; color:%MENTION%;                          background-color:%MENTIONBG%\">",
+                    ),
+                    Some(id) => {
+                        out.push_str("<a href=\"user:");
+                        escape_into(id, out);
+                        out.push_str(
+                            "\" style=\"font-family:'Yap Geist Medium'; color:%MENTION%; \
+                             background-color:%MENTIONBG%; text-decoration:none\">",
+                        );
+                    }
+                    None => out.push_str(
+                        "<span style=\"font-family:'Yap Geist Medium'; color:%MENTIONOFF%; \
+                         background-color:%MENTIONOFFBG%\">",
+                    ),
+                }
                 out.push_str(CHIP_PAD);
                 out.push('@');
                 escape_into(name, out);
                 out.push_str(CHIP_PAD);
-                out.push_str("</span>");
+                out.push_str(if id.is_some_and(|id| !id.is_empty()) {
+                    "</a>"
+                } else {
+                    "</span>"
+                });
             }
             Token::Custom(raw, id) => {
-                let base = api_base.trim_end_matches('/');
+                let base = api_base.api_base.trim_end_matches('/');
                 if base.is_empty() {
                     escape_into(raw, out);
                 } else {

@@ -23,6 +23,7 @@
 //   DesktopShell.toastReply(channelId, messageId, text)   (Send in the toast)
 //   DesktopShell.toastMarkRead(channelId)                 (Mark as Read)
 //   DesktopShell.setAutostart(on), reveal(), hideToTray(), quit()
+//   DesktopShell.quitting                               (closing must not hide)
 
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
@@ -42,6 +43,9 @@ class DesktopShell : public QObject
   Q_PROPERTY(QString badgeTooltip READ badgeTooltip WRITE setBadgeTooltip NOTIFY badgeChanged)
   // The named profile (YAP_PROFILE / --profile), "" for the default one.
   Q_PROPERTY(QString profile READ profile CONSTANT)
+  // True once quit() (or the session's end) began: the window's close
+  // handler must then let the close through, not hide it to the tray.
+  Q_PROPERTY(bool quitting READ quitting NOTIFY quittingChanged)
 
 public:
   explicit DesktopShell(QObject* parent = nullptr);
@@ -79,6 +83,7 @@ public:
   void setBadgeDot(bool dot);
   QString badgeTooltip() const { return m_badgeTooltip; }
   QString profile() const;
+  bool quitting() const { return m_quitting; }
   void setBadgeTooltip(const QString& tooltip);
 
   // A non-empty `messageId` adds Reply and Mark as Read.
@@ -93,7 +98,8 @@ public:
   Q_INVOKABLE void reveal();
   // Close to tray: saves the rect and hides the window.
   Q_INVOKABLE void hideToTray();
-  // Saves the rect and quits.
+  // Saves the rect and quits. Sets quitting first: Qt's quit closes every
+  // window, and a close the window cancels (close to tray) cancels the quit.
   Q_INVOKABLE void quit();
 
   // The tray window's messages (called from its window procedure).
@@ -108,12 +114,15 @@ signals:
   void toastReply(const QString& channelId, const QString& messageId,
                   const QString& text);
   void toastMarkRead(const QString& channelId);
+  void quittingChanged();
 
 private:
   void createTray();
   void removeTray();
   void updateTrayIcon();
   void showTrayMenu();
+  // A tray menu command (kMenuShow, kMenuQuit), chosen or from the test hook.
+  void trayCommand(unsigned chosen);
   void flashTaskbar(bool on);
   void restoreGeometry();
   void scheduleSave();
@@ -138,6 +147,7 @@ private:
   QString m_badgeTooltip;
   bool m_badgeQueued = false;
   bool m_flashing = false;
+  bool m_quitting = false;
 
   // The last normal (not maximized, not minimized) rect.
   QRect m_normal;

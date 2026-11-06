@@ -145,6 +145,7 @@ Item {
                 required property string name
                 required property string avatar
                 required property string initials
+                required property string nameStyle
                 width: suggestions.width
                 height: 36
                 radius: Theme.radius
@@ -158,15 +159,16 @@ Item {
                     initials: suggestion.initials
                     source: suggestion.avatar
                 }
-                Text {
+                // MentionAutocomplete.tsx: UserDisplayName, in their style.
+                DisplayName {
                     x: 36
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - x - handle.width - 20
-                    textFormat: Text.PlainText
+                    width: Math.min(implicitWidth, parent.width - x - handle.width - 20)
                     text: suggestion.name
-                    elide: Text.ElideRight
+                    nameStyle: suggestion.nameStyle
                     color: Theme.ink1
                     font: Theme.type.row
+                    ground: Theme.ply3
                 }
                 Text {
                     id: handle

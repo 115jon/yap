@@ -49,6 +49,11 @@ pub mod qobject {
         #[qproperty(QString, me_deco, cxx_name = "meDeco")]
         /// Our nameplate as JSON `{still, motion, border}`, or empty.
         #[qproperty(QString, me_plate, cxx_name = "mePlate")]
+        /// Our profile effect and frame (JSON, as Profile has them), or empty.
+        #[qproperty(QString, me_effect, cxx_name = "meEffect")]
+        #[qproperty(QString, me_frame, cxx_name = "meFrame")]
+        /// Our display-name style JSON, or empty.
+        #[qproperty(QString, me_name_style, cxx_name = "meNameStyle")]
         /// Our stored avatar display (JSON), or empty.
         #[qproperty(QString, me_display, cxx_name = "meDisplay")]
         type Session = super::SessionRust;
@@ -485,6 +490,8 @@ pub mod qobject {
         /// The profile effect and frame as JSON, or empty.
         #[qproperty(QString, effect)]
         #[qproperty(QString, frame)]
+        /// The display-name style JSON, or empty.
+        #[qproperty(QString, name_style, cxx_name = "nameStyle")]
         /// Where they are signed in, comma-joined (`desktop,mobile,web`).
         #[qproperty(QString, platforms)]
         /// The servers you share: `{count, items: [{id, name, icon,
@@ -550,6 +557,9 @@ pub struct SessionRust {
     me_custom_status: QString,
     me_deco: QString,
     me_plate: QString,
+    me_effect: QString,
+    me_frame: QString,
+    me_name_style: QString,
     me_display: QString,
 }
 
@@ -730,6 +740,7 @@ pub struct ProfileRust {
     deco: QString,
     effect: QString,
     frame: QString,
+    name_style: QString,
     platforms: QString,
     mutual_servers: QString,
 }

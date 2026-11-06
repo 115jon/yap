@@ -36,6 +36,8 @@ Item {
     required property string deco
     required property string plate
     required property string platforms
+    // The display-name style (JSON), or empty.
+    required property string nameStyle
     property color ground: Theme.ply0
     signal profileRequested(string userId, Item anchor)
     // A right click at `at` (in the row): the member's menu.
@@ -88,6 +90,10 @@ Item {
         radius: Theme.radius
         color: hover.hovered ? Theme.tint1 : "transparent"
         opacity: root.online || hover.hovered ? 1 : 0.5
+        // The web dims the row as one group: without a layer each child
+        // fades alone and the presence notch's cut-out shows the avatar
+        // through it. Only dimmed rows pay for the layer.
+        layer.enabled: opacity < 1
         Behavior on color { ColorAnimation { duration: Theme.dur1 } }
 
         HoverHandler { id: hover; enabled: !root.label; cursorShape: Qt.PointingHandCursor }
@@ -146,16 +152,19 @@ Item {
             Row {
                 width: parent.width
                 spacing: 6
-                Text {
+                // MemberList.tsx UserDisplayName: the owner's style, else the
+                // role colour (online, no plate, no style), 2.8:1 on a plate.
+                DisplayName {
                     id: nameText
                     width: Math.min(implicitWidth, parent.width - (crown.visible ? crown.width + 6 : 0)
                         - (devices.visible ? devices.implicitWidth + 6 : 0))
-                    textFormat: Text.PlainText
                     text: root.name
-                    elide: Text.ElideRight
-                    color: root.roleColor.length > 0 && root.plate.length === 0 ? root.roleInk
+                    nameStyle: root.nameStyle
+                    color: root.roleColor.length > 0 && root.plate.length === 0 && root.nameStyle.length === 0 ? root.roleInk
                         : hover.hovered || root.plate.length > 0 ? Theme.ink1 : Theme.ink2
                     font: Theme.type.row
+                    ground: root.ground
+                    minContrast: root.plate.length > 0 ? 2.8 : 3
                 }
                 PlatformIcons {
                     id: devices

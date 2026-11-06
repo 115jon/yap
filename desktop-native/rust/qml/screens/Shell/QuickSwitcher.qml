@@ -3,13 +3,13 @@ import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
 
-// The quick switcher (CommandMenu.tsx), Ctrl+K: a 560 wide menu panel
+// The quick switcher (CommandMenu.tsx), Ctrl+K: a 536 wide menu panel
 // 12 % down the window over the scrim, with no open animation (a keyboard
 // surface used many times a day). The borderless field's row carries the
 // focus as an inset 2 px rule; the list (at most 420) holds Recent and
 // Unread while idle, then DMs, text and voice channels, servers and the
 // actions, ranked by cmdk's score once something is typed; `@ # ! *`
-// narrow it to one kind. Rows are 32 high with a 20 px leading slot;
+// narrow it to one kind. Rows are 36 high with a 20 px leading slot;
 // the highlighted one shows the Enter key. Arrows and Tab move (looping),
 // Enter opens, Esc closes and gives focus back.
 Popup {
@@ -85,7 +85,8 @@ Popup {
     parent: Overlay.overlay
     x: Math.round((parent.width - width) / 2)
     y: Math.max(Math.round(parent.height * 0.12), 40)
-    width: Math.min(560, parent.width - 24)
+    // max-w-[560px] with px-3 inside it: 536 of panel.
+    width: Math.min(536, parent.width - 24)
     height: panel.implicitHeight
     padding: 0
     modal: true
@@ -311,7 +312,8 @@ Popup {
         signal hovered()
         signal picked()
 
-        height: 32
+        // CommandMenuGroups ROW's h-8 loses to MENU_ITEM's min-h-9.
+        height: 36
         Accessible.role: Accessible.ListItem
         Accessible.name: item.label
         Accessible.selected: selected

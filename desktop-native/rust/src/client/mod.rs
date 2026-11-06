@@ -81,14 +81,30 @@ pub fn start(sink: Sink) -> bool {
     COMMANDS.set(tx).is_ok()
 }
 
-/// Commits the snapshot cache writes still pending (waits up to a second).
-/// Called once, when the `Session` singleton goes away with the engine.
+/// The core's way out, once per process (later calls return at once): a
+/// call in progress is left and the room hears so at once (the beacon, at
+/// most 800 ms), then the snapshot cache writes still pending are committed
+/// (at most a second). The shell calls it on `aboutToQuit`
+/// ([`yap_core_shutdown`]): the process then ends without the engine's
+/// teardown. The `Session` singleton's drop is the fallback.
 pub fn shutdown() {
-    // A call in progress: the room hears we left at once (the beacon), and
-    // the call is left so its sockets close cleanly.
-    voice::send_disconnect_beacon(std::time::Duration::from_millis(800));
-    command(Command::Quit);
-    yap_core::shutdown();
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        eprintln!("[quit] core shutdown");
+        voice::send_disconnect_beacon(std::time::Duration::from_millis(800));
+        command(Command::Quit);
+        yap_core::shutdown();
+        eprintln!("[quit] core shutdown done");
+    });
+}
+
+/// [`shutdown`] for the C++ shell (`DesktopShell`, on `aboutToQuit`).
+#[no_mangle]
+pub extern "C" fn yap_core_shutdown() {
+    // Never unwinds into C++.
+    if std::panic::catch_unwind(shutdown).is_err() {
+        eprintln!("[quit] core shutdown panicked");
+    }
 }
 
 /// Sends a command to the core (dropped before `start`).

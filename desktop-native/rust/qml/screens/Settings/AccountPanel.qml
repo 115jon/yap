@@ -28,10 +28,13 @@ Column {
         SettingsRow {
             rowId: "profile"
             leading: Component {
+                // AccountPanel.tsx: AvatarImage with your display, so a
+                // decoration rounds the face and wears its ring.
                 Avatar {
                     size: 44
                     initials: Settings.name
                     source: Settings.avatar
+                    deco: Settings.avatar.length > 0 ? Session.meDeco : ""
                 }
             }
             KitButton {

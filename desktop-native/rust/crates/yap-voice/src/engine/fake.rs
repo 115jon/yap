@@ -64,6 +64,10 @@ pub enum FakeOp {
         mid: String,
         gain: f64,
     },
+    SetTrackPan {
+        mid: String,
+        pan: f64,
+    },
     SetProcessing(Processing),
     SetVideoSink {
         mid: String,
@@ -430,6 +434,16 @@ impl MediaSession for FakeSession {
             FakeOp::SetTrackGain {
                 mid: mid.to_owned(),
                 gain,
+            },
+        );
+    }
+
+    fn set_track_pan(&self, mid: &str, pan: f64) {
+        record(
+            &self.shared,
+            FakeOp::SetTrackPan {
+                mid: mid.to_owned(),
+                pan,
             },
         );
     }

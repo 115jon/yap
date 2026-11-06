@@ -1,5 +1,6 @@
-//! `Audio`: the voice settings of the signed-in user (devices, output
-//! volume, input profile and processing, sensitivity, per-user volumes),
+//! `Audio`: the voice settings of the signed-in user (devices, input and
+//! output volume, input profile and processing, RNNoise, spatial audio,
+//! sensitivity, per-user volumes),
 //! kept in `voice-settings.json` per user as the web keeps them per user,
 //! and handed to the call (`client::voice::set_call_audio`) and to the
 //! device module (`LibwebrtcEngine::choose_devices`). Device lists come
@@ -35,9 +36,15 @@ pub mod qobject {
         #[qproperty(i32, output_volume, cxx_name = "outputVolume")]
         /// `standard`, `studio` or `custom`.
         #[qproperty(QString, input_profile, cxx_name = "inputProfile")]
+        /// WebRTC's noise suppression (the web's browser noise suppression).
         #[qproperty(bool, noise_suppression, cxx_name = "noiseSuppression")]
+        /// "Noise suppression": `none` or `rnnoise`.
+        #[qproperty(QString, noise_reduction, cxx_name = "noiseReduction")]
         #[qproperty(bool, echo_cancellation, cxx_name = "echoCancellation")]
         #[qproperty(bool, high_fidelity, cxx_name = "highFidelity")]
+        #[qproperty(bool, spatial_audio, cxx_name = "spatialAudio")]
+        /// "Input volume", 0..=200 (kept; the web does not apply it either).
+        #[qproperty(i32, input_volume, cxx_name = "inputVolume")]
         #[qproperty(bool, auto_sensitivity, cxx_name = "autoSensitivity")]
         /// The manual threshold, -100..=0 dB.
         #[qproperty(f64, sensitivity)]
@@ -89,11 +96,21 @@ pub mod qobject {
         #[cxx_name = "setProfile"]
         fn set_profile(self: Pin<&mut Audio>, profile: &QString);
 
-        /// `noiseSuppression`, `echoCancellation`, `highFidelity` or
-        /// `autoSensitivity`.
+        /// `noiseSuppression`, `echoCancellation`, `highFidelity`,
+        /// `spatialAudio` or `autoSensitivity`, with the switches the web
+        /// turns off alongside (`VoiceSettings::set_switch`).
         #[qinvokable]
         #[cxx_name = "setSwitch"]
         fn set_switch(self: Pin<&mut Audio>, key: &QString, on: bool);
+
+        /// "Noise suppression": `none` or `rnnoise`.
+        #[qinvokable]
+        #[cxx_name = "changeNoiseReduction"]
+        fn set_noise_reduction_from_ui(self: Pin<&mut Audio>, choice: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "changeInputVolume"]
+        fn set_input_volume_from_ui(self: Pin<&mut Audio>, volume: i32);
 
         #[qinvokable]
         #[cxx_name = "changeSensitivity"]
@@ -196,7 +213,9 @@ use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QList, QString, QStringList};
 use yap_cache::settings;
 use yap_cache::voice::{self, InputProfile, PeerSettings, VoiceSettings, DEFAULT_DEVICE};
-use yap_voice::{peer_gain, AudioDevices, LibwebrtcEngine, Playback, Processing, Sensitivity};
+use yap_voice::{
+    peer_gain, AudioDevices, LibwebrtcEngine, Playback, Processing, Sensitivity, SpatialLocal,
+};
 
 use crate::client::voice::{set_call_audio, CallAudio};
 
@@ -234,8 +253,11 @@ pub struct AudioRust {
     output_volume: i32,
     input_profile: QString,
     noise_suppression: bool,
+    noise_reduction: QString,
     echo_cancellation: bool,
     high_fidelity: bool,
+    spatial_audio: bool,
+    input_volume: i32,
     auto_sensitivity: bool,
     sensitivity: f64,
     level: f64,
@@ -272,9 +294,14 @@ fn profile_name(profile: InputProfile) -> &'static str {
     }
 }
 
-/// What the call takes from these settings.
-fn call_audio(s: &VoiceSettings) -> CallAudio {
+/// What the call takes from these settings (of `user_id`).
+fn call_audio(s: &VoiceSettings, user_id: &str) -> CallAudio {
     CallAudio {
+        spatial: SpatialLocal {
+            enabled: s.spatial_audio_enabled,
+            high_fidelity: s.stream_high_fidelity,
+            user_id: user_id.to_owned(),
+        },
         playback: Playback {
             output: f64::from(s.output_volume) / 100.0,
             peers: s
@@ -302,6 +329,7 @@ fn call_audio(s: &VoiceSettings) -> CallAudio {
             s.noise_suppression,
             s.echo_cancellation,
             s.stream_high_fidelity,
+            s.noise_reduction_active(),
         ),
     }
 }
@@ -344,8 +372,16 @@ impl qobject::Audio {
         self.as_mut()
             .set_input_profile(QString::from(profile_name(s.input_profile)));
         self.as_mut().set_noise_suppression(s.noise_suppression);
+        self.as_mut()
+            .set_noise_reduction(QString::from(if s.noise_reduction_active() {
+                "rnnoise"
+            } else {
+                "none"
+            }));
         self.as_mut().set_echo_cancellation(s.echo_cancellation);
         self.as_mut().set_high_fidelity(s.stream_high_fidelity);
+        self.as_mut().set_spatial_audio(s.spatial_audio_enabled);
+        self.as_mut().set_input_volume(i32::from(s.input_volume));
         self.as_mut().set_auto_sensitivity(s.auto_sensitivity);
         self.as_mut().set_sensitivity(s.sensitivity);
         self.as_mut()
@@ -404,7 +440,7 @@ impl qobject::Audio {
     /// Saves (when signed in) and hands the settings to the call.
     fn commit(self: Pin<&mut Self>) {
         let this = self.rust();
-        set_call_audio(call_audio(&this.settings));
+        set_call_audio(call_audio(&this.settings, &this.user_id));
         if let (Some(dir), false) = (&this.dir, this.user_id.is_empty()) {
             if let Err(error) = voice::save_voice(dir, &this.user_id, &this.settings) {
                 eprintln!("[audio] could not save voice settings: {error}");
@@ -434,7 +470,7 @@ impl qobject::Audio {
             rust.settings = settings;
         }
         self.as_mut().show();
-        set_call_audio(call_audio(&self.rust().settings));
+        set_call_audio(call_audio(&self.rust().settings, &self.rust().user_id));
         send_soundboard_muted(&self.rust().settings);
         let revision = self.rust().peers_revision.wrapping_add(1);
         self.set_peers_revision(revision);
@@ -507,13 +543,26 @@ impl qobject::Audio {
 
     pub fn set_switch(self: Pin<&mut Self>, key: &QString, on: bool) {
         let key = key.to_string();
-        self.edit(|s| match key.as_str() {
-            "noiseSuppression" => s.noise_suppression = on,
-            "echoCancellation" => s.echo_cancellation = on,
-            "highFidelity" => s.stream_high_fidelity = on,
-            "autoSensitivity" => s.auto_sensitivity = on,
-            other => eprintln!("[audio] unknown switch {other}"),
+        // The QML names, as the web's settings keys.
+        let web = match key.as_str() {
+            "highFidelity" => "streamHighFidelity",
+            "spatialAudio" => "spatialAudioEnabled",
+            other => other,
+        };
+        self.edit(|s| {
+            if !s.set_switch(web, on) {
+                eprintln!("[audio] unknown switch {key}");
+            }
         });
+    }
+
+    pub fn set_noise_reduction_from_ui(self: Pin<&mut Self>, choice: &QString) {
+        let choice = choice.to_string();
+        self.edit(|s| s.set_noise_reduction(&choice));
+    }
+
+    pub fn set_input_volume_from_ui(self: Pin<&mut Self>, v: i32) {
+        self.edit(|s| s.input_volume = volume(v));
     }
 
     pub fn set_sensitivity_from_ui(self: Pin<&mut Self>, db: f64) {

@@ -809,6 +809,8 @@ fn social_json(
     json!({
         "kind": "social",
         "provider": name,
+        // EmbedHeader's date (EmbedDate), formatted in the view.
+        "timestamp": shown.timestamp.as_deref().unwrap_or_default(),
         "url": shown.url,
         "page": embed.url,
         "open": open,
@@ -1058,6 +1060,7 @@ fn x_json(embed: &Embed, api_base: &str, message_id: &str) -> Value {
     .collect();
     json!({
         "kind": "x",
+        "timestamp": embed.timestamp.as_deref().unwrap_or_default(),
         "url": embed.url,
         "provider": non_empty(embed.provider.as_ref().map(|p| p.name.as_str())).unwrap_or("X"),
         "color": embed.color.as_deref().unwrap_or_default(),

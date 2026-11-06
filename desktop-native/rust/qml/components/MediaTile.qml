@@ -125,4 +125,33 @@ Rectangle {
         cursorShape: Qt.PointingHandCursor
         onClicked: root.activated()
     }
+
+    // ImageGrid.tsx: a GIF's star at the top-left and, for KLIPY's GIFs,
+    // its mark on a black 35 % chip at the bottom-left
+    // (GifProviderBranding.tsx). Not on the "+N" tile or a hidden one.
+    GifFavoriteStar {
+        x: 8
+        y: 8
+        visible: !root.hidden && root.more === 0 && !!root.item.favorite
+        favorite: root.item.favorite ?? null
+    }
+    Rectangle {
+        x: 8
+        y: parent.height - height - 8
+        visible: !root.hidden && root.more === 0 && root.item.klipy === true
+        width: brand.width + 12
+        height: brand.height + 8
+        radius: 6
+        color: Qt.rgba(0, 0, 0, 0.35)
+        Image {
+            id: brand
+            anchors.centerIn: parent
+            height: 14
+            width: Math.round(14 * 375.1 / 102.5)
+            sourceSize: Qt.size(width * 2, height * 2)
+            source: "qrc:/svg/klipy-text-light.svg"
+            opacity: 0.9
+            Accessible.name: "KLIPY"
+        }
+    }
 }

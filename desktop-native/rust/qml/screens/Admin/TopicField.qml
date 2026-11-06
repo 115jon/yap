@@ -18,9 +18,20 @@ Rectangle {
     implicitHeight: 88
     radius: Theme.radius
     color: Theme.ply2
-    border.width: area.activeFocus ? 2 : 1
+    border.width: 1
     border.color: area.activeFocus ? Theme.ink1 : hover.hovered ? Theme.ink2 : Theme.lineField
     Behavior on border.color { ColorAnimation { duration: Theme.dur1 } }
+    // styles.css :focus-visible: a focused input wears the 2 px --focus
+    // outline outside its 1 px ink-1 edge (offset 0).
+    Rectangle {
+        anchors.fill: parent
+        anchors.margins: -2
+        visible: area.activeFocus
+        radius: Theme.radius + 2
+        color: "transparent"
+        border.width: 2
+        border.color: Theme.focus
+    }
 
     HoverHandler { id: hover; cursorShape: Qt.IBeamCursor }
     // A press anywhere in the box puts the caret in it.

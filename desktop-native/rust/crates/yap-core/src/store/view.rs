@@ -174,6 +174,13 @@ rows! {
         unread: bool => Unread "unread",
         /// Unread mentions and replies.
         mentions: i64 => Mentions "mentions",
+        /// Someone is in one of its voice channels (the dot on the tile).
+        voice: bool => Voice "voice",
+        /// Your call is in it (the path ring and speaker disc).
+        voice_here: bool => VoiceHere "voiceHere",
+        /// The voice tooltip under the name: "N people across M channels",
+        /// then each active channel and who is in it, one per line.
+        voice_tip: String => VoiceTip "voiceTip",
     }
     key(row) -> String { row.id.clone() }
 
@@ -287,6 +294,8 @@ rows! {
         pinned: bool => Pinned "pinned",
         /// The author's avatar decoration (APNG), or empty.
         deco: String => Deco "deco",
+        /// The author's display-name style ([`name_style`]), or empty.
+        name_style: String => NameStyle "nameStyle",
     }
     key(row) -> String { row.id.clone() }
 
@@ -393,6 +402,8 @@ rows! {
         plate: String => Plate "plate",
         /// Where they are signed in, comma-joined (`desktop,mobile,web`).
         platforms: String => Platforms "platforms",
+        /// The display-name style ([`name_style`]), or empty.
+        name_style: String => NameStyle "nameStyle",
     }
     key(row) -> (MemberKind, String) { (row.kind, row.id.clone()) }
 
@@ -452,6 +463,8 @@ rows! {
         name: String => Name "name",
         avatar: String => Avatar "avatar",
         initials: String => Initials "initials",
+        /// The display-name style ([`name_style`]), or empty.
+        name_style: String => NameStyle "nameStyle",
     }
     key(row) -> String { row.id.clone() }
 }
@@ -655,6 +668,12 @@ pub struct MeView {
     pub deco: String,
     /// The nameplate as JSON `{still, motion, border}`, or empty.
     pub plate: String,
+    /// The profile effect and frame JSON (as [`ProfileView`] has them),
+    /// for the profile editor's preview card.
+    pub effect: String,
+    pub frame: String,
+    /// The display-name style ([`name_style`]), or empty.
+    pub name_style: String,
     /// The stored avatar display (JSON), for the shop's previews.
     pub display: String,
 }
@@ -687,6 +706,8 @@ pub struct ProfileView {
     /// empty.
     pub effect: String,
     pub frame: String,
+    /// The display-name style ([`name_style`]), or empty.
+    pub name_style: String,
     /// Where they are signed in, comma-joined (`desktop,web`).
     pub platforms: String,
     /// The servers you share, as JSON `{count, items: [{id, name, icon,
@@ -1251,6 +1272,9 @@ pub(super) fn me(user: &User, api_base: &str) -> MeView {
             .to_owned(),
         deco: collectibles::decoration_url(user.avatar_display.as_ref()),
         plate: plate_json(user),
+        effect: non_null(collectibles::effect_json(user.avatar_display.as_ref())),
+        frame: non_null(collectibles::frame_json(user.avatar_display.as_ref())),
+        name_style: name_style(user.display_name_style.as_ref()),
         display: user
             .avatar_display
             .as_ref()
@@ -1390,11 +1414,13 @@ pub(super) fn server_rows(
     servers: &[Server],
     api_base: &str,
     badge_of: impl Fn(&str) -> Badge,
+    voice_of: impl Fn(&str) -> ServerVoice,
 ) -> Vec<ServerRow> {
     servers
         .iter()
         .map(|s| {
             let (unread, mentions) = badge_of(&s.id);
+            let voice = voice_of(&s.id);
             ServerRow {
                 id: s.id.clone(),
                 name: s.name.clone(),
@@ -1402,9 +1428,64 @@ pub(super) fn server_rows(
                 icon: absolute_url(api_base, s.icon_url.as_deref()),
                 unread,
                 mentions,
+                voice: !voice.channels.is_empty(),
+                voice_here: voice.here && !voice.channels.is_empty(),
+                voice_tip: voice.tip(),
             }
         })
         .collect()
+}
+
+/// A server's active voice channels for the rail (ServerList.tsx
+/// `serverVoiceSummaries`): each channel's name and who is in it, in
+/// channel order.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ServerVoice {
+    pub channels: Vec<(String, Vec<String>)>,
+    /// Your call is in this server.
+    pub here: bool,
+}
+
+impl ServerVoice {
+    /// The tooltip body: the summary line, then up to three channels with
+    /// up to five names each ("+N" for the rest), then "+N more active
+    /// voice channels". Empty when nobody is in voice.
+    pub fn tip(&self) -> String {
+        if self.channels.is_empty() {
+            return String::new();
+        }
+        let people: usize = self.channels.iter().map(|(_, names)| names.len()).sum();
+        let mut lines = vec![format!(
+            "{} across {}",
+            if people == 1 {
+                "1 person".to_owned()
+            } else {
+                format!("{people} people")
+            },
+            if self.channels.len() == 1 {
+                "1 channel".to_owned()
+            } else {
+                format!("{} channels", self.channels.len())
+            }
+        )];
+        for (name, names) in self.channels.iter().take(3) {
+            lines.push(name.clone());
+            let mut who = names.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+            if names.len() > 5 {
+                who.push_str(&format!(" +{}", names.len() - 5));
+            }
+            lines.push(who);
+        }
+        match self.channels.len().saturating_sub(3) {
+            0 => {}
+            1 => lines.push("+1 more active voice channel".to_owned()),
+            n => lines.push(format!("+{n} more active voice channels")),
+        }
+        lines.join(
+            "
+",
+        )
+    }
 }
 
 fn plain_row(kind: TreeKind, id: &str, name: &str) -> ChannelTreeRow {
@@ -1802,10 +1883,18 @@ pub(super) fn message_row(
         initials: initials(author_name),
         avatar: absolute_url(ctx.api_base, author.and_then(|a| a.avatar_url.as_deref())),
         body: message.content.clone(),
-        html: crate::markdown::to_html_with(
+        // MentionBadge.tsx: a mention resolves to a member by username,
+        // ignoring case.
+        html: crate::markdown::to_html_resolving(
             &message.content,
             message.updated_at.is_some(),
             ctx.api_base,
+            &|name| {
+                ctx.members
+                    .iter()
+                    .find(|m| m.user.username.eq_ignore_ascii_case(name))
+                    .map(|m| m.user.id.clone())
+            },
         ),
         created_at: message.created_at.clone(),
         time: stamp.time,
@@ -1837,6 +1926,14 @@ pub(super) fn message_row(
         reply_count: message.reply_count.max(0),
         pinned: message.is_pinned,
         deco: collectibles::decoration_url(author.and_then(|a| a.avatar_display.as_ref())),
+        // useUserResolution: the member's profile, else the message's author.
+        name_style: name_style(
+            ctx.members
+                .iter()
+                .find(|m| m.user.id == message.author_id)
+                .and_then(|m| m.user.display_name_style.as_ref())
+                .or_else(|| author.and_then(|a| a.display_name_style.as_ref())),
+        ),
     }
 }
 
@@ -1944,6 +2041,7 @@ fn label_row(id: String, name: &str, count: usize, online: bool) -> MemberListRo
         deco: String::new(),
         plate: String::new(),
         platforms: String::new(),
+        name_style: String::new(),
     }
 }
 
@@ -2025,12 +2123,77 @@ fn member_row(m: &Member, online: bool, ctx: &MemberContext<'_>) -> MemberListRo
         platforms: ctx
             .presence
             .platforms_of(&user.id, user.presence_platforms.as_deref()),
+        name_style: name_style(user.display_name_style.as_ref()),
     }
 }
 
-/// A banner whose type says video and whose URL does not end in one
-/// carries the type as a fragment (`#video/webm`), which no request sends,
-/// so the card knows to play it (ProfileAssetLayer.tsx `isVideo`).
+/// A display-name style as the card and rows draw it
+/// (profile-customization.ts `normalizeDisplayNameStyle`): compact JSON
+/// `{"font","effect","primary","secondary"}` with `#RRGGBB` colours, or
+/// empty when absent or invalid. The value may be the object or a string
+/// holding it.
+pub fn name_style(value: Option<&serde_json::Value>) -> String {
+    const FONTS: [&str; 8] = [
+        "gg-sans",
+        "tempo",
+        "sakura",
+        "jellybean",
+        "modern",
+        "medieval",
+        "eight-bit",
+        "vampyre",
+    ];
+    const EFFECTS: [&str; 5] = ["solid", "gradient", "neon", "toon", "pop"];
+    let parsed;
+    let object = match value {
+        Some(serde_json::Value::String(text)) => {
+            parsed = serde_json::from_str::<serde_json::Value>(text).ok();
+            parsed.as_ref()
+        }
+        other => other,
+    };
+    let Some(object) = object.and_then(serde_json::Value::as_object) else {
+        return String::new();
+    };
+    let hex = |key: &str| -> Option<String> {
+        let raw = object.get(key)?.as_str()?.trim();
+        let digits = raw.strip_prefix('#').unwrap_or(raw);
+        if !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        let full = match digits.len() {
+            3 => digits.chars().flat_map(|c| [c, c]).collect::<String>(),
+            6 => digits.to_owned(),
+            _ => return None,
+        };
+        Some(format!("#{}", full.to_ascii_uppercase()))
+    };
+    let text = |key: &str| object.get(key).and_then(serde_json::Value::as_str);
+    match (
+        text("font"),
+        text("effect"),
+        hex("primaryColor"),
+        hex("secondaryColor"),
+    ) {
+        (Some(font), Some(effect), Some(primary), Some(secondary))
+            if FONTS.contains(&font) && EFFECTS.contains(&effect) =>
+        {
+            serde_json::json!({
+                "font": font,
+                "effect": effect,
+                "primary": primary,
+                "secondary": secondary,
+            })
+            .to_string()
+        }
+        _ => String::new(),
+    }
+}
+
+/// A banner whose type says video (or an animatable picture: GIF, APNG,
+/// WebP) and whose URL does not end in one carries the type as a fragment
+/// (`#video/webm`, `#image/gif`), which no request sends, so the card knows
+/// to play it (ProfileAssetLayer.tsx `isVideo`; the web's <img> animates).
 pub fn banner_url(url: &str, content_type: Option<&str>) -> String {
     let mime = content_type.unwrap_or_default().trim().to_ascii_lowercase();
     let path = url
@@ -2038,10 +2201,17 @@ pub fn banner_url(url: &str, content_type: Option<&str>) -> String {
         .next()
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let named = [".mp4", ".webm", ".mov", ".m4v", ".ogv"]
-        .iter()
-        .any(|e| path.ends_with(e));
-    if mime.starts_with("video/") && !named && !url.contains('#') {
+    let named = [
+        ".mp4", ".webm", ".mov", ".m4v", ".ogv", ".gif", ".png", ".apng", ".webp",
+    ]
+    .iter()
+    .any(|e| path.ends_with(e));
+    let typed = mime.starts_with("video/")
+        || matches!(
+            mime.as_str(),
+            "image/gif" | "image/png" | "image/apng" | "image/webp"
+        );
+    if typed && !named && !url.contains('#') {
         format!("{url}#{mime}")
     } else {
         url.to_owned()
@@ -2092,6 +2262,7 @@ pub(super) fn profile_view(
         deco: collectibles::decoration_url(user.avatar_display.as_ref()),
         effect: non_null(collectibles::effect_json(user.avatar_display.as_ref())),
         frame: non_null(collectibles::frame_json(user.avatar_display.as_ref())),
+        name_style: name_style(user.display_name_style.as_ref()),
         platforms: presence.platforms_of(&user.id, user.presence_platforms.as_deref()),
         mutual_servers: String::new(),
     }
@@ -2128,6 +2299,7 @@ pub(super) fn mention_rows(users: &[&User], api_base: &str) -> Vec<MentionRow> {
             name: u.label().to_owned(),
             avatar: absolute_url(api_base, u.avatar_url.as_deref()),
             initials: initials(u.label()),
+            name_style: name_style(u.display_name_style.as_ref()),
         })
         .collect()
 }
@@ -2337,6 +2509,33 @@ mod banner_tests {
         assert_eq!(
             banner_url("https://y/api/profile-assets/b1", Some("video/webm")),
             "https://y/api/profile-assets/b1#video/webm"
+        );
+    }
+
+    #[test]
+    fn a_display_name_style_should_normalise_or_be_empty() {
+        use super::name_style;
+        let raw = serde_json::json!(
+            r##"{"font":"tempo","effect":"gradient","primaryColor":"#3cf","secondaryColor":"#fb7185"}"##
+        );
+        assert_eq!(
+            name_style(Some(&raw)),
+            r##"{"effect":"gradient","font":"tempo","primary":"#33CCFF","secondary":"#FB7185"}"##
+        );
+        let bad = serde_json::json!({"font": "comic", "effect": "solid", "primaryColor": "#fff", "secondaryColor": "#000"});
+        assert_eq!(name_style(Some(&bad)), "");
+        assert_eq!(name_style(None), "");
+    }
+
+    #[test]
+    fn an_animated_picture_banner_without_an_extension_should_carry_its_type() {
+        assert_eq!(
+            banner_url("https://y/api/profile-assets/b1", Some("image/gif")),
+            "https://y/api/profile-assets/b1#image/gif"
+        );
+        assert_eq!(
+            banner_url("https://y/api/profile-assets/b1", Some("image/jpeg")),
+            "https://y/api/profile-assets/b1"
         );
     }
 

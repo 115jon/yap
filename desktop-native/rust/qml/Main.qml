@@ -34,8 +34,12 @@ ApplicationWindow {
 
     Component.onCompleted: Session.start()
 
-    // Close to tray (the desktop app's default), else quit.
+    // Close to tray (the desktop app's default), else quit. A quit already
+    // under way (the tray's Quit, the session ending) closes every window
+    // first: that close goes through, or Qt cancels the quit.
     onClosing: close => {
+        if (DesktopShell.quitting)
+            return
         if (Desktop.closeToTray) {
             close.accepted = false
             DesktopShell.hideToTray()

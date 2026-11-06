@@ -584,10 +584,18 @@ impl State {
             view.custom_status = shown.custom_status;
             view.pronouns = text(&me.pronouns);
             view.bio = text(&me.bio);
+            // Typed like the popout's (`#video/webm`), so the editor's
+            // preview plays a video or animated banner too.
             view.banner = me
                 .banner_url
                 .as_deref()
-                .map(|url| absolute_url(&self.api_base, Some(url)))
+                .filter(|url| !url.is_empty())
+                .map(|url| {
+                    crate::store::view::banner_url(
+                        &absolute_url(&self.api_base, Some(url)),
+                        me.banner_content_type.as_deref(),
+                    )
+                })
                 .unwrap_or_default();
             view.banner_color = me
                 .profile_banner_color

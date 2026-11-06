@@ -313,13 +313,41 @@ impl State {
     }
 
     fn sync_servers(&mut self, fx: &mut Effects) {
-        let rows = view::server_rows(&self.servers, &self.api_base, |id| {
-            (self.server_unread(id), self.server_mentions(id))
-        });
+        let here = self.voice.as_ref().map(|v| v.server_id.as_str());
+        let rows = view::server_rows(
+            &self.servers,
+            &self.api_base,
+            |id| (self.server_unread(id), self.server_mentions(id)),
+            |id| self.server_voice(id, here == Some(id)),
+        );
         for diff in view::ordered_diff(&self.view.servers, &rows) {
             fx.view(ViewUpdate::Servers(diff));
         }
         self.view.servers = rows;
+    }
+
+    /// The server's voice channels with people in them, in position order.
+    fn server_voice(&self, server_id: &str, here: bool) -> view::ServerVoice {
+        let Some(list) = self.channels.get(server_id) else {
+            return view::ServerVoice::default();
+        };
+        let mut active: Vec<_> = list
+            .channels
+            .iter()
+            .filter(|c| c.channel_type == ChannelType::Voice)
+            .filter_map(|c| {
+                let occupants = self.voice_channels.get(&c.id)?;
+                (!occupants.is_empty()).then(|| {
+                    let names = occupants.iter().map(|o| o.name.clone()).collect();
+                    (c.position, (c.name.clone(), names))
+                })
+            })
+            .collect();
+        active.sort_by_key(|(position, _)| *position);
+        view::ServerVoice {
+            channels: active.into_iter().map(|(_, channel)| channel).collect(),
+            here,
+        }
     }
 
     /// Who is in a voice channel, as the tree and the voice view show it.
@@ -786,6 +814,7 @@ impl State {
         self.sync_roster(fx);
         self.sync_tree(fx);
         self.sync_members(fx);
+        self.sync_servers(fx);
     }
 
     fn active_server_name(&self) -> String {

@@ -82,6 +82,7 @@ T.Popup {
         deco: Profile.deco
         effect: Profile.effect
         frame: Profile.frame
+        nameStyle: Profile.nameStyle
         platforms: Profile.platforms
         animate: popup.visible
         Accessible.role: Accessible.Dialog

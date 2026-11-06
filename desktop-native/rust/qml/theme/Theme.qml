@@ -229,6 +229,9 @@ QtObject {
         "%QUOTEBAR%": solid(lineStrong),
         "%MENTION%": String(accentInk),
         "%MENTIONBG%": solid(accentTint),
+        // MentionBadge.tsx: a name that is not a member here.
+        "%MENTIONOFF%": String(ink2),
+        "%MENTIONOFFBG%": solid(tint1),
         "%SPOILERFG%": solid(tint3),
         "%SPOILERBG%": solid(tint3),
         "%EDITED%": String(ink3)
@@ -240,6 +243,18 @@ QtObject {
     // On a row that mentions you the mention chip sits on accent-tint, so
     // its own accent-tint lands on that (MentionBadge.tsx on MessageItem).
     readonly property string mentionOnMention: String(Qt.tint(Qt.tint(ply0, accentTint), accentTint))
+    // Underlines the link whose target is `href` (the hovered one): the
+    // web's `pointer-fine:hover:underline` on links and member mentions.
+    function underlineLink(html, href) {
+        if (href.length === 0)
+            return html
+        const esc = href.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;").replace(/%/g, "&#37;")
+        const parts = html.split("href=\"" + esc + "\" style=\"")
+        for (let i = 1; i < parts.length; ++i)
+            parts[i] = parts[i].replace("text-decoration:none", "text-decoration:underline")
+        return parts.join("href=\"" + esc + "\" style=\"")
+    }
     function richText(html, revealed, mentioned) {
         const colors = revealed ? richRevealed : richColors
         return html.replace(/%[A-Z]+%/g, token => token === "%MENTIONBG%" && mentioned

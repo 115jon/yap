@@ -25,6 +25,7 @@ use crate::machine::{
 };
 use crate::sfu::{LayerUpdate, Sfu, Signaling};
 use crate::share::{ShareCaptured, ShareCapturer, ShareEncoding, SharePublished};
+use crate::spatial::SpatialState;
 use crate::tracks::Remote;
 use crate::vad::{EnergyMeter, VAD_TICK};
 use crate::wire::{self, Participant, RoomState, Track};
@@ -324,10 +325,17 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
             let next_timer = self.timers.iter().map(|(at, _)| *at).min();
             let input = tokio::select! {
                 event = recv(&mut inbox.room) => match event {
-                    Some(event) => match room_event(event) {
-                        Some(event) => Input::Room(event),
-                        None => continue,
-                    },
+                    Some(event) => {
+                        // The room's spatial state goes in first, so the
+                        // frame's own event (a Ready sends ours) sees it.
+                        if let Some(state) = spatial_of(&event) {
+                            queue.extend(machine.handle(Input::Room(RoomEvent::Spatial(state))));
+                        }
+                        match room_event(event) {
+                            Some(event) => Input::Room(event),
+                            None => continue,
+                        }
+                    }
                     None => Input::Room(RoomEvent::Closed),
                 },
                 event = recv(&mut inbox.voice) => match event {
@@ -548,6 +556,11 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
             Effect::SetTrackGain { mid, gain } => {
                 if let Some(session) = &self.session {
                     session.set_track_gain(&mid, gain);
+                }
+            }
+            Effect::SetTrackPan { mid, pan } => {
+                if let Some(session) = &self.session {
+                    session.set_track_pan(&mid, pan);
                 }
             }
             Effect::LogStats => {
@@ -808,6 +821,16 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
         tokio::spawn(video_session(
             n, session, states, sfu, remote, jobs_rx, done,
         ));
+    }
+}
+
+/// The spatial state a room Ready, Resumed or op 15 carries.
+fn spatial_of(event: &Event) -> Option<SpatialState> {
+    match event {
+        Event::Ready(d) | Event::Resumed(d) | Event::Frame(GatewayOp::VoiceStateUpdate, d) => {
+            wire::spatial_of(d)
+        }
+        _ => None,
     }
 }
 

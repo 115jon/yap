@@ -34,6 +34,21 @@ pub const DEFAULT_SHARE_QUALITY: &str = "720p30";
 /// The highest per-user and output volume, in percent.
 pub const MAX_VOLUME: u16 = 200;
 
+/// The noise reduction providers (`NoiseReductionProviderId`). Only RNNoise
+/// runs here; Krisp's is the browser SDK, which the web does not offer
+/// either (`isNoiseReductionProviderSupported` is false for it).
+pub const NOISE_REDUCTION_PROVIDERS: [&str; 2] = ["rnnoise", "krisp-browser"];
+
+/// The spatial placement modes (`SpatialPlacementMode`).
+pub const SPATIAL_PLACEMENTS: [&str; 4] = ["line", "arc", "grid", "manual"];
+
+/// A seat on the spatial map (`SpatialPosition`), 0..=100 on both axes.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SpatialPosition {
+    pub x: f64,
+    pub y: f64,
+}
+
 /// The input profile (`VoiceInputProfile`): a preset for the processing
 /// switches, or `Custom` to set them one by one.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,9 +118,26 @@ pub struct VoiceSettings {
     /// The share picker's "Include audio".
     pub screen_share_with_audio: bool,
     pub input_profile: InputProfile,
+    /// WebRTC's noise suppression (the web's "Browser noise suppression").
     pub noise_suppression: bool,
+    /// "Noise suppression": RNNoise on the mic, when the provider is
+    /// `rnnoise` ([`NOISE_REDUCTION_PROVIDERS`]).
+    pub noise_reduction_enabled: bool,
+    pub noise_reduction_provider: String,
     pub echo_cancellation: bool,
     pub stream_high_fidelity: bool,
+    /// "Input volume", 0..=200 percent. Kept and shown as the web keeps it;
+    /// neither client applies it to the mic yet.
+    pub input_volume: u16,
+    /// "Spatial audio": hear the room's placement (with high fidelity).
+    pub spatial_audio_enabled: bool,
+    /// The web's per-user spatial placement fields, kept as it keeps them
+    /// (the room's shared state is what places people).
+    pub spatial_placement_mode: String,
+    pub spatial_room_size: f64,
+    pub spatial_distance: f64,
+    pub spatial_arc_angle: f64,
+    pub spatial_manual_positions: BTreeMap<String, SpatialPosition>,
     /// The manual speaking threshold, -100..=0 dB.
     pub sensitivity: f64,
     pub auto_sensitivity: bool,
@@ -130,8 +162,17 @@ impl Default for VoiceSettings {
             screen_share_with_audio: true,
             input_profile: InputProfile::Standard,
             noise_suppression: true,
+            noise_reduction_enabled: false,
+            noise_reduction_provider: NOISE_REDUCTION_PROVIDERS[0].into(),
             echo_cancellation: true,
             stream_high_fidelity: false,
+            input_volume: 100,
+            spatial_audio_enabled: false,
+            spatial_placement_mode: "arc".into(),
+            spatial_room_size: 40.0,
+            spatial_distance: 55.0,
+            spatial_arc_angle: 120.0,
+            spatial_manual_positions: BTreeMap::new(),
             sensitivity: -50.0,
             auto_sensitivity: true,
             output_volume: 100,
@@ -143,7 +184,24 @@ impl Default for VoiceSettings {
 impl VoiceSettings {
     /// Brings hand-edited or older values into range.
     pub fn normalized(mut self) -> Self {
+        let d = Self::default();
         self.output_volume = self.output_volume.min(MAX_VOLUME);
+        self.input_volume = self.input_volume.min(MAX_VOLUME);
+        if !NOISE_REDUCTION_PROVIDERS.contains(&self.noise_reduction_provider.as_str()) {
+            self.noise_reduction_provider = d.noise_reduction_provider.clone();
+        }
+        if !SPATIAL_PLACEMENTS.contains(&self.spatial_placement_mode.as_str()) {
+            self.spatial_placement_mode = d.spatial_placement_mode.clone();
+        }
+        for (value, default) in [
+            (&mut self.spatial_room_size, d.spatial_room_size),
+            (&mut self.spatial_distance, d.spatial_distance),
+            (&mut self.spatial_arc_angle, d.spatial_arc_angle),
+        ] {
+            if !value.is_finite() {
+                *value = default;
+            }
+        }
         self.sensitivity = if self.sensitivity.is_finite() {
             self.sensitivity.clamp(-100.0, 0.0)
         } else {
@@ -203,7 +261,70 @@ impl VoiceSettings {
         self.noise_suppression = noise;
         self.echo_cancellation = echo;
         self.stream_high_fidelity = hifi;
+        self.noise_reduction_enabled = false;
+        self.spatial_audio_enabled = false;
         self.auto_sensitivity = false;
+    }
+
+    /// RNNoise runs on the mic (chosen, and the provider is one this client
+    /// has; `noiseReductionSupported && noiseReductionEnabled`).
+    pub fn noise_reduction_active(&self) -> bool {
+        self.noise_reduction_enabled
+            && self.noise_reduction_provider == NOISE_REDUCTION_PROVIDERS[0]
+    }
+
+    /// A processing switch turned to `on`, with the switches it turns off
+    /// as the web's settings panel turns them (`handleVoiceToggle`):
+    /// high fidelity and spatial audio turn WebRTC's noise suppression and
+    /// echo cancellation off (spatial audio turns high fidelity on); RNNoise
+    /// turns WebRTC's noise suppression off; WebRTC's noise suppression
+    /// turns RNNoise and high fidelity off; echo cancellation turns high
+    /// fidelity off. `false` for an unknown key.
+    pub fn set_switch(&mut self, key: &str, on: bool) -> bool {
+        match key {
+            "noiseSuppression" => self.noise_suppression = on,
+            "noiseReductionEnabled" => self.noise_reduction_enabled = on,
+            "echoCancellation" => self.echo_cancellation = on,
+            "streamHighFidelity" => self.stream_high_fidelity = on,
+            "spatialAudioEnabled" => self.spatial_audio_enabled = on,
+            "autoSensitivity" => self.auto_sensitivity = on,
+            _ => return false,
+        }
+        if !on {
+            return true;
+        }
+        match key {
+            "streamHighFidelity" => {
+                self.echo_cancellation = false;
+                self.noise_suppression = false;
+            }
+            "spatialAudioEnabled" => {
+                self.stream_high_fidelity = true;
+                self.echo_cancellation = false;
+                self.noise_suppression = false;
+            }
+            "noiseReductionEnabled" => self.noise_suppression = false,
+            "noiseSuppression" => {
+                self.noise_reduction_enabled = false;
+                self.stream_high_fidelity = false;
+            }
+            "echoCancellation" => self.stream_high_fidelity = false,
+            _ => {}
+        }
+        true
+    }
+
+    /// "Noise suppression": `none` or a provider (`setNoiseReductionProvider`).
+    /// RNNoise turns WebRTC's noise suppression off.
+    pub fn set_noise_reduction(&mut self, choice: &str) {
+        if NOISE_REDUCTION_PROVIDERS.contains(&choice) {
+            self.noise_reduction_provider = choice.to_owned();
+        }
+        let enabled = choice == NOISE_REDUCTION_PROVIDERS[0];
+        self.noise_reduction_enabled = enabled;
+        if enabled {
+            self.noise_suppression = false;
+        }
     }
 }
 
@@ -425,6 +546,127 @@ mod tests {
         assert_eq!(
             (s.output_volume, s.input_profile, s.peer("u2").volume),
             (120, InputProfile::Custom, 30)
+        );
+    }
+    #[test]
+    fn audio_defaults_should_match_the_web() {
+        let json = serde_json::to_value(VoiceSettings::default()).expect("json");
+        assert_eq!(
+            (
+                &json["noiseReductionEnabled"],
+                &json["noiseReductionProvider"],
+                &json["inputVolume"],
+                &json["spatialAudioEnabled"],
+                &json["spatialPlacementMode"],
+                &json["spatialRoomSize"],
+            ),
+            (
+                &serde_json::json!(false),
+                &serde_json::json!("rnnoise"),
+                &serde_json::json!(100),
+                &serde_json::json!(false),
+                &serde_json::json!("arc"),
+                &serde_json::json!(40.0),
+            )
+        );
+    }
+
+    #[test]
+    fn an_unknown_provider_should_fall_back_to_rnnoise() {
+        let s = VoiceSettings {
+            noise_reduction_provider: "dolby".into(),
+            ..VoiceSettings::default()
+        }
+        .normalized();
+        assert_eq!(s.noise_reduction_provider, "rnnoise");
+    }
+
+    #[test]
+    fn krisp_should_never_run() {
+        let s = VoiceSettings {
+            noise_reduction_enabled: true,
+            noise_reduction_provider: "krisp-browser".into(),
+            ..VoiceSettings::default()
+        };
+        assert!(!s.noise_reduction_active());
+    }
+
+    #[test]
+    fn rnnoise_should_turn_webrtc_noise_suppression_off() {
+        let mut s = VoiceSettings::default();
+        s.set_noise_reduction("rnnoise");
+        assert!(s.noise_reduction_active() && !s.noise_suppression);
+    }
+
+    #[test]
+    fn webrtc_noise_suppression_should_turn_rnnoise_and_high_fidelity_off() {
+        let mut s = VoiceSettings {
+            noise_reduction_enabled: true,
+            stream_high_fidelity: true,
+            ..VoiceSettings::default()
+        };
+        s.set_switch("noiseSuppression", true);
+        assert!(!s.noise_reduction_enabled && !s.stream_high_fidelity);
+    }
+
+    #[test]
+    fn spatial_audio_should_turn_high_fidelity_on_and_capture_processing_off() {
+        let mut s = VoiceSettings::default();
+        s.set_switch("spatialAudioEnabled", true);
+        assert!(
+            s.spatial_audio_enabled
+                && s.stream_high_fidelity
+                && !s.echo_cancellation
+                && !s.noise_suppression
+        );
+    }
+
+    #[test]
+    fn echo_cancellation_should_turn_high_fidelity_off() {
+        let mut s = VoiceSettings {
+            stream_high_fidelity: true,
+            ..VoiceSettings::default()
+        };
+        s.set_switch("echoCancellation", true);
+        assert!(s.echo_cancellation && !s.stream_high_fidelity);
+    }
+
+    #[test]
+    fn turning_a_switch_off_should_change_only_it() {
+        let mut s = VoiceSettings {
+            stream_high_fidelity: true,
+            spatial_audio_enabled: true,
+            ..VoiceSettings::default()
+        };
+        s.set_switch("streamHighFidelity", false);
+        assert!(!s.stream_high_fidelity && s.spatial_audio_enabled);
+    }
+
+    #[test]
+    fn a_preset_should_turn_rnnoise_and_spatial_audio_off() {
+        let mut s = VoiceSettings {
+            noise_reduction_enabled: true,
+            spatial_audio_enabled: true,
+            ..VoiceSettings::default()
+        };
+        s.set_profile(InputProfile::Standard);
+        assert!(!s.noise_reduction_enabled && !s.spatial_audio_enabled);
+    }
+
+    #[test]
+    fn the_web_spatial_fields_should_parse() {
+        let s: VoiceSettings = serde_json::from_str(
+            r#"{"spatialAudioEnabled":true,"spatialPlacementMode":"grid","spatialManualPositions":{"u1":{"x":10,"y":20}},"inputVolume":150}"#,
+        )
+        .expect("json");
+        assert_eq!(
+            (
+                s.spatial_audio_enabled,
+                s.spatial_placement_mode.as_str(),
+                s.spatial_manual_positions["u1"],
+                s.input_volume
+            ),
+            (true, "grid", SpatialPosition { x: 10.0, y: 20.0 }, 150)
         );
     }
 }

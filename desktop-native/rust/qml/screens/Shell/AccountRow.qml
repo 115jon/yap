@@ -113,14 +113,14 @@ Rectangle {
             height: 36
             clip: true
 
-            Text {
+            DisplayName {
                 id: nameText
-                width: parent.width
-                textFormat: Text.PlainText
+                width: Math.min(implicitWidth, parent.width)
                 text: Session.meName
-                elide: Text.ElideRight
+                nameStyle: Session.meNameStyle
                 color: Theme.ink1
                 font: Theme.type.author
+                ground: Theme.ply1
             }
             // The status line, swapped for the handle while hovered
             // (a transform over dur-3).

@@ -430,6 +430,7 @@ fn set_profile(mut profile: Pin<&mut Profile>, view: &ProfileView) {
     profile.as_mut().set_deco(q(&view.deco));
     profile.as_mut().set_effect(q(&view.effect));
     profile.as_mut().set_frame(q(&view.frame));
+    profile.as_mut().set_name_style(q(&view.name_style));
     profile.as_mut().set_platforms(q(&view.platforms));
     profile.as_mut().set_mutual_servers(q(&view.mutual_servers));
     profile.set_user_id(q(&view.user_id));
@@ -510,6 +511,9 @@ fn set_me(mut session: Pin<&mut Session>, me: &MeView) {
     session.as_mut().set_me_custom_status(q(&me.custom_status));
     session.as_mut().set_me_deco(q(&me.deco));
     session.as_mut().set_me_plate(q(&me.plate));
+    session.as_mut().set_me_effect(q(&me.effect));
+    session.as_mut().set_me_frame(q(&me.frame));
+    session.as_mut().set_me_name_style(q(&me.name_style));
     session.as_mut().set_me_display(q(&me.display));
     session.set_me_id(q(&me.id));
 }

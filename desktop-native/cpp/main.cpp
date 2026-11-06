@@ -77,12 +77,18 @@ protected:
   {
     if (op != GetOperation)
       return QNetworkAccessManager::createRequest(op, request, data);
-    const QByteArray url = request.url().toEncoded();
+    // HTTP/1.1 only. Qt 6.6's HTTP/2 can leave a reply that never finishes,
+    // and QML's image reader runs at most 8 network loads at once
+    // (IMAGEREQUEST_MAX_NETWORK_REQUEST_COUNT), so a few stalled replies
+    // froze every later image: the emoji picker showed one row, for good.
+    QNetworkRequest plain(request);
+    plain.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+    const QByteArray url = plain.url().toEncoded();
     char token[1024];
     const size_t n = yap_media_auth(url.constData(), size_t(url.size()), token, sizeof token);
     if (n == 0 || n > sizeof token)
-      return QNetworkAccessManager::createRequest(op, request, data);
-    QNetworkRequest authed(request);
+      return QNetworkAccessManager::createRequest(op, plain, data);
+    QNetworkRequest authed(plain);
     // Qt copies the request, headers included, onto a redirect: only the
     // API's own origin may see the bearer, so a redirect elsewhere fails.
     authed.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
@@ -312,5 +318,20 @@ int main(int argc, char* argv[])
   }
   CrashNotice::scheduleTestCrash();
 
-  return app.exec();
+  const int code = app.exec();
+  // The quit ends here, without the engine's teardown. Everything that
+  // outlives the process is already done on aboutToQuit (DesktopShell): the
+  // window rect, the tray icon, the toasts, and the core (the call left
+  // with its beacon, the cache committed). The teardown itself could stall
+  // for seconds where nothing could cut it short: the QML image loader's
+  // thread waits for its network thread, which releases one Network List
+  // Manager COM object per cached HTTP connection (Qt's
+  // QNetworkConnectionMonitor), an RPC to the network service each, and a
+  // thread inside that RPC holds up even TerminateProcess.
+  std::fprintf(stderr, "[quit] event loop ended (%d); exiting\n", code);
+#ifdef Q_OS_WIN
+  logfile::finish(500);
+  TerminateProcess(GetCurrentProcess(), UINT(code));
+#endif
+  return code;
 }

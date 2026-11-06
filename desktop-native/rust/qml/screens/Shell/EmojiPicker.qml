@@ -87,6 +87,13 @@ Popup {
         height = h
         open()
     }
+    // The grid's very top, "Your creations" included: positionViewAtBeginning
+    // stops at the first row and leaves the header above the view.
+    function toTop() {
+        grid.positionViewAtBeginning()
+        if (grid.headerItem)
+            grid.contentY = grid.headerItem.y
+    }
     function pick(value) {
         if (value.length === 0)
             return
@@ -104,7 +111,7 @@ Popup {
         view = "emoji"
         search.text = ""
         Emoji.search("")
-        grid.positionViewAtBeginning()
+        root.toTop()
         search.forceActiveFocus()
         Extras.loadEmojis(false)
     }
@@ -155,9 +162,20 @@ Popup {
                 radius: Theme.radius
                 color: Theme.ply2
                 // ui/input.tsx: hover ink-2; focus ink-1 plus a 1 px outline.
-                border.width: search.activeFocus ? 2 : 1
+                border.width: 1
                 border.color: search.activeFocus ? Theme.ink1 : fieldHover.hovered ? Theme.ink2 : Theme.lineField
                 Behavior on border.color { ColorAnimation { duration: Theme.dur1 } }
+                // styles.css :focus-visible: a focused input wears the 2 px --focus
+                // outline outside its 1 px ink-1 edge (offset 0).
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: -2
+                    visible: search.activeFocus
+                    radius: Theme.radius + 2
+                    color: "transparent"
+                    border.width: 2
+                    border.color: Theme.focus
+                }
                 HoverHandler { id: fieldHover; cursorShape: Qt.IBeamCursor }
                 Icon {
                     id: searchGlyph
@@ -182,7 +200,7 @@ Popup {
                     background: null
                     onTextChanged: {
                         Emoji.search(text)
-                        grid.positionViewAtBeginning()
+                        root.toTop()
                     }
                     Keys.onReturnPressed: {
                         const first = grid.itemAtIndex(1)
@@ -272,7 +290,7 @@ Popup {
                     tone: "muted"
                     onClicked: {
                         search.text = ""
-                        grid.positionViewAtBeginning()
+                        root.toTop()
                     }
                 }
                 Repeater {

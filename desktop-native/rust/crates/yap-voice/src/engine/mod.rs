@@ -15,6 +15,10 @@ use crate::wire::IceServer;
 
 mod fake;
 #[cfg(feature = "libwebrtc")]
+mod pipeline;
+#[cfg(all(feature = "libwebrtc", windows))]
+mod wasapi;
+#[cfg(feature = "libwebrtc")]
 mod webrtc;
 
 pub use fake::{FakeEngine, FakeOp, FakeSession};
@@ -103,6 +107,11 @@ pub struct MediaStats {
     pub server: String,
     /// Our camera's and share's encodings.
     pub outbound_video: Vec<OutboundVideo>,
+    /// The own audio path's mic, or its speaker, failed several tries in a
+    /// row (it would not open, or delivered nothing); the call shows its
+    /// stall banner for that side.
+    pub mic_device_failed: bool,
+    pub speaker_device_failed: bool,
 }
 
 /// Owns the audio devices for the length of a call.
@@ -277,12 +286,20 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
     /// later.
     fn set_playout_enabled(&self, enabled: bool);
 
-    /// The mic's capture processing; `Err` says why it was refused.
+    /// The mic's capture processing (the APM and RNNoise); `Err` says why
+    /// it was refused.
     fn set_processing(&self, processing: Processing) -> Result<(), MediaError>;
 
     /// The gain of the remote track on `mid` (1.0 is as sent, 0.0
     /// silent), kept for the track if it has not arrived yet.
     fn set_track_gain(&self, mid: &str, gain: f64);
+
+    /// The stereo pan of the remote track on `mid` (-1 left, 0 centre, 1
+    /// right), kept for the track if it has not arrived yet. Engines that
+    /// mix in mono ignore it.
+    fn set_track_pan(&self, mid: &str, pan: f64) {
+        let _ = (mid, pan);
+    }
 
     /// Routes the frames of the remote video received on `mid` to the
     /// [`VideoOutput`] under `key`, or stops (`None`: frames are dropped

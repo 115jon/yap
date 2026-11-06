@@ -1454,7 +1454,8 @@ pub struct ResultAuthor {
     pub username: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
-    pub display_name_style: Option<String>,
+    /// The object, or the object as a JSON string.
+    pub display_name_style: Option<Value>,
 }
 
 /// One hit (`SearchResultMessage`).

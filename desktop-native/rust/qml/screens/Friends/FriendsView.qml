@@ -264,11 +264,12 @@ Rectangle {
 
     Component {
         id: emptyState
-        // ui/empty-state.tsx md: py-10, the DitherGlyph "empty" slot (3 px
-        // cells), 16 below it, the title 20/700 and the line 4 apart.
+        // ui/empty-state.tsx md with FriendsView's py-16, the DitherGlyph
+        // "empty" slot (3 px cells), 16 below it, the title 20/700 and the
+        // line 4 apart.
         Column {
-            topPadding: 40
-            bottomPadding: 40
+            topPadding: 64
+            bottomPadding: 64
             spacing: 4
             Item {
                 width: parent.width

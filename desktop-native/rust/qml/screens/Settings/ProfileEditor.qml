@@ -231,14 +231,25 @@ T.Popup {
                 x: Math.max(24, (body.width - 1040) / 2)
                 y: 24
                 width: Math.min(1040, body.width - 48)
-                height: beside ? Math.max(preview.height, form.height) : preview.height + 24 + form.height
+                height: beside ? Math.max(previewStack.height, form.height) : previewStack.height + 24 + form.height
 
-                // The popover card others open, from the draft.
-                ProfileCard {
-                    id: preview
+                // The popover card others open, from the draft, wearing your
+                // collectibles; under it, your nameplate behind a member row
+                // (SettingsAccountTab.tsx's preview section).
+                Column {
+                    id: previewStack
                     x: layout.beside ? 0 : (layout.width - width) / 2
                     y: layout.beside ? Math.max(0, Math.min(body.contentY, form.height - height)) : 0
                     width: 340
+                    spacing: 16
+                ProfileCard {
+                    id: preview
+                    width: 340
+                    deco: editor.shownAvatar.length > 0 ? Session.meDeco : ""
+                    effect: Session.meEffect
+                    frame: Session.meFrame
+                    nameStyle: Session.meNameStyle
+                    animate: editor.visible
                     name: Settings.name
                     username: Settings.username
                     avatar: editor.shownAvatar
@@ -271,11 +282,53 @@ T.Popup {
                         }
                     }
                 }
+                // Your nameplate behind a 48 px member row: the avatar
+                // (without its decoration) and the name at 15/500.
+                Rectangle {
+                    visible: Session.mePlate.length > 0
+                    width: parent.width
+                    height: 48
+                    radius: 8
+                    color: Theme.ply2
+                    border.width: 1
+                    border.color: Theme.line
+                    clip: true
+                    Accessible.role: Accessible.Graphic
+                    Accessible.name: qsTr("Nameplate preview")
+                    NameplateLayer {
+                        anchors.fill: parent
+                        anchors.margins: 1
+                        plate: Session.mePlate
+                        playing: editor.visible
+                        ground: Theme.ply2
+                    }
+                    Avatar {
+                        id: plateAvatar
+                        x: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        size: 32
+                        initials: Settings.initials
+                        source: editor.shownAvatar
+                    }
+                    Text {
+                        anchors.left: plateAvatar.right
+                        anchors.leftMargin: 12
+                        anchors.right: parent.right
+                        anchors.rightMargin: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        elide: Text.ElideRight
+                        textFormat: Text.PlainText
+                        text: Settings.name
+                        color: Theme.ink1
+                        font: Theme.type.setting
+                    }
+                }
+                }
 
                 Column {
                     id: form
                     x: layout.beside ? 340 + 32 : 0
-                    y: layout.beside ? 0 : preview.height + 24
+                    y: layout.beside ? 0 : previewStack.height + 24
                     width: layout.beside ? layout.width - 340 - 32 : layout.width
                     spacing: 24
 
@@ -551,8 +604,19 @@ T.Popup {
             height: 80
             radius: Theme.radius
             color: Theme.ply2
-            border.width: area.activeFocus ? 2 : 1
+            border.width: 1
             border.color: area.activeFocus ? Theme.ink1 : areaHover.hovered ? Theme.ink2 : Theme.lineField
+            // styles.css :focus-visible: a focused input wears the 2 px --focus
+            // outline outside its 1 px ink-1 edge (offset 0).
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: -2
+                visible: area.activeFocus
+                radius: Theme.radius + 2
+                color: "transparent"
+                border.width: 2
+                border.color: Theme.focus
+            }
             HoverHandler { id: areaHover }
             TextEdit {
                 id: area

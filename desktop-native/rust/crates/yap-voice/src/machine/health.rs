@@ -116,6 +116,10 @@ pub(super) struct Health {
     unavailable: HashMap<String, u32>,
     /// Our tracks republished within the cooldown.
     cooling: HashSet<String>,
+    /// The banners as last reported: a sentinel's stall or a failing
+    /// device of the own audio path each raise one.
+    reported_inbound: bool,
+    reported_mic: bool,
 }
 
 impl Health {
@@ -136,6 +140,8 @@ impl Health {
         self.last = None;
         self.inbound = Sentinel::default();
         self.outbound = Sentinel::default();
+        self.reported_inbound = false;
+        self.reported_mic = false;
     }
 }
 
@@ -232,7 +238,14 @@ impl CallMachine {
                 "[voice] inbound audio {}",
                 if stalled { "stalled" } else { "recovered" }
             )));
-            fx.push(Effect::Notify(Notice::InboundAudioStalled(stalled)));
+        }
+        let inbound_banner = self.health.inbound.stalled || stats.speaker_device_failed;
+        if inbound_banner != self.health.reported_inbound {
+            self.health.reported_inbound = inbound_banner;
+            if stats.speaker_device_failed && inbound_banner {
+                fx.push(Effect::Log("[voice] the speaker keeps failing".into()));
+            }
+            fx.push(Effect::Notify(Notice::InboundAudioStalled(inbound_banner)));
         }
         // Outbound: an unmuted, published mic that sends nothing.
         let mic_live = self.published.is_some() && !self.muted && !self.standby && self.media_up;
@@ -250,10 +263,18 @@ impl CallMachine {
                     "recovered"
                 }
             )));
-            fx.push(Effect::Notify(Notice::MicStalled(stalled)));
             if stalled {
                 fx.push(Effect::Republish(Republish::Mic));
             }
+        }
+        let mic_failed = stats.mic_device_failed && !self.standby;
+        let mic_banner = self.health.outbound.stalled || mic_failed;
+        if mic_banner != self.health.reported_mic {
+            self.health.reported_mic = mic_banner;
+            if mic_failed && mic_banner {
+                fx.push(Effect::Log("[voice] the mic keeps failing".into()));
+            }
+            fx.push(Effect::Notify(Notice::MicStalled(mic_banner)));
         }
     }
 

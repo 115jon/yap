@@ -73,6 +73,15 @@ T.Popup {
         pronouns: Profile.me ? Profile.pronouns : ""
         banner: Profile.me ? Profile.banner : ""
         bannerColor: Profile.me ? Profile.bannerColor : ""
+        // UserAccountPopover.tsx: your card wears your collectibles,
+        // name style and profile theme.
+        deco: Session.meAvatar.length > 0 ? Session.meDeco : ""
+        effect: Session.meEffect
+        frame: Session.meFrame
+        nameStyle: Session.meNameStyle
+        surfaceColor: Settings.backgroundColor
+        accentColor: Settings.accentColor
+        animate: popup.visible
         statusLine: customStatusLine
         Accessible.role: Accessible.Dialog
         Accessible.name: qsTr("User account options")

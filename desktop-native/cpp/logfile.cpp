@@ -16,6 +16,11 @@ namespace fs = std::filesystem;
 
 namespace {
 
+// The pump thread and the C runtime descriptor owning the pipe's write
+// end, for finish().
+HANDLE g_pump = nullptr;
+int g_writeFd = -1;
+
 constexpr std::uintmax_t kMaxBytes = 5u * 1024 * 1024;
 // The live file and yap-native.1.log .. yap-native.4.log.
 constexpr int kKeep = 5;
@@ -144,8 +149,27 @@ void start()
     }
     _dup2(fd, _fileno(stderr));
     std::setvbuf(stderr, nullptr, _IONBF, 0);
+    g_writeFd = fd;
   }
-  std::thread(pump, read, mirror, dir).detach();
+  std::thread thread(pump, read, mirror, dir);
+  DuplicateHandle(GetCurrentProcess(), thread.native_handle(),
+                  GetCurrentProcess(), &g_pump, SYNCHRONIZE, FALSE, 0);
+  thread.detach();
+}
+
+void finish(unsigned timeoutMs)
+{
+  if (!g_pump || g_writeFd < 0)
+    return;
+  std::fflush(stderr);
+  // Rust's stderr then writes nowhere (a null handle is no stderr to it).
+  SetStdHandle(STD_ERROR_HANDLE, nullptr);
+  // stderr's descriptor holds a duplicate of the write end, g_writeFd the
+  // write end itself: with both closed, the pump reads to the end.
+  _close(_fileno(stderr));
+  _close(g_writeFd);
+  g_writeFd = -1;
+  WaitForSingleObject(g_pump, timeoutMs);
 }
 
 } // namespace logfile

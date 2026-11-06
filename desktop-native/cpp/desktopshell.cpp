@@ -231,6 +231,10 @@ QImage badgedIcon(int count, bool dot, int size)
 
 } // namespace
 
+// rust/src/client/mod.rs: leaves a call (with the beacon) and commits the
+// cache; once per process.
+extern "C" void yap_core_shutdown();
+
 DesktopShell::DesktopShell(QObject* parent)
   : QObject(parent)
 {
@@ -238,9 +242,18 @@ DesktopShell::DesktopShell(QObject* parent)
   m_saveTimer.setInterval(kSaveDebounceMs);
   connect(&m_saveTimer, &QTimer::timeout, this, &DesktopShell::saveNow);
   connect(qApp, &QCoreApplication::aboutToQuit, this, [this] {
+    std::fprintf(stderr, "[quit] aboutToQuit\n");
+    // The session ending (WM_ENDSESSION) quits without quit(): the window
+    // closes for good there too.
+    if (!std::exchange(m_quitting, true))
+      emit quittingChanged();
     saveNow();
     removeTray();
     toast::shutdown();
+    // The core's way out (leave the call, the beacon, the cache) while the
+    // app is whole: main.cpp ends the process without the engine's
+    // teardown, and the session ending (WM_ENDSESSION) gets none either.
+    yap_core_shutdown();
   });
 }
 
@@ -327,6 +340,17 @@ void DesktopShell::attach(QQuickWindow* window, QObject* desktop)
   // `repair_autostart_entry`); never touched otherwise.
   if (desktop && desktop->property("openOnStartup").toBool())
     setAutostart(true);
+
+  // Tests (YAP_TEST_TRAY_QUIT_AFTER_SECS=<s>): the tray menu's Quit is
+  // "chosen" <s> seconds after launch, through the same dispatch as the
+  // real menu (Windows' own tray click cannot be driven without the real
+  // cursor). Inert unless the variable is set.
+  const int quitAfter = qEnvironmentVariableIntValue("YAP_TEST_TRAY_QUIT_AFTER_SECS");
+  if (quitAfter > 0)
+    QTimer::singleShot(quitAfter * 1000, this, [this] {
+      std::fprintf(stderr, "[quit] test hook: tray Quit\n");
+      trayCommand(kMenuQuit);
+    });
 
   restoreGeometry();
   bool toTray = false;
@@ -557,6 +581,13 @@ void DesktopShell::hideToTray()
 
 void DesktopShell::quit()
 {
+  if (m_quitting)
+    return;
+  std::fprintf(stderr, "[quit] requested\n");
+  // Before Qt's quit: it closes every window first and gives up when one
+  // refuses, and Main.qml's close-to-tray refuses unless this is set.
+  m_quitting = true;
+  emit quittingChanged();
   saveNow();
   QCoreApplication::quit();
 }
@@ -686,6 +717,11 @@ void DesktopShell::showTrayMenu()
                    at.y, 0, hwnd, nullptr);
   DestroyMenu(menu);
   PostMessageW(hwnd, WM_NULL, 0, 0);
+  trayCommand(chosen);
+}
+
+void DesktopShell::trayCommand(unsigned chosen)
+{
   if (chosen == kMenuShow) {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     if (now - m_lastActivation >= kActivationDebounceMs) {
@@ -693,6 +729,7 @@ void DesktopShell::showTrayMenu()
       reveal();
     }
   } else if (chosen == kMenuQuit) {
+    std::fprintf(stderr, "[quit] tray menu Quit\n");
     quit();
   }
 }

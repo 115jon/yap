@@ -205,6 +205,10 @@ pub struct User {
     pub avatar_display: Option<Value>,
     pub status: Option<String>,
     pub custom_status: Option<String>,
+    /// The display name's font, effect and colours: a JSON object, or the
+    /// same object as a JSON string (profile-customization.ts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name_style: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bio: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

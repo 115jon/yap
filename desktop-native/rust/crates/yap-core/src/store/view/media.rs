@@ -175,11 +175,20 @@ pub fn attachments_json(attachments: &[Attachment], api_base: &str) -> String {
             let animated = matches!(mime, "image/gif" | "image/apng") || is_gif_host(&url);
             let bytes = a.size_bytes.unwrap_or(0);
             let kind = media_kind(mime);
-            let favorite = if kind == "video" {
+            // ImageGrid.tsx and MessageItem.tsx: an animated picture or a
+            // GIF/clip video carries the star.
+            let favorite = if kind == "video" || kind == "image" {
                 attachment_favorite(a, &url)
             } else {
                 Value::Null
             };
+            // GifProviderBranding.tsx: KLIPY's mark over its GIFs.
+            let klipy = gif_favorite::attachment_provider(
+                a.file_key
+                    .as_deref()
+                    .filter(|k| !k.is_empty())
+                    .or(a.url.as_deref()),
+            ) == Some("klipy");
             json!({
                 "id": a.id.as_deref().unwrap_or_default(),
                 "name": a.filename,
@@ -190,6 +199,7 @@ pub fn attachments_json(attachments: &[Attachment], api_base: &str) -> String {
                 "gif": animated,
                 "nsfw": a.is_nsfw,
                 "favorite": favorite,
+                "klipy": klipy,
             })
         })
         .collect();

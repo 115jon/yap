@@ -19,7 +19,7 @@ use yap_core::{
 use yap_voice::{
     run_call, AdmissionApi, ApiFailure, CallEnv, CallTarget, LibwebrtcEngine, Notice, Playback,
     Processing, Sensitivity, ShareEnd, ShareInfo, ShareNotice, ShareRequest, SourceKind,
-    UserCommand, VideoIntent,
+    SpatialLocal, UserCommand, VideoIntent,
 };
 
 pub use yap_core::VoiceTarget as Target;
@@ -28,6 +28,8 @@ pub use yap_core::VoiceTarget as Target;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CallAudio {
     pub playback: Playback,
+    /// Our spatial audio switches and user id.
+    pub spatial: SpatialLocal,
     pub sensitivity: Sensitivity,
     pub processing: Processing,
 }
@@ -93,6 +95,7 @@ impl Commands {
             UserCommand::SetPlayback(audio.playback.clone()),
             UserCommand::SetSensitivity(audio.sensitivity),
             UserCommand::SetProcessing(audio.processing),
+            UserCommand::SetSpatial(audio.spatial.clone()),
         ]);
     }
 }

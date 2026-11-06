@@ -38,6 +38,11 @@ Loader {
                 bannerColor: Settings.bannerColor
                 surfaceColor: Settings.backgroundColor
                 accentColor: Settings.accentColor
+                // The card others open wears your collectibles and name style.
+                deco: Settings.avatar.length > 0 ? Session.meDeco : ""
+                effect: Session.meEffect
+                frame: Session.meFrame
+                nameStyle: Session.meNameStyle
                 Accessible.role: Accessible.Graphic
                 Accessible.name: qsTr("Profile preview for %1").arg(Settings.name)
                 AboutMe { text: Settings.bio }
@@ -53,7 +58,7 @@ Loader {
                 [qsTr("Microphone"), Audio.inputLabel.length > 0 ? Audio.inputLabel.replace(/^Default - /, "") : qsTr("Default microphone")],
                 [qsTr("Input profile"), Audio.inputProfile === "standard" ? qsTr("Voice isolation") : Audio.inputProfile === "studio" ? qsTr("Studio") : qsTr("Custom")],
                 [qsTr("Sends"), Audio.autoSensitivity ? qsTr("When you talk (automatic)") : qsTr("Above %1 dB").arg(Math.round(Audio.sensitivity))],
-                [qsTr("Noise suppression"), Audio.noiseSuppression ? qsTr("WebRTC") : qsTr("Off")],
+                [qsTr("Noise suppression"), Audio.noiseReduction === "rnnoise" ? qsTr("RNNoise") : Audio.noiseSuppression ? qsTr("WebRTC") : qsTr("Off")],
                 [qsTr("Echo cancellation"), Audio.echoCancellation ? qsTr("On") : qsTr("Off")],
                 [qsTr("Audio"), Audio.highFidelity ? qsTr("High fidelity") : qsTr("Standard")],
                 [qsTr("Camera"), SettingsNav.qualityName(Audio.cameraQuality)],

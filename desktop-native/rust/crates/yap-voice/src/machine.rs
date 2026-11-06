@@ -22,6 +22,7 @@ use crate::sfu::LayerUpdate;
 use crate::share::{
     ShareCaptured, ShareEncoding, ShareNotice, SharePublished, ShareQuality, ShareRequest,
 };
+use crate::spatial::{self, SpatialLocal, SpatialState};
 use crate::tracks::{Kind, Offer, Remote, TrackTable};
 use crate::vad::{level_percent, Sensitivity, Vad};
 use crate::wire::{
@@ -171,8 +172,15 @@ pub enum UserCommand {
     SetSensitivity(Sensitivity),
     /// The output volume and per-user volumes.
     SetPlayback(Playback),
-    /// The mic's echo cancellation, noise suppression and gain control.
+    /// The mic's echo cancellation, noise suppression, gain control and
+    /// RNNoise.
     SetProcessing(Processing),
+    /// Our spatial audio switches and who we are on the room's map. A
+    /// change of either switch goes out in op 15 (`useSpatialAudioSync`).
+    SetSpatial(SpatialLocal),
+    /// A new placement for the room (the spatial panel's `commit`): kept
+    /// and sent in op 15 for everyone.
+    SetSpatialRoom(SpatialState),
     /// Rendered video and the stage.
     SetVideo(VideoIntent),
     /// The participants whose shares the user watches (pressed Watch).
@@ -228,6 +236,9 @@ pub enum RoomEvent {
         leave: bool,
         participant: Participant,
     },
+    /// The room's spatial state, as a Ready, Resumed or op 15 carried it
+    /// (just before that frame's own event).
+    Spatial(SpatialState),
     /// Op 9 answering a credentials refresh (op 40).
     Credentials { voice_token: String },
     /// Op 42: a moderator moved this session; the 4010 close follows.
@@ -545,6 +556,12 @@ pub enum Effect {
         mid: String,
         gain: f64,
     },
+    /// The stereo pan of the remote track received on `mid`, -1..=1 (0
+    /// until set).
+    SetTrackPan {
+        mid: String,
+        pan: f64,
+    },
     /// The mic's capture processing.
     SetProcessing(Processing),
     /// Teardown step 4: stop the mic before any socket closes.
@@ -625,6 +642,11 @@ pub struct CallMachine {
     processing: Processing,
     /// The gain set on each pulled audio mid (absent: 1.0).
     gains: HashMap<String, f64>,
+    /// The pan set on each pulled audio mid (absent: 0).
+    pans: HashMap<String, f64>,
+    /// The room's shared spatial state, and our side of it.
+    spatial_room: SpatialState,
+    spatial_local: SpatialLocal,
     video: VideoIntent,
     watched: BTreeSet<String>,
     /// Watch announcements sent (op 106), by streamer user id.
@@ -696,6 +718,9 @@ impl CallMachine {
             playback: Playback::default(),
             processing: Processing::default(),
             gains: HashMap::new(),
+            pans: HashMap::new(),
+            spatial_room: SpatialState::default(),
+            spatial_local: SpatialLocal::default(),
             video: VideoIntent::default(),
             watched: BTreeSet::new(),
             announced_watch: BTreeSet::new(),
@@ -837,9 +862,13 @@ impl CallMachine {
     /// Sets each pulled audio track's gain where it differs from what was
     /// set (a new mid starts at 1.0): its owner's volume; share audio takes
     /// their stream volume instead, and plays only while their share or
-    /// camera is on stage or we always hear them.
+    /// camera is on stage or we always hear them. While we hear the room
+    /// spatially, a voice track also takes its owner's distance gain and
+    /// pan (`applySpatialAudio`: `cam-audio` only); otherwise pans are 0.
     fn sync_gains(&mut self, fx: &mut Vec<Effect>) {
-        let (roster, playback, gains) = (&self.roster, &self.playback, &mut self.gains);
+        let mixes = self.spatial_mixes();
+        let (roster, playback) = (&self.roster, &self.playback);
+        let (gains, pans) = (&mut self.gains, &mut self.pans);
         let mut live = HashSet::new();
         for (alias, pull) in self.tracks.pulls() {
             let Some(mid) = pull.mid.as_deref().filter(|_| pull.kind == Kind::Audio) else {
@@ -854,10 +883,15 @@ impl CallMachine {
             let audible = !share
                 || self.video.stage.as_deref() == Some(owner)
                 || playback.always_hears(user_id);
+            let place = if share {
+                spatial::FLAT
+            } else {
+                mixes.get(user_id).copied().unwrap_or(spatial::FLAT)
+            };
             let gain = match (audible, share) {
                 (false, _) => 0.0,
                 (true, true) => playback.stream_gain_for(user_id),
-                (true, false) => playback.gain_for(user_id),
+                (true, false) => playback.gain_for(user_id) * place.gain,
             };
             live.insert(mid);
             let set = gains.get(mid).copied().unwrap_or(1.0);
@@ -868,8 +902,66 @@ impl CallMachine {
                     gain,
                 });
             }
+            let set = pans.get(mid).copied().unwrap_or(0.0);
+            if (set - place.pan).abs() > f64::EPSILON {
+                pans.insert(mid.to_owned(), place.pan);
+                fx.push(Effect::SetTrackPan {
+                    mid: mid.to_owned(),
+                    pan: place.pan,
+                });
+            }
         }
         gains.retain(|mid, _| live.contains(mid.as_str()));
+        pans.retain(|mid, _| live.contains(mid.as_str()));
+    }
+
+    /// Each other person's spatial mix by user id (empty while we do not
+    /// hear the room spatially). The map lists us first, then the others in
+    /// roster order, once each.
+    fn spatial_mixes(&self) -> HashMap<String, spatial::Mix> {
+        let local = &self.spatial_local;
+        if !local.hears(&self.spatial_room, self.deafened) {
+            return HashMap::new();
+        }
+        let Some(roster) = &self.roster else {
+            return HashMap::new();
+        };
+        let me = if local.user_id.is_empty() {
+            self.me.as_str()
+        } else {
+            local.user_id.as_str()
+        };
+        let mut seen = HashSet::new();
+        let peers: Vec<String> = roster
+            .snapshot()
+            .into_iter()
+            .filter(|m| !m.me && !m.user_id.is_empty() && m.user_id != me)
+            .filter(|m| seen.insert(m.user_id.clone()))
+            .map(|m| m.user_id)
+            .collect();
+        let peers: Vec<&str> = peers.iter().map(String::as_str).collect();
+        spatial::mixes(me, &peers, &self.spatial_room, true)
+    }
+
+    /// Op 15 with our spatial switches and the room's state (with our
+    /// `enabled` when `ours`, as `useSpatialAudioSync` sends it), once the
+    /// room knows us.
+    fn send_spatial(&mut self, fx: &mut Vec<Effect>, ours: bool) {
+        if !self.sockets_open || !self.room_identified || self.standby {
+            return;
+        }
+        if ours {
+            self.spatial_room.enabled = self.spatial_local.enabled;
+        }
+        self.spatial_room.updated_at = wire::now_ms();
+        fx.push(Effect::Send(
+            Socket::Room,
+            wire::spatial_state(
+                self.spatial_local.enabled,
+                self.spatial_local.high_fidelity,
+                &self.spatial_room,
+            ),
+        ));
     }
 
     /// Routes a pulled video's frames to the UI while a visible tile shows
@@ -1288,6 +1380,7 @@ impl CallMachine {
                     return self.refresh_status(fx);
                 }
                 fx.push(Effect::Send(Socket::Room, self.voice_state()));
+                self.send_spatial(fx, true);
                 self.emit_roster(fx);
                 match self.state {
                     CallState::Connecting => {
@@ -1329,6 +1422,7 @@ impl CallMachine {
                 }
                 self.emit_roster(fx);
             }
+            RoomEvent::Spatial(state) => self.spatial_room = state,
             RoomEvent::Credentials { voice_token } => self.update_token(fx, &voice_token),
             RoomEvent::Moved(to) => {
                 fx.push(Effect::Log(format!(
@@ -1584,6 +1678,21 @@ impl CallMachine {
                         fx.push(Effect::SetProcessing(processing));
                     }
                 }
+            }
+            UserCommand::SetSpatial(local) => {
+                let announce = local.enabled != self.spatial_local.enabled
+                    || local.high_fidelity != self.spatial_local.high_fidelity;
+                self.spatial_local = local;
+                if announce {
+                    self.send_spatial(fx, true);
+                }
+            }
+            UserCommand::SetSpatialRoom(state) => {
+                self.spatial_room = SpatialState {
+                    enabled: self.spatial_room.enabled,
+                    ..state
+                };
+                self.send_spatial(fx, false);
             }
             UserCommand::SetVideo(video) => self.video = video,
             UserCommand::SetWatched(watched) => {
@@ -1910,6 +2019,7 @@ impl CallMachine {
             &self.me,
             &self.voice_token,
         )));
+        self.send_spatial(fx, true);
         if self.published.is_some() {
             fx.push(Effect::PromoteMedia);
             fx.push(Effect::SetMicEnabled(!self.muted));

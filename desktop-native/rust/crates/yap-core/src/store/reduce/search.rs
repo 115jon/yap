@@ -711,11 +711,12 @@ impl State {
                             let avatar = known
                                 .and_then(|u| u.avatar_url.clone())
                                 .or_else(|| m.author.avatar_url.clone());
-                            let styled = m
-                                .author
-                                .display_name_style
-                                .as_deref()
-                                .is_some_and(|s| !s.is_empty());
+                            let name_style = crate::store::view::name_style(
+                                known
+                                    .and_then(|u| u.display_name_style.as_ref())
+                                    .or(m.author.display_name_style.as_ref()),
+                            );
+                            let styled = !name_style.is_empty();
                             let color = members
                                 .iter()
                                 .find(|x| x.id == m.author_id)
@@ -730,6 +731,7 @@ impl State {
                                 initials: initials(&name),
                                 name,
                                 color,
+                                name_style,
                                 avatar: absolute_url(&self.api_base, avatar.as_deref()),
                                 time,
                                 when,

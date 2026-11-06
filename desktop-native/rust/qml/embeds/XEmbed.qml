@@ -83,6 +83,7 @@ Rectangle {
             width: parent.width
             provider: root.embed.provider
             colour: root.embed.color
+            timestamp: root.embed.timestamp ?? ""
             openTip: root.embed.open
             url: root.embed.url
             onOpenLink: url => root.openLink(url)

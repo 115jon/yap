@@ -11,6 +11,7 @@ const QML: &[&str] = &[
     "qml/components/CountBadge.qml",
     "qml/components/DeviceCaret.qml",
     "qml/components/DialogKey.qml",
+    "qml/components/DisplayName.qml",
     "qml/components/Icon.qml",
     "qml/components/GifFavoriteStar.qml",
     "qml/components/IconKey.qml",

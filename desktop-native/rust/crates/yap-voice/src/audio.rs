@@ -75,46 +75,55 @@ pub fn peer_gain(volume: u16, muted: bool) -> f64 {
     }
 }
 
-/// The mic's capture processing (WebRTC's APM, as the browser's
-/// `getUserMedia` constraints are on the web).
+/// The mic's capture processing: WebRTC's APM (as the browser's
+/// `getUserMedia` constraints are on the web) and RNNoise after it (the
+/// web's RNNoise worklet).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Processing {
     pub echo_cancellation: bool,
     pub noise_suppression: bool,
     pub auto_gain_control: bool,
+    /// RNNoise on the processed mic ("Noise suppression: RNNoise").
+    pub noise_reduction: bool,
 }
 
 impl Default for Processing {
-    /// All on, as the device track opens.
+    /// The APM all on, as the device track opens; RNNoise off.
     fn default() -> Self {
         Self {
             echo_cancellation: true,
             noise_suppression: true,
             auto_gain_control: true,
+            noise_reduction: false,
         }
     }
 }
 
 impl Processing {
-    /// The settings as the web resolves them (`resolveCaptureAudioProcessing`
-    /// without RNNoise): high fidelity turns everything off; otherwise the
-    /// two switches, with gain control always on.
+    /// The settings as the web resolves them (`captureProcessingFor` and
+    /// `resolveLocalAudioProcessingMode`): high fidelity turns the APM off;
+    /// otherwise the two switches, with gain control always on, and WebRTC's
+    /// noise suppression off while RNNoise runs. RNNoise runs whenever it
+    /// is chosen, high fidelity or not.
     pub fn from_settings(
         noise_suppression: bool,
         echo_cancellation: bool,
         high_fidelity: bool,
+        noise_reduction: bool,
     ) -> Self {
         if high_fidelity {
             return Self {
                 echo_cancellation: false,
                 noise_suppression: false,
                 auto_gain_control: false,
+                noise_reduction,
             };
         }
         Self {
             echo_cancellation,
-            noise_suppression,
+            noise_suppression: noise_suppression && !noise_reduction,
             auto_gain_control: true,
+            noise_reduction,
         }
     }
 }
@@ -206,19 +215,32 @@ mod tests {
     #[test]
     fn high_fidelity_should_turn_all_processing_off() {
         assert_eq!(
-            Processing::from_settings(true, true, true),
+            Processing::from_settings(true, true, true, false),
             Processing {
                 echo_cancellation: false,
                 noise_suppression: false,
                 auto_gain_control: false,
+                noise_reduction: false,
             }
         );
     }
 
     #[test]
     fn processing_should_keep_gain_control_on_without_high_fidelity() {
-        let p = Processing::from_settings(false, true, false);
+        let p = Processing::from_settings(false, true, false, false);
         assert!(p.auto_gain_control && p.echo_cancellation && !p.noise_suppression);
+    }
+
+    #[test]
+    fn rnnoise_should_replace_webrtc_noise_suppression() {
+        let p = Processing::from_settings(true, true, false, true);
+        assert!(p.noise_reduction && !p.noise_suppression && p.echo_cancellation);
+    }
+
+    #[test]
+    fn rnnoise_should_stay_on_with_high_fidelity() {
+        let p = Processing::from_settings(true, true, true, true);
+        assert!(p.noise_reduction && !p.echo_cancellation && !p.auto_gain_control);
     }
 
     #[test]
