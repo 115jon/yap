@@ -193,6 +193,7 @@ const QML: &[&str] = &[
     "qml/screens/Shell/VideoViewer.qml",
     "qml/screens/Shell/VoiceStatusDialog.qml",
     "qml/screens/Shell/VoiceSwitchDialog.qml",
+    "qml/screens/Shop/CardPreview.qml",
     "qml/screens/Shop/CardSilhouette.qml",
     "qml/screens/Shop/CollectibleStage.qml",
     "qml/screens/Shop/CollectibleThumb.qml",

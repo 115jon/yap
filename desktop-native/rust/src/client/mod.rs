@@ -22,6 +22,9 @@ struct NativeRealtime;
 
 impl Realtime for NativeRealtime {
     fn spawn_gateway(&self, api: Api, user_id: String, events: GatewayEvents) -> GatewayHandle {
+        // Signed in: if the last process died in a call, the room hears it
+        // left now (its first sign-in only).
+        voice::send_stale_beacon(&api, &user_id);
         let (outgoing, rx) = mpsc::unbounded_channel();
         let task = tokio::spawn(gateway::run(api, user_id, rx, events));
         GatewayHandle { outgoing, task }

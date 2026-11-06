@@ -46,6 +46,7 @@ qt_add_executable(YapNative WIN32
   cpp/animatedpicture.cpp cpp/animatedpicture.h
   cpp/authmedia.cpp cpp/authmedia.h
   cpp/camera.cpp cpp/camera.h
+  cpp/composerhighlighter.cpp cpp/composerhighlighter.h
   cpp/crashnotice.cpp cpp/crashnotice.h
   cpp/desktopshell.cpp cpp/desktopshell.h
   cpp/ditherprovider.cpp cpp/ditherprovider.h

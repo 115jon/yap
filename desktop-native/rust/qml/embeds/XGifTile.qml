@@ -74,6 +74,7 @@ Item {
                 size: Theme.iconXs
                 color: Theme.ink1
             }
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
             TapHandler { onTapped: root.paused = !root.paused }
             Accessible.role: Accessible.Button
             Accessible.name: root.motion ? qsTr("Pause GIF") : qsTr("Play GIF")
@@ -88,6 +89,7 @@ Item {
                 color: Theme.ink1
                 font: Theme.type.silk
             }
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
             TapHandler { onTapped: root.openViewer() }
             Accessible.role: Accessible.Button
             Accessible.name: qsTr("Open GIF viewer")

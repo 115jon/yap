@@ -4,14 +4,20 @@ import Yap.Media
 import com.yap.native
 
 // The large live preview of one item on you (CollectiblePreviews.tsx
-// CollectibleStage): your avatar (224 px) wearing the decoration, playing;
-// a member list with your name on the nameplate between two dim rows,
-// playing; or your profile card with the effect (looping, as the shop's
-// stage does) or the frame. `detail` is Shop.detail.
+// CollectibleStage): your avatar wearing the decoration, playing (square
+// and bare when there is none); a member list with your name on the
+// nameplate between two dim rows, playing; or your profile card
+// (CardPreview) with the effect looping or the frame. `detail` is
+// Shop.detail or the picker's `preview`. The decoration's box and inset
+// and the card's height are the caller's (the shop's detail: 224 / 24 and
+// 400; the picker: 208 / 24 and up to 520).
 Item {
     id: root
 
     required property var detail
+    property int decorationBox: 224
+    property int decorationInset: 24
+    property int cardHeight: 400
 
     Loader {
         anchors.centerIn: parent
@@ -22,21 +28,23 @@ Item {
     Component {
         id: decoration
         Item {
-            width: 224
-            height: 224
+            readonly property int face: root.decorationBox - 2 * root.decorationInset
+            readonly property bool worn: root.detail.deco.length > 0
+            width: face
+            height: face
             Avatar {
                 anchors.fill: parent
-                size: 224
-                round: true
+                size: parent.face
+                round: parent.worn
                 initials: Session.meName.length > 0 ? Session.meName : "?"
                 source: Session.meAvatar
             }
             Image {
                 anchors.centerIn: parent
-                width: 224 * 1.2
+                width: parent.face * 1.2
                 height: width
-                visible: motion.status !== AnimatedPicture.Ready
-                source: root.detail.still
+                visible: parent.worn && motion.status !== AnimatedPicture.Ready
+                source: parent.worn ? root.detail.still : ""
                 fillMode: Image.PreserveAspectFit
                 asynchronous: true
                 sourceSize: Qt.size(240, 240)
@@ -44,7 +52,7 @@ Item {
             AnimatedPicture {
                 id: motion
                 anchors.centerIn: parent
-                width: 224 * 1.2
+                width: parent.face * 1.2
                 height: width
                 source: root.detail.deco
                 playing: !Theme.reducedMotion
@@ -135,21 +143,12 @@ Item {
 
     Component {
         id: card
-        ProfileCard {
-            // The profile's own shape (450:880), so effects and frames
-            // have the whole card.
-            width: 220
-            height: Math.round(220 * 880 / 450)
-            name: Session.meName
-            username: Session.meUsername
-            avatar: Session.meAvatar
-            initials: Session.meInitials
-            presence: Session.meStatus
-            customStatus: Session.meCustomStatus
+        CardPreview {
+            height: root.cardHeight
+            width: Math.round(height * 450 / 880)
             deco: root.detail.deco
             effect: root.detail.effect ? JSON.stringify(root.detail.effect) : ""
             frame: root.detail.frame ? JSON.stringify(root.detail.frame) : ""
-            effectPlayback: "loop"
             Accessible.role: Accessible.Graphic
             Accessible.name: qsTr("Your profile with %1").arg(root.detail.name)
         }

@@ -323,6 +323,7 @@ Popup {
                 }
                 T.AbstractButton {
                     id: audioRow
+                    HoverHandler { cursorShape: Qt.PointingHandCursor }
                     anchors.right: parent.right
                     y: 12
                     implicitWidth: audioLabel.implicitWidth + 16 + 44

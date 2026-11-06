@@ -4,9 +4,11 @@ import com.yap.native
 
 // The call strip above the account row while in a call (VoiceDashboard
 // pared down): a 2 px ink-1 rule, the LED label and where the call is,
-// then the action row: the camera key with its device caret, and Leave,
-// the one solid danger fill in a call surface. Mic and deafen live in the
-// account row.
+// then the action row (VoiceDashboard.tsx): camera, share, Activities,
+// Soundboard and Leave, the one solid danger fill in a call surface. The
+// row steps down so Leave is always whole: 48 px keys from 248 px of row,
+// 40 px below that, and under 208 px Activities and Soundboard fold into
+// a More menu. Mic and deafen live in the account row.
 Rectangle {
     id: root
 
@@ -131,11 +133,14 @@ Rectangle {
         x: 8
         y: 56
         width: parent.width - 16
-        height: 40
+        height: key
+        readonly property int key: width >= 248 ? 48 : 40
+        readonly property bool wide: width >= 208
         Row {
-            spacing: 0
+            spacing: 2
             IconKey {
-                size: 40
+                size: actions.key
+                glyph: Theme.iconLg
                 iconName: "camera"
                 tone: Voice.cameraOn ? "live" : "rest"
                 enabled: Camera.hasCamera
@@ -146,12 +151,9 @@ Rectangle {
                 Accessible.checked: Voice.cameraOn
                 onClicked: ShellState.toggleCamera()
             }
-            DeviceCaret {
-                label: qsTr("Camera settings")
-                menu: cameraMenu
-            }
             IconKey {
-                size: 40
+                size: actions.key
+                glyph: Theme.iconLg
                 iconName: "screenShare"
                 tone: Voice.sharing ? "live" : "rest"
                 tip: Voice.sharing ? qsTr("Stop sharing") : qsTr("Share screen")
@@ -159,11 +161,43 @@ Rectangle {
                 Accessible.checked: Voice.sharing
                 onClicked: ShellState.toggleShare()
             }
+            IconKey {
+                id: activitiesKey
+                visible: actions.wide
+                size: actions.key
+                glyph: Theme.iconLg
+                iconName: "activities"
+                tone: activitiesPopup.item?.opened ? "toggled" : "rest"
+                tip: qsTr("Activities")
+                onClicked: root.togglePopover(activitiesPopup, activitiesKey)
+            }
+            IconKey {
+                id: soundboardKey
+                visible: actions.wide
+                size: actions.key
+                glyph: Theme.iconLg
+                iconName: "soundboard"
+                tone: soundboardPopup.item?.opened ? "toggled" : "rest"
+                tip: qsTr("Soundboard")
+                Accessible.name: qsTr("Soundboard")
+                onClicked: root.togglePopover(soundboardPopup, soundboardKey)
+            }
+            IconKey {
+                id: moreKey
+                visible: !actions.wide
+                size: actions.key
+                glyph: Theme.iconLg
+                iconName: "more"
+                tone: moreMenu.visible || soundboardPopup.item?.opened ? "toggled" : "rest"
+                tip: qsTr("More call actions")
+                onClicked: moreMenu.popup(moreKey, 0, -moreMenu.implicitHeight - 8)
+            }
         }
         IconKey {
             id: leave
             anchors.right: parent.right
-            size: 40
+            size: actions.key
+            glyph: Theme.iconLg
             iconName: "disconnect"
             tip: qsTr("Leave call")
             onClicked: Voice.leave()
@@ -188,9 +222,46 @@ Rectangle {
         }
     }
 
-    DeviceMenu {
-        id: cameraMenu
-        mode: "camera"
-        onVoiceSettings: ShellState.cameraSettingsRequested()
+    // The call's apps, as the stage dock opens them (VoiceView.qml):
+    // Activities opens the activities dialog (Wordle; the rest are on hold).
+    property double popoverClosedAt: 0
+    function togglePopover(loader, key) {
+        if (Date.now() - popoverClosedAt < 300)
+            return
+        loader.active = true
+        if (loader.status === Loader.Ready)
+            loader.item.openAt(key)
+    }
+    onInCallChanged: {
+        if (!inCall) {
+            soundboardPopup.item?.close()
+            activitiesPopup.item?.close()
+        }
+    }
+    Loader {
+        id: soundboardPopup
+        active: false
+        sourceComponent: SoundboardPicker { onClosed: root.popoverClosedAt = Date.now() }
+    }
+    Loader {
+        id: activitiesPopup
+        active: false
+        sourceComponent: ActivitiesDialog {
+            people: Nav.voicePanelId === Voice.channelId ? Math.max(1, Nav.voicePanelCount) : 1
+            onClosed: root.popoverClosedAt = Date.now()
+        }
+    }
+    MenuPanel {
+        id: moreMenu
+        MenuRow {
+            glyph: "activities"
+            text: qsTr("Activities")
+            onTriggered: root.togglePopover(activitiesPopup, moreKey)
+        }
+        MenuRow {
+            glyph: "soundboard"
+            text: qsTr("Soundboard")
+            onTriggered: root.togglePopover(soundboardPopup, moreKey)
+        }
     }
 }

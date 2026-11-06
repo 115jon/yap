@@ -79,4 +79,6 @@ T.AbstractButton {
             onObjectRemoved: (index, object) => list.removeItem(object)
         }
     }
+
+    HoverHandler { cursorShape: Qt.PointingHandCursor }
 }

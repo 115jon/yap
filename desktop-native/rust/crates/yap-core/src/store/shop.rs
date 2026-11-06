@@ -67,7 +67,13 @@ pub enum ShopCommand {
     /// The profile editor's picker for a kind, or closed.
     Picker(Option<String>),
     PickerQuery(String),
+    /// The picker's draft: an item id, or [`NONE_OPTION`] for an empty
+    /// slot. Nothing is saved until Apply (an `Equip` or a `Remove`).
+    PickerChoose(String),
 }
+
+/// The picker's "No <kind>" option (CollectibleListbox.tsx NONE_OPTION_ID).
+pub const NONE_OPTION: &str = "__none";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShopRequest {
@@ -147,6 +153,7 @@ pub struct ShopState {
     pub(super) action_error: String,
     pub(super) picker: Option<Kind>,
     pub(super) picker_query: String,
+    pub(super) picker_draft: Option<String>,
 }
 
 /// The catalog kept on disk ([`yap_cache::catalog`]).
@@ -493,23 +500,175 @@ fn page_rows(state: &ShopState, me: Option<&User>) -> Vec<Value> {
     out
 }
 
-fn picker_rows(state: &ShopState, kind: Kind, me: Option<&User>) -> Vec<Value> {
-    let Some(catalog) = state.catalog.as_deref() else {
-        return vec![if state.loading.is_some() {
-            json!({ "type": "loading" })
-        } else {
-            json!({ "type": "empty", "title": "The shop didn't load", "text": state.error })
-        }];
+/// The picker's sections header art (CollectibleListbox.tsx SectionHeader):
+/// the collection's card block, else its strip.
+fn section_art(category: &Category) -> String {
+    category
+        .featured_block_url
+        .as_deref()
+        .filter(|b| !b.is_empty())
+        .map(|b| c::resized_shop_image_url(b, 160.0, 72.0))
+        .or_else(|| c::collection_art(category, 240.0, false).map(|a| a.0))
+        .unwrap_or_default()
+}
+
+/// `optionLabel`: the name, with the variant when the name lacks it.
+fn option_label(item: &Item) -> String {
+    match item.variant_label.as_deref().filter(|v| !v.is_empty()) {
+        Some(variant) if !item.name.contains(variant) => format!("{}, {variant}", item.name),
+        _ => item.name.clone(),
+    }
+}
+
+/// One option of the picker: every item is its own cell (variants too).
+fn picker_option(item: &Item, kind: Kind, equipped_id: Option<&str>) -> Value {
+    let (still, motion) = match kind {
+        Kind::Effect => (c::effect_still_url(item, 168.0), String::new()),
+        _ => item_art(item, kind),
     };
-    let worn = equipped(me);
-    let mut out = vec![json!({
-        "type": "none",
-        "label": kind.none_label(),
-        "equipped": c::selected_sku(me.and_then(|m| m.avatar_display.as_ref()), kind).is_none(),
-    })];
-    let sections = c::sections(catalog, Some(&[kind]), &state.picker_query);
-    // The picker is narrower than the page: three to a row.
-    section_grids(&sections, catalog, &worn, 3, false, "", &mut out);
+    json!({
+        "id": item.id,
+        "name": item.name,
+        "label": option_label(item),
+        "still": still,
+        "motion": motion,
+        "frame": frame_of(item),
+        "equipped": equipped_id == Some(item.id.as_str()),
+    })
+}
+
+/// The stage and caption for the previewed choice (`null` for none).
+fn picker_preview(
+    state: &ShopState,
+    catalog: &Catalog,
+    kind: Kind,
+    item: Option<&Item>,
+    me: Option<&User>,
+) -> Value {
+    let display = me.and_then(|m| m.avatar_display.as_ref());
+    let preview = c::display_with(display, kind, item);
+    let me_id = me.map_or("", |m| m.id.as_str());
+    let plate = match item.filter(|_| kind == Kind::Nameplate) {
+        Some(item) => {
+            let animated = item.animated_url.as_deref();
+            let url = animated.or(item.static_url.as_deref());
+            let content = if animated.is_some() {
+                "video/webm"
+            } else {
+                "image/png"
+            };
+            serde_json::to_value(c::plate(Some(&preview), url, Some(content), me_id))
+                .unwrap_or(Value::Null)
+        }
+        None => Value::Null,
+    };
+    let status = item
+        .and_then(|i| category_of(catalog, &i.category_id))
+        .and_then(|cat| c::collection_status(cat, state.now_ms));
+    json!({
+        "kind": kind.as_str(),
+        "name": item.map_or_else(|| kind.none_label().to_owned(), |i| i.name.clone()),
+        "meta": item.map_or("Your profile without one", |i| i.category_name.as_str()),
+        "status": status.map(|s| s.1).unwrap_or_default(),
+        "still": item.map(|i| item_art(i, kind).0).unwrap_or_default(),
+        "deco": match (kind, item) {
+            (Kind::Decoration, Some(i)) => c::decoration_motion_url(i),
+            (Kind::Decoration, None) => String::new(),
+            _ => c::decoration_url(Some(&preview)),
+        },
+        "effect": c::effect_json(Some(&preview)),
+        "frame": c::frame_json(Some(&preview)),
+        "plate": plate,
+    })
+}
+
+/// The profile editor's picker for one slot (CollectiblePicker.tsx): its
+/// copy, the slot's items by collection (every variant its own cell), the
+/// jump chips, the draft choice against what is worn, and the preview.
+fn picker_json(state: &ShopState, kind: Kind, me: Option<&User>) -> Value {
+    let base = json!({
+        "kind": kind.as_str(),
+        "title": kind.one(),
+        "many": kind.many(),
+        "noneLabel": kind.none_label(),
+        "query": state.picker_query,
+        "busy": state.applying.is_some(),
+        "error": state.action_error,
+    });
+    let Some(catalog) = state.catalog.as_deref() else {
+        let mut out = base;
+        out["loading"] = json!(state.loading.is_some() || state.disk == Disk::Reading);
+        out["loadError"] = json!(state.error);
+        out["sections"] = json!([]);
+        out["chips"] = json!([]);
+        return out;
+    };
+    let worn = c::selected_sku(me.and_then(|m| m.avatar_display.as_ref()), kind);
+    let equipped = worn.as_deref().and_then(|sku| {
+        catalog
+            .items
+            .iter()
+            .find(|i| i.kind == kind.as_str() && i.sku_id == sku)
+    });
+    let equipped_id = equipped.map(|i| i.id.as_str());
+    let selected_id = state
+        .picker_draft
+        .clone()
+        .or_else(|| equipped_id.map(str::to_owned))
+        .unwrap_or_else(|| NONE_OPTION.to_owned());
+    let preview_item = if selected_id == NONE_OPTION {
+        None
+    } else {
+        catalog
+            .items
+            .iter()
+            .find(|i| i.id == selected_id)
+            .or(equipped)
+    };
+    let all = c::sections(catalog, Some(&[kind]), "");
+    let total: usize = all.iter().map(|s| s.items.len()).sum();
+    let query = state.picker_query.trim();
+    let sections = c::sections(catalog, Some(&[kind]), query);
+    let results: usize = sections.iter().map(|s| s.items.len()).sum();
+    let chips: Vec<Value> = if query.is_empty() && all.len() > 1 {
+        all.iter()
+            .map(|s| json!({ "id": s.category.id, "name": s.category.name }))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let sections: Vec<Value> = sections
+        .iter()
+        .map(|section| {
+            let status = c::collection_status(section.category, state.now_ms);
+            json!({
+                "id": section.category.id,
+                "name": section.category.name,
+                "art": section_art(section.category),
+                "count": section.items.len(),
+                "status": status.as_ref().map(|s| s.1.clone()).unwrap_or_default(),
+                "tone": status.map(|s| s.0).unwrap_or_default(),
+                "items": section.items.iter().map(|i| picker_option(i, kind, equipped_id)).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    let changed = selected_id != equipped_id.unwrap_or(NONE_OPTION);
+    let mut out = base;
+    out["loading"] = json!(false);
+    out["loadError"] = json!("");
+    out["total"] = json!(total);
+    out["results"] = json!(results);
+    out["chips"] = Value::Array(chips);
+    out["sections"] = Value::Array(sections);
+    out["equippedId"] = json!(equipped_id.unwrap_or(NONE_OPTION));
+    out["selectedId"] = json!(selected_id);
+    out["changed"] = json!(changed);
+    out["applyLabel"] = json!(if selected_id == NONE_OPTION && changed {
+        "Remove"
+    } else {
+        "Apply"
+    });
+    out["preview"] = picker_preview(state, catalog, kind, preview_item, me);
     out
 }
 
@@ -642,12 +801,11 @@ pub(super) fn shop_view(state: &ShopState, me: Option<&User>) -> ShopView {
     let rows = page_rows(state, me);
     let picker = state
         .picker
-        .map(|k| picker_rows(state, k, me))
-        .unwrap_or_default();
+        .map_or(Value::Null, |k| picker_json(state, k, me));
     ShopView {
         state: header.to_string(),
         rows: Value::Array(rows).to_string(),
-        picker: Value::Array(picker).to_string(),
+        picker: picker.to_string(),
         detail: detail_json(state, me).to_string(),
     }
 }
@@ -756,6 +914,68 @@ mod tests {
         };
         let d: Value = serde_json::from_str(&shop_view(&state, None).detail).unwrap_or_default();
         assert_eq!(d["equipLabel"], "Equip avatar decoration");
+    }
+
+    fn picker(state: &ShopState, me: Option<&User>) -> Value {
+        serde_json::from_str(&shop_view(state, me).picker).unwrap_or_default()
+    }
+
+    #[test]
+    fn the_picker_should_list_every_item_of_its_kind_by_collection() {
+        let state = ShopState {
+            catalog: Some(Box::new(catalog())),
+            picker: Some(Kind::Decoration),
+            ..ShopState::default()
+        };
+        let p = picker(&state, None);
+        assert_eq!(
+            (
+                p["title"].as_str(),
+                p["total"].as_u64(),
+                p["sections"][0]["items"][0]["name"].as_str(),
+                p["selectedId"].as_str(),
+                p["changed"].as_bool(),
+            ),
+            (
+                Some("Avatar decoration"),
+                Some(1),
+                Some("Duck"),
+                Some(NONE_OPTION),
+                Some(false)
+            )
+        );
+    }
+
+    #[test]
+    fn a_picker_draft_should_preview_without_saving() {
+        let me = User {
+            id: "u".into(),
+            avatar_display: Some(
+                json!({"version": 1, "collectibles": {"nameplate": {"skuId": "2"}}}),
+            ),
+            ..User::default()
+        };
+        let state = ShopState {
+            catalog: Some(Box::new(catalog())),
+            picker: Some(Kind::Nameplate),
+            picker_draft: Some(NONE_OPTION.into()),
+            ..ShopState::default()
+        };
+        let p = picker(&state, Some(&me));
+        assert_eq!(
+            (
+                p["equippedId"].as_str(),
+                p["changed"].as_bool(),
+                p["applyLabel"].as_str(),
+                p["preview"]["name"].as_str(),
+            ),
+            (
+                Some("nameplate:2"),
+                Some(true),
+                Some("Remove"),
+                Some("No nameplate")
+            )
+        );
     }
 
     #[test]

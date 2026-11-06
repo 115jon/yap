@@ -22,6 +22,7 @@
 #include "animatedpicture.h"
 #include "authmedia.h"
 #include "camera.h"
+#include "composerhighlighter.h"
 #include "crashnotice.h"
 #include "desktopshell.h"
 #include "ditherprovider.h"
@@ -238,6 +239,8 @@ int main(int argc, char* argv[])
   // players (WebView2).
   qmlRegisterType<AnimatedPicture>("Yap.Media", 1, 0, "AnimatedPicture");
   qmlRegisterType<WebEmbed>("Yap.Media", 1, 0, "WebEmbed");
+  qmlRegisterType<ComposerHighlighter>("Yap.Media", 1, 0,
+                                       "ComposerHighlighter");
   // WebM (VP8/VP9, alpha too) through libvpx, and private video
   // attachments read with the session (Media Foundation for the rest).
   qmlRegisterType<WebmPlayer>("Yap.Media", 1, 0, "WebmPlayer");

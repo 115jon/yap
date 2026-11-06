@@ -115,6 +115,41 @@ pub mod qobject {
         #[cxx_name = "setPeerMuted"]
         fn set_peer_muted(self: Pin<&mut Audio>, user_id: &QString, muted: bool);
 
+        /// Their share's audio ("Stream volume", 0..=200).
+        #[qinvokable]
+        #[cxx_name = "peerStreamVolume"]
+        fn peer_stream_volume(self: &Audio, user_id: &QString) -> i32;
+
+        #[qinvokable]
+        #[cxx_name = "setPeerStreamVolume"]
+        fn set_peer_stream_volume(self: Pin<&mut Audio>, user_id: &QString, volume: i32);
+
+        /// Their share's audio plays off stage ("Always hear stream audio").
+        #[qinvokable]
+        #[cxx_name = "peerAlwaysHear"]
+        fn peer_always_hear(self: &Audio, user_id: &QString) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "setPeerAlwaysHear"]
+        fn set_peer_always_hear(self: Pin<&mut Audio>, user_id: &QString, on: bool);
+
+        /// "Stream attenuation" and its strength (0..=100).
+        #[qinvokable]
+        #[cxx_name = "peerAttenuation"]
+        fn peer_attenuation(self: &Audio, user_id: &QString) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "setPeerAttenuation"]
+        fn set_peer_attenuation(self: Pin<&mut Audio>, user_id: &QString, on: bool);
+
+        #[qinvokable]
+        #[cxx_name = "peerAttenuationStrength"]
+        fn peer_attenuation_strength(self: &Audio, user_id: &QString) -> i32;
+
+        #[qinvokable]
+        #[cxx_name = "setPeerAttenuationStrength"]
+        fn set_peer_attenuation_strength(self: Pin<&mut Audio>, user_id: &QString, strength: i32);
+
         /// Their soundboard is silent for us ("Mute soundboard").
         #[qinvokable]
         #[cxx_name = "peerSoundboardMuted"]
@@ -246,6 +281,17 @@ fn call_audio(s: &VoiceSettings) -> CallAudio {
                 .peer_settings
                 .iter()
                 .map(|(id, p)| (id.clone(), peer_gain(p.volume, p.muted)))
+                .collect(),
+            streams: s
+                .peer_settings
+                .iter()
+                .map(|(id, p)| (id.clone(), peer_gain(p.stream_volume, p.muted)))
+                .collect(),
+            always_hear: s
+                .peer_settings
+                .iter()
+                .filter(|(_, p)| p.always_hear)
+                .map(|(id, _)| id.clone())
                 .collect(),
         },
         sensitivity: Sensitivity {
@@ -508,6 +554,53 @@ impl qobject::Audio {
 
     pub fn set_peer_muted(self: Pin<&mut Self>, user_id: &QString, muted: bool) {
         self.edit_peer(user_id, |p| p.muted = muted);
+    }
+
+    pub fn peer_stream_volume(&self, user_id: &QString) -> i32 {
+        i32::from(
+            self.rust()
+                .settings
+                .peer(&user_id.to_string())
+                .stream_volume,
+        )
+    }
+
+    pub fn set_peer_stream_volume(self: Pin<&mut Self>, user_id: &QString, v: i32) {
+        self.edit_peer(user_id, |p| p.stream_volume = volume(v));
+    }
+
+    pub fn peer_always_hear(&self, user_id: &QString) -> bool {
+        self.rust().settings.peer(&user_id.to_string()).always_hear
+    }
+
+    pub fn set_peer_always_hear(self: Pin<&mut Self>, user_id: &QString, on: bool) {
+        self.edit_peer(user_id, |p| p.always_hear = on);
+    }
+
+    pub fn peer_attenuation(&self, user_id: &QString) -> bool {
+        self.rust()
+            .settings
+            .peer(&user_id.to_string())
+            .attenuation_enabled
+    }
+
+    pub fn set_peer_attenuation(self: Pin<&mut Self>, user_id: &QString, on: bool) {
+        self.edit_peer(user_id, |p| p.attenuation_enabled = on);
+    }
+
+    pub fn peer_attenuation_strength(&self, user_id: &QString) -> i32 {
+        i32::from(
+            self.rust()
+                .settings
+                .peer(&user_id.to_string())
+                .attenuation_strength,
+        )
+    }
+
+    pub fn set_peer_attenuation_strength(self: Pin<&mut Self>, user_id: &QString, v: i32) {
+        self.edit_peer(user_id, |p| {
+            p.attenuation_strength = u16::try_from(v.clamp(0, 100)).unwrap_or(50);
+        });
     }
 
     pub fn peer_soundboard_muted(&self, user_id: &QString) -> bool {

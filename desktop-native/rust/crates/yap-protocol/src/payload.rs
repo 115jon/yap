@@ -362,14 +362,26 @@ pub struct VoiceChannelMember {
     pub self_deaf: Option<bool>,
     pub self_video: Option<bool>,
     pub self_stream: Option<bool>,
+    /// When they joined (ms), for the channel's call clock.
+    #[serde(default)]
+    pub joined_at: Option<Value>,
+    /// `reconnecting` while their voice session is coming back; with
+    /// `connected: false` the row dims (voice-presence.ts).
+    #[serde(default)]
+    pub connection_state: Option<String>,
+    #[serde(default)]
+    pub connected: Option<bool>,
 }
 
 /// `VOICE_CHANNEL_STATES` dispatch data: every visible voice channel that
-/// has someone in it, sent after a subscribe.
+/// has someone in it, sent after a subscribe, and when each call started
+/// (ms, for the sidebar's clock).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct VoiceChannelStates {
     #[serde(default)]
     pub voice_states: BTreeMap<String, Vec<VoiceChannelMember>>,
+    #[serde(default)]
+    pub voice_started_at: BTreeMap<String, Value>,
 }
 
 /// `VOICE_CHANNEL_STATE_UPDATE` dispatch data: one channel's whole roster
@@ -379,6 +391,8 @@ pub struct VoiceChannelStateUpdate {
     pub channel_id: String,
     #[serde(default)]
     pub members: Vec<VoiceChannelMember>,
+    #[serde(default)]
+    pub started_at: Option<Value>,
 }
 
 // Room socket: roster and voice state

@@ -3,15 +3,15 @@ import com.yap.native
 
 // Someone's menu in a call (StreamContextMenu.tsx, ContextMenu/RemoteMenu.tsx)
 // on their tile, their voice row or their floating stream, with no name
-// header, in the web's order: Profile, Message, the "User volume" slider (0-200 %), "Mute",
-// which silences them for you only, "Mute soundboard", which keeps their
-// soundboard sounds from playing for you, then Copy user ID. All are kept
-// per Yap user id. While they share in our call, Watch stream (or Stop
-// watching) leads; the web's per-stream volume, attenuation and "Always
-// hear stream audio" have no native counterpart yet, so the person's own
-// rows follow instead. A moderator also gets "Move to…" (voice-move-targets
-// .ts): the open server's other voice channels they may move members into,
-// when they may move members out of this one.
+// header, in the web's three shapes. Someone not sharing: Profile, Message,
+// the "User volume" slider (0-200 %), "Mute" (silences them for you only),
+// "Mute soundboard", then Copy user ID. Sharing, not watched: Watch stream
+// and "Always hear stream audio". Sharing and watched: Stop watching, Mute,
+// Mute soundboard, the "Stream volume" slider, Always hear, "Stream
+// attenuation" (with its strength while on) and More options (Profile,
+// Message). All are kept per Yap user id. A moderator also gets "Move to…"
+// (voice-move-targets.ts): the open server's other voice channels they may
+// move members into, when they may move members out of this one.
 MenuPanel {
     id: root
 
@@ -69,32 +69,45 @@ MenuPanel {
 
     ClipboardText { id: clipboard }
 
+    readonly property bool sharing: shareParticipant.length > 0
+    readonly property bool watching: sharing && shareWatched
+    readonly property bool plain: !sharing
+
     MenuRow {
-        visible: root.shareParticipant.length > 0
+        visible: root.sharing
         height: visible ? implicitHeight : 0
         text: root.shareWatched ? qsTr("Stop watching") : qsTr("Watch stream")
         glyph: root.shareWatched ? "streamOff" : "stream"
+        bold: true
         onTriggered: Voice.watch(root.shareParticipant, !root.shareWatched)
     }
-    MenuRule { visible: root.shareParticipant.length > 0; height: visible ? implicitHeight : 0 }
+    MenuRule { visible: root.sharing; height: visible ? implicitHeight : 0 }
     MenuRow {
+        visible: root.plain
+        height: visible ? implicitHeight : 0
         text: qsTr("Profile")
         glyph: "account"
         onTriggered: ShellState.showProfile(root.userId, root.anchorItem, "right")
     }
     MenuRow {
+        visible: root.plain
+        height: visible ? implicitHeight : 0
         text: qsTr("Message")
         glyph: "chat"
         onTriggered: Nav.openDm(root.userId)
     }
-    MenuRule {}
+    MenuRule { visible: root.plain; height: visible ? implicitHeight : 0 }
     VolumeSlider {
+        visible: root.plain
+        height: visible ? implicitHeight : 0
         label: qsTr("User volume")
         value: Audio.peersRevision >= 0 ? Audio.peerVolume(root.userId) : 100
         onMoved: Audio.setPeerVolume(root.userId, Math.round(value))
     }
-    MenuRule {}
+    MenuRule { visible: root.plain; height: visible ? implicitHeight : 0 }
     MenuRow {
+        visible: !root.sharing || root.watching
+        height: visible ? implicitHeight : 0
         text: qsTr("Mute")
         glyph: "speakerOff"
         switchable: true
@@ -102,17 +115,90 @@ MenuPanel {
         onTriggered: Audio.setPeerMuted(root.userId, !Audio.peerMuted(root.userId))
     }
     MenuRow {
+        visible: !root.sharing || root.watching
+        height: visible ? implicitHeight : 0
         text: qsTr("Mute soundboard")
         glyph: "soundboard"
         switchable: true
         on: Audio.peersRevision >= 0 && Audio.peerSoundboardMuted(root.userId)
         onTriggered: Audio.setPeerSoundboardMuted(root.userId, !Audio.peerSoundboardMuted(root.userId))
     }
-    MenuRule {}
+    VolumeSlider {
+        visible: root.watching
+        height: visible ? implicitHeight : 0
+        label: qsTr("Stream volume")
+        value: Audio.peersRevision >= 0 ? Audio.peerStreamVolume(root.userId) : 100
+        onMoved: Audio.setPeerStreamVolume(root.userId, Math.round(value))
+    }
     MenuRow {
+        visible: root.sharing
+        height: visible ? implicitHeight : 0
+        text: qsTr("Always hear stream audio")
+        switchable: true
+        on: Audio.peersRevision >= 0 && Audio.peerAlwaysHear(root.userId)
+        onTriggered: Audio.setPeerAlwaysHear(root.userId, !Audio.peerAlwaysHear(root.userId))
+    }
+    MenuRule { visible: root.watching; height: visible ? implicitHeight : 0 }
+    MenuRow {
+        id: attenuationRow
+        visible: root.watching
+        height: visible ? implicitHeight : 0
+        text: qsTr("Stream attenuation")
+        description: qsTr("Automatically reduce stream volume when people are talking.")
+        switchable: true
+        on: Audio.peersRevision >= 0 && Audio.peerAttenuation(root.userId)
+        onTriggered: Audio.setPeerAttenuation(root.userId, !Audio.peerAttenuation(root.userId))
+    }
+    VolumeSlider {
+        visible: root.watching && attenuationRow.on
+        height: visible ? implicitHeight : 0
+        to: 100
+        label: qsTr("Stream attenuation strength")
+        value: Audio.peersRevision >= 0 ? Audio.peerAttenuationStrength(root.userId) : 50
+        onMoved: Audio.setPeerAttenuationStrength(root.userId, Math.round(value))
+    }
+    MenuRule { visible: !root.sharing || root.watching; height: visible ? implicitHeight : 0 }
+    MenuRow {
+        id: copyRow
+        visible: root.plain
+        height: visible ? implicitHeight : 0
         text: qsTr("Copy user ID")
         glyph: "copyId"
         onTriggered: clipboard.copyText(root.userId)
+    }
+    // "More options" (Profile, Message), in Copy user ID's place while we
+    // watch their stream. Taken, not removed: removing destroys it.
+    property bool moreShown: false
+    onWatchingChanged: {
+        let at = -1
+        for (let i = 0; i < root.count; i++) {
+            if (root.itemAt(i) === copyRow)
+                at = i
+        }
+        if (at < 0)
+            return
+        if (root.watching && !root.moreShown) {
+            root.insertMenu(at, moreOptions)
+            root.moreShown = true
+        } else if (!root.watching && root.moreShown) {
+            root.takeMenu(at - 1)
+            root.moreShown = false
+        }
+    }
+    readonly property MenuPanel moreOptions: MenuPanel {
+        id: moreOptions
+        title: qsTr("More options")
+        implicitWidth: 220
+        MenuRow {
+            text: qsTr("Profile")
+            glyph: "account"
+            onTriggered: ShellState.showProfile(root.userId, root.anchorItem, "right")
+        }
+        MenuRow {
+            text: qsTr("Message")
+            glyph: "chat"
+            onTriggered: Nav.openDm(root.userId)
+        }
     }
     // Added only while there is somewhere to move them.
     readonly property MenuRule moveRule: MenuRule {}

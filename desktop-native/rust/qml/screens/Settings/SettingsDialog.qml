@@ -71,7 +71,8 @@ T.Popup {
 
     T.Overlay.modal: Scrim {
         color: Theme.scrim
-        TapHandler { onTapped: dialog.stepBack() }
+        stepsBack: true
+        onTapped: dialog.stepBack()
     }
 
     enter: Transition {
@@ -642,6 +643,7 @@ T.Popup {
 
         T.AbstractButton {
             id: button
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
             width: leaf.width
             height: 36
             enabled: !leaf.searching || leaf.hits.length > 0

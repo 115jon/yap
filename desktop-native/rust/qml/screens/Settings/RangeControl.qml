@@ -22,6 +22,7 @@ Item {
 
     T.Slider {
         id: slider
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
 
         property string accessibleName
 

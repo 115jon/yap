@@ -193,17 +193,16 @@ fn token<'a>(s: &'a str, before: Option<char>) -> Option<(usize, Token<'a>)> {
                 .then_some((n, Token::Italic(t)))
         }
         '~' => delimited(s, "~~", "~~", '~').map(|(n, t)| (n, Token::Strike(t))),
+        // `\[[^\]]+\]\([^)]+\)`: the label runs to the first `]` (a `[`
+        // inside it is text), the url to the first `)`, spaces and all.
         '[' => {
             let close = s.find(']')?;
             let label = &s[1..close];
             let rest = s[close + 1..].strip_prefix('(')?;
             let end = rest.find(')')?;
             let url = &rest[..end];
-            let ok = !label.is_empty()
-                && !url.is_empty()
-                && !label.contains('[')
-                && !url.contains(char::is_whitespace);
-            ok.then_some((close + 2 + end + 1, Token::Link(label, url)))
+            (!label.is_empty() && !url.is_empty())
+                .then_some((close + 2 + end + 1, Token::Link(label, url)))
         }
         '<' => {
             // <:name:id>
@@ -241,8 +240,14 @@ fn token<'a>(s: &'a str, before: Option<char>) -> Option<(usize, Token<'a>)> {
             let n = s
                 .find(|c: char| c.is_whitespace() || "<>\"'`)]".contains(c))
                 .unwrap_or(s.len());
+            // At least one character after `//`, then trailing punctuation
+            // stays text (it may leave the bare scheme, which still links).
+            let scheme = lower.find("//").unwrap_or(0) + 2;
+            if n <= scheme {
+                return None;
+            }
             let url = s[..n].trim_end_matches(['.', ',', ';', ':', '!', '?', ')']);
-            (url.len() > lower.find("//").unwrap_or(0) + 2).then_some((url.len(), Token::Url(url)))
+            Some((url.len(), Token::Url(url)))
         }
         _ => None,
     }
@@ -416,6 +421,43 @@ mod tests {
     }
 
     #[test]
+    fn angle_brackets_should_stay_text_around_the_link() {
+        let out = html("<https://a.example/b>");
+        assert!(out.starts_with("&lt;<a href=\"https://a.example/b\""));
+        assert!(out.ends_with("</a>&gt;"));
+    }
+
+    #[test]
+    fn a_link_should_stop_at_a_closing_paren_or_bracket() {
+        let out = html("(https://a.example/x_(y)) [https://b.example]");
+        assert!(out.contains("href=\"https://a.example/x_(y\""));
+        assert!(out.contains(">https://a.example/x_(y</a>))"));
+        assert!(out.contains("href=\"https://b.example\""));
+    }
+
+    #[test]
+    fn trailing_punctuation_runs_should_all_stay_text() {
+        let out = html("https://a.example/?q=1!?.");
+        assert!(out.contains("href=\"https://a.example/?q=1\""));
+        assert!(out.ends_with("</a>!?."));
+    }
+
+    #[test]
+    fn masked_links_should_take_a_bracket_in_the_label_and_spaces_in_the_url() {
+        let out = html("[a [b](https://a.example/c d)");
+        assert!(out.contains("href=\"https://a.example/c d\""));
+        assert!(out.contains(">a [b</a>"));
+    }
+
+    #[test]
+    fn a_masked_link_label_should_not_autolink() {
+        let out = html("[https://a.example](https://b.example)");
+        assert!(out.contains("href=\"https://b.example\""));
+        assert!(out.contains(">https://a.example</a>"));
+        assert!(!out.contains("href=\"https://a.example\""));
+    }
+
+    #[test]
     fn labelled_links_should_use_the_label() {
         let out = html("[docs](https://a.example/b)");
         assert!(out.contains("href=\"https://a.example/b\""));
@@ -467,12 +509,6 @@ mod tests {
     #[test]
     fn percent_signs_should_never_form_a_colour_token() {
         assert_eq!(html("%LINK% 100%"), "&#37;LINK&#37; 100&#37;");
-    }
-
-    #[test]
-    fn link_urls_with_spaces_should_stay_text() {
-        assert!(!html("[x](https://a.example/ b)").contains(">x</a>"));
-        assert!(!html("[x](https://a.example/\nb)").contains(">x</a>"));
     }
 
     #[test]

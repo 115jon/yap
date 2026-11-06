@@ -215,6 +215,7 @@ Rectangle {
                         color: Theme.ink1
                         opacity: index === root.index ? 1 : 0.45
                         scale: index === root.index ? 1 : 0.8
+                        HoverHandler { cursorShape: Qt.PointingHandCursor }
                         TapHandler { onTapped: root.index = parent.index }
                     }
                 }

@@ -2,7 +2,7 @@
 //! output volume as gains for remote tracks, and the device choice
 //! resolved against what the system lists. Pure; the engine applies it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// The highest per-user or output volume, in percent (ContextMenuItems
 /// `Slider` max, AudioDeviceMenu output max).
@@ -18,6 +18,12 @@ pub struct Playback {
     /// Per Yap user id: that person's gain, 0.0..=2.0 (0 while "Mute" is
     /// on for them).
     pub peers: HashMap<String, f64>,
+    /// Per Yap user id: their share audio's gain ("Stream volume", 0 while
+    /// "Mute" is on), when it is not the default 1.0.
+    pub streams: HashMap<String, f64>,
+    /// People whose share audio plays off stage ("Always hear stream
+    /// audio").
+    pub always_hear: HashSet<String>,
 }
 
 impl Default for Playback {
@@ -25,6 +31,8 @@ impl Default for Playback {
         Self {
             output: 1.0,
             peers: HashMap::new(),
+            streams: HashMap::new(),
+            always_hear: HashSet::new(),
         }
     }
 }
@@ -39,6 +47,22 @@ impl Playback {
             self.peers.get(user_id).copied().unwrap_or(1.0)
         };
         (self.output * peer).clamp(0.0, 4.0)
+    }
+
+    /// The gain for someone's share audio (useVoiceChannel.ts: the stream
+    /// volume, not their voice's).
+    pub fn stream_gain_for(&self, user_id: &str) -> f64 {
+        let stream = if user_id.is_empty() {
+            1.0
+        } else {
+            self.streams.get(user_id).copied().unwrap_or(1.0)
+        };
+        (self.output * stream).clamp(0.0, 4.0)
+    }
+
+    /// Their share audio plays even off stage.
+    pub fn always_hears(&self, user_id: &str) -> bool {
+        !user_id.is_empty() && self.always_hear.contains(user_id)
     }
 }
 
@@ -142,6 +166,7 @@ mod tests {
         let playback = Playback {
             output: 1.5,
             peers: HashMap::from([("u1".to_owned(), 0.5)]),
+            ..Playback::default()
         };
         assert!((playback.gain_for("u1") - 0.75).abs() < 1e-9);
     }
@@ -153,6 +178,19 @@ mod tests {
             ..Playback::default()
         };
         assert!((playback.gain_for("") - 0.8).abs() < 1e-9);
+    }
+
+    #[test]
+    fn share_audio_should_take_the_stream_volume_not_the_voice() {
+        let playback = Playback {
+            output: 0.5,
+            peers: HashMap::from([("u1".to_owned(), 2.0)]),
+            streams: HashMap::from([("u1".to_owned(), 0.4)]),
+            always_hear: HashSet::from(["u1".to_owned()]),
+        };
+        assert!((playback.stream_gain_for("u1") - 0.2).abs() < 1e-9);
+        assert!((playback.stream_gain_for("u2") - 0.5).abs() < 1e-9);
+        assert!(playback.always_hears("u1") && !playback.always_hears("u2"));
     }
 
     #[test]

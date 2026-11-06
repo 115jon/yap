@@ -157,7 +157,7 @@ Rectangle {
             }
         }
 
-        HoverHandler { id: identityHover }
+        HoverHandler { id: identityHover; cursorShape: Qt.PointingHandCursor }
         TapHandler { id: identityTap; onTapped: account.openAbove(identity) }
         Tooltip {
             visible: identityHover.hovered && !account.visible

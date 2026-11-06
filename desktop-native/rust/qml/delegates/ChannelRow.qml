@@ -21,6 +21,10 @@ Rectangle {
     property int mentions: 0
     property bool manage: false
     property bool draggable: false
+    // A voice channel in use: how many are in the call and since when (ms),
+    // shown as "2 · 0:47" in ink-3 at the end (VoiceChannelClock).
+    property int occupants: 0
+    property double startedAt: 0
     signal selected()
     signal menuRequested(Item row, point at)
     signal settingsRequested()
@@ -56,7 +60,7 @@ Rectangle {
     Text {
         anchors.left: parent.left
         anchors.leftMargin: 8 + 20 + 8
-        anchors.right: invite.visible ? invite.left : badge.visible ? badge.left : parent.right
+        anchors.right: invite.visible ? invite.left : meta.visible ? meta.left : parent.right
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
         textFormat: Text.PlainText
@@ -65,13 +69,61 @@ Rectangle {
         color: row.active || hover.hovered || row.unread ? Theme.ink1 : Theme.ink2
         font: row.unread && !row.active ? Theme.type.rowUnread : Theme.type.row
     }
-    CountBadge {
-        id: badge
-        visible: count > 0 && !invite.visible
+    // Trailing meta: steps aside while the hover keys show.
+    Row {
+        id: meta
+        visible: !invite.visible && (row.mentions > 0 || row.occupants > 0)
         anchors.right: parent.right
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
-        count: row.mentions
+        spacing: 6
+        Text {
+            visible: row.occupants > 0
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: String(row.occupants)
+            color: Theme.ink3
+            font: Theme.type.numSm
+            Accessible.name: qsTr("%n in the call", "", row.occupants)
+        }
+        Text {
+            visible: row.occupants > 0 && row.startedAt > 0
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: "·"
+            color: Theme.ink3
+            font: Theme.type.numSm
+            Accessible.ignored: true
+        }
+        Text {
+            id: clock
+            visible: row.occupants > 0 && row.startedAt > 0
+            property double now: Date.now()
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: {
+                const total = Math.max(0, Math.floor((clock.now - row.startedAt) / 1000))
+                const h = Math.floor(total / 3600)
+                const m = Math.floor(total / 60) % 60
+                const sec = String(total % 60).padStart(2, "0")
+                return h > 0 ? "%1:%2:%3".arg(h).arg(String(m).padStart(2, "0")).arg(sec) : "%1:%2".arg(m).arg(sec)
+            }
+            color: Theme.ink3
+            font: Theme.type.numSm
+            Timer {
+                interval: 1000
+                repeat: true
+                running: clock.visible && row.visible
+                triggeredOnStart: true
+                onTriggered: clock.now = Date.now()
+            }
+        }
+        CountBadge {
+            id: badge
+            visible: count > 0
+            anchors.verticalCenter: parent.verticalCenter
+            count: row.mentions
+        }
     }
     IconKey {
         id: invite

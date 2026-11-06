@@ -122,7 +122,8 @@ T.Popup {
 
     T.Overlay.modal: Scrim {
         color: Theme.scrimStacked
-        TapHandler { onTapped: editor.requestClose() }
+        stepsBack: true
+        onTapped: editor.requestClose()
     }
     enter: Transition {
         ParallelAnimation {
@@ -478,22 +479,22 @@ T.Popup {
                         description: qsTr("Decorations from your collection.")
                         SettingsRow {
                             custom: true; rowId: "profile-decoration"; label: qsTr("Avatar decoration"); layout: "inline"
-                            description: editor.worn.avatarDecoration?.name ?? qsTr("No decoration")
+                            description: editor.worn.avatarDecoration?.name ?? qsTr("None")
                             CollectibleKeys { kind: "avatar_decoration"; on: editor.worn.avatarDecoration !== undefined }
                         }
                         SettingsRow {
                             custom: true; rowId: "profile-effect"; label: qsTr("Profile effect"); layout: "inline"
-                            description: editor.worn.profileEffect?.name ?? qsTr("No effect")
+                            description: editor.worn.profileEffect?.name ?? qsTr("None")
                             CollectibleKeys { kind: "profile_effect"; on: editor.worn.profileEffect !== undefined }
                         }
                         SettingsRow {
                             custom: true; rowId: "profile-frame"; label: qsTr("Profile frame"); layout: "inline"
-                            description: editor.worn.profileFrame?.name ?? qsTr("No frame")
+                            description: editor.worn.profileFrame?.name ?? qsTr("None")
                             CollectibleKeys { kind: "profile_frame"; on: editor.worn.profileFrame !== undefined }
                         }
                         SettingsRow {
                             custom: true; rowId: "profile-nameplate"; label: qsTr("Nameplate"); layout: "inline"
-                            description: editor.worn.nameplate?.name ?? qsTr("No nameplate")
+                            description: editor.worn.nameplate?.name ?? qsTr("None")
                             CollectibleKeys { kind: "nameplate"; on: editor.worn.nameplate !== undefined }
                         }
                     }
@@ -603,17 +604,21 @@ T.Popup {
         }
     }
 
-    // A collectible row's keys: Change (Choose when the slot is empty)
-    // opens the slot's picker; Remove empties it at once.
+    // A collectible row's keys: Change opens the slot's picker; Remove
+    // (while the slot holds one) empties it at once.
     component CollectibleKeys: Row {
         id: keys
         required property string kind
         property bool on: false
+        readonly property string label: kind === "avatar_decoration" ? qsTr("avatar decoration")
+            : kind === "profile_effect" ? qsTr("profile effect")
+            : kind === "profile_frame" ? qsTr("profile frame") : qsTr("nameplate")
         spacing: 8
         KitButton {
             size: "sm"
             variant: "secondary"
-            text: keys.on ? qsTr("Change") : qsTr("Choose")
+            text: qsTr("Change")
+            Accessible.name: qsTr("Change %1").arg(keys.label)
             onClicked: picker.show(keys.kind)
         }
         KitButton {
@@ -621,6 +626,7 @@ T.Popup {
             size: "sm"
             variant: "ghost"
             text: qsTr("Remove")
+            Accessible.name: qsTr("Remove %1").arg(keys.label)
             onClicked: Shop.remove(keys.kind)
         }
     }

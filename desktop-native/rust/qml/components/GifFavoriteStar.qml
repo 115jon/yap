@@ -66,4 +66,6 @@ T.Button {
             color: "#ffffff"
         }
     }
+
+    HoverHandler { cursorShape: Qt.PointingHandCursor }
 }

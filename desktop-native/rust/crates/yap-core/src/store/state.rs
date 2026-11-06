@@ -777,6 +777,9 @@ pub struct State {
     pub(super) voice_error: String,
     /// Who is in each voice channel, by channel id (from the gateway).
     pub(super) voice_channels: HashMap<String, Vec<Occupant>>,
+    /// When each occupied voice channel's call started (ms): the earliest
+    /// of what the server said, what we had and the first join.
+    pub(super) voice_started_at: HashMap<String, i64>,
     /// The voice channel whose view is open (landing or call), if any.
     pub(super) voice_view: Option<String>,
     /// The server whose channel tree is shown (the last one that loaded).
@@ -855,6 +858,7 @@ impl State {
             voice_prefs: VoicePrefs::default(),
             voice_error: String::new(),
             voice_channels: HashMap::new(),
+            voice_started_at: HashMap::new(),
             voice_view: None,
             tree_server: None,
             wanted_channel: None,

@@ -97,4 +97,6 @@ T.Button {
             border.color: Theme.focus
         }
     }
+
+    HoverHandler { cursorShape: Qt.PointingHandCursor }
 }

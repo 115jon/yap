@@ -77,6 +77,11 @@ pub const LEAVE_SEND_WINDOW: Duration = Duration::from_millis(100);
 /// (ADMISSION.md "Room socket, op 40").
 pub const CREDENTIAL_REFRESH: Duration = Duration::from_secs(45 * 60);
 
+/// The end reason when the room lost our session and identified a new
+/// participant (a Resume refused with 4006): the SFU session and the voice
+/// grant belong to the old one. The owner may join again at once.
+pub const CALL_RESET: &str = "The call connection was reset. Join again.";
+
 /// The call's phase, with the names and meaning of `packages/voice`
 /// (STATE_MACHINE.md "Phases"; there is no standby here).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -830,8 +835,9 @@ impl CallMachine {
     }
 
     /// Sets each pulled audio track's gain where it differs from what was
-    /// set (a new mid starts at 1.0): its owner's volume, and for share
-    /// audio only while their share or camera is on stage.
+    /// set (a new mid starts at 1.0): its owner's volume; share audio takes
+    /// their stream volume instead, and plays only while their share or
+    /// camera is on stage or we always hear them.
     fn sync_gains(&mut self, fx: &mut Vec<Effect>) {
         let (roster, playback, gains) = (&self.roster, &self.playback, &mut self.gains);
         let mut live = HashSet::new();
@@ -844,11 +850,14 @@ impl CallMachine {
                 .as_ref()
                 .and_then(|r| r.user_id_of(owner))
                 .unwrap_or("");
-            let audible = !is_share(alias) || self.video.stage.as_deref() == Some(owner);
-            let gain = if audible {
-                playback.gain_for(user_id)
-            } else {
-                0.0
+            let share = is_share(alias);
+            let audible = !share
+                || self.video.stage.as_deref() == Some(owner)
+                || playback.always_hears(user_id);
+            let gain = match (audible, share) {
+                (false, _) => 0.0,
+                (true, true) => playback.stream_gain_for(user_id),
+                (true, false) => playback.gain_for(user_id),
             };
             live.insert(mid);
             let set = gains.get(mid).copied().unwrap_or(1.0);
@@ -994,6 +1003,19 @@ impl CallMachine {
             self.state = state;
             fx.push(Effect::Notify(Notice::State(state)));
         }
+    }
+
+    /// Ends the call for a reason of our own while the room may still hold
+    /// our session: `ClientDisconnect` first, as a leave does, so the room
+    /// drops the seat at once. A close alone reads as a lost connection,
+    /// and the room keeps the seat for a resume that never comes (a
+    /// reconnecting ghost for its 120 s grace). Ends the room or a socket
+    /// decided (4008, 4010, a move) need no leave.
+    fn fail(&mut self, fx: &mut Vec<Effect>, reason: String) {
+        if self.sockets_open {
+            self.disconnect(fx);
+        }
+        self.end(fx, Some(reason));
     }
 
     fn end(&mut self, fx: &mut Vec<Effect>, reason: Option<String>) {
@@ -1152,7 +1174,7 @@ impl CallMachine {
                 self.publish_camera(fx);
                 self.drive_share(fx);
             }
-            Err(error) => self.end(fx, Some(error)),
+            Err(error) => self.fail(fx, error),
         }
     }
 
@@ -1255,10 +1277,7 @@ impl CallMachine {
                 {
                     // Resume failed and the room made a new participant: the
                     // voice grant and SFU session belong to the old one.
-                    return self.end(
-                        fx,
-                        Some("The call connection was reset. Join again.".into()),
-                    );
+                    return self.fail(fx, CALL_RESET.into());
                 }
                 let again = std::mem::replace(&mut self.room_identified, true);
                 self.room_up = true;
@@ -1488,11 +1507,11 @@ impl CallMachine {
                 } else if self.published.is_some() && self.rebuilds < MAX_REBUILDS {
                     self.schedule_rebuild(fx);
                 } else {
-                    self.end(fx, Some("Media connection failed".into()));
+                    self.fail(fx, "Media connection failed".into());
                 }
             }
             MediaEvent::State(_) => {}
-            MediaEvent::Closed => self.end(fx, Some("Media connection ended".into())),
+            MediaEvent::Closed => self.fail(fx, "Media connection ended".into()),
         }
     }
 

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import Yap.Chrome
+import Yap.Media
 import com.yap.native
 
 // The composer (MessageInput.tsx): the reply indicator, then the plate:
@@ -305,6 +306,15 @@ Item {
                 bottomPadding: 13
                 background: null
                 Accessible.name: placeholderText
+
+                // Links in accent ink and @mentions on the accent tint as
+                // they are typed or pasted (InputMentionOverlay.tsx).
+                ComposerHighlighter {
+                    document: input.textDocument
+                    linkColor: Theme.accentInk
+                    mentionColor: Theme.accentInk
+                    mentionBackground: Theme.accentTint
+                }
 
                 onTextChanged: {
                     root.updateMention()

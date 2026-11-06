@@ -23,6 +23,10 @@ Item {
     required property bool live
     // Camera on (`self_video`).
     property bool video: false
+    // Their voice session is coming back (voice-presence.ts): the leaf at
+    // half strength, its LED out.
+    property bool reconnecting: false
+    opacity: reconnecting ? 0.5 : 1
     required property bool me
     required property bool first
     required property bool last

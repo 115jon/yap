@@ -457,6 +457,52 @@ fn a_move_should_leave_and_join_the_target_with_its_grant() {
     assert_eq!(gateway_frames(&fx)[0]["d"]["move_grant"], "grant-1");
 }
 
+fn voice_channel(c: &Client) -> String {
+    c.state
+        .channels(SERVER)
+        .expect("tree")
+        .channels
+        .iter()
+        .find(|ch| ch.channel_type == yap_protocol::rest::ChannelType::Voice)
+        .expect("a voice channel")
+        .id
+        .clone()
+}
+
+#[test]
+fn a_reset_call_should_join_the_same_channel_again() {
+    // The room lost our session (a reset object): the call cannot carry
+    // on, so the same channel is joined afresh, with no leave in between.
+    let mut c = Client::online();
+    let voice = voice_channel(&c);
+    let (call, _) = voice_start(&c.command(Command::JoinVoice(voice.clone()))).expect("joins");
+    c.voice(call, VoiceUpdate::Connected);
+    let fx = c.voice(call, VoiceUpdate::Reset);
+    assert!(fx.contains(&Effect::VoiceForget(call)));
+    let (next, target) = voice_start(&fx).expect("joins again");
+    assert_ne!(next, call);
+    assert_eq!(target.channel_id, voice);
+    assert!(target.move_grant.is_none());
+    assert!(gateway_frames(&fx).is_empty(), "no presence leave");
+    assert!(!fx.contains(&Effect::View(ViewUpdate::Sound(Sound::Disconnect))));
+    assert_eq!(
+        c.state.voice().map(|v| v.channel_id.as_str()),
+        Some(voice.as_str())
+    );
+}
+
+#[test]
+fn a_reset_before_the_room_said_ready_should_end_with_the_reason() {
+    let mut c = Client::online();
+    let voice = voice_channel(&c);
+    let (call, _) = voice_start(&c.command(Command::JoinVoice(voice))).expect("joins");
+    let fx = c.voice(call, VoiceUpdate::Reset);
+    assert!(fx.contains(&Effect::VoiceForget(call)));
+    assert!(voice_start(&fx).is_none());
+    assert!(c.state.voice().is_none());
+    assert!(c.state.status().contains("reset"), "{}", c.state.status());
+}
+
 #[test]
 fn move_should_post_the_voice_move_route() {
     let mut c = Client::online();

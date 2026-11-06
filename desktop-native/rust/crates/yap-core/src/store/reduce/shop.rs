@@ -107,9 +107,14 @@ impl State {
             ShopCommand::Picker(kind) => {
                 self.shop.picker = kind.as_deref().and_then(Kind::parse);
                 self.shop.picker_query.clear();
+                self.shop.picker_draft = None;
                 self.shop.action_error.clear();
             }
             ShopCommand::PickerQuery(query) => self.shop.picker_query = query,
+            ShopCommand::PickerChoose(id) => {
+                self.shop.action_error.clear();
+                self.shop.picker_draft = Some(id).filter(|id| !id.is_empty());
+            }
         }
         self.sync_shop(fx);
     }

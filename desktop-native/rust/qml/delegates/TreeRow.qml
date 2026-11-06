@@ -6,9 +6,10 @@ import com.yap.native
 // voice channel (a Talk Tree leaf under it). Labels and channels open their
 // menu on a right click; a channel the user may manage has the gear, and
 // with Manage channels in the server it can be dragged within its group.
-// Under a voice channel its status shows (ChannelSidebar.tsx): read-only
-// while someone is in it; once we are connected there, with Set status (or
-// Edit status) and the picture's keys.
+// A voice channel's status shows after its people (ChannelSidebar.tsx):
+// read-only while someone is in it; once we are connected there, with "Set
+// a channel status" and "Set the vibe". The row that draws it is the
+// channel's last person, or the channel when nobody is listed.
 Loader {
     id: cell
 
@@ -34,6 +35,11 @@ Loader {
     required property string voiceStatus
     required property string voiceStatusMedia
     required property bool voiceStatusEditable
+    required property bool statusHere
+    required property bool reconnecting
+    required property string statusChannel
+    required property int occupants
+    required property double startedAt
     // The open channel (text, or a voice channel's view) and the joined call.
     required property string activeId
     required property string callId
@@ -59,22 +65,27 @@ Loader {
 
     Component {
         id: memberRow
-        MemberRow {
+        Column {
             width: cell.width
-            // Member rows are keyed `<channel>/<user>`.
-            userId: cell.itemId.slice(cell.itemId.indexOf("/") + 1)
-            channelId: cell.itemId.slice(0, cell.itemId.indexOf("/"))
-            name: cell.name
-            avatar: cell.avatar
-            muted: cell.muted
-            deafened: cell.deafened
-            speaking: cell.speaking
-            live: cell.live
-            video: cell.video
-            me: cell.me
-            first: cell.first
-            last: cell.last
-            lit: cell.lit
+            MemberRow {
+                width: cell.width
+                // Member rows are keyed `<channel>/<user>`.
+                userId: cell.itemId.slice(cell.itemId.indexOf("/") + 1)
+                channelId: cell.itemId.slice(0, cell.itemId.indexOf("/"))
+                name: cell.name
+                avatar: cell.avatar
+                muted: cell.muted
+                deafened: cell.deafened
+                speaking: cell.speaking
+                live: cell.live
+                video: cell.video
+                me: cell.me
+                first: cell.first
+                last: cell.last
+                lit: cell.lit
+                reconnecting: cell.reconnecting
+            }
+            StatusLines {}
         }
     }
 
@@ -91,6 +102,8 @@ Loader {
                 unread: cell.unread
                 mentions: cell.mentions
                 manage: cell.manage
+                occupants: cell.occupants
+                startedAt: cell.startedAt
                 draggable: cell.manage && Admin.canManageChannels
                 onSelected: cell.selected(cell.itemId)
                 onMenuRequested: (row, at) => cell.menuRequested(row, at)
@@ -99,15 +112,19 @@ Loader {
                 onDragMoved: scene => cell.dragMoved(scene)
                 onDragEnded: dropped => cell.dragEnded(dropped)
             }
-            VoiceStatusLine {
-                visible: cell.voice && (cell.voiceStatusEditable || cell.voiceStatus.length > 0 || cell.voiceStatusMedia.length > 0)
-                width: cell.width
-                channelId: cell.itemId
-                channelName: cell.name
-                text: cell.voiceStatus
-                media: cell.voiceStatusMedia
-                editable: cell.voiceStatusEditable
-            }
+            StatusLines {}
         }
+    }
+
+    component StatusLines: VoiceStatusLine {
+        // Member rows are keyed `<channel>/<user>`.
+        readonly property string ownerId: cell.kind === "member" ? cell.itemId.slice(0, cell.itemId.indexOf("/")) : cell.itemId
+        visible: cell.statusHere && (cell.voiceStatusEditable || cell.voiceStatus.length > 0 || cell.voiceStatusMedia.length > 0)
+        width: cell.width
+        channelId: ownerId
+        channelName: cell.statusChannel
+        text: cell.voiceStatus
+        media: cell.voiceStatusMedia
+        editable: cell.voiceStatusEditable
     }
 }

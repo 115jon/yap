@@ -65,7 +65,7 @@ Item {
         acceptedButtons: Qt.RightButton
         onTapped: eventPoint => ShellState.showPeerMenu(root.memberId, root.name, root, eventPoint.position, Voice.channelId)
     }
-    HoverHandler { id: hover }
+    HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
 
     Rectangle {
         id: surfaceBox
@@ -152,6 +152,7 @@ Item {
     // Our share: pause or resume its preview (shown on hover or focus).
     T.AbstractButton {
         id: previewKey
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
         visible: root.ownShare && !root.tray && (hover.hovered || visualFocus)
         x: 8
         y: 8

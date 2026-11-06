@@ -30,7 +30,7 @@
 //! | reconnecting | room Ready/Resumed or VoiceReady, with all three up again | joined | status "Connected" |
 //! | connecting, joined, reconnecting | `Leave` (or commands closed) | leaving | op 13 for our track (if the voice socket is ready), op 11 on voice, op 11 on room, arm a 200 ms linger |
 //! | leaving | linger fired | idle | end (left) |
-//! | connecting, joined, reconnecting | admission (or an incomplete one) or media failure, socket stopped (4008, 4010, expired session), Error 4008/4010 on voice, socket task gone, media failed or ended, fresh room participant after a failed resume | idle | end (with the reason) |
+//! | connecting, joined, reconnecting | admission (or an incomplete one) or media failure, socket stopped (4008, 4010, expired session), Error 4008/4010 on voice, socket task gone, media failed or ended, fresh room participant after a failed resume | idle | end (with the reason); for our own failures once the sockets are open (media failed or ended, the mic's publish failed, the fresh participant) op 11 on room and voice first, so the room does not hold the seat |
 //!
 //! `idle` after an end is final: a new call is a new machine. In
 //! `leaving` and after an end every input other than the linger is
@@ -114,9 +114,9 @@ pub use machine::{
     camera_alias, dm_call_slug, screen_alias, screen_audio_alias, stop_message, CallMachine,
     CallState, CallTarget, CameraPublished, Effect, Input, MediaEvent, MediaSpec, MediaState,
     Notice, Published, Republish, RoomEvent, Socket, SocketSpec, StatsSample, Timer, UserCommand,
-    VideoIntent, VoiceEvent, VoiceStats, CREDENTIAL_REFRESH, LEAVE_SEND_WINDOW, MAX_REBUILDS,
-    REBUILD_BACKOFF, REBUILD_STABLE_AFTER, REMOTE_RECONNECT_GRACE, STANDBY_STALE_AFTER,
-    STATS_SAMPLES, VIDEO_RELEASE_DELAY,
+    VideoIntent, VoiceEvent, VoiceStats, CALL_RESET, CREDENTIAL_REFRESH, LEAVE_SEND_WINDOW,
+    MAX_REBUILDS, REBUILD_BACKOFF, REBUILD_STABLE_AFTER, REMOTE_RECONNECT_GRACE,
+    STANDBY_STALE_AFTER, STATS_SAMPLES, VIDEO_RELEASE_DELAY,
 };
 pub use roster::{Member, Roster};
 pub use sfu::{LayerUpdate, Pulled, Pushed, Sfu};

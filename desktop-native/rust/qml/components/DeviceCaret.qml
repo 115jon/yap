@@ -35,4 +35,6 @@ T.AbstractButton {
         border.color: Theme.focus
         visible: caret.visualFocus
     }
+
+    HoverHandler { cursorShape: Qt.PointingHandCursor }
 }

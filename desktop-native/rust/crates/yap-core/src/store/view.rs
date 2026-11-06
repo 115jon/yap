@@ -215,6 +215,17 @@ rows! {
         status: String => Status "voiceStatus",
         status_media: String => StatusMedia "voiceStatusMedia",
         status_editable: bool => StatusEditable "voiceStatusEditable",
+        /// The status rows draw after this row: a voice channel's last
+        /// person, or the channel itself when nobody is listed.
+        status_here: bool => StatusHere "statusHere",
+        /// Members: dimmed, LED off (voice-presence.ts reconnecting).
+        reconnecting: bool => Reconnecting "reconnecting",
+        /// On that row: the voice channel's name (the status dialogs').
+        status_channel: String => StatusChannel "statusChannel",
+        /// Voice channels: how many are in the call, and when it started
+        /// (ms; 0 when unknown).
+        occupants: i64 => Occupants "occupants",
+        started_at: i64 => StartedAt "startedAt",
     }
     key(row) -> (TreeKind, String) { (row.kind, row.id.clone()) }
 
@@ -1268,6 +1279,10 @@ pub(super) struct Seat {
     pub me: bool,
     /// Their avatar decoration, filled in by the store.
     pub deco: String,
+    /// Dimmed with its LED off and no live glyph (voice-presence.ts):
+    /// their session is coming back, or this is us listed while this
+    /// client is not in the call.
+    pub reconnecting: bool,
 }
 
 /// Who is in `channel_id`: the gateway's occupants, with speaking (and our
@@ -1297,17 +1312,19 @@ pub(super) fn seats(
                         Some(c) => (c.muted, c.deafened, c.camera, c.share.is_some()),
                         None => (o.muted, o.deafened, o.video, o.stream),
                     };
+                    let reconnecting = o.reconnecting || (me && call.is_none());
                     Seat {
                         key: o.user_id.clone(),
                         name: o.name.clone(),
                         avatar: absolute_url(api_base, Some(&o.avatar_url)),
                         muted,
                         deafened,
-                        live,
                         video,
-                        speaking: member.is_some_and(|m| m.speaking),
+                        speaking: member.is_some_and(|m| m.speaking) && !reconnecting,
                         me,
                         deco: String::new(),
+                        live: live && !reconnecting,
+                        reconnecting,
                     }
                 })
                 .collect();
@@ -1362,6 +1379,7 @@ fn call_seat(m: &VoiceMember, key: String, call: &VoiceCall) -> Seat {
         speaking: m.speaking,
         me: m.me,
         deco: String::new(),
+        reconnecting: false,
     }
 }
 
@@ -1412,6 +1430,11 @@ fn plain_row(kind: TreeKind, id: &str, name: &str) -> ChannelTreeRow {
         status: String::new(),
         status_media: String::new(),
         status_editable: false,
+        status_here: false,
+        reconnecting: false,
+        status_channel: String::new(),
+        occupants: 0,
+        started_at: 0,
     }
 }
 
@@ -1429,11 +1452,12 @@ fn channel_row(channel: &Channel, (unread, mentions): Badge, manage_all: bool) -
 /// A voice channel's leaves. The path runs from the channel down to you:
 /// every leaf above yours carries the trunk, yours ends it.
 fn member_rows(channel_id: &str, seats: &[Seat]) -> Vec<ChannelTreeRow> {
-    let you = seats.iter().position(|s| s.me);
+    let you = seats.iter().position(|s| s.me && !s.reconnecting);
     seats
         .iter()
         .enumerate()
         .map(|(i, seat)| ChannelTreeRow {
+            reconnecting: seat.reconnecting,
             muted: seat.muted,
             speaking: seat.speaking,
             me: seat.me,

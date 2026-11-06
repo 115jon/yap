@@ -59,4 +59,6 @@ T.AbstractButton {
         color: control.checked ? Theme.primaryFillInk : Theme.ink2
         Behavior on x { NumberAnimation { duration: Theme.reducedMotion ? 0 : Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
     }
+
+    HoverHandler { cursorShape: Qt.PointingHandCursor }
 }

@@ -104,6 +104,7 @@ PlateDialog {
                 model: dialog.status.recents
                 AbstractButton {
                     id: recent
+                    HoverHandler { cursorShape: Qt.PointingHandCursor }
                     required property var modelData
                     width: 72
                     height: 72

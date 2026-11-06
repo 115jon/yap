@@ -28,7 +28,9 @@ use super::state::{
     Standby, Startup, State, Typer, VoiceCall, VoicePrefs,
 };
 use super::time::{is_after, parse_rfc3339, Stamp};
-use super::view::{self, ChannelTreeRow, MessageRow, Row, RowContext, ViewDiff, ViewUpdate};
+use super::view::{
+    self, ChannelTreeRow, MessageRow, Row, RowContext, TreeKind, ViewDiff, ViewUpdate,
+};
 use super::view::{MeView, MemberKind, MemberRole, Seat, UnreadView, VoicePanelView, VoiceView};
 use super::{
     ApiRequest, ApiResponse, CacheWrite, CallId, Command, Dispatch, Effect, GatewayEvent, Input,
@@ -348,40 +350,73 @@ impl State {
     }
 
     /// ChannelSidebar.tsx: the status shows under a voice channel while
-    /// anyone is in it; we may change it once our voice session is up there.
+    /// anyone is in it, after its people (on the last one's row, or the
+    /// channel's when nobody is listed); we may change it once our voice
+    /// session is up there. The channel row also carries how many are in
+    /// the call and when it started, for "2 · 0:47".
     fn add_voice_status(&self, rows: &mut [ChannelTreeRow]) {
+        for i in 0..rows.len() {
+            if !rows[i].voice || rows[i].kind != TreeKind::Channel {
+                continue;
+            }
+            let id = rows[i].id.clone();
+            let mut end = i;
+            while end + 1 < rows.len() && rows[end + 1].kind == TreeKind::Member {
+                end += 1;
+            }
+            rows[i].occupants = i64::try_from(end - i).unwrap_or(i64::MAX);
+            rows[i].started_at = if end > i {
+                self.voice_started_at.get(&id).copied().unwrap_or_default()
+            } else {
+                0
+            };
+            rows[end].status_here = true;
+            rows[end].status_channel = rows[i].name.clone();
+            self.fill_voice_status(&id, &mut rows[end]);
+            if end != i {
+                let (status, media, editable) = (
+                    rows[end].status.clone(),
+                    rows[end].status_media.clone(),
+                    rows[end].status_editable,
+                );
+                rows[i].status = status;
+                rows[i].status_media = media;
+                rows[i].status_editable = editable;
+            }
+        }
+    }
+
+    fn fill_voice_status(&self, channel_id: &str, row: &mut ChannelTreeRow) {
         let connected = self
             .voice
             .as_ref()
             .filter(|_| !self.apps.participant_id.is_empty())
             .map(|call| call.channel_id.as_str());
-        for row in rows.iter_mut().filter(|r| r.voice) {
-            let editable = connected == Some(row.id.as_str());
-            let occupied = editable
-                || self
-                    .voice_channels
-                    .get(&row.id)
-                    .is_some_and(|people| !people.is_empty());
-            let status = self
-                .find_channel(&row.id)
-                .and_then(|c| c.voice_status.as_ref())
-                .filter(|_| occupied);
-            row.status_editable = editable;
-            row.status = status
-                .and_then(|s| s.text.as_deref())
-                .map(str::trim)
-                .unwrap_or_default()
-                .to_owned();
-            row.status_media = status
-                .and_then(|s| s.media.as_ref())
-                .map(|m| {
-                    view::absolute_url(
-                        &self.api_base,
-                        Some(&crate::store::extras::status_media_url(m)),
-                    )
-                })
-                .unwrap_or_default();
-        }
+        let editable = connected == Some(channel_id);
+        let occupied = editable
+            || self
+                .voice_channels
+                .get(channel_id)
+                .is_some_and(|people| !people.is_empty());
+        let status = self
+            .find_channel(channel_id)
+            .and_then(|c| c.voice_status.as_ref())
+            .filter(|_| occupied);
+        row.status_editable = editable;
+        row.status = status
+            .and_then(|s| s.text.as_deref())
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_owned();
+        row.status_media = status
+            .and_then(|s| s.media.as_ref())
+            .map(|m| {
+                view::absolute_url(
+                    &self.api_base,
+                    Some(&crate::store::extras::status_media_url(m)),
+                )
+            })
+            .unwrap_or_default();
     }
 
     /// Read marks, newest messages or notifications changed.
@@ -735,6 +770,8 @@ impl State {
                     deafened: m.self_deaf.unwrap_or(false),
                     video: m.self_video.unwrap_or(false),
                     stream: m.self_stream.unwrap_or(false),
+                    reconnecting: m.connection_state.as_deref() == Some("reconnecting")
+                        || m.connected == Some(false),
                     user_id: m.user_id,
                 }
             })
@@ -3034,6 +3071,18 @@ impl State {
                 }
             }
             Dispatch::VoiceChannelStates(states) => {
+                let mut started = std::collections::HashMap::new();
+                for (id, members) in &states.voice_states {
+                    let at = earliest_start(
+                        states.voice_started_at.get(id),
+                        self.voice_started_at.get(id).copied(),
+                        members,
+                    );
+                    if let Some(at) = at {
+                        started.insert(id.clone(), at);
+                    }
+                }
+                self.voice_started_at = started;
                 let next = states
                     .voice_states
                     .into_iter()
@@ -3062,6 +3111,15 @@ impl State {
                 };
                 if let Some(sound) = sound {
                     fx.view(ViewUpdate::Sound(sound));
+                }
+                if update.members.is_empty() {
+                    self.voice_started_at.remove(&update.channel_id);
+                } else if let Some(at) = earliest_start(
+                    update.started_at.as_ref(),
+                    self.voice_started_at.get(&update.channel_id).copied(),
+                    &update.members,
+                ) {
+                    self.voice_started_at.insert(update.channel_id.clone(), at);
                 }
                 if update.members.is_empty() {
                     self.voice_channels.remove(&update.channel_id);
@@ -3607,6 +3665,25 @@ impl State {
             VoiceUpdate::MicStalled(stalled) => {
                 return self.on_call_stalls(fx, None, Some(stalled))
             }
+            VoiceUpdate::Reset => {
+                // The room lost our session (its object reset) and made a
+                // new participant the old media cannot serve. A joined
+                // channel call carries on as a fresh join of the same
+                // channel: no leave sound, no presence leave, and the room
+                // hands the seat over (one session per user). A DM call or
+                // one never joined just ends.
+                if !current.joined || current.dm {
+                    let reason = super::CALL_RESET.to_owned();
+                    return self.on_voice(fx, call, VoiceUpdate::Ended(Some(reason)));
+                }
+                let Some(ended) = self.voice.take() else {
+                    return;
+                };
+                self.apps_call_ended(fx);
+                self.calls_call_ended();
+                fx.push(Effect::VoiceForget(ended.id));
+                return self.start_voice(fx, ended.server_id, ended.channel_id, None, None);
+            }
             VoiceUpdate::Ended(error) => {
                 // A forced end: the leave sound and presence leave only if
                 // the room had said Ready.
@@ -3640,7 +3717,7 @@ impl State {
 fn join_error_copy(error: &str) -> String {
     let lower = error.to_ascii_lowercase();
     let has = |needles: &[&str]| needles.iter().any(|n| lower.contains(n));
-    if has(&["somewhere else", "moved to another"]) {
+    if has(&["somewhere else", "moved to another", "was reset"]) {
         // Already written for people (yap-voice close reasons).
         return error.to_owned();
     }
@@ -3662,4 +3739,27 @@ fn join_error_copy(error: &str) -> String {
 
 fn unexpected(response: &ApiResponse) -> ApiError {
     ApiError::Decode(format!("unexpected response: {response:?}"))
+}
+
+/// The call's start for the sidebar clock (chat-reducer.ts
+/// SET_VOICE_CHANNEL_STATES): the earliest of what the server sent, what
+/// we had and the first member's join, ignoring anything not positive.
+fn earliest_start(
+    sent: Option<&serde_json::Value>,
+    had: Option<i64>,
+    members: &[yap_protocol::payload::VoiceChannelMember],
+) -> Option<i64> {
+    let ms = |v: &serde_json::Value| {
+        v.as_f64()
+            .filter(|n| n.is_finite() && *n > 0.0)
+            .map(|n| n as i64)
+    };
+    let joined = members
+        .iter()
+        .filter_map(|m| m.joined_at.as_ref().and_then(ms))
+        .min();
+    [sent.and_then(ms), had.filter(|n| *n > 0), joined]
+        .into_iter()
+        .flatten()
+        .min()
 }

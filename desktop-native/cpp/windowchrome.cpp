@@ -38,12 +38,28 @@ void WindowChrome::setTitleBar(QQuickItem* item)
   emit titleBarChanged();
 }
 
+void WindowChrome::setMinimizeButton(QQuickItem* item)
+{
+  if (m_minimizeButton == item)
+    return;
+  m_minimizeButton = item;
+  emit buttonsChanged();
+}
+
 void WindowChrome::setMaximizeButton(QQuickItem* item)
 {
   if (m_maximizeButton == item)
     return;
   m_maximizeButton = item;
-  emit maximizeButtonChanged();
+  emit buttonsChanged();
+}
+
+void WindowChrome::setCloseButton(QQuickItem* item)
+{
+  if (m_closeButton == item)
+    return;
+  m_closeButton = item;
+  emit buttonsChanged();
 }
 
 void WindowChrome::setHitTestVisible(QQuickItem* item, bool visible)
@@ -72,20 +88,35 @@ void WindowChrome::setBorderColor(const QColor& color)
   emit borderColorChanged();
 }
 
-void WindowChrome::setMaximizeHovered(bool hovered)
+void WindowChrome::setHoveredButton(int button)
 {
-  if (m_maximizeHovered == hovered)
+  if (m_hoveredButton == button)
     return;
-  m_maximizeHovered = hovered;
-  emit maximizeHoveredChanged();
+  m_hoveredButton = button;
+  emit hoveredButtonChanged();
 }
 
-void WindowChrome::setMaximizePressed(bool pressed)
+void WindowChrome::setPressedButton(int button)
 {
-  if (m_maximizePressed == pressed)
+  if (m_pressedButton == button)
     return;
-  m_maximizePressed = pressed;
-  emit maximizePressedChanged();
+  m_pressedButton = button;
+  emit pressedButtonChanged();
+}
+
+int WindowChrome::buttonAt(const QPointF& scenePos) const
+{
+#ifdef Q_OS_WIN
+  if (contains(m_minimizeButton, scenePos))
+    return HTMINBUTTON;
+  if (contains(m_maximizeButton, scenePos))
+    return HTMAXBUTTON;
+  if (contains(m_closeButton, scenePos))
+    return HTCLOSE;
+#else
+  Q_UNUSED(scenePos);
+#endif
+  return 0;
 }
 
 void WindowChrome::toggleMaximized()
@@ -144,6 +175,13 @@ bool WindowChrome::contains(QQuickItem* item, const QPointF& scenePos) const
     return false;
   return item->contains(item->mapFromScene(scenePos));
 }
+
+#ifdef Q_OS_WIN
+static bool isCaptionKey(WPARAM hit)
+{
+  return hit == HTMINBUTTON || hit == HTMAXBUTTON || hit == HTCLOSE;
+}
+#endif
 
 bool WindowChrome::nativeEventFilter(const QByteArray& eventType,
                                      void* message, qintptr* result)
@@ -264,8 +302,8 @@ bool WindowChrome::nativeEventFilter(const QByteArray& eventType,
       }
       const qreal ratio = m_window->devicePixelRatio();
       const QPointF scenePos(pt.x / ratio, pt.y / ratio);
-      if (contains(m_maximizeButton, scenePos)) {
-        *result = HTMAXBUTTON;
+      if (const int button = buttonAt(scenePos)) {
+        *result = button;
         return true;
       }
       for (const auto& item : std::as_const(m_hitTestVisible)) {
@@ -278,42 +316,54 @@ bool WindowChrome::nativeEventFilter(const QByteArray& eventType,
       return true;
     }
 
-    // Over HTMAXBUTTON Windows sends non-client mouse messages; mirror them
-    // into QML and click the key ourselves (the default would draw and track
-    // a classic caption button).
+    // Over a caption key Windows sends non-client mouse messages; mirror
+    // them into QML and click the key ourselves (the default would draw and
+    // track a classic caption button).
     case WM_NCMOUSEMOVE: {
-      const bool over = msg->wParam == HTMAXBUTTON;
-      if (over && !m_maximizeHovered) {
+      const int over = isCaptionKey(msg->wParam) ? int(msg->wParam) : 0;
+      if (over && m_hoveredButton != over) {
         TRACKMOUSEEVENT track{ sizeof(TRACKMOUSEEVENT),
                                TME_LEAVE | TME_NONCLIENT, hwnd, 0 };
         TrackMouseEvent(&track);
       }
-      setMaximizeHovered(over);
-      if (!over)
-        setMaximizePressed(false);
+      setHoveredButton(over);
+      if (over != m_pressedButton)
+        setPressedButton(0);
+      return false;
+    }
+    case WM_LBUTTONDOWN: {
+      const qreal ratio = m_window->devicePixelRatio();
+      m_lastPress = QPointF(GET_X_LPARAM(msg->lParam) / ratio,
+                            GET_Y_LPARAM(msg->lParam) / ratio);
+      setHoveredButton(0);
+      setPressedButton(0);
       return false;
     }
     case WM_NCMOUSELEAVE:
     case WM_MOUSEMOVE:
-      setMaximizeHovered(false);
-      setMaximizePressed(false);
+      setHoveredButton(0);
+      setPressedButton(0);
       return false;
     case WM_NCLBUTTONDOWN:
     case WM_NCLBUTTONDBLCLK:
-      if (msg->wParam != HTMAXBUTTON)
+      if (!isCaptionKey(msg->wParam))
         return false;
-      setMaximizePressed(true);
+      setPressedButton(int(msg->wParam));
       *result = 0;
       return true;
-    case WM_NCLBUTTONUP:
-      if (msg->wParam != HTMAXBUTTON)
+    case WM_NCLBUTTONUP: {
+      if (!isCaptionKey(msg->wParam))
         return false;
-      if (m_maximizePressed) {
-        setMaximizePressed(false);
-        toggleMaximized();
+      const int button = int(msg->wParam);
+      if (m_pressedButton == button) {
+        setPressedButton(0);
+        if (button == HTMAXBUTTON)
+          toggleMaximized();
+        emit buttonClicked(button);
       }
       *result = 0;
       return true;
+    }
     default:
       return false;
   }

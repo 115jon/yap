@@ -21,7 +21,8 @@ pub mod qobject {
         /// The page's rows: `hero`, `heading`, `collections`, `rail`,
         /// `grid`, `status`, `loading` or `empty` (see store/shop.rs).
         #[qproperty(QString, rows)]
-        /// The open picker's rows (`none`, `heading`, `grid`).
+        /// The open picker: its copy, sections, draft and preview, or
+        /// `null` (store/shop.rs `picker_json`).
         #[qproperty(QString, picker)]
         /// The open detail, or `null`.
         #[qproperty(QString, detail)]
@@ -63,6 +64,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "setPickerQuery"]
         fn set_picker_query(self: &Shop, query: &QString);
+        /// The picker's draft: an item id, or `__none`.
+        #[qinvokable]
+        #[cxx_name = "choosePicker"]
+        fn choose_picker(self: &Shop, id: &QString);
     }
 
     extern "RustQt" {
@@ -212,6 +217,10 @@ impl qobject::Shop {
 
     pub fn set_picker_query(&self, query: &QString) {
         send(ShopCommand::PickerQuery(text(query)));
+    }
+
+    pub fn choose_picker(&self, id: &QString) {
+        send(ShopCommand::PickerChoose(text(id)));
     }
 }
 

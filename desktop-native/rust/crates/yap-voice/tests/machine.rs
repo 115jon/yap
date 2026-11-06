@@ -696,10 +696,55 @@ fn fresh_room_participant_after_a_drop_should_end_the_call() {
         participant_id: "someone-new".into(),
         ..room_state(&[])
     })));
+    assert_eq!(ends(&fx), vec![Some(yap_voice::CALL_RESET.into())]);
+}
+
+#[test]
+fn fresh_room_participant_after_a_drop_should_leave_the_room_before_ending() {
+    // The room identified a new participant for us: unless it hears the
+    // leave, it holds that seat for a resume (a ghost for 120 s).
+    let mut m = joined();
+    let fx = m.handle(Input::Room(RoomEvent::Ready(RoomState {
+        participant_id: "someone-new".into(),
+        ..room_state(&[])
+    })));
+    assert_eq!(ops(&fx, Socket::Room), vec![11]);
+    assert_eq!(ops(&fx, Socket::Voice), vec![11]);
+    let leave = fx
+        .iter()
+        .position(|e| matches!(e, Effect::Send(Socket::Room, _)))
+        .expect("op 11");
+    let end = fx
+        .iter()
+        .position(|e| matches!(e, Effect::End(_)))
+        .expect("end");
+    assert!(leave < end, "the leave goes out before the sockets close");
+}
+
+#[test]
+fn a_failed_media_connection_should_leave_the_room_before_ending() {
+    let mut m = joined();
+    for _ in 0..yap_voice::MAX_REBUILDS {
+        flap(&mut m);
+    }
+    let fx = m.handle(failed());
+    assert_eq!(ends(&fx), vec![Some("Media connection failed".into())]);
+    assert_eq!(ops(&fx, Socket::Room), vec![11]);
+}
+
+#[test]
+fn a_replaced_session_should_end_without_a_leave() {
+    // The room already ended it (4010): nothing to tell it.
+    let mut m = joined();
+    let fx = m.handle(Input::Room(RoomEvent::Stopped(StopReason::Replaced {
+        code: 4010,
+        reason: "Voice moved to another device".into(),
+    })));
     assert_eq!(
         ends(&fx),
-        vec![Some("The call connection was reset. Join again.".into())]
+        vec![Some("You joined this call somewhere else.".into())]
     );
+    assert!(ops(&fx, Socket::Room).is_empty());
 }
 
 #[test]
@@ -1098,6 +1143,7 @@ fn playback(output: f64, peers: &[(&str, f64)]) -> Input {
     Input::Command(UserCommand::SetPlayback(Playback {
         output,
         peers: peers.iter().map(|(u, g)| ((*u).to_owned(), *g)).collect(),
+        ..Playback::default()
     }))
 }
 

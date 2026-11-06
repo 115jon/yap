@@ -207,6 +207,102 @@ fn beacon() -> &'static Mutex<Option<Beacon>> {
     &BEACON
 }
 
+/// The beacon as kept on disk while a call is up, so a process that dies
+/// mid-call (a crash, a kill, a power cut) can still say it left: the next
+/// start sends it ([`send_stale_beacon`]). Without it the room holds the
+/// dead session for a resume, and the user shows as reconnecting in the
+/// channel for its 120 s grace (90 s more if the close never arrived).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+struct StoredBeacon {
+    user_id: String,
+    server_id: String,
+    channel_id: String,
+    participant_id: String,
+}
+
+/// `voice-beacon.json` in this profile's folder.
+fn beacon_file() -> Option<std::path::PathBuf> {
+    yap_cache::profile::data_root().map(|root| root.join("voice-beacon.json"))
+}
+
+fn store_beacon(stored: &StoredBeacon) {
+    let Some(path) = beacon_file() else {
+        return;
+    };
+    let written = std::fs::create_dir_all(path.parent().unwrap_or(&path))
+        .and_then(|()| std::fs::write(&path, serde_json::to_vec(stored).unwrap_or_default()));
+    if let Err(error) = written {
+        eprintln!("[voice] beacon not kept: {error}");
+    }
+}
+
+/// Forgets the kept beacon if it is `participant_id`'s (any, for `None`).
+fn forget_stored_beacon(participant_id: Option<&str>) {
+    let Some(path) = beacon_file() else {
+        return;
+    };
+    let ours = match participant_id {
+        None => true,
+        Some(id) => read_stored_beacon(&path).is_some_and(|b| b.participant_id == id),
+    };
+    if ours {
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+fn read_stored_beacon(path: &std::path::Path) -> Option<StoredBeacon> {
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
+/// At sign-in (once per process): a beacon kept by an earlier process
+/// means it died in a call. Sends it, so the room drops that session now
+/// rather than after its resume grace; a join that already replaced it
+/// makes this a no-op. Another account's beacon is dropped unsent.
+pub fn send_stale_beacon(api: &Api, user_id: &str) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    let mut first = false;
+    ONCE.call_once(|| first = true);
+    if !first {
+        return;
+    }
+    let Some(path) = beacon_file() else {
+        return;
+    };
+    let Some(stale) = read_stored_beacon(&path) else {
+        let _ = std::fs::remove_file(&path);
+        return;
+    };
+    let live = beacon()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|b| b.participant_id == stale.participant_id);
+    if live {
+        return;
+    }
+    let _ = std::fs::remove_file(&path);
+    if stale.user_id != user_id || stale.server_id.is_empty() {
+        return;
+    }
+    let api = api.clone();
+    tokio::spawn(async move {
+        let body = serde_json::json!({
+            "server_id": stale.server_id,
+            "gateway_session_id": null,
+            "voice_session_id": stale.participant_id,
+        });
+        let path = format!("/api/channels/{}/voice-disconnect", stale.channel_id);
+        let result = api.post(&path, &body).await;
+        eprintln!(
+            "[voice] stale call beacon: {}",
+            match result {
+                Ok(_) => "sent".to_owned(),
+                Err(error) => error.to_string(),
+            }
+        );
+    });
+}
+
 /// On quit (voice-disconnect-beacon.ts on `pagehide`): `POST
 /// /api/channels/{id}/voice-disconnect` with our voice session, so the room
 /// drops us at once rather than after the heartbeat timeout. Waits at most
@@ -219,6 +315,9 @@ pub fn send_disconnect_beacon(wait: Duration) {
     else {
         return;
     };
+    // Sent now (or the call's own leave goes out on quit): nothing is left
+    // for the next start to send.
+    forget_stored_beacon(Some(&beacon.participant_id));
     if beacon.server_id.is_empty() {
         return;
     }
@@ -310,6 +409,7 @@ pub async fn run(
     // Our voice session in this call, once the voice socket is ready.
     let my_participant: Mutex<Option<String>> = Mutex::new(None);
     let (beacon_channel, beacon_server) = (target.channel_id.clone(), target.server_id.clone());
+    let beacon_user = target.me_id.clone();
     let target = CallTarget {
         server_id: target.server_id,
         channel_id: target.channel_id,
@@ -337,6 +437,14 @@ pub async fn run(
                 server_id: beacon_server.clone(),
                 participant_id: participant_id.clone(),
             });
+            if !beacon_server.is_empty() {
+                store_beacon(&StoredBeacon {
+                    user_id: beacon_user.clone(),
+                    server_id: beacon_server.clone(),
+                    channel_id: beacon_channel.clone(),
+                    participant_id: participant_id.clone(),
+                });
+            }
             events.send(VoiceUpdate::VoiceReady { participant_id });
         }
         Notice::Moved(to) => events.send(VoiceUpdate::Moved(VoiceMoved {
@@ -388,7 +496,14 @@ pub async fn run(
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take_if(|b| b.participant_id == mine);
+        // The call ended in this process: its leave (or the room's own
+        // end) already went out.
+        forget_stored_beacon(Some(&mine));
     }
     crate::audio::set_live_level(None);
-    events.send(VoiceUpdate::Ended(error));
+    events.send(if error.as_deref() == Some(yap_voice::CALL_RESET) {
+        VoiceUpdate::Reset
+    } else {
+        VoiceUpdate::Ended(error)
+    });
 }

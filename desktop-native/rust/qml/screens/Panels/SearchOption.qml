@@ -28,6 +28,7 @@ Rectangle {
 
     HoverHandler {
         id: hover
+        cursorShape: Qt.PointingHandCursor
         onPointChanged: if (!root.lit) root.hovered()
     }
     TapHandler { onTapped: root.picked() }

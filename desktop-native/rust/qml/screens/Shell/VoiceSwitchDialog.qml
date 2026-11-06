@@ -32,6 +32,7 @@ PlateDialog {
 
     CheckBox {
         id: dontAsk
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
         text: qsTr("Don't ask again")
         padding: 0
         spacing: 8

@@ -13,9 +13,14 @@ T.MenuItem {
     property bool danger: false
     property bool switchable: false
     property bool on: false
+    // The menu's lead action (Watch stream): semibold.
+    property bool bold: false
+    // A second line under the label (12, ink-3), as StreamMenuEntries
+    // draws an entry's description.
+    property string description: ""
 
     implicitWidth: Math.max(200, implicitContentWidth + leftPadding + rightPadding)
-    implicitHeight: 36
+    implicitHeight: description.length > 0 ? 36 + 16 + 6 : 36
     leftPadding: 12
     rightPadding: switchable ? 36 : 12
 
@@ -40,12 +45,24 @@ T.MenuItem {
             size: Theme.iconSm
             color: control.danger ? Theme.dangerInk : Theme.ink2
         }
-        Text {
+        Column {
             anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-            text: control.text
-            color: control.danger ? Theme.dangerInk : control.enabled ? Theme.ink1 : Theme.ink3
-            font: Theme.type.row
+            spacing: 2
+            Text {
+                textFormat: Text.PlainText
+                text: control.text
+                color: control.danger ? Theme.dangerInk : control.enabled ? Theme.ink1 : Theme.ink3
+                font: control.bold ? Theme.type.panelTitle : Theme.type.row
+            }
+            Text {
+                visible: control.description.length > 0
+                width: Math.max(0, control.availableWidth - (control.glyph.length > 0 ? 28 : 0))
+                wrapMode: Text.Wrap
+                textFormat: Text.PlainText
+                text: control.description
+                color: Theme.ink3
+                font: Theme.type.caption
+            }
         }
     }
     background: Rectangle {

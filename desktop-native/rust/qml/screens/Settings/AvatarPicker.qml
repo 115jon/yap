@@ -25,6 +25,7 @@ PlateDialog {
 
     AbstractButton {
         id: upload
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
         width: parent.width
         height: 112
         hoverEnabled: true
@@ -142,6 +143,7 @@ PlateDialog {
         HoverHandler { id: tileHover }
         AbstractButton {
             id: pick
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
             anchors.fill: parent
             enabled: !dialog.busy
             Accessible.role: Accessible.Button

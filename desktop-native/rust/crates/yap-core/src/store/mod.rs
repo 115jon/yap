@@ -180,6 +180,8 @@ pub struct Occupant {
     pub deafened: bool,
     pub video: bool,
     pub stream: bool,
+    /// Their voice session is coming back (`isVoiceMemberReconnecting`).
+    pub reconnecting: bool,
 }
 
 /// What a voice session reports back.
@@ -229,4 +231,11 @@ pub enum VoiceUpdate {
     MicStalled(bool),
     /// The call is over; the error text if it failed.
     Ended(Option<String>),
+    /// The call is over because the room lost our session and made a new
+    /// participant (a reset room object): a joined channel call is joined
+    /// again at once; anything else ends as `Ended` with [`CALL_RESET`].
+    Reset,
 }
+
+/// What a reset call that is not joined again says.
+pub const CALL_RESET: &str = "The call connection was reset. Join again.";

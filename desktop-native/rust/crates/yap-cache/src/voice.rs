@@ -46,7 +46,8 @@ pub enum InputProfile {
     Custom,
 }
 
-/// What we hear of one person (`PeerSettings` `volume`, `muted`).
+/// What we hear of one person (`PeerSettings` `volume`, `muted`, and for
+/// their share `streamVolume`, `alwaysHear` and the attenuation pair).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 #[serde(rename_all = "camelCase")]
@@ -56,6 +57,14 @@ pub struct PeerSettings {
     pub muted: bool,
     /// Their soundboard is silent for us (`soundboardMuted`).
     pub soundboard_muted: bool,
+    /// Their share's audio, 0..=200 percent ("Stream volume").
+    pub stream_volume: u16,
+    /// Their share's audio plays even while it is not on stage.
+    pub always_hear: bool,
+    /// "Stream attenuation" and its strength (0..=100). Kept as the web
+    /// keeps them; neither client lowers the stream with them yet.
+    pub attenuation_enabled: bool,
+    pub attenuation_strength: u16,
 }
 
 impl Default for PeerSettings {
@@ -64,6 +73,10 @@ impl Default for PeerSettings {
             volume: 100,
             muted: false,
             soundboard_muted: false,
+            stream_volume: 100,
+            always_hear: false,
+            attenuation_enabled: false,
+            attenuation_strength: 50,
         }
     }
 }
@@ -167,6 +180,8 @@ impl VoiceSettings {
     pub fn set_peer(&mut self, user_id: &str, peer: PeerSettings) {
         let peer = PeerSettings {
             volume: peer.volume.min(MAX_VOLUME),
+            stream_volume: peer.stream_volume.min(MAX_VOLUME),
+            attenuation_strength: peer.attenuation_strength.min(100),
             ..peer
         };
         if peer == PeerSettings::default() {
@@ -294,6 +309,7 @@ mod tests {
                 volume: 40,
                 muted: true,
                 soundboard_muted: true,
+                ..PeerSettings::default()
             },
         );
         save_voice(dir.path(), "u-jon", &jon).expect("save");
@@ -307,6 +323,24 @@ mod tests {
             serde_json::from_str(r#"{"volume":100,"muted":false,"soundboardMuted":true}"#)
                 .expect("json");
         assert!(peer.soundboard_muted);
+    }
+
+    #[test]
+    fn stream_settings_should_read_as_the_web_names_them() {
+        let peer: PeerSettings = serde_json::from_str(
+            r#"{"streamVolume":30,"alwaysHear":true,"attenuationEnabled":true,"attenuationStrength":70}"#,
+        )
+        .expect("json");
+        assert_eq!(
+            (
+                peer.volume,
+                peer.stream_volume,
+                peer.always_hear,
+                peer.attenuation_enabled,
+                peer.attenuation_strength
+            ),
+            (100, 30, true, true, 70)
+        );
     }
 
     #[test]
@@ -325,6 +359,7 @@ mod tests {
                 volume: 50,
                 muted: false,
                 soundboard_muted: false,
+                ..PeerSettings::default()
             },
         );
         s.set_peer("u-ana", PeerSettings::default());
@@ -340,6 +375,7 @@ mod tests {
                 volume: 900,
                 muted: false,
                 soundboard_muted: false,
+                ..PeerSettings::default()
             },
         );
         assert_eq!(s.peer("u-ana").volume, 200);

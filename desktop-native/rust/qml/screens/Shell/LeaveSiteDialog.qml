@@ -72,6 +72,7 @@ PlateDialog {
 
     CheckBox {
         id: trust
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
         width: parent.width
         text: qsTr("Trust %1 links from now on").arg(dialog.host)
         padding: 0

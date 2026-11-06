@@ -371,12 +371,20 @@ fn channels_result_should_open_the_first_text_channel_and_request_its_page() {
         status: String::new(),
         status_media: String::new(),
         status_editable: false,
+        status_here: false,
+        reconnecting: false,
+        status_channel: String::new(),
+        occupants: 0,
+        started_at: 0,
     };
-    // Members have not answered: no Manage channels yet.
+    // Members have not answered: no Manage channels yet. An empty voice
+    // channel draws its own status rows.
     let channel = |id: &str, name: &str, voice, category: &str| ChannelTreeRow {
         kind: TreeKind::Channel,
         voice,
         category: category.into(),
+        status_here: voice,
+        status_channel: if voice { name.into() } else { String::new() },
         ..label(id, name)
     };
     assert_eq!(
@@ -1239,6 +1247,47 @@ fn a_voice_state_delta_should_keep_names_and_avatars() {
 }
 
 #[test]
+fn a_reconnecting_occupant_should_dim_and_lose_the_live_glyph() {
+    let mut client = Client::online();
+    let mut ada = occupant("user_ada", "Ada");
+    ada["self_stream"] = json!(true);
+    ada["connection_state"] = json!("reconnecting");
+    let fx = client.gateway(GatewayEvent::Dispatch(voice_states(
+        json!({ VOICE: [ada] }),
+    )));
+    let row = members_of(&fx).into_iter().next().expect("a member row");
+    assert!(row.reconnecting && !row.live);
+}
+
+#[test]
+fn a_voice_channel_in_use_should_count_its_people_and_its_start() {
+    let mut client = Client::online();
+    let fx = client.gateway(GatewayEvent::Dispatch(
+        Dispatch::decode(
+            "VOICE_CHANNEL_STATES",
+            json!({
+                "voice_states": { VOICE: [occupant("user_ada", "Ada"), occupant("user_bo", "Bo")] },
+                "voice_started_at": { VOICE: 1_700_000_000_000_i64 },
+            }),
+        )
+        .expect("decodes"),
+    ));
+    let channel = tree_diffs(&fx)
+        .into_iter()
+        .flat_map(|d| match d {
+            ViewDiff::Reset(rows) | ViewDiff::Insert { rows, .. } => rows.clone(),
+            ViewDiff::Update { row, .. } => vec![row.clone()],
+            ViewDiff::Remove { .. } => Vec::new(),
+        })
+        .find(|r| r.id == VOICE)
+        .expect("the channel row");
+    assert_eq!(
+        (channel.occupants, channel.started_at, channel.status_here),
+        (2, 1_700_000_000_000, false)
+    );
+}
+
+#[test]
 fn an_empty_voice_state_should_clear_the_channel() {
     let mut client = Client::online();
     client.gateway(GatewayEvent::Dispatch(voice_states(json!({
@@ -1246,7 +1295,8 @@ fn an_empty_voice_state_should_clear_the_channel() {
     }))));
     let fx = client.gateway(GatewayEvent::Dispatch(voice_state(VOICE, json!([]))));
     assert!(client.state.occupants(VOICE).is_empty());
-    assert_eq!(tree_diffs(&fx), vec![&ViewDiff::Remove { at: 4, count: 1 }]);
+    // The channel row also loses its count and takes the status rows back.
+    assert_eq!(structural(&fx), vec![&ViewDiff::Remove { at: 4, count: 1 }]);
 }
 
 #[test]
@@ -1786,7 +1836,7 @@ fn joining_voice_should_put_the_roster_under_the_voice_channel() {
         update: VoiceUpdate::Roster(vec![member("p_me", false), member("p_two", false)]),
     });
     // Label, general, label, lounge: members go in at 4.
-    let Some(ViewDiff::Insert { at: 4, rows }) = tree_diffs(&fx).first().copied() else {
+    let Some(ViewDiff::Insert { at: 4, rows }) = structural(&fx).first().copied() else {
         panic!("{fx:#?}");
     };
     let names: Vec<(TreeKind, &str, bool)> =
@@ -1834,7 +1884,7 @@ fn leaving_voice_should_remove_the_member_rows() {
         update: VoiceUpdate::Roster(vec![member("p_me", false), member("p_two", false)]),
     });
     let fx = client.command(Command::LeaveVoice);
-    assert_eq!(tree_diffs(&fx), vec![&ViewDiff::Remove { at: 4, count: 2 }]);
+    assert_eq!(structural(&fx), vec![&ViewDiff::Remove { at: 4, count: 2 }]);
 }
 
 #[test]
@@ -2458,6 +2508,14 @@ fn mention(id: &str, channel: &str, message: &str) -> Value {
 }
 
 /// The last state of a tree row in these effects.
+/// The tree's inserts and removes, without the row updates around them.
+fn structural(fx: &[Effect]) -> Vec<&ViewDiff<ChannelTreeRow>> {
+    tree_diffs(fx)
+        .into_iter()
+        .filter(|d| !matches!(d, ViewDiff::Update { .. }))
+        .collect()
+}
+
 fn tree_row(fx: &[Effect], id: &str) -> Option<ChannelTreeRow> {
     tree_diffs(fx).into_iter().rev().find_map(|d| match d {
         ViewDiff::Update { row, .. } if row.id == id => Some(row.clone()),

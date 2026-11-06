@@ -291,6 +291,7 @@ Item {
                 model: link.item.urls
                 AbstractButton {
                     id: url
+                    HoverHandler { cursorShape: Qt.PointingHandCursor }
                     required property string modelData
                     width: linkBody.width
                     height: 22

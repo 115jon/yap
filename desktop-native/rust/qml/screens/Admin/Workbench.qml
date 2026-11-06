@@ -95,7 +95,8 @@ T.Popup {
 
     T.Overlay.modal: Scrim {
         color: Theme.scrim
-        TapHandler { onTapped: bench.requestClose() }
+        stepsBack: true
+        onTapped: bench.requestClose()
     }
 
     enter: Transition {
