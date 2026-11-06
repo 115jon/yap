@@ -21,6 +21,8 @@ mod desktop;
 mod extras;
 mod friends;
 mod gui;
+#[cfg(windows)]
+mod installer;
 mod invites;
 mod loopback;
 mod media;

@@ -17,6 +17,7 @@ pub mod custom_sounds;
 pub mod emoji;
 pub mod fixture;
 pub mod gif_favorite;
+pub mod install;
 pub mod links;
 pub mod markdown;
 pub mod picker;

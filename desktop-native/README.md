@@ -336,8 +336,8 @@ the decisions.
   - pull self-healing (op 109 out, op 110 republishes), the SFU session
     rebuild on a failed peer connection, releasing video pulls nobody
     shows (pulled again on a video session of their own), and the hidden
-    standby on an occupied voice landing (Join promotes it; opt-in with
-    `YAP_VOICE_STANDBY=on` until its promoted mic captures);
+    standby on an occupied voice landing (Join promotes it; off with
+    `YAP_VOICE_STANDBY=off`);
   - sticker reactions: the dock's GIF & sticker reactions key opens the
     GIF picker in react mode (Single, Burst, Rain, Bounce; 5 at once, then
     one every 3 s, "Slow down!"), and the overlay plays every sticker the
@@ -401,6 +401,23 @@ You need:
 `build.ps1` enters the VS developer shell, configures with CMake, and builds
 with Ninja. A dynamic Qt also works; you then need `windeployqt` to run it.
 
+## Installer
+
+`tools/package.ps1` builds the release exe and packs it with Velopack
+(`vpk`) into a per-user `YapNative.App-win-Setup.exe`: no admin, no .NET at
+install time, installed to `%LOCALAPPDATA%\YapNative.App` (never the data
+root `%LOCALAPPDATA%\YapNative`, which uninstall keeps). The version is
+`[workspace.package]` in `rust/Cargo.toml`, which CMake reads too.
+
+```powershell
+./tools/package.ps1            # unsigned, into build/installer
+./tools/package.ps1 -Sign      # Authenticode through Azure Artifact Signing
+```
+
+Design, hooks, parity with the Tauri app's installer, signing and CI
+(`.github/workflows/desktop-native-release.yml`, manual only) are in
+[docs/INSTALLER.md](docs/INSTALLER.md).
+
 ## Run
 
 ```powershell
@@ -427,7 +444,7 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_TRACE_MEDIA_IO`          | unset                     | `1`: log each loopback relay request (range, status, length)                                                                        |
 | `YAP_TEST_DROP`               | unset                     | `a.png;b.png`: dropped once onto the first open chat (the overlay shows 4 s first), instead of a real drag (tests)                  |
 | `YAP_NO_CLIPBOARD`            | unset                     | `1`: copies are logged (`[clipboard] would copy N characters`), never put on the clipboard (tests)                                  |
-| `YAP_VOICE_STANDBY`           | unset                     | `on`: hold a hidden standby on an occupied voice landing (VOICE_PROTOCOL.md "Standby"; its promoted mic does not capture yet)       |
+| `YAP_VOICE_STANDBY`           | on                        | `off`: no hidden standby on an occupied voice landing (VOICE_PROTOCOL.md "Standby")                                                 |
 | `YAP_TEST_PC_FAIL_AFTER_SECS` | unset                     | `<n>`: `n` s after a call's media first connects, it sees its peer connection fail once (the SFU session rebuild, tests)            |
 
 The defaults mirror `src/lib/site-defaults.ts`.
@@ -462,6 +479,24 @@ Two profiles can run at once; a second launch of the same profile shows the
 first one's window. `YAP_TOKEN`, when set, overrides the credential for any
 profile, so leave it unset for a signed-in profile. The profile rules live in
 `cpp/profile.*` and `rust/crates/yap-cache/src/profile.rs` and must agree.
+
+### Testing notes (agents)
+
+Agents run the test account as profile `spike`, with the session from
+`F:/ct/yapn/secrets/owner.json` (`peer.json` for a second account) in
+`YAP_TOKEN`, so nothing signs in anew and no credential is stored:
+
+```powershell
+$env:YAP_TOKEN = (Get-Content -Raw F:/ct/yapn/secrets/owner.json | ConvertFrom-Json).tok
+./YapNative.exe --profile spike
+```
+
+The default profile, and with it the `yap-native://` scheme and the
+`YapNative` Run value, belongs to the user's installed copy: agents never
+launch it without `--profile`. Never print the token files. An installer
+test uses its own pack id and title (`-PackId YapNative.InstallTest -Title
+"Yap Native InstallTest"`), launches with `--profile spike`, and is
+uninstalled afterwards (docs/INSTALLER.md, "Local test").
 
 ## Assets and theme
 
@@ -508,6 +543,8 @@ rust/src/bridge.rs    YapClient QObject (properties, invokables, signals)
 rust/src/client/      core: config, api (REST), auth (device flow), gateway,
                       socket (room/voice sockets), sfu (partytracks), voice (calls)
 rust/src/desktop.rs   Desktop QObject: shell settings, badge, toasts, window rect
+rust/src/installer.rs Velopack startup and install/uninstall hooks (docs/INSTALLER.md)
+tools/package.ps1     release build + vpk pack into Setup.exe (optionally signed)
 rust/src/video.rs     video frames to the hub; render demand to the call
 rust/src/sound.rs     UI sounds through waveOut
 rust/qml/             UI: Main, SignInView, ServerRail, ChannelSidebar, ChatView, ...

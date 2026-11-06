@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.24)
-project(YapNative VERSION 0.1.0 LANGUAGES CXX)
+# One version for the app and its installer: [workspace.package] in
+# rust/Cargo.toml (tools/package.ps1 reads the same line).
+file(STRINGS rust/Cargo.toml YAP_VERSION_LINE REGEX "^version = \"[0-9]+\\.[0-9]+\\.[0-9]+\"" LIMIT_COUNT 1)
+string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" YAP_VERSION "${YAP_VERSION_LINE}")
+if(NOT YAP_VERSION)
+  message(FATAL_ERROR "No workspace version in rust/Cargo.toml")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS rust/Cargo.toml)
+project(YapNative VERSION ${YAP_VERSION} LANGUAGES CXX)
 
 # The static Qt build uses the static MSVC runtime (/MT); the Rust side
 # matches it through rust/.cargo/config.toml (+crt-static).

@@ -73,7 +73,14 @@ yap-webm = { workspace = true, features = ["libvpx"] }
 uuid = { version = "1.29.0", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Media_Audio"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_System_Registry",
+] }
+# The installer's startup hooks (src/installer.rs, docs/INSTALLER.md). Pinned:
+# tools/package.ps1 and the release workflow use the vpk of the same version.
+velopack = "=1.3.39-g8d2844f"
 # WebView2 for iframe embeds (YouTube, Spotify, TikTok's player). The
 # version Tauri's desktop app uses (desktop/src-tauri/Cargo.lock); it links
 # WebView2LoaderStatic.lib, so no loader DLL ships.

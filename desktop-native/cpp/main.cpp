@@ -146,8 +146,15 @@ static void qtMessage(QtMsgType type, const QMessageLogContext&,
                qPrintable(message));
 }
 
+// Velopack's startup handling (rust/src/installer.rs): an install, update or
+// uninstall hook runs and exits here; any other launch returns at once.
+extern "C" void yap_velopack_startup();
+
 int main(int argc, char* argv[])
 {
+  // First, before Qt and the instance lock: a hook must not show a window
+  // or hand its arguments to a running instance.
+  yap_velopack_startup();
   QElapsedTimer startup;
   startup.start();
   DesktopShell::setProcessIdentity();
