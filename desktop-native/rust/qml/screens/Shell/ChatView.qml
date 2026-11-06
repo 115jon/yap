@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import Yap.Chrome
+import Yap.Media
 import com.yap.native
 
 // One text channel: header, live message list, typing line, composer.
@@ -356,6 +357,7 @@ Rectangle {
             onDownloadRequested: item => root.saveFile(item)
             onVideoOpened: item => root.openVideo(item)
             onLinkOpened: url => root.openLink(url)
+            onEmbedsRemoveRequested: (id, skip) => skip ? Chat.removeEmbeds(id) : removeEmbedsDialog.ask(id)
         }
 
         ScrollBar.vertical: ScrollBar {
@@ -377,6 +379,10 @@ Rectangle {
     }
 
     UnreadBanner {
+        // A web player is a native window over the list: it stays out
+        // from under the banner (cpp/webembed.h PlayerCover).
+        Component.onCompleted: PlayerCover.add(this)
+        Component.onDestruction: PlayerCover.remove(this)
         anchors.top: strip.bottom
         width: parent.width
         visible: Chat.unreadBanner && Chat.dividerId.length > 0
@@ -638,6 +644,8 @@ Rectangle {
         id: viewer
         onClosed: composer.focusInput()
     }
+
+    RemoveEmbedsDialog { id: removeEmbedsDialog }
 
     // Full Screen on a chat video.
     VideoViewer {

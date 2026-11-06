@@ -14,6 +14,7 @@ pub mod collectibles;
 pub mod config;
 pub mod emoji;
 pub mod fixture;
+pub mod gif_favorite;
 pub mod links;
 pub mod markdown;
 pub mod picker;

@@ -11,6 +11,7 @@ use yap_protocol::rest::{Attachment, Embed, GifItem, Reaction};
 
 use super::{query_value, GifRow, GifStatusView, RowContext, UploadRow};
 use crate::emoji;
+use crate::gif_favorite;
 use crate::store::state::{GifBrowse, Upload, UploadStatus};
 
 /// The largest file the server takes (upload.ts, 25 MiB).
@@ -110,6 +111,56 @@ pub fn attachment_url(attachment: &Attachment, api_base: &str) -> String {
     format!("{api_base}{}", encode_path(&path))
 }
 
+/// A video attachment's star (MessageItem.tsx): a GIF (Klipy, Tenor, an
+/// X GIF) saves as that GIF, any other mp4 as a clip; other videos have
+/// none. The ids are the web's, so a star saved there shows here.
+fn attachment_favorite(a: &Attachment, url: &str) -> Value {
+    let mime = a.content_type.as_deref().unwrap_or_default();
+    // `getAttachmentSourceUrl`: the stored URL as the web holds it (a
+    // path on the API), not the absolute one this client loads.
+    let raw = a
+        .url
+        .as_deref()
+        .filter(|u| !u.is_empty())
+        .or(a.file_key.as_deref())
+        .unwrap_or_default();
+    let source = if raw.starts_with('/') || is_web_url(raw) || raw.is_empty() {
+        raw.to_owned()
+    } else {
+        format!("/api/{raw}")
+    };
+    let identity = a
+        .file_key
+        .as_deref()
+        .filter(|k| !k.is_empty())
+        .unwrap_or(&source);
+    let size = a.size_bytes.map(|b| b as f64);
+    let input = gif_favorite::FavoriteInput {
+        id: Some(a.id.as_deref().filter(|i| !i.is_empty()).unwrap_or(&source)),
+        title: Some(&a.filename),
+        source_url: &source,
+        preview_url: Some(&source),
+        send_url: Some(&source),
+        size_bytes: size,
+        content_type: Some(mime),
+        filename: Some(&a.filename),
+        file_key_or_url: Some(identity),
+        ..gif_favorite::FavoriteInput::default()
+    };
+    // `isAnimatedMedia(content_type, isGif, url || file_key)`.
+    let animated = matches!(mime, "image/gif" | "image/apng")
+        || gif_favorite::attachment_provider(Some(raw)).is_some()
+        || gif_favorite::attachment_provider(Some(identity)).is_some()
+        || is_gif_host(url);
+    if animated {
+        gif_favorite::attachment_gif(&input)
+    } else if mime == "video/mp4" {
+        gif_favorite::attachment_clip(&input)
+    } else {
+        Value::Null
+    }
+}
+
 /// The message's attachments, in server order (images, videos and files
 /// are bucketed by QML).
 pub fn attachments_json(attachments: &[Attachment], api_base: &str) -> String {
@@ -123,15 +174,22 @@ pub fn attachments_json(attachments: &[Attachment], api_base: &str) -> String {
             let url = attachment_url(a, api_base);
             let animated = matches!(mime, "image/gif" | "image/apng") || is_gif_host(&url);
             let bytes = a.size_bytes.unwrap_or(0);
+            let kind = media_kind(mime);
+            let favorite = if kind == "video" {
+                attachment_favorite(a, &url)
+            } else {
+                Value::Null
+            };
             json!({
                 "id": a.id.as_deref().unwrap_or_default(),
                 "name": a.filename,
                 "url": url,
-                "kind": media_kind(mime),
+                "kind": kind,
                 "mime": mime,
                 "size": if bytes > 0 { format_file_size(bytes) } else { String::new() },
                 "gif": animated,
                 "nsfw": a.is_nsfw,
+                "favorite": favorite,
             })
         })
         .collect();
@@ -437,11 +495,13 @@ pub fn embeds_json(
     embeds: &[Embed],
     api_base: &str,
     hydrations: &super::super::embeds::Hydrations,
+    message_id: &str,
 ) -> String {
     let items: Vec<Value> = embeds
         .iter()
         .filter_map(|e| {
-            super::embeds::embed_value(e, api_base, hydrations).or_else(|| embed_json(e, api_base))
+            super::embeds::embed_value(e, api_base, hydrations, message_id)
+                .or_else(|| embed_json(e, api_base))
         })
         .collect();
     if items.is_empty() {

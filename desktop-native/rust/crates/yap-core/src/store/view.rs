@@ -1077,6 +1077,8 @@ pub enum ViewUpdate {
     Friends(Box<super::FriendsView>),
     /// The collectibles shop and pickers.
     Shop(Box<super::shop::ShopView>),
+    /// The saved GIF and clip favourites (`provider:id`).
+    GifFavorites(Vec<String>),
     /// The soundboard, Listen Together and activities.
     Apps(Box<super::apps::AppsView>),
     /// Creating and joining servers, and links into the app.
@@ -1726,7 +1728,7 @@ pub(super) fn message_row(
         grouped: grouped(previous, message, ctx.offset) && ctx.divider != Some(message.id.as_str()),
         attachments: media::attachments_json(&message.attachments, ctx.api_base),
         reactions: media::reactions_json(&message.reactions, ctx),
-        embeds: media::embeds_json(&message.embeds, ctx.api_base, ctx.hydrations),
+        embeds: media::embeds_json(&message.embeds, ctx.api_base, ctx.hydrations, &message.id),
         mine,
         nonce: message.nonce.clone().filter(|_| mine).unwrap_or_default(),
         pending: outgoing.is_some_and(|o| !o.failed),
@@ -1934,6 +1936,26 @@ fn member_row(m: &Member, online: bool, ctx: &MemberContext<'_>) -> MemberListRo
     }
 }
 
+/// A banner whose type says video and whose URL does not end in one
+/// carries the type as a fragment (`#video/webm`), which no request sends,
+/// so the card knows to play it (ProfileAssetLayer.tsx `isVideo`).
+pub fn banner_url(url: &str, content_type: Option<&str>) -> String {
+    let mime = content_type.unwrap_or_default().trim().to_ascii_lowercase();
+    let path = url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let named = [".mp4", ".webm", ".mov", ".m4v", ".ogv"]
+        .iter()
+        .any(|e| path.ends_with(e));
+    if mime.starts_with("video/") && !named && !url.contains('#') {
+        format!("{url}#{mime}")
+    } else {
+        url.to_owned()
+    }
+}
+
 /// The popout for `user`: what is known of them (the full profile once
 /// fetched) and the roles they have in the shown server.
 pub(super) fn profile_view(
@@ -1958,7 +1980,10 @@ pub(super) fn profile_view(
         pronouns: trimmed(&user.pronouns),
         bio: trimmed(&user.bio),
         banner: match user.banner_url.as_deref() {
-            Some(url) if !url.is_empty() => absolute_url(api_base, Some(url)),
+            Some(url) if !url.is_empty() => banner_url(
+                &absolute_url(api_base, Some(url)),
+                user.banner_content_type.as_deref(),
+            ),
             _ => String::new(),
         },
         banner_color: user
@@ -2206,5 +2231,26 @@ mod tests {
     fn typing_text_should_pluralise() {
         let names = ["Alice".to_owned(), "Bob".to_owned()];
         assert_eq!(typing_text(&names), "Alice, Bob are typing…");
+    }
+}
+
+#[cfg(test)]
+mod banner_tests {
+    use super::banner_url;
+
+    #[test]
+    fn a_video_banner_without_an_extension_should_carry_its_type() {
+        assert_eq!(
+            banner_url("https://y/api/profile-assets/b1", Some("video/webm")),
+            "https://y/api/profile-assets/b1#video/webm"
+        );
+    }
+
+    #[test]
+    fn a_picture_banner_should_stay_as_it_is() {
+        assert_eq!(
+            banner_url("https://y/b.png", Some("image/png")),
+            "https://y/b.png"
+        );
     }
 }

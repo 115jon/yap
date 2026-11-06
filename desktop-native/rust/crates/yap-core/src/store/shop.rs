@@ -132,6 +132,8 @@ pub enum ShopOp {
 pub struct ShopState {
     pub(super) catalog: Option<Box<Catalog>>,
     pub(super) loaded_ms: i64,
+    /// The copy on disk: not read yet, being read, or read (or none).
+    pub(super) disk: Disk,
     pub(super) now_ms: i64,
     pub(super) loading: Option<RequestId>,
     pub(super) error: String,
@@ -145,6 +147,15 @@ pub struct ShopState {
     pub(super) action_error: String,
     pub(super) picker: Option<Kind>,
     pub(super) picker_query: String,
+}
+
+/// The catalog kept on disk ([`yap_cache::catalog`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Disk {
+    #[default]
+    Unread,
+    Reading,
+    Read,
 }
 
 /// What QML draws: the header and state, the page's rows, the picker's

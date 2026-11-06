@@ -14,6 +14,9 @@
 //   Files.openMedia(path)      opens a picture or video with its app;
 //                              anything else is only revealed
 //   Files.clearImageCache()    empties the downloaded-images cache (sign-out)
+//   Files.openExternal(url)    an http(s) link in the system browser; with
+//                              YAP_LOG_EXTERNAL_OPEN=1 (tests) it is only
+//                              logged as "[external] open <host><path>"
 //
 // Names from messages are untrusted: they are reduced to a plain file
 // name, and nothing but pictures and videos is ever opened.
@@ -36,6 +39,7 @@ public:
   Q_INVOKABLE void reveal(const QString& path) const;
   Q_INVOKABLE void openMedia(const QString& path) const;
   Q_INVOKABLE void clearImageCache();
+  Q_INVOKABLE void openExternal(const QString& url) const;
 
 signals:
   void imageCacheCleared();

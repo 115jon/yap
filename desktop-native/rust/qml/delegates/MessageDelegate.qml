@@ -71,6 +71,8 @@ Item {
     signal retryRequested(string nonce)
     signal discardRequested(string nonce, string text)
     signal reactionToggled(string id, string emoji)
+    // The x on our own embeds; `skip`: Shift was held.
+    signal embedsRemoveRequested(string id, bool skip)
     // The emoji picker, to react to this message.
     signal reactionPickerRequested(string id, Item anchor)
     signal imageOpened(var images, int index)
@@ -447,6 +449,55 @@ Item {
                     onOpenImage: (images, index) => root.imageOpened(images, index)
                     onExpandVideo: (source, position) => ShellState.videoViewerRequested(source, position)
                 }
+                HoverHandler { id: embedHover }
+                // Our own message: the x that removes every preview, just
+                // outside the card's corner, shown while the embed is
+                // hovered or the key has focus (LinkEmbed.tsx). Shift skips
+                // the confirm.
+                Rectangle {
+                    id: removeKey
+                    x: card.width + 4
+                    y: 0
+                    width: 20
+                    height: 20
+                    radius: Theme.radius
+                    // Revealed, not created, on hover (the web's opacity-0
+                    // REVEAL): it stays clickable and reachable by Tab.
+                    visible: root.mine && !root.pending
+                    opacity: embedHover.hovered || activeFocus ? 1 : 0
+                    color: removeArea.containsMouse ? Theme.tint1 : "transparent"
+                    activeFocusOnTab: root.mine
+                    Accessible.role: Accessible.Button
+                    Accessible.name: qsTr("Remove embeds")
+                    Keys.onReturnPressed: event => root.embedsRemoveRequested(root.messageId, (event.modifiers & Qt.ShiftModifier) !== 0)
+                    Keys.onSpacePressed: event => root.embedsRemoveRequested(root.messageId, (event.modifiers & Qt.ShiftModifier) !== 0)
+                    Icon {
+                        anchors.centerIn: parent
+                        name: "close"
+                        size: Theme.iconSm
+                        color: removeArea.containsMouse ? Theme.ink1 : Theme.ink3
+                    }
+                    MouseArea {
+                        id: removeArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: mouse => root.embedsRemoveRequested(root.messageId, (mouse.modifiers & Qt.ShiftModifier) !== 0)
+                    }
+                    Tooltip {
+                        visible: removeArea.containsMouse
+                        text: qsTr("Remove all embeds (Shift+click to skip confirmation)")
+                    }
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: -2
+                        visible: removeKey.activeFocus
+                        color: "transparent"
+                        radius: Theme.radius + 2
+                        border.width: 2
+                        border.color: Theme.focus
+                    }
+                }
             }
         }
         Loader {
@@ -456,8 +507,10 @@ Item {
                 items: root.mediaItems
                 maxWidth: extras.width
                 onOpenImage: (images, index) => root.imageOpened(images, index)
+                clipTo: root.ListView.view
                 onOpenVideo: item => root.videoOpened(item)
                 onDownload: item => root.downloadRequested(item)
+                onExpandVideo: (source, position) => ShellState.videoViewerRequested(source, position)
             }
         }
         Loader {

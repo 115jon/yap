@@ -11,6 +11,7 @@
 //! drops it and starts over. [`Cache`] is blocking; [`Writer`] owns it on a
 //! dedicated thread and coalesces writes (write-behind).
 
+pub mod catalog;
 mod db;
 pub mod settings;
 pub mod voice;

@@ -69,6 +69,45 @@ QQuickItem* overlayOf(QQuickWindow* window)
 
 } // namespace
 
+PlayerCover* PlayerCover::instance()
+{
+  static auto* cover = new PlayerCover;
+  return cover;
+}
+
+void PlayerCover::add(QQuickItem* item)
+{
+  m_items.removeAll(nullptr);
+  if (item && !m_items.contains(item))
+    m_items.append(item);
+}
+
+void PlayerCover::remove(QQuickItem* item)
+{
+  m_items.removeAll(item);
+  m_items.removeAll(nullptr);
+}
+
+QRectF PlayerCover::trim(QRectF shown) const
+{
+  for (const QPointer<QQuickItem>& item : m_items) {
+    if (shown.isEmpty())
+      break;
+    if (!item || !item->isVisible() || item->opacity() <= 0)
+      continue;
+    const QRectF band = item->mapRectToScene(item->boundingRect());
+    if (!band.intersects(shown))
+      continue;
+    if (band.top() <= shown.top() && band.bottom() < shown.bottom())
+      shown.setTop(band.bottom());
+    else if (band.bottom() >= shown.bottom() && band.top() > shown.top())
+      shown.setBottom(band.top());
+    else
+      shown = QRectF();
+  }
+  return shown;
+}
+
 WebEmbed::WebEmbed(QQuickItem* parent)
   : QQuickItem(parent)
 {
@@ -240,6 +279,7 @@ void WebEmbed::place()
   }
   if (m_clipTo)
     shown &= m_clipTo->mapRectToScene(m_clipTo->boundingRect());
+  shown = PlayerCover::instance()->trim(shown);
   const bool visible = isVisible() && !m_covered && win->isVisible()
                        && win->visibility() != QWindow::Minimized && !shown.isEmpty()
                        && !popupOver(shown);

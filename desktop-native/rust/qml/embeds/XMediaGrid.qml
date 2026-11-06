@@ -116,6 +116,14 @@ Item {
                 onOpenViewer: root.expandVideo(tile.item.src, 0)
             }
         }
+        // The GIF or clip favourite, top left (GifFavoriteButton.tsx).
+        GifFavoriteStar {
+            x: 8
+            y: 8
+            z: 3
+            visible: !!tile.item.favorite
+            favorite: tile.item.favorite ?? null
+        }
         // "+N" (MediaMoreOverlay).
         Rectangle {
             anchors.fill: parent

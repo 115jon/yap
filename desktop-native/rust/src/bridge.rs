@@ -165,6 +165,8 @@ pub mod qobject {
         #[qproperty(i32, gif_units1, cxx_name = "gifUnits1")]
         #[qproperty(i32, gif_count0, cxx_name = "gifCount0")]
         #[qproperty(i32, gif_count1, cxx_name = "gifCount1")]
+        // The saved GIF and clip favourites, a JSON array of `provider:id`.
+        #[qproperty(QString, gif_favorites, cxx_name = "gifFavorites")]
         type Chat = super::ChatRust;
 
         /// A download landed at `path`; `open` it (else reveal it).
@@ -207,6 +209,21 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "sendGif"]
         fn send_gif(self: &Chat, gif_id: &QString, reply_to_id: &QString);
+
+        /// A star showed: the favourites load once.
+        #[qinvokable]
+        #[cxx_name = "loadGifFavorites"]
+        fn load_gif_favorites(self: &Chat);
+
+        /// A star was pressed with the item it saves (`GifPickerItem` JSON).
+        #[qinvokable]
+        #[cxx_name = "toggleGifFavorite"]
+        fn toggle_gif_favorite(self: &Chat, item: &QString);
+
+        /// Clears one of our messages' link previews for everyone.
+        #[qinvokable]
+        #[cxx_name = "removeEmbeds"]
+        fn remove_embeds(self: &Chat, message_id: &QString);
 
         /// Saves `url` to `dest` (a path from `Files`); `open` afterwards.
         #[qinvokable]
@@ -488,6 +505,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QList, QString, QStringList};
+use yap_core::store::favorites::FavoritesCommand;
 use yap_core::store::time::format_rfc3339;
 use yap_core::{Phase, ViewUpdate};
 
@@ -576,6 +594,7 @@ pub struct ChatRust {
     gif_units1: i32,
     gif_count0: i32,
     gif_count1: i32,
+    gif_favorites: QString,
 }
 
 #[derive(Default)]
@@ -794,6 +813,23 @@ impl qobject::Chat {
 
     pub fn more_gifs(&self) {
         client::command(Command::GifMore);
+    }
+
+    pub fn load_gif_favorites(&self) {
+        client::command(Command::Favorites(FavoritesCommand::Load));
+    }
+
+    pub fn toggle_gif_favorite(&self, item: &QString) {
+        match serde_json::from_str::<serde_json::Value>(&item.to_string()) {
+            Ok(item) if item.is_object() => {
+                client::command(Command::Favorites(FavoritesCommand::Toggle(item)));
+            }
+            _ => eprintln!("[gif] favourite: not an item"),
+        }
+    }
+
+    pub fn remove_embeds(&self, message_id: &QString) {
+        client::command(Command::RemoveEmbeds(message_id.to_string()));
     }
 
     pub fn send_gif(&self, gif_id: &QString, reply_to_id: &QString) {

@@ -91,6 +91,7 @@ impl Client {
     fn with_catalog() -> Self {
         let mut client = Self::signed_in();
         client.command(Command::Shop(ShopCommand::Open { now_ms: 0 }));
+        client.input(Input::CatalogLoaded(None));
         client.respond(&ApiRequest::Shop(ShopRequest::Catalog), catalog());
         client
     }
@@ -121,6 +122,7 @@ impl Client {
 fn opening_the_shop_should_load_the_catalog_once() {
     let mut client = Client::signed_in();
     client.command(Command::Shop(ShopCommand::Open { now_ms: 0 }));
+    client.input(Input::CatalogLoaded(None));
     client.command(Command::Shop(ShopCommand::Open { now_ms: 1 }));
     let asked = client
         .asked
@@ -226,4 +228,79 @@ fn the_lookup_should_ask_the_tiktok_route() {
         request.path(),
         "/api/tiktok-video?videoUrl=https%3A%2F%2Fwww.tiktok.com%2F%40a%2Fvideo%2F1"
     );
+}
+
+// The catalog on disk (yap-cache `catalog`)
+
+fn catalog_requests(client: &Client) -> usize {
+    client
+        .asked
+        .iter()
+        .filter(|(_, r)| *r == ApiRequest::Shop(ShopRequest::Catalog))
+        .count()
+}
+
+#[test]
+fn the_shop_should_read_the_disk_copy_before_asking() {
+    let mut client = Client::signed_in();
+    let fx = client.command(Command::Shop(ShopCommand::Open { now_ms: 0 }));
+    assert!(fx.contains(&Effect::LoadCatalog) && catalog_requests(&client) == 0);
+}
+
+#[test]
+fn a_fresh_disk_copy_should_show_without_asking_the_server() {
+    let mut client = Client::signed_in();
+    let now = 20 * 60 * 1000;
+    client.command(Command::Shop(ShopCommand::Open { now_ms: now }));
+    client.input(Input::CatalogLoaded(Some((
+        catalog()["catalog"].clone(),
+        now - 60_000,
+    ))));
+    assert_eq!(
+        (catalog_requests(&client), client.shop.rows.contains("Wave")),
+        (0, true)
+    );
+}
+
+#[test]
+fn an_old_disk_copy_should_show_and_be_refreshed() {
+    let mut client = Client::signed_in();
+    let now = 60 * 60 * 1000;
+    client.command(Command::Shop(ShopCommand::Open { now_ms: now }));
+    client.input(Input::CatalogLoaded(Some((
+        catalog()["catalog"].clone(),
+        0,
+    ))));
+    assert_eq!(
+        (catalog_requests(&client), client.shop.rows.contains("Wave")),
+        (1, true)
+    );
+}
+
+#[test]
+fn a_stale_server_copy_should_be_rechecked_after_ten_minutes() {
+    let mut client = Client::signed_in();
+    let mut stale = catalog()["catalog"].clone();
+    stale["stale"] = json!(true);
+    let now = 11 * 60 * 1000;
+    client.command(Command::Shop(ShopCommand::Open { now_ms: now }));
+    client.input(Input::CatalogLoaded(Some((stale, 0))));
+    assert_eq!(catalog_requests(&client), 1);
+}
+
+#[test]
+fn a_fetched_catalog_should_be_kept_on_disk() {
+    let mut client = Client::signed_in();
+    client.command(Command::Shop(ShopCommand::Open { now_ms: 5 }));
+    client.input(Input::CatalogLoaded(None));
+    let (id, request) = client
+        .newest(|r| *r == ApiRequest::Shop(ShopRequest::Catalog))
+        .expect("asked");
+    let result = request.decode(catalog());
+    let fx = client.input(Input::Http { id, result });
+    let saved = fx.iter().find_map(|e| match e {
+        Effect::SaveCatalog { catalog } => Some(catalog["items"][0]["name"].clone()),
+        _ => None,
+    });
+    assert_eq!(saved, Some(json!("Wave")));
 }

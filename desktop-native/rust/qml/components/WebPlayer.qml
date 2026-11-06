@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import Yap.Chrome
 import Yap.Media
 import com.yap.native
 
@@ -34,7 +35,7 @@ Item {
     // A click: the player, or the link when WebView2 cannot run here.
     function activate() {
         if (web.state === WebEmbed.Failed) {
-            Qt.openUrlExternally(root.link)
+            Files.openExternal(root.link)
             Qt.callLater(root.released)
             return
         }
@@ -92,15 +93,27 @@ Item {
         visible: !web.active && !root.quiet
         hovered: hover.hovered
     }
-    Text {
+    // No player here: a chip over the poster says what the next click does
+    // (dark at 64 %, so it reads on any poster).
+    Rectangle {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 8
+        anchors.bottomMargin: 12
         visible: web.state === WebEmbed.Failed && !root.quiet
-        textFormat: Text.PlainText
-        text: qsTr("Player unavailable. Click to open in your browser.")
-        color: "#ffffff"
-        font: Theme.type.captionStrong
+        width: Math.min(parent.width - 24, unavailableText.implicitWidth + 24)
+        height: unavailableText.implicitHeight + 12
+        radius: Theme.radius
+        color: Qt.rgba(0, 0, 0, 0.64)
+        Text {
+            id: unavailableText
+            anchors.centerIn: parent
+            width: Math.min(implicitWidth, parent.width - 24)
+            elide: Text.ElideRight
+            textFormat: Text.PlainText
+            text: qsTr("Player unavailable. Click to open in your browser.")
+            color: "#ffffff"
+            font: Theme.type.captionStrong
+        }
     }
     BusyIndicator {
         anchors.centerIn: parent
@@ -123,7 +136,7 @@ Item {
         anchors.fill: parent
         url: root.url
         clipTo: root.clipTo
-        onExternalRequested: target => Qt.openUrlExternally(target)
+        onExternalRequested: target => Files.openExternal(target)
     }
 
     Accessible.role: Accessible.Button

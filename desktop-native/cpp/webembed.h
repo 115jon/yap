@@ -18,11 +18,35 @@
 // as `externalRequested`, for a user's click only. A new `url` (a pooled row
 // reused) drops the player and `active`.
 
+#include <QtCore/QList>
 #include <QtCore/QPointer>
 #include <QtCore/QString>
 #include <QtQuick/QQuickItem>
 
 #include <cstdint>
+
+// Items QML draws over a scroller that holds players (the chat's unread
+// banner): a player's child window is cut back to stay out from under them
+// (a band across its top or bottom trims it, anything else hides it).
+//
+//   Component.onCompleted: PlayerCover.add(banner)
+class PlayerCover : public QObject
+{
+  Q_OBJECT
+
+public:
+  static PlayerCover* instance();
+
+  Q_INVOKABLE void add(QQuickItem* item);
+  Q_INVOKABLE void remove(QQuickItem* item);
+
+  // `shown` (scene coordinates) less what the covers take.
+  QRectF trim(QRectF shown) const;
+
+private:
+  using QObject::QObject;
+  QList<QPointer<QQuickItem>> m_items;
+};
 
 class WebEmbed : public QQuickItem
 {

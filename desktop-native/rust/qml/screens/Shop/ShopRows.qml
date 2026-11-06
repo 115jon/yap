@@ -143,6 +143,9 @@ ListView {
                 spacing: 12
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
+                // A drag or flick lands on a card's start (the web's
+                // snap-x / snap-start).
+                snapMode: ListView.SnapToItem
                 model: slot.modelData.cards
                 delegate: ShopCard {
                     required property var modelData
@@ -162,6 +165,9 @@ ListView {
                 spacing: 12
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
+                // A drag or flick lands on a card's start (the web's
+                // snap-x / snap-start).
+                snapMode: ListView.SnapToItem
                 model: slot.modelData.cards
                 delegate: CollectionCard {
                     required property var modelData

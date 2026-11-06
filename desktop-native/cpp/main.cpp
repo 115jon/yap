@@ -19,6 +19,7 @@
 #include <cstdio>
 
 #include "animatedpicture.h"
+#include "authmedia.h"
 #include "camera.h"
 #include "desktopshell.h"
 #include "ditherprovider.h"
@@ -28,6 +29,7 @@
 #include "shareprovider.h"
 #include "videohub.h"
 #include "webembed.h"
+#include "webmplayer.h"
 #include "windowchrome.h"
 
 #ifdef Q_OS_WIN
@@ -193,6 +195,14 @@ int main(int argc, char* argv[])
   // players (WebView2).
   qmlRegisterType<AnimatedPicture>("Yap.Media", 1, 0, "AnimatedPicture");
   qmlRegisterType<WebEmbed>("Yap.Media", 1, 0, "WebEmbed");
+  // WebM (VP8/VP9, alpha too) through libvpx, and private video
+  // attachments read with the session (Media Foundation for the rest).
+  qmlRegisterType<WebmPlayer>("Yap.Media", 1, 0, "WebmPlayer");
+  auto* authMedia = new AuthMedia(&app);
+  qmlRegisterSingletonInstance("Yap.Media", 1, 0, "AuthMedia", authMedia);
+  // Items QML draws over the chat list that a web player (a native child
+  // window) must stay out from under: the unread banner.
+  qmlRegisterSingletonInstance("Yap.Media", 1, 0, "PlayerCover", PlayerCover::instance());
 
   QQmlApplicationEngine engine;
   // Not owned by the engine; it outlives it here.

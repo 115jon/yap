@@ -17,6 +17,10 @@ Column {
     signal openImage(var images, int index)
     signal openVideo(var item)
     signal download(var item)
+    // Full Screen from a playing video.
+    signal expandVideo(string source, int position)
+    // The scroller the rows live in (videos pause when it moves them away).
+    property Item clipTo: null
 
     readonly property var images: items.filter(a => a.kind === "image")
     readonly property var videos: items.filter(a => a.kind === "video")
@@ -104,65 +108,134 @@ Column {
         }
     }
 
-    // Videos: no player in this build. A poster key that opens the file in
-    // the system's player (VideoAttachment.tsx's box, 640 x 400 at 16:9).
+    // Videos (VideoAttachment.tsx): played here with the chat player,
+    // fitted into 640 x 400 at the file's own aspect (16:9 until the first
+    // frame says). Private files are read with the session through
+    // AuthMedia; webm through WebmPlayer. One that will not play shows the
+    // web's unplayable state with Download video.
     Repeater {
         model: root.videos
-        Rectangle {
+        Item {
             id: video
             required property var modelData
-            width: Math.min(root.maxWidth, 400)
-            height: Math.round(width * 9 / 16)
-            radius: Theme.radius
-            color: Theme.ply2
-            border.width: 1
-            border.color: videoHover.containsMouse ? Theme.lineStrong : Theme.line
-            Accessible.role: Accessible.Button
-            Accessible.name: qsTr("Play %1 in your video player").arg(video.modelData.name)
+            readonly property var seen: ShellState.mediaSize(video.modelData.url)
+            readonly property real ratio: video.seen && video.seen.h > 0 ? video.seen.w / video.seen.h : 16 / 9
+            readonly property real boxW: Math.min(root.maxWidth, 640, video.seen ? video.seen.w : 640, 400 * video.ratio)
+            readonly property bool hidden: video.modelData.nsfw && !ShellState.isRevealed(video.modelData.id)
+            property bool broken: false
+            width: Math.round(video.broken ? Math.max(video.boxW, Math.min(root.maxWidth, 320)) : video.boxW)
+            height: video.broken ? Math.max(160, Math.round(video.boxW / video.ratio)) : Math.round(video.boxW / video.ratio)
 
-            PlayDisc {
-                anchors.centerIn: parent
-                hovered: videoHover.containsMouse
-            }
-            Column {
-                x: 12
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 10
-                width: parent.width - 24
-                spacing: 2
-                Text {
-                    width: parent.width
-                    textFormat: Text.PlainText
-                    text: video.modelData.name
-                    elide: Text.ElideMiddle
-                    color: Theme.ink1
-                    font: Theme.type.captionStrong
-                }
-                Text {
-                    textFormat: Text.PlainText
-                    text: video.modelData.size.length > 0
-                        ? qsTr("%1 · Opens in your video player").arg(video.modelData.size)
-                        : qsTr("Opens in your video player")
-                    color: Theme.ink3
-                    font: Theme.type.caption
-                }
-            }
-            MouseArea {
-                id: videoHover
+            EmbedVideo {
                 anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.openVideo(video.modelData)
+                visible: !video.broken && !video.hidden
+                source: video.modelData.url
+                contentType: video.modelData.mime
+                aspect: video.ratio
+                name: video.modelData.name
+                clipTo: root.clipTo
+                preview: !video.hidden
+                onSizeKnown: (w, h) => ShellState.rememberSize(video.modelData.url, w, h)
+                onExpandRequested: (source, position) => root.expandVideo(source, position)
+                onFailed: video.broken = true
             }
+            HoverHandler { id: videoHover }
+
+            // Sensitive: hidden until shown (SensitiveMediaFrame.tsx).
+            Rectangle {
+                anchors.fill: parent
+                visible: video.hidden
+                radius: Theme.radiusSheet * 2
+                color: Theme.scrim
+                border.width: 1
+                border.color: Theme.line
+                Column {
+                    anchors.centerIn: parent
+                    spacing: 8
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        textFormat: Text.PlainText
+                        text: qsTr("Sensitive media")
+                        color: Theme.ink1
+                        font: Theme.type.panelTitle
+                    }
+                    KitButton {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: qsTr("Show media")
+                        onClicked: ShellState.reveal(video.modelData.id)
+                    }
+                }
+            }
+
+            // The web's unplayable state.
+            Rectangle {
+                anchors.fill: parent
+                visible: video.broken
+                radius: Theme.radiusSheet * 2
+                color: Theme.ply2
+                border.width: 1
+                border.color: Theme.line
+                Column {
+                    anchors.centerIn: parent
+                    width: Math.min(parent.width - 40, 320)
+                    spacing: 12
+                    Icon {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        name: "alert"
+                        size: 32
+                        color: Theme.ink3
+                    }
+                    Column {
+                        width: parent.width
+                        spacing: 4
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            textFormat: Text.PlainText
+                            text: qsTr("This video cannot be played here")
+                            wrapMode: Text.Wrap
+                            color: Theme.ink1
+                            font: Theme.type.captionStrong
+                        }
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            textFormat: Text.PlainText
+                            text: qsTr("The desktop video engine may not support this file's codec.")
+                            wrapMode: Text.Wrap
+                            color: Theme.ink2
+                            font: Theme.type.caption
+                        }
+                    }
+                    KitButton {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: qsTr("Download video")
+                        onClicked: root.download(video.modelData)
+                    }
+                }
+            }
+
+            // Top right while hovered: Download (VideoDownloadButton).
             IconKey {
                 anchors.right: parent.right
                 anchors.top: parent.top
-                anchors.margins: 6
-                size: 28
-                tone: "rest"
+                anchors.margins: 8
+                z: 3
+                visible: !video.broken && !video.hidden && videoHover.hovered
+                size: 32
+                tone: "onMedia"
                 iconName: "download"
                 tip: qsTr("Download")
                 onClicked: root.download(video.modelData)
+            }
+            // Top left: the GIF or clip favourite (GifFavoriteButton.tsx).
+            GifFavoriteStar {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.margins: 8
+                z: 3
+                visible: !video.broken && !video.hidden && !!video.modelData.favorite
+                favorite: video.modelData.favorite ?? null
             }
         }
     }

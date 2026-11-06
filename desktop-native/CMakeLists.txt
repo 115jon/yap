@@ -35,6 +35,7 @@ qt_add_executable(YapNative WIN32
   cpp/main.cpp
   cpp/app.rc
   cpp/animatedpicture.cpp cpp/animatedpicture.h
+  cpp/authmedia.cpp cpp/authmedia.h
   cpp/camera.cpp cpp/camera.h
   cpp/desktopshell.cpp cpp/desktopshell.h
   cpp/ditherprovider.cpp cpp/ditherprovider.h
@@ -45,6 +46,7 @@ qt_add_executable(YapNative WIN32
   cpp/toast_win.cpp cpp/toast_win.h
   cpp/videohub.cpp cpp/videohub.h
   cpp/webembed.cpp cpp/webembed.h
+  cpp/webmplayer.cpp cpp/webmplayer.h
   cpp/windowchrome.cpp cpp/windowchrome.h)
 target_link_libraries(YapNative PRIVATE
   yap_native_qml

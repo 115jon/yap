@@ -79,12 +79,20 @@ Rectangle {
             : root.accentColor.length > 0 ? root.accentColor : Theme.accentTint
         Image {
             anchors.fill: parent
-            visible: root.banner.length > 0 && status === Image.Ready
-            source: root.banner
+            visible: root.banner.length > 0 && status === Image.Ready && !bannerVideo.shown
+            source: bannerVideo.isVideo(root.banner) ? "" : root.banner
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
             clip: true
             sourceSize.width: 680
+        }
+        // A video banner plays while the card is open (ProfileCard.tsx's
+        // ProfileAssetLayer).
+        ProfileVideoLayer {
+            id: bannerVideo
+            anchors.fill: parent
+            source: isVideo(root.banner) ? root.banner : ""
+            playing: root.visible
         }
     }
 

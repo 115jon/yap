@@ -72,6 +72,8 @@ struct Scalars {
     friends: yap_core::store::FriendsView,
     apps: yap_core::store::apps::AppsView,
     shop: yap_core::store::shop::ShopView,
+    /// The saved favourites' `provider:id`, as JSON.
+    gif_favorites: String,
 }
 
 /// The live QObjects. Each registers from its constructor and clears its
@@ -278,7 +280,7 @@ impl Slot for Chat {
     }
 
     fn restore(mut self: Pin<&mut Self>) {
-        let (typing, unread, history, manage, uploads, gifs, newer) = GUI.with(|gui| {
+        let (typing, unread, history, manage, uploads, gifs, newer, favorites) = GUI.with(|gui| {
             let s = &gui.borrow().scalars;
             (
                 s.typing.clone(),
@@ -288,8 +290,14 @@ impl Slot for Chat {
                 s.uploads,
                 s.gifs.clone(),
                 s.newer,
+                s.gif_favorites.clone(),
             )
         });
+        self.as_mut().set_gif_favorites(q(if favorites.is_empty() {
+            "[]"
+        } else {
+            &favorites
+        }));
         self.as_mut().set_newer_loading(newer.0);
         self.as_mut().set_has_newer(newer.1);
         set_uploads(self.as_mut(), uploads);
@@ -558,6 +566,11 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::Search(view) => crate::search::on_view(*view),
         ViewUpdate::Friends(view) => crate::friends::on_view(*view),
         ViewUpdate::Shop(view) => crate::shop::on_view(*view),
+        ViewUpdate::GifFavorites(keys) => {
+            let text = serde_json::to_string(&keys).unwrap_or_else(|_| "[]".into());
+            with::<Chat>(|chat| chat.set_gif_favorites(q(&text)));
+            scalars(|s| s.gif_favorites = text);
+        }
         ViewUpdate::Apps(view) => crate::apps::on_view(*view),
         ViewUpdate::Invites(view) => crate::invites::on_view(*view),
         ViewUpdate::Toast(toast) => crate::desktop::on_toast(&toast),

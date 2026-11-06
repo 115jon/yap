@@ -359,6 +359,8 @@ pub(super) struct Projection {
     pub friends: super::FriendsView,
     pub apps: super::apps::AppsView,
     pub shop: super::shop::ShopView,
+    /// The saved favourites' `provider:id`.
+    pub favorites: Vec<String>,
 }
 
 /// One step of a profile save, run in order; a failure stops the rest.
@@ -484,6 +486,8 @@ pub(super) struct Pending {
     pub apps: HashMap<RequestId, super::apps::AppsOp>,
     /// The shop.
     pub shop: HashMap<RequestId, super::shop::ShopOp>,
+    /// GIF and clip favourites.
+    pub favorites: HashMap<RequestId, super::favorites::FavoritesOp>,
     /// TikTok and Instagram lookups.
     pub embeds: super::embeds::Pending,
 }
@@ -741,6 +745,8 @@ pub struct State {
     pub(super) apps: super::apps::AppsState,
     /// The collectibles shop.
     pub(super) shop: super::shop::ShopState,
+    /// GIF and clip favourites.
+    pub(super) favorites: super::favorites::FavoritesState,
     /// TikTok and Instagram lookups, by link.
     pub(super) hydrations: super::embeds::Hydrations,
     pub(super) view: Projection,
@@ -805,6 +811,7 @@ impl State {
             invites: super::InviteState::default(),
             apps: super::apps::AppsState::new(),
             shop: Default::default(),
+            favorites: Default::default(),
             hydrations: Default::default(),
             view: Projection::default(),
             pending: Pending::default(),

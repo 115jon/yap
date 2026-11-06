@@ -1,5 +1,6 @@
 import QtQuick
 import QtMultimedia
+import Yap.Media
 import com.yap.native
 
 // A nameplate behind a row (UserNameplateLayer.tsx, ProfileAssetLayer.tsx):
@@ -7,9 +8,10 @@ import com.yap.native
 // webm loops over it while `playing` (the row hovered, or always on an
 // open profile), muted, and never under reduced motion. The player only
 // exists while it plays. `plate` is the row's JSON `{still, motion,
-// border}`. Qt's Media Foundation backend cannot open webm (VP9) over
-// HTTP (it never leaves "loading"; see docs/LIBRARIES.md §10), so a webm
-// plate keeps its still frame; an mp4 one plays.
+// border}`. Media Foundation cannot open webm here, so a webm plate plays
+// through WebmPlayer (libvpx, with the plate's alpha; docs/LIBRARIES.md
+// §10) and an mp4 one through MediaPlayer. Both pause off screen and while
+// the app is in the background, and hold the still until the first frame.
 Item {
     id: root
 
@@ -23,7 +25,7 @@ Item {
 
     readonly property var info: plate.length > 0 ? JSON.parse(plate) : null
     readonly property bool motion: playing && !Theme.reducedMotion && info !== null && info.motion.length > 0
-        && !/\.webm($|[?#])/i.test(info.motion)
+    readonly property bool webm: info !== null && /\.webm($|[?#])/i.test(info.motion)
 
     clip: true
     Accessible.ignored: true
@@ -43,6 +45,8 @@ Item {
     // opacity (1 minus the mask's alpha).
     Rectangle {
         anchors.fill: parent
+        // Over the motion too.
+        z: 1
         visible: root.identityFade && root.info !== null && root.info.assist === true
         gradient: Gradient {
             orientation: Gradient.Horizontal
@@ -62,10 +66,43 @@ Item {
         }
     }
 
+    // The motion, cropped and anchored right like the still (the art sits
+    // at the plate's right end).
     Loader {
         anchors.fill: parent
         active: root.motion
-        sourceComponent: Item {
+        sourceComponent: root.webm ? webmMotion : mp4Motion
+    }
+    Component {
+        id: webmMotion
+        Item {
+            readonly property real aspect: player.videoSize.height > 0 ? player.videoSize.width / player.videoSize.height : 448 / 84
+            VideoOutput {
+                id: webmOutput
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.max(parent.width, parent.height * parent.aspect)
+                height: width / parent.aspect
+                fillMode: VideoOutput.Stretch
+                // Qt 6.6 blends video only below full opacity: the plate's
+                // alpha needs it (cpp/webmplayer.h).
+                opacity: 0.99
+                visible: player.mediaStatus === MediaPlayer.BufferedMedia
+            }
+            WebmPlayer {
+                id: player
+                source: root.info.motion
+                videoOutput: webmOutput
+                loops: MediaPlayer.Infinite
+                decorative: true
+                onErrorOccurred: (error, message) => console.warn("[nameplate]", message)
+                Component.onCompleted: play()
+            }
+        }
+    }
+    Component {
+        id: mp4Motion
+        Item {
             VideoOutput {
                 id: output
                 anchors.fill: parent

@@ -715,12 +715,96 @@ Sources:
 Versions from the crates already in the lock or the registry cache on
 2026-11-05.
 
-| area                   | pick                                                                                                                                                             | why / rejected                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat video             | Qt Multimedia `MediaPlayer` + `VideoOutput` on Windows Media Foundation (the only backend in the static Qt 6.6.3)                                                | Plays mp4 (H.264/AAC) from a URL with seeking, including `/api/proxy-media`'s synthetic 206 ranges (live: TikTok, X, a direct mp4). No seekable `QIODevice` was needed: Media Foundation's own HTTP source does the ranges.                                                                                                                                                                                                                                                                        |
-| webm (nameplates)      | the still frame                                                                                                                                                  | Media Foundation's media engine plays the VP9 webm on this PC (probed through WinRT `MediaPlayer`: 448x84, seekable), but Qt's backend opens sources through `IMFSourceResolver`, which has no webm byte-stream handler: the player sits in `LoadingMedia` forever, with no error. libvpx (inside libwebrtc) plus a matroska demuxer into `VideoHub` would work but is a decoder pipeline for a hover effect; the web itself shows the still at rest. `NameplateLayer` plays only non-webm motion. |
-| APNG and animated WebP | `image` 0.25.10 (`png`, `webp` features, no defaults) in the new `yap-anim` crate, behind `src/anim.rs` and the `AnimatedPicture` item (`cpp/animatedpicture.*`) | Qt's PNG reader shows only APNG's default image; decorations and effects are APNG. One decoder for both formats: frames composited, scaled to the drawn size (never up), premultiplied, delays clamped as browsers do. Decoded on the thread pool; a shared 96 MB cache keyed by URL and size; frames tick only while playing, on screen and with the app active. Qt's `qwebp` could animate WebP too, but one path is simpler.                                                                    |
-| Web players            | `webview2-com` =0.38.2 (Tauri's version, `windows` 0.61, already in the lock)                                                                                    | The web's iframes need a browser. Each player is a WebView2 controller in a child window of ours, placed every rendered frame over its QML item and clipped to the chat list; hidden under popups. The loader is linked statically from `WebView2LoaderStatic.lib` (no DLL; `webview2-com-sys`'s own binding would import `WebView2Loader.dll`).                                                                                                                                                   |
+| area                   | pick                                                                                                                                                             | why / rejected                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat video             | Qt Multimedia `MediaPlayer` + `VideoOutput` on Windows Media Foundation (the only backend in the static Qt 6.6.3)                                                | Plays mp4 (H.264/AAC) from a URL with seeking, including `/api/proxy-media`'s synthetic 206 ranges (live: TikTok, X, a direct mp4). No seekable `QIODevice` was needed: Media Foundation's own HTTP source does the ranges.                                                                                                                                                                                                     |
+| WebM                   | `webm-iterable` 0.7.1 (2026-08-28, MIT, pure Rust) in the new `yap-webm` crate; libvpx's VP8/VP9 decoders and libyuv from LiveKit's `webrtc.lib`                 | Qt's backend opens sources through `IMFSourceResolver`, which has no webm byte-stream handler (the player waits in `LoadingMedia` forever). See §10.1.                                                                                                                                                                                                                                                                          |
+| APNG and animated WebP | `image` 0.25.10 (`png`, `webp` features, no defaults) in the new `yap-anim` crate, behind `src/anim.rs` and the `AnimatedPicture` item (`cpp/animatedpicture.*`) | Qt's PNG reader shows only APNG's default image; decorations and effects are APNG. One decoder for both formats: frames composited, scaled to the drawn size (never up), premultiplied, delays clamped as browsers do. Decoded on the thread pool; a shared 96 MB cache keyed by URL and size; frames tick only while playing, on screen and with the app active. Qt's `qwebp` could animate WebP too, but one path is simpler. |
+| Web players            | `webview2-com` =0.38.2 (Tauri's version, `windows` 0.61, already in the lock)                                                                                    | The web's iframes need a browser. Each player is a WebView2 controller in a child window of ours, placed every rendered frame over its QML item and clipped to the chat list; hidden under popups. The loader is linked statically from `WebView2LoaderStatic.lib` (no DLL; `webview2-com-sys`'s own binding would import `WebView2Loader.dll`).                                                                                |
+
+### 10.1 WebM: demuxer and decoder
+
+- **Demuxer: `webm-iterable`.** Discord's nameplates are VP9 with
+  `AlphaMode` 1: the alpha is a second VP9 stream in each block group's
+  `BlockAdditional` (id 1). `matroska-demuxer` 0.8.1 (2026-08) is the
+  tidier API but its `Frame` drops `BlockAdditions`, so alpha would be
+  lost. `webm-iterable` (600k downloads, maintained, MIT) is a full EBML
+  tag reader: it hands over buffered `BlockGroup`s with their additions,
+  and `SimpleBlock`/`Block` lacing. symphonia's mkv reader (already in
+  yap-audio) only exposes audio codecs. The file is read whole from
+  memory (at most 64 MB) and kept as compressed packets.
+- **Decoder: the libvpx in `webrtc.lib`.** `win-x64-release-webrtc-a545de4`
+  exports `vpx_codec_dec_init_ver`, `vpx_codec_decode`,
+  `vpx_codec_get_frame`, `vpx_codec_vp8_dx`, `vpx_codec_vp9_dx` (and libyuv's
+  `I420Scale`, `ScalePlane`, `ARGBScale`, `I420AlphaToARGB`) with C linkage
+  (checked with `llvm-nm`). `yap-webm` declares them (feature `libvpx`, the
+  structs mirror that libvpx's headers, decoder ABI 12) and links nothing:
+  the exe already links `webrtc.lib` through yap-voice, so no second
+  libvpx, no C toolchain, `/MT` as before. The crate's build script links
+  `webrtc.lib` into its own tests only. `vpx`/`env-libvpx-sys` were not
+  needed.
+- **Output.** Opaque 4:2:0 goes out as I420 and is copied once into a
+  `QVideoFrame` (`Format_YUV420P`), as `videohub.cpp` does for call video;
+  4:4:4/4:2:2 is reduced to 4:2:0 first, VP9 RGB (`VPX_CS_SRGB`) and alpha
+  streams come out as premultiplied BGRA (`Format_BGRA8888_Premultiplied`).
+  Qt 6.6's `QSGVideoMaterial` only turns blending on below full opacity
+  ("respect video formats with Alpha" is a TODO there), so an output that
+  shows alpha sets `opacity: 0.99`.
+- **Pacing and limits.** One thread per player: decode, wait for the
+  frame's wall-clock time, hand it over; frames 250 ms late are decoded but
+  not shown. Loops after the last frame's duration. Pictures larger than
+  the box (1920 x 1080; 960 x 540 for decorations) are box-scaled by
+  libyuv; streams above 4K are refused; 10/12-bit fails as unsupported.
+  `WebmPlayer` pauses the thread when the output is off screen (outside
+  the window or a clipping ancestor), the window is hidden or minimised,
+  or (decorations) the app is not active. Public files are kept in a 32 MB
+  byte cache so every row wearing one nameplate fetches it once.
+- **Measured** (this PC, release build): the shop page at rest 1.7 % of one
+  core, 219 MB private; with the Arctic Winter Frost plate (448x84 VP9 +
+  alpha, 12 fps) animating on the detail stage 2.8 % and 230 MB.
+
+### 10.2 Private video attachments
+
+`/api/attachments/*` needs the session and Media Foundation's HTTP source
+cannot send a header. `QMediaPlayer::setSourceDevice` with a Range-backed
+`QIODevice` was built first and failed live: Qt's `MFStream` serves one
+async read at a time and its `Seek` returns `S_FALSE` while a read is
+pending, so with network-bound reads the MP4 source re-read offset 0 and
+stopped after the first frame. The player now gets
+`http://127.0.0.1:<port>/m/<128-bit token>/<file name>` from
+`AuthMedia.localUrl`; `src/loopback.rs` relays each request (method,
+`Range`) to the API with the bearer added there, for the API's private
+media only, never following a redirect, and streams the status, type,
+length and range back. Media Foundation does its own seeking. WebM
+attachments go through WebmPlayer (which fetches with the session the same
+way).
+
+Frozen mp4s (fixed): Media Foundation showed three frames of any mp4,
+the relay's and a public URL's alike, while its clock ran on (no
+EndOfMedia). Qt 6.6's EVR presenter has three samples
+(`PRESENTER_BUFFER_COUNT`), and a sample goes back to the pool only when
+every `QVideoFrame` on it is gone. EmbedVideo's preview watched
+`videoSink.videoFrameChanged` in QML, and each frame handed to JS stayed
+alive until the next garbage collection, so the pool ran dry after three.
+A `gc()` every 700 ms let it advance about three frames at a time. The
+4B build (d115232d) froze the same way, both behind other windows and on
+an uncovered monitor, so window position was not the cause. The preview
+now waits for `videoSizeChanged` instead, which carries no frame (the MF
+renderer clears the sink when a player goes, so a reloaded player sees
+the size again).
+
+### 10.3 Failure paths
+
+| case                         | what happens                                                                                                                                                                                                                                                                                             | evidence                                                                                                                                          |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No WebView2 runtime          | `YAP_FAKE_NO_WEBVIEW2=1` fails environment creation for this process only. First click: the poster stays with a "Player unavailable. Click to open in your browser." chip; the item is `Failed` for good. Second click: `Files.openExternal` (logged instead of opened under `YAP_LOG_EXTERNAL_OPEN=1`). | live: `[webembed] no WebView2 environment: YAP_FAKE_NO_WEBVIEW2=1`, then `[external] open www.youtube.com/watch`; no msedgewebview2 child started |
+| Player frame renderer killed | The YouTube iframe's renderer exit arrives as `FRAME_RENDER_PROCESS_EXITED` (kind 3), now fatal too: back to the poster, nothing opens. A click makes a new player.                                                                                                                                      | live: killed renderer 9400 (child of our browser 21260, child of YapNative); poster; click played again                                           |
+| Browser process killed       | `BROWSER_PROCESS_EXITED`: back to the poster, and the dead environment is forgotten so the next click creates a new one (before, it would have failed for good).                                                                                                                                         | live: killed browser 3068; poster; click played again                                                                                             |
+| Broken mp4 attachment        | Media Foundation's "Unsupported media type": the web's unplayable state with Download video.                                                                                                                                                                                                             | live                                                                                                                                              |
+| Broken direct mp4 link       | The server makes no embed for a URL that does not load (as on the web); a direct video that fails to play turns into DirectMediaFallback (4B).                                                                                                                                                           | live (no card); fallback tests only                                                                                                               |
+| TikTok lookup fails          | 404 → the status card ("This post was deleted or made private."), 5xx/network → failed with Try again (the hydration TTLs).                                                                                                                                                                              | live (status card); store tests                                                                                                                   |
+| 404 proxied media            | `EmbedVideo.failed` → the card's fallback, as above.                                                                                                                                                                                                                                                     | tests only                                                                                                                                        |
+| Bad WebM                     | not WebM, truncated, no VP8/VP9 track, unsupported depth: the player fails and the item shows the unplayable state; a truncated file plays what it has.                                                                                                                                                  | crate tests                                                                                                                                       |
 
 WebView2 details:
 

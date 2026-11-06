@@ -34,6 +34,14 @@ pub enum Effect {
     /// A frame for the open gateway. Only emitted while it is ready.
     GatewaySend(Frame),
     GatewayDisconnect,
+    /// Read the collectibles catalog kept on disk; answered by
+    /// `Input::CatalogLoaded`.
+    LoadCatalog,
+    /// Keep the catalog (as served) on disk. The runtime stamps it with
+    /// the time it runs, which is when the response arrived.
+    SaveCatalog {
+        catalog: Value,
+    },
     /// Read the stored session; answered by `Input::TokenLoaded`.
     LoadToken,
     /// Open the cache and read the last session's snapshot; answered by
@@ -283,6 +291,13 @@ pub enum ApiRequest {
     Shop(super::shop::ShopRequest),
     /// A TikTok or Instagram lookup.
     Embeds(super::embeds::EmbedsRequest),
+    /// The GIF and clip favourites.
+    Favorites(super::favorites::FavoritesRequest),
+    /// `PATCH /api/channels/{id}/messages {message_id, embeds: []}`.
+    RemoveEmbeds {
+        channel_id: String,
+        message_id: String,
+    },
 }
 
 /// A page of messages, oldest first.
@@ -327,6 +342,8 @@ pub enum ApiResponse {
     Shop(super::shop::ShopResponse),
     /// A lookup's payload, as served.
     Embeds(Value),
+    /// The whole favourites list.
+    Favorites(Vec<Value>),
     /// A call whose body the store does not read.
     Done,
 }
@@ -368,6 +385,8 @@ impl ApiRequest {
             Self::Apps(request) => request.method(),
             Self::Shop(request) => request.method(),
             Self::Embeds(request) => request.method(),
+            Self::Favorites(request) => request.method(),
+            Self::RemoveEmbeds { .. } => Method::Patch,
             Self::SendMessage { .. }
             | Self::Typing { .. }
             | Self::OpenDm { .. }
@@ -405,6 +424,8 @@ impl ApiRequest {
             Self::Apps(request) => request.path(),
             Self::Shop(request) => request.path(),
             Self::Embeds(request) => request.path(),
+            Self::Favorites(request) => request.path(),
+            Self::RemoveEmbeds { channel_id, .. } => format!("/api/channels/{channel_id}/messages"),
             Self::Me => "/api/users/me".into(),
             Self::Servers => "/api/servers".into(),
             Self::Channels { server_id } => format!("/api/servers/{server_id}/channels"),
@@ -487,6 +508,10 @@ impl ApiRequest {
             Self::Apps(request) => request.body(),
             Self::Shop(request) => request.body(),
             Self::Embeds(_) => Value::Null,
+            Self::Favorites(request) => request.body(),
+            Self::RemoveEmbeds { message_id, .. } => {
+                json!({ "message_id": message_id, "embeds": [] })
+            }
             Self::SendMessage {
                 content,
                 reply_to_id,
@@ -569,6 +594,8 @@ impl ApiRequest {
             Self::Apps(request) => ApiResponse::Apps(request.decode(body)?),
             Self::Shop(request) => ApiResponse::Shop(request.decode(body)?),
             Self::Embeds(_) => ApiResponse::Embeds(body),
+            Self::Favorites(request) => ApiResponse::Favorites(request.decode(body)?),
+            Self::RemoveEmbeds { .. } => ApiResponse::Done,
             Self::Me => ApiResponse::Me(Box::new(
                 serde_json::from_value(body).map_err(|e| ApiError::Decode(format!("me: {e}")))?,
             )),

@@ -191,6 +191,10 @@ pub enum Command {
     Shop(super::shop::ShopCommand),
     /// A TikTok or Instagram card asks for its media.
     Embeds(super::embeds::EmbedsCommand),
+    /// The GIF and clip favourites' stars.
+    Favorites(super::favorites::FavoritesCommand),
+    /// Clear one of our messages' link previews (the embed's x).
+    RemoveEmbeds(String),
 }
 
 /// What the profile editor saves. Colours are `#RRGGBB` or `None` (Auto);
@@ -229,6 +233,8 @@ pub enum Input {
     TokenLoaded(Option<Token>),
     /// The last session's snapshot, if the cache has one.
     SnapshotLoaded(Option<Box<Snapshot>>),
+    /// The catalog kept on disk (as served) and when it was fetched.
+    CatalogLoaded(Option<(serde_json::Value, i64)>),
     Http {
         id: RequestId,
         result: Result<ApiResponse, ApiError>,

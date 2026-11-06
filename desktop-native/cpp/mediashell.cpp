@@ -9,9 +9,12 @@
 #include <QtCore/QStandardPaths>
 #include <QtCore/QUrl>
 #include <QtGui/QClipboard>
+#include <QtGui/QDesktopServices>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
 #include <QtGui/QWindow>
+
+#include <cstdio>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -213,6 +216,23 @@ void MediaShell::reveal(const QString& path) const
 #else
   Q_UNUSED(path);
 #endif
+}
+
+void MediaShell::openExternal(const QString& url) const
+{
+  const QUrl target(url);
+  const QString scheme = target.scheme().toLower();
+  // ShellExecute runs whatever a scheme maps to: web links only.
+  if (!target.isValid() || (scheme != QLatin1String("https") && scheme != QLatin1String("http")))
+    return;
+  if (qEnvironmentVariableIntValue("YAP_LOG_EXTERNAL_OPEN") != 0) {
+    // The query can carry ids: host and path only.
+    std::fprintf(stderr, "[external] open %s%s\n", qPrintable(target.host()),
+                 qPrintable(target.path()));
+    std::fflush(stderr);
+    return;
+  }
+  QDesktopServices::openUrl(target);
 }
 
 void MediaShell::openMedia(const QString& path) const

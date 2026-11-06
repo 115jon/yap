@@ -11,12 +11,11 @@ use super::Effects;
 use crate::api::ApiError;
 use crate::collectibles::Kind;
 use crate::settings::describe_api_error;
-use crate::store::shop::{shop_view, ShopCommand, ShopOp, ShopRequest, ShopResponse, Tab};
+use crate::store::shop::{shop_view, Disk, ShopCommand, ShopOp, ShopRequest, ShopResponse, Tab};
 use crate::store::state::State;
 use crate::store::view::ViewUpdate;
+use crate::store::Effect;
 use crate::store::{ApiRequest, ApiResponse, RequestId};
-
-const RELOAD_AFTER_MS: i64 = 30 * 60 * 1000;
 
 impl State {
     fn shop_http(
@@ -37,13 +36,50 @@ impl State {
         self.shop.loading = self.shop_http(fx, ShopRequest::Catalog, ShopOp::Catalog);
     }
 
+    /// Asks the server again unless the copy shown is inside the web's
+    /// freshness window (30 minutes, 10 when the server said stale).
+    fn refresh_catalog(&mut self, fx: &mut Effects) {
+        let reusable = self.shop.catalog.as_ref().is_some_and(|c| {
+            yap_cache::catalog::reusable(c.stale, self.shop.loaded_ms, self.shop.now_ms)
+        });
+        if !reusable {
+            self.load_shop_catalog(fx);
+        }
+    }
+
+    /// The copy on disk arrived (or there is none).
+    pub(super) fn on_catalog_loaded(&mut self, fx: &mut Effects, stored: Option<(Value, i64)>) {
+        if self.shop.disk != Disk::Reading {
+            return;
+        }
+        self.shop.disk = Disk::Read;
+        if self.shop.catalog.is_none() {
+            if let Some((body, fetched_at_ms)) = stored {
+                match serde_json::from_value::<yap_protocol::collectibles::Catalog>(body) {
+                    Ok(catalog) => {
+                        self.shop.catalog = Some(Box::new(catalog));
+                        self.shop.loaded_ms = fetched_at_ms;
+                    }
+                    Err(error) => eprintln!("[shop] cached catalog: {error}"),
+                }
+            }
+        }
+        self.refresh_catalog(fx);
+        self.sync_shop(fx);
+    }
+
     pub(super) fn on_shop(&mut self, fx: &mut Effects, command: ShopCommand) {
         match command {
             ShopCommand::Open { now_ms } => {
                 self.shop.now_ms = now_ms;
-                let stale = now_ms - self.shop.loaded_ms > RELOAD_AFTER_MS;
-                if self.shop.catalog.is_none() || stale {
-                    self.load_shop_catalog(fx);
+                match self.shop.disk {
+                    // The copy kept on disk first: the shop shows it at once.
+                    Disk::Unread if self.shop.catalog.is_none() => {
+                        self.shop.disk = Disk::Reading;
+                        fx.push(Effect::LoadCatalog);
+                    }
+                    Disk::Reading => {}
+                    _ => self.refresh_catalog(fx),
                 }
             }
             ShopCommand::Tab(tab) => {
@@ -145,6 +181,9 @@ impl State {
                 self.shop.loading = None;
                 match result {
                     Ok(ShopResponse::Catalog(catalog)) => {
+                        if let Ok(body) = serde_json::to_value(&*catalog) {
+                            fx.push(Effect::SaveCatalog { catalog: body });
+                        }
                         self.shop.catalog = Some(catalog);
                         self.shop.loaded_ms = self.shop.now_ms;
                         self.shop.error.clear();
@@ -215,10 +254,12 @@ impl State {
     pub(super) fn clear_shop(&mut self) {
         let catalog = self.shop.catalog.take();
         let loaded = self.shop.loaded_ms;
+        let disk = self.shop.disk;
         self.shop = Default::default();
         // The catalog is the same for everyone.
         self.shop.catalog = catalog;
         self.shop.loaded_ms = loaded;
+        self.shop.disk = disk;
         self.pending.shop.clear();
     }
 }

@@ -4,6 +4,7 @@
 mod admin;
 mod apps;
 mod embeds;
+mod favorites;
 mod friends;
 mod invites;
 mod media;
@@ -66,6 +67,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
         Input::User(command) => state.on_command(&mut fx, command),
         Input::TokenLoaded(token) => state.on_token(&mut fx, token),
         Input::SnapshotLoaded(snapshot) => state.on_snapshot(&mut fx, snapshot),
+        Input::CatalogLoaded(stored) => state.on_catalog_loaded(&mut fx, stored),
         Input::Http { id, result } => state.on_http(&mut fx, id, result),
         Input::SignIn { attempt, event } => state.on_sign_in(&mut fx, attempt, event),
         Input::Gateway { session, event } => state.on_gateway(&mut fx, session, event),
@@ -1165,6 +1167,8 @@ impl State {
             Command::Apps(command) => self.on_apps(fx, command),
             Command::Shop(command) => self.on_shop(fx, command),
             Command::Embeds(command) => self.on_embeds(fx, command),
+            Command::Favorites(command) => self.on_favorites(fx, command),
+            Command::RemoveEmbeds(id) => self.remove_embeds(fx, &id),
             Command::Invites(command) => self.on_invites(fx, command),
         }
     }
@@ -1513,6 +1517,7 @@ impl State {
             || self.route_apps_http(fx, id, &mut answer)
             || self.route_shop_http(fx, id, &mut answer)
             || self.route_embeds_http(fx, id, &mut answer)
+            || self.route_favorites_http(fx, id, &mut answer)
         {
             return;
         }
@@ -2366,6 +2371,42 @@ impl State {
                 fx.view(ViewUpdate::Notice(EDIT_FAILED.to_owned()));
             }
         }
+    }
+
+    /// `removeEmbeds`: clears the previews of one of our messages for
+    /// everyone. The row clears at once; the web keeps it cleared even when
+    /// the request fails (no `MESSAGE_UPDATE` then), and so does this.
+    fn remove_embeds(&mut self, fx: &mut Effects, id: &str) {
+        let Some((_, me)) = self.signed_in() else {
+            return;
+        };
+        let me = me.id.clone();
+        let Some(original) = self
+            .messages
+            .as_ref()
+            .and_then(|log| log.get(id))
+            .filter(|m| m.author_id == me && !is_pending(m) && !m.embeds.is_empty())
+            .cloned()
+        else {
+            return;
+        };
+        let patch = MessagePatch {
+            id: id.to_owned(),
+            channel_id: Some(original.channel_id.clone()),
+            content: None,
+            updated_at: None,
+            embeds: Some(Vec::new()),
+            // Its own revision, so the revision rule lets the clear through.
+            content_revision: original.content_revision,
+        };
+        self.apply_patch(fx, &patch);
+        let _ = self.http(
+            fx,
+            ApiRequest::RemoveEmbeds {
+                channel_id: original.channel_id,
+                message_id: id.to_owned(),
+            },
+        );
     }
 
     /// Deletes one of our messages: the row goes at once and comes back if

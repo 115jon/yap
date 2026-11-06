@@ -30,6 +30,7 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2Settings3, ICoreWebView2Settings4, ICoreWebView2_3, ICoreWebView2_8,
     COREWEBVIEW2_COLOR, COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS,
     COREWEBVIEW2_PROCESS_FAILED_KIND, COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED,
+    COREWEBVIEW2_PROCESS_FAILED_KIND_FRAME_RENDER_PROCESS_EXITED,
     COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED,
 };
 use webview2_com::{
@@ -259,9 +260,34 @@ fn with_environment(id: u64) {
     }
 }
 
+/// `YAP_FAKE_NO_WEBVIEW2=1` (tests): environment creation fails as it
+/// does on a PC without the WebView2 runtime, for this process only.
+fn fake_missing_runtime() -> bool {
+    std::env::var("YAP_FAKE_NO_WEBVIEW2").is_ok_and(|v| v == "1")
+}
+
+/// Fails every player waiting on the environment and remembers it.
+fn fail_environment(reason: &str) {
+    eprintln!("[webembed] no WebView2 environment: {reason}");
+    let waiting = ENV.with(|env| {
+        let mut env = env.borrow_mut();
+        let waiting = match &mut *env {
+            Env::Creating(waiting) => std::mem::take(waiting),
+            _ => Vec::new(),
+        };
+        *env = Env::Failed;
+        waiting
+    });
+    fail_waiting(waiting);
+}
+
 fn start_environment() {
     let creating = ENV.with(|env| matches!(&*env.borrow(), Env::Creating(w) if w.len() == 1));
     if !creating {
+        return;
+    }
+    if fake_missing_runtime() {
+        fail_environment("YAP_FAKE_NO_WEBVIEW2=1");
         return;
     }
     let handler = CreateCoreWebView2EnvironmentCompletedHandler::create(Box::new(
@@ -316,17 +342,7 @@ fn start_environment() {
         )
     };
     if hr.is_err() {
-        eprintln!("[webembed] CreateCoreWebView2EnvironmentWithOptions: {hr:?}");
-        let waiting = ENV.with(|env| {
-            let mut env = env.borrow_mut();
-            let waiting = match &mut *env {
-                Env::Creating(waiting) => std::mem::take(waiting),
-                _ => Vec::new(),
-            };
-            *env = Env::Failed;
-            waiting
-        });
-        fail_waiting(waiting);
+        fail_environment(&format!("CreateCoreWebView2EnvironmentWithOptions: {hr:?}"));
     }
 }
 
@@ -385,10 +401,23 @@ fn uri_of(get: impl FnOnce(*mut PWSTR) -> windows::core::Result<()>) -> String {
     take_pwstr(uri)
 }
 
-/// Whether a failed process ends the player.
+/// Whether a failed process ends the player: the browser, the host page's
+/// renderer, or the player frame's own (the page has no other frame).
 fn fatal(kind: COREWEBVIEW2_PROCESS_FAILED_KIND) -> bool {
     kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED
         || kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED
+        || kind == COREWEBVIEW2_PROCESS_FAILED_KIND_FRAME_RENDER_PROCESS_EXITED
+}
+
+/// The browser process died: the shared environment is gone with it, so
+/// the next player makes a new one instead of failing on the dead one.
+fn forget_environment() {
+    ENV.with(|env| {
+        let mut env = env.borrow_mut();
+        if matches!(&*env, Env::Ready(_)) {
+            *env = Env::Missing;
+        }
+    });
 }
 
 /// A navigation of the page or one of its frames: cancelled unless the host
@@ -499,6 +528,9 @@ fn start_page(
                 eprintln!("[webembed] process failed: {kind:?}");
                 // Only the browser or the page's renderer dying ends the
                 // player; a GPU, utility or unresponsive process recovers.
+                if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED {
+                    forget_environment();
+                }
                 if fatal(kind) {
                     emit(id, CRASHED, "");
                 }
@@ -706,6 +738,13 @@ mod tests {
     #[test]
     fn a_lookalike_suffix_should_leave() {
         assert!(!allowed("https://notyoutube.com/embed"));
+    }
+
+    #[test]
+    fn a_crashed_player_frame_should_end_the_player() {
+        assert!(super::fatal(
+            super::COREWEBVIEW2_PROCESS_FAILED_KIND_FRAME_RENDER_PROCESS_EXITED
+        ));
     }
 
     #[test]

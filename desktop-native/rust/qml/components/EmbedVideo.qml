@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtMultimedia
+import Yap.Media
 import com.yap.native
 
 // A video in the chat (VideoAttachment.tsx, VideoPlayerControls.tsx):
@@ -19,6 +20,12 @@ import com.yap.native
 // player starts (one plays at a time, ShellState.activeVideo), and is
 // released when the row is hidden or pooled. A load error says `failed`
 // once, so the card can fall back as the web does.
+//
+// At the end a `<video>` keeps its last frame, but Media Foundation's
+// output goes black when playback ends. So the last second of a playing
+// video is grabbed from the output every few frames (`endFrame`) and shown
+// over the stage once it has ended, under the replay control; without a
+// grab the poster shows. WebM keeps its last frame in the output as it is.
 Item {
     id: root
 
@@ -38,6 +45,11 @@ Item {
     property bool autoStart: false
     // Load the first frame while paused, before any click.
     property bool preview: false
+    // The file's type when known (an attachment's), else the URL decides.
+    property string contentType: ""
+    // WebM plays through WebmPlayer; the API's private files through
+    // AuthMedia's loopback relay; anything else by URL.
+    readonly property bool webm: contentType === "video/webm" || /\.webm($|[?#])/i.test(source)
 
     signal expandRequested(string source, int position)
     signal failed()
@@ -46,6 +58,10 @@ Item {
 
     property bool started: animated || autoStart
     property bool errored: false
+    // The grab of the picture last shown (an image URL), and its result,
+    // which must stay alive for the URL to load.
+    property string endFrame: ""
+    property var endGrab: null
     // The row is pooled (culled, not hidden): the player is let go.
     property bool pooled: false
     // This player's number in ShellState.activeVideo while it plays.
@@ -54,6 +70,8 @@ Item {
     onSourceChanged: {
         started = animated || autoStart
         errored = false
+        endFrame = ""
+        endGrab = null
     }
     readonly property var player: engine.item ? engine.item.player : null
     // A preview's muted peek at the first frame is not playing.
@@ -68,6 +86,26 @@ Item {
         const r = s % 60
         const pad = n => (n < 10 ? "0" : "") + n
         return h > 0 ? h + ":" + pad(m) + ":" + pad(r) : m + ":" + pad(r)
+    }
+
+    // Keeps the picture on the output for the end of the video.
+    function grabFrame() {
+        if (root.webm || root.animated || !root.visible || video.width <= 0 || video.height <= 0)
+            return
+        video.grabToImage(result => {
+            root.endGrab = result
+            root.endFrame = result.url
+        })
+    }
+
+    // The last second, every 250 ms; and at every pause or seek that
+    // leaves the video showing a picture.
+    Timer {
+        interval: 250
+        repeat: true
+        running: root.playing && !root.webm && !root.animated && root.player !== null
+            && root.player.duration > 0 && root.player.duration - root.player.position < 1500
+        onTriggered: root.grabFrame()
     }
 
     function start() {
@@ -116,6 +154,9 @@ Item {
     // One video at a time: playing takes the number, and a newer one (or a
     // web player) taking it pauses this. Muted GIF-mode loops stay out.
     onPlayingChanged: {
+        // Paused (not ended): what shows now is what the end can show.
+        if (!playing && started && !ended && player !== null && player.position > 0)
+            Qt.callLater(root.grabFrame)
         if (playing && !animated) {
             root.claim = ShellState.newVideoId()
             ShellState.activeVideo = root.claim
@@ -146,7 +187,8 @@ Item {
         Image {
             id: posterImage
             anchors.fill: parent
-            visible: root.poster.length > 0 && (!root.player || root.player.mediaStatus < MediaPlayer.BufferedMedia || video.sourceRect.width <= 0)
+            visible: root.poster.length > 0 && (!root.player || root.player.mediaStatus < MediaPlayer.BufferedMedia || video.sourceRect.width <= 0
+                || (root.ended && root.endFrame.length === 0))
             source: root.poster
             fillMode: Image.PreserveAspectFit
             asynchronous: true
@@ -157,23 +199,68 @@ Item {
             id: video
             anchors.fill: parent
             fillMode: VideoOutput.PreserveAspectFit
+            // A transparent webm blends only below full opacity (Qt 6.6).
+            opacity: root.player && root.player.hasAlpha === true ? 0.99 : 1
             onSourceRectChanged: {
                 if (sourceRect.width > 0 && sourceRect.height > 0)
                     root.sizeKnown(sourceRect.width, sourceRect.height)
             }
         }
 
+        // The end of a video: its last picture, as a `<video>` keeps it.
+        Image {
+            anchors.fill: parent
+            visible: root.ended && !root.webm && source.toString().length > 0
+            source: root.endFrame
+            fillMode: Image.Stretch
+            cache: false
+        }
+
         Loader {
             id: engine
             // Hidden (a pooled row, another view): the player goes, so a
-            // paused Media Foundation session costs nothing in the
-            // background.
+            // paused session costs nothing in the background.
             active: (root.started || root.preview) && !root.errored && root.visible && !root.pooled
-            sourceComponent: Item {
+            sourceComponent: root.webm ? webmEngine : mediaEngine
+        }
+
+        // Media Foundation: mp4 and the rest, by URL; the API's private
+        // attachments through AuthMedia's loopback relay (they need the
+        // session, which a URL must never carry).
+        Component {
+            id: mediaEngine
+            Item {
+                id: holder
                 readonly property alias player: mediaPlayer
+                // The URL whose loopback token this engine holds ("" when it
+                // holds none): given back when the engine goes or the source
+                // changes, so the relay does not keep tokens of finished
+                // videos.
+                property string leased: ""
+                function relink() {
+                    if (holder.leased !== "") {
+                        AuthMedia.release(holder.leased)
+                        holder.leased = ""
+                    }
+                    if (!AuthMedia.needsAuth(root.source)) {
+                        mediaPlayer.source = root.source
+                        return
+                    }
+                    const local = AuthMedia.localUrl(root.source)
+                    if (local !== root.source)
+                        holder.leased = root.source
+                    mediaPlayer.source = local
+                }
+                Component.onDestruction: {
+                    if (holder.leased !== "")
+                        AuthMedia.release(holder.leased)
+                }
+                Connections {
+                    target: root
+                    function onSourceChanged() { holder.relink() }
+                }
                 MediaPlayer {
                     id: mediaPlayer
-                    source: root.source
                     videoOutput: video
                     loops: root.animated ? MediaPlayer.Infinite : 1
                     // The preview's peek runs muted until the click.
@@ -188,6 +275,7 @@ Item {
                         root.failed()
                     }
                     Component.onCompleted: {
+                        holder.relink()
                         if (root.startAt > 0)
                             position = root.startAt
                         // A preview plays muted just until its first frame
@@ -197,13 +285,46 @@ Item {
                         play()
                     }
                 }
+                // The first frame: its size arrives with it. Not
+                // videoFrameChanged: a frame handed to JS stays alive until
+                // the next garbage collection, and Media Foundation's
+                // presenter has only three frames to hand out, so playback
+                // froze after three. The size is cleared when a player goes.
                 Connections {
                     target: video.videoSink
-                    function onVideoFrameChanged() {
-                        if (mediaPlayer.peeking && !root.started) {
+                    function onVideoSizeChanged() {
+                        if (mediaPlayer.peeking && !root.started && video.videoSink.videoSize.width > 0) {
                             mediaPlayer.peeking = false
                             mediaPlayer.pause()
                         }
+                    }
+                }
+            }
+        }
+
+        // WebM (VP8/VP9) through libvpx: Media Foundation cannot open it
+        // here. It shows its first frame without playing, so a preview
+        // needs no peek. Silent (no audio track is played).
+        Component {
+            id: webmEngine
+            Item {
+                readonly property alias player: webmPlayer
+                WebmPlayer {
+                    id: webmPlayer
+                    source: root.source
+                    videoOutput: video
+                    loops: root.animated ? MediaPlayer.Infinite : 1
+                    decorative: root.animated
+                    onErrorOccurred: (error, message) => {
+                        console.warn("[video] webm:", message)
+                        root.errored = true
+                        root.failed()
+                    }
+                    Component.onCompleted: {
+                        if (root.startAt > 0)
+                            position = root.startAt
+                        if (root.started)
+                            play()
                     }
                 }
             }

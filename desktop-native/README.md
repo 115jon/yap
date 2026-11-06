@@ -111,8 +111,11 @@ the decisions.
 - Media in messages as the web draws it: pictures (one fitted in 640 x 400,
   or the 2-10 tile grid; GIFs animate; sensitive ones blurred behind
   "Show media"), the image viewer (zoom, pan, previous/next, open the
-  original, download), video as a poster key that opens the system player,
-  file cards that save to Downloads. Attachments load with the session as a
+  original, download), videos played in place with the chat player at the
+  web's sizes (640 x 400 at the file's aspect; Download on hover, the GIF
+  or clip star, the web's "This video cannot be played here" state), file
+  cards that save to Downloads. Private video goes through a loopback relay
+  that adds the session (`src/loopback.rs`), never through the URL. Attachments load with the session as a
   bearer header added by the image loader (`cpp/main.cpp`,
   `src/media.rs`), never as a URL token.
 - Uploads: the + key (system file dialog), Ctrl+V with copied files or a
@@ -146,6 +149,21 @@ the decisions.
   poster and duration badge until clicked, then play/pause/replay, the
   scrub band, time, mute and volume, Full Screen (the video viewer); it
   pauses when scrolled away and is released when its row is hidden.
+- WebM (`crates/yap-webm`, `cpp/webmplayer.*`), which Media Foundation
+  cannot open here: VP8/VP9 (4:2:0, 4:4:4, RGB) with the alpha side
+  stream, demuxed by webm-iterable, decoded by the libvpx inside
+  `webrtc.lib`, paced on its own thread into a `QVideoSink`. Animated
+  nameplates (member list and account row on hover, the shop's stage and
+  cards always), webm attachments and links, and video profile banners.
+  It decodes only while shown, the window is up and, for decorations, the
+  app is active; it loops, holds its first frame when paused, and caps the
+  picture at 1920 x 1080 (960 x 540 for decorations) and the file at 64 MB.
+- The GIF and clip favourite star on video attachments and X media
+  (`/api/gifs?mode=favorites`, `mode=favorite` POST/DELETE, the web's ids),
+  and the x that removes our own message's previews (confirm, Shift skips).
+- The shop catalog is kept on disk (`cache\catalog.json`) and shown at
+  once; it is asked for again after the web's 30 minutes (10 when the
+  server said stale).
 - Collectibles (`yap-core` `collectibles.rs`): avatar decorations (APNG,
   decoded natively) on message, member, DM, voice and account avatars, the
   profile card and the shop; nameplates behind member and account rows;
@@ -266,11 +284,10 @@ sound, per-person and per-server soundboard mute controls. Listen Together:
 radio stations, collections and paging, recently played. Wordle progress is
 kept for the session only (the web keeps it per day). Warp Rush.
 Camera backgrounds, the stream watcher list and stream
-volume, input volume, a mic test outside a call, inline playback of video
-attachments (they need the session header; they still open in the system
-player), webm nameplate motion (the still shows), clips in the GIF picker,
-GIF favorites and categories, stickers, emoji generation, the reaction details
-modal, remove-embeds, the channel details' Media,
+volume, input volume, a mic test outside a call, WebM audio (webm plays
+silent), clips in the GIF picker, the favourites tab and GIF categories,
+stickers, emoji generation, the reaction details modal, the channel
+details' Media,
 Links and Files tabs, toast buttons (reply, mark read)
 and avatars, call rings, the taskbar thumbnail toolbar and auto-update. In
 settings: avatar crop and the recent-avatar picker, display name styles,
@@ -316,6 +333,11 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_SHARE_ONLY_OURS`      | unset                     | `1`: share stills and captures only of our own windows (or one titled "Yap Native Share Test"); other windows listed without titles |
 | `YAP_FAKE_SHARE_AUDIO`     | unset                     | `1`: share audio is a 440 Hz tone, never a loopback                                                                                 |
 | `YAP_PICK_FILES`           | unset                     | `a.png;b.png`: returned by the file picker instead of showing it (tests)                                                            |
+| `YAP_EMBED_MUTED`          | unset                     | `1`: every chat player starts muted (tests)                                                                                         |
+| `YAP_FAKE_NO_WEBVIEW2`     | unset                     | `1`: WebView2 creation fails for this process, as on a PC without the runtime (tests)                                               |
+| `YAP_LOG_EXTERNAL_OPEN`    | unset                     | `1`: links the players would open in the browser are logged as `[external] open <host><path>` instead (tests)                       |
+| `YAP_DECOR_IGNORE_FOCUS`   | unset                     | `1`: decorations (webm nameplates) play in an unfocused window too (tests that cannot take focus)                                   |
+| `YAP_TRACE_MEDIA_IO`       | unset                     | `1`: log each loopback relay request (range, status, length)                                                                        |
 
 The defaults mirror `src/lib/site-defaults.ts`.
 
@@ -356,6 +378,8 @@ cpp/desktopshell.*    one instance, tray and badge, toasts, Run key, window rect
 cpp/toast_win.*       WinRT toasts (WRL, no Qt headers)
 cpp/logfile.*         stderr tee into %LOCALAPPDATA%\YapNative\logs, rotated
 cpp/videohub.*        remote call video into QVideoSinks (VideoHub singleton)
+cpp/webmplayer.*      WebmPlayer: yap-webm frames into a VideoOutput's sink
+cpp/authmedia.*       AuthMedia: private attachments through the loopback relay
 cpp/camera.*          our camera: devices, QCamera or the test pattern, frames out
 assets/, tools/       generated fonts, icons and brand SVGs, and their scripts
 rust/src/bridge.rs    YapClient QObject (properties, invokables, signals)

@@ -18,6 +18,7 @@ mod desktop;
 mod friends;
 mod gui;
 mod invites;
+mod loopback;
 mod media;
 mod models;
 mod panels;
@@ -30,3 +31,4 @@ mod sound;
 mod video;
 #[cfg(windows)]
 mod webembed;
+mod webm;

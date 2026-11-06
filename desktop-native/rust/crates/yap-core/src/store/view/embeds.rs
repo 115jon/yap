@@ -27,6 +27,7 @@ use yap_protocol::rest::{
 
 use super::super::embeds::{Hydration, Hydrations, Provider};
 use super::query_value;
+use crate::gif_favorite;
 
 const PORTRAIT_MAX: f64 = 560.0;
 
@@ -868,10 +869,70 @@ fn x_gif_webp(url: &str) -> Option<String> {
         .then(|| format!("https://gif.fxtwitter.com{}.webp", &path[..path.len() - 4]))
 }
 
-fn x_media(media: &[EmbedMedia], page: &str, api_base: &str) -> Vec<Value> {
+/// The star an X GIF or video carries (XGifTile's
+/// `createExternalGifFavorite`, X videos' `createAttachmentClipFavorite`),
+/// with the web's ids (`x-media-<message>-<index>-<url>`, the proxy path).
+fn x_favorite(m: &EmbedMedia, index: usize, page: &str, api_base: &str, message_id: &str) -> Value {
+    let message = if message_id.is_empty() {
+        "embed"
+    } else {
+        message_id
+    };
+    let proxy = proxied(&m.url, page, api_base);
+    let path = proxy.strip_prefix(api_base).unwrap_or(&proxy).to_owned();
+    if m.is_gif {
+        let webp = x_gif_webp(&m.url);
+        let send = webp.clone().unwrap_or_else(|| path.clone());
+        let id = format!("x-media-{message}-{index}-{}", m.url);
+        let filename = format!(
+            "x-video-{}.{}",
+            index + 1,
+            if webp.is_some() { "webp" } else { "mp4" }
+        );
+        let content = if webp.is_some() {
+            "image/webp"
+        } else {
+            m.content_type.as_deref().unwrap_or("video/mp4")
+        };
+        return gif_favorite::external(&gif_favorite::FavoriteInput {
+            id: Some(&id),
+            title: Some(&filename),
+            alt_text: m.alt_text.as_deref(),
+            source_url: &m.url,
+            preview_url: Some(&send),
+            send_url: Some(&send),
+            width: m.width,
+            height: m.height,
+            content_type: Some(content),
+            ..gif_favorite::FavoriteInput::default()
+        });
+    }
+    let id = format!("x-media-{message}-{index}-{}", m.url);
+    let filename = format!("x-video-{}.mp4", index + 1);
+    gif_favorite::attachment_clip(&gif_favorite::FavoriteInput {
+        id: Some(&id),
+        title: Some(&filename),
+        source_url: &path,
+        preview_url: Some(&path),
+        send_url: Some(&path),
+        width: m.width,
+        height: m.height,
+        filename: Some(&filename),
+        file_key_or_url: Some(&path),
+        ..gif_favorite::FavoriteInput::default()
+    })
+}
+
+fn x_media(
+    media: &[EmbedMedia],
+    page: &str,
+    api_base: &str,
+    message_id: Option<&str>,
+) -> Vec<Value> {
     media
         .iter()
-        .map(|m| {
+        .enumerate()
+        .map(|(index, m)| {
             let video = m.kind == "video";
             let gif = video && m.is_gif;
             let kind = if gif {
@@ -890,6 +951,11 @@ fn x_media(media: &[EmbedMedia], page: &str, api_base: &str) -> Vec<Value> {
                 "h": m.height.unwrap_or(0.0),
                 "duration": m.duration_seconds.unwrap_or(0.0),
                 "alt": m.alt_text.as_deref().unwrap_or_default(),
+                // Quoted posts carry no star (the web draws none there).
+                "favorite": match message_id {
+                    Some(id) if video => x_favorite(m, index, page, api_base, id),
+                    _ => Value::Null,
+                },
             })
         })
         .collect()
@@ -899,7 +965,7 @@ fn collapses(text: &str, lines: usize, chars: usize) -> bool {
     text.lines().count() > lines || text.chars().count() > chars
 }
 
-fn x_json(embed: &Embed, api_base: &str) -> Value {
+fn x_json(embed: &Embed, api_base: &str, message_id: &str) -> Value {
     let page = embed.url.as_str();
     let media: Vec<EmbedMedia> = if !embed.media.is_empty() {
         embed.media.clone()
@@ -968,7 +1034,7 @@ fn x_json(embed: &Embed, api_base: &str) -> Value {
             "collapse": collapses(qtext, 4, 220),
             "url": q.url.as_deref().unwrap_or_default(),
             "timestamp": q.timestamp.as_deref().unwrap_or_default(),
-            "media": x_media(&q.media.iter().take(4).cloned().collect::<Vec<_>>(), qpage, api_base),
+            "media": x_media(&q.media.iter().take(4).cloned().collect::<Vec<_>>(), qpage, api_base, None),
             "extra": q.media.len().saturating_sub(4),
         })
     });
@@ -999,7 +1065,7 @@ fn x_json(embed: &Embed, api_base: &str) -> Value {
         "author": author,
         "text": text,
         "collapse": collapses(text, 5, 280),
-        "media": x_media(&shown, page, api_base),
+        "media": x_media(&shown, page, api_base, Some(message_id)),
         "extra": media.len().saturating_sub(4),
         "chip": chip,
         "cardUrl": card.and_then(|c| c.url.as_deref()).filter(|_| !shown.is_empty() && card_domain.is_some()).unwrap_or_default(),
@@ -1176,7 +1242,12 @@ pub fn hydration_provider(embed: &Embed) -> Option<Provider> {
 }
 
 /// One embed for QML, or `None` for one that cannot show.
-pub fn embed_value(embed: &Embed, api_base: &str, hydrations: &Hydrations) -> Option<Value> {
+pub fn embed_value(
+    embed: &Embed,
+    api_base: &str,
+    hydrations: &Hydrations,
+    message_id: &str,
+) -> Option<Value> {
     if !is_web(&embed.url) {
         return None;
     }
@@ -1232,7 +1303,7 @@ pub fn embed_value(embed: &Embed, api_base: &str, hydrations: &Hydrations) -> Op
             &["x.com", "twitter.com", "fxtwitter.com", "fixupx.com"],
         );
     if x {
-        return Some(x_json(embed, api_base));
+        return Some(x_json(embed, api_base, message_id));
     }
     match embed.kind.as_str() {
         "video" => Some(player_card_json(embed, api_base, false)),
@@ -1314,6 +1385,7 @@ mod tests {
             &embed("TikTok", "https://www.tiktok.com/@a/video/123"),
             "https://y",
             &HashMap::new(),
+            "m",
         )
         .unwrap_or_default();
         assert_eq!(v["state"], "loading");
@@ -1338,7 +1410,7 @@ mod tests {
             width: None,
             height: None,
         });
-        let v = embed_value(&e, "https://y", &hydrations).unwrap_or_default();
+        let v = embed_value(&e, "https://y", &hydrations, "m").unwrap_or_default();
         assert_eq!(
             v["iframe"],
             "https://www.tiktok.com/player/v1/123?description=1&music_info=1"
@@ -1359,6 +1431,7 @@ mod tests {
             &embed("TikTok", "https://www.tiktok.com/@a/video/1"),
             "https://y",
             &hydrations,
+            "m",
         )
         .unwrap_or_default();
         assert!(v["media"][0]["src"]
@@ -1412,7 +1485,7 @@ mod tests {
             kind: Some("direct".into()),
             ..EmbedVideo::default()
         });
-        let v = embed_value(&e, "https://y", &HashMap::new()).unwrap_or_default();
+        let v = embed_value(&e, "https://y", &HashMap::new(), "m").unwrap_or_default();
         assert_eq!(
             (v["kind"].as_str(), v["name"].as_str()),
             (Some("video"), Some("clip.mp4"))

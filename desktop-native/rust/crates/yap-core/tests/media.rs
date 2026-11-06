@@ -559,3 +559,194 @@ fn an_embed_arrival_should_render_a_card() {
         (&json!("card"), &json!("thumbnail"), &json!(400))
     );
 }
+
+// Remove embeds (LinkEmbed.tsx's x, chat-actions.ts `removeEmbeds`)
+
+fn our_message_with_an_embed(client: &mut Client) {
+    let data = json!({
+        "id": "msg_ours", "channel_id": TEXT, "author_id": ME,
+        "author": { "id": ME, "username": "me", "display_name": "Fixture Me" },
+        "content": "https://a.example/", "created_at": "2026-11-04T12:00:09.000Z",
+        "attachments": [], "embeds": [{ "type": "link", "url": "https://a.example/" }],
+        "content_revision": 1
+    });
+    let create = Dispatch::decode("MESSAGE_CREATE", data).expect("decodes");
+    client.gateway(GatewayEvent::Dispatch(create));
+}
+
+#[test]
+fn removing_embeds_should_clear_them_at_once_and_patch() {
+    let mut client = Client::online();
+    our_message_with_an_embed(&mut client);
+    let fx = client.command(Command::RemoveEmbeds("msg_ours".into()));
+    let (_, request) = find(&fx, |r| matches!(r, ApiRequest::RemoveEmbeds { .. }));
+    let log = client.state.messages().expect("log");
+    assert_eq!(
+        (
+            log.get("msg_ours").expect("message").embeds.len(),
+            request.method(),
+            request.path(),
+            request.body()
+        ),
+        (
+            0,
+            yap_core::store::Method::Patch,
+            format!("/api/channels/{TEXT}/messages"),
+            json!({ "message_id": "msg_ours", "embeds": [] })
+        )
+    );
+}
+
+#[test]
+fn someone_elses_embeds_should_not_be_removable() {
+    let mut client = Client::online();
+    let data = json!({ "id": MSG, "channel_id": TEXT, "embeds": [{ "type": "link", "url": "https://a.example/" }] });
+    client.gateway(GatewayEvent::Dispatch(
+        Dispatch::decode("MESSAGE_UPDATE", data).expect("decodes"),
+    ));
+    let fx = client.command(Command::RemoveEmbeds(MSG.into()));
+    assert!(requests(&fx).is_empty());
+}
+
+#[test]
+fn a_failed_removal_should_keep_the_embeds_cleared() {
+    let mut client = Client::online();
+    our_message_with_an_embed(&mut client);
+    let fx = client.command(Command::RemoveEmbeds("msg_ours".into()));
+    let (id, _) = find(&fx, |r| matches!(r, ApiRequest::RemoveEmbeds { .. }));
+    client.answer(
+        id,
+        Err(ApiError::Http {
+            status: 500,
+            message: "nope".into(),
+        }),
+    );
+    let log = client.state.messages().expect("log");
+    assert!(log.get("msg_ours").expect("message").embeds.is_empty());
+}
+
+// GIF and clip favourites (useGifFavoritesStore.ts)
+
+use yap_core::store::favorites::{FavoritesCommand, FavoritesRequest};
+
+fn favourite(id: &str) -> Value {
+    json!({ "provider": "klipy", "id": id, "title": id, "send": { "url": "u", "contentType": "image/gif" } })
+}
+
+fn keys(fx: &[Effect]) -> Option<Vec<String>> {
+    views(fx).find_map(|v| match v {
+        ViewUpdate::GifFavorites(keys) => Some(keys.clone()),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_press_before_the_list_should_load_it_then_add() {
+    let mut client = Client::online();
+    let fx = client.command(Command::Favorites(FavoritesCommand::Toggle(favourite("b"))));
+    let list = find(&fx, |r| {
+        matches!(r, ApiRequest::Favorites(FavoritesRequest::List))
+    });
+    let fx = client.respond(list, json!({ "favorites": [favourite("a")] }));
+    let (_, add) = find(&fx, |r| {
+        matches!(r, ApiRequest::Favorites(FavoritesRequest::Add(_)))
+    });
+    assert_eq!(
+        (keys(&fx), add.body()["favorite"]["id"].clone()),
+        (
+            Some(vec!["klipy:b".to_owned(), "klipy:a".to_owned()]),
+            json!("b")
+        )
+    );
+}
+
+#[test]
+fn pressing_a_saved_favourite_should_delete_it_by_provider_and_id() {
+    let mut client = Client::online();
+    let fx = client.command(Command::Favorites(FavoritesCommand::Load));
+    let list = find(&fx, |r| {
+        matches!(r, ApiRequest::Favorites(FavoritesRequest::List))
+    });
+    client.respond(list, json!({ "favorites": [favourite("a")] }));
+    let fx = client.command(Command::Favorites(FavoritesCommand::Toggle(favourite("a"))));
+    let (_, remove) = find(&fx, |r| {
+        matches!(r, ApiRequest::Favorites(FavoritesRequest::Remove { .. }))
+    });
+    assert_eq!(
+        (keys(&fx), remove.method(), remove.body()),
+        (
+            Some(Vec::new()),
+            yap_core::store::Method::Delete,
+            json!({ "provider": "klipy", "gif_id": "a" })
+        )
+    );
+}
+
+#[test]
+fn a_refused_favourite_should_be_put_back() {
+    let mut client = Client::online();
+    let fx = client.command(Command::Favorites(FavoritesCommand::Load));
+    let list = find(&fx, |r| {
+        matches!(r, ApiRequest::Favorites(FavoritesRequest::List))
+    });
+    client.respond(list, json!({ "favorites": [] }));
+    let fx = client.command(Command::Favorites(FavoritesCommand::Toggle(favourite("a"))));
+    let (id, _) = find(&fx, |r| {
+        matches!(r, ApiRequest::Favorites(FavoritesRequest::Add(_)))
+    });
+    let fx = client.answer(
+        id,
+        Err(ApiError::Http {
+            status: 500,
+            message: "nope".into(),
+        }),
+    );
+    assert_eq!(keys(&fx), Some(Vec::new()));
+}
+
+#[test]
+fn a_loaded_list_should_not_load_again() {
+    let mut client = Client::online();
+    let fx = client.command(Command::Favorites(FavoritesCommand::Load));
+    let list = find(&fx, |r| {
+        matches!(r, ApiRequest::Favorites(FavoritesRequest::List))
+    });
+    client.respond(list, json!({ "favorites": [] }));
+    let fx = client.command(Command::Favorites(FavoritesCommand::Load));
+    assert!(requests(&fx).is_empty());
+}
+
+#[test]
+fn a_klipy_video_attachment_should_carry_its_gif_star() {
+    let mut client = Client::online();
+    let data = json!({
+        "id": "msg_gif", "channel_id": TEXT, "author_id": ME,
+        "author": { "id": ME, "username": "me", "display_name": "Fixture Me" },
+        "content": "", "created_at": "2026-11-04T12:00:09.000Z", "embeds": [],
+        "attachments": [{
+            "id": "att_1", "filename": "dancing-cat.mp4", "content_type": "video/mp4",
+            "file_key": "https://static.klipy.com/ii/abc/dancing-cat.mp4"
+        }]
+    });
+    let fx = client.gateway(GatewayEvent::Dispatch(
+        Dispatch::decode("MESSAGE_CREATE", data).expect("decodes"),
+    ));
+    let row = views(&fx)
+        .find_map(|v| match v {
+            ViewUpdate::Messages(diff) => match &**diff {
+                ViewDiff::Insert { rows, .. } => rows.last().map(|r| r.attachments.clone()),
+                ViewDiff::Update { row, .. } => Some(row.attachments.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("row update");
+    let items: Value = serde_json::from_str(&row).expect("json");
+    assert_eq!(
+        (
+            &items[0]["favorite"]["provider"],
+            &items[0]["favorite"]["id"]
+        ),
+        (&json!("klipy"), &json!("dancing-cat"))
+    );
+}

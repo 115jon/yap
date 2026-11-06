@@ -49,7 +49,10 @@ impl Fixture {
         match request {
             ApiRequest::Apps(_) => ApiResponse::Done,
             // No shop or lookups offline: they fail like a dead network.
-            ApiRequest::Shop(_) | ApiRequest::Embeds(_) => ApiResponse::Done,
+            ApiRequest::Shop(_) | ApiRequest::Embeds(_) | ApiRequest::RemoveEmbeds { .. } => {
+                ApiResponse::Done
+            }
+            ApiRequest::Favorites(_) => ApiResponse::Favorites(Vec::new()),
             ApiRequest::Me => ApiResponse::Me(Box::new(user(ME, "me", Some("Fixture Me")))),
             ApiRequest::Servers => ApiResponse::Servers(vec![Server {
                 id: SERVER.into(),

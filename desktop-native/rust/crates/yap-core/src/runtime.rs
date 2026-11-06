@@ -331,6 +331,7 @@ impl Runner {
             Effect::LoadToken => self.send(Input::TokenLoaded(Some(Token::new("fixture")))),
             // The fixture never reads or writes the snapshot cache.
             Effect::LoadSnapshot => self.send(Input::SnapshotLoaded(None)),
+            Effect::LoadCatalog => self.send(Input::CatalogLoaded(None)),
             Effect::GatewayConnect { session, .. } => self.send(Input::Gateway {
                 session: *session,
                 event: GatewayEvent::Ready,
@@ -385,6 +386,7 @@ impl Runner {
             | Effect::VoiceForget(_)
             | Effect::CacheWrite { .. }
             | Effect::CacheClear { .. }
+            | Effect::SaveCatalog { .. }
             | Effect::Audio { .. } => {}
             Effect::View(_) | Effect::Later { .. } | Effect::StartupMark(_) => return false,
         }
@@ -446,6 +448,40 @@ impl Runner {
             Effect::GatewayDisconnect => self.disconnect_gateway(),
             Effect::LoadToken => self.keyring(KeyringOp::Load),
             Effect::LoadSnapshot => self.load_snapshot(),
+            Effect::LoadCatalog => {
+                let inbox = self.inbox.clone();
+                tokio::spawn(async move {
+                    let read = tokio::task::spawn_blocking(|| {
+                        yap_cache::catalog::default_path()
+                            .and_then(|path| yap_cache::catalog::load(&path))
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    let _ = inbox.send(Input::CatalogLoaded(
+                        read.map(|stored| (stored.catalog, stored.fetched_at_ms)),
+                    ));
+                });
+            }
+            Effect::SaveCatalog { catalog } => {
+                // Stamped as the response lands, not with the clock of the
+                // page that asked.
+                let fetched_at_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+                tokio::task::spawn_blocking(move || {
+                    let Some(path) = yap_cache::catalog::default_path() else {
+                        return;
+                    };
+                    let stored = yap_cache::catalog::StoredCatalog {
+                        fetched_at_ms,
+                        catalog,
+                    };
+                    if let Err(error) = yap_cache::catalog::save(&path, &stored) {
+                        eprintln!("[cache] catalog: {error}");
+                    }
+                });
+            }
             Effect::CacheWrite { user_id, write } => {
                 if let Some(cache) = &self.cache {
                     cache.write(&user_id, write);
