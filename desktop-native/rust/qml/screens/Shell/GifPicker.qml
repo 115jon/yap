@@ -22,7 +22,11 @@ Popup {
     readonly property real col0: Chat.gifUnits0 / 1000 * colW + Math.max(0, Chat.gifCount0 - 1) * gap
     readonly property real col1: Chat.gifUnits1 / 1000 * colW + Math.max(0, Chat.gifCount1 - 1) * gap
 
+    // A pick (the voice status picture) instead of a send.
+    property bool picking: false
+
     signal sent()
+    signal picked(string gifId)
 
     function openAt(anchor) {
         const win = Overlay.overlay
@@ -232,8 +236,12 @@ Popup {
                     HoverHandler { id: tileHover; cursorShape: Qt.PointingHandCursor }
                     TapHandler {
                         onTapped: {
-                            Chat.sendGif(tile.gifId, root.replyToId)
-                            root.sent()
+                            if (root.picking)
+                                root.picked(tile.gifId)
+                            else {
+                                Chat.sendGif(tile.gifId, root.replyToId)
+                                root.sent()
+                            }
                             root.close()
                         }
                     }

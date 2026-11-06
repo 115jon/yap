@@ -564,6 +564,10 @@ pub enum AppEvent {
         puzzle_date: String,
         progress: WordleProgress,
     },
+    /// Who watches whose share (`stream.watch.snapshot`): streamer user id
+    /// → viewer user ids, deduplicated, empty lists dropped
+    /// (stream-watchers.ts `applyStreamWatcherSnapshot`).
+    StreamWatchSnapshot(std::collections::BTreeMap<String, Vec<String>>),
 }
 
 impl AppEvent {
@@ -593,6 +597,27 @@ impl AppEvent {
             "activity.leave" => Some(Self::ActivityLeave {
                 user_id: str_field(d, "userId")?,
             }),
+            "stream.watch.snapshot" => {
+                let map = d.get("watchers_by_streamer")?.as_object()?;
+                let mut watchers = std::collections::BTreeMap::new();
+                for (streamer, viewers) in map {
+                    let mut ids: Vec<String> = Vec::new();
+                    for id in viewers
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                    {
+                        if !id.is_empty() && !ids.iter().any(|known| known == id) {
+                            ids.push(id.to_owned());
+                        }
+                    }
+                    if !ids.is_empty() {
+                        watchers.insert(streamer.clone(), ids);
+                    }
+                }
+                Some(Self::StreamWatchSnapshot(watchers))
+            }
             "wordle.progress" => {
                 let progress = d.get("progress")?;
                 Some(Self::WordleProgress {

@@ -9,9 +9,9 @@ import com.yap.native
 // with a seam on its left; below 1024 px the shell shows it as a sheet.
 // A row opens the member's profile to the panel's left.
 // In channel details (the header's title key) it is 360 wide with its own
-// header (the channel and Close details) and the tabs: Members and Threads
-// (the web's Media, Links and Files tabs are not here yet). The tab goes
-// back to Members when the details close or the channel changes.
+// header (the channel and Close details) and the web's tabs: Members,
+// Media, Threads, Links and Files. The tab goes back to Members when the
+// details close or the channel changes.
 Item {
     id: root
 
@@ -22,6 +22,7 @@ Item {
     property string tab: "members"
 
     readonly property bool threadsShown: details && tab === "threads"
+    readonly property bool mediaShown: details && (tab === "media" || tab === "links" || tab === "files")
 
     onDetailsChanged: if (!details) tab = "members"
     Connections {
@@ -86,11 +87,14 @@ Item {
             height: 40
             Row {
                 height: parent.height
-                spacing: 24
+                spacing: 20
                 Accessible.role: Accessible.PageTabList
                 Accessible.name: qsTr("Member details")
                 DetailsTab { value: "members"; text: qsTr("Members") }
+                DetailsTab { value: "media"; text: qsTr("Media") }
                 DetailsTab { value: "threads"; text: qsTr("Threads") }
+                DetailsTab { value: "links"; text: qsTr("Links") }
+                DetailsTab { value: "files"; text: qsTr("Files") }
             }
             Rectangle {
                 anchors.bottom: parent.bottom
@@ -103,7 +107,7 @@ Item {
 
     ListView {
         id: list
-        visible: !root.threadsShown
+        visible: !root.threadsShown && !root.mediaShown
         anchors.top: detailsHead.visible ? detailsHead.bottom : root.top
         anchors.topMargin: root.details ? 8 : 0
         anchors.bottom: parent.bottom
@@ -172,6 +176,24 @@ Item {
                 ShellState.showDetails = false
                 ShellState.showMembers = false
                 ShellState.threadId = messageId
+            }
+        }
+    }
+
+    // Media, Links and Files; a file jumps to its message as the details
+    // close (FilesTabContent `onClose`, then the jump).
+    Loader {
+        anchors.top: detailsHead.visible ? detailsHead.bottom : root.top
+        anchors.topMargin: 8
+        anchors.bottom: parent.bottom
+        x: root.tab === "media" ? 13 : 16
+        width: parent.width - 2 * x
+        active: root.mediaShown
+        sourceComponent: MediaTabs {
+            tab: root.tab
+            onJumpRequested: messageId => {
+                ShellState.showDetails = false
+                Chat.jumpToMessage(Nav.activeChannelId, messageId)
             }
         }
     }

@@ -209,7 +209,19 @@ impl Api {
         path: &str,
         body: &Value,
     ) -> Result<Value, ApiError> {
-        self.call_at(method, &config::get().api_base, path, body)
+        self.call_at(method, &config::get().api_base, path, body, &[])
+            .await
+    }
+
+    /// [`Api::call`] with extra headers (`X-Voice-Session-Id`).
+    pub async fn call_with(
+        &self,
+        method: crate::store::Method,
+        path: &str,
+        body: &Value,
+        headers: &[(&'static str, String)],
+    ) -> Result<Value, ApiError> {
+        self.call_at(method, &config::get().api_base, path, body, headers)
             .await
     }
 
@@ -220,7 +232,7 @@ impl Api {
         path: &str,
         body: &Value,
     ) -> Result<Value, ApiError> {
-        self.call_at(method, &config::get().kova_auth_url, path, body)
+        self.call_at(method, &config::get().kova_auth_url, path, body, &[])
             .await
     }
 
@@ -230,6 +242,7 @@ impl Api {
         base: &str,
         path: &str,
         body: &Value,
+        headers: &[(&'static str, String)],
     ) -> Result<Value, ApiError> {
         use crate::store::Method as M;
         let method = match method {
@@ -239,7 +252,11 @@ impl Api {
             M::Patch => Method::PATCH,
             M::Delete => Method::DELETE,
         };
-        let builder = self.request_at(method, base, path);
+        let builder = headers
+            .iter()
+            .fold(self.request_at(method, base, path), |b, (name, value)| {
+                b.header(*name, value)
+            });
         let builder = if body.is_null() {
             builder
         } else {

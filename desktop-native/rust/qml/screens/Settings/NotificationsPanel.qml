@@ -4,7 +4,7 @@ import com.yap.native
 
 // Notifications (NotificationsPanel.tsx): desktop alerts, then the sound
 // effects (the master switch, the volume, each category, and Test), kept
-// on this device. Custom sound files wait for a later build.
+// on this device, then the custom sound files (CustomSoundsCard).
 Column {
     id: root
 
@@ -70,13 +70,7 @@ Column {
         }
     }
 
-    SettingsCard {
+    CustomSoundsCard {
         width: parent.width
-        sectionId: "custom-sounds"
-        SettingsRow {
-            rowId: "custom-sounds-enabled"
-            layout: "inline"
-            ComingLater {}
-        }
     }
 }

@@ -23,6 +23,10 @@ T.Popup {
     property string bannerColor
     property string avatarPath
     property bool removeAvatar: false
+    // A recent avatar picked again (AvatarPickerModal.tsx): the stored URL
+    // the save sends, and its picture.
+    property string avatarUrl
+    property string avatarUrlShown
     property string bannerPath
     property bool removeBanner: false
     property string localError
@@ -34,12 +38,13 @@ T.Popup {
         || accentColor !== Settings.accentColor
         || backgroundColor !== Settings.backgroundColor
         || bannerColor !== Settings.bannerColor
-        || avatarPath.length > 0 || removeAvatar
+        || avatarPath.length > 0 || removeAvatar || avatarUrl.length > 0
         || bannerPath.length > 0 || removeBanner
     readonly property string error: localError.length > 0 ? localError : Settings.profileError
     // What the profile wears (collectibles apply at once, not on Save).
     readonly property var worn: Session.meDisplay.length > 0 ? (JSON.parse(Session.meDisplay).collectibles ?? {}) : ({})
-    readonly property string shownAvatar: removeAvatar ? "" : avatarPath.length > 0 ? "file:///" + avatarPath : Settings.avatar
+    readonly property string shownAvatar: removeAvatar ? "" : avatarPath.length > 0 ? "file:///" + avatarPath
+        : avatarUrlShown.length > 0 ? avatarUrlShown : Settings.avatar
     readonly property string shownBanner: removeBanner ? "" : bannerPath.length > 0 ? "file:///" + bannerPath : Settings.banner
 
     function reset() {
@@ -51,6 +56,8 @@ T.Popup {
         bannerColor = Settings.bannerColor
         avatarPath = ""
         removeAvatar = false
+        avatarUrl = ""
+        avatarUrlShown = ""
         bannerPath = ""
         removeBanner = false
         localError = ""
@@ -67,6 +74,7 @@ T.Popup {
             bannerColor: bannerColor,
             avatarPath: avatarPath,
             removeAvatar: removeAvatar,
+            avatarUrl: avatarUrl,
             bannerPath: bannerPath,
             removeBanner: removeBanner,
         }))
@@ -90,6 +98,8 @@ T.Popup {
         if (kind === "avatar") {
             avatarPath = path
             removeAvatar = false
+            avatarUrl = ""
+            avatarUrlShown = ""
         } else {
             bannerPath = path
             removeBanner = false
@@ -104,6 +114,8 @@ T.Popup {
     height: Math.min(820, parent.height - Theme.chrome - 32)
     padding: 0
     modal: true
+    // Ctrl+K stays shut while a modal is up (ExtrasHost).
+    onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
     focus: true
     closePolicy: T.Popup.NoAutoClose
     onAboutToShow: reset()
@@ -275,6 +287,7 @@ T.Popup {
                             label: qsTr("Avatar")
                             description: editor.removeAvatar ? qsTr("Removed when you save")
                                 : editor.avatarPath.length > 0 ? qsTr("New image, uploads when you save")
+                                : editor.avatarUrl.length > 0 ? qsTr("A recent avatar, used when you save")
                                 : Settings.customAvatar ? qsTr("Your current avatar")
                                 : qsTr("Using your sign-in picture")
                             leading: Component {
@@ -291,19 +304,23 @@ T.Popup {
                                 KitButton {
                                     text: qsTr("Change")
                                     Accessible.name: qsTr("Change avatar")
-                                    onClicked: editor.pick("avatar")
+                                    onClicked: avatarPicker.open()
                                 }
                                 KitButton {
-                                    visible: editor.avatarPath.length > 0 || (Settings.customAvatar && !editor.removeAvatar)
+                                    visible: editor.avatarPath.length > 0 || editor.avatarUrl.length > 0
+                                        || (Settings.customAvatar && !editor.removeAvatar)
                                     variant: "ghost"
                                     text: qsTr("Remove")
                                     Accessible.name: qsTr("Remove avatar")
                                     onClicked: {
                                         editor.localError = ""
-                                        if (editor.avatarPath.length > 0)
+                                        if (editor.avatarPath.length > 0 || editor.avatarUrl.length > 0) {
                                             editor.avatarPath = ""
-                                        else
+                                            editor.avatarUrl = ""
+                                            editor.avatarUrlShown = ""
+                                        } else {
                                             editor.removeAvatar = true
+                                        }
                                     }
                                 }
                             }
@@ -610,5 +627,20 @@ T.Popup {
 
     CollectiblePicker {
         id: picker
+    }
+
+    // Choose an image (AvatarPickerModal.tsx): upload, or one of the last
+    // six uploads again.
+    AvatarPicker {
+        id: avatarPicker
+        name: Settings.name
+        onUploadRequested: editor.pick("avatar")
+        onRecentPicked: (stored, url) => {
+            editor.localError = ""
+            editor.avatarPath = ""
+            editor.removeAvatar = false
+            editor.avatarUrl = stored
+            editor.avatarUrlShown = url
+        }
     }
 }

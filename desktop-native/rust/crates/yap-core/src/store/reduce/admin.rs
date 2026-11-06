@@ -1450,7 +1450,7 @@ impl State {
     }
 
     /// A channel as stored now, into its server's tree.
-    fn upsert_channel(&mut self, fx: &mut Effects, channel: Channel) {
+    pub(super) fn upsert_channel(&mut self, fx: &mut Effects, channel: Channel) {
         let Some(server_id) = channel
             .server_id
             .clone()

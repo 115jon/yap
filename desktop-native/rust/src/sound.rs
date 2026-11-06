@@ -3,7 +3,9 @@
 //! like Web Audio voices. The web engine's gates apply: the sounds switch,
 //! the per-group rate limit, and the per-group voice cap (the oldest voice
 //! is cut, as `SoundEngine` fades it), each sound's category switch, and
-//! the volume from the settings.
+//! the volume from the settings. With "Use custom sounds" on, a sound the
+//! user imported a file for plays that file instead (decoded once, at 48
+//! kHz stereo, [`crate::custom_sounds`]).
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,6 +20,9 @@ struct Mixer {
     gate: SoundGate,
     /// Rendered once per sound and volume.
     rendered: HashMap<(Sound, u8), Arc<Vec<i16>>>,
+    /// Imported files, decoded once per sound id (the volume is applied
+    /// when one plays, so this does not grow with the slider).
+    custom: HashMap<String, Arc<Vec<f32>>>,
     /// Playing voices per group, oldest first: (voice id, `HWAVEOUT`).
     voices: HashMap<&'static str, VecDeque<(u64, usize)>>,
 }
@@ -42,16 +47,115 @@ pub fn play(sound: Sound) {
     if !settings.sounds || !sound.enabled_in(&settings.sound_settings) {
         return;
     }
-    start(sound, settings.sound_settings.sound_volume);
+    let custom = settings.sound_settings.custom_sounds;
+    start(sound, settings.sound_settings.sound_volume, custom);
 }
 
 /// The Test key: plays whatever the switches say (`bypassToggles`).
 pub fn play_test(sound: Sound) {
-    start(sound, crate::desktop::current().sound_settings.sound_volume);
+    let settings = crate::desktop::current();
+    start(
+        sound,
+        settings.sound_settings.sound_volume,
+        settings.sound_settings.custom_sounds,
+    );
 }
 
-fn start(sound: Sound, volume: u8) {
+/// The native sound a catalog id plays as, when this build has one.
+fn native_sound(id: &str) -> Option<Sound> {
+    Sound::ALL
+        .into_iter()
+        .find(|s| yap_core::custom_sounds::id_of(*s) == id)
+}
+
+/// The custom sounds card's preview: the imported file when there is one,
+/// else the built-in sound.
+pub fn preview(id: &str) {
+    let volume = crate::desktop::current().sound_settings.sound_volume;
     if volume == 0 {
+        return;
+    }
+    if crate::custom_sounds::file_for(id).is_some() {
+        let group = native_sound(id).map_or("custom", |s| s.spec().group);
+        play_custom(id.to_owned(), group, 1, volume);
+    } else if let Some(sound) = native_sound(id) {
+        start(sound, volume, false);
+    }
+}
+
+/// A new file (or none) for a sound: its decoded copies go.
+pub fn forget_custom(id: &str) {
+    lock().custom.remove(id);
+}
+
+/// 48 kHz stereo `f32` to 16-bit at the sound volume.
+fn custom_pcm(samples: &[f32], volume: u8) -> Vec<i16> {
+    // A gain in 0..=1 loses nothing as f32.
+    #[allow(clippy::cast_possible_truncation)]
+    let gain = synth::volume_to_gain(volume) as f32;
+    samples
+        .iter()
+        // Clamped to ±1 first, so the cast cannot overflow.
+        .map(|s| ((s * gain).clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16)
+        .collect()
+}
+
+/// Plays an imported file on a short-lived thread (decoded there the
+/// first time).
+fn play_custom(id: String, group: &'static str, max_voices: usize, volume: u8) {
+    let spawned = std::thread::Builder::new()
+        .name("yap-sound".into())
+        .spawn(move || {
+            let cached = lock().custom.get(&id).cloned();
+            let samples = match cached {
+                Some(samples) => samples,
+                None => {
+                    let Some(path) = crate::custom_sounds::file_for(&id) else {
+                        return;
+                    };
+                    let hint = path.extension().and_then(|e| e.to_str()).map(str::to_owned);
+                    let decoded = std::fs::read(&path)
+                        .map_err(|e| e.to_string())
+                        .and_then(|bytes| yap_audio::decode_sound(&bytes, hint.as_deref()));
+                    match decoded {
+                        Ok((samples, _)) => {
+                            let samples = Arc::new(samples);
+                            lock().custom.insert(id.clone(), Arc::clone(&samples));
+                            samples
+                        }
+                        Err(error) => {
+                            eprintln!("[sound] custom {id}: {error}");
+                            return;
+                        }
+                    }
+                }
+            };
+            eprintln!("[sound] custom {id}");
+            let samples = custom_pcm(&samples, volume);
+            let format = output::Format {
+                rate: yap_audio::SAMPLE_RATE,
+                channels: 2,
+            };
+            if let Err(error) = output::play(group, max_voices, &samples, format) {
+                eprintln!("[sound] custom {id}: waveOut error {error}");
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("[sound] no thread: {error}");
+    }
+}
+
+fn start(sound: Sound, volume: u8, custom: bool) {
+    if volume == 0 {
+        return;
+    }
+    let id = yap_core::custom_sounds::id_of(sound);
+    if custom && crate::custom_sounds::file_for(id).is_some() {
+        let spec = sound.spec();
+        if !lock().gate.allow(sound, Instant::now()) {
+            return;
+        }
+        play_custom(id.to_owned(), spec.group, spec.max_voices, volume);
         return;
     }
     let samples = {
@@ -71,7 +175,11 @@ fn start(sound: Sound, volume: u8) {
     let spawned = std::thread::Builder::new()
         .name("yap-sound".into())
         .spawn(move || {
-            if let Err(error) = output::play(spec.group, spec.max_voices, &samples) {
+            let format = output::Format {
+                rate: synth::SAMPLE_RATE,
+                channels: 1,
+            };
+            if let Err(error) = output::play(spec.group, spec.max_voices, &samples, format) {
                 eprintln!("[sound] {sound:?}: waveOut error {error}");
             }
         });
@@ -96,6 +204,13 @@ mod output {
 
     const HDR_SIZE: u32 = std::mem::size_of::<WAVEHDR>() as u32;
 
+    /// The PCM layout of a buffer (16-bit, interleaved).
+    #[derive(Clone, Copy)]
+    pub(super) struct Format {
+        pub rate: u32,
+        pub channels: u16,
+    }
+
     /// `WAVEHDR` is `packed(1)`; aligned to 8 its `dwFlags` (offset 24) is
     /// aligned too, so the device's writes can be read with `read_volatile`.
     #[repr(C, align(8))]
@@ -111,13 +226,19 @@ mod output {
 
     /// Plays `samples` on the default device and waits for the end (or for
     /// a newer voice of the group to cut it).
-    pub(super) fn play(group: &'static str, max_voices: usize, samples: &[i16]) -> Result<(), u32> {
+    pub(super) fn play(
+        group: &'static str,
+        max_voices: usize,
+        samples: &[i16],
+        layout: Format,
+    ) -> Result<(), u32> {
+        let block = 2 * layout.channels;
         let format = WAVEFORMATEX {
             wFormatTag: WAVE_FORMAT_PCM as u16,
-            nChannels: 1,
-            nSamplesPerSec: synth::SAMPLE_RATE,
-            nAvgBytesPerSec: synth::SAMPLE_RATE * 2,
-            nBlockAlign: 2,
+            nChannels: layout.channels,
+            nSamplesPerSec: layout.rate,
+            nAvgBytesPerSec: layout.rate * u32::from(block),
+            nBlockAlign: block,
             wBitsPerSample: 16,
             cbSize: 0,
         };
@@ -148,7 +269,8 @@ mod output {
                 }
             }
             drop(mixer);
-            let deadline = Instant::now() + Duration::from_secs(5);
+            // Rings may run to 15 s.
+            let deadline = Instant::now() + Duration::from_secs(16);
             loop {
                 // SAFETY: the boxed header outlives the loop; `Header` keeps
                 // `dwFlags` 4-aligned; the device writes it concurrently.
@@ -177,7 +299,13 @@ mod output {
 
 #[cfg(not(windows))]
 mod output {
-    pub(super) fn play(_: &'static str, _: usize, _: &[i16]) -> Result<(), u32> {
+    #[derive(Clone, Copy)]
+    pub(super) struct Format {
+        pub rate: u32,
+        pub channels: u16,
+    }
+
+    pub(super) fn play(_: &'static str, _: usize, _: &[i16], _: Format) -> Result<(), u32> {
         Ok(())
     }
 }

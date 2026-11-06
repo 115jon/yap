@@ -230,6 +230,10 @@ pub struct User {
     pub nameplate_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nameplate_content_type: Option<String>,
+    /// Where they are signed in (`desktop`, `mobile`, `web`), as presence
+    /// last said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence_platforms: Option<Vec<String>>,
 }
 
 /// The signed-in user.
@@ -318,6 +322,21 @@ pub struct Channel {
     /// The channel's public share override; `None` follows the server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allow_public_shares: Option<bool>,
+    /// A voice channel's status (text and a picture), set by someone in
+    /// the call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_status: Option<VoiceStatus>,
+}
+
+/// A voice channel's status (`voice_status`, lib/voice-channel-status.ts).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct VoiceStatus {
+    #[serde(default)]
+    pub text: Option<String>,
+    /// The picture as the server stored it (`VoiceChannelStatusMedia`),
+    /// sent back untouched when only the text changes.
+    #[serde(default)]
+    pub media: Option<Value>,
 }
 
 /// A channel category.
@@ -859,6 +878,9 @@ pub struct Notification {
     pub server_name: Option<String>,
     #[serde(default)]
     pub channel_name: Option<String>,
+    /// When it was made (the inbox's "5m").
+    #[serde(default)]
+    pub created_at: Option<String>,
 }
 
 /// The author a notification carries.

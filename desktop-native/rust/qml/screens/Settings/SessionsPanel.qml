@@ -4,7 +4,8 @@ import com.yap.native
 
 // Sessions (SessionsPanel.tsx): this device, then every other one, from
 // `/api/sessions`; placeholder rows while they load, the error with Try
-// again when they don't. The list is shown here, not changed.
+// again when they don't. Another device has Sign out, which asks first
+// (`DELETE /api/sessions {sessionId}`); a refusal stays in its strip.
 Column {
     id: root
 
@@ -13,6 +14,8 @@ Column {
     readonly property var others: sessions.filter(session => !session.current)
     readonly property bool loadingFirst: Settings.sessionsState === "loading" && sessions.length === 0
     readonly property bool failed: Settings.sessionsState === "error"
+    readonly property var account: JSON.parse(Extras.account)
+    property string armed: ""
 
     spacing: 40
     Component.onCompleted: Settings.loadSessions()
@@ -110,44 +113,71 @@ Column {
     }
 
     // A device: a 40 px tint-2 key with its glyph, its name over where and
-    // when it was last used.
-    component SessionItem: Row {
-        id: session
+    // when it was last used, and Sign out for another device.
+    component SessionItem: Column {
+        id: item
         required property var modelData
         width: parent ? parent.width : 0
-        spacing: 12
-        Accessible.role: Accessible.ListItem
-        Accessible.name: session.modelData.title + ", " + session.modelData.detail
-        Rectangle {
-            width: 40
-            height: 40
-            radius: Theme.radius
-            color: Theme.tint2
-            Icon {
-                anchors.centerIn: parent
-                name: session.modelData.mobile ? "mobile" : "monitor"
-                size: Theme.iconMd
-                color: Theme.ink1
+        Row {
+            id: session
+            readonly property var modelData: item.modelData
+            width: parent.width
+            spacing: 12
+            Accessible.role: Accessible.ListItem
+            Accessible.name: session.modelData.title + ", " + session.modelData.detail
+            Rectangle {
+                width: 40
+                height: 40
+                radius: Theme.radius
+                color: Theme.tint2
+                Icon {
+                    anchors.centerIn: parent
+                    name: session.modelData.mobile ? "mobile" : "monitor"
+                    size: Theme.iconMd
+                    color: Theme.ink1
+                }
+            }
+            Column {
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width - 52 - (signOut.visible ? signOut.width + 12 : 0)
+                Text {
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    text: session.modelData.title
+                    elide: Text.ElideRight
+                    color: Theme.ink1
+                    font: Theme.type.setting
+                }
+                Text {
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    text: session.modelData.detail
+                    elide: Text.ElideRight
+                    color: Theme.ink2
+                    font: Theme.type.description
+                }
+            }
+            KitButton {
+                id: signOut
+                anchors.verticalCenter: parent.verticalCenter
+                visible: !session.modelData.current && root.armed !== session.modelData.id
+                variant: "secondary"
+                size: "sm"
+                text: qsTr("Sign out")
+                Accessible.name: qsTr("Sign out %1").arg(session.modelData.title)
+                onClicked: root.armed = session.modelData.id
             }
         }
-        Column {
-            anchors.verticalCenter: parent.verticalCenter
-            width: parent.width - 52
-            Text {
-                width: parent.width
-                textFormat: Text.PlainText
-                text: session.modelData.title
-                elide: Text.ElideRight
-                color: Theme.ink1
-                font: Theme.type.setting
-            }
-            Text {
-                width: parent.width
-                textFormat: Text.PlainText
-                text: session.modelData.detail
-                elide: Text.ElideRight
-                color: Theme.ink2
-                font: Theme.type.description
+        Loader {
+            width: parent.width
+            active: root.armed === item.modelData.id
+            sourceComponent: ConfirmStrip {
+                consequence: qsTr("%1 will be signed out and need to sign in again.").arg(item.modelData.title)
+                confirmLabel: qsTr("Sign out device")
+                busy: root.account.revoking === item.modelData.id
+                error: root.account.revokeErrorId === item.modelData.id ? root.account.revokeError : ""
+                onCancelled: root.armed = ""
+                onConfirmed: Extras.revokeSession(item.modelData.id)
             }
         }
     }

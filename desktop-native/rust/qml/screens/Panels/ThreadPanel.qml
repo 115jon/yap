@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
+import Yap.Chrome
 import com.yap.native
 
 // ThreadSidebar.tsx: "Thread" with "N replies" after it; the root message

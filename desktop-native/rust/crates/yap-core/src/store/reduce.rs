@@ -4,6 +4,7 @@
 mod admin;
 mod apps;
 mod embeds;
+mod extras;
 mod favorites;
 mod friends;
 mod invites;
@@ -34,6 +35,7 @@ use super::{
     VoiceTarget, VoiceUpdate,
 };
 use crate::api::{ApiError, Token};
+use crate::command_menu::RecentTarget;
 use crate::shell::{self, Sound};
 use yap_protocol::payload::VoiceChannelMember;
 
@@ -324,12 +326,51 @@ impl State {
             .tree_server
             .as_ref()
             .and_then(|id| self.channels.get(id));
-        view::tree_rows(
+        let mut rows = view::tree_rows(
             list,
             |id| self.seats(id),
             |id| (self.is_unread(id), self.channel_mentions(id)),
             self.tree_manage_all(),
-        )
+        );
+        self.add_voice_status(&mut rows);
+        rows
+    }
+
+    /// ChannelSidebar.tsx: the status shows under a voice channel while
+    /// anyone is in it; we may change it once our voice session is up there.
+    fn add_voice_status(&self, rows: &mut [ChannelTreeRow]) {
+        let connected = self
+            .voice
+            .as_ref()
+            .filter(|_| !self.apps.participant_id.is_empty())
+            .map(|call| call.channel_id.as_str());
+        for row in rows.iter_mut().filter(|r| r.voice) {
+            let editable = connected == Some(row.id.as_str());
+            let occupied = editable
+                || self
+                    .voice_channels
+                    .get(&row.id)
+                    .is_some_and(|people| !people.is_empty());
+            let status = self
+                .find_channel(&row.id)
+                .and_then(|c| c.voice_status.as_ref())
+                .filter(|_| occupied);
+            row.status_editable = editable;
+            row.status = status
+                .and_then(|s| s.text.as_deref())
+                .map(str::trim)
+                .unwrap_or_default()
+                .to_owned();
+            row.status_media = status
+                .and_then(|s| s.media.as_ref())
+                .map(|m| {
+                    view::absolute_url(
+                        &self.api_base,
+                        Some(&crate::store::extras::status_media_url(m)),
+                    )
+                })
+                .unwrap_or_default();
+        }
     }
 
     /// Read marks, newest messages or notifications changed.
@@ -338,6 +379,7 @@ impl State {
         self.sync_tree(fx);
         self.sync_dms(fx);
         self.sync_tray_badge(fx);
+        self.sync_extras(fx);
     }
 
     /// The tray badge (desktop-notifications.ts): unread notifications,
@@ -445,6 +487,8 @@ impl State {
                         .known_user(&tile.member_id)
                         .map(|u| crate::collectibles::decoration_url(u.avatar_display.as_ref()))
                         .unwrap_or_default();
+                } else if tile.me || tile.watching {
+                    tile.watchers = self.watchers_json(&tile.member_id);
                 }
                 tile
             })
@@ -453,6 +497,40 @@ impl State {
             fx.view(ViewUpdate::Tiles(diff));
         }
         self.view.tiles = tiles;
+    }
+
+    /// The people watching a share (stream-watchers.ts
+    /// `buildStreamWatcherIdentities`): the call's names, "You" for us.
+    fn watchers_json(&self, streamer: &str) -> String {
+        let Some(viewers) = self.apps.watchers.get(streamer) else {
+            return String::new();
+        };
+        let me = self.me().map(|me| me.id.clone()).unwrap_or_default();
+        let seats = self
+            .voice
+            .as_ref()
+            .map(|call| self.seats(&call.channel_id))
+            .unwrap_or_default();
+        let people: Vec<serde_json::Value> = viewers
+            .iter()
+            .map(|id| {
+                let seat = seats.iter().find(|s| &s.key == id);
+                let name = if *id == me {
+                    "You".to_owned()
+                } else {
+                    seat.map(|s| s.name.clone())
+                        .or_else(|| self.known_user(id).map(|u| u.label().to_owned()))
+                        .unwrap_or_else(|| "Someone".to_owned())
+                };
+                serde_json::json!({
+                    "userId": id,
+                    "initials": view::initials(&name),
+                    "name": name,
+                    "avatar": seat.map(|s| s.avatar.clone()).unwrap_or_default(),
+                })
+            })
+            .collect();
+        serde_json::Value::Array(people).to_string()
     }
 
     /// The open voice view's scalars (its count follows the roster).
@@ -782,6 +860,7 @@ impl State {
             return;
         }
         self.notifications.retain(|n| !ids.contains(&n.id));
+        self.inbox_read(Some(&ids));
         let _ = self.http(fx, ApiRequest::MarkNotificationsRead { ids });
         self.sync_badges(fx);
     }
@@ -817,6 +896,10 @@ impl State {
             divider.banner = false;
             divider.locked |= returned;
             self.emit_unread(fx);
+        }
+        // A Mark unread waits for the user.
+        if self.read_held() {
+            return;
         }
         self.mark_read(fx, &channel, None);
         self.read_seen_mentions(fx, false);
@@ -1045,6 +1128,7 @@ impl State {
                 self.on_seen(fx, returned);
             }
             Command::MarkRead => {
+                self.release_read_hold();
                 if let Some(channel) = self.active_channel.clone() {
                     self.mark_read(fx, &channel, None);
                     self.read_seen_mentions(fx, true);
@@ -1169,6 +1253,7 @@ impl State {
             Command::Embeds(command) => self.on_embeds(fx, command),
             Command::Favorites(command) => self.on_favorites(fx, command),
             Command::RemoveEmbeds(id) => self.remove_embeds(fx, &id),
+            Command::Extras(command) => self.on_extras(fx, command),
             Command::Invites(command) => self.on_invites(fx, command),
         }
     }
@@ -1518,6 +1603,7 @@ impl State {
             || self.route_shop_http(fx, id, &mut answer)
             || self.route_embeds_http(fx, id, &mut answer)
             || self.route_favorites_http(fx, id, &mut answer)
+            || self.route_extras_http(fx, id, &mut answer)
         {
             return;
         }
@@ -1928,6 +2014,7 @@ impl State {
         if self.divider.take().is_some() {
             self.emit_unread(fx);
         }
+        let name_for_recent = name.clone();
         self.emit_active_channel(fx, id.to_owned(), name);
         self.emit_active_dm(fx);
         self.clear_typing(fx);
@@ -1939,6 +2026,32 @@ impl State {
         // The open channel stops showing as unread.
         self.sync_badges(fx);
         self.sync_members(fx);
+        self.emit_recent(fx, id, name_for_recent);
+    }
+
+    /// The switcher's Recent list (CommandMenu.tsx `recordRecentTarget`):
+    /// recorded here, once both the open channel and the open DM are set,
+    /// so a DM never lands under the server it was opened from or the
+    /// other way round.
+    fn emit_recent(&self, fx: &mut Effects, id: &str, name: String) {
+        let (server_id, server_name) = if self.active_dm().is_some() {
+            ("@me".to_owned(), String::new())
+        } else {
+            (
+                self.active_server.clone().unwrap_or_default(),
+                self.active_server_name(),
+            )
+        };
+        if server_id.is_empty() || id.is_empty() {
+            return;
+        }
+        fx.view(ViewUpdate::Recent(RecentTarget {
+            server_id,
+            channel_id: id.to_owned(),
+            name,
+            voice: false,
+            server_name,
+        }));
     }
 
     /// Fetches the newest page of a channel; the result replaces the list.
@@ -2637,6 +2750,8 @@ impl State {
                 self.sync_badges(fx);
             }
             Dispatch::NotificationCreate(notification) => {
+                self.inbox_created(&notification);
+                self.sync_extras(fx);
                 let known = self.notifications.iter().any(|n| n.id == notification.id);
                 if known {
                     return;
@@ -2664,6 +2779,7 @@ impl State {
                 }
             }
             Dispatch::NotificationsRead(read) => {
+                self.inbox_read(read.ids.as_deref().filter(|_| !read.all));
                 match read.ids {
                     Some(ids) if !read.all => self.notifications.retain(|n| !ids.contains(&n.id)),
                     _ => self.notifications.clear(),
@@ -2671,6 +2787,7 @@ impl State {
                 self.sync_badges(fx);
             }
             Dispatch::NotificationsClear => {
+                self.inbox_cleared();
                 self.notifications.clear();
                 self.sync_badges(fx);
             }

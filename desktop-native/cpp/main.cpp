@@ -227,7 +227,11 @@ int main(int argc, char* argv[])
   // YAP_EMBED_MUTED=1 starts every chat player muted (test runs).
   if (QObject* state =
         engine.singletonInstance<QObject*>("com.yap.native", "ShellState"))
+  {
     state->setProperty("mediaMuted", qEnvironmentVariableIntValue("YAP_EMBED_MUTED") != 0);
+    // YAP_NO_CLIPBOARD=1: copies are logged, never put on the clipboard.
+    state->setProperty("clipboardOff", qEnvironmentVariableIntValue("YAP_NO_CLIPBOARD") != 0);
+  }
 
   engine.loadFromModule("com.yap.native", "Main");
 

@@ -818,6 +818,16 @@ fn jumping_into_another_channel_should_open_it_then_jump() {
 }
 
 #[test]
+fn jumping_into_an_unknown_channel_should_say_it_is_not_available() {
+    let mut client = Client::online(three(), 0);
+    let fx = client.command(jump("chan_nowhere", "m1"));
+    assert!(fx.contains(&Effect::View(ViewUpdate::Notice(
+        "That channel isn't available".into()
+    ))));
+    assert_eq!(client.state.active_channel(), Some(A));
+}
+
+#[test]
 fn a_reply_quote_jump_outside_the_page_should_use_the_window() {
     let mut client = Client::online(three(), 0);
     client.command(jump(B, "old"));

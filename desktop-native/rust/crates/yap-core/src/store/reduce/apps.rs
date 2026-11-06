@@ -223,6 +223,8 @@ impl State {
 
     pub(super) fn on_apps_voice_ready(&mut self, fx: &mut Effects, participant_id: String) {
         self.apps.participant_id = participant_id;
+        // The voice channel status may be changed from here on.
+        self.sync_tree(fx);
         let Some((server_id, _)) = self.apps_call() else {
             return;
         };
@@ -275,6 +277,10 @@ impl State {
         };
         let server_key = wire::server_key(Some(&server_id));
         match event {
+            AppEvent::StreamWatchSnapshot(watchers) => {
+                self.apps.watchers = watchers;
+                self.sync_roster(fx);
+            }
             AppEvent::SoundboardPlay(play) if play.server_key == server_key => {
                 self.on_remote_play(fx, *play, now_ms);
             }
@@ -621,6 +627,7 @@ impl State {
         apps.activity.by_user.clear();
         apps.activity.wordle.progress.clear();
         apps.participant_id.clear();
+        apps.watchers.clear();
         if had_audio {
             self.audio(fx, AudioCommand::StopAll);
             self.audio(fx, AudioCommand::StreamStop);
@@ -2832,6 +2839,7 @@ impl State {
                         &format!("{} items", c.item_count),
                     ]),
                     artwork: c.artwork_url.clone().unwrap_or_default(),
+                    url: c.source_url.clone(),
                 })
                 .collect(),
             collection_title: collection.map(|c| c.title.clone()).unwrap_or_default(),
@@ -2893,6 +2901,11 @@ impl State {
                     artist: track.artist.clone().unwrap_or_default(),
                     artwork: track.artwork_url.clone().unwrap_or_default(),
                     duration_ms: track.duration_ms.unwrap_or(0.0),
+                    url: track
+                        .source_url
+                        .clone()
+                        .filter(|u| !u.is_empty())
+                        .unwrap_or_else(|| track.canonical_url.clone()),
                 })
                 .collect(),
             skipped: l.results.skipped,

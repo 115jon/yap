@@ -408,6 +408,8 @@ struct Draft {
     banner_color: String,
     avatar_path: String,
     remove_avatar: bool,
+    /// A recent avatar's stored URL (the avatar picker).
+    avatar_url: String,
     banner_path: String,
     remove_banner: bool,
 }
@@ -506,6 +508,7 @@ impl qobject::Settings {
             banner_color: color(&draft.banner_color),
             avatar: picked(&draft.avatar_path),
             remove_avatar: draft.remove_avatar,
+            avatar_url: (!draft.avatar_url.is_empty()).then_some(draft.avatar_url),
             banner: picked(&draft.banner_path),
             remove_banner: draft.remove_banner,
         })));

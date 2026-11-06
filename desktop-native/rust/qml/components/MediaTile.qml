@@ -15,7 +15,8 @@ Rectangle {
 
     signal activated()
 
-    readonly property bool hidden: item.nsfw && !ShellState.isRevealed(item.id)
+    // media-safety.ts: sensitive pictures blur under the high filter only.
+    readonly property bool hidden: item.nsfw && ShellState.mediaFilter === "high" && !ShellState.isRevealed(item.id)
     readonly property bool animated: item.gif && !hidden
     readonly property Item picture: animated ? gifLoader.item : still
 
@@ -107,55 +108,9 @@ Rectangle {
     }
 
     // Sensitive: the frame over the blur.
-    Rectangle {
-        anchors.fill: parent
-        visible: root.hidden
-        color: Theme.scrim
-        Column {
-            anchors.centerIn: parent
-            width: Math.min(parent.width - 24, 220)
-            spacing: 4
-            Text {
-                width: parent.width
-                horizontalAlignment: Text.AlignHCenter
-                text: qsTr("Sensitive media")
-                color: Theme.ink1
-                font: Theme.type.panelTitle
-            }
-            Text {
-                width: parent.width
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.Wrap
-                visible: root.height >= 120
-                text: qsTr("Hidden by your high media filter.")
-                color: Theme.ink2
-                font: Theme.type.caption
-            }
-            Item { width: 1; height: 4 }
-            Rectangle {
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: showText.implicitWidth + 24
-                height: 28
-                radius: Theme.radius
-                color: showHover.containsMouse ? Theme.tint3 : Theme.tint2
-                Accessible.role: Accessible.Button
-                Accessible.name: showText.text
-                Text {
-                    id: showText
-                    anchors.centerIn: parent
-                    text: qsTr("Show media")
-                    color: Theme.ink1
-                    font: Theme.type.captionStrong
-                }
-                MouseArea {
-                    id: showHover
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: ShellState.reveal(root.item.id)
-                }
-            }
-        }
+    SensitiveMediaFrame {
+        attachmentId: root.item.id
+        hidden: root.hidden
     }
 
     MouseArea {

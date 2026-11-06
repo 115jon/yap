@@ -485,6 +485,8 @@ pub mod qobject {
         /// The profile effect and frame as JSON, or empty.
         #[qproperty(QString, effect)]
         #[qproperty(QString, frame)]
+        /// Where they are signed in, comma-joined (`desktop,mobile,web`).
+        #[qproperty(QString, platforms)]
         type Profile = super::ProfileRust;
 
         #[qinvokable]
@@ -725,6 +727,7 @@ pub struct ProfileRust {
     deco: QString,
     effect: QString,
     frame: QString,
+    platforms: QString,
 }
 
 impl qobject::Profile {

@@ -121,7 +121,7 @@ Column {
             readonly property var seen: ShellState.mediaSize(video.modelData.url)
             readonly property real ratio: video.seen && video.seen.h > 0 ? video.seen.w / video.seen.h : 16 / 9
             readonly property real boxW: Math.min(root.maxWidth, 640, video.seen ? video.seen.w : 640, 400 * video.ratio)
-            readonly property bool hidden: video.modelData.nsfw && !ShellState.isRevealed(video.modelData.id)
+            readonly property bool hidden: video.modelData.nsfw && ShellState.mediaFilter === "high" && !ShellState.isRevealed(video.modelData.id)
             property bool broken: false
             width: Math.round(video.broken ? Math.max(video.boxW, Math.min(root.maxWidth, 320)) : video.boxW)
             height: video.broken ? Math.max(160, Math.round(video.boxW / video.ratio)) : Math.round(video.boxW / video.ratio)
@@ -142,29 +142,10 @@ Column {
             HoverHandler { id: videoHover }
 
             // Sensitive: hidden until shown (SensitiveMediaFrame.tsx).
-            Rectangle {
-                anchors.fill: parent
-                visible: video.hidden
-                radius: Theme.radiusSheet * 2
-                color: Theme.scrim
-                border.width: 1
-                border.color: Theme.line
-                Column {
-                    anchors.centerIn: parent
-                    spacing: 8
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        textFormat: Text.PlainText
-                        text: qsTr("Sensitive media")
-                        color: Theme.ink1
-                        font: Theme.type.panelTitle
-                    }
-                    KitButton {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: qsTr("Show media")
-                        onClicked: ShellState.reveal(video.modelData.id)
-                    }
-                }
+            SensitiveMediaFrame {
+                attachmentId: video.modelData.id
+                hidden: video.hidden
+                cornerRadius: Theme.radiusSheet * 2
             }
 
             // The web's unplayable state.

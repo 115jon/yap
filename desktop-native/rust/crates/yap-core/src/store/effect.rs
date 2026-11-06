@@ -304,6 +304,8 @@ pub enum ApiRequest {
         channel_id: String,
         message_id: String,
     },
+    /// The inbox, the details tabs, voice status and the other extras.
+    Extras(super::extras::ExtrasRequest),
 }
 
 /// A page of messages, oldest first.
@@ -350,6 +352,7 @@ pub enum ApiResponse {
     Embeds(Value),
     /// The whole favourites list.
     Favorites(Vec<Value>),
+    Extras(super::extras::ExtrasResponse),
     /// A call whose body the store does not read.
     Done,
 }
@@ -389,8 +392,17 @@ impl ApiRequest {
         }
     }
 
+    /// Headers beyond the session's (the voice status routes').
+    pub fn headers(&self) -> Vec<(&'static str, String)> {
+        match self {
+            Self::Extras(request) => request.headers(),
+            _ => Vec::new(),
+        }
+    }
+
     pub fn method(&self) -> Method {
         match self {
+            Self::Extras(request) => request.method(),
             Self::Admin(request) => request.method(),
             Self::Threads(request) => request.method(),
             Self::Search(request) => request.method(),
@@ -430,6 +442,7 @@ impl ApiRequest {
 
     pub fn path(&self) -> String {
         match self {
+            Self::Extras(request) => request.path(),
             Self::Admin(request) => request.path(),
             Self::Threads(request) => request.path(),
             Self::Search(request) => request.path(),
@@ -514,6 +527,7 @@ impl ApiRequest {
     /// The JSON body (`Null` for a GET).
     pub fn body(&self) -> Value {
         match self {
+            Self::Extras(request) => request.body(),
             Self::Admin(request) => request.body(),
             Self::Threads(request) => request.body(),
             Self::Search(_) => Value::Null,
@@ -600,6 +614,7 @@ impl ApiRequest {
     /// Decodes a success body into the response for this request.
     pub fn decode(&self, mut body: Value) -> Result<ApiResponse, ApiError> {
         Ok(match self {
+            Self::Extras(request) => ApiResponse::Extras(request.decode(body)?),
             Self::Admin(request) => ApiResponse::Admin(request.decode(body)?),
             Self::Threads(request) => ApiResponse::Threads(request.decode(body)?),
             Self::Search(request) => ApiResponse::Search(Box::new(request.decode(body)?)),

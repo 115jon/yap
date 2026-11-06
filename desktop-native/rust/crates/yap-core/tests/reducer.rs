@@ -363,6 +363,9 @@ fn channels_result_should_open_the_first_text_channel_and_request_its_page() {
         mentions: 0,
         manage: false,
         category: String::new(),
+        status: String::new(),
+        status_media: String::new(),
+        status_editable: false,
     };
     // Members have not answered: no Manage channels yet.
     let channel = |id: &str, name: &str, voice, category: &str| ChannelTreeRow {

@@ -27,6 +27,8 @@ T.Popup {
     implicitHeight: implicitContentHeight + topPadding + bottomPadding
     padding: 24
     modal: true
+    // Ctrl+K stays shut while a modal is up (ExtrasHost).
+    onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
     focus: true
     closePolicy: busy ? T.Popup.NoAutoClose : T.Popup.CloseOnEscape | T.Popup.CloseOnPressOutside
 

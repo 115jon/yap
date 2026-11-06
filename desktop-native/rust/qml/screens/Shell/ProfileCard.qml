@@ -37,6 +37,8 @@ Rectangle {
     property string deco: ""
     property string effect: ""
     property string frame: ""
+    // Where they are signed in, beside the name (UserPlatformIndicators).
+    property string platforms: ""
     property string effectPlayback: "once"
     property bool animate: true
 
@@ -172,14 +174,28 @@ Rectangle {
         Column {
             width: parent.width
             spacing: 4
-            Text {
+            Row {
                 width: parent.width
-                textFormat: Text.PlainText
-                text: root.name
-                elide: Text.ElideRight
-                color: root.ink
-                font: Theme.type.profileName
-                Accessible.role: Accessible.Heading
+                spacing: 8
+                Text {
+                    id: nameLine
+                    width: Math.min(implicitWidth, parent.width - (devices.visible ? devices.implicitWidth + 8 : 0))
+                    textFormat: Text.PlainText
+                    text: root.name
+                    elide: Text.ElideRight
+                    color: root.ink
+                    font: Theme.type.profileName
+                    Accessible.role: Accessible.Heading
+                }
+                PlatformIcons {
+                    id: devices
+                    anchors.verticalCenter: nameLine.verticalCenter
+                    platforms: root.platforms
+                    presence: root.presence
+                    size: Theme.iconSm
+                    ink: root.subInk
+                    offlineInk: root.themed ? root.subInk : Theme.ink3
+                }
             }
             Text {
                 width: parent.width

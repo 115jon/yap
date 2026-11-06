@@ -2,7 +2,7 @@ import QtQuick
 import com.yap.native
 
 // The tree's right-click menus (ChannelSidebar.tsx `useSidebarContextMenus`):
-//   channel   Copy link; Mute channel and Notification settings (disabled,
+//   channel   Invite to channel, Copy link; Mute channel and Notification settings (disabled,
 //             as on the web); with Manage channels on it, Edit channel and
 //             Duplicate channel; with it server-wide, Create text channel;
 //             Delete channel; Copy channel ID
@@ -39,6 +39,13 @@ MenuPanel {
 
     ClipboardText { id: clipboard }
 
+    MenuRow {
+        visible: menu.onChannel
+        height: visible ? implicitHeight : 0
+        text: qsTr("Invite to channel")
+        glyph: "invite"
+        onTriggered: ShellState.channelInviteRequested(menu.itemId, menu.name, menu.voice)
+    }
     MenuRow {
         visible: menu.onChannel
         height: visible ? implicitHeight : 0

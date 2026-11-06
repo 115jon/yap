@@ -361,6 +361,7 @@ pub(super) struct Projection {
     pub shop: super::shop::ShopView,
     /// The saved favourites' `provider:id`.
     pub favorites: Vec<String>,
+    pub extras: super::extras::ExtrasView,
 }
 
 /// One step of a profile save, run in order; a failure stops the rest.
@@ -488,6 +489,8 @@ pub(super) struct Pending {
     pub shop: HashMap<RequestId, super::shop::ShopOp>,
     /// GIF and clip favourites.
     pub favorites: HashMap<RequestId, super::favorites::FavoritesOp>,
+    /// The inbox, details tabs, voice status and the other extras.
+    pub extras: HashMap<RequestId, super::extras::ExtrasOp>,
     /// TikTok and Instagram lookups.
     pub embeds: super::embeds::Pending,
 }
@@ -593,6 +596,18 @@ pub struct Presence {
     pub custom: HashMap<String, Option<String>>,
     /// Users a `PRESENCE_UPDATE` named since sign-in (offline ones too).
     pub reported: HashSet<String>,
+    /// User id → where they are signed in, as presence last said
+    /// (chat-reducer.ts `presencePlatformsByUserId`).
+    pub platforms: HashMap<String, Vec<String>>,
+}
+
+/// The platforms presence names, known ones only, in the indicators'
+/// order (presence-platform.ts `normalizePresencePlatforms`).
+pub fn presence_platforms<S: AsRef<str>>(values: &[S]) -> Vec<&'static str> {
+    ["desktop", "mobile", "web"]
+        .into_iter()
+        .filter(|known| values.iter().any(|v| v.as_ref() == *known))
+        .collect()
 }
 
 /// A status as the UI shows it: `online`, `idle`, `dnd`, or `None` for
@@ -629,6 +644,15 @@ impl Presence {
             return self.live.get(user_id).copied().unwrap_or("offline");
         }
         live_status(rest).unwrap_or("offline")
+    }
+
+    /// Where someone is signed in, comma-joined (`desktop,web`): the live
+    /// list when presence sent a non-empty one, else what their user row
+    /// carried (UserPlatformIndicators.tsx).
+    pub fn platforms_of(&self, user_id: &str, fallback: Option<&[String]>) -> String {
+        let live = self.platforms.get(user_id).filter(|list| !list.is_empty());
+        let list = live.map(Vec::as_slice).or(fallback).unwrap_or_default();
+        presence_platforms(list).join(",")
     }
 
     /// The live custom status when an update carried one, else `fallback`.
@@ -747,6 +771,7 @@ pub struct State {
     pub(super) shop: super::shop::ShopState,
     /// GIF and clip favourites.
     pub(super) favorites: super::favorites::FavoritesState,
+    pub(super) extras: super::extras::ExtrasState,
     /// TikTok and Instagram lookups, by link.
     pub(super) hydrations: super::embeds::Hydrations,
     pub(super) view: Projection,
@@ -812,6 +837,7 @@ impl State {
             apps: super::apps::AppsState::new(),
             shop: Default::default(),
             favorites: Default::default(),
+            extras: Default::default(),
             hydrations: Default::default(),
             view: Projection::default(),
             pending: Pending::default(),

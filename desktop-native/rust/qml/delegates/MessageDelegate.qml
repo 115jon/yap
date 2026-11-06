@@ -71,6 +71,8 @@ Item {
     signal retryRequested(string nonce)
     signal discardRequested(string nonce, string text)
     signal reactionToggled(string id, string emoji)
+    // Who reacted (ReactionDetailsModal.tsx), on one emoji's tab.
+    signal reactionDetailsRequested(string id, string emoji)
     // The x on our own embeds; `skip`: Shift was held.
     signal embedsRemoveRequested(string id, bool skip)
     // The emoji picker, to react to this message.
@@ -523,6 +525,7 @@ Item {
                 rowHovered: hover.hovered && !root.pending && !root.failed
                 onToggled: emoji => root.reactionToggled(root.messageId, emoji)
                 onAddRequested: anchor => root.reactionPickerRequested(root.messageId, anchor)
+                onDetailsRequested: emoji => root.reactionDetailsRequested(root.messageId, emoji)
             }
         }
         // The thread summary (MessageItem.tsx): 28 high on tint-1, 4 above;

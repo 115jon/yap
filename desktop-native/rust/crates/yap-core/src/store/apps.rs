@@ -1071,6 +1071,8 @@ pub struct AppsState {
     pub activity: ActivityState,
     /// Our voice participant once the voice socket is ready.
     pub participant_id: String,
+    /// Who watches whose share: streamer user id → viewer user ids.
+    pub watchers: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 impl AppsState {
@@ -1255,6 +1257,8 @@ pub struct CollectionRow {
     /// Subtitle and the item count, as the web joins them.
     pub meta: String,
     pub artwork: String,
+    /// Its page (the result actions' Open source URL and Copy URL).
+    pub url: String,
 }
 
 /// A search view of the picker (MyInstants, radio).
@@ -1276,6 +1280,8 @@ pub struct ResultRow {
     pub artist: String,
     pub artwork: String,
     pub duration_ms: f64,
+    /// `getListenTogetherResultUrl`: the source page, else the canonical one.
+    pub url: String,
 }
 
 /// A Wordle tile.

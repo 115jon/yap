@@ -187,6 +187,8 @@ RowLayout {
         height: root.height
         y: 0
         modal: true
+        // Ctrl+K stays shut while a modal is up (ExtrasHost).
+        onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
         interactive: false
         onClosed: {
             if (!root.closingPanelForLayout)
@@ -223,6 +225,8 @@ RowLayout {
         height: root.height
         y: 0
         modal: true
+        // Ctrl+K stays shut while a modal is up (ExtrasHost).
+        onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
         interactive: false
         onClosed: {
             if (!root.closingForLayout)
@@ -289,7 +293,15 @@ RowLayout {
         }
     }
 
+    Binding {
+        target: ShellState
+        property: "mediaFilter"
+        value: Settings.mediaFilter
+    }
+
     ProfilePopout { id: profile }
+    // The quick switcher and the other extras' dialogs.
+    ExtrasHost {}
     PeerMenu { id: peerMenu }
     MemberMenu { id: memberMenu }
 

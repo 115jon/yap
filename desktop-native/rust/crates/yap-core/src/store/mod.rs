@@ -13,6 +13,7 @@ mod admin;
 pub mod apps;
 mod effect;
 pub mod embeds;
+pub mod extras;
 pub mod favorites;
 mod friends;
 mod input;

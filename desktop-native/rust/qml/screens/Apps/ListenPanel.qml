@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import Yap.Chrome
 import com.yap.native
 
 // Listen Together (ListenTogetherPanel.tsx): search tracks or collections,
@@ -147,6 +148,19 @@ AppPopup {
                     IconKey { visible: !root.preview; size: 28; iconName: "queueAdd"; tone: "muted"; tip: qsTr("Queue"); onClicked: Apps.ltEnqueue(result.modelData.index, "append") }
                     IconKey { visible: !root.preview; size: 28; iconName: "playlist"; tone: "muted"; tip: qsTr("Play next"); onClicked: Apps.ltEnqueue(result.modelData.index, "play-next") }
                     IconKey { visible: !root.preview; size: 28; iconName: "play"; tone: "muted"; tip: qsTr("Play now"); onClicked: Apps.ltEnqueue(result.modelData.index, "play-now") }
+                    IconKey {
+                        id: trackMore
+                        visible: !root.preview
+                        size: 28
+                        iconName: "more"
+                        tone: "muted"
+                        tip: qsTr("More actions for %1").arg(result.modelData.title)
+                        onClicked: resultMenu.openFor(false, result.modelData, trackMore, 0, trackMore.height)
+                    }
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: point => resultMenu.openFor(false, result.modelData, result, point.position.x, point.position.y)
+                    }
                 }
             }
             Repeater {
@@ -165,6 +179,18 @@ AppPopup {
                         text: qsTr("Queue collection")
                         enabled: root.l.resolving !== true
                         onClicked: Apps.ltQueueCollection(collection.modelData.index)
+                    }
+                    IconKey {
+                        id: collectionMore
+                        size: 28
+                        iconName: "more"
+                        tone: "muted"
+                        tip: qsTr("More actions for %1").arg(collection.modelData.title)
+                        onClicked: resultMenu.openFor(true, collection.modelData, collectionMore, 0, collectionMore.height)
+                    }
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: point => resultMenu.openFor(true, collection.modelData, collection, point.position.x, point.position.y)
                     }
                 }
             }
@@ -295,4 +321,61 @@ AppPopup {
             }
         }
     }
+
+    // A result's actions (ListenTogetherResultActions.tsx, the desktop
+    // context menu): a track plays now, next or last, a collection queues
+    // whole; both open their source page or copy its URL.
+    MenuPanel {
+        id: resultMenu
+        property bool collection: false
+        property var item: null
+        function openFor(isCollection, item, anchor, x, y) {
+            resultMenu.collection = isCollection
+            resultMenu.item = item
+            const at = anchor.mapToItem(root.contentItem, x, y)
+            popup(root.contentItem, at.x, at.y)
+        }
+        MenuRow {
+            text: qsTr("Play now")
+            glyph: "play"
+            visible: !resultMenu.collection
+            height: visible ? implicitHeight : 0
+            onTriggered: Apps.ltEnqueue(resultMenu.item.index, "play-now")
+        }
+        MenuRow {
+            text: qsTr("Play next")
+            glyph: "skip"
+            visible: !resultMenu.collection
+            height: visible ? implicitHeight : 0
+            onTriggered: Apps.ltEnqueue(resultMenu.item.index, "play-next")
+        }
+        MenuRow {
+            text: qsTr("Add to queue")
+            glyph: "queueAdd"
+            visible: !resultMenu.collection
+            height: visible ? implicitHeight : 0
+            onTriggered: Apps.ltEnqueue(resultMenu.item.index, "append")
+        }
+        MenuRow {
+            text: qsTr("Add collection to queue")
+            glyph: "queueAdd"
+            visible: resultMenu.collection
+            height: visible ? implicitHeight : 0
+            enabled: root.l.resolving !== true
+            onTriggered: Apps.ltQueueCollection(resultMenu.item.index)
+        }
+        MenuRow {
+            text: qsTr("Open source URL")
+            glyph: "externalLink"
+            enabled: resultMenu.item !== null && resultMenu.item.url.length > 0
+            onTriggered: Files.openExternal(resultMenu.item.url)
+        }
+        MenuRow {
+            text: qsTr("Copy URL")
+            glyph: "copy"
+            enabled: resultMenu.item !== null && resultMenu.item.url.length > 0
+            onTriggered: resultClipboard.copyText(resultMenu.item.url)
+        }
+    }
+    ClipboardText { id: resultClipboard }
 }

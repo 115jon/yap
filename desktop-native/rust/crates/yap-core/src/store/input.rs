@@ -195,6 +195,8 @@ pub enum Command {
     Favorites(super::favorites::FavoritesCommand),
     /// Clear one of our messages' link previews (the embed's x).
     RemoveEmbeds(String),
+    /// The inbox, who reacted, the details tabs and the other extras.
+    Extras(super::extras::ExtrasCommand),
 }
 
 /// What the profile editor saves. Colours are `#RRGGBB` or `None` (Auto);
@@ -210,6 +212,9 @@ pub struct ProfileDraft {
     /// A new avatar (path, content type).
     pub avatar: Option<(String, String)>,
     pub remove_avatar: bool,
+    /// A recent avatar to use again (its stored URL), when no new one
+    /// was picked.
+    pub avatar_url: Option<String>,
     /// A new banner (path, content type).
     pub banner: Option<(String, String)>,
     pub remove_banner: bool,

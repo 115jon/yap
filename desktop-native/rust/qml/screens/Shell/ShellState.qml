@@ -113,6 +113,19 @@ QtObject {
             peerMenuRequested(userId, name, anchor, at)
     }
 
+    // The extras ExtrasHost opens: the quick switcher (Ctrl+K), who
+    // reacted, a share link, the channel's quick invite, a voice channel's
+    // status (`media`: its picture) and the voice switch confirm.
+    signal commandMenuRequested()
+    // How many modal dialogs and sheets are open (each counts itself in
+    // `onVisibleChanged`): Ctrl+K does not open the switcher over them.
+    property int modalCount: 0
+    signal reactionsRequested(string messageId, string emoji)
+    signal shareRequested(string messageId, string author, string text, int omitted)
+    signal channelInviteRequested(string channelId, string name, bool voice)
+    signal voiceStatusRequested(string channelId, string name, bool media, string text)
+    signal voiceSwitchRequested(string channelId, string name)
+
     // Home shows the collectibles shop instead of Friends (DMSidebar's
     // Shop row); opening a conversation or Friends leaves it.
     property bool shopOpen: false
@@ -121,6 +134,9 @@ QtObject {
     // this session. `mediaMuted` (YAP_EMBED_MUTED=1, set by main.cpp)
     // starts every player muted for test runs.
     property bool mediaMuted: false
+    // YAP_NO_CLIPBOARD=1 (set by main.cpp): copies are only logged (tests
+    // must not touch the user's clipboard).
+    property bool clipboardOff: false
     property bool videoMuted: false
     property real videoVolume: 1
     // One thing plays at a time (a chat video or a web player): each takes a
@@ -134,11 +150,16 @@ QtObject {
     }
     // The video viewer (Full Screen on a chat video).
     signal videoViewerRequested(string source, int position)
+    // The image viewer from outside the list (the details' Media tab).
+    signal imageViewerRequested(var images, int index)
 
     // Bumped on every change below, so bindings that ask re-run.
     property int mediaVersion: 0
     property var sizes: ({})
     property var revealed: ({})
+    // The account's media filter (`high` blurs sensitive media), fed by
+    // Shell so media rows never create the Settings singleton mid-binding.
+    property string mediaFilter: "high"
 
     function mediaSize(url) {
         return mediaVersion >= 0 ? sizes[url] ?? null : null

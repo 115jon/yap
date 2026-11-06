@@ -51,6 +51,9 @@ pub struct SoundPrefs {
     pub message_received: bool,
     /// 0-100, soundboard playback.
     pub soundboard_volume: u8,
+    /// Imported files play instead of the built-in sounds
+    /// (`customSounds`, off by default).
+    pub custom_sounds: bool,
 }
 
 impl Default for SoundPrefs {
@@ -65,6 +68,7 @@ impl Default for SoundPrefs {
             stream_watcher_activity: true,
             message_received: true,
             soundboard_volume: 100,
+            custom_sounds: false,
         }
     }
 }
@@ -97,6 +101,9 @@ pub struct DesktopSettings {
     pub sounds: bool,
     /// Which sounds play, and how loud.
     pub sound_settings: SoundPrefs,
+    /// "Don't ask again" on the voice switch confirm
+    /// (`rm-voice-switch-skip-confirm`).
+    pub skip_voice_switch_confirm: bool,
 }
 
 impl Default for DesktopSettings {
@@ -108,6 +115,7 @@ impl Default for DesktopSettings {
             desktop_notifications: true,
             sounds: true,
             sound_settings: SoundPrefs::default(),
+            skip_voice_switch_confirm: false,
         }
     }
 }

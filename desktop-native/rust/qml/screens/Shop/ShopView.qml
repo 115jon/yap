@@ -10,12 +10,17 @@ import com.yap.native
 // rows: Featured opens on the newest collection's hero, the collections
 // rail and a rail per collection; a type tab is a grid per collection; a
 // collection opens its own page (back to the shop from the bar); a search
-// lists matches by collection. A card opens the item's detail.
+// lists matches by collection. A card opens the item's detail. The bar's
+// refresh key forces an upstream catalog sync (`POST
+// /api/collectibles/sync`); the server lets only its allow-listed catalog
+// admins do it and says so to everyone else, as the web's client words it.
+// Its outcome shows under the bar for 6 s (the store clears it).
 Rectangle {
     id: root
 
     readonly property var model: JSON.parse(Shop.state)
     readonly property var collection: model.collection
+    readonly property var sync: JSON.parse(Extras.sync)
 
     color: Theme.ply0
     Component.onCompleted: Shop.open()
@@ -38,7 +43,7 @@ Rectangle {
         Row {
             anchors.left: backKey.visible ? backKey.right : parent.left
             anchors.leftMargin: backKey.visible ? 4 : 24
-            anchors.right: search.left
+            anchors.right: syncKey.left
             anchors.rightMargin: 16
             anchors.verticalCenter: parent.verticalCenter
             spacing: 12
@@ -73,6 +78,20 @@ Rectangle {
             }
         }
 
+        IconKey {
+            id: syncKey
+            anchors.right: search.left
+            anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            size: 32
+            tone: "muted"
+            iconName: root.sync.busy ? "loader" : "refresh"
+            tip: qsTr("Refresh the catalog")
+            tipSide: "bottom"
+            enabled: !root.sync.busy
+            onClicked: Extras.syncCatalog()
+        }
+
         KitField {
             id: search
             anchors.right: parent.right
@@ -102,9 +121,33 @@ Rectangle {
         }
     }
 
+    // The sync's outcome.
+    Rectangle {
+        id: syncNote
+        anchors.top: header.bottom
+        width: parent.width
+        height: root.sync.message.length > 0 ? noteText.implicitHeight + 16 : 0
+        visible: height > 0
+        z: 2
+        color: root.sync.ok ? Theme.ply2 : Theme.dangerTint
+        Accessible.role: Accessible.AlertMessage
+        Accessible.name: root.sync.message
+        Text {
+            id: noteText
+            x: 24
+            width: parent.width - 48
+            anchors.verticalCenter: parent.verticalCenter
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+            text: root.sync.message
+            color: root.sync.ok ? Theme.ink2 : Theme.dangerInk
+            font: Theme.type.description
+        }
+    }
+
     Item {
         id: tabStrip
-        anchors.top: header.bottom
+        anchors.top: syncNote.bottom
         width: parent.width
         height: root.collection === null ? 40 : 0
         visible: height > 0

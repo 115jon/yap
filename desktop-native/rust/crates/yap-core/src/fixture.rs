@@ -53,6 +53,7 @@ impl Fixture {
                 ApiResponse::Done
             }
             ApiRequest::Favorites(_) => ApiResponse::Favorites(Vec::new()),
+            ApiRequest::Extras(_) => ApiResponse::Done,
             ApiRequest::Me => ApiResponse::Me(Box::new(user(ME, "me", Some("Fixture Me")))),
             ApiRequest::Servers => ApiResponse::Servers(vec![Server {
                 id: SERVER.into(),
@@ -193,6 +194,7 @@ fn channels() -> ChannelsResponse {
         created_at: None,
         permissions: None,
         allow_public_shares: None,
+        voice_status: None,
     };
     let category = |id: &str, name: &str, rank| Category {
         id: id.into(),

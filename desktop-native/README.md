@@ -278,6 +278,43 @@ the decisions.
     (`/api/wordle/today?date=` in New York's date), hard mode, hints, reveal,
     and everyone's progress (`wordle.progress`). Warp Rush is listed but not
     built.
+- The chat, REST and settings extras of batch N3 (`yap-core`
+  `store/extras.rs` and `command_menu.rs`, `custom_sounds.rs`; the
+  `Extras`, `CommandMenu` and `CustomSounds` objects):
+  - the header bell's inbox (NotificationBell.tsx): the 50 newest, live
+    `NOTIFICATION_CREATE` / `_READ` / `_CLEAR`, open a row (it reads and
+    jumps to the message), Mark all read and Clear all (it asks first);
+  - the Ctrl+K quick switcher (CommandMenu.tsx), also from the DM
+    sidebar's finder: Recent (`quick-switcher.json`) and Unread while idle,
+    DMs, text and voice channels, servers and the actions (mute, deafen,
+    the theme), cmdk's ranking and the `@ # ! *` prefixes, and the hand-off
+    to message search;
+  - who reacted (ReactionDetailsModal.tsx) from "View reactions" or a
+    right click on a chip, with a moderator's remove;
+  - the drop overlay (DragDropOverlay.tsx) over the existing upload path;
+  - the channel details' Media (a gallery into the image viewer), Links
+    and Files tabs;
+  - a voice channel's status (text and a GIF picture, with the voice
+    session header) and its line under the channel in the tree;
+  - the avatar picker's recent avatars (pick one again, delete one);
+  - the emoji picker's AI creations and composer (`/api/emojis`);
+  - platform glyphs beside names in the member list and on the profile
+    card;
+  - the shop's catalog refresh (the server allows its catalog admins only
+    and says so to everyone else);
+  - Mark unread, Share message (expiry, the link, Manage shares) and View
+    reactions on the message menu;
+  - sensitive media blurred under the high media filter only, behind the
+    SensitiveMediaFrame float;
+  - Account: username edits with the availability check, and legacy
+    account claims; Sessions: Sign out on another device (the route
+    answers 501 today, which the row shows);
+  - Invite to channel (ChannelInviteModal.tsx): a fresh 7-day link to the
+    channel, from the row's key or its menu;
+  - custom UI sounds (CustomSoundsCard.tsx): import one or several files,
+    preview, reset, under `%LOCALAPPDATA%\YapNative\custom-sounds`;
+  - Listen Together results' action menu, the voice switch confirm (with
+    Don't ask again) and the stream watcher list on share tiles.
 - Deep links on our own scheme, `yap-native://invite/<code>` and
   `yap-native://chat/<server>/<channel>[?message=<id>]`, registered per
   user at startup under `HKCU\Software\Classes\yap-native` (only the
@@ -295,19 +332,18 @@ unless "Open on startup" is on), data and logs under
 
 Soundboard: station previews, station favicons, the moderator's
 per-server soundboard mute (the web has the menu item but never wires it).
-Listen Together: recent searches and the result actions menu. Activities
+Listen Together: recent searches. Activities
 (Daily Word's per-day board, Warp Rush) wait for their rework as web pages.
-Camera backgrounds, the stream watcher list and stream
+Camera backgrounds, stream
 volume, input volume, a mic test outside a call, WebM audio (webm plays
 silent), clips in the GIF picker, the favourites tab and GIF categories,
-stickers, emoji generation, the reaction details modal, the channel
-details' Media,
-Links and Files tabs, toast buttons (reply, mark read)
+stickers, the avatar picker's GIF tile and the voice status picture's
+upload (GIFs and recent pictures only), toast buttons (reply, mark read)
 and avatars, call rings, the taskbar thumbnail toolbar and auto-update. In
-settings: avatar crop and the recent-avatar picker, display name styles,
-bundles (none in the catalog), username changes, sign-out and session revoke from the page,
-server profiles, call keybinds, custom
-sounds, spatial audio, hardware acceleration and the game capture switch.
+settings: avatar crop, display name styles,
+bundles (none in the catalog), sign-out from the page,
+server profiles, call keybinds,
+spatial audio, hardware acceleration and the game capture switch.
 
 ## Build (Windows)
 
@@ -352,6 +388,8 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_LOG_EXTERNAL_OPEN`    | unset                     | `1`: links the players would open in the browser are logged as `[external] open <host><path>` instead (tests)                       |
 | `YAP_DECOR_IGNORE_FOCUS`   | unset                     | `1`: decorations (webm nameplates) play in an unfocused window too (tests that cannot take focus)                                   |
 | `YAP_TRACE_MEDIA_IO`       | unset                     | `1`: log each loopback relay request (range, status, length)                                                                        |
+| `YAP_TEST_DROP`            | unset                     | `a.png;b.png`: dropped once onto the first open chat (the overlay shows 4 s first), instead of a real drag (tests)                  |
+| `YAP_NO_CLIPBOARD`         | unset                     | `1`: copies are logged (`[clipboard] would copy N characters`), never put on the clipboard (tests)                                  |
 
 The defaults mirror `src/lib/site-defaults.ts`.
 

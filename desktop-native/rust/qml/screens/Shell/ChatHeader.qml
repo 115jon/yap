@@ -6,8 +6,8 @@ import com.yap.native
 // the name, a 16 px seam and the @handle in 13 ink-3) opens the details;
 // on the right pins, notifications and members (40 px muted keys behind a
 // seam), then the underline search field with its "/" key. Members toggles
-// the member panel and pins the pins panel; notifications and search come
-// later.
+// the member panel, pins the pins panel, and the bell opens the inbox under
+// it (its count badge top-right, cut from ply-0).
 Item {
     id: root
 
@@ -182,7 +182,36 @@ Item {
                     ShellState.pinsOpen = true
                 }
             }
-            IconKey { iconName: "bell"; tone: "muted"; tipSide: "bottom"; tip: qsTr("Notifications") }
+            Item {
+                width: 40
+                height: 40
+                IconKey {
+                    id: bell
+                    iconName: "bell"
+                    tone: inbox.opened ? "toggled" : "muted"
+                    tipSide: "bottom"
+                    tip: qsTr("Notifications")
+                    Accessible.checkable: true
+                    Accessible.checked: inbox.opened
+                    onClicked: {
+                        if (inbox.opened) {
+                            inbox.close()
+                            return
+                        }
+                        const at = bell.mapToItem(root, 0, 0)
+                        inbox.x = Math.max(8, at.x + bell.width - inbox.width)
+                        inbox.y = at.y + bell.height + 8
+                        inbox.open()
+                    }
+                }
+                CountBadge {
+                    x: parent.width - width + 2
+                    y: -2
+                    count: Extras.inboxUnread
+                    ring: 2
+                    ground: Theme.ply0
+                }
+            }
             IconKey {
                 iconName: "members"
                 tone: ShellState.showMembers ? "toggled" : "muted"
@@ -297,5 +326,10 @@ Item {
         width: parent.width
         height: 1
         color: Theme.line
+    }
+
+    NotificationInbox {
+        id: inbox
+        parent: root
     }
 }

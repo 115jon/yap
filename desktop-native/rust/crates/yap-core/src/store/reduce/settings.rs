@@ -189,6 +189,21 @@ impl State {
         self.persist(fx, CacheWrite::Me(Box::new(me)));
     }
 
+    /// A username change the server took (AccountPanel.tsx
+    /// `saveProfileField`): the account row at once, then the account.
+    pub(super) fn edit_username(&mut self, fx: &mut Effects, name: &str) {
+        self.edit_me(fx, |me| me.username = name.to_owned());
+        self.refresh_me(fx);
+        self.sync_settings(fx);
+    }
+
+    /// A revoked session leaves the Sessions list.
+    pub(super) fn forget_session_row(&mut self, id: &str) {
+        if let Load::Ready(list) = &mut self.settings.sessions {
+            list.retain(|s| s.id != id);
+        }
+    }
+
     fn refresh_me(&mut self, fx: &mut Effects) {
         if self.pending.me.is_none() {
             self.pending.me = self.http(fx, ApiRequest::Me);
@@ -243,6 +258,13 @@ impl State {
         let kept = collectibles_only(me.avatar_display.as_ref());
         if draft.remove_avatar {
             patch.insert("removeAvatar".into(), Value::Bool(true));
+            if let Some(kept) = &kept {
+                patch.insert("avatarDisplay".into(), kept.clone());
+            }
+        } else if let (None, Some(url)) = (&draft.avatar, &draft.avatar_url) {
+            // A recent avatar (AvatarPickerModal.tsx): the stored URL, and
+            // the display without the old crop.
+            patch.insert("avatarUrl".into(), Value::String(url.clone()));
             if let Some(kept) = &kept {
                 patch.insert("avatarDisplay".into(), kept.clone());
             }

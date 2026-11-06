@@ -108,7 +108,7 @@ impl State {
     }
 
     /// Applies one reaction change to the open channel's row.
-    fn react_row(
+    pub(super) fn react_row(
         &mut self,
         fx: &mut Effects,
         message_id: &str,
@@ -127,6 +127,7 @@ impl State {
         if changed.is_some() {
             self.emit_message_changes(fx, at, before);
             self.persist_messages(fx);
+            self.sync_extras(fx);
         }
     }
 

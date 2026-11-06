@@ -29,6 +29,10 @@ pub mod qobject {
         #[qproperty(bool, sound_screen_share, cxx_name = "soundScreenShare")]
         #[qproperty(bool, sound_stream_viewers, cxx_name = "soundStreamViewers")]
         #[qproperty(i32, soundboard_volume, cxx_name = "soundboardVolume")]
+        /// Imported sound files play instead of the built-in ones.
+        #[qproperty(bool, custom_sounds, cxx_name = "customSounds")]
+        /// "Don't ask again" on the voice switch confirm.
+        #[qproperty(bool, skip_voice_switch, cxx_name = "skipVoiceSwitch")]
         /// Unread notifications (capped at 99); 0 with `badgeDot` or nothing.
         #[qproperty(i32, badge_count, cxx_name = "badgeCount")]
         #[qproperty(bool, badge_dot, cxx_name = "badgeDot")]
@@ -125,6 +129,8 @@ pub struct DesktopRust {
     sound_screen_share: bool,
     sound_stream_viewers: bool,
     soundboard_volume: i32,
+    custom_sounds: bool,
+    skip_voice_switch: bool,
     badge_count: i32,
     badge_dot: bool,
     badge_tooltip: QString,
@@ -210,6 +216,10 @@ fn apply_settings(mut desktop: Pin<&mut qobject::Desktop>, s: DesktopSettings) {
     desktop
         .as_mut()
         .set_soundboard_volume(i32::from(sound.soundboard_volume));
+    desktop.as_mut().set_custom_sounds(sound.custom_sounds);
+    desktop
+        .as_mut()
+        .set_skip_voice_switch(s.skip_voice_switch_confirm);
     desktop.set_sounds(s.sounds);
 }
 
@@ -321,6 +331,8 @@ impl qobject::Desktop {
             "soundMute" => &mut sound.mute_deafen,
             "soundScreenShare" => &mut sound.screen_share,
             "soundStreamViewers" => &mut sound.stream_watcher_activity,
+            "customSounds" => &mut sound.custom_sounds,
+            "skipVoiceSwitch" => &mut next.skip_voice_switch_confirm,
             _ => {
                 eprintln!("[desktop] unknown setting {key}");
                 return;

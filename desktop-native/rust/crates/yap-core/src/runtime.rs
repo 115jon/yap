@@ -424,7 +424,8 @@ impl Runner {
                     } else if request.on_kova() {
                         api.call_kova(method, &path, &body).await
                     } else {
-                        api.call(method, &path, &body).await
+                        api.call_with(method, &path, &body, &request.headers())
+                            .await
                     };
                     let result = body.and_then(|body| request.decode(body));
                     let _ = inbox.send(Input::Http { id, result });

@@ -23,6 +23,8 @@ Popup {
     width: Math.min(parent ? parent.width - 64 : 860, 860)
     height: Math.min(parent ? parent.height - 64 : 560, 560)
     modal: true
+    // Ctrl+K stays shut while a modal is up (ExtrasHost).
+    onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
     dim: true
     padding: 0
     onShownChanged: shown ? open() : close()

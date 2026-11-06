@@ -71,7 +71,7 @@ impl State {
     }
 
     /// The open DM, if a DM is open.
-    fn active_dm(&self) -> Option<&DmChannel> {
+    pub(super) fn active_dm(&self) -> Option<&DmChannel> {
         self.active_channel.as_deref().and_then(|id| self.dm(id))
     }
 
@@ -411,8 +411,12 @@ impl State {
             user_id,
             status,
             custom_status,
+            platforms,
         } = update;
         self.presence.reported.insert(user_id.clone());
+        if let Some(platforms) = platforms {
+            self.presence.platforms.insert(user_id.clone(), platforms);
+        }
         self.apply_presence(&user_id, &status, custom_status.clone());
         // Our own status changed on another device: the account row follows.
         let me = self
@@ -441,7 +445,11 @@ impl State {
         self.presence.live.clear();
         match list.users {
             Some(users) => {
+                self.presence.platforms.clear();
                 for user in users {
+                    self.presence
+                        .platforms
+                        .insert(user.user_id.clone(), user.platforms.unwrap_or_default());
                     let status = user.status.as_deref().unwrap_or("online");
                     self.apply_presence(&user.user_id, status, user.custom_status);
                 }

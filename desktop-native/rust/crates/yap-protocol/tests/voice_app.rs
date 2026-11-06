@@ -251,6 +251,20 @@ fn wordle_progress_should_decode() {
 }
 
 #[test]
+fn a_watch_snapshot_should_dedupe_viewers_and_drop_empty_streams() {
+    let d = serde_json::json!({
+        "type": "stream.watch.snapshot",
+        "watchers_by_streamer": { "u-a": ["u-b", "u-b", ""], "u-c": [] }
+    });
+    let mut want = std::collections::BTreeMap::new();
+    want.insert("u-a".to_owned(), vec!["u-b".to_owned()]);
+    assert_eq!(
+        AppEvent::decode(&d),
+        Some(AppEvent::StreamWatchSnapshot(want))
+    );
+}
+
+#[test]
 fn other_app_events_should_be_ignored() {
     assert_eq!(
         AppEvent::decode(&fixture("stream-watch-snapshot.json")),

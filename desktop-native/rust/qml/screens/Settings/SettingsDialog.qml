@@ -60,6 +60,8 @@ T.Popup {
     height: Math.min(820, parent.height - Theme.chrome - 32)
     padding: 0
     modal: true
+    // Ctrl+K stays shut while a modal is up (ExtrasHost).
+    onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
     focus: true
     closePolicy: T.Popup.NoAutoClose
     // Hidden, not closed, while the theme preview is up: "Back to

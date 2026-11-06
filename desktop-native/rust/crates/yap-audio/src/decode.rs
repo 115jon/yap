@@ -306,6 +306,13 @@ pub(crate) fn decode_clip(
 pub(crate) mod tests {
     use super::*;
 
+    #[test]
+    fn a_short_wav_should_decode_with_its_length() {
+        let bytes = wav(44_100, 1, 440.0, 0.5);
+        let (samples, seconds) = crate::decode_sound(&bytes, Some("wav")).unwrap_or_default();
+        assert!(!samples.is_empty() && (seconds - 0.5).abs() < 0.02);
+    }
+
     /// A 16-bit PCM WAV of a sine.
     pub(crate) fn wav(rate: u32, channels: u16, hz: f32, seconds: f32) -> Vec<u8> {
         let frames = (rate as f32 * seconds) as u32;

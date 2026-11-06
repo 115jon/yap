@@ -74,6 +74,7 @@ struct Scalars {
     shop: yap_core::store::shop::ShopView,
     /// The saved favourites' `provider:id`, as JSON.
     gif_favorites: String,
+    extras: yap_core::store::extras::ExtrasView,
 }
 
 /// The live QObjects. Each registers from its constructor and clears its
@@ -89,6 +90,9 @@ pub struct Objects {
     pub(crate) shop: Option<NonNull<crate::shop::qobject::Shop>>,
     pub(crate) invites: Option<NonNull<crate::invites::qobject::Invites>>,
     pub(crate) apps: Option<NonNull<crate::apps::qobject::Apps>>,
+    pub(crate) extras: Option<NonNull<crate::extras::qobject::Extras>>,
+    pub(crate) command_menu: Option<NonNull<crate::command_menu::qobject::CommandMenu>>,
+    pub(crate) custom_sounds: Option<NonNull<crate::custom_sounds::qobject::CustomSounds>>,
     nav: Option<NonNull<Nav>>,
     chat: Option<NonNull<Chat>>,
     voice: Option<NonNull<Voice>>,
@@ -233,6 +237,24 @@ pub(crate) fn keep_apps(view: yap_core::store::apps::AppsView) {
 
 pub(crate) fn apps_view() -> yap_core::store::apps::AppsView {
     GUI.with(|gui| gui.borrow().scalars.apps.clone())
+}
+
+/// Keeps the extras view for an `Extras` object QML creates later.
+pub(crate) fn keep_extras(view: yap_core::store::extras::ExtrasView) {
+    scalars(|s| s.extras = view);
+}
+
+pub(crate) fn extras_view() -> yap_core::store::extras::ExtrasView {
+    GUI.with(|gui| gui.borrow().scalars.extras.clone())
+}
+
+/// Where the user is, for the quick switcher: the open server (empty at
+/// Home), the open channel, and whether Home shows.
+pub(crate) fn place() -> (String, String, bool) {
+    GUI.with(|gui| {
+        let s = &gui.borrow().scalars;
+        (s.server.0.clone(), s.channel.0.clone(), s.home)
+    })
 }
 
 fn q(text: &str) -> QString {
@@ -397,6 +419,7 @@ fn set_profile(mut profile: Pin<&mut Profile>, view: &ProfileView) {
     profile.as_mut().set_deco(q(&view.deco));
     profile.as_mut().set_effect(q(&view.effect));
     profile.as_mut().set_frame(q(&view.frame));
+    profile.as_mut().set_platforms(q(&view.platforms));
     profile.set_user_id(q(&view.user_id));
 }
 
@@ -551,6 +574,7 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             with::<Nav>(|nav| set_dm(nav, &dm));
             scalars(|s| s.dm = dm);
         }
+        ViewUpdate::Recent(target) => crate::command_menu::record_target(target),
         ViewUpdate::DmUnread(count) => {
             with::<Nav>(|nav| nav.set_dm_unread(int(count)));
             scalars(|s| s.dm_unread = count);
@@ -572,6 +596,7 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             scalars(|s| s.gif_favorites = text);
         }
         ViewUpdate::Apps(view) => crate::apps::on_view(*view),
+        ViewUpdate::Extras(view) => crate::extras::on_view(*view),
         ViewUpdate::Invites(view) => crate::invites::on_view(*view),
         ViewUpdate::Toast(toast) => crate::desktop::on_toast(&toast),
         ViewUpdate::Sound(sound) => crate::sound::play(sound),

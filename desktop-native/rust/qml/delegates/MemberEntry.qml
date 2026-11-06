@@ -5,7 +5,8 @@ import com.yap.native
 // high, silkscreen ink-3, the count at the end, 16 above (8 for the first).
 // A member is a 40 px row, pl-2.5, gap 12: a 32 px avatar with presence (or
 // typing dots) cut out of ply-0, the name in their highest role's colour
-// while online, a crown for the owner, and the custom status under it.
+// while online, where they are signed in (UserPlatformIndicators.tsx) and a
+// crown for the owner, and the custom status under it.
 // Offline rows sit at half opacity until hovered. Someone in your voice
 // channel gets their talk LED in the row's left gutter. A nameplate
 // covers the row behind them (its still; the webm plays while hovered),
@@ -32,6 +33,7 @@ Item {
     // The avatar decoration (APNG) and the nameplate JSON, or empty.
     required property string deco
     required property string plate
+    required property string platforms
     property color ground: Theme.ply0
     signal profileRequested(string userId, Item anchor)
     // A right click at `at` (in the row): the member's menu.
@@ -144,13 +146,20 @@ Item {
                 spacing: 6
                 Text {
                     id: nameText
-                    width: Math.min(implicitWidth, parent.width - (crown.visible ? crown.width + 6 : 0))
+                    width: Math.min(implicitWidth, parent.width - (crown.visible ? crown.width + 6 : 0)
+                        - (devices.visible ? devices.implicitWidth + 6 : 0))
                     textFormat: Text.PlainText
                     text: root.name
                     elide: Text.ElideRight
                     color: root.roleColor.length > 0 && root.plate.length === 0 ? root.roleColor
                         : hover.hovered || root.plate.length > 0 ? Theme.ink1 : Theme.ink2
                     font: Theme.type.row
+                }
+                PlatformIcons {
+                    id: devices
+                    anchors.verticalCenter: nameText.verticalCenter
+                    platforms: root.platforms
+                    presence: root.presence
                 }
                 Icon {
                     id: crown

@@ -169,6 +169,14 @@ Rectangle {
         Chat.download(item.url, Files.openPath(item.name), true)
     }
 
+    // Files a public link leaves out (MessageShareModal.tsx): anything but
+    // pictures and playable videos.
+    function omittedFiles(attachments) {
+        if (attachments.length === 0)
+            return 0
+        return JSON.parse(attachments).filter(a => a.kind !== "image" && a.kind !== "video").length
+    }
+
     function deleteMessage(id, author, text, confirm) {
         if (confirm)
             deleteDialog.ask(id, author, text)
@@ -333,6 +341,9 @@ Rectangle {
             onMenuRequested: (id, author, text, mine, anchor, x, y) => {
                 messageMenu.replyCount = row.replyCount
                 messageMenu.pinned = row.pinned
+                messageMenu.settled = !row.pending && !row.failed
+                messageMenu.hasReactions = row.reactions.length > 0
+                messageMenu.omitted = root.omittedFiles(row.attachments)
                 messageMenu.openFor(id, author, text, mine, anchor, x, y)
             }
             onThreadRequested: id => root.openThread(id)
@@ -349,6 +360,7 @@ Rectangle {
                 Chat.toggleReaction(id, emoji)
                 Emoji.remember(emoji)
             }
+            onReactionDetailsRequested: (id, emoji) => ShellState.reactionsRequested(id, emoji)
             onReactionPickerRequested: (id, anchor) => {
                 reactionPicker.messageId = id
                 reactionPicker.openAt(anchor, true)
@@ -534,6 +546,9 @@ Rectangle {
         property bool mine
         property int replyCount
         property bool pinned
+        property bool settled: true
+        property bool hasReactions: false
+        property int omitted: 0
         function openFor(id, author, text, mine, anchor, x, y) {
             messageId = id
             messageMenu.author = author
@@ -571,11 +586,32 @@ Rectangle {
             height: visible ? implicitHeight : 0
             onTriggered: root.setPin(messageMenu.messageId, messageMenu.author, messageMenu.text, !messageMenu.pinned, true)
         }
+        MenuRow {
+            text: qsTr("View reactions")
+            glyph: "emoji"
+            visible: messageMenu.settled && messageMenu.hasReactions
+            height: visible ? implicitHeight : 0
+            onTriggered: ShellState.reactionsRequested(messageMenu.messageId, "")
+        }
         MenuRule {}
+        MenuRow {
+            text: qsTr("Mark unread")
+            glyph: "markUnread"
+            visible: messageMenu.settled
+            height: visible ? implicitHeight : 0
+            onTriggered: Extras.markUnread(messageMenu.messageId)
+        }
         MenuRow {
             text: qsTr("Copy message link")
             glyph: "link"
             onTriggered: root.copyLink(messageMenu.messageId)
+        }
+        MenuRow {
+            text: qsTr("Share message")
+            glyph: "share"
+            visible: messageMenu.settled
+            height: visible ? implicitHeight : 0
+            onTriggered: ShellState.shareRequested(messageMenu.messageId, messageMenu.author, messageMenu.text, messageMenu.omitted)
         }
         MenuRow {
             text: qsTr("Delete message")
@@ -587,54 +623,134 @@ Rectangle {
         }
     }
 
-    // Files dragged over the chat (DragDropOverlay.tsx): a dashed line-strong
-    // frame 16 px in, "Drop to upload" and the size limit.
+    // Files dragged over the chat (DragDropOverlay.tsx): the scrim with a
+    // dashed line-strong frame 16 px in (radius 12), and over it a ply-3
+    // float with the upload glyph, "Drop to upload" and the size limit. It
+    // fades in; nothing moves or loops.
+    function dropUrls(urls) {
+        const paths = urls.map(u => decodeURIComponent(String(u).replace(/^file:\/\/\//, "")))
+            .filter(p => p.length > 0 && !/^[a-z]+:\/\//i.test(p))
+        if (paths.length > 0)
+            Chat.addFiles(paths)
+        composer.focusInput()
+    }
+
+    // Tests: YAP_TEST_DROP ("a.png;b.png") drops those files once, 2 s
+    // after the first channel opens, with the overlay shown for 4 s first
+    // (long enough for the harness's window captures).
+    property bool testDragging: false
+    property bool testDropped: false
+    readonly property var testDrop: Files.testDropUrls()
+    Timer {
+        id: testDropTimer
+        interval: 2000
+        running: !root.testDropped && root.testDrop.length > 0 && Nav.activeChannelId.length > 0
+        onTriggered: {
+            root.testDropped = true
+            root.testDragging = true
+            testDropEnd.start()
+        }
+    }
+    Timer {
+        id: testDropEnd
+        interval: 4000
+        onTriggered: {
+            root.testDragging = false
+            root.dropUrls(root.testDrop)
+        }
+    }
+
     DropArea {
         id: drop
         anchors.fill: parent
         enabled: Nav.activeChannelId.length > 0
         keys: ["text/uri-list"]
         onDropped: event => {
-            const paths = event.urls.map(u => decodeURIComponent(String(u).replace(/^file:\/\/\//, "")))
-                .filter(p => p.length > 0 && !/^[a-z]+:\/\//i.test(p))
-            if (paths.length > 0)
-                Chat.addFiles(paths)
+            root.dropUrls(event.urls)
             event.acceptProposedAction()
-            composer.focusInput()
         }
 
         Rectangle {
+            id: dropOverlay
+            readonly property bool shown: drop.containsDrag || root.testDragging
             anchors.fill: parent
-            visible: drop.containsDrag
+            z: 30
+            visible: opacity > 0
+            opacity: shown ? 1 : 0
+            Behavior on opacity { OpacityAnimator { duration: Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
             color: Theme.scrim
-            Rectangle {
+            Accessible.ignored: true
+
+            // The dashed frame: drawn once per size (static).
+            Canvas {
+                id: frame
                 anchors.fill: parent
                 anchors.margins: 16
-                radius: Theme.radius
-                color: "transparent"
-                border.width: 2
-                border.color: Theme.lineStrong
+                readonly property color ink: Theme.lineStrong
+                onInkChanged: requestPaint()
+                onWidthChanged: requestPaint()
+                onHeightChanged: requestPaint()
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    ctx.strokeStyle = frame.ink
+                    ctx.lineWidth = 2
+                    // Dashes along each side (6 on, 4 off), solid corners.
+                    const r = 12, x0 = 1, y0 = 1, x1 = width - 1, y1 = height - 1
+                    ctx.beginPath()
+                    const dashes = (ax, ay, bx, by) => {
+                        const len = Math.hypot(bx - ax, by - ay)
+                        for (let t = 0; t < len; t += 10) {
+                            const e = Math.min(t + 6, len)
+                            ctx.moveTo(ax + (bx - ax) * t / len, ay + (by - ay) * t / len)
+                            ctx.lineTo(ax + (bx - ax) * e / len, ay + (by - ay) * e / len)
+                        }
+                    }
+                    dashes(x0 + r, y0, x1 - r, y0)
+                    dashes(x1, y0 + r, x1, y1 - r)
+                    dashes(x1 - r, y1, x0 + r, y1)
+                    dashes(x0, y1 - r, x0, y0 + r)
+                    ctx.moveTo(x1 - r, y0)
+                    ctx.arcTo(x1, y0, x1, y0 + r, r)
+                    ctx.moveTo(x1, y1 - r)
+                    ctx.arcTo(x1, y1, x1 - r, y1, r)
+                    ctx.moveTo(x0 + r, y1)
+                    ctx.arcTo(x0, y1, x0, y1 - r, r)
+                    ctx.moveTo(x0, y0 + r)
+                    ctx.arcTo(x0, y0, x0 + r, y0, r)
+                    ctx.stroke()
+                }
             }
-            Column {
+            Rectangle {
                 anchors.centerIn: parent
-                spacing: 8
-                Icon {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    name: "upload"
-                    size: Theme.icon2xl
-                    color: Theme.ink1
-                }
-                Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: qsTr("Drop to upload")
-                    color: Theme.ink1
-                    font: Theme.type.sectionTitle
-                }
-                Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: qsTr("Files can be up to 25 MB.")
-                    color: Theme.ink2
-                    font: Theme.type.description
+                width: dropCard.implicitWidth + 64
+                height: dropCard.implicitHeight + 48
+                radius: Theme.radiusSheet * 2
+                color: Theme.ply3
+                border.width: 1
+                border.color: Theme.line
+                Column {
+                    id: dropCard
+                    anchors.centerIn: parent
+                    spacing: 8
+                    Icon {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        name: "upload"
+                        size: Theme.icon2xl
+                        color: Theme.ink2
+                    }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: qsTr("Drop to upload")
+                        color: Theme.ink1
+                        font: Theme.type.panelTitle
+                    }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: qsTr("Files can be up to 25 MB.")
+                        color: Theme.ink3
+                        font: Theme.type.description
+                    }
                 }
             }
         }
@@ -657,6 +773,10 @@ Rectangle {
         function onVideoViewerRequested(source, position) {
             if (root.visible)
                 videoViewer.show(source, position)
+        }
+        function onImageViewerRequested(images, index) {
+            if (root.visible)
+                viewer.show(images, index)
         }
     }
 

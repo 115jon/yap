@@ -636,12 +636,26 @@ pub const PANELS: &[PanelDef] = &[
                 "custom-sounds",
                 "Custom sounds (experimental)",
                 "Replace any sound with an audio file of your own. Files stay on this device and are never uploaded.",
-                &[row(
-                    "custom-sounds-enabled",
-                    "Use custom sounds",
-                    "Plays your files instead of the built-in sounds. A sound without a file keeps the built-in one.",
-                    &["custom", "sound pack", "import", "audio file"],
-                )],
+                &[
+                    row(
+                        "custom-sounds-enabled",
+                        "Use custom sounds",
+                        "Plays your files instead of the built-in sounds. A sound without a file keeps the built-in one.",
+                        &["custom", "sound pack", "import", "audio file"],
+                    ),
+                    row(
+                        "custom-sounds-import",
+                        "Import several files",
+                        "Each file's name picks its sound, such as voice-join.mp3 or ring.ogg. Up to 1 MB and 5 seconds per file; rings up to 15 seconds.",
+                        &["bulk", "import", "upload", "sound pack", "files"],
+                    ),
+                    row(
+                        "custom-sounds-reset",
+                        "Reset all custom sounds",
+                        "Deletes every imported file from this device and goes back to the built-in sounds.",
+                        &["reset", "delete", "built-in", "default"],
+                    ),
+                ],
             ),
         ],
     },

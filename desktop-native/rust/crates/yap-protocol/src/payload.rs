@@ -161,6 +161,9 @@ pub struct PresenceUpdateEvent {
     pub status: String,
     #[serde(default, deserialize_with = "present")]
     pub custom_status: Option<Option<String>>,
+    /// Where they are signed in now; absent leaves the known ones.
+    #[serde(default)]
+    pub platforms: Option<Vec<String>>,
 }
 
 /// One connected user in a [`PresenceList`].
@@ -170,6 +173,8 @@ pub struct PresenceEntry {
     pub status: Option<String>,
     #[serde(default, deserialize_with = "present")]
     pub custom_status: Option<Option<String>>,
+    #[serde(default)]
+    pub platforms: Option<Vec<String>>,
 }
 
 /// `PRESENCE_LIST` dispatch data (after every channel subscribe): everyone

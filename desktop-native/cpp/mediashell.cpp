@@ -114,6 +114,15 @@ MediaShell::MediaShell(QObject* parent)
   pruneOld(QStringLiteral("open"));
 }
 
+QStringList MediaShell::testDropUrls() const
+{
+  QStringList urls;
+  const QString paths = qEnvironmentVariable("YAP_TEST_DROP");
+  for (const QString& path : paths.split(QLatin1Char(';'), Qt::SkipEmptyParts))
+    urls << QUrl::fromLocalFile(path).toString();
+  return urls;
+}
+
 void MediaShell::clearImageCache()
 {
   emit imageCacheCleared();

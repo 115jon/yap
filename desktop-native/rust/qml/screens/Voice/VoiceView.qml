@@ -240,7 +240,14 @@ Rectangle {
         NotchedKey {
             anchors.horizontalCenter: parent.horizontalCenter
             text: qsTr("Join voice")
-            onClicked: Voice.join(Nav.voicePanelId)
+            // In another call already: VoiceSwitchModal.tsx asks first,
+            // unless "Don't ask again" was ticked.
+            onClicked: {
+                if (Voice.channelId.length > 0 && Voice.channelId !== Nav.voicePanelId && !Desktop.skipVoiceSwitch)
+                    ShellState.voiceSwitchRequested(Nav.voicePanelId, Nav.voicePanelName)
+                else
+                    Voice.join(Nav.voicePanelId)
+            }
         }
 
         // Why the last join failed; the next join clears it.

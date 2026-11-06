@@ -9,6 +9,9 @@ import com.yap.native
 // jumps between sections; the grid shows Twemoji at 28 px in 40 px cells,
 // nine to a row; the footer names the hovered emoji. Enter in the search
 // picks the first result; Esc closes (the tone menu first).
+// Your creations (AI emoji, `/api/emojis`) lead the grid, polled every 4 s
+// while some still generate; the magic key opens the AI emoji composer
+// (prompt and optional shortcode, `POST /api/emojis`).
 Popup {
     id: root
 
@@ -35,6 +38,13 @@ Popup {
         { id: "flags", icon: "flag", label: qsTr("Flags") }
     ]
     property string activeSection: "people"
+    // `emoji` (the grid) or `compose` (the AI emoji composer).
+    property string view: "emoji"
+    readonly property var creations: JSON.parse(Extras.emojis)
+    readonly property var shownCreations: {
+        const q = search.text.trim().toLowerCase()
+        return q.length === 0 ? creations.rows : creations.rows.filter(e => e.shortcode.toLowerCase().includes(q))
+    }
 
     // Opens next to `anchor` (above it when there is room, else below).
     function openAt(anchor, alignRight) {
@@ -60,10 +70,20 @@ Popup {
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     onOpened: {
+        view = "emoji"
         search.text = ""
         Emoji.search("")
         grid.positionViewAtBeginning()
         search.forceActiveFocus()
+        Extras.loadEmojis(false)
+    }
+
+    // useEffect: every 4 s while any creation is still generating.
+    Timer {
+        interval: 4000
+        repeat: true
+        running: root.opened && root.creations.pending
+        onTriggered: Extras.loadEmojis(true)
     }
     onClosed: hovered = null
 
@@ -98,7 +118,7 @@ Popup {
                 id: field
                 x: 8
                 anchors.verticalCenter: parent.verticalCenter
-                width: parent.width - 16 - 36
+                width: parent.width - 16 - 36 - 36
                 height: 32
                 radius: Theme.radius
                 color: Theme.ply2
@@ -145,6 +165,23 @@ Popup {
                     }
                 }
             }
+            IconKey {
+                anchors.right: toneKey.left
+                anchors.rightMargin: 4
+                anchors.verticalCenter: parent.verticalCenter
+                size: 32
+                iconName: "magic"
+                tone: "muted"
+                tip: qsTr("Generate your own emoji")
+                tipSide: "bottom"
+                Accessible.name: qsTr("Create emoji")
+                onClicked: {
+                    Extras.clearEmojiNotes()
+                    toneMenu.close()
+                    root.view = "compose"
+                    prompt.forceActiveFocus()
+                }
+            }
             Item {
                 id: toneKey
                 anchors.right: parent.right
@@ -189,6 +226,18 @@ Popup {
                 x: 4
                 y: 4
                 spacing: 4
+                IconKey {
+                    visible: root.creations.rows.length > 0
+                    size: 32
+                    iconName: "sparkle"
+                    tip: qsTr("Your creations")
+                    tipSide: "right"
+                    tone: "muted"
+                    onClicked: {
+                        search.text = ""
+                        grid.positionViewAtBeginning()
+                    }
+                }
                 Repeater {
                     model: root.sections
                     IconKey {
@@ -222,6 +271,94 @@ Popup {
             reuseItems: true
             boundsBehavior: Flickable.StopAtBounds
             keyNavigationEnabled: false
+            // Your creations, ahead of every section.
+            header: Column {
+                width: grid.width - 8
+                visible: root.shownCreations.length > 0
+                height: visible ? implicitHeight : 0
+                Item {
+                    width: parent.width
+                    height: 32
+                    Text {
+                        x: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("Your creations")
+                        color: Theme.ink3
+                        font: Theme.type.captionStrong
+                        Accessible.role: Accessible.Heading
+                    }
+                    Row {
+                        anchors.right: parent.right
+                        anchors.rightMargin: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: root.creations.pending
+                        spacing: 4
+                        Icon {
+                            id: genSpin
+                            anchors.verticalCenter: parent.verticalCenter
+                            name: "loader"
+                            size: Theme.iconXs
+                            color: Theme.ink3
+                            RotationAnimator on rotation {
+                                from: 0
+                                to: 360
+                                duration: 900
+                                loops: Animation.Infinite
+                                running: genSpin.visible && !Theme.reducedMotion
+                            }
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: qsTr("Generating")
+                            color: Theme.ink3
+                            font: Theme.type.caption
+                        }
+                    }
+                }
+                Flow {
+                    width: parent.width
+                    Repeater {
+                        model: root.shownCreations
+                        Item {
+                            id: made
+                            required property var modelData
+                            readonly property bool ready: modelData.token.length > 0
+                            width: 40
+                            height: 40
+                            Accessible.role: Accessible.Button
+                            Accessible.name: ":" + modelData.shortcode + ":"
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: Theme.radius
+                                color: madeHover.hovered && made.ready ? Theme.tint2 : made.ready ? "transparent" : Theme.tint1
+                            }
+                            Image {
+                                anchors.centerIn: parent
+                                visible: made.ready
+                                width: 28
+                                height: 28
+                                sourceSize: Qt.size(56, 56)
+                                asynchronous: true
+                                source: made.ready ? made.modelData.url : ""
+                            }
+                            Icon {
+                                anchors.centerIn: parent
+                                visible: !made.ready
+                                name: made.modelData.status === "failed" ? "alert" : "loader"
+                                size: Theme.iconSm
+                                color: Theme.ink3
+                            }
+                            HoverHandler {
+                                id: madeHover
+                                cursorShape: made.ready ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onHoveredChanged: if (hovered && made.ready)
+                                    root.hovered = { u: made.modelData.url, n: made.modelData.shortcode, s: made.modelData.shortcode }
+                            }
+                            TapHandler { onTapped: if (made.ready) root.pick(made.modelData.token) }
+                        }
+                    }
+                }
+            }
             onContentYChanged: {
                 const top = itemAt(width / 2, contentY + 33)
                 if (top && top.section !== "results")
@@ -339,6 +476,143 @@ Popup {
                 text: root.hovered ? ":" + root.hovered.s + ":" : ""
                 color: Theme.ink3
                 font: Theme.type.numSm
+            }
+        }
+
+        // The AI emoji composer (EmojiPicker.tsx `compose`): over the grid,
+        // its own header (back, the title and its line), the prompt with
+        // its count, the optional shortcode, then Generate emoji.
+        Rectangle {
+            anchors.fill: parent
+            anchors.topMargin: 2
+            visible: root.view === "compose"
+            color: Theme.ply3
+            MouseArea { anchors.fill: parent }
+            Item {
+                id: composeHead
+                width: parent.width
+                height: 48
+                IconKey {
+                    id: backKey
+                    x: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    size: 32
+                    iconName: "back"
+                    tone: "muted"
+                    tip: qsTr("Back")
+                    onClicked: {
+                        Extras.clearEmojiNotes()
+                        root.view = "emoji"
+                        search.forceActiveFocus()
+                    }
+                }
+                Column {
+                    anchors.left: backKey.right
+                    anchors.leftMargin: 8
+                    anchors.right: parent.right
+                    anchors.rightMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    Text {
+                        width: parent.width
+                        elide: Text.ElideRight
+                        text: qsTr("AI emoji composer")
+                        color: Theme.ink1
+                        font: Theme.type.panelTitle
+                        Accessible.role: Accessible.Heading
+                    }
+                    Text {
+                        width: parent.width
+                        elide: Text.ElideRight
+                        text: qsTr("Build custom emoji for your server vibe")
+                        color: Theme.ink3
+                        font: Theme.type.caption
+                    }
+                }
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    width: parent.width
+                    height: 1
+                    color: Theme.line
+                }
+            }
+            Column {
+                anchors.top: composeHead.bottom
+                anchors.topMargin: 16
+                x: 16
+                width: parent.width - 32
+                spacing: 12
+                FieldPlate {
+                    width: parent.width
+                    label: qsTr("Prompt")
+                    ground: Theme.ply3
+                    KitField {
+                        id: prompt
+                        maximumLength: 200
+                        placeholderText: qsTr("A cat in a party hat")
+                        onTextEdited: Extras.clearEmojiNotes()
+                        Keys.onReturnPressed: generateKey.clicked()
+                        Keys.onEscapePressed: root.view = "emoji"
+                    }
+                }
+                Text {
+                    width: parent.width
+                    horizontalAlignment: Text.AlignRight
+                    text: qsTr("%1 / 200").arg(prompt.text.length)
+                    color: Theme.ink3
+                    font: Theme.type.num
+                }
+                FieldPlate {
+                    width: parent.width
+                    label: qsTr("Shortcode")
+                    ground: Theme.ply3
+                    KitField {
+                        id: shortcode
+                        maximumLength: 32
+                        placeholderText: qsTr("Optional. We can generate one for you.")
+                        onTextEdited: Extras.clearEmojiNotes()
+                        Keys.onReturnPressed: generateKey.clicked()
+                    }
+                }
+                RowError {
+                    width: parent.width
+                    above: 0
+                    text: root.creations.generateError
+                }
+                Text {
+                    visible: root.creations.generateSuccess.length > 0
+                    width: parent.width
+                    wrapMode: Text.Wrap
+                    textFormat: Text.PlainText
+                    text: root.creations.generateSuccess
+                    color: Theme.successInk
+                    font: Theme.type.description
+                    Accessible.role: Accessible.StaticText
+                }
+                KitButton {
+                    id: generateKey
+                    width: parent.width
+                    variant: "primary"
+                    ground: Theme.ply3
+                    iconName: "magic"
+                    text: qsTr("Generate emoji")
+                    loading: root.creations.generating
+                    enabled: prompt.text.trim().length > 0 && !root.creations.generating
+                    onClicked: {
+                        if (!enabled)
+                            return
+                        Extras.generateEmoji(prompt.text, shortcode.text)
+                    }
+                }
+            }
+            // A made emoji empties the fields, as the web does.
+            Connections {
+                target: Extras
+                function onEmojisChanged() {
+                    if (root.creations.generateSuccess.length > 0) {
+                        prompt.text = ""
+                        shortcode.text = ""
+                    }
+                }
             }
         }
 

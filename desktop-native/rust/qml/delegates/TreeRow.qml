@@ -6,6 +6,9 @@ import com.yap.native
 // voice channel (a Talk Tree leaf under it). Labels and channels open their
 // menu on a right click; a channel the user may manage has the gear, and
 // with Manage channels in the server it can be dragged within its group.
+// Under a voice channel its status shows (ChannelSidebar.tsx): read-only
+// while someone is in it; once we are connected there, with Set status (or
+// Edit status) and the picture's keys.
 Loader {
     id: cell
 
@@ -28,6 +31,9 @@ Loader {
     required property int mentions
     required property bool manage
     required property string categoryId
+    required property string voiceStatus
+    required property string voiceStatusMedia
+    required property bool voiceStatusEditable
     // The open channel (text, or a voice channel's view) and the joined call.
     required property string activeId
     required property string callId
@@ -73,21 +79,34 @@ Loader {
 
     Component {
         id: channelRow
-        ChannelRow {
+        Column {
             width: cell.width
-            name: cell.name
-            voice: cell.voice
-            active: cell.itemId === cell.activeId
-            joined: cell.itemId === cell.callId
-            unread: cell.unread
-            mentions: cell.mentions
-            manage: cell.manage
-            draggable: cell.manage && Admin.canManageChannels
-            onSelected: cell.selected(cell.itemId)
-            onMenuRequested: (row, at) => cell.menuRequested(row, at)
-            onSettingsRequested: cell.settingsRequested()
-            onDragMoved: scene => cell.dragMoved(scene)
-            onDragEnded: dropped => cell.dragEnded(dropped)
+            ChannelRow {
+                width: cell.width
+                name: cell.name
+                voice: cell.voice
+                active: cell.itemId === cell.activeId
+                joined: cell.itemId === cell.callId
+                unread: cell.unread
+                mentions: cell.mentions
+                manage: cell.manage
+                draggable: cell.manage && Admin.canManageChannels
+                onSelected: cell.selected(cell.itemId)
+                onMenuRequested: (row, at) => cell.menuRequested(row, at)
+                onSettingsRequested: cell.settingsRequested()
+                onInviteRequested: ShellState.channelInviteRequested(cell.itemId, cell.name, cell.voice)
+                onDragMoved: scene => cell.dragMoved(scene)
+                onDragEnded: dropped => cell.dragEnded(dropped)
+            }
+            VoiceStatusLine {
+                visible: cell.voice && (cell.voiceStatusEditable || cell.voiceStatus.length > 0 || cell.voiceStatusMedia.length > 0)
+                width: cell.width
+                channelId: cell.itemId
+                channelName: cell.name
+                text: cell.voiceStatus
+                media: cell.voiceStatusMedia
+                editable: cell.voiceStatusEditable
+            }
         }
     }
 }

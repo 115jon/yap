@@ -7,7 +7,8 @@ import com.yap.native
 // lit in `path`. Unread is ink-1 at 600 with a 2x8 ink-1 pill at the panel
 // edge (the row sits 8 px in); mentions add a count chip at the end. A
 // channel the user may manage shows the settings gear on hover (the web's
-// ROW_ACTIONS, over the trailing edge); a right click opens its menu; with
+// ROW_ACTIONS, over the trailing edge), every channel Invite to channel
+// (ChannelInviteModal.tsx); a right click opens its menu; with
 // `draggable` a drag of 5 px or more picks it up.
 Rectangle {
     id: row
@@ -23,6 +24,7 @@ Rectangle {
     signal selected()
     signal menuRequested(Item row, point at)
     signal settingsRequested()
+    signal inviteRequested()
     signal dragMoved(point scene)
     signal dragEnded(bool dropped)
 
@@ -54,7 +56,7 @@ Rectangle {
     Text {
         anchors.left: parent.left
         anchors.leftMargin: 8 + 20 + 8
-        anchors.right: gear.visible ? gear.left : badge.visible ? badge.left : parent.right
+        anchors.right: invite.visible ? invite.left : badge.visible ? badge.left : parent.right
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
         textFormat: Text.PlainText
@@ -65,16 +67,29 @@ Rectangle {
     }
     CountBadge {
         id: badge
-        visible: count > 0 && !gear.visible
+        visible: count > 0 && !invite.visible
         anchors.right: parent.right
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
         count: row.mentions
     }
     IconKey {
+        id: invite
+        z: 1
+        visible: (hover.hovered || hovered || gear.hovered) && !drag.active
+        anchors.right: gear.visible ? gear.left : parent.right
+        anchors.rightMargin: gear.visible ? 2 : 4
+        anchors.verticalCenter: parent.verticalCenter
+        size: 24
+        iconName: "invite"
+        tone: "muted"
+        tip: qsTr("Invite to channel")
+        onClicked: row.inviteRequested()
+    }
+    IconKey {
         id: gear
         z: 1
-        visible: row.manage && (hover.hovered || hovered) && !drag.active
+        visible: row.manage && (hover.hovered || hovered || invite.hovered) && !drag.active
         anchors.right: parent.right
         anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter

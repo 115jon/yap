@@ -34,6 +34,9 @@ Item {
     required property bool video
     required property string videoKey
     required property bool watching
+    // Shares: who watches (JSON), shown top right while it is ours or
+    // watched (ParticipantCard.tsx `shouldShowWatchers`).
+    required property string watchers
 
     property bool solo: false
     // A members-tray thumbnail (144 px): small avatar, no Watch prompt.
@@ -267,5 +270,15 @@ Item {
                 color: Theme.mutedState
             }
         }
+    }
+
+    StreamWatcherList {
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 8
+        z: 4
+        width: Math.min(implicitWidth, parent.width * 0.75)
+        visible: root.screen && !root.tray && (root.me || root.watching) && root.watchers.length > 0
+        watchers: root.watchers
     }
 }

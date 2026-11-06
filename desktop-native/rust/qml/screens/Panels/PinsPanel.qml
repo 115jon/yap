@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
+import Yap.Chrome
 import com.yap.native
 
 // PinnedMessagesSidebar.tsx: "Pinned messages", the open channel's pins

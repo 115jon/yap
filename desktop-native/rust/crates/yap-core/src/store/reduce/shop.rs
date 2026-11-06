@@ -243,6 +243,13 @@ impl State {
         self.on_profile_update(fx, &update);
     }
 
+    /// A catalog the sync answered with: kept as a fresh load.
+    pub(super) fn set_shop_catalog(&mut self, catalog: yap_protocol::collectibles::Catalog) {
+        self.shop.catalog = Some(Box::new(catalog));
+        self.shop.loaded_ms = self.shop.now_ms;
+        self.shop.error.clear();
+    }
+
     pub(super) fn sync_shop(&mut self, fx: &mut Effects) {
         let view = shop_view(&self.shop, self.me());
         if view != self.view.shop {

@@ -33,17 +33,33 @@ Item {
         width: parent.width
         height: Theme.header
 
-        // The finder: a 32 px tint-1 field (the command menu comes later).
+        // The finder: a 32 px tint-1 field that opens the quick switcher
+        // (DMSidebar.tsx `open-command-menu`).
         Rectangle {
+            id: finderKey
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.margins: 8
             anchors.verticalCenter: parent.verticalCenter
             height: 32
             radius: Theme.radius
-            color: Theme.tint1
-            Accessible.role: Accessible.StaticText
+            color: finderHover.hovered ? Theme.tint2 : Theme.tint1
+            activeFocusOnTab: true
+            Accessible.role: Accessible.Button
             Accessible.name: finder.text
+            Keys.onReturnPressed: ShellState.commandMenuRequested()
+            Keys.onSpacePressed: ShellState.commandMenuRequested()
+            HoverHandler { id: finderHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: ShellState.commandMenuRequested() }
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: -2
+                visible: finderKey.activeFocus
+                color: "transparent"
+                radius: Theme.radius
+                border.width: 2
+                border.color: Theme.focus
+            }
             Icon {
                 id: glass
                 x: 8

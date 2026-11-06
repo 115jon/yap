@@ -78,6 +78,14 @@ pub use guard::public_http_client;
 /// The mix rate, in frames per second.
 pub const SAMPLE_RATE: u32 = 48_000;
 
+/// Decodes a whole short file (a custom UI sound) to 48 kHz stereo `f32`
+/// and its length in seconds. Blocks; run it off the GUI thread.
+pub fn decode_sound(bytes: &[u8], hint: Option<&str>) -> Result<(Vec<f32>, f64), String> {
+    let clip = decode::decode_clip(Arc::from(bytes), hint)?;
+    let seconds = clip.samples.len() as f64 / 2.0 / f64::from(SAMPLE_RATE);
+    Ok((clip.samples, seconds))
+}
+
 /// Callback for engine events, called from engine threads.
 pub type EventSink = Arc<dyn Fn(Event) + Send + Sync>;
 

@@ -14,6 +14,8 @@ Flow {
 
     signal toggled(string emoji)
     signal addRequested(Item anchor)
+    // A right click on a chip: who reacted with it.
+    signal detailsRequested(string emoji)
 
     spacing: 6
     topPadding: 6
@@ -78,7 +80,13 @@ Flow {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.toggled(chip.modelData.emoji)
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onClicked: mouse => {
+                    if (mouse.button === Qt.RightButton)
+                        root.detailsRequested(chip.modelData.emoji)
+                    else
+                        root.toggled(chip.modelData.emoji)
+                }
             }
         }
     }

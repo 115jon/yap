@@ -465,6 +465,32 @@ fn opening_a_dm_should_name_the_recipient_in_the_header() {
     ));
 }
 
+fn recent(fx: &[Effect]) -> Vec<(String, String)> {
+    views(fx)
+        .into_iter()
+        .filter_map(|v| match v {
+            ViewUpdate::Recent(target) => {
+                Some((target.server_id.clone(), target.channel_id.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_dm_and_a_channel_should_each_be_recorded_under_their_own_scope() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SelectChannel(DM.into()));
+    assert_eq!(recent(&fx), [("@me".to_owned(), DM.to_owned())]);
+    let fx = client.command(Command::SelectChannel(TEXT.into()));
+    assert_eq!(recent(&fx), [(SERVER.to_owned(), TEXT.to_owned())]);
+    let named = views(&fx).into_iter().any(|v| {
+        matches!(v, ViewUpdate::Recent(target)
+            if target.name == "general" && !target.server_name.is_empty())
+    });
+    assert!(named);
+}
+
 #[test]
 fn a_dm_should_list_the_two_of_you_in_the_member_panel() {
     let mut client = Client::online();

@@ -14,6 +14,7 @@ use super::state::{Outgoing, Phase, Presence, ServerChannels, Typer, VoiceCall};
 use super::time::{parse_rfc3339, LocalOffset, Stamp};
 use super::{Occupant, VoiceMember, VoiceShare};
 use crate::collectibles;
+use crate::command_menu::RecentTarget;
 use crate::shell::{BadgeView, Sound, ToastView};
 
 /// One role value, borrowed from a row.
@@ -209,6 +210,11 @@ rows! {
         /// Channels: their category id (empty for none), the group a drag
         /// reorders within.
         category: String => Category "categoryId",
+        /// Voice channels: the status text and picture (shown while someone
+        /// is in it), and whether we may change it (we are connected there).
+        status: String => Status "voiceStatus",
+        status_media: String => StatusMedia "voiceStatusMedia",
+        status_editable: bool => StatusEditable "voiceStatusEditable",
     }
     key(row) -> (TreeKind, String) { (row.kind, row.id.clone()) }
 
@@ -313,6 +319,9 @@ rows! {
         watching: bool => Watching "watching",
         /// The person's avatar decoration (APNG), or empty.
         deco: String => Deco "deco",
+        /// Shares: who watches, as JSON `[{userId, name, avatar,
+        /// initials}]` (StreamWatcherList.tsx), empty when nobody.
+        watchers: String => Watchers "watchers",
     }
     key(row) -> String { row.id.clone() }
 
@@ -368,6 +377,8 @@ rows! {
         deco: String => Deco "deco",
         /// The nameplate as JSON `{still, motion, border}`, or empty.
         plate: String => Plate "plate",
+        /// Where they are signed in, comma-joined (`desktop,mobile,web`).
+        platforms: String => Platforms "platforms",
     }
     key(row) -> (MemberKind, String) { (row.kind, row.id.clone()) }
 
@@ -662,6 +673,8 @@ pub struct ProfileView {
     /// empty.
     pub effect: String,
     pub frame: String,
+    /// Where they are signed in, comma-joined (`desktop,web`).
+    pub platforms: String,
 }
 
 /// The open DM's recipient, for the header and the title; empty in a
@@ -1062,6 +1075,9 @@ pub enum ViewUpdate {
     /// The open DM, or the default when a server channel (or nothing) is open.
     ActiveDm(DmView),
     Dms(ViewDiff<DmRow>),
+    /// A text channel or DM was opened: the quick switcher's Recent list
+    /// takes it (`@me` as the server for a DM).
+    Recent(RecentTarget),
     /// How many DMs are unread: the rail shows three, the Home key counts
     /// the rest (ChatPageClient.tsx `homeBadgeCount`).
     DmUnread(i64),
@@ -1079,6 +1095,8 @@ pub enum ViewUpdate {
     Shop(Box<super::shop::ShopView>),
     /// The saved GIF and clip favourites (`provider:id`).
     GifFavorites(Vec<String>),
+    /// The inbox, reactions, details tabs and the other extras.
+    Extras(Box<super::extras::ExtrasView>),
     /// The soundboard, Listen Together and activities.
     Apps(Box<super::apps::AppsView>),
     /// Creating and joining servers, and links into the app.
@@ -1381,6 +1399,9 @@ fn plain_row(kind: TreeKind, id: &str, name: &str) -> ChannelTreeRow {
         mentions: 0,
         manage: false,
         category: String::new(),
+        status: String::new(),
+        status_media: String::new(),
+        status_editable: false,
     }
 }
 
@@ -1551,6 +1572,7 @@ pub(super) fn tile_rows(seats: &[Seat], call: &VoiceCall) -> Vec<VoiceTileRow> {
             },
             watching: false,
             deco: s.deco.clone(),
+            watchers: String::new(),
         };
         // Our own share shows its capture as sent (VoiceGrid's local
         // stream tile), live as soon as the share is.
@@ -1855,6 +1877,7 @@ fn label_row(id: String, name: &str, count: usize, online: bool) -> MemberListRo
         speaking: false,
         deco: String::new(),
         plate: String::new(),
+        platforms: String::new(),
     }
 }
 
@@ -1933,6 +1956,9 @@ fn member_row(m: &Member, online: bool, ctx: &MemberContext<'_>) -> MemberListRo
         speaking: seat.is_some_and(|s| s.speaking && !s.muted),
         deco: collectibles::decoration_url(user.avatar_display.as_ref()),
         plate: plate_json(user),
+        platforms: ctx
+            .presence
+            .platforms_of(&user.id, user.presence_platforms.as_deref()),
     }
 }
 
@@ -2000,6 +2026,7 @@ pub(super) fn profile_view(
         deco: collectibles::decoration_url(user.avatar_display.as_ref()),
         effect: non_null(collectibles::effect_json(user.avatar_display.as_ref())),
         frame: non_null(collectibles::frame_json(user.avatar_display.as_ref())),
+        platforms: presence.platforms_of(&user.id, user.presence_platforms.as_deref()),
     }
 }
 

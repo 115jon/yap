@@ -51,6 +51,8 @@ Popup {
     width: 560
     height: Math.min(implicitHeight, parent.height - 64)
     modal: true
+    // Ctrl+K stays shut while a modal is up (ExtrasHost).
+    onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
     focus: true
     padding: 0
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside

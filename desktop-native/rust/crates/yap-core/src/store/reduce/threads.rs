@@ -11,6 +11,9 @@ use std::cmp::Reverse;
 use yap_protocol::rest::{Message, MessagePatch};
 
 use super::{is_pending, Effects};
+
+/// The notice when a jump targets a channel the client does not know.
+const CHANNEL_UNAVAILABLE: &str = "That channel isn't available";
 use crate::admin::{has_any_permission, member_permissions, perm};
 use crate::api::ApiError;
 use crate::settings::describe_api_error;
@@ -433,6 +436,11 @@ impl State {
         if self.active_channel.as_deref() == Some(channel_id) {
             self.panels.jump.wanted = None;
             return self.show_message(fx, channel_id, message_id);
+        }
+        // A channel this client has never listed cannot be opened.
+        if self.dm(channel_id).is_none() && self.server_of(channel_id).is_none() {
+            self.panels.jump.wanted = None;
+            return fx.view(ViewUpdate::Notice(CHANNEL_UNAVAILABLE.to_owned()));
         }
         // Its first page answers once it is open; the jump goes on from there.
         self.panels.jump.wanted = Some((channel_id.to_owned(), message_id.to_owned()));
