@@ -36,6 +36,11 @@ pub const TOKENS: &[&str] = &[
 
 const MONO: &str = "font-family:'Yap Geist Mono'; font-size:13px";
 
+/// A chip's 2 px side padding (MentionBadge.tsx px-0.5): a small no-break
+/// space. Geist has no hair space, and a fallback font's one is wider and
+/// drawn off the chip's background.
+const CHIP_PAD: &str = "<span style=\"font-size:8px\">&nbsp;</span>";
+
 /// The emoji image size in px: the web draws 1.25em of 15px text.
 const EMOJI_PX: u32 = 19;
 
@@ -301,9 +306,11 @@ fn inline(text: &str, api_base: &str, out: &mut String) {
             Token::Code(t) => {
                 out.push_str("<span style=\"");
                 out.push_str(MONO);
-                out.push_str("; background-color:%CODEBG%\">&#8202;");
+                out.push_str("; background-color:%CODEBG%\">");
+                out.push_str(CHIP_PAD);
                 escape_into(t, out);
-                out.push_str("&#8202;</span>");
+                out.push_str(CHIP_PAD);
+                out.push_str("</span>");
             }
             Token::Spoiler(t) => {
                 out.push_str(
@@ -331,10 +338,13 @@ fn inline(text: &str, api_base: &str, out: &mut String) {
             Token::Mention(name) => {
                 out.push_str(
                     "<span style=\"font-family:'Yap Geist Medium'; color:%MENTION%; \
-                     background-color:%MENTIONBG%\">&#8202;@",
+                     background-color:%MENTIONBG%\">",
                 );
+                out.push_str(CHIP_PAD);
+                out.push('@');
                 escape_into(name, out);
-                out.push_str("&#8202;</span>");
+                out.push_str(CHIP_PAD);
+                out.push_str("</span>");
             }
             Token::Custom(raw, id) => {
                 let base = api_base.trim_end_matches('/');
@@ -416,7 +426,8 @@ mod tests {
     fn mentions_should_be_chips() {
         let out = html("hi @ada!");
         assert!(out.contains("%MENTIONBG%"));
-        assert!(out.contains("@ada&#8202;</span>!"));
+        let pad = super::CHIP_PAD;
+        assert!(out.contains(&format!("@ada{pad}</span>!")));
     }
 
     #[test]

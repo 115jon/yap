@@ -32,6 +32,7 @@ T.Menu {
         color: Theme.ply3
         border.width: 1
         border.color: Theme.lineStrong
+        FloatShadow {}
         Rectangle {
             width: parent.width
             height: 2

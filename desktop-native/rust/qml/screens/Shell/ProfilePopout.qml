@@ -68,6 +68,7 @@ T.Popup {
     onClosed: Profile.close(shownId)
 
     contentItem: ProfileCard {
+        floating: true
         id: card
         name: Profile.name
         username: Profile.username

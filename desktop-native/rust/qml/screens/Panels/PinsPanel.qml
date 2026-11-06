@@ -51,14 +51,7 @@ SidePanelFrame {
             onVideoOpened: item => Chat.download(item.url, Files.openPath(item.name), true)
         }
 
-        ScrollBar.vertical: ScrollBar {
-            policy: ScrollBar.AsNeeded
-            contentItem: Rectangle {
-                implicitWidth: 6
-                radius: 3
-                color: Theme.lineStrong
-            }
-        }
+        ScrollBar.vertical: ThinScrollBar {}
     }
 
     // PinsLoading: the row anatomy (avatar 32, a name line, two lines).
@@ -106,28 +99,44 @@ SidePanelFrame {
         }
     }
 
-    // EmptyState size sm, 48 down.
+    // EmptyState size sm (ui/empty-state.tsx): py-10 px-4, the "empty"
+    // DitherGlyph at 2 px cells, 12 below it the title at Bricolage 15/700
+    // and, 4 under, the line at 13 in ink-2.
     Column {
         visible: !Panels.pinsLoading && Panels.pinsCount === 0
-        x: 24
-        y: 48
-        width: parent.width - 48
-        spacing: 6
+        x: 16
+        y: 40
+        width: parent.width - 32
+        spacing: 4
         Accessible.role: Accessible.StaticText
         Accessible.name: qsTr("No pinned messages")
+        Item {
+            width: parent.width
+            height: 40 + 8
+            Image {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 26 * 2
+                height: 20 * 2
+                smooth: false
+                source: "image://dither/empty/" + Theme.hex(Theme.ink3) + "/" + Theme.hex(Theme.accentInk)
+                Accessible.ignored: true
+            }
+        }
         Text {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             text: qsTr("No pinned messages")
             color: Theme.ink1
-            font: Theme.type.panelTitle
+            font: Theme.type.author
+            lineHeight: Theme.type.authorLine
+            lineHeightMode: Text.FixedHeight
         }
         Text {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             text: qsTr("Pin a message from its menu and it shows up here for everyone in the channel.")
             wrapMode: Text.Wrap
-            color: Theme.ink3
+            color: Theme.ink2
             font: Theme.type.description
         }
     }

@@ -442,6 +442,7 @@ fn first_page_should_project_messages_like_before() {
             id: "msg_fixture_0002".into(),
             author_id: "user_fixture_bob".into(),
             author: "bob".into(),
+            author_color: String::new(),
             initials: "B".into(),
             avatar: String::new(),
             body: "see the attached file".into(),

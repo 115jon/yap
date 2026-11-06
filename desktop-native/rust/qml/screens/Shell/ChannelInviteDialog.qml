@@ -87,14 +87,7 @@ PlateDialog {
             boundsBehavior: Flickable.StopAtBounds
             model: dialog.shown
             delegate: FriendLine {}
-            ScrollBar.vertical: ScrollBar {
-                policy: ScrollBar.AsNeeded
-                contentItem: Rectangle {
-                    implicitWidth: 6
-                    radius: 3
-                    color: Theme.lineStrong
-                }
-            }
+            ScrollBar.vertical: ThinScrollBar {}
         }
         Text {
             anchors.centerIn: parent

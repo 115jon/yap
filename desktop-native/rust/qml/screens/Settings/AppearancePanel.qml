@@ -32,7 +32,11 @@ Column {
             hideLabel: true
             Grid {
                 id: grid
-                readonly property int cols: width >= 640 ? 4 : width >= 480 ? 3 : 2
+                // The web's @container is the settings pane (SettingsWorkbench
+                // main column: the dialog less its 16 px insets and 264 rail),
+                // not this card, so desktop sizes always get four.
+                readonly property real pane: (Window.width > 0 ? Window.width : 1280) - 32 - 264
+                readonly property int cols: pane >= 640 ? 4 : pane >= 480 ? 3 : 2
                 width: parent.width
                 columns: cols
                 columnSpacing: 12

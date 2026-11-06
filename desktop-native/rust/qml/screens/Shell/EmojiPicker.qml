@@ -92,6 +92,7 @@ Popup {
         color: Theme.ply3
         border.width: 1
         border.color: Theme.lineStrong
+        FloatShadow {}
         Rectangle {
             width: parent.width
             height: 2
@@ -122,8 +123,11 @@ Popup {
                 height: 32
                 radius: Theme.radius
                 color: Theme.ply2
-                border.width: 1
-                border.color: search.activeFocus ? Theme.ink1 : Theme.lineField
+                // ui/input.tsx: hover ink-2; focus ink-1 plus a 1 px outline.
+                border.width: search.activeFocus ? 2 : 1
+                border.color: search.activeFocus ? Theme.ink1 : fieldHover.hovered ? Theme.ink2 : Theme.lineField
+                Behavior on border.color { ColorAnimation { duration: Theme.dur1 } }
+                HoverHandler { id: fieldHover; cursorShape: Qt.IBeamCursor }
                 Icon {
                     id: searchGlyph
                     x: 8
@@ -139,7 +143,7 @@ Popup {
                     anchors.verticalCenter: parent.verticalCenter
                     leftPadding: 6
                     rightPadding: 8
-                    placeholderText: qsTr("Search emoji")
+                    placeholderText: qsTr("Search emoji and your creations")
                     placeholderTextColor: Theme.ink3
                     color: Theme.ink1
                     selectionColor: Theme.selection
@@ -165,9 +169,11 @@ Popup {
                     }
                 }
             }
+            // EmojiPicker.tsx: the field, the skin tone, then Create.
             IconKey {
-                anchors.right: toneKey.left
-                anchors.rightMargin: 4
+                id: magicKey
+                anchors.right: parent.right
+                anchors.rightMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
                 size: 32
                 iconName: "magic"
@@ -184,8 +190,8 @@ Popup {
             }
             Item {
                 id: toneKey
-                anchors.right: parent.right
-                anchors.rightMargin: 8
+                anchors.right: magicKey.left
+                anchors.rightMargin: 4
                 anchors.verticalCenter: parent.verticalCenter
                 width: 32
                 height: 32
@@ -364,14 +370,7 @@ Popup {
                 if (top && top.section !== "results")
                     root.activeSection = top.section
             }
-            ScrollBar.vertical: ScrollBar {
-                policy: ScrollBar.AsNeeded
-                contentItem: Rectangle {
-                    implicitWidth: 6
-                    radius: 3
-                    color: Theme.lineStrong
-                }
-            }
+            ScrollBar.vertical: ThinScrollBar {}
 
             delegate: Item {
                 id: gridRow

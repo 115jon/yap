@@ -46,14 +46,8 @@ Rectangle {
             anchors.right: syncKey.left
             anchors.rightMargin: 16
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 12
-            Icon {
-                visible: root.collection === null
-                anchors.verticalCenter: parent.verticalCenter
-                name: "shop"
-                size: Theme.iconLg
-                color: Theme.ink3
-            }
+            // ShopView.tsx: the title (ui-xl 600) then the freshness, gap-2.
+            spacing: 8
             Text {
                 id: titleText
                 anchors.verticalCenter: parent.verticalCenter
@@ -61,7 +55,7 @@ Rectangle {
                 text: root.collection !== null ? root.collection.name : qsTr("Shop")
                 elide: Text.ElideRight
                 color: Theme.ink1
-                font: Theme.type.columnTitle
+                font: Theme.type.pageTitle
                 Accessible.role: Accessible.Heading
             }
             Text {

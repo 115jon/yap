@@ -21,7 +21,7 @@ Popup {
 
     parent: Overlay.overlay
     anchors.centerIn: parent
-    width: 440
+    width: 400
     modal: true
     // Ctrl+K stays shut while a modal is up (ExtrasHost).
     onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
@@ -37,6 +37,7 @@ Popup {
         color: Theme.ply3
         border.width: 1
         border.color: Theme.lineStrong
+        FloatShadow { modal: true; radius: Theme.radiusSheet }
     }
 
     enter: Transition {
@@ -49,42 +50,83 @@ Popup {
         NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur3Exit }
     }
 
+    // ResponsiveDialogContent sm: the title at Bricolage 22/700 beside a
+    // 40 px close key, the consequence at 15 in ink-2, the message as a
+    // MessagePreviewCard (tint-1, p-3, a 32 avatar, 13/600 name over 13
+    // ink-2), the Shift hint with its key cap, then Cancel and Delete (48).
     contentItem: Column {
         spacing: 16
 
-        Text {
+        Item {
             width: parent.width
-            text: qsTr("Delete message")
-            color: Theme.ink1
-            font: Theme.type.sectionTitle
-            Accessible.role: Accessible.Heading
+            height: titleText.implicitHeight - 8
+            Text {
+                id: titleText
+                anchors.left: parent.left
+                anchors.right: closeKey.left
+                anchors.rightMargin: 12
+                anchors.top: parent.top
+                text: qsTr("Delete message")
+                wrapMode: Text.Wrap
+                color: Theme.ink1
+                font.family: "Yap Bricolage Head"
+                font.pixelSize: 22
+                font.weight: Font.Bold
+                font.letterSpacing: -0.22
+                lineHeight: 28
+                lineHeightMode: Text.FixedHeight
+                Accessible.role: Accessible.Heading
+            }
+            IconKey {
+                id: closeKey
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.topMargin: -8
+                anchors.rightMargin: -8
+                iconName: "close"
+                tone: "rest"
+                tip: qsTr("Close")
+                onClicked: root.close()
+            }
         }
         Text {
+            // The header's gap-2 under the title, not the body's 16.
             width: parent.width
             text: qsTr("This deletes the message for everyone. You can't undo it.")
             wrapMode: Text.Wrap
             color: Theme.ink2
-            font: Theme.type.description
+            font: Theme.type.message
+            lineHeight: Theme.type.messageLine
+            lineHeightMode: Text.FixedHeight
         }
-        // The message, quoted on the ply below.
+        // The message (MessagePreviewCard.tsx), inert.
         Rectangle {
             width: parent.width
-            height: quote.implicitHeight + 24
+            height: Math.max(32, quote.implicitHeight) + 24
             radius: Theme.radius
-            color: Theme.ply2
-            border.width: 1
-            border.color: Theme.line
-            Column {
-                id: quote
+            color: Theme.tint1
+            Avatar {
                 x: 12
                 y: 12
-                width: parent.width - 24
+                size: 32
+                initials: root.author
+                source: ""
+            }
+            Column {
+                id: quote
+                x: 12 + 32 + 12
+                y: 12
+                width: parent.width - x - 12
                 spacing: 2
                 Text {
+                    width: parent.width
                     textFormat: Text.PlainText
                     text: root.author
+                    elide: Text.ElideRight
                     color: Theme.ink1
-                    font: Theme.type.author
+                    font.family: "Yap Geist SemiBold"
+                    font.pixelSize: 13
+                    font.weight: Font.DemiBold
                 }
                 Text {
                     width: parent.width
@@ -94,19 +136,35 @@ Popup {
                     elide: Text.ElideRight
                     textFormat: Text.PlainText
                     color: Theme.ink2
-                    font: Theme.type.message
+                    font: Theme.type.description
+                    lineHeight: Theme.type.descriptionLine
+                    lineHeightMode: Text.FixedHeight
                 }
             }
         }
-        Text {
+        Row {
             width: parent.width
-            text: qsTr("Hold Shift when you click Delete to skip this.")
-            wrapMode: Text.Wrap
-            color: Theme.ink3
-            font: Theme.type.caption
+            spacing: 4
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("Hold")
+                color: Theme.ink3
+                font: Theme.type.caption
+            }
+            KeyCap {
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("Shift")
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("when you click Delete to skip this.")
+                color: Theme.ink3
+                font: Theme.type.caption
+            }
         }
         Row {
             anchors.right: parent.right
+            topPadding: 8
             spacing: 8
             DialogKey {
                 text: qsTr("Cancel")
@@ -127,10 +185,10 @@ Popup {
     component DialogKey: Button {
         id: key
         property bool danger: false
-        implicitHeight: 40
-        leftPadding: 16
-        rightPadding: 16
-        font: Theme.type.controlSm
+        implicitHeight: Theme.controlLg
+        leftPadding: 20
+        rightPadding: 20
+        font: Theme.type.control
         Keys.onReturnPressed: key.clicked()
         contentItem: Text {
             textFormat: Text.PlainText

@@ -105,6 +105,7 @@ Popup {
         color: Theme.ply3
         border.width: 1
         border.color: Theme.lineStrong
+        FloatShadow { modal: true }
         Rectangle {
             width: parent.width
             height: 2
@@ -219,14 +220,7 @@ Popup {
                     }
                 }
             }
-            ScrollBar.vertical: ScrollBar {
-                policy: ScrollBar.AsNeeded
-                contentItem: Rectangle {
-                    implicitWidth: 6
-                    radius: 3
-                    color: Theme.lineStrong
-                }
-            }
+            ScrollBar.vertical: ThinScrollBar {}
         }
 
         // EmptyState sm, with no art.

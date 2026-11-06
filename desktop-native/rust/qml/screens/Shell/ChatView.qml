@@ -228,7 +228,7 @@ Rectangle {
     Connections {
         target: Chat
         function onNotice(text) {
-            toast.show(text)
+            toast.show(text, true)
         }
         function onReland() {
             if (!root.userMoved)
@@ -254,9 +254,14 @@ Rectangle {
         }
     }
 
+    // The header spans the docked right column too (ChatArea.tsx: the
+    // members, thread, pins and search columns sit under it).
+    property real headerSpan: 0
+
     ChatHeader {
         id: header
-        width: parent.width
+        z: 3
+        width: parent.width + root.headerSpan
     }
 
     ConnectionStrip {
@@ -277,6 +282,58 @@ Rectangle {
         reuseItems: true
         topMargin: 0
         bottomMargin: 8
+
+        // DayDivider (NewMessageSeparator.tsx): a 32 px row, a 24x2 ink-1
+        // rule and the day in silkscreen ink-3, on the text column's gutter.
+        // The current day sticks to the top as a 28 px ply-0 band with a
+        // seam (VirtualMessageList.tsx sticky label).
+        section.property: "day"
+        section.criteria: ViewSection.FullString
+        section.labelPositioning: ViewSection.InlineLabels | ViewSection.CurrentLabelAtStart
+        section.delegate: Item {
+            id: dayRow
+            required property string section
+            readonly property bool stuck: y <= view.contentY + 0.5 && view.contentY > view.originY
+            readonly property var dayDate: new Date(1970, 0, 1 + Number(section))
+            readonly property int dayNumber: Number(section)
+            readonly property string label: dayNumber === Chat.today ? qsTr("Today")
+                : dayNumber === Chat.today - 1 ? qsTr("Yesterday")
+                : dayDate.getFullYear() === new Date().getFullYear() ? Qt.formatDate(dayDate, "dddd, MMMM d")
+                : Qt.formatDate(dayDate, "MMMM d, yyyy")
+            width: view.width
+            height: 32
+            z: 2
+            Accessible.role: Accessible.Separator
+            Accessible.name: label
+            Rectangle {
+                visible: dayRow.stuck
+                width: parent.width
+                height: 28
+                color: Theme.ply0
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    width: parent.width
+                    height: 1
+                    color: Theme.line
+                }
+            }
+            Rectangle {
+                id: dayRule
+                x: 16
+                y: (dayRow.stuck ? 28 : 32) / 2 - 1
+                width: 24
+                height: 2
+                color: Theme.ink1
+            }
+            Text {
+                anchors.left: dayRule.right
+                anchors.leftMargin: 12
+                anchors.verticalCenter: dayRule.verticalCenter
+                text: dayRow.label
+                color: Theme.ink3
+                font: Theme.type.silk
+            }
+        }
 
         onCountChanged: root.olderAsked = false
         // A row at the end that grows (a failed-send line, an edit, a late
@@ -344,6 +401,7 @@ Rectangle {
                 messageMenu.settled = !row.pending && !row.failed
                 messageMenu.hasReactions = row.reactions.length > 0
                 messageMenu.omitted = root.omittedFiles(row.attachments)
+                messageMenu.authorId = row.authorId
                 messageMenu.openFor(id, author, text, mine, anchor, x, y)
             }
             onThreadRequested: id => root.openThread(id)
@@ -372,21 +430,84 @@ Rectangle {
             onEmbedsRemoveRequested: (id, skip) => skip ? Chat.removeEmbeds(id) : removeEmbedsDialog.ask(id)
         }
 
-        ScrollBar.vertical: ScrollBar {
-            policy: ScrollBar.AsNeeded
-            contentItem: Rectangle {
-                implicitWidth: 6
-                radius: 3
-                color: Theme.lineStrong
-            }
-        }
+        ScrollBar.vertical: ThinScrollBar {}
 
-        Text {
-            anchors.centerIn: parent
-            visible: view.count === 0 && Nav.activeChannelId.length > 0
-            text: qsTr("No messages yet. Say something.")
-            color: Theme.ink3
-            font: Theme.type.message
+        // ChatWelcomeContent.tsx at the start of the history: the DM's
+        // avatar (56), name and @handle, or the channel glyph on a 40 px
+        // tint-1 plate and #name; one plain line; a seam 20 below.
+        header: Loader {
+            width: view.width
+            active: !Chat.hasOlder && Nav.activeChannelId.length > 0
+            visible: active
+            sourceComponent: Column {
+                readonly property bool dm: Nav.dmUsername.length > 0
+                readonly property real inner: width - 32
+                leftPadding: 16
+                rightPadding: 16
+                topPadding: 8
+                spacing: 4
+                Item {
+                    width: 56
+                    height: (parent.dm ? 56 : 40) + 8
+                    Avatar {
+                        visible: parent.parent.dm
+                        size: 56
+                        initials: Nav.activeChannelName
+                        source: ""
+                    }
+                    Rectangle {
+                        visible: !parent.parent.dm
+                        width: 40
+                        height: 40
+                        radius: Theme.radius
+                        color: Theme.tint1
+                        Icon {
+                            anchors.centerIn: parent
+                            name: "textChannel"
+                            size: Theme.iconLg
+                            color: Theme.ink2
+                        }
+                    }
+                }
+                Text {
+                    width: parent.inner
+                    textFormat: Text.PlainText
+                    text: parent.dm ? Nav.activeChannelName : "#" + Nav.activeChannelName
+                    wrapMode: Text.Wrap
+                    color: Theme.ink1
+                    font: Theme.type.columnTitle
+                    lineHeight: Theme.type.columnTitleLine
+                    lineHeightMode: Text.FixedHeight
+                    Accessible.role: Accessible.Heading
+                }
+                Text {
+                    visible: parent.dm
+                    textFormat: Text.PlainText
+                    text: "@" + Nav.dmUsername
+                    color: Theme.ink3
+                    font: Theme.type.description
+                }
+                Text {
+                    width: parent.inner
+                    topPadding: parent.dm ? 8 : 0
+                    textFormat: Text.PlainText
+                    text: parent.dm ? qsTr("This is the start of your conversation with %1.").arg(Nav.activeChannelName)
+                        : qsTr("This is the start of #%1.").arg(Nav.activeChannelName)
+                    wrapMode: Text.Wrap
+                    color: Theme.ink2
+                    font: Theme.type.description
+                }
+                Item {
+                    width: parent.inner
+                    height: 20 + 1
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        width: parent.width
+                        height: 1
+                        color: Theme.line
+                    }
+                }
+            }
         }
     }
 
@@ -406,38 +527,78 @@ Rectangle {
         onMarkRead: Chat.markRead()
     }
 
-    // A short-lived line about something that failed, over the list's foot.
+    // ui/toast.tsx ToastCard: a 356 px ply-3 card (line-strong edge,
+    // shadow-2) at the window's bottom right, 16 above the composer: an
+    // 8 px LED (talk for a success, muted for a failure), the message at
+    // Bricolage 15/700 and the 4 s dithered time bar along its foot.
     Rectangle {
         id: toast
-        function show(text) {
+        property bool failure: false
+        function show(text, failure) {
             toastText.text = text
+            toast.failure = failure === true
             toast.visible = true
             toastTimer.restart()
+            toastRun.restart()
         }
         visible: false
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: typingLine.top
-        anchors.bottomMargin: 8
-        width: Math.min(parent.width - 32, toastText.implicitWidth + 32)
-        height: toastText.implicitHeight + 16
+        z: 3
+        x: root.width + root.headerSpan - width - 16
+        y: composer.y - height - 16
+        width: Math.min(356, root.width + root.headerSpan - 32)
+        height: toastText.implicitHeight + 24 + 4
         radius: Theme.radius
         color: Theme.ply3
         border.width: 1
         border.color: Theme.lineStrong
         Accessible.role: Accessible.AlertMessage
         Accessible.name: toastText.text
+        FloatShadow {}
+        Led {
+            x: 16
+            y: 12 + 6
+            size: 8
+            color: toast.failure ? Theme.mutedState : Theme.talk
+        }
         Text {
             id: toastText
             textFormat: Text.PlainText
-            anchors.centerIn: parent
-            width: parent.width - 32
+            x: 16 + 8 + 12
+            y: 12 + 1
+            width: parent.width - x - 16
             wrapMode: Text.Wrap
             color: Theme.ink1
-            font: Theme.type.description
+            font: Theme.type.author
+            lineHeight: Theme.type.authorLine
+            lineHeightMode: Text.FixedHeight
+        }
+        // The time left: accent dither, 2 px cells, emptying left to right.
+        Item {
+            id: toastBar
+            x: 1
+            y: parent.height - 1 - 4
+            width: parent.width - 2
+            height: 4
+            clip: true
+            Image {
+                readonly property int cols: Math.ceil((toast.width - 2) / 2)
+                width: cols * 2
+                height: 4
+                smooth: false
+                source: "image://dither/dots/60/" + Theme.hex(Theme.accentInk) + "/" + cols + "/2"
+            }
+        }
+        NumberAnimation {
+            id: toastRun
+            target: toastBar
+            property: "width"
+            from: toast.width - 2
+            to: 0
+            duration: toastTimer.interval
         }
         Timer {
             id: toastTimer
-            interval: 5000
+            interval: 4000
             onTriggered: toast.visible = false
         }
     }
@@ -537,10 +698,15 @@ Rectangle {
         onEditLast: root.startEdit(Chat.lastEditableId())
     }
 
-    // The More menu of a message (one for the list).
+    // The message menu (MessageItem.tsx `handleContextMenu`, one for the
+    // list): four quick reactions over a seam, then Add reaction, View
+    // reactions, Edit, Reply, thread, Pin | Copy text, Mark unread, Share,
+    // Profile, Copy ID | Delete, Ban (danger rows last, ContextMenu.tsx
+    // `groupMenuItems`).
     MenuPanel {
         id: messageMenu
         property string messageId
+        property string authorId
         property string author
         property string text
         property bool mine
@@ -549,17 +715,91 @@ Rectangle {
         property bool settled: true
         property bool hasReactions: false
         property int omitted: 0
+        property Item anchorItem: null
+        readonly property bool canBan: !mine && Admin.canBan && Nav.dmUsername.length === 0
+        readonly property bool hasDanger: settled && (mine || Chat.canManageMessages) || canBan
         function openFor(id, author, text, mine, anchor, x, y) {
             messageId = id
             messageMenu.author = author
             messageMenu.text = text
             messageMenu.mine = mine
+            anchorItem = anchor
             const at = anchor.mapToItem(root, x, y)
             popup(root, at.x, at.y)
+        }
+        Row {
+            visible: messageMenu.settled
+            height: visible ? 32 + 8 : 0
+            leftPadding: 4
+            topPadding: 4
+            spacing: 4
+            Repeater {
+                model: messageMenu.settled ? JSON.parse(Emoji.quick).slice(0, 4) : []
+                Rectangle {
+                    id: quickChip
+                    required property var modelData
+                    width: 32
+                    height: 32
+                    radius: Theme.radius
+                    color: quickArea.pressed ? Theme.tint3 : quickArea.containsMouse ? Theme.tint2 : Theme.tint1
+                    scale: quickArea.pressed ? Theme.scalePressIcon : 1
+                    Accessible.role: Accessible.Button
+                    Accessible.name: qsTr("React with %1").arg(":" + modelData.s + ":")
+                    Image {
+                        anchors.centerIn: parent
+                        width: 20
+                        height: 20
+                        sourceSize: Qt.size(40, 40)
+                        asynchronous: true
+                        source: quickChip.modelData.u
+                    }
+                    MouseArea {
+                        id: quickArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            Chat.toggleReaction(messageMenu.messageId, quickChip.modelData.e)
+                            Emoji.remember(quickChip.modelData.e)
+                            messageMenu.close()
+                        }
+                    }
+                }
+            }
+        }
+        MenuRule { visible: messageMenu.settled; height: visible ? implicitHeight : 0 }
+        MenuRow {
+            text: qsTr("Add reaction")
+            glyph: "react"
+            visible: messageMenu.settled
+            height: visible ? implicitHeight : 0
+            onTriggered: {
+                reactionPicker.messageId = messageMenu.messageId
+                if (messageMenu.anchorItem)
+                    reactionPicker.openAt(messageMenu.anchorItem, true)
+            }
+        }
+        MenuRule { visible: messageMenu.settled && !messageMenu.hasReactions; height: visible ? implicitHeight : 0 }
+        MenuRow {
+            text: qsTr("View reactions")
+            glyph: "emoji"
+            visible: messageMenu.settled && messageMenu.hasReactions
+            height: visible ? implicitHeight : 0
+            onTriggered: ShellState.reactionsRequested(messageMenu.messageId, "")
+        }
+        MenuRule { visible: messageMenu.settled && messageMenu.hasReactions; height: visible ? implicitHeight : 0 }
+        MenuRow {
+            text: qsTr("Edit message")
+            glyph: "edit"
+            visible: messageMenu.mine && messageMenu.settled
+            height: visible ? implicitHeight : 0
+            onTriggered: root.startEdit(messageMenu.messageId)
         }
         MenuRow {
             text: qsTr("Reply")
             glyph: "reply"
+            visible: messageMenu.settled
+            height: visible ? implicitHeight : 0
             onTriggered: {
                 root.replyToId = messageMenu.messageId
                 root.replyToName = messageMenu.author
@@ -568,43 +808,34 @@ Rectangle {
             }
         }
         MenuRow {
-            text: qsTr("Edit message")
-            glyph: "edit"
-            visible: messageMenu.mine
-            height: visible ? implicitHeight : 0
-            onTriggered: root.startEdit(messageMenu.messageId)
-        }
-        MenuRow {
             text: messageMenu.replyCount > 0 ? qsTr("View thread") : qsTr("Create thread")
             glyph: "thread"
+            visible: messageMenu.settled
+            height: visible ? implicitHeight : 0
             onTriggered: root.openThread(messageMenu.messageId)
         }
         MenuRow {
             text: messageMenu.pinned ? qsTr("Unpin message") : qsTr("Pin message")
             glyph: "pin"
-            visible: Panels.canPin
+            visible: Panels.canPin && messageMenu.settled
             height: visible ? implicitHeight : 0
             onTriggered: root.setPin(messageMenu.messageId, messageMenu.author, messageMenu.text, !messageMenu.pinned, true)
         }
+        MenuRule { visible: Panels.canPin && messageMenu.settled; height: visible ? implicitHeight : 0 }
         MenuRow {
-            text: qsTr("View reactions")
-            glyph: "emoji"
-            visible: messageMenu.settled && messageMenu.hasReactions
-            height: visible ? implicitHeight : 0
-            onTriggered: ShellState.reactionsRequested(messageMenu.messageId, "")
+            text: qsTr("Copy text")
+            glyph: "copy"
+            onTriggered: {
+                clipboard.copyText(messageMenu.text)
+                toast.show(qsTr("Text copied"))
+            }
         }
-        MenuRule {}
         MenuRow {
             text: qsTr("Mark unread")
             glyph: "markUnread"
             visible: messageMenu.settled
             height: visible ? implicitHeight : 0
             onTriggered: Extras.markUnread(messageMenu.messageId)
-        }
-        MenuRow {
-            text: qsTr("Copy message link")
-            glyph: "link"
-            onTriggered: root.copyLink(messageMenu.messageId)
         }
         MenuRow {
             text: qsTr("Share message")
@@ -614,12 +845,36 @@ Rectangle {
             onTriggered: ShellState.shareRequested(messageMenu.messageId, messageMenu.author, messageMenu.text, messageMenu.omitted)
         }
         MenuRow {
+            text: qsTr("Profile")
+            glyph: "account"
+            onTriggered: ShellState.showProfile(messageMenu.authorId, messageMenu.anchorItem, "right")
+        }
+        MenuRow {
+            text: qsTr("Copy ID")
+            glyph: "copyId"
+            visible: messageMenu.settled
+            height: visible ? implicitHeight : 0
+            onTriggered: {
+                clipboard.copyText(messageMenu.messageId)
+                toast.show(qsTr("Message ID copied"))
+            }
+        }
+        MenuRule { visible: messageMenu.hasDanger; height: visible ? implicitHeight : 0 }
+        MenuRow {
             text: qsTr("Delete message")
             glyph: "trash"
             danger: true
-            visible: messageMenu.mine || Chat.canManageMessages
+            visible: messageMenu.settled && (messageMenu.mine || Chat.canManageMessages)
             height: visible ? implicitHeight : 0
             onTriggered: root.deleteMessage(messageMenu.messageId, messageMenu.author, messageMenu.text, true)
+        }
+        MenuRow {
+            text: qsTr("Ban user")
+            glyph: "ban"
+            danger: true
+            visible: messageMenu.canBan
+            height: visible ? implicitHeight : 0
+            onTriggered: ShellState.banRequested(messageMenu.authorId, messageMenu.author)
         }
     }
 

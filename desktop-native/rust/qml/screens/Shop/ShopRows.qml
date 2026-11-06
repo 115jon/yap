@@ -39,14 +39,7 @@ ListView {
     }
     Component.onCompleted: model = JSON.parse(rowsJson)
 
-    ScrollBar.vertical: ScrollBar {
-        policy: ScrollBar.AsNeeded
-        contentItem: Rectangle {
-            implicitWidth: 6
-            radius: 3
-            color: Theme.lineStrong
-        }
-    }
+    ScrollBar.vertical: ThinScrollBar {}
 
     delegate: Loader {
         id: slot
@@ -65,7 +58,7 @@ ListView {
         Component {
             id: hero
             Item {
-                implicitHeight: heroCard.implicitHeight + 40
+                implicitHeight: heroCard.implicitHeight + 12
                 CollectionHero {
                     id: heroCard
                     width: parent.width

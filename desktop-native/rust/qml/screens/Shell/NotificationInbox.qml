@@ -35,6 +35,7 @@ Popup {
         color: Theme.ply3
         border.width: 1
         border.color: Theme.lineStrong
+        FloatShadow {}
         Rectangle {
             width: parent.width
             height: 2
@@ -78,7 +79,7 @@ Popup {
                 verticalAlignment: Text.AlignVCenter
                 text: qsTr("Inbox")
                 color: Theme.ink1
-                font: Theme.type.panelTitle
+                font: Theme.type.menuTitle
                 Accessible.role: Accessible.Heading
             }
             Row {
@@ -167,14 +168,7 @@ Popup {
             boundsBehavior: Flickable.StopAtBounds
             model: root.inbox.rows
             delegate: InboxRow {}
-            ScrollBar.vertical: ScrollBar {
-                policy: ScrollBar.AsNeeded
-                contentItem: Rectangle {
-                    implicitWidth: 6
-                    radius: 3
-                    color: Theme.lineStrong
-                }
-            }
+            ScrollBar.vertical: ThinScrollBar {}
         }
 
         // EmptyState sm, or the load's own state.
@@ -293,16 +287,33 @@ Popup {
                 Item {
                     width: parent.width
                     height: Theme.type.rowLine
-                    Text {
+                    // The name (600 ink-1 unread, 500 ink-2 read), then the
+                    // action at 400 one step quieter (NotificationBell.tsx).
+                    Row {
                         id: who
                         anchors.left: parent.left
                         anchors.right: when.left
                         anchors.rightMargin: 8
-                        elide: Text.ElideRight
-                        textFormat: Text.PlainText
-                        text: row.n.name + " " + row.n.action
-                        color: row.n.unread ? Theme.ink1 : Theme.ink2
-                        font: row.n.unread ? Theme.type.rowUnread : Theme.type.row
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 4
+                        Text {
+                            id: whoName
+                            width: Math.min(implicitWidth, who.width)
+                            elide: Text.ElideRight
+                            textFormat: Text.PlainText
+                            text: row.n.name
+                            color: row.n.unread ? Theme.ink1 : Theme.ink2
+                            font: row.n.unread ? Theme.type.rowUnread : Theme.type.row
+                        }
+                        Text {
+                            width: Math.max(0, who.width - whoName.width - who.spacing)
+                            elide: Text.ElideRight
+                            textFormat: Text.PlainText
+                            text: row.n.action
+                            color: row.n.unread ? Theme.ink2 : Theme.ink3
+                            font.family: "Yap Geist"
+                            font.pixelSize: 14
+                        }
                     }
                     Text {
                         id: when
@@ -312,7 +323,7 @@ Popup {
                         textFormat: Text.PlainText
                         text: root.tick >= 0 && row.n.createdMs > 0 ? Extras.timeAgo(row.n.createdMs) : ""
                         color: Theme.ink3
-                        font: Theme.type.num
+                        font: Theme.type.numSm
                     }
                     Rectangle {
                         id: dot

@@ -9,6 +9,8 @@ Item {
     id: root
 
     property string title
+    // Off: the body draws its own header (search's field row).
+    property bool headerShown: true
     // Shown after the title (a count).
     property alias adornment: adornmentSlot.data
     // Trailing header keys, before Close.
@@ -23,8 +25,9 @@ Item {
 
     Item {
         id: header
+        visible: root.headerShown
         width: parent.width
-        height: Theme.header
+        height: root.headerShown ? Theme.header : 0
         Text {
             id: titleText
             x: 16

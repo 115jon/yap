@@ -12,9 +12,10 @@ ApplicationWindow {
     readonly property bool ready: Session.phase === Session.Ready
     // formatAppTitle (AppTitleBarModel.ts): "#general · Yap HQ".
     // A voice channel has no "#".
-    // At Home: "@ada · Direct messages", or just "Direct messages".
+    // At Home: "@ada · Direct messages", else "Friends" or "Shop".
     readonly property string location: !ready ? "Yap"
-        : Nav.home ? (Nav.dmUsername.length > 0 ? "@" + Nav.dmUsername + " · " + qsTr("Direct messages") : qsTr("Direct messages"))
+        : Nav.home ? (Nav.dmUsername.length > 0 ? "@" + Nav.dmUsername + " · " + qsTr("Direct messages")
+            : ShellState.shopOpen ? qsTr("Shop") : qsTr("Friends"))
         : Nav.activeServerName.length === 0 ? "Yap"
         : Nav.voicePanelName.length > 0 ? Nav.voicePanelName + " · " + Nav.activeServerName
         : Nav.activeChannelName.length > 0 ? "#" + Nav.activeChannelName + " · " + Nav.activeServerName

@@ -16,6 +16,8 @@ T.Button {
     // sm | md | lg
     property string size: "md"
     property string iconName: ""
+    // A glyph after the label (Browse collection's arrow).
+    property string trailingIconName: ""
     property bool loading: false
     // The ply behind a notched primary key (the notch shows it).
     property color ground: Theme.ply0
@@ -63,6 +65,13 @@ T.Button {
                 textFormat: Text.PlainText
                 text: control.text
                 font: control.font
+                color: control.ink
+            }
+            Icon {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: control.trailingIconName.length > 0
+                name: control.trailingIconName
+                size: Theme.iconSm
                 color: control.ink
             }
             // The notched key's cap: DitherDots at 45 %, 12 x 20 (24 on lg).

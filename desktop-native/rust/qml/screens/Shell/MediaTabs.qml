@@ -167,14 +167,7 @@ Item {
                 FileCard { item: card.modelData }
             }
         }
-        ScrollBar.vertical: ScrollBar {
-            policy: ScrollBar.AsNeeded
-            contentItem: Rectangle {
-                implicitWidth: 6
-                radius: 3
-                color: Theme.lineStrong
-            }
-        }
+        ScrollBar.vertical: ThinScrollBar {}
     }
 
     // Loading: the media skeleton, else a spinner.

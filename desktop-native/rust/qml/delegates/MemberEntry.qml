@@ -24,6 +24,8 @@ Item {
     required property string presence
     required property string customStatus
     required property string roleColor
+    // Light themes darken it (styles.css .rm-role-name).
+    readonly property color roleInk: roleColor.length > 0 ? Theme.roleName(roleColor) : Theme.ink2
     required property bool online
     required property bool owner
     required property bool me
@@ -151,7 +153,7 @@ Item {
                     textFormat: Text.PlainText
                     text: root.name
                     elide: Text.ElideRight
-                    color: root.roleColor.length > 0 && root.plate.length === 0 ? root.roleColor
+                    color: root.roleColor.length > 0 && root.plate.length === 0 ? root.roleInk
                         : hover.hovered || root.plate.length > 0 ? Theme.ink1 : Theme.ink2
                     font: Theme.type.row
                 }

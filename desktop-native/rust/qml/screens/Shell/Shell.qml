@@ -15,6 +15,7 @@ RowLayout {
     readonly property bool docked: width >= 1024
     // Search, a thread or pins take the members' place (ChatArea.tsx).
     readonly property bool panelShown: ShellState.sidePanel.length > 0 && chatShown
+    readonly property bool searchShown: ShellState.sidePanel === "search"
     readonly property bool membersShown: (ShellState.showMembers || ShellState.showDetails) && chatShown && !panelShown
     readonly property bool sheetWanted: membersShown && !docked
     readonly property bool panelSheetWanted: panelShown && !docked
@@ -113,11 +114,14 @@ RowLayout {
         Layout.preferredWidth: Theme.treePanel
     }
     Item {
+        // Over the docked column, so the chat header can span it.
+        z: 1
         Layout.fillHeight: true
         Layout.fillWidth: true
 
         ChatView {
             anchors.fill: parent
+            headerSpan: root.docked ? (root.membersShown ? (ShellState.showDetails ? 360 : 240) : root.panelShown ? (root.searchShown ? 380 : 360) : 0) : 0
             visible: Nav.voicePanelId.length === 0 && (!Nav.home || Nav.activeChannelId.length > 0)
         }
         // Home with no conversation open: Friends (it loads as it opens),
@@ -141,38 +145,44 @@ RowLayout {
             sourceComponent: VoiceView {}
         }
     }
-    // Docked: a 240 px ply-0 column with a seam on its left, full height
-    // beside the chat header (MemberList draws no header of its own here).
+    // Docked: a 240 px ply-0 column with a seam on its left, under the
+    // chat header, which spans it (MemberList draws no header here).
     Rectangle {
         visible: root.membersShown && root.docked
         Layout.fillHeight: true
         Layout.preferredWidth: ShellState.showDetails ? 360 : 240
         color: Theme.ply0
         Rectangle {
+            y: Theme.header
             width: 1
-            height: parent.height
+            height: parent.height - y
             color: Theme.line
         }
         MemberPanel {
             anchors.fill: parent
+            anchors.topMargin: Theme.header
             anchors.leftMargin: 1
             details: ShellState.showDetails
         }
     }
 
-    // Docked side panel: a 360 px ply-1 column with a seam on its left.
+    // Docked side panel: a 360 px ply-1 column with a seam on its left,
+    // under the chat header.
     Rectangle {
         visible: root.panelShown && root.docked
         Layout.fillHeight: true
-        Layout.preferredWidth: 360
-        color: Theme.ply1
+        // Search is its own 380 px ply-0 column (SearchPanel.tsx).
+        Layout.preferredWidth: root.searchShown ? 380 : 360
+        color: root.searchShown ? Theme.ply0 : Theme.ply1
         Rectangle {
+            y: Theme.header
             width: 1
-            height: parent.height
+            height: parent.height - y
             color: Theme.line
         }
         Loader {
             anchors.fill: parent
+            anchors.topMargin: Theme.header
             anchors.leftMargin: 1
             active: root.panelShown && root.docked
             sourceComponent: root.sidePanelComponent

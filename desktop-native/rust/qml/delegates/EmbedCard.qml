@@ -109,7 +109,7 @@ Item {
         Text {
             anchors.left: dot.right
             anchors.leftMargin: 8
-            anchors.right: openKey.left
+            anchors.right: openKey.visible ? openKey.left : parent.right
             anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
@@ -120,6 +120,7 @@ Item {
         }
         IconKey {
             id: openKey
+            visible: head.url.length > 0
             anchors.right: parent.right
             anchors.rightMargin: -4
             anchors.verticalCenter: parent.verticalCenter
@@ -162,7 +163,9 @@ Item {
                             provider: root.embed.provider
                             colour: root.embed.color
                             openTip: root.embed.open
-                            url: root.embed.url
+                            // LinkEmbed.tsx: a generic card offers Open only
+                            // with a player (YouTube and X carry their own).
+                            url: (root.embed.player ?? "").length > 0 || root.embed.open !== "Open in a new tab" ? root.embed.url : ""
                         }
                         Text {
                             visible: root.embed.author.length > 0

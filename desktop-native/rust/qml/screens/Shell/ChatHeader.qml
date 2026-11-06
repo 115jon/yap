@@ -13,6 +13,12 @@ Item {
 
     implicitHeight: Theme.header
 
+    // ply-0 under the whole header, the docked column's top included.
+    Rectangle {
+        anchors.fill: parent
+        color: Theme.ply0
+    }
+
     readonly property string searchTip: Nav.dmUsername.length > 0 ? qsTr("Search this conversation") : qsTr("Search messages")
 
     // ChatHeader.tsx `onToggleChannelDetails`.
@@ -214,7 +220,8 @@ Item {
             }
             IconKey {
                 iconName: "members"
-                tone: ShellState.showMembers ? "toggled" : "muted"
+                // Search takes the right column, so members reads unpressed.
+                tone: ShellState.showMembers && !ShellState.searchOpen ? "toggled" : "muted"
                 tipSide: "bottom"
                 tip: ShellState.showMembers ? qsTr("Hide members") : qsTr("Show members")
                 Accessible.checkable: true

@@ -13,9 +13,12 @@ SidePanelFrame {
     id: root
 
     title: qsTr("Search")
+    // SearchPanel.tsx: no title row; the field and a 28 px close key share
+    // the 48 px header (px-3, gap 4).
+    headerShown: false
 
-    // The panel ply (search marks are solid over it).
-    property color ground: Theme.ply1
+    // The panel ply (search marks are solid over it): a ply-0 column.
+    property color ground: Theme.ply0
 
     property var view: ({})
     // Rebuilt only when their part of the state changes, so typing does not
@@ -133,13 +136,25 @@ SidePanelFrame {
         SearchField {
             id: field
             anchors.left: parent.left
-            anchors.right: parent.right
+            anchors.right: closeKey.left
             anchors.leftMargin: 12
-            anchors.rightMargin: 12
+            anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
             view: root.view
             onCloseRequested: root.closeRequested()
             onResultsRequested: root.stepResult(-1, 1)
+        }
+        IconKey {
+            id: closeKey
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            iconName: "close"
+            size: 28
+            tone: "muted"
+            tip: qsTr("Close search")
+            tipSide: "bottom"
+            onClicked: root.closeRequested()
         }
         Rectangle {
             anchors.bottom: parent.bottom
@@ -221,14 +236,7 @@ SidePanelFrame {
         onContentHeightChanged: root.maybeLoadMore()
         onHeightChanged: root.maybeLoadMore()
 
-        ScrollBar.vertical: ScrollBar {
-            policy: ScrollBar.AsNeeded
-            contentItem: Rectangle {
-                implicitWidth: 6
-                radius: 3
-                color: Theme.lineStrong
-            }
-        }
+        ScrollBar.vertical: ThinScrollBar {}
 
         Column {
             id: bodyColumn

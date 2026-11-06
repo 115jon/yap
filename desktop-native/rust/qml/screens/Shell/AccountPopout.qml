@@ -64,6 +64,7 @@ T.Popup {
     }
 
     contentItem: ProfileCard {
+        floating: true
         id: card
         name: Session.meName
         username: Session.meUsername

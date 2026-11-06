@@ -9,6 +9,9 @@ import com.yap.native
 //   block   the control always sits under the text, full width
 //   field   the label is printed across the control's top edge (a legend
 //           plate) and the description goes under it
+//   label   server settings' FieldRow (server-settings/Field.tsx): px-4
+//           py-3, the label at 13/500 over the control, 6 apart, and the
+//           helper at 12 in ink-3 under it
 // Labels and descriptions come from the map by `rowId`; `custom` rows
 // (outside it) pass their own and ignore the search. A row a search hit or
 // a deep link lands on flashes the accent tint.
@@ -32,14 +35,15 @@ Item {
     readonly property string shownLabel: label.length > 0 ? label : SettingsNav.label(rowId)
     readonly property string shownDesc: description.length > 0 ? description : custom ? "" : SettingsNav.desc(rowId)
     readonly property bool field: layout === "field" && !hideLabel
-    readonly property bool side: !field && (layout === "inline" || (layout === "stack" && width >= 560))
-    readonly property bool textShown: !hideLabel && !field
+    readonly property bool labeled: layout === "label"
+    readonly property bool side: !field && !labeled && (layout === "inline" || (layout === "stack" && width >= 560))
+    readonly property bool textShown: !hideLabel && !field && !labeled
     readonly property bool highlighted: !custom && SettingsNav.trimmed.length > 0
     readonly property bool landed: !custom && SettingsNav.target === rowId && rowId.length > 0
 
     width: parent ? parent.width : 0
     visible: custom || SettingsNav.matches(rowId)
-    implicitHeight: 16 + body.height + footerSlot.implicitHeight + 16
+    implicitHeight: (labeled ? 24 : 32) + body.height + footerSlot.implicitHeight
     onVisibleChanged: Qt.callLater(() => parent?.parent?.updateRules?.())
 
     Accessible.role: Accessible.Grouping
@@ -68,9 +72,11 @@ Item {
 
     Item {
         id: body
-        y: 16
-        width: parent.width
-        height: row.field ? 8 + controlSlot.height + (fieldDesc.visible ? 8 + fieldDesc.implicitHeight : 0)
+        x: row.labeled ? 16 : 0
+        y: row.labeled ? 12 : 16
+        width: parent.width - 2 * x
+        height: row.labeled ? 18 + 6 + controlSlot.height + (labeledDesc.visible ? 6 + labeledDesc.implicitHeight : 0)
+            : row.field ? 8 + controlSlot.height + (fieldDesc.visible ? 8 + fieldDesc.implicitHeight : 0)
             : row.side ? Math.max(textBlock.height, controlSlot.height)
             : (row.textShown ? textBlock.height : 0) + (row.textShown && controlSlot.height > 0 ? 12 : 0) + controlSlot.height
 
@@ -134,10 +140,24 @@ Item {
             }
         }
 
+        Text {
+            visible: row.labeled
+            width: parent.width
+            textFormat: Text.PlainText
+            text: row.shownLabel
+            elide: Text.ElideRight
+            color: Theme.ink1
+            font.family: "Yap Geist Medium"
+            font.pixelSize: 13
+            font.weight: Font.Medium
+            lineHeight: Theme.type.descriptionLine
+            lineHeightMode: Text.FixedHeight
+        }
+
         FocusScope {
             id: controlSlot
             x: row.side ? parent.width - width : 0
-            y: row.field ? 8 : row.side ? (parent.height - height) / 2 : row.textShown ? textBlock.height + 12 : 0
+            y: row.labeled ? 18 + 6 : row.field ? 8 : row.side ? (parent.height - height) / 2 : row.textShown ? textBlock.height + 12 : 0
             width: row.side ? controls.implicitWidth : parent.width
             height: controls.implicitHeight
             enabled: !row.disabled
@@ -160,6 +180,21 @@ Item {
             color: Theme.ink2
             font: Theme.type.description
         }
+    }
+
+    Text {
+        id: labeledDesc
+        visible: row.labeled && row.shownDesc.length > 0
+        x: body.x
+        y: body.y + controlSlot.y + controlSlot.height + 6
+        width: body.width
+        textFormat: Text.PlainText
+        text: row.shownDesc
+        wrapMode: Text.Wrap
+        color: Theme.ink3
+        font: Theme.type.caption
+        lineHeight: Theme.type.captionLine
+        lineHeightMode: Text.FixedHeight
     }
 
     Column {

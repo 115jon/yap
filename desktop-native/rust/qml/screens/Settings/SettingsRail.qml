@@ -24,6 +24,8 @@ Loader {
             legend: qsTr("How others see you")
             note: qsTr("Your profile card, as it looks when someone opens it.")
             ProfileCard {
+                // rails.tsx: the card as it floats, shadow included.
+                floating: true
                 width: Math.min(parent.width, implicitWidth)
                 name: Settings.name
                 username: Settings.username
@@ -128,9 +130,10 @@ Loader {
             id: preview
             readonly property string name: SettingsNav.themeName(Settings.theme)
             readonly property var sample: [
-                { who: qsTr("Ada"), color: "#4cc2ff", text: qsTr("Is the voice room still open? I'm joining in five.") },
+                // rails.tsx SAMPLE_CHAT: chart-3 (idle), accent-ink, chart-2 (talk).
+                { who: qsTr("Ada"), color: Theme.idle, text: qsTr("Is the voice room still open? I'm joining in five.") },
                 { who: qsTr("You"), color: Theme.accentInk, text: qsTr("Come through. Noise suppression is on, the fan's back.") },
-                { who: qsTr("Grace"), color: "#3ddc84", text: qsTr("Sharing my screen in a sec.") },
+                { who: qsTr("Grace"), color: Theme.talk, text: qsTr("Sharing my screen in a sec.") },
             ]
             legend: qsTr("Preview")
             note: qsTr("%1. Changes apply as you pick.").arg(name)
@@ -169,8 +172,11 @@ Loader {
                                 Text {
                                     textFormat: Text.PlainText
                                     text: line.modelData.who
-                                    color: Theme.lightGround ? Qt.darker(line.modelData.color, 1.4) : line.modelData.color
-                                    font: Theme.type.rowUnread
+                                    // rm-role-name: darkened on light grounds.
+                                    color: Theme.roleName(line.modelData.color)
+                                    font.family: "Yap Geist SemiBold"
+                                    font.pixelSize: 13
+                                    font.weight: Font.DemiBold
                                 }
                                 Text {
                                     width: parent.width

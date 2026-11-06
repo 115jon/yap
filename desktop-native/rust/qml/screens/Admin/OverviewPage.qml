@@ -152,13 +152,12 @@ Column {
 
         SettingsRow {
             custom: true
-            layout: "field"
+            layout: "label"
             label: qsTr("Server name")
             description: root.canEdit ? qsTr("Shown in the server list and on invites.")
                 : qsTr("Only people with the Manage server permission can change it.")
             KitField {
                 width: parent.width
-                large: true
                 text: root.name
                 readOnly: !root.canEdit
                 maximumLength: 100

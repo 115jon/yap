@@ -84,13 +84,14 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 text: qsTr("Friends")
                 color: Theme.ink1
-                font: Theme.type.columnTitle
+                font: Theme.type.pageTitle
                 Accessible.role: Accessible.Heading
             }
             Item {
                 visible: !root.narrow
                 anchors.verticalCenter: parent.verticalCenter
-                width: 1 + 8
+                // mx-2 inside the row's gap-2: 16 either side.
+                width: 1 + 16
                 height: 20
                 Rectangle {
                     anchors.centerIn: parent
@@ -263,10 +264,24 @@ Rectangle {
 
     Component {
         id: emptyState
+        // ui/empty-state.tsx md: py-10, the DitherGlyph "empty" slot (3 px
+        // cells), 16 below it, the title 20/700 and the line 4 apart.
         Column {
-            topPadding: 64
-            bottomPadding: 64
-            spacing: 8
+            topPadding: 40
+            bottomPadding: 40
+            spacing: 4
+            Item {
+                width: parent.width
+                height: 60 + 12
+                Image {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: 26 * 3
+                    height: 20 * 3
+                    smooth: false
+                    source: "image://dither/empty/" + Theme.hex(Theme.ink3) + "/" + Theme.hex(Theme.accentInk)
+                    Accessible.ignored: true
+                }
+            }
             Text {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
@@ -359,8 +374,9 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 textFormat: Text.PlainText
                 text: tabKey.text
-                color: tabKey.on || tabKey.hovered ? Theme.ink1 : Theme.ink2
-                font: Theme.type.controlSm
+                color: tabKey.on || tabKey.hovered ? Theme.ink1 : Theme.ink3
+                Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+                font: Theme.type.control
             }
             CountBadge {
                 anchors.verticalCenter: parent.verticalCenter

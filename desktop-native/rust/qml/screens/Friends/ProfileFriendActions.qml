@@ -55,6 +55,7 @@ Column {
         ground: root.ground
         enabled: !root.pending
         text: root.relation === "incoming" ? qsTr("Accept") : qsTr("Message")
+        iconName: root.relation === "incoming" ? "check" : "chat"
         onClicked: {
             if (root.relation === "incoming")
                 root.run("accept")

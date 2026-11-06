@@ -144,6 +144,49 @@ QtObject {
         return presence === "idle" ? qsTr("Idle") : presence === "dnd" ? qsTr("Do not disturb")
             : presence === "offline" ? qsTr("Offline") : qsTr("Online")
     }
+    // Role colours are server data. OKLab helpers for the two CSS recipes.
+    function toOklab(c) {
+        const lin = v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+        const r = lin(c.r), g = lin(c.g), b = lin(c.b)
+        const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+        const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+        const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+        return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+                1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+                0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s]
+    }
+    function fromOklab(lab) {
+        const l = Math.pow(lab[0] + 0.3963377774 * lab[1] + 0.2158037573 * lab[2], 3)
+        const m = Math.pow(lab[0] - 0.1055613458 * lab[1] - 0.0638541728 * lab[2], 3)
+        const s = Math.pow(lab[0] - 0.0894841775 * lab[1] - 1.2914855480 * lab[2], 3)
+        const enc = v => {
+            const x = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055
+            return Math.min(1, Math.max(0, x))
+        }
+        return Qt.rgba(enc(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+                       enc(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+                       enc(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s), 1)
+    }
+    // A message author's role ink (message-author.ts `roleInk`):
+    // color-mix(in oklab, role 72%, ink-1).
+    function roleInk(hex) {
+        if (!hex)
+            return ink1
+        const a = toOklab(Qt.color(hex)), b = toOklab(ink1)
+        return fromOklab([0, 1, 2].map(i => a[i] * 0.72 + b[i] * 0.28))
+    }
+    // A member row's role name (styles.css .rm-role-name): as is on dark
+    // grounds; light themes cap OKLCH lightness at .49 and chroma at .16.
+    function roleName(hex) {
+        const c = Qt.color(hex)
+        if (!lightGround)
+            return c
+        const lab = toOklab(c)
+        const chroma = Math.hypot(lab[1], lab[2])
+        const k = chroma > 0.16 ? 0.16 / chroma : 1
+        return fromOklab([Math.min(lab[0], 0.49), lab[1] * k, lab[2] * k])
+    }
+
     readonly property color badge: t.badge
     readonly property color badgeInk: t.onBadge
 
@@ -194,9 +237,13 @@ QtObject {
         "%SPOILERFG%": String(ink1),
         "%SPOILERBG%": solid(tint1)
     })
-    function richText(html, revealed) {
+    // On a row that mentions you the mention chip sits on accent-tint, so
+    // its own accent-tint lands on that (MentionBadge.tsx on MessageItem).
+    readonly property string mentionOnMention: String(Qt.tint(Qt.tint(ply0, accentTint), accentTint))
+    function richText(html, revealed, mentioned) {
         const colors = revealed ? richRevealed : richColors
-        return html.replace(/%[A-Z]+%/g, token => colors[token] ?? token)
+        return html.replace(/%[A-Z]+%/g, token => token === "%MENTIONBG%" && mentioned
+            ? mentionOnMention : colors[token] ?? token)
     }
 
     // ---------- Radii, spacing, sizes (DESIGN.md:125-136) ----------
@@ -279,6 +326,10 @@ QtObject {
         readonly property font caption: Qt.font({ family: "Yap Geist", pixelSize: 12, weight: Font.Normal })
         readonly property font captionStrong: Qt.font({ family: "Yap Geist Medium", pixelSize: 12, weight: Font.Medium })
         readonly property font profileName: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 18, weight: Font.DemiBold })
+        // text-ui-xl semibold: a page header's title (FriendsView.tsx h1).
+        readonly property font pageTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 22, weight: Font.DemiBold, letterSpacing: -0.22 })
+        // text-ui-md semibold: a popover's title (the bell's Inbox).
+        readonly property font menuTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 16, weight: Font.DemiBold })
         readonly property font panelTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 14, weight: Font.DemiBold })
         // Silkscreen: condensed 500 on dark grounds, wide 600 on light.
         readonly property font silk: theme.lightGround

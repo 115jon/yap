@@ -129,14 +129,7 @@ Item {
             onMenuRequested: (userId, name, anchor, at) => ShellState.memberMenuRequested(userId, name, anchor, at)
         }
 
-        ScrollBar.vertical: ScrollBar {
-            policy: ScrollBar.AsNeeded
-            contentItem: Rectangle {
-                implicitWidth: 6
-                radius: 3
-                color: Theme.lineStrong
-            }
-        }
+        ScrollBar.vertical: ThinScrollBar {}
     }
 
     // EmptyState sm: nothing loaded for this server yet.
@@ -213,8 +206,11 @@ Item {
         contentItem: Text {
             verticalAlignment: Text.AlignVCenter
             text: tabKey.text
-            color: tabKey.on || tabKey.hovered ? Theme.ink1 : Theme.ink2
-            font: Theme.type.controlSm
+            color: tabKey.on || tabKey.hovered ? Theme.ink1 : Theme.ink3
+            Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+            // ui/tabs.tsx: Bricolage 15/600 (20 apart, not 24, so all five
+            // fit the 360 column instead of scrolling).
+            font: Theme.type.control
         }
         background: Item {
             Rectangle {

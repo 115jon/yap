@@ -16,6 +16,8 @@ Item {
     required property string messageId
     required property string authorId
     required property string author
+    // The author's top role colour, or empty (message-author.ts).
+    required property string authorColor
     required property string initials
     required property string avatar
     required property string body
@@ -114,11 +116,18 @@ Item {
         return settled >= inlineImages.length
     }
 
-    readonly property string dayText: day === today ? qsTr("Today at %1").arg(time) : date + " · " + time
+    // The header shows the clock only; the day divider carries the day
+    // (MessageItem.tsx `time.time`). The gutter drops the day period
+    // (message-time.ts `formatClock`).
+    readonly property string clock: time.replace(/\s*[AaPp]\.?[Mm]\.?$/, "")
+    readonly property color authorInk: authorColor.length > 0 ? Theme.roleInk(authorColor) : Theme.ink1
     readonly property bool editing: editingId.length > 0 && editingId === messageId
     readonly property bool hasReply: replyId.length > 0
     readonly property int dividerHeight: newDivider ? 24 : 0
-    readonly property int padTop: dividerHeight + (grouped ? 2 : 16 + 2)
+    // A header row's top: mt-4 and pt-0.5, plus the 5 px the web's line
+    // boxes put between a body and the next name (measured on yap.115jon.com).
+    readonly property int headTop: 16 + 2 + 5
+    readonly property int padTop: dividerHeight + (grouped ? 2 : headTop)
     readonly property int headerTop: padTop + (hasReply ? 20 : 0)
     readonly property bool shiftHeld: (hover.point.modifiers & Qt.ShiftModifier) !== 0
     readonly property Item bodyItem: editing && editor.item ? editor : bodyText
@@ -149,15 +158,19 @@ Item {
         onTriggered: root.dim = true
     }
 
-    implicitHeight: extras.y + extras.height
-        + (failedLine.visible ? failedLine.height + 2 : 0) + 2 + footSlot.height
+    // A grouped row is at least 28 inside its padding: the web's hidden
+    // gutter time (pt-1 over a 24 px line) holds it open, so follow-ups sit
+    // 32 apart there (MessageItem.tsx).
+    implicitHeight: Math.max(extras.y + extras.height
+        + (failedLine.visible ? failedLine.height + 2 : 0), grouped ? headerTop + 28 : 0) + 2 + footSlot.height
     opacity: dim ? 0.6 : 1
 
     // The row ground: a mention in accent-tint, hover tint-1.
     Rectangle {
-        y: root.dividerHeight
+        // The row ground starts under the group margin (mt-4 is outside it).
+        y: root.dividerHeight + (root.grouped ? 0 : root.headTop - 2)
         width: parent.width
-        height: parent.height - root.dividerHeight - footSlot.height
+        height: parent.height - y - footSlot.height
         color: root.mentioned ? Theme.accentTint
              : hover.hovered ? Theme.tint1 : "transparent"
     }
@@ -165,9 +178,10 @@ Item {
     // once, then a 300 ms fade when it lets go.
     Rectangle {
         id: jumpTint
-        y: root.dividerHeight
+        // The row ground starts under the group margin (mt-4 is outside it).
+        y: root.dividerHeight + (root.grouped ? 0 : root.headTop - 2)
         width: parent.width
-        height: parent.height - root.dividerHeight - footSlot.height
+        height: parent.height - y - footSlot.height
         color: Theme.accentTint
         opacity: 0
         visible: opacity > 0
@@ -323,7 +337,7 @@ Item {
         y: bodyText.y + 4
         horizontalAlignment: Text.AlignRight
         textFormat: Text.PlainText
-        text: root.time
+        text: root.clock
         color: Theme.ink3
         font: Theme.type.numSm
     }
@@ -338,7 +352,7 @@ Item {
             id: authorText
             textFormat: Text.PlainText
             text: root.author
-            color: Theme.ink1
+            color: root.authorInk
             font: Theme.type.author
             MouseArea {
                 anchors.fill: parent
@@ -349,7 +363,7 @@ Item {
         Text {
             anchors.baseline: authorText.baseline
             textFormat: Text.PlainText
-            text: root.dayText
+            text: root.time
             color: Theme.ink3
             font: Theme.type.numSm
         }
@@ -379,8 +393,9 @@ Item {
         wrapMode: TextEdit.Wrap
         // yap-core markdown.rs: the web's grammar as Qt rich text.
         textFormat: TextEdit.RichText
-        text: Theme.richText(root.imagesReady ? root.html
-            : root.html.replace(/<img [^>]*>/g, "&#8195;&#8202;"), root.revealed)
+        // The web's 22 px line box (text-ui-base 15/22).
+        text: "<div style=\"line-height:22px\">" + Theme.richText(root.imagesReady ? root.html
+            : root.html.replace(/<img [^>]*>/g, "&#8195;&#8202;"), root.revealed, root.mentioned) + "</div>"
         color: Theme.ink1
         selectionColor: Theme.selection
         selectedTextColor: Theme.ink1
@@ -641,14 +656,17 @@ Item {
         active: hover.hovered && !root.editing && !root.pending && !root.failed
         anchors.right: parent.right
         anchors.rightMargin: 24
-        y: root.dividerHeight + (root.grouped ? 2 : 18) - 16
+        // -top-4 from the row box, which starts under the group margin.
+        y: root.dividerHeight + (root.grouped ? 0 : root.headTop - 2) - 16
+        // A 1 px edge and p-0.5 around the 28 px keys: 34 high.
         sourceComponent: Rectangle {
-            width: actions.implicitWidth + 4
-            height: 32
+            width: actions.implicitWidth + 6
+            height: 34
             radius: Theme.radius
             color: Theme.ply3
             border.width: 1
             border.color: Theme.line
+            FloatShadow {}
             Row {
                 id: actions
                 anchors.centerIn: parent
@@ -686,12 +704,18 @@ Item {
                         }
                     }
                 }
-                Rectangle {
+                // ToolbarSeparator: mx-0.5 inside the 2 px gaps.
+                Item {
                     visible: !root.shiftHeld
                     anchors.verticalCenter: parent.verticalCenter
-                    width: 1
+                    width: 5
                     height: 16
-                    color: Theme.line
+                    Rectangle {
+                        x: 2
+                        width: 1
+                        height: 16
+                        color: Theme.line
+                    }
                 }
                 // Shift: the power keys (MessageItem.tsx): link, pin, thread.
                 IconKey {
@@ -716,12 +740,17 @@ Item {
                     visible: root.shiftHeld && root.threadActions
                     onClicked: root.threadRequested(root.messageId)
                 }
-                Rectangle {
+                Item {
                     visible: root.shiftHeld
                     anchors.verticalCenter: parent.verticalCenter
-                    width: 1
+                    width: 5
                     height: 16
-                    color: Theme.line
+                    Rectangle {
+                        x: 2
+                        width: 1
+                        height: 16
+                        color: Theme.line
+                    }
                 }
                 IconKey {
                     id: reactKey

@@ -223,6 +223,9 @@ rows! {
         id: String => Id "messageId",
         author_id: String => AuthorId "authorId",
         author: String => Author "author",
+        /// The author's highest coloured role (`#rrggbb`), else empty
+        /// (message-author.ts `topRoleColor`).
+        author_color: String => AuthorColor "authorColor",
         initials: String => Initials "initials",
         avatar: String => Avatar "avatar",
         /// The Markdown source.
@@ -1636,6 +1639,37 @@ pub(super) struct RowContext<'a> {
     pub names: &'a HashMap<String, String>,
     /// TikTok and Instagram lookups.
     pub hydrations: &'a super::embeds::Hydrations,
+    /// The open server's members (role colours); empty in a DM.
+    pub members: &'a [Member],
+}
+
+/// message-author.ts `buildRoleColorMap`: the highest-positioned role with a
+/// hex colour that is not black.
+fn top_role_color(members: &[Member], user_id: &str) -> String {
+    let valid = |c: &str| {
+        let hex = c.strip_prefix('#').unwrap_or("");
+        matches!(hex.len(), 3 | 6)
+            && hex.chars().all(|ch| ch.is_ascii_hexdigit())
+            && hex.chars().any(|ch| ch != '0')
+    };
+    members
+        .iter()
+        .find(|m| m.user.id == user_id)
+        .and_then(|m| {
+            m.roles
+                .iter()
+                .filter_map(|r| r.color.as_deref().map(|c| (r.position, c.trim())))
+                .filter(|(_, c)| valid(c))
+                .fold(
+                    None,
+                    |best: Option<(i64, &str)>, (position, c)| match best {
+                        Some((p, _)) if position <= p => best,
+                        _ => Some((position, c)),
+                    },
+                )
+        })
+        .map(|(_, c)| c.to_owned())
+        .unwrap_or_default()
 }
 
 /// `\w` as JavaScript reads it without the `u` flag.
@@ -1733,6 +1767,7 @@ pub(super) fn message_row(
         id: message.id.clone(),
         author_id: message.author_id.clone(),
         author: author_name.to_owned(),
+        author_color: top_role_color(ctx.members, &message.author_id),
         initials: initials(author_name),
         avatar: absolute_url(ctx.api_base, author.and_then(|a| a.avatar_url.as_deref())),
         body: message.content.clone(),

@@ -60,6 +60,10 @@ Rectangle {
     border.width: 1
     border.color: Theme.lineStrong
 
+    // A popover (not the settings preview): shadow-2.
+    property bool floating: false
+    FloatShadow { visible: root.floating }
+
     ProfileFrameLayer {
         visible: root.frameInfo !== null
         x: -root.frameInfo?.side * root.frameOuter || 0

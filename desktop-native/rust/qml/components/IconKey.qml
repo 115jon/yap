@@ -7,7 +7,7 @@ import com.yap.native
 //   tone "muted"  ink-3, ink-1 on hover          (header actions)
 //   tone "rest"   tint-1, ink-1                  (dock rest)
 //   tone "off"    muted-state tint and ink, the glyph's off partner
-//   tone "toggled" tint-2, ink-1
+//   tone "toggled" tint-2, ink-1, the Fill glyph (a panel it opens is open)
 //   tone "live"   live tint and ink, the Fill glyph (camera on, sharing)
 //   tone "onMedia" white over a video's scrim (player controls)
 // 24/28 keys take a 16 px glyph, 32 an 18, 40 a 20, 48 a 24.
@@ -17,7 +17,7 @@ T.Button {
     required property string iconName
     property string tone: "ghost"
     property int size: 40
-    property string iconVariant: tone === "off" ? "off" : tone === "live" ? "active" : "idle"
+    property string iconVariant: tone === "off" ? "off" : tone === "live" || tone === "toggled" ? "active" : "idle"
     property string tip: ""
     property bool square: false
     property string tipSide: "top"

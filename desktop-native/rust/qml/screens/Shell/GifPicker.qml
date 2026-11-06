@@ -58,6 +58,7 @@ Popup {
         color: Theme.ply3
         border.width: 1
         border.color: Theme.lineStrong
+        FloatShadow {}
         Rectangle {
             width: parent.width
             height: 2
@@ -186,14 +187,7 @@ Popup {
             }
             onContentYChanged: maybeMore()
             onContentHeightChanged: maybeMore()
-            ScrollBar.vertical: ScrollBar {
-                policy: ScrollBar.AsNeeded
-                contentItem: Rectangle {
-                    implicitWidth: 6
-                    radius: 3
-                    color: Theme.lineStrong
-                }
-            }
+            ScrollBar.vertical: ThinScrollBar {}
 
             Repeater {
                 model: GifListModel

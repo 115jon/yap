@@ -92,6 +92,7 @@ T.Popup {
         color: Theme.ply0
         border.width: 1
         border.color: Theme.line
+        FloatShadow { modal: true; radius: Theme.radiusSheet }
     }
 
     contentItem: FocusScope {
@@ -404,17 +405,7 @@ T.Popup {
                 boundsBehavior: Flickable.StopAtBounds
                 // A press in the page ends the landing on a row.
                 onMovementStarted: SettingsNav.target = ""
-                T.ScrollBar.vertical: T.ScrollBar {
-                    id: scrollBar
-                    policy: body.contentHeight > body.height ? T.ScrollBar.AsNeeded : T.ScrollBar.AlwaysOff
-                    width: 10
-                    contentItem: Rectangle {
-                        implicitWidth: 4
-                        radius: 2
-                        color: Theme.lineStrong
-                        opacity: scrollBar.active ? 1 : 0.6
-                    }
-                }
+                T.ScrollBar.vertical: ThinScrollBar {}
 
                 Item {
                     id: pageContent

@@ -89,7 +89,7 @@ Item {
         input.cursorPosition = start + insert.length
     }
 
-    implicitHeight: (replyBar.visible ? replyBar.height : 0) + plate.height
+    implicitHeight: plate.height
 
     EmojiPicker {
         id: emojiPicker
@@ -113,7 +113,7 @@ Item {
         x: 0
         width: Math.min(root.width, 360)
         height: suggestions.contentHeight + 32
-        y: (replyBar.visible ? replyBar.y : plate.y) - height - 6
+        y: plate.y - height - 6
         radius: Theme.radius
         color: Theme.ply3
         border.width: 1
@@ -186,74 +186,85 @@ Item {
         }
     }
 
-    // ReplyIndicator.tsx: "Replying to" then the name and the line, and a
-    // close key. A 32 px strip on ply-1 joined to the plate.
-    Rectangle {
-        id: replyBar
-        visible: root.replyToId.length > 0
-        width: parent.width
-        height: 32
-        radius: Theme.radius
-        color: Theme.ply1
-        border.width: 1
-        border.color: Theme.line
-        Accessible.role: Accessible.StaticText
-        Accessible.name: qsTr("Replying to %1").arg(root.replyToName)
-
-        Row {
-            x: 12
-            anchors.verticalCenter: parent.verticalCenter
-            width: parent.width - x - closeKey.width - 12
-            spacing: 4
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: qsTr("Replying to")
-                color: Theme.ink3
-                font: Theme.type.caption
-            }
-            Text {
-                id: replyName
-                anchors.verticalCenter: parent.verticalCenter
-                textFormat: Text.PlainText
-                text: root.replyToName
-                color: Theme.ink1
-                font: Theme.type.captionStrong
-            }
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                width: Math.max(0, parent.width - x)
-                text: root.replyToText.replace(/\s+/g, " ")
-                elide: Text.ElideRight
-                textFormat: Text.PlainText
-                color: Theme.ink3
-                font: Theme.type.caption
-            }
-        }
-        IconKey {
-            id: closeKey
-            anchors.right: parent.right
-            anchors.rightMargin: 4
-            anchors.verticalCenter: parent.verticalCenter
-            size: 24
-            iconName: "close"
-            tip: qsTr("Cancel reply")
-            onClicked: root.cancelReply()
-        }
-    }
-
     Rectangle {
         id: plate
-        y: replyBar.visible ? replyBar.height - 1 : 0
+        y: 0
         width: parent.width
-        height: tray.implicitHeight + Math.max(48, Math.min(200, input.implicitHeight + 2))
+        height: replyBar.height + tray.implicitHeight + Math.max(48, Math.min(200, input.implicitHeight + 2))
         radius: Theme.radius
         color: Theme.ply2
-        border.width: 1
+        // focus-within: border and a 1 px ring in ink-1.
+        border.width: input.activeFocus ? 2 : 1
         border.color: input.activeFocus ? Theme.ink1 : Theme.lineField
+        Behavior on border.color { ColorAnimation { duration: Theme.dur1 } }
         clip: true
+
+        // ReplyIndicator.tsx: "Replying to" then the name and the line, and a
+        // close key: a 32 px tint-1 tray inside the box, a seam under it.
+        Rectangle {
+            id: replyBar
+            visible: root.replyToId.length > 0
+            x: 1
+            y: 1
+            width: parent.width - 2
+            height: visible ? 32 : 0
+            color: Theme.tint1
+            Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: 1
+                color: Theme.line
+            }
+            Accessible.role: Accessible.StaticText
+            Accessible.name: qsTr("Replying to %1").arg(root.replyToName)
+
+            Row {
+                x: 12
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width - x - closeKey.width - 12
+                spacing: 4
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Replying to")
+                    color: Theme.ink3
+                    font: Theme.type.caption
+                }
+                Text {
+                    id: replyName
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: root.replyToName
+                    color: Theme.ink1
+                    font: Theme.type.captionStrong
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.max(0, parent.width - x)
+                    // ml-1 on top of the row's gap.
+                    leftPadding: 4
+                    text: root.replyToText.replace(/\s+/g, " ")
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
+                    color: Theme.ink3
+                    font: Theme.type.caption
+                }
+            }
+            IconKey {
+                id: closeKey
+                anchors.right: parent.right
+                anchors.rightMargin: 4
+                anchors.verticalCenter: parent.verticalCenter
+                size: 24
+                iconName: "close"
+                tip: qsTr("Cancel reply")
+                onClicked: root.cancelReply()
+            }
+        }
+
 
         UploadTray {
             id: tray
+            y: replyBar.height
             width: parent.width
             height: implicitHeight
         }
@@ -261,7 +272,7 @@ Item {
         IconKey {
             id: attach
             x: 1
-            y: tray.height + 1
+            y: tray.y + tray.height + 1
             size: 46
             glyph: Theme.iconXl
             square: true
@@ -273,13 +284,15 @@ Item {
         ScrollView {
             anchors.left: attach.right
             anchors.right: slots.left
-            y: tray.height
-            height: parent.height - tray.height
+            y: tray.y + tray.height
+            height: parent.height - y
             TextArea {
                 id: input
                 focus: true
                 wrapMode: TextArea.Wrap
-                placeholderText: root.channelName.length === 0 ? qsTr("Message")
+                // MessageInputPlaceholder.tsx: a reply asks for one.
+                placeholderText: root.replyToId.length > 0 ? qsTr("Reply to %1…").arg(root.replyToName)
+                    : root.channelName.length === 0 ? qsTr("Message")
                     : root.dm ? qsTr("Message @%1").arg(root.channelName) : qsTr("Message #%1").arg(root.channelName)
                 placeholderTextColor: Theme.ink3
                 color: Theme.ink1
@@ -364,7 +377,7 @@ Item {
             id: slots
             anchors.right: parent.right
             anchors.rightMargin: 1
-            y: tray.height + 1
+            y: tray.y + tray.height + 1
             // GIF: a silkscreen word in a 48 high slot, at least 44 wide.
             Item {
                 id: gifKey

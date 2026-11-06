@@ -194,6 +194,11 @@ impl State {
             divider: self.divider.as_ref().map(|d| d.message_id.as_str()),
             names: &self.names,
             hydrations: &self.hydrations,
+            members: self
+                .active_server
+                .as_ref()
+                .and_then(|server| self.members.get(server))
+                .map_or(&[], Vec::as_slice),
         }
     }
 
@@ -3050,7 +3055,13 @@ impl State {
                 .entry(user.id.clone())
                 .or_insert_with(|| user.label().to_owned());
         }
+        // Author names take their role colour once the members are known.
+        let before = self.message_rows();
         self.members.insert(server_id, members);
+        let rows = self.message_rows();
+        for diff in view::ordered_diff(&before, &rows) {
+            fx.messages(diff);
+        }
         self.sync_members(fx);
         self.emit_profile(fx);
     }

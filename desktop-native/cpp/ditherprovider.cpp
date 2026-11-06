@@ -132,6 +132,35 @@ QImage voice(const QColor& frameInk, const QColor& lightInk)
   return image;
 }
 
+// ui/dither-glyph.tsx EMPTY: a dashed slot (solid corners, runs two on,
+// one off) with light pooled in its lower-left corner.
+QImage emptySlot(const QColor& frameInk, const QColor& lightInk)
+{
+  QImage image = canvas(26, 20);
+  paint(
+    image,
+    [&](int x, int y) {
+      if (x < 2 || x > 23 || y < 2 || y > 17)
+        return false;
+      const double d = std::hypot((x - 2) / 21.0, (17 - y) / 15.0) / std::sqrt(2.0);
+      return bayerLit(x, y, std::pow(std::clamp(1 - d * 1.35, 0.0, 1.0), 1.4) * 0.95);
+    },
+    lightInk);
+  paint(
+    image,
+    [&](int x, int y) {
+      const bool edgeX = x == 0 || x == 25;
+      const bool edgeY = y == 0 || y == 19;
+      if (!edgeX && !edgeY)
+        return false;
+      if (edgeX && edgeY)
+        return true;
+      return (edgeY ? x : y) % 3 != 0;
+    },
+    frameInk);
+  return image;
+}
+
 // ui/dither.tsx bayerTileMask, repeated over w x h cells.
 QImage dots(int coveragePercent, const QColor& ink, int w, int h)
 {
@@ -181,6 +210,8 @@ QImage DitherProvider::requestImage(const QString& id, QSize* size,
     image = bark(parts.value(1), color(parts.value(2)));
   else if (kind == QLatin1String("voice"))
     image = voice(color(parts.value(1)), color(parts.value(2)));
+  else if (kind == QLatin1String("empty"))
+    image = emptySlot(color(parts.value(1)), color(parts.value(2)));
   else if (kind == QLatin1String("dots"))
     image = dots(parts.value(1).toInt(), color(parts.value(2)),
                  parts.value(3).toInt(), parts.value(4).toInt());

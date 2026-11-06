@@ -12,6 +12,8 @@ T.Button {
     // The ply behind the key: the notch shows it.
     property color ground: Theme.ply0
     property bool large: true
+    // A leading 16 px glyph (button.tsx [&_svg]:size-4).
+    property string iconName: ""
 
     implicitHeight: large ? Theme.controlLg : Theme.control
     implicitWidth: implicitContentWidth + leftPadding + rightPadding
@@ -24,23 +26,41 @@ T.Button {
     Accessible.role: Accessible.Button
     Accessible.name: text
 
-    contentItem: Row {
-        spacing: 12
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-            text: control.text
-            font: control.font
-            color: control.enabled ? Theme.primaryFillInk : Theme.ink3
-        }
-        // KeyCap: DitherDots at 45 %, 2 px cells, 12 x 20 (24 on lg).
-        Image {
-            anchors.verticalCenter: parent.verticalCenter
-            width: 12
-            height: control.large ? 24 : 20
-            smooth: false
-            source: "image://dither/dots/45/" + Theme.hex(control.enabled ? Theme.primaryFillInk : Theme.ink3)
-                    + "/6/" + (control.large ? 12 : 10)
+    // Centred when the key is wider than its content (justify-center).
+    contentItem: Item {
+        implicitWidth: keyRow.implicitWidth
+        implicitHeight: keyRow.implicitHeight
+        Row {
+            id: keyRow
+            anchors.centerIn: parent
+            spacing: 12
+            Row {
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 8
+                Icon {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: control.iconName.length > 0
+                    name: control.iconName
+                    size: Theme.iconSm
+                    color: control.enabled ? Theme.primaryFillInk : Theme.ink3
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: control.text
+                    font: control.font
+                    color: control.enabled ? Theme.primaryFillInk : Theme.ink3
+                }
+            }
+            // KeyCap: DitherDots at 45 %, 2 px cells, 12 x 20 (24 on lg).
+            Image {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 12
+                height: control.large ? 24 : 20
+                smooth: false
+                source: "image://dither/dots/45/" + Theme.hex(control.enabled ? Theme.primaryFillInk : Theme.ink3)
+                        + "/6/" + (control.large ? 12 : 10)
+            }
         }
     }
 

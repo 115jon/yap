@@ -43,7 +43,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             height: 32
             radius: Theme.radius
-            color: finderHover.hovered ? Theme.tint2 : Theme.tint1
+            color: Theme.tint1
             activeFocusOnTab: true
             Accessible.role: Accessible.Button
             Accessible.name: finder.text
@@ -66,18 +66,28 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 name: "search"
                 size: Theme.iconSm
-                color: Theme.ink3
+                color: finderHover.hovered ? Theme.ink1 : Theme.ink3
+            }
+            // It opens the command menu, so it says so: Ctrl K in the field.
+            Row {
+                id: finderCaps
+                anchors.right: parent.right
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 4
+                KeyCap { text: "Ctrl" }
+                KeyCap { text: "K" }
             }
             Text {
                 id: finder
                 anchors.left: glass.right
                 anchors.leftMargin: 8
-                anchors.right: parent.right
+                anchors.right: finderCaps.left
                 anchors.rightMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
                 text: qsTr("Find or start a conversation")
                 elide: Text.ElideRight
-                color: Theme.ink3
+                color: finderHover.hovered ? Theme.ink1 : Theme.ink3
                 font: Theme.type.description
             }
         }

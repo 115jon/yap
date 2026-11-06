@@ -116,6 +116,7 @@ T.Popup {
         color: Theme.ply0
         border.width: 1
         border.color: Theme.line
+        FloatShadow { modal: true; radius: Theme.radiusSheet }
     }
 
     contentItem: FocusScope {
@@ -335,17 +336,7 @@ T.Popup {
                 clip: true
                 contentHeight: column.height + 32 + 32
                 boundsBehavior: Flickable.StopAtBounds
-                T.ScrollBar.vertical: T.ScrollBar {
-                    id: scrollBar
-                    policy: body.contentHeight > body.height ? T.ScrollBar.AsNeeded : T.ScrollBar.AlwaysOff
-                    width: 10
-                    contentItem: Rectangle {
-                        implicitWidth: 4
-                        radius: 2
-                        color: Theme.lineStrong
-                        opacity: scrollBar.active ? 1 : 0.6
-                    }
-                }
+                T.ScrollBar.vertical: ThinScrollBar {}
 
                 Column {
                     id: column

@@ -102,8 +102,12 @@ Rectangle {
         }
         KitButton {
             visible: root.hero.browse === true
+            // ShopView.tsx: the default (md) primary with its cap and a
+            // trailing arrow. The notch would show a ply over the art, so
+            // the corner stays square here.
             variant: "primary"
-            size: "sm"
+            ground: "transparent"
+            trailingIconName: "arrowRight"
             text: qsTr("Browse collection")
             onClicked: root.browse(root.hero.id)
         }
