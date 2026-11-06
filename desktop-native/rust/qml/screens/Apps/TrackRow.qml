@@ -2,7 +2,7 @@ import QtQuick
 import com.yap.native
 
 // A track in Listen Together (a search result or a queue entry): artwork,
-// title over artist, duration, and the row's keys.
+// title over artist, duration (or a word such as Radio), and the row's keys.
 Rectangle {
     id: root
 
@@ -11,6 +11,8 @@ Rectangle {
     property string artwork
     property real durationMs: 0
     property bool current: false
+    // Shown where the running time goes when there is none ("Radio").
+    property string tail: ""
     default property alias keys: keyRow.data
 
     function clock(ms) {
@@ -77,7 +79,7 @@ Rectangle {
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
         textFormat: Text.PlainText
-        text: root.durationMs > 0 ? root.clock(root.durationMs) : ""
+        text: root.durationMs > 0 ? root.clock(root.durationMs) : root.tail
         color: Theme.ink3
         font: Theme.type.numSm
     }

@@ -18,7 +18,9 @@ libopus = []
 reqwest.workspace = true
 rubato = "5.0.1"
 symphonia = { version = "0.5.5", default-features = false, features = ["aac", "flac", "isomp4", "mkv", "mp3", "ogg", "pcm", "vorbis", "wav"] }
-tokio.workspace = true
+tokio = { workspace = true, features = ["net"] }
+url = "2.5.8"
+yap-protocol.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Media", "Win32_Media_Audio", "Win32_System_Threading"] }

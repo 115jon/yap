@@ -2,10 +2,11 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
 
-// Listen Together (ListenTogetherPanel.tsx): search YouTube or paste a
-// link, queue a result (add, play next, play now), the queue with play and
-// remove, Clear queue, the room's volume on this device and the loudness
-// preset.
+// Listen Together (ListenTogetherPanel.tsx): search tracks or collections,
+// or paste a YouTube or Spotify link (a playlist previews with Play now and
+// Queue); queue a track (add, play next, play now) or a whole collection;
+// the queue (play, remove, Clear queue) and Recently played (Requeue); the
+// room's volume on this device and the loudness preset.
 AppPopup {
     id: root
 
@@ -27,6 +28,14 @@ AppPopup {
     onParsedChanged: syncL()
     Component.onCompleted: syncL()
     property bool confirmClear: false
+    // "queue" or "recent".
+    property string tab: "queue"
+    readonly property bool preview: (l.collectionTitle ?? "").length > 0
+    readonly property bool collections: l.filter === "collection"
+
+    function played(ms) {
+        return Qt.formatTime(new Date(ms), Locale.ShortFormat)
+    }
 
     title: qsTr("Listen Together")
     width: 460
@@ -50,10 +59,37 @@ AppPopup {
                 id: search
                 width: parent.width
                 small: true
-                placeholderText: qsTr("Search YouTube or paste a link")
-                Accessible.name: qsTr("Search YouTube or paste a link")
+                placeholderText: qsTr("Search or paste YouTube / Spotify links")
+                Accessible.name: qsTr("Search or paste a link")
                 Keys.onReturnPressed: Apps.ltSearch(text)
                 Keys.onEnterPressed: Apps.ltSearch(text)
+            }
+            Row {
+                height: 32
+                Accessible.role: Accessible.PageTabList
+                Accessible.name: qsTr("Search for")
+                AppTab { text: qsTr("Tracks"); on: !root.collections; onClicked: Apps.ltFilter("track") }
+                AppTab { text: qsTr("Collections"); on: root.collections; onClicked: Apps.ltFilter("collection") }
+            }
+            Rectangle {
+                visible: (root.l.feedback ?? "").length > 0
+                width: parent.width
+                height: visible ? feedbackText.implicitHeight + 16 : 0
+                radius: Theme.radius
+                color: Theme.tint1
+                Accessible.role: Accessible.StaticText
+                Accessible.name: feedbackText.text
+                Text {
+                    id: feedbackText
+                    x: 12
+                    width: parent.width - 24
+                    anchors.verticalCenter: parent.verticalCenter
+                    wrapMode: Text.Wrap
+                    textFormat: Text.PlainText
+                    text: root.l.feedback ?? ""
+                    color: Theme.ink2
+                    font: Theme.type.caption
+                }
             }
             AppError {
                 width: parent.width
@@ -66,11 +102,37 @@ AppPopup {
                 onDismissed: Apps.ltClearError()
             }
             Text {
-                visible: root.l.searching === true || ((root.l.query ?? "").length > 0 && (root.l.results ?? []).length === 0)
+                visible: root.l.searching === true || ((root.l.query ?? "").length > 0
+                    && (root.l.results ?? []).length === 0 && (root.l.collections ?? []).length === 0)
                 textFormat: Text.PlainText
-                text: root.l.searching ? qsTr("Searching…") : qsTr("No tracks found.")
+                text: root.l.resolving ? qsTr("Resolving link preview…")
+                    : root.l.searching ? qsTr("Searching…") : qsTr("No results")
                 color: Theme.ink3
                 font: Theme.type.caption
+            }
+
+            // A pasted playlist or album: one card, Play now or Queue it all.
+            Rectangle {
+                visible: root.preview
+                width: parent.width
+                height: visible ? 88 : 0
+                radius: Theme.radius
+                color: Theme.tint1
+                TrackRow {
+                    x: 4
+                    y: 4
+                    width: parent.width - 8
+                    title: root.l.collectionTitle ?? ""
+                    artist: root.l.collectionMeta ?? ""
+                    artwork: root.l.collectionArtwork ?? ""
+                }
+                Row {
+                    x: 56
+                    y: 52
+                    spacing: 8
+                    KitButton { size: "sm"; variant: "primary"; iconName: "play"; text: qsTr("Play now"); onClicked: Apps.ltEnqueueAll("play-now") }
+                    KitButton { size: "sm"; variant: "secondary"; text: qsTr("Queue"); onClicked: Apps.ltEnqueueAll("append") }
+                }
             }
             Repeater {
                 model: root.l.results ?? []
@@ -82,13 +144,32 @@ AppPopup {
                     artist: modelData.artist
                     artwork: modelData.artwork
                     durationMs: modelData.durationMs
-                    IconKey { size: 28; iconName: "queueAdd"; tone: "muted"; tip: qsTr("Add to queue"); onClicked: Apps.ltEnqueue(result.modelData.index, "append") }
-                    IconKey { size: 28; iconName: "playlist"; tone: "muted"; tip: qsTr("Play next"); onClicked: Apps.ltEnqueue(result.modelData.index, "play-next") }
-                    IconKey { size: 28; iconName: "play"; tone: "muted"; tip: qsTr("Play now"); onClicked: Apps.ltEnqueue(result.modelData.index, "play-now") }
+                    IconKey { visible: !root.preview; size: 28; iconName: "queueAdd"; tone: "muted"; tip: qsTr("Queue"); onClicked: Apps.ltEnqueue(result.modelData.index, "append") }
+                    IconKey { visible: !root.preview; size: 28; iconName: "playlist"; tone: "muted"; tip: qsTr("Play next"); onClicked: Apps.ltEnqueue(result.modelData.index, "play-next") }
+                    IconKey { visible: !root.preview; size: 28; iconName: "play"; tone: "muted"; tip: qsTr("Play now"); onClicked: Apps.ltEnqueue(result.modelData.index, "play-now") }
+                }
+            }
+            Repeater {
+                model: root.l.collections ?? []
+                delegate: TrackRow {
+                    id: collection
+                    required property var modelData
+                    width: column.width
+                    title: modelData.title
+                    artist: modelData.meta
+                    artwork: modelData.artwork
+                    tail: qsTr("Collection")
+                    KitButton {
+                        size: "sm"
+                        variant: "secondary"
+                        text: qsTr("Queue collection")
+                        enabled: root.l.resolving !== true
+                        onClicked: Apps.ltQueueCollection(collection.modelData.index)
+                    }
                 }
             }
             Text {
-                visible: (root.l.skipped ?? 0) > 0
+                visible: (root.l.skipped ?? 0) > 0 && !root.preview
                 textFormat: Text.PlainText
                 text: qsTr("%1 tracks couldn't be matched and were skipped.").arg(root.l.skipped ?? 0)
                 color: Theme.ink3
@@ -98,15 +179,15 @@ AppPopup {
             Item {
                 width: parent.width
                 height: 32
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.PlainText
-                    text: qsTr("Queue")
-                    color: Theme.ink3
-                    font: Theme.type.captionStrong
+                Row {
+                    height: parent.height
+                    Accessible.role: Accessible.PageTabList
+                    Accessible.name: qsTr("Listen Together room activity")
+                    AppTab { text: qsTr("Queue"); count: (root.l.queue ?? []).length; on: root.tab === "queue"; onClicked: root.tab = "queue" }
+                    AppTab { text: qsTr("Recently played"); count: (root.l.recent ?? []).length; on: root.tab === "recent"; onClicked: root.tab = "recent" }
                 }
                 KitButton {
-                    visible: (root.l.queue ?? []).length > 0 && !root.confirmClear
+                    visible: root.tab === "queue" && (root.l.queue ?? []).length > 0 && !root.confirmClear
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     size: "sm"
@@ -140,25 +221,43 @@ AppPopup {
                 }
             }
             Text {
-                visible: (root.l.queue ?? []).length === 0
+                visible: root.tab === "queue" ? (root.l.queue ?? []).length === 0 : (root.l.recent ?? []).length === 0
+                width: parent.width
+                wrapMode: Text.Wrap
                 textFormat: Text.PlainText
-                text: qsTr("Nothing queued. Search for a track to start listening together.")
+                text: root.tab === "queue" ? qsTr("Queue is empty. Search or paste a link to add the first track.")
+                    : qsTr("Nothing played yet. Tracks show up here after they finish playing in this room.")
                 color: Theme.ink3
                 font: Theme.type.caption
             }
             Repeater {
-                model: root.l.queue ?? []
+                model: root.tab === "queue" ? (root.l.queue ?? []) : []
                 delegate: TrackRow {
                     id: entry
                     required property var modelData
                     width: column.width
                     title: modelData.title
-                    artist: modelData.requester.length > 0 ? qsTr("%1 · Added by %2").arg(modelData.artist).arg(modelData.requester) : modelData.artist
+                    artist: [modelData.artist, modelData.requester.length > 0 ? qsTr("Added by %1").arg(modelData.requester) : "", modelData.batch]
+                        .filter(x => x.length > 0).join(" · ")
                     artwork: modelData.artwork
                     durationMs: modelData.durationMs
+                    tail: modelData.radio ? qsTr("Radio") : ""
                     current: modelData.current
                     IconKey { visible: !entry.modelData.current; size: 28; iconName: "play"; tone: "muted"; tip: qsTr("Play"); onClicked: Apps.ltPlay(entry.modelData.entryId) }
                     IconKey { size: 28; iconName: "trash"; tone: "muted"; tip: qsTr("Remove"); onClicked: Apps.ltRemove(entry.modelData.entryId) }
+                }
+            }
+            Repeater {
+                model: root.tab === "recent" ? (root.l.recent ?? []) : []
+                delegate: TrackRow {
+                    id: recent
+                    required property var modelData
+                    width: column.width
+                    title: modelData.title
+                    artist: modelData.meta
+                    artwork: modelData.artwork
+                    tail: root.played(modelData.playedAt)
+                    KitButton { size: "sm"; variant: "secondary"; iconName: "queueAdd"; text: qsTr("Requeue"); onClicked: Apps.ltRequeue(recent.modelData.historyId) }
                 }
             }
 

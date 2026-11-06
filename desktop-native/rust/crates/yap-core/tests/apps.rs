@@ -591,6 +591,7 @@ fn a_snapshot_should_load_the_stream_at_the_room_position() {
         path,
         position_ms,
         paused,
+        live: false,
     }] = loads.as_slice()
     else {
         panic!("one load: {loads:?}");
@@ -927,4 +928,467 @@ fn leaving_the_call_should_stop_every_clip_and_the_stream() {
     let fx = client.input(Input::User(Command::LeaveVoice));
     let audio = Client::audio(&fx);
     assert!(audio.contains(&AudioCommand::StopAll) && audio.contains(&AudioCommand::StreamStop));
+}
+
+// ── Phase 5 N2: MyInstants, radio, favourites, custom sounds, editing ─────
+
+const STATION: &str = "96062a7b-0601-11e8-ae97-52543be04c81";
+
+fn saves(fx: &[Effect], file: &str) -> Vec<Value> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::SaveLocal { file: f, contents } if *f == file => {
+                serde_json::from_str(contents).ok()
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn instants(client: &mut Client) {
+    client.apps(AppsCommand::InstantsSearch("bruh".into()));
+    let (_, request) = client.asked.last().cloned().expect("a search");
+    assert_eq!(request.path(), "/api/myinstants?q=bruh");
+    client.respond(
+        &request,
+        json!({ "page": 1, "results": [
+            { "id": "bruh", "title": "Bruh", "color": "#ff0000",
+              "url": "https://www.myinstants.com/media/sounds/bruh.mp3" },
+            { "id": "evil", "title": "Evil", "color": "#ff0000",
+              "url": "https://evil.example/media/sounds/x.mp3" },
+        ]}),
+    );
+}
+
+#[test]
+fn myinstants_results_should_keep_only_what_the_room_relays() {
+    let mut client = Client::in_call();
+    instants(&mut client);
+    let ids: Vec<&str> = client
+        .view
+        .instants
+        .results
+        .iter()
+        .map(|t| t.id.as_str())
+        .collect();
+    assert_eq!(ids, ["mi:bruh"]);
+}
+
+#[test]
+fn a_myinstants_sound_should_play_for_everyone_by_its_url() {
+    let mut client = Client::in_call();
+    instants(&mut client);
+    let fx = client.apps(AppsCommand::Play("mi:bruh".into()));
+    let frame = &Client::frames(&fx)[0];
+    assert_eq!(
+        (
+            &frame["type"],
+            &frame["sound_id"],
+            &frame["media_url"],
+            &frame["playback_id"]
+        ),
+        (
+            &json!("soundboard.play"),
+            &json!("bruh"),
+            &json!("https://www.myinstants.com/media/sounds/bruh.mp3"),
+            &json!(format!("sb1:{}:{ME}:bruh", ME.len()))
+        )
+    );
+}
+
+#[test]
+fn favourites_should_load_and_toggle_with_the_web_body() {
+    let mut client = Client::in_call();
+    client.apps(AppsCommand::LoadFavorites);
+    client.respond(
+        &ApiRequest::Apps(AppsRequest::Favorites),
+        json!({ "favorites": [{
+            "id": "snd_9", "title": "Airhorn", "url": "/api/soundboard/uploads/snd_9",
+            "color": "", "soundType": "myinstants", "source_server_id": SERVER,
+        }]}),
+    );
+    // A server upload counts as a server sound whatever the row says.
+    assert_eq!(client.view.favorites[0].kind, "server");
+    instants(&mut client);
+    client.apps(AppsCommand::ToggleFavorite("mi:bruh".into()));
+    let (_, request) = client.asked.last().cloned().expect("a save");
+    assert_eq!(
+        (request.method(), request.body()),
+        (
+            Method::Post,
+            json!({ "action": "add", "sound": {
+                "id": "bruh", "title": "Bruh", "url": "https://www.myinstants.com/media/sounds/bruh.mp3",
+                "color": "#ff0000", "soundType": "myinstants",
+            }})
+        )
+    );
+    assert_eq!(client.view.favorites[0].id, "fav:bruh");
+    assert!(client.view.instants.results[0].favorite);
+}
+
+#[test]
+fn a_refused_favourite_should_be_undone() {
+    let mut client = Client::in_call();
+    instants(&mut client);
+    client.apps(AppsCommand::ToggleFavorite("mi:bruh".into()));
+    let (id, _) = client.asked.last().cloned().expect("a save");
+    client.input(Input::Http {
+        id,
+        result: Err(yap_core::api::ApiError::Http {
+            status: 500,
+            message: "Failed to update favorite".into(),
+        }),
+    });
+    assert!(client.view.favorites.is_empty());
+}
+
+fn stations(client: &mut Client) {
+    client.apps(AppsCommand::RadioSearch(String::new()));
+    let (_, request) = client.asked.last().cloned().expect("a radio search");
+    client.respond(
+        &request,
+        json!([
+            { "stationuuid": STATION, "name": "Lofi Radio",
+              "url_resolved": "https://stream.example.org/lofi.mp3", "favicon": "" },
+            { "stationuuid": "not-a-uuid", "name": "Bad" },
+        ]),
+    );
+}
+
+#[test]
+fn radio_should_search_radio_browser_without_the_session() {
+    let request = AppsRequest::Radio {
+        query: "lofi hip".into(),
+    };
+    assert_eq!(
+        ApiRequest::Apps(request).public_url().as_deref(),
+        Some("https://de1.api.radio-browser.info/json/stations/search?name=lofi%20hip&limit=25&hidebroken=true&order=clickcount&reverse=true")
+    );
+    let mut client = Client::in_call();
+    stations(&mut client);
+    assert_eq!(client.view.radio.results.len(), 1);
+}
+
+#[test]
+fn a_station_should_queue_for_listen_together() {
+    let mut client = Client::in_call();
+    stations(&mut client);
+    let fx = client.apps(AppsCommand::Play(format!("radio:{STATION}")));
+    let frame = &Client::frames(&fx)[0];
+    assert_eq!(
+        (
+            &frame["type"],
+            &frame["mode"],
+            &frame["entries"][0]["track"]["kind"],
+            &frame["entries"][0]["track"]["station_uuid"]
+        ),
+        (
+            &json!("listen_together.enqueue"),
+            &json!("append"),
+            &json!("radio"),
+            &json!(STATION)
+        )
+    );
+}
+
+fn radio_snapshot(stream_url: &str) -> AppEvent {
+    let track = json!({
+        "kind": "radio", "id": STATION, "provider": "radio", "station_uuid": STATION,
+        "title": "Lofi Radio", "canonicalUrl": "https://example.org",
+        "streamUrl": stream_url, "sourceLabel": "Live Radio",
+    });
+    let entry = json!({
+        "entryId": "e_r", "requestedAt": NOW, "track": track,
+        "requester": { "userId": PEER, "displayName": "Spike Peer" },
+    });
+    AppEvent::decode(&json!({
+        "type": "listen_together.snapshot", "room_slug": format!("voice-{SERVER}-{VOICE}"),
+        "snapshot": {
+            "roomSlug": format!("voice-{SERVER}-{VOICE}"), "revision": 1, "paused": false,
+            "currentEntryId": "e_r", "anchorPositionMs": 0, "anchorUpdatedAt": NOW,
+            "lastUpdatedAt": NOW, "queue": [entry.clone()], "currentEntry": entry,
+            "positionMs": 0, "durationMs": null,
+            "recentlyPlayed": [{ "historyId": "h_1", "playedAt": NOW, "entry": {
+                "entryId": "e_old", "requestedAt": NOW,
+                "requester": { "userId": PEER, "displayName": "Spike Peer" },
+                "track": {
+                    "kind": "music", "id": "youtube:dQw4w9WgXcQ", "provider": "youtube",
+                    "videoId": "dQw4w9WgXcQ", "title": "Never Gonna Give You Up",
+                    "artist": "Rick Astley", "durationMs": 213000,
+                    "canonicalUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    "sourceLabel": "YouTube",
+                },
+            }}],
+        },
+    }))
+    .expect("a snapshot")
+}
+
+#[test]
+fn a_radio_entry_should_stream_live_from_the_station() {
+    let mut client = Client::in_call();
+    let fx = client.event(
+        radio_snapshot("https://stream.example.org/lofi.mp3"),
+        NOW + 60_000,
+    );
+    assert!(Client::audio(&fx).contains(&AudioCommand::StreamLoad {
+        key: "e_r".into(),
+        path: "https://stream.example.org/lofi.mp3".into(),
+        position_ms: 0.0,
+        paused: false,
+        live: true,
+    }));
+    // Radio is never sought, however far the clock runs.
+    let fx = client.input(Input::Audio(AudioEvent::StreamPosition {
+        key: "e_r".into(),
+        position_ms: 1_000.0,
+        now_ms: NOW + 600_000,
+    }));
+    assert!(!Client::audio(&fx)
+        .iter()
+        .any(|c| matches!(c, AudioCommand::StreamSeek(_))));
+}
+
+#[test]
+fn a_radio_stream_on_a_private_host_should_not_load() {
+    let mut client = Client::in_call();
+    let fx = client.event(radio_snapshot("https://192.168.1.10/live.mp3"), NOW);
+    assert!(!Client::audio(&fx)
+        .iter()
+        .any(|c| matches!(c, AudioCommand::StreamLoad { .. })));
+}
+
+#[test]
+fn recently_played_should_show_and_requeue() {
+    let mut client = Client::in_call();
+    client.event(radio_snapshot("https://stream.example.org/lofi.mp3"), NOW);
+    assert_eq!(client.view.listen.recent[0].meta, "Rick Astley · YouTube");
+    assert!(client.view.listen.queue[0].radio);
+    let fx = client.apps(AppsCommand::LtRequeue("h_1".into()));
+    let frame = &Client::frames(&fx)[0];
+    assert_eq!(
+        (&frame["mode"], &frame["entries"][0]["track"]["videoId"]),
+        (&json!("append"), &json!("dQw4w9WgXcQ"))
+    );
+}
+
+fn resolve_page(ids: &[&str], next: Option<u64>) -> Value {
+    let tracks: Vec<Value> = ids
+        .iter()
+        .map(|id| {
+            json!({
+                "kind": "music", "id": format!("youtube:{id}"), "provider": "youtube",
+                "videoId": id, "title": format!("Track {id}"), "durationMs": 200000,
+                "canonicalUrl": format!("https://www.youtube.com/watch?v={id}"),
+                "sourceLabel": "YouTube",
+            })
+        })
+        .collect();
+    json!({
+        "kind": "collection", "tracks": tracks, "resolvedCount": ids.len(), "skippedCount": 1,
+        "skippedItems": [], "nextOffset": next, "totalCount": 3,
+        "collection": { "id": "pl_1", "provider": "youtube", "title": "Mix", "itemCount": 3,
+                        "sourceUrl": "https://www.youtube.com/playlist?list=pl_1" },
+    })
+}
+
+#[test]
+fn a_collection_should_resolve_every_page_then_queue_as_one_batch() {
+    let mut client = Client::in_call();
+    client.apps(AppsCommand::LtFilter("collection".into()));
+    client.apps(AppsCommand::LtSearch("mix".into()));
+    let (_, request) = client.asked.last().cloned().expect("a search");
+    assert!(request.path().contains("filter=collection"));
+    client.respond(
+        &request,
+        json!({ "filter": "collection", "cursor": null, "results": [{
+            "kind": "collection", "id": "pl_1", "provider": "youtube", "title": "Mix",
+            "itemCount": 3, "sourceUrl": "https://www.youtube.com/playlist?list=pl_1",
+        }]}),
+    );
+    assert_eq!(client.view.listen.collections[0].meta, "3 items");
+    client.apps(AppsCommand::LtQueueCollection(0));
+    let (_, first) = client.asked.last().cloned().expect("page 1");
+    assert_eq!(first.body()["offset"], json!(0));
+    client.respond(&first, resolve_page(&["aaaaaaa1", "aaaaaaa2"], Some(2)));
+    let (_, second) = client.asked.last().cloned().expect("page 2");
+    assert_eq!(second.body()["offset"], json!(2));
+    let fx = client.respond(&second, resolve_page(&["aaaaaaa3"], None));
+    let frame = &Client::frames(&fx)[0];
+    let entries = frame["entries"].as_array().expect("entries");
+    assert_eq!(entries.len(), 3);
+    assert_eq!(entries[0]["importBatchLabel"], json!("Mix"));
+    assert_eq!(entries[0]["importBatchId"], entries[2]["importBatchId"]);
+    assert_eq!(client.view.listen.feedback, "Queued 3 tracks, skipped 2.");
+}
+
+#[test]
+fn a_pasted_playlist_should_preview_then_play_now() {
+    let mut client = Client::in_call();
+    client.apps(AppsCommand::LtSearch(
+        "https://www.youtube.com/playlist?list=pl_1".into(),
+    ));
+    let (_, request) = client.asked.last().cloned().expect("a resolve");
+    client.respond(&request, resolve_page(&["aaaaaaa1"], None));
+    assert_eq!(client.view.listen.collection_title, "Mix");
+    let fx = client.apps(AppsCommand::LtEnqueueAll {
+        mode: "play-now".into(),
+    });
+    assert_eq!(Client::frames(&fx)[0]["mode"], json!("play-now"));
+    assert!(client.view.listen.results.is_empty());
+}
+
+#[test]
+fn a_muted_peers_soundboard_should_not_play_and_should_stop() {
+    let mut client = Client::in_call_with(Value::Null, airhorn());
+    client.event(broadcast("soundboard-play-server.json"), NOW);
+    let fx = client.apps(AppsCommand::PeerSoundboardMuted {
+        user_id: PEER.into(),
+        muted: true,
+    });
+    assert!(Client::audio(&fx)
+        .iter()
+        .any(|c| matches!(c, AudioCommand::Stop(_))));
+    let fx = client.event(broadcast("soundboard-play-server.json"), NOW);
+    assert!(Client::audio(&fx).is_empty());
+    assert_eq!(client.view.peer_muted, [PEER]);
+}
+
+#[test]
+fn a_custom_sound_should_be_kept_here_and_play_as_a_data_url() {
+    let mut client = Client::in_call();
+    let fx = client.apps(AppsCommand::AddLocalSound {
+        id: "loc_1".into(),
+        file_name: "beep.wav".into(),
+        bytes: b"RIFF....WAVE".to_vec(),
+        name: "Beep".into(),
+        emoji: String::new(),
+        volume: 0.5,
+    });
+    let saved = saves(&fx, "soundboard-sounds.json");
+    let key = format!("voice-soundboard:{SERVER}");
+    assert_eq!(saved[0][&key][0]["name"], json!("Beep"));
+    assert_eq!(client.view.local[0].id, "local:loc_1");
+    let fx = client.apps(AppsCommand::Play("local:loc_1".into()));
+    let frame = &Client::frames(&fx)[0];
+    assert_eq!(
+        (&frame["data_url"], &frame["volume"]),
+        (
+            &json!("data:audio/wav;base64,UklGRi4uLi5XQVZF"),
+            &json!(0.4)
+        )
+    );
+}
+
+#[test]
+fn a_custom_sound_over_128_kib_should_be_refused() {
+    let mut client = Client::in_call();
+    let fx = client.apps(AppsCommand::AddLocalSound {
+        id: "loc_2".into(),
+        file_name: "long.mp3".into(),
+        bytes: vec![0; 128 * 1024 + 1],
+        name: "Long".into(),
+        emoji: String::new(),
+        volume: 1.0,
+    });
+    assert!(saves(&fx, "soundboard-sounds.json").is_empty());
+    assert_eq!(
+        client.view.sound_error,
+        "Custom sounds must be 128 KiB or smaller to play for everyone."
+    );
+}
+
+#[test]
+fn editing_a_server_sound_should_patch_then_tell_the_room() {
+    let mut client = Client::in_call_with(Value::Null, airhorn());
+    client.apps(AppsCommand::EditSound {
+        sound: "snd_9".into(),
+        name: "Big horn".into(),
+        emoji: String::new(),
+        volume: 0.7,
+    });
+    let (_, request) = client.asked.last().cloned().expect("a patch");
+    assert_eq!(
+        (request.method(), request.path(), request.body()),
+        (
+            Method::Patch,
+            format!("/api/servers/{SERVER}/soundboard?soundId=snd_9"),
+            json!({ "sound_name": "Big horn", "sound_emoji": null, "sound_volume": 0.7 })
+        )
+    );
+    let fx = client.respond(&request, json!({ "updated": true }));
+    assert_eq!(
+        Client::frames(&fx)[0]["sound"],
+        json!({ "id": "snd_9", "name": "Big horn", "volume": 0.7 })
+    );
+    assert_eq!(client.view.sounds[0].name, "Big horn");
+}
+
+#[test]
+fn a_dm_call_should_hide_custom_sounds_and_keep_only_playable_favourites() {
+    let mut client = Client::in_call_with(Value::Null, airhorn());
+    client.apps(AppsCommand::LoadFavorites);
+    client.respond(
+        &ApiRequest::Apps(AppsRequest::Favorites),
+        json!({ "favorites": [
+            { "id": "ping", "title": "Ping", "url": "", "color": "", "soundType": "default" },
+            { "id": "snd_9", "title": "Airhorn", "url": "/api/soundboard/uploads/snd_9",
+              "color": "", "soundType": "server", "source_server_id": SERVER },
+            { "id": "snd_gone", "title": "Gone", "url": "/api/soundboard/uploads/snd_gone",
+              "color": "", "soundType": "server", "source_server_id": SERVER },
+            { "id": "bruh", "title": "Bruh", "url": "https://www.myinstants.com/media/sounds/bruh.mp3",
+              "color": "", "soundType": "myinstants" },
+        ]}),
+    );
+    assert_eq!(client.view.favorites.len(), 4, "a server call shows all");
+    // Into a call with no server (a DM call).
+    client.input(Input::User(Command::SelectServer(String::new())));
+    client.input(Input::User(Command::JoinVoice("dm_chan".into())));
+    client.voice(VoiceUpdate::Connected);
+    client.voice(VoiceUpdate::VoiceReady {
+        participant_id: PID.into(),
+    });
+    client.apps(AppsCommand::LocalData {
+        sounds: [(
+            "voice-soundboard:dm-call".to_owned(),
+            vec![yap_core::store::apps::LocalSound {
+                id: "loc_1".into(),
+                name: "Beep".into(),
+                data_url: Some("data:audio/wav;base64,UklGRi4uLi5XQVZF".into()),
+                ..Default::default()
+            }],
+        )]
+        .into(),
+    });
+    client.apps(AppsCommand::LoadCatalog(SERVER.into()));
+    client.respond(&catalog_request(), airhorn());
+    assert!(client.view.in_call && client.view.server_id.is_empty());
+    assert!(client.view.local.is_empty(), "no custom sounds in a DM");
+    let ids: Vec<&str> = client
+        .view
+        .favorites
+        .iter()
+        .map(|tile| tile.id.as_str())
+        .collect();
+    assert_eq!(ids, ["fav:ping", "fav:snd_9"]);
+}
+
+#[test]
+fn one_bad_custom_sound_should_not_wipe_the_file() {
+    let key = "voice-soundboard:srv_fixture";
+    let parsed = yap_core::store::apps::parse_local_sounds(json!({
+        key: [
+            { "id": "loc_1", "name": "Beep", "dataUrl": "data:audio/wav;base64,AAAA", "volume": 0.5 },
+            { "id": 7, "name": null },
+            "not an object",
+            { "id": "loc_2", "name": "Boop" },
+        ],
+        "voice-soundboard:dm-call": [{ "nope": true }],
+    }));
+    let kept: Vec<&str> = parsed[key].iter().map(|sound| sound.id.as_str()).collect();
+    assert_eq!(kept, ["loc_1", "loc_2"]);
+    assert!(!parsed.contains_key("voice-soundboard:dm-call"));
+    // A file of the wrong shape is empty, not a failure.
+    assert!(yap_core::store::apps::parse_local_sounds(json!([1, 2])).is_empty());
+    assert!(yap_core::store::apps::parse_local_sounds(json!({ key: 5 })).is_empty());
 }

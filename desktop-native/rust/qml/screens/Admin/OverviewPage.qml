@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import Yap.Chrome
 import com.yap.native
 
 // Server settings → Overview (OverviewPage.tsx): Server profile (the icon

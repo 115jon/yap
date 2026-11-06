@@ -171,6 +171,29 @@ impl Api {
         Ok(body)
     }
 
+    /// A GET of `url` on another host: no session, no publishable key
+    /// (radio-browser, as the web fetches it from the page).
+    pub async fn get_public(&self, url: &str) -> Result<Value, ApiError> {
+        let response = self
+            .http
+            .get(url)
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .map_err(|error| ApiError::network(&error))?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(ApiError::Http {
+                status: status.as_u16(),
+                message: format!("request failed ({})", status.as_u16()),
+            });
+        }
+        response
+            .json()
+            .await
+            .map_err(|error| ApiError::Decode(error.to_string()))
+    }
+
     pub async fn get(&self, path: &str) -> Result<Value, ApiError> {
         self.send(self.request(Method::GET, path)).await
     }

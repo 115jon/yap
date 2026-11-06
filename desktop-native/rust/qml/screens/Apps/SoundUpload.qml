@@ -1,13 +1,16 @@
 import QtQuick
+import Yap.Chrome
 import com.yap.native
 
-// Add sound (SoundboardPicker.tsx upload form): an audio file (50 MB at
-// most), its name, an optional emoji and its volume, uploaded to the
-// call's server.
+// Add sound (SoundboardPicker.tsx upload form): an audio file, its name,
+// an optional emoji and its volume. Uploaded to the call's server (50 MB at
+// most), or, `local`, kept on this device as a custom sound (128 KiB at
+// most, so the room can relay it to everyone).
 Column {
     id: root
 
     property bool busy: false
+    property bool local: false
     property string path: ""
 
     spacing: 8
@@ -17,7 +20,7 @@ Column {
         variant: "secondary"
         size: "sm"
         iconName: "upload"
-        text: qsTr("Add sound")
+        text: root.local ? qsTr("Add custom sound") : qsTr("Add sound")
         onClicked: {
             const paths = Files.pickFiles(qsTr("Choose an audio file"))
             if (paths.length > 0) {
@@ -72,11 +75,14 @@ Column {
             KitButton {
                 variant: "primary"
                 size: "sm"
-                text: root.busy ? qsTr("Uploading…") : qsTr("Upload")
+                text: root.local ? qsTr("Save") : root.busy ? qsTr("Uploading…") : qsTr("Upload")
                 loading: root.busy
                 enabled: !root.busy && name.text.trim().length > 0
                 onClicked: {
-                    Apps.upload(root.path, name.text, emoji.text, volume.value / 100)
+                    if (root.local)
+                        Apps.addLocalSound(root.path, name.text, emoji.text, volume.value / 100)
+                    else
+                        Apps.upload(root.path, name.text, emoji.text, volume.value / 100)
                     root.path = ""
                 }
             }

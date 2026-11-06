@@ -72,7 +72,8 @@ Rectangle {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
-            text: qsTr("%1 / %2").arg(root.clock(root.position)).arg(root.clock(root.l.durationMs ?? 0))
+            text: root.now?.radio ? qsTr("Live radio")
+                : qsTr("%1 / %2").arg(root.clock(root.position)).arg(root.clock(root.l.durationMs ?? 0))
             color: Theme.ink3
             font: Theme.type.numSm
         }

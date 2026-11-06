@@ -70,6 +70,63 @@ pub mod qobject {
         #[cxx_name = "clearError"]
         fn clear_error(self: &Apps);
 
+        /// MyInstants: trending (empty) or a search.
+        #[qinvokable]
+        #[cxx_name = "searchInstants"]
+        fn search_instants(self: &Apps, query: &QString);
+
+        /// radio-browser: top stations (empty) or a search.
+        #[qinvokable]
+        #[cxx_name = "searchRadio"]
+        fn search_radio(self: &Apps, query: &QString);
+
+        /// The favourites, once per session.
+        #[qinvokable]
+        #[cxx_name = "loadFavorites"]
+        fn load_favorites(self: &Apps);
+
+        /// Favourite or unfavourite a tile (its `id`).
+        #[qinvokable]
+        #[cxx_name = "toggleFavorite"]
+        fn toggle_favorite(self: &Apps, sound: &QString);
+
+        /// Name, emoji and volume (0..1) of a server or custom sound.
+        #[qinvokable]
+        #[cxx_name = "editSound"]
+        fn edit_sound(self: &Apps, sound: &QString, name: &QString, emoji: &QString, volume: f64);
+
+        /// Keep an audio file (128 KiB at most) on this device as a custom
+        /// sound for the call's server.
+        #[qinvokable]
+        #[cxx_name = "addLocalSound"]
+        fn add_local_sound(
+            self: &Apps,
+            path: &QString,
+            name: &QString,
+            emoji: &QString,
+            volume: f64,
+        );
+
+        /// `track` or `collection`.
+        #[qinvokable]
+        #[cxx_name = "ltFilter"]
+        fn lt_filter(self: &Apps, filter: &QString);
+
+        /// Queue a resolved link (all of a collection): `append` or `play-now`.
+        #[qinvokable]
+        #[cxx_name = "ltEnqueueAll"]
+        fn lt_enqueue_all(self: &Apps, mode: &QString);
+
+        /// Resolve collection result `index` and queue it.
+        #[qinvokable]
+        #[cxx_name = "ltQueueCollection"]
+        fn lt_queue_collection(self: &Apps, index: i32);
+
+        /// Queue a recently played entry again.
+        #[qinvokable]
+        #[cxx_name = "ltRequeue"]
+        fn lt_requeue(self: &Apps, history_id: &QString);
+
         /// A join or leave sound for a scope (`*` or a server id). `enabled`
         /// -1 leaves it, 0 off, 1 on; `sound` `default:<id>` or
         /// `server:<server>:<id>` (empty leaves it); `clear` removes it.
@@ -184,7 +241,9 @@ pub mod qobject {
 use core::pin::Pin;
 
 use cxx_qt_lib::QString;
-use yap_core::store::apps::{AppsCommand, AppsView, Trigger};
+use std::io::Read as _;
+
+use yap_core::store::apps::{AppsCommand, AppsView, Trigger, MAX_LOCAL_SOUND_BYTES, SOUNDS_FILE};
 use yap_core::Command;
 
 use crate::client;
@@ -242,7 +301,17 @@ impl cxx_qt::Initialize for qobject::Apps {
     fn initialize(self: Pin<&mut Self>) {
         gui::register(self);
         send_local_settings();
+        send_local_sounds();
     }
+}
+
+/// The custom sounds kept in `%LOCALAPPDATA%\YapNative`.
+fn send_local_sounds() {
+    let sounds = yap_cache::settings::app_dir()
+        .and_then(|dir| yap_cache::settings::load_app_file(&dir, SOUNDS_FILE))
+        .map(yap_core::store::apps::parse_local_sounds)
+        .unwrap_or_default();
+    send(AppsCommand::LocalData { sounds });
 }
 
 impl Drop for AppsRust {
@@ -315,6 +384,76 @@ impl qobject::Apps {
 
     pub fn clear_error(&self) {
         send(AppsCommand::ClearError);
+    }
+
+    pub fn search_instants(&self, query: &QString) {
+        send(AppsCommand::InstantsSearch(text(query)));
+    }
+
+    pub fn search_radio(&self, query: &QString) {
+        send(AppsCommand::RadioSearch(text(query)));
+    }
+
+    pub fn load_favorites(&self) {
+        send(AppsCommand::LoadFavorites);
+    }
+
+    pub fn toggle_favorite(&self, sound: &QString) {
+        send(AppsCommand::ToggleFavorite(text(sound)));
+    }
+
+    pub fn edit_sound(&self, sound: &QString, name: &QString, emoji: &QString, volume: f64) {
+        send(AppsCommand::EditSound {
+            sound: text(sound),
+            name: text(name),
+            emoji: text(emoji),
+            volume,
+        });
+    }
+
+    pub fn add_local_sound(&self, path: &QString, name: &QString, emoji: &QString, volume: f64) {
+        let path = text(path);
+        let file = std::path::Path::new(&path);
+        let file_name = file
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        // One byte past the limit is enough for the store to refuse it.
+        let mut bytes = Vec::new();
+        let read = std::fs::File::open(file).and_then(|f| {
+            f.take(MAX_LOCAL_SOUND_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)
+        });
+        if let Err(error) = read {
+            eprintln!("[soundboard] custom sound: {error}");
+            return;
+        }
+        send(AppsCommand::AddLocalSound {
+            id: uuid::Uuid::new_v4().to_string(),
+            file_name,
+            bytes,
+            name: text(name),
+            emoji: text(emoji),
+            volume,
+        });
+    }
+
+    pub fn lt_filter(&self, filter: &QString) {
+        send(AppsCommand::LtFilter(text(filter)));
+    }
+
+    pub fn lt_enqueue_all(&self, mode: &QString) {
+        send(AppsCommand::LtEnqueueAll { mode: text(mode) });
+    }
+
+    pub fn lt_queue_collection(&self, index: i32) {
+        if let Ok(index) = usize::try_from(index) {
+            send(AppsCommand::LtQueueCollection(index));
+        }
+    }
+
+    pub fn lt_requeue(&self, history_id: &QString) {
+        send(AppsCommand::LtRequeue(text(history_id)));
     }
 
     pub fn set_trigger(

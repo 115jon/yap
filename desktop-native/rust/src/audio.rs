@@ -115,6 +115,15 @@ pub mod qobject {
         #[cxx_name = "setPeerMuted"]
         fn set_peer_muted(self: Pin<&mut Audio>, user_id: &QString, muted: bool);
 
+        /// Their soundboard is silent for us ("Mute soundboard").
+        #[qinvokable]
+        #[cxx_name = "peerSoundboardMuted"]
+        fn peer_soundboard_muted(self: &Audio, user_id: &QString) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "setPeerSoundboardMuted"]
+        fn set_peer_soundboard_muted(self: Pin<&mut Audio>, user_id: &QString, muted: bool);
+
         /// Picks a camera (`default` or an id, with its name). Also how a
         /// refreshed id for the same camera is written back.
         #[qinvokable]
@@ -155,6 +164,19 @@ use yap_cache::voice::{self, InputProfile, PeerSettings, VoiceSettings, DEFAULT_
 use yap_voice::{peer_gain, AudioDevices, LibwebrtcEngine, Playback, Processing, Sensitivity};
 
 use crate::client::voice::{set_call_audio, CallAudio};
+
+/// Whose soundboard the voice settings mute, for the store's filter.
+fn send_soundboard_muted(settings: &VoiceSettings) {
+    let peers = settings
+        .peer_settings
+        .iter()
+        .filter(|(_, peer)| peer.soundboard_muted)
+        .map(|(id, _)| id.clone())
+        .collect();
+    crate::client::command(yap_core::Command::Apps(
+        yap_core::store::apps::AppsCommand::SoundboardMutedPeers(peers),
+    ));
+}
 
 /// The call's mic level as `f64` bits; NaN while no call reads it.
 static LEVEL: AtomicU64 = AtomicU64::new(f64::NAN.to_bits());
@@ -367,6 +389,7 @@ impl qobject::Audio {
         }
         self.as_mut().show();
         set_call_audio(call_audio(&self.rust().settings));
+        send_soundboard_muted(&self.rust().settings);
         let revision = self.rust().peers_revision.wrapping_add(1);
         self.set_peers_revision(revision);
     }
@@ -485,6 +508,23 @@ impl qobject::Audio {
 
     pub fn set_peer_muted(self: Pin<&mut Self>, user_id: &QString, muted: bool) {
         self.edit_peer(user_id, |p| p.muted = muted);
+    }
+
+    pub fn peer_soundboard_muted(&self, user_id: &QString) -> bool {
+        self.rust()
+            .settings
+            .peer(&user_id.to_string())
+            .soundboard_muted
+    }
+
+    pub fn set_peer_soundboard_muted(self: Pin<&mut Self>, user_id: &QString, muted: bool) {
+        self.edit_peer(user_id, |p| p.soundboard_muted = muted);
+        crate::client::command(yap_core::Command::Apps(
+            yap_core::store::apps::AppsCommand::PeerSoundboardMuted {
+                user_id: user_id.to_string(),
+                muted,
+            },
+        ));
     }
 
     pub fn select_camera(self: Pin<&mut Self>, id: &QString, label: &QString) {

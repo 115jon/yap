@@ -7,11 +7,11 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 use yap_protocol::voice_app::{
-    is_date_key, is_playback_owned_by, is_queueable_music, is_resolvable_url, lt_command,
-    parse_playback_id, playback_id, received_at, sanitize_activity, sanitize_data_url,
-    sanitize_inbound_media_url, sanitize_media_url, sanitize_soundboard, upload_url, AppCommand,
-    AppEvent, AutomaticEvent, CatalogSound, EnqueueMode, LtEvent, LtRequester, LtSeed, LtTrack,
-    Sender, SoundboardPlay, WordleProgress,
+    is_date_key, is_playback_owned_by, is_queueable_music, is_resolvable_url, is_station_uuid,
+    lt_command, parse_playback_id, playback_id, received_at, sanitize_activity, sanitize_data_url,
+    sanitize_inbound_media_url, sanitize_media_url, sanitize_public_https_url, sanitize_soundboard,
+    upload_url, AppCommand, AppEvent, AutomaticEvent, CatalogSound, EnqueueMode, LtEvent,
+    LtRequester, LtSeed, LtTrack, Sender, SoundboardPlay, WordleProgress,
 };
 use yap_protocol::{Frame, GatewayOp};
 
@@ -560,6 +560,8 @@ fn lt_commands_should_be_shaped_as_the_web_sends_them() {
                 display_name: "Native Spike".into(),
                 ..LtRequester::default()
             },
+            import_batch_id: None,
+            import_batch_label: None,
         }],
     };
     let d = enqueue.payload("u_me");
@@ -642,4 +644,119 @@ fn resolvable_urls_should_be_youtube_or_spotify_links() {
     assert!(!is_resolvable_url("https://www.youtube.com/"));
     assert!(!is_resolvable_url("never gonna give you up"));
     assert!(!is_resolvable_url("https://example.com/watch?v=1"));
+}
+
+// ── Radio, collections and recently played ────────────────────────────────
+
+const STATION: &str = "96062a7b-0601-11e8-ae97-52543be04c81";
+
+#[test]
+fn station_uuids_should_follow_the_rooms_pattern() {
+    assert!(is_station_uuid(STATION));
+    assert!(is_station_uuid(&STATION.to_ascii_uppercase()));
+    for bad in [
+        "",
+        "96062a7b-0601-01e8-ae97-52543be04c81",
+        "96062a7b-0601-11e8-7e97-52543be04c81",
+        "96062a7b06011-1e8-ae97-52543be04c81",
+        "96062a7b-0601-11e8-ae97-52543be04c8g",
+        "96062a7b-0601-11e8-ae97-52543be04c811",
+    ] {
+        assert!(!is_station_uuid(bad), "{bad}");
+    }
+}
+
+#[test]
+fn radio_urls_should_be_public_https_only() {
+    assert_eq!(
+        sanitize_public_https_url("https://stream.example.org/live.mp3").as_deref(),
+        Some("https://stream.example.org/live.mp3")
+    );
+    assert!(sanitize_public_https_url("https://8.8.8.8/a").is_some());
+    for bad in [
+        "http://stream.example.org/live.mp3",
+        "https://user:pw@stream.example.org/live.mp3",
+        "https://localhost/a",
+        "https://radio.localhost/a",
+        "https://box.local/a",
+        "https://10.0.0.2/a",
+        "https://127.0.0.1/a",
+        "https://169.254.1.1/a",
+        "https://172.20.1.1/a",
+        "https://192.168.1.1/a",
+        "https://0.1.2.3/a",
+        "https://[::1]/a",
+        "ftp://stream.example.org/a",
+        "not a url",
+    ] {
+        assert!(sanitize_public_https_url(bad).is_none(), "{bad}");
+    }
+}
+
+#[test]
+fn a_radio_seed_should_carry_the_station_as_the_web_sends_it() {
+    let seed = LtSeed::radio(
+        STATION,
+        "Lofi Radio",
+        LtRequester {
+            user_id: "u_me".into(),
+            display_name: "Native Spike".into(),
+            ..LtRequester::default()
+        },
+    );
+    let d = AppCommand::LtEnqueue {
+        room_slug: "voice-srv_1-ch_v".into(),
+        mode: EnqueueMode::Append,
+        entries: vec![seed],
+    }
+    .payload("u_me");
+    let track = &d["entries"][0]["track"];
+    assert_eq!(
+        (
+            &track["kind"],
+            &track["provider"],
+            &track["station_uuid"],
+            &track["title"]
+        ),
+        (
+            &json!("radio"),
+            &json!("radio"),
+            &json!(STATION),
+            &json!("Lofi Radio")
+        )
+    );
+    assert_eq!(d["entries"][0]["importBatchId"], Value::Null);
+}
+
+#[test]
+fn recently_played_should_decode_and_drop_bad_entries() {
+    let mut d = fixture("lt-snapshot.json");
+    let entry = d["snapshot"]["queue"][0].clone();
+    d["snapshot"]["recentlyPlayed"] = json!([
+        { "historyId": "h_1", "playedAt": 1_762_349_000_000_i64, "entry": entry },
+        { "historyId": "h_2" },
+        "junk",
+    ]);
+    let Some(AppEvent::ListenTogether(LtEvent::Snapshot { snapshot, .. })) = AppEvent::decode(&d)
+    else {
+        panic!("no snapshot");
+    };
+    assert_eq!(snapshot.recently_played.len(), 1);
+    assert_eq!(
+        snapshot.recently_played[0].entry.track.title,
+        "Never Gonna Give You Up"
+    );
+}
+
+#[test]
+fn data_urls_should_encode_as_the_room_expects() {
+    use yap_protocol::voice_app::data_url;
+    assert_eq!(
+        data_url("audio/wav", b"hello"),
+        "data:audio/wav;base64,aGVsbG8="
+    );
+    assert_eq!(data_url("audio/wav", b"hi"), "data:audio/wav;base64,aGk=");
+    assert_eq!(data_url("audio/wav", b"abc"), "data:audio/wav;base64,YWJj");
+    let bytes: Vec<u8> = (0..=255).collect();
+    assert!(sanitize_data_url(&data_url("audio/mpeg", &bytes), 1024));
 }

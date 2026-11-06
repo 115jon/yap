@@ -699,6 +699,22 @@ and dates come from the crates.io API on 2026-11-05.
   - Other ≥ 400, or media the decoder rejects: switch container once.
     Then fail with `PLAYBACK_UNAVAILABLE` / `PLAYBACK_SRC_NOT_SUPPORTED`.
 
+### 9.7 Live radio (phase 5 N2)
+
+- A radio entry plays the station's own `streamUrl`, as the web's second
+  audio element does: one plain GET, no Range, no session, never sought.
+- Only a URL that passes the room's `sanitizePublicHttpsUrl` is fetched
+  (`yap_protocol::voice_app::sanitize_public_https_url`): https, no
+  credentials, no local names, no private IPv4 or IPv6 literal.
+- `stream/live.rs` reads the body chunk by chunk on the engine's network
+  runtime into a 16-chunk channel; the decode thread reads it as a
+  non-seekable `MediaSource`. A full PCM queue (paused) holds the socket
+  back. 20 s without data counts as a network failure (the web's retry
+  plan applies).
+- The decoder hint comes from `Content-Type`; `audio/aac` and `audio/aacp`
+  are ADTS. MP3, ADTS AAC and Ogg streams play; HLS (`.m3u8`) does not
+  (`PLAYBACK_SRC_NOT_SUPPORTED`).
+
 Sources:
 
 - https://crates.io/crates/symphonia (0.5.5, 0.6.1)

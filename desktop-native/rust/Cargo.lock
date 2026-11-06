@@ -3260,7 +3260,9 @@ dependencies = [
  "rubato",
  "symphonia",
  "tokio",
+ "url",
  "windows-sys 0.61.2",
+ "yap-protocol",
 ]
 
 [[package]]
@@ -3305,6 +3307,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "url",
 ]
 
 [[package]]

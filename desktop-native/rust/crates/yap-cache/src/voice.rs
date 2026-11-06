@@ -49,10 +49,13 @@ pub enum InputProfile {
 /// What we hear of one person (`PeerSettings` `volume`, `muted`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+#[serde(rename_all = "camelCase")]
 pub struct PeerSettings {
     /// 0..=200 percent.
     pub volume: u16,
     pub muted: bool,
+    /// Their soundboard is silent for us (`soundboardMuted`).
+    pub soundboard_muted: bool,
 }
 
 impl Default for PeerSettings {
@@ -60,6 +63,7 @@ impl Default for PeerSettings {
         Self {
             volume: 100,
             muted: false,
+            soundboard_muted: false,
         }
     }
 }
@@ -289,11 +293,20 @@ mod tests {
             PeerSettings {
                 volume: 40,
                 muted: true,
+                soundboard_muted: true,
             },
         );
         save_voice(dir.path(), "u-jon", &jon).expect("save");
         save_voice(dir.path(), "u-other", &VoiceSettings::default()).expect("save");
         assert_eq!(load_voice(dir.path(), "u-jon"), jon);
+    }
+
+    #[test]
+    fn soundboard_mute_should_read_as_the_web_names_it() {
+        let peer: PeerSettings =
+            serde_json::from_str(r#"{"volume":100,"muted":false,"soundboardMuted":true}"#)
+                .expect("json");
+        assert!(peer.soundboard_muted);
     }
 
     #[test]
@@ -311,6 +324,7 @@ mod tests {
             PeerSettings {
                 volume: 50,
                 muted: false,
+                soundboard_muted: false,
             },
         );
         s.set_peer("u-ana", PeerSettings::default());
@@ -325,6 +339,7 @@ mod tests {
             PeerSettings {
                 volume: 900,
                 muted: false,
+                soundboard_muted: false,
             },
         );
         assert_eq!(s.peer("u-ana").volume, 200);

@@ -387,6 +387,7 @@ impl Runner {
             | Effect::CacheWrite { .. }
             | Effect::CacheClear { .. }
             | Effect::SaveCatalog { .. }
+            | Effect::SaveLocal { .. }
             | Effect::Audio { .. } => {}
             Effect::View(_) | Effect::Later { .. } | Effect::StartupMark(_) => return false,
         }
@@ -418,7 +419,9 @@ impl Runner {
                     // The semaphore is never closed, so a permit always comes.
                     let _permit = slots.acquire_owned().await;
                     let (method, path, body) = (request.method(), request.path(), request.body());
-                    let body = if request.on_kova() {
+                    let body = if let Some(url) = request.public_url() {
+                        api.get_public(&url).await
+                    } else if request.on_kova() {
                         api.call_kova(method, &path, &body).await
                     } else {
                         api.call(method, &path, &body).await
@@ -626,6 +629,16 @@ impl Runner {
                                 .map_err(|e| crate::api::ApiError::Decode(format!("upload: {e}")))
                         });
                     let _ = inbox.send(Input::Http { id, result });
+                });
+            }
+            Effect::SaveLocal { file, contents } => {
+                tokio::task::spawn_blocking(move || {
+                    let Some(dir) = yap_cache::settings::app_dir() else {
+                        return;
+                    };
+                    if let Err(error) = yap_cache::settings::save_app_file(&dir, file, &contents) {
+                        eprintln!("[apps] save {file}: {error}");
+                    }
                 });
             }
             Effect::Audio { token, command } => {

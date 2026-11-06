@@ -131,6 +131,12 @@ pub enum Effect {
         token: Option<Token>,
         command: super::apps::AudioCommand,
     },
+    /// Replace one of the voice apps' files in the app folder (custom
+    /// sounds, Daily Word boards) with `contents` (JSON). No answer.
+    SaveLocal {
+        file: &'static str,
+        contents: String,
+    },
 }
 
 /// Which profile image an upload replaces.
@@ -373,6 +379,14 @@ impl ApiRequest {
     /// Kova's auth server answers this, not the Yap API.
     pub fn on_kova(&self) -> bool {
         matches!(self, Self::KovaSession | Self::KovaAccounts)
+    }
+
+    /// A GET of this whole URL on another host, without the session.
+    pub fn public_url(&self) -> Option<String> {
+        match self {
+            Self::Apps(request) => request.public_url(),
+            _ => None,
+        }
     }
 
     pub fn method(&self) -> Method {

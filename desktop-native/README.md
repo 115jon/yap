@@ -251,12 +251,26 @@ the decisions.
     clip sets op 5's SOUNDSHARE flag. Volume is the clip's volume times the
     soundboard volume setting. Join and leave sounds per server or for all
     servers (Settings, Soundboard), synced to `sound_settings`, at most 3 s.
+  - The rest of the web picker: MyInstants (trending and search through
+    `/api/myinstants`, played for everyone by its `myinstants.com` URL),
+    radio (radio-browser search from the client, no session; a station
+    goes to Listen Together), favourites (`/api/myinstants/favorites`, the
+    star on every tile), custom sounds kept on this device
+    (`soundboard-sounds.json`, 128 KiB at most, relayed as a `data:` URL),
+    editing a sound (name, emoji, volume: the server's `PATCH` for its
+    sounds, then `soundboard.catalog-updated`), and "Mute soundboard" on a
+    person's menu (kept with their voice settings). Tile keys show on hover
+    or keyboard focus.
   - The local player is `crates/yap-audio`: symphonia decoding (mp3, AAC/m4a,
     Vorbis, FLAC, WAV, WebM/MKV; Opus through the libopus inside libwebrtc),
     a 48 kHz mixer and `waveOut` on the voice output device.
   - Listen Together: search or a YouTube/Spotify link, queue (append, play
     next, play now), play, pause, seek, skip, remove, clear; the now-playing
-    card. The stream (`/api/listen-together/stream`, mp4, Range, the web's
+    card; Tracks and Collections search, a pasted playlist's preview (Play
+    now, Queue), Queue collection (every resolve page, at most 100, one
+    import batch), Recently played with Requeue, and radio entries played
+    live from the station (a public https stream, never sought). The stream
+    (`/api/listen-together/stream`, mp4, Range, the web's
     retry plan) follows the room's anchor and seeks when it drifts more than
     750 ms. Loudness presets as the web's (compressor and limiter,
     approximated; LIBRARIES.md).
@@ -279,10 +293,10 @@ unless "Open on startup" is on), data and logs under
 
 ## Not yet
 
-Soundboard: MyInstants, radio, favorites, local custom sounds, editing a
-sound, per-person and per-server soundboard mute controls. Listen Together:
-radio stations, collections and paging, recently played. Wordle progress is
-kept for the session only (the web keeps it per day). Warp Rush.
+Soundboard: station previews, station favicons, the moderator's
+per-server soundboard mute (the web has the menu item but never wires it).
+Listen Together: recent searches and the result actions menu. Activities
+(Daily Word's per-day board, Warp Rush) wait for their rework as web pages.
 Camera backgrounds, the stream watcher list and stream
 volume, input volume, a mic test outside a call, WebM audio (webm plays
 silent), clips in the GIF picker, the favourites tab and GIF categories,

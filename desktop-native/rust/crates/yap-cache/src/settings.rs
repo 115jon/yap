@@ -148,6 +148,34 @@ pub(crate) fn write<T: Serialize>(path: &Path, value: &T) -> Result<(), CacheErr
     Ok(())
 }
 
+/// A plain `*.json` name in the app folder (no folders, no `..`).
+fn app_file_name(file: &str) -> bool {
+    file.ends_with(".json")
+        && file.len() > 5
+        && file
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
+        && !file.contains("..")
+}
+
+/// One of the voice apps' own files (custom sounds, Daily Word boards), as
+/// JSON; `None` when missing, unreadable or not a plain file name.
+pub fn load_app_file(dir: &Path, file: &str) -> Option<serde_json::Value> {
+    app_file_name(file).then(|| read(&dir.join(file))).flatten()
+}
+
+/// Replaces one of those files with `contents`, which must be JSON.
+pub fn save_app_file(dir: &Path, file: &str, contents: &str) -> Result<(), CacheError> {
+    if !app_file_name(file) {
+        return Err(CacheError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "not an app file name",
+        )));
+    }
+    let value: serde_json::Value = serde_json::from_str(contents)?;
+    write(&dir.join(file), &value)
+}
+
 /// The settings in `dir`, or the defaults when the file is missing or does
 /// not parse.
 pub fn load_settings(dir: &Path) -> DesktopSettings {
@@ -202,6 +230,20 @@ pub fn save_search_recents(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn app_files_should_round_trip_and_refuse_other_paths() {
+        let dir = tempfile::tempdir().expect("dir");
+        save_app_file(dir.path(), "wordle.json", r#"{"k":[1]}"#).expect("save");
+        assert_eq!(
+            load_app_file(dir.path(), "wordle.json"),
+            Some(serde_json::json!({"k": [1]}))
+        );
+        assert!(save_app_file(dir.path(), "../x.json", "{}").is_err());
+        assert!(save_app_file(dir.path(), "a/b.json", "{}").is_err());
+        assert!(save_app_file(dir.path(), "x.json", "not json").is_err());
+        assert!(load_app_file(dir.path(), "missing.json").is_none());
+    }
 
     #[test]
     fn defaults_match_the_desktop_app() {

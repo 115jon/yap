@@ -62,6 +62,7 @@ mod decode;
 mod dsp;
 mod dynamics;
 mod engine;
+mod guard;
 mod mixer;
 mod opus;
 mod output;
@@ -72,6 +73,7 @@ mod tone;
 use std::sync::Arc;
 
 pub use engine::Engine;
+pub use guard::public_http_client;
 
 /// The mix rate, in frames per second.
 pub const SAMPLE_RATE: u32 = 48_000;
@@ -132,6 +134,9 @@ pub struct StreamRequest {
     pub paused: bool,
     pub volume: f32,
     pub loudness: Loudness,
+    /// A live radio stream (`url` is the station's own): one plain GET,
+    /// no Range, no seeking, `position_ms` ignored.
+    pub live: bool,
 }
 
 impl std::fmt::Debug for StreamRequest {
@@ -145,6 +150,7 @@ impl std::fmt::Debug for StreamRequest {
             .field("paused", &self.paused)
             .field("volume", &self.volume)
             .field("loudness", &self.loudness)
+            .field("live", &self.live)
             .finish()
     }
 }

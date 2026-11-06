@@ -377,6 +377,10 @@ pub struct LtSnapshot {
     pub queue: Vec<LtEntry>,
     #[serde(default)]
     pub current_entry: Option<LtEntry>,
+    /// Finished entries, newest first (the room keeps
+    /// [`RECENTLY_PLAYED_LIMIT`]).
+    #[serde(default, deserialize_with = "recently_played")]
+    pub recently_played: Vec<LtHistory>,
     #[serde(default)]
     pub position_ms: f64,
     #[serde(default)]
@@ -385,6 +389,96 @@ pub struct LtSnapshot {
 
 fn default_true() -> bool {
     true
+}
+
+/// One finished entry (`ListenTogetherRecentlyPlayedEntry`).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LtHistory {
+    pub history_id: String,
+    #[serde(default)]
+    pub played_at: f64,
+    pub entry: LtEntry,
+}
+
+/// The room's `recentlyPlayed`: entries that do not parse are dropped (as
+/// `parseRecentlyPlayed` filters them), at most [`RECENTLY_PLAYED_LIMIT`].
+fn recently_played<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Vec<LtHistory>, D::Error> {
+    let value = Value::deserialize(de)?;
+    Ok(value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| serde_json::from_value::<LtHistory>(item.clone()).ok())
+        .filter(|item| !item.history_id.is_empty())
+        .take(RECENTLY_PLAYED_LIMIT)
+        .collect())
+}
+
+/// `LISTEN_TOGETHER_RECENTLY_PLAYED_LIMIT`.
+pub const RECENTLY_PLAYED_LIMIT: usize = 50;
+
+/// `LISTEN_TOGETHER_IMPORT_LIMIT`: the most entries one enqueue (and one
+/// collection import) carries.
+pub const IMPORT_LIMIT: usize = 100;
+
+/// `MAX_RADIO_STATION_LOOKUPS_PER_ENQUEUE`.
+pub const MAX_RADIO_LOOKUPS_PER_ENQUEUE: usize = 5;
+
+/// `RADIO_STATION_UUID_PATTERN`: a radio-browser station uuid (RFC 4122,
+/// versions 1-5).
+pub fn is_station_uuid(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    for (index, byte) in bytes.iter().enumerate() {
+        let ok = match index {
+            8 | 13 | 18 | 23 => *byte == b'-',
+            14 => (b'1'..=b'5').contains(byte),
+            19 => b"89abAB".contains(byte),
+            _ => byte.is_ascii_hexdigit(),
+        };
+        if !ok {
+            return false;
+        }
+    }
+    true
+}
+
+/// `sanitizePublicHttpsUrl` (`radio-station-resolver.ts`): https, no
+/// credentials, not a local name or a private IPv4 literal, no IPv6
+/// literal. The room only relays radio stream and artwork URLs that pass it,
+/// and nothing else is fetched for a radio entry.
+pub fn sanitize_public_https_url(value: &str) -> Option<String> {
+    if value.is_empty() || value.len() > 2048 {
+        return None;
+    }
+    let url = url::Url::parse(value).ok()?;
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
+        return None;
+    }
+    let host = match url.host()? {
+        url::Host::Domain(domain) => domain.to_ascii_lowercase(),
+        url::Host::Ipv4(ip) => {
+            let [first, second, ..] = ip.octets();
+            let private = first == 0
+                || first == 10
+                || first == 127
+                || (first == 169 && second == 254)
+                || (first == 172 && (16..=31).contains(&second))
+                || (first == 192 && second == 168);
+            if private {
+                return None;
+            }
+            return Some(url.to_string());
+        }
+        url::Host::Ipv6(_) => return None,
+    };
+    if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") {
+        return None;
+    }
+    Some(url.to_string())
 }
 
 /// `listen_together.*` from the room.
@@ -641,6 +735,30 @@ impl EnqueueMode {
 pub struct LtSeed {
     pub track: LtTrack,
     pub requester: LtRequester,
+    /// One id for every entry of a collection import, `None` otherwise.
+    pub import_batch_id: Option<String>,
+    /// The collection's title.
+    pub import_batch_label: Option<String>,
+}
+
+impl LtSeed {
+    /// A radio station as the soundboard queues it: the room looks the
+    /// station up and fills in the rest (`broadcastSound`, `kind: "radio"`).
+    pub fn radio(station_uuid: &str, title: &str, requester: LtRequester) -> Self {
+        Self {
+            track: LtTrack {
+                kind: "radio".into(),
+                id: station_uuid.to_owned(),
+                provider: "radio".into(),
+                title: title.to_owned(),
+                station_uuid: Some(station_uuid.to_owned()),
+                ..LtTrack::default()
+            },
+            requester,
+            import_batch_id: None,
+            import_batch_label: None,
+        }
+    }
 }
 
 /// What we send on op 106.
@@ -960,6 +1078,29 @@ fn base64_value(b: u8) -> u8 {
 
 /// The largest `data_url` clip the room relays (`MAX_SOUNDBOARD_DATA_URL_BYTES`).
 pub const MAX_DATA_URL_BYTES: usize = 128 * 1024;
+
+/// `data:<mime>;base64,<bytes>` with canonical padded base64, as
+/// `FileReader.readAsDataURL` writes it.
+pub fn data_url(mime: &str, bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(mime.len() + 13 + bytes.len().div_ceil(3) * 4);
+    out.push_str("data:");
+    out.push_str(mime);
+    out.push_str(";base64,");
+    for chunk in bytes.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        for (index, shift) in [18u32, 12, 6, 0].into_iter().enumerate() {
+            if index <= chunk.len() {
+                out.push(char::from(ALPHABET[((n >> shift) & 63) as usize]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
 
 /// `normalizeSoundboardUploadUrl` and the MyInstants rule of
 /// `sanitizeSoundboardMediaUrl`.

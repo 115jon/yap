@@ -2,6 +2,7 @@
 //! and decodes (`crate::decode`), resamples, and fills the mixer's queue
 //! (`queue`), recovering from failures the way the web does (`recovery`).
 
+pub(crate) mod live;
 pub(crate) mod queue;
 pub(crate) mod recovery;
 pub(crate) mod source;
@@ -17,11 +18,12 @@ use symphonia::core::units::{Time, TimeBase};
 use crate::decode::{self, PacketDecoder, PacketError};
 use crate::resample::StreamResampler;
 use crate::{Event, EventSink, StreamFailure, SAMPLE_RATE};
+use live::LiveSource;
 use queue::{ms_to_frames, StreamQueue};
 use recovery::{
     alternate_format_url, format_of, plan_recovery, Action, MediaError, Probe, RecoveryState,
 };
-use source::{fetch_error, Cancel, FetchError, RangeFetcher, RangeSource};
+use source::{fetch_error, Cancel, FetchError, Net, RangeFetcher, RangeSource};
 
 /// Decoded audio kept ahead of the mixer.
 const BUFFER_FRAMES: usize = 3 * SAMPLE_RATE as usize;
@@ -85,6 +87,9 @@ pub(crate) struct StreamJob<M> {
     pub make_fetcher: M,
     /// Multiplies retry delays (1.0; tests shrink them).
     pub delay_scale: f64,
+    /// A live radio stream on this network: one plain GET, read to its
+    /// end, never sought (`make_fetcher` is not used).
+    pub live: Option<Net>,
 }
 
 /// Spawns the stream thread.
@@ -152,6 +157,7 @@ where
         events,
         make_fetcher,
         delay_scale,
+        live,
     } = job;
     let mut state = RecoveryState::default();
     let mut generation = queue.generation();
@@ -165,9 +171,15 @@ where
             cancel,
             key: &key,
         };
-        let outcome = match make_fetcher(&url, cancel.clone()) {
-            Ok(fetcher) => play(&attempt, fetcher, &url, position_ms, &mut generation),
-            Err(detail) => {
+        let opened = match &live {
+            Some(_) => Ok(None),
+            None => make_fetcher(&url, cancel.clone()).map(Some),
+        };
+        let outcome = match (opened, &live) {
+            (Ok(None), Some(net)) => play_live(&attempt, net, &url, &mut generation),
+            (Ok(None), None) => Outcome::Stopped,
+            (Ok(Some(fetcher)), _) => play(&attempt, fetcher, &url, position_ms, &mut generation),
+            (Err(detail), _) => {
                 // A URL or header that cannot be built will not build on a
                 // retry either: fail now instead of "reconnecting".
                 eprintln!("[audio] stream {key}: {detail}; Fail (no fetcher)");
@@ -418,7 +430,6 @@ fn play<F: RangeFetcher>(
     start_ms: u64,
     generation: &mut u64,
 ) -> Outcome {
-    let key = attempt.key;
     let source = match RangeSource::open(fetcher) {
         Ok(source) => source,
         Err(error) => {
@@ -439,7 +450,65 @@ fn play<F: RangeFetcher>(
         Some("webm") => Some("webm"),
         _ => Some("m4a"),
     });
-    let (format, track) = match decode::open(Box::new(source), &hint) {
+    play_opened(
+        attempt,
+        Box::new(source),
+        bytes,
+        &hint,
+        url,
+        start_ms,
+        generation,
+        false,
+    )
+}
+
+/// One attempt at a live radio stream: open, decode until it ends, fails
+/// or is stopped. It always starts at 0 (the web never seeks radio).
+fn play_live(attempt: &Attempt<'_>, net: &Net, url: &str, generation: &mut u64) -> Outcome {
+    let source = match LiveSource::open(net, url, attempt.cancel.clone()) {
+        Ok(source) => source,
+        Err(error) => {
+            return match probe_for(&error) {
+                Some(probe) => failed(
+                    Some(MediaError::Network),
+                    probe,
+                    error.to_string(),
+                    0,
+                    false,
+                ),
+                None => Outcome::Stopped,
+            }
+        }
+    };
+    let hint = decode::hint(source.hint().as_deref());
+    play_opened(
+        attempt,
+        Box::new(source),
+        None,
+        &hint,
+        url,
+        0,
+        generation,
+        true,
+    )
+}
+
+/// Decodes an opened source into the queue. A `live` source has no end: if
+/// it finishes cleanly the station dropped us, which is a network failure
+/// (the caller reconnects with backoff).
+#[allow(clippy::too_many_arguments)]
+fn play_opened(
+    attempt: &Attempt<'_>,
+    source: Box<dyn symphonia::core::io::MediaSource>,
+    bytes: Option<u64>,
+    hint: &symphonia::core::probe::Hint,
+    url: &str,
+    start_ms: u64,
+    generation: &mut u64,
+    live: bool,
+) -> Outcome {
+    let key = attempt.key;
+    let (format, track) = match decode::open(source, hint) {
         Ok(opened) => opened,
         Err(error) => {
             if attempt.cancel.is_cancelled() {
@@ -550,11 +619,22 @@ fn play<F: RangeFetcher>(
                 pipeline.flush();
                 let start = pipeline.out_frame;
                 let samples = std::mem::take(&mut pipeline.resampled);
-                attempt.queue.push(*generation, start, samples);
+                if attempt.queue.push(*generation, start, samples) {
+                    played = true;
+                }
                 eprintln!(
                     "[audio] stream {key}: end of stream at {} ms",
                     pipeline.position_ms()
                 );
+                if live {
+                    return failed(
+                        Some(MediaError::Network),
+                        None,
+                        "the station closed the stream".into(),
+                        0,
+                        played,
+                    );
+                }
                 attempt.queue.finish(*generation, false);
                 at_end = true;
                 continue;
@@ -662,6 +742,7 @@ mod tests {
             events,
             make_fetcher,
             delay_scale: 0.001,
+            live: None,
         }
     }
 
@@ -683,6 +764,74 @@ mod tests {
             .lock()
             .map(|events| events.is_empty())
             .unwrap_or(false));
+    }
+
+    #[test]
+    fn a_live_source_decodes_without_seeking() {
+        let data = wav(44_100, 2, 440.0, 1.0);
+        let queue = Arc::new(StreamQueue::new(0));
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        for chunk in data.chunks(4096) {
+            tx.try_send(Ok(chunk.to_vec())).expect("send");
+        }
+        drop(tx);
+        let (stop, commands) = mpsc::channel();
+        let decoder = std::thread::spawn({
+            let queue = Arc::clone(&queue);
+            move || {
+                let source = LiveSource::from_channel(rx, Some("audio/wav".into()));
+                let cancel = Cancel::default();
+                let attempt = Attempt {
+                    queue: &queue,
+                    commands: &commands,
+                    cancel: &cancel,
+                    key: "radio",
+                };
+                let hint = decode::hint(source.hint().as_deref());
+                let mut generation = queue.generation();
+                play_opened(
+                    &attempt,
+                    Box::new(source),
+                    None,
+                    &hint,
+                    URL,
+                    0,
+                    &mut generation,
+                    true,
+                )
+            }
+        });
+        let outcome = decoder.join().expect("decoder");
+        drop(stop);
+        // A live stream never ends on its own: a clean end is a dropped
+        // connection, retried like any network failure, and the queue is
+        // left open for the audio that follows the reconnect.
+        match outcome {
+            Outcome::Failed {
+                media_error,
+                probe,
+                resume_ms,
+                played,
+                ..
+            } => {
+                assert_eq!(media_error, Some(MediaError::Network));
+                assert!(probe.is_none());
+                assert_eq!(resume_ms, 0);
+                assert!(played);
+            }
+            _ => panic!("expected a network failure"),
+        }
+        assert!(!queue.ended());
+        let mut frames = 0;
+        loop {
+            let mut block = vec![0.0; 1920];
+            let pulled = queue.pull(&mut block);
+            frames += pulled.frames;
+            if pulled.frames == 0 {
+                break;
+            }
+        }
+        assert!((44_000..=48_200).contains(&frames), "{frames}");
     }
 
     #[test]

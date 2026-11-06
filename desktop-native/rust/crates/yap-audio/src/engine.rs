@@ -645,8 +645,10 @@ impl Worker {
             };
             let client = {
                 let _entered = runtime.enter();
+                // The stream's host is the API or a CDN, never this machine.
                 reqwest::Client::builder()
                     .connect_timeout(Duration::from_secs(10))
+                    .dns_resolver(crate::guard::PublicResolver)
                     .build()
             };
             let client = match client {
@@ -700,6 +702,7 @@ impl Worker {
             position_ms: request.position_ms,
             queue: Arc::clone(&queue),
             events: Arc::clone(&self.events),
+            live: request.live.then(|| net.clone()),
             make_fetcher: move |url: &str, cancel: Cancel| {
                 HttpFetcher::new(net.clone(), url, &headers, cancel)
             },

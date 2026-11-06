@@ -11,12 +11,13 @@
 //! UI shows ([`AppsView`]). The op 106 wire shapes are
 //! `yap_protocol::voice_app`.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde::Serialize;
 use serde_json::{json, Value};
 use yap_protocol::voice_app::{
-    is_default_sound, LtSnapshot, LtTrack, WordleProgress, DEFAULT_SOUNDS,
+    is_default_sound, sanitize_media_url, upload_url, LtSnapshot, LtTrack, WordleProgress,
+    DEFAULT_SOUNDS,
 };
 
 use super::Method;
@@ -36,6 +37,170 @@ pub const MAX_UPLOAD_BYTES: u64 = 50 * 1024 * 1024;
 /// The scope a join or leave sound applies to when no server overrides it
 /// (`ALL_SERVERS_SOUND_SCOPE`).
 pub const ALL_SERVERS: &str = "*";
+
+/// The largest local custom sound (`MAX_LOCAL_SOUNDBOARD_DATA_URL_BYTES`):
+/// what the room relays as a `data_url`.
+pub const MAX_LOCAL_SOUND_BYTES: usize = 128 * 1024;
+
+/// The radio-browser host the picker searches.
+pub const RADIO_BROWSER: &str = "https://de1.api.radio-browser.info";
+
+/// The local file of custom sounds (localStorage `voice-soundboard:<key>`).
+pub const SOUNDS_FILE: &str = "soundboard-sounds.json";
+/// The localStorage key of a scope's custom sounds.
+pub fn local_sounds_key(server_key: &str) -> String {
+    format!("voice-soundboard:{server_key}")
+}
+
+/// A sound the picker names: `mi:`, `fav:`, `local:` and `radio:` prefix
+/// the newer sources; a bare id is a tone or a sound of the call's server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SoundRef {
+    Catalog(String),
+    Instant(String),
+    Favorite(String),
+    Local(String),
+    Radio(String),
+}
+
+impl SoundRef {
+    pub fn parse(text: &str) -> Self {
+        match text.split_once(':') {
+            Some(("mi", id)) => Self::Instant(id.to_owned()),
+            Some(("fav", id)) => Self::Favorite(id.to_owned()),
+            Some(("local", id)) => Self::Local(id.to_owned()),
+            Some(("radio", id)) => Self::Radio(id.to_owned()),
+            _ => Self::Catalog(text.to_owned()),
+        }
+    }
+}
+
+/// A MyInstants sound (`/api/myinstants` results).
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize, Serialize)]
+pub struct InstantSound {
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub color: String,
+}
+
+/// A favourite (`/api/myinstants/favorites`, `normalizeFavoriteSound`).
+#[derive(Debug, Clone, PartialEq, Default, serde::Deserialize, Serialize)]
+pub struct Favorite {
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub color: String,
+    /// `myinstants`, `server`, `default`, `radio` or `custom`.
+    #[serde(default, rename = "soundType")]
+    pub sound_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<String>,
+    #[serde(default, rename = "serverId", skip_serializing_if = "Option::is_none")]
+    pub server_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_server_id: Option<String>,
+}
+
+impl Favorite {
+    /// `normalizeFavoriteSound`: a server upload is `server` whatever the
+    /// row says; the source server fills both fields.
+    pub fn normalized(mut self) -> Self {
+        let source = self
+            .source_server_id
+            .clone()
+            .or_else(|| self.server_id.clone());
+        if source.is_some() && self.url == upload_url(&self.id) {
+            self.sound_type = "server".into();
+        } else if self.sound_type.is_empty() {
+            self.sound_type = "myinstants".into();
+        }
+        if source.is_some() {
+            self.server_id.clone_from(&source);
+            self.source_server_id = source;
+        }
+        self
+    }
+
+    pub fn source_server(&self) -> Option<&str> {
+        self.server_id
+            .as_deref()
+            .or(self.source_server_id.as_deref())
+    }
+}
+
+/// A radio station (radio-browser's `stations/*` JSON).
+#[derive(Debug, Clone, PartialEq, Default, serde::Deserialize, Serialize)]
+pub struct Station {
+    #[serde(default)]
+    pub stationuuid: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub url_resolved: String,
+    #[serde(default)]
+    pub favicon: String,
+}
+
+/// A custom sound kept on this device (`CustomSound`): its audio is a
+/// `data:` URL the room relays as it is.
+#[derive(Debug, Clone, PartialEq, Default, serde::Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalSound {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<f64>,
+}
+
+/// The custom sounds in `soundboard-sounds.json`, leniently: one entry
+/// that no longer parses (an older shape, a hand edit) is dropped without
+/// losing the others, and a file that is not a map of lists is empty.
+pub fn parse_local_sounds(value: serde_json::Value) -> BTreeMap<String, Vec<LocalSound>> {
+    let Ok(raw) = serde_json::from_value::<BTreeMap<String, Vec<serde_json::Value>>>(value) else {
+        return BTreeMap::new();
+    };
+    raw.into_iter()
+        .filter_map(|(scope, entries)| {
+            let sounds: Vec<LocalSound> = entries
+                .into_iter()
+                .filter_map(|entry| serde_json::from_value::<LocalSound>(entry).ok())
+                .collect();
+            (!sounds.is_empty()).then_some((scope, sounds))
+        })
+        .collect()
+}
+
+/// A collection search result or a resolved collection
+/// (`ListenTogetherSearchCollectionResult`, `...ResolveCollectionMeta`).
+#[derive(Debug, Clone, PartialEq, Default, serde::Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LtCollection {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub subtitle: Option<String>,
+    #[serde(default)]
+    pub item_count: u64,
+    #[serde(default)]
+    pub artwork_url: Option<String>,
+    #[serde(default)]
+    pub source_url: String,
+}
 
 /// The audio a clip plays.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,10 +244,13 @@ pub enum AudioCommand {
     /// Load the stream for queue entry `key` (replacing any other).
     StreamLoad {
         key: String,
-        /// `/api/listen-together/stream?…` on our API.
+        /// `/api/listen-together/stream?…` on our API, or a radio
+        /// station's own https URL (`live`).
         path: String,
         position_ms: f64,
         paused: bool,
+        /// A radio station: an endless stream, never sought, no session.
+        live: bool,
     },
     StreamSeek(f64),
     StreamPause(bool),
@@ -191,9 +359,47 @@ pub enum AppsCommand {
         emoji: String,
         volume: f64,
     },
-    /// Delete a sound of the call's server.
+    /// Delete a sound of the call's server, or a local custom sound
+    /// (`local:<id>`).
     Delete(String),
     ClearError,
+    /// The MyInstants view: trending (empty) or a search.
+    InstantsSearch(String),
+    /// The radio view: top stations (empty) or a search.
+    RadioSearch(String),
+    /// The favourites (once per session, when the picker first opens).
+    LoadFavorites,
+    /// Favourite or unfavourite a sound (a picker reference).
+    ToggleFavorite(String),
+    /// Edit a sound of the call's server or a local one: name, emoji
+    /// (empty clears it) and volume.
+    EditSound {
+        sound: String,
+        name: String,
+        emoji: String,
+        volume: f64,
+    },
+    /// Keep an audio file on this device as a custom sound. The bridge
+    /// reads the file; `id` is new.
+    AddLocalSound {
+        id: String,
+        file_name: String,
+        bytes: Vec<u8>,
+        name: String,
+        emoji: String,
+        volume: f64,
+    },
+    /// The custom sounds this device keeps, by key (read once at startup).
+    LocalData {
+        sounds: BTreeMap<String, Vec<LocalSound>>,
+    },
+    /// Someone's soundboard is muted for us (the peer menu), or not.
+    PeerSoundboardMuted {
+        user_id: String,
+        muted: bool,
+    },
+    /// Everyone whose soundboard is muted for us (the voice settings).
+    SoundboardMutedPeers(Vec<String>),
     /// Settings: a join or leave sound for a scope (`*` or a server id):
     /// on or off, a sound (`default:<id>` or `server:<server>:<id>`), or
     /// cleared.
@@ -230,6 +436,16 @@ pub enum AppsCommand {
     /// Listen Together.
     LtSearch(String),
     LtResolve(String),
+    /// The search tab: `track` or `collection`.
+    LtFilter(String),
+    /// Queue every resolved track (a link's preview): `append` or `play-now`.
+    LtEnqueueAll {
+        mode: String,
+    },
+    /// Resolve a collection result and queue all of it.
+    LtQueueCollection(usize),
+    /// Queue a recently played entry again.
+    LtRequeue(String),
     /// Queue a search or resolve result by its index.
     LtEnqueue {
         index: usize,
@@ -265,9 +481,32 @@ pub enum AppsRequest {
     /// GET `/api/wordle/today?date=`.
     Wordle { date: String },
     /// GET `/api/listen-together/search`.
-    Search { query: String, context: LtContext },
-    /// POST `/api/listen-together/resolve`.
-    Resolve { url: String, context: LtContext },
+    Search {
+        query: String,
+        filter: &'static str,
+        context: LtContext,
+    },
+    /// POST `/api/listen-together/resolve`, a page from `offset`.
+    Resolve {
+        url: String,
+        offset: u64,
+        context: LtContext,
+    },
+    /// GET `/api/myinstants?q=`.
+    Instants { query: String },
+    /// GET `/api/myinstants/favorites`.
+    Favorites,
+    /// POST `/api/myinstants/favorites` `{action, sound}` (`sound` as JSON).
+    SaveFavorite { add: bool, sound: String },
+    /// PATCH `/api/servers/{id}/soundboard?soundId=` (`body` as JSON).
+    EditSound {
+        server_id: String,
+        sound_id: String,
+        body: String,
+    },
+    /// radio-browser's station search, straight from the client as the
+    /// web does it: no session goes there ([`AppsRequest::public_url`]).
+    Radio { query: String },
 }
 
 /// Where a Listen Together request comes from (the voice room it needs).
@@ -320,11 +559,20 @@ fn one() -> f64 {
 pub enum AppsResponse {
     Catalog(Vec<ServerSound>),
     Wordle(Box<WordlePuzzle>),
-    Search(Vec<LtTrack>),
+    Search {
+        tracks: Vec<LtTrack>,
+        collections: Vec<LtCollection>,
+    },
     Resolve {
         tracks: Vec<LtTrack>,
         skipped: usize,
+        resolved: usize,
+        collection: Option<LtCollection>,
+        next_offset: Option<u64>,
     },
+    Instants(Vec<InstantSound>),
+    Favorites(Vec<Favorite>),
+    Stations(Vec<Station>),
     Done,
 }
 
@@ -344,11 +592,33 @@ pub struct WordlePuzzle {
 impl AppsRequest {
     pub fn method(&self) -> Method {
         match self {
-            Self::Catalog { .. } | Self::Wordle { .. } | Self::Search { .. } => Method::Get,
+            Self::Catalog { .. }
+            | Self::Wordle { .. }
+            | Self::Search { .. }
+            | Self::Instants { .. }
+            | Self::Favorites
+            | Self::Radio { .. } => Method::Get,
             Self::DeleteSound { .. } => Method::Delete,
-            Self::SaveTrigger { .. } => Method::Patch,
-            Self::Resolve { .. } => Method::Post,
+            Self::SaveTrigger { .. } | Self::EditSound { .. } => Method::Patch,
+            Self::Resolve { .. } | Self::SaveFavorite { .. } => Method::Post,
         }
+    }
+
+    /// The whole URL of a request that goes to another host without the
+    /// session (radio-browser), else `None` (our API).
+    pub fn public_url(&self) -> Option<String> {
+        let Self::Radio { query } = self else {
+            return None;
+        };
+        let query = query.trim();
+        Some(if query.is_empty() {
+            format!("{RADIO_BROWSER}/json/stations/topclick/25?hidebroken=true")
+        } else {
+            format!(
+                "{RADIO_BROWSER}/json/stations/search?name={}&limit=25&hidebroken=true&order=clickcount&reverse=true",
+                super::uri_component(query)
+            )
+        })
     }
 
     pub fn path(&self) -> String {
@@ -365,14 +635,31 @@ impl AppsRequest {
             ),
             Self::SaveTrigger { .. } => "/api/users/me".into(),
             Self::Wordle { date } => format!("/api/wordle/today?date={}", q(date)),
-            Self::Search { query, context } => format!(
-                "/api/listen-together/search?q={}&filter=track&{}",
+            Self::Search {
+                query,
+                filter,
+                context,
+            } => format!(
+                "/api/listen-together/search?q={}&filter={filter}&{}",
                 q(query),
                 context.query()
             ),
             Self::Resolve { context, .. } => {
                 format!("/api/listen-together/resolve?{}", context.query())
             }
+            Self::Instants { query } if query.trim().is_empty() => "/api/myinstants".into(),
+            Self::Instants { query } => format!("/api/myinstants?q={}", q(query.trim())),
+            Self::Favorites | Self::SaveFavorite { .. } => "/api/myinstants/favorites".into(),
+            Self::EditSound {
+                server_id,
+                sound_id,
+                ..
+            } => format!(
+                "/api/servers/{}/soundboard?soundId={}",
+                q(server_id),
+                q(sound_id)
+            ),
+            Self::Radio { .. } => self.public_url().unwrap_or_default(),
         }
     }
 
@@ -382,10 +669,19 @@ impl AppsRequest {
                 let map: Value = serde_json::from_str(map).unwrap_or(Value::Null);
                 json!({ "sound_settings": { *key: map } })
             }
-            Self::Resolve { url, context } => json!({
+            Self::Resolve {
+                url,
+                offset,
+                context,
+            } => json!({
                 "roomSlug": context.room_slug, "serverId": context.server_id,
-                "channelId": context.channel_id, "url": url,
+                "channelId": context.channel_id, "url": url, "offset": offset,
             }),
+            Self::SaveFavorite { add, sound } => json!({
+                "action": if *add { "add" } else { "remove" },
+                "sound": serde_json::from_str::<Value>(sound).unwrap_or(Value::Null),
+            }),
+            Self::EditSound { body, .. } => serde_json::from_str(body).unwrap_or(Value::Null),
             _ => Value::Null,
         }
     }
@@ -418,21 +714,86 @@ impl AppsRequest {
                 serde_json::from_value(body)
                     .map_err(|e| ApiError::Decode(format!("wordle: {e}")))?,
             )),
-            // Collections need a resolve; the track tab lists tracks only.
-            Self::Search { .. } => AppsResponse::Search(
-                tracks(body.get("results"))
+            Self::Search { .. } => {
+                let results = body.get("results").and_then(Value::as_array);
+                let of_kind = |kind: &str| -> Vec<Value> {
+                    results
+                        .into_iter()
+                        .flatten()
+                        .filter(|item| item.get("kind").and_then(Value::as_str) == Some(kind))
+                        .cloned()
+                        .collect()
+                };
+                AppsResponse::Search {
+                    tracks: tracks(Some(&Value::Array(of_kind("track"))))
+                        .into_iter()
+                        .filter(|t| t.video_id.is_some())
+                        .collect(),
+                    collections: of_kind("collection")
+                        .into_iter()
+                        .filter_map(|item| serde_json::from_value::<LtCollection>(item).ok())
+                        .filter(|c| !c.source_url.is_empty())
+                        .collect(),
+                }
+            }
+            Self::Resolve { .. } => {
+                let count = |key: &str| {
+                    body.get(key)
+                        .and_then(Value::as_u64)
+                        .map_or(0, |n| usize::try_from(n).unwrap_or(usize::MAX))
+                };
+                AppsResponse::Resolve {
+                    tracks: tracks(body.get("tracks")),
+                    skipped: count("skippedCount"),
+                    resolved: count("resolvedCount"),
+                    collection: body
+                        .get("collection")
+                        .filter(|c| c.is_object())
+                        .and_then(|c| serde_json::from_value(c.clone()).ok()),
+                    next_offset: (body.get("kind").and_then(Value::as_str) == Some("collection"))
+                        .then(|| body.get("nextOffset").and_then(Value::as_u64))
+                        .flatten(),
+                }
+            }
+            // Only what the room relays is kept (`sanitizeSoundboardMediaUrl`).
+            Self::Instants { .. } => AppsResponse::Instants(
+                body.get("results")
+                    .and_then(Value::as_array)
                     .into_iter()
-                    .filter(|t| t.video_id.is_some())
+                    .flatten()
+                    .filter_map(|item| serde_json::from_value::<InstantSound>(item.clone()).ok())
+                    .filter(|s| {
+                        !s.id.is_empty()
+                            && s.url.starts_with("https://")
+                            && sanitize_media_url(&s.url).is_some()
+                    })
                     .collect(),
             ),
-            Self::Resolve { .. } => AppsResponse::Resolve {
-                tracks: tracks(body.get("tracks")),
-                skipped: body
-                    .get("skippedCount")
-                    .and_then(Value::as_u64)
-                    .map_or(0, |n| usize::try_from(n).unwrap_or(usize::MAX)),
-            },
-            Self::DeleteSound { .. } | Self::SaveTrigger { .. } => AppsResponse::Done,
+            Self::Favorites => AppsResponse::Favorites(
+                body.get("favorites")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|item| serde_json::from_value::<Favorite>(item.clone()).ok())
+                    .filter(|f| !f.id.is_empty())
+                    .map(Favorite::normalized)
+                    .collect(),
+            ),
+            Self::Radio { .. } => AppsResponse::Stations(match body {
+                Value::Array(items) => items
+                    .into_iter()
+                    .filter_map(|item| serde_json::from_value::<Station>(item).ok())
+                    .filter(|s| {
+                        yap_protocol::voice_app::is_station_uuid(&s.stationuuid)
+                            && !s.name.trim().is_empty()
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            }),
+            Self::DeleteSound { .. }
+            | Self::SaveTrigger { .. }
+            | Self::SaveFavorite { .. }
+            | Self::EditSound { .. } => AppsResponse::Done,
         })
     }
 }
@@ -455,6 +816,18 @@ pub(crate) enum AppsOp {
         server_id: String,
         sound: ServerSound,
     },
+    Instants(String),
+    Favorites,
+    /// The favourite as it was toggled, to undo on a failure.
+    SaveFavorite {
+        add: bool,
+        sound: Favorite,
+    },
+    EditSound {
+        server_id: String,
+        sound: ServerSound,
+    },
+    Radio(String),
 }
 
 /// One playing clip (`activePlaybacks`).
@@ -572,6 +945,25 @@ pub struct SoundboardState {
     pub speaking: bool,
     /// Playback sequence for automatic clips.
     pub sequence: u64,
+    pub instants: SearchState<InstantSound>,
+    pub radio: SearchState<Station>,
+    pub favorites: Vec<Favorite>,
+    /// The favourites were asked for this session.
+    pub favorites_asked: bool,
+    /// Custom sounds on this device, by `voice-soundboard:<key>`.
+    pub local: BTreeMap<String, Vec<LocalSound>>,
+    /// People whose soundboard we muted (`peerSettings[id].soundboardMuted`).
+    pub peer_muted: BTreeSet<String>,
+}
+
+/// A picker search (MyInstants, radio).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SearchState<T> {
+    pub query: String,
+    pub searching: bool,
+    /// An answer has come in (for the empty state).
+    pub loaded: bool,
+    pub results: Vec<T>,
 }
 
 /// One Listen Together search or resolve result.
@@ -579,6 +971,30 @@ pub struct SoundboardState {
 pub struct LtResults {
     pub tracks: Vec<LtTrack>,
     pub skipped: usize,
+    /// Tracks the resolver matched (a collection counts all of its pages).
+    pub resolved: usize,
+    /// A resolved collection (a playlist or album link).
+    pub collection: Option<LtCollection>,
+    /// Collection results (the Collections tab).
+    pub collections: Vec<LtCollection>,
+}
+
+/// What a resolve is for once its last page is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveThen {
+    /// Show it (a pasted link): Play now or Queue from there.
+    Preview,
+    /// Queue all of it at once (`queueSourceUrl`, a collection result).
+    Queue,
+}
+
+/// A resolve going through a collection's pages (`resolveUrl`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolveJob {
+    pub url: String,
+    pub offset: u64,
+    pub then: ResolveThen,
+    pub results: LtResults,
 }
 
 /// Listen Together.
@@ -586,6 +1002,13 @@ pub struct LtResults {
 pub struct ListenState {
     pub snapshot: Option<LtSnapshot>,
     pub query: String,
+    /// `track` or `collection`.
+    pub filter: &'static str,
+    pub resolve: Option<ResolveJob>,
+    /// The panel's status line (`resolveFeedback`).
+    pub feedback: String,
+    /// Import batches made so far (each gets its own id).
+    pub batches: u64,
     pub searching: bool,
     pub results: LtResults,
     pub error: String,
@@ -664,6 +1087,7 @@ impl AppsState {
                 volume: 1.0,
                 loudness: true,
                 preset: "balanced".into(),
+                filter: "track",
                 ..ListenState::default()
             },
             ..Self::default()
@@ -723,6 +1147,7 @@ pub fn lt_plan(
                 position
             },
             paused: snapshot.paused,
+            live: entry.track.is_radio(),
         }];
     }
     let mut out = vec![AudioCommand::StreamPause(snapshot.paused)];
@@ -754,13 +1179,19 @@ pub fn lt_stream_path(video_id: &str, context: &LtContext) -> String {
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SoundTile {
+    /// What the picker sends back to play it (`mi:<id>`, a bare id, ...).
     pub id: String,
     pub name: String,
     pub emoji: String,
-    /// `default` or `server`.
+    /// `default`, `server`, `myinstants`, `radio` or `custom`.
     pub kind: &'static str,
     pub playing: bool,
     pub can_delete: bool,
+    /// Name, emoji and volume can change (`canManage`, as the server checks).
+    pub can_edit: bool,
+    pub favorite: bool,
+    /// Its own volume (the edit form starts from it).
+    pub volume: f64,
 }
 
 /// A playing row.
@@ -798,6 +1229,42 @@ pub struct QueueRow {
     pub duration_ms: f64,
     pub requester: String,
     pub current: bool,
+    pub radio: bool,
+    /// The collection it came in with (`importBatchLabel`).
+    pub batch: String,
+}
+
+/// A recently played row.
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentRow {
+    pub history_id: String,
+    pub title: String,
+    /// Artist and source, as the web joins them.
+    pub meta: String,
+    pub artwork: String,
+    pub played_at: f64,
+}
+
+/// A collection row (the Collections tab).
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionRow {
+    pub index: usize,
+    pub title: String,
+    /// Subtitle and the item count, as the web joins them.
+    pub meta: String,
+    pub artwork: String,
+}
+
+/// A search view of the picker (MyInstants, radio).
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickerSearchView {
+    pub query: String,
+    pub searching: bool,
+    pub loaded: bool,
+    pub results: Vec<SoundTile>,
 }
 
 /// A search or resolve row.
@@ -840,6 +1307,13 @@ pub struct AppsView {
     pub server_id: String,
     pub defaults: Vec<SoundTile>,
     pub sounds: Vec<SoundTile>,
+    pub favorites: Vec<SoundTile>,
+    /// Custom sounds on this device for the call's scope.
+    pub local: Vec<SoundTile>,
+    pub instants: PickerSearchView,
+    pub radio: PickerSearchView,
+    /// People whose soundboard is muted for us.
+    pub peer_muted: Vec<String>,
     pub loading_sounds: bool,
     pub playing: Vec<PlaybackRow>,
     pub send_volume: f64,
@@ -892,6 +1366,15 @@ pub struct HintRow {
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListenView {
+    pub filter: &'static str,
+    pub collections: Vec<CollectionRow>,
+    /// A resolved collection's preview (empty title: none).
+    pub collection_title: String,
+    pub collection_meta: String,
+    pub collection_artwork: String,
+    pub resolving: bool,
+    pub feedback: String,
+    pub recent: Vec<RecentRow>,
     pub queue: Vec<QueueRow>,
     pub now: Option<QueueRow>,
     pub paused: bool,
@@ -930,7 +1413,8 @@ pub fn default_tiles(playing: &[String]) -> Vec<SoundTile> {
             emoji: String::new(),
             kind: "default",
             playing: playing.iter().any(|id| id == sound.id),
-            can_delete: false,
+            volume: 1.0,
+            ..SoundTile::default()
         })
         .collect()
 }

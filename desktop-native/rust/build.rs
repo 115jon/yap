@@ -111,6 +111,8 @@ const QML: &[&str] = &[
     "qml/screens/Apps/NowPlayingCard.qml",
     "qml/screens/Apps/PlaybackRow.qml",
     "qml/screens/Apps/SoundTile.qml",
+    "qml/screens/Apps/SoundEdit.qml",
+    "qml/screens/Apps/AppTab.qml",
     "qml/screens/Apps/SoundUpload.qml",
     "qml/screens/Apps/SoundboardPicker.qml",
     "qml/screens/Apps/TrackRow.qml",

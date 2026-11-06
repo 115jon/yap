@@ -276,7 +276,7 @@ impl Cancel {
         self.flag.load(Ordering::SeqCst)
     }
 
-    async fn cancelled(&self) {
+    pub(crate) async fn cancelled(&self) {
         let notified = self.notify.notified();
         tokio::pin!(notified);
         notified.as_mut().enable();

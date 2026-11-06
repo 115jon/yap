@@ -2,8 +2,9 @@ import QtQuick
 import com.yap.native
 
 // Someone's menu in a call (ContextMenu/RemoteMenu.tsx): their name, the
-// "User volume" slider (0-200 %) and "Mute", which silences them for you
-// only. Both are kept per Yap user id.
+// "User volume" slider (0-200 %), "Mute", which silences them for you
+// only, and "Mute soundboard", which keeps their soundboard sounds from
+// playing for you. All are kept per Yap user id.
 MenuPanel {
     id: root
 
@@ -31,5 +32,12 @@ MenuPanel {
         switchable: true
         on: Audio.peersRevision >= 0 && Audio.peerMuted(root.userId)
         onTriggered: Audio.setPeerMuted(root.userId, !Audio.peerMuted(root.userId))
+    }
+    MenuRow {
+        text: qsTr("Mute soundboard")
+        glyph: "soundboard"
+        switchable: true
+        on: Audio.peersRevision >= 0 && Audio.peerSoundboardMuted(root.userId)
+        onTriggered: Audio.setPeerSoundboardMuted(root.userId, !Audio.peerSoundboardMuted(root.userId))
     }
 }

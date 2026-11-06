@@ -362,24 +362,46 @@ fn run(
             path,
             position_ms,
             paused,
+            live,
         } => {
-            let mut headers = Vec::new();
-            if let Some(token) = &token {
-                headers.push((
-                    "Authorization".to_owned(),
-                    format!("Bearer {}", token.as_str()),
-                ));
-            }
             let (volume, loudness) = stream_audio();
-            eprintln!("[listen] load {key} at {position_ms:.0} ms (paused {paused})");
+            // A station's own stream: only a public https URL, and never the
+            // session. Our stream route: the session as a bearer header.
+            let (url, headers) = if live {
+                match wire::sanitize_public_https_url(&path) {
+                    Some(url) => (url, Vec::new()),
+                    None => {
+                        events.send(AudioEvent::StreamFailed {
+                            key,
+                            code: "PLAYBACK_UNAVAILABLE".into(),
+                            message: "This station can't be played.".into(),
+                        });
+                        return;
+                    }
+                }
+            } else {
+                let mut headers = Vec::new();
+                if let Some(token) = &token {
+                    headers.push((
+                        "Authorization".to_owned(),
+                        format!("Bearer {}", token.as_str()),
+                    ));
+                }
+                (format!("{}{path}", config::get().api_base), headers)
+            };
+            eprintln!(
+                "[listen] load {key} at {position_ms:.0} ms (paused {paused}{})",
+                if live { ", live radio" } else { "" }
+            );
             engine.stream_load(StreamRequest {
                 key,
-                url: format!("{}{path}", config::get().api_base),
+                url,
                 headers,
-                position_ms: ms(position_ms),
+                position_ms: if live { 0 } else { ms(position_ms) },
                 paused,
                 volume,
                 loudness,
+                live,
             });
         }
         AudioCommand::StreamSeek(position_ms) => engine.stream_seek(ms(position_ms)),
@@ -459,6 +481,18 @@ fn origin(url: &str) -> Option<String> {
         .map(|url| url.origin().ascii_serialization())
 }
 
+/// The client for clips from a host other than our API.
+fn public_client() -> Option<&'static reqwest::Client> {
+    static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            yap_audio::public_http_client()
+                .map_err(|e| eprintln!("[soundboard] no public HTTP client: {e}"))
+                .ok()
+        })
+        .as_ref()
+}
+
 /// A clip's bytes: our API with the session, else a plain https GET
 /// (MyInstants). At most [`MAX_FETCH_BYTES`].
 async fn fetch(
@@ -471,7 +505,14 @@ async fn fetch(
     }
     let api_base = config::get().api_base.clone();
     let target = target(&api_base, url)?;
-    let mut request = http.get(&target.url);
+    // A MyInstants sound is a stranger's host: public addresses only, and
+    // redirects only to public https.
+    let client = if target.ours {
+        http
+    } else {
+        public_client().ok_or("no HTTP client for this clip")?
+    };
+    let mut request = client.get(&target.url);
     if target.ours {
         if origin(&target.url) != origin(&api_base) {
             return Err("clip URL is not on our API".into());
