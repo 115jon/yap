@@ -21,6 +21,7 @@
 #include "animatedpicture.h"
 #include "authmedia.h"
 #include "camera.h"
+#include "crashnotice.h"
 #include "desktopshell.h"
 #include "ditherprovider.h"
 #include "iconprovider.h"
@@ -28,6 +29,7 @@
 #include "mediashell.h"
 #include "profile.h"
 #include "shareprovider.h"
+#include "thumbbar.h"
 #include "videohub.h"
 #include "webembed.h"
 #include "webmplayer.h"
@@ -160,8 +162,11 @@ int main(int argc, char* argv[])
   DesktopShell::setProcessIdentity();
   // Only the first instance owns the log file; a later one only hands over.
   const bool first = DesktopShell::takeInstanceLock();
-  if (first)
+  if (first) {
     logfile::start();
+    // Minidumps from here on, into the profile's crashes folder.
+    CrashNotice::install();
+  }
   qInstallMessageHandler(qtMessage);
 
   // No organization: Qt's own caches (QML, pipeline) then go to
@@ -190,6 +195,11 @@ int main(int argc, char* argv[])
   app.installNativeEventFilter(chrome);
   auto* shell = new DesktopShell(&app);
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "DesktopShell", shell);
+  // The taskbar thumbnail's call keys, and the last run's crash notice.
+  auto* thumbbar = new ThumbnailToolbar(&app);
+  qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "Thumbbar", thumbbar);
+  auto* crashes = new CrashNotice(&app);
+  qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "CrashNotice", crashes);
   auto* files = new MediaShell(&app);
   static CachedNetworkFactory networkFactory;
   networkFactory.shell = files;
@@ -255,6 +265,7 @@ int main(int argc, char* argv[])
     // captionless. The shell restores the saved rect and shows it (or
     // keeps it in the tray on an autostart launch with start minimized).
     chrome->attach(window);
+    thumbbar->attach(window);
     // Deep links: our own yap-native:// (registered per user where it
     // differs), from this command line and from later instances.
     shell->setLinkHandler(
@@ -274,6 +285,7 @@ int main(int argc, char* argv[])
       },
       Qt::SingleShotConnection);
   }
+  CrashNotice::scheduleTestCrash();
 
   return app.exec();
 }

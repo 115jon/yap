@@ -17,6 +17,7 @@ Tauri app uses (`desktop/installer`).
 | shortcuts      | `Desktop\Yap Native.lnk`, `Start Menu\Programs\Yap Native.lnk`, both to `current\YapNative.exe` |
 | updater        | `%LOCALAPPDATA%\YapNative.App\Update.exe`                                                       |
 | data root      | `%LOCALAPPDATA%\YapNative` (profiles under `profiles\<name>`), never touched by Velopack        |
+| capture hook   | `current\obs-capture\obs-signed\` (six OBS-signed files, see "Game capture hook payload")       |
 | title, authors | "Yap Native", "115jon" (Start menu, Desktop, Apps & features)                                   |
 | shortcut AUMID | `com.115jon.yap.native`, the default profile's toast identity (`cpp/desktopshell.cpp`)          |
 | version        | `[workspace.package]` in `rust/Cargo.toml`, read by `CMakeLists.txt` and `tools/package.ps1`    |
@@ -112,7 +113,9 @@ Dropped on purpose:
   (`current\YapNative.exe`) is stable across updates.
 - **RMPK payload, LZMA blocks, lock diagnostics, WPF window**: Velopack's
   package format and its own UI (splash with `assets/app/yap-256.png`).
-- **Vulkan layer cleanup**: the native client has no game-capture hook.
+- **Vulkan layer cleanup**: the native client's game capture hook registers
+  no Vulkan layer (see "Game capture hook payload"), so there is nothing to
+  remove.
 - **Tauri updater (`latest.json`, minisign)**: no auto-update yet. Velopack's
   feed files are produced and kept as artifacts for when it lands.
 
@@ -128,10 +131,52 @@ dotnet tool install -g vpk --version 1.3.39-g8d2844f   # the script does this if
 ```
 
 `-PackId`, `-Version`, `-Title` and `-OutDir` override the defaults. The
-script stages only `YapNative.exe`, so nothing else from the build dir ships.
+script stages only `YapNative.exe` and the game capture hook's files, so
+nothing else from the build dir ships.
 Output: `<packId>-win-Setup.exe`, `<packId>-win-Portable.zip`,
 `<packId>-<version>-full.nupkg`, `releases.win.json`, `assets.win.json`,
 `RELEASES`.
+
+## Game capture hook payload
+
+The hook (`rust/crates/yap-capture/src/hook`) injects OBS Studio's own
+`graphics-hook{64,32}.dll` through OBS's `inject-helper{64,32}.exe` and
+`get-graphics-offsets{64,32}.exe`, unmodified and signed by the OBS Project,
+the same six files the Tauri app ships. They are pinned once, in
+`desktop/packaging/obs-signed-hook.lock.json` (OBS 33.0.1, hook 1.8.8: the
+release zip's SHA-256, each file's SHA-256, signer and thumbprint), and the
+native app embeds that same lock.
+
+- **Packaging.** `tools/package.ps1` runs the Tauri build's
+  `desktop/scripts/fetch-obs-signed-hook.ps1` into
+  `stage\obs-capture\obs-signed\`. The script downloads the pinned OBS
+  release zip (cached in `-ObsCacheDir`, `%TEMP%
+alph-obs-signed-hook` by
+  default, or `-ObsZip`), checks the zip's SHA-256, extracts the six files
+  and checks each against the lock: SHA-256, a valid Authenticode
+  signature, the signer subject and certificate thumbprint, the file
+  version. The package script then checks the staged hashes once more, as
+  `desktop/scripts/stage-payload.ps1` does. Any mismatch stops the build.
+  `-NoCaptureHook` leaves them out (shares then always use WGC).
+- **Signing.** With `-Sign`, `vpk` gets `--signExclude obs-capture[\\/]`:
+  OBS's files are never re-signed, since a changed byte voids the OBS
+  Project signature that anti-cheat vendors allowlist.
+- **At run time.** Before every injection the app opens each file without
+  write or delete sharing, checks its SHA-256 against the lock and its
+  Authenticode signer with `WinVerifyTrust`, and copies the set once to a
+  content-addressed folder under the profile's data,
+  `%LOCALAPPDATA%\YapNative[\profiles\<name>]\capture-hook\obs-33.0.1-c37f4412\`,
+  so a DLL a game keeps loaded never sits in Velopack's `current` folder,
+  which an update replaces. Uninstall leaves that folder with the rest of
+  the data root.
+- **No Vulkan layer.** The Tauri app registers an implicit Vulkan layer
+  (`HKCU\SOFTWARE\Khronos\Vulkan\ImplicitLayers`) while the setting is
+  on. The native client does not register one, from the app or the
+  installer, so Vulkan games are hooked only when an OBS-signed hook is
+  already resident in them; otherwise they use WGC.
+- **Licence.** The files are GPL-2.0, run as separate processes and a
+  separate DLL, never linked; the corresponding source is named in the
+  lock's `sources`.
 
 ## Signing
 

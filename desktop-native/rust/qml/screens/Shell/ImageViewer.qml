@@ -60,10 +60,11 @@ Popup {
     }
 
     parent: Overlay.overlay
+    // Under the title bar (ImageViewerModal.tsx inset-below-chrome).
     x: 0
-    y: 0
+    y: ShellState.stageFullscreen ? 0 : Theme.chrome
     width: parent ? parent.width : 0
-    height: parent ? parent.height : 0
+    height: parent ? parent.height - y : 0
     modal: true
     // Ctrl+K stays shut while a modal is up (ExtrasHost).
     onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
@@ -72,7 +73,7 @@ Popup {
     closePolicy: Popup.CloseOnEscape
     onClosed: images = []
 
-    Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.82) }
+    Overlay.modal: Scrim { color: Qt.rgba(0, 0, 0, 0.82) }
     background: Item {}
 
     enter: Transition {

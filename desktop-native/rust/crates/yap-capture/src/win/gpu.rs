@@ -10,23 +10,25 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAPPED_SUBRESOURCE,
     D3D11_MAP_READ, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
 };
-use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
+use windows::Win32::Graphics::Dxgi::Common::{
+    DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
+};
 use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 use windows::Win32::System::WinRT::Direct3D11::CreateDirect3D11DeviceFromDXGIDevice;
 
 /// A D3D11 device, its immediate context and the WinRT wrapper of the
 /// device (what a frame pool takes).
-pub(super) struct Gpu {
-    pub(super) device: ID3D11Device,
+pub(crate) struct Gpu {
+    pub(crate) device: ID3D11Device,
     /// Use only under the owner's lock: the immediate context is not
     /// re-entrant.
-    pub(super) context: ID3D11DeviceContext,
-    pub(super) winrt: IDirect3DDevice,
+    pub(crate) context: ID3D11DeviceContext,
+    pub(crate) winrt: IDirect3DDevice,
 }
 
 impl Gpu {
     /// A hardware device with BGRA support (WGC delivers B8G8R8A8).
-    pub(super) fn new() -> Result<Self, String> {
+    pub(crate) fn new() -> Result<Self, String> {
         let mut device = None;
         let mut context = None;
         // SAFETY: the out pointers are live `Option`s of the types the call
@@ -69,14 +71,25 @@ impl Gpu {
 }
 
 /// A CPU-readable texture the size of the region read from a frame.
-pub(super) struct Staging {
+pub(crate) struct Staging {
     texture: ID3D11Texture2D,
     width: u32,
     height: u32,
 }
 
 impl Staging {
-    pub(super) fn new(device: &ID3D11Device, width: u32, height: u32) -> Result<Self, String> {
+    pub(crate) fn new(device: &ID3D11Device, width: u32, height: u32) -> Result<Self, String> {
+        Self::with_format(device, width, height, DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32)
+    }
+
+    /// A staging texture in `format` (a `DXGI_FORMAT`), for a source of
+    /// that format (a copy needs the same one).
+    pub(crate) fn with_format(
+        device: &ID3D11Device,
+        width: u32,
+        height: u32,
+        format: u32,
+    ) -> Result<Self, String> {
         if width == 0 || height == 0 {
             return Err("an empty staging texture".into());
         }
@@ -85,7 +98,7 @@ impl Staging {
             Height: height,
             MipLevels: 1,
             ArraySize: 1,
-            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            Format: DXGI_FORMAT(format as i32),
             SampleDesc: DXGI_SAMPLE_DESC {
                 Count: 1,
                 Quality: 0,
@@ -108,14 +121,14 @@ impl Staging {
         })
     }
 
-    pub(super) fn size(&self) -> (u32, u32) {
+    pub(crate) fn size(&self) -> (u32, u32) {
         (self.width, self.height)
     }
 
     /// Copies the top-left `width` x `height` of `source` here, maps it and
     /// calls `read` with the rows (`(height - 1) * pitch + width * 4` bytes)
     /// and the row pitch. `source` must be at least that large.
-    pub(super) fn read<R>(
+    pub(crate) fn read<R>(
         &self,
         context: &ID3D11DeviceContext,
         source: &ID3D11Texture2D,
@@ -170,7 +183,7 @@ impl Drop for Unmap<'_> {
 }
 
 /// The D3D11 texture behind a captured frame's surface.
-pub(super) fn frame_texture(
+pub(crate) fn frame_texture(
     frame: &windows::Graphics::Capture::Direct3D11CaptureFrame,
 ) -> windows::core::Result<ID3D11Texture2D> {
     use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
@@ -182,9 +195,17 @@ pub(super) fn frame_texture(
 }
 
 /// The size of a texture.
-pub(super) fn texture_size(texture: &ID3D11Texture2D) -> (u32, u32) {
+pub(crate) fn texture_size(texture: &ID3D11Texture2D) -> (u32, u32) {
     let mut desc = D3D11_TEXTURE2D_DESC::default();
     // SAFETY: a plain query into a live out struct.
     unsafe { texture.GetDesc(&mut desc) };
     (desc.Width, desc.Height)
+}
+
+/// A texture's `DXGI_FORMAT`.
+pub(crate) fn texture_format(texture: &ID3D11Texture2D) -> u32 {
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    // SAFETY: a plain query into a live out struct.
+    unsafe { texture.GetDesc(&mut desc) };
+    desc.Format.0 as u32
 }

@@ -423,7 +423,7 @@ Item {
                         emojiPicker.close()
                     } else {
                         gifPicker.close()
-                        emojiPicker.openAt(emojiKey, true)
+                        emojiPicker.openAt(emojiKey)
                     }
                 }
             }

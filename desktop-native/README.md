@@ -88,9 +88,36 @@ the decisions.
   `yap-core` `shell.rs`): one instance (a second launch shows the first),
   the tray icon with the unread badge, "Show" and "Quit", close to tray,
   Windows toasts for messages, mentions, replies and DMs (click opens the
-  channel), the taskbar flash, the saved window rect, start minimized and
-  open on startup, the web's UI sounds (`synth.rs`, played through
-  `waveOut`), and a rotating log file.
+  channel; a message toast has an inline Reply box with Send, and Mark as
+  Read, which work with the window hidden in the tray: `ToastReply` posts
+  as a reply to the toasted message, open channel or not), the taskbar
+  flash, the saved window rect, start minimized and open on startup, the
+  web's UI sounds (`synth.rs`, played through `waveOut`), and a rotating
+  log file.
+- The taskbar thumbnail toolbar (`cpp/thumbbar.*`, the desktop app's
+  `thumbnail_toolbar.rs` and icons): camera, mic, deafen and disconnect
+  under the window's preview while in a call or a DM call, plus
+  play/pause and skip while Listen Together has a track; hidden
+  otherwise. The icons show the state, the tooltips the next action.
+- Crash reports: minidumps through `crash-handler` and `minidump-writer`
+  (`rust/src/crash.rs`) into the profile's `crashes` folder
+  (`%LOCALAPPDATA%\YapNative[\profiles\<name>]\crashes`, the newest 10
+  kept, nothing uploaded). The next launch shows "Yap Native closed
+  unexpectedly" with Open folder (`cpp/crashnotice.*`) until dismissed.
+  `YAP_TEST_CRASH=1` crashes on purpose 4 s after start.
+- The game capture hook (`crates/yap-capture/src/hook`, the desktop app's
+  `game_capture` ported): a shared window is also tried with OBS Studio's
+  own signed `graphics-hook`, behind Settings > Desktop app > Game capture
+  hook (on by default, `gameCaptureHook`). The blocklist, the web app's
+  remote blocklist, the learned skips and OBS's `OpenProcess` preflight
+  run before anything is injected; the six files pinned in
+  `desktop/packaging/obs-signed-hook.lock.json` are verified (SHA-256,
+  Authenticode, signer) and staged under the profile's `capture-hook`
+  folder. WGC keeps running underneath and carries the share whenever the
+  hook is not delivering. DX11 and DX12 games; Vulkan only when an
+  OBS-signed hook is already resident (no Vulkan layer is registered).
+  `cargo run -p yap-capture --example hook_probe` checks it live against
+  `hook_target`, a D3D11 window the probe starts itself.
 - User settings, the web's Studio workbench (`qml/screens/Settings`): the
   numbered nav (01 You, 02 Calls, 03 App), search that lands on rows
   (the map, search and rules are `yap-core` `settings.rs`), the poster
@@ -350,7 +377,9 @@ the decisions.
   - mutual servers on the profile card, a 4th quick reaction on the
     message menu (the hover bar keeps 3), error toasts that stay until
     dismissed, the web's message row spacing, and the voice view's header
-    and dock as the web has them.
+    and dock as the web has them;
+  - the server menu opens at the pointer, 205 wide, as on the web (the
+    keyboard opens it under the header).
 - Deep links on our own scheme, `yap-native://invite/<code>` and
   `yap-native://chat/<server>/<channel>[?message=<id>]`, registered per
   user at startup under `HKCU\Software\Classes\yap-native` (only the
@@ -374,12 +403,13 @@ Camera backgrounds, stream
 volume, input volume, a mic test outside a call, WebM audio (webm plays
 silent), clips in the GIF picker, the favourites tab and GIF categories,
 stickers, the avatar picker's GIF tile and the voice status picture's
-upload (GIFs and recent pictures only), toast buttons (reply, mark read)
-and avatars, the taskbar thumbnail toolbar and auto-update. In
+upload (GIFs and recent pictures only), toast avatars, toast actions
+from Action Center once the app has quit (no COM activator), the game
+capture hook's Vulkan layer, and auto-update. In
 settings: avatar crop, display name styles,
 bundles (none in the catalog), sign-out from the page,
 server profiles, call keybinds,
-spatial audio, hardware acceleration and the game capture switch.
+spatial audio and hardware acceleration.
 
 ## Build (Windows)
 
@@ -443,6 +473,11 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_DECOR_IGNORE_FOCUS`      | unset                     | `1`: decorations (webm nameplates) play in an unfocused window too (tests that cannot take focus)                                   |
 | `YAP_TRACE_MEDIA_IO`          | unset                     | `1`: log each loopback relay request (range, status, length)                                                                        |
 | `YAP_TEST_DROP`               | unset                     | `a.png;b.png`: dropped once onto the first open chat (the overlay shows 4 s first), instead of a real drag (tests)                  |
+| `YAP_TEST_CRASH`              | unset                     | `1`: crash on purpose 4 s after start (an access violation), to check the minidump and the next launch's notice                     |
+| `YAP_OBS_SIGNED_DIR`          | next to the exe           | the six OBS-signed hook files (default `obs-capture\obs-signed` beside `YapNative.exe`)                                             |
+| `YAP_CAPTURE_HOOK_DIR`        | profile `capture-hook`    | where the verified hook files are staged                                                                                            |
+| `YAP_TEST_TOAST_ACTION`       | unset                     | `reply:<text>` or `mark-read`: 3 s after a message toast shows, its button runs through the same handler a click would (tests)      |
+| `YAP_HOOK_DEBUG`              | unset                     | `1`: the hook's per-frame IPC detail in the log                                                                                     |
 | `YAP_NO_CLIPBOARD`            | unset                     | `1`: copies are logged (`[clipboard] would copy N characters`), never put on the clipboard (tests)                                  |
 | `YAP_VOICE_STANDBY`           | on                        | `off`: no hidden standby on an occupied voice landing (VOICE_PROTOCOL.md "Standby")                                                 |
 | `YAP_TEST_PC_FAIL_AFTER_SECS` | unset                     | `<n>`: `n` s after a call's media first connects, it sees its peer connection fail once (the SFU session rebuild, tests)            |
@@ -532,7 +567,9 @@ cpp/main.cpp          QGuiApplication, fonts, icon provider, theme, startup timi
 cpp/windowchrome.*    custom title bar: caption removal, hit testing, snap layouts
 cpp/iconprovider.*    Phosphor icons, tinted and cached per size and colour
 cpp/desktopshell.*    one instance, tray and badge, toasts, Run key, window rect
-cpp/toast_win.*       WinRT toasts (WRL, no Qt headers)
+cpp/toast_win.*       WinRT toasts with Reply and Mark as read (WRL, no Qt headers)
+cpp/thumbbar.*        taskbar thumbnail toolbar (ITaskbarList3) in calls
+cpp/crashnotice.*     minidump handler install and the next launch's crash notice
 cpp/logfile.*         stderr tee into %LOCALAPPDATA%\YapNative\logs, rotated
 cpp/videohub.*        remote call video into QVideoSinks (VideoHub singleton)
 cpp/webmplayer.*      WebmPlayer: yap-webm frames into a VideoOutput's sink
@@ -543,6 +580,8 @@ rust/src/bridge.rs    YapClient QObject (properties, invokables, signals)
 rust/src/client/      core: config, api (REST), auth (device flow), gateway,
                       socket (room/voice sockets), sfu (partytracks), voice (calls)
 rust/src/desktop.rs   Desktop QObject: shell settings, badge, toasts, window rect
+rust/src/crash.rs     minidumps on a crash (crash-handler + minidump-writer)
+rust/crates/yap-capture/src/hook/  game capture hook (OBS-signed graphics-hook)
 rust/src/installer.rs Velopack startup and install/uninstall hooks (docs/INSTALLER.md)
 tools/package.ps1     release build + vpk pack into Setup.exe (optionally signed)
 rust/src/video.rs     video frames to the hub; render demand to the call

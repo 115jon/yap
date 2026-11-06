@@ -21,10 +21,12 @@ Item {
     readonly property bool hovered: hover.hovered || externalHovered
     readonly property bool pressed: tap.pressed || externalPressed
 
+    // A disabled key (Back with nowhere to go) is dimmed and ignores input.
+    opacity: enabled ? 1 : 0.4
     activeFocusOnTab: true
     Accessible.role: Accessible.Button
     Accessible.name: label
-    Accessible.onPressAction: root.clicked()
+    Accessible.onPressAction: if (root.enabled) root.clicked()
     Keys.onSpacePressed: root.clicked()
     Keys.onReturnPressed: root.clicked()
 

@@ -109,6 +109,9 @@ pub struct DesktopSettings {
     pub skip_voice_switch_confirm: bool,
     /// "Don't ask again" on the start call confirm (`rm-start-call-skip-confirm`).
     pub skip_start_call_confirm: bool,
+    /// Capture games with the OBS-signed game capture hook instead of
+    /// window capture where it can (`gameCaptureHook`, on by default).
+    pub game_capture_hook: bool,
 }
 
 impl Default for DesktopSettings {
@@ -122,6 +125,7 @@ impl Default for DesktopSettings {
             sound_settings: SoundPrefs::default(),
             skip_voice_switch_confirm: false,
             skip_start_call_confirm: false,
+            game_capture_hook: true,
         }
     }
 }
@@ -294,6 +298,18 @@ mod tests {
         .expect("write");
         let settings = load_settings(dir.path());
         assert!(settings.start_minimized && settings.close_to_tray);
+    }
+
+    #[test]
+    fn the_game_capture_hook_should_default_on_and_read_the_desktop_key() {
+        let dir = tempfile::tempdir().expect("dir");
+        assert!(DesktopSettings::default().game_capture_hook);
+        std::fs::write(
+            dir.path().join(SETTINGS_FILE),
+            r#"{"gameCaptureHook": false}"#,
+        )
+        .expect("write");
+        assert!(!load_settings(dir.path()).game_capture_hook);
     }
 
     #[test]

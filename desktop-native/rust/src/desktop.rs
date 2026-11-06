@@ -37,6 +37,8 @@ pub mod qobject {
         #[qproperty(bool, skip_start_call, cxx_name = "skipStartCall")]
         /// Ring and call tones (the `calls` sound category).
         #[qproperty(bool, sound_calls, cxx_name = "soundCalls")]
+        /// Shares capture games with the OBS-signed hook where they can.
+        #[qproperty(bool, game_capture_hook, cxx_name = "gameCaptureHook")]
         /// Unread notifications (capped at 99); 0 with `badgeDot` or nothing.
         #[qproperty(i32, badge_count, cxx_name = "badgeCount")]
         #[qproperty(bool, badge_dot, cxx_name = "badgeDot")]
@@ -45,7 +47,8 @@ pub mod qobject {
         #[qproperty(bool, autostarted)]
         type Desktop = super::DesktopRust;
 
-        /// A toast to show; a click opens `channel_id`.
+        /// A toast to show; a click opens `channel_id`. A toast for a
+        /// message (`message_id` set) has Reply and Mark as read.
         #[qsignal]
         fn toast(
             self: Pin<&mut Desktop>,
@@ -54,6 +57,7 @@ pub mod qobject {
             body: QString,
             channel_id: QString,
             server_id: QString,
+            message_id: QString,
         );
 
         /// Changes one setting (`closeToTray`, `startMinimized`,
@@ -79,6 +83,22 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "openChannel"]
         fn open_channel(self: &Desktop, channel_id: &QString, server_id: &QString);
+
+        /// A toast's Reply: `text` goes to `channel_id` as a reply to
+        /// `message_id`.
+        #[qinvokable]
+        #[cxx_name = "replyFromToast"]
+        fn reply_from_toast(
+            self: &Desktop,
+            channel_id: &QString,
+            message_id: &QString,
+            text: &QString,
+        );
+
+        /// A toast's Mark as read: the channel and its notifications.
+        #[qinvokable]
+        #[cxx_name = "markReadFromToast"]
+        fn mark_read_from_toast(self: &Desktop, channel_id: &QString);
 
         /// Where the window opens: `x,y,w,h,maximized` from the saved rect
         /// placed on `areas` (`x,y,w,h;…`, the monitors' work areas), or
@@ -137,6 +157,7 @@ pub struct DesktopRust {
     skip_voice_switch: bool,
     skip_start_call: bool,
     sound_calls: bool,
+    game_capture_hook: bool,
     badge_count: i32,
     badge_dot: bool,
     badge_tooltip: QString,
@@ -158,11 +179,48 @@ fn shared() -> &'static Mutex<Shared> {
             .as_deref()
             .map(settings::load_settings)
             .unwrap_or_default();
+        // The game capture hook's files live with the profile's data.
+        if let Some(dir) = &dir {
+            yap_capture::set_data_dir(dir.clone());
+        }
+        yap_capture::set_game_capture_hook(settings.game_capture_hook);
+        #[cfg(windows)]
+        yap_capture::hook::remote_policy::spawn_refresh(Box::new(fetch_capture_policy));
         Mutex::new(Shared {
             dir,
             settings,
             badge: BadgeView::default(),
         })
+    })
+}
+
+/// The web app's add-only capture blocklist (`/desktop/capture-policy.json`),
+/// on the policy thread.
+#[cfg(windows)]
+fn fetch_capture_policy() -> Result<Vec<u8>, String> {
+    use yap_capture::hook::remote_policy::{policy_url, FETCH_LIMIT_BYTES, FETCH_TIMEOUT_LIMIT};
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    runtime.block_on(async {
+        let client = reqwest::Client::builder()
+            .timeout(FETCH_TIMEOUT_LIMIT)
+            .https_only(true)
+            .user_agent(concat!("YapNative/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let response = client
+            .get(policy_url())
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+            .map_err(|e| e.to_string())?;
+        let body = response.bytes().await.map_err(|e| e.to_string())?;
+        if body.len() > FETCH_LIMIT_BYTES {
+            return Err(format!("policy file is {} bytes", body.len()));
+        }
+        Ok(body.to_vec())
     })
 }
 
@@ -230,6 +288,8 @@ fn apply_settings(mut desktop: Pin<&mut qobject::Desktop>, s: DesktopSettings) {
         .as_mut()
         .set_skip_start_call(s.skip_start_call_confirm);
     desktop.as_mut().set_sound_calls(sound.calls);
+    desktop.as_mut().set_game_capture_hook(s.game_capture_hook);
+    yap_capture::set_game_capture_hook(s.game_capture_hook);
     desktop.set_sounds(s.sounds);
 }
 
@@ -270,6 +330,7 @@ pub(crate) fn on_toast(toast: &ToastView) {
             QString::from(toast.body.as_str()),
             QString::from(toast.channel_id.as_str()),
             QString::from(toast.server_id.as_str()),
+            QString::from(toast.message_id.as_str()),
         );
     }
 }
@@ -345,6 +406,7 @@ impl qobject::Desktop {
             "skipVoiceSwitch" => &mut next.skip_voice_switch_confirm,
             "skipStartCall" => &mut next.skip_start_call_confirm,
             "soundCalls" => &mut sound.calls,
+            "gameCaptureHook" => &mut next.game_capture_hook,
             _ => {
                 eprintln!("[desktop] unknown setting {key}");
                 return;
@@ -378,6 +440,21 @@ impl qobject::Desktop {
             channel_id: channel_id.to_string(),
             server_id: (!server_id.is_empty()).then_some(server_id),
         });
+    }
+
+    pub fn reply_from_toast(&self, channel_id: &QString, message_id: &QString, text: &QString) {
+        let (nonce, sent_at) = crate::bridge::stamp();
+        client::command(Command::ToastReply {
+            channel_id: channel_id.to_string(),
+            message_id: message_id.to_string(),
+            content: text.to_string(),
+            nonce,
+            sent_at,
+        });
+    }
+
+    pub fn mark_read_from_toast(&self, channel_id: &QString) {
+        client::command(Command::ToastMarkRead(channel_id.to_string()));
     }
 
     pub fn window_placement(&self, areas: &QString, primary: i32) -> QString {

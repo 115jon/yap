@@ -2,8 +2,9 @@ import QtQuick
 import com.yap.native
 
 // Desktop app (DesktopPanel.tsx): startup and closing, kept in
-// `desktop-settings.json` (open on startup is the `YapNative` Run value);
-// performance switches and updates are not in this build yet. The version
+// `desktop-settings.json` (open on startup is the `YapNative` Run value)
+// and the game capture hook; hardware acceleration and updates are not in
+// this build yet. The version
 // is this build's.
 Column {
     spacing: 40
@@ -32,7 +33,11 @@ Column {
         width: parent.width
         sectionId: "performance"
         SettingsRow { rowId: "hardware-acceleration"; layout: "inline"; ComingLater {} }
-        SettingsRow { rowId: "game-capture-hook"; layout: "inline"; ComingLater {} }
+        SwitchSetting {
+            rowId: "game-capture-hook"
+            checked: Desktop.gameCaptureHook
+            onToggled: Desktop.setSetting("gameCaptureHook", !Desktop.gameCaptureHook)
+        }
     }
 
     SettingsCard {

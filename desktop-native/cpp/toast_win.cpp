@@ -10,6 +10,7 @@
 
 #include <roapi.h>
 #include <windows.data.xml.dom.h>
+#include <windows.foundation.collections.h>
 #include <windows.ui.notifications.h>
 #include <wrl/client.h>
 #include <wrl/event.h>
@@ -17,7 +18,11 @@
 
 using ABI::Windows::Data::Xml::Dom::IXmlDocument;
 using ABI::Windows::Data::Xml::Dom::IXmlDocumentIO;
+using ABI::Windows::Foundation::IPropertyValue;
 using ABI::Windows::Foundation::ITypedEventHandler;
+using ABI::Windows::Foundation::Collections::IPropertySet;
+using ABI::Windows::UI::Notifications::IToastActivatedEventArgs;
+using ABI::Windows::UI::Notifications::IToastActivatedEventArgs2;
 using ABI::Windows::UI::Notifications::IToastNotification;
 using ABI::Windows::UI::Notifications::IToastNotification2;
 using ABI::Windows::UI::Notifications::IToastNotificationFactory;
@@ -26,7 +31,9 @@ using ABI::Windows::UI::Notifications::IToastNotifier;
 using ABI::Windows::UI::Notifications::ToastNotification;
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
+using Microsoft::WRL::Wrappers::HString;
 using Microsoft::WRL::Wrappers::HStringReference;
+using StringMap = ABI::Windows::Foundation::Collections::IMap<HSTRING, IInspectable*>;
 
 using ActivatedHandler = ITypedEventHandler<ToastNotification*, IInspectable*>;
 
@@ -58,15 +65,79 @@ std::wstring escape(const std::wstring& text)
   return out;
 }
 
+// The reply box's input id, read back from the activation's user input.
+constexpr wchar_t kReplyInput[] = L"reply";
+
 std::wstring xml(const toast::Content& content)
 {
-  std::wstring out = L"<toast><visual><binding template=\"ToastGeneric\">";
+  std::wstring out =
+    L"<toast launch=\"action=open\"><visual><binding template=\"ToastGeneric\">";
   out += L"<text hint-maxLines=\"1\">" + escape(content.title) + L"</text>";
   if (!content.summary.empty())
     out += L"<text hint-maxLines=\"1\">" + escape(content.summary) + L"</text>";
   out += L"<text>" + escape(content.body) + L"</text>";
-  out += L"</binding></visual><audio silent=\"true\"/></toast>";
+  out += L"</binding></visual>";
+  if (content.messageActions) {
+    // desktop-toasts.ts: Reply (a text box, "Send") and Mark as Read. The
+    // activation is "foreground" (the in-process Activated event fires
+    // for it); the handler decides whether the window shows.
+    out += L"<actions>";
+    out += L"<input id=\"";
+    out += kReplyInput;
+    out += L"\" type=\"text\" placeHolderContent=\"Type your reply...\"/>";
+    out += L"<action content=\"Send\" arguments=\"action=reply\" "
+           L"activationType=\"foreground\" hint-inputId=\"";
+    out += kReplyInput;
+    out += L"\"/>";
+    out += L"<action content=\"Mark as Read\" arguments=\"action=mark-read\" "
+           L"activationType=\"foreground\"/>";
+    out += L"</actions>";
+  }
+  out += L"<audio silent=\"true\"/></toast>";
   return out;
+}
+
+std::wstring fromHstring(HSTRING value)
+{
+  UINT32 length = 0;
+  const wchar_t* raw = WindowsGetStringRawBuffer(value, &length);
+  return raw ? std::wstring(raw, length) : std::wstring();
+}
+
+// The text typed in the reply box, if any.
+std::wstring replyText(IInspectable* args)
+{
+  ComPtr<IInspectable> inspectable(args);
+  ComPtr<IToastActivatedEventArgs2> withInput;
+  ComPtr<IPropertySet> input;
+  ComPtr<StringMap> map;
+  if (!args || FAILED(inspectable.As(&withInput)) ||
+      FAILED(withInput->get_UserInput(&input)) || !input ||
+      FAILED(input.As(&map)))
+    return {};
+  boolean has = false;
+  HStringReference key(kReplyInput);
+  if (FAILED(map->HasKey(key.Get(), &has)) || !has)
+    return {};
+  ComPtr<IInspectable> value;
+  ComPtr<IPropertyValue> property;
+  HString text;
+  if (FAILED(map->Lookup(key.Get(), &value)) || !value ||
+      FAILED(value.As(&property)) ||
+      FAILED(property->GetString(text.GetAddressOf())))
+    return {};
+  return fromHstring(text.Get());
+}
+
+std::wstring activationArguments(IInspectable* args)
+{
+  ComPtr<IInspectable> inspectable(args);
+  ComPtr<IToastActivatedEventArgs> activated;
+  HString arguments;
+  if (!args || FAILED(inspectable.As(&activated)) ||
+      FAILED(activated->get_Arguments(arguments.GetAddressOf())))
+    return {};
+  return fromHstring(arguments.Get());
 }
 
 bool failed(HRESULT hr, const char* step)
@@ -82,8 +153,17 @@ bool failed(HRESULT hr, const char* step)
 
 namespace toast {
 
+Action parseAction(const std::wstring& arguments)
+{
+  if (arguments == L"action=reply")
+    return Action::Reply;
+  if (arguments == L"action=mark-read")
+    return Action::MarkRead;
+  return Action::Open;
+}
+
 bool show(const std::wstring& aumid, const Content& content,
-          std::function<void()> activated)
+          std::function<void(Action action, const std::wstring& reply)> activated)
 {
   ComPtr<IInspectable> inspectable;
   HRESULT hr = RoActivateInstance(
@@ -123,9 +203,12 @@ bool show(const std::wstring& aumid, const Content& content,
   EventRegistrationToken token{};
   hr = notification->add_Activated(
     Callback<ActivatedHandler>(
-      [activated](IToastNotification*, IInspectable*) -> HRESULT {
-        if (activated)
-          activated();
+      [activated](IToastNotification*, IInspectable* args) -> HRESULT {
+        if (!activated)
+          return S_OK;
+        const Action action = parseAction(activationArguments(args));
+        activated(action,
+                  action == Action::Reply ? replyText(args) : std::wstring());
         return S_OK;
       })
       .Get(),

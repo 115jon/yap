@@ -38,6 +38,19 @@ pub enum Command {
         channel_id: String,
         server_id: Option<String>,
     },
+    /// A toast's inline Reply (desktop-toasts.ts `notification-reply`):
+    /// posts `content` to `channel_id` as a reply to `message_id`, whether
+    /// the channel is open or not. Stamped like [`Command::Send`].
+    ToastReply {
+        channel_id: String,
+        message_id: String,
+        content: String,
+        nonce: String,
+        sent_at: String,
+    },
+    /// A toast's Mark as read (`notification-mark-read`): the channel and
+    /// its unread notifications are read, open or not.
+    ToastMarkRead(String),
     /// The chosen status (`online`, `idle`, `dnd`, `offline` = invisible)
     /// and custom status (`None` clears it).
     SetStatus {

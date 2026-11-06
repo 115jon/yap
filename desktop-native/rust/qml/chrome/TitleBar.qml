@@ -23,7 +23,57 @@ Rectangle {
             WindowChrome.setHitTestVisible(key, true)
     }
 
-    // Back and forward: inert until there is navigation history.
+    // Back and forward walk the places opened this session, as the desktop
+    // app's history.back() and forward() walk its routes: text channels,
+    // DMs and Home. A voice channel is not a place (reopening one joins it),
+    // and a place that no longer opens is replaced by wherever it lands.
+    QtObject {
+        id: history
+
+        property var places: []
+        property int index: -1
+        readonly property string here: Session.phase !== Session.Ready || Nav.voicePanelId.length > 0 ? ""
+            : Nav.home ? "home|" + Nav.activeChannelId
+            : Nav.activeChannelId.length > 0 ? Nav.activeServerId + "|" + Nav.activeChannelId
+            : ""
+
+        // A server switch passes through its default channel first: record
+        // where it settles.
+        onHereChanged: settle.restart()
+        readonly property Timer settle: Timer {
+            interval: 300
+            onTriggered: history.record()
+        }
+        readonly property Connections signedOut: Connections {
+            target: Session
+            function onPhaseChanged() {
+                if (Session.phase !== Session.Ready) {
+                    history.places = []
+                    history.index = -1
+                }
+            }
+        }
+
+        function record() {
+            if (here.length === 0 || places[index] === here)
+                return
+            places = places.slice(0, index + 1).concat([here]).slice(-50)
+            index = places.length - 1
+        }
+        function go(step) {
+            const next = index + step
+            if (next < 0 || next >= places.length)
+                return
+            settle.stop()
+            index = next
+            const [server, channel] = places[next].split("|")
+            if (server === "home" && channel.length === 0)
+                Nav.selectHome()
+            else
+                Desktop.openChannel(channel, server === "home" ? "" : server)
+        }
+    }
+
     Row {
         id: leading
         x: 8
@@ -39,6 +89,8 @@ Rectangle {
             idleInk: Theme.ink3
             radius: Theme.radius
             label: qsTr("Go back")
+            enabled: history.index > 0
+            onClicked: history.go(-1)
         }
         WindowKey {
             id: forwardKey
@@ -49,6 +101,8 @@ Rectangle {
             idleInk: Theme.ink3
             radius: Theme.radius
             label: qsTr("Go forward")
+            enabled: history.index < history.places.length - 1
+            onClicked: history.go(1)
         }
     }
 

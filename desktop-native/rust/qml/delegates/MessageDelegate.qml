@@ -77,8 +77,9 @@ Item {
     signal reactionDetailsRequested(string id, string emoji)
     // The x on our own embeds; `skip`: Shift was held.
     signal embedsRemoveRequested(string id, bool skip)
-    // The emoji picker, to react to this message.
-    signal reactionPickerRequested(string id, Item anchor)
+    // The emoji picker, to react to this message: beside the strip's add
+    // chip (to its right) or the hover bar's react key (to its left).
+    signal reactionPickerRequested(string id, Item anchor, bool toRight)
     signal imageOpened(var images, int index)
     signal downloadRequested(var item)
     signal videoOpened(var item)
@@ -545,7 +546,7 @@ Item {
                 chips: root.reactionChips
                 rowHovered: hover.hovered && !root.pending && !root.failed
                 onToggled: emoji => root.reactionToggled(root.messageId, emoji)
-                onAddRequested: anchor => root.reactionPickerRequested(root.messageId, anchor)
+                onAddRequested: anchor => root.reactionPickerRequested(root.messageId, anchor, true)
                 onDetailsRequested: emoji => root.reactionDetailsRequested(root.messageId, emoji)
             }
         }
@@ -763,7 +764,7 @@ Item {
                     size: 28
                     iconName: "react"
                     tip: qsTr("Add reaction")
-                    onClicked: root.reactionPickerRequested(root.messageId, reactKey)
+                    onClicked: root.reactionPickerRequested(root.messageId, reactKey, false)
                 }
                 IconKey {
                     size: 28

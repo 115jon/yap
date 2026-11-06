@@ -86,6 +86,9 @@ struct Shared {
     /// Also the lock the immediate context is used under.
     state: Mutex<FrameState>,
     closed: AtomicBool,
+    /// Set while the game capture hook carries the share: frames are
+    /// dropped as they arrive, so WGC resumes the moment it is cleared.
+    gated: Arc<AtomicBool>,
     /// Error sites already reported.
     reported: Mutex<HashSet<&'static str>>,
 }
@@ -134,6 +137,9 @@ impl Shared {
         let Ok(frame) = pool.TryGetNextFrame() else {
             return Ok(());
         };
+        if self.gated.load(Ordering::Acquire) {
+            return Ok(());
+        }
         let pts_hns = frame
             .SystemRelativeTime()
             .map(|time| time.Duration)
@@ -245,6 +251,7 @@ impl WgcSession {
                 staging: None,
             }),
             closed: AtomicBool::new(false),
+            gated: Arc::new(AtomicBool::new(false)),
             reported: Mutex::new(HashSet::new()),
         });
 
@@ -289,6 +296,11 @@ impl WgcSession {
             .StartCapture()
             .map_err(|e| format!("could not start the capture: {e}"))?;
         Ok(capture)
+    }
+
+    /// The gate the game capture hook holds while it carries the share.
+    pub(super) fn gate(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.shared.gated)
     }
 
     /// The source's size when the capture started.

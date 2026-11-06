@@ -12,11 +12,12 @@ ApplicationWindow {
     readonly property bool ready: Session.phase === Session.Ready
     // formatAppTitle (AppTitleBarModel.ts): "#general · Yap HQ".
     // A voice channel has no "#".
-    // At Home: "@ada · Direct messages", else "Friends" or "Shop".
-    readonly property string location: !ready ? "Yap"
+    // At Home: "@ada · Direct messages", else "Friends" or "Shop". Empty
+    // before chat loads: the bar then shows no title (the "logo" model).
+    readonly property string location: !ready ? ""
         : Nav.home ? (Nav.dmUsername.length > 0 ? "@" + Nav.dmUsername + " · " + qsTr("Direct messages")
             : ShellState.shopOpen ? qsTr("Shop") : qsTr("Friends"))
-        : Nav.activeServerName.length === 0 ? "Yap"
+        : Nav.activeServerName.length === 0 ? ""
         : Nav.voicePanelName.length > 0 ? Nav.voicePanelName + " · " + Nav.activeServerName
         : Nav.activeChannelName.length > 0 ? "#" + Nav.activeChannelName + " · " + Nav.activeServerName
         : Nav.activeServerName
@@ -28,7 +29,8 @@ ApplicationWindow {
     color: Theme.ply0
     // A named profile shows in the title, so two windows are easy to tell
     // apart: "#general - Yap HQ (jon)".
-    title: DesktopShell.profile.length > 0 ? location + " (" + DesktopShell.profile + ")" : location
+    readonly property string named: DesktopShell.profile.length > 0 ? " (" + DesktopShell.profile + ")" : ""
+    title: (location.length > 0 ? location : "Yap") + named
 
     Component.onCompleted: Session.start()
 
@@ -49,8 +51,8 @@ ApplicationWindow {
 
     Connections {
         target: Desktop
-        function onToast(title, summary, body, channelId, serverId) {
-            DesktopShell.showToast(title, summary, body, channelId, serverId)
+        function onToast(title, summary, body, channelId, serverId, messageId) {
+            DesktopShell.showToast(title, summary, body, channelId, serverId, messageId)
         }
         function onOpenOnStartupChanged() {
             DesktopShell.setAutostart(Desktop.openOnStartup)
@@ -111,15 +113,18 @@ ApplicationWindow {
 
     header: TitleBar {
         visible: !ShellState.stageFullscreen
-        title: window.title
+        title: window.location.length > 0 || window.named.length > 0 ? window.title : ""
         maximized: window.visibility === Window.Maximized
         onMinimizeRequested: window.showMinimized()
         onCloseRequested: window.close()
     }
 
+    // Over the shell while it fades out on the first Ready.
     BootView {
+        id: boot
+        z: 1
         anchors.fill: parent
-        visible: window.booting
+        visible: window.booting || boot.exiting
         active: window.booting
         status: Session.status
     }
@@ -132,5 +137,15 @@ ApplicationWindow {
     Shell {
         anchors.fill: parent
         visible: window.ready
+    }
+
+    // Toast actions and the taskbar thumbnail toolbar.
+    DesktopLink {}
+
+    CrashNoticeCard {
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 16
+        z: 10
     }
 }

@@ -462,6 +462,9 @@ pub(super) struct Pending {
     pub page: Option<(RequestId, String)>,
     /// request → nonce of the send
     pub sends: HashMap<RequestId, String>,
+    /// nonce → text of a toast reply to a channel that is not open. It has
+    /// no outbox row, so this is all that is left of it if the send fails.
+    pub toast_replies: HashMap<String, String>,
     /// (request, channel id) of the page before the open window
     pub older: Option<(RequestId, String)>,
     /// Channel trees of servers other than the shown one (for unread).

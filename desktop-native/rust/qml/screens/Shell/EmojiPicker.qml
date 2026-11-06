@@ -46,13 +46,44 @@ Popup {
         return q.length === 0 ? creations.rows : creations.rows.filter(e => e.shortcode.toLowerCase().includes(q))
     }
 
-    // Opens next to `anchor` (above it when there is room, else below).
-    function openAt(anchor, alignRight) {
+    // Above `anchor` (EmojiPicker.tsx placement "top-end", the composer's
+    // and the status dialog's keys): from its left edge, kept 10 inside the
+    // window (so at the composer it reaches over the member column), and
+    // shortened to the room above it.
+    function openAt(anchor) {
         const win = Overlay.overlay
         const at = anchor.mapToItem(win, 0, 0)
-        const h = Math.min(560, win.height - 24)
-        x = Math.max(10, Math.min(win.width - width - 10, alignRight ? at.x + anchor.width - width : at.x))
-        y = at.y - h - 8 >= 10 ? at.y - h - 8 : Math.min(win.height - h - 10, at.y + anchor.height + 8)
+        const h = Math.min(560, win.height - 20 - Theme.chrome, Math.max(100, at.y - 16 - Theme.chrome))
+        x = Math.min(Math.max(10, at.x), Math.max(10, win.width - width - 10))
+        y = at.y - 8 - h
+        height = h
+        open()
+    }
+    // Beside `anchor` (EmojiPicker.tsx placement "left" / "right"): level
+    // with its top, on the other side when that one would leave the window,
+    // and never under the title bar.
+    function openBeside(anchor, toRight) {
+        const win = Overlay.overlay
+        const at = anchor.mapToItem(win, 0, 0)
+        const top = Theme.chrome + 10
+        const h = Math.min(560, win.height - 20 - Theme.chrome)
+        let left = toRight ? at.x + anchor.width + 8 : at.x - width - 8
+        if (toRight ? left + width > win.width - 10 : left < 10)
+            left = toRight ? at.x - width - 8 : at.x + anchor.width + 8
+        x = Math.min(Math.max(10, left), Math.max(10, win.width - width - 10))
+        y = Math.min(Math.max(top, at.y), Math.max(top, win.height - h - 10))
+        height = h
+        open()
+    }
+    // Under `anchor`'s bottom-left corner (placement "bottom-end", the
+    // message menu's Add reaction), pinned 10 above the window's bottom
+    // when it would run past it.
+    function openBelow(anchor) {
+        const win = Overlay.overlay
+        const at = anchor.mapToItem(win, 0, anchor.height)
+        const h = Math.min(560, win.height - 20 - Theme.chrome)
+        x = Math.min(Math.max(10, at.x), Math.max(10, win.width - width - 10))
+        y = at.y + 8 + h > win.height - 10 ? win.height - 10 - h : at.y + 8
         height = h
         open()
     }

@@ -58,7 +58,7 @@ Rectangle {
     }
 
     // Server header: Bricolage 17/800, chevron on the far edge; it opens
-    // the server menu under it.
+    // the server menu.
     Rectangle {
         id: header
         visible: !Nav.home
@@ -96,7 +96,12 @@ Rectangle {
             color: Theme.ink2
         }
         HoverHandler { id: headerHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: serverMenu.visible ? serverMenu.close() : serverMenu.popup(header, 8, header.height + 4) }
+        // A click opens it at the pointer (ChannelSidebar.tsx openMenu);
+        // the keyboard opens it under the header.
+        TapHandler {
+            onTapped: eventPoint => serverMenu.visible ? serverMenu.close()
+                : serverMenu.popup(header, eventPoint.position.x, eventPoint.position.y)
+        }
         Rectangle {
             anchors.fill: parent
             visible: header.activeFocus

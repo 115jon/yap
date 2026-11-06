@@ -219,7 +219,7 @@ RowLayout {
                 color: Theme.lineStrong
             }
         }
-        T.Overlay.modal: Rectangle { color: Theme.scrim }
+        T.Overlay.modal: Scrim { color: Theme.scrim }
         contentItem: Loader {
             active: panelSheet.visible && root.panelShown
             sourceComponent: root.sidePanelComponent
@@ -258,7 +258,7 @@ RowLayout {
                 color: Theme.lineStrong
             }
         }
-        T.Overlay.modal: Rectangle { color: Theme.scrim }
+        T.Overlay.modal: Scrim { color: Theme.scrim }
         contentItem: Item {
             // In details the panel draws its own header instead.
             Item {

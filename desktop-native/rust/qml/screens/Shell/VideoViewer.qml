@@ -29,7 +29,7 @@ Popup {
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     onClosed: source = ""
 
-    Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.85) }
+    Overlay.modal: Scrim { color: Qt.rgba(0, 0, 0, 0.85) }
     background: Item {}
 
     contentItem: Item {

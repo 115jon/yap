@@ -27,7 +27,14 @@ param(
     [switch]$Sign,
     [string]$SigningEndpoint = $(if ($env:ARTIFACT_SIGNING_ENDPOINT) { $env:ARTIFACT_SIGNING_ENDPOINT } else { "https://eus.codesigning.azure.net/" }),
     [string]$SigningAccount = $(if ($env:ARTIFACT_SIGNING_ACCOUNT) { $env:ARTIFACT_SIGNING_ACCOUNT } else { "jon115signing" }),
-    [string]$SigningProfile = $(if ($env:ARTIFACT_SIGNING_PROFILE) { $env:ARTIFACT_SIGNING_PROFILE } else { "publictrust" })
+    [string]$SigningProfile = $(if ($env:ARTIFACT_SIGNING_PROFILE) { $env:ARTIFACT_SIGNING_PROFILE } else { "publictrust" }),
+    # The game capture hook's OBS-signed files (docs/INSTALLER.md): fetched
+    # and verified by the desktop app's script, into a cache folder that is
+    # reused across runs. -ObsZip uses an OBS release zip already on disk.
+    [string]$ObsCacheDir = $(if ($env:YAP_OBS_CACHE_DIR) { $env:YAP_OBS_CACHE_DIR } else { Join-Path $env:TEMP "ralph-obs-signed-hook" }),
+    [string]$ObsZip,
+    # Leave the hook files out (the hook then always falls back to WGC).
+    [switch]$NoCaptureHook
 )
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -81,13 +88,35 @@ if (-not $SkipBuild) {
 $exe = Join-Path $BuildDir "YapNative.exe"
 if (-not (Test-Path $exe)) { throw "No $exe; build first or drop -SkipBuild." }
 
-# The package is exactly what is staged: the one static exe.
+# The package is exactly what is staged: the one static exe, and the game
+# capture hook's six OBS-signed files.
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
 $stage = Join-Path $OutDir "stage-$PackId-$Version"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory $stage | Out-Null
 Copy-Item $exe $stage
+
+# The OBS-signed capture hook, byte for byte as OBS released it, next to the
+# exe (the app looks in obs-capture\obs-signed). The desktop app's fetch
+# script downloads the pinned OBS zip if needed and checks every file against
+# desktop/packaging/obs-signed-hook.lock.json: SHA-256, a valid Authenticode
+# signature, the signer and its thumbprint. Any mismatch stops the build.
+if (-not $NoCaptureHook) {
+    $hookDir = Join-Path $stage "obs-capture\obs-signed"
+    $fetch = Join-Path $root "..\desktop\scripts\fetch-obs-signed-hook.ps1"
+    $fetchArgs = @{ Destination = $hookDir; CacheDir = $ObsCacheDir }
+    if ($ObsZip) { $fetchArgs.ZipPath = $ObsZip }
+    & $fetch @fetchArgs
+    if (-not $?) { throw "fetch-obs-signed-hook.ps1 failed" }
+    $lock = Get-Content -Raw (Join-Path $root "..\desktop\packaging\obs-signed-hook.lock.json") | ConvertFrom-Json
+    foreach ($file in $lock.files) {
+        $staged = Join-Path $hookDir $file.name
+        $sha = (Get-FileHash -Algorithm SHA256 $staged).Hash.ToLowerInvariant()
+        if ($sha -ne $file.sha256) { throw "Staged $($file.name) does not match the lock" }
+    }
+    Write-Host "==> OBS-signed capture hook $($lock.obs_version) staged and checked"
+}
 
 $packArgs = @(
     "pack", "--skip-updates",
@@ -118,6 +147,9 @@ if ($Sign) {
         CertificateProfileName = $SigningProfile
     } | ConvertTo-Json | Set-Content -Encoding utf8NoBOM $metadata
     $packArgs += @("--azureTrustedSignFile", $metadata)
+    # Never re-sign OBS's files: a changed byte voids the OBS Project
+    # signature that anti-cheat vendors allowlist.
+    $packArgs += @("--signExclude", "obs-capture[\\/]")
 }
 
 & $vpk.Path @packArgs

@@ -4,7 +4,7 @@
 
 mod audio;
 mod enumerate;
-mod gpu;
+pub(crate) mod gpu;
 mod icon;
 mod item;
 mod session;
@@ -155,6 +155,9 @@ pub(crate) fn window_icon(source_id: &str, size: u32) -> Option<Image> {
 /// session and pool are closed, the handlers removed, and the watchdog and
 /// audio threads stopped and joined.
 pub struct Capture {
+    /// The game capture hook's attempt, for a window (dropped first: it
+    /// holds the WGC session's gate).
+    hook: Option<crate::hook::attempt::HookCapture>,
     session: Option<WgcSession>,
     ended: Arc<Ender>,
     watchdog: Option<(Arc<Stop>, JoinHandle<()>)>,
@@ -165,6 +168,7 @@ impl Drop for Capture {
     fn drop(&mut self) {
         // Nothing may report the end of a share the driver has let go of.
         self.ended.disarm();
+        self.hook = None;
         if let Some((stop, thread)) = self.watchdog.take() {
             stop.stop();
             let _ = thread.join();
@@ -177,6 +181,9 @@ impl Drop for Capture {
 pub(crate) fn set_quality(capture: &Capture, quality: ShareQuality) {
     if let Some(session) = &capture.session {
         session.set_quality(quality);
+    }
+    if let Some(hook) = &capture.hook {
+        hook.set_quality(quality);
     }
 }
 
@@ -200,7 +207,9 @@ pub(crate) fn start(
     );
 
     // From here any early return drops `capture`, which releases the rest.
+    let gate = session.gate();
     let mut capture = Capture {
+        hook: None,
         session: Some(session),
         ended,
         watchdog: None,
@@ -208,6 +217,14 @@ pub(crate) fn start(
     };
     if let SourceId::Window(value) = id {
         capture.watchdog = Some(spawn_watchdog(value, Arc::clone(&capture.ended))?);
+        // Games: the OBS-signed hook, tried alongside (WGC carries the share
+        // until and unless it delivers).
+        if crate::game_capture_hook() {
+            match crate::hook::attempt::spawn(value, quality, gate) {
+                Ok(hook) => capture.hook = Some(hook),
+                Err(error) => eprintln!("[capture] {id} hook not tried: {error}"),
+            }
+        }
     }
 
     let has_audio = request.audio && start_audio(&mut capture, id);

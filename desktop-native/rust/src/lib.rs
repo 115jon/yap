@@ -16,7 +16,12 @@ mod calls;
 mod camera;
 mod client;
 mod command_menu;
+#[cfg(windows)]
+mod crash;
 mod custom_sounds;
+// The bridge's toast signal carries the whole toast (title, summary, body
+// and the three ids it acts on), one argument over clippy's limit.
+#[allow(clippy::too_many_arguments)]
 mod desktop;
 mod extras;
 mod friends;

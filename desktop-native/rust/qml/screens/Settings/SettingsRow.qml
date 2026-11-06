@@ -199,8 +199,9 @@ Item {
 
     Column {
         id: footerSlot
+        x: body.x
         y: body.y + body.height
-        width: parent.width
+        width: body.width
     }
 
     Rectangle {

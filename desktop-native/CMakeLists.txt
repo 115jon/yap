@@ -45,6 +45,7 @@ qt_add_executable(YapNative WIN32
   cpp/animatedpicture.cpp cpp/animatedpicture.h
   cpp/authmedia.cpp cpp/authmedia.h
   cpp/camera.cpp cpp/camera.h
+  cpp/crashnotice.cpp cpp/crashnotice.h
   cpp/desktopshell.cpp cpp/desktopshell.h
   cpp/ditherprovider.cpp cpp/ditherprovider.h
   cpp/iconprovider.cpp cpp/iconprovider.h
@@ -52,6 +53,7 @@ qt_add_executable(YapNative WIN32
   cpp/mediashell.cpp cpp/mediashell.h
   cpp/profile.cpp cpp/profile.h
   cpp/shareprovider.cpp cpp/shareprovider.h
+  cpp/thumbbar.cpp cpp/thumbbar.h
   cpp/toast_win.cpp cpp/toast_win.h
   cpp/videohub.cpp cpp/videohub.h
   cpp/webembed.cpp cpp/webembed.h
@@ -67,16 +69,22 @@ file(GLOB YAP_FONT_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/assets
   CONFIGURE_DEPENDS assets/fonts/*.ttf)
 file(GLOB YAP_SVG_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/assets
   CONFIGURE_DEPENDS assets/svg/*.svg)
+# The taskbar thumbnail toolbar's icons (the desktop app's
+# resources/thumbnail-toolbar), embedded as :/thumbbar.
+file(GLOB YAP_THUMBBAR_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/assets
+  CONFIGURE_DEPENDS assets/thumbbar/*.png)
 file(STRINGS assets/icons/files.txt YAP_ICON_NAMES)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS assets/icons/files.txt)
 list(TRANSFORM YAP_ICON_NAMES PREPEND icons/ OUTPUT_VARIABLE YAP_ICON_FILES)
 list(TRANSFORM YAP_FONT_FILES PREPEND assets/ OUTPUT_VARIABLE YAP_FONT_PATHS)
 list(TRANSFORM YAP_SVG_FILES PREPEND assets/ OUTPUT_VARIABLE YAP_SVG_PATHS)
 list(TRANSFORM YAP_ICON_FILES PREPEND assets/ OUTPUT_VARIABLE YAP_ICON_PATHS)
+list(TRANSFORM YAP_THUMBBAR_FILES PREPEND assets/ OUTPUT_VARIABLE YAP_THUMBBAR_PATHS)
 qt_add_resources(YapNative yap_assets
   PREFIX /
   BASE assets
-  FILES ${YAP_FONT_PATHS} ${YAP_SVG_PATHS} ${YAP_ICON_PATHS} assets/app/yap-256.png)
+  FILES ${YAP_FONT_PATHS} ${YAP_SVG_PATHS} ${YAP_ICON_PATHS} ${YAP_THUMBBAR_PATHS}
+    assets/app/yap-256.png)
 # Avatars and server icons come as PNG, JPEG, WebP or GIF over HTTPS. Call
 # video renders through Qt Multimedia's VideoOutput, whose QVideoSink needs
 # a media backend (Windows Media Foundation; nothing is decoded by it).

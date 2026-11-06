@@ -12,7 +12,7 @@ use yap_core::store::{
     reduce, ApiRequest, Command, Dispatch, Effect, GatewayEvent, Input, RequestId, State, ViewDiff,
     ViewUpdate,
 };
-use yap_core::{VoiceMember, VoiceUpdate};
+use yap_core::{ApiError, VoiceMember, VoiceUpdate};
 
 const BASE: &str = "https://api.fixture.invalid";
 const SERVER: &str = "srv_fixture";
@@ -454,4 +454,130 @@ fn open(channel: &str, server: Option<&str>) -> Command {
         channel_id: channel.into(),
         server_id: server.map(Into::into),
     }
+}
+
+fn reply(channel: &str, message: &str, content: &str, nonce: &str) -> Command {
+    Command::ToastReply {
+        channel_id: channel.into(),
+        message_id: message.into(),
+        content: content.into(),
+        nonce: nonce.into(),
+        sent_at: "2026-11-06T10:00:00.000Z".into(),
+    }
+}
+
+fn sends(fx: &[Effect]) -> Vec<&ApiRequest> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::Http { request, .. } if matches!(request, ApiRequest::SendMessage { .. }) => {
+                Some(request)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_toast_reply_should_post_to_a_channel_that_is_not_open() {
+    let mut client = Client::online();
+    let fx = client.command(reply(DM, "m9", "  on my way ", "n_toast"));
+    assert_eq!(
+        sends(&fx),
+        [&ApiRequest::SendMessage {
+            channel_id: DM.into(),
+            content: "on my way".into(),
+            reply_to_id: Some("m9".into()),
+            nonce: "n_toast".into(),
+            attachment_ids: Vec::new(),
+            nsfw_attachment_ids: Vec::new(),
+        }]
+    );
+}
+
+#[test]
+fn a_toast_reply_to_the_open_channel_should_post_it_as_a_reply() {
+    let mut client = Client::online();
+    let fx = client.command(reply(TEXT, "m9", "yes", "n_open"));
+    assert!(
+        matches!(sends(&fx)[..], [ApiRequest::SendMessage { channel_id, reply_to_id: Some(parent), .. }]
+            if channel_id == TEXT && parent == "m9"),
+        "{fx:#?}"
+    );
+}
+
+#[test]
+fn a_failed_toast_reply_to_a_channel_that_is_not_open_should_show_a_notice_with_the_text() {
+    let mut client = Client::online();
+    client.command(reply(DM, "m9", "on my way", "n_lost"));
+    let (id, _) = client.asked.last().cloned().expect("the send");
+    let fx = client.input(Input::Http {
+        id,
+        result: Err(ApiError::Network("down".into())),
+    });
+    let notice = fx.iter().find_map(|e| match e {
+        Effect::View(ViewUpdate::Notice(text)) => Some(text.as_str()),
+        _ => None,
+    });
+    let text = notice.unwrap_or_else(|| panic!("no notice: {fx:#?}"));
+    assert!(text.starts_with("Couldn't send your reply"), "{text}");
+    assert!(text.ends_with("on my way"), "{text}");
+}
+
+#[test]
+fn a_failed_toast_reply_to_the_open_channel_should_mark_its_row_not_show_a_notice() {
+    let mut client = Client::online();
+    client.command(reply(TEXT, "m9", "yes", "n_row"));
+    let (id, _) = client.asked.last().cloned().expect("the send");
+    let fx = client.input(Input::Http {
+        id,
+        result: Err(ApiError::Network("down".into())),
+    });
+    assert!(
+        !fx.iter()
+            .any(|e| matches!(e, Effect::View(ViewUpdate::Notice(_)))),
+        "{fx:#?}"
+    );
+}
+
+#[test]
+fn a_sent_toast_reply_should_show_no_notice() {
+    let mut client = Client::online();
+    client.command(reply(DM, "m9", "ok", "n_fine"));
+    let (id, _) = client.asked.last().cloned().expect("the send");
+    let fx = client.input(Input::Http {
+        id,
+        result: Ok(yap_core::store::ApiResponse::Sent(None)),
+    });
+    assert!(
+        !fx.iter()
+            .any(|e| matches!(e, Effect::View(ViewUpdate::Notice(_)))),
+        "{fx:#?}"
+    );
+}
+
+#[test]
+fn an_empty_toast_reply_should_send_nothing() {
+    let mut client = Client::online();
+    let fx = client.command(reply(DM, "m9", "   ", "n_empty"));
+    assert!(sends(&fx).is_empty());
+}
+
+#[test]
+fn a_toast_mark_read_should_read_the_channel_notifications() {
+    let mut client = Client::online();
+    client.notification("dm", DM, "m9");
+    let fx = client.command(Command::ToastMarkRead(DM.into()));
+    let read = fx.iter().any(|e| {
+        matches!(e, Effect::Http { request: ApiRequest::MarkNotificationsRead { ids }, .. }
+            if ids == &["n_m9".to_owned()])
+    });
+    assert!(read, "{fx:#?}");
+}
+
+#[test]
+fn a_toast_mark_read_should_clear_the_badge_count() {
+    let mut client = Client::online();
+    client.notification("mention", VOICE, "m9");
+    client.command(Command::ToastMarkRead(VOICE.into()));
+    assert_eq!(client.badge.count, 0);
 }

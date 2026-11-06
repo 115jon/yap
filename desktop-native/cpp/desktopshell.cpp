@@ -17,6 +17,7 @@
 #include <QtQuick/QQuickWindow>
 
 #include <algorithm>
+#include <functional>
 #include <cstdio>
 #include <string>
 #include <utility>
@@ -757,26 +758,61 @@ void DesktopShell::setBadgeTooltip(const QString& tooltip)
 
 void DesktopShell::showToast(const QString& title, const QString& summary,
                              const QString& body, const QString& channelId,
-                             const QString& serverId)
+                             const QString& serverId, const QString& messageId)
 {
   // No tag: each message is its own toast, as on the desktop app.
   toast::Content content{ wide(title), wide(summary), wide(body), {} };
+  content.messageActions = !messageId.isEmpty() && !channelId.isEmpty();
   QPointer<DesktopShell> self(this);
   const QString channel = channelId;
   const QString server = serverId;
-  const bool shown = toast::show(aumid(), content, [self, channel, server] {
-    // A WinRT thread: hop to the GUI thread.
-    QMetaObject::invokeMethod(
-      qApp,
-      [self, channel, server] {
-        if (!self)
-          return;
-        self->reveal();
-        emit self->toastActivated(channel, server);
-      },
-      Qt::QueuedConnection);
-  });
-  std::fprintf(stderr, "[toast] %s\n", shown ? "shown" : "refused");
+  const QString message = messageId;
+  std::function<void(toast::Action, const std::wstring&)> activated =
+    [self, channel, server, message](toast::Action action,
+                                     const std::wstring& reply) {
+      const QString text = QString::fromStdWString(reply).trimmed();
+      // A WinRT thread: hop to the GUI thread.
+      QMetaObject::invokeMethod(
+        qApp,
+        [self, channel, server, message, action, text] {
+          if (!self)
+            return;
+          switch (action) {
+            case toast::Action::Reply:
+              // An empty box sends nothing (desktop-toasts.ts trims).
+              std::fprintf(stderr, "[toast] reply (%d chars)\n",
+                           int(text.size()));
+              if (!text.isEmpty())
+                emit self->toastReply(channel, message, text);
+              break;
+            case toast::Action::MarkRead:
+              std::fprintf(stderr, "[toast] mark as read\n");
+              emit self->toastMarkRead(channel);
+              break;
+            case toast::Action::Open:
+              self->reveal();
+              emit self->toastActivated(channel, server);
+              break;
+          }
+        },
+        Qt::QueuedConnection);
+    };
+  const bool shown = toast::show(aumid(), content, activated);
+  // Tests (YAP_TEST_TOAST_ACTION=reply:<text> or mark-read): the message
+  // toast's button is "clicked" 3 s later through the same handler, as
+  // the WinRT Activated event would call it (Windows' own click cannot be
+  // driven without the real cursor).
+  const QString test = qEnvironmentVariable("YAP_TEST_TOAST_ACTION");
+  if (shown && content.messageActions && !test.isEmpty()) {
+    const bool reply = test.startsWith(QLatin1String("reply:"));
+    const std::wstring text = reply ? test.mid(6).toStdWString() : std::wstring();
+    QTimer::singleShot(3000, this, [activated, reply, text] {
+      std::fprintf(stderr, "[toast] test hook: %s\n", reply ? "Send" : "Mark as Read");
+      activated(reply ? toast::Action::Reply : toast::Action::MarkRead, text);
+    });
+  }
+  std::fprintf(stderr, "[toast] %s%s\n", shown ? "shown" : "refused",
+               content.messageActions ? " (reply, mark as read)" : "");
   // desktop-toasts.ts: every toast also flashes the taskbar button.
   flashTaskbar(true);
 }

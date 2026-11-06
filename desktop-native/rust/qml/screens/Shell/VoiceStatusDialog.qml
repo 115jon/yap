@@ -72,7 +72,7 @@ PlateDialog {
                     size: 28
                     tone: "muted"
                     tip: qsTr("Insert emoji")
-                    onClicked: picker.openAt(emojiKey, true)
+                    onClicked: picker.openAt(emojiKey)
                 }
             }
         }

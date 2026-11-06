@@ -54,6 +54,10 @@ pub const MENTION_SUGGESTIONS: usize = 5;
 
 const EDIT_FAILED: &str =
     "Couldn't save your edit. Your message is unchanged. Try editing it again.";
+/// The text of a toast reply that could not be sent follows, so it is not
+/// lost with the toast (the channel is not open, so no composer to keep it).
+const TOAST_REPLY_FAILED: &str =
+    "Couldn't send your reply. Check your connection and try again. Your reply was:";
 const DELETE_FAILED: &str = "Couldn't delete the message. Check your connection and try again.";
 
 /// Permission bits (src/lib/permissions.ts).
@@ -1151,6 +1155,14 @@ impl State {
                 server_id,
             } => self.open_channel(fx, &channel_id, server_id),
             Command::OpenDm(user_id) => self.open_dm(fx, &user_id),
+            Command::ToastReply {
+                channel_id,
+                message_id,
+                content,
+                nonce,
+                sent_at,
+            } => self.toast_reply(fx, &channel_id, message_id, content.trim(), nonce, sent_at),
+            Command::ToastMarkRead(channel_id) => self.toast_mark_read(fx, &channel_id),
             Command::SetStatus {
                 status,
                 custom_status,
@@ -2399,6 +2411,72 @@ impl State {
         }
     }
 
+    /// A toast's Reply. The open channel takes the composer's path (its
+    /// pending row shows at once); any other channel is posted to directly,
+    /// and the gateway echo brings the message wherever it shows.
+    fn toast_reply(
+        &mut self,
+        fx: &mut Effects,
+        channel_id: &str,
+        message_id: String,
+        content: &str,
+        nonce: String,
+        sent_at: String,
+    ) {
+        if channel_id.is_empty()
+            || content.is_empty()
+            || nonce.is_empty()
+            || self.signed_in().is_none()
+            || self.outbox.contains_key(&nonce)
+        {
+            return;
+        }
+        let reply_to_id = Some(message_id).filter(|id| !id.is_empty());
+        if self.active_channel.as_deref() == Some(channel_id) {
+            if self.queue_send(fx, content, reply_to_id, nonce.clone(), sent_at, Vec::new()) {
+                self.post(fx, &nonce);
+            }
+            return;
+        }
+        let request = ApiRequest::SendMessage {
+            channel_id: channel_id.to_owned(),
+            content: content.to_owned(),
+            reply_to_id,
+            nonce: nonce.clone(),
+            attachment_ids: Vec::new(),
+            nsfw_attachment_ids: Vec::new(),
+        };
+        if let Some(id) = self.http(fx, request) {
+            self.pending.sends.insert(id, nonce.clone());
+            self.pending.toast_replies.insert(nonce, content.to_owned());
+        }
+    }
+
+    /// A toast's Mark as read (ChatPageClient.tsx `handleMarkRead`): the
+    /// channel's unread notifications, then the channel itself.
+    fn toast_mark_read(&mut self, fx: &mut Effects, channel_id: &str) {
+        if channel_id.is_empty() || self.signed_in().is_none() {
+            return;
+        }
+        let ids: Vec<String> = self
+            .notifications
+            .iter()
+            .filter(|n| n.channel_id.as_deref() == Some(channel_id))
+            .map(|n| n.id.clone())
+            .collect();
+        if !ids.is_empty() {
+            self.notifications.retain(|n| !ids.contains(&n.id));
+            self.inbox_read(Some(&ids));
+            let _ = self.http(fx, ApiRequest::MarkNotificationsRead { ids });
+        }
+        if self.active_channel.as_deref() == Some(channel_id) {
+            self.release_read_hold();
+            self.set_divider(fx, None);
+        }
+        self.mark_read(fx, channel_id, None);
+        self.sync_badges(fx);
+    }
+
     /// The pending row and its outbox entry; `false` when nothing is open.
     fn queue_send(
         &mut self,
@@ -2506,12 +2584,20 @@ impl State {
     }
 
     fn on_sent(&mut self, fx: &mut Effects, nonce: &str, result: Result<ApiResponse, ApiError>) {
+        let toast_reply = self.pending.toast_replies.remove(nonce);
         match result {
             Ok(ApiResponse::Sent(Some(message))) => self.upsert_if_open(fx, *message),
             // An odd body: the gateway echo still reconciles the row.
             Ok(_) => {}
             Err(error) if error.is_unauthorized() => self.fail(fx, &error),
-            Err(_) => self.set_send_failed(fx, nonce, true),
+            Err(_) if self.outbox.contains_key(nonce) => self.set_send_failed(fx, nonce, true),
+            // A toast reply to a channel that is not open has no row to
+            // mark failed: say so, with the text.
+            Err(_) => {
+                if let Some(text) = toast_reply {
+                    fx.view(ViewUpdate::Notice(format!("{TOAST_REPLY_FAILED} {text}")));
+                }
+            }
         }
     }
 

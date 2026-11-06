@@ -155,9 +155,9 @@ SidePanelFrame {
                 Chat.toggleReaction(id, emoji)
                 Emoji.remember(emoji)
             }
-            onReactionPickerRequested: (id, anchor) => {
+            onReactionPickerRequested: (id, anchor, toRight) => {
                 reactionPicker.messageId = id
-                reactionPicker.openAt(anchor, true)
+                reactionPicker.openBeside(anchor, toRight)
             }
             onLinkOpened: url => {
                 if (/^(https?:|mailto:)/i.test(url))

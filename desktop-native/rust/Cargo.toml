@@ -93,6 +93,10 @@ windows = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 windows-core = "0.61"
+# Minidumps on a crash (src/crash.rs): Embark's in-process handler for
+# exceptions, aborts and pure calls, and rust-minidump's writer.
+crash-handler = "0.6"
+minidump-writer = "0.10"
 
 [build-dependencies]
 cxx-qt-build = "0.10"

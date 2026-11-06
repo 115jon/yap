@@ -69,7 +69,7 @@ T.Popup {
     readonly property bool wanted: SettingsNav.open && !SettingsNav.previewing
     onOpened: navList.forceActiveFocus()
 
-    T.Overlay.modal: Rectangle {
+    T.Overlay.modal: Scrim {
         color: Theme.scrim
         TapHandler { onTapped: dialog.stepBack() }
     }

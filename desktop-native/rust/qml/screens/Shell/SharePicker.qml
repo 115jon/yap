@@ -110,7 +110,7 @@ Popup {
     padding: 0
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
-    Overlay.modal: Rectangle { color: Theme.scrim }
+    Overlay.modal: Scrim { color: Theme.scrim }
 
     background: Rectangle {
         radius: Theme.radiusSheet

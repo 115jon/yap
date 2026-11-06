@@ -28,7 +28,7 @@ Popup {
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     onClosed: Shop.openPicker("")
 
-    Overlay.modal: Rectangle { color: Theme.scrim }
+    Overlay.modal: Scrim { color: Theme.scrim }
 
     background: Rectangle {
         radius: Theme.radiusSheet * 3

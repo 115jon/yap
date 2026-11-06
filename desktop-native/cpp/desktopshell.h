@@ -17,8 +17,11 @@
 // QML (import Yap.Chrome):
 //   DesktopShell.badgeCount / badgeDot / badgeTooltip   (bind from Desktop)
 //   DesktopShell.profile                                "" or the profile name
-//   DesktopShell.showToast(title, summary, body, channelId, serverId)
+//   DesktopShell.showToast(title, summary, body, channelId, serverId,
+//                          messageId)
 //   DesktopShell.toastActivated(channelId, serverId)
+//   DesktopShell.toastReply(channelId, messageId, text)   (Send in the toast)
+//   DesktopShell.toastMarkRead(channelId)                 (Mark as Read)
 //   DesktopShell.setAutostart(on), reveal(), hideToTray(), quit()
 
 #include <QtCore/QObject>
@@ -78,9 +81,11 @@ public:
   QString profile() const;
   void setBadgeTooltip(const QString& tooltip);
 
+  // A non-empty `messageId` adds Reply and Mark as Read.
   Q_INVOKABLE void showToast(const QString& title, const QString& summary,
                              const QString& body, const QString& channelId,
-                             const QString& serverId);
+                             const QString& serverId,
+                             const QString& messageId = QString());
   // Writes or removes the HKCU Run value "YapNative" ("YapNative-<profile>"
   // for a named profile). False on failure.
   Q_INVOKABLE bool setAutostart(bool enabled);
@@ -98,6 +103,11 @@ signals:
   void badgeChanged();
   // A toast was clicked; the window is already revealed.
   void toastActivated(const QString& channelId, const QString& serverId);
+  // A toast's Send (with the text typed in it) or Mark as Read. The window
+  // stays as it was (hidden in the tray, say).
+  void toastReply(const QString& channelId, const QString& messageId,
+                  const QString& text);
+  void toastMarkRead(const QString& channelId);
 
 private:
   void createTray();

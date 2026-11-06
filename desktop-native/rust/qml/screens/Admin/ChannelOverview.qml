@@ -58,14 +58,13 @@ Column {
 
         SettingsRow {
             custom: true
-            layout: "field"
+            layout: "label"
             label: qsTr("Channel name")
             description: root.channel.voice ? qsTr("Shown in the channel list as typed.")
                 : root.preview !== root.name ? qsTr("Shown as #%1").arg(root.preview.length > 0 ? root.preview : qsTr("channel"))
                 : qsTr("Lowercase, with dashes instead of spaces.")
             KitField {
                 width: parent.width
-                large: true
                 text: root.name
                 maximumLength: 100
                 invalid: root.nameError.length > 0
@@ -80,7 +79,7 @@ Column {
         }
         SettingsRow {
             custom: true
-            layout: "block"
+            layout: "label"
             label: qsTr("Topic")
             TopicField {
                 width: parent.width

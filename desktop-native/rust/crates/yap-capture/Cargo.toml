@@ -4,12 +4,17 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Yap screen share capture on Windows: the picker's sources and thumbnails, Windows Graphics Capture of a monitor or window, and WASAPI loopback of its audio, handed to yap-voice. No Qt."
+description = "Yap screen share capture on Windows: the picker's sources and thumbnails, Windows Graphics Capture of a monitor or window, the OBS-signed game capture hook, and WASAPI loopback of its audio, handed to yap-voice. No Qt."
 
 [dependencies]
 # Without libwebrtc here: the app turns it on (features unify), and this
 # crate checks and tests on its own without the WebRTC build.
 yap-voice = { path = "../yap-voice", default-features = false }
+# The game capture hook's lock file, learned skips and remote blocklist.
+serde.workspace = true
+serde_json.workspace = true
+# The signed hook files' SHA-256 against the lock.
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 # `windows-core` is named directly because `#[implement]` expands to paths
@@ -29,6 +34,16 @@ windows = { version = "0.61.3", features = [
     "Win32_Graphics_Gdi",
     "Win32_Media_Audio",
     "Win32_Security",
+    "Win32_Security_Cryptography",
+    "Win32_Security_Cryptography_Catalog",
+    "Win32_Security_Cryptography_Sip",
+    "Win32_Security_WinTrust",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_IO",
+    "Win32_System_Memory",
+    "Win32_System_Performance",
+    "Win32_System_Pipes",
+    "Win32_System_SystemInformation",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",

@@ -10,7 +10,8 @@ import com.yap.native
 MenuPanel {
     id: menu
 
-    implicitWidth: 248
+    // The web's menu width.
+    implicitWidth: 205
 
     MenuRow {
         text: qsTr("Server boost")

@@ -175,7 +175,7 @@ Column {
 
         SettingsRow {
             custom: true
-            layout: "field"
+            layout: "label"
             label: qsTr("Role name")
             KitField {
                 width: parent.width

@@ -120,7 +120,7 @@ T.Popup {
     closePolicy: T.Popup.NoAutoClose
     onAboutToShow: reset()
 
-    T.Overlay.modal: Rectangle {
+    T.Overlay.modal: Scrim {
         color: Theme.scrimStacked
         TapHandler { onTapped: editor.requestClose() }
     }

@@ -27,6 +27,8 @@
 
 mod cache;
 mod filter;
+#[cfg(windows)]
+pub mod hook;
 mod ids;
 mod pace;
 mod pcm;
@@ -94,6 +96,28 @@ pub fn thumbnail(source_id: &str, max_width: u32) -> Option<Image> {
 /// Windows only; monitors have none.
 pub fn window_icon(source_id: &str, size: u32) -> Option<Image> {
     platform::window_icon(source_id, size)
+}
+
+static GAME_CAPTURE_HOOK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// The "Game capture hook" setting (on by default): a shared window is
+/// also tried with the OBS-signed hook (see [`hook`]); off, always WGC.
+pub fn set_game_capture_hook(on: bool) {
+    GAME_CAPTURE_HOOK.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the hook is tried for a shared window.
+pub fn game_capture_hook() -> bool {
+    GAME_CAPTURE_HOOK.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Where the hook keeps its files (the profile's data folder). Without it
+/// nothing is staged or remembered.
+pub fn set_data_dir(dir: std::path::PathBuf) {
+    #[cfg(windows)]
+    hook::set_data_dir(dir);
+    #[cfg(not(windows))]
+    let _ = dir;
 }
 
 /// `YAP_SHARE_ONLY_OURS=1`: only our own windows may be captured.

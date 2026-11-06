@@ -32,7 +32,7 @@ T.Popup {
     focus: true
     closePolicy: busy ? T.Popup.NoAutoClose : T.Popup.CloseOnEscape | T.Popup.CloseOnPressOutside
 
-    T.Overlay.modal: Rectangle { color: Theme.scrim }
+    T.Overlay.modal: Scrim { color: Theme.scrim }
 
     enter: Transition {
         ParallelAnimation {

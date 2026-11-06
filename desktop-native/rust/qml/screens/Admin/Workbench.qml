@@ -93,7 +93,7 @@ T.Popup {
     onClosed: escapes = []
     onActiveIdChanged: toTop()
 
-    T.Overlay.modal: Rectangle {
+    T.Overlay.modal: Scrim {
         color: Theme.scrim
         TapHandler { onTapped: bench.requestClose() }
     }

@@ -427,9 +427,9 @@ Rectangle {
                 Emoji.remember(emoji)
             }
             onReactionDetailsRequested: (id, emoji) => ShellState.reactionsRequested(id, emoji)
-            onReactionPickerRequested: (id, anchor) => {
+            onReactionPickerRequested: (id, anchor, toRight) => {
                 reactionPicker.messageId = id
-                reactionPicker.openAt(anchor, true)
+                reactionPicker.openBeside(anchor, toRight)
             }
             onImageOpened: (images, index) => viewer.show(images, index)
             onDownloadRequested: item => root.saveFile(item)
@@ -794,14 +794,14 @@ Rectangle {
         }
         MenuRule { visible: messageMenu.settled; height: visible ? implicitHeight : 0 }
         MenuRow {
+            id: addReactionRow
             text: qsTr("Add reaction")
             glyph: "react"
             visible: messageMenu.settled
             height: visible ? implicitHeight : 0
             onTriggered: {
                 reactionPicker.messageId = messageMenu.messageId
-                if (messageMenu.anchorItem)
-                    reactionPicker.openAt(messageMenu.anchorItem, true)
+                reactionPicker.openBelow(addReactionRow)
             }
         }
         MenuRule { visible: messageMenu.settled && !messageMenu.hasReactions; height: visible ? implicitHeight : 0 }

@@ -62,7 +62,7 @@ Popup {
 
     ClipboardText { id: clipboard }
 
-    Overlay.modal: Rectangle { color: Theme.scrim }
+    Overlay.modal: Scrim { color: Theme.scrim }
 
     background: Rectangle {
         radius: Theme.radiusSheet
