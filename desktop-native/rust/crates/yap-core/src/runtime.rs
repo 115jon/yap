@@ -953,7 +953,9 @@ pub fn spawn(
     if let Some(fixture) = fixture {
         eprintln!("[fixture] {fixture:?}: offline, no keyring, gateway or voice");
     }
-    let state = State::new(&config::get().api_base).with_local_offset(local_offset);
+    let state = State::new(&config::get().api_base)
+        .with_local_offset(local_offset)
+        .with_voice_standby(config::get().voice_standby);
     runtime().spawn(async move {
         // The fixture runs offline and never touches the cache.
         let cache = fixture.is_none().then(yap_cache::default_path).flatten();

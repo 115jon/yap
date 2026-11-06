@@ -16,8 +16,10 @@ pub const COLUMNS: usize = 9;
 /// Recents kept, most recent first (emoji.ts `MAX_RECENTS`).
 pub const MAX_RECENTS: usize = 36;
 
-/// Quick reactions shown in the hover bar.
-pub const QUICK_REACTIONS: usize = 3;
+/// Quick reactions offered (`RECENT_REACTION_MENU_LIMIT`): the hover bar
+/// shows the first 3 (`getQuickReactionItems(3)`), the message menu 4
+/// (`QUICK_REACTION_BUTTON_LIMIT`).
+pub const QUICK_REACTIONS: usize = 5;
 
 /// What fills the quick reactions after the recents.
 const QUICK_FALLBACK: [&str; 5] = ["thumbsup", "heart", "joy", "tada", "fire"];
@@ -197,7 +199,7 @@ mod tests {
     fn quick_reactions_should_fill_from_the_fallbacks() {
         let quick: Vec<Value> = serde_json::from_str(&quick_reactions(&[], 0, "")).expect("json");
         let codes: Vec<&str> = quick.iter().filter_map(|c| c["s"].as_str()).collect();
-        assert_eq!(codes, ["thumbsup", "heart", "joy"]);
+        assert_eq!(codes, ["thumbsup", "heart", "joy", "tada", "fire"]);
     }
 
     #[test]

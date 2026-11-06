@@ -209,10 +209,43 @@ pub fn empty_frame(op: GatewayOp) -> String {
 
 /// The room Identify (op 0); it, not standby, is what grants the join.
 pub fn room_identify(name: &str, username: &str) -> Value {
-    json!({ "op": GatewayOp::Identify.code(), "d": {
+    room_identify_as(name, username, false)
+}
+
+/// The room Identify, as a hidden standby (`standby: true`: no join grant,
+/// nobody sees us) when `standby`.
+pub fn room_identify_as(name: &str, username: &str, standby: bool) -> Value {
+    let mut frame = json!({ "op": GatewayOp::Identify.code(), "d": {
         "name": name, "username": username,
         "platform": "desktop", "supports_voice_state_deltas": true,
+    }});
+    if standby {
+        frame["d"]["standby"] = json!(true);
+    }
+    frame
+}
+
+/// Promotes a standby room session to a join (op 15 `promote_standby`,
+/// room-gateway.ts `promoteStandby`), with the mic and deafen state.
+pub fn promote_standby(muted: bool, deafened: bool) -> String {
+    json!({ "op": GatewayOp::VoiceStateUpdate as u16, "d": {
+        "promote_standby": true, "self_mute": muted, "self_deaf": deafened,
     }})
+    .to_string()
+}
+
+/// TrackUnavailable (op 109): the SFU keeps not finding a track we pull.
+pub fn track_unavailable(
+    participant_id: &str,
+    track_name: &str,
+    sfu_track_name: &str,
+    session_id: &str,
+) -> String {
+    json!({ "op": GatewayOp::TrackUnavailable.code(), "d": {
+        "participant_id": participant_id, "track_name": track_name,
+        "sfu_track_name": sfu_track_name, "session_id": session_id,
+    }})
+    .to_string()
 }
 
 /// The voice Identify (op 100).

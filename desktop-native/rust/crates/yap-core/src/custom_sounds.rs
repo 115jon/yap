@@ -121,6 +121,10 @@ pub fn id_of(sound: Sound) -> &'static str {
         Sound::Disconnect => "disconnect",
         Sound::ScreenShareStart => "screenShareStart",
         Sound::ScreenShareStop => "screenShareStop",
+        Sound::Ring => "ring",
+        Sound::OutgoingRing => "outgoingRing",
+        Sound::CallConnect => "callConnect",
+        Sound::CallEnd => "callEnd",
     }
 }
 

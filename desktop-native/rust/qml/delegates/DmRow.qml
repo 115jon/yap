@@ -44,6 +44,24 @@ Rectangle {
 
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
     TapHandler { onTapped: row.selected() }
+    // Right click: the conversation's menu (Start call asks first).
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: eventPoint => rowMenu.popup(row, eventPoint.position.x, eventPoint.position.y)
+    }
+    MenuPanel {
+        id: rowMenu
+        MenuRow {
+            text: qsTr("Start call")
+            glyph: "call"
+            onTriggered: ShellState.startCall(row.channelId, row.name, true)
+        }
+        MenuRow {
+            text: qsTr("Profile")
+            glyph: "profile"
+            onTriggered: row.profileRequested(row)
+        }
+    }
 
     PresenceAvatar {
         id: face

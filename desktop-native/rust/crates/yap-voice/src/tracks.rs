@@ -44,6 +44,10 @@ pub struct Remote {
     /// The simulcast layer to ask for (`simulcast.preferredRid`); `None`
     /// for audio and single-layer video.
     pub preferred_rid: Option<String>,
+    /// Pull it on a receive-only session of its own: this alias's pull was
+    /// closed before, and on the same peer connection the SFU recycles the
+    /// closed m-line, which libwebrtc refuses (`SplitVideoTransport`).
+    pub fresh: bool,
 }
 
 /// A publication as last offered (VoiceReady or op 12).
@@ -168,6 +172,7 @@ impl TrackTable {
                 session_id: offer.session_id.clone(),
                 kind: offer.kind,
                 preferred_rid,
+                fresh: false,
             });
         }
         pulls
@@ -198,6 +203,26 @@ impl TrackTable {
             }
             (None, None) => Vec::new(),
         }
+    }
+
+    /// Forgets every pull (a new peer connection: their mids are gone with
+    /// the old one); the offers stay, so they are pulled again.
+    pub fn reset_pulls(&mut self) {
+        self.pulls.clear();
+    }
+
+    /// Releases a pull nobody wants any more (its offer stays, so wanting it
+    /// again pulls it again); its mid to close.
+    pub fn release(&mut self, alias: &str) -> Option<String> {
+        self.retire(alias)
+    }
+
+    /// The alias of the in-flight pull of `sfu_track_name`.
+    pub fn pending_alias(&self, sfu_track_name: &str) -> Option<&str> {
+        self.pulls
+            .iter()
+            .find(|(_, p)| p.sfu_track_name == sfu_track_name && p.mid.is_none())
+            .map(|(alias, _)| alias.as_str())
     }
 
     /// Forgets the pull of `alias`; its mid, if it had one, to close.

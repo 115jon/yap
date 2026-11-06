@@ -155,6 +155,8 @@ impl State {
             self.view.dm = dm.clone();
             fx.view(ViewUpdate::ActiveDm(dm));
         }
+        // The open DM's call area and header key follow the open DM.
+        self.sync_calls(fx);
     }
 
     /// A user as the lists know them: you, a member of any server, a DM
@@ -202,7 +204,28 @@ impl State {
             .and_then(|list| list.iter().find(|m| &m.user.id == id))
             .map_or(&[][..], |m| m.roles.as_slice());
         let me = self.me().map_or("", |me| me.id.as_str());
-        view::profile_view(user, roles, me, &self.presence, &self.api_base)
+        let mut view = view::profile_view(user, roles, me, &self.presence, &self.api_base);
+        // ProfileCard.tsx "Mutual servers": not on your own card.
+        if let Some((_, mutuals)) = self
+            .profile_mutuals
+            .as_ref()
+            .filter(|(owner, m)| owner == id && !view.me && m.count > 0)
+        {
+            let items: Vec<serde_json::Value> = mutuals
+                .items
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "id": s.id, "name": s.name,
+                        "icon": view::absolute_url(&self.api_base, s.icon_url.as_deref()),
+                        "initial": s.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default(),
+                    })
+                })
+                .collect();
+            view.mutual_servers =
+                serde_json::json!({ "count": mutuals.count, "items": items }).to_string();
+        }
+        view
     }
 
     pub(super) fn emit_profile(&mut self, fx: &mut Effects) {
@@ -617,9 +640,10 @@ impl State {
         result: Result<ApiResponse, ApiError>,
     ) {
         match result {
-            Ok(ApiResponse::Profile(user)) => {
+            Ok(ApiResponse::Profile(user, mutuals)) => {
                 if let Some((_, full)) = self.profile.as_mut().filter(|(id, _)| id == user_id) {
                     *full = Some(*user);
+                    self.profile_mutuals = Some((user_id.to_owned(), mutuals));
                 }
                 self.emit_profile(fx);
             }

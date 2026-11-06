@@ -11,8 +11,10 @@ import com.yap.native
 Item {
     id: root
 
-    // The Yap user id, for their call menu (right click).
+    // The Yap user id, for their call menu (right click), and the voice
+    // channel they are in.
     property string userId
+    property string channelId
     required property string name
     required property string avatar
     required property bool muted
@@ -41,7 +43,7 @@ Item {
     TapHandler {
         enabled: !root.me && root.userId.length > 0
         acceptedButtons: Qt.RightButton
-        onTapped: eventPoint => ShellState.showPeerMenu(root.userId, root.name, root, eventPoint.position)
+        onTapped: eventPoint => ShellState.showPeerMenu(root.userId, root.name, root, eventPoint.position, root.channelId)
     }
 
     // Guides: up, tick, down.

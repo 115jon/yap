@@ -6,11 +6,13 @@ use std::fmt;
 use std::time::Duration;
 
 use serde_json::Value;
+use yap_protocol::payload::{RepublishRequest, VoiceMove};
 use yap_protocol::rest::{VoiceAdmission, VoiceAdmissionRequest};
 use yap_protocol::{GatewayOp, VOICE_MOVED_CLOSE_REASON};
 use yap_realtime::StopReason;
 
 use crate::audio::{Playback, Processing};
+use crate::engine::MediaStats;
 use crate::layers::{
     resolve_quality, select_rid, Quality, RenderSize, LAYER_DOWNGRADE_DELAY, LAYER_SWITCH_SETTLE,
     LAYER_UPGRADE_DELAY,
@@ -26,9 +28,31 @@ use crate::wire::{
     self, Announced, Bootstrap, IceServer, Participant, RoomState, SelfState, Track,
 };
 
+mod health;
 mod share;
 
+use health::Health;
+pub use health::{StatsSample, VoiceStats, STATS_SAMPLES};
 use share::Share;
+
+/// How many SFU session rebuilds in a row (without the new peer connection
+/// ever connecting) before a failed connection ends the call.
+pub const MAX_REBUILDS: u32 = 3;
+
+/// How long a pulled video nobody shows any more keeps its pull before it
+/// is released (a tile scrolled away for a moment keeps it).
+pub const VIDEO_RELEASE_DELAY: Duration = Duration::from_secs(15);
+
+/// A standby's mic track sends nothing; the SFU drops a track without media
+/// after about 30 s, so a promotion after this long pushes it again
+/// (voice-standby.ts `republishIfStale`).
+pub const STANDBY_STALE_AFTER: Duration = Duration::from_secs(25);
+
+/// A DM call's room: both user ids, sorted (`dmCallRoomSlug`).
+pub fn dm_call_slug(me: &str, peer: &str) -> String {
+    let (a, b) = if me <= peer { (me, peer) } else { (peer, me) };
+    format!("dm-call-{a}-{b}")
+}
 
 /// How long a remote participant's pulls outlive a voice `ClientDisconnect`
 /// for them (`REMOTE_RECONNECT_GRACE_MS`, STATE_MACHINE.md "Reconnect
@@ -76,18 +100,30 @@ impl fmt::Display for CallState {
 }
 
 /// What a call needs to join.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CallTarget {
+    /// Empty for a DM call.
     pub server_id: String,
+    /// The voice channel, or the DM channel of a call.
     pub channel_id: String,
     pub me_name: String,
     pub me_username: String,
+    /// A DM call's room (`dm-call-<a>-<b>`, [`dm_call_slug`]); `None`: the
+    /// server voice channel's.
+    pub room_slug: Option<String>,
+    /// The grant a moderator's move carried (VoiceMove): stands in for
+    /// CONNECT on this join's admission.
+    pub move_grant: Option<String>,
+    /// Warm up hidden (`standby: true`) until [`UserCommand::Promote`].
+    pub standby: bool,
 }
 
 impl CallTarget {
     /// The room both call sockets and the SFU proxy live under.
     pub fn slug(&self) -> String {
-        format!("voice-{}-{}", self.server_id, self.channel_id)
+        self.room_slug
+            .clone()
+            .unwrap_or_else(|| format!("voice-{}-{}", self.server_id, self.channel_id))
     }
 }
 
@@ -146,6 +182,8 @@ pub enum UserCommand {
     /// Our own soundboard clip is playing (or not): op 5's SOUNDSHARE flag
     /// (`vad.setSoundboardSpeaking`).
     SetSoundboardSpeaking(bool),
+    /// A standby becomes the join (voice-standby.ts claim, `promote_standby`).
+    Promote,
     Leave,
 }
 
@@ -179,6 +217,8 @@ pub enum RoomEvent {
     },
     /// Op 9 answering a credentials refresh (op 40).
     Credentials { voice_token: String },
+    /// Op 42: a moderator moved this session; the 4010 close follows.
+    Moved(VoiceMove),
     /// The socket dropped; it reconnects.
     Disconnected,
     /// The socket stopped for good.
@@ -216,6 +256,8 @@ pub enum VoiceEvent {
     },
     /// Op 106: a voice app event (soundboard, Listen Together, activities).
     App(Value),
+    /// Op 110: a listener cannot pull one of ours; push it again.
+    Republish(RepublishRequest),
     /// An Error 4008 or 4010: this session must stop.
     Rejected {
         message: String,
@@ -259,6 +301,12 @@ pub enum Timer {
     LayerSettle { track: String, token: u64 },
     /// Every 5 s: log media stats.
     Stats,
+    /// A video pull nobody showed for [`VIDEO_RELEASE_DELAY`].
+    ReleaseVideo { track: String, token: u64 },
+    /// A republish of `track` may be asked for again.
+    RepublishCooldown { track: String },
+    /// A standby's idle mic is likely gone from the SFU.
+    StandbyStale,
     /// [`CREDENTIAL_REFRESH`] after the voice token `token` counts arrived:
     /// ask the room for a fresh one (op 40).
     RefreshCredentials { token: u64 },
@@ -293,6 +341,19 @@ pub enum Input {
     PullDone {
         sfu_track_name: String,
         mid: Option<String>,
+    },
+    /// The pull of `sfu_track_name` failed because the SFU kept answering
+    /// `not_found_track_error` (sent just before its failed [`Input::PullDone`]).
+    PullNotFound {
+        sfu_track_name: String,
+    },
+    /// A republish ([`Effect::Republish`]) landed: the new SFU track name.
+    Republished(Result<(Republish, String), String>),
+    /// A stats snapshot of the call's peer connection, `at_ms` on the VAD's
+    /// clock.
+    Stats {
+        stats: MediaStats,
+        at_ms: u64,
     },
     Command(UserCommand),
     Timer(Timer),
@@ -336,6 +397,21 @@ pub enum Notice {
     VoiceReady { participant_id: String },
     /// A voice app event (op 106) arrived.
     App(Value),
+    /// A moderator moved us (op 42): the call ends; the owner joins there.
+    Moved(VoiceMove),
+    /// The voice details' numbers, every stats tick.
+    Stats(VoiceStats),
+    /// Nothing arrives from anyone while someone speaks (AudioSentinel).
+    InboundAudioStalled(bool),
+    /// Our unmuted mic sends nothing (OutboundAudioSentinel).
+    MicStalled(bool),
+}
+
+/// Which of our publications a republish pushes again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Republish {
+    Mic,
+    Camera,
 }
 
 /// How to open one call socket.
@@ -360,6 +436,8 @@ pub struct MediaSpec {
     pub voice_token: String,
     /// The msid stream for our mic (`cam-<participant>`).
     pub stream_id: String,
+    /// A standby: push the mic but do not capture until promoted.
+    pub standby: bool,
 }
 
 /// Everything the machine asks for. The owner runs them in order.
@@ -377,6 +455,15 @@ pub enum Effect {
     /// Open media, create the SFU session and push the mic; answer with
     /// [`Input::Published`] (socket events wait until then).
     OpenMedia(MediaSpec),
+    /// The peer connection failed: drop it (and its pulls, video sessions
+    /// and worker) and open media again on a new SFU session, as
+    /// PartyTracks does; answer with [`Input::Published`].
+    RebuildMedia(MediaSpec),
+    /// Push one of our publications again under a new SFU track name
+    /// (serialized with pulls); answer with [`Input::Republished`].
+    Republish(Republish),
+    /// A promoted standby: start capturing the mic.
+    PromoteMedia,
     /// Send a text frame once that socket is ready.
     Send(Socket, String),
     /// The identify the voice socket sends next.
@@ -491,6 +578,8 @@ pub struct CallMachine {
     ended: bool,
     me: String,
     voice_token: String,
+    /// The admission's ICE servers (a rebuild opens media with them again).
+    ice_servers: Vec<IceServer>,
     /// The token of the armed credential refresh (a newer token re-arms it).
     refresh: u64,
     published: Option<Published>,
@@ -533,6 +622,20 @@ pub struct CallMachine {
     /// Op 106 frames sent while the voice socket was not ready (joining or
     /// reconnecting), flushed on the next VoiceReady; dropped on leave.
     app_queue: VecDeque<String>,
+    /// A moderator moved us: the stop that follows is not an error.
+    moved: bool,
+    /// SFU session rebuilds since media last connected.
+    rebuilds: u32,
+    /// Still a hidden standby (not promoted).
+    standby: bool,
+    /// The standby's mic has sat long enough to be gone from the SFU.
+    standby_stale: bool,
+    /// Video aliases whose pull was closed: later pulls of them are fresh.
+    closed_video: HashSet<String>,
+    /// Release timers of unwanted video pulls, by alias.
+    releasing: HashMap<String, u64>,
+    /// Stats, the sentinels, op 109 reports and republish cooldowns.
+    health: Health,
 }
 
 /// Frames held for a voice socket that is not ready (the oldest go first
@@ -547,6 +650,7 @@ impl CallMachine {
             ended: false,
             me: String::new(),
             voice_token: String::new(),
+            ice_servers: Vec::new(),
             refresh: 0,
             published: None,
             sockets_open: false,
@@ -577,6 +681,13 @@ impl CallMachine {
             share: Share::default(),
             soundboard_speaking: false,
             app_queue: VecDeque::new(),
+            moved: false,
+            rebuilds: 0,
+            standby: false,
+            standby_stale: false,
+            closed_video: HashSet::new(),
+            releasing: HashMap::new(),
+            health: Health::default(),
         }
     }
 
@@ -637,9 +748,19 @@ impl CallMachine {
                     mid,
                 },
             ) => {
+                if mid.is_some() {
+                    if let Some(alias) = self.tracks.pending_alias(&sfu_track_name) {
+                        self.health.pulled(alias);
+                    }
+                }
                 let closing = self.tracks.pull_done(&sfu_track_name, mid);
                 close(&mut fx, closing);
             }
+            (_, Input::PullNotFound { sfu_track_name }) => {
+                self.on_pull_not_found(&mut fx, &sfu_track_name);
+            }
+            (_, Input::Republished(result)) => self.on_republished(&mut fx, result),
+            (_, Input::Stats { stats, at_ms }) => self.on_stats(&mut fx, &stats, at_ms),
             (_, Input::Command(command)) => self.on_command(&mut fx, command),
             (_, Input::Timer(timer)) => self.on_timer(&mut fx, timer),
             (_, Input::MicLevel { rms, at_ms }) => self.on_mic_level(&mut fx, rms, at_ms),
@@ -660,9 +781,12 @@ impl CallMachine {
         if self.connected {
             // Pull what is wanted once media is up (VOICE_PROTOCOL.md §3.3c).
             let (video, watched) = (&self.video, &self.watched);
-            let pulls = self
+            let mut pulls = self
                 .tracks
                 .take_pulls(|offer| wanted(offer, video, watched));
+            for remote in &mut pulls {
+                remote.fresh = self.closed_video.contains(&remote.track_name);
+            }
             for remote in &pulls {
                 if remote.kind == Kind::Video && is_camera(&remote.track_name) {
                     let quality = resolve_quality(video.demand.get(&remote.track_name).copied());
@@ -676,6 +800,7 @@ impl CallMachine {
                 }
             }
             fx.extend(pulls.into_iter().map(Effect::Pull));
+            self.sync_releases(fx);
         }
         self.sync_gains(fx);
         self.sync_routes(fx);
@@ -889,11 +1014,10 @@ impl CallMachine {
         self.set_state(fx, CallState::Connecting);
         self.set_status(fx, "Getting tickets");
         let (t, slug) = (&self.target, self.target.slug());
-        fx.push(Effect::RequestAdmission(VoiceAdmissionRequest::join(
-            &t.server_id,
-            &t.channel_id,
-            &slug,
-        )));
+        fx.push(Effect::RequestAdmission(
+            VoiceAdmissionRequest::join(&t.server_id, &t.channel_id, &slug)
+                .with_move_grant(t.move_grant.as_deref()),
+        ));
     }
 
     /// The join's admission: the credentials come from its `media`, not
@@ -922,13 +1046,21 @@ impl CallMachine {
         self.voice_token = voice_token;
         self.roster = Some(Roster::new(&self.me, &self.target.me_name));
         self.sockets_open = true;
+        self.standby = self.target.standby;
 
         let t = &self.target;
         let slug = t.slug();
+        // A standby's voice socket connects but does not identify until the
+        // promotion (the room never offers it anyone's tracks before).
+        let voice_identify = if self.standby {
+            Value::Null
+        } else {
+            wire::voice_identify(&self.me, &self.voice_token)
+        };
         let sockets = Effect::OpenSockets {
             room: Box::new(SocketSpec {
                 path: format!("/api/channels/{slug}/ws?v=1"),
-                identify: wire::room_identify(&t.me_name, &t.me_username),
+                identify: wire::room_identify_as(&t.me_name, &t.me_username, self.standby),
                 first_ticket: room_ticket,
                 reconnect: VoiceAdmissionRequest::room_reconnect(
                     &t.server_id,
@@ -938,7 +1070,7 @@ impl CallMachine {
             }),
             voice: Box::new(SocketSpec {
                 path: format!("/api/channels/{slug}/voice?v=1"),
-                identify: wire::voice_identify(&self.me, &self.voice_token),
+                identify: voice_identify,
                 first_ticket: voice_ticket,
                 // The participant never changes in a call (a fresh one ends
                 // it), so the binding is fixed.
@@ -950,12 +1082,14 @@ impl CallMachine {
                 ),
             }),
         };
+        self.ice_servers = ice_servers.clone();
         let media = Effect::OpenMedia(MediaSpec {
             ice_servers,
             stream_id: format!("cam-{}", self.me),
             slug,
             participant_id: self.me.clone(),
             voice_token: self.voice_token.clone(),
+            standby: self.standby,
         });
         self.set_status(fx, "Joining");
         fx.push(sockets);
@@ -971,8 +1105,14 @@ impl CallMachine {
         match result {
             Ok(published) => {
                 self.published = Some(published);
-                if self.muted {
+                if self.muted || self.standby {
                     fx.push(Effect::SetMicEnabled(false));
+                }
+                if self.standby {
+                    fx.push(Effect::ArmTimer {
+                        timer: Timer::StandbyStale,
+                        after: STANDBY_STALE_AFTER,
+                    });
                 }
                 if self.deafened {
                     fx.push(Effect::SetPlayoutEnabled(false));
@@ -1100,6 +1240,11 @@ impl CallMachine {
                 let again = std::mem::replace(&mut self.room_identified, true);
                 self.room_up = true;
                 self.replace_roster(&d);
+                if self.standby {
+                    // Hidden: no voice state, no join until the promotion.
+                    self.emit_roster(fx);
+                    return self.refresh_status(fx);
+                }
                 fx.push(Effect::Send(Socket::Room, self.voice_state()));
                 self.emit_roster(fx);
                 match self.state {
@@ -1143,11 +1288,19 @@ impl CallMachine {
                 self.emit_roster(fx);
             }
             RoomEvent::Credentials { voice_token } => self.update_token(fx, &voice_token),
+            RoomEvent::Moved(to) => {
+                fx.push(Effect::Log(format!(
+                    "[voice/room] moved to channel {}",
+                    to.channel_id
+                )));
+                self.moved = true;
+                fx.push(Effect::Notify(Notice::Moved(to)));
+            }
             RoomEvent::Disconnected => {
                 self.room_up = false;
                 self.lost(fx);
             }
-            RoomEvent::Stopped(reason) => self.end(fx, Some(stop_message(reason))),
+            RoomEvent::Stopped(reason) => self.stopped(fx, reason),
             RoomEvent::Closed => self.end(fx, Some("Room connection closed".into())),
         }
     }
@@ -1215,6 +1368,9 @@ impl CallMachine {
                 participant_id,
                 speaking,
             } => {
+                if speaking && participant_id != self.me {
+                    self.health.heard_speaking();
+                }
                 let changed = self
                     .roster
                     .as_mut()
@@ -1253,6 +1409,7 @@ impl CallMachine {
                 });
             }
             VoiceEvent::App(d) => fx.push(Effect::Notify(Notice::App(d))),
+            VoiceEvent::Republish(request) => self.on_republish_request(fx, &request),
             VoiceEvent::Rejected { message } => self.end(fx, Some(message)),
             VoiceEvent::IdentifyRejected => {
                 // Expired voice token: the room's Resumed reply carries a
@@ -1270,7 +1427,7 @@ impl CallMachine {
                 self.voice_ready = false;
                 self.refresh_status(fx);
             }
-            VoiceEvent::Stopped(reason) => self.end(fx, Some(stop_message(reason))),
+            VoiceEvent::Stopped(reason) => self.stopped(fx, reason),
             VoiceEvent::Closed => self.end(fx, Some("Voice connection closed".into())),
         }
     }
@@ -1280,16 +1437,22 @@ impl CallMachine {
             MediaEvent::State(MediaState::Connected) => {
                 self.connected = true;
                 self.media_up = true;
+                self.rebuilds = 0;
                 self.restored(fx);
             }
             MediaEvent::State(MediaState::Disconnected) => {
                 self.media_up = false;
                 self.lost(fx);
             }
-            // No SFU session rebuild here (PartyTracks would start a new
-            // session and republish): a failed peer connection ends the call.
+            // PartyTracks discards a failed session and starts again: a new
+            // capability, our tracks pushed and announced again, the pulls
+            // made again. A connection that keeps failing ends the call.
             MediaEvent::State(MediaState::Failed) => {
-                self.end(fx, Some("Media connection failed".into()));
+                if self.published.is_some() && self.rebuilds < MAX_REBUILDS {
+                    self.rebuild(fx);
+                } else {
+                    self.end(fx, Some("Media connection failed".into()));
+                }
             }
             MediaEvent::State(_) => {}
             MediaEvent::Closed => self.end(fx, Some("Media connection ended".into())),
@@ -1394,6 +1557,7 @@ impl CallMachine {
                     self.send_speaking(fx);
                 }
             }
+            UserCommand::Promote => self.promote(fx),
             UserCommand::Leave => self.leave(fx),
         }
     }
@@ -1571,6 +1735,13 @@ impl CallMachine {
                     fx.push(Effect::LogStats);
                 }
             }
+            Timer::ReleaseVideo { track, token } => self.release_video(fx, &track, token),
+            Timer::RepublishCooldown { track } => self.health.cooled(&track),
+            Timer::StandbyStale => {
+                if self.standby {
+                    self.standby_stale = true;
+                }
+            }
             Timer::RefreshCredentials { token } => {
                 if self.sockets_open && token == self.refresh {
                     fx.push(Effect::Send(
@@ -1582,6 +1753,141 @@ impl CallMachine {
                     self.arm_refresh(fx);
                 }
             }
+        }
+    }
+}
+
+impl CallMachine {
+    /// A socket stopped for good. After a move the 4010 is expected: the
+    /// call just ends (the owner joins the target).
+    fn stopped(&mut self, fx: &mut Vec<Effect>, reason: StopReason) {
+        let moved_close = matches!(
+            &reason,
+            StopReason::Replaced { reason, .. } if reason == VOICE_MOVED_CLOSE_REASON
+        );
+        if self.moved || moved_close {
+            self.end(fx, None);
+        } else {
+            self.end(fx, Some(stop_message(reason)));
+        }
+    }
+
+    /// The peer connection failed: a new SFU session (PartyTracks' recovery,
+    /// VOICE_PROTOCOL.md §3.3 "Recovery"). Pulls start again once it
+    /// connects; our mic (and a camera that was on) is pushed again and
+    /// announced under its new capability. A share in flight ends.
+    fn rebuild(&mut self, fx: &mut Vec<Effect>) {
+        self.rebuilds += 1;
+        fx.push(Effect::Log(format!(
+            "[voice] peer connection failed; rebuilding the SFU session ({}/{MAX_REBUILDS})",
+            self.rebuilds
+        )));
+        self.published = None;
+        self.connected = false;
+        self.media_up = false;
+        self.tracks.reset_pulls();
+        self.gains.clear();
+        self.routes.clear();
+        self.layers.clear();
+        self.releasing.clear();
+        // Every closed slot belonged to the old connection.
+        self.closed_video.clear();
+        self.health.reset_media();
+        self.camera.pushing = false;
+        self.camera.published = None;
+        self.camera.on = false;
+        self.drop_shares_for_rebuild(fx);
+        fx.push(Effect::RebuildMedia(MediaSpec {
+            ice_servers: self.ice_servers.clone(),
+            slug: self.target.slug(),
+            participant_id: self.me.clone(),
+            voice_token: self.voice_token.clone(),
+            stream_id: format!("cam-{}", self.me),
+            // A standby stays hidden on its new session too.
+            standby: self.standby,
+        }));
+        self.lost(fx);
+    }
+
+    /// A standby becomes the join: the room hears `promote_standby` (with
+    /// mute and deafen), the voice socket identifies, capture starts.
+    fn promote(&mut self, fx: &mut Vec<Effect>) {
+        if !std::mem::replace(&mut self.standby, false) {
+            return;
+        }
+        fx.push(Effect::Log("[voice] standby promoted".into()));
+        fx.push(Effect::Send(
+            Socket::Room,
+            wire::promote_standby(self.muted, self.deafened),
+        ));
+        fx.push(Effect::SetVoiceIdentify(wire::voice_identify(
+            &self.me,
+            &self.voice_token,
+        )));
+        if self.published.is_some() {
+            fx.push(Effect::PromoteMedia);
+            fx.push(Effect::SetMicEnabled(!self.muted));
+            if std::mem::take(&mut self.standby_stale) {
+                fx.push(Effect::Log(
+                    "[voice] standby mic idle too long; republishing".into(),
+                ));
+                fx.push(Effect::Republish(Republish::Mic));
+            }
+        }
+        if self.room_identified && self.state == CallState::Connecting {
+            self.set_state(fx, CallState::Joined);
+            fx.push(Effect::Notify(Notice::Connected));
+        }
+        self.refresh_status(fx);
+    }
+
+    /// Arms a release for each live video pull nothing wants any more, and
+    /// cancels the ones wanted again.
+    fn sync_releases(&mut self, fx: &mut Vec<Effect>) {
+        let (video, watched) = (&self.video, &self.watched);
+        let mut unwanted = HashSet::new();
+        for (alias, pull) in self.tracks.pulls() {
+            if pull.kind != Kind::Video || pull.mid.is_none() || pull.parked {
+                continue;
+            }
+            let Some(offer) = self.tracks.offer_of(alias) else {
+                continue;
+            };
+            if wanted(offer, video, watched).is_none() {
+                unwanted.insert(alias.to_owned());
+            }
+        }
+        self.releasing.retain(|alias, _| unwanted.contains(alias));
+        for alias in unwanted {
+            if self.releasing.contains_key(&alias) {
+                continue;
+            }
+            self.next_token += 1;
+            self.releasing.insert(alias.clone(), self.next_token);
+            fx.push(Effect::ArmTimer {
+                timer: Timer::ReleaseVideo {
+                    track: alias,
+                    token: self.next_token,
+                },
+                after: VIDEO_RELEASE_DELAY,
+            });
+        }
+    }
+
+    /// Closes a video pull that stayed unwanted; a later pull of it runs on
+    /// a fresh receive session.
+    fn release_video(&mut self, fx: &mut Vec<Effect>, alias: &str, token: u64) {
+        if self.releasing.get(alias) != Some(&token) {
+            return;
+        }
+        self.releasing.remove(alias);
+        if let Some(mid) = self.tracks.release(alias) {
+            fx.push(Effect::Log(format!(
+                "[voice] releasing {alias}: nobody shows it"
+            )));
+            self.layers.remove(alias);
+            self.closed_video.insert(alias.to_owned());
+            close(fx, vec![mid]);
         }
     }
 }

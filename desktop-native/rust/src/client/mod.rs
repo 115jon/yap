@@ -81,6 +81,10 @@ pub fn start(sink: Sink) -> bool {
 /// Commits the snapshot cache writes still pending (waits up to a second).
 /// Called once, when the `Session` singleton goes away with the engine.
 pub fn shutdown() {
+    // A call in progress: the room hears we left at once (the beacon), and
+    // the call is left so its sockets close cleanly.
+    voice::send_disconnect_beacon(std::time::Duration::from_millis(800));
+    command(Command::Quit);
     yap_core::shutdown();
 }
 

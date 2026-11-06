@@ -124,9 +124,11 @@ Item {
     readonly property bool editing: editingId.length > 0 && editingId === messageId
     readonly property bool hasReply: replyId.length > 0
     readonly property int dividerHeight: newDivider ? 24 : 0
-    // A header row's top: mt-4 and pt-0.5, plus the 5 px the web's line
-    // boxes put between a body and the next name (measured on yap.115jon.com).
-    readonly property int headTop: 16 + 2 + 5
+    // A header row's top: mt-4 and pt-0.5, plus the 4 px the web's line
+    // boxes put between a body and the next name: groups sit 66 apart for a
+    // one-line message on yap.115jon.com (re-measured 2026-11-06 against
+    // parity/server-channel-web.png; 5 drifted ~10 px by the screen's foot).
+    readonly property int headTop: 16 + 2 + 4
     readonly property int padTop: dividerHeight + (grouped ? 2 : headTop)
     readonly property int headerTop: padTop + (hasReply ? 20 : 0)
     readonly property bool shiftHeld: (hover.point.modifiers & Qt.ShiftModifier) !== 0
@@ -350,6 +352,10 @@ Item {
         spacing: 8
         Text {
             id: authorText
+            // The name in its 20 px line box with CSS's half-leading
+            // (leading-5), as the web sets it, not at the box's top.
+            height: Theme.type.authorLine
+            verticalAlignment: Text.AlignVCenter
             textFormat: Text.PlainText
             text: root.author
             color: root.authorInk
@@ -673,7 +679,7 @@ Item {
                 spacing: 2
                 // Quick reactions: recents, then thumbs up, heart, joy.
                 Repeater {
-                    model: root.shiftHeld ? [] : JSON.parse(Emoji.quick)
+                    model: root.shiftHeld ? [] : JSON.parse(Emoji.quick).slice(0, 3)
                     Item {
                         id: quick
                         required property var modelData

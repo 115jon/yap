@@ -90,7 +90,12 @@ fn views(fx: &[Effect]) -> Vec<&ViewUpdate> {
 fn is_shell(update: &ViewUpdate) -> bool {
     matches!(
         update,
-        ViewUpdate::Toast(_) | ViewUpdate::Sound(_) | ViewUpdate::Badge(_)
+        ViewUpdate::Toast(_)
+            | ViewUpdate::Sound(_)
+            | ViewUpdate::StopSound(_)
+            | ViewUpdate::Badge(_)
+            // The call surfaces follow the open DM and tree on their own.
+            | ViewUpdate::Calls(_)
     )
 }
 

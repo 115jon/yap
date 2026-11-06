@@ -135,11 +135,22 @@ impl State {
         if self.apps.participant_id.is_empty() {
             return None;
         }
+        // A DM call's room is the pair's (`dm-call-<a>-<b>`), with no server.
+        let dm_peer = self
+            .voice
+            .as_ref()
+            .filter(|call| call.dm)
+            .and_then(|_| self.dm(&channel_id))
+            .map(|dm| dm.recipient.id.clone());
+        let (room_slug, server_id) = match dm_peer {
+            Some(peer) => (super::calls::dm_call_slug(&self.apps_me(), &peer), None),
+            None => (format!("voice-{server_id}-{channel_id}"), Some(server_id)),
+        };
         Some(Sender {
             participant_id: self.apps.participant_id.clone(),
             user_id: Some(self.apps_me()),
-            room_slug: format!("voice-{server_id}-{channel_id}"),
-            server_id: Some(server_id),
+            room_slug,
+            server_id,
         })
     }
 
@@ -277,6 +288,7 @@ impl State {
         };
         let server_key = wire::server_key(Some(&server_id));
         match event {
+            AppEvent::Sticker(sticker) => self.on_sticker(fx, sticker),
             AppEvent::StreamWatchSnapshot(watchers) => {
                 self.apps.watchers = watchers;
                 self.sync_roster(fx);

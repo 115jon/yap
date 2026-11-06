@@ -11,6 +11,7 @@
 
 mod admin;
 pub mod apps;
+pub mod calls;
 mod effect;
 pub mod embeds;
 pub mod extras;
@@ -74,14 +75,22 @@ pub struct CallId(pub u64);
 pub struct SignInId(pub u64);
 
 /// What a voice session needs to join.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VoiceTarget {
+    /// Empty for a DM call.
     pub server_id: String,
     /// The signed-in user (soundboard playback ids, activities).
     pub me_id: String,
+    /// The voice channel, or a DM call's DM channel.
     pub channel_id: String,
     pub me_name: String,
     pub me_username: String,
+    /// A DM call's room (`dm-call-<a>-<b>`).
+    pub room_slug: Option<String>,
+    /// A moderator's move grant for this join.
+    pub move_grant: Option<String>,
+    /// Warm up hidden until [`VoiceCommand::Promote`].
+    pub standby: bool,
 }
 
 /// Commands to a running voice session.
@@ -104,7 +113,20 @@ pub enum VoiceCommand {
     SendApp(String),
     /// Our own soundboard clip is audible (op 5 SOUNDSHARE).
     SetSoundboardSpeaking(bool),
+    /// A standby becomes the join.
+    Promote,
     Leave,
+}
+
+/// Where a moderator moved us (op 42).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VoiceMoved {
+    pub server_id: String,
+    pub channel_id: String,
+    pub channel_name: String,
+    pub mover_name: String,
+    /// Stands in for CONNECT on the join there.
+    pub grant: Option<String>,
 }
 
 /// A screen share as asked for, or as it is live.
@@ -197,6 +219,14 @@ pub enum VoiceUpdate {
         event: Box<yap_protocol::voice_app::AppEvent>,
         now_ms: i64,
     },
+    /// A moderator moved us; the call ends and the target is joined.
+    Moved(VoiceMoved),
+    /// The voice details' numbers (every 5 s).
+    Stats(Box<calls::CallStats>),
+    /// Nothing arrives while someone speaks.
+    InboundStalled(bool),
+    /// Our unmuted mic sends nothing.
+    MicStalled(bool),
     /// The call is over; the error text if it failed.
     Ended(Option<String>),
 }

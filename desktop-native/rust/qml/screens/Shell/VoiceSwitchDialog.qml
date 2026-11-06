@@ -10,10 +10,13 @@ PlateDialog {
 
     property string channelId
     property string channelName
+    // Switching to a DM call (its DM channel) rather than a voice channel.
+    property bool call: false
 
-    function start(channelId, name) {
+    function start(channelId, name, call) {
         dialog.channelId = channelId
         dialog.channelName = name
+        dialog.call = call ?? false
         dontAsk.checked = false
         open()
     }
@@ -70,7 +73,10 @@ PlateDialog {
                 if (dontAsk.checked)
                     Desktop.setSetting("skipVoiceSwitch", true)
                 dialog.close()
-                Voice.join(dialog.channelId)
+                if (dialog.call)
+                    Calls.start(dialog.channelId)
+                else
+                    Voice.join(dialog.channelId)
             }
         }
     ]

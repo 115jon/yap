@@ -325,6 +325,19 @@ pub struct VoiceCall {
     pub share: Option<super::VoiceShare>,
     /// Why the last share failed; empty otherwise.
     pub share_error: String,
+    /// A 1:1 DM call (`channel_id` is the DM channel, no server).
+    pub dm: bool,
+    /// A moderator's move grant, offered once on this call's op 33.
+    pub move_grant: Option<String>,
+}
+
+/// A hidden standby session warming a voice channel's join
+/// (voice-standby.ts): promoted by the next join of that channel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Standby {
+    pub id: super::CallId,
+    pub server_id: String,
+    pub channel_id: String,
 }
 
 /// Mic and deafen, kept between calls and in the snapshot cache (the
@@ -362,6 +375,7 @@ pub(super) struct Projection {
     /// The saved favourites' `provider:id`.
     pub favorites: Vec<String>,
     pub extras: super::extras::ExtrasView,
+    pub calls: super::calls::CallsView,
 }
 
 /// One step of a profile save, run in order; a failure stops the rest.
@@ -438,6 +452,8 @@ pub(super) struct SettingsPending {
 /// The request id each slot is waiting for. A result for any other id is stale.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct Pending {
+    /// Voice moves in flight.
+    pub moves: std::collections::HashSet<RequestId>,
     pub me: Option<RequestId>,
     pub servers: Option<RequestId>,
     /// (request, server id)
@@ -731,6 +747,8 @@ pub struct State {
     pub(super) presence: Presence,
     /// The user whose popout is open, and their full profile once fetched.
     pub(super) profile: Option<(String, Option<User>)>,
+    /// The servers shared with the popout's user, from their profile.
+    pub(super) profile_mutuals: Option<(String, yap_protocol::rest::MutualServers)>,
     pub(super) divider: Option<Divider>,
     /// The open channel's newest message time when it loaded: mentions on
     /// messages after it arrived while it was open (and were seen).
@@ -745,6 +763,12 @@ pub struct State {
     pub(super) focused: bool,
     pub(super) at_bottom: bool,
     pub(super) voice: Option<VoiceCall>,
+    /// The warm standby, if one is held.
+    pub(super) standby: Option<Standby>,
+    /// Standby sessions are allowed (`YAP_VOICE_STANDBY`).
+    pub(super) standby_enabled: bool,
+    /// DM calls, moves, stickers, the voice details.
+    pub(super) calls: super::calls::CallsState,
     pub(super) voice_prefs: VoicePrefs,
     /// Why the last call failed; cleared by the next join.
     pub(super) voice_error: String,
@@ -812,6 +836,7 @@ impl State {
             dms: Vec::new(),
             presence: Presence::default(),
             profile: None,
+            profile_mutuals: None,
             divider: None,
             seen_floor: None,
             seen_from: None,
@@ -821,6 +846,9 @@ impl State {
             focused: true,
             at_bottom: false,
             voice: None,
+            standby: None,
+            standby_enabled: true,
+            calls: Default::default(),
             voice_prefs: VoicePrefs::default(),
             voice_error: String::new(),
             voice_channels: HashMap::new(),
@@ -847,6 +875,13 @@ impl State {
             refreshing: false,
             next_id: 0,
         }
+    }
+
+    /// Allows hidden standby sessions on occupied voice landings (on by
+    /// default).
+    pub fn with_voice_standby(mut self, enabled: bool) -> Self {
+        self.standby_enabled = enabled;
+        self
     }
 
     /// Formats message times with this offset source (UTC by default).

@@ -2,10 +2,10 @@
 
 use serde_json::Value;
 use yap_protocol::payload::{
-    ChannelDeleteEvent, ChannelUpdateEvent, GuildDelete, GuildMemberAdd, GuildMemberRemove,
-    GuildMemberUpdate, MessageDeleteEvent, MessageUnpinEvent, NotificationsRead, PresenceList,
-    PresenceUpdateEvent, ReactionEvent, RelationshipRemove, TypingStartEvent, UserProfileUpdate,
-    VoiceChannelStateUpdate, VoiceChannelStates,
+    CallRing, CallRingStop, CallRinging, ChannelDeleteEvent, ChannelUpdateEvent, GuildDelete,
+    GuildMemberAdd, GuildMemberRemove, GuildMemberUpdate, MessageDeleteEvent, MessageUnpinEvent,
+    NotificationsRead, PresenceList, PresenceUpdateEvent, ReactionEvent, RelationshipRemove,
+    TypingStartEvent, UserProfileUpdate, VoiceChannelStateUpdate, VoiceChannelStates,
 };
 use yap_protocol::rest::{
     DmChannel, Message, MessagePatch, Notification, ReadState, Relationship, Server,
@@ -197,6 +197,10 @@ pub enum Command {
     RemoveEmbeds(String),
     /// The inbox, who reacted, the details tabs and the other extras.
     Extras(super::extras::ExtrasCommand),
+    /// DM calls, moves, stickers and the voice details.
+    Calls(super::calls::CallsCommand),
+    /// The app is quitting: leave the call (its sockets close cleanly).
+    Quit,
 }
 
 /// What the profile editor saves. Colours are `#RRGGBB` or `None` (Auto);
@@ -336,6 +340,12 @@ pub enum Dispatch {
     /// A relationship was made or changed (`RELATIONSHIP_ADD`).
     RelationshipAdd(Box<Relationship>),
     RelationshipRemove(RelationshipRemove),
+    /// Someone calls us (`CALL_RING`).
+    CallRing(CallRing),
+    /// Our call rings on their side (`CALL_RINGING`).
+    CallRinging(CallRinging),
+    /// A ring is over (`CALL_RING_STOP`).
+    CallRingStop(CallRingStop),
 }
 
 impl Dispatch {
@@ -389,6 +399,9 @@ impl Dispatch {
                 Self::RelationshipAdd(Box::new(serde_json::from_value(data).ok()?))
             }
             "RELATIONSHIP_REMOVE" => Self::RelationshipRemove(serde_json::from_value(data).ok()?),
+            "CALL_RING" => Self::CallRing(serde_json::from_value(data).ok()?),
+            "CALL_RINGING" => Self::CallRinging(serde_json::from_value(data).ok()?),
+            "CALL_RING_STOP" => Self::CallRingStop(serde_json::from_value(data).ok()?),
             _ => return None,
         })
     }

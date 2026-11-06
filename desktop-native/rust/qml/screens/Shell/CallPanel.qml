@@ -40,7 +40,9 @@ Rectangle {
         Text {
             width: parent.width
             textFormat: Text.PlainText
-            text: Voice.channelName + (Nav.activeServerId.length > 0 ? " / " + Nav.activeServerName : "")
+            // A DM call names who it is with (UserPanel.tsx "Call with …").
+            text: JSON.parse(Calls.view).inDmCall ? qsTr("Call with %1").arg(Voice.channelName)
+                : Voice.channelName + (Nav.activeServerId.length > 0 ? " / " + Nav.activeServerName : "")
             elide: Text.ElideRight
             color: Theme.ink2
             font: Theme.type.caption

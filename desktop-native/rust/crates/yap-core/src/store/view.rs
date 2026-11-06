@@ -678,6 +678,9 @@ pub struct ProfileView {
     pub frame: String,
     /// Where they are signed in, comma-joined (`desktop,web`).
     pub platforms: String,
+    /// The servers you share, as JSON `{count, items: [{id, name, icon,
+    /// initial}]}`, or empty.
+    pub mutual_servers: String,
 }
 
 /// The open DM's recipient, for the header and the title; empty in a
@@ -1100,6 +1103,10 @@ pub enum ViewUpdate {
     GifFavorites(Vec<String>),
     /// The inbox, reactions, details tabs and the other extras.
     Extras(Box<super::extras::ExtrasView>),
+    /// DM calls, moves, stickers and the voice details.
+    Calls(Box<super::calls::CallsView>),
+    /// Stop a looping sound (a ring) at once.
+    StopSound(Sound),
     /// The soundboard, Listen Together and activities.
     Apps(Box<super::apps::AppsView>),
     /// Creating and joining servers, and links into the app.
@@ -2062,6 +2069,7 @@ pub(super) fn profile_view(
         effect: non_null(collectibles::effect_json(user.avatar_display.as_ref())),
         frame: non_null(collectibles::frame_json(user.avatar_display.as_ref())),
         platforms: presence.platforms_of(&user.id, user.presence_platforms.as_deref()),
+        mutual_servers: String::new(),
     }
 }
 

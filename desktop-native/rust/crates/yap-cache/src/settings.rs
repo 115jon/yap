@@ -49,6 +49,8 @@ pub struct SoundPrefs {
     pub screen_share: bool,
     pub stream_watcher_activity: bool,
     pub message_received: bool,
+    /// Rings and the call connect and end tones (category `calls`).
+    pub calls: bool,
     /// 0-100, soundboard playback.
     pub soundboard_volume: u8,
     /// Imported files play instead of the built-in sounds
@@ -67,6 +69,7 @@ impl Default for SoundPrefs {
             screen_share: true,
             stream_watcher_activity: true,
             message_received: true,
+            calls: true,
             soundboard_volume: 100,
             custom_sounds: false,
         }
@@ -104,6 +107,8 @@ pub struct DesktopSettings {
     /// "Don't ask again" on the voice switch confirm
     /// (`rm-voice-switch-skip-confirm`).
     pub skip_voice_switch_confirm: bool,
+    /// "Don't ask again" on the start call confirm (`rm-start-call-skip-confirm`).
+    pub skip_start_call_confirm: bool,
 }
 
 impl Default for DesktopSettings {
@@ -116,6 +121,7 @@ impl Default for DesktopSettings {
             sounds: true,
             sound_settings: SoundPrefs::default(),
             skip_voice_switch_confirm: false,
+            skip_start_call_confirm: false,
         }
     }
 }

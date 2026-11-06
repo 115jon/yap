@@ -23,6 +23,7 @@ fn target() -> CallTarget {
         channel_id: "c1".into(),
         me_name: "Jon".into(),
         me_username: "jon".into(),
+        ..CallTarget::default()
     }
 }
 
@@ -396,6 +397,7 @@ fn join_should_announce_on_voice_ready_and_pull_only_after_media_connects() {
                 session_id: "session-ana".into(),
                 kind: Kind::Audio,
                 preferred_rid: None,
+                fresh: false,
             }),
         ]
     );
@@ -709,16 +711,13 @@ fn admission_rejected_should_stop_the_call() {
 }
 
 #[test]
-fn session_replaced_by_a_move_should_stop_the_call() {
+fn session_replaced_by_a_move_should_end_the_call_quietly() {
     let mut m = joined();
     let fx = m.handle(Input::Voice(VoiceEvent::Stopped(StopReason::Replaced {
         code: 4010,
         reason: yap_protocol::VOICE_MOVED_CLOSE_REASON.into(),
     })));
-    assert_eq!(
-        ends(&fx),
-        vec![Some("You were moved to another voice channel.".into())]
-    );
+    assert_eq!(ends(&fx), vec![None]);
 }
 
 #[test]
@@ -865,10 +864,58 @@ fn admission_failure_should_end_with_its_reason() {
     );
 }
 
+fn failed() -> Input {
+    Input::Media(MediaEvent::State(MediaState::Failed))
+}
+
+fn rebuilds(fx: &[Effect]) -> usize {
+    fx.iter()
+        .filter(|e| matches!(e, Effect::RebuildMedia(_)))
+        .count()
+}
+
 #[test]
-fn media_failure_should_end_the_call() {
+fn media_failure_should_rebuild_the_sfu_session_instead_of_ending() {
     let mut m = joined();
-    let fx = m.handle(Input::Media(MediaEvent::State(MediaState::Failed)));
+    let fx = m.handle(failed());
+    assert_eq!(rebuilds(&fx), 1);
+    assert!(ends(&fx).is_empty());
+    assert_eq!(m.state(), CallState::Reconnecting);
+}
+
+#[test]
+fn a_rebuilt_session_should_announce_the_new_capability_and_pull_again() {
+    let mut m = joined();
+    m.handle(failed());
+    let fx = m.handle(Input::Published(Ok(Published {
+        session_id: "cap-2".into(),
+        sfu_track_name: "my-sfu-2".into(),
+    })));
+    let announced = sends(&fx, Socket::Voice);
+    assert_eq!(announced[0]["d"]["tracks"][0]["session_id"], "cap-2");
+    assert!(pulls(&fx).is_empty(), "pulls wait for the new connection");
+    let fx = m.handle(connected());
+    assert_eq!(pulls(&fx), vec!["sfu-ana".to_owned()]);
+    assert_eq!(m.state(), CallState::Joined);
+}
+
+#[test]
+fn a_connection_that_keeps_failing_should_end_the_call() {
+    let mut m = joined();
+    for _ in 0..yap_voice::MAX_REBUILDS {
+        m.handle(failed());
+        m.handle(Input::Published(Ok(published())));
+    }
+    let fx = m.handle(failed());
+    assert_eq!(ends(&fx), vec![Some("Media connection failed".into())]);
+}
+
+#[test]
+fn a_failure_before_media_connected_once_should_end_the_call() {
+    let mut m = CallMachine::new(target());
+    m.handle(Input::Start);
+    m.handle(Input::Admitted(Ok(admission())));
+    let fx = m.handle(failed());
     assert_eq!(ends(&fx), vec![Some("Media connection failed".into())]);
 }
 
@@ -1782,4 +1829,398 @@ fn a_repeated_soundboard_flag_should_send_nothing() {
     m.handle(Input::Command(UserCommand::SetSoundboardSpeaking(true)));
     let fx = m.handle(Input::Command(UserCommand::SetSoundboardSpeaking(true)));
     assert!(sends(&fx, Socket::Voice).is_empty());
+}
+
+// ---- Batch N4: DM calls, moves, self-healing, release, standby, stats ----
+
+fn dm_target() -> CallTarget {
+    CallTarget {
+        channel_id: "dm-1".into(),
+        me_name: "Jon".into(),
+        me_username: "jon".into(),
+        room_slug: Some(yap_voice::dm_call_slug("u-b", "u-a")),
+        ..CallTarget::default()
+    }
+}
+
+#[test]
+fn dm_call_slug_should_sort_the_two_user_ids() {
+    assert_eq!(yap_voice::dm_call_slug("u-b", "u-a"), "dm-call-u-a-u-b");
+    assert_eq!(yap_voice::dm_call_slug("u-a", "u-b"), "dm-call-u-a-u-b");
+}
+
+#[test]
+fn a_dm_call_should_ask_one_admission_for_its_room_without_a_server() {
+    let mut m = CallMachine::new(dm_target());
+    let fx = m.handle(Input::Start);
+    let request = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::RequestAdmission(r) => Some(json_of(r)),
+            _ => None,
+        })
+        .expect("an admission");
+    assert_eq!(
+        request,
+        json!({
+            "channelId": "dm-1", "roomSlug": "dm-call-u-a-u-b",
+            "sockets": ["room", "voice"], "media": true,
+        })
+    );
+}
+
+#[test]
+fn a_dm_call_should_open_its_sockets_under_the_dm_room() {
+    let mut m = CallMachine::new(dm_target());
+    m.handle(Input::Start);
+    let fx = m.handle(Input::Admitted(Ok(admission())));
+    let room = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::OpenSockets { room, .. } => Some(room.path.clone()),
+            _ => None,
+        })
+        .expect("sockets");
+    assert_eq!(room, "/api/channels/dm-call-u-a-u-b/ws?v=1");
+}
+
+#[test]
+fn a_join_after_a_move_should_carry_the_grant() {
+    let mut m = CallMachine::new(CallTarget {
+        move_grant: Some("grant-1".into()),
+        ..target()
+    });
+    let fx = m.handle(Input::Start);
+    let request = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::RequestAdmission(r) => Some(json_of(r)),
+            _ => None,
+        })
+        .expect("an admission");
+    assert_eq!(request["moveGrant"], "grant-1");
+}
+
+#[test]
+fn a_voice_move_should_report_the_target_then_end_quietly_on_4010() {
+    let mut m = joined();
+    let fx = m.handle(Input::Room(RoomEvent::Moved(
+        serde_json::from_value(json!({
+            "channel_id": "c2", "server_id": "s1", "channel_name": "Lounge",
+            "mover_name": "Mod", "grant": "g", "grant_expires_at": 5.0,
+        }))
+        .expect("a move"),
+    )));
+    let moved = fx.iter().find_map(|e| match e {
+        Effect::Notify(Notice::Moved(to)) => Some(to.channel_id.clone()),
+        _ => None,
+    });
+    assert_eq!(moved.as_deref(), Some("c2"));
+    let fx = m.handle(Input::Room(RoomEvent::Stopped(StopReason::Replaced {
+        code: 4010,
+        reason: "Session replaced".into(),
+    })));
+    assert_eq!(ends(&fx), vec![None]);
+}
+
+fn not_found(sfu: &str) -> Input {
+    Input::PullNotFound {
+        sfu_track_name: sfu.into(),
+    }
+}
+
+/// A joined call where bo's mic was offered and is being pulled.
+fn pulling_bo() -> CallMachine {
+    let mut m = joined();
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "bo".into(),
+        tracks: vec![track("bo", "cam-audio-bo", "sfu-bo")],
+    }));
+    m
+}
+
+#[test]
+fn a_pull_the_sfu_keeps_not_finding_should_send_track_unavailable() {
+    let mut m = pulling_bo();
+    let fx = m.handle(not_found("sfu-bo"));
+    let sent = sends(&fx, Socket::Voice);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["op"], 109);
+    assert_eq!(
+        sent[0]["d"],
+        json!({
+            "participant_id": "bo", "track_name": "cam-audio-bo",
+            "sfu_track_name": "sfu-bo", "session_id": "session-bo",
+        })
+    );
+}
+
+#[test]
+fn track_unavailable_should_stop_after_three_reports_until_a_pull_works() {
+    let mut m = pulling_bo();
+    let mut reports = 0;
+    for _ in 0..5 {
+        let fx = m.handle(not_found("sfu-bo"));
+        reports += ops(&fx, Socket::Voice)
+            .iter()
+            .filter(|op| **op == 109)
+            .count();
+        m.handle(Input::PullDone {
+            sfu_track_name: "sfu-bo".into(),
+            mid: None,
+        });
+    }
+    assert_eq!(reports, 3);
+}
+
+fn republish_request(track: &str, sfu: Option<&str>) -> Input {
+    Input::Voice(VoiceEvent::Republish(
+        serde_json::from_value(json!({ "track_name": track, "sfu_track_name": sfu }))
+            .expect("a request"),
+    ))
+}
+
+fn republishes(fx: &[Effect]) -> Vec<yap_voice::Republish> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::Republish(kind) => Some(*kind),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_republish_request_for_our_mic_should_push_it_again_once_per_cooldown() {
+    let mut m = joined();
+    let fx = m.handle(republish_request("cam-audio-me-1", Some("my-sfu")));
+    assert_eq!(republishes(&fx), vec![yap_voice::Republish::Mic]);
+    let fx = m.handle(republish_request("cam-audio-me-1", Some("my-sfu")));
+    assert!(republishes(&fx).is_empty(), "rate-limited");
+    m.handle(Input::Timer(Timer::RepublishCooldown {
+        track: "cam-audio-me-1".into(),
+    }));
+    let fx = m.handle(republish_request("cam-audio-me-1", None));
+    assert_eq!(republishes(&fx), vec![yap_voice::Republish::Mic]);
+}
+
+#[test]
+fn a_stale_or_foreign_republish_request_should_be_ignored() {
+    let mut m = joined();
+    let fx = m.handle(republish_request("cam-audio-me-1", Some("old-sfu")));
+    assert!(republishes(&fx).is_empty());
+    let fx = m.handle(republish_request("cam-audio-ana", None));
+    assert!(republishes(&fx).is_empty());
+}
+
+#[test]
+fn a_landed_republish_should_announce_the_new_sfu_track() {
+    let mut m = joined();
+    let fx = m.handle(Input::Republished(Ok((
+        yap_voice::Republish::Mic,
+        "my-sfu-2".into(),
+    ))));
+    let sent = sends(&fx, Socket::Voice);
+    assert_eq!(sent[0]["op"], 12);
+    assert_eq!(sent[0]["d"]["tracks"][0]["sfu_track_name"], "my-sfu-2");
+}
+
+fn shown(alias: &str) -> VideoIntent {
+    VideoIntent {
+        demand: [(
+            alias.to_owned(),
+            RenderSize {
+                width: 320,
+                height: 180,
+            },
+        )]
+        .into_iter()
+        .collect(),
+        stage: None,
+    }
+}
+
+fn release_timer(fx: &[Effect]) -> Option<Timer> {
+    fx.iter().find_map(|e| match e {
+        Effect::ArmTimer { timer, after } if *after == yap_voice::VIDEO_RELEASE_DELAY => {
+            Some(timer.clone())
+        }
+        _ => None,
+    })
+}
+
+#[test]
+fn a_camera_nobody_shows_should_be_released_and_pulled_fresh_later() {
+    let mut m = joined();
+    m.handle(Input::Command(UserCommand::SetVideo(shown(
+        "cam-video-ana",
+    ))));
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![camera("ana", "sfu-cam")],
+    }));
+    m.handle(done("sfu-cam", "m-cam"));
+    let fx = m.handle(Input::Command(
+        UserCommand::SetVideo(VideoIntent::default()),
+    ));
+    let timer = release_timer(&fx).expect("a release timer");
+    let fx = m.handle(Input::Timer(timer));
+    assert_eq!(closes(&fx), vec![vec!["m-cam".to_owned()]]);
+    let fx = m.handle(Input::Command(UserCommand::SetVideo(shown(
+        "cam-video-ana",
+    ))));
+    let fresh: Vec<bool> = fx
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Pull(r) => Some(r.fresh),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fresh, vec![true]);
+}
+
+#[test]
+fn a_camera_shown_again_before_the_delay_should_keep_its_pull() {
+    let mut m = joined();
+    m.handle(Input::Command(UserCommand::SetVideo(shown(
+        "cam-video-ana",
+    ))));
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![camera("ana", "sfu-cam")],
+    }));
+    m.handle(done("sfu-cam", "m-cam"));
+    let fx = m.handle(Input::Command(
+        UserCommand::SetVideo(VideoIntent::default()),
+    ));
+    let timer = release_timer(&fx).expect("a release timer");
+    m.handle(Input::Command(UserCommand::SetVideo(shown(
+        "cam-video-ana",
+    ))));
+    let fx = m.handle(Input::Timer(timer));
+    assert!(closes(&fx).is_empty());
+}
+
+fn standby_machine() -> (CallMachine, Vec<Effect>) {
+    let mut m = CallMachine::new(CallTarget {
+        standby: true,
+        ..target()
+    });
+    m.handle(Input::Start);
+    let fx = m.handle(Input::Admitted(Ok(admission())));
+    (m, fx)
+}
+
+#[test]
+fn a_standby_should_identify_hidden_and_hold_the_voice_identify() {
+    let (_m, fx) = standby_machine();
+    let (room, voice) = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::OpenSockets { room, voice } => {
+                Some((room.identify.clone(), voice.identify.clone()))
+            }
+            _ => None,
+        })
+        .expect("sockets");
+    assert_eq!(room["d"]["standby"], true);
+    assert_eq!(voice, Value::Null);
+}
+
+#[test]
+fn a_standby_ready_should_not_join_until_promoted() {
+    let (mut m, _) = standby_machine();
+    let fx = m.handle(Input::Published(Ok(published())));
+    assert!(fx.contains(&Effect::SetMicEnabled(false)));
+    let fx = m.handle(Input::Room(RoomEvent::Ready(room_state(&[]))));
+    assert!(
+        sends(&fx, Socket::Room).is_empty(),
+        "no voice state while hidden"
+    );
+    assert_eq!(m.state(), CallState::Connecting);
+    let fx = m.handle(Input::Command(UserCommand::Promote));
+    let room = sends(&fx, Socket::Room);
+    assert_eq!(room[0]["d"]["promote_standby"], true);
+    assert!(fx
+        .iter()
+        .any(|e| matches!(e, Effect::SetVoiceIdentify(v) if v["op"] == 100)));
+    assert!(fx.contains(&Effect::PromoteMedia));
+    assert!(fx.contains(&Effect::Notify(Notice::Connected)));
+    assert_eq!(m.state(), CallState::Joined);
+}
+
+#[test]
+fn a_stale_standby_should_republish_its_mic_on_promotion() {
+    let (mut m, _) = standby_machine();
+    m.handle(Input::Published(Ok(published())));
+    m.handle(Input::Timer(Timer::StandbyStale));
+    let fx = m.handle(Input::Command(UserCommand::Promote));
+    assert_eq!(republishes(&fx), vec![yap_voice::Republish::Mic]);
+}
+
+fn stats(at_ms: u64, mic: u64, inbound: u64) -> Input {
+    Input::Stats {
+        stats: yap_voice::MediaStats {
+            mic_bytes_sent: mic,
+            audio_bytes_received: inbound,
+            audio_packets_received: inbound / 100,
+            round_trip: Some(0.04),
+            server: "203.0.113.5:3478 udp".into(),
+            inbound_streams: 1,
+            ..yap_voice::MediaStats::default()
+        },
+        at_ms,
+    }
+}
+
+fn voice_stats(fx: &[Effect]) -> Option<yap_voice::VoiceStats> {
+    fx.iter().find_map(|e| match e {
+        Effect::Notify(Notice::Stats(s)) => Some(s.clone()),
+        _ => None,
+    })
+}
+
+#[test]
+fn stats_should_report_bitrate_round_trip_and_the_server() {
+    let mut m = joined();
+    m.handle(stats(0, 0, 0));
+    let fx = m.handle(stats(5_000, 25_000, 10_000));
+    let s = voice_stats(&fx).expect("stats");
+    assert!((s.bitrate_kbps - 40.0).abs() < 1e-9, "{}", s.bitrate_kbps);
+    assert_eq!(s.rtt_ms, Some(40.0));
+    assert_eq!(s.server, "203.0.113.5:3478 udp");
+    assert_eq!(s.quality, "good");
+    assert_eq!(s.samples.len(), 1);
+}
+
+#[test]
+fn a_silent_unmuted_mic_should_stall_after_30_s_and_republish() {
+    let mut m = joined();
+    m.handle(stats(0, 100, 0));
+    let mut stalled = false;
+    let mut kinds = Vec::new();
+    for tick in 1..=6 {
+        let fx = m.handle(stats(tick * 5_000, 100, 0));
+        stalled |= fx.contains(&Effect::Notify(Notice::MicStalled(true)));
+        kinds.extend(republishes(&fx));
+    }
+    assert!(stalled);
+    assert_eq!(kinds, vec![yap_voice::Republish::Mic]);
+}
+
+#[test]
+fn inbound_audio_should_stall_only_while_someone_speaks() {
+    let mut m = joined();
+    m.handle(stats(0, 0, 500));
+    let mut stalled = false;
+    for tick in 1..=7 {
+        m.handle(Input::Voice(VoiceEvent::Speaking {
+            participant_id: "ana".into(),
+            speaking: true,
+        }));
+        let fx = m.handle(stats(tick * 5_000, tick * 1_000, 500));
+        stalled |= fx.contains(&Effect::Notify(Notice::InboundAudioStalled(true)));
+    }
+    assert!(stalled);
+    let fx = m.handle(stats(40_000, 9_000, 900));
+    assert!(fx.contains(&Effect::Notify(Notice::InboundAudioStalled(false))));
 }

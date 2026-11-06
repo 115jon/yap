@@ -63,6 +63,7 @@ Loader {
             width: cell.width
             // Member rows are keyed `<channel>/<user>`.
             userId: cell.itemId.slice(cell.itemId.indexOf("/") + 1)
+            channelId: cell.itemId.slice(0, cell.itemId.indexOf("/"))
             name: cell.name
             avatar: cell.avatar
             muted: cell.muted

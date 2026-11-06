@@ -24,6 +24,22 @@ Popup {
 
     // A pick (the voice status picture) instead of a send.
     property bool picking: false
+    // Voice reaction mode (GifPickerModal.tsx `voiceMode`): a tile goes
+    // into the call as a sticker reaction and the picker stays open, with
+    // the display mode row and the rate limit line.
+    property bool voiceMode: false
+    property string displayMode: "single"
+    readonly property var displayModes: [
+        { id: "single", text: qsTr("Single") }, { id: "burst", text: qsTr("Burst 💥") },
+        { id: "rain", text: qsTr("Rain 🌧️") }, { id: "bounce", text: qsTr("Bounce 🏀") }]
+
+    // The asset's type from its URL (the overlay renders video or a picture).
+    function stickerType(url) {
+        const path = url.split("?")[0].toLowerCase()
+        return path.endsWith(".mp4") || path.indexOf("/clips/") >= 0 ? "video/mp4"
+            : path.endsWith(".webp") ? "image/webp"
+            : path.endsWith(".png") ? "image/png" : "image/gif"
+    }
 
     signal sent()
     signal picked(string gifId)
@@ -167,6 +183,78 @@ Popup {
                     }
                 }
             }
+            // React mode, then "Slow down!" while the rate limit holds.
+            Item {
+                visible: root.voiceMode
+                width: parent.width
+                height: visible ? 40 : 0
+                Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.line }
+                Row {
+                    x: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 4
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        rightPadding: 4
+                        textFormat: Text.PlainText
+                        text: qsTr("React mode")
+                        color: Theme.ink3
+                        font: Theme.type.captionStrong
+                    }
+                    Repeater {
+                        model: root.displayModes
+                        Rectangle {
+                            id: mode
+                            required property var modelData
+                            readonly property bool active: root.displayMode === modelData.id
+                            width: modeText.implicitWidth + 16
+                            height: 28
+                            radius: Theme.radius
+                            color: active ? Theme.tint2 : "transparent"
+                            Accessible.role: Accessible.Button
+                            Accessible.name: modelData.text
+                            Accessible.checkable: true
+                            Accessible.checked: active
+                            Text {
+                                id: modeText
+                                anchors.centerIn: parent
+                                textFormat: Text.PlainText
+                                text: mode.modelData.text
+                                color: mode.active || modeHover.hovered ? Theme.ink1 : Theme.ink3
+                                font: Theme.type.captionStrong
+                            }
+                            HoverHandler { id: modeHover; cursorShape: Qt.PointingHandCursor }
+                            TapHandler { onTapped: root.displayMode = mode.modelData.id }
+                        }
+                    }
+                }
+                Row {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 4
+                    visible: Calls.rateLimited
+                    Icon {
+                        anchors.verticalCenter: parent.verticalCenter
+                        name: "warning"
+                        size: Theme.iconXs
+                        color: Theme.warningInk
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        textFormat: Text.PlainText
+                        text: qsTr("Slow down!")
+                        color: Theme.warningInk
+                        font: Theme.type.captionStrong
+                        Accessible.role: Accessible.StaticText
+                    }
+                }
+                Timer {
+                    running: Calls.rateLimited
+                    interval: 2500
+                    onTriggered: Calls.clearRateLimit()
+                }
+            }
             Item { width: 1; height: 2 }
         }
 
@@ -230,6 +318,10 @@ Popup {
                     HoverHandler { id: tileHover; cursorShape: Qt.PointingHandCursor }
                     TapHandler {
                         onTapped: {
+                            if (root.voiceMode) {
+                                Calls.sendSticker(tile.preview, root.stickerType(tile.preview), root.displayMode)
+                                return
+                            }
                             if (root.picking)
                                 root.picked(tile.gifId)
                             else {

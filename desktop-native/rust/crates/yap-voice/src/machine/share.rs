@@ -448,3 +448,29 @@ impl CallMachine {
         self.share.published = None;
     }
 }
+
+impl CallMachine {
+    /// The peer connection is being replaced: a live share ends (its
+    /// tracks were on the old connection), op 13 for its names, the
+    /// captures go and the UI hears it failed.
+    pub(super) fn drop_shares_for_rebuild(&mut self, fx: &mut Vec<Effect>) {
+        let live = self.share.live.is_some();
+        if live && self.voice_ready {
+            for alias in [screen_alias(&self.me), screen_audio_alias(&self.me)] {
+                fx.push(Effect::Send(Socket::Voice, wire::stop_tracks(&[&alias])));
+            }
+        }
+        let pending = self.share.step.token().is_some();
+        self.release_shares(fx);
+        if live {
+            self.share_changed(fx);
+        }
+        if live || pending {
+            fx.push(Effect::Notify(Notice::Share(ShareNotice::Ended {
+                reason: ShareEnd::Failed,
+                announced: live,
+                error: Some("The call connection was reset.".into()),
+            })));
+        }
+    }
+}

@@ -559,3 +559,96 @@ pub struct VoiceReady {
     pub speaking: BTreeMap<String, i64>,
     pub join_wait_ms: Option<u64>,
 }
+
+// DM calls (chat gateway ops 36-39, `chat-gateway.ts` CALL_*)
+
+/// CallInitiate (op 36): ring the other recipient of a DM.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallInitiate {
+    pub target_user_id: String,
+    pub channel_id: String,
+}
+
+/// CallAccept (37), CallDecline (38) and CallEnd (39).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallRef {
+    pub call_id: String,
+}
+
+/// `CALL_RING`: someone calls us.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct CallRing {
+    pub call_id: String,
+    pub caller_id: String,
+    pub caller_name: Option<String>,
+    pub caller_username: Option<String>,
+    pub caller_display_name: Option<String>,
+    pub caller_avatar: Option<String>,
+    pub channel_id: String,
+}
+
+/// `CALL_RINGING`: our call rings on their side.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct CallRinging {
+    pub call_id: String,
+    pub callee_id: String,
+    pub callee_name: Option<String>,
+    pub callee_username: Option<String>,
+    pub callee_display_name: Option<String>,
+    pub callee_avatar: Option<String>,
+    pub channel_id: String,
+}
+
+/// `CALL_RING_STOP`: the ring is over (`accepted`, `timeout`, `declined`,
+/// `cancelled`, `busy`, `unavailable`, `invalid`, `expired`, `abandoned`,
+/// ...). `call_id` is null for a call that never rang.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct CallRingStop {
+    pub call_id: Option<String>,
+    pub reason: String,
+}
+
+/// VoiceMove (op 42, room socket): a moderator moved this session.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct VoiceMove {
+    pub channel_id: String,
+    pub server_id: String,
+    pub channel_name: Option<String>,
+    pub mover_name: Option<String>,
+    /// Signed for this user and channel; stands in for CONNECT there.
+    pub grant: Option<String>,
+    /// Epoch ms.
+    pub grant_expires_at: Option<f64>,
+}
+
+/// `POST /api/voice/move` (voice-move-client.ts).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct VoiceMoveRequest {
+    pub server_id: String,
+    pub user_id: String,
+    pub from_channel_id: String,
+    pub to_channel_id: String,
+}
+
+/// TrackUnavailable (op 109, voice socket): our pulls of this track keep
+/// failing with `not_found_track_error`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TrackUnavailable {
+    pub participant_id: String,
+    pub track_name: String,
+    pub sfu_track_name: String,
+    pub session_id: String,
+}
+
+/// RepublishRequest (op 110, voice socket): push this publication again.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct RepublishRequest {
+    pub track_name: String,
+    pub sfu_track_name: Option<String>,
+    pub session_id: Option<String>,
+}

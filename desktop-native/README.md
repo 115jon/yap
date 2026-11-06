@@ -315,6 +315,42 @@ the decisions.
     preview, reset, under `%LOCALAPPDATA%\YapNative\custom-sounds`;
   - Listen Together results' action menu, the voice switch confirm (with
     Don't ask again) and the stream watcher list on share tiles.
+- The voice core and 1:1 calls of batch N4 (`yap-voice` `machine.rs`,
+  `machine/health.rs`, `driver.rs`; `yap-core` `store/calls.rs` and
+  `store/reduce/calls.rs`; the `Calls` object; QML `screens/Calls`). The
+  wire details are in [VOICE_PROTOCOL.md](VOICE_PROTOCOL.md):
+  - DM calls as the web rings them: the DM header's call key (Join call
+    while it has someone in it), Start call on a DM row's menu (it asks
+    first, with Don't ask again), the voice switch confirm when in a voice
+    channel, the incoming call card (top right, while that DM is not open:
+    Accept or Decline, Escape declines), the call area over the DM's
+    messages (people as call tiles with the ringing ring and LED words, the
+    lobby keys: Cancel call, Join with video, Join voice, Decline; in the
+    call its tiles and the dock: camera, share, Leave), the ring, outgoing
+    ring, connect and end tones (a new Calls sound category), the incoming
+    call toast, the busy auto-decline, the server's timeout and every ring
+    stop reason; "Call with …" on the call strip;
+  - voice moves: "Move to…" on a call tile's or Talk Tree leaf's menu for
+    moderators, and following a move (toast, leave, join the target with
+    its grant);
+  - pull self-healing (op 109 out, op 110 republishes), the SFU session
+    rebuild on a failed peer connection, releasing video pulls nobody
+    shows (pulled again on a video session of their own), and the hidden
+    standby on an occupied voice landing (Join promotes it; opt-in with
+    `YAP_VOICE_STANDBY=on` until its promoted mic captures);
+  - sticker reactions: the dock's GIF & sticker reactions key opens the
+    GIF picker in react mode (Single, Burst, Rain, Bounce; 5 at once, then
+    one every 3 s, "Slow down!"), and the overlay plays every sticker the
+    room relays;
+  - the voice details (the connection word in the voice header and the DM
+    call dock): transport states, quality, the small multiples, the SFU
+    edge, loss, remote tracks, our outgoing video, Copy stats;
+  - the audio sentinels' "We can't hear you" banner, and the disconnect
+    beacon on quit;
+  - mutual servers on the profile card, a 4th quick reaction on the
+    message menu (the hover bar keeps 3), error toasts that stay until
+    dismissed, the web's message row spacing, and the voice view's header
+    and dock as the web has them.
 - Deep links on our own scheme, `yap-native://invite/<code>` and
   `yap-native://chat/<server>/<channel>[?message=<id>]`, registered per
   user at startup under `HKCU\Software\Classes\yap-native` (only the
@@ -339,7 +375,7 @@ volume, input volume, a mic test outside a call, WebM audio (webm plays
 silent), clips in the GIF picker, the favourites tab and GIF categories,
 stickers, the avatar picker's GIF tile and the voice status picture's
 upload (GIFs and recent pictures only), toast buttons (reply, mark read)
-and avatars, call rings, the taskbar thumbnail toolbar and auto-update. In
+and avatars, the taskbar thumbnail toolbar and auto-update. In
 settings: avatar crop, display name styles,
 bundles (none in the catalog), sign-out from the page,
 server profiles, call keybinds,
@@ -372,25 +408,27 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 ./build/Release/YapNative.exe
 ```
 
-| env var                    | default                   | meaning                                                                                                                             |
-| -------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `YAP_API_URL`              | `https://yap.115jon.com`  | API and gateway                                                                                                                     |
-| `YAP_KOVA_AUTH_URL`        | `https://auth.115jon.com` | Kova                                                                                                                                |
-| `YAP_KOVA_PUBLISHABLE_KEY` | Yap's live key            | Kova app                                                                                                                            |
-| `YAP_GATEWAY_ORIGIN`       | `YAP_API_URL`             | `Origin` sent on realtime sockets                                                                                                   |
-| `YAP_TOKEN`                | none                      | use this session instead of the credential store                                                                                    |
-| `YAP_PROFILE`              | unset                     | a profile name (`[a-z0-9-]{1,32}`; also `--profile <name>`): a second, separate copy of the app, see "Profiles"                     |
-| `YAP_FAKE_CAMERA`          | unset                     | `1`: a test pattern stands in for every camera                                                                                      |
-| `YAP_SHARE_ONLY_OURS`      | unset                     | `1`: share stills and captures only of our own windows (or one titled "Yap Native Share Test"); other windows listed without titles |
-| `YAP_FAKE_SHARE_AUDIO`     | unset                     | `1`: share audio is a 440 Hz tone, never a loopback                                                                                 |
-| `YAP_PICK_FILES`           | unset                     | `a.png;b.png`: returned by the file picker instead of showing it (tests)                                                            |
-| `YAP_EMBED_MUTED`          | unset                     | `1`: every chat player starts muted (tests)                                                                                         |
-| `YAP_FAKE_NO_WEBVIEW2`     | unset                     | `1`: WebView2 creation fails for this process, as on a PC without the runtime (tests)                                               |
-| `YAP_LOG_EXTERNAL_OPEN`    | unset                     | `1`: links the players would open in the browser are logged as `[external] open <host><path>` instead (tests)                       |
-| `YAP_DECOR_IGNORE_FOCUS`   | unset                     | `1`: decorations (webm nameplates) play in an unfocused window too (tests that cannot take focus)                                   |
-| `YAP_TRACE_MEDIA_IO`       | unset                     | `1`: log each loopback relay request (range, status, length)                                                                        |
-| `YAP_TEST_DROP`            | unset                     | `a.png;b.png`: dropped once onto the first open chat (the overlay shows 4 s first), instead of a real drag (tests)                  |
-| `YAP_NO_CLIPBOARD`         | unset                     | `1`: copies are logged (`[clipboard] would copy N characters`), never put on the clipboard (tests)                                  |
+| env var                       | default                   | meaning                                                                                                                             |
+| ----------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `YAP_API_URL`                 | `https://yap.115jon.com`  | API and gateway                                                                                                                     |
+| `YAP_KOVA_AUTH_URL`           | `https://auth.115jon.com` | Kova                                                                                                                                |
+| `YAP_KOVA_PUBLISHABLE_KEY`    | Yap's live key            | Kova app                                                                                                                            |
+| `YAP_GATEWAY_ORIGIN`          | `YAP_API_URL`             | `Origin` sent on realtime sockets                                                                                                   |
+| `YAP_TOKEN`                   | none                      | use this session instead of the credential store                                                                                    |
+| `YAP_PROFILE`                 | unset                     | a profile name (`[a-z0-9-]{1,32}`; also `--profile <name>`): a second, separate copy of the app, see "Profiles"                     |
+| `YAP_FAKE_CAMERA`             | unset                     | `1`: a test pattern stands in for every camera                                                                                      |
+| `YAP_SHARE_ONLY_OURS`         | unset                     | `1`: share stills and captures only of our own windows (or one titled "Yap Native Share Test"); other windows listed without titles |
+| `YAP_FAKE_SHARE_AUDIO`        | unset                     | `1`: share audio is a 440 Hz tone, never a loopback                                                                                 |
+| `YAP_PICK_FILES`              | unset                     | `a.png;b.png`: returned by the file picker instead of showing it (tests)                                                            |
+| `YAP_EMBED_MUTED`             | unset                     | `1`: every chat player starts muted (tests)                                                                                         |
+| `YAP_FAKE_NO_WEBVIEW2`        | unset                     | `1`: WebView2 creation fails for this process, as on a PC without the runtime (tests)                                               |
+| `YAP_LOG_EXTERNAL_OPEN`       | unset                     | `1`: links the players would open in the browser are logged as `[external] open <host><path>` instead (tests)                       |
+| `YAP_DECOR_IGNORE_FOCUS`      | unset                     | `1`: decorations (webm nameplates) play in an unfocused window too (tests that cannot take focus)                                   |
+| `YAP_TRACE_MEDIA_IO`          | unset                     | `1`: log each loopback relay request (range, status, length)                                                                        |
+| `YAP_TEST_DROP`               | unset                     | `a.png;b.png`: dropped once onto the first open chat (the overlay shows 4 s first), instead of a real drag (tests)                  |
+| `YAP_NO_CLIPBOARD`            | unset                     | `1`: copies are logged (`[clipboard] would copy N characters`), never put on the clipboard (tests)                                  |
+| `YAP_VOICE_STANDBY`           | unset                     | `on`: hold a hidden standby on an occupied voice landing (VOICE_PROTOCOL.md "Standby"; its promoted mic does not capture yet)       |
+| `YAP_TEST_PC_FAIL_AFTER_SECS` | unset                     | `<n>`: `n` s after a call's media first connects, it sees its peer connection fail once (the SFU session rebuild, tests)            |
 
 The defaults mirror `src/lib/site-defaults.ts`.
 
@@ -408,17 +446,17 @@ nothing changes.
 ./YapNative.exe --profile jon          # or: $env:YAP_PROFILE = "jon"
 ```
 
-| what                    | default profile                           | profile `<name>`                                         |
-| ----------------------- | ----------------------------------------- | -------------------------------------------------------- |
-| data folder (cache, settings, sounds, logs, WebView2) | `%LOCALAPPDATA%\YapNative` | `%LOCALAPPDATA%\YapNative\profiles\<name>` |
-| credential              | Credential Manager, service `com.115jon.yap.native-spike` | the same service with `:<name>` appended |
-| instance lock and pipe  | `...native.instance`, `...native.<session>` | `...native.instance.<name>`, `...native.<name>.<session>` |
-| AUMID (toasts)          | `com.115jon.yap.native`, "Yap Native"     | `com.115jon.yap.native.<name>`, "Yap Native (`<name>`)"  |
-| tray window class       | `YapNativeTrayWindow`                     | `YapNativeTrayWindow-<name>`                             |
-| tray tooltip, title     | "Yap Native", the location                | "Yap Native (`<name>`)", the location with `(<name>)`    |
-| Run (autostart) value   | `YapNative`                               | `YapNative-<name>`, launching with `--profile <name>`    |
-| `yap-native://` scheme  | registered                                | never registered                                         |
-| Qt `applicationName`    | `YapNative`                               | `YapNative-<name>` (Qt's own cache folders)              |
+| what                                                  | default profile                                           | profile `<name>`                                          |
+| ----------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------- |
+| data folder (cache, settings, sounds, logs, WebView2) | `%LOCALAPPDATA%\YapNative`                                | `%LOCALAPPDATA%\YapNative\profiles\<name>`                |
+| credential                                            | Credential Manager, service `com.115jon.yap.native-spike` | the same service with `:<name>` appended                  |
+| instance lock and pipe                                | `...native.instance`, `...native.<session>`               | `...native.instance.<name>`, `...native.<name>.<session>` |
+| AUMID (toasts)                                        | `com.115jon.yap.native`, "Yap Native"                     | `com.115jon.yap.native.<name>`, "Yap Native (`<name>`)"   |
+| tray window class                                     | `YapNativeTrayWindow`                                     | `YapNativeTrayWindow-<name>`                              |
+| tray tooltip, title                                   | "Yap Native", the location                                | "Yap Native (`<name>`)", the location with `(<name>)`     |
+| Run (autostart) value                                 | `YapNative`                                               | `YapNative-<name>`, launching with `--profile <name>`     |
+| `yap-native://` scheme                                | registered                                                | never registered                                          |
+| Qt `applicationName`                                  | `YapNative`                                               | `YapNative-<name>` (Qt's own cache folders)               |
 
 Two profiles can run at once; a second launch of the same profile shows the
 first one's window. `YAP_TOKEN`, when set, overrides the credential for any

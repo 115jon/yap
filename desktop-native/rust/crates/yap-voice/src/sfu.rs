@@ -242,6 +242,9 @@ impl Sfu {
 
 /// The SFU calls the pull worker makes; [`Sfu`] in production.
 pub(crate) trait Signaling: Clone + Send + Sync + 'static {
+    /// `sessions/new`: a session capability (a video session's own).
+    fn new_session(&self) -> impl Future<Output = Result<String>> + Send;
+
     /// Pushes one local track; returns the SFU's answer.
     fn push(
         &self,
@@ -280,6 +283,10 @@ pub(crate) trait Signaling: Clone + Send + Sync + 'static {
 }
 
 impl Signaling for Sfu {
+    fn new_session(&self) -> impl Future<Output = Result<String>> + Send {
+        Sfu::new_session(self)
+    }
+
     async fn push(
         &self,
         session: &str,

@@ -22,12 +22,14 @@ T.Button {
     // The ply behind a notched primary key (the notch shows it).
     property color ground: Theme.ply0
 
-    readonly property bool filled: variant === "primary" || variant === "danger"
+    // `talk`: the call accept key (ui/dock.ts CALL_ACCEPT), talk green.
+    readonly property bool filled: variant === "primary" || variant === "danger" || variant === "talk"
     readonly property bool notched: variant === "primary" && size !== "sm"
     readonly property bool tonal: filled && !enabled
     readonly property color ink: tonal ? Theme.ink3
         : variant === "primary" ? Theme.primaryFillInk
         : variant === "danger" ? Theme.dangerFillInk
+        : variant === "talk" ? Theme.talkFillInk
         : variant === "destructive" ? Theme.dangerInk
         : Theme.ink1
 
@@ -110,6 +112,7 @@ T.Button {
             color: control.tonal ? Theme.tint2
                 : control.variant === "primary" ? Theme.primaryFill
                 : control.variant === "danger" ? Theme.dangerFill
+                : control.variant === "talk" ? Theme.talk
                 : Theme.dangerTint
         }
         Rectangle {

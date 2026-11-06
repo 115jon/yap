@@ -62,7 +62,10 @@ use libwebrtc::video_source::VideoResolution;
 use libwebrtc::MediaType;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
-use super::{I420Frame, LocalOffer, MediaEngine, MediaError, MediaSession, VideoOutput};
+use super::{
+    I420Frame, LocalOffer, MediaEngine, MediaError, MediaSession, MediaStats, OutboundVideo,
+    VideoOutput,
+};
 use crate::audio::{resolve, AudioDevice, AudioDevices, Processing};
 use crate::camera::live::{set_sink, Keepalive};
 use crate::layers::CAMERA_SIMULCAST;
@@ -205,6 +208,15 @@ fn list_devices(f: &PeerConnectionFactory) -> AudioDevices {
 /// or playout that was running. A line per switch.
 fn apply(f: &PeerConnectionFactory, sel: &mut Selection) -> Option<String> {
     let list = list_devices(f);
+    if list.inputs.is_empty() || list.outputs.is_empty() {
+        // Diagnostic: a call that can select no device sends no audio.
+        eprintln!(
+            "[voice] devices: none to apply (recording_devices={} playout_devices={} adm_active={})",
+            f.recording_devices(),
+            f.playout_devices(),
+            f.is_platform_adm_active()
+        );
+    }
     let name = |devices: &[AudioDevice], id: &str| {
         devices
             .iter()
@@ -563,7 +575,15 @@ fn vp8_first() -> Vec<RtpCodecCapability> {
 #[derive(Clone)]
 pub struct LibwebrtcSession {
     pc: PeerConnection,
-    mic: RtcAudioTrack,
+    /// The device mic track: `None` on a receive-only video session, and
+    /// on a standby until its promotion creates it.
+    mic: Arc<Mutex<Option<RtcAudioTrack>>>,
+    /// Owns the call's senders (not a receive-only video session).
+    sender_session: bool,
+    /// A standby's silent stand-in for the mic (no device is touched).
+    standby: Arc<Mutex<Option<RtcAudioTrack>>>,
+    /// The mic's send transceiver (stopped by a republish).
+    mic_transceiver: Arc<Mutex<Option<RtpTransceiver>>>,
     sender: Arc<Mutex<Option<RtpSender>>>,
     camera: Arc<Mutex<Option<CameraSend>>>,
     screen: Arc<Mutex<Option<ScreenSend>>>,
@@ -604,6 +624,70 @@ impl MediaEngine for LibwebrtcEngine {
         f.set_adm_recording_enabled(true);
         f.set_adm_playout_enabled(true);
         let mic: RtcAudioTrack = f.create_device_audio_track("mic");
+        let (session, states) = Self::connect(f, ice_servers, Some(mic), true)?;
+        Ok((session, states))
+    }
+
+    fn open_standby(
+        &self,
+        ice_servers: &[IceServer],
+    ) -> Result<(LibwebrtcSession, UnboundedReceiver<MediaState>), MediaError> {
+        let f = factory();
+        if !f.acquire_platform_adm() {
+            return Err(MediaError("no audio device".into()));
+        }
+        {
+            let mut sel = lock(selection());
+            sel.applied_input = None;
+            sel.applied_output = None;
+            if let Some(line) = apply(f, &mut sel) {
+                eprintln!("{line}");
+            }
+        }
+        MIC_LIVE.store(false, Ordering::Relaxed);
+        CALL_OPEN.store(true, Ordering::Relaxed);
+        // Hidden: no recording (the mic stays closed) until the promotion
+        // creates the device track; playout is ready.
+        f.set_adm_recording_enabled(false);
+        f.set_adm_playout_enabled(true);
+        Self::connect(f, ice_servers, None, true)
+    }
+
+    fn open_receiver(
+        &self,
+        ice_servers: &[IceServer],
+    ) -> Result<(LibwebrtcSession, UnboundedReceiver<MediaState>), MediaError> {
+        Self::connect(factory(), ice_servers, None, false)
+    }
+
+    fn release(&self) {
+        CALL_OPEN.store(false, Ordering::Relaxed);
+        MIC_LIVE.store(false, Ordering::Relaxed);
+        let f = factory();
+        f.release_platform_adm();
+        if !f.is_platform_adm_active() {
+            Self::forget_applied();
+        }
+    }
+
+    fn check_devices(&self) -> Option<String> {
+        let f = factory();
+        if !f.is_platform_adm_active() {
+            return None;
+        }
+        apply(f, &mut lock(selection()))
+    }
+}
+
+impl LibwebrtcEngine {
+    /// One peer connection with these ICE servers; `mic` is the call's mic
+    /// track (none for a receive-only video session).
+    fn connect(
+        f: &PeerConnectionFactory,
+        ice_servers: &[IceServer],
+        mic: Option<RtcAudioTrack>,
+        sender_session: bool,
+    ) -> Result<(LibwebrtcSession, UnboundedReceiver<MediaState>), MediaError> {
         let pc = f
             .create_peer_connection({
                 let mut config = RtcConfiguration::default();
@@ -637,7 +721,10 @@ impl MediaEngine for LibwebrtcEngine {
         Ok((
             LibwebrtcSession {
                 pc,
-                mic,
+                mic: Arc::new(Mutex::new(mic)),
+                sender_session,
+                standby: Arc::new(Mutex::new(None)),
+                mic_transceiver: Arc::new(Mutex::new(None)),
                 sender: Arc::new(Mutex::new(None)),
                 camera: Arc::new(Mutex::new(None)),
                 screen: Arc::new(Mutex::new(None)),
@@ -648,32 +735,19 @@ impl MediaEngine for LibwebrtcEngine {
             states,
         ))
     }
-
-    fn release(&self) {
-        CALL_OPEN.store(false, Ordering::Relaxed);
-        MIC_LIVE.store(false, Ordering::Relaxed);
-        let f = factory();
-        f.release_platform_adm();
-        if !f.is_platform_adm_active() {
-            Self::forget_applied();
-        }
-    }
-
-    fn check_devices(&self) -> Option<String> {
-        let f = factory();
-        if !f.is_platform_adm_active() {
-            return None;
-        }
-        apply(f, &mut lock(selection()))
-    }
 }
 
-impl MediaSession for LibwebrtcSession {
-    async fn publish_mic(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
+impl LibwebrtcSession {
+    /// Adds the mic as a send-only Opus transceiver and offers it.
+    async fn push_mic(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
+        let mic = lock(&self.mic)
+            .clone()
+            .or_else(|| lock(&self.standby).clone())
+            .ok_or_else(|| MediaError("no mic on a receive-only session".into()))?;
         let transceiver = self
             .pc
             .add_transceiver(
-                MediaStreamTrack::Audio(self.mic.clone()),
+                MediaStreamTrack::Audio(mic.clone()),
                 RtpTransceiverInit {
                     direction: RtpTransceiverDirection::SendOnly,
                     stream_ids: vec![stream_id.to_owned()],
@@ -682,7 +756,8 @@ impl MediaSession for LibwebrtcSession {
             )
             .map_err(err("add transceiver"))?;
         *lock(&self.sender) = Some(transceiver.sender());
-        MIC_LIVE.store(self.mic.enabled(), Ordering::Relaxed);
+        *lock(&self.mic_transceiver) = Some(transceiver.clone());
+        MIC_LIVE.store(mic.enabled(), Ordering::Relaxed);
         let opus: Vec<_> = factory()
             .get_rtp_sender_capabilities(MediaType::Audio)
             .codecs
@@ -703,6 +778,57 @@ impl MediaSession for LibwebrtcSession {
             sdp: offer.to_string(),
             mid: transceiver.mid().unwrap_or_else(|| "0".into()),
         })
+    }
+}
+
+impl MediaSession for LibwebrtcSession {
+    async fn publish_mic(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
+        self.push_mic(stream_id).await
+    }
+
+    async fn publish_standby(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
+        // Silence nobody feeds: the SFU keeps the track about 30 s without
+        // media; a later promotion republishes it if it went stale.
+        let source = NativeAudioSource::new(AudioSourceOptions::default(), 48_000, 1, 0);
+        let track = factory().create_audio_track("standby", source);
+        track.set_enabled(false);
+        *lock(&self.standby) = Some(track);
+        self.push_mic(stream_id).await
+    }
+
+    fn promote_mic(&self) -> Result<(), MediaError> {
+        if lock(&self.mic).is_some() {
+            return Ok(());
+        }
+        let f = factory();
+        // Recording must be on before the device track exists.
+        f.set_adm_recording_enabled(true);
+        let mic: RtcAudioTrack = f.create_device_audio_track("mic");
+        let sender = lock(&self.sender)
+            .clone()
+            .ok_or_else(|| MediaError("the standby pushed no mic".into()))?;
+        sender
+            .set_track(Some(MediaStreamTrack::Audio(mic.clone())))
+            .map_err(|e| MediaError(format!("promote mic: {e:?}")))?;
+        MIC_LIVE.store(mic.enabled(), Ordering::Relaxed);
+        *lock(&self.mic) = Some(mic);
+        lock(&self.standby).take();
+        // The send stream was already running on the silence, so WebRTC
+        // does not start recording for the new track by itself; whatever
+        // it set up while recording was off is stopped first.
+        f.stop_recording();
+        let init = f.init_recording();
+        let started = init && f.start_recording();
+        eprintln!("[voice] standby mic promoted (init {init}, recording {started})");
+        Ok(())
+    }
+
+    async fn republish_mic(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
+        // The old send goes with the new offer (its m-line is rejected).
+        if let Some(old) = lock(&self.mic_transceiver).take() {
+            let _ = old.stop();
+        }
+        self.push_mic(stream_id).await
     }
 
     async fn apply_answer(&self, sdp: &str, what: &'static str) -> Result<(), MediaError> {
@@ -1040,8 +1166,10 @@ impl MediaSession for LibwebrtcSession {
     }
 
     fn set_mic_enabled(&self, enabled: bool) {
-        self.mic.set_enabled(enabled);
-        MIC_LIVE.store(enabled, Ordering::Relaxed);
+        if let Some(mic) = lock(&self.mic).as_ref() {
+            mic.set_enabled(enabled);
+            MIC_LIVE.store(enabled, Ordering::Relaxed);
+        }
     }
 
     fn set_playout_enabled(&self, enabled: bool) {
@@ -1055,11 +1183,15 @@ impl MediaSession for LibwebrtcSession {
     }
 
     fn set_processing(&self, processing: Processing) -> Result<(), MediaError> {
-        let id = self.mic.id();
+        let Some(mic) = lock(&self.mic).clone() else {
+            return Ok(());
+        };
+        let mic = &mic;
+        let id = mic.id();
         // SAFETY: as in `set_volume`; the mic track lives as long as `self`.
         let code = unsafe {
             yap_audio_track_set_processing(
-                livekit_track(&self.mic),
+                livekit_track(mic),
                 id.as_ptr().cast(),
                 id.len(),
                 processing.echo_cancellation,
@@ -1093,13 +1225,20 @@ impl MediaSession for LibwebrtcSession {
     }
 
     fn stop_local(&self) {
+        if !self.sender_session {
+            return;
+        }
         set_sink(None);
         set_share_sink(None);
         set_share_audio(None);
         lock(&self.camera).take();
         lock(&self.screen).take();
         lock(&self.screen_audio).take();
-        self.mic.set_enabled(false);
+        lock(&self.standby).take();
+        let Some(mic) = lock(&self.mic).clone() else {
+            return;
+        };
+        mic.set_enabled(false);
         MIC_LIVE.store(false, Ordering::Relaxed);
         let f = factory();
         if f.recording_is_initialized() {
@@ -1119,49 +1258,69 @@ impl MediaSession for LibwebrtcSession {
         })
     }
 
-    async fn stats(&self) -> Result<String, MediaError> {
+    async fn stats(&self) -> Result<MediaStats, MediaError> {
         let stats = self
             .pc
             .get_stats()
             .await
             .map_err(|e| MediaError(format!("{e:?}")))?;
         let gains = lock(&self.remotes).gains.clone();
+        let mic_mid = lock(&self.mic_transceiver)
+            .as_ref()
+            .and_then(RtpTransceiver::mid);
+        let mut out = MediaStats::default();
         let mut line = String::from("[voice] stats");
+        let mut pair: Option<(f64, String)> = None;
+        let mut remote_candidates: HashMap<String, String> = HashMap::new();
         for stat in stats {
             match stat {
-                RtcStats::OutboundRtp(out) if !out.outbound.rid.is_empty() => {
-                    let o = &out.outbound;
+                RtcStats::OutboundRtp(o) if o.stream.kind == "video" => {
+                    let v = &o.outbound;
                     line += &format!(
-                        " out[{}/{}]={}B {}x{}@{:.0} {} limit={:?}{}",
-                        o.mid,
-                        o.rid,
-                        out.sent.bytes_sent,
-                        o.frame_width,
-                        o.frame_height,
-                        o.frames_per_second,
-                        o.encoder_implementation,
-                        o.quality_limitation_reason,
-                        if o.active { "" } else { " off" },
+                        " out[{}{}]={}B {}x{}@{:.0} {} limit={:?}{}",
+                        v.mid,
+                        if v.rid.is_empty() {
+                            String::new()
+                        } else {
+                            format!("/{}", v.rid)
+                        },
+                        o.sent.bytes_sent,
+                        v.frame_width,
+                        v.frame_height,
+                        v.frames_per_second,
+                        v.encoder_implementation,
+                        v.quality_limitation_reason,
+                        if v.active { "" } else { " off" },
                     );
+                    out.outbound_video.push(OutboundVideo {
+                        mid: v.mid.clone(),
+                        rid: v.rid.clone(),
+                        bytes_sent: o.sent.bytes_sent,
+                        frames_encoded: u64::from(v.frames_encoded),
+                        width: v.frame_width,
+                        height: v.frame_height,
+                        fps: v.frames_per_second,
+                        encoder: v.encoder_implementation.clone(),
+                        limitation: format!("{:?}", v.quality_limitation_reason).to_lowercase(),
+                        active: v.active,
+                    });
                 }
-                RtcStats::OutboundRtp(out) if out.outbound.frame_width > 0 => {
-                    let o = &out.outbound;
-                    line += &format!(
-                        " out[{}]={}B {}x{}@{:.0} {} limit={:?}",
-                        o.mid,
-                        out.sent.bytes_sent,
-                        o.frame_width,
-                        o.frame_height,
-                        o.frames_per_second,
-                        o.encoder_implementation,
-                        o.quality_limitation_reason,
-                    );
-                }
-                RtcStats::OutboundRtp(out) => {
-                    line += &format!(" out[{}]={}B", out.outbound.mid, out.sent.bytes_sent);
+                RtcStats::OutboundRtp(o) => {
+                    line += &format!(" out[{}]={}B", o.outbound.mid, o.sent.bytes_sent);
+                    if mic_mid.as_deref() == Some(o.outbound.mid.as_str()) {
+                        out.mic_bytes_sent = o.sent.bytes_sent;
+                        out.mic_packets_sent = o.sent.packets_sent;
+                    }
                 }
                 RtcStats::InboundRtp(inbound) => {
                     let mid = &inbound.inbound.mid;
+                    out.inbound_streams += 1;
+                    if inbound.stream.kind == "audio" {
+                        out.audio_bytes_received += inbound.inbound.bytes_received;
+                        out.audio_packets_received += inbound.received.packets_received;
+                        out.audio_packets_lost += inbound.received.packets_lost;
+                        out.audio_jitter = out.audio_jitter.max(inbound.received.jitter);
+                    }
                     line += &format!(
                         " in[{mid}]={}B level={:.3} gain={:.2}",
                         inbound.inbound.bytes_received,
@@ -1172,16 +1331,40 @@ impl MediaSession for LibwebrtcSession {
                 RtcStats::MediaSource(source) if source.source.kind == "audio" => {
                     line += &format!(" mic={:.3}", source.audio.audio_level);
                 }
+                RtcStats::CandidatePair(p) if p.candidate_pair.nominated => {
+                    let c = &p.candidate_pair;
+                    if pair.is_none() || c.current_round_trip_time > 0.0 {
+                        pair = Some((c.current_round_trip_time, c.remote_candidate_id.clone()));
+                    }
+                }
+                RtcStats::RemoteCandidate(c) => {
+                    let r = &c.remote_candidate;
+                    remote_candidates.insert(
+                        c.rtc.id.clone(),
+                        format!("{}:{} {}", r.address, r.port, r.protocol),
+                    );
+                }
                 _ => {}
             }
         }
-        Ok(line)
+        if let Some((rtt, remote)) = pair {
+            out.round_trip = (rtt > 0.0).then_some(rtt);
+            out.server = remote_candidates.remove(&remote).unwrap_or_default();
+            if let Some(rtt) = out.round_trip {
+                line += &format!(" rtt={:.0}ms", rtt * 1000.0);
+            }
+        }
+        out.line = line;
+        Ok(out)
     }
 
     fn close(&self) {
-        set_sink(None);
-        set_share_sink(None);
-        set_share_audio(None);
+        // A receive-only session owns none of the call's senders.
+        if self.sender_session {
+            set_sink(None);
+            set_share_sink(None);
+            set_share_audio(None);
+        }
         lock(&self.camera).take();
         lock(&self.screen).take();
         lock(&self.screen_audio).take();

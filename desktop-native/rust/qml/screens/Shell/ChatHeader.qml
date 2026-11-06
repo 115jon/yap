@@ -170,6 +170,22 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 4
             rightPadding: 8
+            // ChatHeader.tsx: a DM's call key, "Join call" while its call
+            // has someone in it; hidden while we are in it or it rings.
+            IconKey {
+                readonly property var calls: JSON.parse(Calls.view)
+                readonly property bool here: calls.dmChannelId === Nav.activeChannelId
+                readonly property bool ringing: calls.channelId === Nav.activeChannelId
+                    && (calls.status === "ringing_outgoing" || calls.status === "ringing_incoming")
+                readonly property bool existing: here && (calls.lobby ?? []).length > 0
+                visible: Nav.dmUsername.length > 0 && here && !calls.joined && !ringing
+                iconName: "call"
+                tone: "muted"
+                tipSide: "bottom"
+                tip: existing ? qsTr("Join call") : qsTr("Start voice call")
+                Accessible.name: tip
+                onClicked: ShellState.startCall(Nav.activeChannelId, Nav.dmUsername, false)
+            }
             // useChatArea.ts `handleTogglePins`: pins take the thread's place.
             IconKey {
                 readonly property bool open: ShellState.sidePanel === "pins"

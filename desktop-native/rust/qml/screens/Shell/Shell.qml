@@ -313,6 +313,8 @@ RowLayout {
     // The quick switcher and the other extras' dialogs.
     ExtrasHost {}
     PeerMenu { id: peerMenu }
+    // A call ringing for us while its DM is not open.
+    IncomingCallCard {}
     MemberMenu { id: memberMenu }
 
     // Server and channel settings, the create, invite and confirm dialogs.
@@ -351,8 +353,8 @@ RowLayout {
         function onProfileRequested(userId, anchor, side) {
             profile.openFor(userId, anchor, side)
         }
-        function onPeerMenuRequested(userId, name, anchor, at) {
-            peerMenu.openFor(userId, name, anchor, at.x, at.y)
+        function onPeerMenuRequested(userId, name, anchor, at, channelId) {
+            peerMenu.openFor(userId, name, anchor, at.x, at.y, channelId)
         }
         function onMemberMenuRequested(userId, name, anchor, at) {
             memberMenu.openFor(userId, name, anchor, at.x, at.y)

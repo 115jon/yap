@@ -474,7 +474,7 @@ impl<T: TicketSource> Actor<T> {
                 link.acked = true;
                 link.missed = 0;
                 link.hello = true;
-                vec![self.hello_reply(link)]
+                self.hello_reply(link).into_iter().collect()
             }
             GatewayOp::HeartbeatACK => {
                 link.acked = true;
@@ -541,7 +541,9 @@ impl<T: TicketSource> Actor<T> {
         }
     }
 
-    fn hello_reply(&mut self, link: &mut Link) -> String {
+    /// Resume, or the identify. A null identify is held back (a standby's
+    /// voice socket): [`Connection::set_identify`] sends it later.
+    fn hello_reply(&mut self, link: &mut Link) -> Option<String> {
         if self.config.reconnect == Reconnect::Resume {
             if let Some(session_id) = &self.session {
                 link.resuming = true;
@@ -550,12 +552,15 @@ impl<T: TicketSource> Actor<T> {
                     seq_ack: self.last_seq,
                 };
                 if let Ok(frame) = Frame::with_payload(GatewayOp::Resume, &resume) {
-                    return frame.encode();
+                    return Some(frame.encode());
                 }
             }
         }
+        if self.config.identify.is_null() {
+            return None;
+        }
         link.identify_sent = true;
-        self.config.identify.to_string()
+        Some(self.config.identify.to_string())
     }
 
     fn mark_ready(&mut self, link: &mut Link) -> Vec<String> {

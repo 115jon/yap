@@ -176,7 +176,40 @@ fn voices(sound: Sound) -> Vec<Voice> {
             tone(0.0, 880.0, 0.08, 0.08, 0.0),
             tone(0.0, 660.0, 0.12, 0.08, 0.1),
         ],
+        Sound::Ring => {
+            let mut v = chime(0.0, 880.0, 0.2, 0.08);
+            v.extend(chime(0.2, 1047.0, 0.2, 0.08));
+            v.extend(chime(0.4, 880.0, 0.2, 0.06));
+            v
+        }
+        Sound::OutgoingRing => vec![
+            tone(0.0, 440.0, 0.3, 0.06, 0.0),
+            tone(0.0, 440.0, 0.3, 0.06, 0.5),
+        ],
+        Sound::CallConnect => vec![
+            tone(0.0, 523.0, 0.08, 0.1, 0.0),
+            tone(0.0, 659.0, 0.08, 0.1, 0.09),
+            tone(0.0, 880.0, 0.15, 0.1, 0.18),
+        ],
+        Sound::CallEnd => vec![
+            tone(0.0, 660.0, 0.12, 0.1, 0.0),
+            tone(0.0, 440.0, 0.18, 0.1, 0.14),
+        ],
     }
+}
+
+/// A ring repeated `cycles` times, each cycle padded with silence to its
+/// period (`renderSynthLoop`, looped on the audio clock on the web).
+pub fn render_loop(sound: Sound, gain: f64, cycles: usize) -> Vec<f32> {
+    let one = render(sound, gain);
+    let Some(period) = sound.loop_period() else {
+        return one;
+    };
+    // At most a few seconds at 48 kHz: the cast cannot truncate.
+    let len = (period.as_secs_f64() * f64::from(SAMPLE_RATE)).round() as usize;
+    let mut cycle = one;
+    cycle.resize(len.max(cycle.len()), 0.0);
+    cycle.repeat(cycles.max(1))
 }
 
 /// `sounds.ts` `volumeToGain`: the 0-100 setting on a perceptual taper.
@@ -261,6 +294,13 @@ mod tests {
         let p = Param::new(1.0).set(0.0, 0.1).linear(0.2, 0.11);
         assert_eq!(p.at(0.05), 1.0);
         assert!((p.at(0.105) - 0.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_ring_loop_repeats_its_padded_cycle() {
+        let looped = render_loop(Sound::Ring, 1.0, 3);
+        assert_eq!(looped.len(), 3 * 120_000);
+        assert_eq!(looped[..120_000], looped[120_000..240_000]);
     }
 
     #[test]

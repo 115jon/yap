@@ -104,17 +104,18 @@ pub use camera::{push_camera_frame, CameraFrame, PixelFormat};
 pub use driver::{run_call, AdmissionApi, ApiFailure, CallEnv, Commands};
 pub use engine::{
     FakeEngine, FakeOp, FakeSession, I420Frame, LocalOffer, MediaEngine, MediaError, MediaSession,
-    VideoOutput,
+    MediaStats, OutboundVideo, VideoOutput,
 };
 #[cfg(feature = "libwebrtc")]
 pub use engine::{LibwebrtcEngine, LibwebrtcSession};
 pub use layers::{CameraEncoding, CAMERA_SIMULCAST};
 pub use layers::{Quality, RenderSize};
 pub use machine::{
-    camera_alias, screen_alias, screen_audio_alias, stop_message, CallMachine, CallState,
-    CallTarget, CameraPublished, Effect, Input, MediaEvent, MediaSpec, MediaState, Notice,
-    Published, RoomEvent, Socket, SocketSpec, Timer, UserCommand, VideoIntent, VoiceEvent,
-    CREDENTIAL_REFRESH, LEAVE_SEND_WINDOW, REMOTE_RECONNECT_GRACE,
+    camera_alias, dm_call_slug, screen_alias, screen_audio_alias, stop_message, CallMachine,
+    CallState, CallTarget, CameraPublished, Effect, Input, MediaEvent, MediaSpec, MediaState,
+    Notice, Published, Republish, RoomEvent, Socket, SocketSpec, StatsSample, Timer, UserCommand,
+    VideoIntent, VoiceEvent, VoiceStats, CREDENTIAL_REFRESH, LEAVE_SEND_WINDOW, MAX_REBUILDS,
+    REMOTE_RECONNECT_GRACE, STANDBY_STALE_AFTER, STATS_SAMPLES, VIDEO_RELEASE_DELAY,
 };
 pub use roster::{Member, Roster};
 pub use sfu::{LayerUpdate, Pulled, Pushed, Sfu};

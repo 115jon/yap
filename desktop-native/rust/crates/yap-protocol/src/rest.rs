@@ -88,18 +88,31 @@ pub struct VoiceAdmissionRequest {
     /// which binds the voice ticket.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub participant_id: Option<String>,
+    /// The grant a `VoiceMove` frame carried: stands in for CONNECT in the
+    /// channel it names. Only on the join after a move.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub move_grant: Option<String>,
 }
 
 impl VoiceAdmissionRequest {
+    /// `server_id` empty: a DM call (`dm-call-<a>-<b>`), which names no server.
     fn new(server_id: &str, channel_id: &str, room_slug: &str, sockets: Vec<CallSocket>) -> Self {
         Self {
             channel_id: channel_id.to_owned(),
-            server_id: Some(server_id.to_owned()),
+            server_id: (!server_id.is_empty()).then(|| server_id.to_owned()),
             room_slug: Some(room_slug.to_owned()),
             sockets,
             media: false,
             participant_id: None,
+            move_grant: None,
         }
+    }
+
+    /// The same request carrying a move grant (none when empty).
+    #[must_use]
+    pub fn with_move_grant(mut self, grant: Option<&str>) -> Self {
+        self.move_grant = grant.filter(|g| !g.is_empty()).map(str::to_owned);
+        self
     }
 
     /// A join (Client flow 1): both tickets and the media credentials.
@@ -1015,10 +1028,29 @@ pub struct FriendRequestSent {
     pub kind: Option<i64>,
 }
 
-/// `GET /api/users/:id/profile`: the full user (mutuals are not read yet).
+/// `GET /api/users/:id/profile`: the full user and the servers you share
+/// (user.service.ts `getUserProfileMutuals`; mutual friends are not read).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ProfileResponse {
     pub user: User,
+    #[serde(default, rename = "mutualServers")]
+    pub mutual_servers: MutualServers,
+}
+
+/// `mutualServers`: how many, and the first few.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct MutualServers {
+    pub count: i64,
+    pub items: Vec<MutualServer>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct MutualServer {
+    pub id: String,
+    pub name: String,
+    pub icon_url: Option<String>,
 }
 
 // Server administration (server settings, channel settings)

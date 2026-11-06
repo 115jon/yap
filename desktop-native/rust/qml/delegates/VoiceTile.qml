@@ -63,7 +63,7 @@ Item {
     TapHandler {
         enabled: !root.me
         acceptedButtons: Qt.RightButton
-        onTapped: eventPoint => ShellState.showPeerMenu(root.memberId, root.name, root, eventPoint.position)
+        onTapped: eventPoint => ShellState.showPeerMenu(root.memberId, root.name, root, eventPoint.position, Voice.channelId)
     }
     HoverHandler { id: hover }
 

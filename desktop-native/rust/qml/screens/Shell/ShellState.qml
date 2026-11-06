@@ -105,12 +105,13 @@ QtObject {
             profileRequested(userId, anchor, side ?? "right")
     }
 
-    // `at` is a point in `anchor`.
-    signal peerMenuRequested(string userId, string name, Item anchor, point at)
+    // `at` is a point in `anchor`; `channelId` is the voice channel they
+    // are in (for "Move to"), empty when unknown.
+    signal peerMenuRequested(string userId, string name, Item anchor, point at, string channelId)
 
-    function showPeerMenu(userId, name, anchor, at) {
+    function showPeerMenu(userId, name, anchor, at, channelId) {
         if (userId.length > 0)
-            peerMenuRequested(userId, name, anchor, at)
+            peerMenuRequested(userId, name, anchor, at, channelId ?? "")
     }
 
     // The extras ExtrasHost opens: the quick switcher (Ctrl+K), who
@@ -125,6 +126,14 @@ QtObject {
     signal channelInviteRequested(string channelId, string name, bool voice)
     signal voiceStatusRequested(string channelId, string name, bool media, string text)
     signal voiceSwitchRequested(string channelId, string name)
+    // A DM call (ChatPageClient.tsx `executeStartCall`); ExtrasHost
+    // decides: `confirm` asks first (StartCallModal) unless "Don't ask
+    // again", and a voice channel call in progress asks whether to leave it.
+    signal startCallRequested(string channelId, string name, bool confirm)
+
+    function startCall(channelId, name, confirm) {
+        startCallRequested(channelId, name, confirm)
+    }
 
     // Home shows the collectibles shop instead of Friends (DMSidebar's
     // Shop row); opening a conversation or Friends leaves it.

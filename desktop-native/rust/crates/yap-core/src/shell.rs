@@ -212,10 +212,16 @@ pub enum Sound {
     Disconnect,
     ScreenShareStart,
     ScreenShareStop,
+    /// The incoming ring: one cycle, repeated every [`Sound::loop_period`].
+    Ring,
+    /// What the caller hears while it rings.
+    OutgoingRing,
+    CallConnect,
+    CallEnd,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 12] = [
+    pub const ALL: [Sound; 16] = [
         Sound::VoiceJoin,
         Sound::VoiceLeave,
         Sound::Mute,
@@ -228,7 +234,21 @@ impl Sound {
         Sound::Disconnect,
         Sound::ScreenShareStart,
         Sound::ScreenShareStop,
+        Sound::Ring,
+        Sound::OutgoingRing,
+        Sound::CallConnect,
+        Sound::CallEnd,
     ];
+
+    /// A ring's cycle (`SOUND_SPECS[id].loopSeconds`): it repeats until it
+    /// is stopped. `None` for one-shot sounds.
+    pub fn loop_period(self) -> Option<Duration> {
+        match self {
+            Sound::Ring => Some(Duration::from_millis(2500)),
+            Sound::OutgoingRing => Some(Duration::from_secs(3)),
+            _ => None,
+        }
+    }
 
     /// `SOUND_SPECS[id]`: the rate-limit group, the shortest gap between
     /// starts in it, and how many may sound at once.
@@ -241,6 +261,9 @@ impl Sound {
             Sound::Message => ("message", 350, 2),
             Sound::Connect | Sound::Disconnect => ("self", 250, 1),
             Sound::ScreenShareStart | Sound::ScreenShareStop => ("screen", 250, 1),
+            Sound::Ring => ("ring", 0, 1),
+            Sound::OutgoingRing => ("outgoingRing", 0, 1),
+            Sound::CallConnect | Sound::CallEnd => ("call", 300, 1),
         };
         SoundSpec {
             group,
@@ -258,6 +281,7 @@ impl Sound {
             Sound::Message => prefs.message_received,
             Sound::Connect | Sound::Disconnect => prefs.self_connect_disconnect,
             Sound::ScreenShareStart | Sound::ScreenShareStop => prefs.screen_share,
+            Sound::Ring | Sound::OutgoingRing | Sound::CallConnect | Sound::CallEnd => prefs.calls,
         }
     }
 }

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use super::{LocalOffer, MediaEngine, MediaError, MediaSession};
+use super::{LocalOffer, MediaEngine, MediaError, MediaSession, MediaStats};
 use crate::audio::Processing;
 use crate::machine::MediaState;
 use crate::share::ShareEncoding;
@@ -17,6 +17,16 @@ pub enum FakeOp {
     Open {
         ice_servers: usize,
     },
+    /// A receive-only video session (its number, from 1).
+    OpenReceiver(usize),
+    RepublishMic {
+        stream_id: String,
+    },
+    OpenStandby,
+    PublishStandby {
+        stream_id: String,
+    },
+    PromoteMic,
     PublishMic {
         stream_id: String,
     },
@@ -76,6 +86,10 @@ struct Shared {
     camera_stale: bool,
     /// What `screen_stale` answers.
     screen_stale: bool,
+    /// What `stats` answers.
+    stats: MediaStats,
+    /// Receive-only sessions opened so far.
+    receivers: usize,
 }
 
 /// Records calls; clones share the record.
@@ -135,6 +149,14 @@ impl FakeEngine {
             .screen_stale = stale;
     }
 
+    /// Sets what `stats` reports.
+    pub fn set_stats(&self, stats: MediaStats) {
+        self.shared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .stats = stats;
+    }
+
     /// Everything called so far, in order.
     pub fn ops(&self) -> Vec<FakeOp> {
         self.shared
@@ -180,6 +202,32 @@ impl MediaEngine for FakeEngine {
         ))
     }
 
+    fn open_standby(
+        &self,
+        ice_servers: &[IceServer],
+    ) -> Result<(FakeSession, UnboundedReceiver<MediaState>), MediaError> {
+        record(&self.shared, FakeOp::OpenStandby);
+        self.open(ice_servers)
+    }
+
+    fn open_receiver(
+        &self,
+        _ice_servers: &[IceServer],
+    ) -> Result<(FakeSession, UnboundedReceiver<MediaState>), MediaError> {
+        let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+        shared.receivers += 1;
+        let n = shared.receivers;
+        shared.ops.push(FakeOp::OpenReceiver(n));
+        // Its states never change in tests: the sender goes at once.
+        let (_tx, rx) = mpsc::unbounded_channel();
+        Ok((
+            FakeSession {
+                shared: Arc::clone(&self.shared),
+            },
+            rx,
+        ))
+    }
+
     fn release(&self) {
         record(&self.shared, FakeOp::Release);
     }
@@ -196,6 +244,37 @@ impl MediaSession for FakeSession {
         Ok(LocalOffer {
             sdp: "fake-offer".into(),
             mid: "0".into(),
+        })
+    }
+
+    async fn publish_standby(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
+        record(
+            &self.shared,
+            FakeOp::PublishStandby {
+                stream_id: stream_id.to_owned(),
+            },
+        );
+        Ok(LocalOffer {
+            sdp: "fake-offer".into(),
+            mid: "0".into(),
+        })
+    }
+
+    fn promote_mic(&self) -> Result<(), MediaError> {
+        record(&self.shared, FakeOp::PromoteMic);
+        Ok(())
+    }
+
+    async fn republish_mic(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
+        record(
+            &self.shared,
+            FakeOp::RepublishMic {
+                stream_id: stream_id.to_owned(),
+            },
+        );
+        Ok(LocalOffer {
+            sdp: "fake-republish-offer".into(),
+            mid: "5".into(),
         })
     }
 
@@ -376,9 +455,14 @@ impl MediaSession for FakeSession {
             .energy
     }
 
-    async fn stats(&self) -> Result<String, MediaError> {
-        record(&self.shared, FakeOp::Stats);
-        Ok("[voice] stats".into())
+    async fn stats(&self) -> Result<MediaStats, MediaError> {
+        let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+        shared.ops.push(FakeOp::Stats);
+        let mut stats = shared.stats.clone();
+        if stats.line.is_empty() {
+            stats.line = "[voice] stats".into();
+        }
+        Ok(stats)
     }
 
     fn close(&self) {

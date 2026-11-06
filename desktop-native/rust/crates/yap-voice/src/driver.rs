@@ -20,8 +20,8 @@ use yap_realtime::{Config, Connection, Event, Policy, Reconnect, TicketError, Ti
 
 use crate::engine::{MediaEngine, MediaSession};
 use crate::machine::{
-    CallMachine, CallTarget, CameraPublished, Effect, Input, MediaEvent, MediaSpec, Notice,
-    Published, RoomEvent, Socket, SocketSpec, Timer, UserCommand, VoiceEvent,
+    CallMachine, CallTarget, CameraPublished, Effect, Input, MediaEvent, MediaSpec, MediaState,
+    Notice, Published, Republish, RoomEvent, Socket, SocketSpec, Timer, UserCommand, VoiceEvent,
 };
 use crate::sfu::{LayerUpdate, Sfu, Signaling};
 use crate::share::{ShareCaptured, ShareCapturer, ShareEncoding, SharePublished};
@@ -115,6 +115,37 @@ enum Job {
     },
     /// Park the share's video and drop its audio.
     UnpublishShare,
+    /// Push one of ours again under a new SFU track name.
+    Republish(Republish),
+}
+
+/// A job for one video session (a fresh pull's own peer connection).
+enum VideoJob {
+    /// Close its pulls at the SFU, drain, then drop the connection.
+    Close(Vec<String>),
+    Update(LayerUpdate),
+}
+
+/// How long a video session with nothing pulled lives on, so the SFU can
+/// take its `tracks/close` (`VIDEO_SESSION_DRAIN_MS`).
+const VIDEO_SESSION_DRAIN: Duration = Duration::from_secs(3);
+
+/// Mids of a video session's pulls carry its number: `v<n>:<mid>`.
+fn video_mid(mid: &str) -> Option<(u32, &str)> {
+    let rest = mid.strip_prefix('v')?;
+    let (n, mid) = rest.split_once(':')?;
+    Some((n.parse().ok()?, mid))
+}
+
+/// `YAP_TEST_PC_FAIL_AFTER_SECS=<n>`: a test hook. `n` s after media first
+/// connects, the call sees its peer connection fail once (the SFU session
+/// rebuild path). Unset: off.
+fn test_fail_after() -> Option<Duration> {
+    std::env::var("YAP_TEST_PC_FAIL_AFTER_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|secs| secs.is_finite() && *secs >= 0.0)
+        .map(Duration::from_secs_f64)
 }
 
 /// What the worker reports back.
@@ -124,6 +155,9 @@ enum Done {
     Pull(String, Option<String>),
     Camera(Result<CameraPublished, String>),
     Share(Result<SharePublished, String>),
+    /// The pull of this SFU track kept getting `not_found_track_error`.
+    NotFound(String),
+    Republished(Result<(Republish, String), String>),
 }
 
 /// A share capture's news, from the blocking start or the capture itself.
@@ -169,6 +203,16 @@ struct Io<'a, E: MediaEngine, T, S: ShareCapturer> {
     sfu: Option<Sfu>,
     jobs: Option<UnboundedSender<Job>>,
     worker: Option<JoinHandle<()>>,
+    /// Where pull results go (video sessions report there too).
+    done: Option<UnboundedSender<Done>>,
+    /// The ICE servers media opened with (video sessions use them).
+    ice_servers: Vec<crate::wire::IceServer>,
+    /// Open video sessions by number: the session and its job queue.
+    videos: HashMap<u32, (E::Session, UnboundedSender<VideoJob>)>,
+    next_video: u32,
+    /// The test hook's failure, once media connected.
+    fail_at: Option<Instant>,
+    fail_armed: bool,
     timers: Vec<(Instant, Timer)>,
     /// The mic level between two reads of the energy counters.
     meter: EnergyMeter,
@@ -209,6 +253,12 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
             sfu: None,
             jobs: None,
             worker: None,
+            done: None,
+            ice_servers: Vec::new(),
+            videos: HashMap::new(),
+            next_video: 0,
+            fail_at: None,
+            fail_armed: test_fail_after().is_some(),
             timers: Vec::new(),
             meter: EnergyMeter::default(),
             started: Instant::now(),
@@ -288,13 +338,28 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
                     None => Input::Voice(VoiceEvent::Closed),
                 },
                 state = recv(&mut inbox.media) => Input::Media(match state {
-                    Some(state) => MediaEvent::State(state),
+                    Some(state) => {
+                        if state == MediaState::Connected && std::mem::take(&mut self.fail_armed) {
+                            if let Some(after) = test_fail_after() {
+                                eprintln!("[voice] test hook: failing the peer connection in {after:?}");
+                                self.fail_at = Some(Instant::now() + after);
+                            }
+                        }
+                        MediaEvent::State(state)
+                    }
                     None => MediaEvent::Closed,
                 }),
+                () = tokio::time::sleep_until(self.fail_at.unwrap_or_else(Instant::now)), if self.fail_at.is_some() => {
+                    self.fail_at = None;
+                    eprintln!("[voice] test hook: peer connection failed");
+                    Input::Media(MediaEvent::State(MediaState::Failed))
+                },
                 done = recv(&mut inbox.pulls) => match done {
                     Some(Done::Pull(sfu_track_name, mid)) => Input::PullDone { sfu_track_name, mid },
                     Some(Done::Camera(result)) => Input::CameraPublished(result),
                     Some(Done::Share(result)) => Input::SharePublished(result),
+                    Some(Done::NotFound(sfu_track_name)) => Input::PullNotFound { sfu_track_name },
+                    Some(Done::Republished(result)) => Input::Republished(result),
                     None => {
                         inbox.pulls = None;
                         continue;
@@ -356,6 +421,20 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
                 let result = self.open_media(spec, inbox).await;
                 return Applied::Input(Input::Published(result.map_err(|e| format!("{e:#}"))));
             }
+            Effect::RebuildMedia(spec) => {
+                self.drop_media(inbox);
+                let result = self.open_media(spec, inbox).await;
+                return Applied::Input(Input::Published(result.map_err(|e| format!("{e:#}"))));
+            }
+            Effect::Republish(kind) => self.job(Job::Republish(kind)),
+            Effect::PromoteMedia => {
+                if let Some(session) = &self.session {
+                    match session.promote_mic() {
+                        Ok(()) => session.start_capture(),
+                        Err(error) => eprintln!("[voice] standby promotion: {error}"),
+                    }
+                }
+            }
             Effect::Send(socket, text) => {
                 let connection = match socket {
                     Socket::Room => &self.room,
@@ -375,9 +454,20 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
                     sfu.set_voice_token(&token);
                 }
             }
+            Effect::Pull(remote) if remote.fresh => self.pull_fresh(remote),
             Effect::Pull(remote) => self.job(Job::Pull(remote)),
-            Effect::Close(mids) => self.job(Job::Close(mids)),
-            Effect::UpdateLayer(layer) => self.job(Job::Update(layer)),
+            Effect::Close(mids) => self.close_mids(mids),
+            Effect::UpdateLayer(layer) => match video_mid(&layer.mid) {
+                Some((n, mid)) => {
+                    if let Some((_, jobs)) = self.videos.get(&n) {
+                        let _ = jobs.send(VideoJob::Update(LayerUpdate {
+                            mid: mid.to_owned(),
+                            ..layer
+                        }));
+                    }
+                }
+                None => self.job(Job::Update(layer)),
+            },
             Effect::PublishCamera { stream_id } => self.job(Job::PublishCamera { stream_id }),
             Effect::SetCameraLive(live) => {
                 if let Some(session) = &self.session {
@@ -420,11 +510,18 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
                     session.set_screen_audio_enabled(enabled);
                 }
             }
-            Effect::SetVideoSink { mid, key } => {
-                if let Some(session) = &self.session {
-                    session.set_video_sink(&mid, key.as_deref());
+            Effect::SetVideoSink { mid, key } => match video_mid(&mid) {
+                Some((n, mid)) => {
+                    if let Some((session, _)) = self.videos.get(&n) {
+                        session.set_video_sink(mid, key.as_deref());
+                    }
                 }
-            }
+                None => {
+                    if let Some(session) = &self.session {
+                        session.set_video_sink(&mid, key.as_deref());
+                    }
+                }
+            },
             Effect::StopLocalMedia => {
                 if let Some(session) = &self.session {
                     session.stop_local();
@@ -459,7 +556,12 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
                 }
                 if let Some(session) = &self.session {
                     match session.stats().await {
-                        Ok(line) => eprintln!("{line}"),
+                        Ok(stats) => {
+                            eprintln!("{}", stats.line);
+                            let at_ms = u64::try_from(self.started.elapsed().as_millis())
+                                .unwrap_or(u64::MAX);
+                            return Applied::Input(Input::Stats { stats, at_ms });
+                        }
                         Err(error) => eprintln!("[voice] stats failed: {error}"),
                     }
                 }
@@ -567,7 +669,12 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
         spec: MediaSpec,
         inbox: &mut Inbox<S::Capture>,
     ) -> Result<Published> {
-        let (session, states) = self.env.engine.open(&spec.ice_servers)?;
+        let (session, states) = if spec.standby {
+            self.env.engine.open_standby(&spec.ice_servers)?
+        } else {
+            self.env.engine.open(&spec.ice_servers)?
+        };
+        self.ice_servers = spec.ice_servers.clone();
         inbox.media = Some(states);
         self.session = Some(session.clone());
         let sfu = Sfu::new(
@@ -579,22 +686,31 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
         );
         self.sfu = Some(sfu.clone());
         let session_id = sfu.new_session().await?;
-        let offer = session.publish_mic(&spec.stream_id).await?;
+        let offer = if spec.standby {
+            session.publish_standby(&spec.stream_id).await?
+        } else {
+            session.publish_mic(&spec.stream_id).await?
+        };
         let sfu_track_name = uuid::Uuid::new_v4().to_string();
         let pushed = sfu
             .push(&session_id, &offer.sdp, &offer.mid, &sfu_track_name)
             .await?;
         session.apply_answer(&pushed.answer_sdp, "answer").await?;
-        session.start_capture();
+        // A standby captures only once it is promoted (PromoteMedia).
+        if !spec.standby {
+            session.start_capture();
+        }
 
         // Pulls run in their own task so a slow retry never blocks Leave
         // or frames.
         let (jobs, jobs_rx) = mpsc::unbounded_channel();
         let (done_tx, done_rx) = mpsc::unbounded_channel();
+        self.done = Some(done_tx.clone());
         self.worker = Some(tokio::spawn(pull_worker(
             session,
             sfu,
             session_id.clone(),
+            spec.stream_id.clone(),
             jobs_rx,
             done_tx,
         )));
@@ -613,12 +729,85 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
         self.room = None;
         self.voice = None;
         self.jobs = None;
+        self.close_videos();
         if let Some(worker) = self.worker.take() {
             worker.abort();
         }
         if let Some(session) = self.session.take() {
             session.close();
         }
+    }
+
+    /// Closes every video session at once (teardown or a rebuild).
+    fn close_videos(&mut self) {
+        for (_, (session, _)) in self.videos.drain() {
+            session.close();
+        }
+    }
+
+    /// Drops the failed peer connection with its worker, pulls and video
+    /// sessions, and gives the devices back, before media opens again.
+    fn drop_media(&mut self, inbox: &mut Inbox<S::Capture>) {
+        self.jobs = None;
+        self.done = None;
+        inbox.pulls = None;
+        inbox.media = None;
+        self.close_videos();
+        if let Some(worker) = self.worker.take() {
+            worker.abort();
+        }
+        if let Some(session) = self.session.take() {
+            session.close();
+        }
+        self.sfu = None;
+        self.env.engine.release();
+    }
+
+    /// Closes pulls: main-session mids on the worker, a video session's on
+    /// that session (which then drains and goes).
+    fn close_mids(&mut self, mids: Vec<String>) {
+        let mut main = Vec::new();
+        let mut videos: HashMap<u32, Vec<String>> = HashMap::new();
+        for mid in mids {
+            match video_mid(&mid) {
+                Some((n, bare)) => videos.entry(n).or_default().push(bare.to_owned()),
+                None => main.push(mid),
+            }
+        }
+        if !main.is_empty() {
+            self.job(Job::Close(main));
+        }
+        for (n, mids) in videos {
+            if let Some((_, jobs)) = self.videos.remove(&n) {
+                let _ = jobs.send(VideoJob::Close(mids));
+            }
+        }
+    }
+
+    /// A pull on a receive-only peer connection of its own (a video alias
+    /// pulled again after its pull closed): open it, make its SFU session,
+    /// pull, and report the mid as `v<n>:<mid>`.
+    fn pull_fresh(&mut self, remote: Remote) {
+        let (Some(sfu), Some(done)) = (self.sfu.clone(), self.done.clone()) else {
+            return;
+        };
+        let opened = self.env.engine.open_receiver(&self.ice_servers);
+        let (session, states) = match opened {
+            Ok(opened) => opened,
+            Err(error) => {
+                eprintln!("[voice] video session failed to open: {error}");
+                let _ = done.send(Done::Pull(remote.sfu_track_name, None));
+                return;
+            }
+        };
+        self.next_video += 1;
+        let n = self.next_video;
+        let (jobs, jobs_rx) = mpsc::unbounded_channel();
+        self.videos.insert(n, (session.clone(), jobs));
+        eprintln!("[voice] video session {n} opened for {}", remote.track_name);
+        tokio::spawn(video_session(
+            n, session, states, sfu, remote, jobs_rx, done,
+        ));
     }
 }
 
@@ -640,6 +829,9 @@ fn room_event(event: Event) -> Option<RoomEvent> {
         Event::Frame(GatewayOp::Resumed, d) => Some(RoomEvent::Credentials {
             voice_token: wire::str_of(&d, "voice_token").to_owned(),
         }),
+        Event::Frame(GatewayOp::VoiceMove, d) => {
+            serde_json::from_value(d).ok().map(RoomEvent::Moved)
+        }
         Event::Frame(GatewayOp::Error, d) => {
             eprintln!("[voice] room error {d}");
             None
@@ -677,6 +869,9 @@ fn voice_event(event: Event) -> Option<VoiceEvent> {
             participant_id: pid(&d),
         }),
         Event::Frame(GatewayOp::VoiceAppEvent, d) => Some(VoiceEvent::App(d)),
+        Event::Frame(GatewayOp::RepublishRequest, d) => {
+            serde_json::from_value(d).ok().map(VoiceEvent::Republish)
+        }
         Event::Frame(GatewayOp::Error, d) => {
             eprintln!("[voice] voice error {d}");
             let code = d.get("code").and_then(Value::as_i64).unwrap_or(0);
@@ -776,6 +971,7 @@ async fn pull_worker<S: MediaSession, G: Signaling>(
     session: S,
     sfu: G,
     session_id: String,
+    mic_stream: String,
     mut jobs: UnboundedReceiver<Job>,
     done: UnboundedSender<Done>,
 ) {
@@ -802,10 +998,24 @@ async fn pull_worker<S: MediaSession, G: Signaling>(
                     }
                     Err(error) => {
                         eprintln!("[voice] pull {} failed: {error:#}", remote.track_name);
+                        if is_not_found(&error) {
+                            let _ = done.send(Done::NotFound(remote.sfu_track_name.clone()));
+                        }
                         None
                     }
                 };
                 let _ = done.send(Done::Pull(remote.sfu_track_name, mid));
+            }
+            Job::Republish(kind) => {
+                let result = republish(&session, &sfu, &session_id, &mic_stream, kind, &mut camera)
+                    .await
+                    .map(|name| (kind, name))
+                    .map_err(|error| format!("{error:#}"));
+                match &result {
+                    Ok((kind, name)) => eprintln!("[voice] republished {kind:?} as {name}"),
+                    Err(error) => eprintln!("[voice] republish failed: {error}"),
+                }
+                let _ = done.send(Done::Republished(result));
             }
             Job::PublishCamera { stream_id } => {
                 let result = publish_camera(&session, &sfu, &session_id, &stream_id, &mut camera)
@@ -876,6 +1086,124 @@ async fn pull_worker<S: MediaSession, G: Signaling>(
             },
         }
     }
+}
+
+/// Whether a pull failure was the SFU not finding the track.
+fn is_not_found(error: &anyhow::Error) -> bool {
+    format!("{error:#}").contains("not_found")
+}
+
+/// Pushes the mic or the camera again under a new SFU track name
+/// (PartyTracks `republishTrack`).
+async fn republish<S: MediaSession, G: Signaling>(
+    session: &S,
+    sfu: &G,
+    session_id: &str,
+    mic_stream: &str,
+    kind: Republish,
+    camera: &mut Option<CameraPublished>,
+) -> Result<String> {
+    match kind {
+        Republish::Mic => {
+            let offer = session.republish_mic(mic_stream).await?;
+            push_local(session, sfu, session_id, offer, "republish answer").await
+        }
+        Republish::Camera => {
+            // Whatever the keepalive says: the SFU lost this one.
+            *camera = None;
+            let published = async {
+                let offer = session.publish_camera(mic_stream).await?;
+                push_local(session, sfu, session_id, offer, "camera answer").await
+            }
+            .await;
+            match published {
+                Ok(name) => {
+                    *camera = Some(CameraPublished {
+                        sfu_track_name: name.clone(),
+                        simulcast_rids: session.camera_rids(),
+                    });
+                    session.set_camera_live(true);
+                    Ok(name)
+                }
+                Err(error) => {
+                    session.abandon_camera();
+                    Err(error)
+                }
+            }
+        }
+    }
+}
+
+/// One video session: a receive-only peer connection with its own SFU
+/// session for one fresh pull. It reports the pull (mid `v<n>:<mid>`),
+/// then serves layer switches until its pull closes, drains
+/// [`VIDEO_SESSION_DRAIN`] and closes.
+async fn video_session<S: MediaSession, G: Signaling>(
+    n: u32,
+    session: S,
+    mut states: UnboundedReceiver<MediaState>,
+    sfu: G,
+    remote: Remote,
+    mut jobs: UnboundedReceiver<VideoJob>,
+    done: UnboundedSender<Done>,
+) {
+    let pulled = async {
+        let capability = sfu.new_session().await?;
+        let mid = pull(&session, &sfu, &capability, &remote).await?;
+        anyhow::Ok((capability, mid))
+    }
+    .await;
+    let capability = match pulled {
+        Ok((capability, mid)) => {
+            eprintln!(
+                "[voice] pulled {} from {} on video session {n}",
+                remote.track_name, remote.participant_id
+            );
+            let _ = done.send(Done::Pull(
+                remote.sfu_track_name.clone(),
+                Some(format!("v{n}:{mid}")),
+            ));
+            capability
+        }
+        Err(error) => {
+            eprintln!(
+                "[voice] pull {} failed on video session {n}: {error:#}",
+                remote.track_name
+            );
+            if is_not_found(&error) {
+                let _ = done.send(Done::NotFound(remote.sfu_track_name.clone()));
+            }
+            let _ = done.send(Done::Pull(remote.sfu_track_name, None));
+            session.close();
+            return;
+        }
+    };
+    loop {
+        tokio::select! {
+            job = jobs.recv() => match job {
+                Some(VideoJob::Update(layer)) => {
+                    if let Err(error) = sfu.update_layer(&capability, &layer).await {
+                        eprintln!("[voice] layer update failed on video session {n}: {error:#}");
+                    }
+                }
+                Some(VideoJob::Close(mids)) => {
+                    if let Err(error) = close(&session, &sfu, &capability, &mids).await {
+                        eprintln!("[voice] close failed on video session {n}: {error:#}");
+                    }
+                    tokio::time::sleep(VIDEO_SESSION_DRAIN).await;
+                    break;
+                }
+                None => break,
+            },
+            Some(state) = states.recv() => {
+                if matches!(state, MediaState::Failed | MediaState::Disconnected) {
+                    eprintln!("[voice] video session {n}: {state:?}");
+                }
+            }
+        }
+    }
+    session.close();
+    eprintln!("[voice] video session {n} closed");
 }
 
 /// Our camera on the SFU (PartyTracks `publishStream` for `cam` video):
@@ -1101,6 +1429,11 @@ mod tests {
     }
 
     impl Signaling for FakeSfu {
+        async fn new_session(&self) -> Result<String> {
+            self.log("new session".into());
+            Ok("video-cap".into())
+        }
+
         async fn push(&self, _: &str, offer_sdp: &str, mid: &str, _: &str) -> Result<String> {
             self.log(format!("push {mid} {offer_sdp}"));
             let failing = &self.failing_pushes;
@@ -1165,6 +1498,7 @@ mod tests {
             session_id: "their-session".into(),
             kind: crate::tracks::Kind::Audio,
             preferred_rid: None,
+            fresh: false,
         }
     }
 
@@ -1226,6 +1560,7 @@ mod tests {
             channel_id: "c1".into(),
             me_name: "Jon".into(),
             me_username: "jon".into(),
+            ..CallTarget::default()
         }
     }
 
@@ -1392,6 +1727,7 @@ mod tests {
             channel_id: "c1".into(),
             me_name: "Jon".into(),
             me_username: "jon".into(),
+            ..CallTarget::default()
         };
         let (commands, rx) = mpsc::unbounded_channel();
         commands.send(UserCommand::Leave).expect("open");
@@ -1417,6 +1753,7 @@ mod tests {
             session,
             sfu.clone(),
             "cap".into(),
+            "cam-me".into(),
             jobs_rx,
             done_tx,
         ));
@@ -1465,6 +1802,7 @@ mod tests {
             session,
             sfu.clone(),
             "cap".into(),
+            "cam-me".into(),
             jobs_rx,
             done_tx,
         ));
@@ -1506,6 +1844,7 @@ mod tests {
             session,
             sfu.clone(),
             "cap".into(),
+            "cam-me".into(),
             jobs_rx,
             done_tx,
         ));

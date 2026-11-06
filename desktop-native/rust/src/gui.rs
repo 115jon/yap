@@ -75,6 +75,7 @@ struct Scalars {
     /// The saved favourites' `provider:id`, as JSON.
     gif_favorites: String,
     extras: yap_core::store::extras::ExtrasView,
+    calls: yap_core::store::calls::CallsView,
 }
 
 /// The live QObjects. Each registers from its constructor and clears its
@@ -91,6 +92,7 @@ pub struct Objects {
     pub(crate) invites: Option<NonNull<crate::invites::qobject::Invites>>,
     pub(crate) apps: Option<NonNull<crate::apps::qobject::Apps>>,
     pub(crate) extras: Option<NonNull<crate::extras::qobject::Extras>>,
+    pub(crate) calls: Option<NonNull<crate::calls::qobject::Calls>>,
     pub(crate) command_menu: Option<NonNull<crate::command_menu::qobject::CommandMenu>>,
     pub(crate) custom_sounds: Option<NonNull<crate::custom_sounds::qobject::CustomSounds>>,
     nav: Option<NonNull<Nav>>,
@@ -246,6 +248,15 @@ pub(crate) fn keep_extras(view: yap_core::store::extras::ExtrasView) {
 
 pub(crate) fn extras_view() -> yap_core::store::extras::ExtrasView {
     GUI.with(|gui| gui.borrow().scalars.extras.clone())
+}
+
+/// Keeps the calls view for a `Calls` object QML creates later.
+pub(crate) fn keep_calls(view: yap_core::store::calls::CallsView) {
+    scalars(|s| s.calls = view);
+}
+
+pub(crate) fn calls_view() -> yap_core::store::calls::CallsView {
+    GUI.with(|gui| gui.borrow().scalars.calls.clone())
 }
 
 /// Where the user is, for the quick switcher: the open server (empty at
@@ -420,6 +431,7 @@ fn set_profile(mut profile: Pin<&mut Profile>, view: &ProfileView) {
     profile.as_mut().set_effect(q(&view.effect));
     profile.as_mut().set_frame(q(&view.frame));
     profile.as_mut().set_platforms(q(&view.platforms));
+    profile.as_mut().set_mutual_servers(q(&view.mutual_servers));
     profile.set_user_id(q(&view.user_id));
 }
 
@@ -600,6 +612,8 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::Invites(view) => crate::invites::on_view(*view),
         ViewUpdate::Toast(toast) => crate::desktop::on_toast(&toast),
         ViewUpdate::Sound(sound) => crate::sound::play(sound),
+        ViewUpdate::StopSound(sound) => crate::sound::stop(sound),
+        ViewUpdate::Calls(view) => crate::calls::on_view(*view),
         ViewUpdate::Badge(badge) => crate::desktop::on_badge(badge),
         ViewUpdate::Uploads(diff) => models::apply::<m::UploadListModel>(diff),
         ViewUpdate::UploadCounts { ready, busy } => {

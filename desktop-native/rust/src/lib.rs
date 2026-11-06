@@ -12,6 +12,7 @@ mod apps;
 mod apps_audio;
 mod audio;
 mod bridge;
+mod calls;
 mod camera;
 mod client;
 mod command_menu;

@@ -3,6 +3,7 @@
 
 mod admin;
 mod apps;
+mod calls;
 mod embeds;
 mod extras;
 mod favorites;
@@ -24,7 +25,7 @@ use yap_protocol::{Frame, GatewayOp};
 
 use super::state::{
     pending_id, Boot, Divider, MessageLog, Outgoing, Pending, Phase, ServerChannels, Session,
-    Startup, State, Typer, VoiceCall, VoicePrefs,
+    Standby, Startup, State, Typer, VoiceCall, VoicePrefs,
 };
 use super::time::{is_after, parse_rfc3339, Stamp};
 use super::view::{self, ChannelTreeRow, MessageRow, Row, RowContext, ViewDiff, ViewUpdate};
@@ -162,7 +163,7 @@ impl State {
             channel_id: call.channel_id.clone(),
             self_mute: Some(call.muted),
             started_at: None,
-            move_grant: None,
+            move_grant: call.move_grant.clone(),
         };
         frame(GatewayOp::VoiceChannelJoin, &join)
     }
@@ -563,6 +564,10 @@ impl State {
                 channel_name: self
                     .find_channel(&call.channel_id)
                     .map(|c| c.name.clone())
+                    .or_else(|| {
+                        self.dm(&call.channel_id)
+                            .map(|dm| dm.recipient.label().to_owned())
+                    })
                     .unwrap_or_default(),
                 live: call.status == "Connected",
                 status: call.status.clone(),
@@ -634,6 +639,7 @@ impl State {
         self.voice_view = Some(id.to_owned());
         self.emit_voice_panel(fx);
         self.sync_roster(fx);
+        self.sync_standby(fx);
     }
 
     fn close_voice_panel(&mut self, fx: &mut Effects) {
@@ -641,6 +647,62 @@ impl State {
             fx.view(ViewUpdate::VoicePanel(VoicePanelView::default()));
             self.sync_roster(fx);
         }
+        self.sync_standby(fx);
+    }
+
+    /// Holds a standby for the open voice landing while someone else is in
+    /// that channel and we are in no call (voice-standby.ts: a join only has
+    /// to swap the mic in); drops it otherwise.
+    fn sync_standby(&mut self, fx: &mut Effects) {
+        let me = self.me().map(|me| me.id.clone()).unwrap_or_default();
+        let wanted = self
+            .voice_view
+            .clone()
+            .filter(|_| self.standby_enabled && self.voice.is_none() && !self.home)
+            .filter(|id| {
+                self.voice_channels
+                    .get(id)
+                    .is_some_and(|list| list.iter().any(|o| o.user_id != me))
+            })
+            .zip(self.active_server.clone());
+        let held = self
+            .standby
+            .as_ref()
+            .map(|s| (s.channel_id.clone(), s.server_id.clone()));
+        if wanted == held {
+            return;
+        }
+        if let Some(standby) = self.standby.take() {
+            fx.push(Effect::Voice {
+                call: standby.id,
+                command: VoiceCommand::Leave,
+            });
+        }
+        let (Some((channel_id, server_id)), Some((session, me))) = (wanted, self.signed_in())
+        else {
+            return;
+        };
+        let target = VoiceTarget {
+            server_id: server_id.clone(),
+            me_id: me.id.clone(),
+            channel_id: channel_id.clone(),
+            me_name: me.label().to_owned(),
+            me_username: me.username.clone(),
+            standby: true,
+            ..VoiceTarget::default()
+        };
+        let token = session.token.clone();
+        let call = CallId(self.next_id());
+        fx.push(Effect::VoiceStart {
+            call,
+            token,
+            target,
+        });
+        self.standby = Some(Standby {
+            id: call,
+            server_id,
+            channel_id,
+        });
     }
 
     /// A gateway roster for one voice channel, profiles kept from the last
@@ -1259,6 +1321,16 @@ impl State {
             Command::Favorites(command) => self.on_favorites(fx, command),
             Command::RemoveEmbeds(id) => self.remove_embeds(fx, &id),
             Command::Extras(command) => self.on_extras(fx, command),
+            Command::Calls(command) => self.on_calls(fx, command),
+            Command::Quit => {
+                if let Some(standby) = self.standby.take() {
+                    fx.push(Effect::Voice {
+                        call: standby.id,
+                        command: VoiceCommand::Leave,
+                    });
+                }
+                self.leave_voice(fx);
+            }
             Command::Invites(command) => self.on_invites(fx, command),
         }
     }
@@ -1598,7 +1670,8 @@ impl State {
         result: Result<ApiResponse, ApiError>,
     ) {
         let mut answer = Some(result);
-        if self.route_settings_http(fx, id, &mut answer)
+        if self.route_calls_http(fx, id, &mut answer)
+            || self.route_settings_http(fx, id, &mut answer)
             || self.route_admin_http(fx, id, &mut answer)
             || self.route_thread_http(fx, id, &mut answer)
             || self.route_search_http(fx, id, &mut answer)
@@ -2868,6 +2941,8 @@ impl State {
                     .collect();
                 self.voice_channels = next;
                 self.sync_voice_channels(fx);
+                self.sync_standby(fx);
+                self.sync_calls(fx);
             }
             Dispatch::VoiceChannelState(update) => {
                 let me = self.me().map(|me| me.id.clone()).unwrap_or_default();
@@ -2891,8 +2966,15 @@ impl State {
                     self.voice_channels.insert(update.channel_id, occupants);
                 }
                 self.sync_voice_channels(fx);
+                self.sync_standby(fx);
+                self.sync_calls(fx);
             }
-            Dispatch::PresenceUpdate(update) => self.on_presence(fx, update),
+            Dispatch::PresenceUpdate(update) => {
+                if update.status == "offline" {
+                    self.on_call_peer_offline(fx, &update.user_id);
+                }
+                self.on_presence(fx, update);
+            }
             Dispatch::PresenceList(list) => self.on_presence_list(fx, list),
             Dispatch::MemberAdd(add) => self.on_member_add(fx, *add),
             Dispatch::MemberRemove(remove) => self.on_member_remove(fx, remove),
@@ -2909,6 +2991,9 @@ impl State {
             }
             Dispatch::RelationshipAdd(relationship) => self.on_relationship_add(*relationship),
             Dispatch::RelationshipRemove(remove) => self.on_relationship_remove(&remove.user_id),
+            Dispatch::CallRing(ring) => self.on_call_ring(fx, ring),
+            Dispatch::CallRinging(ringing) => self.on_call_ringing(fx, ringing),
+            Dispatch::CallRingStop(stop) => self.on_call_ring_stop(fx, stop),
         }
     }
 
@@ -3125,26 +3210,69 @@ impl State {
         {
             return;
         }
-        self.leave_voice(fx);
-        let (Some((session, me)), Some(server_id)) = (self.signed_in(), self.active_server.clone())
-        else {
+        let Some(server_id) = self.active_server.clone() else {
             return;
         };
+        self.start_voice(fx, server_id, channel_id, None, None);
+    }
+
+    /// Joins a voice channel (or, with `room_slug`, a DM call's room),
+    /// leaving any other call first; a standby held for it is promoted.
+    fn start_voice(
+        &mut self,
+        fx: &mut Effects,
+        server_id: String,
+        channel_id: String,
+        room_slug: Option<String>,
+        move_grant: Option<String>,
+    ) {
+        let promoted = self.standby.take_if(|s| {
+            s.channel_id == channel_id
+                && s.server_id == server_id
+                && room_slug.is_none()
+                && move_grant.is_none()
+        });
+        self.leave_call(fx);
+        if let Some(stale) = self.standby.take() {
+            fx.push(Effect::Voice {
+                call: stale.id,
+                command: VoiceCommand::Leave,
+            });
+        }
+        let Some((session, me)) = self.signed_in() else {
+            return;
+        };
+        let dm = room_slug.is_some();
         let target = VoiceTarget {
             server_id: server_id.clone(),
             me_id: me.id.clone(),
             channel_id: channel_id.clone(),
             me_name: me.label().to_owned(),
             me_username: me.username.clone(),
+            room_slug,
+            move_grant: move_grant.clone(),
+            standby: false,
         };
         let token = session.token.clone();
         self.voice_error.clear();
-        let call = CallId(self.next_id());
-        fx.push(Effect::VoiceStart {
-            call,
-            token,
-            target,
-        });
+        let call = match promoted {
+            Some(standby) => {
+                fx.push(Effect::Voice {
+                    call: standby.id,
+                    command: VoiceCommand::Promote,
+                });
+                standby.id
+            }
+            None => {
+                let call = CallId(self.next_id());
+                fx.push(Effect::VoiceStart {
+                    call,
+                    token,
+                    target,
+                });
+                call
+            }
+        };
         // The kept mic and deafen apply from the start.
         let prefs = self.voice_prefs;
         if prefs.muted {
@@ -3175,6 +3303,8 @@ impl State {
             share_wanted: None,
             share: None,
             share_error: String::new(),
+            dm,
+            move_grant,
         });
         self.emit_voice(fx);
     }
@@ -3183,6 +3313,14 @@ impl State {
     /// leave sound and sends the presence leave (op 34); one the room never
     /// answered just goes.
     fn leave_voice(&mut self, fx: &mut Effects) {
+        self.leave_call(fx);
+        self.sync_standby(fx);
+        self.sync_calls(fx);
+    }
+
+    /// [`Self::leave_voice`] without re-deciding the standby (a join is
+    /// about to start).
+    fn leave_call(&mut self, fx: &mut Effects) {
         // The leave sound goes before the leave (auto-soundboard.ts).
         if let (Some(frame), Some(call)) = (self.apps_leave_frame(), self.voice.as_ref()) {
             fx.push(Effect::Voice {
@@ -3192,7 +3330,9 @@ impl State {
         }
         if let Some(call) = self.voice.take() {
             self.apps_call_ended(fx);
-            if call.joined {
+            self.calls_call_ended();
+            // A DM call plays its own end tone (DMCallRegion `handleLeave`).
+            if call.joined && !call.dm {
                 fx.view(ViewUpdate::Sound(Sound::Disconnect));
             }
             fx.push(Effect::Voice {
@@ -3294,6 +3434,14 @@ impl State {
     }
 
     fn on_voice(&mut self, fx: &mut Effects, call: CallId, update: VoiceUpdate) {
+        if self.standby.as_ref().is_some_and(|s| s.id == call) {
+            // Hidden until promoted: only its end matters.
+            if matches!(update, VoiceUpdate::Ended(_)) {
+                self.standby = None;
+                fx.push(Effect::VoiceForget(call));
+            }
+            return;
+        }
         let Some(current) = self.voice.as_mut().filter(|c| c.id == call) else {
             return;
         };
@@ -3324,11 +3472,18 @@ impl State {
                 // `joined`: the connect sound and one presence join (op 33),
                 // as the web sends once the room join completes. Mute and
                 // deafen go on the room socket only (VOICE_ROSTER.md).
-                if !std::mem::replace(&mut current.joined, true) {
+                // A DM call plays the call connect tone from its ring stop.
+                if !std::mem::replace(&mut current.joined, true) && !current.dm {
                     fx.view(ViewUpdate::Sound(Sound::Connect));
                 }
+                let dm = current.dm;
                 let join = Self::voice_join_frame(current);
+                // The grant did its job (both tickets and this join).
+                current.move_grant = None;
                 self.gateway_send(fx, join);
+                if dm {
+                    self.dm_call_joined(fx);
+                }
             }
             VoiceUpdate::Rejoined => {
                 let join = Self::voice_join_frame(current);
@@ -3340,16 +3495,31 @@ impl State {
             VoiceUpdate::App { event, now_ms } => {
                 return self.on_app_event(fx, *event, now_ms);
             }
+            VoiceUpdate::Moved(moved) => return self.on_moved(fx, moved),
+            VoiceUpdate::Stats(stats) => return self.on_call_stats(fx, *stats),
+            VoiceUpdate::InboundStalled(stalled) => {
+                return self.on_call_stalls(fx, Some(stalled), None);
+            }
+            VoiceUpdate::MicStalled(stalled) => {
+                return self.on_call_stalls(fx, None, Some(stalled))
+            }
             VoiceUpdate::Ended(error) => {
                 // A forced end: the leave sound and presence leave only if
                 // the room had said Ready.
                 if let Some(ended) = self.voice.take() {
                     self.apps_call_ended(fx);
+                    self.calls_call_ended();
                     if ended.joined {
-                        fx.view(ViewUpdate::Sound(Sound::Disconnect));
+                        if !ended.dm {
+                            fx.view(ViewUpdate::Sound(Sound::Disconnect));
+                        }
                         self.gateway_send(fx, Self::voice_leave_frame(&ended.channel_id));
                     }
                     fx.push(Effect::VoiceForget(ended.id));
+                    if ended.dm {
+                        self.dm_call_ended(fx);
+                    }
+                    self.sync_standby(fx);
                 }
                 if let Some(error) = error {
                     self.voice_error = join_error_copy(&error);

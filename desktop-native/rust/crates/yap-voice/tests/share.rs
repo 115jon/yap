@@ -17,6 +17,7 @@ fn joined() -> CallMachine {
         channel_id: "c1".into(),
         me_name: "Jon".into(),
         me_username: "jon".into(),
+        ..CallTarget::default()
     });
     m.handle(Input::Start);
     m.handle(Input::Admitted(Ok(serde_json::from_value(json!({
@@ -444,6 +445,7 @@ fn a_share_before_the_mic_is_published_should_wait_for_it() {
         channel_id: "c1".into(),
         me_name: "Jon".into(),
         me_username: "jon".into(),
+        ..CallTarget::default()
     });
     m.handle(Input::Start);
     m.handle(Input::Admitted(Ok(serde_json::from_value(json!({

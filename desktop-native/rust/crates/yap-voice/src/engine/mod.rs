@@ -61,9 +61,70 @@ pub trait VideoOutput: Send + Sync + 'static {
     fn frame(&self, key: &str, frame: &I420Frame<'_>);
 }
 
+/// One outbound video encoding, as the stats report it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OutboundVideo {
+    pub mid: String,
+    /// The simulcast layer (`f`, `h`, `q`), empty for a single layer.
+    pub rid: String,
+    pub bytes_sent: u64,
+    pub frames_encoded: u64,
+    pub width: u32,
+    pub height: u32,
+    pub fps: f64,
+    /// libwebrtc's `encoderImplementation` (`libvpx`, ...).
+    pub encoder: String,
+    /// `none`, `cpu`, `bandwidth` or `other`.
+    pub limitation: String,
+    pub active: bool,
+}
+
+/// One stats snapshot of a peer connection (the driver takes one every 5 s):
+/// the log line, and the numbers the voice details, the streaming stats and
+/// the audio sentinels read.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MediaStats {
+    /// The `[voice] stats ...` line for the log.
+    pub line: String,
+    /// Our mic's outbound RTP, bytes and packets so far.
+    pub mic_bytes_sent: u64,
+    pub mic_packets_sent: u64,
+    /// Every inbound audio stream, summed.
+    pub audio_bytes_received: u64,
+    pub audio_packets_received: u64,
+    pub audio_packets_lost: i64,
+    /// The highest inbound audio jitter, seconds.
+    pub audio_jitter: f64,
+    /// Inbound RTP streams (remote tracks that receive).
+    pub inbound_streams: u32,
+    /// The selected candidate pair's current round trip, seconds.
+    pub round_trip: Option<f64>,
+    /// The remote candidate of that pair (`address:port protocol`).
+    pub server: String,
+    /// Our camera's and share's encodings.
+    pub outbound_video: Vec<OutboundVideo>,
+}
+
 /// Owns the audio devices for the length of a call.
 pub trait MediaEngine: Send + Sync + 'static {
     type Session: MediaSession;
+
+    /// Like [`MediaEngine::open`], for a hidden standby: the devices are
+    /// held but the mic is not opened until [`MediaSession::promote_mic`].
+    fn open_standby(
+        &self,
+        ice_servers: &[IceServer],
+    ) -> Result<(Self::Session, UnboundedReceiver<MediaState>), MediaError> {
+        self.open(ice_servers)
+    }
+
+    /// A receive-only peer connection for video pulls of its own (a fresh
+    /// path after a closed pull: PartyTracks `SplitVideoTransport`). It has
+    /// no mic and touches no device.
+    fn open_receiver(
+        &self,
+        ice_servers: &[IceServer],
+    ) -> Result<(Self::Session, UnboundedReceiver<MediaState>), MediaError>;
 
     /// Opens the devices and one peer connection with these ICE servers.
     /// The receiver carries its connection state changes.
@@ -89,6 +150,29 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
     /// Adds the mic as a send-only Opus transceiver in `stream_id`, and
     /// sets and returns the local offer (§3.3b: we offer, the SFU answers).
     fn publish_mic(
+        &self,
+        stream_id: &str,
+    ) -> impl Future<Output = Result<LocalOffer, MediaError>> + Send;
+
+    /// A standby's push: a silent track stands in for the mic (no device
+    /// is opened). Sets and returns the local offer.
+    fn publish_standby(
+        &self,
+        stream_id: &str,
+    ) -> impl Future<Output = Result<LocalOffer, MediaError>> + Send {
+        self.publish_mic(stream_id)
+    }
+
+    /// The standby is promoted: the device mic replaces the silence on the
+    /// same sender (no renegotiation).
+    fn promote_mic(&self) -> Result<(), MediaError> {
+        Ok(())
+    }
+
+    /// Pushes the mic again as a new send transceiver (a republish: the SFU
+    /// lost the track, op 110 or a stale standby); the old one is stopped.
+    /// Sets and returns the local offer.
+    fn republish_mic(
         &self,
         stream_id: &str,
     ) -> impl Future<Output = Result<LocalOffer, MediaError>> + Send;
@@ -213,8 +297,8 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
     /// from the send stream, once it has any.
     fn mic_energy(&self) -> impl Future<Output = Option<(f64, f64)>> + Send;
 
-    /// One line of media stats for the log.
-    fn stats(&self) -> impl Future<Output = Result<String, MediaError>> + Send;
+    /// A stats snapshot (and its log line).
+    fn stats(&self) -> impl Future<Output = Result<MediaStats, MediaError>> + Send;
 
     /// Drops remote tracks and closes the peer connection.
     fn close(&self);

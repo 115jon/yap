@@ -183,6 +183,85 @@ T.Popup {
             }
         }
 
+        // Mutual servers (ProfileCard.tsx): the count, then up to 8 chips
+        // (the icon, else the initial, and the name).
+        Column {
+            id: mutuals
+            readonly property var info: Profile.mutualServers.length > 0 ? JSON.parse(Profile.mutualServers) : null
+            visible: info !== null && info.count > 0
+            width: parent.width
+            spacing: 8
+            Row {
+                spacing: 6
+                Text {
+                    text: qsTr("Mutual servers")
+                    color: Theme.ink2
+                    font: Theme.type.captionStrong
+                    Accessible.role: Accessible.Heading
+                }
+                Text {
+                    textFormat: Text.PlainText
+                    text: mutuals.info ? String(mutuals.info.count) : ""
+                    color: Theme.ink3
+                    font: Theme.type.captionStrong
+                }
+            }
+            Flow {
+                width: parent.width
+                spacing: 6
+                Repeater {
+                    model: mutuals.info ? mutuals.info.items.slice(0, 8) : []
+                    delegate: Rectangle {
+                        id: serverChip
+                        required property var modelData
+                        width: Math.min(serverRow.implicitWidth + 4 + 10, parent ? parent.width : 300)
+                        height: 24
+                        radius: Theme.radius
+                        color: Theme.tint1
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: modelData.name
+                        Row {
+                            id: serverRow
+                            x: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 6
+                            Rectangle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 16
+                                height: 16
+                                radius: 2
+                                color: Theme.tint3
+                                clip: true
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: serverIcon.status !== Image.Ready
+                                    textFormat: Text.PlainText
+                                    text: serverChip.modelData.initial
+                                    color: Theme.ink1
+                                    font: Theme.type.captionStrong
+                                }
+                                Image {
+                                    id: serverIcon
+                                    anchors.fill: parent
+                                    source: serverChip.modelData.icon
+                                    sourceSize: Qt.size(32, 32)
+                                    asynchronous: true
+                                    fillMode: Image.PreserveAspectCrop
+                                }
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                textFormat: Text.PlainText
+                                text: serverChip.modelData.name
+                                color: Theme.ink1
+                                font: Theme.type.captionStrong
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         MenuPanel {
             id: roleMenu
             implicitWidth: 220

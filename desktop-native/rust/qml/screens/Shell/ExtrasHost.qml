@@ -34,6 +34,17 @@ Item {
             status.start(channelId, name, media, text)
         }
         function onVoiceSwitchRequested(channelId, name) { voiceSwitch.start(channelId, name) }
+        function onStartCallRequested(channelId, name, confirm) {
+            if (confirm && !Desktop.skipStartCall) {
+                startCall.start(channelId, name)
+                return
+            }
+            const inVoiceChannel = Voice.channelId.length > 0 && Voice.channelId !== channelId
+            if (inVoiceChannel && !Desktop.skipVoiceSwitch)
+                voiceSwitch.start(channelId, name, true)
+            else
+                Calls.start(channelId)
+        }
     }
 
     QuickSwitcher { id: switcher }
@@ -42,4 +53,5 @@ Item {
     ChannelInviteDialog { id: invite }
     VoiceStatusDialog { id: status }
     VoiceSwitchDialog { id: voiceSwitch }
+    StartCallDialog { id: startCall }
 }

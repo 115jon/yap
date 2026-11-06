@@ -306,6 +306,8 @@ pub enum ApiRequest {
     },
     /// The inbox, the details tabs, voice status and the other extras.
     Extras(super::extras::ExtrasRequest),
+    /// `POST /api/voice/move`: a moderator moves someone.
+    VoiceMove(yap_protocol::payload::VoiceMoveRequest),
 }
 
 /// A page of messages, oldest first.
@@ -331,7 +333,8 @@ pub enum ApiResponse {
     Members(Vec<Member>),
     Dms(Vec<DmChannel>),
     Dm(Box<DmChannel>),
-    Profile(Box<User>),
+    /// The full user and the servers you share.
+    Profile(Box<User>, yap_protocol::rest::MutualServers),
     /// A file (or a GIF pick) the next message can link.
     Uploaded(UploadedFile),
     Gifs(GifPage),
@@ -413,6 +416,7 @@ impl ApiRequest {
             Self::Embeds(request) => request.method(),
             Self::Favorites(request) => request.method(),
             Self::RemoveEmbeds { .. } => Method::Patch,
+            Self::VoiceMove(_) => Method::Post,
             Self::SendMessage { .. }
             | Self::Typing { .. }
             | Self::OpenDm { .. }
@@ -453,6 +457,7 @@ impl ApiRequest {
             Self::Embeds(request) => request.path(),
             Self::Favorites(request) => request.path(),
             Self::RemoveEmbeds { channel_id, .. } => format!("/api/channels/{channel_id}/messages"),
+            Self::VoiceMove(_) => "/api/voice/move".into(),
             Self::Me => "/api/users/me".into(),
             Self::Servers => "/api/servers".into(),
             Self::Channels { server_id } => format!("/api/servers/{server_id}/channels"),
@@ -537,6 +542,7 @@ impl ApiRequest {
             Self::Shop(request) => request.body(),
             Self::Embeds(_) => Value::Null,
             Self::Favorites(request) => request.body(),
+            Self::VoiceMove(request) => serde_json::to_value(request).unwrap_or(Value::Null),
             Self::RemoveEmbeds { message_id, .. } => {
                 json!({ "message_id": message_id, "embeds": [] })
             }
@@ -624,7 +630,7 @@ impl ApiRequest {
             Self::Shop(request) => ApiResponse::Shop(request.decode(body)?),
             Self::Embeds(_) => ApiResponse::Embeds(body),
             Self::Favorites(request) => ApiResponse::Favorites(request.decode(body)?),
-            Self::RemoveEmbeds { .. } => ApiResponse::Done,
+            Self::RemoveEmbeds { .. } | Self::VoiceMove(_) => ApiResponse::Done,
             Self::Me => ApiResponse::Me(Box::new(
                 serde_json::from_value(body).map_err(|e| ApiError::Decode(format!("me: {e}")))?,
             )),
@@ -668,7 +674,7 @@ impl ApiRequest {
             Self::Profile { .. } => {
                 let profile: ProfileResponse = serde_json::from_value(body)
                     .map_err(|e| ApiError::Decode(format!("profile: {e}")))?;
-                ApiResponse::Profile(Box::new(profile.user))
+                ApiResponse::Profile(Box::new(profile.user), profile.mutual_servers)
             }
             Self::GifUpload { .. } => ApiResponse::Uploaded(
                 serde_json::from_value(body)

@@ -36,8 +36,22 @@ fn lock() -> std::sync::MutexGuard<'static, Mixer> {
     mixer().lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// How many cycles a ring plays before it stops by itself: past the
+/// server's 30 s ring timeout (`CALL_RING_TIMEOUT_MS`).
+const RING_CYCLES: usize = 13;
+
 fn pcm(sound: Sound, volume: u8) -> Vec<i16> {
-    synth::pcm16(&synth::render(sound, synth::volume_to_gain(volume)))
+    let gain = synth::volume_to_gain(volume);
+    if sound.loop_period().is_some() {
+        return synth::pcm16(&synth::render_loop(sound, gain, RING_CYCLES));
+    }
+    synth::pcm16(&synth::render(sound, gain))
+}
+
+/// Stops a sound's group at once (`playRingStop`): every voice of it is
+/// reset. Never gated.
+pub fn stop(sound: Sound) {
+    output::stop_group(sound.spec().group);
 }
 
 /// Plays `sound` unless the sounds switch or its category is off, or its
@@ -224,6 +238,16 @@ mod output {
         }
     }
 
+    /// Cuts every playing voice of `group` (their threads then close them).
+    pub(super) fn stop_group(group: &'static str) {
+        let mixer = lock();
+        for (_, handle) in mixer.voices.get(group).into_iter().flatten() {
+            // SAFETY: as in `play`: a listed voice's handle is open, and only
+            // its own thread closes it, after leaving the list under this lock.
+            unsafe { waveOutReset(*handle as HWAVEOUT) };
+        }
+    }
+
     /// Plays `samples` on the default device and waits for the end (or for
     /// a newer voice of the group to cut it).
     pub(super) fn play(
@@ -269,8 +293,8 @@ mod output {
                 }
             }
             drop(mixer);
-            // Rings may run to 15 s.
-            let deadline = Instant::now() + Duration::from_secs(16);
+            // A looped ring runs about 33 s; a custom one up to 15.
+            let deadline = Instant::now() + Duration::from_secs(40);
             loop {
                 // SAFETY: the boxed header outlives the loop; `Header` keeps
                 // `dwFlags` 4-aligned; the device writes it concurrently.
@@ -308,4 +332,6 @@ mod output {
     pub(super) fn play(_: &'static str, _: usize, _: &[i16], _: Format) -> Result<(), u32> {
         Ok(())
     }
+
+    pub(super) fn stop_group(_: &'static str) {}
 }

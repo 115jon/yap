@@ -88,6 +88,29 @@ Rectangle {
                 color: Theme.ink1
                 font: Theme.type.columnTitle
             }
+            // The connection word (StreamingStatsPanel.tsx): opens the voice
+            // details (VoiceDetailsPanel.tsx).
+            Rectangle {
+                id: detailsKey
+                visible: root.joined
+                anchors.verticalCenter: parent.verticalCenter
+                width: detailsLabel.implicitWidth + 16
+                height: 28
+                radius: Theme.radius
+                color: detailsHover.hovered ? Theme.tint1 : "transparent"
+                activeFocusOnTab: true
+                Accessible.role: Accessible.Button
+                Accessible.name: qsTr("Voice details")
+                Keys.onSpacePressed: details.toggleAt(detailsKey)
+                LedLabel {
+                    id: detailsLabel
+                    anchors.centerIn: parent
+                    text: Voice.live ? qsTr("Connected") : (Voice.status || qsTr("Connecting"))
+                    ledState: Voice.live ? "talk" : "idle"
+                }
+                HoverHandler { id: detailsHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: details.toggleAt(detailsKey) }
+            }
             // On stage: who, and Live for media (VoiceHeader.tsx).
             Rectangle {
                 visible: root.focused
@@ -130,6 +153,7 @@ Rectangle {
             }
         }
         IconKey {
+            id: chatKey
             anchors.right: parent.right
             anchors.rightMargin: 16
             anchors.verticalCenter: parent.verticalCenter
@@ -148,9 +172,41 @@ Rectangle {
     }
 
     ConnectionStrip {
-        id: strip
+        id: connection
         anchors.top: header.bottom
         width: parent.width
+    }
+
+    // The audio sentinels (RoomVoiceView.tsx): nothing goes out from our
+    // unmuted mic, or nothing comes in while someone talks.
+    Rectangle {
+        id: strip
+        readonly property var calls: JSON.parse(Calls.view)
+        readonly property bool stalled: root.joined && !Voice.muted && (calls.micStalled || calls.inboundStalled)
+        anchors.top: connection.bottom
+        width: parent.width
+        height: stalled ? 32 : 0
+        visible: stalled
+        color: Theme.dangerTint
+        Row {
+            x: 16
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 8
+            Icon {
+                anchors.verticalCenter: parent.verticalCenter
+                name: "micOff"
+                size: Theme.iconSm
+                color: Theme.dangerInk
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
+                text: qsTr("We can't hear you. Your microphone isn't picking up any sound.")
+                color: Theme.dangerInk
+                font: Theme.type.caption
+                Accessible.role: Accessible.AlertMessage
+            }
+        }
     }
 
     // Landing.
@@ -371,6 +427,12 @@ Rectangle {
         sourceComponent: WordleStage {}
     }
 
+    StickerOverlay {
+        anchors.fill: body
+        active: root.joined
+        visible: root.joined
+    }
+
     NowPlayingCard {
         id: nowPlaying
         anchors.bottom: dock.top
@@ -393,8 +455,10 @@ Rectangle {
     }
 
     // The stage bar (VoiceControls.tsx): ply-1 with a top seam, 48 px
-    // square keys in the dock recipe (ui/dock.ts): mic, deafen, camera,
-    // share, a divider, then Leave, the one solid danger fill.
+    // square keys in the dock recipe (ui/dock.ts): camera, share, a
+    // divider, activities, soundboard, GIF & sticker reactions (and Listen
+    // Together, a native key), a divider, then Leave, the one solid danger
+    // fill. Mic and deafen live on the account row, as on desktop web.
     Rectangle {
         id: dock
         anchors.bottom: parent.bottom
@@ -406,20 +470,6 @@ Rectangle {
         Row {
             anchors.centerIn: parent
             spacing: 8
-            IconKey {
-                size: 48
-                iconName: "mic"
-                tone: Voice.muted ? "off" : "rest"
-                tip: Voice.muted ? qsTr("Unmute") : qsTr("Mute")
-                onClicked: Voice.requestMute(!Voice.muted)
-            }
-            IconKey {
-                size: 48
-                iconName: "deafen"
-                tone: Voice.deafened ? "off" : "rest"
-                tip: Voice.deafened ? qsTr("Undeafen") : qsTr("Deafen")
-                onClicked: Voice.requestDeafen(!Voice.deafened)
-            }
             IconKey {
                 size: 48
                 iconName: "camera"
@@ -441,6 +491,20 @@ Rectangle {
                 Accessible.checked: Voice.sharing
                 onClicked: ShellState.toggleShare()
             }
+            Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 1
+                height: 24
+                color: Theme.line
+            }
+            IconKey {
+                id: activitiesKey
+                size: 48
+                iconName: "activities"
+                tone: root.activity.length > 0 ? "live" : activitiesPopup.item?.opened ? "toggled" : "rest"
+                tip: qsTr("Activities")
+                onClicked: root.togglePopover(activitiesPopup, activitiesKey)
+            }
             IconKey {
                 id: soundboardKey
                 size: 48
@@ -450,20 +514,20 @@ Rectangle {
                 onClicked: root.togglePopover(soundboardPopup, soundboardKey)
             }
             IconKey {
+                id: reactKey
+                size: 48
+                iconName: "sticker"
+                tone: reactions.opened ? "toggled" : "rest"
+                tip: qsTr("GIF & sticker reactions")
+                onClicked: reactions.opened ? reactions.close() : reactions.openAt(reactKey)
+            }
+            IconKey {
                 id: listenKey
                 size: 48
                 iconName: "music"
                 tone: listenPopup.item?.opened ? "toggled" : "rest"
                 tip: qsTr("Listen Together")
                 onClicked: root.togglePopover(listenPopup, listenKey)
-            }
-            IconKey {
-                id: activitiesKey
-                size: 48
-                iconName: "activities"
-                tone: root.activity.length > 0 ? "live" : activitiesPopup.item?.opened ? "toggled" : "rest"
-                tip: qsTr("Activities")
-                onClicked: root.togglePopover(activitiesPopup, activitiesKey)
             }
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
@@ -517,6 +581,13 @@ Rectangle {
             onClicked: ShellState.stageFullscreen = !ShellState.stageFullscreen
         }
     }
+
+    GifPicker {
+        id: reactions
+        voiceMode: true
+        mediaType: "stickers"
+    }
+    VoiceDetailsPopup { id: details }
 
     Loader {
         id: soundboardPopup

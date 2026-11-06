@@ -43,7 +43,7 @@ Item {
     TapHandler {
         enabled: !root.tile.me
         acceptedButtons: Qt.RightButton
-        onTapped: eventPoint => ShellState.showPeerMenu(root.tile.memberId, root.tile.name, root, eventPoint.position)
+        onTapped: eventPoint => ShellState.showPeerMenu(root.tile.memberId, root.tile.name, root, eventPoint.position, Voice.channelId)
     }
 
     Rectangle {

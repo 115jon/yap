@@ -487,6 +487,9 @@ pub mod qobject {
         #[qproperty(QString, frame)]
         /// Where they are signed in, comma-joined (`desktop,mobile,web`).
         #[qproperty(QString, platforms)]
+        /// The servers you share: `{count, items: [{id, name, icon,
+        /// initial}]}`, or empty.
+        #[qproperty(QString, mutual_servers, cxx_name = "mutualServers")]
         type Profile = super::ProfileRust;
 
         #[qinvokable]
@@ -728,6 +731,7 @@ pub struct ProfileRust {
     effect: QString,
     frame: QString,
     platforms: QString,
+    mutual_servers: QString,
 }
 
 impl qobject::Profile {

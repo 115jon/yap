@@ -33,6 +33,10 @@ pub mod qobject {
         #[qproperty(bool, custom_sounds, cxx_name = "customSounds")]
         /// "Don't ask again" on the voice switch confirm.
         #[qproperty(bool, skip_voice_switch, cxx_name = "skipVoiceSwitch")]
+        /// "Don't ask again" on the start call confirm.
+        #[qproperty(bool, skip_start_call, cxx_name = "skipStartCall")]
+        /// Ring and call tones (the `calls` sound category).
+        #[qproperty(bool, sound_calls, cxx_name = "soundCalls")]
         /// Unread notifications (capped at 99); 0 with `badgeDot` or nothing.
         #[qproperty(i32, badge_count, cxx_name = "badgeCount")]
         #[qproperty(bool, badge_dot, cxx_name = "badgeDot")]
@@ -131,6 +135,8 @@ pub struct DesktopRust {
     soundboard_volume: i32,
     custom_sounds: bool,
     skip_voice_switch: bool,
+    skip_start_call: bool,
+    sound_calls: bool,
     badge_count: i32,
     badge_dot: bool,
     badge_tooltip: QString,
@@ -220,6 +226,10 @@ fn apply_settings(mut desktop: Pin<&mut qobject::Desktop>, s: DesktopSettings) {
     desktop
         .as_mut()
         .set_skip_voice_switch(s.skip_voice_switch_confirm);
+    desktop
+        .as_mut()
+        .set_skip_start_call(s.skip_start_call_confirm);
+    desktop.as_mut().set_sound_calls(sound.calls);
     desktop.set_sounds(s.sounds);
 }
 
@@ -333,6 +343,8 @@ impl qobject::Desktop {
             "soundStreamViewers" => &mut sound.stream_watcher_activity,
             "customSounds" => &mut sound.custom_sounds,
             "skipVoiceSwitch" => &mut next.skip_voice_switch_confirm,
+            "skipStartCall" => &mut next.skip_start_call_confirm,
+            "soundCalls" => &mut sound.calls,
             _ => {
                 eprintln!("[desktop] unknown setting {key}");
                 return;

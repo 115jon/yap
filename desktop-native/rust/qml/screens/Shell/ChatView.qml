@@ -270,9 +270,17 @@ Rectangle {
         width: parent.width
     }
 
+    // A DM's call area (DMCallRegion.tsx), above the messages.
+    DmCallRegion {
+        id: callRegion
+        anchors.top: strip.bottom
+        width: parent.width
+        height: implicitHeight
+    }
+
     ListView {
         id: view
-        anchors.top: strip.bottom
+        anchors.top: callRegion.bottom
         anchors.bottom: typingLine.top
         anchors.left: parent.left
         anchors.right: parent.right
@@ -530,7 +538,8 @@ Rectangle {
     // ui/toast.tsx ToastCard: a 356 px ply-3 card (line-strong edge,
     // shadow-2) at the window's bottom right, 16 above the composer: an
     // 8 px LED (talk for a success, muted for a failure), the message at
-    // Bricolage 15/700 and the 4 s dithered time bar along its foot.
+    // Bricolage 15/700 and the 4 s dithered time bar along its foot. An
+    // error stays until dismissed (14.3): no time bar, a close key.
     Rectangle {
         id: toast
         property bool failure: false
@@ -538,8 +547,13 @@ Rectangle {
             toastText.text = text
             toast.failure = failure === true
             toast.visible = true
-            toastTimer.restart()
-            toastRun.restart()
+            if (toast.failure) {
+                toastTimer.stop()
+                toastRun.stop()
+            } else {
+                toastTimer.restart()
+                toastRun.restart()
+            }
         }
         visible: false
         z: 3
@@ -565,16 +579,27 @@ Rectangle {
             textFormat: Text.PlainText
             x: 16 + 8 + 12
             y: 12 + 1
-            width: parent.width - x - 16
+            width: parent.width - x - (toast.failure ? 48 : 16)
             wrapMode: Text.Wrap
             color: Theme.ink1
             font: Theme.type.author
             lineHeight: Theme.type.authorLine
             lineHeightMode: Text.FixedHeight
         }
+        IconKey {
+            visible: toast.failure
+            anchors.right: parent.right
+            anchors.rightMargin: 8
+            y: 6
+            size: 32
+            iconName: "close"
+            tip: qsTr("Dismiss")
+            onClicked: toast.visible = false
+        }
         // The time left: accent dither, 2 px cells, emptying left to right.
         Item {
             id: toastBar
+            visible: !toast.failure
             x: 1
             y: parent.height - 1 - 4
             width: parent.width - 2

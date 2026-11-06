@@ -53,7 +53,7 @@ impl Fixture {
                 ApiResponse::Done
             }
             ApiRequest::Favorites(_) => ApiResponse::Favorites(Vec::new()),
-            ApiRequest::Extras(_) => ApiResponse::Done,
+            ApiRequest::Extras(_) | ApiRequest::VoiceMove(_) => ApiResponse::Done,
             ApiRequest::Me => ApiResponse::Me(Box::new(user(ME, "me", Some("Fixture Me")))),
             ApiRequest::Servers => ApiResponse::Servers(vec![Server {
                 id: SERVER.into(),

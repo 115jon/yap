@@ -568,6 +568,71 @@ pub enum AppEvent {
     /// → viewer user ids, deduplicated, empty lists dropped
     /// (stream-watchers.ts `applyStreamWatcherSnapshot`).
     StreamWatchSnapshot(std::collections::BTreeMap<String, Vec<String>>),
+    /// A floating sticker reaction (`reaction.sticker`, as the voice room
+    /// re-broadcasts it sanitized).
+    Sticker(Sticker),
+}
+
+/// A sticker reaction (StickerReactionsOverlay.tsx).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sticker {
+    pub url: String,
+    /// `image/gif`, `image/webp`, ... or `video/mp4`.
+    pub content_type: String,
+    /// `single`, `burst`, `rain` or `bounce`.
+    pub display_mode: String,
+    pub participant_id: String,
+    /// The sender; absent when the room could not look it up.
+    pub user_id: Option<String>,
+}
+
+/// The display modes the voice room relays (anything else is `single`).
+pub const STICKER_MODES: [&str; 4] = ["single", "burst", "rain", "bounce"];
+
+impl Sticker {
+    /// The frame we send (GifPickerModal.tsx voice mode); the room adds the
+    /// sender and the time.
+    pub fn frame(url: &str, content_type: &str, display_mode: &str) -> String {
+        let mode = if STICKER_MODES.contains(&display_mode) {
+            display_mode
+        } else {
+            "single"
+        };
+        let content_type = if content_type.is_empty() {
+            "image/gif"
+        } else {
+            content_type
+        };
+        serde_json::json!({ "op": crate::GatewayOp::VoiceAppEvent.code(), "d": {
+            "type": "reaction.sticker", "url": url, "contentType": content_type,
+            "displayMode": mode,
+        }})
+        .to_string()
+    }
+
+    fn decode(d: &Value) -> Option<Self> {
+        let url = str_field(d, "url").filter(|u| !u.is_empty())?;
+        // Older events carry no type: infer it from the URL as the web does.
+        let content_type = str_field(d, "contentType")
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| {
+                if url.contains(".mp4") || url.contains("/clips/") {
+                    "video/mp4".to_owned()
+                } else {
+                    "image/gif".to_owned()
+                }
+            });
+        let display_mode = str_field(d, "displayMode")
+            .filter(|m| STICKER_MODES.contains(&m.as_str()))
+            .unwrap_or_else(|| "single".to_owned());
+        Some(Self {
+            url,
+            content_type,
+            display_mode,
+            participant_id: str_field(d, "participant_id").unwrap_or_default(),
+            user_id: str_field(d, "user_id").filter(|u| !u.is_empty()),
+        })
+    }
 }
 
 impl AppEvent {
@@ -582,6 +647,7 @@ impl AppEvent {
             return decode_listen_together(kind, d).map(Self::ListenTogether);
         }
         match kind {
+            "reaction.sticker" => Sticker::decode(d).map(Self::Sticker),
             "activity.start" => {
                 let activity = str_field(d, "activity")?;
                 let user_id = str_field(d, "userId")?;
