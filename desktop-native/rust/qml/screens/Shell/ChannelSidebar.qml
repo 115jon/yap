@@ -39,6 +39,30 @@ Rectangle {
             dropY = -1
         }
     }
+    // A sidebar click (useChatPageLogic.ts `handleSelectChannel` behind
+    // ChatPageClient.tsx `guardedSelectChannel`): a voice channel joins as
+    // it opens, promoting the landing's standby when one is held. The one
+    // already joined, or the one already open, only shows. In another
+    // voice session it asks first (VoiceSwitchModal) unless "Don't ask
+    // again"; the channel opens once that is confirmed.
+    function openChannel(channelId, voice, name) {
+        const open = Nav.voicePanelId.length > 0 ? Nav.voicePanelId : Nav.activeChannelId
+        if (!voice || channelId === open || Voice.channelId === channelId) {
+            Nav.selectChannel(channelId)
+            return
+        }
+        if (Voice.channelId.length > 0 && !Desktop.skipVoiceSwitch) {
+            ShellState.voiceSwitchRequested(channelId, name, true)
+            return
+        }
+        // Join first: opening an occupied channel while in no call would
+        // otherwise start the landing's standby, and this join would then
+        // promote one that is still connecting (the web skips the standby
+        // when the select joins).
+        Voice.join(channelId)
+        Nav.selectChannel(channelId)
+    }
+
     function endDrag() {
         if (dragId.length > 0 && dropId.length > 0)
             Admin.moveChannel(dragId, dropId)
@@ -176,7 +200,13 @@ Rectangle {
             width: list.width - list.leftMargin
             activeId: Nav.voicePanelId.length > 0 ? Nav.voicePanelId : Nav.activeChannelId
             callId: Voice.channelId
-            onSelected: channelId => Nav.selectChannel(channelId)
+            onSelected: channelId => root.openChannel(channelId, treeRow.voice, treeRow.name)
+            function remember() {
+                if (treeRow.kind === "channel" && treeRow.voice)
+                    ShellState.voiceChannelNames[treeRow.itemId] = treeRow.name
+            }
+            Component.onCompleted: remember()
+            ListView.onReused: remember()
             onSettingsRequested: ShellState.channelSettingsRequested(treeRow.itemId)
             onMenuRequested: (row, at) => {
                 if (treeRow.kind === "channel")

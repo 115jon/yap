@@ -68,6 +68,17 @@ pub mod qobject {
         #[cxx_name = "setSetting"]
         fn set_setting(self: Pin<&mut Desktop>, key: &QString, value: bool);
 
+        /// Whether links to `host` open without the "Leaving Yap"
+        /// confirmation (useExternalLinkConfirmation.tsx).
+        #[qinvokable]
+        #[cxx_name = "isTrustedLinkHost"]
+        fn is_trusted_link_host(self: &Desktop, host: &QString) -> bool;
+
+        /// "Trust <host> links from now on": saved on this device.
+        #[qinvokable]
+        #[cxx_name = "trustLinkHost"]
+        fn trust_link_host(self: &Desktop, host: &QString);
+
         /// `soundVolume` or `soundboardVolume`, 0-100, saved.
         #[qinvokable]
         #[cxx_name = "setVolume"]
@@ -414,6 +425,22 @@ impl qobject::Desktop {
         };
         *field = value;
         store(self, next);
+    }
+
+    pub fn is_trusted_link_host(&self, host: &QString) -> bool {
+        let host = host.to_string().to_ascii_lowercase();
+        settings::app_dir()
+            .is_some_and(|dir| settings::load_trusted_link_hosts(&dir).contains(&host))
+    }
+
+    pub fn trust_link_host(&self, host: &QString) {
+        let Some(dir) = settings::app_dir() else {
+            return;
+        };
+        // Trust is an enhancement: the link still opens if this fails.
+        if let Err(error) = settings::trust_link_host(&dir, &host.to_string()) {
+            eprintln!("[desktop] trusted links not saved: {error}");
+        }
     }
 
     pub fn set_volume(self: Pin<&mut Self>, key: &QString, value: i32) {

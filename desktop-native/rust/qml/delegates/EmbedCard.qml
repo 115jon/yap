@@ -31,6 +31,9 @@ Item {
     signal expandVideo(string source, int position)
 
     readonly property string kind: embed.kind
+    // For the message menu's Copy link / Open link (the web's
+    // `data-embed-url`); the pictures inside carry `contextMedia`.
+    readonly property string contextLink: embed.url ?? ""
     implicitWidth: loader.item ? loader.item.width : 0
     implicitHeight: loader.item ? loader.item.height : 0
 
@@ -217,6 +220,7 @@ Item {
                     }
                     // "thumbnail": 80 x 80 beside the text.
                     Rectangle {
+                        readonly property string contextMedia: frame.thumb ? root.embed.image : ""
                         visible: frame.thumb
                         width: 80
                         height: 80
@@ -242,6 +246,8 @@ Item {
                 // (1.91:1 when the size is unknown); players keep their box.
                 Rectangle {
                     id: picture
+                    // A player's poster is not media to save or link to.
+                    readonly property string contextMedia: frame.large && !root.embed.play ? root.embed.image : ""
                     readonly property real aspect: root.embed.w > 0 && root.embed.h > 0
                         ? root.embed.h / root.embed.w : 1 / 1.91
                     visible: frame.large

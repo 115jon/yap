@@ -19,6 +19,7 @@ void WindowChrome::attach(QQuickWindow* window)
   const HWND hwnd = reinterpret_cast<HWND>(window->winId());
   m_window = window;
   m_hwnd = reinterpret_cast<quintptr>(hwnd);
+  m_dpi = GetDpiForWindow(hwnd);
   applyFrameColors();
   // Re-run WM_NCCALCSIZE now that the filter is in place.
   SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
@@ -118,6 +119,25 @@ void WindowChrome::applyFrameColors()
 #endif
 }
 
+QSize WindowChrome::scaledWindowSize(unsigned newDpi) const
+{
+#ifdef Q_OS_WIN
+  const HWND hwnd = reinterpret_cast<HWND>(m_hwnd);
+  RECT client{};
+  GetClientRect(hwnd, &client);
+  const UINT oldDpi = m_dpi ? m_dpi : GetDpiForWindow(hwnd);
+  const int frameX = GetSystemMetricsForDpi(SM_CXFRAME, newDpi) +
+                     GetSystemMetricsForDpi(SM_CXPADDEDBORDER, newDpi);
+  const int frameY = GetSystemMetricsForDpi(SM_CYFRAME, newDpi) +
+                     GetSystemMetricsForDpi(SM_CXPADDEDBORDER, newDpi);
+  return QSize(MulDiv(client.right, int(newDpi), int(oldDpi)) + 2 * frameX,
+               MulDiv(client.bottom, int(newDpi), int(oldDpi)) + frameY);
+#else
+  Q_UNUSED(newDpi);
+  return {};
+#endif
+}
+
 bool WindowChrome::contains(QQuickItem* item, const QPointF& scenePos) const
 {
   if (!item || !item->isVisible())
@@ -142,6 +162,66 @@ bool WindowChrome::nativeEventFilter(const QByteArray& eventType,
                      GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
 
   switch (msg->message) {
+    // A monitor with another scale: keep the client's logical size exact.
+    // Qt scales the whole frame by the DPI ratio, but Windows rounds the
+    // resize border per DPI (8 px at 96, 9 at 120, 11 at 168), so each move
+    // between monitors grew or shrank the client by a pixel or two. The
+    // size comes from the client and the new DPI's own border; our frame
+    // has no top edge (WM_NCCALCSIZE below).
+    case WM_GETDPISCALEDSIZE: {
+      if (IsZoomed(hwnd) || IsIconic(hwnd) ||
+          m_window->visibility() == QWindow::FullScreen)
+        return false;
+      const QSize size = scaledWindowSize(unsigned(msg->wParam));
+      *reinterpret_cast<SIZE*>(msg->lParam) = SIZE{ size.width(), size.height() };
+      *result = TRUE;
+      return true;
+    }
+    case WM_DPICHANGED: {
+      // Qt applies the suggested rectangle; make its size the exact one
+      // too (a programmatic move gets a linearly scaled one).
+      const UINT oldDpi = m_dpi ? m_dpi : dpi;
+      const UINT newDpi = HIWORD(msg->wParam);
+      if (!IsZoomed(hwnd) && !IsIconic(hwnd) &&
+          m_window->visibility() != QWindow::FullScreen) {
+        auto* rect = reinterpret_cast<RECT*>(msg->lParam);
+        const QSize size = scaledWindowSize(newDpi);
+        rect->right = rect->left + size.width();
+        rect->bottom = rect->top + size.height();
+        // A DPI change from Qt's own setGeometry (the saved rect restored
+        // onto another monitor) keeps Qt's rect, which it framed with the
+        // old DPI's border: the client comes out a few pixels short. Once
+        // Qt is done, put the border it assumed back to the new one.
+        const RECT suggested = *rect;
+        QMetaObject::invokeMethod(
+          this,
+          [hwnd, suggested, oldDpi, newDpi] {
+            RECT now{};
+            GetWindowRect(hwnd, &now);
+            if (IsZoomed(hwnd) || IsIconic(hwnd) || EqualRect(&now, &suggested) ||
+                GetDpiForWindow(hwnd) != newDpi)
+              return;
+            const auto border = [](UINT d, int metric) {
+              return GetSystemMetricsForDpi(metric, d) +
+                     GetSystemMetricsForDpi(SM_CXPADDEDBORDER, d);
+            };
+            const int oldX = border(oldDpi, SM_CXFRAME);
+            const int newX = border(newDpi, SM_CXFRAME);
+            const int oldY = border(oldDpi, SM_CYFRAME);
+            const int newY = border(newDpi, SM_CYFRAME);
+            if (oldX == newX && oldY == newY)
+              return;
+            SetWindowPos(hwnd, nullptr, now.left + oldX - newX, now.top,
+                         now.right - now.left - 2 * oldX + 2 * newX,
+                         now.bottom - now.top - oldY + newY,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+          },
+          Qt::QueuedConnection);
+      }
+      m_dpi = newDpi;
+      return false;
+    }
+
     case WM_NCCALCSIZE: {
       if (!msg->wParam)
         return false;

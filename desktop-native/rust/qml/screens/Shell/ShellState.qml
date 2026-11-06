@@ -56,6 +56,31 @@ QtObject {
         focusedTile = focusedTile === tileId ? "" : tileId
     }
 
+    // Voice channel names by id, as the sidebar lists them (the switch
+    // confirm names the channel it leads to).
+    property var voiceChannelNames: ({})
+    // A share to put on stage once its tile exists (ChatPageClient.tsx
+    // `pendingStreamFocusRef`): `screen:<user>`.
+    property string pendingStreamTile: ""
+
+    // Watch stream (the sidebar's hover card, `handleWatchLiveStream`):
+    // open that voice channel, joining it if we are not there (asking
+    // first when in another call), and put the share on stage.
+    function watchStream(channelId, userId) {
+        pendingStreamTile = "screen:" + userId
+        if (Voice.channelId === channelId) {
+            Nav.selectChannel(channelId)
+            return
+        }
+        if (Voice.channelId.length > 0 && !Desktop.skipVoiceSwitch) {
+            voiceSwitchRequested(channelId, voiceChannelNames[channelId] ?? "", true)
+            return
+        }
+        // Join before opening it (ChannelSidebar.openChannel).
+        Voice.join(channelId)
+        Nav.selectChannel(channelId)
+    }
+
     // The camera key (camera-toggle.ts, CameraLink): off goes off at
     // once; on opens the Camera dialog first while "Preview before turning
     // on camera" is set.
@@ -125,7 +150,8 @@ QtObject {
     signal shareRequested(string messageId, string author, string text, int omitted)
     signal channelInviteRequested(string channelId, string name, bool voice)
     signal voiceStatusRequested(string channelId, string name, bool media, string text)
-    signal voiceSwitchRequested(string channelId, string name)
+    // `select`: a sidebar click, which opens the channel too once switched.
+    signal voiceSwitchRequested(string channelId, string name, bool select)
     // A DM call (ChatPageClient.tsx `executeStartCall`); ExtrasHost
     // decides: `confirm` asks first (StartCallModal) unless "Don't ask
     // again", and a voice channel call in progress asks whether to leave it.

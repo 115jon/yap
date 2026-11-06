@@ -17,6 +17,7 @@
 #include <QtCore/QList>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
+#include <QtCore/QSize>
 #include <QtGui/QColor>
 #include <QtQuick/QQuickItem>
 
@@ -75,10 +76,14 @@ private:
   void setMaximizePressed(bool pressed);
   void applyFrameColors();
   bool contains(QQuickItem* item, const QPointF& scenePos) const;
+  // The window size that keeps the client's logical size at `newDpi`.
+  QSize scaledWindowSize(unsigned newDpi) const;
 
   QPointer<QQuickWindow> m_window;
   // Set once the native window exists, so the filter never creates it.
   quintptr m_hwnd = 0;
+  // The window's DPI before the change being handled (WM_DPICHANGED).
+  unsigned m_dpi = 0;
   QPointer<QQuickItem> m_titleBar;
   QPointer<QQuickItem> m_maximizeButton;
   QList<QPointer<QQuickItem>> m_hitTestVisible;

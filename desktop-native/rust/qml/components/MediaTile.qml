@@ -15,6 +15,10 @@ Rectangle {
 
     signal activated()
 
+    // For the message menu's Copy / Open media link (the web's
+    // `data-media-url`).
+    readonly property string contextMedia: item && item.url ? item.url : ""
+
     // media-safety.ts: sensitive pictures blur under the high filter only.
     readonly property bool hidden: item.nsfw && ShellState.mediaFilter === "high" && !ShellState.isRevealed(item.id)
     readonly property bool animated: item.gif && !hidden

@@ -50,6 +50,29 @@ Rectangle {
             || view.contentY >= view.originY + view.contentHeight + view.bottomMargin - view.height - 12
     }
 
+    // Whether the list follows its newest end: set by landing and by the
+    // user's own scrolling, never by geometry, so a resize or a DPI change
+    // (which moves contentY while the rows reflow) cannot drop it.
+    property bool followEnd: true
+    property bool reflowPending: false
+
+    function reflow() {
+        if (!root.landed || !root.followEnd || Chat.hasNewer) {
+            updateNearEnd()
+            return
+        }
+        if (root.reflowPending)
+            return
+        root.reflowPending = true
+        Qt.callLater(() => {
+            root.reflowPending = false
+            // Unless a jump, a reland or the user moved it meanwhile.
+            if (root.landed && root.followEnd && !Chat.hasNewer && !view.moving)
+                view.positionViewAtEnd()
+            root.updateNearEnd()
+        })
+    }
+
     function updateNearEnd() {
         const end = isNearEnd()
         if (end !== root.nearEnd) {
@@ -85,6 +108,7 @@ Rectangle {
                 highlightTimer.restart()
             }
             updateNearEnd()
+            root.followEnd = root.nearEnd && !Chat.hasNewer
             reportPosition()
         })
     }
@@ -209,7 +233,7 @@ Rectangle {
 
         // A jump's window grows at its end without following it.
         function onAboutToAppend() {
-            root.stickToEnd = root.nearEnd && !Chat.hasNewer
+            root.stickToEnd = (root.nearEnd || root.followEnd) && !Chat.hasNewer
         }
 
         // Follow new messages when already at the end, and always after
@@ -220,6 +244,7 @@ Rectangle {
                     if (!root.stickToEnd && !mine)
                         return
                     view.positionViewAtEnd()
+                    root.followEnd = true
                     root.updateNearEnd()
                 })
         }
@@ -345,22 +370,17 @@ Rectangle {
 
         onCountChanged: root.olderAsked = false
         // A row at the end that grows (a failed-send line, an edit, a late
-        // layout) keeps the list at its end if it was there.
-        onContentHeightChanged: {
-            if (root.landed && root.nearEnd && !Chat.hasNewer)
-                Qt.callLater(() => {
-                    // Unless a jump or a reland moved it meanwhile.
-                    if (!root.landed || !root.nearEnd || Chat.hasNewer)
-                        return
-                    view.positionViewAtEnd()
-                    root.updateNearEnd()
-                })
-            else
-                root.updateNearEnd()
-        }
-        onHeightChanged: root.updateNearEnd()
+        // layout), a resize, or a monitor scale change (every row reflows)
+        // keeps the list at its end if it was following it.
+        onContentHeightChanged: root.reflow()
+        onHeightChanged: root.reflow()
+        onWidthChanged: root.reflow()
         onMovementStarted: root.userMoved = true
         onContentYChanged: {
+            // Only the user's own scrolling (wheel, drag, flick, the bar)
+            // decides whether the end is followed.
+            if (view.moving || view.ScrollBar.vertical.pressed)
+                root.followEnd = root.isNearEnd()
             root.updateNearEnd()
             const nearTop = contentY - originY < root.historyFetchPx
             if (!nearTop)
@@ -410,6 +430,9 @@ Rectangle {
                 messageMenu.hasReactions = row.reactions.length > 0
                 messageMenu.omitted = root.omittedFiles(row.attachments)
                 messageMenu.authorId = row.authorId
+                const under = row.contextAt(anchor, x, y)
+                messageMenu.link = under.link
+                messageMenu.media = under.media
                 messageMenu.openFor(id, author, text, mine, anchor, x, y)
             }
             onThreadRequested: id => root.openThread(id)
@@ -740,6 +763,10 @@ Rectangle {
         property bool settled: true
         property bool hasReactions: false
         property int omitted: 0
+        // The link and the picture under the pointer (`hoveredUrl`,
+        // `publicMediaUrl` in MessageItem.tsx).
+        property string link
+        property string media
         property Item anchorItem: null
         readonly property bool canBan: !mine && Admin.canBan && Nav.dmUsername.length === 0
         readonly property bool hasDanger: settled && (mine || Chat.canManageMessages) || canBan
@@ -863,6 +890,23 @@ Rectangle {
             onTriggered: Extras.markUnread(messageMenu.messageId)
         }
         MenuRow {
+            text: qsTr("Copy link")
+            glyph: "link"
+            visible: messageMenu.link.length > 0
+            height: visible ? implicitHeight : 0
+            onTriggered: {
+                clipboard.copyText(messageMenu.link)
+                toast.show(qsTr("Link copied"))
+            }
+        }
+        MenuRow {
+            text: qsTr("Open link")
+            glyph: "externalLink"
+            visible: messageMenu.link.length > 0
+            height: visible ? implicitHeight : 0
+            onTriggered: leaveSite.request(messageMenu.link)
+        }
+        MenuRow {
             text: qsTr("Share message")
             glyph: "share"
             visible: messageMenu.settled
@@ -901,7 +945,27 @@ Rectangle {
             height: visible ? implicitHeight : 0
             onTriggered: ShellState.banRequested(messageMenu.authorId, messageMenu.author)
         }
+        MenuRule { visible: messageMenu.media.length > 0; height: visible ? implicitHeight : 0 }
+        MenuRow {
+            text: qsTr("Copy media link")
+            glyph: "copy"
+            visible: messageMenu.media.length > 0
+            height: visible ? implicitHeight : 0
+            onTriggered: {
+                clipboard.copyText(messageMenu.media)
+                toast.show(qsTr("Media link copied"))
+            }
+        }
+        MenuRow {
+            text: qsTr("Open media link")
+            glyph: "externalLink"
+            visible: messageMenu.media.length > 0
+            height: visible ? implicitHeight : 0
+            onTriggered: leaveSite.request(messageMenu.media)
+        }
     }
+
+    LeaveSiteDialog { id: leaveSite }
 
     // Files dragged over the chat (DragDropOverlay.tsx): the scrim with a
     // dashed line-strong frame 16 px in (radius 12), and over it a ply-3

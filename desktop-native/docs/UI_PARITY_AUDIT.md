@@ -166,3 +166,103 @@ scale compared.
   reports patterns that were already there, such as the imperative popup
   geometry in `EmojiPicker.qml`. qmllint cannot resolve the cxx-qt modules
   without a qmldir.
+
+## Voice + display pass
+
+Pass of 2026-11-06 (later the same day). Native ran as `--profile spike`
+(the owner test account); the web side was `web-shot.mjs` as Spike Peer
+(`--media`, `--fake-share`: a fake mic and camera, and a canvas for the
+shared screen, never the desktop). Captures are in
+`F:/ct/yapn/run/display/` and `F:/ct/yapn/run/voice/`.
+
+### Display configurations
+
+The test display was `\\.\DISPLAY15`, a Parsec Virtual Display Adapter
+(IddCx) at 3840,0, the only display with no windows on it. The primary
+(`DISPLAY37`, "VDD by MTT") is the only HDR-capable one and was left
+alone, as was `DISPLAY14` (one browser window). `F:/ct/yapn/tools/display.ps1`
+(`list`, `save`, `set`, `restore`) changes it: modes with a dynamic
+`ChangeDisplaySettingsEx`, the scale with the DPI-scale packet of
+`DisplayConfigSetDeviceInfo`, HDR with `SET_ADVANCED_COLOR_STATE`. Every
+change ran inside `try`/`finally` around a verified restore to
+`original.json` (1920 x 1080 at 60 Hz, 100 %, SDR, at 3840,0).
+`dispcase.ps1` drives one configuration: our window (1024 x 572 logical)
+moves from the primary onto the display, then probes, the title bar's
+`WM_NCHITTEST` answers, a tooltip, the message menu, the emoji picker, the
+WebView2 player, maximise, and the move back.
+
+| config                     | result                                                                                                                                                                                                                        |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 100 % 1080p                | Baseline: exact size, the player's child window on the item's rect, maximise equal to the work area.                                                                                                                          |
+| 125 / 150 / 175 % 1080p    | Before: the client came out 1-2 px larger on each move (1025.6, 1025.3, 1026.3 logical wide), drifted on the way back (1023 x 572 after 150 %), and the chat lost its place at the end. After: 1024 x 572 exactly, both ways. |
+| 200 % 1080p                | Windows caps this display at 175 % (`dpiMax`), so the set lands on 175 %.                                                                                                                                                     |
+| 150 / 200 % 2160p          | As above, exact after the fixes. Maximise fills the work area to the pixel (2560 x 1392 and 1920 x 1032 logical).                                                                                                             |
+| 240 Hz (the highest)       | The driver advertises 144 and 240 Hz, but its vblank, measured with `D3DKMTWaitForVerticalBlankEvent` (`tools/vblank.ps1`), stays at 60.0 Hz in every mode, so nothing can render faster on it.                               |
+| HDR on at 4K               | Not testable: the Parsec display has no advanced colour, and the one HDR display is the primary.                                                                                                                              |
+| restore on a 150 % monitor | Before: the saved rect came back 1020 x 570 and 3 px off. After: identical (1024 x 572, same client origin). Maximised at 175 % restores maximised.                                                                           |
+
+At every scale the title bar answered `CAPTION` on the bar, `MAXBUTTON` on
+maximise (snap layouts), `CLIENT` on Back, Forward, minimise and close, and
+`TOP` on the resize band. Text and icons stay sharp (no bitmap scaling).
+The WebView2 host followed the poster to the pixel at every scale (150 %:
+516 x 291 px for a 344 x 194 item), and the YouTube controls render at the
+monitor's scale. Menus, the emoji picker and dialogs open inside the
+window. Tooltips could not be checked: hover posted to the window does not
+reach Qt's `HoverHandler`.
+
+Fixes:
+
+- `cpp/app.manifest`: per-monitor v2 DPI awareness from the manifest (Qt
+  set it at startup before; the WebView2 hosts and the crash notice now get
+  it from the first instruction).
+- `cpp/main.cpp`: the `PassThrough` rounding is stated, and Qt's wall-clock
+  animation driver is used (`QSG_USE_SIMPLE_ANIMATION_DRIVER`). Qt 6.6's
+  default advances each frame by the primary screen's vsync, fixed at
+  startup (`qsgcontext.cpp`), so on a faster secondary monitor every
+  transition ran 2-4x fast. `YAP_QSG_VSYNC_ANIMATIONS=1` keeps the old
+  driver. Text uses vertical-only hinting: Qt chose GDI full hinting while
+  every screen is at 100 % and DirectWrite once one is scaled, so line wraps
+  changed with the monitor setup. DirectWrite natural is also Chromium's
+  look.
+- `cpp/windowchrome.cpp`: `WM_GETDPISCALEDSIZE` and `WM_DPICHANGED` size
+  the window from the client plus the new DPI's own resize border (Windows
+  rounds it: 8 px at 96 dpi, 9 at 120, 11 at 144). A DPI change inside Qt's
+  own `setGeometry` keeps Qt's rect, so its border is corrected once Qt is
+  done.
+- `cpp/desktopshell.cpp`: the saved rect is restored on its own screen.
+- `cpp/webembed.cpp`, `src/webembed.rs`: the player's rasterization scale is
+  Qt's device pixel ratio (monitor detection off), and WebView2 hears
+  `NotifyParentWindowPositionChanged` when the window moves.
+- `screens/Shell/ChatView.qml`: following the end is the user's choice
+  (`followEnd`), not geometry, so a resize, a width change or a scale
+  change keeps the list at its newest message.
+
+Video tiles size from `Screen.devicePixelRatio`, and the camera tile was
+sharp at 100 %. The calls ran at 100 %, so tiles at other scales were not
+seen live.
+
+### Voice view
+
+Seven short calls in General (Native Spike Lab), each under 2 minutes, one
+session per account, native muted (its device is a real microphone). Three
+or more people cannot be shown with two accounts, so the 3-4 person grids
+were compared in code: `fitGrid` matches `grid-columns.ts`, and the web's
+phone fill (a stage under 560 wide with 2-4 people) was added.
+
+| #   | area                          | finding                                                                                                                                                                                                                                                                                                                                                                            | fixed                                                                                            |
+| --- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| V1  | sidebar voice click           | Native only opened the landing. The web joins as it opens (`handleSelectChannel`, voice-join-on-select): the channel already open only shows, the one you are in only shows, another call asks first (VoiceSwitchModal) unless "Don't ask again", and the channel opens once the switch is confirmed. Nothing gates on a user limit or permission at click time.                   | yes: `ChannelSidebar.openChannel`, `VoiceSwitchDialog.select`                                    |
+| V2  | join from an occupied channel | The first cut selected, then joined: the landing started its standby and the join promoted it while it was still connecting, so the call sat at "Joining". The web skips the standby when the select joins.                                                                                                                                                                        | yes: join, then select (call 5 connected at once)                                                |
+| V3  | grid, tiles, rings            | 1-3 tiles (person, share) lay out alike, and the speaking rings, mute and deafen glyphs and the "is sharing" / Watch stream tile match. The web's stage grid renders left-aligned despite `place-content: safe center`, a web bug; native keeps it centred.                                                                                                                        | layout: yes (phone fill); web bug noted                                                          |
+| V4  | call panel (sidebar)          | Native said "Voice connected" and "General / server". The web says "Connected" when ping, the clock and the options key share the row, joins with " · " (the server only when it fits whole), and shows ping, the call clock and Voice options.                                                                                                                                    | yes: label, place, ping (from the call stats), clock, options key (opens the connection details) |
+| V5  | call panel keys               | The web adds Activities and Soundboard to this row. Native keeps them in the stage dock only.                                                                                                                                                                                                                                                                                      | no: needs the dock's popovers moved out of `VoiceView`                                           |
+| V6  | participant menu              | Native had a name header, the volume, the mutes and Move to. The web's StreamContextMenu has no header and reads Profile, Message, volume, Mute, Mute soundboard, Copy user ID; on a share, Watch stream or Stop watching leads.                                                                                                                                                   | yes (the per-stream volume, attenuation and "Always hear stream audio" have no native API yet)   |
+| V7  | stream hover card             | Missing. Built as `components/VoiceStreamHoverCard.qml` on live roster rows: Streaming now, Live, the preview (your own share's capture; others get the placeholder, since no thumbnails reach native), Watch stream / Open stream, 12 px beside the row, closing 90 ms after both are left.                                                                                       | yes. Seen on the web; not driven on native (posted hover does not reach `HoverHandler`)          |
+| V8  | floating stream preview       | Missing. Built as `screens/Voice/FloatingStreamPreview.qml`: your share or a watched one floats over other views while you are in the call, with Go to channel, Minimise to a bubble, the hover pill (Stream settings, Stop streaming / watching) and corner snapping on drag. The first build stretched it over the whole view (a sized Loader).                                  | yes                                                                                              |
+| V9  | voice details                 | Tabs, sections, numbers and copy match VoiceDetailsPanel.                                                                                                                                                                                                                                                                                                                          | —                                                                                                |
+| V10 | sidebar roster                | Same leaves, LEDs and glyphs. The web lists the channel status rows ("Set a channel status", "Set the vibe") under the people and shows "2 · 0:47" on the channel. Native shows "Set status" and "Add picture" above them, with no count or clock.                                                                                                                                 | no: the order and the per-channel clock come from the Rust tree model                            |
+| V11 | message menu                  | Copy link and Open link (a link in the text, or the embed under the pointer), Copy media link and Open media link (the picture under it, the media proxy unwrapped to its original). Open goes through "Leaving Yap" (`LeaveSiteDialog.qml`): http(s) only, the app's origin and trusted hosts open at once, and "Trust <host> links from now on" is kept in `trusted-links.json`. | yes (closes D19)                                                                                 |
+
+Native's own share could not be started in these runs: in
+`YAP_SHARE_ONLY_OURS` mode the picker did not list the "Yap Native Share
+Test" window, so share tiles were checked from the web peer's share.

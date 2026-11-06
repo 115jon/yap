@@ -369,6 +369,17 @@ void DesktopShell::restoreGeometry()
   const QRect rect(parts[0].toInt(), parts[1].toInt(), parts[2].toInt(),
                    parts[3].toInt());
   m_normal = rect;
+  // The saved rect is in the logical pixels of the screen it was on: give
+  // the (hidden) window that screen first, so Qt maps it with that
+  // screen's scale. Mapped with the primary's, a rect on a 150% monitor
+  // came back a few pixels small and off.
+  for (QScreen* screen : screens) {
+    if (screen->geometry().contains(rect.center())) {
+      if (m_window->screen() != screen)
+        m_window->setScreen(screen);
+      break;
+    }
+  }
   m_window->setGeometry(rect);
   if (parts[4] == QLatin1String("1"))
     m_window->setWindowStates(Qt::WindowMaximized);

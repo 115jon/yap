@@ -319,7 +319,7 @@ Rectangle {
             // unless "Don't ask again" was ticked.
             onClicked: {
                 if (Voice.channelId.length > 0 && Voice.channelId !== Nav.voicePanelId && !Desktop.skipVoiceSwitch)
-                    ShellState.voiceSwitchRequested(Nav.voicePanelId, Nav.voicePanelName)
+                    ShellState.voiceSwitchRequested(Nav.voicePanelId, Nav.voicePanelName, false)
                 else
                     Voice.join(Nav.voicePanelId)
             }
@@ -350,10 +350,22 @@ Rectangle {
     // Joined: one tile per person, fitted to the stage (grid-columns.ts
     // fitGrid): the column count that gives the largest 16:9 tile under
     // both the width and the height, 8 px gaps; one tile stops at 640, and
-    // below 200 the grid keeps 200 and scrolls.
+    // below 200 the grid keeps 200 and scrolls. A stage under 560 wide
+    // with 2-4 people fills its height instead (`usesPhoneFill`): two stack
+    // in one column, three or four sit 2 x 2, in whatever shape it gives.
     function fitGrid(width, height, count) {
         const gap = 8
         const n = Math.max(1, count)
+        if (width > 0 && width < 560 && n >= 2 && n <= 4) {
+            const fillCols = n === 2 ? 1 : 2
+            const fillRows = Math.ceil(n / fillCols)
+            return {
+                cols: fillCols,
+                tileW: Math.max(0, Math.floor((width - (fillCols - 1) * gap) / fillCols)),
+                tileH: Math.max(0, Math.floor((height - (fillRows - 1) * gap) / fillRows)),
+                scrolls: false
+            }
+        }
         let best = { cols: 1, tileW: 0, scrolls: false }
         for (let cols = 1; cols <= n; cols++) {
             const rows = Math.ceil(n / cols)
@@ -370,6 +382,30 @@ Rectangle {
             return { cols: cols, tileW: Math.max(0, Math.floor((width - (cols - 1) * gap) / cols)), scrolls: true }
         }
         return best
+    }
+
+    // Watch stream from the sidebar's card: once that share's tile is in
+    // the call, it goes on stage (`attemptPendingStreamFocus`); given up
+    // after 10 s.
+    Timer {
+        id: pendingFocus
+        property int tries: 0
+        interval: 200
+        repeat: true
+        running: root.joined && ShellState.pendingStreamTile.length > 0
+        onRunningChanged: tries = 0
+        onTriggered: {
+            for (let i = 0; i < tiles.count; i++) {
+                const tile = tiles.itemAt(i)
+                if (tile && tile.tileId === ShellState.pendingStreamTile) {
+                    ShellState.focusedTile = tile.tileId
+                    ShellState.pendingStreamTile = ""
+                    return
+                }
+            }
+            if (++tries >= 50)
+                ShellState.pendingStreamTile = ""
+        }
     }
 
     Flickable {
@@ -395,7 +431,7 @@ Rectangle {
                 model: root.joined && !root.focused ? VoiceTileModel : null
                 delegate: VoiceTile {
                     width: stage.fit.tileW
-                    height: Math.round(stage.fit.tileW * 9 / 16)
+                    height: stage.fit.tileH !== undefined ? stage.fit.tileH : Math.round(stage.fit.tileW * 9 / 16)
                     solo: tiles.count === 1
                 }
             }

@@ -42,6 +42,7 @@ cxx_qt_import_qml_module(yap_native_qml
 qt_add_executable(YapNative WIN32
   cpp/main.cpp
   cpp/app.rc
+  cpp/app.manifest
   cpp/animatedpicture.cpp cpp/animatedpicture.h
   cpp/authmedia.cpp cpp/authmedia.h
   cpp/camera.cpp cpp/camera.h

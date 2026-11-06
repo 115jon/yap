@@ -12,17 +12,21 @@ PlateDialog {
     property string channelName
     // Switching to a DM call (its DM channel) rather than a voice channel.
     property bool call: false
+    // From a sidebar click: the channel opens once the switch is confirmed
+    // (ChatPageClient.tsx `guardedSelectChannel`), not before.
+    property bool select: false
 
-    function start(channelId, name, call) {
+    function start(channelId, name, call, select) {
         dialog.channelId = channelId
         dialog.channelName = name
         dialog.call = call ?? false
+        dialog.select = select ?? false
         dontAsk.checked = false
         open()
     }
 
     width: Math.min(384, parent.width - 32)
-    title: qsTr("Switch to %1?").arg(channelName)
+    title: channelName.length > 0 ? qsTr("Switch to %1?").arg(channelName) : qsTr("Switch voice channel?")
     description: qsTr("You'll leave %1.").arg(Voice.channelName.length > 0 ? Voice.channelName : qsTr("your current voice channel"))
     onOpened: switchKey.forceActiveFocus()
 
@@ -73,10 +77,13 @@ PlateDialog {
                 if (dontAsk.checked)
                     Desktop.setSetting("skipVoiceSwitch", true)
                 dialog.close()
-                if (dialog.call)
+                if (dialog.call) {
                     Calls.start(dialog.channelId)
-                else
-                    Voice.join(dialog.channelId)
+                    return
+                }
+                Voice.join(dialog.channelId)
+                if (dialog.select)
+                    Nav.selectChannel(dialog.channelId)
             }
         }
     ]

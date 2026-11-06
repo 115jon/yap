@@ -99,6 +99,7 @@ private:
   void fail();
   void stop();
   void place();
+  void parentMoved();
   bool popupOver(const QRectF& shown) const;
   void setState(State state);
 

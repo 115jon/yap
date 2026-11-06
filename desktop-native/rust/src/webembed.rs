@@ -25,11 +25,12 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 use webview2_com::Microsoft::Web::WebView2::Win32::{
-    ICoreWebView2, ICoreWebView2Controller, ICoreWebView2Controller2, ICoreWebView2Environment,
-    ICoreWebView2EnvironmentOptions, ICoreWebView2NavigationStartingEventArgs,
-    ICoreWebView2Settings3, ICoreWebView2Settings4, ICoreWebView2_3, ICoreWebView2_8,
-    COREWEBVIEW2_COLOR, COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS,
-    COREWEBVIEW2_PROCESS_FAILED_KIND, COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED,
+    ICoreWebView2, ICoreWebView2Controller, ICoreWebView2Controller2, ICoreWebView2Controller3,
+    ICoreWebView2Environment, ICoreWebView2EnvironmentOptions,
+    ICoreWebView2NavigationStartingEventArgs, ICoreWebView2Settings3, ICoreWebView2Settings4,
+    ICoreWebView2_3, ICoreWebView2_8, COREWEBVIEW2_COLOR,
+    COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS, COREWEBVIEW2_PROCESS_FAILED_KIND,
+    COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED,
     COREWEBVIEW2_PROCESS_FAILED_KIND_FRAME_RENDER_PROCESS_EXITED,
     COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED,
 };
@@ -71,12 +72,15 @@ const FAILED: i32 = 2;
 const EXTERNAL: i32 = 3;
 const CRASHED: i32 = 4;
 
-/// Where the item is and what of it shows, in the parent's client pixels.
+/// Where the item is and what of it shows, in the parent's client pixels,
+/// and the window's device pixel ratio (Qt's, which the page's CSS pixels
+/// follow so they stay the QML item's logical pixels).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct Place {
     item: RECT,
     clip: RECT,
     visible: bool,
+    scale: f64,
 }
 
 struct Host {
@@ -588,6 +592,20 @@ fn apply_place(id: u64, place: Place) {
         };
         // SAFETY: a live controller on its own thread.
         unsafe {
+            // Qt's ratio, not the monitor's: they differ under
+            // QT_SCALE_FACTOR or a rounding policy, and the bounds above are
+            // Qt's device pixels. Set before the bounds, so a move to a
+            // monitor with another scale lays the page out once.
+            if place.scale > 0.0 {
+                if let Ok(controller3) = controller.cast::<ICoreWebView2Controller3>() {
+                    let _ = controller3.SetShouldDetectMonitorScaleChanges(false);
+                    let mut current = 0.0;
+                    let _ = controller3.RasterizationScale(&mut current);
+                    if (current - place.scale).abs() > 1e-3 {
+                        let _ = controller3.SetRasterizationScale(place.scale);
+                    }
+                }
+            }
             let _ = controller.SetBounds(bounds);
             let _ = controller.SetIsVisible(shown);
         }
@@ -664,7 +682,8 @@ pub unsafe extern "C" fn yap_web_open(
 }
 
 /// Moves a player: `item_*` is the whole item and `clip_*` the part shown,
-/// both in the parent's client pixels.
+/// both in the parent's client pixels; `scale` is the window's device pixel
+/// ratio.
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
 pub extern "C" fn yap_web_place(
@@ -678,6 +697,7 @@ pub extern "C" fn yap_web_place(
     clip_w: i32,
     clip_h: i32,
     visible: bool,
+    scale: f64,
 ) {
     let place = Place {
         item: RECT {
@@ -693,6 +713,7 @@ pub extern "C" fn yap_web_place(
             bottom: clip_y + clip_h,
         },
         visible,
+        scale,
     };
     let changed = HOSTS.with(|hosts| {
         let mut hosts = hosts.borrow_mut();
@@ -706,6 +727,16 @@ pub extern "C" fn yap_web_place(
     });
     if changed {
         apply_place(id, place);
+    }
+}
+
+/// The app's window moved on screen (the child windows did not move in it):
+/// WebView2 needs to hear it for its own popups and accessibility.
+#[no_mangle]
+pub extern "C" fn yap_web_parent_moved(id: u64) {
+    if let Some(controller) = controller(id) {
+        // SAFETY: a live controller on its own thread.
+        let _ = unsafe { controller.NotifyParentWindowPositionChanged() };
     }
 }
 

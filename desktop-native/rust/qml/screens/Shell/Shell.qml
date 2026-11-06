@@ -144,6 +144,46 @@ RowLayout {
             active: Nav.voicePanelId.length > 0
             sourceComponent: VoiceView {}
         }
+        // In the call but looking elsewhere: our share, and each share we
+        // watch, float over the view (ChatPageClient.tsx
+        // `shouldRenderFloatingStreamPreview`, `...WatchedStreamPreviews`).
+        Item {
+            id: floatingPreviews
+            anchors.fill: parent
+            z: 2
+            readonly property bool away: Voice.channelId.length > 0 && Nav.voicePanelId !== Voice.channelId
+                && !ShellState.stageFullscreen
+            Repeater {
+                model: floatingPreviews.away ? VoiceTileModel : null
+                delegate: Loader {
+                    id: previewSlot
+                    required property string kind
+                    required property bool me
+                    required property bool watching
+                    required property string videoKey
+                    required property string name
+                    required property string participantId
+                    required property string memberId
+                    // No size of its own: the card keeps its own and is
+                    // placed in `floatingPreviews` (a sized Loader would
+                    // stretch it).
+                    active: kind === "screen" && (me || watching)
+                    sourceComponent: FloatingStreamPreview {
+                        videoKey: previewSlot.videoKey
+                        displayName: previewSlot.name
+                        participantId: previewSlot.participantId
+                        memberId: previewSlot.memberId
+                        me: previewSlot.me
+                        channelName: Voice.channelName
+                        area: floatingPreviews
+                        // Our share first, a watched one above it while we
+                        // share too (the web's `slotIndex`).
+                        slot: previewSlot.me || !Voice.sharing ? 0 : 1
+                        onGoToChannel: Nav.selectChannel(Voice.channelId)
+                    }
+                }
+            }
+        }
     }
     // Docked: a 240 px ply-0 column with a seam on its left, under the
     // chat header, which spans it (MemberList draws no header here).

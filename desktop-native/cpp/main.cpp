@@ -3,6 +3,7 @@
 
 #include <QtCore/QDirIterator>
 #include <QtCore/QElapsedTimer>
+#include <QtGui/QFont>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QIcon>
@@ -176,6 +177,18 @@ int main(int argc, char* argv[])
   QGuiApplication::setApplicationName(
     QStringLiteral("YapNative") +
     QString::fromStdWString(profile::suffix(L'-')));
+  // Fractional monitor scales as they are (125%, 150%, 175%), the way
+  // Chromium renders them; QT_SCALE_FACTOR_ROUNDING_POLICY still overrides.
+  // Per-monitor v2 awareness comes from the manifest (cpp/app.manifest).
+  QGuiApplication::setHighDpiScaleFactorRoundingPolicy(
+    Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+  // Animations on wall-clock time. Qt's default driver advances one
+  // primary-screen vsync per frame, fixed at startup, so on a faster
+  // secondary monitor (144 Hz beside a 60 Hz primary) every transition ran
+  // that much faster. YAP_QSG_VSYNC_ANIMATIONS=1 keeps Qt's default.
+  if (!qEnvironmentVariableIsSet("QSG_USE_SIMPLE_ANIMATION_DRIVER") &&
+      qEnvironmentVariableIntValue("YAP_QSG_VSYNC_ANIMATIONS") == 0)
+    qputenv("QSG_USE_SIMPLE_ANIMATION_DRIVER", "1");
   QGuiApplication app(argc, argv);
   // A second launch shows the first instance's window and exits.
   if (!first) {
@@ -188,6 +201,15 @@ int main(int argc, char* argv[])
   // closer to Chromium's DirectWrite output. YAP_TEXT=qt for the other.
   if (qEnvironmentVariable("YAP_TEXT") != QLatin1String("qt"))
     QQuickWindow::setTextRenderType(QQuickWindow::NativeTextRendering);
+  // DirectWrite with vertical-only hinting at every scale, as Chromium
+  // draws text. Qt's default picks GDI's full hinting while every monitor
+  // is at 100% and DirectWrite once one is scaled, so glyph widths (and
+  // with them every wrapped line) changed with the monitor setup.
+  {
+    QFont font = QGuiApplication::font();
+    font.setHintingPreference(QFont::PreferVerticalHinting);
+    QGuiApplication::setFont(font);
+  }
   registerFonts();
 
   auto* chrome = new WindowChrome(&app);

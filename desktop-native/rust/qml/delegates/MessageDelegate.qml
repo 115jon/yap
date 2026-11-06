@@ -65,6 +65,45 @@ Item {
     signal deleteRequested(string id, string author, string text, bool confirm)
     // Opens the message menu at (x, y) in `anchor`'s coordinates.
     signal menuRequested(string id, string author, string text, bool mine, Item anchor, real x, real y)
+
+    // What a right-click at (x, y) in `item` is over (MessageItem.tsx
+    // `handleContextMenu`): `link`, a web link in the text or the embed under
+    // it; `media`, the picture under it. The deepest item that names one
+    // wins; a link in the text beats its embed.
+    function contextAt(item, x, y) {
+        let link = ""
+        let media = ""
+        let node = root
+        let at = item.mapToItem(root, x, y)
+        while (node) {
+            const child = node.childAt(at.x, at.y)
+            if (!child)
+                break
+            at = node.mapToItem(child, at.x, at.y)
+            if (typeof child.contextLink === "string" && child.contextLink.length > 0)
+                link = child.contextLink
+            if (typeof child.contextMedia === "string" && child.contextMedia.length > 0)
+                media = child.contextMedia
+            node = child
+        }
+        const inText = bodyText.mapFromItem(item, x, y)
+        if (bodyText.visible && bodyText.contains(inText)) {
+            const textLink = bodyText.linkAt(inText.x, inText.y)
+            if (textLink.length > 0)
+                link = textLink
+        }
+        // Only web links leave the app: mentions, spoilers and our own
+        // schemes are not "links" here (message text is untrusted).
+        if (!/^https?:\/\//i.test(link))
+            link = ""
+        // The media proxy's address names the original (getPublicMediaUrl).
+        const proxied = /\/api\/proxy-media\?(?:.*&)?url=([^&]+)/.exec(media)
+        if (proxied)
+            media = decodeURIComponent(proxied[1])
+        if (!/^https?:\/\//i.test(media))
+            media = ""
+        return { link: link, media: media }
+    }
     signal jumpRequested(string id)
     // The author's avatar or name: their profile, next to `anchor`.
     signal profileRequested(string userId, Item anchor)

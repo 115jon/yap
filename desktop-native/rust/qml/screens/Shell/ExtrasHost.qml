@@ -33,7 +33,7 @@ Item {
         function onVoiceStatusRequested(channelId, name, media, text) {
             status.start(channelId, name, media, text)
         }
-        function onVoiceSwitchRequested(channelId, name) { voiceSwitch.start(channelId, name) }
+        function onVoiceSwitchRequested(channelId, name, select) { voiceSwitch.start(channelId, name, false, select) }
         function onStartCallRequested(channelId, name, confirm) {
             if (confirm && !Desktop.skipStartCall) {
                 startCall.start(channelId, name)

@@ -17,6 +17,7 @@ pub const WINDOW_STATE_FILE: &str = "window-state.json";
 pub const EMOJI_FILE: &str = "emoji-prefs.json";
 pub const APPEARANCE_FILE: &str = "appearance.json";
 pub const SEARCH_FILE: &str = "search-recent.json";
+pub const TRUSTED_LINKS_FILE: &str = "trusted-links.json";
 
 /// The theme picked on this device (next-themes' `theme` key on the web):
 /// a theme id or `system`. App-wide, like the web's origin storage.
@@ -231,6 +232,25 @@ pub fn save_emoji(dir: &Path, prefs: &EmojiPrefs) -> Result<(), CacheError> {
     write(&dir.join(EMOJI_FILE), prefs)
 }
 
+/// The hosts whose links open without the "Leaving Yap" confirmation
+/// (localStorage `ralph-meet:trusted-external-link-domains` on the web):
+/// lower case, sorted. Empty when missing or unreadable.
+pub fn load_trusted_link_hosts(dir: &Path) -> Vec<String> {
+    read::<Vec<String>>(&dir.join(TRUSTED_LINKS_FILE)).unwrap_or_default()
+}
+
+/// Adds `host` (lower-cased) to the trusted hosts and saves them.
+pub fn trust_link_host(dir: &Path, host: &str) -> Result<(), CacheError> {
+    let host = host.trim().to_ascii_lowercase();
+    let mut hosts = load_trusted_link_hosts(dir);
+    if host.is_empty() || hosts.contains(&host) {
+        return Ok(());
+    }
+    hosts.push(host);
+    hosts.sort();
+    write(&dir.join(TRUSTED_LINKS_FILE), &hosts)
+}
+
 /// Recent message searches by scope key (`s:<server>`, `c:<channel>`;
 /// localStorage `rm:search-recent:<scope>` on the web), each entry as the
 /// web stores it. Empty when missing or unreadable.
@@ -248,6 +268,19 @@ pub fn save_search_recents(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trusted_link_hosts_should_be_kept_lower_case_sorted_and_once() {
+        let dir = tempfile::tempdir().expect("dir");
+        assert!(load_trusted_link_hosts(dir.path()).is_empty());
+        trust_link_host(dir.path(), "Example.COM").expect("trust");
+        trust_link_host(dir.path(), "a.example").expect("trust");
+        trust_link_host(dir.path(), "example.com").expect("trust again");
+        assert_eq!(
+            load_trusted_link_hosts(dir.path()),
+            vec!["a.example".to_owned(), "example.com".to_owned()]
+        );
+    }
 
     #[test]
     fn app_files_should_round_trip_and_refuse_other_paths() {

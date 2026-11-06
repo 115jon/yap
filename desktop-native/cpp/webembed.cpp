@@ -11,7 +11,9 @@
 extern "C" void yap_web_set_callback(void (*callback)(uint64_t, int, const char16_t*, size_t));
 extern "C" uint64_t yap_web_open(intptr_t parent, const char16_t* url, size_t len, bool muted);
 extern "C" void yap_web_place(uint64_t id, int item_x, int item_y, int item_w, int item_h,
-                              int clip_x, int clip_y, int clip_w, int clip_h, bool visible);
+                              int clip_x, int clip_y, int clip_w, int clip_h, bool visible,
+                              double scale);
+extern "C" void yap_web_parent_moved(uint64_t id);
 extern "C" void yap_web_close(uint64_t id);
 
 namespace {
@@ -211,9 +213,19 @@ void WebEmbed::open()
   m_window = win;
   m_frames = connect(win, &QQuickWindow::afterAnimating, this, &WebEmbed::place);
   connect(win, &QWindow::visibilityChanged, this, &WebEmbed::place, Qt::UniqueConnection);
+  // The window moving on screen leaves the player where it is in it, but
+  // WebView2 must hear of it (its popups and accessibility).
+  for (auto signal : { &QWindow::xChanged, &QWindow::yChanged })
+    connect(win, signal, this, &WebEmbed::parentMoved, Qt::UniqueConnection);
   place();
   // A still window renders nothing: make one frame so placement follows.
   win->update();
+}
+
+void WebEmbed::parentMoved()
+{
+  if (m_id != 0)
+    yap_web_parent_moved(m_id);
 }
 
 void WebEmbed::close()
@@ -290,7 +302,7 @@ void WebEmbed::place()
   const int cx = px(shown.x());
   const int cy = px(shown.y());
   yap_web_place(m_id, ix, iy, px(item.right()) - ix, px(item.bottom()) - iy, cx, cy,
-                px(shown.right()) - cx, px(shown.bottom()) - cy, visible);
+                px(shown.right()) - cx, px(shown.bottom()) - cy, visible, dpr);
 }
 
 void WebEmbed::onEvent(uint64_t id, int event, const QString& text)

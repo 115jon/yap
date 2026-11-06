@@ -158,4 +158,40 @@ Item {
         }
     }
     HoverHandler { id: hover }
+
+    // Someone live: their stream card while the row or the card is hovered
+    // (VoiceStreamHoverCard.tsx); it closes 90 ms after both are left.
+    Loader {
+        id: streamCard
+        active: root.live && root.userId.length > 0
+        sourceComponent: VoiceStreamHoverCard {
+            anchorItem: root
+            name: root.name
+            me: root.me
+            onHeldChanged: if (!held) cardClose.restart()
+            onWatchRequested: {
+                close()
+                ShellState.watchStream(root.channelId, root.userId)
+            }
+        }
+    }
+    Timer {
+        id: cardClose
+        interval: 90
+        onTriggered: {
+            if (streamCard.item && !hover.hovered && !streamCard.item.held)
+                streamCard.item.close()
+        }
+    }
+    Connections {
+        target: hover
+        function onHoveredChanged() {
+            if (hover.hovered && streamCard.item) {
+                cardClose.stop()
+                streamCard.item.open()
+            } else {
+                cardClose.restart()
+            }
+        }
+    }
 }
