@@ -18,11 +18,8 @@ pub struct Config {
     pub gateway_origin: String,
     /// A session token to use instead of the credential store (dev only).
     pub dev_token: Option<String>,
-    /// Hidden standby sessions on occupied voice landings, opt-in with
-    /// `YAP_VOICE_STANDBY=on`: the protocol side works, but the device mic
-    /// swapped in on promotion does not capture yet (StartRecording is
-    /// refused after a standby ran with recording off), so a promoted call
-    /// would send nothing until its mic is republished.
+    /// Hidden standby sessions on occupied voice landings, as on the web;
+    /// `YAP_VOICE_STANDBY=off` turns them off.
     pub voice_standby: bool,
 }
 
@@ -50,8 +47,8 @@ pub fn get() -> &'static Config {
                 "pk_live_yl2Z9ssEwlWuOYHVRWozk9WThozu4nFP3QAhCWAsPhE",
             ),
             dev_token: std::env::var("YAP_TOKEN").ok().filter(|v| !v.is_empty()),
-            voice_standby: std::env::var("YAP_VOICE_STANDBY")
-                .is_ok_and(|v| v.trim().eq_ignore_ascii_case("on")),
+            voice_standby: !std::env::var("YAP_VOICE_STANDBY")
+                .is_ok_and(|v| v.trim().eq_ignore_ascii_case("off")),
         }
     })
 }

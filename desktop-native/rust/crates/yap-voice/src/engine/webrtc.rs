@@ -82,6 +82,22 @@ fn factory() -> &'static PeerConnectionFactory {
     FACTORY.get_or_init(PeerConnectionFactory::default)
 }
 
+/// Keeps WebRTC's voice engine, and with it the platform ADM, up for the
+/// process. The voice engine runs only while a peer connection exists: when
+/// the last one goes, `WebRtcVoiceEngine::Terminate` terminates the ADM, and
+/// webrtc-sys's `AdmProxy` never initialises its platform ADM again (its
+/// `Init` is a no-op), so every later call would list -1 devices and record
+/// nothing. One idle connection (no transceivers, no ICE), made just before
+/// the first call's and never closed, holds the engine.
+fn keep_voice_engine(f: &PeerConnectionFactory) {
+    static KEEPER: OnceLock<Option<PeerConnection>> = OnceLock::new();
+    KEEPER.get_or_init(|| {
+        f.create_peer_connection(RtcConfiguration::default())
+            .map_err(|e| eprintln!("[voice] voice engine keeper refused: {e:?}"))
+            .ok()
+    });
+}
+
 fn err(what: &str) -> impl FnOnce(libwebrtc::RtcError) -> MediaError + '_ {
     move |e| MediaError(format!("{what}: {e:?}"))
 }
@@ -580,7 +596,8 @@ pub struct LibwebrtcSession {
     mic: Arc<Mutex<Option<RtcAudioTrack>>>,
     /// Owns the call's senders (not a receive-only video session).
     sender_session: bool,
-    /// A standby's silent stand-in for the mic (no device is touched).
+    /// A standby's mic: the device track, disabled, with ADM recording off
+    /// (the device stays closed) until the promotion enables both.
     standby: Arc<Mutex<Option<RtcAudioTrack>>>,
     /// The mic's send transceiver (stopped by a republish).
     mic_transceiver: Arc<Mutex<Option<RtpTransceiver>>>,
@@ -588,7 +605,7 @@ pub struct LibwebrtcSession {
     camera: Arc<Mutex<Option<CameraSend>>>,
     screen: Arc<Mutex<Option<ScreenSend>>>,
     screen_audio: Arc<Mutex<Option<ScreenAudioSend>>>,
-    /// Camera, share and share audio transceivers a fresh push replaced,
+    /// Mic, camera, share and share audio transceivers a fresh push replaced,
     /// kept, unfed, until the call ends (closing one renegotiates; see
     /// PartyTracks `republishTrack`).
     retired: Arc<Mutex<Vec<RtpTransceiver>>>,
@@ -647,7 +664,7 @@ impl MediaEngine for LibwebrtcEngine {
         MIC_LIVE.store(false, Ordering::Relaxed);
         CALL_OPEN.store(true, Ordering::Relaxed);
         // Hidden: no recording (the mic stays closed) until the promotion
-        // creates the device track; playout is ready.
+        // enables the device track; playout is ready.
         f.set_adm_recording_enabled(false);
         f.set_adm_playout_enabled(true);
         Self::connect(f, ice_servers, None, true)
@@ -688,6 +705,7 @@ impl LibwebrtcEngine {
         mic: Option<RtcAudioTrack>,
         sender_session: bool,
     ) -> Result<(LibwebrtcSession, UnboundedReceiver<MediaState>), MediaError> {
+        keep_voice_engine(f);
         let pc = f
             .create_peer_connection({
                 let mut config = RtcConfiguration::default();
@@ -787,10 +805,13 @@ impl MediaSession for LibwebrtcSession {
     }
 
     async fn publish_standby(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
-        // Silence nobody feeds: the SFU keeps the track about 30 s without
-        // media; a later promotion republishes it if it went stale.
-        let source = NativeAudioSource::new(AudioSourceOptions::default(), 48_000, 1, 0);
-        let track = factory().create_audio_track("standby", source);
+        // The device mic, disabled, while ADM recording is off: nothing opens
+        // the device and nothing is sent (the SFU keeps the track about 30 s
+        // without media; a later promotion republishes it if it went stale).
+        // Not a silent `NativeAudioSource`: LiveKit's WebRTC marks a send
+        // stream made for one as external for good, and an external stream
+        // never gets device audio, not even after `set_track` to the mic.
+        let track = factory().create_device_audio_track("mic");
         track.set_enabled(false);
         *lock(&self.standby) = Some(track);
         self.push_mic(stream_id).await
@@ -800,22 +821,22 @@ impl MediaSession for LibwebrtcSession {
         if lock(&self.mic).is_some() {
             return Ok(());
         }
-        let f = factory();
-        // Recording must be on before the device track exists.
-        f.set_adm_recording_enabled(true);
-        let mic: RtcAudioTrack = f.create_device_audio_track("mic");
-        let sender = lock(&self.sender)
-            .clone()
+        let mic = lock(&self.standby)
+            .take()
             .ok_or_else(|| MediaError("the standby pushed no mic".into()))?;
-        sender
-            .set_track(Some(MediaStreamTrack::Audio(mic.clone())))
-            .map_err(|e| MediaError(format!("promote mic: {e:?}")))?;
-        MIC_LIVE.store(mic.enabled(), Ordering::Relaxed);
+        let f = factory();
+        // Windows' built-in AEC refuses to record before playout runs, and a
+        // standby has pulled nothing yet, so nothing has started playout.
+        if !f.playout_is_initialized() {
+            let _ = f.init_playout() && f.start_playout();
+        }
+        f.set_adm_recording_enabled(true);
+        mic.set_enabled(true);
+        MIC_LIVE.store(true, Ordering::Relaxed);
         *lock(&self.mic) = Some(mic);
-        lock(&self.standby).take();
-        // The send stream was already running on the silence, so WebRTC
-        // does not start recording for the new track by itself; whatever
-        // it set up while recording was off is stopped first.
+        // The send stream was already running with recording off, so WebRTC
+        // does not start recording by itself; whatever it set up while
+        // recording was off is stopped first.
         f.stop_recording();
         let init = f.init_recording();
         let started = init && f.start_recording();
@@ -824,9 +845,21 @@ impl MediaSession for LibwebrtcSession {
     }
 
     async fn republish_mic(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
-        // The old send goes with the new offer (its m-line is rejected).
+        // The old send is retired, not stopped: a stopped one's m-line is
+        // rejected, and the mic's is the BUNDLE tag (the session's first),
+        // so the new send would lose the transport and never connect. Its
+        // encoding goes inactive, so it sends nothing, and it stays until
+        // the call ends, like a replaced camera.
         if let Some(old) = lock(&self.mic_transceiver).take() {
-            let _ = old.stop();
+            let sender = old.sender();
+            let mut parameters = sender.parameters();
+            for encoding in &mut parameters.encodings {
+                encoding.active = false;
+            }
+            if let Err(error) = sender.set_parameters(parameters) {
+                eprintln!("[voice] old mic send not deactivated: {error:?}");
+            }
+            lock(&self.retired).push(old);
         }
         self.push_mic(stream_id).await
     }
@@ -1372,5 +1405,37 @@ impl MediaSession for LibwebrtcSession {
         lock(&self.remotes).clear();
         *lock(&self.sender) = None;
         self.pc.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A call's peer connection going must leave the ADM usable for the
+    /// next call. Without the keeper, WebRTC terminates the ADM with the last
+    /// peer connection and it lists -1 devices from then on. Needs the
+    /// platform's audio stack; skipped where the ADM cannot start.
+    #[test]
+    fn adm_should_outlive_a_calls_peer_connection() {
+        let f = factory();
+        if !f.acquire_platform_adm() {
+            return;
+        }
+        let before = (f.recording_devices(), f.playout_devices());
+        keep_voice_engine(f);
+        let pc = f
+            .create_peer_connection(RtcConfiguration::default())
+            .expect("peer connection");
+        pc.close();
+        drop(pc);
+        f.release_platform_adm();
+        assert!(f.acquire_platform_adm());
+        let after = (f.recording_devices(), f.playout_devices());
+        f.release_platform_adm();
+        assert_eq!(
+            before, after,
+            "devices before and after a call's peer connection"
+        );
     }
 }
