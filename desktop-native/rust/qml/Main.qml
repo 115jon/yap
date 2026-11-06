@@ -24,7 +24,7 @@ ApplicationWindow {
     height: 800
     minimumWidth: 940
     minimumHeight: 560
-    color: Theme.ply0
+    // apart: "#general - Yap HQ (jon)".
     // A named profile shows in the title, so two windows are easy to tell
     // apart: "#general � Yap HQ (jon)".
     title: DesktopShell.profile.length > 0 ? location + " (" + DesktopShell.profile + ")" : location
