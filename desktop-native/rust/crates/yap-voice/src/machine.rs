@@ -39,6 +39,14 @@ use share::Share;
 /// ever connecting) before a failed connection ends the call.
 pub const MAX_REBUILDS: u32 = 3;
 
+/// The wait before the first SFU session rebuild; each one after doubles it
+/// (1 s, 2 s, 4 s).
+pub const REBUILD_BACKOFF: Duration = Duration::from_secs(1);
+
+/// How long a connection must stay up before the rebuild count starts over:
+/// a link that flaps keeps spending the same few rebuilds.
+pub const REBUILD_STABLE_AFTER: Duration = Duration::from_secs(60);
+
 /// How long a pulled video nobody shows any more keeps its pull before it
 /// is released (a tile scrolled away for a moment keeps it).
 pub const VIDEO_RELEASE_DELAY: Duration = Duration::from_secs(15);
@@ -310,6 +318,10 @@ pub enum Timer {
     /// [`CREDENTIAL_REFRESH`] after the voice token `token` counts arrived:
     /// ask the room for a fresh one (op 40).
     RefreshCredentials { token: u64 },
+    /// The backoff before an SFU session rebuild is over.
+    Rebuild { token: u64 },
+    /// Media `token` stayed connected for [`REBUILD_STABLE_AFTER`].
+    MediaStable { token: u64 },
 }
 
 /// Everything the machine consumes.
@@ -626,6 +638,13 @@ pub struct CallMachine {
     moved: bool,
     /// SFU session rebuilds since media last connected.
     rebuilds: u32,
+    /// A rebuild is waiting out its backoff or for its new session: a
+    /// failure reported by the old connection meanwhile is stale.
+    rebuilding: bool,
+    /// The armed rebuild's token (an older timer fires as a no-op).
+    rebuild_token: u64,
+    /// The connected media's stability timer (0: none armed).
+    stable_token: u64,
     /// Still a hidden standby (not promoted).
     standby: bool,
     /// The standby's mic has sat long enough to be gone from the SFU.
@@ -683,6 +702,9 @@ impl CallMachine {
             app_queue: VecDeque::new(),
             moved: false,
             rebuilds: 0,
+            rebuilding: false,
+            rebuild_token: 0,
+            stable_token: 0,
             standby: false,
             standby_stale: false,
             closed_video: HashSet::new(),
@@ -1102,6 +1124,7 @@ impl CallMachine {
         if self.published.is_some() || !self.sockets_open {
             return;
         }
+        self.rebuilding = false;
         match result {
             Ok(published) => {
                 self.published = Some(published);
@@ -1437,19 +1460,33 @@ impl CallMachine {
             MediaEvent::State(MediaState::Connected) => {
                 self.connected = true;
                 self.media_up = true;
-                self.rebuilds = 0;
+                // The count starts over only once the link has held for a
+                // while, not on every connect.
+                self.next_token += 1;
+                self.stable_token = self.next_token;
+                fx.push(Effect::ArmTimer {
+                    timer: Timer::MediaStable {
+                        token: self.stable_token,
+                    },
+                    after: REBUILD_STABLE_AFTER,
+                });
                 self.restored(fx);
             }
             MediaEvent::State(MediaState::Disconnected) => {
                 self.media_up = false;
+                self.stable_token = 0;
                 self.lost(fx);
             }
             // PartyTracks discards a failed session and starts again: a new
             // capability, our tracks pushed and announced again, the pulls
             // made again. A connection that keeps failing ends the call.
+            // The rebuild waits out a backoff first.
             MediaEvent::State(MediaState::Failed) => {
-                if self.published.is_some() && self.rebuilds < MAX_REBUILDS {
-                    self.rebuild(fx);
+                self.stable_token = 0;
+                if self.rebuilding {
+                    // The connection being replaced reporting again.
+                } else if self.published.is_some() && self.rebuilds < MAX_REBUILDS {
+                    self.schedule_rebuild(fx);
                 } else {
                     self.end(fx, Some("Media connection failed".into()));
                 }
@@ -1742,6 +1779,16 @@ impl CallMachine {
                     self.standby_stale = true;
                 }
             }
+            Timer::Rebuild { token } => {
+                if self.rebuilding && token == self.rebuild_token && self.published.is_some() {
+                    self.rebuild(fx);
+                }
+            }
+            Timer::MediaStable { token } => {
+                if token == self.stable_token && self.media_up {
+                    self.rebuilds = 0;
+                }
+            }
             Timer::RefreshCredentials { token } => {
                 if self.sockets_open && token == self.refresh {
                     fx.push(Effect::Send(
@@ -1776,6 +1823,26 @@ impl CallMachine {
     /// VOICE_PROTOCOL.md §3.3 "Recovery"). Pulls start again once it
     /// connects; our mic (and a camera that was on) is pushed again and
     /// announced under its new capability. A share in flight ends.
+    fn schedule_rebuild(&mut self, fx: &mut Vec<Effect>) {
+        self.rebuilding = true;
+        self.next_token += 1;
+        self.rebuild_token = self.next_token;
+        // 1 s, 2 s, 4 s: doubling per rebuild already spent.
+        let after = REBUILD_BACKOFF * 2u32.saturating_pow(self.rebuilds);
+        fx.push(Effect::Log(format!(
+            "[voice] peer connection failed; rebuilding in {} ms",
+            after.as_millis()
+        )));
+        fx.push(Effect::ArmTimer {
+            timer: Timer::Rebuild {
+                token: self.rebuild_token,
+            },
+            after,
+        });
+        self.media_up = false;
+        self.lost(fx);
+    }
+
     fn rebuild(&mut self, fx: &mut Vec<Effect>) {
         self.rebuilds += 1;
         fx.push(Effect::Log(format!(

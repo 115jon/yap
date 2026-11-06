@@ -389,6 +389,10 @@ fn join_should_announce_on_voice_ready_and_pull_only_after_media_connects() {
     assert_eq!(
         fx,
         vec![
+            Effect::ArmTimer {
+                timer: Timer::MediaStable { token: 2 },
+                after: yap_voice::REBUILD_STABLE_AFTER,
+            },
             Effect::Notify(Notice::Status("Connected")),
             Effect::Pull(yap_voice::Remote {
                 participant_id: "ana".into(),
@@ -874,19 +878,54 @@ fn rebuilds(fx: &[Effect]) -> usize {
         .count()
 }
 
+/// The rebuild timer a failure armed, with its backoff.
+fn rebuild_timer(fx: &[Effect]) -> Option<(Timer, Duration)> {
+    fx.iter().find_map(|e| match e {
+        Effect::ArmTimer { timer, after } if matches!(timer, Timer::Rebuild { .. }) => {
+            Some((timer.clone(), *after))
+        }
+        _ => None,
+    })
+}
+
+/// The stability timer a connect armed.
+fn stable_timer(fx: &[Effect]) -> Option<(Timer, Duration)> {
+    fx.iter().find_map(|e| match e {
+        Effect::ArmTimer { timer, after } if matches!(timer, Timer::MediaStable { .. }) => {
+            Some((timer.clone(), *after))
+        }
+        _ => None,
+    })
+}
+
+/// One failure, its backoff over, the new session published and connected.
+/// Returns the failure's backoff and the connect's effects.
+fn flap(m: &mut CallMachine) -> (Duration, Vec<Effect>) {
+    let (timer, after) = rebuild_timer(&m.handle(failed())).expect("a rebuild is armed");
+    assert_eq!(rebuilds(&m.handle(Input::Timer(timer))), 1);
+    m.handle(Input::Published(Ok(published())));
+    (after, m.handle(connected()))
+}
+
 #[test]
-fn media_failure_should_rebuild_the_sfu_session_instead_of_ending() {
+fn media_failure_should_rebuild_the_sfu_session_after_a_backoff_instead_of_ending() {
     let mut m = joined();
     let fx = m.handle(failed());
-    assert_eq!(rebuilds(&fx), 1);
+    assert_eq!(rebuilds(&fx), 0, "not inline");
     assert!(ends(&fx).is_empty());
     assert_eq!(m.state(), CallState::Reconnecting);
+    let (timer, after) = rebuild_timer(&fx).expect("armed");
+    assert_eq!(after, yap_voice::REBUILD_BACKOFF);
+    let fx = m.handle(Input::Timer(timer));
+    assert_eq!(rebuilds(&fx), 1);
+    assert!(ends(&fx).is_empty());
 }
 
 #[test]
 fn a_rebuilt_session_should_announce_the_new_capability_and_pull_again() {
     let mut m = joined();
-    m.handle(failed());
+    let (timer, _) = rebuild_timer(&m.handle(failed())).expect("armed");
+    m.handle(Input::Timer(timer));
     let fx = m.handle(Input::Published(Ok(Published {
         session_id: "cap-2".into(),
         sfu_track_name: "my-sfu-2".into(),
@@ -900,14 +939,90 @@ fn a_rebuilt_session_should_announce_the_new_capability_and_pull_again() {
 }
 
 #[test]
-fn a_connection_that_keeps_failing_should_end_the_call() {
+fn a_connection_that_keeps_failing_should_end_the_call_after_the_capped_backoffs() {
+    let mut m = joined();
+    let waits: Vec<Duration> = (0..yap_voice::MAX_REBUILDS)
+        .map(|_| flap(&mut m).0)
+        .collect();
+    assert_eq!(
+        waits,
+        [1, 2, 4].map(Duration::from_secs),
+        "doubling, one rebuild each"
+    );
+    let fx = m.handle(failed());
+    assert!(rebuild_timer(&fx).is_none());
+    assert_eq!(rebuilds(&fx), 0);
+    assert_eq!(ends(&fx), vec![Some("Media connection failed".into())]);
+}
+
+#[test]
+fn a_flapping_link_should_not_get_its_rebuilds_back_on_every_connect() {
     let mut m = joined();
     for _ in 0..yap_voice::MAX_REBUILDS {
-        m.handle(failed());
-        m.handle(Input::Published(Ok(published())));
+        let (_, connect) = flap(&mut m);
+        // A connect that drops again before the stability window.
+        assert_eq!(
+            stable_timer(&connect).expect("armed").1,
+            yap_voice::REBUILD_STABLE_AFTER
+        );
     }
     let fx = m.handle(failed());
     assert_eq!(ends(&fx), vec![Some("Media connection failed".into())]);
+}
+
+#[test]
+fn a_connection_that_stayed_up_for_the_stability_window_should_get_its_rebuilds_back() {
+    let mut m = joined();
+    for _ in 0..yap_voice::MAX_REBUILDS {
+        let (_, connect) = flap(&mut m);
+        let (timer, after) = stable_timer(&connect).expect("armed");
+        assert_eq!(after, Duration::from_secs(60));
+        m.handle(Input::Timer(timer));
+    }
+    // Every window held: the next failure starts from the short backoff.
+    let fx = m.handle(failed());
+    assert!(ends(&fx).is_empty());
+    assert_eq!(
+        rebuild_timer(&fx).expect("armed").1,
+        yap_voice::REBUILD_BACKOFF
+    );
+}
+
+#[test]
+fn a_stability_timer_that_a_drop_outlived_should_not_reset_the_count() {
+    let mut m = joined();
+    let (_, connect) = flap(&mut m);
+    let (stale, _) = stable_timer(&connect).expect("armed");
+    // Drops and returns: the first window is void.
+    m.handle(Input::Media(MediaEvent::State(MediaState::Disconnected)));
+    m.handle(connected());
+    m.handle(Input::Timer(stale));
+    let (_, after) = rebuild_timer(&m.handle(failed())).expect("armed");
+    assert_eq!(after, Duration::from_secs(2), "one rebuild already spent");
+}
+
+#[test]
+fn a_second_failure_during_a_rebuild_should_not_rebuild_again_or_end_the_call() {
+    let mut m = joined();
+    // During the backoff.
+    let (timer, _) = rebuild_timer(&m.handle(failed())).expect("armed");
+    let fx = m.handle(failed());
+    assert!(ends(&fx).is_empty());
+    assert!(rebuild_timer(&fx).is_none());
+    assert_eq!(rebuilds(&fx), 0);
+    // Waiting for the new session.
+    assert_eq!(rebuilds(&m.handle(Input::Timer(timer.clone()))), 1);
+    let fx = m.handle(failed());
+    assert!(ends(&fx).is_empty());
+    assert!(rebuild_timer(&fx).is_none());
+    assert_eq!(rebuilds(&fx), 0);
+    // The timer fires once only.
+    assert_eq!(rebuilds(&m.handle(Input::Timer(timer))), 0);
+    // The new session counts again as soon as it exists.
+    m.handle(Input::Published(Ok(published())));
+    let fx = m.handle(failed());
+    assert!(ends(&fx).is_empty());
+    assert_eq!(rebuild_timer(&fx).expect("armed").1, Duration::from_secs(2));
 }
 
 #[test]

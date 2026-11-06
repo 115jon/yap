@@ -323,6 +323,13 @@ impl State {
     /// whose ring timed out or was declined stays in the call's room;
     /// anything else ends the call.
     pub(super) fn on_call_ring_stop(&mut self, fx: &mut Effects, stop: CallRingStop) {
+        // A stop for another call (a ring we declined while busy) is not ours.
+        let ours = self.calls.ring.as_ref().and_then(|r| r.call_id.as_deref());
+        if let (Some(ours), Some(theirs)) = (ours, stop.call_id.as_deref()) {
+            if ours != theirs {
+                return;
+            }
+        }
         fx.view(ViewUpdate::StopSound(Sound::Ring));
         fx.view(ViewUpdate::StopSound(Sound::OutgoingRing));
         let status = self.calls.ring.as_ref().map(|r| r.status);

@@ -307,7 +307,8 @@ pub async fn run(
         api_base: cfg.api_base.clone(),
         origin: cfg.gateway_origin.clone(),
     };
-    let ready = std::sync::atomic::AtomicBool::new(false);
+    // Our voice session in this call, once the voice socket is ready.
+    let my_participant: Mutex<Option<String>> = Mutex::new(None);
     let (beacon_channel, beacon_server) = (target.channel_id.clone(), target.server_id.clone());
     let target = CallTarget {
         server_id: target.server_id,
@@ -327,7 +328,9 @@ pub async fn run(
         Notice::Camera { on, error } => events.send(VoiceUpdate::Camera { on, error }),
         Notice::Share(notice) => events.send(share_update(notice)),
         Notice::VoiceReady { participant_id } => {
-            ready.store(true, std::sync::atomic::Ordering::Relaxed);
+            *my_participant
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(participant_id.clone());
             *beacon().lock().unwrap_or_else(PoisonError::into_inner) = Some(Beacon {
                 api: beacon_api.clone(),
                 channel_id: beacon_channel.clone(),
@@ -374,11 +377,17 @@ pub async fn run(
         )),
     };
     let error = run_call(env, target, Commands::new(commands), notify).await;
-    if ready.load(std::sync::atomic::Ordering::Relaxed) {
+    // Only our own beacon: a newer call (a move, a standby promotion) may
+    // already have replaced it.
+    let mine = my_participant
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    if let Some(mine) = mine {
         beacon()
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .take();
+            .take_if(|b| b.participant_id == mine);
     }
     crate::audio::set_live_level(None);
     events.send(VoiceUpdate::Ended(error));

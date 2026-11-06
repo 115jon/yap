@@ -774,3 +774,52 @@ fn data_urls_should_encode_as_the_room_expects() {
     let bytes: Vec<u8> = (0..=255).collect();
     assert!(sanitize_data_url(&data_url("audio/mpeg", &bytes), 1024));
 }
+
+fn sticker(url: &str) -> Option<AppEvent> {
+    AppEvent::decode(&json!({
+        "type": "reaction.sticker", "url": url, "contentType": "image/gif",
+        "displayMode": "single", "participant_id": "p",
+    }))
+}
+
+#[test]
+fn a_sticker_from_one_of_the_rooms_hosts_should_decode() {
+    for url in [
+        "https://static.klipy.com/a.webp",
+        "https://static2.klipy.com/a.webp",
+        "https://media.tenor.com/a.gif",
+        "https://media12.tenor.com/a.gif",
+        "https://c.tenor.com/a.gif",
+        "https://gif.fxtwitter.com/a.gif",
+        "https://video.twimg.com/a.mp4",
+        "https://STATIC.KLIPY.COM/a.webp",
+    ] {
+        assert!(
+            matches!(sticker(url), Some(AppEvent::Sticker(_))),
+            "{url} should decode"
+        );
+    }
+}
+
+#[test]
+fn a_sticker_that_is_not_https_from_an_allowed_host_should_be_dropped() {
+    for url in [
+        "http://static.klipy.com/a.webp",
+        "ftp://static.klipy.com/a.webp",
+        "//static.klipy.com/a.webp",
+        "https://example.com/a.gif",
+        "https://static.klipy.com.evil.example/a.gif",
+        "https://evil.example/static.klipy.com/a.gif",
+        "https://user@static.klipy.com@evil.example/a.gif",
+        "https://staticx.klipy.com/a.gif",
+        "https://xstatic.klipy.com/a.gif",
+        "https://tenor.com/a.gif",
+        "https://d.tenor.com/a.gif",
+        "https://twimg.com/a.mp4",
+        "data:image/gif;base64,AAAA",
+        "javascript:alert(1)",
+        "not a url",
+    ] {
+        assert_eq!(sticker(url), None, "{url} should be dropped");
+    }
+}

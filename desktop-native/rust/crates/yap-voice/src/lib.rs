@@ -115,7 +115,8 @@ pub use machine::{
     CallState, CallTarget, CameraPublished, Effect, Input, MediaEvent, MediaSpec, MediaState,
     Notice, Published, Republish, RoomEvent, Socket, SocketSpec, StatsSample, Timer, UserCommand,
     VideoIntent, VoiceEvent, VoiceStats, CREDENTIAL_REFRESH, LEAVE_SEND_WINDOW, MAX_REBUILDS,
-    REMOTE_RECONNECT_GRACE, STANDBY_STALE_AFTER, STATS_SAMPLES, VIDEO_RELEASE_DELAY,
+    REBUILD_BACKOFF, REBUILD_STABLE_AFTER, REMOTE_RECONNECT_GRACE, STANDBY_STALE_AFTER,
+    STATS_SAMPLES, VIDEO_RELEASE_DELAY,
 };
 pub use roster::{Member, Roster};
 pub use sfu::{LayerUpdate, Pulled, Pushed, Sfu};

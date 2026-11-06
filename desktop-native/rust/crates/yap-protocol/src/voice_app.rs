@@ -611,7 +611,7 @@ impl Sticker {
     }
 
     fn decode(d: &Value) -> Option<Self> {
-        let url = str_field(d, "url").filter(|u| !u.is_empty())?;
+        let url = str_field(d, "url").filter(|u| is_sticker_url(u))?;
         // Older events carry no type: infer it from the URL as the web does.
         let content_type = str_field(d, "contentType")
             .filter(|t| !t.is_empty())
@@ -633,6 +633,31 @@ impl Sticker {
             user_id: str_field(d, "user_id").filter(|u| !u.is_empty()),
         })
     }
+}
+
+/// The room only relays https stickers from its hosts
+/// (`realtime/voice-room.ts`); a client drops anything else it is handed.
+fn is_sticker_url(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    if parsed.scheme() != "https" {
+        return false;
+    }
+    let Some(host) = parsed.host_str().map(str::to_ascii_lowercase) else {
+        return false;
+    };
+    // `static\d*.klipy.com`, `media\d*.tenor.com`.
+    let numbered = |prefix: &str, domain: &str| {
+        host.strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix(domain))
+            .is_some_and(|digits| digits.bytes().all(|b| b.is_ascii_digit()))
+    };
+    numbered("static", ".klipy.com")
+        || numbered("media", ".tenor.com")
+        || host == "c.tenor.com"
+        || host == "gif.fxtwitter.com"
+        || host == "video.twimg.com"
 }
 
 impl AppEvent {

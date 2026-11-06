@@ -21,7 +21,10 @@ Rectangle {
     readonly property bool ringingOut: mine && calls.status === "ringing_outgoing"
     readonly property bool ringingIn: mine && calls.status === "ringing_incoming"
     readonly property bool joined: calls.joined === true && Voice.channelId === dmId
-    readonly property bool stalled: joined && !Voice.muted && (calls.micStalled || calls.inboundStalled)
+    // The sentinels apart (a muted mic is silent on purpose; what we hear is
+    // not affected by it).
+    readonly property bool micStalled: joined && !Voice.muted && calls.micStalled === true
+    readonly property bool inboundStalled: joined && calls.inboundStalled === true
     readonly property int tileHeight: (Window.height >= 800 ? 224 : 176) - 24
 
     implicitHeight: shown ? banner.height + stageArea.height + dock.height + 1 : 0
@@ -30,30 +33,50 @@ Rectangle {
     Accessible.role: Accessible.Grouping
     Accessible.name: qsTr("Call with %1").arg(calls.dmName ?? "")
 
-    // AudioSentinel: nothing goes out (or comes in while someone talks).
-    Rectangle {
+    // AudioSentinel: nothing goes out of our unmuted mic, or nothing comes
+    // in while someone talks.
+    Column {
         id: banner
         width: parent.width
-        height: root.stalled ? 32 : 0
-        visible: root.stalled
-        color: Theme.dangerTint
-        Row {
-            x: 16
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 8
-            Icon {
-                anchors.verticalCenter: parent.verticalCenter
-                name: "micOff"
-                size: Theme.iconSm
-                color: Theme.dangerInk
-            }
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                textFormat: Text.PlainText
-                text: qsTr("We can't hear you. Your microphone isn't picking up any sound.")
-                color: Theme.dangerInk
-                font: Theme.type.caption
-                Accessible.role: Accessible.AlertMessage
+        Repeater {
+            model: [
+                {
+                    "shown": root.micStalled,
+                    "icon": "micOff",
+                    "text": qsTr("We can't hear you. Your microphone isn't picking up any sound.")
+                },
+                {
+                    "shown": root.inboundStalled,
+                    "icon": "deafen",
+                    "text": qsTr("You can't hear anyone. Check your output device.")
+                }
+            ]
+            Rectangle {
+                id: line
+                required property var modelData
+                width: banner.width
+                height: modelData.shown ? 32 : 0
+                visible: modelData.shown
+                color: Theme.dangerTint
+                Row {
+                    x: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 8
+                    Icon {
+                        anchors.verticalCenter: parent.verticalCenter
+                        name: line.modelData.icon
+                        size: Theme.iconSm
+                        color: Theme.dangerInk
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        textFormat: Text.PlainText
+                        text: line.modelData.text
+                        color: Theme.dangerInk
+                        font: Theme.type.caption
+                        Accessible.role: Accessible.AlertMessage
+                    }
+                }
             }
         }
     }

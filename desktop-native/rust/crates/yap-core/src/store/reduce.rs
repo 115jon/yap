@@ -38,6 +38,7 @@ use super::{
 use crate::api::{ApiError, Token};
 use crate::command_menu::RecentTarget;
 use crate::shell::{self, Sound};
+use crate::store::calls::{CallsCommand, RingStatus};
 use yap_protocol::payload::VoiceChannelMember;
 
 const SESSION_ENDED: &str = "Your session ended. Sign in again.";
@@ -1330,6 +1331,19 @@ impl State {
                     });
                 }
                 self.leave_voice(fx);
+                // A ring still going: an outgoing one is cancelled (op 39) so
+                // the peer stops ringing, and ours goes quiet.
+                let status = self.calls.ring.as_ref().map(|r| r.status);
+                if matches!(
+                    status,
+                    Some(RingStatus::RingingIncoming | RingStatus::RingingOutgoing)
+                ) {
+                    if status == Some(RingStatus::RingingOutgoing) {
+                        self.on_calls(fx, CallsCommand::Cancel);
+                    }
+                    self.end_ring(fx, "left");
+                    self.sync_calls(fx);
+                }
             }
             Command::Invites(command) => self.on_invites(fx, command),
         }
@@ -1546,6 +1560,9 @@ impl State {
         self.clear_invites();
         self.clear_shop();
         self.leave_voice(fx);
+        self.calls = Default::default();
+        fx.view(ViewUpdate::StopSound(Sound::Ring));
+        fx.view(ViewUpdate::StopSound(Sound::OutgoingRing));
         self.close_voice_panel(fx);
         self.voice_channels.clear();
         // The next user brings their own (from their snapshot).
@@ -1598,6 +1615,7 @@ impl State {
         self.tree_server = None;
         self.sync_servers(fx);
         self.sync_tree(fx);
+        self.sync_calls(fx);
         self.pending = Pending::default();
         self.boot = None;
         self.refreshing = false;

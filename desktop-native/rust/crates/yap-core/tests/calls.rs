@@ -280,6 +280,77 @@ fn a_ring_while_in_another_active_call_should_be_declined_at_once() {
         json!({ "op": 38, "d": { "call_id": "call-9" } })
     );
     assert!(sounds(&fx).is_empty());
+    // The server's "declined" stop for the foreign call is not ours.
+    let fx = c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": "call-9", "reason": "declined" }),
+    );
+    assert!(sounds(&fx).is_empty());
+    assert!(!fx
+        .iter()
+        .any(|e| matches!(e, Effect::View(ViewUpdate::StopSound(_)))));
+    assert_eq!(c.view.status, RingStatus::Active);
+    assert!(c.state.voice().is_some());
+}
+
+#[test]
+fn an_accept_racing_a_cancelled_stop_should_end_the_call_and_ignore_the_expired_reply() {
+    let mut c = Client::online();
+    ring(&mut c);
+    c.calls(CallsCommand::Accept { video: false });
+    let fx = c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": "call-1", "reason": "cancelled" }),
+    );
+    assert!(voice_start(&fx).is_none());
+    assert_eq!(c.view.status, RingStatus::Idle);
+    assert_eq!(c.view.end_reason, "cancelled");
+    // The server answers our late accept with "expired".
+    let fx = c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": "call-1", "reason": "expired" }),
+    );
+    assert!(voice_start(&fx).is_none());
+    assert!(!sounds(&fx).contains(&Sound::CallEnd));
+    assert_eq!(c.view.status, RingStatus::Idle);
+    assert!(c.state.voice().is_none());
+}
+
+#[test]
+fn quit_while_an_outgoing_ring_goes_should_cancel_it_and_silence_the_ring() {
+    let mut c = Client::online();
+    c.dispatch(
+        "CALL_RINGING",
+        json!({ "call_id": "call-2", "callee_id": ALICE, "channel_id": DM }),
+    );
+    let fx = c.command(Command::Quit);
+    assert_eq!(
+        gateway_frames(&fx)[0],
+        json!({ "op": 39, "d": { "call_id": "call-2" } })
+    );
+    assert!(fx.contains(&Effect::View(ViewUpdate::StopSound(Sound::OutgoingRing))));
+    assert_eq!(c.view.status, RingStatus::Idle);
+}
+
+#[test]
+fn quit_while_an_incoming_ring_goes_should_only_silence_it() {
+    let mut c = Client::online();
+    ring(&mut c);
+    let fx = c.command(Command::Quit);
+    assert!(gateway_frames(&fx).is_empty());
+    assert!(fx.contains(&Effect::View(ViewUpdate::StopSound(Sound::Ring))));
+    assert_eq!(c.view.status, RingStatus::Idle);
+}
+
+#[test]
+fn signing_out_while_a_ring_goes_should_silence_it_and_reset_the_calls() {
+    let mut c = Client::online();
+    ring(&mut c);
+    let fx = c.command(Command::SignOut);
+    assert!(fx.contains(&Effect::View(ViewUpdate::StopSound(Sound::Ring))));
+    assert!(fx.contains(&Effect::View(ViewUpdate::StopSound(Sound::OutgoingRing))));
+    assert_eq!(c.view.status, RingStatus::Idle);
+    assert!(c.view.end_reason.is_empty());
 }
 
 #[test]
