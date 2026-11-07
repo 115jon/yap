@@ -155,6 +155,7 @@ impl State {
     }
 
     fn set_status(&mut self, fx: &mut Effects, text: impl Into<String>) {
+        self.page_status = false;
         self.status = text.into();
         fx.view(ViewUpdate::Status(self.status.clone()));
     }
@@ -1388,6 +1389,7 @@ impl State {
                 media_type,
                 provider,
             } => self.gif_search(fx, &query, &media_type, &provider),
+            Command::GifReset => self.gifs.feeds.clear(),
             Command::GifStart {
                 media_type,
                 provider,
@@ -2368,11 +2370,24 @@ impl State {
             has_more_before,
         } = match result {
             Ok(ApiResponse::Messages(page)) => page,
-            Ok(other) => return self.chain_failed(fx, &unexpected(&other)),
-            Err(error) => return self.chain_failed(fx, &error),
+            Ok(other) => {
+                self.chain_failed(fx, &unexpected(&other));
+                self.page_status = true;
+                return;
+            }
+            Err(error) => {
+                self.chain_failed(fx, &error);
+                self.page_status = !error.is_unauthorized();
+                return;
+            }
         };
         if self.active_channel.as_deref() != Some(channel_id) {
             return;
+        }
+        // The channel shown now loaded: a failed page's error (the gone
+        // channel the cache opened first) no longer applies.
+        if self.page_status {
+            self.set_status(fx, "");
         }
         // A refetch of what is on screen (the cached window, or a refetch
         // after a reconnect) changes only the rows that differ. A jump's

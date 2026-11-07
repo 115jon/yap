@@ -335,6 +335,8 @@ SidePanelFrame {
             glyph: "link"
             onTriggered: clipboard.copyText(Chat.messageLink(rowMenu.messageId))
         }
+        // groupMenuItems: the danger row last, behind a rule.
+        MenuRule { visible: rowMenu.mine || Chat.canManageMessages; height: visible ? implicitHeight : 0 }
         MenuRow {
             text: qsTr("Delete message")
             glyph: "trash"

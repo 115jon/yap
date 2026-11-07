@@ -1018,23 +1018,6 @@ Rectangle {
                         toast.show(qsTr("Message ID copied"))
                     }
                 }
-                MenuRule { visible: messageMenu.hasDanger; height: visible ? implicitHeight : 0 }
-                MenuRow {
-                    text: qsTr("Delete message")
-                    glyph: "trash"
-                    danger: true
-                    visible: messageMenu.settled && (messageMenu.mine || Chat.canManageMessages)
-                    height: visible ? implicitHeight : 0
-                    onTriggered: root.deleteMessage(messageMenu.messageId, messageMenu.author, messageMenu.text, true, messageMenu.row)
-                }
-                MenuRow {
-                    text: qsTr("Ban user")
-                    glyph: "ban"
-                    danger: true
-                    visible: messageMenu.canBan
-                    height: visible ? implicitHeight : 0
-                    onTriggered: ShellState.banRequested(messageMenu.authorId, messageMenu.author)
-                }
                 MenuRule { visible: messageMenu.media.length > 0; height: visible ? implicitHeight : 0 }
                 // MessageItem.tsx: Save image | Copy media link, Open media
                 // link. Copy image is native's own (the web has it in the
@@ -1070,6 +1053,24 @@ Rectangle {
                     visible: messageMenu.media.length > 0
                     height: visible ? implicitHeight : 0
                     onTriggered: leaveSite.load()?.request(messageMenu.media)
+                }
+                // groupMenuItems: the danger rows last, behind their rule.
+                MenuRule { visible: messageMenu.hasDanger; height: visible ? implicitHeight : 0 }
+                MenuRow {
+                    text: qsTr("Delete message")
+                    glyph: "trash"
+                    danger: true
+                    visible: messageMenu.settled && (messageMenu.mine || Chat.canManageMessages)
+                    height: visible ? implicitHeight : 0
+                    onTriggered: root.deleteMessage(messageMenu.messageId, messageMenu.author, messageMenu.text, true, messageMenu.row)
+                }
+                MenuRow {
+                    text: qsTr("Ban user")
+                    glyph: "ban"
+                    danger: true
+                    visible: messageMenu.canBan
+                    height: visible ? implicitHeight : 0
+                    onTriggered: ShellState.banRequested(messageMenu.authorId, messageMenu.author)
                 }
             }
         }

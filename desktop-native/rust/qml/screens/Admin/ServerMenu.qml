@@ -5,8 +5,10 @@ import com.yap.native
 // Invite to server; with Manage channels, Server settings, Create channel
 // and Create category. The web's other rows (Server boost, Create event,
 // App directory, Notification and Privacy settings, Edit Per-server
-// Profile, Hide muted channels) do nothing yet there either, so they show
-// disabled. Members (not the owner) get Leave server, with a confirm.
+// Profile, Hide muted channels) are enabled rows that only close the menu
+// there, and here too. Groups follow `groupMenuItems`: a rule after each
+// `divider` row, and the danger row last behind one. Members (not the
+// owner) get Leave server, with a confirm.
 MenuPanel {
     id: menu
 
@@ -16,7 +18,6 @@ MenuPanel {
     MenuRow {
         text: qsTr("Server boost")
         glyph: "gem"
-        enabled: false
     }
     MenuRow {
         text: qsTr("Invite to server")
@@ -50,36 +51,30 @@ MenuPanel {
         height: visible ? implicitHeight : 0
         text: qsTr("Create event")
         glyph: "event"
-        enabled: false
     }
     MenuRow {
         visible: Admin.canManageChannels
         height: visible ? implicitHeight : 0
         text: qsTr("App directory")
         glyph: "grid"
-        enabled: false
     }
-    MenuRule {}
+    MenuRule { visible: Admin.canManageChannels; height: visible ? implicitHeight : 0 }
     MenuRow {
         text: qsTr("Notification settings")
         glyph: "bell"
-        enabled: false
     }
     MenuRow {
         text: qsTr("Privacy settings")
         glyph: "shield"
-        enabled: false
     }
     MenuRule {}
     MenuRow {
         text: qsTr("Edit Per-server Profile")
         glyph: "edit"
-        enabled: false
     }
     MenuRow {
         text: qsTr("Hide muted channels")
         glyph: "eyeOff"
-        enabled: false
     }
     MenuRule { visible: !Admin.isOwner; height: visible ? implicitHeight : 0 }
     MenuRow {

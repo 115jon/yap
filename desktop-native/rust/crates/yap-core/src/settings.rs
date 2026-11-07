@@ -171,6 +171,12 @@ pub const PANELS: &[PanelDef] = &[
                             "provider", "linked",
                         ],
                     ),
+                    row(
+                        "sign-out",
+                        "Sign out",
+                        "Sign out of Yap on this device.",
+                        &["log out", "logout", "leave"],
+                    ),
                 ],
             ),
         ],

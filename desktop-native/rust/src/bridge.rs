@@ -211,6 +211,23 @@ pub mod qobject {
         #[cxx_name = "searchGifs"]
         fn search_gifs(self: &Chat, query: &QString, media_type: &QString, provider: &QString);
 
+        /// The picker opened: results kept from its last open are dropped.
+        #[qinvokable]
+        #[cxx_name = "resetGifs"]
+        fn reset_gifs(self: &Chat);
+
+        /// A small UI memory kept on this device (the web's localStorage),
+        /// as JSON: `<name>.json` in the app folder; empty when missing.
+        /// `name` is `[a-z0-9-]`.
+        #[qinvokable]
+        #[cxx_name = "uiMemory"]
+        fn ui_memory(self: &Chat, name: &QString) -> QString;
+
+        /// Replaces that memory with `json`.
+        #[qinvokable]
+        #[cxx_name = "setUiMemory"]
+        fn set_ui_memory(self: &Chat, name: &QString, json: &QString);
+
         /// The picker's start screen: categories and the Trending tile.
         #[qinvokable]
         #[cxx_name = "startGifs"]
@@ -881,6 +898,32 @@ impl qobject::Chat {
         });
     }
 
+    pub fn reset_gifs(&self) {
+        client::command(Command::GifReset);
+    }
+
+    pub fn ui_memory(&self, name: &QString) -> QString {
+        let Some(file) = ui_memory_file(&name.to_string()) else {
+            return QString::default();
+        };
+        yap_cache::settings::app_dir()
+            .and_then(|dir| yap_cache::settings::load_app_file(&dir, &file))
+            .map(|value| QString::from(value.to_string().as_str()))
+            .unwrap_or_default()
+    }
+
+    pub fn set_ui_memory(&self, name: &QString, json: &QString) {
+        let (Some(file), Some(dir)) = (
+            ui_memory_file(&name.to_string()),
+            yap_cache::settings::app_dir(),
+        ) else {
+            return;
+        };
+        if let Err(error) = yap_cache::settings::save_app_file(&dir, &file, &json.to_string()) {
+            eprintln!("[ui-memory] {file}: {error}");
+        }
+    }
+
     pub fn start_gifs(&self, media_type: &QString, provider: &QString) {
         client::command(Command::GifStart {
             media_type: media_type.to_string(),
@@ -1169,3 +1212,14 @@ registered!(
     Voice => VoiceRust,
     Profile => ProfileRust,
 );
+
+/// `ui-<name>.json` for a `[a-z0-9-]` name, so QML can only reach its own
+/// files in the app folder.
+fn ui_memory_file(name: &str) -> Option<String> {
+    let ok = !name.is_empty()
+        && name.len() <= 48
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    ok.then(|| format!("ui-{name}.json"))
+}

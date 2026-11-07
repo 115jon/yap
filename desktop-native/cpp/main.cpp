@@ -1,7 +1,9 @@
 // Entry point: a Qt Quick app whose logic lives in the Rust crate
 // (YapClient, registered by the com.yap.native QML module).
 
+#include <QtCore/QAbstractNativeEventFilter>
 #include <QtCore/QDirIterator>
+#include <QtCore/QPointer>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
 #include <QtCore/QHash>
@@ -12,12 +14,16 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QIcon>
 #include <QtGui/QSurfaceFormat>
+#include <QtGui/QEnterEvent>
+#include <QtGui/QMouseEvent>
+#include <QtGui/QPointingDevice>
 #include <QtGui/QWindow>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkDiskCache>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
 #include <QtQml/QQmlApplicationEngine>
+#include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlNetworkAccessManagerFactory>
 #ifdef QT_QML_DEBUG
@@ -56,6 +62,219 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
+
+#ifdef Q_OS_WIN
+// YAP_TEST_POINTER=1 (test runs only): a pointer that lives inside the
+// process. A test tool posts the registered message "YapTestPointer" to
+// our window, with the point in client pixels in lParam and in wParam
+// 0 move (hover), 1 leave, 2 left press, 3 left release. It becomes the
+// same QMouseEvent a real pointer would give the QQuickWindow, so hover,
+// tooltips, hover cards and pressed states show on a window that is
+// behind others (a posted WM_MOUSEMOVE gives none: Qt resolves the window
+// under the screen point). The real cursor, keyboard and focus are never
+// touched.
+class TestPointer : public QAbstractNativeEventFilter
+{
+public:
+  explicit TestPointer(QQuickWindow* window)
+    : m_window(window), m_message(RegisterWindowMessageW(L"YapTestPointer"))
+  {
+  }
+
+  bool nativeEventFilter(const QByteArray&, void* message, qintptr*) override
+  {
+    auto* msg = static_cast<MSG*>(message);
+    if (m_message == 0 || msg->message != m_message || !m_window
+        || msg->hwnd != reinterpret_cast<HWND>(m_window->winId()))
+      return false;
+    const qreal dpr = m_window->devicePixelRatio();
+    const QPointF local(qreal(short(LOWORD(msg->lParam))) / dpr,
+                        qreal(short(HIWORD(msg->lParam))) / dpr);
+    const QPointF global = m_window->mapToGlobal(local);
+    switch (msg->wParam) {
+    case 1: {
+      QEvent leave(QEvent::Leave);
+      QCoreApplication::sendEvent(m_window, &leave);
+      m_inside = false;
+      m_buttons = Qt::NoButton;
+      break;
+    }
+    case 2:
+    case 3: {
+      enter(local, global);
+      const bool press = msg->wParam == 2;
+      m_buttons = press ? Qt::LeftButton : Qt::NoButton;
+      QMouseEvent ev(press ? QEvent::MouseButtonPress : QEvent::MouseButtonRelease,
+                     local, local, global, Qt::LeftButton, m_buttons, Qt::NoModifier);
+      QCoreApplication::sendEvent(m_window, &ev);
+      break;
+    }
+    default: {
+      enter(local, global);
+      QMouseEvent ev(QEvent::MouseMove, local, local, global, Qt::NoButton, m_buttons,
+                     Qt::NoModifier);
+      QCoreApplication::sendEvent(m_window, &ev);
+      break;
+    }
+    }
+    return true;
+  }
+
+private:
+  void enter(const QPointF& local, const QPointF& global)
+  {
+    if (m_inside)
+      return;
+    m_inside = true;
+    QEnterEvent ev(local, local, global);
+    QCoreApplication::sendEvent(m_window, &ev);
+  }
+
+  QPointer<QQuickWindow> m_window;
+  UINT m_message;
+  bool m_inside = false;
+  Qt::MouseButtons m_buttons = Qt::NoButton;
+};
+#endif
+
+// Presses stop at the popup they land in. In Qt 6.6, once an item takes a
+// press, the pointer handlers of every item under the point still get it
+// (QQuickDeliveryAgent goes on "handlersOnly"), so a TapHandler beneath a
+// popup, modal or not, takes a passive grab and taps on the release:
+// picking a clip in the vibe picker also tapped "Set a channel status"
+// under it, and a picker's tab or category cell opened the channel under
+// it. Two parts:
+//   - a press on a popup (or a modal popup's dimmer) is delivered here
+//     first; then every passive grab it left with a handler outside that
+//     popup is cancelled (the handler sees a cancel, as when a grab is
+//     stolen), so nothing beneath taps, long-presses or stays pressed;
+//   - each popup gets a bottom-most MouseArea over its item that accepts
+//     the presses nothing inside took, so items beneath never see them,
+//     and a wheel nothing inside took stops there too, rather than
+//     scrolling the chat under a dialog.
+// Tooltips and drawers (a drawer drags from its own item) name their
+// background `yapNoPressSink` and are left alone.
+class PopupPressSink : public QObject
+{
+public:
+  PopupPressSink(QQmlEngine* engine, QQuickWindow* window)
+    : QObject(window), m_engine(engine), m_window(window), m_component(engine)
+  {
+    m_component.setData(
+      "import QtQuick\n"
+      "MouseArea { anchors.fill: parent; z: -100000; acceptedButtons: Qt.AllButtons;"
+      " onWheel: wheel => wheel.accepted = true }\n",
+      QUrl(QStringLiteral("qrc:/yap/PopupPressSink.qml")));
+    QQuickItem* content = window->contentItem();
+    connect(content, &QQuickItem::childrenChanged, this, [this, content] { findOverlay(content); });
+    findOverlay(content);
+    window->installEventFilter(this);
+  }
+
+protected:
+  bool eventFilter(QObject* watched, QEvent* event) override
+  {
+    if (watched != m_window || m_delivering || event->type() != QEvent::MouseButtonPress)
+      return false;
+    auto* press = static_cast<QMouseEvent*>(event);
+    QQuickItem* owner = ownerAt(press->scenePosition());
+    if (!owner)
+      return false;
+    // Deliver it now, then take back what it gave the handlers beneath.
+    m_delivering = true;
+    QCoreApplication::sendEvent(m_window, press);
+    m_delivering = false;
+    const QPointingDevice* device = press->pointingDevice();
+    for (const QEventPoint& point : press->points()) {
+      const QList<QPointer<QObject>> grabbers = press->passiveGrabbers(point);
+      for (const QPointer<QObject>& grabber : grabbers) {
+        if (!grabber || !grabber->inherits("QQuickPointerHandler"))
+          continue;
+        auto* parent = grabber->property("parent").value<QQuickItem*>();
+        if (parent && (parent == owner || owner->isAncestorOf(parent)))
+          continue;
+        emit device->grabChanged(grabber, QPointingDevice::CancelGrabPassive, press, point);
+        if (grabber)
+          press->removePassiveGrabber(point, grabber);
+      }
+    }
+    return true;
+  }
+
+private:
+  static bool optedOut(QQuickItem* item)
+  {
+    const QList<QQuickItem*> parts = item->childItems();
+    return std::any_of(parts.begin(), parts.end(), [](QQuickItem* part) {
+      return part->objectName() == QLatin1String("yapNoPressSink");
+    });
+  }
+
+  // The topmost open popup item (or modal dimmer) under a scene point.
+  QQuickItem* ownerAt(const QPointF& scenePos) const
+  {
+    if (!m_overlay || !m_overlay->isVisible())
+      return nullptr;
+    const QList<QQuickItem*> layers = m_overlay->childItems();
+    QQuickItem* top = nullptr;
+    for (QQuickItem* layer : layers) {
+      if (!layer->isVisible() || layer->opacity() <= 0
+          || !layer->contains(layer->mapFromScene(scenePos)))
+        continue;
+      if (layer->inherits("QQuickPopupItem") && optedOut(layer))
+        continue;
+      if (!top || layer->z() >= top->z())
+        top = layer;
+    }
+    return top;
+  }
+
+  void findOverlay(QQuickItem* content)
+  {
+    if (m_overlay)
+      return;
+    for (QQuickItem* child : content->childItems()) {
+      if (child->inherits("QQuickOverlay")) {
+        m_overlay = child;
+        connect(child, &QQuickItem::childrenChanged, this, &PopupPressSink::sinkPopups);
+        sinkPopups();
+        return;
+      }
+    }
+  }
+
+  void sinkPopups()
+  {
+    if (!m_overlay)
+      return;
+    for (QQuickItem* item : m_overlay->childItems()) {
+      if (!item->inherits("QQuickPopupItem") || item->property("_yap_sunk").toBool())
+        continue;
+      item->setProperty("_yap_sunk", true);
+      if (optedOut(item))
+        continue;
+      QObject* made = m_component.beginCreate(m_engine->rootContext());
+      auto* sink = qobject_cast<QQuickItem*>(made);
+      if (!sink) {
+        delete made;
+        std::fprintf(stderr, "[popup] press sink: %s\n", qPrintable(m_component.errorString()));
+        return;
+      }
+      sink->setParent(item);
+      sink->setParentItem(item);
+      m_component.completeCreate();
+      if (++m_sunk == 1)
+        std::fprintf(stderr, "[popup] presses stop at popups\n");
+    }
+  }
+
+  int m_sunk = 0;
+  bool m_delivering = false;
+  QQmlEngine* m_engine;
+  QQuickWindow* m_window;
+  QQmlComponent m_component;
+  QPointer<QQuickItem> m_overlay;
+};
 
 // The brand faces, one static cut per family (assets/fonts, built by
 // tools/build-fonts.py). Registered before QML so Theme's families resolve.
@@ -484,6 +703,13 @@ int main(int argc, char* argv[])
       window->setProperty("_q_showWithoutActivating", true);
     chrome->attach(window);
     thumbbar->attach(window);
+    new PopupPressSink(&engine, window);
+#ifdef Q_OS_WIN
+    if (qEnvironmentVariableIntValue("YAP_TEST_POINTER") != 0) {
+      app.installNativeEventFilter(new TestPointer(window));
+      std::fprintf(stderr, "[test] in-process pointer on (YAP_TEST_POINTER)\n");
+    }
+#endif
     // Deep links: our own yap-native:// (registered per user where it
     // differs), from this command line and from later instances.
     shell->setLinkHandler(

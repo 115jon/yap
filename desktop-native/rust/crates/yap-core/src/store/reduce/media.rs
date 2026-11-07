@@ -37,6 +37,11 @@ fn gif_provider(provider: &str, media_type: &str) -> &'static str {
 }
 
 /// `getGifProviderLabel`.
+/// A feed's key in `GifBrowse::feeds`.
+fn feed_key(provider: &str, media_type: &str, query: &str) -> String {
+    format!("{provider}\n{media_type}\n{query}")
+}
+
 fn provider_label(provider: &str) -> &'static str {
     if provider == "tenor" {
         "Tenor"
@@ -394,9 +399,16 @@ impl State {
             return;
         }
         self.leave_feed();
+        let key = feed_key(provider, media_type, &query);
         self.gifs.query = query;
         self.gifs.media_type = media_type.to_owned();
         self.gifs.provider = provider.to_owned();
+        if let Some((items, next)) = self.gifs.feeds.remove(&key) {
+            self.gifs.items = items;
+            self.gifs.next = next;
+            self.sync_gifs(fx);
+            return;
+        }
         self.fetch_gifs(fx, false);
     }
 
@@ -554,7 +566,13 @@ impl State {
     }
 
     /// Drops the feed: its tiles, cursor, error and the page in flight.
+    /// A feed with tiles is kept in `feeds` for when it is shown again.
     fn leave_feed(&mut self) {
+        if !self.gifs.favorites && !self.gifs.items.is_empty() && !self.gifs.media_type.is_empty() {
+            let key = feed_key(&self.gifs.provider, &self.gifs.media_type, &self.gifs.query);
+            let items = std::mem::take(&mut self.gifs.items);
+            self.gifs.feeds.insert(key, (items, self.gifs.next.take()));
+        }
         self.pending.gifs = None;
         self.gifs.favorites = false;
         self.gifs.loading = false;

@@ -561,6 +561,35 @@ fn page_answered_after_a_channel_switch_should_be_ignored() {
 }
 
 #[test]
+fn a_failed_page_should_leave_the_status_once_another_channel_loads() {
+    let mut client = Client::signed_in_with(channels_with_two_text());
+    let fx = client.command(Command::SelectChannel(TEXT.into()));
+    let page = request_for(&fx, &messages());
+    let error = ApiError::Http {
+        status: 403,
+        message: "Channel not found or access denied".into(),
+    };
+    client.fail(page, error);
+    assert_eq!(
+        client.state.status(),
+        "HTTP 403: Channel not found or access denied"
+    );
+    let second = ApiRequest::Messages {
+        channel_id: SECOND_TEXT.into(),
+        before: None,
+    };
+    let fx = client.command(Command::SelectChannel(SECOND_TEXT.into()));
+    let page = request_for(&fx, &second);
+    let fx = client.respond(
+        page,
+        &second,
+        json!({ "messages": [message_in(SECOND_TEXT, "m1")] }),
+    );
+    assert!(views(&fx).contains(&&ViewUpdate::Status(String::new())));
+    assert_eq!(client.state.status(), "");
+}
+
+#[test]
 fn channels_answered_after_a_server_switch_should_be_ignored() {
     let mut client = Client::signed_in();
     let fx = client.command(Command::SelectServer(SERVER.into()));

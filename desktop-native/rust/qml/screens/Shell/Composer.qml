@@ -412,7 +412,13 @@ Item {
                 Accessible.name: qsTr("Open GIF picker")
                 Rectangle {
                     anchors.fill: parent
-                    color: root.gifMedia === "gifs" ? Theme.tint2 : gifHover.hovered ? Theme.tint1 : "transparent"
+                    color: root.gifMedia === "gifs" ? Theme.tint2 : "transparent"
+                }
+                // PRESS: the ink at 8 % on hover, 14 % pressed.
+                Rectangle {
+                    anchors.fill: parent
+                    color: Theme.ink1
+                    opacity: gifTap.pressed ? 0.14 : gifHover.hovered ? 0.08 : 0
                 }
                 Text {
                     id: gifText
@@ -423,10 +429,12 @@ Item {
                 }
                 LazyPopup {
                     when: gifHover.hovered
-                    sourceComponent: Tooltip { visible: gifHover.hovered; text: qsTr("Open GIF picker") }
+                    // InputControls.tsx: "GIFs", 8 above.
+                    sourceComponent: Tooltip { visible: gifHover.hovered; text: qsTr("GIFs"); y: -implicitHeight - 8 }
                 }
                 HoverHandler { id: gifHover; cursorShape: Qt.PointingHandCursor }
                 TapHandler {
+                    id: gifTap
                     onTapped: {
                         emojiPicker.item?.close()
                         gifPicker.load()?.toggleFor(gifKey, "gifs")

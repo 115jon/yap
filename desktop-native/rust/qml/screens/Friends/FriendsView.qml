@@ -350,6 +350,8 @@ Rectangle {
             glyph: "call"
             onTriggered: ShellState.startCallWithRequested(rowMenu.person.userId, rowMenu.person.name)
         }
+        // groupMenuItems: the danger row last, behind a rule.
+        MenuRule { visible: rowMenu.person.kind !== "blocked"; height: visible ? implicitHeight : 0 }
         MenuRow {
             visible: rowMenu.person.kind !== "blocked"
             height: visible ? implicitHeight : 0

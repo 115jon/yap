@@ -90,6 +90,7 @@ Rectangle {
                         visible: homeHover.hovered
                         text: qsTr("Direct messages")
                         side: "right"
+                        x: homeTile.x + homeTile.width + 12
                     }
                 }
             }
@@ -283,6 +284,8 @@ Rectangle {
                 visible: keyHover.hovered
                 text: key.name
                 side: "right"
+                // sideOffset 12 from the tile (ServerList.tsx).
+                x: tile.x + tile.width + 12
             }
         }
     }

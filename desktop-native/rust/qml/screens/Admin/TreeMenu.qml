@@ -5,9 +5,10 @@ import com.yap.native
 //   channel   Invite to channel, Copy link; Mute channel and Notification settings (disabled,
 //             as on the web); with Manage channels on it, Edit channel and
 //             Duplicate channel; with it server-wide, Create text channel;
-//             Delete channel; Copy channel ID
+//             Copy channel ID; Delete channel
 //   category  Create channel, Copy ID, Delete category
 //   sidebar   Create channel and Create category, Invite to server, Copy ID
+// Danger rows sit last behind a rule (ContextMenu.tsx groupMenuItems).
 // Copies happen only from the click.
 MenuPanel {
     id: menu
@@ -110,6 +111,17 @@ MenuPanel {
         glyph: "invite"
         onTriggered: ShellState.inviteRequested()
     }
+    MenuRule { visible: !menu.onCategory; height: visible ? implicitHeight : 0 }
+    MenuRow {
+        text: menu.onChannel ? qsTr("Copy channel ID") : qsTr("Copy ID")
+        glyph: "copy"
+        onTriggered: clipboard.copyText(menu.onSidebar ? Nav.activeServerId : menu.itemId)
+    }
+    // groupMenuItems: danger rows go last, behind a rule of their own.
+    MenuRule {
+        visible: (menu.onChannel && menu.manage) || (menu.onCategory && menu.manageAll)
+        height: visible ? implicitHeight : 0
+    }
     MenuRow {
         visible: menu.onChannel && menu.manage
         height: visible ? implicitHeight : 0
@@ -117,12 +129,6 @@ MenuPanel {
         glyph: "trash"
         danger: true
         onTriggered: ShellState.deleteChannelRequested(menu.itemId, menu.name, menu.voice)
-    }
-    MenuRule {}
-    MenuRow {
-        text: menu.onChannel ? qsTr("Copy channel ID") : qsTr("Copy ID")
-        glyph: "copy"
-        onTriggered: clipboard.copyText(menu.onSidebar ? Nav.activeServerId : menu.itemId)
     }
     MenuRow {
         visible: menu.onCategory && menu.manageAll

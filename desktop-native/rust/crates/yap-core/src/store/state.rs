@@ -588,6 +588,11 @@ pub struct GifBrowse {
     /// Answers for `terms_query` so far (autocomplete, suggestions): the
     /// shown terms change once both are in, as the web awaits both.
     pub terms_next: [Option<Vec<String>>; 2],
+    /// The feeds left this open (provider, media type and query): their
+    /// tiles and cursor, shown again without a fetch when the tab or the
+    /// search comes back, as the web keeps a cache per picker. Cleared
+    /// when the picker opens.
+    pub feeds: HashMap<String, (Vec<GifItem>, Option<String>)>,
 }
 
 /// A GIF picker request besides its pages.
@@ -756,6 +761,9 @@ pub struct State {
     pub(super) local_offset: LocalOffset,
     pub(super) phase: Phase,
     pub(super) status: String,
+    /// `status` holds a failed page of the open channel (a cached channel
+    /// that is gone answers 403), cleared once a page loads.
+    pub(super) page_status: bool,
     pub(super) connected: bool,
     pub(super) session: Option<Session>,
     pub(super) sign_in: Option<SignInId>,
@@ -880,6 +888,7 @@ impl State {
             local_offset: LocalOffset::UTC,
             phase: Phase::Boot,
             status: String::new(),
+            page_status: false,
             connected: false,
             session: None,
             sign_in: None,

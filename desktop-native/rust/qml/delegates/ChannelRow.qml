@@ -60,14 +60,15 @@ Rectangle {
     Text {
         anchors.left: parent.left
         anchors.leftMargin: 8 + 20 + 8
-        anchors.right: invite.visible ? invite.left : meta.visible ? meta.left : parent.right
+        anchors.right: gear.visible ? gear.left : invite.visible ? invite.left : meta.visible ? meta.left : parent.right
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
         textFormat: Text.PlainText
         text: row.name
         elide: Text.ElideRight
         color: row.active || hover.hovered || row.unread ? Theme.ink1 : Theme.ink2
-        font: row.unread && !row.active ? Theme.type.rowUnread : Theme.type.row
+        // The open channel is font-semibold, as an unread one is.
+        font: row.unread || row.active ? Theme.type.rowUnread : Theme.type.row
     }
     // Trailing meta: steps aside while the hover keys show.
     Row {
@@ -129,8 +130,9 @@ Rectangle {
         id: invite
         z: 1
         visible: (hover.hovered || hovered || gear.hovered) && !drag.active
-        anchors.right: gear.visible ? gear.left : parent.right
-        anchors.rightMargin: gear.visible ? 2 : 4
+        // ChannelSidebar.tsx: Channel settings, then Invite at the end.
+        anchors.right: parent.right
+        anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter
         size: 24
         iconName: "invite"
@@ -142,8 +144,8 @@ Rectangle {
         id: gear
         z: 1
         visible: row.manage && (hover.hovered || hovered || invite.hovered) && !drag.active
-        anchors.right: parent.right
-        anchors.rightMargin: 4
+        anchors.right: invite.left
+        anchors.rightMargin: 2
         anchors.verticalCenter: parent.verticalCenter
         size: 24
         iconName: "settings"

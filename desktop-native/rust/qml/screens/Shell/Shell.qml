@@ -252,6 +252,8 @@ RowLayout {
             NumberAnimation { property: "position"; to: 0; duration: Theme.dur4Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
         }
         background: Rectangle {
+            // A drawer drags from its own item (main.cpp PopupPressSink).
+            objectName: "yapNoPressSink"
             color: Theme.ply3
             Rectangle {
                 width: 1
@@ -291,6 +293,8 @@ RowLayout {
             NumberAnimation { property: "position"; to: 0; duration: Theme.dur4Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
         }
         background: Rectangle {
+            // A drawer drags from its own item (main.cpp PopupPressSink).
+            objectName: "yapNoPressSink"
             color: Theme.ply3
             Rectangle {
                 width: 1

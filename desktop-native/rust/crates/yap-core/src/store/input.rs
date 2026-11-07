@@ -121,6 +121,8 @@ pub enum Command {
         media_type: String,
         provider: String,
     },
+    /// The picker opened: the feeds kept from its last open are dropped.
+    GifReset,
     /// The picker's start screen: the categories and the Trending tile.
     GifStart {
         media_type: String,

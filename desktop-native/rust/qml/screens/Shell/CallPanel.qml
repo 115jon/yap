@@ -133,9 +133,17 @@ Rectangle {
         }
     }
     LazyPopup { id: details; sourceComponent: VoiceDetailsPopup {} }
+    // The spatial map's zoom and pan outlive the panel (the web keeps the
+    // panel mounted for the call and only hides it).
+    QtObject {
+        id: spatialView
+        property real zoom: 1
+        property real panX: 0
+        property real panY: 0
+    }
     LazyPopup {
         id: spatialPanel
-        sourceComponent: SpatialAudioPopup { dmCall: root.dmCall }
+        sourceComponent: SpatialAudioPopup { dmCall: root.dmCall; viewStore: spatialView }
     }
     LazyPopup {
         id: optionsMenu

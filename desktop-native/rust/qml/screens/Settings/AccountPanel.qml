@@ -5,7 +5,8 @@ import com.yap.native
 // profile editor), the display name and the username with their inline
 // editors (the username's availability is checked 400 ms after typing
 // stops), and server profiles. Sign-in: the email and sign-in methods from
-// Kova, shown as the web shows them (Kova owns them). Then, when the server
+// Kova, shown as the web shows them (Kova owns them), and Sign out behind
+// its confirm. Then, when the server
 // offers any, the legacy accounts this sign-in may claim.
 Column {
     id: root
@@ -316,6 +317,30 @@ Column {
             layout: "inline"
             visible: Settings.methodsState !== "error" && SettingsNav.matches("sign-in-method")
             ValueText { text: Settings.methodsState === "ready" ? Settings.signInMethods : qsTr("Loading…") }
+        }
+        // Sign out, behind its confirm (the web's only sign-out key).
+        SettingsRow {
+            id: signOutRow
+            rowId: "sign-out"
+            layout: "inline"
+            property bool armed: false
+            KitButton {
+                variant: "destructive"
+                iconName: "logout"
+                text: qsTr("Sign out")
+                visible: !signOutRow.armed
+                onClicked: signOutRow.armed = true
+            }
+            footer: Loader {
+                width: signOutRow.width
+                active: signOutRow.armed
+                sourceComponent: ConfirmStrip {
+                    consequence: qsTr("You'll be signed out on this device, and any call you're in will end.")
+                    confirmLabel: qsTr("Sign out")
+                    onCancelled: signOutRow.armed = false
+                    onConfirmed: Session.signOut()
+                }
+            }
         }
     }
 

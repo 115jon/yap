@@ -71,8 +71,43 @@ Popup {
     readonly property bool rateLimited: browse.rateLimited === true
     // The picker-wide clip mute (`chat:clips:muted`, muted by default).
     property bool clipsMuted: true
+    onClipsMutedChanged: saveMemory()
     // Recent searches per media type (`chat:gifs:recent:<type>`), five.
     property var recents: ({})
+    onRecentsChanged: saveMemory()
+    // The web's localStorage for these three (and the voice display mode)
+    // is `ui-gif-picker.json` on this device; read at each open, since
+    // the composer's, the vibe's and the call's pickers share it.
+    property bool memoryLoaded: false
+    function loadMemory() {
+        memoryLoaded = false
+        const text = Chat.uiMemory("gif-picker")
+        let stored = {}
+        try {
+            stored = text.length > 0 ? JSON.parse(text) : {}
+        } catch (e) {
+            stored = {}
+        }
+        clipsMuted = stored.clipsMuted !== false
+        const kept = {}
+        for (const media of ["gifs", "stickers", "clips", "memes"]) {
+            const list = stored.recent ? stored.recent[media] : null
+            if (Array.isArray(list))
+                kept[media] = list.filter(q => typeof q === "string" && q.trim().length > 0).slice(0, 5)
+        }
+        recents = kept
+        displayMode = displayModes.some(m => m.id === stored.voiceDisplayMode) ? stored.voiceDisplayMode : "single"
+        memoryLoaded = true
+    }
+    function saveMemory() {
+        if (memoryLoaded)
+            Chat.setUiMemory("gif-picker", JSON.stringify({ clipsMuted: clipsMuted, recent: recents, voiceDisplayMode: displayMode }))
+    }
+    // Each feed's scroll, restored when it shows again (the web's cache
+    // keeps `scrollTop`); for this open only.
+    property var scrollMemo: ({})
+    property string feedKey: ""
+    property real pendingScroll: 0
     readonly property var recentQueries: recents[mediaType] ?? []
     // KLIPY's 429 on a "more": the next page waits 5 s.
     property bool coolingDown: false
@@ -126,6 +161,7 @@ Popup {
     // the display mode row and the rate limit line.
     property bool voiceMode: false
     property string displayMode: "single"
+    onDisplayModeChanged: saveMemory()
     readonly property var displayModes: [
         { id: "single", text: qsTr("Single") }, { id: "burst", text: qsTr("Burst 💥") },
         { id: "rain", text: qsTr("Rain 🌧️") }, { id: "bounce", text: qsTr("Bounce 🏀") }]
@@ -194,6 +230,9 @@ Popup {
             place()
     }
     onWindowWidthChanged: if (visible) place()
+    // Expand changes the width after isExpanded's own handler may have run:
+    // place again once it has (it was centred on the old, narrow width).
+    onWidthChanged: if (visible) place()
 
     // The provider a media type can use (`KLIPY_ONLY_MEDIA_TYPES`).
     function providerFor(media, wanted) {
@@ -202,6 +241,10 @@ Popup {
 
     // Loads what the mode shows.
     function load() {
+        if (feedKey.length > 0)
+            scrollMemo[feedKey] = flick.contentY
+        feedKey = [mode, mediaType, provider, mode === "search" ? query : ""].join("|")
+        pendingScroll = scrollMemo[feedKey] ?? 0
         flick.contentY = 0
         if (mode === "categories")
             Chat.startGifs(mediaType, provider)
@@ -230,6 +273,9 @@ Popup {
     }
     // A fresh picker each open, as the web mounts one per open.
     function reset() {
+        scrollMemo = {}
+        feedKey = ""
+        pendingScroll = 0
         openedAs = defaultMediaType
         mediaType = defaultMediaType
         provider = providerFor(mediaType, "klipy")
@@ -439,6 +485,10 @@ Popup {
     Overlay.modal: Scrim { color: Theme.scrimStacked }
     // Escape is handled below: it first shuts the terms list.
     closePolicy: Popup.CloseOnPressOutside
+    onAboutToShow: {
+        loadMemory()
+        Chat.resetGifs()
+    }
     onOpened: {
         relayout()
         Chat.loadGifFavorites()
@@ -989,7 +1039,14 @@ Popup {
                     Chat.moreGifs()
             }
             onContentYChanged: maybeMore()
-            onContentHeightChanged: maybeMore()
+            onContentHeightChanged: {
+                // A kept feed comes back at its scroll once its tiles are in.
+                if (root.pendingScroll > 0 && contentHeight - height >= root.pendingScroll) {
+                    contentY = root.pendingScroll
+                    root.pendingScroll = 0
+                }
+                maybeMore()
+            }
             ScrollBar.vertical: ThinScrollBar {}
 
             Column {
@@ -1325,8 +1382,19 @@ Popup {
                             MediaHover { on: tile.hovered }
                             CellRing { on: tile.activeFocus }
                             HoverHandler { id: tileHover; cursorShape: Qt.PointingHandCursor }
-                            TapHandler { onTapped: root.select(tile) }
+                            // A tap on a chip (mute, star) is the chip's alone: both
+                            // handlers see it, so the tile skips it (the web's
+                            // chips stop propagation).
+                            TapHandler {
+                                onTapped: eventPoint => {
+                                    const onChip = chip => chip.visible
+                                        && chip.contains(chip.mapFromItem(tile, eventPoint.position))
+                                    if (!onChip(muteChip) && !onChip(starChip))
+                                        root.select(tile)
+                                }
+                            }
                             MediaChip {
+                                id: muteChip
                                 visible: tile.isClip
                                 x: 4
                                 y: tile.height - height - 4
@@ -1359,6 +1427,7 @@ Popup {
                                 }
                             }
                             MediaChip {
+                                id: starChip
                                 x: tile.width - width - 4
                                 y: 4
                                 // Kept up once saved.

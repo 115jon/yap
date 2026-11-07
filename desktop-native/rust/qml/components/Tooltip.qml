@@ -37,6 +37,8 @@ T.ToolTip {
         verticalAlignment: Text.AlignVCenter
     }
     background: Rectangle {
+        // Presses pass through a tooltip (main.cpp PopupPressSink).
+        objectName: "yapNoPressSink"
         radius: Theme.radius
         color: Theme.ink1
     }

@@ -895,6 +895,46 @@ fn clips_should_loop_their_mp4_with_its_length_and_poster() {
 }
 
 #[test]
+fn a_feed_shown_again_should_come_from_the_picker_cache_until_it_reopens() {
+    let mut client = Client::online();
+    with_gifs(&mut client);
+    let stickers = |client: &mut Client| {
+        client.command(Command::GifSearch {
+            query: String::new(),
+            media_type: "stickers".into(),
+            provider: "klipy".into(),
+        })
+    };
+    let back = |client: &mut Client| {
+        client.command(Command::GifSearch {
+            query: String::new(),
+            media_type: "gifs".into(),
+            provider: "klipy".into(),
+        })
+    };
+    let fx = stickers(&mut client);
+    assert!(requests(&fx)
+        .iter()
+        .any(|(_, r)| matches!(r, ApiRequest::Gifs { .. })));
+    // Back on GIFs: the two tiles and the cursor again, no fetch.
+    let fx = back(&mut client);
+    assert!(!requests(&fx)
+        .iter()
+        .any(|(_, r)| matches!(r, ApiRequest::Gifs { .. })));
+    assert_eq!(gif_tiles(&fx).len(), 2);
+    let fx = client.command(Command::GifMore);
+    let (_, more) = find(&fx, |r| matches!(r, ApiRequest::Gifs { .. }));
+    assert!(more.path().contains("next=Mg"));
+    // A new open fetches again.
+    stickers(&mut client);
+    client.command(Command::GifReset);
+    let fx = back(&mut client);
+    assert!(requests(&fx)
+        .iter()
+        .any(|(_, r)| matches!(r, ApiRequest::Gifs { .. })));
+}
+
+#[test]
 fn tenor_should_answer_gifs_when_chosen() {
     let mut client = Client::online();
     let fx = client.command(Command::GifSearch {

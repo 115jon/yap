@@ -173,6 +173,8 @@ Item {
             visible: hover.hovered && !entry.voice
             text: entry.name
             side: "right"
+            // sideOffset 12 from the tile (ServerList.tsx).
+            x: tile.x + tile.width + 12
         }
     }
     // With people in voice the tooltip names the channels and who is in
@@ -185,6 +187,8 @@ Item {
             id: voiceTipBox
             visible: hover.hovered && entry.voice
             side: "right"
+            // sideOffset 12 from the tile (ServerList.tsx).
+            x: tile.x + tile.width + 12
             topPadding: 6
             bottomPadding: 6
             contentItem: Column {
@@ -196,7 +200,8 @@ Item {
                         textFormat: Text.PlainText
                         text: entry.name
                         color: Theme.ply0
-                        font.family: Theme.type.captionStrong.family
+                        // font-semibold: the SemiBold cut (each family is one static cut).
+                        font.family: Theme.type.rowUnread.family
                         font.pixelSize: Theme.type.captionStrong.pixelSize
                         font.weight: Font.DemiBold
                     }
@@ -235,7 +240,7 @@ Item {
                                 text: channelBlock.title
                                 color: Theme.ply0
                                 opacity: channelBlock.more ? 0.7 : 1
-                                font.family: Theme.type.captionStrong.family
+                                font.family: channelBlock.more ? Theme.type.captionStrong.family : Theme.type.rowUnread.family
                                 font.pixelSize: Theme.type.captionStrong.pixelSize
                                 font.weight: channelBlock.more ? Theme.type.captionStrong.weight : Font.DemiBold
                             }

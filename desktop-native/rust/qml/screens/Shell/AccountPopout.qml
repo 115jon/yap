@@ -8,7 +8,8 @@ import com.yap.native
 // the account row, 8 px above it. The status line under your name edits the
 // custom status (Enter or leaving the field saves, Esc cancels). The rows:
 // your status (a submenu of Online, Idle, Do not disturb and Invisible),
-// Copy user ID, and Sign out. Status changes are stored and broadcast.
+// Copy user ID (Sign out is in Settings > Account, as on the web). Status
+// changes are stored and broadcast.
 T.Popup {
     id: popup
 
@@ -129,15 +130,6 @@ T.Popup {
                     onTriggered: {
                         clipboard.copy(Session.meId)
                         popup.close()
-                    }
-                }
-                AccountRowKey {
-                    glyph: "logout"
-                    text: qsTr("Sign out")
-                    danger: true
-                    onTriggered: {
-                        popup.close()
-                        Session.signOut()
                     }
                 }
             }

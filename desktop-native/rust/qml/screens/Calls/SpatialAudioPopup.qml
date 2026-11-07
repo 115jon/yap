@@ -39,10 +39,15 @@ Popup {
     // Spatial audio needs high fidelity (the warning row).
     readonly property bool blocked: !Audio.highFidelity
 
-    // The map's view: zoom 0.65-1.8 and pan, kept while the panel is open.
-    property real zoom: 1
-    property real panX: 0
-    property real panY: 0
+    // The map's view: zoom 0.65-1.8 and pan, kept in `viewStore` (the
+    // call's) so a reopened panel shows the map as it was left.
+    property QtObject viewStore: null
+    property real zoom: viewStore ? viewStore.zoom : 1
+    property real panX: viewStore ? viewStore.panX : 0
+    property real panY: viewStore ? viewStore.panY : 0
+    onZoomChanged: if (viewStore) viewStore.zoom = zoom
+    onPanXChanged: if (viewStore) viewStore.panX = panX
+    onPanYChanged: if (viewStore) viewStore.panY = panY
     readonly property real roomVisualScale: 1.16 - ((room.roomSize - 10) / 90) * 0.34
     readonly property real totalZoom: zoom * roomVisualScale
 
