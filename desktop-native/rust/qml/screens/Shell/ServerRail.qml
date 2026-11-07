@@ -83,16 +83,8 @@ Rectangle {
                     ring: 2
                     ground: Theme.ply0
                 }
-                LazyPopup {
-                    // Made while hovered.
-                    when: homeHover.hovered
-                    sourceComponent: Tooltip {
-                        visible: homeHover.hovered
-                        text: qsTr("Direct messages")
-                        side: "right"
-                        x: homeTile.x + homeTile.width + 12
-                    }
-                }
+                // No tooltip: the web's Home has only its accessible name
+                // (ServerList.tsx).
             }
 
             // The 2 px ink rule under Home (my-1).

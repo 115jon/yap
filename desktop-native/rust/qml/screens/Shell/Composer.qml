@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Templates as T
 import Yap.Chrome
 import Yap.Media
 import com.yap.native
@@ -12,17 +13,21 @@ import com.yap.native
 // uploads, or both), Shift+Enter adds a line, Up in an empty composer
 // edits your last message, Esc drops the reply. `@` opens member
 // suggestions above it. Ctrl+V with files or a picture on the clipboard
-// uploads them; the + key opens the file dialog. Stickers are not wired.
+// uploads them; the + key opens the file dialog. Without Send messages
+// it is ComposerReadOnly: the lock and why, nothing to type in.
 Item {
     id: root
 
     property string channelName
     // A DM: the prompt names the person ("Message @Ada").
     property bool dm: false
+    // No Send messages here (ComposerReadOnly): the lock line instead.
+    property bool readOnly: false
     // The message being replied to (empty: none).
     property string replyToId
     property string replyToName
     property string replyToText
+    property int replyToFiles: 0
 
     signal send(string text, string replyToId)
     signal cancelReply()
@@ -90,7 +95,7 @@ Item {
         input.cursorPosition = start + insert.length
     }
 
-    implicitHeight: plate.height
+    implicitHeight: readOnly ? lockedPlate.height : plate.height
 
     // Made on first use and kept: their grids are costly to build again.
     LazyPopup {
@@ -202,8 +207,44 @@ Item {
         }
     }
 
+    // ComposerReadOnly (MessageInput.tsx): the composer's box with the lock
+    // in its 48 px slot and the reason at the input's 15/22, in ink-3.
+    Rectangle {
+        id: lockedPlate
+        visible: root.readOnly
+        width: parent.width
+        height: Math.max(48, lockedText.implicitHeight)
+        radius: Theme.radius
+        color: Theme.ply2
+        border.width: 1
+        border.color: Theme.lineField
+        Accessible.role: Accessible.StaticText
+        Accessible.name: lockedText.text
+        Icon {
+            x: 1 + (46 - width) / 2
+            y: 1 + (46 - height) / 2
+            name: "lock"
+            size: Theme.iconLg
+            color: Theme.ink3
+        }
+        Text {
+            id: lockedText
+            x: 48
+            width: parent.width - x - 12
+            topPadding: 13
+            bottomPadding: 13
+            text: qsTr("You don't have permission to send messages in this channel.")
+            wrapMode: Text.Wrap
+            color: Theme.ink3
+            font: Theme.type.message
+            lineHeight: Theme.type.messageLine
+            lineHeightMode: Text.FixedHeight
+        }
+    }
+
     Rectangle {
         id: plate
+        visible: !root.readOnly
         y: 0
         width: parent.width
         height: replyBar.height + tray.implicitHeight + Math.max(48, Math.min(200, input.implicitHeight + 2))
@@ -253,16 +294,36 @@ Item {
                     color: Theme.ink1
                     font: Theme.type.captionStrong
                 }
-                Text {
+                // ReplyPreviewContent.tsx: the text; with none, an image
+                // glyph and "Click to see attachment", or "(no content)",
+                // in italics.
+                Row {
+                    readonly property bool empty: root.replyToText.trim().length === 0
                     anchors.verticalCenter: parent.verticalCenter
                     width: Math.max(0, parent.width - x)
                     // ml-1 on top of the row's gap.
                     leftPadding: 4
-                    text: root.replyToText.replace(/\s+/g, " ")
-                    elide: Text.ElideRight
-                    textFormat: Text.PlainText
-                    color: Theme.ink3
-                    font: Theme.type.caption
+                    spacing: 4
+                    Icon {
+                        id: replyGlyph
+                        visible: parent.empty && root.replyToFiles > 0
+                        anchors.verticalCenter: parent.verticalCenter
+                        name: "image"
+                        size: Theme.iconXs
+                        color: Theme.ink3
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Math.max(0, parent.width - parent.leftPadding - (replyGlyph.visible ? replyGlyph.width + 4 : 0))
+                        text: !parent.empty ? root.replyToText.replace(/\s+/g, " ")
+                            : root.replyToFiles > 0 ? qsTr("Click to see attachment") : qsTr("(no content)")
+                        elide: Text.ElideRight
+                        textFormat: Text.PlainText
+                        color: Theme.ink3
+                        font.family: Theme.type.caption.family
+                        font.pixelSize: Theme.type.caption.pixelSize
+                        font.italic: parent.empty
+                    }
                 }
             }
             IconKey {
@@ -298,6 +359,7 @@ Item {
         }
 
         ScrollView {
+            id: inputScroll
             anchors.left: attach.right
             anchors.right: slots.left
             y: tray.y + tray.height
@@ -331,7 +393,134 @@ Item {
                     mentionBackground: Theme.accentTint
                 }
 
+                // The hovered `@name` (useMessageInput.ts handleMouseMove):
+                // the typed span under the pointer and where its top centre
+                // is. Cleared on input, scroll, send and leave, as the web
+                // does, so the tooltip never sits at a stale place.
+                property int hoverStart: -1
+                property int hoverEnd: -1
+                property point hoverAnchor
+                function clearMentionHover() {
+                    if (hoverStart < 0)
+                        return
+                    hoverStart = -1
+                    hoverEnd = -1
+                    Chat.hoverMention("")
+                }
+                function hoverMentionAt(px, py) {
+                    // InputMentionOverlay.tsx's tokens, in order: a link or
+                    // an emoji code takes its `@` with it.
+                    const re = /(https?:\/\/[^\s<>"'`)\]]+)|<:([a-z0-9_]+):([a-z0-9-]+)>|:([a-z0-9_+-]+):|@([a-zA-Z0-9_]+)/gi
+                    const at = input.positionAt(px, py)
+                    let m
+                    while ((m = re.exec(input.text)) !== null) {
+                        if (m.index > at)
+                            break
+                        const end = m.index + m[0].length
+                        if (!m[5] || at >= end)
+                            continue
+                        // positionAt picks the nearest character: the
+                        // pointer must be on the span's own line and box.
+                        const a = input.positionToRectangle(m.index)
+                        const b = input.positionToRectangle(end)
+                        if (a.y === b.y && px >= a.x && px <= b.x && py >= a.y && py <= a.y + a.height) {
+                            if (m.index !== hoverStart || end !== hoverEnd) {
+                                hoverStart = m.index
+                                hoverEnd = end
+                                hoverAnchor = Qt.point(Math.round((a.x + b.x) / 2), a.y)
+                                Chat.hoverMention(m[5])
+                            }
+                            return
+                        }
+                        break
+                    }
+                    clearMentionHover()
+                }
+                HoverHandler {
+                    id: inputHover
+                    onPointChanged: if (hovered) input.hoverMentionAt(point.position.x, point.position.y)
+                    onHoveredChanged: if (!hovered) input.clearMentionHover()
+                }
+                Connections {
+                    target: inputScroll.contentItem
+                    function onContentYChanged() { input.clearMentionHover() }
+                }
+
+                // HoveredMentionTooltip.tsx: the tooltip look with the
+                // member's 18 px face (the picture, or the name's first
+                // letter on ply-0 at 20 %) and display name, 10 above the
+                // mention's top centre, shown at once.
+                T.ToolTip {
+                    id: mentionTip
+                    readonly property var member: Chat.hoveredMention.length > 0 ? JSON.parse(Chat.hoveredMention) : null
+                    visible: member !== null && input.hoverStart >= 0
+                    x: Math.round(input.hoverAnchor.x - width / 2)
+                    y: input.hoverAnchor.y - height - 10
+                    margins: 8
+                    topPadding: 4
+                    bottomPadding: 4
+                    leftPadding: 8
+                    rightPadding: 8
+                    implicitWidth: implicitContentWidth + leftPadding + rightPadding
+                    implicitHeight: Math.max(28, implicitContentHeight + topPadding + bottomPadding)
+                    closePolicy: T.Popup.NoAutoClose
+                    contentItem: Row {
+                        spacing: 6
+                        Item {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 18
+                            height: 18
+                            Avatar {
+                                visible: (mentionTip.member?.avatar ?? "").length > 0
+                                size: 18
+                                initials: ""
+                                source: mentionTip.member?.avatar ?? ""
+                                deco: mentionTip.member?.deco ?? ""
+                            }
+                            Rectangle {
+                                visible: (mentionTip.member?.avatar ?? "").length === 0
+                                anchors.fill: parent
+                                radius: Theme.radius
+                                color: Qt.alpha(Theme.ply0, 0.2)
+                                Text {
+                                    anchors.centerIn: parent
+                                    textFormat: Text.PlainText
+                                    text: (mentionTip.member?.name ?? "").charAt(0).toUpperCase()
+                                    color: Theme.ply0
+                                    font.family: "Yap Geist SemiBold"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                }
+                            }
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(implicitWidth, 240 - 16 - 24)
+                            elide: Text.ElideRight
+                            textFormat: Text.PlainText
+                            text: mentionTip.member?.name ?? ""
+                            color: Theme.ply0
+                            font: Theme.type.captionStrong
+                        }
+                    }
+                    background: Rectangle {
+                        objectName: "yapNoPressSink"
+                        radius: Theme.radius
+                        color: Theme.ink1
+                    }
+                    enter: Transition {
+                        ParallelAnimation {
+                            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+                            NumberAnimation { property: "scale"; from: Theme.scaleIn; to: 1; duration: Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+                        }
+                    }
+                    exit: Transition {
+                        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur2Exit }
+                    }
+                }
+
                 onTextChanged: {
+                    input.clearMentionHover()
                     root.updateMention()
                     const now = Date.now()
                     if (text.trim().length > 0 && now - root.typingSentAt > 3000) {
@@ -448,7 +637,8 @@ Item {
                 glyph: Theme.iconXl
                 square: true
                 iconName: "sticker"
-                tip: qsTr("Open sticker picker")
+                tip: qsTr("Stickers")
+                Accessible.name: qsTr("Open sticker picker")
                 tone: root.gifMedia === "stickers" ? "toggled" : "ghost"
                 onClicked: {
                     emojiPicker.item?.close()
@@ -461,7 +651,8 @@ Item {
                 glyph: Theme.iconXl
                 square: true
                 iconName: "emoji"
-                tip: qsTr("Open emoji picker")
+                tip: qsTr("Emoji")
+                Accessible.name: qsTr("Open emoji picker")
                 tone: root.emojiOpen ? "toggled" : "ghost"
                 onClicked: {
                     if (root.emojiOpen) {

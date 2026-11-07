@@ -55,6 +55,7 @@ struct Scalars {
     /// (loading, more) of older pages.
     history: (bool, bool),
     manage_messages: bool,
+    read_only: bool,
     voice: VoiceView,
     panel: VoicePanelView,
     home: bool,
@@ -313,19 +314,21 @@ impl Slot for Chat {
     }
 
     fn restore(mut self: Pin<&mut Self>) {
-        let (typing, unread, history, manage, uploads, gifs, newer, favorites) = GUI.with(|gui| {
-            let s = &gui.borrow().scalars;
-            (
-                s.typing.clone(),
-                s.unread.clone(),
-                s.history,
-                s.manage_messages,
-                s.uploads,
-                s.gifs.clone(),
-                s.newer,
-                s.gif_favorites.clone(),
-            )
-        });
+        let (typing, unread, history, manage, read_only, uploads, gifs, newer, favorites) = GUI
+            .with(|gui| {
+                let s = &gui.borrow().scalars;
+                (
+                    s.typing.clone(),
+                    s.unread.clone(),
+                    s.history,
+                    s.manage_messages,
+                    s.read_only,
+                    s.uploads,
+                    s.gifs.clone(),
+                    s.newer,
+                    s.gif_favorites.clone(),
+                )
+            });
         self.as_mut().set_gif_favorites(q(if favorites.is_empty() {
             "[]"
         } else {
@@ -340,6 +343,7 @@ impl Slot for Chat {
         self.as_mut().set_older_loading(history.0);
         self.as_mut().set_has_older(history.1);
         self.as_mut().set_can_manage_messages(manage);
+        self.as_mut().set_read_only(read_only);
         self.set_today(today());
     }
 }
@@ -406,6 +410,8 @@ fn string_list(items: &[String]) -> QStringList {
 
 fn set_dm(mut nav: Pin<&mut Nav>, dm: &DmView) {
     nav.as_mut().set_dm_username(q(&dm.username));
+    nav.as_mut().set_dm_avatar(q(&dm.avatar));
+    nav.as_mut().set_dm_deco(q(&dm.deco));
     nav.set_dm_user_id(q(&dm.user_id));
 }
 
@@ -556,6 +562,11 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             with::<Chat>(|chat| chat.set_typing_text(q(&text)));
             scalars(|s| s.typing = text);
         }
+        ViewUpdate::TypingPing => with::<Chat>(|chat| chat.typing_pinged()),
+        ViewUpdate::PageLoading(loading) => with::<Chat>(|chat| chat.set_page_loading(loading)),
+        ViewUpdate::MentionHover(json) => {
+            with::<Chat>(|chat| chat.set_hovered_mention(q(&json)));
+        }
         ViewUpdate::Voice(view) => {
             with::<Voice>(|voice| set_voice(voice, &view));
             scalars(|s| s.voice = view);
@@ -586,6 +597,10 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::ManageMessages(manage) => {
             with::<Chat>(|chat| chat.set_can_manage_messages(manage));
             scalars(|s| s.manage_messages = manage);
+        }
+        ViewUpdate::ReadOnly(read_only) => {
+            with::<Chat>(|chat| chat.set_read_only(read_only));
+            scalars(|s| s.read_only = read_only);
         }
         ViewUpdate::Home(home) => {
             with::<Nav>(|nav| nav.set_home(home));

@@ -232,9 +232,11 @@ T.Popup {
             Item {
                 id: layout
                 readonly property bool beside: width >= 840
-                x: Math.max(24, (body.width - 1040) / 2)
+                // max-w-[1040px] holds the md:px-6 padding: the content is
+                // 48 narrower than the box, centred.
+                x: Math.round((body.width - Math.min(1040, body.width)) / 2) + 24
                 y: 24
-                width: Math.min(1040, body.width - 48)
+                width: Math.min(1040, body.width) - 48
                 height: beside ? Math.max(previewStack.height, form.height) : previewStack.height + 24 + form.height
 
                 // The popover card others open, from the draft, wearing your
@@ -281,6 +283,27 @@ T.Popup {
                             textFormat: Text.PlainText
                             text: editor.bio.trim()
                             wrapMode: Text.Wrap
+                            color: preview.ink
+                            font: Theme.type.description
+                        }
+                    }
+                    // ProfileSections `memberSince`: "Member Since" this
+                    // server, else "Account Created".
+                    Column {
+                        readonly property var since: Settings.memberSince.length > 0 ? JSON.parse(Settings.memberSince) : null
+                        visible: since !== null
+                        width: parent.width
+                        spacing: 8
+                        Text {
+                            textFormat: Text.PlainText
+                            text: parent.since ? parent.since.label : ""
+                            color: preview.subInk
+                            font: Theme.type.captionStrong
+                            Accessible.role: Accessible.Heading
+                        }
+                        Text {
+                            textFormat: Text.PlainText
+                            text: parent.since ? parent.since.value : ""
                             color: preview.ink
                             font: Theme.type.description
                         }
@@ -348,12 +371,28 @@ T.Popup {
                                 : editor.avatarUrl.length > 0 ? qsTr("A recent avatar, used when you save")
                                 : Settings.customAvatar ? qsTr("Your current avatar")
                                 : qsTr("Using your sign-in picture")
+                            // Thumb round: the picture cropped round, or the
+                            // name's initial at 15/600 on the tint.
                             leading: Component {
                                 Thumb {
+                                    round: true
                                     Avatar {
-                                        size: 44
+                                        visible: editor.shownAvatar.length > 0
+                                        anchors.centerIn: parent
+                                        size: 42
+                                        round: true
                                         initials: Settings.name
                                         source: editor.shownAvatar
+                                    }
+                                    Text {
+                                        visible: editor.shownAvatar.length === 0
+                                        anchors.centerIn: parent
+                                        textFormat: Text.PlainText
+                                        text: Settings.name.trim().charAt(0).toUpperCase()
+                                        color: Theme.ink1
+                                        font.family: "Yap Geist SemiBold"
+                                        font.pixelSize: 15
+                                        font.weight: Font.DemiBold
                                     }
                                 }
                             }
@@ -535,22 +574,43 @@ T.Popup {
                         title: qsTr("Collectibles")
                         description: qsTr("Decorations from your collection.")
                         SettingsRow {
-                            custom: true; rowId: "profile-decoration"; label: qsTr("Avatar decoration"); layout: "inline"
+                            custom: true; rowId: "profile-decoration"; label: qsTr("Avatar decoration")
                             description: editor.worn.avatarDecoration?.name ?? qsTr("None")
+                            // The worn ring art at 36, or the sparkle.
+                            leading: Component {
+                                Thumb {
+                                    Image {
+                                        visible: Session.meDeco.length > 0
+                                        anchors.centerIn: parent
+                                        width: 36
+                                        height: 36
+                                        source: Session.meDeco
+                                        sourceSize: Qt.size(72, 72)
+                                        fillMode: Image.PreserveAspectFit
+                                        asynchronous: true
+                                    }
+                                    Icon {
+                                        visible: Session.meDeco.length === 0
+                                        anchors.centerIn: parent
+                                        name: "sparkle"
+                                        color: Theme.ink3
+                                    }
+                                }
+                            }
                             CollectibleKeys { kind: "avatar_decoration"; on: editor.worn.avatarDecoration !== undefined }
                         }
                         SettingsRow {
-                            custom: true; rowId: "profile-effect"; label: qsTr("Profile effect"); layout: "inline"
+                            custom: true; rowId: "profile-effect"; label: qsTr("Profile effect")
                             description: editor.worn.profileEffect?.name ?? qsTr("None")
                             CollectibleKeys { kind: "profile_effect"; on: editor.worn.profileEffect !== undefined }
                         }
                         SettingsRow {
-                            custom: true; rowId: "profile-frame"; label: qsTr("Profile frame"); layout: "inline"
+                            custom: true; rowId: "profile-frame"; label: qsTr("Profile frame")
                             description: editor.worn.profileFrame?.name ?? qsTr("None")
                             CollectibleKeys { kind: "profile_frame"; on: editor.worn.profileFrame !== undefined }
                         }
                         SettingsRow {
-                            custom: true; rowId: "profile-nameplate"; label: qsTr("Nameplate"); layout: "inline"
+                            custom: true; rowId: "profile-nameplate"; label: qsTr("Nameplate")
                             description: editor.worn.nameplate?.name ?? qsTr("None")
                             CollectibleKeys { kind: "nameplate"; on: editor.worn.nameplate !== undefined }
                         }
@@ -574,9 +634,10 @@ T.Popup {
     // 80 wide), on tint-1 with a line edge.
     component Thumb: Rectangle {
         property bool wide: false
+        property bool round: false
         width: wide ? 80 : 44
         height: 44
-        radius: Theme.radius
+        radius: round ? 22 : Theme.radius
         color: Theme.tint1
         border.width: 1
         border.color: Theme.line
@@ -683,7 +744,6 @@ T.Popup {
             : kind === "profile_frame" ? qsTr("profile frame") : qsTr("nameplate")
         spacing: 8
         KitButton {
-            size: "sm"
             variant: "secondary"
             text: qsTr("Change")
             Accessible.name: qsTr("Change %1").arg(keys.label)
@@ -691,7 +751,6 @@ T.Popup {
         }
         KitButton {
             visible: keys.on
-            size: "sm"
             variant: "ghost"
             text: qsTr("Remove")
             Accessible.name: qsTr("Remove %1").arg(keys.label)

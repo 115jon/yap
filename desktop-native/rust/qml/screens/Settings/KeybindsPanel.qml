@@ -18,6 +18,7 @@ Column {
     SettingsCard {
         width: parent.width
         sectionId: "built-in-shortcuts"
+        SettingsRow { rowId: "kb-command-menu"; layout: "inline"; KeyCombo { keys: [qsTr("Ctrl"), "K"]; spoken: qsTr("Ctrl K") } }
         SettingsRow { rowId: "kb-send"; layout: "inline"; KeyCombo { keys: [qsTr("Enter")]; spoken: qsTr("Enter") } }
         SettingsRow { rowId: "kb-new-line"; layout: "inline"; KeyCombo { keys: [qsTr("Shift"), qsTr("Enter")]; spoken: qsTr("Shift Enter") } }
         SettingsRow { rowId: "kb-edit-last"; layout: "inline"; KeyCombo { keys: ["↑"]; spoken: qsTr("Up arrow") } }

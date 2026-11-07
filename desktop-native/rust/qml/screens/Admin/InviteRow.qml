@@ -38,10 +38,12 @@ Item {
         onTriggered: row.copied = false
     }
 
+    // px-4 py-3, no rule between rows.
     Item {
         id: top
+        x: 16
         y: 12
-        width: parent.width
+        width: parent.width - 32
         height: 40
         Row {
             anchors.left: parent.left
@@ -116,8 +118,9 @@ Item {
 
     Loader {
         id: confirm
+        x: top.x
         y: top.y + top.height
-        width: parent.width
+        width: top.width
         active: row.armed
         sourceComponent: ConfirmStrip {
             irreversible: true
@@ -131,15 +134,10 @@ Item {
     }
     RowError {
         id: rowError
+        x: top.x
         y: top.y + top.height
+        width: top.width
         visible: !row.armed && row.revoking.error.length > 0
         text: row.revoking.error
-    }
-
-    Rectangle {
-        anchors.bottom: parent.bottom
-        width: parent.width
-        height: 1
-        color: Theme.line
     }
 }

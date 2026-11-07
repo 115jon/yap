@@ -356,6 +356,7 @@ impl State {
             .messages
             .as_ref()
             .and_then(|log| log.get(&message_id))
+            .or_else(|| self.thread_message(&message_id))
             .map(|m| m.channel_id.clone())
         else {
             return;

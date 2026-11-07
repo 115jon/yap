@@ -106,6 +106,8 @@ pub mod qobject {
         /// The open DM's recipient; empty in a server channel.
         #[qproperty(QString, dm_user_id, cxx_name = "dmUserId")]
         #[qproperty(QString, dm_username, cxx_name = "dmUsername")]
+        #[qproperty(QString, dm_avatar, cxx_name = "dmAvatar")]
+        #[qproperty(QString, dm_deco, cxx_name = "dmDeco")]
         /// Unread DMs: the rail shows three, the Home key counts the rest.
         #[qproperty(i32, dm_unread, cxx_name = "dmUnread")]
         type Nav = super::NavRust;
@@ -138,6 +140,9 @@ pub mod qobject {
         #[qml_element]
         #[qml_singleton]
         #[qproperty(QString, typing_text, cxx_name = "typingText")]
+        // The composer's hovered `@name`: `{name, avatar, deco}` JSON of
+        // the member it names, or empty (`hoverMention`).
+        #[qproperty(QString, hovered_mention, cxx_name = "hoveredMention")]
         // Today's local day number, to compare with a row's `day`.
         #[qproperty(i32, today)]
         // The "New" divider: the message it sits above (empty: none), the
@@ -157,6 +162,10 @@ pub mod qobject {
         #[qproperty(bool, newer_loading, cxx_name = "newerLoading")]
         // Delete is offered on others' messages too (MANAGE_MESSAGES).
         #[qproperty(bool, can_manage_messages, cxx_name = "canManageMessages")]
+        // The open channel refuses our messages: the composer's lock line.
+        #[qproperty(bool, read_only, cxx_name = "readOnly")]
+        // The newest page is loading (the skeleton while the list is empty).
+        #[qproperty(bool, page_loading, cxx_name = "pageLoading")]
         // The composer tray: finished uploads (sent with the next message)
         // and ones still going.
         #[qproperty(i32, uploads_ready, cxx_name = "uploadsReady")]
@@ -280,6 +289,12 @@ pub mod qobject {
         #[qsignal]
         fn notice(self: Pin<&mut Chat>, text: QString);
 
+        /// Someone in the open channel typed again (ChatTypingIndicator.tsx:
+        /// its dots run until 6 s pass without one).
+        #[qsignal]
+        #[cxx_name = "typingPinged"]
+        fn typing_pinged(self: Pin<&mut Chat>);
+
         /// The divider was placed after the list had landed: land again.
         #[qsignal]
         fn reland(self: Pin<&mut Chat>);
@@ -341,6 +356,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "queryMentions"]
         fn query_mentions(self: &Chat, query: &QString, open: bool);
+
+        /// The composer's pointer is over `@username` (empty: over none).
+        #[qinvokable]
+        #[cxx_name = "hoverMention"]
+        fn hover_mention(self: &Chat, username: &QString);
 
         /// The newest of our own sent messages (Up to edit), or empty.
         #[qinvokable]
@@ -645,12 +665,15 @@ pub struct NavRust {
     home: bool,
     dm_user_id: QString,
     dm_username: QString,
+    dm_avatar: QString,
+    dm_deco: QString,
     dm_unread: i32,
 }
 
 #[derive(Default)]
 pub struct ChatRust {
     typing_text: QString,
+    hovered_mention: QString,
     today: i32,
     divider_id: QString,
     unread_banner: bool,
@@ -663,6 +686,8 @@ pub struct ChatRust {
     has_newer: bool,
     newer_loading: bool,
     can_manage_messages: bool,
+    read_only: bool,
+    page_loading: bool,
     uploads_ready: i32,
     uploads_busy: i32,
     gif_loading: bool,
@@ -1036,6 +1061,11 @@ impl qobject::Chat {
 
     pub fn query_mentions(&self, query: &QString, open: bool) {
         client::command(Command::MentionQuery(open.then(|| query.to_string())));
+    }
+
+    pub fn hover_mention(&self, username: &QString) {
+        let name = username.to_string();
+        client::command(Command::MentionHover((!name.is_empty()).then_some(name)));
     }
 
     pub fn last_editable_id(&self) -> QString {

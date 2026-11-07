@@ -147,9 +147,19 @@ impl State {
     pub(super) fn emit_active_dm(&mut self, fx: &mut Effects) {
         let dm = self
             .active_dm()
-            .map(|dm| DmView {
-                user_id: dm.recipient.id.clone(),
-                username: dm.recipient.username.clone(),
+            .map(|dm| {
+                let avatar = view::absolute_url(&self.api_base, dm.recipient.avatar_url.as_deref());
+                let deco = if avatar.is_empty() {
+                    String::new()
+                } else {
+                    crate::collectibles::decoration_url(dm.recipient.avatar_display.as_ref())
+                };
+                DmView {
+                    user_id: dm.recipient.id.clone(),
+                    username: dm.recipient.username.clone(),
+                    avatar,
+                    deco,
+                }
             })
             .unwrap_or_default();
         if dm != self.view.dm {
@@ -207,28 +217,7 @@ impl State {
         let me = self.me().map_or("", |me| me.id.as_str());
         let mut view = view::profile_view(user, roles, me, &self.presence, &self.api_base);
         // ProfileCard.tsx "Mutual servers": not on your own card.
-        // resolveProfileReferenceDate: the join date in the shown server,
-        // else the account's creation, as `Nov 5, 2026` in UTC.
-        let date = |v: &serde_json::Value| match v {
-            serde_json::Value::String(s) => crate::store::time::parse_rfc3339(s),
-            serde_json::Value::Number(n) => n.as_f64().filter(|n| *n > 0.0).map(|n| n as i64),
-            _ => None,
-        };
-        let since = member
-            .and_then(|m| m.joined_at.as_ref())
-            .and_then(date)
-            .map(|ms| ("Member Since", ms))
-            .or_else(|| {
-                user.created_at
-                    .as_deref()
-                    .and_then(crate::store::time::parse_rfc3339)
-                    .map(|ms| ("Account Created", ms))
-            });
-        if let Some((label, ms)) = since {
-            let value =
-                crate::store::time::local_date(ms, crate::store::time::LocalOffset::UTC, false);
-            view.member_since = serde_json::json!({ "label": label, "value": value }).to_string();
-        }
+        view.member_since = member_since_json(user, member);
         if let Some((_, why)) = self.profile_error.as_ref().filter(|(owner, _)| owner == id) {
             view.load_error = why.clone();
         }
@@ -733,4 +722,32 @@ impl State {
             Ok(_) => {}
         }
     }
+}
+
+/// resolveProfileReferenceDate: the join date in the shown server, else the
+/// account's creation, as `{label, value}` JSON with the date as
+/// `Nov 5, 2026` in UTC; empty without either.
+pub(super) fn member_since_json(
+    user: &yap_protocol::rest::User,
+    member: Option<&yap_protocol::rest::Member>,
+) -> String {
+    let date = |v: &serde_json::Value| match v {
+        serde_json::Value::String(s) => crate::store::time::parse_rfc3339(s),
+        serde_json::Value::Number(n) => n.as_f64().filter(|n| *n > 0.0).map(|n| n as i64),
+        _ => None,
+    };
+    let since = member
+        .and_then(|m| m.joined_at.as_ref())
+        .and_then(date)
+        .map(|ms| ("Member Since", ms))
+        .or_else(|| {
+            user.created_at
+                .as_deref()
+                .and_then(crate::store::time::parse_rfc3339)
+                .map(|ms| ("Account Created", ms))
+        });
+    since.map_or_else(String::new, |(label, ms)| {
+        let value = crate::store::time::local_date(ms, crate::store::time::LocalOffset::UTC, false);
+        serde_json::json!({ "label": label, "value": value }).to_string()
+    })
 }

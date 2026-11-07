@@ -494,6 +494,12 @@ pub const PANELS: &[PanelDef] = &[
                 "Built-in shortcuts",
                 "These work everywhere in Yap and can't be changed.",
                 &[
+                    row(
+                        "kb-command-menu",
+                        "Open the command menu",
+                        "Jump to a server, channel or DM, or mute and deafen.",
+                        &["search", "quick switcher", "ctrl k", "cmd k"],
+                    ),
                     row("kb-send", "Send a message", "", &["enter", "composer"]),
                     row(
                         "kb-new-line",

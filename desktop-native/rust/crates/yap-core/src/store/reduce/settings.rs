@@ -612,6 +612,15 @@ impl State {
             view.theme_sync = me.theme_sync();
             view.media_filter = media_filter(me.media_content_filter.as_deref()).to_owned();
             view.created_at = text(&me.created_at);
+            // The editor's preview card (SettingsAccountTab.tsx
+            // `referenceDate`): joined the shown server, else created.
+            let member = self
+                .active_server
+                .as_deref()
+                .filter(|_| !self.home)
+                .and_then(|server| self.members.get(server))
+                .and_then(|list| list.iter().find(|m| m.user.id == me.id));
+            view.member_since = super::social::member_since_json(me, member);
         }
         view
     }

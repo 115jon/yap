@@ -33,9 +33,16 @@ ListView {
     bottomMargin: 32
 
     onRowsJsonChanged: {
+        // At the top (or empty until now) it stays at the top, top margin
+        // included: an empty list sits at 0, which would hide the margin.
+        const top = count === 0 || contentY <= originY - topMargin + 1
         const at = contentY
         model = JSON.parse(rowsJson)
-        Qt.callLater(() => { root.contentY = Math.min(at, Math.max(root.originY - root.topMargin, root.contentHeight - root.height + root.originY)) })
+        Qt.callLater(() => {
+            const first = root.originY - root.topMargin
+            root.contentY = top ? first
+                : Math.max(first, Math.min(at, root.contentHeight - root.height + root.originY))
+        })
     }
     Component.onCompleted: model = JSON.parse(rowsJson)
 
@@ -58,7 +65,8 @@ ListView {
         Component {
             id: hero
             Item {
-                implicitHeight: heroCard.implicitHeight + 12
+                // The body's gap-10 under the hero.
+                implicitHeight: heroCard.implicitHeight + 40
                 CollectionHero {
                     id: heroCard
                     width: parent.width
@@ -69,8 +77,12 @@ ListView {
         }
         Component {
             id: heading
+            // SectionHeading: 16/24 semibold and its count, mb-3. The rails
+            // and the hero carry the gap-10 above it; after a grid it is
+            // added here.
             Item {
-                implicitHeight: (slot.index > 0 ? 24 : 0) + 44
+                readonly property string before: slot.index > 0 ? (root.model[slot.index - 1]?.type ?? "") : ""
+                implicitHeight: (before.length > 0 && before !== "hero" && before !== "rail" && before !== "collections" ? 32 : 0) + 24 + 12
                 Row {
                     anchors.left: parent.left
                     anchors.bottom: parent.bottom
@@ -83,7 +95,9 @@ ListView {
                         elide: Text.ElideRight
                         width: Math.min(implicitWidth, root.innerWidth - 200)
                         color: Theme.ink1
-                        font: Theme.type.sectionTitle
+                        font.family: "Yap Geist SemiBold"
+                        font.pixelSize: 16
+                        font.weight: Font.DemiBold
                         Accessible.role: Accessible.Heading
                     }
                     Text {
@@ -131,7 +145,7 @@ ListView {
         Component {
             id: rail
             ListView {
-                implicitHeight: Math.round(196 * 3 / 4) + 56 + 32
+                implicitHeight: Math.round(196 * 3 / 4) + 56 + 8 + 40
                 orientation: ListView.Horizontal
                 spacing: 12
                 clip: true
@@ -153,7 +167,8 @@ ListView {
         Component {
             id: collections
             ListView {
-                implicitHeight: Math.round(260 * 463 / 1037) + 28 + 40
+                // The card, the scroller's pb-2, then gap-10.
+                implicitHeight: Math.round(260 * 463 / 1037) + 28 + 8 + 40
                 orientation: ListView.Horizontal
                 spacing: 12
                 clip: true

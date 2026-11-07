@@ -77,7 +77,6 @@ Column {
             KitButton {
                 visible: !root.showCreate
                 variant: "primary"
-                size: "sm"
                 iconName: "add"
                 text: qsTr("Create link")
                 onClicked: {
@@ -254,6 +253,9 @@ Column {
         }
         PageState {
             visible: root.invites.state === "ready" && root.list.length === 0
+            // EmptyState size="sm" art={null}, inside the card.
+            small: true
+            art: false
             title: qsTr("No active invite links")
             message: qsTr("Create a link to let people join %1.").arg(root.server.name)
         }

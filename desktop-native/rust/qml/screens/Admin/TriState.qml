@@ -29,7 +29,9 @@ Rectangle {
         picked(next.value)
     }
 
-    implicitWidth: 3 * 92 + 2 * 2 + 4
+    // grid-cols-[repeat(3,minmax(84px,auto))] with p-0.5 gap-0.5 in a
+    // 1 px frame.
+    implicitWidth: keys.implicitWidth + 4
     implicitHeight: 32 + 4
     radius: Theme.radius
     color: "transparent"
@@ -54,6 +56,7 @@ Rectangle {
     }
 
     Row {
+        id: keys
         x: 2
         y: 2
         spacing: 2
@@ -63,7 +66,10 @@ Rectangle {
                 id: key
                 required property var modelData
                 readonly property bool chosen: root.value === modelData.value
-                width: (root.width - 4 - 4) / 3
+                // px-2.5 around the 16 px glyph, gap-1.5 and the label at
+                // 13 (its chosen weight, so the column holds still).
+                TextMetrics { id: labelSize; text: key.modelData.label; font: Theme.type.labelStrong }
+                width: Math.max(84, Math.ceil(labelSize.advanceWidth) + Theme.iconSm + 6 + 20)
                 height: 32
                 enabled: !root.disabled
                 focusPolicy: Qt.NoFocus
@@ -98,7 +104,7 @@ Rectangle {
                             textFormat: Text.PlainText
                             text: key.modelData.label
                             color: parent.ink
-                            font: key.chosen ? Theme.type.rowUnread : Theme.type.row
+                            font: key.chosen ? Theme.type.labelStrong : Theme.type.description
                         }
                     }
                 }

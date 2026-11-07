@@ -206,8 +206,9 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 textFormat: Text.PlainText
                 text: tabKey.text
-                color: tabKey.on || tabKey.hovered ? Theme.ink1 : Theme.ink2
-                font: Theme.type.controlSm
+                // ui/tabs.tsx: Bricolage 15/600, ink-3 until chosen or hovered.
+                color: tabKey.on || tabKey.hovered ? Theme.ink1 : Theme.ink3
+                font: Theme.type.control
             }
             Text {
                 visible: tabKey.count >= 0 && root.model.loaded

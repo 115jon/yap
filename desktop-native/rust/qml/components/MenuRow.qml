@@ -30,6 +30,10 @@ T.MenuItem {
     // and `rightIcon` (a trailing chevron on a row that is not a submenu).
     property string subtitle: ""
     property bool chevron: false
+    // Shift was held over the row (the pointer reports its modifiers): the
+    // message menu's Pin and Delete skip their confirm then (isShiftHeld).
+    readonly property bool shiftHeld: (shiftHover.point.modifiers & Qt.ShiftModifier) !== 0
+    HoverHandler { id: shiftHover }
 
     implicitWidth: Math.max(200, implicitContentWidth + leftPadding + rightPadding)
     implicitHeight: description.length > 0 ? 36 + 16 + 6 : subtitle.length > 0 ? 44 : 36

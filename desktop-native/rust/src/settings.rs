@@ -36,6 +36,7 @@ pub mod qobject {
         #[qproperty(bool, theme_sync, cxx_name = "themeSync")]
         #[qproperty(QString, media_filter, cxx_name = "mediaFilter")]
         #[qproperty(QString, created_at, cxx_name = "createdAt")]
+        #[qproperty(QString, member_since, cxx_name = "memberSince")]
         // Loads: `idle`, `loading`, `ready` or `error`, with the error copy.
         #[qproperty(QString, email_state, cxx_name = "emailState")]
         #[qproperty(QString, email)]
@@ -172,6 +173,7 @@ pub struct SettingsRust {
     theme_sync: bool,
     media_filter: QString,
     created_at: QString,
+    member_since: QString,
     email_state: QString,
     email: QString,
     methods_state: QString,
@@ -333,6 +335,7 @@ fn apply(mut object: Pin<&mut qobject::Settings>, view: &SettingsView) {
     o.as_mut().set_theme_sync(view.theme_sync);
     o.as_mut().set_media_filter(q(&view.media_filter));
     o.as_mut().set_created_at(q(&view.created_at));
+    o.as_mut().set_member_since(q(&view.member_since));
     let (mut state, mut value) = (QString::default(), QString::default());
     set_load(&mut state, Some(&mut value), &view.email);
     o.as_mut().set_email(value);

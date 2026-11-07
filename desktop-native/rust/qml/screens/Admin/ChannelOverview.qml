@@ -89,9 +89,13 @@ Column {
                 accessibleName: qsTr("Topic")
                 onEdited: value => root.description = value
             }
+            // FieldRow's helper line: gap-1.5, the count at Num sm on a 20
+            // line.
             footer: Text {
                 width: parent.width
-                topPadding: 6
+                topPadding: 8
+                lineHeight: 20
+                lineHeightMode: Text.FixedHeight
                 horizontalAlignment: Text.AlignRight
                 textFormat: Text.PlainText
                 text: qsTr("%1 / %2").arg(root.description.length).arg(1024)
@@ -101,12 +105,13 @@ Column {
         }
         SettingsRow {
             custom: true
-            layout: "field"
+            // layout="stack": the 40 px SettingsSelect trigger on the
+            // trailing side, 240 wide.
+            layout: "stack"
             label: qsTr("Public sharing")
             description: qsTr("Whether people can share messages from this channel with a public link.")
             SelectField {
-                width: parent.width
-                large: true
+                width: 240
                 firstIsDefault: false
                 text: qsTr("Public sharing")
                 ids: ["inherit", "allow", "deny"]

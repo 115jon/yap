@@ -14,6 +14,7 @@ Column {
     property string description
     // Trailing controls on the legend line, before the index.
     property Component actions: null
+    property Component legendLead: null
     default property alias rows: list.data
 
     readonly property var section: SettingsNav.sections[sectionId] ?? null
@@ -46,28 +47,46 @@ Column {
         color: Theme.ink1
     }
     Item {
+        id: legendLine
+        // The line is as tall as its trailing control (min-h 14), and the
+        // legend sits on the control's baseline (items-baseline): a 40 px
+        // key puts it 16 down, a 32 px one 12.
+        readonly property real controlHeight: actionsLoader.item && actionsLoader.item.visible ? actionsLoader.height : 0
+        readonly property real leadHeight: leadLoader.item ? leadLoader.height : 0
+        readonly property real lift: controlHeight > 14 ? Math.round((controlHeight - 14) / 2) + 3 : 0
         width: parent.width
-        height: 12 + 14
-        Text {
-            y: 12
-            textFormat: Text.PlainText
-            text: card.legend
-            color: Theme.ink3
-            font: Theme.type.silk
-            Accessible.role: Accessible.Heading
+        height: 12 + Math.max(14, controlHeight, leadHeight)
+        Row {
+            y: 12 + legendLine.lift
+            spacing: 8
+            // A mark before the legend (the override editor's role dot);
+            // the line grows to hold it.
+            Loader {
+                id: leadLoader
+                anchors.verticalCenter: parent.verticalCenter
+                active: card.legendLead !== null
+                visible: active
+                sourceComponent: card.legendLead
+            }
+            Text {
+                textFormat: Text.PlainText
+                text: card.legend
+                color: Theme.ink3
+                font: Theme.type.silk
+                Accessible.role: Accessible.Heading
+            }
         }
         Row {
             anchors.right: parent.right
             y: 12
-            height: 14
             spacing: 12
             Loader {
-                anchors.verticalCenter: parent.verticalCenter
+                id: actionsLoader
                 active: card.actions !== null
                 sourceComponent: card.actions
             }
             Text {
-                anchors.verticalCenter: parent.verticalCenter
+                y: legendLine.lift
                 textFormat: Text.PlainText
                 text: card.index
                 color: Theme.ink3
@@ -78,7 +97,8 @@ Column {
     Text {
         visible: card.desc.length > 0
         topPadding: 12
-        width: Math.min(parent.width, 560)
+        // max-w-[62ch] of 13 px Geist.
+        width: Math.min(parent.width, 534)
         textFormat: Text.PlainText
         text: card.desc
         wrapMode: Text.Wrap
@@ -87,7 +107,9 @@ Column {
         lineHeight: Theme.type.descriptionLine
         lineHeightMode: Text.FixedHeight
     }
-    Item { width: 1; height: 12 }
+    // RuleCard's mt-3 under the legend; a description sits flush on the
+    // rows (their own py-4 spaces them).
+    Item { width: 1; height: card.desc.length > 0 ? 0 : 12 }
     Column {
         id: list
         width: parent.width

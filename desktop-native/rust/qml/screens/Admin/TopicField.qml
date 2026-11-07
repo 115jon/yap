@@ -15,7 +15,9 @@ Rectangle {
 
     signal edited(string value)
 
-    implicitHeight: 88
+    // field-sizing-content with min-h-11: one line tall when empty, then
+    // it grows with the text (to 240 here; the web's resize-y has no cap).
+    implicitHeight: Math.min(240, Math.max(44, area.implicitHeight + 14))
     radius: Theme.radius
     color: Theme.ply2
     border.width: 1
@@ -39,10 +41,11 @@ Rectangle {
 
     Flickable {
         id: flick
-        x: 12
-        y: 8
-        width: parent.width - 24
-        height: parent.height - 16
+        // px-2.5 py-1.5 inside the 1 px edge.
+        x: 11
+        y: 7
+        width: parent.width - 22
+        height: parent.height - 14
         clip: true
         contentHeight: area.height
         boundsBehavior: Flickable.StopAtBounds
@@ -54,7 +57,9 @@ Rectangle {
             color: Theme.ink1
             selectionColor: Theme.selection
             selectedTextColor: Theme.ink1
-            font: Theme.type.message
+            // md:text-ui-row: 14/20.
+            font.family: "Yap Geist"
+            font.pixelSize: 14
             selectByMouse: true
             activeFocusOnTab: true
             Accessible.role: Accessible.EditableText

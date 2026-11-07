@@ -23,6 +23,7 @@ Item {
     required property string body
     required property string html
     required property string time
+    required property string createdAt
     required property string date
     required property int day
     required property bool edited
@@ -176,8 +177,40 @@ Item {
     readonly property bool shiftHeld: (hover.point.modifiers & Qt.ShiftModifier) !== 0
     readonly property Item bodyItem: editing && editor.item ? editor : bodyText
 
-    // ||Spoilers|| show once clicked.
-    property bool revealed: false
+    // ||Spoilers|| show once clicked, each on its own (MarkdownRenderer.tsx
+    // `Spoiler`): the numbers (markdown.rs `spoiler:<n>`) shown so far.
+    property var revealedSpoilers: ({})
+    // The hover bar stays while its own menu or emoji picker is open
+    // (MessageItem.tsx `keepBar`); the host sets it.
+    property bool keepBar: false
+
+    // `Thursday, October 22, 2026 at 8:12 PM` (message-time.ts `formatFull`),
+    // for the time and "(edited)" tooltips.
+    function fullTime(iso) {
+        const date = new Date(iso)
+        return isNaN(date.getTime()) ? qsTr("Unknown time")
+            : Qt.formatDateTime(date, "dddd, MMMM d, yyyy 'at' h:mm AP")
+    }
+    // A hidden spoiler's colours: tint-3 on tint-3, line-strong on hover;
+    // a shown one's: ink-1 on tint-1 (MarkdownRenderer.tsx).
+    function shadeSpoilers(html, hot) {
+        return html.replace(/href="spoiler:(\d+)" style="color:%SPOILERFG%; background-color:%SPOILERBG%/g,
+            (match, n) => {
+                const shown = revealedSpoilers[n] === true
+                if (!shown && hot !== "spoiler:" + n)
+                    return match
+                const fg = shown ? Theme.richRevealed["%SPOILERFG%"] : Theme.solid(Theme.lineStrong)
+                const bg = shown ? Theme.richRevealed["%SPOILERBG%"] : fg
+                return "href=\"spoiler:" + n + "\" style=\"color:" + fg + "; background-color:" + bg
+            })
+    }
+    // A link that does something on click: not a shown spoiler or the
+    // edited marker.
+    function isLive(link) {
+        if (link.length === 0 || link.startsWith("edited:"))
+            return false
+        return !(link.startsWith("spoiler:") && revealedSpoilers[link.slice(8)] === true)
+    }
     // Pending rows dim only after 400 ms, so a quick echo never flickers.
     property bool dim: false
 
@@ -189,7 +222,7 @@ Item {
     // dim into the row it is reused for.
     ListView.onPooled: {
         bodyText.deselect()
-        revealed = false
+        revealedSpoilers = {}
         dim = false
         rowPooled = true
     }
@@ -384,6 +417,12 @@ Item {
         text: root.clock
         color: Theme.ink3
         font: Theme.type.numSm
+        // The full date on hover (MessageItem.tsx `title={fullTime}`).
+        HoverHandler { id: gutterHover }
+        LazyPopup {
+            when: gutterHover.hovered
+            sourceComponent: Tooltip { visible: gutterHover.hovered; text: root.fullTime(root.createdAt) }
+        }
     }
 
     Row {
@@ -416,6 +455,13 @@ Item {
             text: root.time
             color: Theme.ink3
             font: Theme.type.numSm
+            Accessible.name: root.fullTime(root.createdAt)
+            // MessageHeaderTime: the full date in a tooltip on hover.
+            HoverHandler { id: timeHover }
+            LazyPopup {
+                when: timeHover.hovered
+                sourceComponent: Tooltip { visible: timeHover.hovered; text: root.fullTime(root.createdAt) }
+            }
         }
         // Pinned (MessageItem.tsx): the Fill pin at 12 in ink-3.
         Icon {
@@ -444,12 +490,18 @@ Item {
         // yap-core markdown.rs: the web's grammar as Qt rich text.
         textFormat: TextEdit.RichText
         // The web's 22 px line box (text-ui-base 15/22).
-        text: "<div style=\"line-height:22px\">" + Theme.richText(Theme.underlineLink(root.imagesReady ? root.html
-            : root.html.replace(/<img [^>]*>/g, "&#8195;&#8202;"), hotLink), root.revealed, root.mentioned) + "</div>"
+        text: "<div style=\"line-height:22px\">" + Theme.richText(root.shadeSpoilers(Theme.underlineLink(root.imagesReady ? root.html
+            : root.html.replace(/<img [^>]*>/g, "&#8195;&#8202;"), hotLink.startsWith("spoiler:") || hotLink.startsWith("edited:") ? "" : hotLink),
+            hotLink), false, root.mentioned) + "</div>"
         // The hovered link, underlined (kept while the pointer is on it:
-        // re-setting the text clears `hoveredLink` until the next move).
+        // re-setting the text clears `hoveredLink` until the next move). A
+        // hidden spoiler tints instead; "(edited)" shows its time.
         property string hotLink: ""
-        onHoveredLinkChanged: if (hoveredLink.length > 0) hotLink = hoveredLink
+        onHoveredLinkChanged: if (hoveredLink.length > 0) {
+            if (hoveredLink !== hotLink && hoveredLink.startsWith("edited:"))
+                editedTip.x = bodyHover.point.position.x
+            hotLink = hoveredLink
+        }
         color: Theme.ink1
         selectionColor: Theme.selection
         selectedTextColor: Theme.ink1
@@ -457,8 +509,10 @@ Item {
         // Message text is untrusted: only open web and mail links. On Windows
         // openUrlExternally is ShellExecute, so file:// etc. would run things.
         onLinkActivated: link => {
-            if (link === "spoiler:")
-                root.revealed = true
+            if (link.startsWith("spoiler:"))
+                root.revealedSpoilers = Object.assign({}, root.revealedSpoilers, { [link.slice(8)]: true })
+            else if (link.startsWith("edited:"))
+                return
             else if (link.startsWith("user:"))
                 root.profileRequested(link.slice(5), bodyText)
             else if (Invites.openLink(link))
@@ -469,11 +523,25 @@ Item {
 
         HoverHandler {
             id: bodyHover
-            cursorShape: bodyText.hoveredLink.length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
+            cursorShape: root.isLive(bodyText.hotLink) ? Qt.PointingHandCursor : Qt.IBeamCursor
             onHoveredChanged: if (!hovered) bodyText.hotLink = ""
             // Off a link (but still on the text): drop the underline.
             onPointChanged: if (bodyText.hoveredLink.length === 0 && bodyText.hotLink.length > 0
                 && bodyText.linkAt(point.position.x, point.position.y).length === 0) bodyText.hotLink = ""
+        }
+        // "(edited)": `Edited {full time}` above the pointer (MessageItem.tsx
+        // `title`); x is set as the pointer reaches it.
+        Item {
+            id: editedTip
+            readonly property bool on: bodyText.hotLink.startsWith("edited:")
+            y: bodyText.height - 22
+            LazyPopup {
+                when: editedTip.on
+                sourceComponent: Tooltip {
+                    visible: editedTip.on
+                    text: qsTr("Edited %1").arg(root.fullTime(bodyText.hotLink.slice(7)))
+                }
+            }
         }
     }
 
@@ -714,23 +782,35 @@ Item {
     // The hover bar (MessageItem.tsx): -16 from the top, 24 from the
     // right, ply-3 with a seam (no shadow yet), 28 px keys 2 px apart. Built
     // only for the hovered row, which rises above its neighbours so the bar
-    // can overhang the row above. Holding Shift swaps More for Delete.
-    z: hover.hovered ? 1 : 0
+    // can overhang the row above. Holding Shift swaps More for Delete. It
+    // stays while `keepBar` holds, and fades in from scale .97 over 100 ms
+    // from its bottom-right corner.
+    z: hover.hovered || keepBar ? 1 : 0
     Loader {
-        active: hover.hovered && !root.editing && !root.pending && !root.failed
+        active: (hover.hovered || root.keepBar) && !root.editing && !root.pending && !root.failed
         anchors.right: parent.right
         anchors.rightMargin: 24
         // -top-4 from the row box, which starts under the group margin.
         y: root.dividerHeight + (root.grouped ? 0 : root.headTop - 2) - 16
         // A 1 px edge and p-0.5 around the 28 px keys: 34 high.
         sourceComponent: Rectangle {
+            id: bar
             width: actions.implicitWidth + 6
             height: 34
             radius: Theme.radius
             color: Theme.ply3
             border.width: 1
             border.color: Theme.line
+            transformOrigin: Item.BottomRight
+            opacity: 0
+            scale: Theme.scaleIn
+            ParallelAnimation {
+                running: true
+                NumberAnimation { target: bar; property: "opacity"; to: 1; duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+                NumberAnimation { target: bar; property: "scale"; to: 1; duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+            }
             FloatShadow {}
+            ClipboardText { id: clipboard }
             Row {
                 id: actions
                 anchors.centerIn: parent
@@ -784,13 +864,32 @@ Item {
                         color: Theme.line
                     }
                 }
-                // Shift: the power keys (MessageItem.tsx): link, pin, thread.
+                // Shift: the power keys (MessageItem.tsx): copy ID, link,
+                // mark unread, pin, thread. The bar is only built for a
+                // settled message.
+                IconKey {
+                    size: 28
+                    iconName: "copyId"
+                    tip: qsTr("Copy message ID")
+                    visible: root.shiftHeld
+                    onClicked: {
+                        clipboard.copyText(root.messageId)
+                        Chat.notice(qsTr("Message ID copied"))
+                    }
+                }
                 IconKey {
                     size: 28
                     iconName: "link"
                     tip: qsTr("Copy message link")
                     visible: root.shiftHeld
                     onClicked: root.linkRequested(root.messageId)
+                }
+                IconKey {
+                    size: 28
+                    iconName: "markUnread"
+                    tip: qsTr("Mark unread")
+                    visible: root.shiftHeld
+                    onClicked: Extras.markUnread(root.messageId)
                 }
                 IconKey {
                     size: 28

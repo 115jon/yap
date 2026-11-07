@@ -59,8 +59,10 @@ Column {
                 Accessible.role: Accessible.ListItem
                 Accessible.name: modelData.actor + " " + modelData.verb + (target ? " " + target.label : "")
 
+                // AuditRow: px-4 py-3, gap-3, no rule between rows.
                 Avatar {
                     id: face
+                    x: 16
                     y: 12
                     size: 24
                     initials: entry.modelData.actorInitials
@@ -73,7 +75,7 @@ Column {
                     anchors.left: face.right
                     anchors.leftMargin: 12
                     anchors.right: parent.right
-                    spacing: 4
+                    anchors.rightMargin: 16
                     // "Actor verb Target": the target bold when named, the
                     // invite code in mono, the id on hover.
                     Flow {
@@ -84,12 +86,16 @@ Column {
                             text: entry.modelData.actor
                             color: Theme.ink1
                             font: Theme.type.occupant
+                            lineHeight: Theme.type.descriptionLine
+                            lineHeightMode: Text.FixedHeight
                         }
                         Text {
                             textFormat: Text.PlainText
                             text: entry.modelData.verb
                             color: Theme.ink2
                             font: Theme.type.description
+                            lineHeight: Theme.type.descriptionLine
+                            lineHeightMode: Text.FixedHeight
                         }
                         Text {
                             id: targetText
@@ -99,6 +105,8 @@ Column {
                             color: entry.target && entry.target.named ? Theme.ink1 : Theme.ink2
                             font: entry.target && entry.target.code ? Theme.type.code
                                 : entry.target && entry.target.named ? Theme.type.occupant : Theme.type.description
+                            lineHeight: Theme.type.descriptionLine
+                            lineHeightMode: Text.FixedHeight
                             HoverHandler { id: targetHover; enabled: entry.target !== null && entry.target.id.length > 0 }
                             LazyPopup {
                                 when: targetHover.hovered
@@ -107,15 +115,25 @@ Column {
                                     text: entry.target ? qsTr("ID %1").arg(entry.target.id) : ""
                                 }
                             }
-                            Rectangle {
+                            // A dotted line-strong underline 3 under the
+                            // baseline (decoration-dotted, offset 3 px).
+                            Row {
                                 visible: entry.target !== null && entry.target.id.length > 0
-                                anchors.bottom: parent.bottom
-                                width: parent.width
-                                height: 1
-                                color: Theme.lineStrong
+                                y: Math.round(targetText.baselineOffset) + 3
+                                spacing: 1
+                                Repeater {
+                                    model: Math.ceil(targetText.width / 2)
+                                    Rectangle { width: 1; height: 1; color: Theme.lineStrong }
+                                }
                             }
                         }
                     }
+                    // Details: mt-1.5, gap-0.5.
+                    Column {
+                        visible: entry.modelData.details.length > 0
+                        width: parent.width
+                        topPadding: 6
+                        spacing: 2
                     Repeater {
                         model: entry.modelData.details
                         delegate: Row {
@@ -137,6 +155,8 @@ Column {
                                 wrapMode: Text.Wrap
                                 color: Theme.ink2
                                 font: Theme.type.description
+                                lineHeight: Theme.type.descriptionLine
+                                lineHeightMode: Text.FixedHeight
                                 textFormat: Text.PlainText
                                 text: detail.modelData.type === "perm" ? detail.modelData.name
                                     : detail.modelData.type === "list" ? detail.modelData.label + ": " + detail.modelData.items.join(", ")
@@ -144,9 +164,13 @@ Column {
                             }
                         }
                     }
+                    }
                     Text {
                         visible: entry.modelData.reason.length > 0
                         width: parent.width
+                        topPadding: 6
+                        lineHeight: Theme.type.descriptionLine
+                        lineHeightMode: Text.FixedHeight
                         textFormat: Text.PlainText
                         text: qsTr("Reason: %1").arg(entry.modelData.reason)
                         wrapMode: Text.Wrap
@@ -154,17 +178,14 @@ Column {
                         font: Theme.type.description
                     }
                     Text {
+                        topPadding: 4
                         textFormat: Text.PlainText
                         text: entry.modelData.when
                         color: Theme.ink3
                         font: Theme.type.caption
+                        lineHeight: Theme.type.captionLine
+                        lineHeightMode: Text.FixedHeight
                     }
-                }
-                Rectangle {
-                    anchors.bottom: parent.bottom
-                    width: parent.width
-                    height: 1
-                    color: Theme.line
                 }
             }
         }

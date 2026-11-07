@@ -28,6 +28,7 @@ SettingsCard {
     }
 
     title: row.name
+    legendLead: Component { OverrideMark { row: root.row } }
     description: isRole
         ? qsTr("Inherit keeps what %1 gets from its server role settings. Deny and Allow replace it in %2.").arg(row.name).arg(channel.label)
         : qsTr("Inherit keeps what %1 gets from their roles. Deny and Allow replace it in %2.").arg(row.name).arg(channel.label)
@@ -79,6 +80,8 @@ SettingsCard {
             required property var modelData
             custom: true
             layout: "stack"
+            // The split page only shows on a wide pane: inline, as the web.
+            containerWidth: 560
             label: modelData.name
             description: modelData.desc
             TriState {

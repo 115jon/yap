@@ -75,6 +75,7 @@ const DELETE_FAILED: &str = "Couldn't delete the message. Check your connection 
 
 /// Permission bits (src/lib/permissions.ts).
 const ADMINISTRATOR: i64 = 1;
+const SEND_MESSAGES: i64 = 1 << 9;
 const MANAGE_MESSAGES: i64 = 1 << 10;
 
 fn is_pending(message: &Message) -> bool {
@@ -958,6 +959,7 @@ impl State {
     fn emit_active_channel(&mut self, fx: &mut Effects, id: String, name: String) {
         fx.view(ViewUpdate::ActiveChannel { id, name });
         fx.view(ViewUpdate::ManageMessages(self.can_manage_messages()));
+        fx.view(ViewUpdate::ReadOnly(!self.can_send_messages()));
         // The tray shows the open channel's uploads.
         self.sync_uploads(fx);
     }
@@ -968,6 +970,19 @@ impl State {
             .and_then(|id| self.find_channel(id))
             .and_then(|c| c.permissions)
             .is_some_and(|p| p & ADMINISTRATOR != 0 || p & MANAGE_MESSAGES != 0)
+    }
+
+    /// useChatArea.ts `canSendMessages`: Send messages or Administrator in
+    /// the open channel; a DM, or a channel without its permissions, can.
+    fn can_send_messages(&self) -> bool {
+        if self.home {
+            return true;
+        }
+        self.active_channel
+            .as_deref()
+            .and_then(|id| self.find_channel(id))
+            .and_then(|c| c.permissions)
+            .is_none_or(|p| p & ADMINISTRATOR != 0 || p & SEND_MESSAGES != 0)
     }
 
     // Unread
@@ -1203,6 +1218,25 @@ impl State {
         self.view.mentions = rows;
     }
 
+    /// The composer's hovered `@name` (HoveredMentionTooltip.tsx): the
+    /// candidate whose username matches it, ignoring case, as JSON
+    /// `{name, avatar, deco}`; empty when nobody matches.
+    fn mention_hover(&mut self, fx: &mut Effects, username: Option<String>) {
+        let json = username
+            .and_then(|name| {
+                let name = name.to_lowercase();
+                self.mention_candidates()
+                    .into_iter()
+                    .find(|u| u.username.to_lowercase() == name)
+            })
+            .map(|u| view::mention_hover_json(u, &self.api_base))
+            .unwrap_or_default();
+        if json != self.view.mention_hover {
+            self.view.mention_hover.clone_from(&json);
+            fx.view(ViewUpdate::MentionHover(json));
+        }
+    }
+
     // Snapshot cache (write-through; the writer coalesces)
 
     /// Stores part of the signed-in user's snapshot.
@@ -1375,6 +1409,7 @@ impl State {
                 }
             }
             Command::MentionQuery(query) => self.mention_query(fx, query),
+            Command::MentionHover(username) => self.mention_hover(fx, username),
             Command::ToggleReaction { message_id, emoji } => {
                 self.toggle_reaction(fx, &message_id, &emoji);
             }
@@ -2145,6 +2180,7 @@ impl State {
         self.active_channel = None;
         self.messages = None;
         self.pending.page = None;
+        fx.view(ViewUpdate::PageLoading(false));
         self.pending.older = None;
         self.seen_floor = None;
         self.seen_from = None;
@@ -2357,6 +2393,7 @@ impl State {
         self.pending.page = self
             .http(fx, request)
             .map(|req| (req, channel_id.to_owned()));
+        fx.view(ViewUpdate::PageLoading(self.pending.page.is_some()));
     }
 
     fn on_page(
@@ -2365,6 +2402,7 @@ impl State {
         channel_id: &str,
         result: Result<ApiResponse, ApiError>,
     ) {
+        fx.view(ViewUpdate::PageLoading(false));
         let Page {
             messages,
             has_more_before,
@@ -3248,6 +3286,7 @@ impl State {
                         }
                     }
                     self.emit_typing(fx);
+                    fx.view(ViewUpdate::TypingPing);
                     fx.push(Effect::Later {
                         delay: TYPING_TIMEOUT,
                         input: Box::new(Input::TypingExpired {

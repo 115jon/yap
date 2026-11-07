@@ -21,6 +21,8 @@ Rectangle {
     property string replyToId
     property string replyToName
     property string replyToText
+    // Its attachments, for "Click to see attachment" when it has no text.
+    property int replyToFiles: 0
     // Older pages load once the top is this close (HISTORY_FETCH_PX).
     readonly property int historyFetchPx: 800
     readonly property bool windowActive: Window.active
@@ -160,6 +162,14 @@ Rectangle {
         toast.show(qsTr("Message link copied"))
     }
 
+    function replyTo(id, author, text, attachments) {
+        root.replyToId = id
+        root.replyToName = author
+        root.replyToText = text
+        root.replyToFiles = attachments && attachments.length > 0 ? JSON.parse(attachments).length : 0
+        composer.focusInput()
+    }
+
     function startEdit(id) {
         if (id.length === 0)
             return
@@ -206,14 +216,6 @@ Rectangle {
     Connections {
         target: ShellState
         function onCopyImageRequested(url, name) { root.copyImage(url, name) }
-    }
-
-    // Files a public link leaves out (MessageShareModal.tsx): anything but
-    // pictures and playable videos.
-    function omittedFiles(attachments) {
-        if (attachments.length === 0)
-            return 0
-        return JSON.parse(attachments).filter(a => a.kind !== "image" && a.kind !== "video").length
     }
 
     // `row`: the message's delegate, for the dialog's preview card
@@ -329,6 +331,59 @@ Rectangle {
         height: implicitHeight
     }
 
+    // VirtualMessageList.tsx MessageSkeleton while the first page loads
+    // with nothing to show: three groups of a full row and two compact
+    // ones, still tint-1 blocks on the row metrics (avatar 40, a 20 px
+    // author line, 22 px body lines). Nothing pulses.
+    Column {
+        id: skeleton
+        anchors.bottom: view.bottom
+        anchors.left: view.left
+        anchors.right: view.right
+        bottomPadding: 8
+        visible: Chat.pageLoading && view.count === 0 && Nav.activeChannelId.length > 0
+        Accessible.ignored: true
+        Repeater {
+            model: 9
+            Item {
+                id: bone
+                required property int index
+                readonly property bool compact: index % 3 !== 0
+                width: skeleton.width
+                height: compact ? 26 : 16 + 54
+                Rectangle {
+                    visible: !bone.compact
+                    x: 16
+                    y: 16 + 2
+                    width: 40
+                    height: 40
+                    radius: Theme.radius
+                    color: Theme.tint1
+                }
+                Item {
+                    x: 16 + 40 + 12
+                    y: bone.compact ? 2 : 16 + 2
+                    width: bone.width - x - 24
+                    height: bone.compact ? 22 : 50
+                    Row {
+                        visible: !bone.compact
+                        height: 20
+                        spacing: 8
+                        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 96; height: 12; radius: 2; color: Theme.tint1 }
+                        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 40; height: 10; radius: 2; color: Theme.tint1 }
+                    }
+                    Rectangle {
+                        y: (bone.compact ? 0 : 28) + 5
+                        width: parent.width * (bone.compact ? 0.45 : 0.65)
+                        height: 12
+                        radius: 2
+                        color: Theme.tint1
+                    }
+                }
+            }
+        }
+    }
+
     ListView {
         id: view
         anchors.top: callRegion.bottom
@@ -438,13 +493,10 @@ Rectangle {
             width: view.width
             today: Chat.today
             editingId: root.editingId
+            // The bar stays while its emoji picker is open (`keepBar`).
+            keepBar: (reactionPicker.item?.visible ?? false) && reactionPicker.item.messageId === messageId
             highlightId: root.highlightId
-            onReplyRequested: (id, author, text) => {
-                root.replyToId = id
-                root.replyToName = author
-                root.replyToText = text
-                composer.focusInput()
-            }
+            onReplyRequested: (id, author, text) => root.replyTo(id, author, text, row.attachments)
             onEditRequested: id => root.startEdit(id)
             onEditSaved: (id, text) => {
                 if (text.trim().length === 0) {
@@ -458,20 +510,7 @@ Rectangle {
             onEditCancelled: root.endEdit()
             onDeleteRequested: (id, author, text, confirm) => root.deleteMessage(id, author, text, confirm, row)
             onMenuRequested: (id, author, text, mine, anchor, x, y) => {
-                const menu = messageMenuHost.load()
-                if (!menu)
-                    return
-                menu.replyCount = row.replyCount
-                menu.pinned = row.pinned
-                menu.settled = !row.pending && !row.failed
-                menu.hasReactions = row.reactions.length > 0
-                menu.omitted = root.omittedFiles(row.attachments)
-                menu.authorId = row.authorId
-                menu.row = row
-                const under = row.contextAt(anchor, x, y)
-                menu.link = under.link
-                menu.media = under.media
-                menu.openFor(id, author, text, mine, anchor, x, y)
+                messageMenuHost.load()?.openOn(row, id, author, text, mine, anchor, x, y)
             }
             onThreadRequested: id => root.openThread(id)
             onPinRequested: (id, author, text, pin, confirm) => root.setPin(id, author, text, pin, confirm)
@@ -514,7 +553,8 @@ Rectangle {
         // tint-1 plate and #name; one plain line; a seam 20 below.
         header: Loader {
             width: view.width
-            active: !Chat.hasOlder && Nav.activeChannelId.length > 0
+            // Not while the first page loads (the skeleton stands in).
+            active: !Chat.hasOlder && Nav.activeChannelId.length > 0 && !(Chat.pageLoading && view.count === 0)
             visible: active
             sourceComponent: Column {
                 readonly property bool dm: Nav.dmUsername.length > 0
@@ -530,7 +570,8 @@ Rectangle {
                         visible: parent.parent.dm
                         size: 56
                         initials: Nav.activeChannelName
-                        source: ""
+                        source: Nav.dmAvatar
+                        deco: Nav.dmDeco
                     }
                     Rectangle {
                         visible: !parent.parent.dm
@@ -751,23 +792,94 @@ Rectangle {
         }
     }
 
-    // "Name is typing…"; the core drops each name 8 s after their last ping
-    // or when they post.
+    // ChatTypingIndicator.tsx: the three dots (one breathing layer, ink-2
+    // while running, ink-3 once 6 s pass without a ping), then the names in
+    // 600 ink-2 and "is typing…" in ink-3. The core drops each name 8 s
+    // after their last ping or when they post.
     Item {
         id: typingLine
         anchors.bottom: composer.top
         width: parent.width
         height: 24
 
-        Text {
-            anchors.left: parent.left
-            anchors.leftMargin: 16
+        readonly property string text: Chat.typingText
+        readonly property string suffix: text.endsWith(" is typing…") ? " is typing…" : " are typing…"
+        property bool running: false
+        Connections {
+            target: Chat
+            function onTypingPinged() {
+                typingLine.running = true
+                typingQuiet.restart()
+            }
+        }
+        Timer {
+            id: typingQuiet
+            interval: 6000
+            onTriggered: typingLine.running = false
+        }
+
+        Row {
+            id: typingRow
+            x: 16
             anchors.verticalCenter: parent.verticalCenter
-            visible: Chat.typingText.length > 0
-            textFormat: Text.PlainText
-            text: Chat.typingText
-            color: Theme.ink3
-            font: Theme.type.caption
+            width: parent.width - 32
+            spacing: 8
+            visible: typingLine.text.length > 0
+            opacity: visible ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+            Accessible.role: Accessible.StaticText
+            Accessible.name: typingLine.text
+            // TypingDots: 20 x 4, r 2 at 2/10/18, at 100/70/45 %.
+            Row {
+                id: dots
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 4
+                readonly property color ink: typingLine.running ? Theme.ink2 : Theme.ink3
+                Repeater {
+                    model: [1, 0.7, 0.45]
+                    Rectangle {
+                        required property real modelData
+                        width: 4
+                        height: 4
+                        radius: 2
+                        color: dots.ink
+                        opacity: modelData
+                    }
+                }
+                // animate-pulse at 1.2 s: 1 → 0.5 → 1, still under reduced
+                // motion or with the app in the background.
+                SequentialAnimation on opacity {
+                    running: typingLine.running && typingRow.visible && !Theme.reducedMotion
+                        && Qt.application.state === Qt.ApplicationActive
+                    loops: Animation.Infinite
+                    onRunningChanged: if (!running) dots.opacity = 1
+                    NumberAnimation { to: 0.5; duration: 600; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.4, 0, 0.6, 1, 1, 1] }
+                    NumberAnimation { to: 1; duration: 600; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.4, 0, 0.6, 1, 1, 1] }
+                }
+            }
+            Row {
+            anchors.verticalCenter: parent.verticalCenter
+            Text {
+                id: typingNames
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.min(implicitWidth, typingRow.width - dots.width - 8 - typingSuffix.implicitWidth)
+                elide: Text.ElideRight
+                textFormat: Text.PlainText
+                text: typingLine.text.slice(0, Math.max(0, typingLine.text.length - typingLine.suffix.length))
+                color: Theme.ink2
+                font.family: "Yap Geist SemiBold"
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+            }
+            Text {
+                id: typingSuffix
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
+                text: typingLine.suffix
+                color: Theme.ink3
+                font: Theme.type.caption
+            }
+            }
         }
     }
 
@@ -780,10 +892,12 @@ Rectangle {
         anchors.topMargin: 0
         channelName: Nav.activeChannelName
         dm: Nav.dmUsername.length > 0
+        readOnly: Chat.readOnly && Nav.dmUsername.length === 0
         enabled: Nav.activeChannelId.length > 0
         replyToId: root.replyToId
         replyToName: root.replyToName
         replyToText: root.replyToText
+        replyToFiles: root.replyToFiles
         onSend: (text, replyToId) => {
             Chat.sendMessage(text, replyToId)
             root.replyToId = ""
@@ -792,286 +906,25 @@ Rectangle {
         onEditLast: root.startEdit(Chat.lastEditableId())
     }
 
-    // The message menu (MessageItem.tsx `handleContextMenu`, one for the
-    // list): four quick reactions over a seam, then Add reaction, View
-    // reactions, Edit, Reply, thread, Pin | Copy text, Mark unread, Share,
-    // Profile, Copy ID | Delete, Ban (danger rows last, ContextMenu.tsx
-    // `groupMenuItems`).
+    // The message menu (MessageMenu.qml), one for the list.
     LazyPopup {
         id: messageMenuHost
         sourceComponent: Component {
-            MenuPanel {
-                id: messageMenu
-                property string messageId
-                property string authorId
-                property string author
-                property string text
-                property bool mine
-                property int replyCount
-                property bool pinned
-                property bool settled: true
-                property bool hasReactions: false
-                property int omitted: 0
-                // The link and the picture under the pointer (`hoveredUrl`,
-                // `publicMediaUrl` in MessageItem.tsx).
-                property string link
-                property string media
-                // The row it was opened on (the delete preview).
-                property Item row: null
-                property Item anchorItem: null
-                readonly property bool canBan: !mine && Admin.canBan && Nav.dmUsername.length === 0
-                readonly property bool hasDanger: settled && (mine || Chat.canManageMessages) || canBan
-                function openFor(id, author, text, mine, anchor, x, y) {
-                    messageId = id
-                    messageMenu.author = author
-                    messageMenu.text = text
-                    messageMenu.mine = mine
-                    anchorItem = anchor
-                    const at = anchor.mapToItem(root, x, y)
-                    popup(root, at.x, at.y)
+            MessageMenu {
+                host: root
+                onEditRequested: id => root.startEdit(id)
+                onReplyRequested: (id, author, text) => root.replyTo(id, author, text, row?.attachments ?? "")
+                onThreadRequested: id => root.openThread(id)
+                onPinRequested: (id, author, text, pin, confirm) => root.setPin(id, author, text, pin, confirm)
+                onDeleteRequested: (id, author, text, row, confirm) => root.deleteMessage(id, author, text, confirm, row)
+                onReactionPickerRequested: (id, anchor) => {
+                    const picker = reactionPicker.load()
+                    if (!picker)
+                        return
+                    picker.messageId = id
+                    picker.openBelow(anchor)
                 }
-                Row {
-                    visible: messageMenu.settled
-                    height: visible ? 32 + 8 : 0
-                    leftPadding: 4
-                    topPadding: 4
-                    spacing: 4
-                    Repeater {
-                        model: messageMenu.settled ? JSON.parse(Emoji.quick).slice(0, 4) : []
-                        Rectangle {
-                            id: quickChip
-                            required property var modelData
-                            width: 32
-                            height: 32
-                            radius: Theme.radius
-                            color: quickArea.pressed ? Theme.tint3 : quickArea.containsMouse ? Theme.tint2 : Theme.tint1
-                            scale: quickArea.pressed ? Theme.scalePressIcon : 1
-                            Accessible.role: Accessible.Button
-                            Accessible.name: qsTr("React with %1").arg(":" + modelData.s + ":")
-                            Image {
-                                id: quickImage
-                                anchors.centerIn: parent
-                                width: 20
-                                height: 20
-                                sourceSize: Qt.size(40, 40)
-                                asynchronous: true
-                                source: quickChip.modelData.u
-                            }
-                            // The emoji itself while (or if) its picture
-                            // does not load, so the row is never blank.
-                            Text {
-                                anchors.centerIn: parent
-                                visible: quickImage.status !== Image.Ready
-                                textFormat: Text.PlainText
-                                text: quickChip.modelData.e
-                                font.family: "Segoe UI Emoji"
-                                font.pixelSize: 17
-                            }
-                            MouseArea {
-                                id: quickArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    Chat.toggleReaction(messageMenu.messageId, quickChip.modelData.e)
-                                    Emoji.remember(quickChip.modelData.e)
-                                    messageMenu.close()
-                                }
-                            }
-                        }
-                    }
-                }
-                MenuRule { visible: messageMenu.settled; height: visible ? implicitHeight : 0 }
-                // Add reaction is a submenu (MessageReactionSubmenu.tsx): the
-                // five recent or fallback reactions, each its 16 px emoji and
-                // ":code:", then View more, which opens the picker.
-                MenuPanel {
-                    id: addReactionMenu
-                    title: qsTr("Add reaction")
-                    glyph: "react"
-                    shown: messageMenu.settled
-                    Instantiator {
-                        model: messageMenu.settled ? JSON.parse(Emoji.quick).slice(0, 5) : []
-                        delegate: MenuRow {
-                            required property var modelData
-                            text: ":" + modelData.s + ":"
-                            image: modelData.u
-                            imageText: modelData.e
-                            onTriggered: {
-                                Chat.toggleReaction(messageMenu.messageId, modelData.e)
-                                Emoji.remember(modelData.e)
-                                messageMenu.close()
-                            }
-                        }
-                        onObjectAdded: (index, object) => addReactionMenu.insertItem(index, object)
-                        onObjectRemoved: (index, object) => addReactionMenu.removeItem(object)
-                    }
-                    MenuRule {}
-                    MenuRow {
-                        id: viewMoreRow
-                        text: qsTr("View more")
-                        glyph: "react"
-                        onTriggered: {
-                            const picker = reactionPicker.load()
-                            if (!picker)
-                                return
-                            picker.messageId = messageMenu.messageId
-                            // Under the row, as the web anchors it.
-                            picker.openBelow(viewMoreRow)
-                        }
-                    }
-                }
-                MenuRule { visible: messageMenu.settled && !messageMenu.hasReactions; height: visible ? implicitHeight : 0 }
-                MenuRow {
-                    text: qsTr("View reactions")
-                    glyph: "emoji"
-                    visible: messageMenu.settled && messageMenu.hasReactions
-                    height: visible ? implicitHeight : 0
-                    onTriggered: ShellState.reactionsRequested(messageMenu.messageId, "")
-                }
-                MenuRule { visible: messageMenu.settled && messageMenu.hasReactions; height: visible ? implicitHeight : 0 }
-                MenuRow {
-                    text: qsTr("Edit message")
-                    glyph: "edit"
-                    visible: messageMenu.mine && messageMenu.settled
-                    height: visible ? implicitHeight : 0
-                    onTriggered: root.startEdit(messageMenu.messageId)
-                }
-                MenuRow {
-                    text: qsTr("Reply")
-                    glyph: "reply"
-                    visible: messageMenu.settled
-                    height: visible ? implicitHeight : 0
-                    onTriggered: {
-                        root.replyToId = messageMenu.messageId
-                        root.replyToName = messageMenu.author
-                        root.replyToText = messageMenu.text
-                        composer.focusInput()
-                    }
-                }
-                MenuRow {
-                    text: messageMenu.replyCount > 0 ? qsTr("View thread") : qsTr("Create thread")
-                    glyph: "thread"
-                    visible: messageMenu.settled
-                    height: visible ? implicitHeight : 0
-                    onTriggered: root.openThread(messageMenu.messageId)
-                }
-                MenuRow {
-                    text: messageMenu.pinned ? qsTr("Unpin message") : qsTr("Pin message")
-                    glyph: "pin"
-                    visible: Panels.canPin && messageMenu.settled
-                    height: visible ? implicitHeight : 0
-                    onTriggered: root.setPin(messageMenu.messageId, messageMenu.author, messageMenu.text, !messageMenu.pinned, true)
-                }
-                MenuRule { visible: Panels.canPin && messageMenu.settled; height: visible ? implicitHeight : 0 }
-                MenuRow {
-                    text: qsTr("Copy text")
-                    glyph: "copy"
-                    onTriggered: {
-                        clipboard.copyText(messageMenu.text)
-                        toast.show(qsTr("Text copied"))
-                    }
-                }
-                MenuRow {
-                    text: qsTr("Mark unread")
-                    glyph: "markUnread"
-                    visible: messageMenu.settled
-                    height: visible ? implicitHeight : 0
-                    onTriggered: Extras.markUnread(messageMenu.messageId)
-                }
-                MenuRow {
-                    text: qsTr("Copy link")
-                    glyph: "link"
-                    visible: messageMenu.link.length > 0
-                    height: visible ? implicitHeight : 0
-                    onTriggered: {
-                        clipboard.copyText(messageMenu.link)
-                        toast.show(qsTr("Link copied"))
-                    }
-                }
-                MenuRow {
-                    text: qsTr("Open link")
-                    glyph: "externalLink"
-                    visible: messageMenu.link.length > 0
-                    height: visible ? implicitHeight : 0
-                    onTriggered: leaveSite.load()?.request(messageMenu.link)
-                }
-                MenuRow {
-                    text: qsTr("Share message")
-                    glyph: "share"
-                    visible: messageMenu.settled
-                    height: visible ? implicitHeight : 0
-                    onTriggered: ShellState.shareRequested(messageMenu.messageId, messageMenu.author, messageMenu.text, messageMenu.omitted)
-                }
-                MenuRow {
-                    text: qsTr("Profile")
-                    glyph: "account"
-                    onTriggered: ShellState.showFullProfile(messageMenu.authorId, messageMenu.anchorItem)
-                }
-                MenuRow {
-                    text: qsTr("Copy ID")
-                    glyph: "copyId"
-                    visible: messageMenu.settled
-                    height: visible ? implicitHeight : 0
-                    onTriggered: {
-                        clipboard.copyText(messageMenu.messageId)
-                        toast.show(qsTr("Message ID copied"))
-                    }
-                }
-                MenuRule { visible: messageMenu.media.length > 0; height: visible ? implicitHeight : 0 }
-                // MessageItem.tsx: Save image | Copy media link, Open media
-                // link. Copy image is native's own (the web has it in the
-                // viewer only).
-                MenuRow {
-                    text: qsTr("Save image")
-                    glyph: "download"
-                    visible: messageMenu.media.length > 0
-                    height: visible ? implicitHeight : 0
-                    onTriggered: root.saveFile({ url: messageMenu.media, name: messageMenu.media.split(/[?#]/)[0].split("/").pop() || "image.png" })
-                }
-                MenuRow {
-                    text: qsTr("Copy image")
-                    glyph: "copy"
-                    visible: messageMenu.media.length > 0
-                    height: visible ? implicitHeight : 0
-                    onTriggered: root.copyImage(messageMenu.media, "")
-                }
-                MenuRule { visible: messageMenu.media.length > 0; height: visible ? implicitHeight : 0 }
-                MenuRow {
-                    text: qsTr("Copy media link")
-                    glyph: "copy"
-                    visible: messageMenu.media.length > 0
-                    height: visible ? implicitHeight : 0
-                    onTriggered: {
-                        clipboard.copyText(messageMenu.media)
-                        toast.show(qsTr("Media link copied"))
-                    }
-                }
-                MenuRow {
-                    text: qsTr("Open media link")
-                    glyph: "externalLink"
-                    visible: messageMenu.media.length > 0
-                    height: visible ? implicitHeight : 0
-                    onTriggered: leaveSite.load()?.request(messageMenu.media)
-                }
-                // groupMenuItems: the danger rows last, behind their rule.
-                MenuRule { visible: messageMenu.hasDanger; height: visible ? implicitHeight : 0 }
-                MenuRow {
-                    text: qsTr("Delete message")
-                    glyph: "trash"
-                    danger: true
-                    visible: messageMenu.settled && (messageMenu.mine || Chat.canManageMessages)
-                    height: visible ? implicitHeight : 0
-                    onTriggered: root.deleteMessage(messageMenu.messageId, messageMenu.author, messageMenu.text, true, messageMenu.row)
-                }
-                MenuRow {
-                    text: qsTr("Ban user")
-                    glyph: "ban"
-                    danger: true
-                    visible: messageMenu.canBan
-                    height: visible ? implicitHeight : 0
-                    onTriggered: ShellState.banRequested(messageMenu.authorId, messageMenu.author)
-                }
+                onOpenLinkRequested: url => leaveSite.load()?.request(url)
             }
         }
     }

@@ -391,7 +391,7 @@ fn channels_result_should_open_the_first_text_channel_and_request_its_page() {
         ..label(id, name)
     };
     assert_eq!(
-        views(&fx)[..5],
+        views(&fx)[..6],
         [
             &ViewUpdate::Channels(ViewDiff::Reset(vec![
                 label("cat_fixture_text", "Text"),
@@ -403,8 +403,10 @@ fn channels_result_should_open_the_first_text_channel_and_request_its_page() {
                 id: TEXT.into(),
                 name: "general".into()
             },
-            // The fixture channel's permissions include MANAGE_MESSAGES.
+            // The fixture channel's permissions are MANAGE_MESSAGES alone:
+            // no SEND_MESSAGES, so the composer is read-only.
             &ViewUpdate::ManageMessages(true),
+            &ViewUpdate::ReadOnly(true),
             &ViewUpdate::Messages(Box::new(ViewDiff::Reset(Vec::new()))),
             &ViewUpdate::History {
                 loading: false,
@@ -448,7 +450,11 @@ fn first_page_should_project_messages_like_before() {
         &messages(),
         fixture("messages-page.json"),
     );
-    assert!(matches!(views(&fx).first(), Some(ViewUpdate::Messages(_))));
+    // The skeleton goes, then the rows come.
+    assert!(matches!(
+        views(&fx)[..2],
+        [ViewUpdate::PageLoading(false), ViewUpdate::Messages(_)]
+    ));
     let Some(ViewDiff::Reset(list)) = message_diffs(&fx).first().copied() else {
         panic!("{fx:#?}");
     };
@@ -463,7 +469,8 @@ fn first_page_should_project_messages_like_before() {
             avatar: String::new(),
             body: "see the attached file".into(),
             html: "see the attached file \
-                   <span style=\"color:%EDITED%; font-size:12px\">(edited)</span>"
+                   <a href=\"edited:2026-11-04T12:01:00.000Z\" \
+                   style=\"color:%EDITED%; font-size:12px; text-decoration:none\">(edited)</a>"
                 .into(),
             created_at: "2026-11-04T12:00:05.000Z".into(),
             // `State::new` formats in UTC.
@@ -497,7 +504,7 @@ fn first_page_should_project_messages_like_before() {
     assert!(list[0].reactions.contains(r#""count":1"#));
     assert!(fx.contains(&Effect::StartupMark("messages shown")));
     assert_eq!(
-        views(&fx)[1..],
+        views(&fx)[2..],
         [
             &ViewUpdate::Phase(Phase::Ready),
             &ViewUpdate::Status(String::new()),
@@ -767,7 +774,10 @@ fn typing_in_the_open_channel_should_show_the_known_name() {
     )));
     assert_eq!(
         views(&fx),
-        vec![&ViewUpdate::Typing("Alice is typing…".into())]
+        vec![
+            &ViewUpdate::Typing("Alice is typing…".into()),
+            &ViewUpdate::TypingPing
+        ]
     );
 }
 
@@ -828,7 +838,10 @@ fn typing_by_an_unknown_user_should_say_someone() {
     let fx = client.gateway(GatewayEvent::Dispatch(typing));
     assert_eq!(
         views(&fx),
-        vec![&ViewUpdate::Typing("Someone is typing…".into())]
+        vec![
+            &ViewUpdate::Typing("Someone is typing…".into()),
+            &ViewUpdate::TypingPing
+        ]
     );
 }
 

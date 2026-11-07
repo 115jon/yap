@@ -156,6 +156,9 @@ pub enum Command {
     },
     /// The `@` query in the composer, or `None` when no suggestion list is open.
     MentionQuery(Option<String>),
+    /// A typed `@name` under the pointer in the composer (its tooltip), or
+    /// `None` when the pointer left it.
+    MentionHover(Option<String>),
     JoinVoice(String),
     LeaveVoice,
     SetVoiceMuted(bool),

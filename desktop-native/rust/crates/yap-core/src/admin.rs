@@ -595,6 +595,48 @@ fn shown(value: &Value) -> String {
     }
 }
 
+/// A voice status as words. It is a `{text, media}` object now (older
+/// entries hold the bare text): the text, and the media's title (or its
+/// kind) after it. The web prints the object as "[object Object]".
+fn voice_status_shown(value: &Value) -> String {
+    let Value::Object(status) = value else {
+        return if is_empty(value) {
+            String::new()
+        } else {
+            shown(value)
+        };
+    };
+    let text = status
+        .get("text")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    let media = status.get("media").filter(|m| m.is_object()).map(|media| {
+        let title = media.get("title").and_then(Value::as_str).map(str::trim);
+        match title.filter(|t| !t.is_empty()) {
+            Some(title) => title.to_owned(),
+            None => {
+                let video = media
+                    .get("preview_content_type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|t| t.starts_with("video/"));
+                match media.get("media_type").and_then(Value::as_str) {
+                    Some("clips") => "a clip".to_owned(),
+                    Some("stickers") => "a sticker".to_owned(),
+                    None if video => "a clip".to_owned(),
+                    _ => "a GIF".to_owned(),
+                }
+            }
+        }
+    });
+    match (text.is_empty(), media) {
+        (false, Some(media)) => format!("{text} ({media})"),
+        (false, None) => text.to_owned(),
+        (true, Some(media)) => media,
+        (true, None) => String::new(),
+    }
+}
+
 fn channel_label(name: &str, voice: bool) -> String {
     if voice {
         name.to_owned()
@@ -700,11 +742,14 @@ fn channel_details(changes: &Map<String, Value>) -> Vec<AuditDetail> {
             "description" => format!("Topic: {}", shown(after)),
             "allow_public_shares" if is_empty(after) => "Public sharing follows the server".into(),
             "allow_public_shares" => format!("Public sharing {}", on_off(after)),
-            "voice_status" if is_empty(after) => "Cleared the voice status".into(),
-            "voice_status" => match before.filter(|b| !is_empty(b)) {
-                Some(before) => format!("Voice status: {} → {}", shown(before), shown(after)),
-                None => format!("Voice status: {}", shown(after)),
-            },
+            "voice_status" => {
+                let after = voice_status_shown(after);
+                match before.map(voice_status_shown).filter(|b| !b.is_empty()) {
+                    _ if after.is_empty() => "Cleared the voice status".into(),
+                    Some(before) => format!("Voice status: {before} → {after}"),
+                    None => format!("Voice status: {after}"),
+                }
+            }
             _ => continue,
         };
         details.push(text(line));
@@ -989,6 +1034,26 @@ pub fn audit_lookup<'a>(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn voice_status_objects_read_as_words() {
+        let clip = serde_json::json!({
+            "text": null,
+            "media": {"media_type": "clips", "title": "Good morning"},
+        });
+        assert_eq!(super::voice_status_shown(&clip), "Good morning");
+        let untitled =
+            serde_json::json!({"text": "hi", "media": {"media_type": "clips", "title": null}});
+        assert_eq!(super::voice_status_shown(&untitled), "hi (a clip)");
+        assert_eq!(
+            super::voice_status_shown(&serde_json::json!("plain")),
+            "plain"
+        );
+        assert_eq!(
+            super::voice_status_shown(&serde_json::json!({"text": null, "media": null})),
+            ""
+        );
+    }
     use super::*;
 
     #[test]

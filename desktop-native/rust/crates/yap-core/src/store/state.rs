@@ -357,6 +357,8 @@ pub(super) struct Projection {
     pub roster: Vec<VoiceMemberRow>,
     pub tiles: Vec<VoiceTileRow>,
     pub mentions: Vec<MentionRow>,
+    /// The composer's hovered mention, as last emitted.
+    pub mention_hover: String,
     pub dms: Vec<DmRow>,
     pub members: Vec<MemberListRow>,
     /// Unread DMs, as last emitted.

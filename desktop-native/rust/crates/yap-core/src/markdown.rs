@@ -10,12 +10,19 @@
 //! Native emoji in plain text become Twemoji images too. Newlines are line
 //! breaks.
 //!
+//! Spoilers are `spoiler:<n>` links, numbered from 0 in source order, so
+//! each one reveals on its own (MarkdownRenderer.tsx `Spoiler`). The edited
+//! marker is an `edited:<time>` link, the hover target for its full-time
+//! tooltip (MessageItem.tsx `title`).
+//!
 //! Emoji never appear in code (inline or fenced), URLs or link labels, and
 //! `~~strike~~` text is kept verbatim, all as on the web.
 //!
 //! Colours are theme roles, so the output carries `%TOKEN%` placeholders the
 //! UI swaps for the current theme's values (see [`TOKENS`]). Faces are the
 //! static cuts by family, never `<b>`/`<i>`, which would synthesise.
+
+use std::cell::Cell;
 
 use crate::emoji;
 
@@ -46,18 +53,20 @@ const CHIP_PAD: &str = "<span style=\"font-size:8px\">&nbsp;</span>";
 /// The emoji image size in px: the web draws 1.25em of 15px text.
 const EMOJI_PX: u32 = 19;
 
-/// The rich text for a message body; `edited` appends the marker. Without an
-/// API base, custom emoji stay text. See [`to_html_with`].
+/// The rich text for a message body; `edited` appends the marker (with no
+/// time). Without an API base, custom emoji stay text. See [`to_html_with`].
 pub fn to_html(source: &str, edited: bool) -> String {
     to_html_with(source, edited, "")
 }
 
-/// The rich text for a message body; `edited` appends the marker. Custom
-/// emoji (`<:name:id>`) load from `{api_base}/api/emojis/assets/{id}`; with an
-/// empty `api_base` they stay text (Qt cannot fall back when an image fails,
-/// as the web does).
+/// The rich text for a message body; `edited` appends the marker (with no
+/// time). Custom emoji (`<:name:id>`) load from
+/// `{api_base}/api/emojis/assets/{id}`; with an empty `api_base` they stay
+/// text (Qt cannot fall back when an image fails, as the web does).
 pub fn to_html_with(source: &str, edited: bool, api_base: &str) -> String {
-    to_html_resolving(source, edited, api_base, &|_| Some(String::new()))
+    to_html_resolving(source, edited.then_some(""), api_base, &|_| {
+        Some(String::new())
+    })
 }
 
 /// What the inline renderer needs beyond the text.
@@ -65,19 +74,26 @@ struct Cx<'a> {
     api_base: &'a str,
     /// The user id behind an `@username`, when it names a member.
     resolve: &'a dyn Fn(&str) -> Option<String>,
+    /// The next spoiler's number.
+    spoilers: Cell<u32>,
 }
 
 /// [`to_html_with`], with `@username` resolved through `resolve`
 /// (MentionBadge.tsx): a member's mention is a `user:<id>` link on the
 /// accent tint (underlined on hover, opening the profile); `None` is the
 /// inert tint-1 chip in ink-2; an empty id keeps the plain accent chip.
+/// `edited_at` (the edit's RFC 3339 time) appends the marker.
 pub fn to_html_resolving(
     source: &str,
-    edited: bool,
+    edited_at: Option<&str>,
     api_base: &str,
     resolve: &dyn Fn(&str) -> Option<String>,
 ) -> String {
-    let cx = Cx { api_base, resolve };
+    let cx = Cx {
+        api_base,
+        resolve,
+        spoilers: Cell::new(0),
+    };
     let api_base = &cx;
     let mut out = String::with_capacity(source.len() + 64);
     let mut rest = source;
@@ -99,8 +115,12 @@ pub fn to_html_resolving(
         rest = &rest[start + 3 + len + 3..];
     }
     text_block(rest, api_base, &mut out);
-    if edited {
-        out.push_str(" <span style=\"color:%EDITED%; font-size:12px\">(edited)</span>");
+    if let Some(at) = edited_at {
+        out.push_str(" <a href=\"edited:");
+        escape_into(at, &mut out);
+        out.push_str(
+            "\" style=\"color:%EDITED%; font-size:12px; text-decoration:none\">(edited)</a>",
+        );
     }
     out
 }
@@ -342,10 +362,12 @@ fn inline(text: &str, api_base: &Cx, out: &mut String) {
                 out.push_str("</span>");
             }
             Token::Spoiler(t) => {
-                out.push_str(
-                    "<a href=\"spoiler:\" style=\"color:%SPOILERFG%; background-color:%SPOILERBG%; \
-                     text-decoration:none\">",
-                );
+                let n = api_base.spoilers.get();
+                api_base.spoilers.set(n + 1);
+                out.push_str(&format!(
+                    "<a href=\"spoiler:{n}\" style=\"color:%SPOILERFG%; \
+                     background-color:%SPOILERBG%; text-decoration:none\">"
+                ));
                 inline(t, api_base, out);
                 out.push_str("</a>");
             }
@@ -416,7 +438,7 @@ fn inline(text: &str, api_base: &Cx, out: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{to_html, to_html_with};
+    use super::{to_html, to_html_resolving, to_html_with};
 
     const API: &str = "https://api.test";
 
@@ -518,8 +540,22 @@ mod tests {
     #[test]
     fn spoilers_should_be_hidden_links() {
         let out = html("||secret||");
-        assert!(out.starts_with("<a href=\"spoiler:\""));
+        // MessageDelegate.qml matches this opening to colour one spoiler.
+        assert!(out.starts_with(
+            "<a href=\"spoiler:0\" style=\"color:%SPOILERFG%; background-color:%SPOILERBG%; "
+        ));
         assert!(out.contains("secret"));
+    }
+
+    #[test]
+    fn spoilers_should_be_numbered_in_source_order() {
+        let out = html("||a|| x\n> ||b||\n```\n||c||\n```\n**||d||**");
+        for n in 0..3 {
+            assert!(out.contains(&format!("href=\"spoiler:{n}\"")), "{out}");
+        }
+        assert!(!out.contains("spoiler:3"));
+        // Fenced code is never a spoiler.
+        assert!(out.contains("||c||"));
     }
 
     #[test]
@@ -546,7 +582,17 @@ mod tests {
 
     #[test]
     fn edited_should_append_the_marker() {
-        assert!(to_html("x", true).ends_with("(edited)</span>"));
+        assert!(to_html("x", true).ends_with("(edited)</a>"));
+        assert!(!to_html("x", false).contains("(edited)"));
+    }
+
+    #[test]
+    fn the_edited_marker_should_link_its_time() {
+        assert_eq!(
+            to_html_resolving("x", Some("2026-11-04T12:00:05.000Z"), API, &|_| None),
+            "x <a href=\"edited:2026-11-04T12:00:05.000Z\" \
+             style=\"color:%EDITED%; font-size:12px; text-decoration:none\">(edited)</a>"
+        );
     }
 
     #[test]

@@ -739,6 +739,9 @@ pub struct ProfileView {
 pub struct DmView {
     pub user_id: String,
     pub username: String,
+    /// Their picture (absolute) and decoration, for the DM's welcome.
+    pub avatar: String,
+    pub deco: String,
 }
 
 /// The call, as the sidebar shows it. Empty ids and `false` when not in one;
@@ -1065,6 +1068,9 @@ pub struct SettingsView {
     pub theme_sync: bool,
     pub media_filter: String,
     pub created_at: String,
+    /// `{label, value}`: "Member Since" the shown server or "Account
+    /// Created" (the editor's preview); empty without a date.
+    pub member_since: String,
     /// Kova: the email (empty: none on file) and the sign-in methods.
     pub email: Load<String>,
     pub sign_in_methods: Load<String>,
@@ -1105,6 +1111,13 @@ pub enum ViewUpdate {
     },
     /// The typing line (`"Alice is typing…"`), empty when nobody is.
     Typing(String),
+    /// The composer's hovered mention ([`mention_hover_json`]), or empty.
+    MentionHover(String),
+    /// The open channel's newest page is loading (the list's skeleton
+    /// while it has no rows).
+    PageLoading(bool),
+    /// Someone in the open channel typed again (the dots run 6 s after).
+    TypingPing,
     Voice(VoiceView),
     VoicePanel(VoicePanelView),
     Servers(ViewDiff<ServerRow>),
@@ -1126,6 +1139,8 @@ pub enum ViewUpdate {
     /// The open channel lets this user delete others' messages
     /// (`MANAGE_MESSAGES` or `ADMINISTRATOR` in its `permissions`).
     ManageMessages(bool),
+    /// The open channel refuses our messages (ComposerReadOnly).
+    ReadOnly(bool),
     Mentions(ViewDiff<MentionRow>),
     /// A short-lived line about something that failed (a toast).
     Notice(String),
@@ -1913,7 +1928,7 @@ pub(super) fn message_row(
         // ignoring case.
         html: crate::markdown::to_html_resolving(
             &message.content,
-            message.updated_at.is_some(),
+            message.updated_at.as_deref(),
             ctx.api_base,
             &|name| {
                 ctx.members
@@ -2331,6 +2346,25 @@ pub(super) fn mention_rows(users: &[&User], api_base: &str) -> Vec<MentionRow> {
             name_style: name_style(u.display_name_style.as_ref()),
         })
         .collect()
+}
+
+/// The composer mention tooltip's member (HoveredMentionTooltip.tsx):
+/// `{name, avatar, deco}`. Only a face with a picture wears its decoration.
+pub(super) fn mention_hover_json(user: &User, api_base: &str) -> String {
+    let avatar = absolute_url(api_base, user.avatar_url.as_deref());
+    let deco = if avatar.is_empty() {
+        String::new()
+    } else {
+        collectibles::decoration_url(user.avatar_display.as_ref())
+    };
+    // `display_name?.trim() || username`.
+    let name = user
+        .display_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(&user.username);
+    serde_json::json!({ "name": name, "avatar": avatar, "deco": deco }).to_string()
 }
 
 /// The typing line for these names (ChatTypingIndicator.tsx): up to three

@@ -36,14 +36,21 @@ Item {
     readonly property string shownDesc: description.length > 0 ? description : custom ? "" : SettingsNav.desc(rowId)
     readonly property bool field: layout === "field" && !hideLabel
     readonly property bool labeled: layout === "label"
-    readonly property bool side: !field && !labeled && (layout === "inline" || (layout === "stack" && width >= 560))
+    // `stack` reads the settings pane's width (@container in
+    // SettingsWorkbench.tsx), which is the row's own unless a split page
+    // narrows the row (the override editor).
+    property real containerWidth: width
+    readonly property bool side: !field && !labeled && (layout === "inline" || (layout === "stack" && containerWidth >= 560))
     readonly property bool textShown: !hideLabel && !field && !labeled
     readonly property bool highlighted: !custom && SettingsNav.trimmed.length > 0
     readonly property bool landed: !custom && SettingsNav.target === rowId && rowId.length > 0
 
     width: parent ? parent.width : 0
     visible: custom || SettingsNav.matches(rowId)
-    implicitHeight: (labeled ? 24 : 32) + body.height + footerSlot.implicitHeight
+    // The hairline is the row's border-b, under its padding.
+    // A `label` row is server-settings FieldRow: no border of its own.
+    readonly property bool ruled: rule && !labeled
+    implicitHeight: (labeled ? 24 : 32) + body.height + footerSlot.implicitHeight + (ruled ? 1 : 0)
     onVisibleChanged: Qt.callLater(() => parent?.parent?.updateRules?.())
 
     Accessible.role: Accessible.Grouping
@@ -109,7 +116,7 @@ Item {
                 }
                 Text {
                     visible: row.shownDesc.length > 0
-                    width: Math.min(parent.width, 520)
+                    width: Math.min(parent.width, 517) // max-w-[60ch]
                     text: row.highlighted ? SettingsNav.highlight(row.shownDesc) : row.shownDesc
                     textFormat: row.highlighted ? Text.RichText : Text.PlainText
                     wrapMode: Text.Wrap
@@ -173,7 +180,7 @@ Item {
             id: fieldDesc
             visible: row.field && row.shownDesc.length > 0
             y: controlSlot.y + controlSlot.height + 8
-            width: Math.min(parent.width, 520)
+            width: Math.min(parent.width, 517) // max-w-[60ch]
             textFormat: Text.PlainText
             text: row.shownDesc
             wrapMode: Text.Wrap
@@ -205,7 +212,7 @@ Item {
     }
 
     Rectangle {
-        visible: row.rule
+        visible: row.ruled
         anchors.bottom: parent.bottom
         width: parent.width
         height: 1

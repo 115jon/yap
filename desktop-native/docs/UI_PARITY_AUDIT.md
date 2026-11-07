@@ -670,3 +670,114 @@ Web paths are under `src/`, native paths under `desktop-native/`.
 - `cargo test -p yap-core -p yap-protocol -p yap-cache -p yap-voice`
   (`LK_CUSTOM_WEBRTC` set): 1253 passed, 0 failed.
 - `build.ps1` into `F:/ct/yapn/rel` is green (8 builds this pass).
+
+## Pass 9 (pass 8 leftovers, settings and editors, functional gaps)
+
+Pass of 2026-11-07, on the pass 8 build (kept in `F:/ct/yapn/run/sweep9/before/`).
+Native ran as copies in `F:/ct/yapn/run/sweep9/bin-<tag>/` (`run-p9.ps1`, the
+pass 8 runner pointed at sweep9; `-Spike` for the test owner). The test owner
+owns Native Spike Lab, so every server and channel settings page was opened
+there. One override was changed (@everyone denied Send messages in #general,
+to see the read-only composer as Spike Peer in a second session,
+`--profile spikepeer`) and put back to Inherit. The six themes were switched
+on the test owner's device only (theme sync off) and Midnight was put back.
+The only writes from the peer were typing pings. jontest was not used. The web
+side is `web-shot.mjs` as the test owner at the native window's size
+(1268 x 825). It gained `--scheme dark|light` (the colour scheme the default
+"system" theme follows); the themes were set through `localStorage.theme` in
+the headless context. Captures stay local in `F:/ct/yapn/run/sweep9/`.
+
+The web's server settings have five tabs: Overview, Roles, Invites, Bans and
+Audit log. Members, emoji, stickers, soundboard, moderation and integrations
+are not tabs on the web, so there was nothing to compare for them. Channel
+settings have Overview and Permissions.
+
+Web paths are under `src/`, native paths under `desktop-native/`.
+
+### Work items
+
+| #   | screen               | difference                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| --- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| N1  | composer mention tip | Missing (`HoveredMentionTooltip.tsx`). The composer now finds the typed `@name` under the pointer with the overlay's token order (a link or emoji code takes its `@`), checks the pointer is on that span's own line, and asks the core for the candidate (`Chat.hoverMention`, `Command::MentionHover`, `Chat.hoveredMention` JSON: name, picture, decoration). The tip is the tooltip look with the 18 px face (picture, or the initial on ply-0 at 20 %) and the display name, 10 above the mention's top centre, shown at once. It clears on input, scroll, send and leave. `crop-mention-hover-native-after.png` vs `mention-hover-web.png`: same place and size. |
+| N2  | thread row menu      | Four rows. The menu is now `screens/Shell/MessageMenu.qml`, shared by the chat and the thread panel: quick reactions, Add reaction, View reactions, Edit, Reply, Pin, Copy text, Mark unread, Copy/Open link, Share, Profile, Copy ID, the media rows, Delete and Ban. Thread rows drop the thread row (ThreadSidebar.tsx passes no `onThread`). Reply in a thread row focuses the thread's field (kept: the web puts the reply on the channel composer). Thread rows also open the reactions dialog now, and a moderator can remove a reaction on a thread reply. `thread-menu-native-before.png`, `thread-menu-native-after.png`, `thread-menu-web.png`.             |
+| N3  | Home tooltip         | Native showed "Direct messages" on hover; the web's Home has only its accessible name. Removed. `crop-hover-home-native-after.png` vs `crop-hover-home-web.png`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| N4  | message menu, Shift  | Pin and Delete from the menu always confirmed. Holding Shift over the row now skips the confirm, as the hover bar and the web (`isShiftHeld`) do. `MenuRow.shiftHeld` reads the pointer's modifiers.                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+
+### Sweep
+
+| #   | screen                         | difference                                                                                                                                                                                                                                                                                           | web source                                              | native                                                                 | fixed                                                                                                        |
+| --- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| P1  | settings cards (all)           | A card with a description put 12 px between it and its rows; the web's rows sit flush (their own py-4). Card descriptions were 560 wide (web 62ch, 534) and row descriptions 520 (60ch, 517). A row's hairline sat inside its padding; the web's border-b adds a pixel, so every row was 1 px short. | `settings/primitives.tsx`, `ui/plate.tsx` RuleCard      | `Settings/SettingsCard.qml`, `Settings/SettingsRow.qml`                | yes: `ss-overview-native-before.png`, `-after.png` vs `web-ss-overview.png` (within 1 px)                    |
+| P2  | card legend with a control     | The legend line stayed 14 high, so a 40 px key overflowed it. The web's line grows to the control (items-baseline) and the legend sits on its baseline.                                                                                                                                              | `ui/plate.tsx`                                          | `Settings/SettingsCard.qml`                                            | yes                                                                                                          |
+| P3  | server settings > Invites      | Create link was a 32 px key without the notch and dither; the web's is the 40 px primary. Invite rows had no px-4 inset and a hairline the web has not.                                                                                                                                              | `InvitesTab.tsx`                                        | `Admin/InvitesPage.qml`, `Admin/InviteRow.qml`                         | yes: `ss-invites-native-before.png`, `-after.png` vs `web-ss-invites.png`                                    |
+| P4  | server settings > Audit log    | Rows had no px-4 inset, a hairline, 4 px gaps (web 6 under the line, 2 between details, 4 before the time) and a solid underline (web dotted). A voice status printed its raw JSON; it now reads "Voice status: Good morning", "a clip" or "a GIF". The web prints "[object Object]" (a web bug).    | `AuditLogTab.tsx`, `audit-format.ts`                    | `Admin/AuditPage.qml`, `yap-core/src/admin.rs` `voice_status_shown`    | yes: `ss-audit-native-before.png`, `-after.png` vs `web-ss-audit.png`                                        |
+| P5  | empty states (Bans, overrides) | No DitherGlyph. PageState is now the EmptyState anatomy: the `empty` glyph, 16 gaps, title, a 40ch description; `small` (sm: 2 px cells, 15 px title, 12 gaps) for the override editor and, without art, the empty invite list.                                                                      | `ui/empty-state.tsx`, `server-settings/states.tsx`      | `Admin/PageState.qml`                                                  | yes: `ss-bans-native-before.png`, `-after.png` vs `web-ss-bans.png`                                          |
+| P6  | server settings > Roles        | Rows were 1 px short each (P1).                                                                                                                                                                                                                                                                      | `RolesTab`                                              | —                                                                      | yes: `ss-roles-native-after.png` vs `web-ss-roles.png`                                                       |
+| P7  | channel settings > Overview    | The name and topic rows (FieldRow) drew hairlines the web has not. The topic was 88 high; the web's grows from one line (44). Public sharing was a full-width field plate; the web's is a stack row with a 240 px select on the right. The count sat 6 px high.                                      | `ChannelSettingsModal.tsx`, `server-settings/Field.tsx` | `Admin/ChannelOverview.qml`, `Admin/TopicField.qml`, `SettingsRow.qml` | yes: `cs-overview-native.png`, `-after2.png` vs `web-cs-overview.png`                                        |
+| P8  | channel settings > Permissions | The editor was 8 px further right (web gap-4), the list had no px-2 pt-2 inset, the legend had no role dot, the tri-state rows stacked under the text (the web's stack reads the pane's width) and each segment was 92 wide at 14 px (web: at least 84, 13 px).                                      | `ChannelPermissionsTab.tsx`, `PermissionTriState.tsx`   | `Admin/PermissionsPage.qml`, `OverrideEditor.qml`, `TriState.qml`      | yes: `cs-perm-everyone-native.png`, `-after2.png` vs `web-cs-perm-everyone.png` (within 2 px)                |
+| P9  | profile editor                 | Content was 24 px wider each side (the web's 1040 includes its px-6). The avatar thumb was square (web round, the initial at 15/600). The preview had no Member Since. Collectible keys were 32 px (web 40) and the decoration row had no thumb.                                                     | `SettingsAccountTab.tsx`                                | `Settings/ProfileEditor.qml`, core `SettingsView.member_since`         | yes: `pe-1-native.png`, `pe-1-native-after.png` vs `web-pe-1.png`; `pe-5-native-after.png` vs `web-pe-4.png` |
+| P10 | shop                           | The tabs were Bricolage 14 in ink-2 (web 15 in ink-3). Section headings were Bricolage 20 (web Geist 16/600) with the wrong gaps (web gap-10 between sections, mb-3). A reload while the list was empty hid the 24 px top margin.                                                                    | `ShopView.tsx`, `ui/tabs.tsx`                           | `Shop/ShopView.qml`, `Shop/ShopRows.qml`                               | yes: `shop-native.png`, `shop-native-after.png` vs `web-shop.png` (within 4 px)                              |
+| P11 | collectible picker             | Search, chips, the none tile and the groups line up. The web's chip strip starts at the pane's edge, native's under the search (kept).                                                                                                                                                               | `CollectiblesPicker`                                    | —                                                                      | matches: `picker-deco-native.png` vs `web-picker-deco.png`                                                   |
+| P12 | six themes                     | Rail, sidebar, chat, header, composer, active row and title bar grounds match pixel for pixel in light, dark, Miku light/dark and Spider-Man light/dark.                                                                                                                                             | `styles.css` themes                                     | —                                                                      | matches: `theme-<name>-native.png` vs `theme-<name>-web.png`                                                 |
+| P13 | tooltips                       | A long tooltip ran on one line; the web's caps at 240 and balances its lines (the full date over two).                                                                                                                                                                                               | `ui/tooltip.tsx`                                        | `components/Tooltip.qml`                                               | yes: `crop-time-tip-native-after.png` vs `crop-time-tip-web.png`                                             |
+
+### Functional gaps
+
+A source read of the web's chat components against native (keys, the Ctrl+K
+menu, the message menu, the composer, drops, uploads, the list) found these.
+The web has none of: slash commands, a markdown preview or toolbar, polls,
+scheduled sends, syntax highlighting, an edit-history view, `:emoji`, `#channel`
+or role autocomplete, per-channel drafts, Alt+Up/Down or Ctrl+/. Ctrl+K,
+uploads, drops, Jump to present, the unread banner and divider were already at
+parity.
+
+| #   | gap                                                   | web source                                  | native                                                           | done                                                                 |
+| --- | ----------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------- |
+| F1  | read-only composer                                    | `MessageInput.tsx` ComposerReadOnly         | core `ReadOnly` (Send messages or Administrator), `Composer.qml` | yes: `crop-readonly-peer-native.png` vs `crop-readonly-peer-web.png` |
+| F2  | first-page skeleton                                   | `VirtualMessageList.tsx` MessageSkeleton    | core `PageLoading`, `ChatView.qml`; the welcome waits for it     | yes                                                                  |
+| F3  | typing line: dots and weights                         | `ChatTypingIndicator.tsx`, `TypingDots.tsx` | `ChatView.qml`, core `TypingPing` (the dots run 6 s per ping)    | yes: `crop-typing-native-after2.png` vs `crop-typing-web.png`        |
+| F4  | Shift bar: Copy message ID, Mark unread               | `MessageItem.tsx` 1739-1760                 | `MessageDelegate.qml`                                            | yes                                                                  |
+| F5  | full-date tooltips (time, gutter, edited)             | `MessageItem.tsx` MessageHeaderTime         | `MessageDelegate.qml`, `markdown.rs` `edited:` link              | yes: `crop-time-tip-native-after.png`                                |
+| F6  | each spoiler reveals alone, hover tint                | `MarkdownRenderer.tsx`                      | `markdown.rs` numbers them, `MessageDelegate.qml`                | yes                                                                  |
+| F7  | hover bar kept while its picker is open, 100 ms entry | `MessageItem.tsx` keepBar                   | `MessageDelegate.qml` `keepBar`, set by ChatView and ThreadPanel | yes                                                                  |
+| F8  | Shift skips confirms in the menu                      | `MessageItem.tsx` 977, 1045                 | N4                                                               | yes                                                                  |
+| F9  | reply bar: "Click to see attachment" / "(no content)" | `ReplyPreviewContent.tsx`                   | `Composer.qml`                                                   | yes                                                                  |
+| F10 | DM welcome avatar                                     | `ChatWelcomeContent.tsx`                    | core `DmView.avatar/deco`, `ChatView.qml`                        | yes                                                                  |
+| F11 | Keybinds: Ctrl+K row                                  | `settings/KeybindsPanel.tsx`                | `KeybindsPanel.qml`, `yap-core/src/settings.rs`                  | yes                                                                  |
+| F12 | composer key tooltips "Stickers", "Emoji"             | `InputControls.tsx`                         | `Composer.qml`                                                   | yes                                                                  |
+| F13 | voice-channel text chat                               | `ChatPageClient.tsx` 1436-1464              | the Show chat key does nothing                                   | no (M-L)                                                             |
+| F14 | each channel reopens where it was left                | `useChatArea.ts` 381-430                    | always the divider or the end                                    | no (M)                                                               |
+| F15 | mentions edit as one unit                             | `useMessageInput.ts` 435-560                | needs a synchronous member check in the composer                 | no                                                                   |
+| F16 | emoji drawn in the composer                           | `InputMentionOverlay.tsx`                   | the highlighter colours links and mentions only                  | no (M)                                                               |
+| F17 | keyboard focus on rows shows the bar                  | `MessageItem.tsx` 1721                      | rows take no focus                                               | no                                                                   |
+| F18 | reply bar name in its style, fade                     | `ReplyIndicator.tsx`                        | plain name, no fade                                              | no                                                                   |
+| F19 | Ctrl+L in Listen Together                             | `ListenTogetherPanel.tsx`                   | —                                                                | no                                                                   |
+| F20 | over 25 MB: toast, no tile                            | `useMessageInput.ts` 626-632                | a failed tile that says why (kept)                               | kept                                                                 |
+
+### Totals
+
+- 4 work items, all fixed. 13 sweep rows: 10 fixed, 2 matching, 1 matching
+  with one kept difference (P11). 20 functional gaps: 12 implemented, 7 open,
+  1 kept.
+- Not at parity:
+  - F13-F19 above.
+  - The profile editor has no avatar Crop key (the web's crop editor), no
+    nameplate Upload and no display-name style editor ("Coming later").
+  - The shop's refresh key is native's own; the hero is 3 px shorter and the
+    first heading 4 px lower than the web's.
+  - The settings dialogs sit under the title bar (kept since pass 8).
+  - The web's "text-pretty" wrapping (row descriptions avoid a lone last
+    word) has no Qt equivalent; lines may break one word later.
+  - The Shift bar and the hover-bar animation were not captured: the test
+    pointer carries no modifiers.
+  - Web bug: the audit log prints an object voice status as "[object
+    Object]" (`audit-format.ts` `channelDetails`).
+
+### Checks
+
+- `cargo clippy --workspace -- -D warnings` passes.
+- `cargo fmt --all -- --check` is clean for the files this pass changed; it
+  still flags `rust/build.rs` and `yap-core/src/fixture.rs`, as at 0.2.2.
+- `cargo test -p yap-core -p yap-protocol -p yap-cache -p yap-voice`
+  (`LK_CUSTOM_WEBRTC` set): 1644 passed, 0 failed.
+- `build.ps1` into `F:/ct/yapn/rel` is green (6 builds this pass).

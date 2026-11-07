@@ -156,14 +156,17 @@ Item {
         Column {
             visible: !root.adding
             width: parent.width
-            topPadding: 4
+            // The list's li: px-2 pt-2 pb-2.
+            topPadding: 8
+            bottomPadding: 8
+            leftPadding: 8
             spacing: 1
             Repeater {
                 model: root.rows
                 delegate: KitRow {
                     id: entry
                     required property var modelData
-                    width: listCard.width
+                    width: listCard.width - 16
                     tall: true
                     current: root.selectedId === modelData.targetId
                     Accessible.name: modelData.name
@@ -311,7 +314,7 @@ Item {
     Column {
         id: editorColumn
         visible: root.overrides.state === "ready"
-        x: listCard.width + 24
+        x: listCard.width + 16 // gap-4
         width: parent.width - x
 
         Loader {
@@ -328,6 +331,9 @@ Item {
         }
         PageState {
             visible: root.selected === null
+            // EmptyEditor: EmptyState size="sm", pt-7.
+            small: true
+            topPadding: 28
             title: qsTr("Pick a role or member")
             message: qsTr("Choose one from the list to change what they can do in %1, or add a new override.").arg(root.channel.label)
         }

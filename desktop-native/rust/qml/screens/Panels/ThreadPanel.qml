@@ -122,6 +122,7 @@ SidePanelFrame {
             editingId: root.editingId
             highlightId: ""
             threadActions: false
+            keepBar: reactionPicker.visible && reactionPicker.messageId === messageId
             foot: messageId === Panels.threadRootId ? rootFoot : null
             onReplyRequested: replyField.forceActiveFocus()
             onEditRequested: id => root.editingId = id
@@ -137,15 +138,8 @@ SidePanelFrame {
                 else
                     Chat.deleteMessage(id)
             }
-            onMenuRequested: (id, author, text, mine, anchor, x, y) => {
-                rowMenu.messageId = id
-                rowMenu.author = author
-                rowMenu.text = text
-                rowMenu.mine = mine
-                rowMenu.pinned = row.pinned
-                const at = anchor.mapToItem(root, x, y)
-                rowMenu.popup(root, Math.min(at.x, root.width - rowMenu.width - 8), at.y)
-            }
+            onMenuRequested: (id, author, text, mine, anchor, x, y) => rowMenu.openOn(row, id, author, text, mine, anchor, x, y)
+            onReactionDetailsRequested: (id, emoji) => ShellState.reactionsRequested(id, emoji)
             onJumpRequested: id => Chat.jumpToMessage(Nav.activeChannelId, id)
             onProfileRequested: (userId, anchor) => ShellState.showProfile(userId, anchor, "left")
             onImageOpened: (images, index) => viewer.show(images, index)
@@ -309,42 +303,26 @@ SidePanelFrame {
         }
     }
 
-    MenuPanel {
+    // The full message menu, as the web gives thread rows (MessageMenu.qml),
+    // without the thread row. Reply goes to the thread's own field.
+    MessageMenu {
         id: rowMenu
-        property string messageId
-        property string author
-        property string text
-        property bool mine
-        property bool pinned
-        MenuRow {
-            text: qsTr("Edit message")
-            glyph: "edit"
-            visible: rowMenu.mine
-            height: visible ? implicitHeight : 0
-            onTriggered: root.editingId = rowMenu.messageId
+        host: root
+        threadActions: false
+        onEditRequested: id => root.editingId = id
+        onReplyRequested: replyField.forceActiveFocus()
+        onPinRequested: (id, author, text, pin, confirm) => root.setPin(id, author, text, pin, confirm)
+        onDeleteRequested: (id, author, text, row, confirm) => {
+            if (confirm)
+                deleteDialog.ask(id, author, text)
+            else
+                Chat.deleteMessage(id)
         }
-        MenuRow {
-            text: rowMenu.pinned ? qsTr("Unpin message") : qsTr("Pin message")
-            glyph: "pin"
-            visible: Panels.canPin
-            height: visible ? implicitHeight : 0
-            onTriggered: root.setPin(rowMenu.messageId, rowMenu.author, rowMenu.text, !rowMenu.pinned, true)
+        onReactionPickerRequested: (id, anchor) => {
+            reactionPicker.messageId = id
+            reactionPicker.openBelow(anchor)
         }
-        MenuRow {
-            text: qsTr("Copy message link")
-            glyph: "link"
-            onTriggered: clipboard.copyText(Chat.messageLink(rowMenu.messageId))
-        }
-        // groupMenuItems: the danger row last, behind a rule.
-        MenuRule { visible: rowMenu.mine || Chat.canManageMessages; height: visible ? implicitHeight : 0 }
-        MenuRow {
-            text: qsTr("Delete message")
-            glyph: "trash"
-            danger: true
-            visible: rowMenu.mine || Chat.canManageMessages
-            height: visible ? implicitHeight : 0
-            onTriggered: deleteDialog.ask(rowMenu.messageId, rowMenu.author, rowMenu.text)
-        }
+        onOpenLinkRequested: url => leaveSite.load()?.request(url)
     }
 
     EmojiPicker {
@@ -364,6 +342,8 @@ SidePanelFrame {
     }
 
     ClipboardText { id: clipboard }
+
+    LazyPopup { id: leaveSite; sourceComponent: LeaveSiteDialog {} }
 
     ImageViewer { id: viewer }
 }
