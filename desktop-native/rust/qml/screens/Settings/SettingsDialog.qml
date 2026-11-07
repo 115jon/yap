@@ -611,7 +611,7 @@ T.Popup {
     readonly property string landing: SettingsNav.target
     onLandingChanged: if (landing.length > 0) Qt.callLater(land)
     onShownIdChanged: Qt.callLater(land)
-    onWantedChanged: {
+    function follow() {
         if (wanted) {
             open()
             Qt.callLater(land)
@@ -619,6 +619,9 @@ T.Popup {
             close()
         }
     }
+    onWantedChanged: follow()
+    // Made on the first open (LazyPopup), already wanted.
+    Component.onCompleted: follow()
     Connections {
         target: SettingsNav
         function onOpenChanged() {

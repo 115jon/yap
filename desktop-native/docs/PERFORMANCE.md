@@ -341,3 +341,255 @@ How they compare:
 Side observation: after the headless peer's browser closed, the native
 sidebar kept showing it in the voice channel. The server's roster
 (`quit-roster.mjs`) was already empty.
+
+# Performance pass 2 (2026-11-06)
+
+The first pass's remaining gaps, in the brief's order. Before is the tree at
+25fbec7b (the pass 1 "after" build, re-measured where noted); after is the
+final build of this pass. Same machine and method as pass 1.
+
+## Method (new)
+
+- `YAP_DEBUG_OBJECTS=N` (`cpp/main.cpp`, `dumpObjectCounts`): every N
+  seconds, the objects alive in the window's trees, closed popups' trees
+  included, split by the outermost popup that owns them, then the files that
+  declare the most of the rest. `YAP_DEBUG_GC=1` runs the JS collector and
+  trims the component cache before each count.
+- `YAP_DEBUG_ANIMATIONS` also lists each `AnimatedImage` (playing, frame,
+  shown) and each `ViewportWatch`, walking the item tree (a list's
+  delegates are not QObject children, so `findChildren` misses them).
+- `QSG_RENDERER_DEBUG=change` to see what each frame dirtied, and
+  `QSG_RENDER_TIMING=1` for the render rate.
+- Scroll: the render thread's `syncAndRender: start, elapsed since last
+call` intervals, inside the two wheel windows only (the pause between
+  them is left out). Scripts: `F:/ct/yapn/tools/p2/` (`idle.ps1`,
+  `scroll.ps1`, `popups.ps1`, `spike.ps1`, `linkflags.ps1`, `hover.ps1`).
+- The displays were checked awake (59 Hz vblank) for the CPU samples. One
+  earlier sample (0.65 %) was taken with them asleep and is not used.
+
+## Findings and fixes
+
+### 1. Idle memory: closed popups built at startup
+
+**Finding.** A new counter, `YAP_DEBUG_OBJECTS=N` (`cpp/main.cpp`), walks the
+window's trees every N seconds (closed popups' trees too, which hang off the
+popup rather than the window) and splits the objects by the outermost popup
+that owns them. At idle on the user's account: 13,030 objects, 9,802 of them
+(75 %) in 45 closed popups. The largest were the profile editor (1,587),
+Settings (912), the voice status dialog (742), the profile popout (456), the
+two emoji pickers (442 each), the message menu (395), the peer menu (331),
+the account popout (279), the tree and server menus (271, 267), the camera
+dialog (250) and ~25 tooltips (245 together).
+
+**Fix.** `components/LazyPopup.qml`: a Loader that makes its popup when it is
+first opened (`load()`, synchronous) or while `when` holds, and lets it go a
+moment after `closed` (`keep: true` keeps it). A popup that sets no parent
+of its own is given the declaring item as parent, so it positions as before.
+Every popup in the list above, the drawers' contents and the hover tooltips
+go through it; state-driven popups (Settings, the theme sheet, the incoming
+call card) open themselves as they are made (`Component.onCompleted`). The
+emoji and GIF pickers are kept once made (their grids are costly to build
+again); Settings too (see 3).
+
+Also lazy now: the camera list. `CameraCapture` listed cameras in its
+constructor, which starts Media Foundation; it now lists on the first read
+(`cpp/camera.cpp`, `ensureListed`), and DmCallRegion reads it only once
+joined.
+
+What is left of the 120 MB target: a signed-out window (the shell made,
+1,700 objects, no account data) is already 136.5 MB private. D3D11 is the
+cheapest backend here (D3D12 292 MB, OpenGL 228 MB, same build). The
+process heap holds ~95 MB of small blocks with no dominant size, so the
+next cuts need a heap profile with stacks (UMDH needs `gflags +ust` on the
+image name; not done, as it would also apply to the user's own install of
+the same exe).
+
+### 2. Focused idle with animated content
+
+Three causes:
+
+- **GIF tiles in the list's cache buffer played.** `cacheBuffer: 1200` keeps
+  rows made up to 1,200 px outside the viewport. Their `AnimatedImage` tiles
+  and GIF-mode video loops were `visible` (they are, to Qt), so every frame
+  they decoded cost a full window render with nothing new on screen.
+  `ViewportWatch` (`cpp/animatedpicture.h`) reports whether its item shows
+  inside the window and every clipping ancestor, re-checked after each
+  rendered frame; `MediaTile.qml` and `EmbedVideo.qml` play only while it
+  says so. (`AnimatedPicture` already did; it now shares the same test.)
+- **Every animated picture ran its own timer.** Decorations, nameplates and
+  effects at different delays and phases each asked for a render, so a few
+  of them kept the window near 60 renders a second. Frame changes now land
+  on a shared 30 Hz grid (`animatedpicture.cpp`, `kSlotMs`), so pictures due
+  in the same slot share one render; a picture keeps its speed by skipping
+  to the frame due when the slot comes.
+- **A GIF server icon kept its own clock.** `AnimatedImage` runs a QMovie
+  timer of its own. Small GIFs (rail icons) now play through
+  `AnimatedPicture`, which decodes them with Qt's GIF reader
+  (`decodeGif`), so they join the grid (`ServerIcon.qml`).
+- **Every decoration frame cost two renders.** `QSG_RENDERER_DEBUG=change`
+  showed each grid tick followed, 15 ms later, by a frame with nothing
+  dirty. Offline member rows dimmed through `layer.enabled`; a decoration
+  inside such a layer re-renders the layer, and the layer then asks the
+  window for another frame. The dim is now the ground at 50 % over the row
+  (`MemberEntry.qml`): over a solid ground that is the same picture as the
+  row at 50 %, with no layer.
+
+### 3. Settings left memory behind per open
+
+**Finding.** Made per open (the lazy pattern above), 20 opens grew private
+bytes by 159 MB, ~8 MB an open; pass 1, with the dialog made once, measured
++2.6 MB an open. QML objects did not leak: the counter came back to the same
+total after each close. Forcing the JS collector (`YAP_DEBUG_GC=1`) still
+left ~7 MB an open, so it is native memory. Bisecting:
+
+- switching pages inside one open (20 panel rebuilds, the profile card
+  included) grew nothing;
+- the account popout (the same profile card) and the profile editor (the
+  same card, modal) cycled flat;
+- the new private allocations were 2.1 and 3.6 MB blocks.
+
+Replacing the modal shadow (below) did not change it (+10.8 MB an open), so
+the cause is still open: something the dialog shell makes once per instance.
+
+**Fix (mitigation).** Settings is made on its first open and kept
+(`Shell.qml`, `keep: true`): 20 opens now grow nothing (-1.1 MB after the
+settle), better than pass 1's +2.6 MB an open, since the shadow no longer
+builds a layer per open. The first open costs ~86 MB (the dialog, the
+profile card's decoded effects), which stays.
+
+**Shadows.** `FloatShadow.qml` now draws a nine-slice made once per style by
+`image://shadow` (`cpp/shadowprovider.cpp`): the CSS shadow (Gaussian,
+sigma = blur / 2, the spread and offset exact), no layer and no blur pass,
+so every float with a shadow (menus, popovers, the hover bar, dialogs) opens
+and redraws without an off-screen render.
+
+### 4. Scroll on rich history
+
+Rows came back from the pool (`reuseItems`) and were rebound inside the
+frame they entered on: their embeds and attachments were rebuilt there,
+where the cache buffer's incubation cannot help. `ChatView.qml` turns reuse
+off; with `cacheBuffer: 1200` new rows are incubated across frames ahead of
+the viewport. No frame went past 33 ms in the test below; the price is CPU
+while scrolling (46 % against 24 %), since rows are made rather than
+rebound.
+
+### 5. Exe size
+
+A `/MAP` of the link, symbols summed by library (approximate: a symbol's
+size is the gap to the next public one):
+
+| part                                                                            | MiB  |
+| ------------------------------------------------------------------------------- | ---- |
+| libwebrtc (LiveKit's prebuilt, with libaom AV1, FFmpeg H.264 pieces, BoringSSL) | 18.1 |
+| Rust (all crates, thin LTO, one codegen unit, `opt-level = 3`)                  | 15.9 |
+| QML compiled ahead of time (qmlcachegen C++) and type registration              | 8.8  |
+| Qt modules (Gui, Quick, Qml, Core, Templates, Basic, Network, ...)              | ~21  |
+| static CRT                                                                      | ~3   |
+| C built by `cc` (Opus, RNNoise, libvpx, ...)                                    | 2.7  |
+| SQLite                                                                          | 1.4  |
+| fonts, icons and SVGs (qrc, in `.rdata`)                                        | ~2   |
+
+Fixed: a static Qt links every default plugin of a type. The ICO, ICNS,
+TGA, TIFF and WBMP decoders, the OpenSSL TLS backend (Schannel is the one
+used), the SVG icon engine, network information and all of the QML debug
+and profiler services (outside the profiling build) are now excluded
+(`CMakeLists.txt`). The fonts are already subset (1.5 MB for 22 faces).
+`/OPT:REF /OPT:ICF` are on (MSVC's default without `/DEBUG`), and the Rust
+side already has thin LTO, one codegen unit and stripped symbols.
+
+Not done, and what is left: the budget needs ~18 MiB more. Options, by
+size: a libwebrtc built without the software AV1 and H.264 codecs (the
+prebuilt has no switch for it); qmlcachegen's bytecode-only mode for cold
+screens (Admin, Shop, Settings), which `cxx-qt-build` 0.10 does not expose;
+`opt-level = "s"` for the cold Rust crates (~3 MiB, measure the hot paths
+first).
+
+### 6. The WebRTC factory after a call
+
+The keeper is still needed while a factory lives: every call opens the ADM
+(its device choice is applied there, and `YAP_ADM_AUDIO=1` records and
+plays through it), and without a peer connection WebRTC terminates the ADM
+for good. So the factory and the keeper now go together, 30 s after the
+last call ends, if nothing has used the factory since
+(`yap-voice/src/engine/webrtc.rs`, `release_factory_later`); the next call
+makes a new factory and a new ADM. The standby on an occupied voice landing
+now follows the web's `useVoiceStandbyActive`: the window off screen
+(minimised or in the tray) keeps it for 15 s, then drops it; shown again,
+it comes back (`Command::WindowShown`, `reduce.rs set_window_shown`).
+
+Measured on the test account (two calls in Native Spike Lab › General, each
+under 2 minutes, left with the leave key): `[voice] webrtc factory released`
+30 s after each leave; threads 128 in the call, 124 after it, 108 after the
+release; minimised afterwards 0.05 % (pass 1: the 100 Hz device ran for the
+rest of the process). The second call made a new factory and sent audio
+normally (500 frames in and out per 5 s). The hidden-window standby was
+tested in the reducer only (no second account was in the channel).
+
+### 7. A stale voice roster in the sidebar
+
+The gateway sends `VOICE_CHANNEL_STATES` after Identify, Resume and a
+channel subscribe, but only when some visible channel has someone in it
+(`meeting-room.ts sendVoiceChannelStates` returns early on an empty
+payload). A peer who left while our gateway was reconnecting therefore
+stayed in the sidebar for good: no update for the gap, and no snapshot to
+replace it. After a Ready or Resumed the core now checks, after 5 s, which
+channels the server resent (a snapshot, or an update for that channel) and
+drops the rest (`reduce.rs expect_voice_rosters`, `check_voice_rosters`).
+Tests: `a_roster_emptied_while_the_gateway_was_away_should_clear_after_reconnect`
+and three more in `tests/reducer.rs`.
+
+## Before and after (pass 2)
+
+On the user's account (`--profile jontest`), Predator Island › #general,
+the window focused, unless noted.
+
+| metric                                               | before                             | after                                                  |
+| ---------------------------------------------------- | ---------------------------------- | ------------------------------------------------------ |
+| QML objects alive at idle                            | 13,030 (9,802 in 45 closed popups) | **3,944** (49 in 2)                                    |
+| `qml loaded` after launch, warm / cold               | 462-470 / 635 ms                   | **160-165 / 220 ms**                                   |
+| first frame, warm p50 / cold                         | 893 / 1,071 ms                     | **692 / 743 ms**                                       |
+| idle working set / private                           | 238 / 263 MB (pass 1: 232 / 249)   | **174 / 194 MB**                                       |
+| idle working set / private, chat-10k fixture         | 219 / 242 MB                       | **183 / 208 MB**                                       |
+| signed-out window (floor), private                   | n/a                                | 136.5 MB                                               |
+| focused idle CPU / GPU (decorations, GIF rail icon)  | 5.9 % / 7.0 %                      | **4.2-4.9 % / 3.8-4.1 %**                              |
+| same, before the rail icon joined the grid           | n/a                                | 2.15 % / 2.87 %                                        |
+| renders per second at that idle                      | ~48 (half of them empty)           | at most 30 (shared grid)                               |
+| GIFs in the list's cache buffer, off screen          | playing                            | **paused**                                             |
+| Settings, 20 opens and closes                        | +2.6 MB an open (pass 1)           | **-1.1 MB in all** (kept once made; ~86 MB first open) |
+| scroll, rich history: frame interval p50/p95/p99/max | 16/33/65/78 ms                     | **16/20/30/32 ms**                                     |
+| scroll frames > 33 ms / > 50 ms                      | 43 / 19 of 897                     | **0 / 0 of 643**                                       |
+| CPU during that scroll                               | 24 %                               | 46 %                                                   |
+| exe                                                  | 83,044,352 B (79.2 MiB)            | 81,704,448 B (77.9 MiB)                                |
+| WebRTC after a call                                  | lives for the process              | **released 30 s after the last call**                  |
+| threads in a call / after leave / after release      | n/a                                | 128 / 124 / 108                                        |
+| minimised idle after a call                          | 100 Hz device kept running         | **0.05 %**                                             |
+| a voice roster emptied during a gateway gap          | stale for good                     | cleared 5 s after Ready                                |
+
+Popups checked open, animating and drawn after the change (posted input,
+screenshots): Settings, profile editor, account popout, emoji picker, GIF
+picker, notification inbox, server menu, channel tree menu, member menu,
+profile popout, message menu, a tooltip. No QML warnings in the final
+build's logs (the scroll log has 18 image loads refused by TikTok's CDN,
+403, which are content). Escape over the profile editor opened from
+Settings did not close it in the harness (its close key did); posted keys
+to a window that is never foreground were not checked against the base
+build.
+
+## Remaining gaps (pass 2)
+
+1. **Idle memory is 194 MB private, not under 120.** The signed-out floor
+   is 136.5 MB (D3D11, the driver, the static Qt and the QML engine). The
+   rest needs a heap profile with stacks.
+2. **Focused idle with animated content is 4.2-4.9 %, not under 3 %.**
+   About 30 renders a second at ~1 ms of CPU each (the render itself is
+   0.12 ms; the rest is presenting and the GUI thread). A coarser grid
+   (20-25 Hz) would cut it further at some smoothness.
+3. **Settings' per-instance leak is mitigated, not found.** Native memory,
+   ~10 MB an instance, made by the dialog shell; panels, the profile card
+   and the shadow are cleared.
+4. **Scroll is smooth but costs twice the CPU** (rows made, not reused).
+5. **The exe is 77.9 MiB against a 60 MB budget.** See 5 above: libwebrtc
+   without its software AV1/H.264, qmlcachegen bytecode for cold screens,
+   `opt-level = "s"` for cold crates.
+6. **The hidden-window standby** is covered by reducer tests, not yet by a
+   live call with a second account in the channel.

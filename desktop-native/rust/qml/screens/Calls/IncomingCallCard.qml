@@ -16,6 +16,8 @@ Popup {
     readonly property bool wanted: ringing && calls.channelId !== Nav.activeChannelId
 
     onWantedChanged: wanted ? open() : close()
+    // Made as the call rings (LazyPopup).
+    Component.onCompleted: if (wanted) open()
 
     parent: Overlay.overlay
     x: parent ? parent.width - width - 16 : 0

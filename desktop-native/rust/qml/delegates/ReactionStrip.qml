@@ -71,9 +71,12 @@ Flow {
                     font: Theme.type.kbd
                 }
             }
-            Tooltip {
-                visible: chipHover.containsMouse
-                text: chip.modelData.tip
+            LazyPopup {
+                when: chipHover.containsMouse
+                sourceComponent: Tooltip {
+                    visible: chipHover.containsMouse
+                    text: chip.modelData.tip
+                }
             }
             MouseArea {
                 id: chipHover

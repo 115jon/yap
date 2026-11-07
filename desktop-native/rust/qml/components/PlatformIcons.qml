@@ -40,9 +40,12 @@ Row {
             size: root.size
             color: root.shown
             HoverHandler { id: glyphHover }
-            Tooltip {
-                visible: glyphHover.hovered
-                text: root.meta[glyph.modelData]?.label ?? ""
+            LazyPopup {
+                when: glyphHover.hovered
+                sourceComponent: Tooltip {
+                    visible: glyphHover.hovered
+                    text: root.meta[glyph.modelData]?.label ?? ""
+                }
             }
         }
     }

@@ -1,4 +1,5 @@
 import QtQuick
+import Yap.Media
 import com.yap.native
 
 // One rail tile (ServerList.tsx RAIL_TILE): a 40 px tint-1 key with a
@@ -68,7 +69,7 @@ Item {
             id: picture
             anchors.fill: parent
             source: entry.icon
-            visible: status === Image.Ready && !(gif.item && gif.item.status === AnimatedImage.Ready)
+            visible: status === Image.Ready && !(gif.item && gif.item.status === AnimatedPicture.Ready)
             fillMode: Image.PreserveAspectCrop
             clip: true
             asynchronous: true
@@ -76,18 +77,20 @@ Item {
             sourceSize.height: Theme.railTile * 2
         }
         // A GIF icon plays, as the web's <img> does (not under reduced
-        // motion, and only while the app is in front).
+        // motion, and only while the app is in front). AnimatedPicture, not
+        // AnimatedImage: its frames land on the grid the decorations share,
+        // so an animated icon costs the window no renders of its own.
         Loader {
             id: gif
             anchors.fill: parent
             active: /\.gif($|[?#])/i.test(entry.icon)
-            sourceComponent: AnimatedImage {
+            sourceComponent: AnimatedPicture {
                 source: entry.icon
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
+                fillMode: AnimatedPicture.PreserveAspectCrop
                 clip: true
-                visible: status === AnimatedImage.Ready
-                playing: !Theme.reducedMotion && Qt.application.state === Qt.ApplicationActive
+                // (It draws nothing until its frames are in, and only
+                // loads while visible: no `visible` tied to its status.)
+                playing: !Theme.reducedMotion
             }
         }
         // You are here: your call's server wears a 1 px path ring inside
@@ -152,83 +155,91 @@ Item {
 
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
     TapHandler { id: tap; onTapped: entry.selected() }
-    Tooltip {
-        visible: hover.hovered && !entry.voice
-        text: entry.name
-        side: "right"
+    LazyPopup {
+        // Made while hovered.
+        when: hover.hovered && !entry.voice
+        sourceComponent: Tooltip {
+            visible: hover.hovered && !entry.voice
+            text: entry.name
+            side: "right"
+        }
     }
     // With people in voice the tooltip names the channels and who is in
     // them (ServerList.tsx): the name at 600, the summary at 70 %, then
     // each channel with its glyph and the names under it.
-    Tooltip {
-        id: voiceTipBox
-        visible: hover.hovered && entry.voice
-        side: "right"
-        topPadding: 6
-        bottomPadding: 6
-        contentItem: Column {
-            spacing: 6
-            Column {
-                Text {
-                    width: Math.min(implicitWidth, 260)
-                    elide: Text.ElideRight
-                    textFormat: Text.PlainText
-                    text: entry.name
-                    color: Theme.ply0
-                    font.family: Theme.type.captionStrong.family
-                    font.pixelSize: Theme.type.captionStrong.pixelSize
-                    font.weight: Font.DemiBold
-                }
-                Text {
-                    textFormat: Text.PlainText
-                    text: entry.voiceLines.length > 0 ? entry.voiceLines[0] : ""
-                    color: Theme.ply0
-                    opacity: 0.7
-                    font: Theme.type.captionStrong
-                }
-            }
-            Repeater {
-                // Pairs of lines after the summary: channel, then names; a
-                // trailing odd line is the "+N more" note.
-                model: Math.ceil((entry.voiceLines.length - 1) / 2)
+    LazyPopup {
+        // Made while hovered.
+        when: hover.hovered && entry.voice
+        sourceComponent: Tooltip {
+            id: voiceTipBox
+            visible: hover.hovered && entry.voice
+            side: "right"
+            topPadding: 6
+            bottomPadding: 6
+            contentItem: Column {
+                spacing: 6
                 Column {
-                    id: channelBlock
-                    required property int index
-                    readonly property string title: entry.voiceLines[1 + index * 2]
-                    readonly property string names: entry.voiceLines[2 + index * 2] ?? ""
-                    readonly property bool more: names.length === 0
-                    Row {
-                        spacing: 6
-                        Icon {
-                            anchors.verticalCenter: parent.verticalCenter
-                            visible: !channelBlock.more
-                            name: "voiceChannel"
-                            size: 12
-                            color: Theme.ply0
-                            opacity: 0.7
-                        }
-                        Text {
-                            width: Math.min(implicitWidth, 240)
-                            elide: Text.ElideRight
-                            textFormat: Text.PlainText
-                            text: channelBlock.title
-                            color: Theme.ply0
-                            opacity: channelBlock.more ? 0.7 : 1
-                            font.family: Theme.type.captionStrong.family
-                            font.pixelSize: Theme.type.captionStrong.pixelSize
-                            font.weight: channelBlock.more ? Theme.type.captionStrong.weight : Font.DemiBold
-                        }
-                    }
                     Text {
-                        visible: !channelBlock.more
-                        leftPadding: 18
-                        width: Math.min(implicitWidth, 258)
+                        width: Math.min(implicitWidth, 260)
                         elide: Text.ElideRight
                         textFormat: Text.PlainText
-                        text: channelBlock.names
+                        text: entry.name
+                        color: Theme.ply0
+                        font.family: Theme.type.captionStrong.family
+                        font.pixelSize: Theme.type.captionStrong.pixelSize
+                        font.weight: Font.DemiBold
+                    }
+                    Text {
+                        textFormat: Text.PlainText
+                        text: entry.voiceLines.length > 0 ? entry.voiceLines[0] : ""
                         color: Theme.ply0
                         opacity: 0.7
                         font: Theme.type.captionStrong
+                    }
+                }
+                Repeater {
+                    // Pairs of lines after the summary: channel, then names; a
+                    // trailing odd line is the "+N more" note.
+                    model: Math.ceil((entry.voiceLines.length - 1) / 2)
+                    Column {
+                        id: channelBlock
+                        required property int index
+                        readonly property string title: entry.voiceLines[1 + index * 2]
+                        readonly property string names: entry.voiceLines[2 + index * 2] ?? ""
+                        readonly property bool more: names.length === 0
+                        Row {
+                            spacing: 6
+                            Icon {
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: !channelBlock.more
+                                name: "voiceChannel"
+                                size: 12
+                                color: Theme.ply0
+                                opacity: 0.7
+                            }
+                            Text {
+                                width: Math.min(implicitWidth, 240)
+                                elide: Text.ElideRight
+                                textFormat: Text.PlainText
+                                text: channelBlock.title
+                                color: Theme.ply0
+                                opacity: channelBlock.more ? 0.7 : 1
+                                font.family: Theme.type.captionStrong.family
+                                font.pixelSize: Theme.type.captionStrong.pixelSize
+                                font.weight: channelBlock.more ? Theme.type.captionStrong.weight : Font.DemiBold
+                            }
+                        }
+                        Text {
+                            visible: !channelBlock.more
+                            leftPadding: 18
+                            width: Math.min(implicitWidth, 258)
+                            elide: Text.ElideRight
+                            textFormat: Text.PlainText
+                            text: channelBlock.names
+                            color: Theme.ply0
+                            opacity: 0.7
+                            font: Theme.type.captionStrong
+                        }
                     }
                 }
             }

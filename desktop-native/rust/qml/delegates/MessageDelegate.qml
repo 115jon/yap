@@ -561,9 +561,12 @@ Item {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: mouse => root.embedsRemoveRequested(root.messageId, (mouse.modifiers & Qt.ShiftModifier) !== 0)
                     }
-                    Tooltip {
-                        visible: removeArea.containsMouse
-                        text: qsTr("Remove all embeds (Shift+click to skip confirmation)")
+                    LazyPopup {
+                        when: removeArea.containsMouse
+                        sourceComponent: Tooltip {
+                            visible: removeArea.containsMouse
+                            text: qsTr("Remove all embeds (Shift+click to skip confirmation)")
+                        }
                     }
                     Rectangle {
                         anchors.fill: parent
@@ -754,7 +757,10 @@ Item {
                             asynchronous: true
                             source: quick.modelData.u
                         }
-                        Tooltip { visible: quickTap.containsMouse; text: ":" + quick.modelData.s + ":" }
+                        LazyPopup {
+                            when: quickTap.containsMouse
+                            sourceComponent: Tooltip { visible: quickTap.containsMouse; text: ":" + quick.modelData.s + ":" }
+                        }
                         MouseArea {
                             id: quickTap
                             anchors.fill: parent

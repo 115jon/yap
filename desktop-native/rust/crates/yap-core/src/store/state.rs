@@ -770,6 +770,16 @@ pub struct State {
     pub(super) standby: Option<Standby>,
     /// Standby sessions are allowed (`YAP_VOICE_STANDBY`).
     pub(super) standby_enabled: bool,
+    /// The window is on screen (not minimised, not in the tray).
+    pub(super) window_shown: bool,
+    /// Hidden past the grace: no standby (useVoiceStandbyActive).
+    pub(super) standby_paused: bool,
+    /// Counts hides and shows; a grace timer for an older one is ignored.
+    pub(super) window_generation: u64,
+    /// The pending roster check after a gateway Ready or Resumed, and the
+    /// channels whose roster the server sent since.
+    pub(super) voice_roster_check: u64,
+    pub(super) voice_confirmed: HashSet<String>,
     /// DM calls, moves, stickers, the voice details.
     pub(super) calls: super::calls::CallsState,
     pub(super) voice_prefs: VoicePrefs,
@@ -854,6 +864,11 @@ impl State {
             voice: None,
             standby: None,
             standby_enabled: true,
+            window_shown: true,
+            standby_paused: false,
+            window_generation: 0,
+            voice_roster_check: 0,
+            voice_confirmed: HashSet::new(),
             calls: Default::default(),
             voice_prefs: VoicePrefs::default(),
             voice_error: String::new(),

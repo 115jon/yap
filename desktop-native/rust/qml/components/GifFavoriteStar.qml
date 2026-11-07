@@ -35,10 +35,13 @@ T.Button {
     Accessible.checkable: true
     Accessible.checked: control.isSaved
 
-    Tooltip {
-        visible: control.hovered
-        text: control.label
-        side: "right"
+    LazyPopup {
+        when: control.hovered
+        sourceComponent: Tooltip {
+            visible: control.hovered
+            text: control.label
+            side: "right"
+        }
     }
 
     background: Rectangle {

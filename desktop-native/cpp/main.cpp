@@ -3,6 +3,8 @@
 
 #include <QtCore/QDirIterator>
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QHash>
+#include <QtCore/QSet>
 #include <QtCore/QTimer>
 #include <QtGui/QFont>
 #include <QtGui/QFontDatabase>
@@ -21,10 +23,13 @@
 // enabler turns the debug services on.
 #include <QtQml/qqmldebug.h>
 #endif
+#include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 #include <QtQuickControls2/QQuickStyle>
 
+#include <algorithm>
 #include <cstdio>
+#include <functional>
 
 #include "animatedpicture.h"
 #include "authmedia.h"
@@ -37,6 +42,7 @@
 #include "logfile.h"
 #include "mediashell.h"
 #include "profile.h"
+#include "shadowprovider.h"
 #include "shareprovider.h"
 #include "thumbbar.h"
 #include "videohub.h"
@@ -202,10 +208,103 @@ static void dumpRunningAnimations(QQmlApplicationEngine& engine)
                      qPrintable(picture->source().fileName()), picture->width(),
                      picture->height());
       }
+  // Qt's own GIF players, and whether each viewport watch sees its item.
+  // Through the item tree: a list's delegates are not QObject children.
+  std::function<void(QQuickItem*)> walk = [&walk](QQuickItem* item) {
+    if (item->inherits("QQuickAnimatedImage"))
+      std::fprintf(stderr, "[anim-debug] AnimatedImage playing %d paused %d frame %d/%d status %d shown %d\n",
+                   item->property("playing").toBool(), item->property("paused").toBool(),
+                   item->property("currentFrame").toInt(), item->property("frameCount").toInt(),
+                   item->property("status").toInt(), visibleInWindow(item));
+    else if (auto* watch = qobject_cast<ViewportWatch*>(item))
+      std::fprintf(stderr, "[anim-debug] ViewportWatch inView %d visible %d %gx%g\n",
+                   watch->inView(), watch->isVisible(), watch->width(), watch->height());
+    for (QQuickItem* child : item->childItems())
+      walk(child);
+  };
+  for (QObject* root : engine.rootObjects())
+    if (auto* window = qobject_cast<QQuickWindow*>(root))
+      walk(window->contentItem());
   QWindow* focus = QGuiApplication::focusWindow();
   std::fprintf(stderr, "[anim-debug] %d running, %d pictures ticking, app state %d, focus %s\n",
                running, ticking, int(QGuiApplication::applicationState()),
                focus ? qPrintable(focus->title()) : "none");
+}
+
+// A QML type's name without the engine's "_QMLTYPE_n" / "_QML_n" suffix.
+static QString typeName(const QObject* object)
+{
+  QString name = QString::fromLatin1(object->metaObject()->className());
+  const qsizetype cut = name.indexOf(QLatin1String("_QML"));
+  return cut > 0 ? name.left(cut) : name;
+}
+
+// YAP_DEBUG_OBJECTS=N (diagnostics): every N seconds, the number of objects
+// alive in the window's trees (closed popups' trees included, which hang off
+// the popup, not the window), split by the outermost popup that owns them,
+// largest first, then the files that declare the most of the rest.
+static void dumpObjectCounts(QQmlApplicationEngine& engine)
+{
+  QSet<QObject*> seen;
+  QHash<QString, int> byPopup;
+  QHash<QString, int> byFile;
+  int total = 0;
+  std::function<void(QObject*, const QString&)> visit = [&](QObject* object,
+                                                            const QString& popup) {
+    if (!object || seen.contains(object))
+      return;
+    seen.insert(object);
+    ++total;
+    QString owner = popup;
+    const bool isPopup = object->inherits("QQuickPopup");
+    if (owner.isEmpty() && isPopup) {
+      QQmlContext* context = qmlContext(object);
+      owner = typeName(object) + QLatin1String(" (") +
+              (context ? context->baseUrl().fileName() : QStringLiteral("?")) +
+              QLatin1Char(')');
+    }
+    if (!owner.isEmpty()) {
+      ++byPopup[owner];
+    } else {
+      QQmlContext* context = qmlContext(object);
+      ++byFile[context ? context->baseUrl().fileName() : QStringLiteral("(no context)")];
+    }
+    for (QObject* child : object->children())
+      visit(child, owner);
+    if (auto* item = qobject_cast<QQuickItem*>(object))
+      for (QQuickItem* child : item->childItems())
+        visit(child, owner);
+    if (isPopup) {
+      // The popup item (contentItem's parent) is not the popup's child.
+      if (auto* content = object->property("contentItem").value<QQuickItem*>()) {
+        visit(content->parentItem(), owner);
+        visit(content, owner);
+      }
+      visit(object->property("background").value<QObject*>(), owner);
+    }
+  };
+  for (QObject* root : engine.rootObjects()) {
+    visit(root, QString());
+    if (auto* window = qobject_cast<QQuickWindow*>(root))
+      visit(window->contentItem(), QString());
+  }
+  int inPopups = 0;
+  for (int n : std::as_const(byPopup))
+    inPopups += n;
+  std::fprintf(stderr, "[objects] %d alive, %d in %lld popups\n", total, inPopups,
+               static_cast<long long>(byPopup.size()));
+  auto top = [](const QHash<QString, int>& counts, const char* kind, int limit) {
+    QList<QPair<int, QString>> rows;
+    for (auto it = counts.cbegin(); it != counts.cend(); ++it)
+      rows.append({ it.value(), it.key() });
+    std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+    for (int i = 0; i < rows.size() && i < limit; ++i)
+      std::fprintf(stderr, "[objects] %s %6d %s\n", kind, rows[i].first,
+                   qPrintable(rows[i].second));
+  };
+  top(byPopup, "popup", 40);
+  top(byFile, "file ", 25);
+  std::fflush(stderr);
 }
 
 // Velopack's startup handling (rust/src/installer.rs): an install, update or
@@ -298,6 +397,7 @@ int main(int argc, char* argv[])
   // APNG and animated WebP (decorations, effects, X GIFs), and the web
   // players (WebView2).
   qmlRegisterType<AnimatedPicture>("Yap.Media", 1, 0, "AnimatedPicture");
+  qmlRegisterType<ViewportWatch>("Yap.Media", 1, 0, "ViewportWatch");
   qmlRegisterType<WebEmbed>("Yap.Media", 1, 0, "WebEmbed");
   qmlRegisterType<ComposerHighlighter>("Yap.Media", 1, 0,
                                        "ComposerHighlighter");
@@ -316,6 +416,7 @@ int main(int argc, char* argv[])
   engine.addImageProvider(QStringLiteral("icon"), new IconProvider);
   engine.addImageProvider(QStringLiteral("dither"), new DitherProvider);
   engine.addImageProvider(QStringLiteral("share"), new ShareProvider);
+  engine.addImageProvider(QStringLiteral("shadow"), new ShadowProvider);
   QObject::connect(
     &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
     [] { QCoreApplication::exit(-1); }, Qt::QueuedConnection);
@@ -377,6 +478,20 @@ int main(int argc, char* argv[])
   if (const int every = qEnvironmentVariableIntValue("YAP_DEBUG_ANIMATIONS"); every > 0) {
     auto* dump = new QTimer(&app);
     QObject::connect(dump, &QTimer::timeout, &app, [&engine] { dumpRunningAnimations(engine); });
+    dump->start(every * 1000);
+  }
+  if (const int every = qEnvironmentVariableIntValue("YAP_DEBUG_OBJECTS"); every > 0) {
+    // YAP_DEBUG_GC=1 also runs the JS garbage collector before each count,
+    // to tell garbage not yet collected from objects still referenced.
+    const bool collect = qEnvironmentVariableIntValue("YAP_DEBUG_GC") != 0;
+    auto* dump = new QTimer(&app);
+    QObject::connect(dump, &QTimer::timeout, &app, [&engine, collect] {
+      if (collect) {
+        engine.collectGarbage();
+        engine.trimComponentCache();
+      }
+      dumpObjectCounts(engine);
+    });
     dump->start(every * 1000);
   }
 

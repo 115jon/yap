@@ -259,7 +259,10 @@ Popup {
                     asynchronous: true
                     source: root.toneUrls[Emoji.skinTone]
                 }
-                Tooltip { visible: toneHover.hovered && !toneMenu.visible; text: qsTr("Skin tone") }
+                LazyPopup {
+                    when: toneHover.hovered && !toneMenu.visible
+                    sourceComponent: Tooltip { visible: toneHover.hovered && !toneMenu.visible; text: qsTr("Skin tone") }
+                }
                 HoverHandler { id: toneHover; cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: toneMenu.visible ? toneMenu.close() : toneMenu.open() }
             }

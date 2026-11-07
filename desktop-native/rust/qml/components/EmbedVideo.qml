@@ -84,8 +84,15 @@ Item {
     readonly property var player: engine.item ? engine.item.player : null
     // A GIF-mode loop plays only while the app is in front, as decorations
     // do: unfocused, hidden to the tray or minimised it holds its frame (a
-    // looping video decodes and draws every frame otherwise).
+    // looping video decodes and draws every frame otherwise). It also holds
+    // while off screen (a row in the list's cache buffer), as the web's
+    // offscreen GIFs do.
     readonly property bool appActive: Qt.application.state === Qt.ApplicationActive
+        && (!root.animated || seen.inView)
+    ViewportWatch {
+        id: seen
+        anchors.fill: parent
+    }
     onAppActiveChanged: {
         if (!root.animated || root.webm || root.player === null || root.errored)
             return

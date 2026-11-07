@@ -83,10 +83,14 @@ Rectangle {
                     ring: 2
                     ground: Theme.ply0
                 }
-                Tooltip {
-                    visible: homeHover.hovered
-                    text: qsTr("Direct messages")
-                    side: "right"
+                LazyPopup {
+                    // Made while hovered.
+                    when: homeHover.hovered
+                    sourceComponent: Tooltip {
+                        visible: homeHover.hovered
+                        text: qsTr("Direct messages")
+                        side: "right"
+                    }
                 }
             }
 
@@ -271,10 +275,14 @@ Rectangle {
         }
         HoverHandler { id: keyHover; cursorShape: Qt.PointingHandCursor }
         TapHandler { id: keyTap; onTapped: Nav.selectChannel(key.channelId) }
-        Tooltip {
-            visible: keyHover.hovered
-            text: key.name
-            side: "right"
+        LazyPopup {
+            // Made while hovered.
+            when: keyHover.hovered
+            sourceComponent: Tooltip {
+                visible: keyHover.hovered
+                text: key.name
+                side: "right"
+            }
         }
     }
 }

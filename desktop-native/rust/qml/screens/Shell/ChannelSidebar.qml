@@ -88,14 +88,14 @@ Rectangle {
         visible: !Nav.home
         width: parent.width - 1
         height: Theme.header
-        color: serverMenu.visible ? Theme.tint2 : headerHover.hovered ? Theme.tint1 : "transparent"
+        color: (serverMenu.item?.visible ?? false) ? Theme.tint2 : headerHover.hovered ? Theme.tint1 : "transparent"
         Behavior on color { ColorAnimation { duration: Theme.dur1 } }
         activeFocusOnTab: true
         Accessible.role: Accessible.Button
         Accessible.name: qsTr("Open server menu")
-        Accessible.onPressAction: serverMenu.popup(header, 8, header.height + 4)
-        Keys.onReturnPressed: serverMenu.popup(header, 8, header.height + 4)
-        Keys.onSpacePressed: serverMenu.popup(header, 8, header.height + 4)
+        Accessible.onPressAction: serverMenu.load()?.popup(header, 8, header.height + 4)
+        Keys.onReturnPressed: serverMenu.load()?.popup(header, 8, header.height + 4)
+        Keys.onSpacePressed: serverMenu.load()?.popup(header, 8, header.height + 4)
 
         Text {
             anchors.left: parent.left
@@ -123,8 +123,8 @@ Rectangle {
         // A click opens it at the pointer (ChannelSidebar.tsx openMenu);
         // the keyboard opens it under the header.
         TapHandler {
-            onTapped: eventPoint => serverMenu.visible ? serverMenu.close()
-                : serverMenu.popup(header, eventPoint.position.x, eventPoint.position.y)
+            onTapped: eventPoint => serverMenu.item?.visible ? serverMenu.item.close()
+                : serverMenu.load()?.popup(header, eventPoint.position.x, eventPoint.position.y)
         }
         Rectangle {
             anchors.fill: parent
@@ -210,10 +210,10 @@ Rectangle {
             onSettingsRequested: ShellState.channelSettingsRequested(treeRow.itemId)
             onMenuRequested: (row, at) => {
                 if (treeRow.kind === "channel")
-                    treeMenu.openFor("channel", treeRow.itemId, treeRow.name, treeRow.voice, treeRow.categoryId, treeRow.manage, row, at.x, at.y)
+                    treeMenu.load()?.openFor("channel", treeRow.itemId, treeRow.name, treeRow.voice, treeRow.categoryId, treeRow.manage, row, at.x, at.y)
                 // The loose groups' labels are not categories: no menu.
                 else if (treeRow.kind === "label" && !treeRow.itemId.startsWith("__"))
-                    treeMenu.openFor("category", treeRow.itemId, treeRow.name, false, "", treeRow.manage, row, at.x, at.y)
+                    treeMenu.load()?.openFor("category", treeRow.itemId, treeRow.name, false, "", treeRow.manage, row, at.x, at.y)
             }
             onDragMoved: scene => {
                 if (root.dragId !== treeRow.itemId) {
@@ -247,12 +247,12 @@ Rectangle {
             const at = list.mapFromItem(root, eventPoint.position.x, eventPoint.position.y)
             const inside = at.y >= 0 && at.y <= list.height && at.x >= 0 && at.x <= list.width
             if (inside && list.indexAt(at.x + list.contentX, at.y + list.contentY) < 0)
-                treeMenu.openFor("sidebar", "", "", false, "", false, list, at.x, at.y)
+                treeMenu.load()?.openFor("sidebar", "", "", false, "", false, list, at.x, at.y)
         }
     }
 
-    ServerMenu { id: serverMenu }
-    TreeMenu { id: treeMenu }
+    LazyPopup { id: serverMenu; sourceComponent: ServerMenu {} }
+    LazyPopup { id: treeMenu; sourceComponent: TreeMenu {} }
 
     // Home: the DM list in the same column.
     DmSidebar {

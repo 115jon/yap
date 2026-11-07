@@ -54,6 +54,7 @@ qt_add_executable(YapNative WIN32
   cpp/logfile.cpp cpp/logfile.h
   cpp/mediashell.cpp cpp/mediashell.h
   cpp/profile.cpp cpp/profile.h
+  cpp/shadowprovider.cpp cpp/shadowprovider.h
   cpp/shareprovider.cpp cpp/shareprovider.h
   cpp/thumbbar.cpp cpp/thumbbar.h
   cpp/toast_win.cpp cpp/toast_win.h
@@ -90,9 +91,14 @@ qt_add_resources(YapNative yap_assets
 # Avatars and server icons come as PNG, JPEG, WebP or GIF over HTTPS. Call
 # video renders through Qt Multimedia's VideoOutput, whose QVideoSink needs
 # a media backend (Windows Media Foundation; nothing is decoded by it).
-qt_import_plugins(YapNative INCLUDE
-  Qt::QSvgPlugin Qt::QGifPlugin Qt::QJpegPlugin Qt::QWebpPlugin
-  Qt::QSchannelBackendPlugin Qt::QWindowsMediaPlugin)
+# Only those: a static Qt otherwise links every default plugin of a type
+# (ICO, ICNS, TGA, TIFF and WBMP decoders, the OpenSSL TLS backend, the SVG
+# icon engine, network information), none of which the app uses.
+qt_import_plugins(YapNative
+  INCLUDE_BY_TYPE imageformats Qt::QSvgPlugin Qt::QGifPlugin Qt::QJpegPlugin Qt::QWebpPlugin)
+qt_import_plugins(YapNative INCLUDE_BY_TYPE tls Qt::QSchannelBackendPlugin)
+qt_import_plugins(YapNative INCLUDE Qt::QWindowsMediaPlugin
+  EXCLUDE_BY_TYPE iconengines networkinformation)
 if(WIN32)
   # dwmapi for the title bar; shell32, advapi32 and runtimeobject for the
   # tray, the Run key and WinRT toasts; the rest is what libwebrtc (static)
@@ -115,4 +121,7 @@ if(YAP_QML_PROFILER)
     Qt::QQmlDebugServerFactoryPlugin Qt::QQmlProfilerServiceFactoryPlugin
     Qt::QQuickProfilerAdapterFactoryPlugin Qt::QTcpServerConnectionFactoryPlugin
     Qt::QLocalClientConnectionFactoryPlugin)
+else()
+  # A static Qt links the QML debug and profiler services by default.
+  qt_import_plugins(YapNative EXCLUDE_BY_TYPE qmltooling)
 endif()

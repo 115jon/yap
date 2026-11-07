@@ -89,11 +89,6 @@ Item {
         anchors.fill: parent
         radius: Theme.radius
         color: hover.hovered ? Theme.tint1 : "transparent"
-        opacity: root.online || hover.hovered ? 1 : 0.5
-        // The web dims the row as one group: without a layer each child
-        // fades alone and the presence notch's cut-out shows the avatar
-        // through it. Only dimmed rows pay for the layer.
-        layer.enabled: opacity < 1
         Behavior on color { ColorAnimation { duration: Theme.dur1 } }
 
         HoverHandler { id: hover; enabled: !root.label; cursorShape: Qt.PointingHandCursor }
@@ -180,9 +175,13 @@ Item {
                     size: Theme.iconXs
                     color: Theme.warningInk
                     HoverHandler { id: crownHover }
-                    Tooltip {
-                        visible: crownHover.hovered
-                        text: qsTr("Server owner")
+                    LazyPopup {
+                        // Made while hovered.
+                        when: crownHover.hovered
+                        sourceComponent: Tooltip {
+                            visible: crownHover.hovered
+                            text: qsTr("Server owner")
+                        }
                     }
                 }
             }
@@ -195,6 +194,18 @@ Item {
                 color: Theme.ink3
                 font: Theme.type.caption
             }
+        }
+        // Offline: the row at half, as the web's opacity-50. The ground at
+        // half over the row is the same picture as the row at half over
+        // the ground, and needs no layer: a layer re-renders, then asks for
+        // another window frame, on every frame of a decoration inside it.
+        Rectangle {
+            anchors.fill: parent
+            z: 10
+            radius: Theme.radius
+            visible: !root.online && !hover.hovered
+            color: Qt.rgba(root.ground.r, root.ground.g, root.ground.b, 0.5)
+            Accessible.ignored: true
         }
     }
 }

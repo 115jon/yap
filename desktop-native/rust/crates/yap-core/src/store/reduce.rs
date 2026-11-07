@@ -51,6 +51,16 @@ pub const REFRESHING: &str = "Refreshing…";
 /// How long someone stays on the typing line after their last typing event.
 pub const TYPING_TIMEOUT: Duration = Duration::from_secs(8);
 
+/// How long a hidden window keeps its standby session before dropping it
+/// (voice-standby.ts STANDBY_HIDDEN_GRACE_MS), so an alt-tab or a quick
+/// trip to the tray does not churn sessions.
+pub const STANDBY_HIDDEN_GRACE: Duration = Duration::from_secs(15);
+
+/// How long after a gateway Ready or Resumed the server's roster snapshot
+/// may take. It sends `VOICE_CHANNEL_STATES` only when some channel has
+/// people in it, so a channel it has not resent by then is empty.
+pub const VOICE_ROSTER_GRACE: Duration = Duration::from_secs(5);
+
 /// Mention suggestions shown at once (MentionAutocomplete.tsx).
 pub const MENTION_SUGGESTIONS: usize = 5;
 
@@ -94,6 +104,15 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
                 .retain(|t| !(t.user_id == user_id && t.generation == generation));
             if state.typing.len() != before {
                 state.emit_typing(&mut fx);
+            }
+        }
+        Input::VoiceRosterCheck { generation } => {
+            state.check_voice_rosters(&mut fx, generation);
+        }
+        Input::StandbyHidden { generation } => {
+            if generation == state.window_generation && !state.window_shown {
+                state.standby_paused = true;
+                state.sync_standby(&mut fx);
             }
         }
     }
@@ -726,7 +745,9 @@ impl State {
         let wanted = self
             .voice_view
             .clone()
-            .filter(|_| self.standby_enabled && self.voice.is_none() && !self.home)
+            .filter(|_| {
+                self.standby_enabled && !self.standby_paused && self.voice.is_none() && !self.home
+            })
             .filter(|id| {
                 self.voice_channels
                     .get(id)
@@ -771,6 +792,60 @@ impl State {
             server_id,
             channel_id,
         });
+    }
+
+    /// The window went on or off screen. Hidden, the standby goes after
+    /// [`STANDBY_HIDDEN_GRACE`]; shown, it comes back at once.
+    fn set_window_shown(&mut self, fx: &mut Effects, shown: bool) {
+        if shown == self.window_shown {
+            return;
+        }
+        self.window_shown = shown;
+        self.window_generation += 1;
+        if shown {
+            self.standby_paused = false;
+            self.sync_standby(fx);
+        } else {
+            fx.push(Effect::Later {
+                delay: STANDBY_HIDDEN_GRACE,
+                input: Box::new(Input::StandbyHidden {
+                    generation: self.window_generation,
+                }),
+            });
+        }
+    }
+
+    /// A fresh or resumed gateway session: the server resends the rosters
+    /// with people in them, and nothing for empty ones, so whoever left
+    /// while we were away would stay listed. A check after
+    /// [`VOICE_ROSTER_GRACE`] drops what it has not confirmed.
+    fn expect_voice_rosters(&mut self, fx: &mut Effects) {
+        self.voice_roster_check += 1;
+        self.voice_confirmed.clear();
+        if self.voice_channels.is_empty() {
+            return;
+        }
+        fx.push(Effect::Later {
+            delay: VOICE_ROSTER_GRACE,
+            input: Box::new(Input::VoiceRosterCheck {
+                generation: self.voice_roster_check,
+            }),
+        });
+    }
+
+    fn check_voice_rosters(&mut self, fx: &mut Effects, generation: u64) {
+        if generation != self.voice_roster_check {
+            return;
+        }
+        let confirmed = std::mem::take(&mut self.voice_confirmed);
+        let before = self.voice_channels.len();
+        self.voice_channels.retain(|id, _| confirmed.contains(id));
+        self.voice_started_at.retain(|id, _| confirmed.contains(id));
+        if self.voice_channels.len() != before {
+            self.sync_voice_channels(fx);
+            self.sync_standby(fx);
+            self.sync_calls(fx);
+        }
     }
 
     /// A gateway roster for one voice channel, profiles kept from the last
@@ -1256,6 +1331,7 @@ impl State {
                 content,
             } => self.edit_message(fx, &message_id, content.trim()),
             Command::DeleteMessage(id) => self.delete_message(fx, &id),
+            Command::WindowShown(shown) => self.set_window_shown(fx, shown),
             Command::Typing => {
                 if let (Some(channel_id), Some(_)) = (self.active_channel.clone(), self.signed_in())
                 {
@@ -2946,6 +3022,7 @@ impl State {
                 // A fresh gateway session starts online: say otherwise.
                 self.send_status(fx);
                 self.sync_subscriptions(fx);
+                self.expect_voice_rosters(fx);
                 // A fresh session after a drop (Resume failed or was not
                 // possible): events during the gap are lost, so refetch what
                 // is on screen.
@@ -2964,6 +3041,7 @@ impl State {
                 // presence; resend the subscriptions anyway, since switches
                 // made while offline were not sent (they are idempotent).
                 self.sync_subscriptions(fx);
+                self.expect_voice_rosters(fx);
             }
             GatewayEvent::Closed => {
                 current.gateway.ready = false;
@@ -3100,6 +3178,9 @@ impl State {
                 }
             }
             Dispatch::VoiceChannelStates(states) => {
+                // The whole picture: no check pending is needed.
+                self.voice_roster_check += 1;
+                self.voice_confirmed.clear();
                 let mut started = std::collections::HashMap::new();
                 for (id, members) in &states.voice_states {
                     let at = earliest_start(
@@ -3150,6 +3231,7 @@ impl State {
                 ) {
                     self.voice_started_at.insert(update.channel_id.clone(), at);
                 }
+                self.voice_confirmed.insert(update.channel_id.clone());
                 if update.members.is_empty() {
                     self.voice_channels.remove(&update.channel_id);
                 } else {

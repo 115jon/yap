@@ -106,9 +106,12 @@ Item {
                 color: Theme.ink1
                 font: Theme.type.silk
             }
-            Tooltip {
-                visible: altKey.hovered
-                text: root.item.alt
+            LazyPopup {
+                when: altKey.hovered
+                sourceComponent: Tooltip {
+                    visible: altKey.hovered
+                    text: root.item.alt
+                }
             }
             Accessible.role: Accessible.Button
             Accessible.name: qsTr("Show GIF alt text")

@@ -7,7 +7,9 @@ T.AbstractButton {
     id: caret
 
     required property string label
-    required property DeviceMenu menu
+    // Its device menu, made as it opens (a LazyPopup of a DeviceMenu).
+    required property LazyPopup menu
+    readonly property bool menuOpen: menu.item?.visible ?? false
     // Over a nameplate (the account row): the plate's ink, lighter at rest.
     property color plateInk: "transparent"
     property color plateMuted: "transparent"
@@ -17,15 +19,15 @@ T.AbstractButton {
     focusPolicy: Qt.StrongFocus
     Accessible.role: Accessible.ButtonMenu
     Accessible.name: label
-    onClicked: caret.menu.visible ? caret.menu.close() : caret.menu.openAbove(caret)
+    onClicked: caret.menuOpen ? caret.menu.item.close() : caret.menu.load()?.openAbove(caret)
 
     contentItem: Item {
         Icon {
             anchors.centerIn: parent
             name: "chevronDown"
             size: 10
-            color: caret.plateInk.a > 0 ? (caret.hovered || caret.menu.visible ? caret.plateInk : caret.plateMuted)
-                : caret.hovered || caret.menu.visible ? Theme.ink1 : Theme.ink3
+            color: caret.plateInk.a > 0 ? (caret.hovered || caret.menuOpen ? caret.plateInk : caret.plateMuted)
+                : caret.hovered || caret.menuOpen ? Theme.ink1 : Theme.ink3
         }
     }
     background: Rectangle {

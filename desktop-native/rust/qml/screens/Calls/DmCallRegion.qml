@@ -201,7 +201,7 @@ Rectangle {
                     ledState: Voice.live ? "talk" : "idle"
                 }
                 HoverHandler { id: detailsHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: detailsPopup.toggleAt(details) }
+                TapHandler { onTapped: detailsPopup.load()?.toggleAt(details) }
             }
             Row {
                 anchors.centerIn: parent
@@ -210,9 +210,11 @@ Rectangle {
                     size: 48
                     iconName: "camera"
                     tone: Voice.cameraOn ? "live" : "rest"
-                    enabled: Camera.hasCamera
+                    // Read once joined: listing cameras starts Media Foundation.
+                    readonly property bool hasCamera: root.joined && Camera.hasCamera
+                    enabled: hasCamera
                     opacity: enabled ? 1 : 0.45
-                    tip: !Camera.hasCamera ? qsTr("No camera detected")
+                    tip: !hasCamera ? qsTr("No camera detected")
                         : Voice.cameraOn ? qsTr("Turn off camera") : qsTr("Turn on camera")
                     onClicked: ShellState.toggleCamera()
                 }
@@ -245,5 +247,5 @@ Rectangle {
         color: Theme.line
     }
 
-    VoiceDetailsPopup { id: detailsPopup }
+    LazyPopup { id: detailsPopup; sourceComponent: VoiceDetailsPopup {} }
 }

@@ -100,9 +100,12 @@ Column {
                             font: entry.target && entry.target.code ? Theme.type.code
                                 : entry.target && entry.target.named ? Theme.type.occupant : Theme.type.description
                             HoverHandler { id: targetHover; enabled: entry.target !== null && entry.target.id.length > 0 }
-                            Tooltip {
-                                visible: targetHover.hovered
-                                text: entry.target ? qsTr("ID %1").arg(entry.target.id) : ""
+                            LazyPopup {
+                                when: targetHover.hovered
+                                sourceComponent: Tooltip {
+                                    visible: targetHover.hovered
+                                    text: entry.target ? qsTr("ID %1").arg(entry.target.id) : ""
+                                }
                             }
                             Rectangle {
                                 visible: entry.target !== null && entry.target.id.length > 0

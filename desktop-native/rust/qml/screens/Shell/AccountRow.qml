@@ -158,13 +158,16 @@ Rectangle {
         }
 
         HoverHandler { id: identityHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { id: identityTap; onTapped: account.openAbove(identity) }
-        Tooltip {
-            visible: identityHover.hovered && !account.visible
-            text: qsTr("View profile · %1").arg(Session.meCustomStatus.length > 0 ? root.presenceWord + ": " + Session.meCustomStatus : root.presenceWord)
+        TapHandler { id: identityTap; onTapped: account.load()?.openAbove(identity) }
+        LazyPopup {
+            when: identityHover.hovered && !(account.item?.visible ?? false)
+            sourceComponent: Tooltip {
+                visible: identityHover.hovered && !(account.item?.visible ?? false)
+                text: qsTr("View profile · %1").arg(Session.meCustomStatus.length > 0 ? root.presenceWord + ": " + Session.meCustomStatus : root.presenceWord)
+            }
         }
 
-        AccountPopout { id: account }
+        LazyPopup { id: account; sourceComponent: AccountPopout {} }
     }
 
     Row {
@@ -207,14 +210,18 @@ Rectangle {
         }
     }
 
-    DeviceMenu {
+    LazyPopup {
         id: inputMenu
-        mode: "input"
-        onVoiceSettings: SettingsNav.show("voice", "microphone")
+        sourceComponent: DeviceMenu {
+            mode: "input"
+            onVoiceSettings: SettingsNav.show("voice", "microphone")
+        }
     }
-    DeviceMenu {
+    LazyPopup {
         id: outputMenu
-        mode: "output"
-        onVoiceSettings: SettingsNav.show("voice", "speaker")
+        sourceComponent: DeviceMenu {
+            mode: "output"
+            onVoiceSettings: SettingsNav.show("voice", "speaker")
+        }
     }
 }

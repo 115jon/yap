@@ -23,6 +23,7 @@ const QML: &[&str] = &[
     "qml/components/KitField.qml",
     "qml/components/Led.qml",
     "qml/components/LedLabel.qml",
+    "qml/components/LazyPopup.qml",
     "qml/components/LevelMeter.qml",
     "qml/components/LinkText.qml",
     "qml/components/MediaTile.qml",

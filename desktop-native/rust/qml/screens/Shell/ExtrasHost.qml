@@ -15,43 +15,44 @@ Item {
         // Closing the switcher is always allowed; opening it waits for
         // Settings, the profile editor and every other modal to be shut.
         enabled: Session.phase === Session.Ready
-            && (switcher.opened || (ShellState.modalCount === 0 && !SettingsNav.open))
+            && ((switcher.item?.opened ?? false) || (ShellState.modalCount === 0 && !SettingsNav.open))
         onActivated: {
-            if (switcher.opened)
-                switcher.close()
+            if (switcher.item?.opened)
+                switcher.item.close()
             else
-                switcher.show()
+                switcher.load()?.show()
         }
     }
 
     Connections {
         target: ShellState
-        function onCommandMenuRequested() { switcher.show() }
-        function onReactionsRequested(messageId, emoji) { reactions.ask(messageId, emoji) }
-        function onShareRequested(messageId, author, text, omitted) { share.ask(messageId, author, text, omitted) }
-        function onChannelInviteRequested(channelId, name, voice) { invite.start(channelId, name, voice) }
+        function onCommandMenuRequested() { switcher.load()?.show() }
+        function onReactionsRequested(messageId, emoji) { reactions.load()?.ask(messageId, emoji) }
+        function onShareRequested(messageId, author, text, omitted) { share.load()?.ask(messageId, author, text, omitted) }
+        function onChannelInviteRequested(channelId, name, voice) { invite.load()?.start(channelId, name, voice) }
         function onVoiceStatusRequested(channelId, name, media, text) {
-            status.start(channelId, name, media, text)
+            status.load()?.start(channelId, name, media, text)
         }
-        function onVoiceSwitchRequested(channelId, name, select) { voiceSwitch.start(channelId, name, false, select) }
+        function onVoiceSwitchRequested(channelId, name, select) { voiceSwitch.load()?.start(channelId, name, false, select) }
         function onStartCallRequested(channelId, name, confirm) {
             if (confirm && !Desktop.skipStartCall) {
-                startCall.start(channelId, name)
+                startCall.load()?.start(channelId, name)
                 return
             }
             const inVoiceChannel = Voice.channelId.length > 0 && Voice.channelId !== channelId
             if (inVoiceChannel && !Desktop.skipVoiceSwitch)
-                voiceSwitch.start(channelId, name, true)
+                voiceSwitch.load()?.start(channelId, name, true)
             else
                 Calls.start(channelId)
         }
     }
 
-    QuickSwitcher { id: switcher }
-    ReactionDetailsDialog { id: reactions }
-    MessageShareDialog { id: share }
-    ChannelInviteDialog { id: invite }
-    VoiceStatusDialog { id: status }
-    VoiceSwitchDialog { id: voiceSwitch }
-    StartCallDialog { id: startCall }
+    // Each made as it opens and let go once closed.
+    LazyPopup { id: switcher; sourceComponent: QuickSwitcher {} }
+    LazyPopup { id: reactions; sourceComponent: ReactionDetailsDialog {} }
+    LazyPopup { id: share; sourceComponent: MessageShareDialog {} }
+    LazyPopup { id: invite; sourceComponent: ChannelInviteDialog {} }
+    LazyPopup { id: status; sourceComponent: VoiceStatusDialog {} }
+    LazyPopup { id: voiceSwitch; sourceComponent: VoiceSwitchDialog {} }
+    LazyPopup { id: startCall; sourceComponent: StartCallDialog {} }
 }

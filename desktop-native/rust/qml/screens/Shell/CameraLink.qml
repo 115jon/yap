@@ -33,17 +33,17 @@ Item {
             if (on || !Audio.alwaysPreviewVideo)
                 Voice.setCamera(!on)
             else
-                dialog.openFor(true)
+                dialog.load()?.openFor(true)
         }
-        function onCameraSettingsRequested() { dialog.openFor(false) }
+        function onCameraSettingsRequested() { dialog.load()?.openFor(false) }
     }
     Connections {
         target: Voice
         function onCameraErrorChanged() {
-            if (Voice.cameraError.length > 0 && !dialog.visible)
-                dialog.openFor(false)
+            if (Voice.cameraError.length > 0 && !(dialog.item?.visible ?? false))
+                dialog.load()?.openFor(false)
         }
     }
 
-    CameraDialog { id: dialog }
+    LazyPopup { id: dialog; sourceComponent: CameraDialog {} }
 }

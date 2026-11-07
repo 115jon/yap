@@ -1,7 +1,10 @@
 #include "animatedpicture.h"
 
+#include <QtCore/QBuffer>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QThreadPool>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QImageReader>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
@@ -42,8 +45,47 @@ constexpr qint64 kMaxDownload = 24 * 1024 * 1024;
 // One animation's decoded frames (yap-anim stops at the same size).
 constexpr qsizetype kMaxAnimation = 48 * 1024 * 1024;
 
+// A GIF (server icons): Qt's own decoder, every frame, fitted into `box`
+// like yap-anim's (never scaled up), so it plays on the shared grid.
+AnimationPtr decodeGif(const QByteArray& bytes, QSize box)
+{
+  QBuffer buffer;
+  buffer.setData(bytes);
+  buffer.open(QIODevice::ReadOnly);
+  QImageReader reader(&buffer, "gif");
+  const QSize full = reader.size();
+  if (!reader.canRead() || full.isEmpty())
+    return nullptr;
+  QSize target = full;
+  if (box.width() > 0 && box.height() > 0 &&
+      (full.width() > box.width() || full.height() > box.height()))
+    target = full.scaled(box, Qt::KeepAspectRatio);
+  auto data = std::make_shared<AnimationData>();
+  while (reader.canRead()) {
+    QImage frame = reader.read();
+    if (frame.isNull())
+      break;
+    if (frame.size() != target)
+      frame = frame.scaled(target, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    frame = frame.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    if (!data->frames.isEmpty() && data->bytes + frame.sizeInBytes() > kMaxAnimation)
+      break;
+    data->bytes += frame.sizeInBytes();
+    data->frames.append(frame);
+    data->delays.append(qMax(reader.nextImageDelay(), 16));
+  }
+  // QMovie's count: -1 forever, else how many times it repeats.
+  const int repeats = reader.loopCount();
+  data->loops = repeats < 0 ? 0 : repeats + 1;
+  if (data->frames.isEmpty())
+    return nullptr;
+  return data;
+}
+
 AnimationPtr decodeBytes(const QByteArray& bytes, QSize box)
 {
+  if (bytes.startsWith("GIF8"))
+    return decodeGif(bytes, box);
   void* anim = yap_anim_decode(reinterpret_cast<const uint8_t*>(bytes.constData()),
                                size_t(bytes.size()), uint32_t(qMax(0, box.width())),
                                uint32_t(qMax(0, box.height())));
@@ -194,6 +236,28 @@ void AnimationCache::trim()
   }
 }
 
+namespace {
+
+// The shared grid frame changes are put on (see the header).
+constexpr qint64 kSlotMs = 33;
+
+qint64 animationNow()
+{
+  static const QElapsedTimer clock = [] {
+    QElapsedTimer started;
+    started.start();
+    return started;
+  }();
+  return clock.elapsed();
+}
+
+qint64 slotAfter(qint64 at)
+{
+  return (at + kSlotMs - 1) / kSlotMs * kSlotMs;
+}
+
+} // namespace
+
 AnimatedPicture::AnimatedPicture(QQuickItem* parent)
   : QQuickItem(parent)
 {
@@ -258,6 +322,9 @@ void AnimatedPicture::restart()
   }
   m_frameDirty = true;
   update();
+  // The first frame gets its whole time again.
+  m_timer.stop();
+  m_due = 0;
   schedule();
 }
 
@@ -331,6 +398,8 @@ void AnimatedPicture::onLoaded(const QString& key)
   if (fresh) {
     m_frame = 0;
     m_played = 0;
+    m_timer.stop();
+    m_due = 0;
     if (m_finished) {
       m_finished = false;
       emit finishedChanged();
@@ -348,18 +417,57 @@ void AnimatedPicture::onLoaded(const QString& key)
   schedule();
 }
 
-bool AnimatedPicture::onScreen() const
+bool visibleInWindow(const QQuickItem* item)
 {
-  QQuickWindow* win = window();
-  if (!win)
+  QQuickWindow* win = item->window();
+  if (!win || !item->isVisible())
     return false;
-  QRectF shown = mapRectToScene(boundingRect());
+  QRectF shown = item->mapRectToScene(item->boundingRect());
   shown &= QRectF(0, 0, win->width(), win->height());
-  for (QQuickItem* up = parentItem(); up && !shown.isEmpty(); up = up->parentItem()) {
+  for (QQuickItem* up = item->parentItem(); up && !shown.isEmpty(); up = up->parentItem()) {
     if (up->clip())
       shown &= up->mapRectToScene(up->boundingRect());
   }
   return !shown.isEmpty();
+}
+
+bool AnimatedPicture::onScreen() const
+{
+  return visibleInWindow(this);
+}
+
+ViewportWatch::ViewportWatch(QQuickItem* parent)
+  : QQuickItem(parent)
+{
+}
+
+void ViewportWatch::itemChange(ItemChange change, const ItemChangeData& value)
+{
+  QQuickItem::itemChange(change, value);
+  if (change == ItemSceneChange) {
+    disconnect(m_frames);
+    if (value.window)
+      m_frames = connect(value.window, &QQuickWindow::afterAnimating, this,
+                         &ViewportWatch::check);
+    check();
+  } else if (change == ItemVisibleHasChanged) {
+    check();
+  }
+}
+
+void ViewportWatch::geometryChange(const QRectF& next, const QRectF& previous)
+{
+  QQuickItem::geometryChange(next, previous);
+  check();
+}
+
+void ViewportWatch::check()
+{
+  const bool shown = visibleInWindow(this);
+  if (shown == m_inView)
+    return;
+  m_inView = shown;
+  emit inViewChanged();
 }
 
 bool AnimatedPicture::shouldRun() const
@@ -379,10 +487,12 @@ void AnimatedPicture::schedule()
   disconnect(m_frameWatch);
   if (!shouldRun()) {
     m_timer.stop();
+    m_due = 0;
     return;
   }
   if (!onScreen()) {
     m_timer.stop();
+    m_due = 0;
     // Scrolling back renders frames: look again after each one.
     if (m_window)
       m_frameWatch = connect(m_window, &QQuickWindow::afterAnimating, this, [this] {
@@ -391,8 +501,17 @@ void AnimatedPicture::schedule()
       });
     return;
   }
-  if (!m_timer.isActive())
-    m_timer.start(m_anim->delays.value(m_frame, 100));
+  if (!m_timer.isActive()) {
+    const qint64 now = animationNow();
+    if (m_due == 0)
+      m_due = now + m_anim->delays.value(m_frame, 100);
+    startTimer(now);
+  }
+}
+
+void AnimatedPicture::startTimer(qint64 now)
+{
+  m_timer.start(int(qMax<qint64>(1, slotAfter(m_due) - now)));
 }
 
 void AnimatedPicture::advance()
@@ -403,22 +522,37 @@ void AnimatedPicture::advance()
     schedule();
     return;
   }
+  const qint64 now = animationNow();
   const int count = int(m_anim->frames.size());
-  int next = m_frame + 1;
-  if (next >= count) {
-    ++m_played;
-    const int plays = playCount();
-    if (plays > 0 && m_played >= plays) {
-      m_finished = true;
-      emit finishedChanged();
-      return;
+  bool moved = false;
+  // Every frame due by now: the slot may come after several.
+  for (int skipped = 0; m_due <= now && skipped < count; ++skipped) {
+    int next = m_frame + 1;
+    if (next >= count) {
+      ++m_played;
+      const int plays = playCount();
+      if (plays > 0 && m_played >= plays) {
+        m_finished = true;
+        m_due = 0;
+        emit finishedChanged();
+        break;
+      }
+      next = 0;
     }
-    next = 0;
+    m_frame = next;
+    moved = true;
+    m_due += m_anim->delays.value(m_frame, 100);
   }
-  m_frame = next;
-  m_frameDirty = true;
-  update();
-  m_timer.start(m_anim->delays.value(m_frame, 100));
+  if (moved) {
+    m_frameDirty = true;
+    update();
+  }
+  if (m_finished)
+    return;
+  // Far behind (a long stall): carry on from now.
+  if (m_due <= now)
+    m_due = now + m_anim->delays.value(m_frame, 100);
+  startTimer(now);
 }
 
 void AnimatedPicture::watchWindow(QQuickWindow* window)

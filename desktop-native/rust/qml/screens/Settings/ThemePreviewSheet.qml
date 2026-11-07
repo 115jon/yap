@@ -28,6 +28,8 @@ T.Drawer {
     closePolicy: T.Popup.CloseOnEscape
     readonly property bool wanted: SettingsNav.open && SettingsNav.previewing
     onWantedChanged: wanted ? open() : close()
+    // Made as it is wanted (LazyPopup).
+    Component.onCompleted: if (wanted) open()
     onClosed: SettingsNav.previewing = false
 
     enter: Transition {

@@ -20,6 +20,8 @@ use crate::api::{ApiError, Token};
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Start,
+    /// The window is on screen (`false`: minimised or hidden to the tray).
+    WindowShown(bool),
     StartSignIn,
     CancelSignIn,
     UseToken(String),
@@ -283,6 +285,16 @@ pub enum Input {
     /// One typer's timeout; only the newest event of theirs clears them.
     TypingExpired {
         user_id: String,
+        generation: u64,
+    },
+    /// A while after a gateway Ready or Resumed: rosters nobody resent are
+    /// empty now. Only the newest check counts.
+    VoiceRosterCheck {
+        generation: u64,
+    },
+    /// The window has been hidden for [`super::reduce::STANDBY_HIDDEN_GRACE`].
+    /// Only the newest hide counts.
+    StandbyHidden {
         generation: u64,
     },
 }

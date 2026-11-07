@@ -130,9 +130,13 @@ Column {
             border.width: 2
             border.color: Theme.focus
         }
-        Tooltip {
-            visible: keyHover.hovered && key.tip.length > 0
-            text: key.tip
+        LazyPopup {
+            // Made while hovered.
+            when: keyHover.hovered && key.tip.length > 0
+            sourceComponent: Tooltip {
+                visible: keyHover.hovered && key.tip.length > 0
+                text: key.tip
+            }
         }
         HoverHandler { id: keyHover; cursorShape: Qt.PointingHandCursor }
         TapHandler { onTapped: key.clicked() }

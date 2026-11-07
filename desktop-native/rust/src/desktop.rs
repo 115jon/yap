@@ -133,6 +133,12 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "launchToTray"]
         fn launch_to_tray(self: &Desktop) -> bool;
+
+        /// The window went on or off screen (minimised or in the tray): a
+        /// hidden window drops its voice standby after a grace.
+        #[qinvokable]
+        #[cxx_name = "setWindowShown"]
+        fn set_window_shown(self: &Desktop, shown: bool);
     }
 
     impl cxx_qt::Initialize for Desktop {}
@@ -482,6 +488,10 @@ impl qobject::Desktop {
 
     pub fn mark_read_from_toast(&self, channel_id: &QString) {
         client::command(Command::ToastMarkRead(channel_id.to_string()));
+    }
+
+    pub fn set_window_shown(&self, shown: bool) {
+        client::command(Command::WindowShown(shown));
     }
 
     pub fn window_placement(&self, areas: &QString, primary: i32) -> QString {

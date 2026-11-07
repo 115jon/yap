@@ -59,9 +59,10 @@ public:
   explicit CameraCapture(QObject* parent = nullptr);
   ~CameraCapture() override;
 
-  QStringList deviceIds() const { return m_ids; }
-  QStringList deviceNames() const { return m_names; }
-  bool hasCamera() const { return !m_ids.isEmpty(); }
+  // The list is read on first use: listing starts Media Foundation.
+  QStringList deviceIds() const { ensureListed(); return m_ids; }
+  QStringList deviceNames() const { ensureListed(); return m_names; }
+  bool hasCamera() const { ensureListed(); return !m_ids.isEmpty(); }
   QString deviceId() const { return m_deviceId; }
   void setDeviceId(const QString& id);
   QString deviceLabel() const { return m_deviceLabel; }
@@ -104,7 +105,8 @@ private:
   };
   static Profile profileFor(const QString& quality);
 
-  void listDevices();
+  void ensureListed() const;
+  void listDevices(bool notify = true);
   void sync();
   void open();
   void close();

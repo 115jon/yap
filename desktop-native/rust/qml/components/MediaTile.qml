@@ -1,4 +1,5 @@
 import QtQuick
+import Yap.Media
 import com.yap.native
 
 // One picture of a message (ImageGrid.tsx tile): a 1 px seam, a tint-1
@@ -73,9 +74,15 @@ Rectangle {
             source: root.item.url
             fillMode: root.fill ? Image.PreserveAspectCrop : Image.PreserveAspectFit
             // Only while the app is in front (unfocused, hidden or
-            // minimised, a GIF holds its frame, as decorations do).
+            // minimised, a GIF holds its frame, as decorations do) and the
+            // tile is on screen (a row in the list's cache buffer is not;
+            // the web pauses offscreen GIFs too).
             playing: root.visible && status === AnimatedImage.Ready
-                && Qt.application.state === Qt.ApplicationActive
+                && Qt.application.state === Qt.ApplicationActive && seen.inView
+            ViewportWatch {
+                id: seen
+                anchors.fill: parent
+            }
             onStatusChanged: root.learn(anim)
         }
     }

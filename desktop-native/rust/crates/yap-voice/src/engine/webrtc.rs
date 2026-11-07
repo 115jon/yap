@@ -35,8 +35,8 @@
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
@@ -86,31 +86,80 @@ use crate::share::{ShareEncoding, SHARE_AUDIO_CHANNELS, SHARE_AUDIO_RATE};
 use crate::wire::IceServer;
 
 /// The process-wide factory, made by the first call (never before: its
-/// synthetic audio device wakes every 10 ms for as long as it lives).
-static FACTORY: OnceLock<PeerConnectionFactory> = OnceLock::new();
+/// synthetic audio device wakes every 10 ms for as long as it lives) and let
+/// go [`FACTORY_IDLE`] after the last call ends.
+static FACTORY: Mutex<Option<PeerConnectionFactory>> = Mutex::new(None);
 
-/// One process-wide factory: it owns the platform ADM.
-fn factory() -> &'static PeerConnectionFactory {
-    FACTORY.get_or_init(|| {
+/// Counts uses of the factory; a pending release made before the newest use
+/// does nothing.
+static FACTORY_USES: AtomicU64 = AtomicU64::new(0);
+
+/// How long the factory outlives the last call: a quick rejoin keeps it.
+const FACTORY_IDLE: Duration = Duration::from_secs(30);
+
+/// One process-wide factory: it owns the platform ADM. Made if there is
+/// none.
+fn factory() -> PeerConnectionFactory {
+    let mut held = lock(&FACTORY);
+    FACTORY_USES.fetch_add(1, Ordering::Relaxed);
+    held.get_or_insert_with(|| {
         eprintln!("[voice] webrtc factory created");
         PeerConnectionFactory::default()
     })
+    .clone()
 }
 
-/// Keeps WebRTC's voice engine, and with it the platform ADM, up for the
-/// process. The voice engine runs only while a peer connection exists: when
-/// the last one goes, `WebRtcVoiceEngine::Terminate` terminates the ADM, and
-/// webrtc-sys's `AdmProxy` never initialises its platform ADM again (its
-/// `Init` is a no-op), so every later call would list -1 devices and record
-/// nothing. One idle connection (no transceivers, no ICE), made just before
-/// the first call's and never closed, holds the engine.
+/// The factory if one is up (none is made for asking).
+fn existing_factory() -> Option<PeerConnectionFactory> {
+    lock(&FACTORY).clone()
+}
+
+/// Keeps WebRTC's voice engine, and with it the platform ADM, up while the
+/// factory lives. The voice engine runs only while a peer connection exists:
+/// when the last one goes, `WebRtcVoiceEngine::Terminate` terminates the
+/// ADM, and webrtc-sys's `AdmProxy` never initialises its platform ADM again
+/// (its `Init` is a no-op), so every later call on that factory would list
+/// -1 devices and record nothing. Every call still opens the ADM (its
+/// device choice is applied there, and `YAP_ADM_AUDIO=1` records and plays
+/// through it), so the keeper stays: one idle connection (no transceivers,
+/// no ICE), made just before the first call's, closed only with the
+/// factory. A new factory brings a new ADM.
+static KEEPER: Mutex<Option<PeerConnection>> = Mutex::new(None);
+
 fn keep_voice_engine(f: &PeerConnectionFactory) {
-    static KEEPER: OnceLock<Option<PeerConnection>> = OnceLock::new();
-    KEEPER.get_or_init(|| {
-        f.create_peer_connection(RtcConfiguration::default())
+    let mut keeper = lock(&KEEPER);
+    if keeper.is_none() {
+        *keeper = f
+            .create_peer_connection(RtcConfiguration::default())
             .map_err(|e| eprintln!("[voice] voice engine keeper refused: {e:?}"))
-            .ok()
-    });
+            .ok();
+    }
+}
+
+/// The last call ended: after [`FACTORY_IDLE`] with no call opened and no
+/// other use since, the keeper and the factory go, and with them its
+/// threads and the synthetic audio device's 100 Hz wake-ups. The next call
+/// makes a new one.
+fn release_factory_later() {
+    let uses = FACTORY_USES.load(Ordering::Relaxed);
+    let spawned = std::thread::Builder::new()
+        .name("yap-voice-idle".into())
+        .spawn(move || {
+            std::thread::sleep(FACTORY_IDLE);
+            let mut held = lock(&FACTORY);
+            if FACTORY_USES.load(Ordering::Relaxed) != uses || CALL_OPEN.load(Ordering::Relaxed) {
+                return;
+            }
+            if let Some(keeper) = lock(&KEEPER).take() {
+                keeper.close();
+            }
+            if held.take().is_some() {
+                eprintln!("[voice] webrtc factory released");
+            }
+        });
+    if let Err(e) = spawned {
+        eprintln!("[voice] factory release: {e}");
+    }
 }
 
 fn err(what: &str) -> impl FnOnce(libwebrtc::RtcError) -> MediaError + '_ {
@@ -340,7 +389,7 @@ impl LibwebrtcEngine {
         if let Some(list) = super::wasapi::list_devices() {
             return list;
         }
-        let f = factory();
+        let f = &factory();
         if !f.acquire_platform_adm() {
             return AudioDevices::default();
         }
@@ -361,8 +410,8 @@ impl LibwebrtcEngine {
         sel.output = output;
         // Before the first call there is no factory to tell: the call
         // applies the choice when it opens the ADM.
-        match FACTORY.get() {
-            Some(f) if f.is_platform_adm_active() => apply(f, &mut sel),
+        match existing_factory() {
+            Some(f) if f.is_platform_adm_active() => apply(&f, &mut sel),
             _ => None,
         }
     }
@@ -737,7 +786,7 @@ impl MediaEngine for LibwebrtcEngine {
         &self,
         ice_servers: &[IceServer],
     ) -> Result<(LibwebrtcSession, UnboundedReceiver<MediaState>), MediaError> {
-        let f = factory();
+        let f = &factory();
         if !CALL_OPEN.load(Ordering::Relaxed) {
             // No call runs: a fallback to the ADM takes effect here, never
             // midway through one.
@@ -781,7 +830,7 @@ impl MediaEngine for LibwebrtcEngine {
         &self,
         ice_servers: &[IceServer],
     ) -> Result<(LibwebrtcSession, UnboundedReceiver<MediaState>), MediaError> {
-        let f = factory();
+        let f = &factory();
         if !CALL_OPEN.load(Ordering::Relaxed) {
             // No call runs: a fallback to the ADM takes effect here, never
             // midway through one.
@@ -816,7 +865,7 @@ impl MediaEngine for LibwebrtcEngine {
         &self,
         ice_servers: &[IceServer],
     ) -> Result<(LibwebrtcSession, UnboundedReceiver<MediaState>), MediaError> {
-        Self::connect(factory(), ice_servers, None, false)
+        Self::connect(&factory(), ice_servers, None, false)
     }
 
     fn release(&self) {
@@ -825,19 +874,20 @@ impl MediaEngine for LibwebrtcEngine {
         if pipeline::enabled() {
             pipeline().stop();
         }
-        let f = factory();
+        let f = &factory();
         f.release_platform_adm();
         if !f.is_platform_adm_active() {
             Self::forget_applied();
         }
+        release_factory_later();
     }
 
     fn check_devices(&self) -> Option<String> {
-        let f = FACTORY.get()?;
+        let f = existing_factory()?;
         if !f.is_platform_adm_active() {
             return None;
         }
-        apply(f, &mut lock(selection()))
+        apply(&f, &mut lock(selection()))
     }
 }
 
@@ -983,7 +1033,7 @@ impl MediaSession for LibwebrtcSession {
             eprintln!("[voice] standby mic promoted (own audio path)");
             return Ok(());
         }
-        let f = factory();
+        let f = &factory();
         // Windows' built-in AEC refuses to record before playout runs, and a
         // standby has pulled nothing yet, so nothing has started playout.
         if !f.playout_is_initialized() {
@@ -1036,7 +1086,7 @@ impl MediaSession for LibwebrtcSession {
         if pipeline::enabled() {
             return;
         }
-        let f = factory();
+        let f = &factory();
         if !f.recording_is_initialized() {
             let ok = f.init_recording() && f.start_recording();
             eprintln!("[voice] started recording explicitly: {ok}");
@@ -1463,7 +1513,7 @@ impl MediaSession for LibwebrtcSession {
             pipeline().stop_capture();
             return;
         }
-        let f = factory();
+        let f = &factory();
         if f.recording_is_initialized() {
             f.stop_recording();
         }
@@ -1613,7 +1663,7 @@ mod tests {
     /// platform's audio stack; skipped where the ADM cannot start.
     #[test]
     fn adm_should_outlive_a_calls_peer_connection() {
-        let f = factory();
+        let f = &factory();
         if !f.acquire_platform_adm() {
             return;
         }
@@ -1643,7 +1693,7 @@ mod tests {
         let Some(ours) = super::super::wasapi::list_devices() else {
             return;
         };
-        let f = factory();
+        let f = &factory();
         if !f.acquire_platform_adm() {
             return;
         }

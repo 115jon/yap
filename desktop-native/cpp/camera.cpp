@@ -227,15 +227,26 @@ CameraCapture::CameraCapture(QObject* parent) : QObject(parent)
 {
   m_fake = qEnvironmentVariable("YAP_FAKE_CAMERA") == QLatin1String("1");
   m_clock.start();
-  m_devices = new QMediaDevices(this);
-  connect(m_devices, &QMediaDevices::videoInputsChanged, this, [this] {
-    listDevices();
+}
+
+// The first read of the list (a call's camera key, Settings, a camera
+// turned on) lists the cameras and starts watching for changes. Not at
+// startup: listing initialises Media Foundation, which a session without
+// video never needs. The first list is taken silently, inside the read.
+void CameraCapture::ensureListed() const
+{
+  if (m_devices)
+    return;
+  auto* self = const_cast<CameraCapture*>(this);
+  self->m_devices = new QMediaDevices(self);
+  connect(self->m_devices, &QMediaDevices::videoInputsChanged, self, [self] {
+    self->listDevices();
     // A camera was plugged in or out: a blocked open may work now, and a
     // fallback may get its saved camera back.
-    m_blocked = false;
-    sync();
+    self->m_blocked = false;
+    self->sync();
   });
-  listDevices();
+  self->listDevices(false);
 }
 
 CameraCapture::~CameraCapture()
@@ -256,7 +267,7 @@ CameraCapture::Profile CameraCapture::profileFor(const QString& quality)
   return { 1280, 720, 30 };
 }
 
-void CameraCapture::listDevices()
+void CameraCapture::listDevices(bool notify)
 {
   m_cameras = QMediaDevices::videoInputs();
   QStringList ids;
@@ -279,7 +290,8 @@ void CameraCapture::listDevices()
   if (ids != m_ids || names != m_names) {
     m_ids = ids;
     m_names = names;
-    emit devicesChanged();
+    if (notify)
+      emit devicesChanged();
   }
 }
 
@@ -372,6 +384,7 @@ void CameraCapture::sync()
     close();
     return;
   }
+  ensureListed();
   bool fellBack = false;
   QCameraDevice device;
   QByteArray id = kFakeId;

@@ -41,10 +41,14 @@ T.Button {
     Accessible.role: Accessible.Button
     Accessible.name: tip
 
-    Tooltip {
-        visible: control.hovered && control.tip.length > 0
-        text: control.tip
-        side: control.tipSide
+    LazyPopup {
+        // Made while hovered.
+        when: control.hovered && control.tip.length > 0
+        sourceComponent: Tooltip {
+            visible: control.hovered && control.tip.length > 0
+            text: control.tip
+            side: control.tipSide
+        }
     }
 
     contentItem: Item {

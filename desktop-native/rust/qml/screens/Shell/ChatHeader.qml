@@ -129,10 +129,13 @@ Item {
         }
         HoverHandler { id: titleHover; cursorShape: Qt.PointingHandCursor }
         TapHandler { onTapped: root.toggleDetails() }
-        Tooltip {
-            visible: titleHover.hovered
-            text: ShellState.showDetails ? qsTr("Hide details") : qsTr("Channel details")
-            side: "bottom"
+        LazyPopup {
+            when: titleHover.hovered
+            sourceComponent: Tooltip {
+                visible: titleHover.hovered
+                text: ShellState.showDetails ? qsTr("Hide details") : qsTr("Channel details")
+                side: "bottom"
+            }
         }
         Rectangle {
             anchors.fill: parent
@@ -210,20 +213,23 @@ Item {
                 IconKey {
                     id: bell
                     iconName: "bell"
-                    tone: inbox.opened ? "toggled" : "muted"
+                    tone: (inbox.item?.opened ?? false) ? "toggled" : "muted"
                     tipSide: "bottom"
                     tip: qsTr("Notifications")
                     Accessible.checkable: true
-                    Accessible.checked: inbox.opened
+                    Accessible.checked: inbox.item?.opened ?? false
                     onClicked: {
-                        if (inbox.opened) {
-                            inbox.close()
+                        if (inbox.item?.opened) {
+                            inbox.item.close()
                             return
                         }
+                        const panel = inbox.load()
+                        if (!panel)
+                            return
                         const at = bell.mapToItem(root, 0, 0)
-                        inbox.x = Math.max(8, at.x + bell.width - inbox.width)
-                        inbox.y = at.y + bell.height + 8
-                        inbox.open()
+                        panel.x = Math.max(8, at.x + bell.width - panel.width)
+                        panel.y = at.y + bell.height + 8
+                        panel.open()
                     }
                 }
                 CountBadge {
@@ -276,10 +282,13 @@ Item {
                 }
             }
             TapHandler { onTapped: root.openSearch("") }
-            Tooltip {
-                visible: searchHover.hovered
-                text: root.searchTip
-                side: "bottom"
+            LazyPopup {
+                when: searchHover.hovered
+                sourceComponent: Tooltip {
+                    visible: searchHover.hovered
+                    text: root.searchTip
+                    side: "bottom"
+                }
             }
             Row {
                 anchors.verticalCenter: parent.verticalCenter
@@ -351,8 +360,8 @@ Item {
         color: Theme.line
     }
 
-    NotificationInbox {
+    LazyPopup {
         id: inbox
-        parent: root
+        sourceComponent: NotificationInbox { parent: root }
     }
 }

@@ -155,9 +155,12 @@ Item {
                             onActivated: Chat.retryUpload(tile.uploadId)
                         }
                     }
-                    Tooltip {
-                        visible: tileHover.hovered && tile.failed && tile.error.length > 0
-                        text: tile.error
+                    LazyPopup {
+                        when: tileHover.hovered && tile.failed && tile.error.length > 0
+                        sourceComponent: Tooltip {
+                            visible: tileHover.hovered && tile.failed && tile.error.length > 0
+                            text: tile.error
+                        }
                     }
 
                     // The size chip, bottom right.
@@ -200,9 +203,12 @@ Item {
                             size: Theme.iconXs
                             color: tile.nsfw ? Theme.warningInk : Theme.ink2
                         }
-                        Tooltip {
-                            visible: nsfwHover.hovered
-                            text: tile.nsfw ? qsTr("Marked sensitive") : qsTr("Mark as sensitive")
+                        LazyPopup {
+                            when: nsfwHover.hovered
+                            sourceComponent: Tooltip {
+                                visible: nsfwHover.hovered
+                                text: tile.nsfw ? qsTr("Marked sensitive") : qsTr("Mark as sensitive")
+                            }
                         }
                         HoverHandler { id: nsfwHover; cursorShape: Qt.PointingHandCursor }
                         TapHandler { onTapped: Chat.setUploadSensitive(tile.uploadId, !tile.nsfw) }

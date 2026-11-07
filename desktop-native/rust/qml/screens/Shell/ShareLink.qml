@@ -10,7 +10,7 @@ Item {
             if (Voice.sharing)
                 Voice.stopShare()
             else
-                picker.openPicker()
+                picker.load()?.openPicker()
         }
     }
     Connections {
@@ -21,5 +21,5 @@ Item {
         }
     }
 
-    SharePicker { id: picker }
+    LazyPopup { id: picker; sourceComponent: SharePicker {} }
 }

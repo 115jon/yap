@@ -32,7 +32,15 @@ ApplicationWindow {
     readonly property string named: DesktopShell.profile.length > 0 ? " (" + DesktopShell.profile + ")" : ""
     title: (location.length > 0 ? location : "Yap") + named
 
-    Component.onCompleted: Session.start()
+    Component.onCompleted: {
+        Session.start()
+        Desktop.setWindowShown(shownOnScreen)
+    }
+
+    // Off screen (minimised or in the tray): a voice standby goes after a
+    // grace, as a hidden web tab's does (voice-standby.ts).
+    readonly property bool shownOnScreen: visible && visibility !== Window.Minimized
+    onShownOnScreenChanged: Desktop.setWindowShown(shownOnScreen)
 
     // Close to tray (the desktop app's default), else quit. A quit already
     // under way (the tray's Quit, the session ending) closes every window

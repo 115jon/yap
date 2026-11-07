@@ -2,7 +2,8 @@
 
 // An animated picture Qt's image plugins cannot animate: APNG (avatar
 // decorations, profile effects) and animated WebP (X GIFs). A still PNG or
-// WebP works too, as one frame.
+// WebP works too, as one frame. A small GIF (a server icon) plays here too,
+// decoded by Qt's reader, so it shares the frame grid below.
 //
 //   AnimatedPicture { source: url; playing: hovered; fillMode: ... }
 //
@@ -16,6 +17,11 @@
 // a game or minimised; the web's useAppActive) and some of the item is on
 // screen: inside the window and every clipping ancestor (a scrolled list).
 // Otherwise the timer stops; nothing ticks for a still picture.
+//
+// Frame changes land on a shared 30 Hz grid, so every picture due in the
+// same slot advances in the same pass and they share one window render
+// (each render redraws the whole window). A picture keeps its speed: a slot
+// that comes after several of its frames skips to the one due by then.
 
 #include <QtCore/QHash>
 #include <QtCore/QPointer>
@@ -67,6 +73,41 @@ private:
   QSet<QString> m_pending;
   QSet<QString> m_failed;
   qsizetype m_bytes = 0;
+};
+
+// Whether `item` shows any part of itself: inside its window and every
+// clipping ancestor (a scrolled list's viewport).
+bool visibleInWindow(const QQuickItem* item);
+
+// Says whether the item it fills is on screen, for animations Qt plays
+// itself (AnimatedImage): a row in a list's cache buffer is visible but
+// off screen, and every frame it plays still costs the window a render.
+//
+//   ViewportWatch { id: seen; anchors.fill: parent }
+//   AnimatedImage { playing: seen.inView && ... }
+//
+// Checked after each frame the window renders (scrolling renders frames).
+class ViewportWatch : public QQuickItem
+{
+  Q_OBJECT
+  Q_PROPERTY(bool inView READ inView NOTIFY inViewChanged)
+
+public:
+  explicit ViewportWatch(QQuickItem* parent = nullptr);
+  bool inView() const { return m_inView; }
+
+signals:
+  void inViewChanged();
+
+protected:
+  void itemChange(ItemChange change, const ItemChangeData& value) override;
+  void geometryChange(const QRectF& next, const QRectF& previous) override;
+
+private:
+  void check();
+
+  bool m_inView = false;
+  QMetaObject::Connection m_frames;
 };
 
 class AnimatedPicture : public QQuickItem
@@ -130,6 +171,7 @@ private:
   void setStatus(Status status);
   void schedule();
   void advance();
+  void startTimer(qint64 now);
   bool onScreen() const;
   bool shouldRun() const;
   void watchWindow(QQuickWindow* window);
@@ -147,6 +189,9 @@ private:
   int m_played = 0;
   // A frame change waits for the render thread to pick it up.
   bool m_frameDirty = false;
+  // When the shown frame ends, on the shared animation clock (0: not
+  // running).
+  qint64 m_due = 0;
   QTimer m_timer;
   QPointer<QQuickWindow> m_window;
   QMetaObject::Connection m_frameWatch;

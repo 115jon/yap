@@ -1303,6 +1303,123 @@ fn an_empty_voice_state_should_clear_the_channel() {
     assert_eq!(structural(&fx), vec![&ViewDiff::Remove { at: 4, count: 1 }]);
 }
 
+/// The delayed input a reduction scheduled (the first `Effect::Later`).
+fn later(fx: &[Effect]) -> Option<Input> {
+    fx.iter().find_map(|e| match e {
+        Effect::Later { input, .. } => Some((**input).clone()),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_roster_emptied_while_the_gateway_was_away_should_clear_after_reconnect() {
+    let mut client = Client::online();
+    client.gateway(GatewayEvent::Dispatch(voice_states(json!({
+        VOICE: [occupant("user_ada", "Ada")],
+    }))));
+    client.gateway(GatewayEvent::Closed);
+    // Ada left during the gap; with every channel empty the server sends
+    // no VOICE_CHANNEL_STATES after the new Ready.
+    let fx = client.gateway(GatewayEvent::Ready);
+    let check = later(&fx).expect("a roster check");
+    assert_eq!(client.state.occupants(VOICE).len(), 1);
+    let fx = client.input(check);
+    assert!(client.state.occupants(VOICE).is_empty());
+    assert!(members_of(&fx).is_empty());
+    assert_eq!(structural(&fx), vec![&ViewDiff::Remove { at: 4, count: 1 }]);
+}
+
+#[test]
+fn a_roster_snapshot_after_reconnect_should_cancel_the_check() {
+    let mut client = Client::online();
+    client.gateway(GatewayEvent::Dispatch(voice_states(json!({
+        VOICE: [occupant("user_ada", "Ada")],
+    }))));
+    client.gateway(GatewayEvent::Closed);
+    let check = later(&client.gateway(GatewayEvent::Ready)).expect("a roster check");
+    client.gateway(GatewayEvent::Dispatch(voice_states(json!({
+        VOICE: [occupant("user_ada", "Ada")],
+    }))));
+    assert!(client.input(check).is_empty());
+    assert_eq!(client.state.occupants(VOICE).len(), 1);
+}
+
+#[test]
+fn a_roster_updated_after_resume_should_survive_the_check() {
+    let mut client = Client::online();
+    client.gateway(GatewayEvent::Dispatch(voice_states(json!({
+        VOICE: [occupant("user_ada", "Ada")],
+    }))));
+    let check = later(&client.gateway(GatewayEvent::Resumed)).expect("a roster check");
+    client.gateway(GatewayEvent::Dispatch(voice_state(
+        VOICE,
+        json!([occupant("user_ada", "Ada"), occupant("user_bob", "Bob")]),
+    )));
+    client.input(check);
+    assert_eq!(client.state.occupants(VOICE).len(), 2);
+}
+
+#[test]
+fn reconnecting_with_no_rosters_should_schedule_no_check() {
+    let mut client = Client::online();
+    client.gateway(GatewayEvent::Closed);
+    assert!(later(&client.gateway(GatewayEvent::Ready)).is_none());
+}
+
+/// The occupied landing's standby: (starts, leaves) in `fx`.
+fn standby_moves(fx: &[Effect]) -> (usize, usize) {
+    let starts = fx
+        .iter()
+        .filter(|e| matches!(e, Effect::VoiceStart { target, .. } if target.standby))
+        .count();
+    let leaves = fx
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                Effect::Voice {
+                    command: VoiceCommand::Leave,
+                    ..
+                }
+            )
+        })
+        .count();
+    (starts, leaves)
+}
+
+#[test]
+fn a_hidden_window_should_drop_the_standby_after_the_grace_and_take_it_back_when_shown() {
+    let mut client = Client::online();
+    client.command(Command::SelectChannel(VOICE.into()));
+    let fx = client.gateway(GatewayEvent::Dispatch(voice_states(json!({
+        VOICE: [occupant("user_ada", "Ada")],
+    }))));
+    assert_eq!(standby_moves(&fx), (1, 0));
+    let fx = client.command(Command::WindowShown(false));
+    assert_eq!(standby_moves(&fx), (0, 0), "kept through the grace");
+    let grace = later(&fx).expect("a grace timer");
+    assert_eq!(standby_moves(&client.input(grace)), (0, 1));
+    assert_eq!(
+        standby_moves(&client.command(Command::WindowShown(true))),
+        (1, 0)
+    );
+}
+
+#[test]
+fn a_window_shown_again_within_the_grace_should_keep_the_standby() {
+    let mut client = Client::online();
+    client.command(Command::SelectChannel(VOICE.into()));
+    client.gateway(GatewayEvent::Dispatch(voice_states(json!({
+        VOICE: [occupant("user_ada", "Ada")],
+    }))));
+    let grace = later(&client.command(Command::WindowShown(false))).expect("a grace timer");
+    assert_eq!(
+        standby_moves(&client.command(Command::WindowShown(true))),
+        (0, 0)
+    );
+    assert_eq!(standby_moves(&client.input(grace)), (0, 0));
+}
+
 #[test]
 fn the_path_should_run_down_to_you_and_speaking_should_come_from_the_call() {
     let mut client = Client::online();

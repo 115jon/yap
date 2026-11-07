@@ -299,7 +299,15 @@ RowLayout {
             }
         }
         T.Overlay.modal: Scrim { color: Theme.scrim }
-        contentItem: Item {
+        // Made while the sheet shows.
+        contentItem: Loader {
+            active: sheet.visible
+            sourceComponent: sheetContent
+        }
+    }
+    Component {
+        id: sheetContent
+        Item {
             // In details the panel draws its own header instead.
             Item {
                 id: sheetHeader
@@ -349,13 +357,43 @@ RowLayout {
         value: Settings.mediaFilter
     }
 
-    ProfilePopout { id: profile }
     // The quick switcher and the other extras' dialogs.
     ExtrasHost {}
-    PeerMenu { id: peerMenu }
-    // A call ringing for us while its DM is not open.
-    IncomingCallCard {}
-    MemberMenu { id: memberMenu }
+
+    // The shell's popups, each made as it opens and let go once closed
+    // (LazyPopup); they position against the shell, as if declared here.
+    Item {
+        Layout.preferredWidth: 0
+        Layout.preferredHeight: 0
+
+        LazyPopup { id: profile; host: root; sourceComponent: ProfilePopout {} }
+        LazyPopup { id: peerMenu; host: root; sourceComponent: PeerMenu {} }
+        // A call ringing for us while its DM is not open.
+        LazyPopup {
+            host: root
+            when: JSON.parse(Calls.view).status === "ringing_incoming"
+            sourceComponent: IncomingCallCard {}
+        }
+        LazyPopup { id: memberMenu; host: root; sourceComponent: MemberMenu {} }
+        // User settings (kept while the theme preview hides it), the profile
+        // editor over it (or alone, from the account card) and the theme
+        // preview sheet.
+        LazyPopup {
+            host: root
+            when: SettingsNav.open
+            // Kept once made: making it per open left ~10 MB behind each
+            // time (native memory, not QML objects; docs/PERFORMANCE.md).
+            keep: true
+            sourceComponent: SettingsDialog {}
+        }
+        LazyPopup { id: profileEditor; host: root; sourceComponent: ProfileEditor {} }
+        LazyPopup {
+            host: root
+            when: SettingsNav.open && SettingsNav.previewing
+            // Its parent from the start: it opens as it is made.
+            sourceComponent: ThemePreviewSheet { parent: root }
+        }
+    }
 
     // Server and channel settings, the create, invite and confirm dialogs.
     AdminHost {
@@ -369,21 +407,16 @@ RowLayout {
         Layout.preferredHeight: 0
     }
 
-    // User settings, the profile editor over it (or alone, from the
-    // account card) and the theme preview sheet.
-    SettingsDialog {}
-    ProfileEditor { id: profileEditor }
-    ThemePreviewSheet {}
     Connections {
         target: SettingsNav
-        function onProfileEditorRequested() { profileEditor.open() }
+        function onProfileEditorRequested() { profileEditor.load()?.open() }
     }
     Connections {
         target: Session
         function onPhaseChanged() {
             if (Session.phase !== Session.Ready) {
                 SettingsNav.close()
-                profileEditor.close()
+                profileEditor.item?.close()
             }
         }
     }
@@ -391,13 +424,13 @@ RowLayout {
     Connections {
         target: ShellState
         function onProfileRequested(userId, anchor, side) {
-            profile.openFor(userId, anchor, side)
+            profile.load()?.openFor(userId, anchor, side)
         }
         function onPeerMenuRequested(userId, name, anchor, at, channelId) {
-            peerMenu.openFor(userId, name, anchor, at.x, at.y, channelId)
+            peerMenu.load()?.openFor(userId, name, anchor, at.x, at.y, channelId)
         }
         function onMemberMenuRequested(userId, name, anchor, at) {
-            memberMenu.openFor(userId, name, anchor, at.x, at.y)
+            memberMenu.load()?.openFor(userId, name, anchor, at.x, at.y)
         }
     }
 }

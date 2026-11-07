@@ -92,18 +92,27 @@ Item {
 
     implicitHeight: plate.height
 
-    EmojiPicker {
+    // Made on first use and kept: their grids are costly to build again.
+    LazyPopup {
         id: emojiPicker
-        onPicked: value => root.insertText(value)
-        onClosed: input.forceActiveFocus()
+        keep: true
+        sourceComponent: EmojiPicker {
+            onPicked: value => root.insertText(value)
+            onClosed: input.forceActiveFocus()
+        }
     }
 
-    GifPicker {
+    LazyPopup {
         id: gifPicker
-        replyToId: root.replyToId
-        onSent: root.cancelReply()
-        onClosed: input.forceActiveFocus()
+        keep: true
+        sourceComponent: GifPicker {
+            replyToId: root.replyToId
+            onSent: root.cancelReply()
+            onClosed: input.forceActiveFocus()
+        }
     }
+    readonly property bool emojiOpen: emojiPicker.item?.visible ?? false
+    readonly property bool gifOpen: gifPicker.item?.visible ?? false
 
     // Mention suggestions (MentionAutocomplete.tsx): up to five members,
     // over the list, Up/Down to move, Enter or Tab to insert, Esc to close.
@@ -399,24 +408,27 @@ Item {
                 Accessible.name: qsTr("Open GIF picker")
                 Rectangle {
                     anchors.fill: parent
-                    color: gifPicker.visible ? Theme.tint2 : gifHover.hovered ? Theme.tint1 : "transparent"
+                    color: root.gifOpen ? Theme.tint2 : gifHover.hovered ? Theme.tint1 : "transparent"
                 }
                 Text {
                     id: gifText
                     anchors.centerIn: parent
                     text: "GIF"
-                    color: gifHover.hovered || gifPicker.visible ? Theme.ink1 : Theme.ink2
+                    color: gifHover.hovered || root.gifOpen ? Theme.ink1 : Theme.ink2
                     font: Theme.type.silk
                 }
-                Tooltip { visible: gifHover.hovered; text: qsTr("Open GIF picker") }
+                LazyPopup {
+                    when: gifHover.hovered
+                    sourceComponent: Tooltip { visible: gifHover.hovered; text: qsTr("Open GIF picker") }
+                }
                 HoverHandler { id: gifHover; cursorShape: Qt.PointingHandCursor }
                 TapHandler {
                     onTapped: {
-                        if (gifPicker.visible) {
-                            gifPicker.close()
+                        if (root.gifOpen) {
+                            gifPicker.item.close()
                         } else {
-                            emojiPicker.close()
-                            gifPicker.openAt(gifKey)
+                            emojiPicker.item?.close()
+                            gifPicker.load()?.openAt(gifKey)
                         }
                     }
                 }
@@ -429,13 +441,13 @@ Item {
                 square: true
                 iconName: "emoji"
                 tip: qsTr("Open emoji picker")
-                tone: emojiPicker.visible ? "toggled" : "ghost"
+                tone: root.emojiOpen ? "toggled" : "ghost"
                 onClicked: {
-                    if (emojiPicker.visible) {
-                        emojiPicker.close()
+                    if (root.emojiOpen) {
+                        emojiPicker.item.close()
                     } else {
-                        gifPicker.close()
-                        emojiPicker.openAt(emojiKey)
+                        gifPicker.item?.close()
+                        emojiPicker.load()?.openAt(emojiKey)
                     }
                 }
             }

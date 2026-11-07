@@ -119,14 +119,14 @@ Rectangle {
                 id: optionsKey
                 anchors.verticalCenter: parent.verticalCenter
                 size: 24
-                tone: details.opened ? "toggled" : "muted"
+                tone: (details.item?.opened ?? false) ? "toggled" : "muted"
                 iconName: "sliders"
                 tip: qsTr("Voice options")
-                onClicked: details.toggleAt(optionsKey)
+                onClicked: details.load()?.toggleAt(optionsKey)
             }
         }
     }
-    VoiceDetailsPopup { id: details }
+    LazyPopup { id: details; sourceComponent: VoiceDetailsPopup {} }
 
     Item {
         id: actions
@@ -188,9 +188,12 @@ Rectangle {
                 size: actions.key
                 glyph: Theme.iconLg
                 iconName: "more"
-                tone: moreMenu.visible || soundboardPopup.item?.opened ? "toggled" : "rest"
+                tone: (moreMenu.item?.visible ?? false) || soundboardPopup.item?.opened ? "toggled" : "rest"
                 tip: qsTr("More call actions")
-                onClicked: moreMenu.popup(moreKey, 0, -moreMenu.implicitHeight - 8)
+                onClicked: {
+                    const menu = moreMenu.load()
+                    menu?.popup(moreKey, 0, -menu.implicitHeight - 8)
+                }
             }
         }
         IconKey {
@@ -251,17 +254,19 @@ Rectangle {
             onClosed: root.popoverClosedAt = Date.now()
         }
     }
-    MenuPanel {
+    LazyPopup {
         id: moreMenu
-        MenuRow {
-            glyph: "activities"
-            text: qsTr("Activities")
-            onTriggered: root.togglePopover(activitiesPopup, moreKey)
-        }
-        MenuRow {
-            glyph: "soundboard"
-            text: qsTr("Soundboard")
-            onTriggered: root.togglePopover(soundboardPopup, moreKey)
+        sourceComponent: MenuPanel {
+            MenuRow {
+                glyph: "activities"
+                text: qsTr("Activities")
+                onTriggered: root.togglePopover(activitiesPopup, moreKey)
+            }
+            MenuRow {
+                glyph: "soundboard"
+                text: qsTr("Soundboard")
+                onTriggered: root.togglePopover(soundboardPopup, moreKey)
+            }
         }
     }
 }

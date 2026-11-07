@@ -149,7 +149,7 @@ Rectangle {
     // `handlePinToggle`).
     function setPin(id, author, text, pin, confirm) {
         if (pin || confirm)
-            pinDialog.ask(id, author, text, pin)
+            pinDialog.load()?.ask(id, author, text, pin)
         else
             Panels.setPinned(id, false)
     }
@@ -203,7 +203,7 @@ Rectangle {
 
     function deleteMessage(id, author, text, confirm) {
         if (confirm)
-            deleteDialog.ask(id, author, text)
+            deleteDialog.load()?.ask(id, author, text)
         else
             Chat.deleteMessage(id)
     }
@@ -312,11 +312,14 @@ Rectangle {
         clip: true
         model: MessageListModel
         boundsBehavior: Flickable.StopAtBounds
-        reuseItems: true
         // Rows within this distance of the viewport are made ahead of the
         // scroll, incubated across frames, so a row with embeds (6-8 ms to
         // make) is ready before it shows instead of stalling the frame it
-        // enters on (the default is 320 px, outrun by a wheel scroll).
+        // enters on (the default is 320 px, outrun by a wheel scroll). No
+        // reuse: a pooled row is rebound inside the frame it enters on, so
+        // its embeds and attachments were rebuilt there, where incubation
+        // cannot help (docs/PERFORMANCE.md, pass 2).
+        reuseItems: false
         cacheBuffer: 1200
         topMargin: 0
         bottomMargin: 8
@@ -429,16 +432,19 @@ Rectangle {
             onEditCancelled: root.endEdit()
             onDeleteRequested: (id, author, text, confirm) => root.deleteMessage(id, author, text, confirm)
             onMenuRequested: (id, author, text, mine, anchor, x, y) => {
-                messageMenu.replyCount = row.replyCount
-                messageMenu.pinned = row.pinned
-                messageMenu.settled = !row.pending && !row.failed
-                messageMenu.hasReactions = row.reactions.length > 0
-                messageMenu.omitted = root.omittedFiles(row.attachments)
-                messageMenu.authorId = row.authorId
+                const menu = messageMenuHost.load()
+                if (!menu)
+                    return
+                menu.replyCount = row.replyCount
+                menu.pinned = row.pinned
+                menu.settled = !row.pending && !row.failed
+                menu.hasReactions = row.reactions.length > 0
+                menu.omitted = root.omittedFiles(row.attachments)
+                menu.authorId = row.authorId
                 const under = row.contextAt(anchor, x, y)
-                messageMenu.link = under.link
-                messageMenu.media = under.media
-                messageMenu.openFor(id, author, text, mine, anchor, x, y)
+                menu.link = under.link
+                menu.media = under.media
+                menu.openFor(id, author, text, mine, anchor, x, y)
             }
             onThreadRequested: id => root.openThread(id)
             onPinRequested: (id, author, text, pin, confirm) => root.setPin(id, author, text, pin, confirm)
@@ -456,14 +462,17 @@ Rectangle {
             }
             onReactionDetailsRequested: (id, emoji) => ShellState.reactionsRequested(id, emoji)
             onReactionPickerRequested: (id, anchor, toRight) => {
-                reactionPicker.messageId = id
-                reactionPicker.openBeside(anchor, toRight)
+                const picker = reactionPicker.load()
+                if (!picker)
+                    return
+                picker.messageId = id
+                picker.openBeside(anchor, toRight)
             }
-            onImageOpened: (images, index) => viewer.show(images, index)
+            onImageOpened: (images, index) => viewer.load()?.show(images, index)
             onDownloadRequested: item => root.saveFile(item)
             onVideoOpened: item => root.openVideo(item)
             onLinkOpened: url => root.openLink(url)
-            onEmbedsRemoveRequested: (id, skip) => skip ? Chat.removeEmbeds(id) : removeEmbedsDialog.ask(id)
+            onEmbedsRemoveRequested: (id, skip) => skip ? Chat.removeEmbeds(id) : removeEmbedsDialog.load()?.ask(id)
         }
 
         ScrollBar.vertical: ThinScrollBar {}
@@ -756,221 +765,229 @@ Rectangle {
     // reactions, Edit, Reply, thread, Pin | Copy text, Mark unread, Share,
     // Profile, Copy ID | Delete, Ban (danger rows last, ContextMenu.tsx
     // `groupMenuItems`).
-    MenuPanel {
-        id: messageMenu
-        property string messageId
-        property string authorId
-        property string author
-        property string text
-        property bool mine
-        property int replyCount
-        property bool pinned
-        property bool settled: true
-        property bool hasReactions: false
-        property int omitted: 0
-        // The link and the picture under the pointer (`hoveredUrl`,
-        // `publicMediaUrl` in MessageItem.tsx).
-        property string link
-        property string media
-        property Item anchorItem: null
-        readonly property bool canBan: !mine && Admin.canBan && Nav.dmUsername.length === 0
-        readonly property bool hasDanger: settled && (mine || Chat.canManageMessages) || canBan
-        function openFor(id, author, text, mine, anchor, x, y) {
-            messageId = id
-            messageMenu.author = author
-            messageMenu.text = text
-            messageMenu.mine = mine
-            anchorItem = anchor
-            const at = anchor.mapToItem(root, x, y)
-            popup(root, at.x, at.y)
-        }
-        Row {
-            visible: messageMenu.settled
-            height: visible ? 32 + 8 : 0
-            leftPadding: 4
-            topPadding: 4
-            spacing: 4
-            Repeater {
-                model: messageMenu.settled ? JSON.parse(Emoji.quick).slice(0, 4) : []
-                Rectangle {
-                    id: quickChip
-                    required property var modelData
-                    width: 32
-                    height: 32
-                    radius: Theme.radius
-                    color: quickArea.pressed ? Theme.tint3 : quickArea.containsMouse ? Theme.tint2 : Theme.tint1
-                    scale: quickArea.pressed ? Theme.scalePressIcon : 1
-                    Accessible.role: Accessible.Button
-                    Accessible.name: qsTr("React with %1").arg(":" + modelData.s + ":")
-                    Image {
-                        anchors.centerIn: parent
-                        width: 20
-                        height: 20
-                        sourceSize: Qt.size(40, 40)
-                        asynchronous: true
-                        source: quickChip.modelData.u
-                    }
-                    MouseArea {
-                        id: quickArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            Chat.toggleReaction(messageMenu.messageId, quickChip.modelData.e)
-                            Emoji.remember(quickChip.modelData.e)
-                            messageMenu.close()
+    LazyPopup {
+        id: messageMenuHost
+        sourceComponent: Component {
+            MenuPanel {
+                id: messageMenu
+                property string messageId
+                property string authorId
+                property string author
+                property string text
+                property bool mine
+                property int replyCount
+                property bool pinned
+                property bool settled: true
+                property bool hasReactions: false
+                property int omitted: 0
+                // The link and the picture under the pointer (`hoveredUrl`,
+                // `publicMediaUrl` in MessageItem.tsx).
+                property string link
+                property string media
+                property Item anchorItem: null
+                readonly property bool canBan: !mine && Admin.canBan && Nav.dmUsername.length === 0
+                readonly property bool hasDanger: settled && (mine || Chat.canManageMessages) || canBan
+                function openFor(id, author, text, mine, anchor, x, y) {
+                    messageId = id
+                    messageMenu.author = author
+                    messageMenu.text = text
+                    messageMenu.mine = mine
+                    anchorItem = anchor
+                    const at = anchor.mapToItem(root, x, y)
+                    popup(root, at.x, at.y)
+                }
+                Row {
+                    visible: messageMenu.settled
+                    height: visible ? 32 + 8 : 0
+                    leftPadding: 4
+                    topPadding: 4
+                    spacing: 4
+                    Repeater {
+                        model: messageMenu.settled ? JSON.parse(Emoji.quick).slice(0, 4) : []
+                        Rectangle {
+                            id: quickChip
+                            required property var modelData
+                            width: 32
+                            height: 32
+                            radius: Theme.radius
+                            color: quickArea.pressed ? Theme.tint3 : quickArea.containsMouse ? Theme.tint2 : Theme.tint1
+                            scale: quickArea.pressed ? Theme.scalePressIcon : 1
+                            Accessible.role: Accessible.Button
+                            Accessible.name: qsTr("React with %1").arg(":" + modelData.s + ":")
+                            Image {
+                                anchors.centerIn: parent
+                                width: 20
+                                height: 20
+                                sourceSize: Qt.size(40, 40)
+                                asynchronous: true
+                                source: quickChip.modelData.u
+                            }
+                            MouseArea {
+                                id: quickArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    Chat.toggleReaction(messageMenu.messageId, quickChip.modelData.e)
+                                    Emoji.remember(quickChip.modelData.e)
+                                    messageMenu.close()
+                                }
+                            }
                         }
                     }
                 }
+                MenuRule { visible: messageMenu.settled; height: visible ? implicitHeight : 0 }
+                MenuRow {
+                    id: addReactionRow
+                    text: qsTr("Add reaction")
+                    glyph: "react"
+                    visible: messageMenu.settled
+                    height: visible ? implicitHeight : 0
+                    onTriggered: {
+                        const picker = reactionPicker.load()
+                        if (!picker)
+                            return
+                        picker.messageId = messageMenu.messageId
+                        picker.openBelow(addReactionRow)
+                    }
+                }
+                MenuRule { visible: messageMenu.settled && !messageMenu.hasReactions; height: visible ? implicitHeight : 0 }
+                MenuRow {
+                    text: qsTr("View reactions")
+                    glyph: "emoji"
+                    visible: messageMenu.settled && messageMenu.hasReactions
+                    height: visible ? implicitHeight : 0
+                    onTriggered: ShellState.reactionsRequested(messageMenu.messageId, "")
+                }
+                MenuRule { visible: messageMenu.settled && messageMenu.hasReactions; height: visible ? implicitHeight : 0 }
+                MenuRow {
+                    text: qsTr("Edit message")
+                    glyph: "edit"
+                    visible: messageMenu.mine && messageMenu.settled
+                    height: visible ? implicitHeight : 0
+                    onTriggered: root.startEdit(messageMenu.messageId)
+                }
+                MenuRow {
+                    text: qsTr("Reply")
+                    glyph: "reply"
+                    visible: messageMenu.settled
+                    height: visible ? implicitHeight : 0
+                    onTriggered: {
+                        root.replyToId = messageMenu.messageId
+                        root.replyToName = messageMenu.author
+                        root.replyToText = messageMenu.text
+                        composer.focusInput()
+                    }
+                }
+                MenuRow {
+                    text: messageMenu.replyCount > 0 ? qsTr("View thread") : qsTr("Create thread")
+                    glyph: "thread"
+                    visible: messageMenu.settled
+                    height: visible ? implicitHeight : 0
+                    onTriggered: root.openThread(messageMenu.messageId)
+                }
+                MenuRow {
+                    text: messageMenu.pinned ? qsTr("Unpin message") : qsTr("Pin message")
+                    glyph: "pin"
+                    visible: Panels.canPin && messageMenu.settled
+                    height: visible ? implicitHeight : 0
+                    onTriggered: root.setPin(messageMenu.messageId, messageMenu.author, messageMenu.text, !messageMenu.pinned, true)
+                }
+                MenuRule { visible: Panels.canPin && messageMenu.settled; height: visible ? implicitHeight : 0 }
+                MenuRow {
+                    text: qsTr("Copy text")
+                    glyph: "copy"
+                    onTriggered: {
+                        clipboard.copyText(messageMenu.text)
+                        toast.show(qsTr("Text copied"))
+                    }
+                }
+                MenuRow {
+                    text: qsTr("Mark unread")
+                    glyph: "markUnread"
+                    visible: messageMenu.settled
+                    height: visible ? implicitHeight : 0
+                    onTriggered: Extras.markUnread(messageMenu.messageId)
+                }
+                MenuRow {
+                    text: qsTr("Copy link")
+                    glyph: "link"
+                    visible: messageMenu.link.length > 0
+                    height: visible ? implicitHeight : 0
+                    onTriggered: {
+                        clipboard.copyText(messageMenu.link)
+                        toast.show(qsTr("Link copied"))
+                    }
+                }
+                MenuRow {
+                    text: qsTr("Open link")
+                    glyph: "externalLink"
+                    visible: messageMenu.link.length > 0
+                    height: visible ? implicitHeight : 0
+                    onTriggered: leaveSite.load()?.request(messageMenu.link)
+                }
+                MenuRow {
+                    text: qsTr("Share message")
+                    glyph: "share"
+                    visible: messageMenu.settled
+                    height: visible ? implicitHeight : 0
+                    onTriggered: ShellState.shareRequested(messageMenu.messageId, messageMenu.author, messageMenu.text, messageMenu.omitted)
+                }
+                MenuRow {
+                    text: qsTr("Profile")
+                    glyph: "account"
+                    onTriggered: ShellState.showProfile(messageMenu.authorId, messageMenu.anchorItem, "right")
+                }
+                MenuRow {
+                    text: qsTr("Copy ID")
+                    glyph: "copyId"
+                    visible: messageMenu.settled
+                    height: visible ? implicitHeight : 0
+                    onTriggered: {
+                        clipboard.copyText(messageMenu.messageId)
+                        toast.show(qsTr("Message ID copied"))
+                    }
+                }
+                MenuRule { visible: messageMenu.hasDanger; height: visible ? implicitHeight : 0 }
+                MenuRow {
+                    text: qsTr("Delete message")
+                    glyph: "trash"
+                    danger: true
+                    visible: messageMenu.settled && (messageMenu.mine || Chat.canManageMessages)
+                    height: visible ? implicitHeight : 0
+                    onTriggered: root.deleteMessage(messageMenu.messageId, messageMenu.author, messageMenu.text, true)
+                }
+                MenuRow {
+                    text: qsTr("Ban user")
+                    glyph: "ban"
+                    danger: true
+                    visible: messageMenu.canBan
+                    height: visible ? implicitHeight : 0
+                    onTriggered: ShellState.banRequested(messageMenu.authorId, messageMenu.author)
+                }
+                MenuRule { visible: messageMenu.media.length > 0; height: visible ? implicitHeight : 0 }
+                MenuRow {
+                    text: qsTr("Copy media link")
+                    glyph: "copy"
+                    visible: messageMenu.media.length > 0
+                    height: visible ? implicitHeight : 0
+                    onTriggered: {
+                        clipboard.copyText(messageMenu.media)
+                        toast.show(qsTr("Media link copied"))
+                    }
+                }
+                MenuRow {
+                    text: qsTr("Open media link")
+                    glyph: "externalLink"
+                    visible: messageMenu.media.length > 0
+                    height: visible ? implicitHeight : 0
+                    onTriggered: leaveSite.load()?.request(messageMenu.media)
+                }
             }
-        }
-        MenuRule { visible: messageMenu.settled; height: visible ? implicitHeight : 0 }
-        MenuRow {
-            id: addReactionRow
-            text: qsTr("Add reaction")
-            glyph: "react"
-            visible: messageMenu.settled
-            height: visible ? implicitHeight : 0
-            onTriggered: {
-                reactionPicker.messageId = messageMenu.messageId
-                reactionPicker.openBelow(addReactionRow)
-            }
-        }
-        MenuRule { visible: messageMenu.settled && !messageMenu.hasReactions; height: visible ? implicitHeight : 0 }
-        MenuRow {
-            text: qsTr("View reactions")
-            glyph: "emoji"
-            visible: messageMenu.settled && messageMenu.hasReactions
-            height: visible ? implicitHeight : 0
-            onTriggered: ShellState.reactionsRequested(messageMenu.messageId, "")
-        }
-        MenuRule { visible: messageMenu.settled && messageMenu.hasReactions; height: visible ? implicitHeight : 0 }
-        MenuRow {
-            text: qsTr("Edit message")
-            glyph: "edit"
-            visible: messageMenu.mine && messageMenu.settled
-            height: visible ? implicitHeight : 0
-            onTriggered: root.startEdit(messageMenu.messageId)
-        }
-        MenuRow {
-            text: qsTr("Reply")
-            glyph: "reply"
-            visible: messageMenu.settled
-            height: visible ? implicitHeight : 0
-            onTriggered: {
-                root.replyToId = messageMenu.messageId
-                root.replyToName = messageMenu.author
-                root.replyToText = messageMenu.text
-                composer.focusInput()
-            }
-        }
-        MenuRow {
-            text: messageMenu.replyCount > 0 ? qsTr("View thread") : qsTr("Create thread")
-            glyph: "thread"
-            visible: messageMenu.settled
-            height: visible ? implicitHeight : 0
-            onTriggered: root.openThread(messageMenu.messageId)
-        }
-        MenuRow {
-            text: messageMenu.pinned ? qsTr("Unpin message") : qsTr("Pin message")
-            glyph: "pin"
-            visible: Panels.canPin && messageMenu.settled
-            height: visible ? implicitHeight : 0
-            onTriggered: root.setPin(messageMenu.messageId, messageMenu.author, messageMenu.text, !messageMenu.pinned, true)
-        }
-        MenuRule { visible: Panels.canPin && messageMenu.settled; height: visible ? implicitHeight : 0 }
-        MenuRow {
-            text: qsTr("Copy text")
-            glyph: "copy"
-            onTriggered: {
-                clipboard.copyText(messageMenu.text)
-                toast.show(qsTr("Text copied"))
-            }
-        }
-        MenuRow {
-            text: qsTr("Mark unread")
-            glyph: "markUnread"
-            visible: messageMenu.settled
-            height: visible ? implicitHeight : 0
-            onTriggered: Extras.markUnread(messageMenu.messageId)
-        }
-        MenuRow {
-            text: qsTr("Copy link")
-            glyph: "link"
-            visible: messageMenu.link.length > 0
-            height: visible ? implicitHeight : 0
-            onTriggered: {
-                clipboard.copyText(messageMenu.link)
-                toast.show(qsTr("Link copied"))
-            }
-        }
-        MenuRow {
-            text: qsTr("Open link")
-            glyph: "externalLink"
-            visible: messageMenu.link.length > 0
-            height: visible ? implicitHeight : 0
-            onTriggered: leaveSite.request(messageMenu.link)
-        }
-        MenuRow {
-            text: qsTr("Share message")
-            glyph: "share"
-            visible: messageMenu.settled
-            height: visible ? implicitHeight : 0
-            onTriggered: ShellState.shareRequested(messageMenu.messageId, messageMenu.author, messageMenu.text, messageMenu.omitted)
-        }
-        MenuRow {
-            text: qsTr("Profile")
-            glyph: "account"
-            onTriggered: ShellState.showProfile(messageMenu.authorId, messageMenu.anchorItem, "right")
-        }
-        MenuRow {
-            text: qsTr("Copy ID")
-            glyph: "copyId"
-            visible: messageMenu.settled
-            height: visible ? implicitHeight : 0
-            onTriggered: {
-                clipboard.copyText(messageMenu.messageId)
-                toast.show(qsTr("Message ID copied"))
-            }
-        }
-        MenuRule { visible: messageMenu.hasDanger; height: visible ? implicitHeight : 0 }
-        MenuRow {
-            text: qsTr("Delete message")
-            glyph: "trash"
-            danger: true
-            visible: messageMenu.settled && (messageMenu.mine || Chat.canManageMessages)
-            height: visible ? implicitHeight : 0
-            onTriggered: root.deleteMessage(messageMenu.messageId, messageMenu.author, messageMenu.text, true)
-        }
-        MenuRow {
-            text: qsTr("Ban user")
-            glyph: "ban"
-            danger: true
-            visible: messageMenu.canBan
-            height: visible ? implicitHeight : 0
-            onTriggered: ShellState.banRequested(messageMenu.authorId, messageMenu.author)
-        }
-        MenuRule { visible: messageMenu.media.length > 0; height: visible ? implicitHeight : 0 }
-        MenuRow {
-            text: qsTr("Copy media link")
-            glyph: "copy"
-            visible: messageMenu.media.length > 0
-            height: visible ? implicitHeight : 0
-            onTriggered: {
-                clipboard.copyText(messageMenu.media)
-                toast.show(qsTr("Media link copied"))
-            }
-        }
-        MenuRow {
-            text: qsTr("Open media link")
-            glyph: "externalLink"
-            visible: messageMenu.media.length > 0
-            height: visible ? implicitHeight : 0
-            onTriggered: leaveSite.request(messageMenu.media)
         }
     }
 
-    LeaveSiteDialog { id: leaveSite }
+    LazyPopup { id: leaveSite; sourceComponent: LeaveSiteDialog {} }
 
     // Files dragged over the chat (DragDropOverlay.tsx): the scrim with a
     // dashed line-strong frame 16 px in (radius 12), and over it a ply-3
@@ -1105,12 +1122,14 @@ Rectangle {
         }
     }
 
-    ImageViewer {
+    LazyPopup {
         id: viewer
-        onClosed: composer.focusInput()
+        sourceComponent: ImageViewer {
+            onClosed: composer.focusInput()
+        }
     }
 
-    RemoveEmbedsDialog { id: removeEmbedsDialog }
+    LazyPopup { id: removeEmbedsDialog; sourceComponent: RemoveEmbedsDialog {} }
 
     // Full Screen on a chat video.
     VideoViewer {
@@ -1125,27 +1144,35 @@ Rectangle {
         }
         function onImageViewerRequested(images, index) {
             if (root.visible)
-                viewer.show(images, index)
+                viewer.load()?.show(images, index)
         }
     }
 
     // The picker behind a message's react keys.
-    EmojiPicker {
+    // Kept once made: its grid is costly to build again.
+    LazyPopup {
         id: reactionPicker
-        property string messageId
-        onPicked: value => Chat.toggleReaction(messageId, value)
+        keep: true
+        sourceComponent: EmojiPicker {
+            property string messageId
+            onPicked: value => Chat.toggleReaction(messageId, value)
+        }
     }
 
-    DeleteDialog {
+    LazyPopup {
         id: deleteDialog
-        onConfirmed: id => Chat.deleteMessage(id)
-        onClosed: composer.focusInput()
+        sourceComponent: DeleteDialog {
+            onConfirmed: id => Chat.deleteMessage(id)
+            onClosed: composer.focusInput()
+        }
     }
 
-    PinDialog {
+    LazyPopup {
         id: pinDialog
-        onConfirmed: (id, pin) => Panels.setPinned(id, pin)
-        onClosed: composer.focusInput()
+        sourceComponent: PinDialog {
+            onConfirmed: (id, pin) => Panels.setPinned(id, pin)
+            onClosed: composer.focusInput()
+        }
     }
 
     ClipboardText { id: clipboard }
