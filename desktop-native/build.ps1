@@ -33,6 +33,20 @@ if (-not $vs) { throw "No Visual Studio with the x64 C++ tools found." }
 Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
 Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64" | Out-Null
 
+# CMake keeps the Qt it first found (Qt6_DIR and each Qt6<Module>_DIR) in its
+# cache and ignores a new prefix, so a build dir configured against another
+# Qt is configured afresh.
+$cache = Join-Path $BuildDir "CMakeCache.txt"
+if (Test-Path $cache) {
+    $cached = (Select-String -Path $cache -Pattern '^Qt6_DIR:PATH=(.*)$').Matches.Groups[1].Value
+    $wanted = "$QtDir/lib/cmake/Qt6"
+    if ($cached -and ([IO.Path]::GetFullPath($cached) -ne [IO.Path]::GetFullPath($wanted))) {
+        Write-Host "Qt changed ($cached -> $wanted); configuring afresh."
+        Remove-Item $cache
+        Remove-Item -Recurse -Force (Join-Path $BuildDir "CMakeFiles") -ErrorAction SilentlyContinue
+    }
+}
+
 cmake -S $PSScriptRoot -B $BuildDir -G Ninja "-DCMAKE_BUILD_TYPE=$Config" "-DCMAKE_PREFIX_PATH=$QtDir"
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 cmake --build $BuildDir
