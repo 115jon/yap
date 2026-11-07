@@ -3,6 +3,7 @@
 
 #include <QtCore/QDirIterator>
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QFile>
 #include <QtCore/QHash>
 #include <QtCore/QSet>
 #include <QtCore/QTimer>
@@ -38,6 +39,7 @@
 #include "crashnotice.h"
 #include "desktopshell.h"
 #include "ditherprovider.h"
+#include "heaptrace.h"
 #include "iconprovider.h"
 #include "logfile.h"
 #include "mediashell.h"
@@ -313,6 +315,8 @@ extern "C" void yap_velopack_startup();
 
 int main(int argc, char* argv[])
 {
+  // YAP_DEBUG_HEAP (diagnostics): allocation stacks from here on.
+  heaptrace::install();
   // First, before Qt and the instance lock: a hook must not show a window
   // or hand its arguments to a running instance.
   yap_velopack_startup();
@@ -347,6 +351,14 @@ int main(int argc, char* argv[])
   if (!qEnvironmentVariableIsSet("QSG_USE_SIMPLE_ANIMATION_DRIVER") &&
       qEnvironmentVariableIntValue("YAP_QSG_VSYNC_ANIMATIONS") == 0)
     qputenv("QSG_USE_SIMPLE_ANIMATION_DRIVER", "1");
+  // The JS engine commits its whole JS and GC stacks up front (4 + 2 MB by
+  // default, plus guards), every page charged to the process whether it is
+  // touched or not. Our QML never recurses deeply: 1 MB of JS stack is
+  // ~130,000 values, and a full GC stack only means an extra drain.
+  if (!qEnvironmentVariableIsSet("QV4_JS_MAX_STACK_SIZE"))
+    qputenv("QV4_JS_MAX_STACK_SIZE", QByteArray::number(1024 * 1024));
+  if (!qEnvironmentVariableIsSet("QV4_GC_MAX_STACK_SIZE"))
+    qputenv("QV4_GC_MAX_STACK_SIZE", QByteArray::number(512 * 1024));
   QGuiApplication app(argc, argv);
   // A second launch shows the first instance's window and exits.
   if (!first) {
@@ -493,6 +505,28 @@ int main(int argc, char* argv[])
       dumpObjectCounts(engine);
     });
     dump->start(every * 1000);
+  }
+
+  if (heaptrace::active()) {
+    // A dump each time "<prefix>.now" appears: its text is the tag, after
+    // "gc " the JS collector runs first. The file is removed once written.
+    auto* poll = new QTimer(&app);
+    QObject::connect(poll, &QTimer::timeout, &app, [&engine] {
+      const QString trigger = qEnvironmentVariable("YAP_DEBUG_HEAP") + QStringLiteral(".now");
+      QFile file(trigger);
+      if (!file.exists() || !file.open(QIODevice::ReadOnly))
+        return;
+      QString tag = QString::fromUtf8(file.readAll()).trimmed();
+      file.close();
+      QFile::remove(trigger);
+      if (tag.startsWith(QLatin1String("gc "))) {
+        tag = tag.mid(3);
+        engine.collectGarbage();
+        engine.trimComponentCache();
+      }
+      heaptrace::dump(qPrintable(tag.isEmpty() ? QStringLiteral("now") : tag));
+    });
+    poll->start(500);
   }
 
   const int code = app.exec();

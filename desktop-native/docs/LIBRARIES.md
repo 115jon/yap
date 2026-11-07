@@ -975,3 +975,72 @@ is 17.3 MB.
   web animates them. AVIF is not uploaded from here (the `image` crate's
   AVIF decoder needs dav1d, a C library); one uploaded on the web fails to
   decode and the row says it could not be applied, as the web does.
+
+## 13. Patched dependencies and the custom Qt (2026-11-07)
+
+From performance pass 3 (docs/PERFORMANCE.md). Each patch lives in
+`desktop-native/patches/<dependency>/` with the script that applies it.
+Nothing outside `desktop-native/` changes, and no existing toolchain is
+overwritten.
+
+### 13.1 Patched crates
+
+`patches/vendor.ps1` copies each crate from the cargo registry into
+`rust/vendor/<crate>` and applies `patches/<crate>/*.patch`.
+
+- `rust/vendor` is ignored by git; `rust/Cargo.toml` builds the copies
+  through `[patch.crates-io]`.
+- `build.ps1` runs the script before CMake. Its stamp (the version plus the
+  patch hashes) makes it a no-op when the copies are current.
+- On a fresh checkout, run it once before `cargo test` or `cargo clippy`.
+- After changing a patch, run it with `-Force`.
+
+| crate                   | patch                                  | why                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `qt-build-utils` 0.10.0 | `0001-qmlcachegen-bytecode-only.patch` | Reads `QT_BUILD_UTILS_QMLCACHEGEN_BYTECODE_ONLY`, a `;`-separated list of a file path suffix, a folder ending in `/`, or `*`. qmlcachegen then compiles those files with `--only-bytecode`. `rust/build.rs` sets the list (`BYTECODE_ONLY`) to the cold screens and popups. cxx-qt-build 0.10 has no option for it. QML: 8.6 to 6.7 MiB.                                                                                     |
+| `webrtc-sys` 0.3.52     | `0001-no-av1-encoder.patch`            | Takes the `LibaomAv1EncoderTemplateAdapter` out of the encoder factory, so the linker drops libaom's AV1 encoder: libwebrtc 16.2 to 12.8 MiB of the exe. The client never sends AV1: VP8 for the camera and software shares (yap-voice puts VP8 first), H.264 for hardware ones. AV1 still decodes (dav1d, `video_decoder_factory.cpp`), and the decoder factory's scalability list comes from `av1_svc_config`, not libaom. |
+
+Two webrtc-sys candidates were tried and dropped:
+
+- the VP9 encoder: other objects still link it, so removing it saved only
+  55 KB;
+- OpenH264: hardware shares need some factory to advertise H.264.
+
+### 13.2 The custom static Qt
+
+`patches/qt/build-qt.ps1` builds Qt 6.6.3 from the qt-everywhere source
+zip into `F:/ct/qt-custom/6.6.3-yap`.
+
+- **Modules:** qtbase, qtshadertools, qtdeclarative, qtsvg, qtimageformats
+  and qtmultimedia.
+- **Toolchain:** Visual Studio 2022 (the MSVC the stock static Qt was built
+  with), with `-static -static-runtime -release -ltcg`.
+- **Cost:** about 2 h on this machine. It needs 32 GB of build tree and
+  0.5 GB of extracted source while it builds, and installs to 8.4 GB (LTCG
+  libraries). `-Clean` removes the intermediates after the install.
+- **Who uses it:**
+  - `build.ps1` uses it when it is there; `YAP_QT_DIR` or `-QtDir` still
+    wins;
+  - the release workflow still downloads the stock
+    `qt-6.6.3-static-msvc-x64.zip`. A zip of this build needs uploading
+    before releases use it.
+
+What changes from the stock static Qt (`F:/Files/Downloads/qt/src/6.6.3`):
+
+| option or patch                                                             | effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-optimize-size`                                                            | `/O1` for Qt itself. Qt and the other libraries in the exe went from 29.2 to 21.8 MiB.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `-no-opengl -no-feature-vulkan`                                             | Qt Quick runs on D3D11 only. The app never chose another backend (`QSG_RHI_BACKEND` no longer offers OpenGL).                                                                                                                                                                                                                                                                                                                                                                                        |
+| `-no-freetype -no-widgets -no-dbus -no-feature-sql -no-openssl -schannel`   | Not used here: no QtWidgets, and Schannel is the TLS backend.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `-no-feature-ffmpeg`                                                        | Qt Multimedia's Media Foundation backend only (the one the app loads).                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `0001-release-pooled-batches-and-unused-glyph-caches.patch` (qtdeclarative) | `QQuickWindow::releaseResources()` on a shown window also frees the batch renderer's pooled batches with their buffers (`Renderer::releaseCachedResources`), and the glyph caches of font engines no text uses (the threaded render loop's release). Without it, a dialog opened once kept its batches and glyph atlases for the window's life. This was the Settings memory. The app asks for a release after a popup is let go (`DesktopShell.releaseGraphicsSoon`) and before hiding to the tray. |
+
+Checked on this build:
+
+- the shell, Settings, the profile editor, the emoji and GIF pickers, the
+  menus and the tooltips draw as before, with no QML warnings;
+- GIFs animate;
+- a hide to the tray and restore works.
+
+Not checked this session: a call (camera, share, the video tiles), WebView2
+embeds or the media player. Verify those before the custom Qt ships.

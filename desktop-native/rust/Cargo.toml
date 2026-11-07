@@ -112,8 +112,67 @@ workspace = true
 [profile.release]
 lto = "thin"
 codegen-units = 1
-opt-level = 3
+# Size first (docs/PERFORMANCE.md, pass 3): most of the code is the core,
+# the bridge, the HTTP stack and the QML compiled to C++ (whose `cc` build
+# takes /O1 from this). The per-frame paths keep opt-level 3 below.
+opt-level = "s"
 strip = "symbols"
+
+# Audio (RNNoise, resampling, the mix), camera backgrounds, picture
+# decoding and capture: per-frame work, kept at full speed.
+[profile.release.package.nnnoiseless]
+opt-level = 3
+[profile.release.package.rustfft]
+opt-level = 3
+[profile.release.package.realfft]
+opt-level = 3
+[profile.release.package.rubato]
+opt-level = 3
+[profile.release.package.yap-audio]
+opt-level = 3
+[profile.release.package.yap-voice]
+opt-level = 3
+[profile.release.package.yap-segment]
+opt-level = 3
+[profile.release.package.ndarray]
+opt-level = 3
+[profile.release.package.yap-anim]
+opt-level = 3
+[profile.release.package.yap-capture]
+opt-level = 3
+[profile.release.package.yap-webm]
+opt-level = 3
+[profile.release.package.image]
+opt-level = 3
+[profile.release.package.png]
+opt-level = 3
+[profile.release.package.image-webp]
+opt-level = 3
+[profile.release.package.zune-jpeg]
+opt-level = 3
+[profile.release.package.zune-core]
+opt-level = 3
+[profile.release.package.fdeflate]
+opt-level = 3
+[profile.release.package.miniz_oxide]
+opt-level = 3
+[profile.release.package.zlib-rs]
+opt-level = 3
+[profile.release.package.crc32fast]
+opt-level = 3
+[profile.release.package.gif]
+opt-level = 3
+[profile.release.package.weezl]
+opt-level = 3
+
+# Patched dependencies (desktop-native/patches, docs/LIBRARIES.md): the
+# copies are made by patches/vendor.ps1 (build.ps1 runs it).
+#   qt-build-utils: qmlcachegen's bytecode-only mode for the QML files
+#   rust/build.rs names.
+#   webrtc-sys: no AV1 (libaom) encoder in the encoder factory.
+[patch.crates-io]
+qt-build-utils = { path = "vendor/qt-build-utils" }
+webrtc-sys = { path = "vendor/webrtc-sys" }
 
 [features]
 link_qt_object_files = ["cxx-qt-build/link_qt_object_files"]

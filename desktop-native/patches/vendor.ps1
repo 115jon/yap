@@ -1,0 +1,56 @@
+# Makes rust/vendor/<crate>: a crates.io crate, the version below, with the
+# patches in patches/<crate>/ applied. rust/Cargo.toml's [patch.crates-io]
+# builds these copies; build.ps1 runs this when one is missing, and so must
+# anyone building or testing the Rust side on a fresh checkout:
+#
+#   pwsh desktop-native/patches/vendor.ps1 [-Force]
+#
+# The copies are generated (rust/vendor is ignored by git): change a patch,
+# then run with -Force. docs/LIBRARIES.md, "Patched dependencies", lists why
+# each patch exists.
+param([switch]$Force)
+$ErrorActionPreference = "Stop"
+$crates = [ordered]@{
+    # qmlcachegen's bytecode-only mode for the QML files rust/build.rs names.
+    "qt-build-utils" = "0.10.0"
+    # No AV1 (libaom) encoder in the encoder factory (exe size).
+    "webrtc-sys"     = "0.3.52"
+}
+$rust = Join-Path $PSScriptRoot "../rust"
+$cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME ".cargo" }
+foreach ($name in $crates.Keys) {
+    $version = $crates[$name]
+    $dest = Join-Path $rust "vendor/$name"
+    $stamp = Join-Path $dest ".yap-vendored"
+    $patches = @(Get-ChildItem (Join-Path $PSScriptRoot "$name/*.patch") | Sort-Object Name)
+    $want = "$version " + (($patches | ForEach-Object { (Get-FileHash $_.FullName).Hash.Substring(0, 12) }) -join " ")
+    if (-not $Force -and (Test-Path $stamp) -and ((Get-Content -Raw $stamp).Trim() -eq $want)) { continue }
+    $find = {
+        Get-ChildItem (Join-Path $cargoHome "registry/src") -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName "$name-$version" } | Where-Object { Test-Path $_ } | Select-Object -First 1
+    }
+    $src = & $find
+    if (-not $src) {
+        # Not unpacked yet: a throwaway manifest that depends on it makes
+        # cargo download and unpack it.
+        $tmp = Join-Path ([IO.Path]::GetTempPath()) "yap-vendor-$name"
+        New-Item -ItemType Directory -Force "$tmp/src" | Out-Null
+        Set-Content "$tmp/Cargo.toml" "[package]`nname = `"fetch`"`nversion = `"0.0.0`"`nedition = `"2021`"`n[dependencies]`n$name = `"=$version`"`n"
+        Set-Content "$tmp/src/lib.rs" ""
+        cargo fetch --manifest-path "$tmp/Cargo.toml"
+        $src = & $find
+        if (-not $src) { throw "$name $version is not in the cargo registry" }
+    }
+    if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+    Copy-Item -Recurse $src $dest
+    Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $dest ".cargo-ok")
+    Push-Location $dest
+    try {
+        foreach ($patch in $patches) {
+            git apply --ignore-whitespace -p1 $patch.FullName
+            if ($LASTEXITCODE) { throw "failed to apply $name/$($patch.Name)" }
+            "applied $name/$($patch.Name)"
+        }
+    } finally { Pop-Location }
+    Set-Content $stamp $want
+}

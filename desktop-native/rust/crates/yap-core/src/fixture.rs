@@ -62,7 +62,8 @@ impl Fixture {
                 id: SERVER.into(),
                 name: "Fixture Server".into(),
                 owner_id: Some(ME.into()),
-                icon_url: None,
+                // YAP_FIXTURE_ICON=<url>: a server icon (a GIF one animates).
+                icon_url: std::env::var("YAP_FIXTURE_ICON").ok(),
                 created_at: None,
                 invites_paused: None,
                 allow_public_shares: None,
@@ -339,7 +340,19 @@ pub fn messages(count: usize) -> Vec<Message> {
             at += 1000 * (2 + rng.below(90)) as i64;
         }
         let (id, username, display) = AUTHORS[author];
-        let attachments = if rng.below(40) == 0 {
+        // YAP_FIXTURE_GIF=<url>: the last message and the fifth from last
+        // carry that GIF (animated idle with chat GIFs, docs/PERFORMANCE.md).
+        let gif = std::env::var("YAP_FIXTURE_GIF").ok().filter(|_| n + 1 == count || n + 6 == count);
+        let attachments = if let Some(url) = gif {
+            vec![Attachment {
+                id: Some(format!("att_fixture_{n}")),
+                filename: format!("loop-{n}.gif"),
+                content_type: Some("image/gif".into()),
+                url: Some(url),
+                size_bytes: Some(1024),
+                ..Attachment::default()
+            }]
+        } else if rng.below(40) == 0 {
             // The app icon, so a scroll test lays out real pictures offline.
             vec![Attachment {
                 id: Some(format!("att_fixture_{n}")),

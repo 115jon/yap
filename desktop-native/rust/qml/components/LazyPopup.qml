@@ -1,4 +1,5 @@
 import QtQuick
+import Yap.Chrome
 
 // A popup that exists only while it is in use: made when it is first
 // opened (or while `when` holds) and let go once it has closed, so a closed
@@ -27,8 +28,12 @@ Loader {
     }
 
     function release() {
-        if (!keep && !when && item && !item.visible)
+        if (!keep && !when && item && !item.visible) {
             active = false
+            // The renderer keeps what the popup's frames needed (pooled
+            // batches, glyph caches) until asked; ask once things settle.
+            DesktopShell.releaseGraphicsSoon()
+        }
     }
 
     onWhenChanged: {

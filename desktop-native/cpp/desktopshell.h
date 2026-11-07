@@ -30,6 +30,7 @@
 #include <QtCore/QRect>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QTimer>
 
 class QLocalServer;
@@ -98,6 +99,12 @@ public:
   Q_INVOKABLE void reveal();
   // Close to tray: saves the rect and hides the window.
   Q_INVOKABLE void hideToTray();
+  // Gives back the scene graph's spare memory a moment from now (debounced):
+  // the renderer's pooled batches and buffers, glyph caches no text uses and
+  // unreferenced pixmaps (QQuickWindow::releaseResources() with the patched
+  // Qt, patches/qt). LazyPopup calls it when a popup is let go; the next
+  // frame remakes what the scene still shows.
+  Q_INVOKABLE void releaseGraphicsSoon();
   // Saves the rect and quits. Sets quitting first: Qt's quit closes every
   // window, and a close the window cancels (close to tray) cancels the quit.
   Q_INVOKABLE void quit();
@@ -152,4 +159,6 @@ private:
   // The last normal (not maximized, not minimized) rect.
   QRect m_normal;
   QTimer m_saveTimer;
+  QTimer m_releaseTimer;
+  QElapsedTimer m_lastRelease;
 };

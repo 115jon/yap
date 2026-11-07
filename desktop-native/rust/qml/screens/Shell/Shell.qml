@@ -381,9 +381,10 @@ RowLayout {
         LazyPopup {
             host: root
             when: SettingsNav.open
-            // Kept once made: making it per open left ~10 MB behind each
-            // time (native memory, not QML objects; docs/PERFORMANCE.md).
-            keep: true
+            // Made per open and let go after: what each instance left behind
+            // was the scene graph's pooled batches and glyph caches, which
+            // the patched Qt now releases (LazyPopup asks;
+            // docs/PERFORMANCE.md, pass 3).
             sourceComponent: SettingsDialog {}
         }
         LazyPopup { id: profileEditor; host: root; sourceComponent: ProfileEditor {} }

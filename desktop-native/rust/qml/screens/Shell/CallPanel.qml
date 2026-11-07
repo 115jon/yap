@@ -143,9 +143,12 @@ Rectangle {
                 glyph: Theme.iconLg
                 iconName: "camera"
                 tone: Voice.cameraOn ? "live" : "rest"
-                enabled: Camera.hasCamera
+                // In a call only: the first read lists the cameras, which
+                // starts Media Foundation (~MBs), and this panel exists,
+                // hidden, all the time.
+                enabled: root.inCall && Camera.hasCamera
                 opacity: enabled ? 1 : 0.45
-                tip: !Camera.hasCamera ? qsTr("No camera detected")
+                tip: !enabled ? qsTr("No camera detected")
                     : Voice.cameraOn ? qsTr("Turn off camera") : qsTr("Turn on camera")
                 Accessible.checkable: true
                 Accessible.checked: Voice.cameraOn

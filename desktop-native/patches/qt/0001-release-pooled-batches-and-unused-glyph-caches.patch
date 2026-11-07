@@ -1,0 +1,34 @@
+diff -ru a/qtdeclarative/src/quick/scenegraph/coreapi/qsgbatchrenderer.cpp b/qtdeclarative/src/quick/scenegraph/coreapi/qsgbatchrenderer.cpp
+--- a/qtdeclarative/src/quick/scenegraph/coreapi/qsgbatchrenderer.cpp	2026-11-07 05:01:27.757917000 -0600
++++ b/qtdeclarative/src/quick/scenegraph/coreapi/qsgbatchrenderer.cpp	2026-11-07 05:01:54.799889300 -0600
+@@ -964,6 +964,15 @@
+     m_vertexUploadPool.reset();
+     m_indexUploadPool.shrink(0);
+     m_indexUploadPool.reset();
++
++    // Yap patch (desktop-native/patches/qt): the pooled batches too. Each
++    // keeps its vertex, index and uniform buffers for reuse, and they only
++    // grow, so every batch a scene ever needed (a dialog opened once)
++    // stayed allocated, on the heap and in the driver, until the renderer
++    // went. Batches in use are untouched; new ones are made as needed.
++    for (int i = 0; i < m_batchPool.size(); ++i)
++        qsg_wipeBatch(m_batchPool.at(i));
++    m_batchPool.reset();
+ }
+ 
+ void Renderer::invalidateAndRecycleBatch(Batch *b)
+diff -ru a/qtdeclarative/src/quick/scenegraph/qsgthreadedrenderloop.cpp b/qtdeclarative/src/quick/scenegraph/qsgthreadedrenderloop.cpp
+--- a/qtdeclarative/src/quick/scenegraph/qsgthreadedrenderloop.cpp	2026-11-07 05:01:27.871101800 -0600
++++ b/qtdeclarative/src/quick/scenegraph/qsgthreadedrenderloop.cpp	2026-11-07 05:01:54.799889300 -0600
+@@ -380,6 +380,11 @@
+                     qCDebug(QSG_LOG_RENDERLOOP, QSG_RT_PAD, "- requesting renderer to release cached resources");
+                     d->renderer->releaseCachedResources();
+                 }
++                // Yap patch (desktop-native/patches/qt): glyph caches of font
++                // engines no text node uses any more. Otherwise they go only on a
++                // font database change, so text shown once (a closed dialog)
++                // kept its atlas textures for good.
++                d->context->invalidateGlyphCaches();
+ #if QT_CONFIG(quick_shadereffect)
+                 QSGRhiShaderEffectNode::garbageCollectMaterialTypeCache(window);
+ #endif
