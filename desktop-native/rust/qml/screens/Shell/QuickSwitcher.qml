@@ -129,6 +129,8 @@ Popup {
                 color: Theme.ink3
             }
             TextField {
+                // No Qt 6.9+ default edit menu (the web has none of its own).
+                ContextMenu.menu: null
                 id: field
                 anchors.left: glass.right
                 anchors.leftMargin: 8

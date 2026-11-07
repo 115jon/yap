@@ -55,7 +55,6 @@ qt_add_executable(YapNative WIN32
   cpp/logfile.cpp cpp/logfile.h
   cpp/mediashell.cpp cpp/mediashell.h
   cpp/profile.cpp cpp/profile.h
-  cpp/shadowprovider.cpp cpp/shadowprovider.h
   cpp/shareprovider.cpp cpp/shareprovider.h
   cpp/thumbbar.cpp cpp/thumbbar.h
   cpp/toast_win.cpp cpp/toast_win.h
@@ -63,6 +62,12 @@ qt_add_executable(YapNative WIN32
   cpp/webembed.cpp cpp/webembed.h
   cpp/webmplayer.cpp cpp/webmplayer.h
   cpp/windowchrome.cpp cpp/windowchrome.h)
+# Whole-program optimization for our C++ too (/GL, link-time code
+# generation): the static Qt is built with -ltcg, so the link already runs
+# LTCG over Qt, and now over cpp/ with it. (Not the C++ that `cc` builds
+# into the Rust static library: rustc's archive has no symbol index for
+# /GL objects, so the link cannot find them.) Same MSVC as Qt: build.ps1.
+set_property(TARGET YapNative PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 target_link_libraries(YapNative PRIVATE
   yap_native_qml
   Qt::Gui Qt::Multimedia Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg)
@@ -103,10 +108,10 @@ qt_import_plugins(YapNative INCLUDE Qt::QWindowsMediaPlugin
 if(WIN32)
   # dwmapi for the title bar; shell32, advapi32 and runtimeobject for the
   # tray, the Run key and WinRT toasts; the rest is what libwebrtc (static)
-  # needs.
+  # needs (mfplat and mfuuid: its H.264 decoder, patches/webrtc-sys).
   target_link_libraries(YapNative PRIVATE
     dwmapi shell32 user32 advapi32 runtimeobject msdmo wmcodecdspuuid dmoguids crypt32 iphlpapi ole32 secur32
-    winmm ws2_32 strmiids d3d11 gdi32 dxgi shcore userenv dbghelp)
+    winmm ws2_32 strmiids d3d11 gdi32 dxgi shcore userenv dbghelp mfplat mfuuid)
 endif()
 
 # Static Qt: pull in the QML plugins the UI imports.

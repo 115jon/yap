@@ -45,7 +45,6 @@
 #include "logfile.h"
 #include "mediashell.h"
 #include "profile.h"
-#include "shadowprovider.h"
 #include "shareprovider.h"
 #include "thumbbar.h"
 #include "videohub.h"
@@ -352,6 +351,16 @@ int main(int argc, char* argv[])
   if (!qEnvironmentVariableIsSet("QSG_USE_SIMPLE_ANIMATION_DRIVER") &&
       qEnvironmentVariableIntValue("YAP_QSG_VSYNC_ANIMATIONS") == 0)
     qputenv("QSG_USE_SIMPLE_ANIMATION_DRIVER", "1");
+  // Qt Quick's basic render loop: frames render on the GUI thread, paced by
+  // Qt 6.9's DXGI vblank thread (QDxgiVSyncService), instead of on a render
+  // thread of their own. Our frames are small (1-2 ms), so the threaded
+  // loop's overlap bought nothing, and its per-frame handoff between the
+  // two threads cost more than the frame: focused animated idle (a GIF rail
+  // icon and two chat GIFs, 25.7 renders a second) went from 6.4 % to 3.9 %
+  // of a core (docs/PERFORMANCE.md, pass 5). QSG_RENDER_LOOP=threaded keeps
+  // Qt's default.
+  if (!qEnvironmentVariableIsSet("QSG_RENDER_LOOP"))
+    qputenv("QSG_RENDER_LOOP", "basic");
   // The JS engine commits its whole JS and GC stacks up front (4 + 2 MB by
   // default, plus guards), every page charged to the process whether it is
   // touched or not. Our QML never recurses deeply: 1 MB of JS stack is
@@ -437,7 +446,6 @@ int main(int argc, char* argv[])
   engine.addImageProvider(QStringLiteral("icon"), new IconProvider);
   engine.addImageProvider(QStringLiteral("dither"), new DitherProvider);
   engine.addImageProvider(QStringLiteral("share"), new ShareProvider);
-  engine.addImageProvider(QStringLiteral("shadow"), new ShadowProvider);
   QObject::connect(
     &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
     [] { QCoreApplication::exit(-1); }, Qt::QueuedConnection);

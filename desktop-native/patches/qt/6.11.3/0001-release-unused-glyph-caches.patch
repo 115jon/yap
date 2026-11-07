@@ -1,3 +1,18 @@
+diff --git a/qtdeclarative/src/quick/scenegraph/qsgrenderloop.cpp b/qtdeclarative/src/quick/scenegraph/qsgrenderloop.cpp
+index 6e317dd..74381f5 100644
+--- a/qtdeclarative/src/quick/scenegraph/qsgrenderloop.cpp
++++ b/qtdeclarative/src/quick/scenegraph/qsgrenderloop.cpp
+@@ -855,6 +855,10 @@ void QSGGuiThreadRenderLoop::releaseResources(QQuickWindow *w)
+     emit d->context->releaseCachedResourcesRequested();
+     if (d->renderer)
+         d->renderer->releaseCachedResources();
++    // Yap patch (desktop-native/patches/qt): as in the threaded loop, the
++    // glyph caches of font engines no text node uses any more.
++    if (d->context)
++        d->context->invalidateGlyphCaches();
+ #if QT_CONFIG(quick_shadereffect)
+     QSGRhiShaderEffectNode::garbageCollectMaterialTypeCache(w);
+ #endif
 diff --git a/qtdeclarative/src/quick/scenegraph/qsgthreadedrenderloop.cpp b/qtdeclarative/src/quick/scenegraph/qsgthreadedrenderloop.cpp
 index 9ca2bc6..5a65904 100644
 --- a/qtdeclarative/src/quick/scenegraph/qsgthreadedrenderloop.cpp

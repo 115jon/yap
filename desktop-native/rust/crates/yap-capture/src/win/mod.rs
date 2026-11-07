@@ -4,6 +4,7 @@
 
 mod audio;
 mod enumerate;
+mod fake;
 pub(crate) mod gpu;
 mod icon;
 mod item;
@@ -162,6 +163,8 @@ pub struct Capture {
     ended: Arc<Ender>,
     watchdog: Option<(Arc<Stop>, JoinHandle<()>)>,
     audio: Option<Audio>,
+    /// `YAP_FAKE_SHARE_SOURCE` (test runs): the synthetic picture's thread.
+    fake: Option<(Arc<Stop>, JoinHandle<()>)>,
 }
 
 impl Drop for Capture {
@@ -169,7 +172,7 @@ impl Drop for Capture {
         // Nothing may report the end of a share the driver has let go of.
         self.ended.disarm();
         self.hook = None;
-        if let Some((stop, thread)) = self.watchdog.take() {
+        for (stop, thread) in [self.watchdog.take(), self.fake.take()].into_iter().flatten() {
             stop.stop();
             let _ = thread.join();
         }
@@ -194,11 +197,25 @@ pub(crate) fn start(
     ensure_mta();
     let id = SourceId::parse(&request.source_id)
         .ok_or_else(|| format!("unknown source {:?}", request.source_id))?;
-    check_allowed(id)?;
-
     let ended = Arc::new(Ender::new(ended));
-    let item = item::capture_item(id)?;
     let quality = ShareQuality::of(&request.quality);
+    // Before the only-ours check: nothing of the picked source is read.
+    if let Some((width, height)) = fake::size() {
+        eprintln!("[capture] {id} replaced by a {width}x{height} test picture (YAP_FAKE_SHARE_SOURCE)");
+        let mut capture = Capture {
+            hook: None,
+            session: None,
+            ended,
+            watchdog: None,
+            audio: None,
+            fake: Some(fake::spawn(width, height, quality)?),
+        };
+        // Audio too only when it is synthetic (YAP_FAKE_SHARE_AUDIO).
+        let has_audio = request.audio && fake_audio() && start_audio(&mut capture, id);
+        return Ok((capture, ShareCaptured { has_audio }));
+    }
+    check_allowed(id)?;
+    let item = item::capture_item(id)?;
     let session = WgcSession::start(item, Gpu::new()?, quality, CURSOR, Arc::clone(&ended))?;
     let (width, height) = session.size();
     eprintln!(
@@ -214,6 +231,7 @@ pub(crate) fn start(
         ended,
         watchdog: None,
         audio: None,
+        fake: None,
     };
     if let SourceId::Window(value) = id {
         capture.watchdog = Some(spawn_watchdog(value, Arc::clone(&capture.ended))?);

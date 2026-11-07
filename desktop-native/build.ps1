@@ -1,11 +1,11 @@
 # Builds YapNative.exe: CMake + Ninja, MSVC from the newest Visual Studio,
 # Qt from -QtDir (a static Qt gives one self-contained .exe).
 param(
-    # The size-optimized, patched static Qt (patches/qt/build-qt.ps1) when
-    # it is there; the stock static Qt otherwise.
+    # The size-optimized, patched static Qt 6.11.3 (patches/qt/build-qt.ps1).
+    # The stock static Qt 6.6.3 no longer builds the app (QML needs 6.9+).
     [string]$QtDir = $(if ($env:YAP_QT_DIR) { $env:YAP_QT_DIR }
-                       elseif (Test-Path "F:/ct/qt-custom/6.6.3-yap/bin/qmake.exe") { "F:/ct/qt-custom/6.6.3-yap" }
-                       else { "F:/Files/Downloads/qt/src/6.6.3" }),
+                       elseif (Test-Path "F:/ct/qt-custom-6.11/6.11.3-yap/bin/qmake.exe") { "F:/ct/qt-custom-6.11/6.11.3-yap" }
+                       else { throw "No Qt 6.11.3: build it with patches/qt/build-qt.ps1, or pass -QtDir / set YAP_QT_DIR." }),
     [ValidateSet("Release", "RelWithDebInfo", "Debug")]
     [string]$Config = "Release",
     [string]$BuildDir = $(if ($env:YAP_NATIVE_BUILD_DIR) { $env:YAP_NATIVE_BUILD_DIR } else { "$PSScriptRoot/build/$Config" }),
@@ -28,8 +28,11 @@ if (-not $env:LK_CUSTOM_WEBRTC -and (Test-Path "$webrtc/lib")) { $env:LK_CUSTOM_
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-$vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-if (-not $vs) { throw "No Visual Studio with the x64 C++ tools found." }
+# Visual Studio 2022, the MSVC patches/qt/build-qt.ps1 builds Qt with: Qt's
+# libraries are link-time code (-ltcg), and so is our C++ (/GL), and LTCG
+# cannot mix objects from two compiler versions.
+$vs = & $vswhere -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
+if (-not $vs) { throw "Visual Studio 2022 with the x64 C++ tools not found." }
 Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
 Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64" | Out-Null
 

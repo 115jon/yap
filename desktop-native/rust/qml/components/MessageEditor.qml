@@ -31,6 +31,8 @@ Column {
             anchors.fill: parent
             anchors.margins: 1
             TextArea {
+                // No Qt 6.9+ default edit menu (the web has none of its own).
+                ContextMenu.menu: null
                 id: input
                 wrapMode: TextArea.Wrap
                 color: Theme.ink1

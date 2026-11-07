@@ -1,0 +1,25 @@
+--- a/src/video_decoder_factory.cpp
++++ b/src/video_decoder_factory.cpp
+@@ -128,9 +128,10 @@ std::vector<webrtc::SdpVideoFormat> VideoDecoderFactory::GetSupportedFormats()
+     }
+   }
+ 
+-  formats.push_back(webrtc::SdpVideoFormat(
+-      webrtc::SdpVideoFormat::AV1Profile0(),
+-      webrtc::LibaomAv1EncoderSupportedScalabilityModes()));
++  // Yap patch (desktop-native/patches/webrtc-sys): no AV1 decoder (dav1d,
++  // 1.4 MiB of the exe). No Yap client sends AV1: the native one sends VP8
++  // and H.264, the web and mobile ones their WebRTC stack's default, VP8.
++  // An AV1 stream would not play here; restore with this patch removed.
+   return formats;
+ }
+ 
+@@ -196,7 +197,7 @@ std::unique_ptr<webrtc::VideoDecoder> VideoDecoderFactory::Create(
+ #endif
+ 
+ 
+-#if defined(RTC_DAV1D_IN_INTERNAL_DECODER_FACTORY)
++#if defined(RTC_DAV1D_IN_INTERNAL_DECODER_FACTORY) && 0  // Yap patch: no AV1
+   if (absl::EqualsIgnoreCase(format.name, webrtc::kAv1CodecName)) {
+     return webrtc::CreateDav1dDecoder();
+   }
