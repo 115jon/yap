@@ -1,0 +1,16 @@
+diff --git a/qtdeclarative/src/quick/scenegraph/qsgthreadedrenderloop.cpp b/qtdeclarative/src/quick/scenegraph/qsgthreadedrenderloop.cpp
+index 9ca2bc6..5a65904 100644
+--- a/qtdeclarative/src/quick/scenegraph/qsgthreadedrenderloop.cpp
++++ b/qtdeclarative/src/quick/scenegraph/qsgthreadedrenderloop.cpp
+@@ -384,6 +384,11 @@ bool QSGRenderThread::event(QEvent *e)
+                     qCDebug(QSG_LOG_RENDERLOOP, QSG_RT_PAD, "- requesting renderer to release cached resources");
+                     d->renderer->releaseCachedResources();
+                 }
++                // Yap patch (desktop-native/patches/qt): glyph caches of font
++                // engines no text node uses any more. Otherwise they go only on a
++                // font database change, so text shown once (a closed dialog)
++                // kept its atlas textures for good.
++                d->context->invalidateGlyphCaches();
+ #if QT_CONFIG(quick_shadereffect)
+                 QSGRhiShaderEffectNode::garbageCollectMaterialTypeCache(window);
+ #endif

@@ -983,3 +983,326 @@ Source (worktree `native/perf3`):
 - Patches (docs/LIBRARIES.md §13):
   - `patches/vendor.ps1`;
   - `patches/qt-build-utils/`, `patches/webrtc-sys/`, `patches/qt/`.
+
+# Performance pass 4 (2026-11-07)
+
+The brief, in order: long-run memory growth first, then validating the
+custom Qt and Rust `opt-level = "s"` in real calls, focused animated idle
+under 3 %, idle memory towards 120 MB, hardware video decode, and a 1440p60
+share number.
+
+Before is the pass 3 build (59acb1e5, `F:/ct/yapn/tmp/p4/soak0.exe`); after
+is this pass's final build (`F:/ct/yapn/tmp/p4/final.exe`). For the Qt and
+opt-level A/B, `F:/ct/yapn/rel-base4` is this pass's source built with the
+stock static Qt 6.6.3 and Rust at opt-level 3
+(`CARGO_PROFILE_RELEASE_OPT_LEVEL=3`).
+
+## Conditions
+
+- **The displays were asleep all session.** All three are virtual (the VDD
+  primary and two Parsec displays), and DWM paced presents at ~4 Hz (Qt
+  logged `swap=250ms`). `SetThreadExecutionState(ES_DISPLAY_REQUIRED)` from
+  one of our processes did not wake them. Frame-paced numbers here are
+  taken with presents unpaced instead (`YAP_DEBUG_NO_VSYNC`, below).
+- **A Qt 6.11.3 build ran for about an hour of the session**, using every
+  core. CPU numbers from that hour are only compared with runs interleaved
+  under the same load (the call A/B).
+- **The user's copy was read only** (`YapNativeMine.exe --profile jon`,
+  0.2.1). Its counters were read by PID every 5 minutes for 2 hours, from
+  16.8 h up:
+  - it held **589.2 MB private the whole time**;
+  - 1,261 to 1,273 handles, 99 threads, and a 32-35 MB working set in the
+    tray;
+  - 131 s of CPU in 115 min hidden, which is 1.9 % of a core;
+  - a peak working set of 514.7 MB.
+
+## Method (new)
+
+- **The soak fixture** (`YAP_FIXTURE=soak`,
+  `rust/crates/yap-core/src/fixture/soak.rs`):
+  - four text channels of 400 messages and a voice channel, offline;
+  - a driver in the core replays gateway traffic at `YAP_FIXTURE_SOAK`
+    events a second (default 8):
+    - new messages; with a media server, one in ten carries a GIF, one a
+      picture and one an image embed, each at a URL of its own;
+    - edits, deletes, reactions, typing, presence and voice rosters;
+  - a channel switch every `YAP_FIXTURE_SOAK_SWITCH` seconds (default 30);
+  - deterministic, so runs compare;
+  - `YAP_FIXTURE_MEDIA=http://127.0.0.1:5871` serves avatars and media
+    (`tools/p4/media-server.mjs`, with pictures from
+    `tools/p4/make-media.ps1`).
+- **App switches for test runs** (all off unless set):
+  - `YAP_DEBUG_SOAK_TRAY=N`: every N s (at least 30) the window goes to
+    the tray and comes back 20 s later. It does not take the focus, and it
+    is told it is active (`main.cpp`).
+  - `YAP_DEBUG_NO_ACTIVATE=1`: every show leaves the focus where it is
+    (Qt's `_q_showWithoutActivating`).
+  - `YAP_DEBUG_NO_VSYNC=1`: swap interval 0, so a run on a sleeping
+    display renders every frame its content asks for.
+  - `YAP_NO_TOASTS=1`: each toast is built but never shown
+    (`toast_win.cpp`).
+  - `YAP_NULL_SPEAKER=1` now also silences the UI sounds (`sound.rs`). The
+    first soak smoke test played the message sound through the real
+    speakers and raised real toasts; these two switches cover both.
+- **Tools** (`F:/ct/yapn/tools/p4/`):
+  - `soak.ps1`: a soak run with counters every minute, a Settings
+    open/close and a scroll every 4 min, and optional heap dumps;
+  - `ab-soak.ps1`: two exes side by side on the soak;
+  - `handles.ps1` and `handles-diff.ps1`: a process's handles by object
+    type, read-only from the system handle table;
+  - `tray-handles.ps1`: handles per tray cycle;
+  - `anim-idle.ps1` and `renders.py`: animated idle, as CPU and as renders
+    a second per window from `QSG_RENDER_TIMING`;
+  - `call-app.ps1`, `call-ab.ps1`, `call-release.ps1`, `cam-retain.ps1`
+    and `cam-cpu.ps1`: the owner account on profile `perf`, the headless
+    web peer with a camera, and posted clicks to our window only;
+  - `cpu.ps1`, and `build.ps1` (a pass build into any build dir);
+  - `F:/ct/yapn/tools/p4-sampler.ps1`: read-only counters by PID.
+- **Profile names are lowercase only** (`profile.cpp`); an invalid one
+  falls back to the default profile.
+  - One A/B run used `perf4ab-A` and wrote three files of the default
+    profile: `window-state.json`, `quick-switcher.json` and
+    `capture-policy.json`.
+  - The fixture entry it added to `quick-switcher.json` was removed by
+    hand. The window position it saved stayed.
+
+## Findings and fixes
+
+### 1. The blurred camera: +330 MB while on, +93 MB kept for good
+
+This is the largest memory event in normal use. In a call (the owner on our
+profile, the web peer with its camera), our camera turned on with the blur:
+
+| step                                    | DirectML (before)  | CPU provider (after) |
+| --------------------------------------- | ------------------ | -------------------- |
+| start                                   | 155.7 MB           | 156.0 MB             |
+| in the call                             | 168.2 MB           | 168.3 MB             |
+| camera with blur                        | **498.5 MB**       | **270.3 MB**         |
+| camera off (+20 s)                      | 256.8 MB           | 183.3 MB             |
+| left the call (+50 s)                   | **248.4 MB** (+93) | **176.0 MB** (+20)   |
+| working set with the blur               | 431.5 MB           | 263.5 MB             |
+| process CPU over 25 s with the blur     | 9.70 s, 9.67 s     | 8.97 s               |
+| segmentation (wall, smoothing included) | 4.09-4.74 ms       | 4.09 ms              |
+
+- **It is a one-off high-water mark, not a leak per session.** A second
+  session in the same process added only 2.6 MB.
+- **The kept memory is outside the exe's own allocations.** The heap tracer
+  saw 46.5 MB live through the exe's imports, while the process heap held
+  124.8 MB allocated. The rest belongs to onnxruntime, DirectML and the
+  driver, which the tracer does not hook.
+- **DirectML saves no CPU on this model.** Its own thread is cheaper
+  (172-188 ms per 25 s, against 891 ms on the CPU). But its D3D12
+  submission and driver threads cost more than the inference saves on a
+  256x256 model.
+- **Fix** (`yap-segment`): the CPU provider by default, without its memory
+  arena. `YAP_SEGMENT_GPU=1` runs DirectML for comparisons.
+- **This matches the user's copy:**
+  - its peak working set was 514.7 MB, and we measured 431-492 MB with the
+    blurred camera on;
+  - its memory stays high in the tray afterwards.
+
+### 2. Toasts leaked their platform objects
+
+The soak's handle count rose in two ways:
+
+- by ~120 at each tray cycle;
+- by ~100 semaphores and ~50 events every 30 s with the window in the
+  background.
+
+**Bisect, on the soak:**
+
+- not the tray cycle (flat on the plain fixture);
+- not the network images, and not the GIFs;
+- with the window active, so no toasts, the count was flat.
+
+**Cause:**
+
+- Each toast registered an `Activated` handler and never removed it.
+- The registration keeps the toast, and the platform's objects behind it,
+  alive.
+- So `g_kept`'s limit of 32 never freed anything: about 2.6 kernel handles
+  a toast, plus memory.
+
+**Fix** (`toast_win.cpp`):
+
+- `g_kept` keeps each toast with its registration token;
+- a dropped toast unregisters first;
+- the same happens on every error path, and right away under
+  `YAP_NO_TOASTS`.
+
+| side by side, window in the background | before         | after                |
+| -------------------------------------- | -------------- | -------------------- |
+| handles over 6 min of soak traffic     | 1,263 to 3,244 | 1,030 to 1,041       |
+| private at 6 min                       | 249.1 MB       | 240.0 MB             |
+| handles over a 2-hour soak             | 1,160 to 3,991 | flat, 1,061 to 1,112 |
+
+The real toast path (`Show`) could not be exercised without putting toasts
+on the user's desktop. It shares the fixed code.
+
+### 3. The soak itself: flat after warm-up
+
+The soak ran with media, a channel switch every 30 s, a Settings
+open/close and a scroll every 4 min, and a tray cycle every 5 min.
+
+- **The traced heap was flat.** Live heap went −2.0 MB from minute 0 to
+  minute 40: the image owners shrank by 4.4 MB and the QML engine grew by
+  2 MB.
+- **Before** (the pass 3 build): 215 MB at the start, 245 MB at 50 min and
+  280-300 MB at 2 h, with handles growing with every toast (above).
+- **After the toast fix** (run c2): 210.6 MB at the start, then 306.9,
+  308.9, 305.1, 294.9, 306.3 and 308.3 MB from 20 to 70 min. It is flat
+  after a 20-minute warm-up of the caches, and handles are flat too.
+- **The final build** (run d3, with the GIF file budget below): 213.4 MB
+  at the start, then 237.0, 255.5, 242.0, 256.9 and 249.3 MB at 10, 20,
+  30, 40 and 46 min. From 20 to 46 min it averaged 263.7 MB, against
+  326.0 MB for run c2 over the same span; handles stayed at 1,079-1,112.
+- Early in a run the before build sits a little lower (230-245 MB at
+  20-50 min), but it keeps rising with every toast.
+
+### 4. Chat GIFs on the shared clock, one frame held
+
+`MediaTile.qml` played chat GIFs with `AnimatedImage`. Each one ran on its
+own QMovie clock, off the 30 Hz grid that the decorations and rail icons
+share.
+
+- **`AnimatedPicture.stream`** (`cpp/animatedpicture.*`):
+  - a GIF is kept as its file and decoded one frame at a time as it plays,
+    on the shared grid;
+  - the item holds the file and the frame on screen;
+  - a GIF more than twice as large as its tile is scaled down as it
+    decodes; otherwise the GPU scales it;
+  - other formats decode as before.
+- `AnimatedPicture.Status` now follows `Image.Status`'s order, so QML can
+  compare either one with `Image.Ready`.
+- **The GIF files have their own 4 MB budget**, oldest out first. In the
+  soak they had filled the whole 32 MB cache budget meant for decoded
+  frames, and the plateau sat ~30 MB above the before build.
+
+Focused animated idle, unpaced (`YAP_DEBUG_NO_VSYNC=1`): the chat-10k
+fixture with a GIF rail icon and two chat GIFs (pass 3's scene), with our
+window told it is active:
+
+| build                                        | renders a second | CPU (one core) |
+| -------------------------------------------- | ---------------- | -------------- |
+| before (`AnimatedImage`)                     | 31.7             | 10.49 %        |
+| after (streamed, on the grid)                | 25.8             | 5.49 %         |
+| after, rail icon only (48 px, 20 fps)        | 20.2             | 4.76 %         |
+| stock Qt + opt-level 3, same source (2 runs) | 25.8             | 5.83 %, 5.83 % |
+| custom Qt + opt-level "s" (2 runs)           | 25.7-25.8        | 6.46 %, 5.62 % |
+
+- **Under 3 % is not reached.** A render costs ~2.1-2.3 ms of CPU whatever
+  changed: a 48 px icon alone at 20 fps is 4.8 %.
+- Per thread over 20 s (516 renders): GUI 375 ms, render thread 328 ms,
+  two NVIDIA driver threads 437 ms.
+- Pass 2 measured ~1.5 ms a render on an awake display. Presenting unpaced
+  may cost more than a paced present.
+- The custom Qt at `/O1` is not why renders cost that much: the stock Qt
+  build is within the noise.
+
+### 5. Custom Qt and opt-level "s" in calls: no regression
+
+An interleaved A/B under the same machine load, with the owner on profile
+`perf` (RNNoise on) and the web peer with its camera:
+
+| per 25 s                                      | before (stock Qt, opt 3) | after (custom Qt, opt "s") |
+| --------------------------------------------- | ------------------------ | -------------------------- |
+| voice, RNNoise, watching the peer: mic thread | 672 ms                   | 781 ms                     |
+| the same, whole process                       | 2,141 ms                 | 2,156 ms                   |
+| plus our camera with blur, whole process      | 9,641 ms                 | 7,922 ms                   |
+| video encoder thread                          | 2,641 ms                 | 1,938 ms                   |
+| blur / blend per 720p frame                   | 1.85 / 1.72 ms           | 1.32-1.38 / 1.04-1.06 ms   |
+| segmentation                                  | 5.22 ms                  | 5.33-5.38 ms               |
+| private with the blurred camera               | 496.1 MB                 | 497.7 MB                   |
+
+The machine load moved between runs: the mic thread is 16 % slower one
+way, and the blur 30 % faster the other. Nothing points at the
+size-optimized builds.
+
+- **Checked working:** joining and leaving, the peer's camera on our
+  screen, and our camera both ways with and without the blur.
+- **Not checked:** a screen share, WebView2 embeds and the WMF media
+  player.
+
+### 6. Qt 6.11.3: built, measured, not adopted yet
+
+Details are in LIBRARIES.md §13.3. Against the custom 6.6.3 on the fixture:
+
+- idle private memory went from 191.3 to 177.5 MB (−14 MB), and the
+  working set fell by 8 MB;
+- animated idle costs the same;
+- the exe is 8.7 MB larger (71.7 MB).
+
+One regression: `ChatHeader.qml`'s "/" shortcut guard reads the `Window`
+attached property from a `Shortcut`. Qt 6.11 no longer allows that, so "/"
+typed in the composer would open search.
+
+## Before and after (pass 4)
+
+| metric                                     | before                                     | after                                                          |
+| ------------------------------------------ | ------------------------------------------ | -------------------------------------------------------------- |
+| blurred camera, private while on           | 498.5 MB                                   | **270.3 MB**                                                   |
+| kept after the camera and the call         | +92.7 MB                                   | **+20.0 MB**                                                   |
+| process CPU with the blurred camera (25 s) | 9.70 s                                     | **8.97 s**                                                     |
+| handles after 2 h of soak                  | 3,991 (growing)                            | **~1,100 (flat)**                                              |
+| focused animated idle, unpaced             | 10.49 %, 31.7/s                            | **5.49 %, 25.8/s**                                             |
+| exe                                        | 62,895,104 B                               | 62,940,672 B                                                   |
+| soak: private at 20 / 40 min, then at 2 h  | 230.5 / 235.4 MB, then 280-300 MB (rising) | 255.5 / 256.9 MB, then flat (240.6-280.7 MB from 20 to 46 min) |
+| soak: handles                              | 1,160 to 3,991 in 2 h                      | flat, 1,079-1,112                                              |
+
+## Targets
+
+1. **Long-run memory: the two mechanisms found are fixed.** They are the
+   blurred camera's DirectML memory and the toast registrations, and the
+   soak is flat after its warm-up.
+   - The user's 589 MB could not be replayed exactly. The synthetic
+     traffic does not reach it, and its counters stayed flat while it was
+     hidden.
+   - What remains, cheapest first:
+     - a soak of calls (join, camera, share, leave, repeated) for hours;
+       each call step here was checked once or twice, not for hours;
+     - screen shares and watching shares (NVENC, decode buffers) under the
+       same retention test as the camera;
+     - extending the heap tracer to DLLs loaded later (onnxruntime, Media
+       Foundation, the driver), by hooking their import tables at load.
+2. **Custom Qt and opt-level "s": validated in calls** (above). A screen
+   share, WebView2 and the media player still need a check.
+3. **Animated idle under 3 %: not reached** (10.49 % down to 5.49 %).
+   Next:
+   - a profiler on the GUI thread's ~0.7 ms a render (needs WPR, which
+     needs elevation);
+   - a measurement on an awake display, to see the real present cost;
+   - fewer renders: GIF frames moved to the nearest slot instead of the
+     next one, or a 20 Hz grid for chat GIFs (a smoothness cost).
+4. **Idle memory towards 120 MB.** Qt 6.11.3 gives −14 MB once the shortcut
+   is fixed and the exe size is audited. Not done this pass:
+   - cold screens loaded by URL;
+   - smaller per-message state. Each message is held three times: in the
+     core's log (with a full `User` per message), in the core's view rows
+     and in the bridge's model rows. The change is to share authors
+     (`Arc<User>`) and rows (`Arc<MessageRow>`). It matters for long
+     scrollback, less for a normal channel.
+5. **Hardware video decode: not started.** It needs a webrtc-sys patch with
+   a Media Foundation H.264 decoder factory, and a 1080p or 1440p share to
+   watch.
+6. **1440p60 share: not measured.** WGC delivers ~4 fps from a window on a
+   sleeping display (N6b), and the displays slept all session.
+
+## Files
+
+- C++:
+  - `cpp/toast_win.cpp`: the registration fix and `YAP_NO_TOASTS`;
+  - `cpp/animatedpicture.cpp` and `cpp/animatedpicture.h`: streamed GIFs,
+    the file budget and the status order;
+  - `cpp/main.cpp`: `YAP_DEBUG_SOAK_TRAY`, `YAP_DEBUG_NO_ACTIVATE` and
+    `YAP_DEBUG_NO_VSYNC`.
+- QML (1 file): `components/MediaTile.qml`, with chat GIFs on
+  `AnimatedPicture { stream: true }`.
+- Rust:
+  - `crates/yap-segment/src/lib.rs`: the CPU provider by default;
+  - the soak fixture: `crates/yap-core/src/fixture.rs`,
+    `crates/yap-core/src/fixture/soak.rs` (new) and
+    `crates/yap-core/src/runtime.rs`;
+  - `src/sound.rs`: `YAP_NULL_SPEAKER` silences the UI sounds.
+- Qt: `patches/qt/build-qt.ps1` (`-Version`) and `patches/qt/6.11.3/`
+  (new).
+- Docs: this section, LIBRARIES.md §12 (segmentation) and §13.2-13.3.

@@ -940,9 +940,23 @@ ours is loaded by full path.
 
 Costs (RTX 3080): a segmentation is 0.87 ms on DirectML in isolation
 (`cargo test --release -p yap-segment`, `YAP_SEGMENTATION_DIR` set), 3.7 ms
-on the CPU provider (`YAP_SEGMENT_CPU=1`); in the app 3.5-4.2 ms with
-smoothing and the feather, 12 times a second on its own thread. Per 720p
-frame: input 0.09 ms, blur 0.9-1.1 ms, blend 0.9-1.1 ms. See PERFORMANCE.md.
+on the CPU provider; in the app 3.5-4.2 ms with smoothing and the feather,
+12 times a second on its own thread. Per 720p frame: input 0.09 ms, blur
+0.9-1.1 ms, blend 0.9-1.1 ms. See PERFORMANCE.md.
+
+**The CPU provider is the default since performance pass 4**
+(`YAP_SEGMENT_GPU=1` runs DirectML; the CPU provider runs without its
+memory arena). In the app, with a blurred 720p30 camera in a call:
+
+| provider | process CPU over 25 s | private while it runs | kept after the camera stops and the call ends |
+| -------- | --------------------- | --------------------- | --------------------------------------------- |
+| DirectML | 9.70 s, 9.67 s        | +330 MB (498 MB)      | +93 MB                                        |
+| CPU      | 8.97 s                | +100 MB (268 MB)      | +20 MB                                        |
+
+DirectML's inference thread is cheaper (172-188 ms against 891 ms per
+25 s), but its D3D12 submission and driver threads cost more than that,
+and its device, DirectML operators and driver allocations live in
+onnxruntime's and the driver's own heaps after the session is dropped.
 
 ### 12.3 Licences and size
 
@@ -1042,5 +1056,42 @@ Checked on this build:
 - GIFs animate;
 - a hide to the tray and restore works.
 
-Not checked this session: a call (camera, share, the video tiles), WebView2
-embeds or the media player. Verify those before the custom Qt ships.
+Checked in performance pass 4, A/B against the stock Qt with Rust at
+opt-level 3 (`F:/ct/yapn/rel-base4`), in calls between the two test
+accounts: voice with RNNoise, the web peer's camera on our screen, our
+camera both ways with no background and with the blur. No regression; the
+numbers are in PERFORMANCE.md, pass 4. Not checked yet: a screen share,
+WebView2 embeds and the media player.
+
+### 13.3 Qt 6.11.3, built and not adopted (performance pass 4)
+
+`build-qt.ps1 -Version 6.11.3 -Zip <qt-everywhere-src-6.11.3.zip> -Root
+F:/ct/qt-custom-6.11` builds the same configuration from Qt 6.11.3 into
+`F:/ct/qt-custom-6.11/6.11.3-yap` (about 1 h here). Patches for a version
+other than 6.6.3 live in `patches/qt/<version>/`:
+
+- `6.11.3/0001-release-unused-glyph-caches.patch` is the glyph-cache half
+  of the 6.6.3 patch. The batch half is upstream in 6.11: recycled batches
+  hand their buffers to pools capped at 2 MB each, and
+  `releaseCachedResources()` empties those pools.
+
+The app builds against it unchanged (`build.ps1 -QtDir ...`). Against the
+custom 6.6.3, on the chat-10k fixture:
+
+| metric                                   | 6.6.3-yap         | 6.11.3-yap       |
+| ---------------------------------------- | ----------------- | ---------------- |
+| idle private / ws (2 runs each, A/B)     | 191.3 / 170.5 MB  | 177.5 / 162.7 MB |
+| animated idle (unpaced), renders and CPU | 25.8/s, 5.6-6.5 % | 25.9/s, 5.6 %    |
+| exe                                      | 62,939,136 B      | 71,678,976 B     |
+
+Before switching:
+
+- `ChatHeader.qml`'s "/" `Shortcut` reads `Window.activeFocusItem`. Qt 6.11
+  no longer gives the `Window` attached property to a non-Item, so the
+  guard reads `undefined` and "/" typed in the composer would open search
+  (warning: "Window.window only supports types derived from Item"). It
+  needs `root.Window.activeFocusItem`.
+- The exe grows by 8.7 MB; the new features 6.11 turns on by default need
+  an audit against the configure flags above.
+- Calls, shares, WebView2 and the media player need the same checks as
+  6.6.3-yap.

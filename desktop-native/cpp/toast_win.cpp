@@ -42,8 +42,34 @@ namespace {
 // Toasts stay alive (with their handler) while they may still be clicked;
 // a toast object that is released no longer reports activation.
 constexpr std::size_t kKept = 32;
+
+// A shown toast and its Activated registration. The registration keeps the
+// toast (and the platform's objects behind it: ~2.6 kernel handles a toast)
+// alive by itself, so dropping one unregisters it first; without that every
+// toast ever shown stayed (docs/PERFORMANCE.md, pass 4).
+struct Kept
+{
+  ComPtr<IToastNotification> notification;
+  EventRegistrationToken token{};
+
+  Kept(ComPtr<IToastNotification> n, EventRegistrationToken t)
+    : notification(std::move(n))
+    , token(t)
+  {
+  }
+  Kept(Kept&&) = default;
+  Kept& operator=(Kept&&) = default;
+  Kept(const Kept&) = delete;
+  Kept& operator=(const Kept&) = delete;
+  ~Kept()
+  {
+    if (notification && token.value != 0)
+      notification->remove_Activated(token);
+  }
+};
+
 std::mutex g_lock;
-std::deque<ComPtr<IToastNotification>> g_kept;
+std::deque<Kept> g_kept;
 
 std::wstring escape(const std::wstring& text)
 {
@@ -214,6 +240,14 @@ bool show(const std::wstring& aumid, const Content& content,
       .Get(),
     &token);
   failed(hr, "add_Activated");
+  // Unregisters on every way out unless it is kept below.
+  Kept kept(notification, SUCCEEDED(hr) ? token : EventRegistrationToken{});
+
+  // YAP_NO_TOASTS (test runs, the soak): everything but the Show itself,
+  // so nothing reaches the desktop.
+  static const bool off = GetEnvironmentVariableW(L"YAP_NO_TOASTS", nullptr, 0) > 0;
+  if (off)
+    return true;
 
   ComPtr<IToastNotificationManagerStatics> manager;
   ComPtr<IToastNotifier> notifier;
@@ -230,7 +264,7 @@ bool show(const std::wstring& aumid, const Content& content,
     return false;
 
   std::lock_guard guard(g_lock);
-  g_kept.push_back(notification);
+  g_kept.push_back(std::move(kept));
   while (g_kept.size() > kKept)
     g_kept.pop_front();
   return true;
