@@ -47,6 +47,7 @@ Item {
         }
     }
 
-    Loader { id: createServer; active: false; sourceComponent: CreateServerDialog {} }
-    Loader { id: inviteLanding; active: false; sourceComponent: InviteLanding {} }
+    // By URL: their types load on first use (docs/PERFORMANCE.md, pass 6).
+    Loader { id: createServer; active: false; source: "CreateServerDialog.qml" }
+    Loader { id: inviteLanding; active: false; source: "InviteLanding.qml" }
 }

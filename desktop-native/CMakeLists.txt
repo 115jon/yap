@@ -20,6 +20,9 @@ add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 
 find_package(Qt6 REQUIRED COMPONENTS
   Core Gui Multimedia Network Qml Quick QuickControls2 Svg QmlImportScanner)
+# Private: QHwVideoBuffer and QRhi's native handles, for decoded video
+# drawn from its D3D11 texture (cpp/videohub.cpp).
+find_package(Qt6 REQUIRED COMPONENTS GuiPrivate MultimediaPrivate)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -55,6 +58,7 @@ qt_add_executable(YapNative WIN32
   cpp/logfile.cpp cpp/logfile.h
   cpp/mediashell.cpp cpp/mediashell.h
   cpp/profile.cpp cpp/profile.h
+  cpp/sampler.cpp cpp/sampler.h
   cpp/shareprovider.cpp cpp/shareprovider.h
   cpp/thumbbar.cpp cpp/thumbbar.h
   cpp/toast_win.cpp cpp/toast_win.h
@@ -72,7 +76,8 @@ set_property(TARGET YapNative PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 # QWindowSystemInterface, as a real key does, so shortcuts see it.
 target_link_libraries(YapNative PRIVATE
   yap_native_qml
-  Qt::Gui Qt::GuiPrivate Qt::Multimedia Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg)
+  Qt::Gui Qt::Multimedia Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg
+  Qt::GuiPrivate Qt::MultimediaPrivate)
 
 # Brand fonts, Phosphor icons and brand SVGs (assets/, built by tools/),
 # embedded as :/fonts, :/icons and :/svg.

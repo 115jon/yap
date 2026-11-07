@@ -1973,7 +1973,7 @@ pub(super) fn message_row(
     previous: Option<&Message>,
     ctx: &RowContext<'_>,
 ) -> MessageRow {
-    let author = message.author.as_ref();
+    let author = message.author.as_deref();
     let author_name = author.map(User::label).unwrap_or_default();
     let stamp = parse_rfc3339(&message.created_at)
         .map(|ms| Stamp::new(ms, ctx.offset))

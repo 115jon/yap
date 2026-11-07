@@ -195,7 +195,7 @@ impl State {
             id,
             channel_id: channel_id.clone(),
             author_id: me.id.clone(),
-            author: Some(me),
+            author: Some(me.into()),
             content: content.to_owned(),
             reply_to_id: Some(root_id.clone()),
             reply_to: None,

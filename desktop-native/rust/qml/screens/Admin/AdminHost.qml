@@ -71,10 +71,12 @@ Item {
         }
     }
 
-    Loader { id: serverSettings; active: false; sourceComponent: ServerSettings {} }
-    Loader { id: channelSettings; active: false; sourceComponent: ChannelSettings {} }
-    Loader { id: createChannel; active: false; sourceComponent: CreateChannelDialog {} }
-    Loader { id: createCategory; active: false; sourceComponent: CreateCategoryDialog {} }
-    Loader { id: invite; active: false; sourceComponent: InviteDialog {} }
-    Loader { id: confirm; active: false; sourceComponent: ConfirmDialog {} }
+    // By URL, so their types load on first use, not at startup
+    // (docs/PERFORMANCE.md, pass 6).
+    Loader { id: serverSettings; active: false; source: "ServerSettings.qml" }
+    Loader { id: channelSettings; active: false; source: "ChannelSettings.qml" }
+    Loader { id: createChannel; active: false; source: "CreateChannelDialog.qml" }
+    Loader { id: createCategory; active: false; source: "CreateCategoryDialog.qml" }
+    Loader { id: invite; active: false; source: "InviteDialog.qml" }
+    Loader { id: confirm; active: false; source: "ConfirmDialog.qml" }
 }

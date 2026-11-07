@@ -8,6 +8,10 @@
 # The copies are generated (rust/vendor is ignored by git): change a patch,
 # then run with -Force. docs/LIBRARIES.md, "Patched dependencies", lists why
 # each patch exists.
+#
+# A patch is a plain unified diff (--- a/<path>, +++ b/<path>) with no
+# `diff --git` header: git apply, run inside this repository, silently skips
+# the files of a git-style patch (it reads their paths from the repo root).
 param([switch]$Force)
 $ErrorActionPreference = "Stop"
 $crates = [ordered]@{
@@ -15,8 +19,11 @@ $crates = [ordered]@{
     # and the .qml files in the resources left empty (DISCARD_QML_CONTENTS).
     "qt-build-utils" = "0.10.0"
     # No AV1 encoder or decoder (exe size); H.264 decoded by Media Foundation,
-    # on the GPU where it can.
+    # on the GPU where it can, into textures the UI draws as they are.
     "webrtc-sys"     = "0.3.52"
+    # The C++ buffer behind a native video frame, so the UI can draw the
+    # decoder's D3D11 textures without a copy (zero copy, pass 6).
+    "libwebrtc"      = "0.3.55"
 }
 $rust = Join-Path $PSScriptRoot "../rust"
 $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME ".cargo" }

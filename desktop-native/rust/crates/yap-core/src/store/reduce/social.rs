@@ -201,7 +201,7 @@ impl State {
                 self.messages
                     .as_ref()?
                     .iter()
-                    .filter_map(|m| m.author.as_ref())
+                    .filter_map(|m| m.author.as_deref())
                     .find(|u| u.id == id)
             })
     }
@@ -669,7 +669,7 @@ impl State {
                 };
                 for (_, message_id) in &authored {
                     if let Some(author) = log.get_mut(message_id).and_then(|m| m.author.as_mut()) {
-                        update.apply(author);
+                        update.apply(std::sync::Arc::make_mut(author));
                     }
                 }
             });

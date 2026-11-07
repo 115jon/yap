@@ -921,6 +921,16 @@ Foundation's H.264 MFT, on the GPU through a D3D11 device manager, in a
 patched webrtc-sys (§13.1). libwebrtc's FFmpeg decoder is no longer linked
 on Windows. VP8 and VP9 stay on libvpx.
 
+Zero copy (performance pass 6): the window renders on a D3D11 device the
+app makes (video support, multithread protected) and hands to Qt Quick
+(`QQuickGraphicsDevice::fromDeviceAndContext`) and to the decoder
+(`yap_mf_set_shared_device`). Each decoded picture is copied on the GPU into
+an NV12 texture of a small per-stream pool and travels as a native WebRTC
+buffer; `cpp/videohub.cpp` wraps it in a `QVideoFrame` whose
+`QHwVideoBuffer` returns the texture, and `VideoOutput` samples it directly
+(an R8 view for luma, an R8G8 view for chroma). No readback, I420 copy or
+upload. `YAP_ZERO_COPY=0` keeps the copying path.
+
 ### 12.2 Person segmentation for backgrounds
 
 | piece      | pick                                                                                                                                                                                                                    | instead of                                                                                        |
@@ -985,9 +995,7 @@ is 17.3 MB.
 
 ### 12.4 Left for later
 
-- Zero-copy decode: the decoder's D3D11 texture handed to Qt Quick on a
-  shared device. The Media Foundation decoder (pass 5) still reads each
-  picture back and converts it to I420.
+- Zero-copy decode: done in performance pass 6 (§12.1).
 - A zero-copy share: WGC texture to a D3D11 video processor (BGRA to NV12)
   to the MFT on the same device, as the desktop app does; today the frame
   is read back once for the preview and converted on the CPU.
@@ -1022,6 +1030,14 @@ overwritten.
 | `webrtc-sys` 0.3.52     | `0001-no-av1-encoder.patch`            | Takes the `LibaomAv1EncoderTemplateAdapter` out of the encoder factory, so the linker drops libaom's AV1 encoder: libwebrtc 16.2 to 12.8 MiB of the exe. The client never sends AV1: VP8 for the camera and software shares (yap-voice puts VP8 first), H.264 for hardware ones. (AV1 decoding went in pass 5: `0003`.)                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `webrtc-sys` 0.3.52     | `0002-mf-h264-decoder.patch`           | `src/mf_h264_decoder.cpp` (new): a `VideoDecoder` on Media Foundation's H.264 MFT (`CLSID_MSH264DecoderMFT`). It decodes on the GPU through a D3D11 device manager (one device per stream, released with it) and reads each NV12 picture back with `IMF2DBuffer::Lock2D`, then libyuv converts it to I420. It runs in low-latency mode. Without a usable GPU, or with `YAP_H264_DECODER=software`, the same MFT decodes in software. On Windows the decoder factory uses it for H.264, and libwebrtc's FFmpeg decoder is no longer referenced, so the linker drops it (3.1 MiB). H.264 is offered only when the MFT can be made, which Windows N without the Media Feature Pack cannot do. Numbers: PERFORMANCE.md, pass 5. |
 | `webrtc-sys` 0.3.52     | `0003-no-av1-decoder.patch`            | AV1 is no longer offered or decoded, so dav1d leaves the exe (1.8 MiB). No Yap client sends AV1: the native one sends VP8 and H.264, and the web and mobile ones keep their stack's default, VP8. With Cloudflare's SFU the publisher alone picks the codec, so an AV1 publisher would show nothing here. To restore it, remove the patch.                                                                                                                                                                                                                                                                                                                                                                                  |
+
+| `webrtc-sys` 0.3.52 | `0004-mf-h264-zero-copy.patch` | Performance pass 6. `yap_mf_set_shared_device(ID3D11Device*)` registers the UI's device; a decoder configured afterwards decodes on it, copies each picture out of the decoder's texture array (`CopySubresourceRegion`) into an NV12 texture from a per-stream pool, and delivers it as a `kNative` buffer (`D3D11Nv12Buffer`, `storage_representation()` = `yap-d3d11-nv12`; `ToI420()` reads back through a staging texture for a consumer that needs pixels). `yap_d3d11_frame(const livekit_ffi::VideoFrameBuffer*, YapD3D11Frame*)` gives the UI the texture and a reference. Without a registered device it behaves as `0002`. Numbers: PERFORMANCE.md, pass 6. |
+| `libwebrtc` 0.3.55 | `0001-native-buffer-sys-ptr.patch` | Performance pass 6. `NativeBuffer::sys_ptr()` (Windows): the C++ `livekit_ffi::VideoFrameBuffer` behind a native frame, which the crate keeps sealed. `yap-voice` passes it to the video output, which asks webrtc-sys for the texture (`0004`). |
+
+A patch is a plain unified diff (`--- a/<path>`, `+++ b/<path>`) without a
+`diff --git` header: `git apply` run inside this repository silently skips
+the files of a git-style patch. Pass 6's first `0004` was one and applied
+nothing.
 
 Two webrtc-sys candidates were tried and dropped:
 
@@ -1088,14 +1104,15 @@ Pass 4 built it. Pass 5 adopted it, trimmed its configure and made it
 
 What differs from 6.6.3-yap (§13.2), besides the version:
 
-| option or patch                                                    | effect                                                                                                                                                                                                                                                                                                                  |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-no-feature-freetype`                                             | 6.11 builds FreeType despite `-no-freetype`. The app draws with DirectWrite. 0.5 MiB.                                                                                                                                                                                                                                   |
-| `-no-feature-timezone_locale`                                      | CLDR time-zone display names, 3.75 MiB. The app formats dates in Rust and shows no zone names.                                                                                                                                                                                                                          |
-| other `-no-feature-*` (listed in the script)                       | Unused: calendars, PDF, ODF, Markdown, shared memory, system semaphores, SOCKS5, DNS lookups, the Network List Manager monitor, PPM and XBM, TableView/TreeView, sprites, particles, XMLHttpRequest, WorkerScript, and the Controls styles other than Basic. XPM stays: drag and drop needs it, and so does `DropArea`. |
-| `6.11.3/0001-release-unused-glyph-caches.patch`                    | The glyph-cache half of the 6.6.3 patch, in the threaded **and** basic render loops (the app runs the basic loop since pass 5). The batch half is upstream: recycled batches give their buffers to pools capped at 2 MB, which `releaseCachedResources()` empties.                                                      |
-| `6.11.3/0002-hlsl-only-shaders.patch` with `-DQT_YAP_HLSL_ONLY=ON` | Qt's own `.qsb` shaders carry SPIR-V and DXBC only, with no GLSL or MSL. The app runs on Direct3D only.                                                                                                                                                                                                                 |
-| `6.11.3/0003-timezone-without-locale-names.patch`                  | Windows' time-zone backend would not build without `timezone_locale`. It now falls back to Windows' own zone names, as before 6.8.                                                                                                                                                                                      |
+| option or patch                                                    | effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-no-feature-freetype`                                             | 6.11 builds FreeType despite `-no-freetype`. The app draws with DirectWrite. 0.5 MiB.                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `-no-feature-timezone_locale`                                      | CLDR time-zone display names, 3.75 MiB. The app formats dates in Rust and shows no zone names.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| other `-no-feature-*` (listed in the script)                       | Unused: calendars, PDF, ODF, Markdown, shared memory, system semaphores, SOCKS5, DNS lookups, the Network List Manager monitor, PPM and XBM, TableView/TreeView, sprites, particles, XMLHttpRequest, WorkerScript, and the Controls styles other than Basic. XPM stays: drag and drop needs it, and so does `DropArea`.                                                                                                                                                                                                                            |
+| `6.11.3/0001-release-unused-glyph-caches.patch`                    | The glyph-cache half of the 6.6.3 patch, in the threaded **and** basic render loops (the app runs the basic loop since pass 5). The batch half is upstream: recycled batches give their buffers to pools capped at 2 MB, which `releaseCachedResources()` empties.                                                                                                                                                                                                                                                                                 |
+| `6.11.3/0002-hlsl-only-shaders.patch` with `-DQT_YAP_HLSL_ONLY=ON` | Qt's own `.qsb` shaders carry SPIR-V and DXBC only, with no GLSL or MSL. The app runs on Direct3D only.                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `6.11.3/0003-timezone-without-locale-names.patch`                  | Windows' time-zone backend would not build without `timezone_locale`. It now falls back to Windows' own zone names, as before 6.8.                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `6.11.3/0004-d3d11-shared-resource-batches.patch`                  | Performance pass 6. `QRhiD3D11::setShaderResources` deep-copied the bound SRB's batched bindings (six stages of `QRhiBatchedBindings`) into the command buffer at every bind, and Qt Quick binds per draw (dynamic offsets): 9-11 % of the GUI thread's time in the animated idle. The batches are now an immutable `std::shared_ptr` snapshot, rebuilt only when the bindings change, and the command buffer keeps a reference. Built into `F:/ct/qt-custom-6.11p6/6.11.3-yap`, so the shared install other worktrees build with was not touched. |
 
 Checked on this build:
 
@@ -1107,20 +1124,46 @@ Checked on this build:
   1080p60) through NVENC, the other watching;
 - clippy and the workspace tests (PERFORMANCE.md, pass 5).
 
-**CI (not done; a later step).** `.github/workflows/desktop-native-release.yml`
+**CI (not done; written down in performance pass 6).** Nothing was
+uploaded and no secret changed. `.github/workflows/desktop-native-release.yml`
 still downloads `qt-6.6.3-static-msvc-x64.zip` from the
-`native-build-assets` release, and builds with whatever Visual Studio the
-runner has. To move it:
+`native-build-assets` release, and that Qt no longer builds the app. What
+the move needs:
 
-1. Zip `F:/ct/qt-custom-6.11/6.11.3-yap` (8.2 GB unpacked: the LTCG
-   libraries, `bin/`, `include/`, `lib/cmake`, `mkspecs`, `plugins`, `qml`,
-   `metatypes`, `modules`). The zip will likely be over GitHub's 2 GB asset
-   limit, so either split it, or leave out `doc/` and `sbom/` and check.
-   Upload it as `qt-6.11.3-yap-static-msvc-x64.zip` to `native-build-assets`.
-2. In the workflow: the step name, the asset name, the self-hosted message
-   ("a static Qt 6.11.3"), and `YAP_QT_DIR` pointing at the unzipped
-   folder.
-3. The runner needs Visual Studio 2022 (17.x) with the x64 C++ tools, the
-   same toolset as the Qt build (MSVC 14.44 here). `build.ps1` refuses to
-   run without it.
-4. The patched crates need nothing: `build.ps1` runs `patches/vendor.ps1`.
+1. **The archive.** Pack the installed Qt, `F:/ct/qt-custom-6.11/6.11.3-yap`
+   (8.2 GB: `lib/` 6.6 GB of LTCG libraries, `plugins/` 1.2 GB, `qml/`,
+   `bin/`, `include/`, `mkspecs/`, `metatypes/`, `modules/`). With pass 6's
+   `0004` adopted, pack the tree built with it instead (built here into
+   `F:/ct/qt-custom-6.11p6/6.11.3-yap`).
+   - **Use 7z (LZMA2), not zip.** Measured on `Qt6Gui.lib` (406 MB):
+     deflate keeps 26 %, which puts the whole tree at ~2.1 GB, over
+     GitHub's 2 GB limit per release asset; LZMA2 (`7z a -mx=7`) keeps
+     10 %, ~0.9 GB for the tree.
+   - **Keep the private headers** (`include/*/6.11.3/*/private`) and the
+     `lib/cmake/Qt6*Private` packages: since pass 6, `CMakeLists.txt` needs
+     `GuiPrivate` and `MultimediaPrivate` (`cpp/videohub.cpp`).
+   - `doc/` and `sbom/` (2.4 MB) can go.
+   - Upload as `qt-6.11.3-yap-static-msvc-x64.7z` to `native-build-assets`.
+2. **The workflow's Qt step:**
+   - its name, and the self-hosted message ("a static Qt 6.11.3");
+   - `gh release download ... --pattern "qt-6.11.3-yap-static-msvc-x64.7z"`;
+   - `7z x "$env:RUNNER_TEMP\qt-6.11.3-yap-static-msvc-x64.7z" -o"$dir"`
+     instead of `Expand-Archive` (7-Zip is on the hosted Windows image);
+   - the check for `bin/qmake.exe`, and `YAP_QT_DIR` pointing at the
+     folder.
+   - Unpack under `RUNNER_TEMP`: unpacked Qt is 8.2 GB, and the Rust and
+     CMake build dirs take several GB more.
+3. **The toolset.** Qt's libraries are LTCG objects from MSVC 14.44
+   (Visual Studio 2022 17.14), and so is `cpp/` (`/GL`): a link with
+   another compiler version fails with C1047. `build.ps1` already picks
+   Visual Studio 2022 and refuses to run without it. `windows-latest`
+   (Windows Server 2025) has 17.14 today; pinning the image
+   (`windows-2025`) keeps a later image change from breaking the link, and
+   a self-hosted runner needs 2022 with the x64 C++ tools installed.
+4. **The patched crates** need nothing in the workflow: `build.ps1` runs
+   `patches/vendor.ps1`, which since pass 6 vendors three crates
+   (`qt-build-utils`, `webrtc-sys`, `libwebrtc`) with `git apply` and fetches
+   any that are not in the cargo registry yet (network on a cold cache).
+5. **The Rust cache** (`swatinem/rust-cache`) keys on `Cargo.lock`, which
+   pass 6 changes (`libwebrtc` now builds from `rust/vendor`), so the first
+   run after the move rebuilds everything (~40 min with fat LTO here).

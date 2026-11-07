@@ -12,6 +12,13 @@
 // RGB on the GPU) and kept as the key's latest frame; one queued call per
 // key carries the newest frame to the GUI thread, where its sinks get it. A
 // GUI thread that falls behind skips frames instead of queueing them.
+//
+// Zero copy (docs/PERFORMANCE.md, pass 6): shareDevice() gives the window
+// a D3D11 device of ours, with video support, and hands the same device to
+// the H.264 decoder (patches/webrtc-sys/0004). A frame the GPU decoded then
+// arrives as its NV12 texture (yap_video_native_frame), and the QVideoFrame
+// wraps that texture: VideoOutput samples it where it is, with no readback,
+// I420 copy or upload. YAP_ZERO_COPY=0 keeps the copying path.
 
 #include <QtCore/QHash>
 #include <QtCore/QList>
@@ -49,6 +56,8 @@ private:
   QList<QPointer<QVideoSink>> m_sinks;
 };
 
+class QQuickWindow;
+
 class VideoHub : public QObject
 {
   Q_OBJECT
@@ -56,6 +65,11 @@ class VideoHub : public QObject
 public:
   explicit VideoHub(QObject* parent = nullptr);
   static VideoHub* instance();
+
+  // Before `window` is first shown: render it on a device the video
+  // decoder shares (zero copy). Does nothing off Direct3D 11, with
+  // YAP_ZERO_COPY=0, or when the device cannot be made.
+  static void shareDevice(QQuickWindow* window);
 
   Q_INVOKABLE void attach(const QString& key, QVideoSink* sink);
   Q_INVOKABLE void detach(const QString& key, QVideoSink* sink);

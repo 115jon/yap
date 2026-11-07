@@ -67,6 +67,14 @@ pub trait VideoOutput: Send + Sync + 'static {
     /// A frame of the track routed under `key` (its alias, e.g.
     /// `cam-video-<participant>`).
     fn frame(&self, key: &str, frame: &I420Frame<'_>);
+
+    /// A frame still on the GPU: `buffer` is the C++
+    /// `livekit_ffi::VideoFrameBuffer` behind a native frame, valid for the
+    /// call. True if the output took it; false and the frame comes again
+    /// through [`Self::frame`], read back to I420.
+    fn native_frame(&self, _key: &str, _buffer: *const std::ffi::c_void, _rotation: u16) -> bool {
+        false
+    }
 }
 
 /// One outbound video encoding, as the stats report it.

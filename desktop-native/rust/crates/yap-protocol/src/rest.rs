@@ -2,6 +2,8 @@
 //! envelope). Loose like the payloads: unknown fields are ignored and only
 //! fields the client cannot do without are required.
 
+use std::sync::Arc;
+
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -811,12 +813,15 @@ pub struct Message {
     pub channel_id: String,
     #[serde(default)]
     pub author_id: String,
-    pub author: Option<User>,
+    /// Shared: a channel's messages hold one copy per author (the log
+    /// interns them), and a `User` is ~0.5 KB inline (performance pass 6).
+    pub author: Option<Arc<User>>,
     #[serde(default)]
     pub content: String,
     pub reply_to_id: Option<String>,
+    /// Boxed: most messages are not replies, and it holds a `User` too.
     #[serde(default, deserialize_with = "lenient")]
-    pub reply_to: Option<ReplyTo>,
+    pub reply_to: Option<Box<ReplyTo>>,
     #[serde(default)]
     pub is_pinned: bool,
     #[serde(default)]
