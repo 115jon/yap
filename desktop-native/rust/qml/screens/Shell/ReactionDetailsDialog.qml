@@ -202,6 +202,7 @@ Popup {
                 border.color: Theme.focus
             }
         }
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
     }
 
     component PersonRow: Item {

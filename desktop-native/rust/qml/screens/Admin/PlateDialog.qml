@@ -7,7 +7,10 @@ import com.yap.native
 // silkscreen kicker, the title (Bricolage 20), an optional dithered rule,
 // the description, then the fields and a right-aligned footer of keys.
 // Opens with scale 0.96 and a fade; Escape or a press outside closes it
-// unless it is busy.
+// unless it is busy. `c1` is the web's DialogContent as it stands: centred
+// (placement center), the 28/32 title, the 15/22 description, 16 between
+// the header and the body, the 40 px tint-2 close key 16 in from the top
+// right, and no footer gap without footer keys.
 T.Popup {
     id: dialog
 
@@ -16,16 +19,19 @@ T.Popup {
     property string description
     property bool rule: false
     property bool busy: false
+    property bool c1: false
     default property alias content: fields.data
     property alias footer: footerRow.data
 
     parent: T.Overlay.overlay
     x: Math.round((parent.width - width) / 2)
-    y: Math.max(Theme.chrome + 32, Math.round(parent.height * 0.14))
+    y: c1 ? Math.max(Theme.chrome + 16, Math.round((parent.height - height) / 2 + Theme.chrome / 2))
+        : Math.max(Theme.chrome + 32, Math.round(parent.height * 0.14))
     width: Math.min(480, parent.width - 32)
     // Templates popups have no implicit size of their own.
     implicitHeight: implicitContentHeight + topPadding + bottomPadding
-    padding: 24
+    // C1: p-6 inside the 1 px edge.
+    padding: c1 ? 25 : 24
     modal: true
     // Ctrl+K stays shut while a modal is up (ExtrasHost).
     onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
@@ -49,6 +55,23 @@ T.Popup {
         color: Theme.ply3
         border.width: 1
         border.color: Theme.lineStrong
+
+        // The close key (DialogPrimitive.Close): over the plate, not in
+        // the column, as the web's sits absolute at top-4 right-4.
+        IconKey {
+            visible: dialog.c1
+            // top-4 right-4 inside the 1 px edge.
+            x: parent.width - width - 17
+            y: 17
+            size: 40
+            glyph: Theme.iconMd
+            tone: "toggled"
+            iconVariant: "idle"
+            iconName: "close"
+            tip: qsTr("Close")
+            enabled: !dialog.busy
+            onClicked: dialog.close()
+        }
     }
 
     contentItem: Column {
@@ -68,11 +91,15 @@ T.Popup {
         }
         Text {
             width: parent.width
+            // pr-12: clear of the close key.
+            rightPadding: dialog.c1 ? 48 : 0
             textFormat: Text.PlainText
             text: dialog.title
             wrapMode: Text.Wrap
             color: Theme.ink1
-            font: Theme.type.sectionTitle
+            font: dialog.c1 ? Theme.type.dialogTitle : Theme.type.sectionTitle
+            lineHeight: dialog.c1 ? Theme.type.dialogTitleLine : 1
+            lineHeightMode: dialog.c1 ? Text.FixedHeight : Text.ProportionalHeight
             Accessible.role: Accessible.Heading
         }
         Item {
@@ -89,22 +116,34 @@ T.Popup {
             width: parent.width
             topPadding: 8
             textFormat: Text.PlainText
+            rightPadding: dialog.c1 ? 48 : 0
             text: dialog.description
             wrapMode: Text.Wrap
             color: Theme.ink2
-            font: Theme.type.description
-            lineHeight: Theme.type.descriptionLine
+            font: dialog.c1 ? Theme.type.dialogBody : Theme.type.description
+            lineHeight: dialog.c1 ? Theme.type.dialogBodyLine : Theme.type.descriptionLine
             lineHeightMode: Text.FixedHeight
         }
-        Item { width: 1; height: fields.height > 0 ? 20 : 0 }
+        Item { width: 1; height: fields.height > 0 ? (dialog.c1 ? 16 : 20) : 0 }
         Column {
             id: fields
             width: parent.width
             spacing: 16
         }
-        Item { width: 1; height: 24 }
+        // A C1 plate without footer keys ends at its body (no footer).
+        Item { width: 1; height: dialog.c1 && !footerRow.shown ? 0 : 24 }
         Row {
             id: footerRow
+            // Any footer key showing (keys hidden by `visible: false` still
+            // gave the row its height, so a key-less C1 plate kept a 64 px
+            // tail).
+            readonly property bool shown: {
+                for (let i = 0; i < children.length; ++i)
+                    if (children[i].visible)
+                        return true
+                return false
+            }
+            height: !dialog.c1 || shown ? implicitHeight : 0
             anchors.right: parent.right
             spacing: 8
         }

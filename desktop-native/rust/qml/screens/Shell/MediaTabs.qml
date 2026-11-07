@@ -2,15 +2,15 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import Yap.Chrome
+import Yap.Media
 import com.yap.native
 
 // The channel details' Media, Links and Files tabs (MemberList.tsx
 // MediaTabContent, LinksTabContent, FilesTabContent), loaded afresh each
 // time a tab shows (`/api/channels/{id}/media?type=`).
 // - Media: a three-column grid of square tiles (radius 12, 6 apart), the
-//   poster's 24 px avatar top right and the file name on hover; a picture
-//   opens the viewer (with its neighbours), a video plays in the system
-//   player.
+//   poster's 24 px avatar top right and the file name on hover; any tile
+//   opens the in-app viewer with every item (a video plays inline there).
 // - Links: ply-2 cards with the poster, the channel and when, then each
 //   URL in the message as an accent link.
 // - Files: ply-2 cards with the file glyph in a 44 px well, the name, size
@@ -35,14 +35,23 @@ Item {
     Component.onCompleted: load()
     onTabChanged: load()
 
+    // Every tile, pictures and videos alike, opens the in-app viewer at its
+    // place in the list (MemberList.tsx handleMediaClick): a video plays
+    // there, and the viewer's author chip, time and Jump to message come
+    // from the row (messageId, author, avatar, createdMs).
+    property bool viewerOpened: false
     function openMedia(index) {
-        const item = root.rows[index]
-        if (item.video) {
-            Chat.download(item.url, Files.openPath(item.name), true)
-            return
+        root.viewerOpened = true
+        ShellState.imageViewerRequested(root.rows, index)
+    }
+    // The viewer's Jump to message closes the panel, as the web's does.
+    Connections {
+        target: ShellState
+        function onViewerJumped(messageId) {
+            if (root.viewerOpened)
+                ShellState.showDetails = false
+            root.viewerOpened = false
         }
-        const images = root.rows.filter(r => !r.video).map(r => ({ url: r.url, name: r.name, gif: r.gif, id: r.id, size: r.size }))
-        ShellState.imageViewerRequested(images, Math.max(0, images.findIndex(r => r.id === item.id)))
     }
 
     function openLink(url) {
@@ -66,12 +75,15 @@ Item {
             id: tile
             required property var modelData
             required property int index
+            readonly property bool webp: /\.webp($|[?#])/i.test(modelData.url)
+            readonly property bool animated: !modelData.video && (modelData.gif === true || webp)
             width: grid.cellWidth
             height: grid.cellHeight
             hoverEnabled: true
             Accessible.role: Accessible.Button
             Accessible.name: modelData.name
             onClicked: root.openMedia(index)
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
             contentItem: Item {}
             background: Item {
                 Rectangle {
@@ -86,10 +98,44 @@ Item {
                     Image {
                         anchors.fill: parent
                         anchors.margins: 1
-                        source: tile.modelData.video ? tile.modelData.poster : tile.modelData.url
+                        visible: !tile.animated
+                        source: tile.animated ? "" : tile.modelData.video ? tile.modelData.poster : tile.modelData.url
                         sourceSize: Qt.size(240, 240)
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
+                    }
+                    // A GIF plays in its tile, as the web's <img> does, while
+                    // on screen and the app is in front; an animated WebP
+                    // through AnimatedPicture (Qt's WebP reader stops after
+                    // one pass even when the file loops forever).
+                    Loader {
+                        anchors.fill: parent
+                        anchors.margins: 1
+                        active: tile.animated
+                        sourceComponent: tile.webp ? webpTile : gifTile
+                    }
+                    Component {
+                        id: webpTile
+                        AnimatedPicture {
+                            source: tile.modelData.url
+                            fillMode: AnimatedPicture.PreserveAspectCrop
+                            playing: true
+                        }
+                    }
+                    Component {
+                        id: gifTile
+                        AnimatedImage {
+                            source: tile.modelData.url
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            cache: false
+                            playing: status === AnimatedImage.Ready && tileSeen.inView
+                                && Qt.application.state === Qt.ApplicationActive
+                            ViewportWatch {
+                                id: tileSeen
+                                anchors.fill: parent
+                            }
+                        }
                     }
                     Icon {
                         anchors.centerIn: parent

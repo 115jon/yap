@@ -27,7 +27,7 @@ pub const INBOX_LIMIT: usize = 50;
 /// The voice channel status text's limit (voice-channel-status.ts).
 pub const MAX_VOICE_STATUS_TEXT: usize = 120;
 /// The AI emoji prompt's limit (lib/emoji.ts `MAX_AI_EMOJI_PROMPT_LENGTH`).
-pub const MAX_EMOJI_PROMPT: usize = 200;
+pub const MAX_EMOJI_PROMPT: usize = 300;
 /// Recent avatars shown (AvatarPickerModal.tsx: "Your last 6 uploads").
 pub const RECENT_AVATARS: usize = 6;
 /// The channel invite's lifetime (ChannelInviteModal.tsx: 7 days).
@@ -106,6 +106,16 @@ pub enum ExtrasCommand {
     UseVoiceMedia {
         channel_id: String,
         asset_id: String,
+    },
+    /// A file of ours (`Files.pickFiles`) uploaded as a recent status
+    /// picture, then set as the status (VoiceChannelMediaStatusModal.tsx
+    /// `handleUpload`). `width` and `height` are its size (1 when unknown).
+    UploadVoiceMedia {
+        channel_id: String,
+        path: String,
+        content_type: String,
+        width: u32,
+        height: u32,
     },
     RemoveVoiceMedia(String),
     CloseVoiceStatus,
@@ -538,6 +548,10 @@ pub enum ExtrasOp {
     VoiceMediaAdded {
         channel_id: String,
     },
+    /// A file uploaded; then the status takes it.
+    VoiceMediaUploaded {
+        channel_id: String,
+    },
     Avatars,
     DeleteAvatar(String),
     Emojis,
@@ -612,6 +626,9 @@ pub struct ExtrasState {
     pub(super) status_saved: u32,
     pub(super) voice_media: Vec<VoiceMediaAsset>,
     pub(super) voice_media_fetch: Fetch,
+    /// The picture dialog's channel.
+    pub(super) voice_media_channel: String,
+    pub(super) voice_uploading: Option<RequestId>,
     pub(super) avatars: Vec<AvatarUpload>,
     pub(super) avatars_fetch: Fetch,
     pub(super) avatar_busy: Option<String>,
@@ -755,12 +772,21 @@ pub struct VoiceMediaRow {
     pub id: String,
     pub url: String,
     pub title: String,
+    /// `preview_width` and `preview_height` (at least 1): the tile's shape.
+    pub width: f64,
+    pub height: f64,
+    /// A clip (`preview_content_type` video/*), which this build does not play.
+    pub video: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceStatusView {
     pub saving: bool,
+    /// A file is on its way up.
+    pub uploading: bool,
+    /// The dialog's channel shows a picture now.
+    pub has_media: bool,
     pub error: String,
     pub saved: u32,
     pub media_loading: bool,
@@ -793,6 +819,8 @@ pub struct AvatarsView {
 pub struct EmojiRow {
     pub id: String,
     pub shortcode: String,
+    /// What it was made from (the picker's preview name and search).
+    pub prompt: String,
     pub url: String,
     pub status: String,
     /// What goes into the composer (`<:code:id>`), empty until ready.
@@ -1022,6 +1050,46 @@ pub fn status_media_url(media: &Value) -> String {
         .unwrap_or_default()
         .to_owned()
 }
+
+/// A status media's preview size, each side at least 1 (the web's
+/// `aspectRatio: max(1, w) / max(1, h)`).
+pub fn status_media_size(media: &Value) -> (f64, f64) {
+    let side = |key: &str| {
+        media
+            .get(key)
+            .and_then(Value::as_f64)
+            .unwrap_or(1.0)
+            .max(1.0)
+    };
+    (side("preview_width"), side("preview_height"))
+}
+
+/// A clip rather than a picture.
+pub fn status_media_is_video(media: &Value) -> bool {
+    media
+        .get("preview_content_type")
+        .and_then(Value::as_str)
+        .is_some_and(|t| t.starts_with("video/"))
+}
+
+/// The upload's type from the file name, as the server accepts them
+/// (`getVoiceStatusMediaUploadContentType`): GIF, PNG, JPEG, WebP, MP4 and
+/// WebM.
+pub fn voice_media_upload_type(name: &str) -> Option<&'static str> {
+    let ext = name.rsplit_once('.')?.1.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "gif" => "image/gif",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        _ => return None,
+    })
+}
+
+/// The server's limit for one status picture.
+pub const MAX_VOICE_MEDIA_UPLOAD_BYTES: u64 = 25 * 1024 * 1024;
 
 /// `normalizeUsername` then `UsernameSchema`: lower case, 2-32 of
 /// letters, digits, `_`, `.` and `-`, starting with a letter or digit.

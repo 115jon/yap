@@ -384,6 +384,9 @@ T.Popup {
                     anchors.verticalCenter: parent.verticalCenter
                     iconName: "close"
                     tone: "toggled"
+                    // The web's close is the Bold X on tint-2; the toggled
+                    // tone's Fill glyph is the X in a filled square.
+                    iconVariant: "idle"
                     tip: qsTr("Close settings")
                     tipSide: "bottom"
                     onClicked: SettingsNav.close()
@@ -756,6 +759,7 @@ T.Popup {
                         font: Theme.type.caption
                     }
                 }
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
             }
         }
         Text {

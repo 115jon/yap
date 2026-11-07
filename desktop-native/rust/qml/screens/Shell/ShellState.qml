@@ -185,8 +185,14 @@ QtObject {
     }
     // The video viewer (Full Screen on a chat video).
     signal videoViewerRequested(string source, int position)
-    // The image viewer from outside the list (the details' Media tab).
+    // The media viewer from outside the list (the details' Media tab):
+    // ImageViewer.show's items ({ url, name, id, size, gif } and, all
+    // optional, video, poster, mime, nsfw, messageId, channelId, author,
+    // avatar, initials, createdMs). A `video: true` item plays inline.
     signal imageViewerRequested(var images, int index)
+    // The viewer's Jump to message ran (it already called
+    // Chat.jumpToMessage); a side panel that opened it may close.
+    signal viewerJumped(string messageId)
 
     // Bumped on every change below, so bindings that ask re-run.
     property int mediaVersion: 0

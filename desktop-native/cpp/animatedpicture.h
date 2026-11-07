@@ -57,8 +57,9 @@ public:
   bool failed(const QString& key) const { return m_failed.contains(key); }
   // Starts loading `url` for a `box`-sized key unless it is cached or on
   // its way; `loaded(key)` follows.
+  // `cover`: decode to cover the box (a cropped fill), not to fit it.
   void request(QNetworkAccessManager* network, const QUrl& url, QSize box,
-               const QString& key);
+               const QString& key, bool cover = false);
 
 signals:
   void loaded(const QString& key);

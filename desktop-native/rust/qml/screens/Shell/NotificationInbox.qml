@@ -5,8 +5,7 @@ import com.yap.native
 
 // The bell's inbox (NotificationBell.tsx): a non-modal 380 wide menu
 // panel under the bell, at most 560 tall. Its header (48, px-4, a seam):
-// "Inbox", then "Mark all read" while anything is unread, Clear all (it
-// asks first) and Close. Rows (py-3, px-4, hairlines between) carry the
+// "Inbox", then "Mark all read" while anything is unread, and Close. Rows (py-3, px-4, hairlines between) carry the
 // sender's 32 px avatar, "Name mentioned you" with the time and the
 // unread dot, the channel and server (not for a DM) and two lines of the
 // message; unread ones sit on the mention tint. A row reads it and jumps
@@ -86,17 +85,13 @@ Popup {
                 anchors.right: parent.right
                 anchors.rightMargin: 10
                 height: 48
-                spacing: 4
+                // gap-2. The web's header has no Clear all (NotificationBell.tsx
+                // InboxPanel): Mark all read, then Close.
+                spacing: 8
                 InboxLink {
                     visible: root.inbox.unread > 0
                     text: qsTr("Mark all read")
                     onClicked: Extras.readAll()
-                }
-                InboxLink {
-                    visible: root.inbox.rows.length > 0
-                    text: qsTr("Clear all")
-                    danger: true
-                    onClicked: root.confirmClear = true
                 }
                 IconKey {
                     id: closeKey
@@ -228,6 +223,7 @@ Popup {
             border.width: link.visualFocus ? 2 : 0
             border.color: Theme.focus
         }
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
     }
 
     component InboxRow: AbstractButton {
@@ -370,5 +366,6 @@ Popup {
                 }
             }
         }
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
     }
 }

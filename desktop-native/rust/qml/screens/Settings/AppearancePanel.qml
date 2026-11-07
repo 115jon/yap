@@ -140,6 +140,7 @@ Column {
                             color: tile.on ? Theme.ink1 : Theme.ink2
                             font: tile.on ? Theme.type.rowUnread : Theme.type.description
                         }
+                        HoverHandler { cursorShape: Qt.PointingHandCursor }
                     }
                 }
             }

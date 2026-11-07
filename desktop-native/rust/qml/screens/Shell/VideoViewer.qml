@@ -2,9 +2,10 @@ import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
 
-// Full Screen for a chat video (VideoAttachment.tsx `variant="viewer"`):
-// the video over the scrim at most the window less 64 px, playing on from
-// where the row was, with the close key. Esc or a click outside closes it.
+// Full Screen for a chat video (useVideoPlayer.ts toggleFullscreen: the
+// player's element fullscreen, `fixed inset-0 bg-black`): the video on
+// black over the whole window below the title bar, playing on from where
+// the row was. Its Full Screen key or Esc leaves.
 Popup {
     id: root
 
@@ -18,19 +19,20 @@ Popup {
     }
 
     parent: Overlay.overlay
-    anchors.centerIn: parent
-    width: parent ? parent.width - 64 : 800
-    height: parent ? parent.height - 64 : 600
+    x: 0
+    y: ShellState.stageFullscreen ? 0 : Theme.chrome
+    width: parent ? parent.width : 800
+    height: parent ? parent.height - y : 600
     modal: true
     // Ctrl+K stays shut while a modal is up (ExtrasHost).
     onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
     dim: true
     padding: 0
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    closePolicy: Popup.CloseOnEscape
     onClosed: source = ""
 
-    Overlay.modal: Scrim { color: Qt.rgba(0, 0, 0, 0.85) }
-    background: Item {}
+    Overlay.modal: Scrim { color: "#000000" }
+    background: Rectangle { color: "#000000" }
 
     contentItem: Item {
         Accessible.role: Accessible.Dialog
@@ -42,18 +44,9 @@ Popup {
                 source: root.source
                 startAt: root.position
                 autoStart: true
+                framed: false
                 onExpandRequested: root.close()
             }
-        }
-        IconKey {
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.margins: 8
-            size: 40
-            tone: "onMedia"
-            iconName: "close"
-            tip: qsTr("Close")
-            onClicked: root.close()
         }
     }
 }

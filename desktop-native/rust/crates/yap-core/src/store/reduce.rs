@@ -1305,6 +1305,7 @@ impl State {
                 sent_at,
             } => self.toast_reply(fx, &channel_id, message_id, content.trim(), nonce, sent_at),
             Command::ToastMarkRead(channel_id) => self.toast_mark_read(fx, &channel_id),
+            Command::MarkServerRead(server_id) => self.mark_server_read(fx, &server_id),
             Command::SetStatus {
                 status,
                 custom_status,
@@ -2619,6 +2620,38 @@ impl State {
             self.set_divider(fx, None);
         }
         self.mark_read(fx, channel_id, None);
+        self.sync_badges(fx);
+    }
+
+    fn mark_server_read(&mut self, fx: &mut Effects, server_id: &str) {
+        if server_id.is_empty() || self.signed_in().is_none() {
+            return;
+        }
+        let unread: Vec<String> = self
+            .channels
+            .get(server_id)
+            .map(|list| {
+                list.channels
+                    .iter()
+                    .filter(|c| self.has_unread(&c.id))
+                    .map(|c| c.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for channel_id in &unread {
+            self.mark_read(fx, channel_id, None);
+        }
+        let ids: Vec<String> = self
+            .notifications
+            .iter()
+            .filter(|n| n.server_id.as_deref() == Some(server_id))
+            .map(|n| n.id.clone())
+            .collect();
+        if !ids.is_empty() {
+            self.notifications.retain(|n| !ids.contains(&n.id));
+            self.inbox_read(Some(&ids));
+            let _ = self.http(fx, ApiRequest::MarkNotificationsRead { ids });
+        }
         self.sync_badges(fx);
     }
 

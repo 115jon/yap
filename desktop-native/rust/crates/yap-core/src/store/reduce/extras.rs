@@ -62,6 +62,7 @@ impl State {
                 self.save_voice_status(fx, &channel_id, status);
             }
             ExtrasCommand::LoadVoiceMedia(channel_id) => {
+                self.extras.voice_media_channel.clone_from(&channel_id);
                 let request = ExtrasRequest::VoiceMedia {
                     channel_id,
                     voice_session: self.apps.participant_id.clone(),
@@ -103,6 +104,36 @@ impl State {
                     let status = x::voice_status_body(text.as_deref(), Some(&media));
                     self.save_voice_status(fx, &channel_id, status);
                 }
+            }
+            ExtrasCommand::UploadVoiceMedia {
+                channel_id,
+                path,
+                content_type,
+                width,
+                height,
+            } => {
+                if self.extras.status_saving.is_some() || self.extras.voice_uploading.is_some() {
+                    return;
+                }
+                let Some(token) = self.session.as_ref().map(|s| s.token.clone()) else {
+                    return;
+                };
+                let id = RequestId(self.next_id());
+                fx.push(Effect::VoiceMediaUpload {
+                    id,
+                    token,
+                    channel_id: channel_id.clone(),
+                    path,
+                    content_type,
+                    width,
+                    height,
+                    voice_session: self.apps.participant_id.clone(),
+                });
+                self.pending
+                    .extras
+                    .insert(id, ExtrasOp::VoiceMediaUploaded { channel_id });
+                self.extras.voice_uploading = Some(id);
+                self.extras.status_error.clear();
             }
             ExtrasCommand::RemoveVoiceMedia(channel_id) => {
                 let text = self.voice_status_text(&channel_id);
@@ -760,6 +791,25 @@ impl State {
                     }
                 }
             }
+            (ExtrasOp::VoiceMediaUploaded { channel_id }, result) => {
+                if self.extras.voice_uploading == Some(id) {
+                    self.extras.voice_uploading = None;
+                }
+                match result {
+                    Ok(ExtrasResponse::VoiceMediaAdded(asset)) => {
+                        let media = asset.media.clone();
+                        self.extras.voice_media.retain(|a| a.id != asset.id);
+                        self.extras.voice_media.insert(0, asset);
+                        let text = self.voice_status_text(&channel_id);
+                        let status = x::voice_status_body(text.as_deref(), Some(&media));
+                        self.save_voice_status(fx, &channel_id, status);
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        self.extras.status_error = voice_status_error(&error, "upload that media");
+                    }
+                }
+            }
             (ExtrasOp::VoiceMediaAdded { channel_id }, result) => {
                 self.extras.status_saving = None;
                 match result {
@@ -1071,6 +1121,8 @@ impl State {
             media: self.media_view(),
             voice_status: x::VoiceStatusView {
                 saving: e.status_saving.is_some(),
+                uploading: e.voice_uploading.is_some(),
+                has_media: self.voice_status_media(&e.voice_media_channel).is_some(),
                 error: e.status_error.clone(),
                 saved: e.status_saved,
                 media_loading: e.voice_media_fetch.is_loading(),
@@ -1078,10 +1130,16 @@ impl State {
                 recents: e
                     .voice_media
                     .iter()
-                    .map(|a| x::VoiceMediaRow {
-                        id: a.id.clone(),
-                        url: view::absolute_url(base, Some(&x::status_media_url(&a.media))),
-                        title: a.media["title"].as_str().unwrap_or_default().to_owned(),
+                    .map(|a| {
+                        let (width, height) = x::status_media_size(&a.media);
+                        x::VoiceMediaRow {
+                            id: a.id.clone(),
+                            url: view::absolute_url(base, Some(&x::status_media_url(&a.media))),
+                            title: a.media["title"].as_str().unwrap_or_default().to_owned(),
+                            width,
+                            height,
+                            video: x::status_media_is_video(&a.media),
+                        }
                     })
                     .collect(),
             },
@@ -1115,6 +1173,7 @@ impl State {
                         x::EmojiRow {
                             id: m.id.clone(),
                             shortcode: m.shortcode.clone(),
+                            prompt: m.prompt.clone(),
                             url: view::absolute_url(base, m.image_url.as_deref()),
                             status: m.status.clone(),
                             token: if ready {

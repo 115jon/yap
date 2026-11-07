@@ -172,7 +172,13 @@ pub fn attachments_json(attachments: &[Attachment], api_base: &str) -> String {
         .map(|a| {
             let mime = a.content_type.as_deref().unwrap_or_default();
             let url = attachment_url(a, api_base);
-            let animated = matches!(mime, "image/gif" | "image/apng") || is_gif_host(&url);
+            // media.ts `isAnimatedMedia`: an animated type, a GIF host, or a
+            // GIF provider's file (KLIPY, Tenor, an X GIF on fxtwitter, often
+            // an animated WebP), so it plays like the web's <img>.
+            let animated = matches!(mime, "image/gif" | "image/apng")
+                || is_gif_host(&url)
+                || gif_favorite::attachment_provider(a.file_key.as_deref()).is_some()
+                || gif_favorite::attachment_provider(a.url.as_deref()).is_some();
             let bytes = a.size_bytes.unwrap_or(0);
             let kind = media_kind(mime);
             // ImageGrid.tsx and MessageItem.tsx: an animated picture or a
@@ -648,6 +654,26 @@ pub(in crate::store) fn gif_rows(browse: &GifBrowse) -> (Vec<GifRow>, GifStatusV
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_x_gif_webp_attachment_should_play_like_a_gif() {
+        let a = Attachment {
+            filename: "HKohayFWcAA3VCp.webp".into(),
+            content_type: Some("image/webp".into()),
+            url: Some("https://gif.fxtwitter.com/tweet_video/HKohayFWcAA3VCp.webp".into()),
+            file_key: Some("https://gif.fxtwitter.com/tweet_video/HKohayFWcAA3VCp.webp".into()),
+            ..Attachment::default()
+        };
+        let still = Attachment {
+            content_type: Some("image/webp".into()),
+            url: Some("https://cdn.example.com/photo.webp".into()),
+            ..Attachment::default()
+        };
+        let json: Vec<serde_json::Value> =
+            serde_json::from_str(&attachments_json(&[a, still], "https://yap.test")).expect("json");
+        assert_eq!(json[0]["gif"], true);
+        assert_eq!(json[1]["gif"], false);
+    }
 
     #[test]
     fn file_sizes_should_format_like_the_web() {

@@ -59,6 +59,7 @@ Column {
                             color: Theme.ink1
                         }
                     }
+                    HoverHandler { cursorShape: Qt.PointingHandCursor }
                 }
             }
         }

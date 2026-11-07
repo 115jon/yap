@@ -102,6 +102,7 @@ Rectangle {
                         }
                     }
                 }
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
             }
         }
     }

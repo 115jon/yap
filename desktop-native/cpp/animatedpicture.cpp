@@ -56,10 +56,13 @@ AnimationPtr decodeGif(const QByteArray& bytes, QSize box)
   const QSize full = reader.size();
   if (!reader.canRead() || full.isEmpty())
     return nullptr;
+  // A 0 side is unbounded (a cropped picture bounds its long side only).
+  const qreal sx = box.width() > 0 ? qreal(box.width()) / full.width() : 1.0;
+  const qreal sy = box.height() > 0 ? qreal(box.height()) / full.height() : 1.0;
+  const qreal scale = qMin<qreal>(1.0, qMin(sx, sy));
   QSize target = full;
-  if (box.width() > 0 && box.height() > 0 &&
-      (full.width() > box.width() || full.height() > box.height()))
-    target = full.scaled(box, Qt::KeepAspectRatio);
+  if (scale < 1.0)
+    target = QSize(qMax(1, qRound(full.width() * scale)), qMax(1, qRound(full.height() * scale)));
   auto data = std::make_shared<AnimationData>();
   while (reader.canRead()) {
     QImage frame = reader.read();
@@ -80,6 +83,23 @@ AnimationPtr decodeGif(const QByteArray& bytes, QSize box)
   if (data->frames.isEmpty())
     return nullptr;
   return data;
+}
+
+// The box to fit a picture into so it covers `box` (a cropped fill): the
+// picture scaled by the larger of the two ratios, never up. The box itself
+// when the header gives no size.
+QSize coverBox(const QByteArray& bytes, QSize box)
+{
+  QBuffer buffer;
+  buffer.setData(bytes);
+  buffer.open(QIODevice::ReadOnly);
+  const QSize full = QImageReader(&buffer).size();
+  if (full.isEmpty() || box.isEmpty())
+    return box;
+  const qreal scale = qMin<qreal>(1.0, qMax(qreal(box.width()) / full.width(),
+                                            qreal(box.height()) / full.height()));
+  return QSize(qMax(1, int(std::ceil(full.width() * scale))),
+               qMax(1, int(std::ceil(full.height() * scale))));
 }
 
 AnimationPtr decodeBytes(const QByteArray& bytes, QSize box)
@@ -162,7 +182,7 @@ AnimationPtr AnimationCache::find(const QString& key)
 }
 
 void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
-                             QSize box, const QString& key)
+                             QSize box, const QString& key, bool cover)
 {
   if (m_entries.contains(key) || m_pending.contains(key) || m_failed.contains(key))
     return;
@@ -178,7 +198,7 @@ void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
             if (received > kMaxDownload)
               reply->abort();
           });
-  connect(reply, &QNetworkReply::finished, this, [this, reply, box, key] {
+  connect(reply, &QNetworkReply::finished, this, [this, reply, box, key, cover] {
     reply->deleteLater();
     if (reply->error() != QNetworkReply::NoError) {
       std::fprintf(stderr, "[anim] %s: %s\n", qPrintable(reply->url().host()),
@@ -190,8 +210,8 @@ void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
     }
     const QByteArray bytes = reply->readAll();
     QPointer<AnimationCache> self(this);
-    QThreadPool::globalInstance()->start([self, bytes, box, key] {
-      AnimationPtr data = decodeBytes(bytes, box);
+    QThreadPool::globalInstance()->start([self, bytes, box, key, cover] {
+      AnimationPtr data = decodeBytes(bytes, cover ? coverBox(bytes, box) : box);
       QMetaObject::invokeMethod(
         AnimationCache::instance(),
         [self, data, key] {
@@ -300,6 +320,8 @@ void AnimatedPicture::setFillMode(FillMode mode)
     return;
   m_fillMode = mode;
   emit fillModeChanged();
+  // A cropped picture decodes to cover its box, not to fit it.
+  load();
   update();
 }
 
@@ -366,8 +388,13 @@ void AnimatedPicture::load()
   // Sizes round up to 16 px so neighbouring sizes share one decode.
   auto bucket = [](qreal v) { return (int(std::ceil(v)) + 15) / 16 * 16; };
   const QSize box(bucket(width() * dpr), bucket(height() * dpr));
+  // A cropped picture decodes to cover the box, a fitted one to fit inside
+  // it (fitting a square banner into 340 x 96 decoded it at 96 x 96 and
+  // stretched that).
+  const bool cover = m_fillMode == PreserveAspectCrop;
   const QString key = m_source.toString() + QLatin1Char('|') + QString::number(box.width())
-                      + QLatin1Char('x') + QString::number(box.height());
+                      + QLatin1Char('x') + QString::number(box.height())
+                      + (cover ? QStringLiteral("c") : QString());
   if (key == m_key && (m_anim || m_status == Loading))
     return;
   m_key = key;
@@ -378,7 +405,7 @@ void AnimatedPicture::load()
   setStatus(Loading);
   QQmlEngine* engine = qmlEngine(this);
   AnimationCache::instance()->request(engine ? engine->networkAccessManager() : nullptr,
-                                      m_source, box, key);
+                                      m_source, box, key, cover);
   if (AnimationCache::instance()->failed(key))
     setStatus(Error);
 }

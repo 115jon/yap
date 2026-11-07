@@ -305,6 +305,8 @@ QtObject {
     readonly property real scaleIn: reducedMotion ? 1 : 0.97
     readonly property real scaleOut: reducedMotion ? 1 : 0.985
     readonly property real scaleDialog: reducedMotion ? 1 : 0.96
+    // The media viewer's exit (ImageViewerModal.tsx MEDIA_PRESENCE zoom-out-[0.98]).
+    readonly property real scaleViewerOut: reducedMotion ? 1 : 0.98
     readonly property real scalePress: reducedMotion ? 1 : 0.97
     readonly property real scalePressIcon: reducedMotion ? 1 : 0.96
     readonly property int shift: reducedMotion ? 0 : 4
@@ -335,6 +337,8 @@ QtObject {
         readonly property font row: Qt.font({ family: "Yap Geist Medium", pixelSize: 14, weight: Font.Medium })
         readonly property font rowUnread: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 14, weight: Font.DemiBold })
         readonly property font description: Qt.font({ family: "Yap Geist", pixelSize: 13, weight: Font.Normal })
+        // text-ui-base: a C1 dialog's description (DialogDescription, 15/22).
+        readonly property font dialogBody: Qt.font({ family: "Yap Geist", pixelSize: 15, weight: Font.Normal })
         // A settings row's label (primitives.tsx: 15/500).
         readonly property font setting: Qt.font({ family: "Yap Geist Medium", pixelSize: 15, weight: Font.Medium })
         readonly property font occupant: Qt.font({ family: "Yap Geist Medium", pixelSize: 13, weight: Font.Medium })
@@ -346,6 +350,10 @@ QtObject {
         // text-ui-md semibold: a popover's title (the bell's Inbox).
         readonly property font menuTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 16, weight: Font.DemiBold })
         readonly property font panelTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 14, weight: Font.DemiBold })
+        // text-ui-sm semibold: a small section heading (the vibe's Recents).
+        readonly property font labelStrong: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 13, weight: Font.DemiBold })
+        // text-ui-sm semibold: the media viewer's author (ImageViewerToolbar.tsx).
+        readonly property font nameSm: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 13, weight: Font.DemiBold })
         // Silkscreen: condensed 500 on dark grounds, wide 600 on light.
         readonly property font silk: theme.lightGround
             ? Qt.font({ family: "Yap Martian Num SemiBold", pixelSize: 11, weight: Font.DemiBold, letterSpacing: 1.1, capitalization: Font.AllUppercase })
@@ -364,6 +372,7 @@ QtObject {
         readonly property int columnTitleLine: 24
         readonly property int authorLine: 20
         readonly property int messageLine: 22
+        readonly property int dialogBodyLine: 22
         readonly property int rowLine: 20
         readonly property int descriptionLine: 18
         readonly property int captionLine: 16

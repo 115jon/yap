@@ -22,6 +22,9 @@ Item {
     readonly property var voiceLines: voiceTip.length > 0 ? voiceTip.split("
 ") : []
     signal selected()
+    // A right click or a long press (ServerList.tsx onContextMenu and
+    // useLongPress), at a point in the tile.
+    signal menuRequested(real x, real y)
 
     // Off while a pooled delegate takes a new row, so its pill does not
     // animate from the previous row's state.
@@ -155,6 +158,14 @@ Item {
 
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
     TapHandler { id: tap; onTapped: entry.selected() }
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: (point) => entry.menuRequested(point.position.x, point.position.y)
+    }
+    TapHandler {
+        acceptedDevices: PointerDevice.TouchScreen
+        onLongPressed: entry.menuRequested(point.position.x, point.position.y)
+    }
     LazyPopup {
         // Made while hovered.
         when: hover.hovered && !entry.voice

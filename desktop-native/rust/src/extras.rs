@@ -29,8 +29,8 @@ pub mod qobject {
         /// url, poster, video, gif, author, avatar, initials, createdMs,
         /// urls, size, date, icon}]}`.
         #[qproperty(QString, media)]
-        /// `{saving, error, saved, mediaLoading, mediaError, recents: [{id,
-        /// url, title}]}`.
+        /// `{saving, uploading, hasMedia, error, saved, mediaLoading,
+        /// mediaError, recents: [{id, url, title, width, height, video}]}`.
         #[qproperty(QString, voice_status, cxx_name = "voiceStatus")]
         /// `{loading, error, busyId, rows: [{id, avatarUrl, url, current}]}`.
         #[qproperty(QString, avatars)]
@@ -114,6 +114,12 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "useVoiceMedia"]
         fn use_voice_media(self: &Extras, channel_id: &QString, asset_id: &QString);
+
+        /// A picked file (a path from `Files.pickFiles`) uploaded and set
+        /// as the status picture; a sentence when it cannot go.
+        #[qinvokable]
+        #[cxx_name = "uploadVoiceMedia"]
+        fn upload_voice_media(self: &Extras, channel_id: &QString, path: &QString) -> QString;
 
         #[qinvokable]
         #[cxx_name = "removeVoiceMedia"]
@@ -380,6 +386,37 @@ impl qobject::Extras {
             channel_id: text(channel_id),
             asset_id: text(asset_id),
         });
+    }
+
+    pub fn upload_voice_media(&self, channel_id: &QString, path: &QString) -> QString {
+        let path = text(path);
+        let file = std::path::Path::new(&path);
+        let name = file
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        // The server's own refusals, said before the bytes go.
+        let Some(content_type) = x::voice_media_upload_type(&name) else {
+            return QString::from("Only GIF, PNG, JPG, WEBP, MP4, and WEBM files are supported.");
+        };
+        if std::fs::metadata(file).map_or(0, |m| m.len()) > x::MAX_VOICE_MEDIA_UPLOAD_BYTES {
+            return QString::from("Voice status media must be 25 MB or smaller.");
+        }
+        // `readMediaDimensions`: a picture's own size; a clip's is not read
+        // here, so it goes as 1 x 1 (the web's fallback).
+        let (width, height) = if content_type.starts_with("image/") {
+            image::image_dimensions(file).unwrap_or((1, 1))
+        } else {
+            (1, 1)
+        };
+        send(ExtrasCommand::UploadVoiceMedia {
+            channel_id: text(channel_id),
+            path,
+            content_type: content_type.to_owned(),
+            width: width.max(1),
+            height: height.max(1),
+        });
+        QString::default()
     }
 
     pub fn remove_voice_media(&self, channel_id: &QString) {

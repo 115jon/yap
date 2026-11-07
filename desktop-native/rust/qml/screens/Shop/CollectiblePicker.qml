@@ -715,7 +715,7 @@ Popup {
                     anchors.centerIn: parent
                     width: parent.width * 1.2
                     height: width
-                    visible: !cell.none && !decoMotion.visible
+                    visible: !cell.none && decoMotion.opacity === 0
                     source: !cell.none && root.kind === "avatar_decoration" ? cell.modelData.still : ""
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
@@ -728,7 +728,8 @@ Popup {
                     height: width
                     // Only the cell under the pointer or focus plays.
                     source: cell.active && !cell.none && root.kind === "avatar_decoration" ? cell.modelData.motion : ""
-                    visible: cell.active && status === AnimatedPicture.Ready
+                    // Opacity, not visible: AnimatedPicture only loads while visible.
+                    opacity: cell.active && status === AnimatedPicture.Ready ? 1 : 0
                     playing: cell.active && !Theme.reducedMotion
                 }
             }

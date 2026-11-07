@@ -458,5 +458,6 @@ Popup {
             border.width: 2
             border.color: Theme.focus
         }
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
     }
 }

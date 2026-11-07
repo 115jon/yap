@@ -35,6 +35,19 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "sectionRow"]
         fn section_row(self: &Emoji, section: &QString) -> i32;
+
+        /// The person's AI emoji (`Extras.emojis` JSON), which the grid
+        /// shows after the recents and searches first. Refills only when
+        /// they changed.
+        #[qinvokable]
+        #[cxx_name = "setCreations"]
+        fn set_creations(self: Pin<&mut Emoji>, json: &QString);
+
+        /// Row `row`'s `cells`: the JSON cells of a `cells` row, a header's
+        /// trailing count, or empty.
+        #[qinvokable]
+        #[cxx_name = "rowCells"]
+        fn row_cells(self: &Emoji, row: i32) -> QString;
     }
 
     impl cxx_qt::Initialize for Emoji {}
@@ -45,6 +58,7 @@ use std::cell::RefCell;
 
 use cxx_qt_lib::QString;
 use yap_cache::settings::{self, EmojiPrefs};
+use yap_core::picker::Creations;
 use yap_core::store::view::ViewDiff;
 
 use crate::gui;
@@ -61,6 +75,7 @@ pub struct EmojiRust {
 struct Picker {
     query: String,
     prefs: Option<EmojiPrefs>,
+    creations: Creations,
 }
 
 thread_local! {
@@ -112,8 +127,17 @@ impl cxx_qt::Initialize for qobject::Emoji {
 /// Rebuilds the grid for the current query and tone.
 fn refill() {
     let prefs = prefs();
-    let query = PICKER.with(|p| p.borrow().query.clone());
-    let rows = yap_core::picker::rows(&query, prefs.skin_tone, &prefs.recents, api_base());
+    let (query, creations) = PICKER.with(|p| {
+        let p = p.borrow();
+        (p.query.clone(), p.creations.clone())
+    });
+    let rows = yap_core::picker::rows(
+        &query,
+        prefs.skin_tone,
+        &prefs.recents,
+        &creations,
+        api_base(),
+    );
     models::apply::<m::EmojiGridModel>(ViewDiff::Reset(rows));
 }
 
@@ -147,6 +171,29 @@ impl qobject::Emoji {
                 .position(|r| r.kind == "header" && r.section == section)
                 .and_then(|i| i32::try_from(i).ok())
                 .unwrap_or(-1)
+        })
+    }
+
+    pub fn set_creations(self: Pin<&mut Self>, json: &QString) {
+        let creations: Creations = serde_json::from_str(&json.to_string()).unwrap_or_default();
+        let changed = PICKER.with(|p| {
+            let mut p = p.borrow_mut();
+            let changed = p.creations != creations;
+            p.creations = creations;
+            changed
+        });
+        if changed {
+            refill();
+        }
+    }
+
+    pub fn row_cells(&self, row: i32) -> QString {
+        gui::with_rows(|rows| {
+            usize::try_from(row)
+                .ok()
+                .and_then(|i| rows.emoji.get(i))
+                .map(|r| QString::from(&r.cells))
+                .unwrap_or_default()
         })
     }
 }

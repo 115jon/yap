@@ -370,6 +370,7 @@ impl Runner {
             }),
             Effect::Download { id, .. }
             | Effect::BackgroundUpload { id, .. }
+            | Effect::VoiceMediaUpload { id, .. }
             | Effect::ProfileUpload { id, .. }
             | Effect::SoundUpload { id, .. } => self.send(Input::Http {
                 id: *id,
@@ -609,6 +610,40 @@ impl Runner {
                                     )
                                 })
                             });
+                    let _ = inbox.send(Input::Http { id, result });
+                });
+            }
+            Effect::VoiceMediaUpload {
+                id,
+                token,
+                channel_id,
+                path,
+                content_type,
+                width,
+                height,
+                voice_session,
+            } => {
+                let api = Api::new(self.http.clone(), token);
+                let inbox = self.inbox.clone();
+                tokio::spawn(async move {
+                    let upload = VoiceMediaUpload {
+                        channel_id,
+                        path,
+                        content_type,
+                        width,
+                        height,
+                        voice_session,
+                    };
+                    let result = voice_media_upload(&api, upload).await.and_then(|mut body| {
+                        let item = body.get_mut("item").map(serde_json::Value::take);
+                        serde_json::from_value(item.unwrap_or_default())
+                            .map(|asset| {
+                                ApiResponse::Extras(
+                                    crate::store::extras::ExtrasResponse::VoiceMediaAdded(asset),
+                                )
+                            })
+                            .map_err(|e| crate::api::ApiError::Decode(format!("media: {e}")))
+                    });
                     let _ = inbox.send(Input::Http { id, result });
                 });
             }
@@ -901,6 +936,51 @@ async fn background_upload(
     api.upload(
         "/api/camera-backgrounds",
         reqwest::multipart::Form::new().part("file", part),
+    )
+    .await
+}
+
+struct VoiceMediaUpload {
+    channel_id: String,
+    path: String,
+    content_type: String,
+    width: u32,
+    height: u32,
+    voice_session: String,
+}
+
+/// `POST /api/channels/{id}/voice-status-media`: the file as `file` with
+/// its size (VoiceChannelMediaStatusModal.tsx `handleUpload`).
+async fn voice_media_upload(
+    api: &Api,
+    upload: VoiceMediaUpload,
+) -> Result<Value, crate::api::ApiError> {
+    let path = Path::new(&upload.path);
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "media".into());
+    check_size(path, crate::store::extras::MAX_VOICE_MEDIA_UPLOAD_BYTES).await?;
+    let bytes = tokio::fs::read(path)
+        .await
+        .map_err(|error| crate::api::ApiError::Network(error.to_string()))?;
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name(name)
+        .mime_str(&upload.content_type)
+        .map_err(|_| crate::api::ApiError::Decode("bad content type".into()))?;
+    let form = reqwest::multipart::Form::new()
+        .part("file", part)
+        .text("preview_width", upload.width.max(1).to_string())
+        .text("preview_height", upload.height.max(1).to_string());
+    let headers: Vec<(&'static str, String)> = if upload.voice_session.is_empty() {
+        Vec::new()
+    } else {
+        vec![("X-Voice-Session-Id", upload.voice_session)]
+    };
+    api.upload_with(
+        &format!("/api/channels/{}/voice-status-media", upload.channel_id),
+        form,
+        &headers,
     )
     .await
 }

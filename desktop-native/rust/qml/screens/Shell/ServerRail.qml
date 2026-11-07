@@ -172,6 +172,7 @@ Rectangle {
             width: list.width
             active: !Nav.home && icon.serverId === Nav.activeServerId
             onSelected: Nav.selectServer(icon.serverId)
+            onMenuRequested: (x, y) => serverMenu.load()?.openFor(icon.serverId, icon.unread, icon, x, y)
         }
 
         footer: Item {
@@ -282,6 +283,38 @@ Rectangle {
                 visible: keyHover.hovered
                 text: key.name
                 side: "right"
+            }
+        }
+    }
+
+    // A server's right-click menu (ServerList.tsx handleServerContextMenu):
+    // Mark as read (off without unread channels) and Copy ID. The web has
+    // no Leave server here yet ("returns once the API exists").
+    LazyPopup {
+        id: serverMenu
+        sourceComponent: MenuPanel {
+            id: menu
+            property string serverId
+            property bool unread: false
+            function openFor(id, isUnread, anchor, x, y) {
+                serverId = id
+                unread = isUnread
+                popup(anchor, x, y)
+            }
+            ClipboardText { id: clipboard }
+            MenuRow {
+                text: qsTr("Mark as read")
+                glyph: "check"
+                enabled: menu.unread
+                onTriggered: Chat.markServerRead(menu.serverId)
+            }
+            MenuRow {
+                text: qsTr("Copy ID")
+                glyph: "copy"
+                onTriggered: {
+                    clipboard.copyText(menu.serverId)
+                    Chat.notice(qsTr("Server ID copied"))
+                }
             }
         }
     }

@@ -207,6 +207,7 @@ Item {
                     }
                 }
             }
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
         }
 
         ScrollBar.vertical: ThinScrollBar {}

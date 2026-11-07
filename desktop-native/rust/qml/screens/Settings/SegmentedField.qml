@@ -88,6 +88,7 @@ Column {
                         color: cell.on ? Theme.primaryFillInk : Theme.ink2
                         font: Theme.type.control
                     }
+                    HoverHandler { cursorShape: Qt.PointingHandCursor }
                 }
             }
         }

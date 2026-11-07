@@ -581,3 +581,32 @@ fn a_toast_mark_read_should_clear_the_badge_count() {
     client.command(Command::ToastMarkRead(VOICE.into()));
     assert_eq!(client.badge.count, 0);
 }
+
+#[test]
+fn mark_server_read_should_read_its_channels_and_notifications() {
+    let mut client = Client::online();
+    client.message("m9", VOICE, ALICE, "hey @me");
+    client.notification("mention", VOICE, "m9");
+    let fx = client.command(Command::MarkServerRead(SERVER.into()));
+    let channel_read = fx.iter().any(|e| {
+        matches!(e, Effect::Http { request: ApiRequest::MarkRead { channel_id }, .. }
+            if channel_id == VOICE)
+    });
+    let notes_read = fx.iter().any(|e| {
+        matches!(e, Effect::Http { request: ApiRequest::MarkNotificationsRead { ids }, .. }
+            if ids == &["n_m9".to_owned()])
+    });
+    assert!(channel_read && notes_read, "{fx:#?}");
+    assert_eq!(client.badge.count, 0);
+}
+
+#[test]
+fn mark_server_read_should_leave_other_servers_alone() {
+    let mut client = Client::online();
+    client.notification("mention", VOICE, "m9");
+    let fx = client.command(Command::MarkServerRead(SERVER_TWO.into()));
+    assert!(
+        !fx.iter().any(|e| matches!(e, Effect::Http { .. })),
+        "{fx:#?}"
+    );
+}

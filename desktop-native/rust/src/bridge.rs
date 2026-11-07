@@ -289,6 +289,12 @@ pub mod qobject {
         #[cxx_name = "markRead"]
         fn mark_read(self: &Chat);
 
+        /// The rail menu's Mark as read: the server's channels and
+        /// notifications.
+        #[qinvokable]
+        #[cxx_name = "markServerRead"]
+        fn mark_server_read(self: &Chat, server_id: &QString);
+
         /// Filters `MentionListModel` by username; an empty query closes it.
         #[qinvokable]
         #[cxx_name = "queryMentions"]
@@ -909,6 +915,10 @@ impl qobject::Chat {
 
     pub fn mark_read(&self) {
         client::command(Command::MarkRead);
+    }
+
+    pub fn mark_server_read(&self, server_id: &QString) {
+        client::command(Command::MarkServerRead(server_id.to_string()));
     }
 
     pub fn query_mentions(&self, query: &QString, open: bool) {

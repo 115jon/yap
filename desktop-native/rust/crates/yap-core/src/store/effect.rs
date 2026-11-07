@@ -134,6 +134,21 @@ pub enum Effect {
         path: String,
         content_type: String,
     },
+    /// Upload a voice status picture as multipart `file` with
+    /// `preview_width` and `preview_height` to the channel's
+    /// `voice-status-media` route, naming our voice session (at most
+    /// 25 MB). Answered by `Input::Http` with
+    /// `ApiResponse::Extras(VoiceMediaAdded)`.
+    VoiceMediaUpload {
+        id: RequestId,
+        token: Token,
+        channel_id: String,
+        path: String,
+        content_type: String,
+        width: u32,
+        height: u32,
+        voice_session: String,
+    },
     /// Tell the local player (soundboard clips, the Listen Together
     /// stream). `token` fetches our own media.
     Audio {

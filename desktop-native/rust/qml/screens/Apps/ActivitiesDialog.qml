@@ -117,5 +117,6 @@ AppPopup {
                 font: Theme.type.caption
             }
         }
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
     }
 }

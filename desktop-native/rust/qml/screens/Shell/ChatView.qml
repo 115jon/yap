@@ -468,7 +468,12 @@ Rectangle {
                 picker.messageId = id
                 picker.openBeside(anchor, toRight)
             }
-            onImageOpened: (images, index) => viewer.load()?.show(images, index)
+            // The viewer's Jump to message, and for attachments (they carry
+            // `mime`) its author chip: ImageGrid passes the author, a link
+            // embed's picture has no chip on the web.
+            onImageOpened: (images, index) => viewer.load()?.show(images.map(i => Object.assign({
+                messageId: row.messageId,
+            }, i.mime !== undefined ? { author: row.author, avatar: row.avatar, initials: row.initials } : {}, i)), index)
             onDownloadRequested: item => root.saveFile(item)
             onVideoOpened: item => root.openVideo(item)
             onLinkOpened: url => root.openLink(url)
@@ -815,12 +820,23 @@ Rectangle {
                             Accessible.role: Accessible.Button
                             Accessible.name: qsTr("React with %1").arg(":" + modelData.s + ":")
                             Image {
+                                id: quickImage
                                 anchors.centerIn: parent
                                 width: 20
                                 height: 20
                                 sourceSize: Qt.size(40, 40)
                                 asynchronous: true
                                 source: quickChip.modelData.u
+                            }
+                            // The emoji itself while (or if) its picture
+                            // does not load, so the row is never blank.
+                            Text {
+                                anchors.centerIn: parent
+                                visible: quickImage.status !== Image.Ready
+                                textFormat: Text.PlainText
+                                text: quickChip.modelData.e
+                                font.family: "Segoe UI Emoji"
+                                font.pixelSize: 17
                             }
                             MouseArea {
                                 id: quickArea
@@ -837,18 +853,43 @@ Rectangle {
                     }
                 }
                 MenuRule { visible: messageMenu.settled; height: visible ? implicitHeight : 0 }
-                MenuRow {
-                    id: addReactionRow
-                    text: qsTr("Add reaction")
+                // Add reaction is a submenu (MessageReactionSubmenu.tsx): the
+                // five recent or fallback reactions, each its 16 px emoji and
+                // ":code:", then View more, which opens the picker.
+                MenuPanel {
+                    id: addReactionMenu
+                    title: qsTr("Add reaction")
                     glyph: "react"
-                    visible: messageMenu.settled
-                    height: visible ? implicitHeight : 0
-                    onTriggered: {
-                        const picker = reactionPicker.load()
-                        if (!picker)
-                            return
-                        picker.messageId = messageMenu.messageId
-                        picker.openBelow(addReactionRow)
+                    shown: messageMenu.settled
+                    Instantiator {
+                        model: messageMenu.settled ? JSON.parse(Emoji.quick).slice(0, 5) : []
+                        delegate: MenuRow {
+                            required property var modelData
+                            text: ":" + modelData.s + ":"
+                            image: modelData.u
+                            imageText: modelData.e
+                            onTriggered: {
+                                Chat.toggleReaction(messageMenu.messageId, modelData.e)
+                                Emoji.remember(modelData.e)
+                                messageMenu.close()
+                            }
+                        }
+                        onObjectAdded: (index, object) => addReactionMenu.insertItem(index, object)
+                        onObjectRemoved: (index, object) => addReactionMenu.removeItem(object)
+                    }
+                    MenuRule {}
+                    MenuRow {
+                        id: viewMoreRow
+                        text: qsTr("View more")
+                        glyph: "react"
+                        onTriggered: {
+                            const picker = reactionPicker.load()
+                            if (!picker)
+                                return
+                            picker.messageId = messageMenu.messageId
+                            // Under the row, as the web anchors it.
+                            picker.openBelow(viewMoreRow)
+                        }
                     }
                 }
                 MenuRule { visible: messageMenu.settled && !messageMenu.hasReactions; height: visible ? implicitHeight : 0 }

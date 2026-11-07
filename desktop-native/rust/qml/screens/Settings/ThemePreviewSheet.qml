@@ -141,6 +141,7 @@ T.Drawer {
                                 font: Theme.type.occupant
                             }
                         }
+                        HoverHandler { cursorShape: Qt.PointingHandCursor }
                     }
                 }
             }

@@ -135,7 +135,10 @@ Item {
                     source: root.banner
                     fillMode: AnimatedPicture.PreserveAspectCrop
                     clip: true
-                    visible: status === AnimatedPicture.Ready
+                    // Opacity, not visible: AnimatedPicture loads only while
+                    // visible, so `visible: status === Ready` never loaded it
+                    // (the banner stayed on its still).
+                    opacity: status === AnimatedPicture.Ready ? 1 : 0
                     playing: root.animate && root.visible && !Theme.reducedMotion
                     Accessible.ignored: true
                 }

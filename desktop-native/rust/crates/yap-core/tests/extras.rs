@@ -598,3 +598,90 @@ fn a_status_save_should_collapse_its_text_and_keep_no_picture() {
         json!({ "voice_status": { "text": "coding now", "media": null } })
     );
 }
+
+#[test]
+fn an_uploaded_picture_should_lead_the_recents_and_become_the_status() {
+    let mut client = Client::online();
+    let fx = client.command(ExtrasCommand::UploadVoiceMedia {
+        channel_id: "chan_voice".into(),
+        path: "C:/pictures/cat.gif".into(),
+        content_type: "image/gif".into(),
+        width: 320,
+        height: 240,
+    });
+    let id = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::VoiceMediaUpload {
+                id,
+                channel_id,
+                width,
+                height,
+                content_type,
+                ..
+            } => {
+                assert_eq!(channel_id, "chan_voice");
+                assert_eq!((*width, *height), (320, 240));
+                assert_eq!(content_type, "image/gif");
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("an upload");
+    assert!(view(&fx).expect("view").voice_status.uploading);
+
+    let media = json!({
+        "id": "vsm_1", "provider": "upload", "media_type": "gifs", "title": "cat.gif",
+        "preview_url": "/api/voice-status-media/s/vsm_1/cat.gif",
+        "preview_width": 320, "preview_height": 240, "preview_content_type": "image/gif",
+    });
+    let asset = serde_json::from_value(json!({ "id": "vsm_1", "media": media })).expect("asset");
+    let fx = client.answer(
+        id,
+        Ok(ApiResponse::Extras(
+            yap_core::store::extras::ExtrasResponse::VoiceMediaAdded(asset),
+        )),
+    );
+    let (_, request) = extras_request(&fx);
+    assert_eq!(
+        request.body(),
+        json!({ "voice_status": { "text": null, "media": media } })
+    );
+    let status = view(&fx).expect("view").voice_status;
+    assert!(!status.uploading && status.saving);
+    let row = &status.recents[0];
+    assert_eq!((row.width, row.height, row.video), (320.0, 240.0, false));
+    assert_eq!(
+        row.url,
+        format!("{BASE}/api/voice-status-media/s/vsm_1/cat.gif")
+    );
+}
+
+#[test]
+fn a_refused_upload_should_say_so() {
+    let mut client = Client::online();
+    let fx = client.command(ExtrasCommand::UploadVoiceMedia {
+        channel_id: "chan_voice".into(),
+        path: "C:/pictures/cat.gif".into(),
+        content_type: "image/gif".into(),
+        width: 1,
+        height: 1,
+    });
+    let id = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::VoiceMediaUpload { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("an upload");
+    let fx = client.answer(
+        id,
+        Err(http_error(
+            415,
+            "Only GIF, PNG, JPG, WEBP, MP4, and WEBM files are supported.",
+        )),
+    );
+    let status = view(&fx).expect("view").voice_status;
+    assert!(!status.uploading);
+    assert!(!status.error.is_empty());
+}

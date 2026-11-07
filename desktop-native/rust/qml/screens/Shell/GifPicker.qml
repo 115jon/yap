@@ -9,7 +9,10 @@ import com.yap.native
 // masonry (round-robin, 2 px gaps, 6 px tiles on tint-1) that pages in
 // within 320 px of its end; "Powered by KLIPY" sits at the foot. A tile
 // sends at once. Clips are videos, which this build does not play, so
-// the tabs are GIFs, Stickers and Memes.
+// the tabs are GIFs, Stickers and Memes. `expanded` is the voice
+// channel vibe's picker (`initialExpanded lockExpanded`): a centred modal
+// workbench, min(900, window - 32) by min(780, window - chrome - 48), over
+// the stacked scrim, with 4 columns at 1024 px (3 at 768).
 Popup {
     id: root
 
@@ -18,9 +21,44 @@ Popup {
     readonly property var labels: ({ gifs: qsTr("GIFs"), stickers: qsTr("stickers"), memes: qsTr("memes") })
     readonly property string label: labels[mediaType] ?? qsTr("GIFs")
     readonly property real gap: 2
-    readonly property real colW: (flick.width - gap) / 2
+    property bool expanded: false
+    // useColumnsCount: the expanded grid widens with the window.
+    readonly property int columns: !expanded || !parent ? 2 : parent.width >= 1024 ? 4 : parent.width >= 768 ? 3 : 2
+    readonly property real colW: (flick.width - gap * (columns - 1)) / columns
     readonly property real col0: Chat.gifUnits0 / 1000 * colW + Math.max(0, Chat.gifCount0 - 1) * gap
     readonly property real col1: Chat.gifUnits1 / 1000 * colW + Math.max(0, Chat.gifCount1 - 1) * gap
+    // The expanded grid's round-robin over `columns` (the model places
+    // tiles for two): each tile's height above it in its column, and each
+    // column's height and count, in thousandths of the column width.
+    property var tops: []
+    property var colUnits: []
+    property var colCounts: []
+    readonly property real contentBottom: {
+        if (!expanded)
+            return Math.max(col0, col1)
+        let bottom = 0
+        for (let c = 0; c < colUnits.length; ++c)
+            bottom = Math.max(bottom, colUnits[c] / 1000 * colW + Math.max(0, colCounts[c] - 1) * gap)
+        return bottom
+    }
+    function relayout() {
+        if (!expanded)
+            return
+        const units = new Array(columns).fill(0)
+        const counts = new Array(columns).fill(0)
+        const next = []
+        for (let i = 0; i < tiles.count; ++i) {
+            const tile = tiles.itemAt(i)
+            const c = i % columns
+            next.push(units[c])
+            units[c] += tile ? Number(tile["aspect"]) : 1000
+            counts[c] += 1
+        }
+        tops = next
+        colUnits = units
+        colCounts = counts
+    }
+    onColumnsChanged: relayout()
 
     // A pick (the voice status picture) instead of a send.
     property bool picking: false
@@ -54,17 +92,29 @@ Popup {
         height = h
         open()
     }
+    // The expanded workbench, centred under the window chrome.
+    function openCentred() {
+        const win = Overlay.overlay
+        height = Math.max(100, Math.min(780, win.height - Theme.chrome - 48))
+        x = Math.round((win.width - width) / 2)
+        y = Math.round((win.height - height) / 2 + Theme.chrome / 2)
+        open()
+    }
     function query() {
         Chat.searchGifs(search.text, root.mediaType)
         flick.contentY = 0
     }
 
     parent: Overlay.overlay
-    width: Math.min(420, (parent ? parent.width : 420) - 24)
+    width: expanded ? Math.min(900, (parent ? parent.width : 900) - 32)
+        : Math.min(420, (parent ? parent.width : 420) - 24)
     padding: 0
     focus: true
+    modal: expanded
+    Overlay.modal: Scrim { color: Theme.scrimStacked }
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     onOpened: {
+        relayout()
         search.forceActiveFocus()
         query()
     }
@@ -273,7 +323,7 @@ Popup {
             height: parent.height - header.height - footer.height
             clip: true
             contentWidth: width
-            contentHeight: Math.max(root.col0, root.col1) + 4
+            contentHeight: root.contentBottom + 4
             boundsBehavior: Flickable.StopAtBounds
             // Page in near the end, or while the first pages do not fill it.
             function maybeMore() {
@@ -285,9 +335,13 @@ Popup {
             ScrollBar.vertical: ThinScrollBar {}
 
             Repeater {
+                id: tiles
                 model: GifListModel
+                onItemAdded: Qt.callLater(root.relayout)
+                onItemRemoved: Qt.callLater(root.relayout)
                 Rectangle {
                     id: tile
+                    required property int index
                     required property string gifId
                     required property string title
                     required property string preview
@@ -295,10 +349,12 @@ Popup {
                     required property int column
                     required property int above
                     required property int offset
+                    onAspectChanged: if (root.expanded) Qt.callLater(root.relayout)
                     // Only tiles near the viewport load (and animate).
                     readonly property bool near: y + height > flick.contentY - 200 && y < flick.contentY + flick.height + 200
-                    x: column * (root.colW + root.gap)
-                    y: offset / 1000 * root.colW + above * root.gap
+                    x: (root.expanded ? index % root.columns : column) * (root.colW + root.gap)
+                    y: root.expanded ? (root.tops[index] ?? 0) / 1000 * root.colW + Math.floor(index / root.columns) * root.gap
+                        : offset / 1000 * root.colW + above * root.gap
                     width: root.colW
                     height: aspect / 1000 * root.colW
                     radius: 6

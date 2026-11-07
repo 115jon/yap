@@ -53,6 +53,10 @@ pub enum Command {
     /// A toast's Mark as read (`notification-mark-read`): the channel and
     /// its unread notifications are read, open or not.
     ToastMarkRead(String),
+    /// The server rail menu's Mark as read (ServerList.tsx, ChatPageClient
+    /// `onMarkServerRead`): every channel of the server with messages after
+    /// its read mark is read, and the server's unread notifications too.
+    MarkServerRead(String),
     /// The chosen status (`online`, `idle`, `dnd`, `offline` = invisible)
     /// and custom status (`None` clears it).
     SetStatus {

@@ -191,6 +191,7 @@ Column {
                 border.color: Theme.focus
             }
         }
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
     }
 
     // One link: who, what, its LED status with the dates and views, and

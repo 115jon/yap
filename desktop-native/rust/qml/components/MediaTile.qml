@@ -22,8 +22,19 @@ Rectangle {
 
     // media-safety.ts: sensitive pictures blur under the high filter only.
     readonly property bool hidden: item.nsfw && ShellState.mediaFilter === "high" && !ShellState.isRevealed(item.id)
-    readonly property bool animated: item.gif && !hidden
+    // A WebP may be animated too (the web's <img> plays it either way).
+    readonly property bool webp: item.mime === "image/webp" || /\.webp($|[?#])/i.test(item.url)
+    readonly property bool animated: (item.gif || webp) && !hidden
+    // A WebP plays through AnimatedPicture (yap-anim): Qt's WebP reader
+    // (AnimatedImage) stops after one pass even when the file loops forever,
+    // so an X GIF pinned in #general froze on its last frame. GIFs stay on
+    // AnimatedImage.
+    readonly property bool viaPicture: animated && webp
     readonly property Item picture: animated ? gifLoader.item : still
+    readonly property bool pictureReady: picture !== null
+        && picture.status === (viaPicture ? AnimatedPicture.Ready : Image.Ready)
+    readonly property bool pictureBroken: picture !== null
+        && picture.status === (viaPicture ? AnimatedPicture.Error : Image.Error)
 
     radius: Theme.radius
     color: Theme.tint1
@@ -42,7 +53,10 @@ Rectangle {
 
     Image {
         id: still
-        visible: !root.animated
+        // A fitted WebP keeps its still under the player until it plays:
+        // only a decode at its own size tells the real size (the player
+        // decodes at the box's).
+        visible: !root.animated || (root.viaPicture && !root.pictureReady)
         anchors.fill: parent
         anchors.margins: 1
         asynchronous: true
@@ -50,7 +64,7 @@ Rectangle {
         smooth: true
         mipmap: !root.hidden
         fillMode: root.fill || root.hidden ? Image.PreserveAspectCrop : Image.PreserveAspectFit
-        source: root.animated ? "" : root.item.url
+        source: root.animated && !(root.viaPicture && !root.fill) ? "" : root.item.url
         // A sensitive picture decodes at 16 px: scaled up, that is the blur.
         // A fitted one decodes at its own size (a cap would scale small
         // pictures up, and the learnt size must be the real one).
@@ -64,7 +78,21 @@ Rectangle {
         active: root.animated
         anchors.fill: parent
         anchors.margins: 1
-        sourceComponent: AnimatedImage {
+        sourceComponent: root.viaPicture ? webpPlayer : gifPlayer
+    }
+    Component {
+        id: webpPlayer
+        AnimatedPicture {
+            fillMode: root.fill ? AnimatedPicture.PreserveAspectCrop : AnimatedPicture.PreserveAspectFit
+            source: root.item.url
+            // AnimatedPicture itself holds while off screen or the app is
+            // not in front.
+            playing: root.visible
+        }
+    }
+    Component {
+        id: gifPlayer
+        AnimatedImage {
             id: anim
             asynchronous: true
             // Frames decode as they show (as a browser does): cached, every
@@ -90,8 +118,9 @@ Rectangle {
     // Loading or broken: a glyph on the tint.
     Icon {
         anchors.centerIn: parent
-        visible: !root.hidden && root.picture !== null && root.picture.status !== Image.Ready
-        name: root.picture !== null && root.picture.status === Image.Error ? "imageBroken" : "image"
+        visible: !root.hidden && root.picture !== null && !root.pictureReady
+            && !(root.viaPicture && still.status === Image.Ready)
+        name: root.pictureBroken ? "imageBroken" : "image"
         size: Theme.iconXl
         color: Theme.ink3
     }
@@ -130,13 +159,20 @@ Rectangle {
         hidden: root.hidden
     }
 
+    // Hover tint and the hand; the click is a TapHandler. In the pins panel
+    // this MouseArea saw the press and the release but never emitted
+    // `clicked`, so a pinned picture never opened the viewer.
     MouseArea {
         id: hover
         anchors.fill: parent
         enabled: !root.hidden
         hoverEnabled: true
+        acceptedButtons: Qt.NoButton
         cursorShape: Qt.PointingHandCursor
-        onClicked: root.activated()
+    }
+    TapHandler {
+        enabled: !root.hidden
+        onTapped: root.activated()
     }
 
     // ImageGrid.tsx: a GIF's star at the top-left and, for KLIPY's GIFs,

@@ -44,7 +44,7 @@ Item {
                     anchors.centerIn: parent
                     width: parent.width * 1.2
                     height: width
-                    visible: !motionPicture.visible
+                    visible: motionPicture.opacity === 0
                     source: root.still
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
@@ -57,7 +57,9 @@ Item {
                     height: width
                     // Only the hovered tile loads its APNG.
                     source: root.animate && root.motion.length > 0 ? root.motion : ""
-                    visible: root.animate && status === AnimatedPicture.Ready
+                    // Opacity, not visible: AnimatedPicture only loads while
+                    // visible, so hiding it until Ready never loads it.
+                    opacity: root.animate && status === AnimatedPicture.Ready ? 1 : 0
                     playing: root.animate && !Theme.reducedMotion
                 }
             }

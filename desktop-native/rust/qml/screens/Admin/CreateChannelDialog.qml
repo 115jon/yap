@@ -232,5 +232,6 @@ PlateDialog {
         rightPadding: 12
         topPadding: 12
         bottomPadding: 12
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
     }
 }

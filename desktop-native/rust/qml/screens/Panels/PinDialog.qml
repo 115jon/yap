@@ -173,5 +173,6 @@ Popup {
                 border.color: Theme.focus
             }
         }
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
     }
 }

@@ -113,6 +113,8 @@ pub fn media_needs_auth(api_base: &str, url: &str) -> bool {
         rest.starts_with("/api/attachments/")
             || rest.starts_with("/api/emojis/assets/")
             || rest.starts_with("/api/camera-backgrounds/")
+            // Uploaded voice status pictures (getAuthAssetUrl adds the token).
+            || rest.starts_with("/api/voice-status-media/")
     })
 }
 
@@ -280,6 +282,23 @@ impl Api {
         self.send(builder).await
     }
 
+    /// [`Api::upload`] with extra headers (the voice session a voice
+    /// channel's routes check).
+    pub async fn upload_with(
+        &self,
+        path: &str,
+        form: reqwest::multipart::Form,
+        headers: &[(&'static str, String)],
+    ) -> Result<Value, ApiError> {
+        let builder = headers.iter().fold(
+            self.request(Method::POST, path)
+                .multipart(form)
+                .timeout(UPLOAD_TIMEOUT),
+            |b, (name, value)| b.header(*name, value),
+        );
+        self.send(builder).await
+    }
+
     /// Streams `url` into the file `dest` (its folder is created), at most
     /// `cap` bytes; a longer body is refused, and no partial file is left
     /// behind on any failure. The session goes along only when `url` is the
@@ -352,6 +371,7 @@ mod tests {
             "/api/attachments/c/a/x.png",
             "/api/emojis/assets/e.png",
             "/api/camera-backgrounds/id/beach.png",
+            "/api/voice-status-media/s/a/clip.gif",
         ] {
             assert!(media_needs_auth(BASE, &format!("{BASE}{path}")), "{path}");
         }

@@ -8,6 +8,11 @@ import com.yap.native
 T.Menu {
     id: control
 
+    // As a submenu: the glyph its row in the parent menu shows, and whether
+    // that row shows at all.
+    property string glyph: ""
+    property bool shown: true
+
     implicitWidth: Math.min(280, Math.max(200, contentItem.implicitWidth + leftPadding + rightPadding))
     implicitHeight: contentItem.implicitHeight + topPadding + bottomPadding
     padding: 4

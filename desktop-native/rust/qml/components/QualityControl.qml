@@ -148,5 +148,6 @@ Column {
             border.color: Theme.focus
             Behavior on color { ColorAnimation { duration: Theme.dur1 } }
         }
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
     }
 }

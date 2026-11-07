@@ -268,6 +268,7 @@ T.Popup {
                                     font: navRow.current ? Theme.type.rowUnread : Theme.type.row
                                 }
                             }
+                            HoverHandler { cursorShape: Qt.PointingHandCursor }
                         }
                     }
                 }
@@ -317,6 +318,8 @@ T.Popup {
                     anchors.verticalCenter: parent.verticalCenter
                     iconName: "close"
                     tone: "toggled"
+                    // The Bold X on tint-2, as the web's close (not the Fill X).
+                    iconVariant: "idle"
                     tip: qsTr("Close %1").arg(bench.title.toLowerCase())
                     tipSide: "bottom"
                     onClicked: bench.requestClose()

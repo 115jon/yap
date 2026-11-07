@@ -171,5 +171,6 @@ Flow {
                 border.color: Theme.accentInk
             }
         }
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
     }
 }
