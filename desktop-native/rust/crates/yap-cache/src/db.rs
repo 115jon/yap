@@ -15,7 +15,7 @@ use crate::{
 
 /// Bumped whenever the tables or the JSON in them change shape. Any other
 /// version on disk is dropped and recreated.
-pub const SCHEMA_VERSION: i32 = 2;
+pub const SCHEMA_VERSION: i32 = 3;
 
 const SCHEMA: &str = "
 CREATE TABLE users (
@@ -46,6 +46,12 @@ CREATE TABLE messages (
     written_at INTEGER NOT NULL,
     PRIMARY KEY (user_id, channel_id, position)
 ) WITHOUT ROWID;
+CREATE TABLE scroll_positions (
+    user_id    TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    PRIMARY KEY (user_id, channel_id)
+) WITHOUT ROWID;
 ";
 
 /// Coalesced writes: per user, the newest value per key, plus whether the
@@ -65,6 +71,7 @@ struct UserBatch {
     voice: Option<VoicePrefs>,
     channels: HashMap<String, ChannelsResponse>,
     messages: HashMap<String, Vec<Message>>,
+    scroll: HashMap<String, String>,
 }
 
 impl UserBatch {
@@ -75,6 +82,7 @@ impl UserBatch {
             || self.voice.is_some()
             || !self.channels.is_empty()
             || !self.messages.is_empty()
+            || !self.scroll.is_empty()
     }
 }
 
@@ -103,6 +111,12 @@ impl Batch {
                 user.messages.insert(channel_id, messages);
             }
             Write::Voice(prefs) => user.voice = Some(prefs),
+            Write::Scroll {
+                channel_id,
+                message_id,
+            } => {
+                user.scroll.insert(channel_id, message_id);
+            }
         }
     }
 
@@ -279,6 +293,15 @@ impl Cache {
             )?,
             None => Vec::new(),
         };
+        let scroll_positions = {
+            let mut query = self.conn.prepare(
+                "SELECT channel_id, message_id FROM scroll_positions WHERE user_id = ?1",
+            )?;
+            let rows = query.query_map([user_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
         Ok(Some(Snapshot {
             me,
             servers,
@@ -288,6 +311,7 @@ impl Cache {
             messages,
             written_at_ms,
             voice: voice.as_deref().and_then(decode),
+            scroll_positions,
         }))
     }
 
@@ -337,7 +361,13 @@ impl Cache {
 }
 
 fn delete_user(tx: &Transaction<'_>, user_id: &str) -> Result<(), CacheError> {
-    for table in ["users", "servers", "channel_trees", "messages"] {
+    for table in [
+        "users",
+        "servers",
+        "channel_trees",
+        "messages",
+        "scroll_positions",
+    ] {
         tx.execute(
             &format!("DELETE FROM {table} WHERE user_id = ?1"),
             [user_id],
@@ -382,6 +412,13 @@ fn write_user(
         for (position, server) in (0_i64..).zip(servers) {
             insert.execute(params![user_id, position, encode(server)?])?;
         }
+    }
+    for (channel_id, message_id) in &user.scroll {
+        tx.execute(
+            "INSERT OR REPLACE INTO scroll_positions (user_id, channel_id, message_id)
+             VALUES (?1, ?2, ?3)",
+            params![user_id, channel_id, message_id],
+        )?;
     }
     for (server_id, tree) in &user.channels {
         tx.execute(

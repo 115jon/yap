@@ -485,6 +485,7 @@ fn set_panel(mut nav: Pin<&mut Nav>, panel: &VoicePanelView) {
     nav.as_mut().set_voice_panel_name(q(&panel.name));
     nav.as_mut()
         .set_voice_panel_count(i32::try_from(panel.count).unwrap_or(i32::MAX));
+    nav.as_mut().set_voice_panel_chat(panel.chat);
     nav.set_voice_panel_id(q(&panel.id));
 }
 
@@ -658,6 +659,8 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::PinnedMessages(diff) => models::apply::<m::PinnedMessageModel>(*diff),
         ViewUpdate::Panels(view) => crate::panels::on_view(*view),
         ViewUpdate::JumpTo(id) => with::<Chat>(|chat| chat.jumped(q(&id))),
+        ViewUpdate::ScrollRestore(id) => with::<Chat>(|chat| chat.set_restore_id(q(&id))),
+        ViewUpdate::MentionNames(names) => with::<Chat>(|chat| chat.set_mention_names(q(&names))),
         ViewUpdate::Newer { loading, more } => {
             with::<Chat>(|mut chat| {
                 chat.as_mut().set_has_newer(more);

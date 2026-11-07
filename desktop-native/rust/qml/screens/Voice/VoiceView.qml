@@ -152,16 +152,22 @@ Rectangle {
                 }
             }
         }
+        // The channel's text chat beside the view (VoiceLanding.tsx "Show
+        // chat", no tooltip; VoiceHeader.tsx the "Chat" tooltip), hidden
+        // while it is open.
         IconKey {
             id: chatKey
+            visible: !Nav.voicePanelChat
             anchors.right: parent.right
             anchors.rightMargin: 16
             anchors.verticalCenter: parent.verticalCenter
             size: 32
             tone: "muted"
             iconName: "chat"
-            tip: qsTr("Show chat")
+            tip: root.joined ? qsTr("Chat") : ""
             tipSide: "bottom"
+            Accessible.name: root.joined ? qsTr("Chat") : qsTr("Show chat")
+            onClicked: Nav.showVoiceChat(true)
         }
         Rectangle {
             anchors.bottom: parent.bottom

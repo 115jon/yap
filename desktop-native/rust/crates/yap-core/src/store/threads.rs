@@ -273,6 +273,8 @@ pub(super) enum PanelOp {
     Around {
         channel_id: String,
         message_id: String,
+        /// Reopening where the channel was left: no highlight.
+        restore: bool,
     },
     Newer {
         channel_id: String,

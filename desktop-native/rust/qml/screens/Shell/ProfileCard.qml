@@ -28,6 +28,9 @@ Item {
     property string name
     property string username
     property string avatar
+    // The avatar display's crop (`{x, y, width, height}` in percent), or
+    // null (Avatar.qml).
+    property var crop: null
     property string initials
     property string pronouns
     property string presence
@@ -193,15 +196,24 @@ Item {
                         font.pixelSize: 24
                         font.weight: Font.ExtraBold
                     }
-                    Image {
-                        id: picture
+                    Item {
+                        id: face
                         anchors.fill: parent
-                        source: root.avatar
-                        visible: status === Image.Ready && root.deco.length === 0
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                        sourceSize.width: root.avatarSize * 2
-                        sourceSize.height: root.avatarSize * 2
+                        visible: picture.status === Image.Ready && root.deco.length === 0
+                        clip: true
+                        Image {
+                            id: picture
+                            readonly property var c: root.crop && root.crop.width > 0 && root.crop.height > 0 ? root.crop : null
+                            x: c ? -c.x / c.width * face.width : 0
+                            y: c ? -c.y / c.height * face.height : 0
+                            width: c ? face.width * 100 / c.width : face.width
+                            height: c ? face.height * 100 / c.height : face.height
+                            source: root.avatar
+                            fillMode: c ? Image.Stretch : Image.PreserveAspectCrop
+                            asynchronous: true
+                            sourceSize.width: Math.min(2048, Math.ceil(width * 2))
+                            sourceSize.height: Math.min(2048, Math.ceil(height * 2))
+                        }
                     }
                     // Decorated: the face crops round under the ring art.
                     Loader {
@@ -217,7 +229,7 @@ Item {
                             }
                             MultiEffect {
                                 anchors.fill: parent
-                                source: picture
+                                source: face
                                 maskEnabled: true
                                 maskSource: roundMask
                             }

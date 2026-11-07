@@ -12,13 +12,18 @@ RowLayout {
     id: root
 
     readonly property bool chatShown: Nav.voicePanelId.length === 0 && Nav.activeChannelId.length > 0
+    // A voice channel's text chat beside its view (ChatPageClient.tsx, the
+    // "Voice chat" SidePanel): a 360 column with a seam on its left.
+    readonly property bool voiceChat: Nav.voicePanelId.length > 0 && Nav.voicePanelChat
+        && Nav.activeChannelId === Nav.voicePanelId
     readonly property bool docked: width >= 1024
-    // Search, a thread or pins take the members' place (ChatArea.tsx).
-    readonly property bool panelShown: ShellState.sidePanel.length > 0 && chatShown
+    // Search, a thread or pins take the members' place (ChatArea.tsx). In
+    // the voice chat's column they open as the sheet.
+    readonly property bool panelShown: ShellState.sidePanel.length > 0 && (chatShown || voiceChat)
     readonly property bool searchShown: ShellState.sidePanel === "search"
     readonly property bool membersShown: (ShellState.showMembers || ShellState.showDetails) && chatShown && !panelShown
     readonly property bool sheetWanted: membersShown && !docked
-    readonly property bool panelSheetWanted: panelShown && !docked
+    readonly property bool panelSheetWanted: panelShown && (!docked || voiceChat)
 
     // Closing the sheet for a layout change (the chat went away, the window
     // widened) keeps the preference; only a dismissal turns it off.
@@ -120,9 +125,21 @@ RowLayout {
         Layout.fillWidth: true
 
         ChatView {
-            anchors.fill: parent
-            headerSpan: root.docked ? (root.membersShown ? (ShellState.showDetails ? 360 : 240) : root.panelShown ? (root.searchShown ? 380 : 360) : 0) : 0
-            visible: Nav.voicePanelId.length === 0 && (!Nav.home || Nav.activeChannelId.length > 0)
+            // Beside the voice view: 360 with its seam (border-l) included.
+            x: root.voiceChat ? parent.width - width : 0
+            z: root.voiceChat ? 1 : 0
+            width: root.voiceChat ? Math.min(359, parent.width) : parent.width
+            height: parent.height
+            docked: root.voiceChat
+            headerSpan: root.voiceChat ? 0 : root.docked ? (root.membersShown ? (ShellState.showDetails ? 360 : 240) : root.panelShown ? (root.searchShown ? 380 : 360) : 0) : 0
+            visible: root.voiceChat || (Nav.voicePanelId.length === 0 && (!Nav.home || Nav.activeChannelId.length > 0))
+            Rectangle {
+                visible: root.voiceChat
+                x: -1
+                width: 1
+                height: parent.height
+                color: Theme.line
+            }
         }
         // Home with no conversation open: Friends (it loads as it opens),
         // or the shop from the sidebar's Shop row.
@@ -139,8 +156,11 @@ RowLayout {
             id: shopView
             ShopView {}
         }
+        // Below 1024 the voice chat covers the view's right side (the web's
+        // sheet); docked, the view gives it the column.
         Loader {
-            anchors.fill: parent
+            width: parent.width - (root.voiceChat && root.docked ? 360 : 0)
+            height: parent.height
             active: Nav.voicePanelId.length > 0
             sourceComponent: VoiceView {}
         }
@@ -209,7 +229,7 @@ RowLayout {
     // Docked side panel: a 360 px ply-1 column with a seam on its left,
     // under the chat header.
     Rectangle {
-        visible: root.panelShown && root.docked
+        visible: root.panelShown && root.docked && !root.voiceChat
         Layout.fillHeight: true
         // Search is its own 380 px ply-0 column (SearchPanel.tsx).
         Layout.preferredWidth: root.searchShown ? 380 : 360
@@ -224,7 +244,7 @@ RowLayout {
             anchors.fill: parent
             anchors.topMargin: Theme.header
             anchors.leftMargin: 1
-            active: root.panelShown && root.docked
+            active: root.panelShown && root.docked && !root.voiceChat
             sourceComponent: root.sidePanelComponent
         }
     }

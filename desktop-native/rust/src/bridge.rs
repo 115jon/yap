@@ -101,6 +101,8 @@ pub mod qobject {
         #[qproperty(QString, voice_panel_id, cxx_name = "voicePanelId")]
         #[qproperty(QString, voice_panel_name, cxx_name = "voicePanelName")]
         #[qproperty(i32, voice_panel_count, cxx_name = "voicePanelCount")]
+        /// Its text chat is open beside it (it is then the active channel).
+        #[qproperty(bool, voice_panel_chat, cxx_name = "voicePanelChat")]
         /// Home (the DM list) instead of a server.
         #[qproperty(bool, home)]
         /// The open DM's recipient; empty in a server channel.
@@ -130,6 +132,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "openDm"]
         fn open_dm(self: &Nav, user_id: &QString);
+
+        /// The open voice channel's text chat beside its view, or not.
+        #[qinvokable]
+        #[cxx_name = "showVoiceChat"]
+        fn show_voice_chat(self: &Nav, show: bool);
     }
 
     impl cxx_qt::Initialize for Nav {}
@@ -143,11 +150,17 @@ pub mod qobject {
         // The composer's hovered `@name`: `{name, avatar, deco}` JSON of
         // the member it names, or empty (`hoverMention`).
         #[qproperty(QString, hovered_mention, cxx_name = "hoveredMention")]
+        // The `@` candidates' lowercased usernames (JSON array): a mention
+        // of one edits as a unit in the composer.
+        #[qproperty(QString, mention_names, cxx_name = "mentionNames")]
         // Today's local day number, to compare with a row's `day`.
         #[qproperty(i32, today)]
         // The "New" divider: the message it sits above (empty: none), the
         // banner, its count and when the first unread message was sent.
         #[qproperty(QString, divider_id, cxx_name = "dividerId")]
+        // Where the next landing goes (the channel reopens where it was
+        // left): this message at the top, or empty for the divider or end.
+        #[qproperty(QString, restore_id, cxx_name = "restoreId")]
         #[qproperty(bool, unread_banner, cxx_name = "unreadBanner")]
         #[qproperty(i32, unread_count, cxx_name = "unreadCount")]
         #[qproperty(QString, unread_since_time, cxx_name = "unreadSinceTime")]
@@ -337,6 +350,18 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "setSeenFrom"]
         fn set_seen_from(self: &Chat, message_id: &QString);
+
+        /// The composer's pictures (InputMentionOverlay.tsx): a JSON array
+        /// of `[start, end, url]`, UTF-16 offsets into `text`.
+        #[qinvokable]
+        #[cxx_name = "composerEmoji"]
+        fn composer_emoji(self: &Chat, text: &QString) -> QString;
+
+        /// The top-most message on screen while scrolled up (the channel
+        /// reopens there).
+        #[qinvokable]
+        #[cxx_name = "scrollAt"]
+        fn scroll_at(self: &Chat, message_id: &QString);
 
         #[qinvokable]
         #[cxx_name = "setFocused"]
@@ -662,6 +687,7 @@ pub struct NavRust {
     voice_panel_id: QString,
     voice_panel_name: QString,
     voice_panel_count: i32,
+    voice_panel_chat: bool,
     home: bool,
     dm_user_id: QString,
     dm_username: QString,
@@ -674,8 +700,10 @@ pub struct NavRust {
 pub struct ChatRust {
     typing_text: QString,
     hovered_mention: QString,
+    mention_names: QString,
     today: i32,
     divider_id: QString,
+    restore_id: QString,
     unread_banner: bool,
     unread_count: i32,
     unread_since_time: QString,
@@ -808,6 +836,10 @@ impl qobject::Nav {
 
     pub fn open_dm(&self, user_id: &QString) {
         client::command(Command::OpenDm(user_id.to_string()));
+    }
+
+    pub fn show_voice_chat(&self, show: bool) {
+        client::command(Command::ShowVoiceChat(show));
     }
 }
 
@@ -1045,6 +1077,20 @@ impl qobject::Chat {
 
     pub fn set_seen_from(&self, message_id: &QString) {
         client::command(Command::SeenFrom(message_id.to_string()));
+    }
+
+    pub fn composer_emoji(&self, text: &QString) -> QString {
+        let text = text.to_string();
+        let spans: Vec<(usize, usize, String)> =
+            yap_core::emoji::composer_emoji(&text, &yap_core::config::get().api_base)
+                .into_iter()
+                .map(|s| (s.start, s.end, s.url))
+                .collect();
+        QString::from(serde_json::to_string(&spans).unwrap_or_default().as_str())
+    }
+
+    pub fn scroll_at(&self, message_id: &QString) {
+        client::command(Command::ScrollAt(message_id.to_string()));
     }
 
     pub fn set_focused(&self, focused: bool) {

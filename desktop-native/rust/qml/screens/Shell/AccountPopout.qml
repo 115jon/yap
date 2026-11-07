@@ -87,16 +87,21 @@ T.Popup {
         Accessible.role: Accessible.Dialog
         Accessible.name: qsTr("User account options")
 
-        // The menu rows reach the card's inset edges (-mx-2 -mb-2).
+        // The menu rows reach the card's inset edges (-mx-2 -mb-2). Both
+        // views share one grid cell on the web, so the card keeps the
+        // taller one's height and does not jump as they swap.
         Item {
             x: -8
             width: parent.width + 16
-            height: (popup.statusView ? statusRows.implicitHeight : mainRows.implicitHeight) - 8
+            height: Math.max(statusRows.implicitHeight, mainRows.implicitHeight) - 8
 
             Column {
                 id: mainRows
                 width: parent.width
-                visible: !popup.statusView
+                // Hidden by opacity: a hidden positioner reports no height.
+                opacity: popup.statusView ? 0 : 1
+                enabled: !popup.statusView
+                Accessible.ignored: popup.statusView
                 AccountRowKey {
                     glyph: "edit"
                     text: qsTr("Edit profile")
@@ -137,7 +142,9 @@ T.Popup {
             Column {
                 id: statusRows
                 width: parent.width
-                visible: popup.statusView
+                opacity: popup.statusView ? 1 : 0
+                enabled: popup.statusView
+                Accessible.ignored: !popup.statusView
                 AccountRowKey {
                     glyph: "chevronLeft"
                     text: qsTr("Status")

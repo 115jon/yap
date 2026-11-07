@@ -948,6 +948,133 @@ pub fn validate_display_name(value: &str) -> Result<String, &'static str> {
     Ok(trimmed.to_owned())
 }
 
+/// An avatar crop (avatar-display.ts `AvatarCropRect`): the square the
+/// avatar shows, in hundredths of a percent of the picture (the web rounds
+/// to two places).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AvatarCrop {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl AvatarCrop {
+    /// A crop from percents, refused as `normalizeAvatarDisplay` refuses
+    /// one: each side 1 to 100, and inside the picture.
+    pub fn from_percent(x: f64, y: f64, width: f64, height: f64) -> Option<Self> {
+        let finite = [x, y, width, height].iter().all(|v| v.is_finite());
+        let sides = (1.0..=100.0).contains(&width) && (1.0..=100.0).contains(&height);
+        // A hair of float slack: the editor clamps to 100 minus the side.
+        let inside = x >= 0.0 && y >= 0.0 && x + width <= 100.005 && y + height <= 100.005;
+        if !(finite && sides && inside) {
+            return None;
+        }
+        let at = |v: f64| (v * 100.0).round() as u32;
+        let (width, height) = (at(width), at(height));
+        Some(Self {
+            x: at(x).min(10_000 - width),
+            y: at(y).min(10_000 - height),
+            width,
+            height,
+        })
+    }
+
+    /// `{x, y, width, height}` in percents, as the server stores it.
+    pub fn to_json(self) -> serde_json::Value {
+        let pct = |v: u32| f64::from(v) / 100.0;
+        serde_json::json!({
+            "x": pct(self.x),
+            "y": pct(self.y),
+            "width": pct(self.width),
+            "height": pct(self.height),
+        })
+    }
+}
+
+/// The avatar display a save sends (AvatarFrameEditor `handleConfirm`):
+/// the crop, if any, over the stored display's collectibles; `None` when
+/// it holds neither. `stored` may be the object or a string holding it.
+pub fn avatar_display(
+    stored: Option<&serde_json::Value>,
+    crop: Option<AvatarCrop>,
+) -> Option<serde_json::Value> {
+    let parsed = match stored {
+        Some(serde_json::Value::String(text)) => serde_json::from_str(text).ok(),
+        other => other.cloned(),
+    };
+    let collectibles = parsed
+        .as_ref()
+        .and_then(|d| d.get("collectibles"))
+        .filter(|c| c.as_object().is_some_and(|map| !map.is_empty()))
+        .cloned();
+    let mut display = serde_json::Map::new();
+    display.insert("version".into(), 1.into());
+    if let Some(crop) = crop {
+        display.insert("crop".into(), crop.to_json());
+    }
+    if let Some(collectibles) = collectibles {
+        display.insert("collectibles".into(), collectibles);
+    }
+    (display.len() > 1).then_some(serde_json::Value::Object(display))
+}
+
+/// A display-name style as the views carry it (`{font, effect, primary,
+/// secondary}`, `view::name_style`) in the shape the server takes
+/// (`DisplayNameStyle`: `primaryColor`, `secondaryColor`); null for empty
+/// or anything `normalizeDisplayNameStyle` would refuse.
+pub fn name_style_patch(view_json: &str) -> serde_json::Value {
+    let Ok(style) = serde_json::from_str::<serde_json::Value>(view_json) else {
+        return serde_json::Value::Null;
+    };
+    let shaped = serde_json::json!({
+        "font": style.get("font"),
+        "effect": style.get("effect"),
+        "primaryColor": style.get("primary"),
+        "secondaryColor": style.get("secondary"),
+    });
+    let normal = crate::store::view::name_style(Some(&shaped));
+    match serde_json::from_str::<serde_json::Value>(&normal) {
+        Ok(normal) => serde_json::json!({
+            "font": normal["font"],
+            "effect": normal["effect"],
+            "primaryColor": normal["primary"],
+            "secondaryColor": normal["secondary"],
+        }),
+        Err(_) => serde_json::Value::Null,
+    }
+}
+
+/// The largest nameplate the server takes (`MAX_PROFILE_NAMEPLATE_SIZE`).
+pub const NAMEPLATE_MAX_BYTES: u64 = 25 * 1024 * 1024;
+
+/// A file the nameplate upload takes, by extension (the web's picker:
+/// `image/*,video/mp4,video/webm,video/ogg`; the server checks the bytes
+/// for PNG, JPEG, GIF, WebP, AVIF, MP4, WebM and Ogg): its content type.
+pub fn nameplate_content_type(path: &str) -> Option<&'static str> {
+    let ext = std::path::Path::new(path)
+        .extension()?
+        .to_string_lossy()
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "png" | "apng" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "avif" => Some("image/avif"),
+        "mp4" | "m4v" => Some("video/mp4"),
+        "webm" => Some("video/webm"),
+        "ogv" | "ogg" => Some("video/ogg"),
+        _ => None,
+    }
+}
+
+/// A nameplate this account uploaded (`isManagedNameplateUrl`): Remove
+/// deletes the file rather than unequipping a collectible.
+pub fn is_managed_nameplate(url: &str) -> bool {
+    url.starts_with("/api/profile-assets/nameplate/")
+}
+
 /// The web's failure copy for a REST call (`describeApiError`); `action`
 /// completes "Unable to …" ("save your profile").
 pub fn describe_api_error(error: &ApiError, action: &str) -> String {

@@ -217,6 +217,8 @@ const QML: &[&str] = &[
     "qml/screens/Shop/StatusChip.qml",
     "qml/screens/Settings/AccountPanel.qml",
     "qml/screens/Settings/AvatarPicker.qml",
+    "qml/screens/Settings/AvatarCropDialog.qml",
+    "qml/screens/Settings/NameStyleDialog.qml",
     "qml/screens/Settings/AppearancePanel.qml",
     "qml/screens/Settings/ColorControl.qml",
     "qml/screens/Settings/ComingLater.qml",

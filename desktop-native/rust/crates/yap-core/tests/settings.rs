@@ -3,9 +3,10 @@
 
 use serde_json::{json, Value};
 use yap_core::settings::{
-    self, describe_api_error, describe_last_active, editor_colors, lede, normalize_hex_color,
+    self, avatar_display, describe_api_error, describe_last_active, editor_colors,
+    is_managed_nameplate, lede, name_style_patch, nameplate_content_type, normalize_hex_color,
     row_matches, search, section_position, share_status, sign_in_method_labels, synced_theme,
-    theme_seed, validate_display_name,
+    theme_seed, validate_display_name, AvatarCrop,
 };
 use yap_core::store::{
     reduce, ApiRequest, ApiResponse, Command, Effect, GatewayEvent, Input, Load, ProfileAsset,
@@ -60,12 +61,17 @@ impl Client {
 
     /// Signed in with the gateway up; the rest of the boot is not answered.
     fn online() -> Self {
+        Self::online_as(me_json())
+    }
+
+    /// As [`Self::online`], signed in as `me`.
+    fn online_as(me: Value) -> Self {
         let mut client = Self {
             state: State::new(BASE),
         };
         let fx = client.command(Command::UseToken("tok_fixture".into()));
         let (id, request) = find(&fx, |r| *r == ApiRequest::Me);
-        client.respond(id, &request, me_json());
+        client.respond(id, &request, me);
         let session = client.state.session().expect("session").id;
         client.input(Input::Gateway {
             session,
@@ -617,4 +623,240 @@ fn a_profile_update_dispatch_should_reach_the_settings_view() {
         (view.bio.as_str(), view.accent_color.as_str()),
         ("New bio", "#34D399")
     );
+}
+
+// The profile editor: crop, display-name style, nameplate
+
+fn upload_of(fx: &[Effect]) -> Option<(RequestId, ProfileAsset, String)> {
+    fx.iter().find_map(|e| match e {
+        Effect::ProfileUpload {
+            id,
+            asset,
+            content_type,
+            ..
+        } => Some((*id, asset.clone(), content_type.clone())),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_crop_should_round_to_hundredths_and_stay_inside() {
+    let crop = AvatarCrop::from_percent(12.345, 0.0, 87.659, 50.0).expect("valid");
+    assert_eq!(
+        crop.to_json(),
+        json!({ "x": 12.34, "y": 0.0, "width": 87.66, "height": 50.0 })
+    );
+}
+
+#[test]
+fn a_crop_outside_the_picture_should_be_refused() {
+    assert_eq!(AvatarCrop::from_percent(60.0, 0.0, 50.0, 50.0), None);
+    assert_eq!(AvatarCrop::from_percent(0.0, 0.0, 0.5, 50.0), None);
+    assert_eq!(AvatarCrop::from_percent(f64::NAN, 0.0, 50.0, 50.0), None);
+}
+
+#[test]
+fn an_avatar_display_should_put_the_crop_over_the_collectibles() {
+    let stored = json!({
+        "version": 1,
+        "crop": { "x": 1, "y": 1, "width": 10, "height": 10 },
+        "collectibles": { "nameplate": { "skuId": "9" } },
+    });
+    let crop = AvatarCrop::from_percent(0.0, 25.0, 100.0, 50.0);
+    assert_eq!(
+        avatar_display(Some(&Value::String(stored.to_string())), crop),
+        Some(json!({
+            "version": 1,
+            "crop": { "x": 0.0, "y": 25.0, "width": 100.0, "height": 50.0 },
+            "collectibles": { "nameplate": { "skuId": "9" } },
+        }))
+    );
+    assert_eq!(
+        avatar_display(Some(&stored), None),
+        Some(json!({ "version": 1, "collectibles": { "nameplate": { "skuId": "9" } } }))
+    );
+    assert_eq!(avatar_display(None, None), None);
+}
+
+#[test]
+fn a_name_style_should_go_out_in_the_servers_shape() {
+    let style = r##"{"font":"tempo","effect":"neon","primary":"#fde68a","secondary":"#F97316"}"##;
+    assert_eq!(
+        name_style_patch(style),
+        json!({
+            "font": "tempo",
+            "effect": "neon",
+            "primaryColor": "#FDE68A",
+            "secondaryColor": "#F97316",
+        })
+    );
+    assert_eq!(name_style_patch(""), Value::Null);
+    let unknown = r##"{"font":"comic","effect":"neon","primary":"#FFFFFF","secondary":"#000000"}"##;
+    assert_eq!(name_style_patch(unknown), Value::Null);
+}
+
+#[test]
+fn nameplates_should_take_pictures_and_the_three_video_types() {
+    assert_eq!(
+        nameplate_content_type(r"C:\a\plate.WEBM"),
+        Some("video/webm")
+    );
+    assert_eq!(nameplate_content_type("plate.ogv"), Some("video/ogg"));
+    assert_eq!(nameplate_content_type("plate.mp4"), Some("video/mp4"));
+    assert_eq!(nameplate_content_type("plate.png"), Some("image/png"));
+    assert_eq!(nameplate_content_type("plate.mov"), None);
+    assert!(is_managed_nameplate("/api/profile-assets/nameplate/u.webm"));
+    assert!(!is_managed_nameplate("https://cdn.discordapp.com/x.webm"));
+}
+
+#[test]
+fn a_profile_save_should_send_a_changed_name_style() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        name_style: Some(
+            r##"{"font":"sakura","effect":"pop","primary":"#F472B6","secondary":"#38BDF8"}"##
+                .into(),
+        ),
+        ..draft()
+    })));
+    assert_eq!(
+        patch(&fx).1["displayNameStyle"],
+        json!({
+            "font": "sakura",
+            "effect": "pop",
+            "primaryColor": "#F472B6",
+            "secondaryColor": "#38BDF8",
+        })
+    );
+}
+
+#[test]
+fn a_cleared_name_style_should_go_out_as_null() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        name_style: Some(String::new()),
+        ..draft()
+    })));
+    let body = patch(&fx).1;
+    assert_eq!(body.get("displayNameStyle"), Some(&Value::Null));
+}
+
+#[test]
+fn an_untouched_name_style_should_stay_out_of_the_patch() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SaveProfile(Box::new(draft())));
+    assert_eq!(patch(&fx).1.get("displayNameStyle"), None);
+}
+
+#[test]
+fn framing_the_current_avatar_should_patch_its_display() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        avatar_crop: Some(AvatarCrop::from_percent(10.0, 0.0, 80.0, 100.0)),
+        ..draft()
+    })));
+    assert_eq!(
+        patch(&fx).1["avatarDisplay"],
+        json!({
+            "version": 1,
+            "crop": { "x": 10.0, "y": 0.0, "width": 80.0, "height": 100.0 },
+        })
+    );
+}
+
+#[test]
+fn a_new_avatar_should_upload_with_its_crop() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        avatar: Some((r"C:\tmp\a.png".into(), "image/png".into())),
+        avatar_crop: Some(AvatarCrop::from_percent(0.0, 12.5, 100.0, 75.0)),
+        ..draft()
+    })));
+    let (id, body) = patch(&fx);
+    assert_eq!(body.get("avatarDisplay"), None);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    let display = fx.iter().find_map(|e| match e {
+        Effect::ProfileUpload {
+            asset: ProfileAsset::Avatar { display },
+            ..
+        } => display.clone(),
+        _ => None,
+    });
+    let display: Value = serde_json::from_str(&display.expect("display")).expect("json");
+    assert_eq!(
+        display,
+        json!({
+            "version": 1,
+            "crop": { "x": 0.0, "y": 12.5, "width": 100.0, "height": 75.0 },
+        })
+    );
+}
+
+#[test]
+fn a_nameplate_should_upload_after_the_patch() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        nameplate: Some((r"C:\tmp\plate.webm".into(), "video/webm".into())),
+        ..draft()
+    })));
+    assert!(upload_of(&fx).is_none());
+    let (id, _) = patch(&fx);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    let (_, asset, content_type) = upload_of(&fx).expect("upload");
+    assert_eq!(
+        (asset.path(), asset, content_type.as_str()),
+        (
+            "/api/profile-assets/manage",
+            ProfileAsset::Nameplate,
+            "video/webm"
+        )
+    );
+}
+
+#[test]
+fn a_failed_nameplate_upload_should_name_the_step() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        nameplate: Some((r"C:\tmp\plate.png".into(), "image/png".into())),
+        ..draft()
+    })));
+    let (id, _) = patch(&fx);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    let (upload, _, _) = upload_of(&fx).expect("upload");
+    let fx = client.answer(upload, Err(http_error(415)));
+    let view = settings(&fx).expect("view");
+    assert_eq!(
+        view.profile_error,
+        "Unable to upload your nameplate. Check the details and try again."
+    );
+}
+
+#[test]
+fn removing_an_uploaded_nameplate_should_delete_it() {
+    let mut me = me_json();
+    me["nameplate_url"] = json!("/api/profile-assets/nameplate/user_fixture_me.png");
+    me["nameplate_content_type"] = json!("image/png");
+    let mut client = Client::online_as(me);
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        remove_nameplate: true,
+        ..draft()
+    })));
+    let (id, _) = patch(&fx);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    let (_, request) = find(&fx, |r| *r == ApiRequest::DeleteNameplate);
+    assert_eq!(request.body(), json!({ "kind": "nameplate" }));
+}
+
+#[test]
+fn removing_without_an_uploaded_nameplate_should_delete_nothing() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        remove_nameplate: true,
+        ..draft()
+    })));
+    let (id, _) = patch(&fx);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    assert!(requests(&fx)
+        .iter()
+        .all(|(_, r)| *r != ApiRequest::DeleteNameplate));
 }

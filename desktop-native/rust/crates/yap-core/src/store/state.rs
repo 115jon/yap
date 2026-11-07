@@ -359,6 +359,8 @@ pub(super) struct Projection {
     pub mentions: Vec<MentionRow>,
     /// The composer's hovered mention, as last emitted.
     pub mention_hover: String,
+    /// The `@` candidates' usernames, as last emitted.
+    pub mention_names: String,
     pub dms: Vec<DmRow>,
     pub members: Vec<MemberListRow>,
     /// Unread DMs, as last emitted.
@@ -399,6 +401,7 @@ pub enum ProfileStep {
         content_type: String,
     },
     DeleteBanner,
+    DeleteNameplate,
     /// Read the profile back.
     Refresh,
 }
@@ -412,8 +415,13 @@ impl ProfileStep {
                 asset: ProfileAsset::Avatar { .. },
                 ..
             } => "upload your avatar",
+            Self::Upload {
+                asset: ProfileAsset::Nameplate,
+                ..
+            } => "upload your nameplate",
             Self::Upload { .. } => "upload your banner",
             Self::DeleteBanner => "remove your banner",
+            Self::DeleteNameplate => "remove your nameplate",
             Self::Refresh => "refresh your profile",
         }
     }
@@ -755,6 +763,9 @@ pub(super) enum Startup {
     Done,
 }
 
+/// A channel left at its newest end (`scrollPositions` "BOTTOM").
+pub(super) const SCROLL_BOTTOM: &str = "BOTTOM";
+
 /// Everything the client knows. Built by [`State::new`], changed only by
 /// [`super::reduce`].
 #[derive(Debug, Clone, PartialEq)]
@@ -821,6 +832,12 @@ pub struct State {
     pub(super) gifs: GifBrowse,
     pub(super) focused: bool,
     pub(super) at_bottom: bool,
+    /// Where each channel was left (useChatArea.ts `scrollPositions`): the
+    /// top message on screen, or [`SCROLL_BOTTOM`] at the newest end.
+    pub(super) scroll_positions: HashMap<String, String>,
+    /// Channels whose position came from a jump: scrolling the jump's
+    /// window does not move it (`jumpAnchors`).
+    pub(super) jump_anchors: HashSet<String>,
     pub(super) voice: Option<VoiceCall>,
     /// The warm standby, if one is held.
     pub(super) standby: Option<Standby>,
@@ -848,6 +865,9 @@ pub struct State {
     pub(super) voice_started_at: HashMap<String, i64>,
     /// The voice channel whose view is open (landing or call), if any.
     pub(super) voice_view: Option<String>,
+    /// That view's text chat is shown beside it (it is then the active
+    /// channel).
+    pub(super) voice_chat: bool,
     /// The server whose channel tree is shown (the last one that loaded).
     pub(super) tree_server: Option<String>,
     /// A channel to open once its server's tree answers (a toast click).
@@ -921,6 +941,8 @@ impl State {
             gifs: GifBrowse::default(),
             focused: true,
             at_bottom: false,
+            scroll_positions: HashMap::new(),
+            jump_anchors: HashSet::new(),
             voice: None,
             standby: None,
             standby_enabled: true,
@@ -935,6 +957,7 @@ impl State {
             voice_channels: HashMap::new(),
             voice_started_at: HashMap::new(),
             voice_view: None,
+            voice_chat: false,
             tree_server: None,
             wanted_channel: None,
             toasted: Toasted::default(),
@@ -1051,7 +1074,24 @@ impl State {
     /// A channel has messages newer than its read mark (ChannelSidebar.tsx;
     /// the open channel never shows as unread).
     pub fn is_unread(&self, channel_id: &str) -> bool {
-        self.active_channel.as_deref() != Some(channel_id) && self.has_unread(channel_id)
+        self.channel_on_screen() != Some(channel_id) && self.has_unread(channel_id)
+    }
+
+    /// The channel the user looks at: an open voice view's (ChatPageClient.tsx
+    /// makes it the active channel), else the active one.
+    pub(super) fn channel_on_screen(&self) -> Option<&str> {
+        self.voice_view
+            .as_deref()
+            .or(self.active_channel.as_deref())
+    }
+
+    /// The active channel's messages are on screen: no voice view covers
+    /// them, or they are that view's own chat beside it.
+    pub(super) fn chat_on_screen(&self) -> bool {
+        match self.voice_view.as_deref() {
+            None => true,
+            Some(id) => self.voice_chat && self.active_channel.as_deref() == Some(id),
+        }
     }
 
     /// The newest message is after the read mark (or nothing was read).

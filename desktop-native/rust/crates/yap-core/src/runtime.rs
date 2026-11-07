@@ -1008,7 +1008,12 @@ async fn profile_upload(
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "image".into());
-    check_size(Path::new(&path), MAX_IMAGE_UPLOAD_BYTES).await?;
+    let cap = if asset == ProfileAsset::Nameplate {
+        crate::settings::NAMEPLATE_MAX_BYTES
+    } else {
+        MAX_IMAGE_UPLOAD_BYTES
+    };
+    check_size(Path::new(&path), cap).await?;
     let bytes = tokio::fs::read(&path)
         .await
         .map_err(|error| crate::api::ApiError::Network(error.to_string()))?;
@@ -1019,6 +1024,7 @@ async fn profile_upload(
     let mut form = reqwest::multipart::Form::new();
     match &asset {
         ProfileAsset::Banner => form = form.text("kind", "banner"),
+        ProfileAsset::Nameplate => form = form.text("kind", "nameplate"),
         ProfileAsset::Avatar {
             display: Some(display),
         } => form = form.text("avatar_display", display.clone()),

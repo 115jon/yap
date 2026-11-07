@@ -23,6 +23,8 @@ pub mod qobject {
         #[qproperty(QString, initials)]
         #[qproperty(QString, avatar)]
         #[qproperty(bool, custom_avatar, cxx_name = "customAvatar")]
+        /// The nameplate is an upload of ours (Remove deletes it on Save).
+        #[qproperty(bool, custom_nameplate, cxx_name = "customNameplate")]
         #[qproperty(QString, status)]
         #[qproperty(QString, custom_status, cxx_name = "customStatus")]
         #[qproperty(QString, pronouns)]
@@ -95,6 +97,12 @@ pub mod qobject {
         #[cxx_name = "imageType"]
         fn image_type(self: &Settings, path: &QString) -> QString;
 
+        /// The content type of a picture or video the nameplate can take,
+        /// or empty.
+        #[qinvokable]
+        #[cxx_name = "nameplateType"]
+        fn nameplate_type(self: &Settings, path: &QString) -> QString;
+
         #[qinvokable]
         #[cxx_name = "loadAccount"]
         fn load_account(self: &Settings);
@@ -117,7 +125,10 @@ pub mod qobject {
 
         /// The profile editor's draft as JSON: `{pronouns, bio,
         /// customStatus, accentColor, backgroundColor, bannerColor,
-        /// avatarPath, removeAvatar, bannerPath, removeBanner}`.
+        /// avatarPath, removeAvatar, avatarUrl, bannerPath, removeBanner,
+        /// crop ({x, y, width, height} in percent, or null; sent when
+        /// `cropChanged`), nameStyle (sent when `nameStyleChanged`),
+        /// nameplatePath, removeNameplate}`.
         #[qinvokable]
         #[cxx_name = "saveProfile"]
         fn save_profile(self: &Settings, draft: &QString);
@@ -161,6 +172,7 @@ pub struct SettingsRust {
     initials: QString,
     avatar: QString,
     custom_avatar: bool,
+    custom_nameplate: bool,
     status: QString,
     custom_status: QString,
     pronouns: QString,
@@ -323,6 +335,7 @@ fn apply(mut object: Pin<&mut qobject::Settings>, view: &SettingsView) {
     o.as_mut().set_initials(q(&view.initials));
     o.as_mut().set_avatar(q(&view.avatar));
     o.as_mut().set_custom_avatar(view.custom_avatar);
+    o.as_mut().set_custom_nameplate(view.custom_nameplate);
     o.as_mut().set_status(q(&view.status));
     o.as_mut().set_custom_status(q(&view.custom_status));
     o.as_mut().set_pronouns(q(&view.pronouns));
@@ -415,6 +428,22 @@ struct Draft {
     avatar_url: String,
     banner_path: String,
     remove_banner: bool,
+    /// The frame editor's crop, in percent (null: none).
+    crop: Option<Crop>,
+    crop_changed: bool,
+    /// The display-name style as the views carry it (empty: none).
+    name_style: String,
+    name_style_changed: bool,
+    nameplate_path: String,
+    remove_nameplate: bool,
+}
+
+#[derive(Deserialize, Default, Clone, Copy)]
+struct Crop {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
 }
 
 /// An image file the profile can take: its content type by extension.
@@ -480,6 +509,12 @@ impl qobject::Settings {
             .unwrap_or_default()
     }
 
+    pub fn nameplate_type(&self, path: &QString) -> QString {
+        settings::nameplate_content_type(&path.to_string())
+            .map(q)
+            .unwrap_or_default()
+    }
+
     pub fn load_account(&self) {
         client::command(Command::LoadAccount);
     }
@@ -514,6 +549,15 @@ impl qobject::Settings {
             avatar_url: (!draft.avatar_url.is_empty()).then_some(draft.avatar_url),
             banner: picked(&draft.banner_path),
             remove_banner: draft.remove_banner,
+            avatar_crop: draft.crop_changed.then(|| {
+                draft
+                    .crop
+                    .and_then(|c| settings::AvatarCrop::from_percent(c.x, c.y, c.width, c.height))
+            }),
+            name_style: draft.name_style_changed.then_some(draft.name_style),
+            nameplate: settings::nameplate_content_type(&draft.nameplate_path)
+                .map(|kind| (draft.nameplate_path.clone(), kind.to_owned())),
+            remove_nameplate: draft.remove_nameplate,
         })));
     }
 

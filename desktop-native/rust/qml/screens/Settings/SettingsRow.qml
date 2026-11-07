@@ -26,6 +26,9 @@ Item {
     property bool hideLabel: false
     property bool custom: false
     property Component leading: null
+    // Drawn in place of the description text (the profile editor's name
+    // in its style).
+    property Component descriptionItem: null
     property color ground: Theme.ply0
     // Set by the card: the last shown row has no hairline.
     property bool rule: true
@@ -114,8 +117,14 @@ Item {
                     lineHeight: 20
                     lineHeightMode: Text.FixedHeight
                 }
+                Loader {
+                    active: row.descriptionItem !== null
+                    visible: active
+                    width: Math.min(parent.width, 517)
+                    sourceComponent: row.descriptionItem
+                }
                 Text {
-                    visible: row.shownDesc.length > 0
+                    visible: row.shownDesc.length > 0 && row.descriptionItem === null
                     width: Math.min(parent.width, 517) // max-w-[60ch]
                     text: row.highlighted ? SettingsNav.highlight(row.shownDesc) : row.shownDesc
                     textFormat: row.highlighted ? Text.RichText : Text.PlainText

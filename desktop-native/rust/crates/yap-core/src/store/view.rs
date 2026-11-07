@@ -296,6 +296,9 @@ rows! {
         deco: String => Deco "deco",
         /// The author's display-name style ([`name_style`]), or empty.
         name_style: String => NameStyle "nameStyle",
+        /// A DM call record's line (CallRecordRow.tsx, [`call_line`]):
+        /// JSON `{tone, text, duration}`, empty for any other message.
+        call: String => Call "call",
     }
     key(row) -> String { row.id.clone() }
 
@@ -783,6 +786,8 @@ pub struct VoicePanelView {
     pub name: String,
     /// How many people are in it.
     pub count: i64,
+    /// Its text chat is open beside it.
+    pub chat: bool,
 }
 
 /// The open channel's "New" divider and the banner over the list.
@@ -1055,6 +1060,9 @@ pub struct SettingsView {
     pub avatar: String,
     /// The avatar is an upload (`/api/avatars/…`), so it can be removed.
     pub custom_avatar: bool,
+    /// The nameplate is an upload (`/api/profile-assets/nameplate/…`):
+    /// Remove deletes it on Save.
+    pub custom_nameplate: bool,
     pub status: String,
     pub custom_status: String,
     pub pronouns: String,
@@ -1113,6 +1121,10 @@ pub enum ViewUpdate {
     Typing(String),
     /// The composer's hovered mention ([`mention_hover_json`]), or empty.
     MentionHover(String),
+    /// The `@` candidates' usernames, lowercased, as a JSON array: the
+    /// composer edits a mention of one as a unit (useMessageInput.ts
+    /// `getValidMentions`).
+    MentionNames(String),
     /// The open channel's newest page is loading (the list's skeleton
     /// while it has no rows).
     PageLoading(bool),
@@ -1214,6 +1226,10 @@ pub enum ViewUpdate {
     /// Bring this message of the open channel into view and highlight it
     /// (a jump; after a window replaced the list, in the same batch).
     JumpTo(String),
+    /// Where the next landing of the list goes (useChatArea.ts restore):
+    /// this message at the top (centred in a detached window), or empty for
+    /// the divider or the end. Sent before the rows it applies to.
+    ScrollRestore(String),
     /// Newer pages of a detached list: one is loading; there are more
     /// (the list is not at the channel's newest end).
     Newer {
@@ -1312,7 +1328,7 @@ pub(super) fn me(user: &User, api_base: &str) -> MeView {
             .trim()
             .to_owned(),
         deco: collectibles::decoration_url(user.avatar_display.as_ref()),
-        plate: plate_json(user),
+        plate: plate_json(user, api_base),
         effect: non_null(collectibles::effect_json(user.avatar_display.as_ref())),
         frame: non_null(collectibles::frame_json(user.avatar_display.as_ref())),
         name_style: name_style(user.display_name_style.as_ref()),
@@ -1794,6 +1810,69 @@ pub(super) struct RowContext<'a> {
     pub hydrations: &'a super::embeds::Hydrations,
     /// The open server's members (role colours); empty in a DM.
     pub members: &'a [Member],
+    /// The open DM's other person (a call record's callee name).
+    pub dm_recipient: Option<&'a User>,
+}
+
+/// formatCallDuration: 0:07, 4:12, 1:02:03.
+fn call_duration(seconds: f64) -> String {
+    let total = if seconds.is_finite() {
+        seconds.round().max(0.0) as u64
+    } else {
+        0
+    };
+    let (h, m, s) = (total / 3600, total % 3600 / 60, total % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+/// describeCallRecord as the viewer reads it: the tone (`missed` takes the
+/// danger glyph), the words and an ended call's length, as JSON; empty for
+/// a message that is not a call record.
+pub(super) fn call_line(message: &Message, ctx: &RowContext<'_>) -> String {
+    let Some(call) = message
+        .call
+        .as_ref()
+        .filter(|_| message.kind.as_deref() == Some("call"))
+    else {
+        return String::new();
+    };
+    let caller = message
+        .author
+        .as_ref()
+        .map(User::label)
+        .filter(|n| !n.is_empty())
+        .unwrap_or("Someone");
+    let callee = ctx
+        .dm_recipient
+        .filter(|u| u.id == call.callee_id)
+        .map(User::label)
+        .filter(|n| !n.is_empty())
+        .unwrap_or("them");
+    let viewer_called = !ctx.me_id.is_empty() && ctx.me_id == call.caller_id;
+    let (tone, text, duration) = match call.outcome.as_str() {
+        "missed" if viewer_called => ("neutral", format!("You called {callee} · no answer"), None),
+        "missed" => ("missed", format!("Missed call from {caller}"), None),
+        "declined" if viewer_called => ("neutral", format!("{callee} declined your call"), None),
+        "declined" => (
+            "neutral",
+            format!("You declined a call from {caller}"),
+            None,
+        ),
+        _ => (
+            "neutral",
+            if viewer_called {
+                "You called".to_owned()
+            } else {
+                format!("{caller} called")
+            },
+            Some(call_duration(call.duration_s.unwrap_or(0.0))),
+        ),
+    };
+    serde_json::json!({ "tone": tone, "text": text, "duration": duration }).to_string()
 }
 
 /// message-author.ts `buildRoleColorMap`: the highest-positioned role with a
@@ -1975,6 +2054,7 @@ pub(super) fn message_row(
                 .and_then(|m| m.user.display_name_style.as_ref())
                 .or_else(|| author.and_then(|a| a.display_name_style.as_ref())),
         ),
+        call: call_line(message, ctx),
     }
 }
 
@@ -2160,7 +2240,7 @@ fn member_row(m: &Member, online: bool, ctx: &MemberContext<'_>) -> MemberListRo
         in_call: seat.is_some(),
         speaking: seat.is_some_and(|s| s.speaking && !s.muted),
         deco: collectibles::decoration_url(user.avatar_display.as_ref()),
-        plate: plate_json(user),
+        plate: plate_json(user, ctx.api_base),
         platforms: ctx
             .presence
             .platforms_of(&user.id, user.presence_platforms.as_deref()),
@@ -2320,14 +2400,20 @@ fn non_null(value: serde_json::Value) -> String {
     }
 }
 
-/// A user's nameplate for a row, or empty.
-pub fn plate_json(user: &User) -> String {
-    let plate = collectibles::plate(
+/// A user's nameplate for a row, or empty. An uploaded one
+/// (`/api/profile-assets/…`) is fetched from the API.
+pub fn plate_json(user: &User, api_base: &str) -> String {
+    let mut plate = collectibles::plate(
         user.avatar_display.as_ref(),
         user.nameplate_url.as_deref(),
         user.nameplate_content_type.as_deref(),
         &user.id,
     );
+    for url in [&mut plate.still, &mut plate.motion] {
+        if url.starts_with('/') {
+            *url = absolute_url(api_base, Some(url.as_str()));
+        }
+    }
     if plate.still.is_empty() && plate.motion.is_empty() {
         return String::new();
     }

@@ -223,8 +223,11 @@ impl State {
         };
         for file in files {
             if file.size > MAX_UPLOAD_BYTES {
+                // useMessageInput.ts: the error toast's title, then its
+                // description on the next line.
                 fx.view(ViewUpdate::Notice(format!(
-                    "{} is too large to upload. Files can be up to 25 MB.",
+                    "{} is too large to upload
+Files can be up to 25 MB.",
                     file.name
                 )));
                 continue;

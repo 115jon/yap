@@ -450,10 +450,12 @@ fn first_page_should_project_messages_like_before() {
         &messages(),
         fixture("messages-page.json"),
     );
-    // The skeleton goes, then the rows come.
+    // The skeleton goes, then the rows come, landing where nothing was
+    // saved (the divider or the end).
     assert!(matches!(
-        views(&fx)[..2],
-        [ViewUpdate::PageLoading(false), ViewUpdate::Messages(_)]
+        &views(&fx)[..3],
+        [ViewUpdate::PageLoading(false), ViewUpdate::ScrollRestore(at), ViewUpdate::Messages(_)]
+            if at.is_empty()
     ));
     let Some(ViewDiff::Reset(list)) = message_diffs(&fx).first().copied() else {
         panic!("{fx:#?}");
@@ -498,13 +500,14 @@ fn first_page_should_project_messages_like_before() {
             pinned: false,
             deco: String::new(),
             name_style: String::new(),
+            call: String::new(),
         }
     );
     assert!(list[0].attachments.contains(r#""name":"notes.txt""#));
     assert!(list[0].reactions.contains(r#""count":1"#));
     assert!(fx.contains(&Effect::StartupMark("messages shown")));
     assert_eq!(
-        views(&fx)[2..],
+        views(&fx)[3..],
         [
             &ViewUpdate::Phase(Phase::Ready),
             &ViewUpdate::Status(String::new()),
@@ -1231,6 +1234,7 @@ fn selecting_a_voice_channel_should_open_its_view_without_joining() {
             id: VOICE.into(),
             name: "lounge".into(),
             count: 0,
+            chat: false,
         })))
     );
     assert_eq!(client.state.voice_view(), Some(VOICE));
@@ -1520,6 +1524,7 @@ fn the_voice_view_roster_should_count_who_is_in_the_channel() {
             id: VOICE.into(),
             name: "lounge".into(),
             count: 1,
+            chat: false,
         })))
     );
     let roster: Vec<_> = fx
@@ -2255,6 +2260,7 @@ fn snapshot() -> Snapshot {
         messages,
         written_at_ms: 0,
         voice: None,
+        scroll_positions: Vec::new(),
     }
 }
 
@@ -3938,4 +3944,103 @@ fn the_calls_spatial_map_should_reach_the_voice_view_and_go_with_it() {
     assert_eq!(last_voice_view(&fx).spatial, map);
     let fx = client.command(Command::LeaveVoice);
     assert_eq!(last_voice_view(&fx).spatial, "");
+}
+
+// A voice channel's text chat (ChatPageClient.tsx "Voice chat")
+
+#[test]
+fn showing_a_voice_channels_chat_should_open_its_messages_beside_the_view() {
+    let mut client = Client::online();
+    client.command(Command::SelectChannel(VOICE.into()));
+    let fx = client.command(Command::ShowVoiceChat(true));
+    request_for(
+        &fx,
+        &ApiRequest::Messages {
+            channel_id: VOICE.into(),
+            before: None,
+        },
+    );
+    assert!(fx.contains(&Effect::View(ViewUpdate::VoicePanel(VoicePanelView {
+        id: VOICE.into(),
+        name: "lounge".into(),
+        count: 0,
+        chat: true,
+    }))));
+    assert_eq!(client.state.voice_view(), Some(VOICE));
+    assert_eq!(client.state.active_channel(), Some(VOICE));
+    // Selecting the channel again closes the chat (`SET_VOICE_TEXT` false).
+    client.command(Command::SelectChannel(VOICE.into()));
+    let fx = client.command(Command::SelectChannel(VOICE.into()));
+    assert!(fx.contains(&Effect::View(ViewUpdate::VoicePanel(VoicePanelView {
+        id: VOICE.into(),
+        name: "lounge".into(),
+        count: 0,
+        chat: false,
+    }))));
+}
+
+#[test]
+fn a_message_in_a_hidden_voice_chat_should_not_be_marked_read() {
+    let mut client = Client::online();
+    client.command(Command::SelectChannel(VOICE.into()));
+    client.command(Command::ShowVoiceChat(true));
+    client.command(Command::ShowVoiceChat(false));
+    let fx = client.dispatch("MESSAGE_CREATE", msg(VOICE, "v1", "user_fixture_alice", A3));
+    assert!(
+        !requests(&fx)
+            .iter()
+            .any(|(_, r)| matches!(r, ApiRequest::MarkRead { .. })),
+        "{fx:#?}"
+    );
+}
+
+#[test]
+fn the_text_channel_behind_a_voice_view_should_show_unread() {
+    let mut client = Client::online();
+    client.command(Command::SelectChannel(VOICE.into()));
+    let fx = client.dispatch("MESSAGE_CREATE", msg(TEXT, "t9", "user_fixture_alice", A3));
+    assert!(
+        !requests(&fx)
+            .iter()
+            .any(|(_, r)| matches!(r, ApiRequest::MarkRead { .. })),
+        "{fx:#?}"
+    );
+    assert!(client.state.is_unread(TEXT));
+}
+
+#[test]
+fn a_dm_call_record_should_read_as_the_viewer_sees_it() {
+    let mut client = Client::online();
+    let call = |outcome: &str, caller: &str, id: &str| {
+        json!({
+            "id": id, "channel_id": TEXT, "author_id": caller,
+            "author": { "id": caller, "username": "alice", "display_name": "Alice" },
+            "content": "Missed call", "type": "call",
+            "call": { "call_id": "c1", "outcome": outcome, "caller_id": caller,
+                      "callee_id": "user_fixture_me", "duration_s": 252 },
+            "created_at": A3,
+        })
+    };
+    let fx = client.dispatch("MESSAGE_CREATE", call("missed", "user_fixture_alice", "call1"));
+    let rows: Vec<&MessageRow> = message_diffs(&fx)
+        .into_iter()
+        .filter_map(|d| match d {
+            ViewDiff::Insert { rows, .. } => rows.first(),
+            _ => None,
+        })
+        .collect();
+    let row = rows.first().expect("a row");
+    assert_eq!(
+        row.call,
+        r#"{"duration":null,"text":"Missed call from Alice","tone":"missed"}"#
+    );
+    let fx = client.dispatch("MESSAGE_CREATE", call("ended", "user_fixture_alice", "call2"));
+    let ended = message_diffs(&fx)
+        .into_iter()
+        .find_map(|d| match d {
+            ViewDiff::Insert { rows, .. } => rows.first().map(|r| r.call.clone()),
+            _ => None,
+        })
+        .expect("a row");
+    assert!(ended.contains(r#""duration":"4:12""#) && ended.contains("Alice called"), "{ended}");
 }

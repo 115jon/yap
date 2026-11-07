@@ -22,6 +22,9 @@ Rectangle {
     // Round crop without a decoration here (a preview whose decoration
     // draws elsewhere).
     property bool round: false
+    // The avatar display's crop (avatar-display.ts, `{x, y, width,
+    // height}` in percent of the picture), or null: the picture covers.
+    property var crop: null
 
     readonly property bool decorated: deco.length > 0
     readonly property bool roundFace: decorated || round
@@ -44,16 +47,26 @@ Rectangle {
         font.weight: Font.ExtraBold
     }
 
-    Image {
-        id: picture
+    // The face: the picture covering, or with a crop the picture scaled
+    // so the crop fills the key (avatarDisplayToImageStyle).
+    Item {
+        id: face
         anchors.fill: parent
-        source: root.source
-        visible: status === Image.Ready && !root.roundFace
-        fillMode: Image.PreserveAspectCrop
+        visible: picture.status === Image.Ready && !root.roundFace
         clip: true
-        asynchronous: true
-        sourceSize.width: root.size * 2
-        sourceSize.height: root.size * 2
+        Image {
+            id: picture
+            readonly property var c: root.crop && root.crop.width > 0 && root.crop.height > 0 ? root.crop : null
+            x: c ? -c.x / c.width * face.width : 0
+            y: c ? -c.y / c.height * face.height : 0
+            width: c ? face.width * 100 / c.width : face.width
+            height: c ? face.height * 100 / c.height : face.height
+            source: root.source
+            fillMode: c ? Image.Stretch : Image.PreserveAspectCrop
+            asynchronous: true
+            sourceSize.width: Math.min(2048, Math.ceil(width * 2))
+            sourceSize.height: Math.min(2048, Math.ceil(height * 2))
+        }
     }
 
     // The round crop, only for a decorated face.
@@ -70,7 +83,7 @@ Rectangle {
             }
             MultiEffect {
                 anchors.fill: parent
-                source: picture
+                source: face
                 maskEnabled: true
                 maskSource: roundMask
             }

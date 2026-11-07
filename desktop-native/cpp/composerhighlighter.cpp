@@ -1,5 +1,6 @@
 #include "composerhighlighter.h"
 
+#include <QtGui/QFontMetricsF>
 #include <QtGui/QTextCharFormat>
 #include <QtGui/QTextDocument>
 
@@ -53,6 +54,34 @@ protected:
         setFormat(int(match.capturedStart(0)), int(match.capturedLength(0)),
                   mention);
     }
+    // Under the pictures: no glyph (the caret and the selection stay).
+    const int from = currentBlock().position();
+    const int to = from + int(text.size());
+    QTextCharFormat clear;
+    clear.setForeground(Qt::transparent);
+    for (const QVariant& range : m_owner->hidden()) {
+      const QVariantList pair = range.toList();
+      if (pair.size() != 2)
+        continue;
+      const int start = qMax(from, pair[0].toInt());
+      const int end = qMin(to, pair[1].toInt());
+      if (end > start)
+        setFormat(start - from, end - start, clear);
+    }
+    // A placeholder widens to 1.35em (the web's fixed emoji box).
+    const QFont font = document()->defaultFont();
+    const qreal box = font.pixelSize() > 0 ? font.pixelSize() * 1.35
+                                           : QFontMetricsF(font).height() * 1.1;
+    for (const QVariant& at : m_owner->fixed()) {
+      const int pos = at.toInt();
+      if (pos < from || pos >= to)
+        continue;
+      QTextCharFormat wide = clear;
+      const qreal advance = QFontMetricsF(font).horizontalAdvance(text.at(pos - from));
+      wide.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+      wide.setFontLetterSpacing(box - advance);
+      setFormat(pos - from, 1, wide);
+    }
   }
 
 private:
@@ -101,6 +130,24 @@ void ComposerHighlighter::setMentionBackground(const QColor& color)
   m_mentionBackground = color;
   rehighlight();
   emit colorsChanged();
+}
+
+void ComposerHighlighter::setHidden(const QVariantList& ranges)
+{
+  if (m_hidden == ranges)
+    return;
+  m_hidden = ranges;
+  rehighlight();
+  emit rangesChanged();
+}
+
+void ComposerHighlighter::setFixed(const QVariantList& positions)
+{
+  if (m_fixed == positions)
+    return;
+  m_fixed = positions;
+  rehighlight();
+  emit rangesChanged();
 }
 
 void ComposerHighlighter::rehighlight()

@@ -63,9 +63,11 @@ qt_add_executable(YapNative WIN32
   cpp/webembed.cpp cpp/webembed.h
   cpp/webmplayer.cpp cpp/webmplayer.h
   cpp/windowchrome.cpp cpp/windowchrome.h)
+# Qt::GuiPrivate: the test keyboard (YAP_TEST_POINTER) delivers through
+# QWindowSystemInterface, as a real key does, so shortcuts see it.
 target_link_libraries(YapNative PRIVATE
   yap_native_qml
-  Qt::Gui Qt::Multimedia Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg)
+  Qt::Gui Qt::GuiPrivate Qt::Multimedia Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg)
 
 # Brand fonts, Phosphor icons and brand SVGs (assets/, built by tools/),
 # embedded as :/fonts, :/icons and :/svg.

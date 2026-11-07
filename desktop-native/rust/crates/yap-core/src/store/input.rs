@@ -92,6 +92,12 @@ pub enum Command {
     LoadOlder,
     /// Whether the message list is at its newest end.
     SetAtBottom(bool),
+    /// The top-most message on screen while the list is scrolled up: the
+    /// channel reopens there (useChatArea.ts `SET_SCROLL_POSITION`).
+    ScrollAt(String),
+    /// The open voice channel's text chat beside its view
+    /// (useChatPageLogic.ts `SET_VOICE_TEXT`).
+    ShowVoiceChat(bool),
     /// The top-most message on screen (reported with the end): its
     /// mentions and everything below it have been seen.
     SeenFrom(String),
@@ -268,6 +274,16 @@ pub struct ProfileDraft {
     /// A new banner (path, content type).
     pub banner: Option<(String, String)>,
     pub remove_banner: bool,
+    /// The frame editor's crop (AvatarFrameEditor.tsx): `None` leaves the
+    /// stored one, `Some(None)` saves none.
+    pub avatar_crop: Option<Option<crate::settings::AvatarCrop>>,
+    /// The display-name style as the views carry it
+    /// (`view::name_style`): `None` leaves it, `Some("")` clears it.
+    pub name_style: Option<String>,
+    /// A new nameplate (path, content type): a picture or a video.
+    pub nameplate: Option<(String, String)>,
+    /// Delete the uploaded nameplate.
+    pub remove_nameplate: bool,
 }
 
 /// A file the user picked, pasted or dropped, as the UI read it.

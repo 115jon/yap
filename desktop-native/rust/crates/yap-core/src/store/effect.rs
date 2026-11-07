@@ -178,6 +178,8 @@ pub enum ProfileAsset {
     Avatar { display: Option<String> },
     /// `POST /api/profile-assets/manage` with `kind=banner`.
     Banner,
+    /// The same route with `kind=nameplate`: a picture or a video.
+    Nameplate,
     /// `POST /api/servers/icon-upload`; answers with the icon's URL.
     ServerIcon,
 }
@@ -186,7 +188,7 @@ impl ProfileAsset {
     pub fn path(&self) -> &'static str {
         match self {
             Self::Avatar { .. } => "/api/avatar-upload",
-            Self::Banner => "/api/profile-assets/manage",
+            Self::Banner | Self::Nameplate => "/api/profile-assets/manage",
             Self::ServerIcon => "/api/servers/icon-upload",
         }
     }
@@ -321,6 +323,8 @@ pub enum ApiRequest {
     UpdateProfile(Value),
     /// Drop the banner (`DELETE /api/profile-assets/manage`).
     DeleteBanner,
+    /// Drop the uploaded nameplate (the same route, `kind=nameplate`).
+    DeleteNameplate,
     Sessions,
     Shares,
     RevokeShare {
@@ -482,7 +486,7 @@ impl ApiRequest {
             | Self::SetPresence { .. }
             | Self::GifUpload { .. } => Method::Post,
             Self::UpdateProfile(_) => Method::Patch,
-            Self::DeleteBanner | Self::RevokeShare { .. } => Method::Delete,
+            Self::DeleteBanner | Self::DeleteNameplate | Self::RevokeShare { .. } => Method::Delete,
             Self::Sessions | Self::Shares | Self::KovaSession | Self::KovaAccounts => Method::Get,
             Self::MarkRead { .. } => Method::Put,
             Self::React { add: true, .. } => Method::Put,
@@ -545,7 +549,7 @@ impl ApiRequest {
             Self::SetPresence { .. } => "/api/presence".into(),
             Self::Profile { user_id } => format!("/api/users/{user_id}/profile"),
             Self::UpdateProfile(_) => "/api/update-profile".into(),
-            Self::DeleteBanner => "/api/profile-assets/manage".into(),
+            Self::DeleteBanner | Self::DeleteNameplate => "/api/profile-assets/manage".into(),
             Self::Sessions => "/api/sessions".into(),
             Self::Shares => "/api/shares".into(),
             Self::RevokeShare { share_id } => format!("/api/shares/{}", query_value(share_id)),
@@ -699,6 +703,7 @@ impl ApiRequest {
             Self::Typing { .. } | Self::MarkRead { .. } => json!({}),
             Self::UpdateProfile(patch) => patch.clone(),
             Self::DeleteBanner => json!({ "kind": "banner" }),
+            Self::DeleteNameplate => json!({ "kind": "nameplate" }),
             Self::Sessions
             | Self::Shares
             | Self::RevokeShare { .. }
@@ -816,9 +821,10 @@ impl ApiRequest {
                     .map(|account| account.provider_id)
                     .collect(),
             ),
-            Self::UpdateProfile(_) | Self::DeleteBanner | Self::RevokeShare { .. } => {
-                ApiResponse::Done
-            }
+            Self::UpdateProfile(_)
+            | Self::DeleteBanner
+            | Self::DeleteNameplate
+            | Self::RevokeShare { .. } => ApiResponse::Done,
             Self::DeleteMessage { .. }
             | Self::React { .. }
             | Self::GifShare { .. }

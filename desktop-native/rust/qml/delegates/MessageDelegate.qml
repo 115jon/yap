@@ -52,6 +52,11 @@ Item {
     required property string deco
     // The author's display-name style (JSON), or empty.
     required property string nameStyle
+    // A DM call record's line (CallRecordRow.tsx): JSON {tone, text,
+    // duration}, or empty.
+    required property string call
+    readonly property var callLine: call.length > 0 ? JSON.parse(call) : null
+    readonly property bool isCall: callLine !== null
     // Today's local day number (`Chat.today`).
     required property int today
     // The list's edit target and jump highlight (message ids, or empty).
@@ -183,6 +188,10 @@ Item {
     // The hover bar stays while its own menu or emoji picker is open
     // (MessageItem.tsx `keepBar`); the host sets it.
     property bool keepBar: false
+    // The list's keyboard focus is on this row (ChatView arrow keys): the
+    // bar shows as it does for focus inside the row on the web
+    // (`group-focus-within/row`), with a focus ring.
+    property bool keyFocused: false
 
     // `Thursday, October 22, 2026 at 8:12 PM` (message-time.ts `formatFull`),
     // for the time and "(edited)" tooltips.
@@ -238,7 +247,9 @@ Item {
     // A grouped row is at least 28 inside its padding: the web's hidden
     // gutter time (pt-1 over a 24 px line) holds it open, so follow-ups sit
     // 32 apart there (MessageItem.tsx).
-    implicitHeight: Math.max(extras.y + extras.height
+    // A call record is mt-2 and a py-1.5 line around its 32 px glyph box.
+    implicitHeight: isCall ? dividerHeight + 8 + 44
+        : Math.max(extras.y + extras.height
         + (failedLine.visible ? failedLine.height + 2 : 0), grouped ? headerTop + 28 : 0) + 2 + footSlot.height
     opacity: dim ? 0.6 : 1
 
@@ -248,8 +259,60 @@ Item {
         y: root.dividerHeight + (root.grouped ? 0 : root.headTop - 2)
         width: parent.width
         height: parent.height - y - footSlot.height
-        color: root.mentioned ? Theme.accentTint
+        color: root.isCall ? "transparent" : root.mentioned ? Theme.accentTint
              : hover.hovered ? Theme.tint1 : "transparent"
+    }
+
+    // CallRecordRow.tsx: px-4, the call glyph in a 32 px box (danger ink
+    // for a missed call), the line in ui-sm ink-2, an ended call's length
+    // and the time in the number face, ink-3. No bar, no menu.
+    Row {
+        visible: root.isCall
+        x: 16
+        y: root.dividerHeight + 8 + 6
+        width: parent.width - 32
+        height: 32
+        spacing: 12
+        Accessible.role: Accessible.StaticText
+        Accessible.name: root.isCall ? root.callLine.text : ""
+        Item {
+            width: 32
+            height: 32
+            Icon {
+                anchors.centerIn: parent
+                name: "call"
+                size: Theme.iconSm
+                color: root.isCall && root.callLine.tone === "missed" ? Theme.dangerInk : Theme.ink3
+            }
+        }
+        Text {
+            id: callText
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.min(implicitWidth, parent.width - 44 - (callDuration.visible ? callDuration.implicitWidth + 12 : 0) - callTime.implicitWidth - 16)
+            elide: Text.ElideRight
+            textFormat: Text.PlainText
+            text: root.isCall ? root.callLine.text : ""
+            color: Theme.ink2
+            font: Theme.type.description
+        }
+        Text {
+            id: callDuration
+            visible: root.isCall && !!root.callLine.duration
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: visible ? root.callLine.duration : ""
+            color: Theme.ink3
+            font: Theme.type.num
+        }
+        Text {
+            id: callTime
+            anchors.verticalCenter: parent.verticalCenter
+            leftPadding: 4
+            textFormat: Text.PlainText
+            text: root.time
+            color: Theme.ink3
+            font: Theme.type.num
+        }
     }
     // The jump highlight (MessageItem.tsx `data-highlight`): accent-tint at
     // once, then a 300 ms fade when it lets go.
@@ -275,10 +338,21 @@ Item {
     }
 
     HoverHandler { id: hover }
+    // The keyboard focus ring (outline-2 in focus ink, inset).
+    Rectangle {
+        visible: root.keyFocused
+        z: 2
+        y: root.dividerHeight + (root.grouped ? 0 : root.headTop - 2)
+        width: parent.width
+        height: parent.height - y - footSlot.height
+        color: "transparent"
+        border.width: 2
+        border.color: Theme.focus
+    }
     // Right-click opens the same menu as More, at the pointer.
     TapHandler {
         acceptedButtons: Qt.RightButton
-        enabled: !root.editing && !root.pending && !root.failed
+        enabled: !root.editing && !root.pending && !root.failed && !root.isCall
         onTapped: point => root.menuRequested(root.messageId, root.author, root.body, root.mine,
                                               root, point.position.x, point.position.y)
     }
@@ -389,7 +463,7 @@ Item {
 
     Avatar {
         id: authorAvatar
-        visible: !root.grouped
+        visible: !root.grouped && !root.isCall
         x: 16
         y: root.headerTop + 2
         size: 40
@@ -408,7 +482,7 @@ Item {
 
     Text {
         // Gutter time for grouped messages: Martian 11, right-aligned.
-        visible: root.grouped && hover.hovered
+        visible: root.grouped && hover.hovered && !root.isCall
         x: 16
         width: 40
         y: bodyText.y + 4
@@ -427,7 +501,7 @@ Item {
 
     Row {
         id: meta
-        visible: !root.grouped
+        visible: !root.grouped && !root.isCall
         x: 68
         y: root.headerTop
         spacing: 8
@@ -479,7 +553,7 @@ Item {
 
     TextEdit {
         id: bodyText
-        visible: !root.editing && root.hasText
+        visible: !root.editing && root.hasText && !root.isCall
         height: root.hasText ? implicitHeight : 0
         x: 68
         y: root.grouped ? root.headerTop : meta.y + Theme.type.authorLine
@@ -574,6 +648,7 @@ Item {
     // Previews, attachments and reactions, in that order (MessageItem.tsx).
     Column {
         id: extras
+        visible: !root.isCall
         x: 68
         y: root.bodyItem.y + root.bodyItem.height
         width: root.width - x - 24
@@ -785,9 +860,9 @@ Item {
     // can overhang the row above. Holding Shift swaps More for Delete. It
     // stays while `keepBar` holds, and fades in from scale .97 over 100 ms
     // from its bottom-right corner.
-    z: hover.hovered || keepBar ? 1 : 0
+    z: hover.hovered || keepBar || keyFocused ? 1 : 0
     Loader {
-        active: (hover.hovered || root.keepBar) && !root.editing && !root.pending && !root.failed
+        active: (hover.hovered || root.keepBar || root.keyFocused) && !root.editing && !root.pending && !root.failed && !root.isCall
         anchors.right: parent.right
         anchors.rightMargin: 24
         // -top-4 from the row box, which starts under the group margin.

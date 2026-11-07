@@ -1145,3 +1145,101 @@ fn an_answer_for_another_channel_should_not_fill_the_threads_tab() {
     );
     assert!(client.seen.panels.threads.is_empty());
 }
+
+// Where each channel was left (useChatArea.ts scroll restore)
+
+fn restores(fx: &[Effect]) -> Vec<&str> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::View(ViewUpdate::ScrollRestore(id)) => Some(id.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn scroll_writes(fx: &[Effect]) -> Vec<(&str, &str)> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::CacheWrite {
+                write:
+                    CacheWrite::Scroll {
+                        channel_id,
+                        message_id,
+                    },
+                ..
+            } => Some((channel_id.as_str(), message_id.as_str())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_channel_should_reopen_at_the_message_it_was_left_on() {
+    let mut client = Client::online(three(), 0);
+    client.command(Command::SetAtBottom(false));
+    let fx = client.command(Command::ScrollAt("m2".into()));
+    assert_eq!(scroll_writes(&fx), vec![(A, "m2")]);
+    client.command(Command::SelectChannel(B.into()));
+    client.command(Command::SelectChannel(A.into()));
+    let fx = client.respond(&messages_of(A), page(three(), true));
+    assert_eq!(restores(&fx), vec!["m2"]);
+}
+
+#[test]
+fn a_channel_left_at_its_end_should_reopen_at_the_end_without_a_divider() {
+    let mut client = Client::online(three(), 0);
+    // `online` reports the end: the position is the bottom.
+    client.command(Command::SelectChannel(B.into()));
+    // Alice wrote while A was closed: the read mark is behind.
+    client.dispatch("MESSAGE_CREATE", msg(A, "m4", ALICE, 3));
+    assert!(client.state.is_unread(A));
+    client.command(Command::SelectChannel(A.into()));
+    let mut newer = three();
+    newer.push(msg(A, "m4", ALICE, 3));
+    let fx = client.respond(&messages_of(A), page(newer, true));
+    assert_eq!(restores(&fx), vec![""]);
+    assert!(client.state.divider().is_none());
+}
+
+#[test]
+fn a_saved_message_outside_the_newest_page_should_load_its_window_unhighlighted() {
+    let mut client = Client::online(three(), 0);
+    client.command(Command::SetAtBottom(false));
+    client.command(Command::ScrollAt("m1".into()));
+    client.command(Command::SelectChannel(B.into()));
+    client.command(Command::SelectChannel(A.into()));
+    // The newest page no longer holds m1.
+    client.respond(&messages_of(A), page(vec![msg(A, "m3", ALICE, 2)], true));
+    assert!(client.asked_for(&around(A, "m1")));
+    let window = json!({ "messages": three(), "hasMoreBefore": false, "hasMoreAfter": true });
+    let fx = client.respond(&around(A, "m1"), window);
+    assert_eq!(restores(&fx), vec!["m1"]);
+    assert!(client.seen.jumps.is_empty());
+}
+
+#[test]
+fn scrolling_a_jumps_window_should_keep_the_jumped_position() {
+    let mut client = Client::online(three(), 0);
+    client.command(jump(A, "m9"));
+    let window = json!({ "messages": three(), "hasMoreBefore": false, "hasMoreAfter": true });
+    client.respond(&around(A, "m9"), window);
+    client.command(Command::SetAtBottom(false));
+    let fx = client.command(Command::ScrollAt("m1".into()));
+    assert!(scroll_writes(&fx).is_empty(), "{fx:#?}");
+}
+
+#[test]
+fn the_newest_page_shown_while_a_saved_window_loads_should_not_overwrite_the_position() {
+    let mut client = Client::online(three(), 0);
+    client.command(Command::SetAtBottom(false));
+    client.command(Command::ScrollAt("m1".into()));
+    client.command(Command::SelectChannel(B.into()));
+    client.command(Command::SelectChannel(A.into()));
+    client.respond(&messages_of(A), page(vec![msg(A, "m3", ALICE, 2)], true));
+    // The list lands on the newest page and says it is at its end.
+    let fx = client.command(Command::SetAtBottom(true));
+    assert!(scroll_writes(&fx).is_empty(), "{fx:#?}");
+    let window = json!({ "messages": three(), "hasMoreBefore": false, "hasMoreAfter": true });
+    let fx = client.respond(&around(A, "m1"), window);
+    assert_eq!(restores(&fx), vec!["m1"]);
+}

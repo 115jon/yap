@@ -834,10 +834,32 @@ pub struct Message {
     /// `"call"` for a DM call record.
     #[serde(rename = "type")]
     pub kind: Option<String>,
+    /// The call record of a `"call"` message (call-record.ts).
+    #[serde(
+        default,
+        deserialize_with = "lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub call: Option<CallRecord>,
     /// Messages that reply to this one, its thread (message.service.ts
     /// `formatMessageRow`; 0 when absent).
     #[serde(default, deserialize_with = "count")]
     pub reply_count: i64,
+}
+
+/// A DM call's outcome, kept as a system message (`type: "call"`,
+/// call-record.ts `CallRecordSchema`); the message's author is the caller.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct CallRecord {
+    #[serde(default)]
+    pub call_id: String,
+    /// `missed`, `declined` or `ended`.
+    pub outcome: String,
+    pub caller_id: String,
+    pub callee_id: String,
+    /// Seconds from answer to hang-up; ended calls only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_s: Option<f64>,
 }
 
 /// A count that may be absent or `null`.

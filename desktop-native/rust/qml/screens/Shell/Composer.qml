@@ -21,11 +21,14 @@ Item {
     property string channelName
     // A DM: the prompt names the person ("Message @Ada").
     property bool dm: false
+    // A voice channel's chat: the prompt has no "#".
+    property bool voice: false
     // No Send messages here (ComposerReadOnly): the lock line instead.
     property bool readOnly: false
     // The message being replied to (empty: none).
     property string replyToId
     property string replyToName
+    property string replyToStyle
     property string replyToText
     property int replyToFiles: 0
 
@@ -54,12 +57,128 @@ Item {
         input.forceActiveFocus()
     }
 
-    // Inserts at the cursor (an emoji from the picker).
+    // Inserts at the cursor (an emoji from the picker). A server emoji
+    // goes in as one private-use placeholder drawn as its picture, and
+    // back to its `<:name:id>` token on send (useMessageInput.ts
+    // `insertEmoji`, message-input-utils.ts placeholders).
     function insertText(text) {
+        if (/^<:[a-z0-9_]+:[a-z0-9-]+>$/i.test(text)) {
+            let code = 0xe000
+            while (code <= 0xf8ff && (root.customMap[String.fromCharCode(code)] !== undefined
+                    || input.text.indexOf(String.fromCharCode(code)) >= 0))
+                code++
+            if (code <= 0xf8ff) {
+                const placeholder = String.fromCharCode(code)
+                const spans = JSON.parse(Chat.composerEmoji(text))
+                const next = Object.assign({}, root.customMap)
+                next[placeholder] = { token: text, url: spans.length > 0 ? spans[0][2] : "" }
+                root.customMap = next
+                text = placeholder
+            }
+        }
         const at = input.cursorPosition
         input.insert(at, text)
         input.cursorPosition = at + text.length
         input.forceActiveFocus()
+    }
+
+    // Placeholder character -> {token, url} of a picked server emoji.
+    property var customMap: ({})
+    function expandPlaceholders(text) {
+        let out = ""
+        for (const c of text)
+            out += root.customMap[c] !== undefined ? root.customMap[c].token : c
+        return out
+    }
+
+    // The composer's pictures, recomputed with the text: [start, end, url,
+    // fixed] (InputMentionOverlay.tsx).
+    property var emojiSpans: []
+    property string emojiKey: "[]"
+    function updateEmoji() {
+        const spans = JSON.parse(Chat.composerEmoji(input.text)).map(s => [s[0], s[1], s[2], false])
+        for (let i = 0; i < input.text.length; i++) {
+            const entry = root.customMap[input.text[i]]
+            if (entry !== undefined && entry.url.length > 0)
+                spans.push([i, i + 1, entry.url, true])
+        }
+        spans.sort((a, b) => a[0] - b[0])
+        const key = JSON.stringify(spans)
+        if (key === root.emojiKey)
+            return
+        root.emojiKey = key
+        root.emojiSpans = spans
+    }
+
+    // Mentions of a member edit as one unit (useMessageInput.ts
+    // `getValidMentions`): not inside a link, and the name is a member's.
+    readonly property var memberNames: {
+        const set = {}
+        for (const name of JSON.parse(Chat.mentionNames || "[]"))
+            set[name] = true
+        return set
+    }
+    function validMentions() {
+        const re = /@([a-zA-Z0-9_]+)/g
+        const text = input.text
+        const out = []
+        let m
+        while ((m = re.exec(text)) !== null) {
+            const before = text.slice(0, m.index)
+            const tokenStart = Math.max(before.lastIndexOf(" "), before.lastIndexOf("\n"), before.lastIndexOf("\t")) + 1
+            const token = text.slice(tokenStart).split(/\s/)[0]
+            if (/^https?:\/\//i.test(token))
+                continue
+            if (root.memberNames[m[1].toLowerCase()])
+                out.push({ start: m.index, end: m.index + m[0].length })
+        }
+        return out
+    }
+    // A caret or selection edge inside a mention moves out of it
+    // (`enforceAtomicMentions`).
+    property bool enforcing: false
+    // The text's length at the last check: a caret moved by typing (the
+    // length changed) is left alone, as the web runs this on select and
+    // click only, so finishing a name before a space keeps the caret.
+    property int enforcedLength: 0
+    function enforceAtomic() {
+        if (root.enforcing || input.preeditText.length > 0)
+            return
+        if (input.length !== root.enforcedLength) {
+            root.enforcedLength = input.length
+            return
+        }
+        const text = input.text
+        const start = input.selectionStart
+        const end = input.selectionEnd
+        let ns = start
+        let ne = end
+        for (const m of validMentions()) {
+            if (start > m.start && start <= m.end && start === end) {
+                if (start < m.start + (m.end - m.start) / 2)
+                    ns = m.start
+                else
+                    ns = text[m.end] === " " ? m.end + 1 : m.end
+                ne = ns
+            } else if (start > m.start && start < m.end) {
+                ns = m.start
+            }
+            if (end > m.start && end < m.end)
+                ne = text[m.end] === " " ? m.end + 1 : m.end
+        }
+        if (ns === start && ne === end)
+            return
+        root.enforcing = true
+        if (ns === ne)
+            input.cursorPosition = ns
+        else
+            input.select(ns, ne)
+        root.enforcing = false
+    }
+    // The member mention ending at the caret (or one space before it).
+    function mentionBefore(cursor) {
+        const text = input.text
+        return validMentions().find(m => cursor === m.end || (cursor === m.end + 1 && text[m.end] === " "))
     }
 
     // Puts a discarded send back, unless something new was typed meanwhile.
@@ -260,7 +379,31 @@ Item {
         // close key: a 32 px tint-1 tray inside the box, a seam under it.
         Rectangle {
             id: replyBar
-            visible: root.replyToId.length > 0
+            // Kept for its 100 ms fade after the reply is cleared (sent,
+            // cancelled, Esc): `useLingeringReply`.
+            property bool closing: false
+            visible: root.replyToId.length > 0 || closing
+            Connections {
+                target: root
+                function onReplyToIdChanged() {
+                    if (root.replyToId.length > 0) {
+                        enterOut.stop()
+                        replyBar.closing = false
+                    } else if (replyBar.opacity > 0) {
+                        replyBar.closing = true
+                        enterIn.stop()
+                        enterOut.restart()
+                    }
+                }
+            }
+            NumberAnimation {
+                id: enterOut
+                target: replyBar
+                property: "opacity"
+                to: 0
+                duration: Theme.dur1
+                onFinished: replyBar.closing = false
+            }
             x: 1
             y: 1
             width: parent.width - 2
@@ -274,11 +417,20 @@ Item {
             }
             Accessible.role: Accessible.StaticText
             Accessible.name: qsTr("Replying to %1").arg(root.replyToName)
+            // rm-list-enter: opacity and 4 px of travel in (dur-3)
+            // (ReplyIndicator.tsx).
+            property real shift: 0
+            onVisibleChanged: if (visible) enterIn.restart()
+            ParallelAnimation {
+                id: enterIn
+                NumberAnimation { target: replyBar; property: "shift"; from: 4; to: 0; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+                NumberAnimation { target: replyBar; property: "opacity"; from: 0; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+            }
 
             Row {
                 x: 12
-                anchors.verticalCenter: parent.verticalCenter
-                width: parent.width - x - closeKey.width - 12
+                y: (parent.height - height) / 2 + replyBar.shift
+                width: parent.width - x - closeKey.width - 16 - 8
                 spacing: 4
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
@@ -286,13 +438,16 @@ Item {
                     color: Theme.ink3
                     font: Theme.type.caption
                 }
-                Text {
+                // UserDisplayName in the author's style, max-w-56.
+                DisplayName {
                     id: replyName
                     anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.PlainText
+                    width: Math.min(implicitWidth, 224)
                     text: root.replyToName
+                    nameStyle: root.replyToStyle
                     color: Theme.ink1
                     font: Theme.type.captionStrong
+                    ground: Theme.ply2
                 }
                 // ReplyPreviewContent.tsx: the text; with none, an image
                 // glyph and "Click to see attachment", or "(no content)",
@@ -329,9 +484,10 @@ Item {
             IconKey {
                 id: closeKey
                 anchors.right: parent.right
-                anchors.rightMargin: 4
+                anchors.rightMargin: 16
                 anchors.verticalCenter: parent.verticalCenter
                 size: 24
+                tone: "muted"
                 iconName: "close"
                 tip: qsTr("Cancel reply")
                 onClicked: root.cancelReply()
@@ -371,7 +527,8 @@ Item {
                 // MessageInputPlaceholder.tsx: a reply asks for one.
                 placeholderText: root.replyToId.length > 0 ? qsTr("Reply to %1…").arg(root.replyToName)
                     : root.channelName.length === 0 ? qsTr("Message")
-                    : root.dm ? qsTr("Message @%1").arg(root.channelName) : qsTr("Message #%1").arg(root.channelName)
+                    : root.dm ? qsTr("Message @%1").arg(root.channelName)
+                    : root.voice ? qsTr("Message %1").arg(root.channelName) : qsTr("Message #%1").arg(root.channelName)
                 placeholderTextColor: Theme.ink3
                 color: Theme.ink1
                 selectionColor: Theme.selection
@@ -391,6 +548,39 @@ Item {
                     linkColor: Theme.accentInk
                     mentionColor: Theme.accentInk
                     mentionBackground: Theme.accentTint
+                    // The emoji's own glyphs go clear under their pictures.
+                    hidden: root.emojiSpans.map(s => [s[0], s[1]])
+                    fixed: root.emojiSpans.filter(s => s[3]).map(s => s[0])
+                }
+
+                // The pictures (InputMentionOverlay.tsx EmojiToken, 1.35em):
+                // at the start of a token's box, centred on its line; a
+                // placeholder's centred in its own 1.35em box. Placed again
+                // whenever the text lays out anew.
+                property int layoutTick: 0
+                onContentWidthChanged: layoutTick++
+                onContentHeightChanged: layoutTick++
+                onWidthChanged: layoutTick++
+                Repeater {
+                    model: root.emojiSpans
+                    Image {
+                        required property var modelData
+                        readonly property rect at: (input.layoutTick, input.positionToRectangle(Math.min(modelData[0], input.length)))
+                        readonly property rect after: (input.layoutTick, input.positionToRectangle(Math.min(modelData[1], input.length)))
+                        readonly property real box: Math.round(Theme.type.message.pixelSize * 1.35)
+                        width: box
+                        height: box
+                        x: modelData[3] ? at.x + ((after.y === at.y ? after.x - at.x : box) - box) / 2 : at.x
+                        y: at.y + (at.height - box) / 2
+                        source: modelData[2]
+                        sourceSize.width: 64
+                        sourceSize.height: 64
+                        smooth: true
+                        mipmap: true
+                        asynchronous: true
+                        fillMode: Image.PreserveAspectFit
+                        Accessible.ignored: true
+                    }
                 }
 
                 // The hovered `@name` (useMessageInput.ts handleMouseMove):
@@ -521,6 +711,8 @@ Item {
 
                 onTextChanged: {
                     input.clearMentionHover()
+                    root.updateEmoji()
+                    input.layoutTick++
                     root.updateMention()
                     const now = Date.now()
                     if (text.trim().length > 0 && now - root.typingSentAt > 3000) {
@@ -528,15 +720,21 @@ Item {
                         Chat.sendTyping()
                     }
                 }
-                onCursorPositionChanged: root.updateMention()
+                onCursorPositionChanged: {
+                    root.enforceAtomic()
+                    root.updateMention()
+                }
+                onSelectionStartChanged: root.enforceAtomic()
+                onSelectionEndChanged: root.enforceAtomic()
 
                 function submit() {
                     const text = input.text.trim()
                     // Finished uploads go even without text (a single space).
                     if (text.length === 0 && Chat.uploadsReady === 0)
                         return
-                    root.send(text, root.replyToId)
+                    root.send(root.expandPlaceholders(text), root.replyToId)
                     input.clear()
+                    root.customMap = ({})
                     root.typingSentAt = 0
                 }
 
@@ -550,6 +748,38 @@ Item {
                             Chat.addFiles(files)
                             event.accepted = true
                             return
+                        }
+                    }
+                    // A member's mention moves and deletes as one unit
+                    // (useMessageInput.ts handleKeyDown).
+                    const caret = input.cursorPosition
+                    const collapsed = input.selectionStart === input.selectionEnd
+                    if (collapsed && !(event.modifiers & (Qt.ShiftModifier | Qt.ControlModifier | Qt.AltModifier))) {
+                        if (event.key === Qt.Key_Left) {
+                            const m = root.mentionBefore(caret)
+                            if (m) {
+                                root.enforcing = true
+                                input.cursorPosition = m.start
+                                root.enforcing = false
+                                event.accepted = true
+                                return
+                            }
+                        } else if (event.key === Qt.Key_Right) {
+                            const m = root.validMentions().find(m => caret === m.start)
+                            if (m) {
+                                root.enforcing = true
+                                input.cursorPosition = input.text[m.end] === " " ? m.end + 1 : m.end
+                                root.enforcing = false
+                                event.accepted = true
+                                return
+                            }
+                        } else if (event.key === Qt.Key_Backspace && caret > 0) {
+                            const m = root.mentionBefore(caret)
+                            if (m) {
+                                input.remove(m.start, caret)
+                                event.accepted = true
+                                return
+                            }
                         }
                     }
                     if (root.mentionOpen) {

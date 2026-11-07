@@ -9,9 +9,9 @@ use yap_protocol::rest::{SessionInfo, ShareItem, User};
 use super::Effects;
 use crate::api::ApiError;
 use crate::settings::{
-    describe_api_error, editor_colors, is_app_theme, media_filter, normalize_hex_color,
-    sign_in_method_labels, validate_display_name, BIO_MAX, CUSTOM_STATUS_MAX, MEDIA_FILTERS,
-    PRONOUNS_MAX,
+    avatar_display, describe_api_error, editor_colors, is_app_theme, is_managed_nameplate,
+    media_filter, name_style_patch, normalize_hex_color, sign_in_method_labels,
+    validate_display_name, BIO_MAX, CUSTOM_STATUS_MAX, MEDIA_FILTERS, PRONOUNS_MAX,
 };
 use crate::store::state::{ProfileStep, State};
 use crate::store::time::parse_rfc3339;
@@ -255,7 +255,15 @@ impl State {
             "profileBannerColor".into(),
             color(draft.banner_color.as_deref()),
         );
+        // The display-name style goes out only when it changed (the web
+        // sends it on every save; an unchanged one is the same write).
+        if let Some(style) = &draft.name_style {
+            patch.insert("displayNameStyle".into(), name_style_patch(style));
+        }
         let kept = collectibles_only(me.avatar_display.as_ref());
+        // The frame editor's crop over the collectibles (the upload's
+        // `avatar_display`, or the patch's).
+        let cropped = avatar_display(me.avatar_display.as_ref(), draft.avatar_crop.flatten());
         if draft.remove_avatar {
             patch.insert("removeAvatar".into(), Value::Bool(true));
             if let Some(kept) = &kept {
@@ -263,11 +271,18 @@ impl State {
             }
         } else if let (None, Some(url)) = (&draft.avatar, &draft.avatar_url) {
             // A recent avatar (AvatarPickerModal.tsx): the stored URL, and
-            // the display without the old crop.
+            // the display without the old crop (or with the one framed
+            // since).
             patch.insert("avatarUrl".into(), Value::String(url.clone()));
-            if let Some(kept) = &kept {
-                patch.insert("avatarDisplay".into(), kept.clone());
+            if let Some(display) = &cropped {
+                patch.insert("avatarDisplay".into(), display.clone());
             }
+        } else if let (None, Some(_)) = (&draft.avatar, draft.avatar_crop) {
+            // The current avatar framed again: the display alone.
+            patch.insert(
+                "avatarDisplay".into(),
+                cropped.clone().unwrap_or(Value::Null),
+            );
         }
         let status = clip(&draft.custom_status, CUSTOM_STATUS_MAX);
         let saved_status = me.custom_status.as_deref().unwrap_or_default().trim();
@@ -280,7 +295,7 @@ impl State {
         if let (Some((path, content_type)), false) = (&draft.avatar, draft.remove_avatar) {
             steps.push(ProfileStep::Upload {
                 asset: ProfileAsset::Avatar {
-                    display: kept.map(|kept| kept.to_string()),
+                    display: cropped.map(|display| display.to_string()),
                 },
                 path: path.clone(),
                 content_type: content_type.clone(),
@@ -294,6 +309,22 @@ impl State {
             });
         } else if draft.remove_banner && me.banner_url.is_some() {
             steps.push(ProfileStep::DeleteBanner);
+        }
+        // A collectible nameplate is unequipped from the shop at once; only
+        // an uploaded file waits for Save.
+        if let Some((path, content_type)) = &draft.nameplate {
+            steps.push(ProfileStep::Upload {
+                asset: ProfileAsset::Nameplate,
+                path: path.clone(),
+                content_type: content_type.clone(),
+            });
+        } else if draft.remove_nameplate
+            && me
+                .nameplate_url
+                .as_deref()
+                .is_some_and(is_managed_nameplate)
+        {
+            steps.push(ProfileStep::DeleteNameplate);
         }
         steps.push(ProfileStep::Refresh);
         self.settings.profile_steps = steps.into();
@@ -312,6 +343,7 @@ impl State {
         let id = match step {
             ProfileStep::Patch { patch, .. } => self.http(fx, ApiRequest::UpdateProfile(patch)),
             ProfileStep::DeleteBanner => self.http(fx, ApiRequest::DeleteBanner),
+            ProfileStep::DeleteNameplate => self.http(fx, ApiRequest::DeleteNameplate),
             ProfileStep::Refresh => self.http(fx, ApiRequest::Me),
             ProfileStep::Upload {
                 asset,
@@ -580,6 +612,10 @@ impl State {
                 .avatar_url
                 .as_deref()
                 .is_some_and(|url| url.starts_with("/api/avatars/"));
+            view.custom_nameplate = me
+                .nameplate_url
+                .as_deref()
+                .is_some_and(is_managed_nameplate);
             view.status = shown.status;
             view.custom_status = shown.custom_status;
             view.pronouns = text(&me.pronouns);

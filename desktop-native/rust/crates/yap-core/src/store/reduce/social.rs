@@ -142,6 +142,16 @@ impl State {
             fx.view(ViewUpdate::Members(diff));
         }
         self.view.members = rows;
+        let names: Vec<String> = self
+            .mention_candidates()
+            .iter()
+            .map(|u| u.username.to_lowercase())
+            .collect();
+        let names = serde_json::to_string(&names).unwrap_or_default();
+        if names != self.view.mention_names {
+            self.view.mention_names.clone_from(&names);
+            fx.view(ViewUpdate::MentionNames(names));
+        }
     }
 
     pub(super) fn emit_active_dm(&mut self, fx: &mut Effects) {

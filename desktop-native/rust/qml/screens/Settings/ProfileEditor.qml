@@ -11,6 +11,9 @@ import com.yap.native
 // the form once it fits, above it otherwise. The form: Avatar and banner,
 // Profile theme, About you. Edits are a draft until Save in the unsaved
 // bar; closing while dirty nudges the bar instead of dropping the draft.
+// A new avatar is framed first (AvatarCropDialog: the crop is saved beside
+// the picture), Crop frames the current one again; the name style opens
+// NameStyleDialog; Upload takes a picture or video as the nameplate.
 T.Popup {
     id: editor
 
@@ -29,6 +32,15 @@ T.Popup {
     property string avatarUrlShown
     property string bannerPath
     property bool removeBanner: false
+    // The frame editor's crop (`{x, y, width, height}` in percent, or
+    // null), when it changed (a recent avatar starts without one).
+    property var crop: null
+    property bool cropChanged: false
+    // The display-name style as the views carry it, or empty.
+    property string nameStyle
+    // A picture or video for the nameplate, or the upload to delete.
+    property string nameplatePath
+    property bool removeNameplate: false
     property string localError
     property bool saved: false
 
@@ -40,12 +52,31 @@ T.Popup {
         || bannerColor !== Settings.bannerColor
         || avatarPath.length > 0 || removeAvatar || avatarUrl.length > 0
         || bannerPath.length > 0 || removeBanner
+        || cropChanged || nameStyle !== Session.meNameStyle
+        || nameplatePath.length > 0 || removeNameplate
     readonly property string error: localError.length > 0 ? localError : Settings.profileError
     // What the profile wears (collectibles apply at once, not on Save).
     readonly property var worn: Session.meDisplay.length > 0 ? (JSON.parse(Session.meDisplay).collectibles ?? {}) : ({})
     readonly property string shownAvatar: removeAvatar ? "" : avatarPath.length > 0 ? "file:///" + avatarPath
         : avatarUrlShown.length > 0 ? avatarUrlShown : Settings.avatar
     readonly property string shownBanner: removeBanner ? "" : bannerPath.length > 0 ? "file:///" + bannerPath : Settings.banner
+    // The stored crop, then the draft's (avatarDisplayToImageStyle).
+    readonly property var storedCrop: {
+        if (Session.meDisplay.length === 0)
+            return null
+        const display = JSON.parse(Session.meDisplay)
+        return display && display.crop ? display.crop : null
+    }
+    readonly property var shownCrop: removeAvatar ? null : cropChanged ? crop : storedCrop
+    readonly property string nameplateType: nameplatePath.length > 0 ? Settings.nameplateType(nameplatePath) : ""
+    // The plate the preview wears: the picked file, else the saved one.
+    readonly property string shownPlate: removeNameplate ? ""
+        : nameplatePath.length > 0 ? JSON.stringify({
+            still: nameplateType.startsWith("video/") ? "" : "file:///" + nameplatePath,
+            motion: nameplateType.startsWith("video/") ? "file:///" + nameplatePath : "",
+            border: "", light: false, assist: true
+        })
+        : Session.mePlate
 
     function reset() {
         pronouns = Settings.pronouns
@@ -60,6 +91,11 @@ T.Popup {
         avatarUrlShown = ""
         bannerPath = ""
         removeBanner = false
+        crop = null
+        cropChanged = false
+        nameStyle = Session.meNameStyle
+        nameplatePath = ""
+        removeNameplate = false
         localError = ""
         saved = false
     }
@@ -77,6 +113,12 @@ T.Popup {
             avatarUrl: avatarUrl,
             bannerPath: bannerPath,
             removeBanner: removeBanner,
+            crop: crop,
+            cropChanged: cropChanged,
+            nameStyle: nameStyle,
+            nameStyleChanged: nameStyle !== Session.meNameStyle,
+            nameplatePath: nameplatePath,
+            removeNameplate: removeNameplate,
         }))
     }
     function requestClose() {
@@ -96,14 +138,40 @@ T.Popup {
         }
         localError = ""
         if (kind === "avatar") {
-            avatarPath = path
-            removeAvatar = false
-            avatarUrl = ""
-            avatarUrlShown = ""
+            // handleAvatarFile: framed before it joins the draft.
+            cropper.filePath = path
+            cropper.source = "file:///" + path
+            cropper.open()
         } else {
             bannerPath = path
             removeBanner = false
         }
+    }
+
+    // Upload a nameplate (handleNameplateSelect): a picture or a video.
+    function pickNameplate() {
+        const paths = Files.pickFiles(qsTr("Upload a nameplate"))
+        const path = paths.length > 0 ? paths[0] : ""
+        if (path.length === 0)
+            return
+        if (Settings.nameplateType(path).length === 0) {
+            localError = qsTr("Choose an image or video file for your nameplate.")
+            return
+        }
+        localError = ""
+        removeNameplate = false
+        nameplatePath = path
+    }
+    // handleRemoveNameplate: a picked file is dropped, an uploaded one is
+    // deleted on Save; a collectible comes off at once, as the other slots.
+    function removePlate() {
+        localError = ""
+        if (nameplatePath.length > 0)
+            nameplatePath = ""
+        else if (worn.nameplate === undefined && Settings.customNameplate)
+            removeNameplate = true
+        else
+            Shop.remove("nameplate")
     }
 
     parent: T.Overlay.overlay
@@ -254,11 +322,12 @@ T.Popup {
                     deco: editor.shownAvatar.length > 0 ? Session.meDeco : ""
                     effect: Session.meEffect
                     frame: Session.meFrame
-                    nameStyle: Session.meNameStyle
+                    nameStyle: editor.nameStyle
                     animate: editor.visible
                     name: Settings.name
                     username: Settings.username
                     avatar: editor.shownAvatar
+                    crop: editor.shownCrop
                     initials: Settings.initials
                     pronouns: editor.pronouns.trim()
                     presence: Settings.status
@@ -312,7 +381,7 @@ T.Popup {
                 // Your nameplate behind a 48 px member row: the avatar
                 // (without its decoration) and the name at 15/500.
                 Rectangle {
-                    visible: Session.mePlate.length > 0
+                    visible: editor.shownPlate.length > 0
                     width: parent.width
                     height: 48
                     radius: 8
@@ -325,7 +394,7 @@ T.Popup {
                     NameplateLayer {
                         anchors.fill: parent
                         anchors.margins: 1
-                        plate: Session.mePlate
+                        plate: editor.shownPlate
                         playing: editor.visible
                         ground: Theme.ply2
                     }
@@ -336,18 +405,20 @@ T.Popup {
                         size: 32
                         initials: Settings.initials
                         source: editor.shownAvatar
+                        crop: editor.shownCrop
                     }
-                    Text {
+                    // The name in its style, held to 2.8:1 on the plate.
+                    DisplayName {
                         anchors.left: plateAvatar.right
                         anchors.leftMargin: 12
-                        anchors.right: parent.right
-                        anchors.rightMargin: 12
                         anchors.verticalCenter: parent.verticalCenter
-                        elide: Text.ElideRight
-                        textFormat: Text.PlainText
+                        width: Math.min(implicitWidth, parent.width - plateAvatar.width - 36)
                         text: Settings.name
+                        nameStyle: editor.nameStyle
                         color: Theme.ink1
                         font: Theme.type.setting
+                        ground: Theme.ply2
+                        minContrast: 2.8
                     }
                 }
                 }
@@ -368,7 +439,7 @@ T.Popup {
                             label: qsTr("Avatar")
                             description: editor.removeAvatar ? qsTr("Removed when you save")
                                 : editor.avatarPath.length > 0 ? qsTr("New image, uploads when you save")
-                                : editor.avatarUrl.length > 0 ? qsTr("A recent avatar, used when you save")
+                                : editor.avatarUrl.length > 0 ? qsTr("Recent image, applies when you save")
                                 : Settings.customAvatar ? qsTr("Your current avatar")
                                 : qsTr("Using your sign-in picture")
                             // Thumb round: the picture cropped round, or the
@@ -383,6 +454,7 @@ T.Popup {
                                         round: true
                                         initials: Settings.name
                                         source: editor.shownAvatar
+                                        crop: editor.shownCrop
                                     }
                                     Text {
                                         visible: editor.shownAvatar.length === 0
@@ -403,14 +475,28 @@ T.Popup {
                                     Accessible.name: qsTr("Change avatar")
                                     onClicked: avatarPicker.open()
                                 }
+                                // The current picture framed again.
+                                KitButton {
+                                    variant: "ghost"
+                                    text: qsTr("Crop")
+                                    Accessible.name: qsTr("Crop avatar")
+                                    enabled: editor.shownAvatar.length > 0
+                                    onClicked: {
+                                        cropper.filePath = ""
+                                        cropper.source = editor.shownAvatar
+                                        cropper.open()
+                                    }
+                                }
                                 KitButton {
                                     visible: editor.avatarPath.length > 0 || editor.avatarUrl.length > 0
-                                        || (Settings.customAvatar && !editor.removeAvatar)
+                                        || (!editor.removeAvatar && (Settings.customAvatar || editor.shownCrop !== null))
                                     variant: "ghost"
                                     text: qsTr("Remove")
                                     Accessible.name: qsTr("Remove avatar")
                                     onClicked: {
                                         editor.localError = ""
+                                        editor.crop = null
+                                        editor.cropChanged = false
                                         if (editor.avatarPath.length > 0 || editor.avatarUrl.length > 0) {
                                             editor.avatarPath = ""
                                             editor.avatarUrl = ""
@@ -520,8 +606,28 @@ T.Popup {
                             rowId: "profile-name-style"
                             label: qsTr("Display name style")
                             description: Settings.name
-                            layout: "inline"
-                            ComingLater {}
+                            // The name in the draft's style, 16/600.
+                            descriptionItem: Component {
+                                DisplayName {
+                                    text: Settings.name
+                                    nameStyle: editor.nameStyle
+                                    color: Theme.ink2
+                                    font: Theme.type.menuTitle
+                                    ground: Theme.ply2
+                                }
+                            }
+                            KitButton {
+                                text: editor.nameStyle.length > 0 ? qsTr("Edit") : qsTr("Add")
+                                Accessible.name: editor.nameStyle.length > 0 ? qsTr("Edit display name style") : qsTr("Add display name style")
+                                onClicked: styleDialog.open()
+                            }
+                            KitButton {
+                                visible: editor.nameStyle.length > 0
+                                variant: "ghost"
+                                text: qsTr("Clear")
+                                Accessible.name: qsTr("Clear display name style")
+                                onClicked: editor.nameStyle = ""
+                            }
                         }
                         SettingsRow {
                             custom: true
@@ -611,8 +717,32 @@ T.Popup {
                         }
                         SettingsRow {
                             custom: true; rowId: "profile-nameplate"; label: qsTr("Nameplate")
-                            description: editor.worn.nameplate?.name ?? qsTr("None")
-                            CollectibleKeys { kind: "nameplate"; on: editor.worn.nameplate !== undefined }
+                            description: editor.removeNameplate ? qsTr("Removed when you save")
+                                : editor.nameplatePath.length > 0 ? qsTr("New file, uploads when you save")
+                                : editor.worn.nameplate?.name ?? (Session.mePlate.length > 0 ? qsTr("Custom nameplate") : qsTr("None"))
+                            Row {
+                                spacing: 8
+                                KitButton {
+                                    variant: "secondary"
+                                    text: qsTr("Change")
+                                    Accessible.name: qsTr("Change nameplate")
+                                    onClicked: picker.show("nameplate")
+                                }
+                                KitButton {
+                                    variant: "ghost"
+                                    text: qsTr("Upload")
+                                    Accessible.name: qsTr("Upload a nameplate")
+                                    onClicked: editor.pickNameplate()
+                                }
+                                KitButton {
+                                    visible: editor.nameplatePath.length > 0
+                                        || (!editor.removeNameplate && (Session.mePlate.length > 0 || editor.worn.nameplate !== undefined))
+                                    variant: "ghost"
+                                    text: qsTr("Remove")
+                                    Accessible.name: qsTr("Remove nameplate")
+                                    onClicked: editor.removePlate()
+                                }
+                            }
                         }
                     }
                 }
@@ -762,6 +892,40 @@ T.Popup {
         id: picker
     }
 
+    // Frame your avatar: a picked file (Apply puts it in the draft) or the
+    // current picture again (Apply changes the crop only).
+    AvatarCropDialog {
+        id: cropper
+        property string filePath
+        name: Settings.name
+        initialCrop: editor.shownCrop
+        round: Session.meDeco.length > 0
+        onApplied: crop => {
+            if (filePath.length > 0) {
+                editor.avatarPath = filePath
+                editor.avatarUrl = ""
+                editor.avatarUrlShown = ""
+            }
+            editor.removeAvatar = false
+            editor.crop = crop
+            editor.cropChanged = true
+        }
+    }
+
+    NameStyleDialog {
+        id: styleDialog
+        displayName: Settings.name
+        username: Settings.username
+        avatar: editor.shownAvatar
+        avatarCrop: editor.shownCrop
+        initials: Settings.initials
+        initialStyle: editor.nameStyle
+        surfaceColor: editor.backgroundColor
+        accentColor: editor.accentColor
+        bannerColor: editor.bannerColor
+        onApplied: style => editor.nameStyle = style
+    }
+
     // Choose an image (AvatarPickerModal.tsx): upload, or one of the last
     // six uploads again.
     AvatarPicker {
@@ -774,6 +938,9 @@ T.Popup {
             editor.removeAvatar = false
             editor.avatarUrl = stored
             editor.avatarUrlShown = url
+            // withoutCrop: a recent picture starts unframed.
+            editor.crop = null
+            editor.cropChanged = true
         }
     }
 }

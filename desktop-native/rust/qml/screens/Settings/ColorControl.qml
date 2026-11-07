@@ -6,15 +6,21 @@ import com.yap.native
 // A profile colour (SettingsAccountTab.tsx ColorControl): the 8 preset
 // swatches, a "+" chip that opens the custom colour (a hex field), and
 // "Auto" while it follows the app theme, or a ghost Reset back to Auto.
-// `value` is `#RRGGBB` or empty for Auto.
+// `value` is `#RRGGBB` or empty for Auto. Without `allowAuto` (the name
+// style's colours) there is no Auto: Reset shows while the value is not
+// `fallback` and goes back to it.
 Flow {
     id: root
 
     property string value
     // Lowercase noun for control names ("banner color").
     property string name
-    readonly property list<string> presets: ["#FFFFFF", "#F4E6D4", "#FFD0BF", "#FCA5A5", "#F472B6", "#C084FC", "#60A5FA", "#34D399"]
+    // PROFILE_COLOR_SWATCHES (DISPLAY_NAME_COLOR_SWATCHES for a name).
+    property list<string> presets: ["#FFFFFF", "#F4E6D4", "#FFD0BF", "#FCA5A5", "#F472B6", "#C084FC", "#60A5FA", "#34D399"]
+    property bool allowAuto: true
+    property string fallback: ""
     readonly property bool custom: value.length > 0 && !presets.includes(value)
+    readonly property bool isDefault: allowAuto ? value.length === 0 : value === fallback
 
     signal picked(string value)
 
@@ -65,7 +71,8 @@ Flow {
                     if (Settings.normalizeColor(text) === root.value || (text.length === 0 && root.value.length === 0))
                         return
                     if (text.length === 0) {
-                        root.picked("")
+                        if (root.allowAuto)
+                            root.picked("")
                     } else {
                         const next = Settings.normalizeColor(text)
                         if (next.length > 0)
@@ -102,7 +109,7 @@ Flow {
                             width: 240 - 24 - 40
                             leadingInset: 10
                             maximumLength: 7
-                            placeholderText: qsTr("Auto")
+                            placeholderText: root.allowAuto ? qsTr("Auto") : root.fallback.replace(/^#/, "")
                             font: Theme.type.code
                             Accessible.name: qsTr("Hex %1").arg(root.name)
                             onAccepted: {
@@ -125,7 +132,7 @@ Flow {
     }
 
     Text {
-        visible: root.value.length === 0
+        visible: root.allowAuto && root.isDefault
         height: 28
         verticalAlignment: Text.AlignVCenter
         text: qsTr("Auto")
@@ -133,12 +140,12 @@ Flow {
         font: Theme.type.caption
     }
     KitButton {
-        visible: root.value.length > 0
+        visible: !root.isDefault
         variant: "ghost"
         size: "sm"
         text: qsTr("Reset")
         Accessible.name: qsTr("Use the default %1").arg(root.name)
-        onClicked: root.picked("")
+        onClicked: root.picked(root.allowAuto ? "" : root.fallback)
     }
 
     // A 28 px swatch; chosen is a 2 px accent ring 2 px out.

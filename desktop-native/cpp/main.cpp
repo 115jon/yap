@@ -60,6 +60,7 @@
 #include "windowchrome.h"
 
 #ifdef Q_OS_WIN
+#include <qpa/qwindowsysteminterface.h>
 #include <windows.h>
 #endif
 
@@ -73,19 +74,43 @@
 // behind others (a posted WM_MOUSEMOVE gives none: Qt resolves the window
 // under the screen point). The real cursor, keyboard and focus are never
 // touched.
+//
+// The test keyboard, "YapTestKey": wParam a Qt::Key, lParam the
+// Qt::KeyboardModifiers. The press and release go through
+// QWindowSystemInterface as a real key's would, so shortcuts and the focus
+// item both see them (a posted WM_KEYDOWN carries no Ctrl or Shift: Qt
+// reads those from the real keyboard). Key 0 only holds the modifiers for
+// the pointer's events that follow (Shift over a row), until the next.
 class TestPointer : public QAbstractNativeEventFilter
 {
 public:
   explicit TestPointer(QQuickWindow* window)
-    : m_window(window), m_message(RegisterWindowMessageW(L"YapTestPointer"))
+    : m_window(window), m_message(RegisterWindowMessageW(L"YapTestPointer")),
+      m_keyMessage(RegisterWindowMessageW(L"YapTestKey"))
   {
   }
 
   bool nativeEventFilter(const QByteArray&, void* message, qintptr*) override
   {
     auto* msg = static_cast<MSG*>(message);
-    if (m_message == 0 || msg->message != m_message || !m_window
-        || msg->hwnd != reinterpret_cast<HWND>(m_window->winId()))
+    if (!m_window || msg->hwnd != reinterpret_cast<HWND>(m_window->winId()))
+      return false;
+    if (m_keyMessage != 0 && msg->message == m_keyMessage) {
+      // wParam 0xFFFF: type the code point in lParam (an emoji, which a
+      // posted WM_CHAR pair may not deliver).
+      if (msg->wParam == 0xFFFF) {
+        const char32_t cp = char32_t(msg->lParam);
+        const QString text = QString::fromUcs4(&cp, 1);
+        QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(
+          m_window, QEvent::KeyPress, Qt::Key_unknown, Qt::NoModifier, text);
+        QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(
+          m_window, QEvent::KeyRelease, Qt::Key_unknown, Qt::NoModifier, text);
+        return true;
+      }
+      key(int(msg->wParam), Qt::KeyboardModifiers(int(msg->lParam)));
+      return true;
+    }
+    if (m_message == 0 || msg->message != m_message)
       return false;
     const qreal dpr = m_window->devicePixelRatio();
     const QPointF local(qreal(short(LOWORD(msg->lParam))) / dpr,
@@ -105,14 +130,14 @@ public:
       const bool press = msg->wParam == 2;
       m_buttons = press ? Qt::LeftButton : Qt::NoButton;
       QMouseEvent ev(press ? QEvent::MouseButtonPress : QEvent::MouseButtonRelease,
-                     local, local, global, Qt::LeftButton, m_buttons, Qt::NoModifier);
+                     local, local, global, Qt::LeftButton, m_buttons, m_mods);
       QCoreApplication::sendEvent(m_window, &ev);
       break;
     }
     default: {
       enter(local, global);
       QMouseEvent ev(QEvent::MouseMove, local, local, global, Qt::NoButton, m_buttons,
-                     Qt::NoModifier);
+                     m_mods);
       QCoreApplication::sendEvent(m_window, &ev);
       break;
     }
@@ -121,6 +146,25 @@ public:
   }
 
 private:
+  void key(int code, Qt::KeyboardModifiers mods)
+  {
+    m_mods = mods;
+    if (code == 0)
+      return;
+    // The text a US layout gives: letters follow Shift, other printable
+    // keys their own character; control keys none (Ctrl+L is a shortcut).
+    QString text;
+    if (!(mods & (Qt::ControlModifier | Qt::AltModifier)) && code >= 0x20 && code < 0x7f) {
+      const QChar c(code);
+      text = (mods & Qt::ShiftModifier) ? QString(c) : QString(c.toLower());
+    }
+    QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(
+      m_window, QEvent::KeyPress, code, mods, text);
+    QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(
+      m_window, QEvent::KeyRelease, code, mods, text);
+    m_mods = Qt::NoModifier;
+  }
+
   void enter(const QPointF& local, const QPointF& global)
   {
     if (m_inside)
@@ -132,8 +176,10 @@ private:
 
   QPointer<QQuickWindow> m_window;
   UINT m_message;
+  UINT m_keyMessage;
   bool m_inside = false;
   Qt::MouseButtons m_buttons = Qt::NoButton;
+  Qt::KeyboardModifiers m_mods = Qt::NoModifier;
 };
 #endif
 

@@ -20,6 +20,9 @@ Rectangle {
     property string highlightId
     property string replyToId
     property string replyToName
+    // The replied author's display-name style (ReplyIndicator.tsx
+    // UserDisplayName).
+    property string replyToStyle
     property string replyToText
     // Its attachments, for "Click to see attachment" when it has no text.
     property int replyToFiles: 0
@@ -93,6 +96,20 @@ Rectangle {
         Chat.setAtBottom(view.count > 0 && root.nearEnd)
     }
 
+    // Scrolled up, the top message on screen is where the channel reopens
+    // (useChatArea.ts `handleScrollRangeChange`, 120 ms after it settles).
+    Timer {
+        id: scrollReport
+        interval: 120
+        onTriggered: {
+            if (!root.landed || root.nearEnd || view.count === 0)
+                return
+            const top = view.itemAt(view.width / 2, view.contentY + 1)
+            if (top)
+                Chat.scrollAt(top.messageId)
+        }
+    }
+
     // Opening a channel lands on the divider when there is one, else the end.
     // Twice: the first pass creates the rows around the target, the second
     // places it with their real heights.
@@ -120,6 +137,15 @@ Rectangle {
             const target = Chat.indexOfMessage(root.jumpTarget)
             if (target >= 0) {
                 view.positionViewAtIndex(target, ListView.Center)
+                return
+            }
+        }
+        // Where the channel was left (useChatArea.ts restore): that message
+        // at the top, centred in a window loaded around it.
+        if (Chat.restoreId.length > 0) {
+            const saved = Chat.indexOfMessage(Chat.restoreId)
+            if (saved >= 0) {
+                view.positionViewAtIndex(saved, Chat.hasNewer ? ListView.Center : ListView.Beginning)
                 return
             }
         }
@@ -162,9 +188,10 @@ Rectangle {
         toast.show(qsTr("Message link copied"))
     }
 
-    function replyTo(id, author, text, attachments) {
+    function replyTo(id, author, text, attachments, nameStyle) {
         root.replyToId = id
         root.replyToName = author
+        root.replyToStyle = nameStyle ?? ""
         root.replyToText = text
         root.replyToFiles = attachments && attachments.length > 0 ? JSON.parse(attachments).length : 0
         composer.focusInput()
@@ -216,6 +243,90 @@ Rectangle {
     Connections {
         target: ShellState
         function onCopyImageRequested(url, name) { root.copyImage(url, name) }
+    }
+
+    // The focused row's keys (native; the web reaches a message's actions
+    // by Tab only): R reply, E edit, Delete delete (Shift: no confirm),
+    // P pin or unpin, T thread, + react, Ctrl+C copy the text, Enter or the
+    // menu key the message menu. Other typing goes to the composer.
+    function rowKey(event) {
+        const n = view.count
+        const at = view.currentIndex
+        const page = Math.max(1, Math.floor(view.height / 60))
+        const plain = !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+        switch (event.key) {
+        case Qt.Key_Up: view.focusRow(at - 1); event.accepted = true; return
+        case Qt.Key_Down: view.focusRow(at + 1); event.accepted = true; return
+        case Qt.Key_PageUp: view.focusRow(at - page); event.accepted = true; return
+        case Qt.Key_PageDown: view.focusRow(at + page); event.accepted = true; return
+        case Qt.Key_Home: view.focusRow(0); event.accepted = true; return
+        case Qt.Key_End: view.focusRow(n - 1); event.accepted = true; return
+        case Qt.Key_Escape: composer.focusInput(); event.accepted = true; return
+        }
+        const row = view.currentItem
+        if (!row || row.pending || row.failed)
+            return
+        if (event.key === Qt.Key_C && (event.modifiers & Qt.ControlModifier)) {
+            clipboard.copyText(row.body)
+            event.accepted = true
+            return
+        }
+        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Menu
+                || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+            messageMenuHost.load()?.openOn(row, row.messageId, row.author, row.body, row.mine,
+                                           row, row.width - 24, row.padTop)
+            event.accepted = true
+            return
+        }
+        if (!plain)
+            return
+        switch (event.key) {
+        case Qt.Key_R:
+            root.replyTo(row.messageId, row.author, row.body, row.attachments, row.nameStyle)
+            event.accepted = true
+            return
+        case Qt.Key_E:
+            if (row.mine) {
+                root.startEdit(row.messageId)
+                event.accepted = true
+            }
+            return
+        case Qt.Key_Delete:
+        case Qt.Key_Backspace:
+            if (row.canDelete) {
+                root.deleteMessage(row.messageId, row.author, row.body, !(event.modifiers & Qt.ShiftModifier), row)
+                event.accepted = true
+            }
+            return
+        case Qt.Key_P:
+            if (Panels.canPin) {
+                root.setPin(row.messageId, row.author, row.body, !row.pinned, !(event.modifiers & Qt.ShiftModifier))
+                event.accepted = true
+            }
+            return
+        case Qt.Key_T:
+            if (row.threadActions) {
+                root.openThread(row.messageId)
+                event.accepted = true
+            }
+            return
+        case Qt.Key_Plus:
+        case Qt.Key_Equal: {
+            const picker = reactionPicker.load()
+            if (picker) {
+                picker.messageId = row.messageId
+                picker.openBeside(row, false)
+            }
+            event.accepted = true
+            return
+        }
+        }
+        // Anything else typed goes to the composer, as it starts there.
+        if (event.text.length > 0 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127) {
+            composer.focusInput()
+            composer.insertText(event.text)
+            event.accepted = true
+        }
     }
 
     // `row`: the message's delegate, for the dialog's preview card
@@ -310,11 +421,15 @@ Rectangle {
     // The header spans the docked right column too (ChatArea.tsx: the
     // members, thread, pins and search columns sit under it).
     property real headerSpan: 0
+    // The voice channel's chat beside its view (ChatHeader.tsx `docked`).
+    property bool docked: false
 
     ChatHeader {
         id: header
         z: 3
         width: parent.width + root.headerSpan
+        docked: root.docked
+        onCloseRequested: Nav.showVoiceChat(false)
     }
 
     ConnectionStrip {
@@ -402,6 +517,32 @@ Rectangle {
         // cannot help (docs/PERFORMANCE.md, pass 2).
         reuseItems: false
         cacheBuffer: 1200
+        // Keyboard: Tab reaches the list; Up/Down, Page Up/Down, Home and
+        // End move between messages, and the focused one takes the
+        // message's own keys (rowKey below). Escape goes back to the
+        // composer. The view does not chase its current item.
+        activeFocusOnTab: true
+        keyNavigationEnabled: false
+        highlightFollowsCurrentItem: false
+        Accessible.role: Accessible.List
+        Accessible.name: qsTr("Messages")
+        onActiveFocusChanged: {
+            if (!activeFocus || count === 0)
+                return
+            // The newest message on screen.
+            const bottom = view.indexAt(view.width / 2, view.contentY + view.height - view.bottomMargin - 2)
+            const keep = currentItem && currentItem.y + currentItem.height > contentY && currentItem.y < contentY + height
+            if (!keep)
+                currentIndex = bottom >= 0 ? bottom : count - 1
+            positionViewAtIndex(currentIndex, ListView.Contain)
+        }
+        function focusRow(index) {
+            if (count === 0)
+                return
+            currentIndex = Math.max(0, Math.min(count - 1, index))
+            positionViewAtIndex(currentIndex, ListView.Contain)
+        }
+        Keys.onPressed: event => root.rowKey(event)
         topMargin: 0
         bottomMargin: 8
 
@@ -471,6 +612,8 @@ Rectangle {
             if (view.moving || view.ScrollBar.vertical.pressed)
                 root.followEnd = root.isNearEnd()
             root.updateNearEnd()
+            if (root.landed && !root.nearEnd)
+                scrollReport.restart()
             const nearTop = contentY - originY < root.historyFetchPx
             if (!nearTop)
                 root.olderAsked = false
@@ -492,11 +635,12 @@ Rectangle {
             id: row
             width: view.width
             today: Chat.today
+            keyFocused: view.activeFocus && ListView.isCurrentItem
             editingId: root.editingId
             // The bar stays while its emoji picker is open (`keepBar`).
             keepBar: (reactionPicker.item?.visible ?? false) && reactionPicker.item.messageId === messageId
             highlightId: root.highlightId
-            onReplyRequested: (id, author, text) => root.replyTo(id, author, text, row.attachments)
+            onReplyRequested: (id, author, text) => root.replyTo(id, author, text, row.attachments, row.nameStyle)
             onEditRequested: id => root.startEdit(id)
             onEditSaved: (id, text) => {
                 if (text.trim().length === 0) {
@@ -558,10 +702,14 @@ Rectangle {
             visible: active
             sourceComponent: Column {
                 readonly property bool dm: Nav.dmUsername.length > 0
-                readonly property real inner: width - 32
-                leftPadding: 16
-                rightPadding: 16
-                topPadding: 8
+                // A voice channel's chat (ChatWelcomeContent.tsx isVoice).
+                readonly property bool voice: root.docked
+                // An empty list holds it in p-4 (VirtualMessageList.tsx).
+                readonly property int pad: view.count === 0 ? 16 : 0
+                readonly property real inner: width - 32 - 2 * pad
+                leftPadding: 16 + pad
+                rightPadding: 16 + pad
+                topPadding: 8 + pad
                 spacing: 4
                 Item {
                     width: 56
@@ -581,7 +729,7 @@ Rectangle {
                         color: Theme.tint1
                         Icon {
                             anchors.centerIn: parent
-                            name: "textChannel"
+                            name: parent.parent.parent.voice ? "voiceChannel" : "textChannel"
                             size: Theme.iconLg
                             color: Theme.ink2
                         }
@@ -590,7 +738,7 @@ Rectangle {
                 Text {
                     width: parent.inner
                     textFormat: Text.PlainText
-                    text: parent.dm ? Nav.activeChannelName : "#" + Nav.activeChannelName
+                    text: parent.dm || parent.voice ? Nav.activeChannelName : "#" + Nav.activeChannelName
                     wrapMode: Text.Wrap
                     color: Theme.ink1
                     font: Theme.type.columnTitle
@@ -610,6 +758,7 @@ Rectangle {
                     topPadding: parent.dm ? 8 : 0
                     textFormat: Text.PlainText
                     text: parent.dm ? qsTr("This is the start of your conversation with %1.").arg(Nav.activeChannelName)
+                        : parent.voice ? qsTr("This is the start of the %1 chat.").arg(Nav.activeChannelName)
                         : qsTr("This is the start of #%1.").arg(Nav.activeChannelName)
                     wrapMode: Text.Wrap
                     color: Theme.ink2
@@ -653,8 +802,12 @@ Rectangle {
     Rectangle {
         id: toast
         property bool failure: false
+        // A second line is the description (ToastCard `description`).
         function show(text, failure) {
-            toastText.text = text
+            const cut = text.indexOf("
+")
+            toastText.text = cut < 0 ? text : text.slice(0, cut)
+            toastDesc.text = cut < 0 ? "" : text.slice(cut + 1)
             toast.failure = failure === true
             toast.visible = true
             if (toast.failure) {
@@ -670,7 +823,7 @@ Rectangle {
         x: root.width + root.headerSpan - width - 16
         y: composer.y - height - 16
         width: Math.min(356, root.width + root.headerSpan - 32)
-        height: toastText.implicitHeight + 24 + 4
+        height: toastText.implicitHeight + (toastDesc.text.length > 0 ? 4 + toastDesc.implicitHeight : 0) + 24 + 4
         radius: Theme.radius
         color: Theme.ply3
         border.width: 1
@@ -694,6 +847,20 @@ Rectangle {
             color: Theme.ink1
             font: Theme.type.author
             lineHeight: Theme.type.authorLine
+            lineHeightMode: Text.FixedHeight
+        }
+        // mt-1, text-ui-sm in ink-2.
+        Text {
+            id: toastDesc
+            visible: text.length > 0
+            textFormat: Text.PlainText
+            x: toastText.x
+            y: toastText.y + toastText.implicitHeight + 4
+            width: toastText.width
+            wrapMode: Text.Wrap
+            color: Theme.ink2
+            font: Theme.type.description
+            lineHeight: 18
             lineHeightMode: Text.FixedHeight
         }
         IconKey {
@@ -892,10 +1059,13 @@ Rectangle {
         anchors.topMargin: 0
         channelName: Nav.activeChannelName
         dm: Nav.dmUsername.length > 0
+        // A voice channel's chat: "Message lounge" (composerPrompt isVoice).
+        voice: root.docked
         readOnly: Chat.readOnly && Nav.dmUsername.length === 0
         enabled: Nav.activeChannelId.length > 0
         replyToId: root.replyToId
         replyToName: root.replyToName
+        replyToStyle: root.replyToStyle
         replyToText: root.replyToText
         replyToFiles: root.replyToFiles
         onSend: (text, replyToId) => {
@@ -913,7 +1083,7 @@ Rectangle {
             MessageMenu {
                 host: root
                 onEditRequested: id => root.startEdit(id)
-                onReplyRequested: (id, author, text) => root.replyTo(id, author, text, row?.attachments ?? "")
+                onReplyRequested: (id, author, text) => root.replyTo(id, author, text, row?.attachments ?? "", row?.nameStyle ?? "")
                 onThreadRequested: id => root.openThread(id)
                 onPinRequested: (id, author, text, pin, confirm) => root.setPin(id, author, text, pin, confirm)
                 onDeleteRequested: (id, author, text, row, confirm) => root.deleteMessage(id, author, text, confirm, row)

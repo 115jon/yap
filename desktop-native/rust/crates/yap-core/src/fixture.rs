@@ -159,6 +159,7 @@ impl Fixture {
             | ApiRequest::GifShare { .. }
             | ApiRequest::UpdateProfile(_)
             | ApiRequest::DeleteBanner
+            | ApiRequest::DeleteNameplate
             | ApiRequest::RevokeShare { .. } => ApiResponse::Done,
             // No pins, no windows; a thread is empty.
             ApiRequest::Threads(request) => ApiResponse::Threads(
@@ -282,6 +283,7 @@ pub(crate) fn blank_message() -> Message {
         nonce: None,
         content_revision: None,
         kind: None,
+        call: None,
         reply_count: 0,
     }
 }

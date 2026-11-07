@@ -460,9 +460,148 @@ pub fn split_native(text: &str) -> Vec<Segment<'_>> {
     segments
 }
 
+/// One emoji the composer draws as a picture over its text
+/// (InputMentionOverlay.tsx): `start..end` in UTF-16 units, as QML counts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposerEmoji {
+    pub start: usize,
+    pub end: usize,
+    pub url: String,
+}
+
+/// The longest native emoji at byte `i` of `text`, as `(end, cell)`.
+fn native_at(idx: &Index, text: &str, i: usize) -> Option<(usize, EmojiCell)> {
+    let mut chars = text[i..].chars();
+    let first = chars.next()?;
+    if !can_start(idx, first, chars.next()) {
+        return None;
+    }
+    let ends: Vec<usize> = text[i..]
+        .char_indices()
+        .skip(1)
+        .map(|(at, _)| i + at)
+        .chain(std::iter::once(text.len()))
+        .take(idx.max_key_chars)
+        .collect();
+    ends.into_iter().rev().find_map(|end| {
+        let &(at, skin) = idx.by_native.get(&text[i..end])?;
+        Some((end, cell_of(&idx.entries[at], skin)))
+    })
+}
+
+/// The end of a run of bytes from byte `i` that `allowed` takes (it sees
+/// them lowercased).
+fn run(text: &[u8], i: usize, allowed: impl Fn(u8) -> bool) -> usize {
+    let mut end = i;
+    while end < text.len() && allowed(text[end].to_ascii_lowercase()) {
+        end += 1;
+    }
+    end
+}
+
+/// The composer's pictures, scanned as InputMentionOverlay.tsx does: a
+/// link (to the first space or one of `<>"'`)]`) and an `@name` hold
+/// none; a `<:name:id>` is the server's emoji
+/// (`{api_base}/api/emojis/assets/{id}`), a known `:shortcode:` its
+/// Twemoji, and a native emoji in plain text its Twemoji.
+pub fn composer_emoji(text: &str, api_base: &str) -> Vec<ComposerEmoji> {
+    let idx = index();
+    let bytes = text.as_bytes();
+    let base = api_base.trim_end_matches('/');
+    let word = |c: u8| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_';
+    let mut out = Vec::new();
+    let mut i = 0;
+    // The UTF-16 offset of byte `seen`.
+    let mut seen = 0;
+    let mut units = 0;
+    while i < text.len() {
+        let rest = &text[i..];
+        let lower = rest
+            .get(..8)
+            .map_or_else(|| rest.to_ascii_lowercase(), str::to_ascii_lowercase);
+        let token = if lower.starts_with("https://") || lower.starts_with("http://") {
+            let n = rest
+                .find(|c: char| c.is_whitespace() || "<>\"'`)]".contains(c))
+                .unwrap_or(rest.len());
+            Some((i + n, None))
+        } else if rest.starts_with("<:") {
+            let name_end = run(bytes, i + 2, word);
+            let id_end = if name_end > i + 2 && bytes.get(name_end) == Some(&b':') {
+                run(bytes, name_end + 1, |c| {
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-'
+                })
+            } else {
+                name_end
+            };
+            (id_end > name_end + 1 && bytes.get(id_end) == Some(&b'>')).then(|| {
+                let id = &text[name_end + 1..id_end];
+                let url = (!base.is_empty()).then(|| format!("{base}/api/emojis/assets/{id}"));
+                (id_end + 1, url)
+            })
+        } else {
+            None
+        };
+        let token = token.or_else(|| match bytes[i] {
+            b':' => {
+                let end = run(bytes, i + 1, |c| word(c) || c == b'+' || c == b'-');
+                (end > i + 1 && bytes.get(end) == Some(&b':')).then(|| {
+                    let url = by_shortcode(&text[i + 1..end], 0).map(|cell| cell.image_url());
+                    (end + 1, url)
+                })
+            }
+            b'@' => {
+                let end = run(bytes, i + 1, word);
+                (end > i + 1).then_some((end, None))
+            }
+            _ => None,
+        });
+        let (end, url) = match token {
+            Some(token) => token,
+            None => match native_at(idx, text, i) {
+                Some((end, cell)) => (end, Some(cell.image_url())),
+                None => (i + rest.chars().next().map_or(1, char::len_utf8), None),
+            },
+        };
+        if let Some(url) = url {
+            units += text[seen..i].encode_utf16().count();
+            let start = units;
+            units += text[i..end].encode_utf16().count();
+            seen = end;
+            out.push(ComposerEmoji {
+                start,
+                end: units,
+                url,
+            });
+        }
+        i = end;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn composer_emoji_should_find_native_shortcode_and_server_emoji_but_not_in_links() {
+        let text = "hi \u{1F600} :smile: <:party:abc-12> https://x.test/:smile: @a:smile: :nope:";
+        let spans = composer_emoji(text, "https://api.test/");
+        let found: Vec<(usize, usize, &str)> = spans
+            .iter()
+            .map(|s| (s.start, s.end, s.url.as_str()))
+            .collect();
+        assert_eq!(found.len(), 4, "{found:?}");
+        // The grinning face is two UTF-16 units.
+        assert_eq!((found[0].0, found[0].1), (3, 5));
+        assert!(found[0].2.ends_with("1f600.png"), "{found:?}");
+        assert_eq!((found[1].0, found[1].1), (6, 13));
+        assert_eq!(
+            found[2],
+            (14, 29, "https://api.test/api/emojis/assets/abc-12")
+        );
+        // `@a` ends at the colon; the shortcode after it still draws.
+        assert!(found[3].2.ends_with(".png"));
+    }
 
     fn emoji(segment: &Segment<'_>) -> Option<String> {
         match segment {

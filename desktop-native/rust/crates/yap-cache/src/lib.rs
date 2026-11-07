@@ -67,6 +67,9 @@ pub struct Snapshot {
     pub written_at_ms: i64,
     /// `None` until the user changed mic or deafen once.
     pub voice: Option<VoicePrefs>,
+    /// Where each channel was left: its top message on screen, or
+    /// `BOTTOM` (the web's persisted `scrollPositions`).
+    pub scroll_positions: Vec<(String, String)>,
 }
 
 /// One replacement for part of a user's snapshot. Each replaces what was
@@ -91,6 +94,11 @@ pub enum Write {
     },
     /// Mic and deafen.
     Voice(VoicePrefs),
+    /// Where a channel was left.
+    Scroll {
+        channel_id: String,
+        message_id: String,
+    },
 }
 
 /// `%LOCALAPPDATA%\YapNative\cache\snapshot.db` (under the profile's folder

@@ -320,7 +320,8 @@ fn a_file_over_25_mb_should_be_refused_with_the_web_copy() {
     });
     assert_eq!(
         notice.as_deref(),
-        Some("big.png is too large to upload. Files can be up to 25 MB.")
+        Some("big.png is too large to upload
+Files can be up to 25 MB.")
     );
 }
 

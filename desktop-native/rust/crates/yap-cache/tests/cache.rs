@@ -132,6 +132,7 @@ fn a_snapshot_should_round_trip_through_the_file() {
             messages: (0..3).map(|n| message("chan_text", n)).collect(),
             written_at_ms: 1_000,
             voice: None,
+            scroll_positions: Vec::new(),
         }
     );
 }
@@ -357,4 +358,38 @@ fn a_writer_without_a_database_should_drop_writes() {
     writer.attach(None);
     writer.write(ALICE, Write::Me(Box::new(user(ALICE))));
     assert!(writer.flush(Duration::from_secs(5)));
+}
+
+#[test]
+fn scroll_positions_should_round_trip_and_replace_per_channel() {
+    let (_dir, path) = temp();
+    let mut cache = Cache::open(&path).expect("open");
+    write_snapshot(&mut cache, ALICE, 1_000);
+    let mut batch = Batch::default();
+    for (channel, at) in [
+        ("chan_text", "msg_1"),
+        ("chan_two", "BOTTOM"),
+        ("chan_text", "msg_2"),
+    ] {
+        batch.push(
+            ALICE,
+            Write::Scroll {
+                channel_id: channel.into(),
+                message_id: at.into(),
+            },
+        );
+    }
+    cache.apply_at(batch, 2_000).expect("apply");
+    drop(cache);
+
+    let cache = Cache::open(&path).expect("reopen");
+    let mut positions = load(&cache, ALICE).expect("snapshot").scroll_positions;
+    positions.sort();
+    assert_eq!(
+        positions,
+        vec![
+            ("chan_text".to_owned(), "msg_2".to_owned()),
+            ("chan_two".to_owned(), "BOTTOM".to_owned()),
+        ]
+    );
 }

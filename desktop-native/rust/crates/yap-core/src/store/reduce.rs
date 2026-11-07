@@ -26,7 +26,7 @@ use yap_protocol::{Frame, GatewayOp};
 
 use super::state::{
     pending_id, Boot, Divider, MessageLog, Outgoing, Pending, Phase, ServerChannels, Session,
-    Standby, Startup, State, Typer, VoiceCall, VoicePrefs,
+    Standby, Startup, State, Typer, VoiceCall, VoicePrefs, SCROLL_BOTTOM,
 };
 use super::time::{is_after, parse_rfc3339, Stamp};
 use super::view::{
@@ -224,11 +224,15 @@ impl State {
             divider: self.divider.as_ref().map(|d| d.message_id.as_str()),
             names: &self.names,
             hydrations: &self.hydrations,
+            // A DM has no server roles to colour its names with (the open
+            // server stays set behind Home).
             members: self
                 .active_server
                 .as_ref()
+                .filter(|_| !self.home)
                 .and_then(|server| self.members.get(server))
                 .map_or(&[], Vec::as_slice),
+            dm_recipient: self.active_dm().map(|dm| &dm.recipient),
         }
     }
 
@@ -652,6 +656,7 @@ impl State {
                     .map(|c| c.name.clone())
                     .unwrap_or_default(),
                 count: i64::try_from(self.seats(id).len()).unwrap_or(i64::MAX),
+                chat: self.voice_chat,
             },
             None => VoicePanelView::default(),
         };
@@ -739,19 +744,84 @@ impl State {
     }
 
     /// Opens a voice channel's view (its landing; the call once joined).
+    /// Selecting it closes its text chat (`SET_VOICE_TEXT` false); a jump
+    /// into it opens the chat after.
     fn open_voice_panel(&mut self, fx: &mut Effects, id: &str) {
         self.voice_view = Some(id.to_owned());
+        self.voice_chat = false;
         self.emit_voice_panel(fx);
         self.sync_roster(fx);
         self.sync_standby(fx);
+        // What reads as unread follows the channel on screen.
+        self.sync_badges(fx);
     }
 
     fn close_voice_panel(&mut self, fx: &mut Effects) {
+        self.voice_chat = false;
         if self.voice_view.take().is_some() {
             fx.view(ViewUpdate::VoicePanel(VoicePanelView::default()));
             self.sync_roster(fx);
+            self.sync_badges(fx);
         }
         self.sync_standby(fx);
+    }
+
+    /// The voice channel's text chat beside its view (ChatPageClient.tsx
+    /// "Voice chat" SidePanel): the channel's messages open as the active
+    /// channel; hiding them keeps them loaded for the next open.
+    fn show_voice_chat(&mut self, fx: &mut Effects, show: bool) {
+        let Some(id) = self.voice_view.clone() else {
+            return;
+        };
+        self.voice_chat = show;
+        if show && self.active_channel.as_deref() != Some(id.as_str()) {
+            let name = self
+                .find_channel(&id)
+                .map(|c| c.name.clone())
+                .unwrap_or_default();
+            self.open_messages(fx, &id, name, false);
+        }
+        self.emit_voice_panel(fx);
+        self.on_seen(fx, false);
+    }
+
+    /// Where the open channel is left: its top message, or the end.
+    fn set_scroll_position(&mut self, fx: &mut Effects, channel_id: &str, at: &str) {
+        if channel_id.is_empty()
+            || at.is_empty()
+            || self.scroll_positions.get(channel_id).map(String::as_str) == Some(at)
+        {
+            return;
+        }
+        self.scroll_positions
+            .insert(channel_id.to_owned(), at.to_owned());
+        self.persist(
+            fx,
+            CacheWrite::Scroll {
+                channel_id: channel_id.to_owned(),
+                message_id: at.to_owned(),
+            },
+        );
+    }
+
+    /// The list reports its top message while scrolled up. A jump's
+    /// window keeps the jump's position (`lockPosition`).
+    fn scroll_at(&mut self, fx: &mut Effects, message_id: &str) {
+        let Some(channel) = self.active_channel.clone() else {
+            return;
+        };
+        if self.at_bottom
+            || self.restoring()
+            || !self.chat_on_screen()
+            || (self.detached() && self.jump_anchors.contains(&channel))
+            || self
+                .messages
+                .as_ref()
+                .is_none_or(|l| l.channel_id != channel)
+        {
+            return;
+        }
+        self.set_scroll_position(fx, &channel, message_id);
     }
 
     /// Holds a standby for the open voice landing while someone else is in
@@ -1119,6 +1189,8 @@ impl State {
             || self.pending.page.is_some()
             || self.pending.read_states.is_some()
             || self.detached()
+            || self.restoring()
+            || !self.chat_on_screen()
         {
             return;
         }
@@ -1392,8 +1464,17 @@ impl State {
             Command::LoadOlder => self.load_older(fx),
             Command::SetAtBottom(at_bottom) => {
                 self.at_bottom = at_bottom;
+                // At the end of the newest page: the channel reopens there.
+                if at_bottom && !self.detached() && !self.restoring() && self.chat_on_screen() {
+                    if let Some(channel) = self.active_channel.clone() {
+                        self.jump_anchors.remove(&channel);
+                        self.set_scroll_position(fx, &channel, SCROLL_BOTTOM);
+                    }
+                }
                 self.on_seen(fx, false);
             }
+            Command::ScrollAt(id) => self.scroll_at(fx, &id),
+            Command::ShowVoiceChat(show) => self.show_voice_chat(fx, show),
             Command::SeenFrom(id) => self.seen_from = Some(id),
             Command::SetFocused(focused) => {
                 let returned = focused && !self.focused;
@@ -1659,8 +1740,10 @@ impl State {
             active_channel,
             messages,
             voice,
+            scroll_positions,
             ..
         } = snapshot;
+        self.scroll_positions = scroll_positions.into_iter().collect();
         if let Some(prefs) = voice.filter(|p| *p != self.voice_prefs) {
             self.voice_prefs = prefs;
             self.emit_voice(fx);
@@ -1826,6 +1909,8 @@ impl State {
         }
         self.names.clear();
         self.clear_typing(fx);
+        self.scroll_positions.clear();
+        self.jump_anchors.clear();
         self.read_states.clear();
         self.last_message_at.clear();
         self.notifications.clear();
@@ -2319,7 +2404,20 @@ impl State {
         // A server channel leaves Home.
         self.leave_home(fx);
         match kind {
-            ChannelType::Voice => self.open_voice_panel(fx, id),
+            ChannelType::Voice => {
+                self.open_voice_panel(fx, id);
+                // A jump to one of its messages opens its chat
+                // (useChatPageLogic.ts `navigate-channel`).
+                let jumping = self
+                    .panels
+                    .jump
+                    .wanted
+                    .as_ref()
+                    .is_some_and(|(channel, _)| channel == id);
+                if jumping {
+                    self.show_voice_chat(fx, true);
+                }
+            }
             _ => self.open_text(fx, id, name),
         }
     }
@@ -2327,6 +2425,13 @@ impl State {
     /// Opens a text channel or a DM: subscribe, an empty list, the page.
     fn open_text(&mut self, fx: &mut Effects, id: &str, name: String) {
         self.close_voice_panel(fx);
+        self.open_messages(fx, id, name, true);
+    }
+
+    /// The active channel becomes `id` (a text channel, a DM, or a voice
+    /// channel's chat): subscribe, an empty list, the page. `recent`: it
+    /// goes on the switcher's Recent list.
+    fn open_messages(&mut self, fx: &mut Effects, id: &str, name: String, recent: bool) {
         if let Some(previous) = self.active_channel.replace(id.to_owned()) {
             if previous != id {
                 self.gateway_send(
@@ -2356,7 +2461,9 @@ impl State {
         // The open channel stops showing as unread.
         self.sync_badges(fx);
         self.sync_members(fx);
-        self.emit_recent(fx, id, name_for_recent);
+        if recent {
+            self.emit_recent(fx, id, name_for_recent);
+        }
     }
 
     /// The switcher's Recent list (CommandMenu.tsx `recordRecentTarget`):
@@ -2475,10 +2582,40 @@ impl State {
             let at = newest.created_at.clone();
             self.bump_last_message(channel_id, &at);
         }
+        // Where the channel was left (useChatArea.ts restore), unless a
+        // jump into it waits: a saved message in this page lands at the top
+        // (the newest one: the end), one outside it loads its window, and
+        // the end ("BOTTOM") in a focused window shows no divider (the
+        // channel is read once the list says it is there).
+        let jumping = self
+            .panels
+            .jump
+            .wanted
+            .as_ref()
+            .is_some_and(|(channel, _)| channel == channel_id);
+        let mut restore = String::new();
+        let mut around = None;
+        let mut at_end = false;
+        if !shown && !jumping {
+            match self.scroll_positions.get(channel_id).map(String::as_str) {
+                Some(SCROLL_BOTTOM) => at_end = true,
+                Some(id) if log.get(id).is_some() => {
+                    let newest = log.iter().rev().find(|m| !is_pending(m));
+                    if newest.is_some_and(|m| m.id == id) {
+                        at_end = true;
+                    } else {
+                        restore = id.to_owned();
+                    }
+                }
+                Some(id) => around = Some(id.to_owned()),
+                None => {}
+            }
+        }
         // With unread messages the divider goes above the first one after
         // the read mark (useChatArea.ts), cached rows on screen or not.
         let placed = match &self.divider {
             Some(_) => false,
+            None if at_end && self.focused => false,
             None => {
                 self.divider = self.divider_for(&log);
                 self.divider.is_some()
@@ -2498,6 +2635,7 @@ impl State {
                 fx.messages(diff);
             }
         } else {
+            fx.view(ViewUpdate::ScrollRestore(restore));
             fx.messages(ViewDiff::Reset(rows));
         }
         if placed {
@@ -2518,6 +2656,11 @@ impl State {
         self.sync_badges(fx);
         self.on_seen(fx, false);
         self.after_page_jump(fx, channel_id);
+        if let Some(id) = around {
+            // A position a jump left highlights again (`wasJump`).
+            let anchored = self.jump_anchors.contains(channel_id);
+            self.load_around(fx, channel_id, &id, !anchored);
+        }
     }
 
     /// Asks for the page before the oldest loaded message.
@@ -2799,6 +2942,7 @@ impl State {
             nonce: Some(nonce.clone()),
             content_revision: None,
             kind: None,
+            call: None,
             reply_count: 0,
         };
         self.outbox.insert(
@@ -3468,7 +3612,11 @@ impl State {
         }
         self.upsert_if_open(fx, message);
         // A jump's window has not reached the new message: unseen, not read.
-        if self.active_channel.as_deref() == Some(channel.as_str()) && !self.detached() {
+        if self.active_channel.as_deref() == Some(channel.as_str())
+            && !self.detached()
+            && !self.restoring()
+            && self.chat_on_screen()
+        {
             self.mark_read(fx, &channel, Some(&at));
         }
         self.sync_badges(fx);

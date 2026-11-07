@@ -11,6 +11,12 @@ import com.yap.native
 Item {
     id: root
 
+    // The voice channel's chat docked beside its view (ChatHeader.tsx
+    // `docked`, a 360 column): search is a key like the others, there is
+    // no members key, and a close key ends the row.
+    property bool docked: false
+    signal closeRequested()
+
     implicitHeight: Theme.header
 
     // ply-0 under the whole header, the docked column's top included.
@@ -23,6 +29,9 @@ Item {
 
     // ChatHeader.tsx `onToggleChannelDetails`.
     function toggleDetails() {
+        // The docked chat has no column for the details.
+        if (root.docked)
+            return
         ShellState.showDetails = !ShellState.showDetails
     }
 
@@ -100,12 +109,17 @@ Item {
             Icon {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: Nav.activeChannelId.length > 0
-                name: Nav.dmUsername.length > 0 ? "mention" : "textChannel"
+                name: Nav.dmUsername.length > 0 ? "mention" : root.docked ? "voiceChannel" : "textChannel"
                 size: Theme.iconLg
                 color: titleHover.hovered ? Theme.ink2 : Theme.ink3
             }
             Text {
+                id: titleText
                 anchors.verticalCenter: parent.verticalCenter
+                // Truncated to what the actions leave (min-w-0 truncate).
+                width: Math.min(implicitWidth, Math.max(0, actions.x - 12 - 16 - 8 - 28
+                    - (Nav.dmUsername.length > 0 ? handle.implicitWidth + 17 + 16 : 0)))
+                elide: Text.ElideRight
                 textFormat: Text.PlainText
                 text: Nav.activeChannelName
                 color: Theme.ink1
@@ -119,6 +133,7 @@ Item {
                 color: Theme.lineStrong
             }
             Text {
+                id: handle
                 anchors.verticalCenter: parent.verticalCenter
                 visible: Nav.dmUsername.length > 0
                 textFormat: Text.PlainText
@@ -241,6 +256,7 @@ Item {
                 }
             }
             IconKey {
+                visible: !root.docked
                 iconName: "members"
                 // Search takes the right column, so members reads unpressed.
                 tone: ShellState.showMembers && !ShellState.searchOpen ? "toggled" : "muted"
@@ -266,7 +282,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             width: 224
             height: 38
-            visible: root.width >= 720 && !ShellState.searchOpen
+            visible: root.width >= 720 && !ShellState.searchOpen && !root.docked
             activeFocusOnTab: true
             Accessible.role: Accessible.Button
             Accessible.name: root.searchTip
@@ -337,7 +353,7 @@ Item {
         // and the search key of a narrow header.
         IconKey {
             anchors.verticalCenter: parent.verticalCenter
-            visible: ShellState.searchOpen || root.width < 720
+            visible: ShellState.searchOpen || root.width < 720 || root.docked
             iconName: "search"
             tone: ShellState.searchOpen ? "toggled" : "muted"
             tipSide: "bottom"
@@ -349,6 +365,21 @@ Item {
                     ShellState.searchOpen = false
                 else
                     root.openSearch("")
+            }
+        }
+        // "Close chat" (ml-1 past the row's gap).
+        Item {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.docked
+            width: 44
+            height: 40
+            IconKey {
+                x: 4
+                iconName: "close"
+                tone: "muted"
+                tipSide: "bottom"
+                tip: qsTr("Close chat")
+                onClicked: root.closeRequested()
             }
         }
     }

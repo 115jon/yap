@@ -41,6 +41,17 @@ AppPopup {
     title: qsTr("Listen Together")
     width: 460
     onOpened: search.forceActiveFocus()
+
+    // Ctrl+L: the search field, its text selected (ListenTogetherPanel.tsx).
+    Shortcut {
+        enabled: root.visible
+        sequence: "Ctrl+L"
+        context: Qt.WindowShortcut
+        onActivated: {
+            search.forceActiveFocus(Qt.ShortcutFocusReason)
+            search.selectAll()
+        }
+    }
     onClosed: confirmClear = false
 
     Flickable {

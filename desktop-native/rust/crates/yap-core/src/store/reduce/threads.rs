@@ -17,7 +17,7 @@ const CHANNEL_UNAVAILABLE: &str = "That channel isn't available";
 use crate::admin::{has_any_permission, member_permissions, perm};
 use crate::api::ApiError;
 use crate::settings::describe_api_error;
-use crate::store::state::{pending_id, MessageLog, Outgoing, State};
+use crate::store::state::{pending_id, MessageLog, Outgoing, State, SCROLL_BOTTOM};
 use crate::store::threads::{PanelOp, PanelsView, ThreadListRow, ThreadListState, ThreadState};
 use crate::store::time::{parse_rfc3339, relative_time};
 use crate::store::view::{self, Load, MessageRow, RowContext, ViewDiff, ViewUpdate};
@@ -34,6 +34,16 @@ impl State {
     /// The open channel's list does not reach the newest message (a jump's
     /// window): nothing is marked read and live messages are not appended
     /// until it does (useChatArea.ts `isDetached`).
+    /// A saved position's window is loading over the newest page: what
+    /// the list reports meanwhile is about a page about to be replaced
+    /// (the web shows nothing until it lands).
+    pub(super) fn restoring(&self) -> bool {
+        self.panels
+            .pending
+            .values()
+            .any(|op| matches!(op, PanelOp::Around { restore: true, .. }))
+    }
+
     pub(super) fn detached(&self) -> bool {
         self.messages.as_ref().is_some_and(|log| log.has_more_after)
     }
@@ -198,6 +208,7 @@ impl State {
             nonce: Some(nonce.clone()),
             content_revision: None,
             kind: None,
+            call: None,
             reply_count: 0,
         });
         self.panels.thread_dirty = true;
@@ -435,6 +446,10 @@ impl State {
         }
         if self.active_channel.as_deref() == Some(channel_id) {
             self.panels.jump.wanted = None;
+            // A voice channel's chat opens beside its view.
+            if self.voice_view.as_deref() == Some(channel_id) && !self.voice_chat {
+                self.show_voice_chat(fx, true);
+            }
             return self.show_message(fx, channel_id, message_id);
         }
         // A channel this client has never listed cannot be opened.
@@ -453,7 +468,10 @@ impl State {
     }
 
     /// A loaded message is highlighted; anything else loads its window.
+    /// The channel reopens there (`SET_SCROLL_POSITION`, `SET_JUMP_ANCHOR`).
     fn show_message(&mut self, fx: &mut Effects, channel_id: &str, message_id: &str) {
+        self.set_scroll_position(fx, channel_id, message_id);
+        self.jump_anchors.insert(channel_id.to_owned());
         let loaded = self
             .messages
             .as_ref()
@@ -462,6 +480,18 @@ impl State {
             fx.view(ViewUpdate::JumpTo(message_id.to_owned()));
             return self.read_message_notifications(fx, message_id);
         }
+        self.load_around(fx, channel_id, message_id, false);
+    }
+
+    /// The window around a message replaces the list (a jump, or a saved
+    /// position that is not in the newest page).
+    pub(super) fn load_around(
+        &mut self,
+        fx: &mut Effects,
+        channel_id: &str,
+        message_id: &str,
+        restore: bool,
+    ) {
         self.panels
             .pending
             .retain(|_, op| !matches!(op, PanelOp::Around { .. } | PanelOp::Newer { .. }));
@@ -473,6 +503,7 @@ impl State {
         let op = PanelOp::Around {
             channel_id: channel_id.to_owned(),
             message_id: message_id.to_owned(),
+            restore,
         };
         self.panel_request(fx, request, op);
     }
@@ -510,6 +541,7 @@ impl State {
         fx: &mut Effects,
         channel_id: &str,
         message_id: &str,
+        restore: bool,
         result: Result<ThreadResponse, ApiError>,
     ) {
         // A failed jump changes nothing, as on the web.
@@ -548,6 +580,14 @@ impl State {
         self.pending.page = None;
         self.pending.older = None;
         self.at_bottom = false;
+        if restore {
+            // Centred, not highlighted (useChatArea.ts "restore saved id via
+            // around load").
+            fx.view(ViewUpdate::ScrollRestore(message_id.to_owned()));
+            fx.messages(ViewDiff::Reset(self.message_rows()));
+            return self.emit_history(fx);
+        }
+        fx.view(ViewUpdate::ScrollRestore(String::new()));
         fx.messages(ViewDiff::Reset(self.message_rows()));
         self.emit_history(fx);
         fx.view(ViewUpdate::JumpTo(message_id.to_owned()));
@@ -639,6 +679,8 @@ impl State {
             .pending
             .retain(|_, op| !matches!(op, PanelOp::Around { .. } | PanelOp::Newer { .. }));
         self.panels.jump.newer_loading = false;
+        self.jump_anchors.remove(&channel);
+        self.set_scroll_position(fx, &channel, SCROLL_BOTTOM);
         self.mark_read(fx, &channel, None);
         self.set_divider(fx, None);
         self.load_page(fx, &channel);
@@ -691,7 +733,8 @@ impl State {
             PanelOp::Around {
                 channel_id,
                 message_id,
-            } => self.on_around(fx, &channel_id, &message_id, result),
+                restore,
+            } => self.on_around(fx, &channel_id, &message_id, restore, result),
             PanelOp::Newer { channel_id } => self.on_newer(fx, &channel_id, result),
             PanelOp::ThreadSend { .. } => {}
         }

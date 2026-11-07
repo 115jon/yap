@@ -27,6 +27,10 @@ Rectangle {
     Component.onCompleted: syncL()
     readonly property var now: l.now ?? null
     property real position: 0
+    // A keyboard seek being previewed (ms), or -1: committed on key up,
+    // dropped by Escape (ListenTogetherNowPlayingCard.tsx handleSeekKey*).
+    property real previewMs: -1
+    readonly property real shownMs: previewMs >= 0 ? previewMs : position
 
     function tick() {
         const base = l.positionMs ?? 0
@@ -73,7 +77,7 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
             text: root.now?.radio ? qsTr("Live radio")
-                : qsTr("%1 / %2").arg(root.clock(root.position)).arg(root.clock(root.l.durationMs ?? 0))
+                : qsTr("%1 / %2").arg(root.clock(root.shownMs)).arg(root.clock(root.l.durationMs ?? 0))
             color: Theme.ink3
             font: Theme.type.numSm
         }
@@ -92,8 +96,54 @@ Rectangle {
             onClicked: Apps.ltSkip()
         }
     }
-    // The progress bar: a click or drag seeks the room.
+    // The progress bar: a click or drag seeks the room; focused, the arrow
+    // keys move by 5 s, Page Up/Down by a tenth, Home/End to the ends, and
+    // the seek goes out when the key comes up (Escape cancels it).
     Item {
+        id: seekBar
+        readonly property real duration: root.l.durationMs ?? 0
+        function nudge(event) {
+            if (duration <= 0 || root.now?.radio)
+                return false
+            const from = root.previewMs >= 0 ? root.previewMs : root.position
+            let to = -1
+            switch (event.key) {
+            case Qt.Key_Left: case Qt.Key_Down: to = from - 5000; break
+            case Qt.Key_Right: case Qt.Key_Up: to = from + 5000; break
+            case Qt.Key_PageDown: to = from - duration / 10; break
+            case Qt.Key_PageUp: to = from + duration / 10; break
+            case Qt.Key_Home: to = 0; break
+            case Qt.Key_End: to = duration; break
+            case Qt.Key_Return: case Qt.Key_Enter: to = from; break
+            default: return false
+            }
+            root.previewMs = Math.max(0, Math.min(duration, to))
+            return true
+        }
+        function commit() {
+            if (root.previewMs < 0)
+                return
+            const at = root.previewMs
+            root.previewMs = -1
+            Apps.ltSeek(at)
+        }
+        activeFocusOnTab: true
+        Accessible.role: Accessible.Slider
+        Accessible.name: qsTr("Seek %1").arg(root.now?.title ?? "")
+        Accessible.description: qsTr("%1 of %2").arg(root.clock(root.shownMs)).arg(root.clock(duration))
+        Keys.onPressed: event => {
+            if (event.key === Qt.Key_Escape && root.previewMs >= 0) {
+                event.accepted = true
+                root.previewMs = -1
+                return
+            }
+            event.accepted = nudge(event)
+        }
+        Keys.onReleased: event => {
+            if (root.previewMs >= 0 && event.key !== Qt.Key_Escape && !event.isAutoRepeat)
+                commit()
+        }
+        onActiveFocusChanged: if (!activeFocus) commit()
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
@@ -107,18 +157,26 @@ Rectangle {
             radius: 2
             color: Theme.tint3
             Rectangle {
-                width: (root.l.durationMs ?? 0) > 0 ? parent.width * Math.min(1, root.position / root.l.durationMs) : 0
+                width: (root.l.durationMs ?? 0) > 0 ? parent.width * Math.min(1, root.shownMs / root.l.durationMs) : 0
                 height: parent.height
                 radius: 2
                 color: Theme.primaryFill
             }
         }
+        // The focus ring (outline-2, offset 2).
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -2
+            visible: seekBar.activeFocus
+            color: "transparent"
+            radius: Theme.radius
+            border.width: 2
+            border.color: Theme.focus
+        }
         MouseArea {
             anchors.fill: parent
             anchors.topMargin: -4
             cursorShape: Qt.PointingHandCursor
-            Accessible.role: Accessible.Slider
-            Accessible.name: qsTr("Seek")
             onReleased: mouse => {
                 const duration = root.l.durationMs ?? 0
                 if (duration > 0)
