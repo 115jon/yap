@@ -389,6 +389,7 @@ impl Runner {
             | Effect::CacheClear { .. }
             | Effect::SaveCatalog { .. }
             | Effect::SaveLocal { .. }
+            | Effect::RemoveCachedBackground { .. }
             | Effect::Audio { .. } => {}
             Effect::View(_) | Effect::Later { .. } | Effect::StartupMark(_) => return false,
         }
@@ -664,6 +665,20 @@ impl Runner {
                     };
                     if let Err(error) = yap_cache::settings::save_app_file(&dir, file, &contents) {
                         eprintln!("[apps] save {file}: {error}");
+                    }
+                });
+            }
+            Effect::RemoveCachedBackground { id } => {
+                tokio::task::spawn_blocking(move || {
+                    let Some(path) = yap_cache::settings::app_dir()
+                        .and_then(|dir| crate::store::backgrounds::cached_path(&dir, &id))
+                    else {
+                        return;
+                    };
+                    match std::fs::remove_file(&path) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => eprintln!("[camera] remove background {id}: {error}"),
                     }
                 });
             }

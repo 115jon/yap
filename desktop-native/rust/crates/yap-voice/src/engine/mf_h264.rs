@@ -12,13 +12,20 @@
 //!   the frames wake, so the thread blocks in one place.
 //! - Keyframes: the first frame of a stream is an IDR, and each request the
 //!   pass-through raises (a viewer's PLI or FIR, a reconfiguration) forces
-//!   one (`CODECAPI_AVEncVideoForceKeyFrame`); a one-second GOP bounds a
-//!   late joiner's wait, as the desktop app's encoder does.
+//!   one (`CODECAPI_AVEncVideoForceKeyFrame`), at most one per
+//!   [`KEYFRAME_GAP`] (a request inside it waits for the next frame after
+//!   it); a one-second GOP bounds a late joiner's wait, as the desktop
+//!   app's encoder does.
 //! - Rate: the pass-through reports WebRTC's bandwidth estimate; the
 //!   encoder's mean bitrate follows it, capped at the preset
 //!   ([`crate::h264::next_bitrate`]).
 //! - A new frame size (another preset, a resized window, the parked share's
-//!   black frames) starts a fresh MFT at that size.
+//!   black frames) starts a fresh MFT at that size. Frames smaller than
+//!   320x180 are padded to it with black (some MFTs will not open below).
+//! - Failure: the encoder stops taking frames and says so
+//!   ([`HwEncoder::failed`]); the call pushes the share again on VP8. A
+//!   stream that had produced output failing keeps later shares on VP8
+//!   too; one that never got going costs only this share.
 //!
 //! The output is Constrained Baseline (`profile-level-id=42e01f`, mode 1),
 //! which every browser, the mobile app and this client decode.
@@ -26,7 +33,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use libwebrtc::video_frame::{
@@ -145,11 +151,11 @@ struct Shared {
     failed: AtomicBool,
 }
 
-/// A running hardware encoder. Dropping it stops the thread.
+/// A running hardware encoder. Dropping it stops the thread without
+/// waiting for it.
 pub(crate) struct HwEncoder {
     shared: Arc<Shared>,
     tx: mpsc::Sender<Msg>,
-    join: Option<JoinHandle<()>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -288,14 +294,34 @@ unsafe fn candidates(activates: &[IMFActivate]) -> Vec<Candidate> {
         .collect()
 }
 
-/// An encoder failed mid-share: later shares use VP8 for the rest of the
-/// process.
+/// A stream that had produced output failed: the hardware is not to be
+/// trusted, so later shares use VP8 for the rest of the process.
 static BROKEN: AtomicBool = AtomicBool::new(false);
 
-fn fail(shared: &Shared) {
+/// The encoder failed: the share falls back to VP8. `produced`: the stream
+/// that failed had produced output, so later shares do too. A stream that
+/// never got going (it would not open at this size, or refused its first
+/// input) costs this share only.
+fn fail(shared: &Shared, produced: bool) {
     shared.failed.store(true, Ordering::Relaxed);
-    BROKEN.store(true, Ordering::Relaxed);
+    if produced {
+        BROKEN.store(true, Ordering::Relaxed);
+    }
 }
+
+/// `YAP_TEST_MFT_FAIL_AFTER_SECS=<n>`: a test hook. `n` s after a share's
+/// encoder first produces output, it fails as a dead MFT would (once per
+/// process). Unset: off.
+fn test_fail_after() -> Option<Duration> {
+    std::env::var("YAP_TEST_MFT_FAIL_AFTER_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|secs| secs.is_finite() && *secs >= 0.0)
+        .map(Duration::from_secs_f64)
+}
+
+/// The test hook has failed an encoder already.
+static TEST_FAILED: AtomicBool = AtomicBool::new(false);
 
 /// `YAP_SHARE_ENCODER=software`: shares use libwebrtc's VP8, as on a machine
 /// without a hardware encoder (for comparisons and fallback tests).
@@ -376,15 +402,12 @@ impl HwEncoder {
         let (tx, rx) = mpsc::channel();
         let thread_shared = Arc::clone(&shared);
         let events = tx.clone();
-        let join = std::thread::Builder::new()
+        // Detached: see the `Drop` below.
+        std::thread::Builder::new()
             .name("yap-h264".into())
             .spawn(move || run(&thread_shared, &source, &rx, &events))
             .map_err(|e| format!("encoder thread: {e}"))?;
-        Ok(Self {
-            shared,
-            tx,
-            join: Some(join),
-        })
+        Ok(Self { shared, tx })
     }
 
     /// Queues a frame (newest wins). `false` once the encoder failed.
@@ -435,10 +458,10 @@ impl HwEncoder {
 
 impl Drop for HwEncoder {
     fn drop(&mut self) {
+        // Not joined: the share's send side drops on an async worker, and
+        // an MFT's shutdown can take a while. The thread shuts its MFT down
+        // and ends on its own once it reads this.
         let _ = self.tx.send(Msg::Stop);
-        if let Some(join) = self.join.take() {
-            let _ = join.join();
-        }
     }
 }
 
@@ -529,9 +552,11 @@ struct Stream {
     bitrate: u64,
     fps: u32,
     epoch: Instant,
-    /// Input times of frames in flight, oldest first.
-    in_flight: std::collections::VecDeque<Instant>,
+    /// When each frame in flight went in, by its sample time.
+    in_flight: h264::InFlight<Instant>,
     frame_index: u64,
+    /// It handed at least one access unit on.
+    produced: bool,
 }
 
 impl Stream {
@@ -647,8 +672,9 @@ impl Stream {
                 bitrate,
                 fps,
                 epoch: Instant::now(),
-                in_flight: std::collections::VecDeque::new(),
+                in_flight: h264::InFlight::default(),
                 frame_index: 0,
+                produced: false,
             };
             if events_tx.is_some() {
                 stream.listen()?;
@@ -734,7 +760,7 @@ impl Stream {
             }
             match self.mft.ProcessInput(0, &sample, 0) {
                 Ok(()) => {
-                    self.in_flight.push_back(Instant::now());
+                    self.in_flight.push(hns, Instant::now());
                     self.frame_index += 1;
                     Ok(true)
                 }
@@ -782,8 +808,11 @@ impl Stream {
                 Ok(()) => {}
                 Err(e) if e.code() == MF_E_TRANSFORM_NEED_MORE_INPUT => return Ok(()),
                 Err(e) if e.code() == MF_E_TRANSFORM_STREAM_CHANGE => {
+                    // An asynchronous MFT answers one ProcessOutput per
+                    // METransformHaveOutput: once it has the new type, it
+                    // raises another for the output it holds.
                     self.renegotiate_output()?;
-                    continue;
+                    return Ok(());
                 }
                 Err(e) => return Err(format!("ProcessOutput: {e}")),
             }
@@ -821,8 +850,9 @@ impl Stream {
         counters: &Counters,
     ) -> Result<(), String> {
         // SAFETY: live sample; the locked bytes are copied before unlocking.
-        let (bytes, clean) = unsafe {
+        let (bytes, clean, time) = unsafe {
             let clean = sample.GetUINT32(&MFSampleExtension_CleanPoint).unwrap_or(0) == 1;
+            let time = sample.GetSampleTime().ok();
             let buffer = sample
                 .ConvertToContiguousBuffer()
                 .map_err(|e| format!("contiguous: {e}"))?;
@@ -833,9 +863,9 @@ impl Stream {
                 .map_err(|e| format!("lock out: {e}"))?;
             let bytes = std::slice::from_raw_parts(data, len as usize).to_vec();
             let _ = buffer.Unlock();
-            (bytes, clean)
+            (bytes, clean, time)
         };
-        if let Some(started) = self.in_flight.pop_front() {
+        if let Some(started) = self.in_flight.take(time) {
             let us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
             counters.latency_total_us.fetch_add(us, Ordering::Relaxed);
         }
@@ -868,6 +898,7 @@ impl Stream {
             frame_metadata: None,
         });
         counters.frames_out.fetch_add(1, Ordering::Relaxed);
+        self.produced = true;
         if key {
             counters.keyframes.fetch_add(1, Ordering::Relaxed);
         }
@@ -931,7 +962,7 @@ fn run(
         Ok(mf) => mf,
         Err(why) => {
             eprintln!("[share] h264 encoder: {why}");
-            fail(shared);
+            fail(shared, false);
             return;
         }
     };
@@ -940,12 +971,12 @@ fn run(
         Ok(list) if list.len() > shared.index => list,
         Ok(_) => {
             eprintln!("[share] h264 encoder: the probed MFT is gone");
-            fail(shared);
+            fail(shared, false);
             return;
         }
         Err(why) => {
             eprintln!("[share] h264 encoder: {why}");
-            fail(shared);
+            fail(shared, false);
             return;
         }
     };
@@ -954,6 +985,8 @@ fn run(
     let mut generation = 0u64;
     let mut last_key = Instant::now() - KEYFRAME_GAP;
     let mut applied = *lock(&shared.config);
+    let fail_after = test_fail_after().filter(|_| !TEST_FAILED.load(Ordering::Relaxed));
+    let mut fail_at: Option<Instant> = None;
     loop {
         let msg = match rx.recv_timeout(IDLE) {
             Ok(msg) => Some(msg),
@@ -961,6 +994,18 @@ fn run(
             Err(RecvTimeoutError::Disconnected) => break,
         };
         let outcome = (|| -> Result<bool, String> {
+            if let Some(after) = fail_after {
+                let produced = shared.counters.frames_out.load(Ordering::Relaxed) > 0;
+                if fail_at.is_none() && produced {
+                    eprintln!("[share] test hook: failing the h264 encoder in {after:?}");
+                    fail_at = Some(Instant::now() + after);
+                }
+                if fail_at.is_some_and(|at| Instant::now() >= at)
+                    && !TEST_FAILED.swap(true, Ordering::Relaxed)
+                {
+                    return Err("test hook: the MFT stopped (YAP_TEST_MFT_FAIL_AFTER_SECS)".into());
+                }
+            }
             match msg {
                 Some(Msg::Stop) => return Ok(false),
                 Some(Msg::Event {
@@ -1013,8 +1058,15 @@ fn run(
             Ok(true) => {}
             Ok(false) => break,
             Err(why) => {
-                eprintln!("[share] h264 encoder failed: {why}");
-                fail(shared);
+                // Only a stream that worked marks the hardware broken; one
+                // that never produced (an open at this size, a first input
+                // refused) falls back for this share alone.
+                let produced = stream.as_ref().is_some_and(|s| s.produced);
+                eprintln!(
+                    "[share] h264 encoder failed{}: {why}",
+                    if produced { "" } else { " before any output" }
+                );
+                fail(shared, produced);
                 break;
             }
         }
@@ -1043,6 +1095,7 @@ fn feed(
         let Some(frame) = lock(&shared.pending).take() else {
             return Ok(());
         };
+        let frame = at_hardware_size(frame);
         let size = (frame.width(), frame.height());
         if stream.as_ref().is_some_and(|s| s.size != size) {
             if let Some(old) = stream.take() {
@@ -1084,7 +1137,9 @@ fn feed(
                 shared.counters.bitrate.store(s.bitrate, Ordering::Relaxed);
             }
         }
-        let keyframe = source.take_keyframe_request() && last_key.elapsed() >= KEYFRAME_GAP;
+        // Inside the gap the request is left with the pass-through, so a
+        // later frame honours it (taking it first would drop it).
+        let keyframe = last_key.elapsed() >= KEYFRAME_GAP && source.take_keyframe_request();
         if keyframe {
             *last_key = Instant::now();
         }
@@ -1097,6 +1152,49 @@ fn feed(
             s.need_input -= 1;
         } else {
             s.need_input = 0;
+        }
+    }
+}
+
+/// `frame` at the size the hardware encodes it ([`h264::hardware_size`]):
+/// as it is, or centred on black when it is smaller (a tiny window).
+fn at_hardware_size(frame: Arc<I420Buffer>) -> Arc<I420Buffer> {
+    let (w, h) = (frame.width(), frame.height());
+    let (tw, th) = h264::hardware_size(w, h);
+    if (tw, th) == (w, h) {
+        return frame;
+    }
+    let mut out = I420Buffer::new(tw, th);
+    let (dsy, dsu, dsv) = out.strides();
+    let (ssy, ssu, ssv) = frame.strides();
+    let (sy, su, sv) = frame.data();
+    let (ox, oy) = (h264::pad_offset(w, tw), h264::pad_offset(h, th));
+    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+    let (dy, du, dv) = out.data_mut();
+    dy.fill(16);
+    du.fill(128);
+    dv.fill(128);
+    copy_plane((sy, ssy), (dy, dsy), (w, h), (ox, oy));
+    copy_plane((su, ssu), (du, dsu), (cw, ch), (ox / 2, oy / 2));
+    copy_plane((sv, ssv), (dv, dsv), (cw, ch), (ox / 2, oy / 2));
+    Arc::new(out)
+}
+
+/// Copies a `size` plane (`src`, its stride) into `dst` (its stride) at
+/// `at`. Rows that would not fit are left out.
+fn copy_plane(
+    (src, src_stride): (&[u8], u32),
+    (dst, dst_stride): (&mut [u8], u32),
+    (w, h): (u32, u32),
+    (x, y): (u32, u32),
+) {
+    let (w, x) = (w as usize, x as usize);
+    let (ss, ds) = (src_stride as usize, dst_stride as usize);
+    for row in 0..h as usize {
+        let from = src.get(row * ss..row * ss + w);
+        let at = (y as usize + row) * ds + x;
+        if let (Some(from), Some(to)) = (from, dst.get_mut(at..at + w)) {
+            to.copy_from_slice(from);
         }
     }
 }

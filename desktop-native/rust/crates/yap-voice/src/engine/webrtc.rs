@@ -684,6 +684,11 @@ struct ScreenSend {
     sink: ShareSink,
     transceiver: RtpTransceiver,
     refresher: Refresher,
+    /// VP8 because the hardware encoder failed earlier in this same share:
+    /// the next share pushes afresh to try the hardware again.
+    fallback: bool,
+    /// Its encoder's failure was reported (`take_screen_failure`).
+    failure_reported: AtomicBool,
 }
 
 impl ScreenSend {
@@ -698,6 +703,18 @@ impl ScreenSend {
     #[cfg(not(windows))]
     fn encoder(&self) -> Option<&std::convert::Infallible> {
         None
+    }
+
+    /// Its hardware encoder failed: frames go nowhere.
+    fn encoder_failed(&self) -> bool {
+        #[cfg(windows)]
+        {
+            self.encoder().is_some_and(HwEncoder::failed)
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
     }
 }
 
@@ -1300,7 +1317,13 @@ impl MediaSession for LibwebrtcSession {
         stream_id: &str,
         encoding: &ShareEncoding,
     ) -> Result<LocalOffer, MediaError> {
-        if let Some(old) = lock(&self.screen).take() {
+        let old = lock(&self.screen).take();
+        // A live share whose hardware encoder failed is being pushed again:
+        // it stays on VP8 (a parked one is a new share, which may try).
+        let fallback = old
+            .as_ref()
+            .is_some_and(|o| o.encoder_failed() && !o.refresher.parked());
+        if let Some(old) = old {
             set_share_sink(None);
             // Its refresher goes with it: the old sender gets no frames.
             lock(&self.retired).push(old.transceiver);
@@ -1312,8 +1335,19 @@ impl MediaSession for LibwebrtcSession {
         };
         // A hardware encoder when there is one: an encoded source (no raw
         // keepalive), fed the H.264 access units of the encoder thread.
+        // The first probe opens an MFT (about 100 ms): off the async worker.
         #[cfg(windows)]
-        let hardware = super::mf_h264::probe().and_then(|_| {
+        let probed = if fallback {
+            eprintln!("[share] this share's hardware encoder failed; it stays on VP8");
+            None
+        } else {
+            tokio::task::spawn_blocking(super::mf_h264::probe)
+                .await
+                .ok()
+                .flatten()
+        };
+        #[cfg(windows)]
+        let hardware = probed.and_then(|_| {
             let source = NativeVideoSource::new_encoded(hint.clone());
             match HwEncoder::start(source.clone(), hw_config(encoding)) {
                 Ok(encoder) => Some((source, ShareSink::Hardware(Arc::new(encoder)))),
@@ -1371,6 +1405,8 @@ impl MediaSession for LibwebrtcSession {
             refresher: Refresher::start(sink.clone()),
             sink,
             transceiver: transceiver.clone(),
+            fallback,
+            failure_reported: AtomicBool::new(false),
         });
         let offer = self
             .pc
@@ -1415,15 +1451,21 @@ impl MediaSession for LibwebrtcSession {
     }
 
     fn screen_stale(&self) -> bool {
-        // A hardware encoder that failed cannot be revived: the next share
-        // pushes afresh, on VP8 (the probe remembers the failure).
-        #[cfg(windows)]
-        let broken = |screen: &ScreenSend| screen.encoder().is_some_and(HwEncoder::failed);
-        #[cfg(not(windows))]
-        let broken = |_: &ScreenSend| false;
-        lock(&self.screen)
-            .as_ref()
-            .is_none_or(|screen| screen.refresher.stale() || broken(screen))
+        // A hardware encoder that failed cannot be revived: the share pushes
+        // afresh, on VP8. A parked VP8 fallback is pushed afresh too, so the
+        // next share tries the hardware again (unless the probe remembers a
+        // failure that had produced output).
+        lock(&self.screen).as_ref().is_none_or(|screen| {
+            screen.refresher.stale()
+                || screen.encoder_failed()
+                || (screen.fallback && screen.refresher.parked())
+        })
+    }
+
+    fn take_screen_failure(&self) -> bool {
+        lock(&self.screen).as_ref().is_some_and(|screen| {
+            screen.encoder_failed() && !screen.failure_reported.swap(true, Ordering::Relaxed)
+        })
     }
 
     async fn publish_screen_audio(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {

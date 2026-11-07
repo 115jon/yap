@@ -288,8 +288,13 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
     fn set_screen_live(&self, live: bool);
 
     /// The parked share's keepalive stalled long enough that the SFU may
-    /// have dropped its track, or there is no share send: push afresh.
+    /// have dropped its track, its hardware encoder failed, or there is no
+    /// share send: push afresh.
     fn screen_stale(&self) -> bool;
+
+    /// The share's hardware encoder failed since the last ask: its frames
+    /// go nowhere until it is pushed afresh. `true` once per failure.
+    fn take_screen_failure(&self) -> bool;
 
     /// Adds the share's audio (48 kHz stereo, fed by
     /// [`crate::push_screen_audio`]) as a send-only Opus transceiver in

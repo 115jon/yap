@@ -471,3 +471,53 @@ fn leaving_should_release_the_capture_without_withdrawing() {
         .iter()
         .all(|names| !names.iter().any(|n| n.starts_with("screen-"))));
 }
+
+#[test]
+fn a_failed_hardware_encoder_should_publish_the_live_share_again() {
+    let mut m = sharing();
+    let fx = m.handle(Input::ShareEncoderFailed);
+    assert_eq!(publishes(&fx), vec![true]);
+}
+
+#[test]
+fn a_failed_hardware_encoder_should_keep_the_capture() {
+    let mut m = sharing();
+    let fx = m.handle(Input::ShareEncoderFailed);
+    assert!(releases(&fx).is_empty() && captures(&fx).is_empty());
+}
+
+#[test]
+fn the_republished_share_should_announce_its_new_video_track_only() {
+    let mut m = sharing();
+    m.handle(Input::ShareEncoderFailed);
+    let fx = m.handle(published("v2", Some("a1")));
+    assert_eq!(
+        announced(&fx),
+        vec![("screen-video-me-1".into(), "v2".into())]
+    );
+}
+
+#[test]
+fn the_republished_share_should_stay_live_without_an_end() {
+    let mut m = sharing();
+    m.handle(Input::ShareEncoderFailed);
+    let fx = m.handle(published("v2", Some("a1")));
+    assert!(fx.contains(&Effect::SetShareLive(true)));
+    assert!(!notices(&fx)
+        .iter()
+        .any(|n| matches!(n, ShareNotice::Ended { .. })));
+}
+
+#[test]
+fn an_encoder_failure_without_a_live_share_should_do_nothing() {
+    let mut m = joined();
+    assert!(publishes(&m.handle(Input::ShareEncoderFailed)).is_empty());
+}
+
+#[test]
+fn an_encoder_failure_while_a_publish_runs_should_be_left_to_it() {
+    let mut m = joined();
+    m.handle(start("window-7", true));
+    m.handle(captured(1, true));
+    assert!(publishes(&m.handle(Input::ShareEncoderFailed)).is_empty());
+}

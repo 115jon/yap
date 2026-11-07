@@ -37,6 +37,9 @@ extern "C" bool yap_camera_frame(int32_t format,
 // A camera background is on (src/camera.rs): frames go to Rust for the
 // preview too, and the preview shows the composited ones it hands back.
 extern "C" bool yap_camera_effect_active();
+// The capture closed (src/camera.rs): the background effect lets go of its
+// segmenter and frame buffers until the next frame.
+extern "C" void yap_camera_closed();
 
 namespace {
 
@@ -541,6 +544,7 @@ void CameraCapture::close()
   m_openId.clear();
   m_openName.clear();
   m_running = false;
+  yap_camera_closed();
   std::fprintf(stderr, "[camera] closed\n");
   emit runningChanged();
 }

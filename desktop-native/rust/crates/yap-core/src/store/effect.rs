@@ -146,6 +146,12 @@ pub enum Effect {
         file: &'static str,
         contents: String,
     },
+    /// A deleted camera background: remove its kept picture
+    /// (`backgrounds::cached_path` in the app folder), if there is one.
+    /// No answer.
+    RemoveCachedBackground {
+        id: String,
+    },
 }
 
 /// Which profile image an upload replaces.

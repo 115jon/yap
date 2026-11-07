@@ -131,6 +131,11 @@ enum VideoJob {
 /// take its `tracks/close` (`VIDEO_SESSION_DRAIN_MS`).
 const VIDEO_SESSION_DRAIN: Duration = Duration::from_secs(3);
 
+/// How often the share's hardware encoder is checked for a failure (a
+/// failed one is republished on VP8 at once, so viewers see a short pause,
+/// not a frozen share).
+const SHARE_ENCODER_CHECK: Duration = Duration::from_millis(500);
+
 /// Mids of a video session's pulls carry its number: `v<n>:<mid>`.
 fn video_mid(mid: &str) -> Option<(u32, &str)> {
     let rest = mid.strip_prefix('v')?;
@@ -283,6 +288,8 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
         let mut stats: Option<Interval> = None;
         let mut level = tokio::time::interval(VAD_TICK);
         level.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut encoder_check = tokio::time::interval(SHARE_ENCODER_CHECK);
+        encoder_check.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut commands_open = true;
         loop {
             // Effects run in order. The admission and media are awaited
@@ -406,6 +413,14 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
                         at_ms: u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX),
                     },
                     None => continue,
+                },
+                _ = encoder_check.tick(), if self.session.is_some() => {
+                    if self.session.as_ref().is_some_and(MediaSession::take_screen_failure) {
+                        eprintln!("[share] hardware encoder failed mid-share");
+                        Input::ShareEncoderFailed
+                    } else {
+                        continue;
+                    }
                 },
                 _ = stats.tick() => Input::Timer(Timer::Stats),
             };
@@ -1928,6 +1943,33 @@ mod tests {
         assert!(engine.ops().contains(&FakeOp::AbandonScreen));
         assert!(matches!(second, Done::Share(Ok(_))));
         assert_eq!(sfu.calls().len(), 2, "pushed again, not resumed");
+    }
+
+    #[tokio::test]
+    async fn a_failed_share_encoder_should_push_a_fresh_video_track() {
+        let engine = FakeEngine::new();
+        let sfu = FakeSfu::default();
+        let (jobs, mut done) = worker_on(&engine, &sfu);
+        let publish = || Job::PublishShare {
+            stream_id: "screen-me".into(),
+            encoding: crate::share::ShareEncoding {
+                max_bitrate: 8_000_000,
+                max_framerate: 30.0,
+                detail: true,
+            },
+            audio: false,
+        };
+        let video_of = |d: Done| match d {
+            Done::Share(Ok(p)) => p.video_sfu_track,
+            other => panic!("not a share result: {other:?}"),
+        };
+        jobs.send(publish()).expect("worker alive");
+        let first = video_of(done.recv().await.expect("first"));
+        engine.fail_screen_encoder();
+        jobs.send(publish()).expect("worker alive");
+        let second = video_of(done.recv().await.expect("second"));
+
+        assert_ne!(first, second, "a new SFU track, not the frozen one");
     }
 
     #[tokio::test]

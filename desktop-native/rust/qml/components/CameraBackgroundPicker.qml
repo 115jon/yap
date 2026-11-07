@@ -29,6 +29,20 @@ Column {
 
     spacing: 0
     Component.onCompleted: Audio.loadCameraBackgrounds()
+    // A stale error does not greet the next visit (as the web clears it).
+    onVisibleChanged: {
+        if (!visible)
+            clearErrors()
+    }
+    Component.onDestruction: {
+        if (Audio)
+            Audio.clearCameraBackgroundError()
+    }
+
+    function clearErrors() {
+        uploadError = ""
+        Audio.clearCameraBackgroundError()
+    }
 
     // The effect's state for the error line (it loads on a worker).
     Timer {
@@ -74,8 +88,10 @@ Column {
                 Keys.onSpacePressed: pick()
                 Keys.onReturnPressed: pick()
                 function pick() {
-                    if (!root.disabledTiles)
-                        Audio.selectCameraBackground(modelData.key)
+                    if (root.disabledTiles)
+                        return
+                    root.clearErrors()
+                    Audio.selectCameraBackground(modelData.key)
                 }
 
                 Rectangle {

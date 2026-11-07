@@ -1,12 +1,13 @@
 //! Camera backgrounds (`CameraCard.tsx`): the list once, an upload first in
-//! the list, a delete at once (put back on a refusal), and the chosen
-//! picture fetched for the camera effect.
+//! the list, a delete at once (put back on a refusal, its kept picture
+//! removed once it went through), and the chosen picture fetched for the
+//! camera effect (a failed fetch waits before it runs again).
 
 use super::Effects;
 use crate::api::ApiError;
 use crate::store::backgrounds::{
-    absolute, BackgroundsCommand, BackgroundsOp, BackgroundsRequest, BackgroundsResponse,
-    BackgroundsView,
+    absolute, is_safe_id, BackgroundsCommand, BackgroundsOp, BackgroundsRequest,
+    BackgroundsResponse, BackgroundsView, Backoff, FetchWanted,
 };
 use crate::store::effect::Effect;
 use crate::store::state::State;
@@ -46,44 +47,91 @@ impl State {
                 self.backgrounds.ready.remove(&target);
                 match self.http(
                     fx,
-                    ApiRequest::Backgrounds(BackgroundsRequest::Delete(target)),
+                    ApiRequest::Backgrounds(BackgroundsRequest::Delete(target.clone())),
                 ) {
                     Some(id) => {
-                        self.pending
-                            .backgrounds
-                            .insert(id, BackgroundsOp::Delete { previous });
+                        self.pending.backgrounds.insert(
+                            id,
+                            BackgroundsOp::Delete {
+                                id: target,
+                                previous,
+                            },
+                        );
                     }
                     None => self.backgrounds.items = previous,
                 }
             }
-            BackgroundsCommand::Fetch { id, dest } => {
-                if self.backgrounds.ready.get(&id) == Some(&dest)
-                    || self.backgrounds.fetching.contains(&id)
-                {
-                    return;
-                }
-                let Some(asset) = self.backgrounds.items.iter().find(|a| a.id == id) else {
-                    return;
-                };
-                let Some(token) = self.session.as_ref().map(|s| s.token.clone()) else {
-                    return;
-                };
-                let url = absolute(&asset.url, &crate::config::get().api_base);
-                let request = RequestId(self.next_id());
-                fx.push(Effect::Download {
-                    id: request,
-                    token,
-                    url,
-                    dest: dest.clone(),
-                });
-                self.backgrounds.fetching.insert(id.clone());
-                self.pending
-                    .backgrounds
-                    .insert(request, BackgroundsOp::Fetch { id, dest });
-            }
+            BackgroundsCommand::Fetch {
+                id,
+                dest,
+                now_ms,
+                retry,
+            } => self.fetch_background(
+                fx,
+                FetchWanted {
+                    id,
+                    dest,
+                    now_ms,
+                    retry,
+                },
+            ),
             BackgroundsCommand::ClearError => self.backgrounds.error.clear(),
         }
         self.sync_backgrounds(fx);
+    }
+
+    /// Fetches a background's picture unless it is there, on its way, or
+    /// waiting after a failure (a user's pick, `retry`, does not wait). One
+    /// asked for before the list is in is sent once the list is.
+    fn fetch_background(&mut self, fx: &mut Effects, wanted: FetchWanted) {
+        let id = wanted.id.as_str();
+        if !is_safe_id(id)
+            || self.backgrounds.ready.get(id) == Some(&wanted.dest)
+            || self.backgrounds.fetching.contains(id)
+        {
+            return;
+        }
+        let waiting = self
+            .backgrounds
+            .failed
+            .get(id)
+            .is_some_and(|b| wanted.now_ms < b.until_ms);
+        if waiting && !wanted.retry {
+            return;
+        }
+        let asset = self.backgrounds.items.iter().find(|a| a.id == id);
+        let token = self.session.as_ref().map(|s| s.token.clone());
+        let (Some(asset), Some(token)) = (asset, token) else {
+            if !self.backgrounds.loaded {
+                self.backgrounds.deferred = Some(wanted);
+            }
+            return;
+        };
+        let url = absolute(&asset.url, &crate::config::get().api_base);
+        let request = RequestId(self.next_id());
+        fx.push(Effect::Download {
+            id: request,
+            token,
+            url,
+            dest: wanted.dest.clone(),
+        });
+        if self
+            .backgrounds
+            .deferred
+            .as_ref()
+            .is_some_and(|d| d.id == id)
+        {
+            self.backgrounds.deferred = None;
+        }
+        self.backgrounds.fetching.insert(wanted.id.clone());
+        self.pending.backgrounds.insert(
+            request,
+            BackgroundsOp::Fetch {
+                id: wanted.id,
+                dest: wanted.dest,
+                asked_ms: wanted.now_ms,
+            },
+        );
     }
 
     fn load_backgrounds(&mut self, fx: &mut Effects) {
@@ -126,6 +174,10 @@ impl State {
                         Ok(ApiResponse::Backgrounds(BackgroundsResponse::List(items))) => {
                             self.backgrounds.items = items;
                             self.backgrounds.loaded = true;
+                            // The fetch that waited for the list.
+                            if let Some(wanted) = self.backgrounds.deferred.take() {
+                                self.fetch_background(fx, wanted);
+                            }
                         }
                         Err(error) => {
                             self.backgrounds.error =
@@ -148,19 +200,28 @@ impl State {
                     Ok(_) => {}
                 }
             }
-            (BackgroundsOp::Delete { previous }, result) => {
-                if let Err(error) = result {
+            (BackgroundsOp::Delete { id, previous }, result) => match result {
+                Ok(_) => {
+                    self.backgrounds.failed.remove(&id);
+                    fx.push(Effect::RemoveCachedBackground { id });
+                }
+                Err(error) => {
                     self.backgrounds.items = previous;
                     self.backgrounds.error = format!("Couldn't remove that background ({error}).");
                 }
-            }
-            (BackgroundsOp::Fetch { id, dest }, result) => {
+            },
+            (BackgroundsOp::Fetch { id, dest, asked_ms }, result) => {
                 self.backgrounds.fetching.remove(&id);
                 match result {
                     Ok(_) => {
+                        self.backgrounds.failed.remove(&id);
                         self.backgrounds.ready.insert(id, dest);
                     }
                     Err(error) => {
+                        // Not again until the wait is over or the user picks
+                        // it again (a 404 stays a 404).
+                        let next = Backoff::after(self.backgrounds.failed.get(&id), asked_ms);
+                        self.backgrounds.failed.insert(id, next);
                         self.backgrounds.error =
                             format!("Couldn't download that background ({error}).");
                     }

@@ -212,6 +212,12 @@ pub mod qobject {
         #[cxx_name = "loadCameraBackgrounds"]
         fn load_camera_backgrounds(self: &Audio);
 
+        /// Clears the backgrounds' error line (a tile was picked, or the
+        /// picker went away).
+        #[qinvokable]
+        #[cxx_name = "clearCameraBackgroundError"]
+        fn clear_camera_background_error(self: &Audio);
+
         /// Uploads a picture; the reason it cannot, or "" once it is sent.
         #[qinvokable]
         #[cxx_name = "uploadCameraBackground"]
@@ -764,11 +770,18 @@ impl qobject::Audio {
 
     pub fn select_camera_background(self: Pin<&mut Self>, key: &QString) {
         let choice = voice::CameraBackground::from_key(&key.to_string());
+        crate::camera::background_picked();
         self.edit(|s| s.camera_background = choice);
     }
 
     pub fn load_camera_backgrounds(&self) {
         crate::client::command(yap_core::Command::Backgrounds(BackgroundsCommand::Load));
+    }
+
+    pub fn clear_camera_background_error(&self) {
+        crate::client::command(yap_core::Command::Backgrounds(
+            BackgroundsCommand::ClearError,
+        ));
     }
 
     pub fn upload_camera_background(&self, path: &QString) -> QString {
@@ -780,7 +793,7 @@ impl qobject::Audio {
             .unwrap_or_default();
         // `getCameraBackgroundValidationError`.
         let Some(content_type) = background_type(&name) else {
-            return QString::from("Use a GIF, WebP, PNG, JPEG or AVIF image.");
+            return QString::from("Use a GIF, WebP, PNG or JPEG image.");
         };
         if std::fs::metadata(file).map_or(0, |m| m.len()) > MAX_BACKGROUND_BYTES {
             return QString::from("Backgrounds must be 25 MB or smaller.");

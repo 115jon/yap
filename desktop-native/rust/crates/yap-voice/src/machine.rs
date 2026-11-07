@@ -365,6 +365,9 @@ pub enum Input {
     },
     /// The share's publish finished, or why it failed.
     SharePublished(Result<SharePublished, String>),
+    /// The live share's hardware encoder failed: its frames go nowhere
+    /// until the share is pushed again (on VP8).
+    ShareEncoderFailed,
     /// A pull finished; `mid` if it worked.
     PullDone {
         sfu_track_name: String,
@@ -790,6 +793,7 @@ impl CallMachine {
             }
             (_, Input::ShareCaptureEnded { token }) => self.on_share_capture_ended(&mut fx, token),
             (_, Input::SharePublished(result)) => self.on_share_published(&mut fx, result),
+            (_, Input::ShareEncoderFailed) => self.on_share_encoder_failed(&mut fx),
             (_, Input::Room(event)) => self.on_room(&mut fx, event),
             (_, Input::Voice(event)) => self.on_voice(&mut fx, event),
             (_, Input::Media(event)) => self.on_media(&mut fx, event),

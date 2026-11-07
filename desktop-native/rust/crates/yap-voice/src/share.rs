@@ -636,6 +636,11 @@ pub(crate) mod live {
             let gap = self.longest_gap_ms.load(Ordering::Relaxed).max(open);
             self.parked.load(Ordering::Relaxed) && u128::from(gap) >= STALE_AFTER.as_millis()
         }
+
+        /// Between shares (sending black), not live.
+        pub(crate) fn parked(&self) -> bool {
+            self.parked.load(Ordering::Relaxed)
+        }
     }
 
     impl Drop for Refresher {

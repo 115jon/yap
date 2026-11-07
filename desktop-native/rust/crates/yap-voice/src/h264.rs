@@ -180,6 +180,78 @@ pub fn keep_frame(detail: bool, target: u64, max: u64, index: u64) -> bool {
     index.is_multiple_of(every)
 }
 
+/// The smallest frame the hardware encoder is given: some vendors' MFTs
+/// refuse to open below about this, so smaller frames (a tiny window) are
+/// padded up to it ([`hardware_size`]).
+pub const MIN_HARDWARE_SIZE: (u32, u32) = (320, 180);
+
+/// The size a `w` x `h` frame is encoded at in hardware: at least
+/// [`MIN_HARDWARE_SIZE`] on each side, and even (NV12).
+pub fn hardware_size(w: u32, h: u32) -> (u32, u32) {
+    let side = |n: u32, min: u32| n.max(min).next_multiple_of(2);
+    (side(w, MIN_HARDWARE_SIZE.0), side(h, MIN_HARDWARE_SIZE.1))
+}
+
+/// Where an `inner` side sits centred in an `outer` one when padded, on
+/// an even offset so the chroma lines up.
+pub fn pad_offset(inner: u32, outer: u32) -> u32 {
+    (outer.saturating_sub(inner) / 2) & !1
+}
+
+/// At most this many frames are tracked between `ProcessInput` and their
+/// access unit (an MFT that drops frames never answers for them).
+pub const IN_FLIGHT_MAX: usize = 32;
+
+/// Frames handed to the encoder and not yet out, by sample time (100 ns),
+/// oldest first, with what was noted at input (when, for the latency).
+#[derive(Debug)]
+pub struct InFlight<T> {
+    queue: std::collections::VecDeque<(i64, T)>,
+}
+
+impl<T> Default for InFlight<T> {
+    fn default() -> Self {
+        Self {
+            queue: std::collections::VecDeque::with_capacity(IN_FLIGHT_MAX),
+        }
+    }
+}
+
+impl<T> InFlight<T> {
+    /// A frame went in at sample time `time`. The oldest is forgotten
+    /// past [`IN_FLIGHT_MAX`].
+    pub fn push(&mut self, time: i64, value: T) {
+        if self.queue.len() >= IN_FLIGHT_MAX {
+            self.queue.pop_front();
+        }
+        self.queue.push_back((time, value));
+    }
+
+    /// The input of an access unit with sample time `time` (`None`: the
+    /// encoder gave none, so the oldest). Frames before it that never came
+    /// out are dropped.
+    pub fn take(&mut self, time: Option<i64>) -> Option<T> {
+        let Some(time) = time else {
+            return self.queue.pop_front().map(|(_, v)| v);
+        };
+        while self.queue.front().is_some_and(|(at, _)| *at < time) {
+            self.queue.pop_front();
+        }
+        match self.queue.front() {
+            Some((at, _)) if *at == time => self.queue.pop_front().map(|(_, v)| v),
+            _ => None,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
+}
+
 /// The order H.264 payloads are offered in: constrained baseline level 3.1
 /// with packetization mode 1 first (what the desktop app and web peers
 /// negotiate; every browser decodes it), then other mode-1 entries, then the
@@ -329,5 +401,64 @@ mod tests {
         let mode0 = "level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42e01f";
         assert!(h264_rank(cb) < h264_rank(high));
         assert!(h264_rank(high) < h264_rank(mode0));
+    }
+
+    #[test]
+    fn a_tiny_window_should_be_padded_to_the_hardware_minimum() {
+        assert_eq!(hardware_size(200, 100), (320, 180));
+    }
+
+    #[test]
+    fn a_narrow_window_should_be_padded_on_its_short_side_only() {
+        assert_eq!(hardware_size(1000, 120), (1000, 180));
+    }
+
+    #[test]
+    fn a_large_frame_should_keep_its_size_in_hardware() {
+        assert_eq!(hardware_size(1920, 1080), (1920, 1080));
+    }
+
+    #[test]
+    fn hardware_sizes_should_be_even() {
+        assert_eq!(hardware_size(641, 361), (642, 362));
+    }
+
+    #[test]
+    fn padding_should_centre_on_an_even_offset() {
+        assert_eq!((pad_offset(200, 320), pad_offset(98, 180)), (60, 40));
+    }
+
+    #[test]
+    fn an_access_unit_should_take_its_own_input() {
+        let mut queue = InFlight::default();
+        queue.push(10, "a");
+        queue.push(20, "b");
+        assert_eq!(queue.take(Some(20)), Some("b"));
+    }
+
+    #[test]
+    fn frames_the_encoder_dropped_should_be_forgotten() {
+        let mut queue = InFlight::default();
+        queue.push(10, "a");
+        queue.push(20, "b");
+        queue.take(Some(20));
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn in_flight_frames_should_be_capped() {
+        let mut queue = InFlight::default();
+        for t in 0..100 {
+            queue.push(t, ());
+        }
+        assert_eq!(queue.len(), IN_FLIGHT_MAX);
+    }
+
+    #[test]
+    fn an_access_unit_without_a_time_should_take_the_oldest() {
+        let mut queue = InFlight::default();
+        queue.push(10, "a");
+        queue.push(20, "b");
+        assert_eq!(queue.take(None), Some("a"));
     }
 }

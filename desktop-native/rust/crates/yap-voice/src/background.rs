@@ -9,6 +9,11 @@
 //!   [`SEGMENT_FPS`] times a second its 256x256 RGB goes to the segmenter
 //!   thread (newest wins); every frame is composited with the latest mask.
 //!   Until the first mask the camera shows as it is, as on the web.
+//! - The segmenter thread starts with the first frame and stops when the
+//!   camera does ([`camera_stopped`]): the model, its ONNX session and GPU
+//!   memory, and the frame buffers are let go until the next frame. Neither
+//!   stopping it nor dropping the effect waits for it (a model still
+//!   loading finishes on its own thread and is dropped there).
 //! - The mask: the model's person confidence through the web's smoothstep
 //!   (0.35..0.8) and 9-tap feather, smoothed over time (each new mask
 //!   moves [`MASK_EMA`] of the way, so the edge does not shimmer between
@@ -67,9 +72,10 @@ pub trait Segmenter: Send {
     fn backend(&self) -> String;
 }
 
-/// Makes the segmenter on its own thread (loading a model can take a
-/// moment and must not hold up the camera).
-pub type SegmenterFactory = Box<dyn FnOnce() -> Result<Box<dyn Segmenter>, String> + Send>;
+/// Makes the segmenter on the segmenter thread (loading a model can take a
+/// moment and must not hold up the camera). Called again each time the
+/// camera starts after a stop.
+pub type SegmenterFactory = Arc<dyn Fn() -> Result<Box<dyn Segmenter>, String> + Send + Sync>;
 
 /// An I420 frame borrowed mutably (the encoder's own buffer).
 pub struct FrameMut<'a> {
@@ -121,13 +127,45 @@ struct Slot {
     stop: bool,
 }
 
+/// What the camera thread and one segmenter thread share.
+#[derive(Default)]
 struct Shared {
     slot: Mutex<Slot>,
     wake: Condvar,
     mask: Mutex<Option<Arc<Vec<u8>>>>,
-    stats: Mutex<EffectStats>,
 }
 
+/// A running segmenter thread. Dropping it asks the thread to stop and
+/// does not wait: the thread ends after the segmentation (or the model
+/// load) it is in, and drops the model there.
+struct Worker {
+    shared: Arc<Shared>,
+}
+
+impl Worker {
+    fn start(factory: SegmenterFactory, stats: Arc<Mutex<EffectStats>>) -> Self {
+        let shared = Arc::new(Shared::default());
+        let thread_shared = Arc::clone(&shared);
+        let spawned = std::thread::Builder::new()
+            .name("yap-segment".into())
+            .spawn(move || segment_loop(&thread_shared, &*factory, &stats));
+        // Detached (see the type's docs); a failed spawn leaves no masks,
+        // so the camera shows as it is.
+        if let Err(e) = spawned {
+            eprintln!("[camera] segmenter thread: {e}");
+        }
+        Self { shared }
+    }
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        lock(&self.shared.slot).stop = true;
+        self.shared.wake.notify_one();
+    }
+}
+
+#[derive(Default)]
 struct Scratch {
     last_sent: Option<Instant>,
     background: Planes,
@@ -145,13 +183,15 @@ struct Scratch {
     logged: Option<Instant>,
 }
 
-/// A running effect: the background, the segmenter thread and the
-/// camera thread's scratch.
+/// A chosen background: what goes behind the person, the segmenter
+/// thread while the camera runs, and the camera thread's scratch.
 pub struct Effect {
     background: Background,
-    shared: Arc<Shared>,
+    factory: SegmenterFactory,
+    stats: Arc<Mutex<EffectStats>>,
+    /// Started by the first frame, stopped by [`Self::release`].
+    worker: Mutex<Option<Worker>>,
     scratch: Mutex<Scratch>,
-    worker: Option<std::thread::JoinHandle<()>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -159,46 +199,42 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl Effect {
-    /// Starts the segmenter thread.
+    /// A background; nothing runs (and no model loads) until a frame comes.
     pub fn start(background: Background, factory: SegmenterFactory) -> Self {
-        let shared = Arc::new(Shared {
-            slot: Mutex::new(Slot::default()),
-            wake: Condvar::new(),
-            mask: Mutex::new(None),
-            stats: Mutex::new(EffectStats::default()),
-        });
-        let thread_shared = Arc::clone(&shared);
-        let worker = std::thread::Builder::new()
-            .name("yap-segment".into())
-            .spawn(move || segment_loop(&thread_shared, factory))
-            .map_err(|e| eprintln!("[camera] segmenter thread: {e}"))
-            .ok();
         Self {
             background,
-            shared,
-            scratch: Mutex::new(Scratch {
-                last_sent: None,
-                background: Planes::default(),
-                cover: None,
-                small: Planes::default(),
-                tmp: Vec::new(),
-                alphas: None,
-                frame_ns: 0,
-                stage_ns: [0; 3],
-                stage_frames: 0,
-                logged: None,
-            }),
-            worker,
+            factory,
+            stats: Arc::new(Mutex::new(EffectStats::default())),
+            worker: Mutex::new(None),
+            scratch: Mutex::new(Scratch::default()),
         }
     }
 
     pub fn stats(&self) -> EffectStats {
-        lock(&self.shared.stats).clone()
+        lock(&self.stats).clone()
+    }
+
+    /// The camera stopped: the segmenter thread stops (without waiting for
+    /// it) and the frame buffers go. The next frame starts afresh.
+    pub fn release(&self) {
+        let worker = lock(&self.worker).take();
+        drop(worker);
+        *lock(&self.scratch) = Scratch::default();
+    }
+
+    /// The running segmenter's shared state, started if it is not.
+    fn shared(&self) -> Arc<Shared> {
+        let mut worker = lock(&self.worker);
+        let worker = worker.get_or_insert_with(|| {
+            Worker::start(Arc::clone(&self.factory), Arc::clone(&self.stats))
+        });
+        Arc::clone(&worker.shared)
     }
 
     /// Composites one frame in place.
     pub fn apply(&self, frame: &mut FrameMut<'_>) {
         let started = Instant::now();
+        let shared = self.shared();
         let mut scratch = lock(&self.scratch);
         let due = scratch
             .last_sent
@@ -206,11 +242,11 @@ impl Effect {
         if due {
             scratch.last_sent = Some(Instant::now());
             let input = model_input(frame);
-            let mut slot = lock(&self.shared.slot);
+            let mut slot = lock(&shared.slot);
             slot.input = Some(input);
-            self.shared.wake.notify_one();
+            shared.wake.notify_one();
         }
-        let mask = lock(&self.shared.mask).clone();
+        let mask = lock(&shared.mask).clone();
         let Some(mask) = mask else {
             return;
         };
@@ -262,7 +298,7 @@ impl Effect {
         scratch.stage_ns[2] += (done - background_done).as_nanos();
         scratch.stage_frames += 1;
         scratch.frame_ns += (done - started).as_nanos();
-        let mut stats = lock(&self.shared.stats);
+        let mut stats = lock(&self.stats);
         stats.frames += 1;
         stats.frame_ms = scratch.frame_ns as f64 / 1e6 / stats.frames as f64;
         if scratch
@@ -289,16 +325,6 @@ impl Effect {
     }
 }
 
-impl Drop for Effect {
-    fn drop(&mut self) {
-        lock(&self.shared.slot).stop = true;
-        self.shared.wake.notify_one();
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-    }
-}
-
 /// The next input, or `None` once the effect stops.
 fn next_input(shared: &Shared) -> Option<Vec<f32>> {
     let mut slot = lock(&shared.slot);
@@ -316,7 +342,11 @@ fn next_input(shared: &Shared) -> Option<Vec<f32>> {
     }
 }
 
-fn segment_loop(shared: &Shared, factory: SegmenterFactory) {
+fn segment_loop(
+    shared: &Shared,
+    factory: &(dyn Fn() -> Result<Box<dyn Segmenter>, String> + Send + Sync),
+    stats: &Mutex<EffectStats>,
+) {
     // Nothing loads until a frame comes: a background chosen in the
     // settings costs nothing while no camera runs.
     let Some(mut pending) = next_input(shared) else {
@@ -326,18 +356,22 @@ fn segment_loop(shared: &Shared, factory: SegmenterFactory) {
         Ok(s) => {
             let backend = s.backend();
             eprintln!("[camera] background segmentation on {backend}");
-            lock(&shared.stats).backend = backend;
+            lock(stats).backend = backend;
             s
         }
         Err(why) => {
             eprintln!("[camera] background segmentation unavailable: {why}");
-            lock(&shared.stats).error = why;
+            lock(stats).error = why;
             return;
         }
     };
     let mut shown: Option<Vec<f32>> = None;
     let mut total_ns = 0u128;
     loop {
+        // Stopped while the model loaded or segmented: drop it here.
+        if lock(&shared.slot).stop {
+            return;
+        }
         let input = std::mem::take(&mut pending);
         let started = Instant::now();
         match segmenter.segment(&input) {
@@ -352,7 +386,7 @@ fn segment_loop(shared: &Shared, factory: SegmenterFactory) {
         }
         total_ns += started.elapsed().as_nanos();
         {
-            let mut stats = lock(&shared.stats);
+            let mut stats = lock(stats);
             stats.segmentations += 1;
             stats.segment_ms = total_ns as f64 / 1e6 / stats.segmentations as f64;
         }
@@ -367,7 +401,8 @@ fn segment_loop(shared: &Shared, factory: SegmenterFactory) {
 static EFFECT: RwLock<Option<Arc<Effect>>> = RwLock::new(None);
 
 /// Turns a background on (or off with `None`). A new background starts a
-/// new segmenter; the old one stops.
+/// new segmenter; the old one stops. Never waits on a segmenter thread, so
+/// it is safe on the GUI thread.
 pub fn set_camera_background(effect: Option<(Background, SegmenterFactory)>) {
     let next = effect.map(|(background, factory)| Arc::new(Effect::start(background, factory)));
     let old = std::mem::replace(
@@ -375,6 +410,14 @@ pub fn set_camera_background(effect: Option<(Background, SegmenterFactory)>) {
         next,
     );
     drop(old);
+}
+
+/// The camera stopped: the running effect lets go of its segmenter and
+/// buffers until the next frame.
+pub fn camera_stopped() {
+    if let Some(effect) = camera_effect() {
+        effect.release();
+    }
 }
 
 /// The running effect, if any.
@@ -1037,7 +1080,7 @@ mod tests {
         static LOADED: AtomicBool = AtomicBool::new(false);
         let effect = Effect::start(
             Background::Blur { strong: true },
-            Box::new(|| {
+            Arc::new(|| {
                 LOADED.store(true, Ordering::SeqCst);
                 Ok(Box::new(Flat(1.0)) as Box<dyn Segmenter>)
             }),
@@ -1045,6 +1088,94 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         assert!(!LOADED.load(Ordering::SeqCst));
         drop(effect);
+    }
+
+    /// A factory that takes `load` to load and counts its loads.
+    fn slow_factory(
+        load: Duration,
+        loads: Arc<std::sync::atomic::AtomicUsize>,
+    ) -> SegmenterFactory {
+        Arc::new(move || {
+            std::thread::sleep(load);
+            loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Box::new(Flat(1.0)) as Box<dyn Segmenter>)
+        })
+    }
+
+    /// Feeds frames until `loads` reaches `n` (or 2 s pass).
+    fn feed_until_loaded(effect: &Effect, loads: &std::sync::atomic::AtomicUsize, n: usize) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while loads.load(std::sync::atomic::Ordering::SeqCst) < n && Instant::now() < deadline {
+            let mut room = planes(64, 36, 200);
+            effect.apply(&mut frame(&mut room));
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn dropping_an_effect_should_not_wait_for_a_loading_model() {
+        let loads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let effect = Effect::start(
+            Background::Blur { strong: true },
+            slow_factory(Duration::from_secs(1), Arc::clone(&loads)),
+        );
+        let mut room = planes(64, 36, 200);
+        effect.apply(&mut frame(&mut room));
+        // The model is loading on the segmenter thread now.
+        std::thread::sleep(Duration::from_millis(50));
+        let started = Instant::now();
+        drop(effect);
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_camera_stop_should_let_go_of_the_frame_buffers() {
+        let loads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let effect = Effect::start(
+            Background::Blur { strong: true },
+            slow_factory(Duration::ZERO, Arc::clone(&loads)),
+        );
+        feed_until_loaded(&effect, &loads, 1);
+        // A mask has come by now, so the scratch holds a frame's worth.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while lock(&effect.scratch).alphas.is_none() && Instant::now() < deadline {
+            let mut room = planes(64, 36, 200);
+            effect.apply(&mut frame(&mut room));
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(lock(&effect.scratch).alphas.is_some(), "no mask came");
+        effect.release();
+        let scratch = lock(&effect.scratch);
+        assert!(scratch.alphas.is_none() && scratch.background.y.is_empty());
+    }
+
+    #[test]
+    fn a_camera_stop_should_stop_the_segmenter_until_the_next_frame() {
+        let loads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let effect = Effect::start(
+            Background::Blur { strong: true },
+            slow_factory(Duration::ZERO, Arc::clone(&loads)),
+        );
+        feed_until_loaded(&effect, &loads, 1);
+        effect.release();
+        assert!(lock(&effect.worker).is_none());
+    }
+
+    #[test]
+    fn the_next_frame_after_a_stop_should_load_the_model_again() {
+        let loads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let effect = Effect::start(
+            Background::Blur { strong: true },
+            slow_factory(Duration::ZERO, Arc::clone(&loads)),
+        );
+        feed_until_loaded(&effect, &loads, 1);
+        effect.release();
+        feed_until_loaded(&effect, &loads, 2);
+        assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
     #[test]
@@ -1056,7 +1187,7 @@ mod tests {
         };
         let effect = Effect::start(
             Background::Image(Arc::new(red)),
-            Box::new(|| Ok(Box::new(Flat(0.0)) as Box<dyn Segmenter>)),
+            Arc::new(|| Ok(Box::new(Flat(0.0)) as Box<dyn Segmenter>)),
         );
         let mut room = planes(64, 36, 200);
         let deadline = Instant::now() + Duration::from_secs(2);

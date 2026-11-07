@@ -972,4 +972,6 @@ is 17.3 MB.
   to the MFT on the same device, as the desktop app does; today the frame
   is read back once for the preview and converted on the CPU.
 - Animated (GIF/WebP) background images play their first frame only; the
-  web animates them. AVIF backgrounds are refused at decode.
+  web animates them. AVIF is not uploaded from here (the `image` crate's
+  AVIF decoder needs dav1d, a C library); one uploaded on the web fails to
+  decode and the row says it could not be applied, as the web does.

@@ -14,10 +14,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use yap_cache::voice::CameraBackground;
-use yap_core::store::backgrounds::BackgroundsCommand;
+use yap_core::store::backgrounds::{cached_path, is_safe_id, BackgroundsCommand};
 use yap_voice::background::{
-    camera_effect, camera_effect_active, set_camera_background, Background, Rgba, Segmenter,
-    SegmenterFactory,
+    camera_effect, camera_effect_active, camera_stopped, set_camera_background, Background, Rgba,
+    Segmenter, SegmenterFactory,
 };
 use yap_voice::{push_camera_frame, CameraFrame, PixelFormat};
 
@@ -91,12 +91,17 @@ pub unsafe extern "C" fn yap_camera_frame(
 #[derive(Default)]
 struct Wanted {
     choice: CameraBackground,
-    /// Where fetched pictures go (`<app data>/camera-backgrounds`).
+    /// The app's data folder (fetched pictures go in its
+    /// `camera-backgrounds`).
     dir: Option<PathBuf>,
     /// Fetched pictures by background id.
     ready: BTreeMap<String, String>,
     /// The key of what was last applied.
     applied: String,
+    /// The user just picked a background (a failed fetch is tried again).
+    picked: bool,
+    /// Why the applied picture could not be used, for the settings row.
+    error: Option<String>,
 }
 
 fn wanted() -> &'static Mutex<Wanted> {
@@ -109,9 +114,18 @@ pub fn set_background_choice(choice: CameraBackground, dir: Option<PathBuf>) {
     {
         let mut w = wanted().lock().unwrap_or_else(PoisonError::into_inner);
         w.choice = choice;
-        w.dir = dir.map(|d| d.join("camera-backgrounds"));
+        w.dir = dir;
     }
     update_background();
+}
+
+/// The user picked a background (before its choice is saved): a picture
+/// whose fetch failed is asked for again.
+pub fn background_picked() {
+    wanted()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .picked = true;
 }
 
 /// The store fetched these pictures.
@@ -124,7 +138,7 @@ pub fn set_background_ready(ready: BTreeMap<String, String>) {
 }
 
 fn segmenter() -> SegmenterFactory {
-    Box::new(|| yap_segment::OrtSegmenter::load().map(|s| Box::new(s) as Box<dyn Segmenter>))
+    Arc::new(|| yap_segment::OrtSegmenter::load().map(|s| Box::new(s) as Box<dyn Segmenter>))
 }
 
 /// A picture as RGBA, at most 2560 on its long side (a cover of the
@@ -150,16 +164,20 @@ fn decode(path: &str) -> Result<Rgba, String> {
 }
 
 /// Where background `id`'s picture is: fetched this run, or kept on disk
-/// from an earlier one.
+/// from an earlier one. `None` for an id that is not safe as a file name.
 fn picture(w: &Wanted, id: &str) -> Option<String> {
+    if !is_safe_id(id) {
+        return None;
+    }
     w.ready.get(id).cloned().or_else(|| {
-        let kept = w.dir.as_ref()?.join(id);
+        let kept = cached_path(w.dir.as_ref()?, id)?;
         kept.is_file().then(|| kept.to_string_lossy().into_owned())
     })
 }
 
 fn update_background() {
     let mut w = wanted().lock().unwrap_or_else(PoisonError::into_inner);
+    let picked = std::mem::take(&mut w.picked);
     let key = match &w.choice {
         CameraBackground::None => "none".to_owned(),
         CameraBackground::Blur { strength } => format!("blur:{strength}"),
@@ -169,14 +187,18 @@ fn update_background() {
         },
     };
     if key == w.applied {
-        if let (true, CameraBackground::Image { id }) = (key.starts_with("fetching:"), &w.choice) {
-            // Still waiting: the list may have come in since (the store
-            // drops repeats of both).
-            fetch(&w, id);
+        // Unchanged. Only a pick asks again for a picture that is not in
+        // (a failed fetch waits otherwise; the list's arrival sends one
+        // that waited for it).
+        if let (true, CameraBackground::Image { id }) = (picked, &w.choice) {
+            if key.starts_with("fetching:") {
+                fetch(&w, id, true);
+            }
         }
         return;
     }
     w.applied.clone_from(&key);
+    w.error = None;
     match w.choice.clone() {
         CameraBackground::None => set_camera_background(None),
         CameraBackground::Blur { strength } => {
@@ -197,55 +219,82 @@ fn update_background() {
                     crate::video::install_output();
                     let spawned = std::thread::Builder::new()
                         .name("yap-background-image".into())
-                        .spawn(move || match decode(&path) {
-                            Ok(rgba) => {
-                                let still = wanted()
-                                    .lock()
-                                    .unwrap_or_else(PoisonError::into_inner)
-                                    .applied
-                                    .starts_with(&format!("image:{id}:"));
-                                if still {
-                                    set_camera_background(Some((
-                                        Background::Image(Arc::new(rgba)),
-                                        segmenter(),
-                                    )));
-                                }
-                            }
-                            Err(why) => eprintln!("[camera] background image {id}: {why}"),
-                        });
+                        .spawn(move || apply_picture(&id, &path));
                     if let Err(e) = spawned {
                         eprintln!("[camera] background image thread: {e}");
                     }
                 }
-                None => fetch(&w, &id),
+                None if !is_safe_id(&id) => {
+                    eprintln!("[camera] background id {id:?} refused");
+                    w.error = Some("unsafe background id".into());
+                }
+                None => fetch(&w, &id, picked),
             }
+        }
+    }
+}
+
+/// Decodes background `id`'s picture and runs it, unless the choice moved
+/// on meanwhile. A picture that does not decode (a format this build
+/// cannot read, a broken file) is kept as the effect's error, so the
+/// settings row says it could not be applied, as the web does.
+fn apply_picture(id: &str, path: &str) {
+    let decoded = decode(path);
+    let mut w = wanted().lock().unwrap_or_else(PoisonError::into_inner);
+    if !w.applied.starts_with(&format!("image:{id}:")) {
+        return;
+    }
+    match decoded {
+        Ok(rgba) => {
+            drop(w);
+            set_camera_background(Some((Background::Image(Arc::new(rgba)), segmenter())));
+        }
+        Err(why) => {
+            eprintln!("[camera] background image {id}: {why}");
+            w.error = Some(why);
         }
     }
 }
 
 /// Asks the store for background `id`'s picture (loading the list first
 /// if it has not: a choice kept from the last run comes before it).
-fn fetch(w: &Wanted, id: &str) {
-    let Some(dir) = w.dir.as_ref() else {
+/// `retry`: the user picked it, so a failed fetch runs again at once.
+fn fetch(w: &Wanted, id: &str, retry: bool) {
+    let Some(dest) = w.dir.as_ref().and_then(|dir| cached_path(dir, id)) else {
         return;
     };
-    let dest = dir.join(id).to_string_lossy().into_owned();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
     crate::client::command(yap_core::Command::Backgrounds(BackgroundsCommand::Load));
     crate::client::command(yap_core::Command::Backgrounds(BackgroundsCommand::Fetch {
         id: id.to_owned(),
-        dest,
+        dest: dest.to_string_lossy().into_owned(),
+        now_ms,
+        retry,
     }));
 }
 
 /// How the effect is doing, as JSON for the settings row: whether the
-/// segmenter can run here, its backend, error and per-frame costs.
+/// segmenter can run here, its backend, error and per-frame costs. A
+/// picture that would not decode is the error too.
 pub fn background_effect_info() -> String {
     let stats = camera_effect().map(|e| e.stats()).unwrap_or_default();
+    let picture_error = wanted()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .error
+        .clone();
+    let error = if stats.error.is_empty() {
+        picture_error.unwrap_or_default()
+    } else {
+        stats.error
+    };
     serde_json::json!({
         "available": yap_segment::available(),
         "active": camera_effect_active(),
         "backend": stats.backend,
-        "error": stats.error,
+        "error": error,
         "segmentMs": stats.segment_ms,
         "frameMs": stats.frame_ms,
         "segmentations": stats.segmentations,
@@ -258,4 +307,12 @@ pub fn background_effect_info() -> String {
 #[no_mangle]
 pub extern "C" fn yap_camera_effect_active() -> bool {
     camera_effect_active()
+}
+
+/// For `cpp/camera.cpp`: the capture closed. The effect lets go of its
+/// segmenter (the ONNX session and its GPU memory) and its frame buffers
+/// until the next frame.
+#[no_mangle]
+pub extern "C" fn yap_camera_closed() {
+    camera_stopped();
 }

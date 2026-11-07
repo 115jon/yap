@@ -90,6 +90,8 @@ struct Shared {
     camera_stale: bool,
     /// What `screen_stale` answers.
     screen_stale: bool,
+    /// What the next `take_screen_failure` answers.
+    screen_failed: bool,
     /// What `stats` answers.
     stats: MediaStats,
     /// Receive-only sessions opened so far.
@@ -151,6 +153,14 @@ impl FakeEngine {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .screen_stale = stale;
+    }
+
+    /// Makes the share's hardware encoder fail: `take_screen_failure` says
+    /// so once, and `screen_stale` from then on.
+    pub fn fail_screen_encoder(&self) {
+        let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+        shared.screen_failed = true;
+        shared.screen_stale = true;
     }
 
     /// Sets what `stats` reports.
@@ -379,6 +389,16 @@ impl MediaSession for FakeSession {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .screen_stale
+    }
+
+    fn take_screen_failure(&self) -> bool {
+        std::mem::take(
+            &mut self
+                .shared
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .screen_failed,
+        )
     }
 
     async fn publish_screen_audio(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {

@@ -341,6 +341,36 @@ impl CallMachine {
         self.drive_share(fx);
     }
 
+    /// The live share's hardware encoder failed mid-share: the same capture
+    /// is published again, which pushes a fresh (VP8) track since the
+    /// failed one counts as stale; viewers get the new track by op 12 under
+    /// the same name, as on a restart. Silent, as the web has no such
+    /// notice. A step in flight already pushes afresh, so it is left alone.
+    pub(super) fn on_share_encoder_failed(&mut self, fx: &mut Vec<Effect>) {
+        let (Step::Idle, Some(live)) = (&self.share.step, self.share.live.clone()) else {
+            return;
+        };
+        if self.share.wanted.as_ref().map(|(t, _)| *t) != Some(live.token) {
+            return;
+        }
+        fx.push(Effect::Log(
+            "[share] hardware encoder failed; publishing the share again on VP8".into(),
+        ));
+        fx.push(Effect::PublishShare {
+            stream_id: format!("screen-{}", self.me),
+            encoding: ShareEncoding::of(&live.request),
+            audio: live.has_audio,
+        });
+        self.share.step = Step::Publishing {
+            token: live.token,
+            request: live.request,
+            captured: ShareCaptured {
+                has_audio: live.has_audio,
+            },
+            replacing: true,
+        };
+    }
+
     /// A capture or publish of `token` failed. A restart had released the
     /// live capture already, so the share ends; a first start just fails.
     fn share_failed(&mut self, fx: &mut Vec<Effect>, token: u64, replacing: bool, error: String) {
