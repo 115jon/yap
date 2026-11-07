@@ -1843,7 +1843,7 @@ pub(super) fn call_line(message: &Message, ctx: &RowContext<'_>) -> String {
     let caller = message
         .author
         .as_ref()
-        .map(User::label)
+        .map(|u| u.label())
         .filter(|n| !n.is_empty())
         .unwrap_or("Someone");
     let callee = ctx
