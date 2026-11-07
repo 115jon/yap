@@ -19,7 +19,7 @@ license = "GPL-3.0-only"
 publish = false
 
 [workspace.dependencies]
-serde = { version = "1.0.229", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = "1.0.154"
 keyring = { version = "3", features = ["windows-native"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "native-tls"] }
@@ -172,10 +172,13 @@ opt-level = 3
 #   qt-build-utils: qmlcachegen's bytecode-only mode for the QML files
 #   rust/build.rs names, and empty .qml files in the resources.
 #   webrtc-sys: no AV1 encoder or decoder, and H.264 decoded by Media
-#   Foundation (on the GPU where it can) instead of FFmpeg.
+#   Foundation (on the GPU where it can) instead of FFmpeg, into D3D11
+#   textures the UI draws without a copy.
+#   libwebrtc: the C++ buffer behind a native frame (those textures).
 [patch.crates-io]
 qt-build-utils = { path = "vendor/qt-build-utils" }
 webrtc-sys = { path = "vendor/webrtc-sys" }
+libwebrtc = { path = "vendor/libwebrtc" }
 
 [features]
 link_qt_object_files = ["cxx-qt-build/link_qt_object_files"]

@@ -129,15 +129,9 @@ RowLayout {
         Loader {
             anchors.fill: parent
             active: Nav.home && Nav.activeChannelId.length === 0 && Nav.voicePanelId.length === 0
-            sourceComponent: ShellState.shopOpen ? shopView : friendsView
-        }
-        Component {
-            id: friendsView
-            FriendsView {}
-        }
-        Component {
-            id: shopView
-            ShopView {}
+            // By URL, as the cold screens below: their types load on first
+            // use, not at startup (docs/PERFORMANCE.md, pass 6).
+            source: ShellState.shopOpen ? "../Shop/ShopView.qml" : "../Friends/FriendsView.qml"
         }
         Loader {
             anchors.fill: parent
@@ -367,7 +361,7 @@ RowLayout {
         Layout.preferredHeight: 0
 
         LazyPopup { id: profile; host: root; sourceComponent: ProfilePopout {} }
-        LazyPopup { id: fullProfile; host: root; sourceComponent: ProfileModal {} }
+        LazyPopup { id: fullProfile; host: root; source: "ProfileModal.qml" }
         LazyPopup { id: peerMenu; host: root; sourceComponent: PeerMenu {} }
         // A call ringing for us while its DM is not open.
         LazyPopup {
@@ -386,9 +380,9 @@ RowLayout {
             // was the scene graph's pooled batches and glyph caches, which
             // the patched Qt now releases (LazyPopup asks;
             // docs/PERFORMANCE.md, pass 3).
-            sourceComponent: SettingsDialog {}
+            source: "../Settings/SettingsDialog.qml"
         }
-        LazyPopup { id: profileEditor; host: root; sourceComponent: ProfileEditor {} }
+        LazyPopup { id: profileEditor; host: root; source: "../Settings/ProfileEditor.qml" }
         LazyPopup {
             host: root
             when: SettingsNav.open && SettingsNav.previewing

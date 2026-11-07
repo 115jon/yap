@@ -47,12 +47,13 @@ Item {
         }
     }
 
-    // Each made as it opens and let go once closed.
-    LazyPopup { id: switcher; sourceComponent: QuickSwitcher {} }
-    LazyPopup { id: reactions; sourceComponent: ReactionDetailsDialog {} }
-    LazyPopup { id: share; sourceComponent: MessageShareDialog {} }
-    LazyPopup { id: invite; sourceComponent: ChannelInviteDialog {} }
-    LazyPopup { id: status; sourceComponent: VoiceStatusDialog {} }
-    LazyPopup { id: voiceSwitch; sourceComponent: VoiceSwitchDialog {} }
-    LazyPopup { id: startCall; sourceComponent: StartCallDialog {} }
+    // Each made as it opens and let go once closed. By URL, so their types
+    // load on first use, not at startup (docs/PERFORMANCE.md, pass 6).
+    LazyPopup { id: switcher; source: "QuickSwitcher.qml" }
+    LazyPopup { id: reactions; source: "ReactionDetailsDialog.qml" }
+    LazyPopup { id: share; source: "MessageShareDialog.qml" }
+    LazyPopup { id: invite; source: "ChannelInviteDialog.qml" }
+    LazyPopup { id: status; source: "VoiceStatusDialog.qml" }
+    LazyPopup { id: voiceSwitch; source: "VoiceSwitchDialog.qml" }
+    LazyPopup { id: startCall; source: "../Calls/StartCallDialog.qml" }
 }

@@ -50,7 +50,7 @@ fn new_message(rng: &mut Rng, serial: u64, channel_id: &str, base: Option<&str>)
         id: format!("msg_soak_{serial}"),
         channel_id: channel_id.into(),
         author_id: author_id.into(),
-        author: Some(user(author_id, username, display)),
+        author: Some(user(author_id, username, display).into()),
         content: sentence(rng),
         created_at: format_rfc3339(now_ms()),
         ..blank_message()

@@ -1,6 +1,7 @@
 //! The typed client state. Only [`super::reduce`] mutates it.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 
 use yap_cache::Snapshot;
 use yap_protocol::rest::Reaction;
@@ -114,6 +115,9 @@ pub struct MessageLog {
     pub has_more_after: bool,
     messages: Vec<Message>,
     index: HashMap<String, usize>,
+    /// One shared copy of each author, by user id: a page carries the author
+    /// in full on every message (performance pass 6).
+    authors: HashMap<String, Arc<User>>,
 }
 
 impl MessageLog {
@@ -156,7 +160,23 @@ impl MessageLog {
     }
 
     /// Inserts (at the end) or replaces by id; returns the position.
+    /// `message`'s author as the copy already shared, when it is the same.
+    fn intern(&mut self, mut message: Message) -> Message {
+        if let Some(author) = &message.author {
+            match self.authors.get(&author.id) {
+                Some(known) if Arc::ptr_eq(known, author) || **known == **author => {
+                    message.author = Some(Arc::clone(known));
+                }
+                _ => {
+                    self.authors.insert(author.id.clone(), Arc::clone(author));
+                }
+            }
+        }
+        message
+    }
+
     pub fn upsert(&mut self, message: Message) -> usize {
+        let message = self.intern(message);
         match self.index.get(&message.id) {
             Some(&i) => {
                 self.messages[i] = message;
@@ -261,6 +281,7 @@ impl MessageLog {
             .into_iter()
             .filter(|m| !self.index.contains_key(&m.id))
             .collect();
+        let fresh: Vec<Message> = fresh.into_iter().map(|m| self.intern(m)).collect();
         let count = fresh.len();
         if count > 0 {
             self.messages.splice(0..0, fresh);
@@ -272,6 +293,7 @@ impl MessageLog {
     /// Inserts by `created_at` (after equal times); returns the position.
     /// For putting back a message whose delete failed.
     pub fn insert_sorted(&mut self, message: Message) -> usize {
+        let message = self.intern(message);
         if let Some(&i) = self.index.get(&message.id) {
             self.messages[i] = message;
             return i;
@@ -290,6 +312,7 @@ impl MessageLog {
         if self.index.contains_key(&message.id) {
             return None;
         }
+        let message = self.intern(message);
         let i = self.index.remove(old_id)?;
         self.index.insert(message.id.clone(), i);
         self.messages[i] = message;

@@ -265,8 +265,11 @@ fn main() {
     // and JITs the functions that run often. Pass 3 kept the chat, sidebars,
     // calls and shared components as C++; pass 5 measured no cost in making
     // them bytecode too (a fast wheel scroll through the 10k-message fixture
-    // and the animated idle cost the same or less), and 2.8 MiB off the exe
-    // (docs/PERFORMANCE.md, pass 5).
+    // and the animated idle cost the same or less), and 2.8 MiB off the exe.
+    // Pass 6 compiled the startup path (Main, Shell, the chat view, rail,
+    // sidebar, composer and message delegate) to C++ again: startup was the
+    // same (qml loaded 205 ms against 202) for 0.6 MB of exe, so it stays
+    // bytecode (docs/PERFORMANCE.md, passes 5 and 6).
     std::env::set_var("QT_BUILD_UTILS_QMLCACHEGEN_BYTECODE_ONLY", "*");
     // The patched qt-build-utils again: the .qml files go into the
     // resources empty, as Qt 6.8's DISCARD_QML_CONTENTS does. Every file is

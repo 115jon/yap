@@ -3,7 +3,9 @@
 //! Frames: the call's media engine hands decoded I420 planes to
 //! [`QtOutput`] on a media thread; it passes them straight to
 //! `cpp/videohub.cpp`, which copies them once into a `QVideoFrame` and hands
-//! that to the `VideoOutput`s showing the key, on the GUI thread.
+//! that to the `VideoOutput`s showing the key, on the GUI thread. A frame
+//! the GPU decoded comes as its D3D11 texture instead, which the
+//! `VideoOutput` samples as it is (zero copy).
 //!
 //! Demand: each `VideoSurface` in QML reports the device-pixel size it shows
 //! a key at, and withdraws when it goes. The largest size per key, with the
@@ -31,6 +33,12 @@ extern "C" {
         v: *const u8,
         stride_v: u32,
     );
+    fn yap_video_native_frame(
+        key: *const c_char,
+        key_len: usize,
+        buffer: *const std::ffi::c_void,
+        rotation: u16,
+    ) -> bool;
 }
 
 /// Hands frames to the Qt video hub.
@@ -63,6 +71,12 @@ impl VideoOutput for QtOutput {
                 frame.stride_v,
             );
         }
+    }
+
+    fn native_frame(&self, key: &str, buffer: *const std::ffi::c_void, rotation: u16) -> bool {
+        // SAFETY: `buffer` is valid for the call (the trait's contract); the
+        // C++ side takes its own reference before returning.
+        unsafe { yap_video_native_frame(key.as_ptr().cast(), key.len(), buffer, rotation) }
     }
 }
 

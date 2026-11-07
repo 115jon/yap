@@ -34,6 +34,9 @@
 # caches no text uses (the Settings memory, PERFORMANCE.md); in 6.11.3 the
 # batch half is upstream, 0001 is the glyph half (both render loops), 0002
 # the shader one and 0003 lets the Windows time zones build without CLDR names.
+# 0004 (performance pass 6): the D3D11 backend shares each shader resource
+# binding set's batched bindings with the command buffer instead of copying
+# them at every bind (a bind per draw in Qt Quick).
 param(
     [string]$Version = "6.11.3",
     [string]$Zip = $(if ($Version -eq "6.6.3") { "F:/Files/Downloads/qt/src/qt-everywhere-src-6.6.3.zip" } else { "F:/ct/qt-dl/qt-everywhere-src-$Version.zip" }),

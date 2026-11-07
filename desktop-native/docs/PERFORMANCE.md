@@ -1634,3 +1634,434 @@ Source (worktree `native/perf3`):
     `0003-no-av1-decoder.patch` (new);
   - `patches/vendor.ps1`.
 - Docs: this section, and LIBRARIES.md §6, §12 and §13.
+
+# Performance pass 6 (2026-11-07)
+
+The brief, in order:
+
+1. zero-copy decode into Qt for watched shares;
+2. per-frame render CPU, with focused animated idle under 3 %;
+3. idle memory towards 120 MB;
+4. with awake displays, a real window-capture 1440p60 share and the
+   animated idle with vsync;
+5. what CI needs for the Qt 6.11 archive.
+
+The coordinator added a sixth: the startup cost of making all QML
+bytecode-only in pass 5.
+
+Before is pass 5's final build (`F:/ct/yapn/tmp/p6/before`, the same
+binary as `tmp/p5/c7.exe`, 59,124,224 B). After is this pass's final build
+(`F:/ct/yapn/tmp/p6/final`). Intermediate builds, all from the `native/perf3`
+worktree:
+
+| build | what it adds                                                                      |
+| ----- | --------------------------------------------------------------------------------- |
+| `zc`  | zero-copy decode (§1)                                                             |
+| `url` | `zc` + cold screens loaded by URL (§3)                                            |
+| `aot` | `url` + the startup path compiled to C++ again, shared message authors (§3, §6)   |
+| `c1`  | `aot` + the in-process sampler (§2)                                               |
+| final | `c1` without the startup C++ (§6), on the Qt with patch `0004` (§2); 59,164,160 B |
+
+## Conditions
+
+- **The displays were awake** for the whole session: vblank waits ran at
+  60.0 Hz on all three (`tools/vblank.ps1`). Pass 5's unpaced switch was
+  still used for comparisons with its numbers.
+- **The machine was shared.** A `qemu` VM used 1-2.5 cores all session, and
+  another agent's builds (`link.exe` at ~1.8 cores) ran for part of it. CPU
+  numbers are compared only within interleaved runs.
+- **The other agent's session.** At 14:02 a `--profile spike` session from
+  `F:/ct/yapn/run/sweep10` was running; nothing of mine started until it had
+  ended. The pass 6 tools refuse to start while another agent's YapNative or
+  node peer runs (`tools/p6/app.ps1`; pass 5's copy carried a tab character
+  in its own path and so matched nothing of its own).
+- **WPR was not available.** The elevate-broker request for the xperf trace
+  timed out unapproved, so the GUI thread was profiled in-process
+  instead (§2, `YAP_DEBUG_SAMPLE`). The driver's own threads are seen only
+  as per-thread CPU.
+
+## Method (new)
+
+Tools are in `F:/ct/yapn/tools/p6/`:
+
+- `owner.ps1`: the owner on profile `perf6` sharing the synthetic source
+  (`YAP_FAKE_SHARE_SOURCE`) at 1440p60 or 1080p60, by posted clicks;
+- `watch.ps1`, `watch-heap.ps1`: the peer on `perf6peer` watching it, with
+  per-thread CPU over 25 s and three heap breakdowns
+  (`YAP_DEBUG_HEAP_HOOK=0`);
+- `leave.ps1`: hang up and stop one of ours by PID;
+- `anim-idle.ps1`, `anim-ab.ps1`: focused animated idle, builds interleaved,
+  paced and unpaced; `-NoTiming` drops `QSG_RENDER_TIMING` (below);
+  `<build>@nozc` runs a build with `YAP_ZERO_COPY=0`;
+- `startup.ps1`, `startup-ab.ps1`: startup lines of fixture launches,
+  builds interleaved, with `-Fresh` for a fresh profile;
+- `heap-idle.ps1`: the traced heap of the static fixture at idle;
+- `sample-anim.ps1`, `samplesym.py`: GUI-thread samples of the animated
+  idle, named from the link map;
+- `xperf-session.ps1`: a one-approval elevated xperf trace (not approved
+  this session);
+- `test.ps1`: tests and clippy on the custom Qt.
+
+New in the app (off unless set):
+
+- **`YAP_DEBUG_SAMPLE=<prefix>`** (`cpp/sampler.cpp`): a sampling profiler
+  of the GUI thread that needs no elevation. Each time `<prefix>.now`
+  appears it samples for `YAP_DEBUG_SAMPLE_SECONDS` (default 20): it
+  suspends the thread every millisecond, unwinds its stack with the
+  modules' unwind tables and resumes it. Frames are written as `exe+rva`,
+  or a DLL's nearest export. `samplesym.py` names them, leaves out the
+  stacks parked in a wait, and sums by leaf, by function anywhere on the
+  stack and by area. A trigger written before launch samples the startup.
+- **`YAP_ZERO_COPY=0`**: the copying video path (comparisons).
+
+## 1. Zero-copy decode into Qt
+
+### What changed
+
+- **One D3D11 device for the window and the decoder**
+  (`VideoHub::shareDevice`, called before the window is first shown).
+  - The app creates it as Qt would (BGRA support, the first hardware
+    adapter), plus video support for the decoder, and turns on
+    multithread protection, since the decoder's thread and the GUI
+    thread both use it.
+  - Qt Quick takes it through
+    `QQuickWindow::setGraphicsDevice(QQuickGraphicsDevice::fromDeviceAndContext(...))`,
+    and the decoder through `yap_mf_set_shared_device` (webrtc-sys patch
+    `0004`).
+  - Off Direct3D 11, with `YAP_ZERO_COPY=0`, or when the device cannot be
+    made, nothing changes.
+- **The decoder** (`0004`) decodes on that device. Each picture is copied
+  on the GPU (`CopySubresourceRegion`) out of the decoder's texture array
+  into an NV12 texture from a small pool per stream, and the decoder gets
+  its surface back at once. The frame travels through libwebrtc as a
+  native buffer; `ToI420()` reads it back only for a consumer that needs
+  pixels.
+- **Into Rust and back** (`libwebrtc` patch `0001`, `yap-voice`,
+  `src/video.rs`): `pump_video` hands a native frame's C++ buffer to the
+  output (`VideoOutput::native_frame`); only an output that cannot take it
+  gets it read back.
+- **Into Qt** (`cpp/videohub.cpp`): `yap_video_native_frame` wraps the
+  texture in a `QVideoFrame` whose buffer is a `QHwVideoBuffer`
+  (`D3D11FrameBuffer`). Its `textureHandle()` returns the texture when the
+  QRhi is ours, and `VideoOutput` samples it as it is: Qt's NV12 shader
+  through an R8 view for luma and an R8G8 view for chroma. No readback, no
+  I420 conversion, no upload. `map()` reads back once for any consumer
+  without our device.
+- The `QVideoFrame` holds the decoder's frame, and with it the texture, so
+  the pool reuses a texture only once Qt has let it go. The device's
+  immediate context orders the next copy after the draw that sampled it.
+
+### Results
+
+The owner shared the synthetic source over NVENC (pass 5's `before` exe);
+the peer watched, alternating builds. CPU is per 25 s of the watcher:
+
+| watching                                        | before (pass 5)                  | after (zero copy)                                    |
+| ----------------------------------------------- | -------------------------------- | ---------------------------------------------------- |
+| 1440p60, process                                | 10.36, 10.70, 10.83 s (**42 %**) | 8.20, 8.97, 8.41 s; final build 7.89 s (**32-36 %**) |
+| 1440p60, GUI thread                             | 2.50-2.80 s                      | 1.39-1.69 s                                          |
+| 1440p60, decoder thread                         | 0.73-0.94 s                      | 0.33 s                                               |
+| 1440p60, `yap-core` (I420 to Qt)                | 0.67-0.97 s, two threads         | 0.28 s                                               |
+| 1080p60, process                                | 8.83, 8.62 s (**35 %**)          | 6.41, 6.48 s (**26 %**)                              |
+| frames shown                                    | 60 fps                           | 59-60 fps                                            |
+| private while watching 1440p60                  | 337-346 MB                       | **257-306 MB**; final build 230-266 MB               |
+| private while watching 1080p60                  | 286-290 MB                       | **238-267 MB**                                       |
+| 20 s after leaving                              | 185 MB                           | 172 MB                                               |
+| heap / driver-private / write-comb. (1440p, MB) | 134 / 127 / 56                   | 98 / 99 / 57-80                                      |
+
+- **CPU: −20 % at 1440p60 and −26 % at 1080p60.** What is left is the
+  call itself: WebRTC's network thread (2.4-2.6 s, receiving 14 Mbps), the
+  synthetic audio device and the test mic (~1.2 s), and the GUI thread
+  drawing the call.
+- **Memory: −60 to −80 MB while watching.** The heap lost the I420 frames
+  and their `QVideoFrame` copies (−36 MB); the rest is the second D3D11
+  device and the MFT's staging copies that are gone. The write-combined
+  memory moves between 57 and 80 MB as the driver pools the texture
+  uploads of the rest of the UI; it does not grow.
+- **The picture is the same** (screenshots `tmp/p6/share/w-*.png`), at the
+  same colour conversion as before (the format's default colour space).
+- **The cost when nothing is watched:** +1.5 MB private at idle (the
+  device has video support), and no measurable CPU (§2's A/B,
+  `c1@nozc`).
+
+## 2. Per-frame render CPU and focused animated idle
+
+### The measurement itself was a third of the cost
+
+Profiling the GUI thread (`YAP_DEBUG_SAMPLE`, 60-90 s of the animated idle)
+put **13-19 % of its running samples in `ZwWriteFile`**: the
+`QSG_RENDER_TIMING` line Qt writes for every frame, which the measurement
+scripts of passes 4 and 5 turned on to count renders, going through our
+message handler to the redirected stderr. The "2.2 ms a frame" of passes
+4 and 5 included it.
+
+Focused animated idle (pass 3's scene: chat-10k, a GIF rail icon and two
+chat GIFs, 25.5 renders a second), 40 s runs interleaved, without the
+logging:
+
+| build                                | vsync (awake display)        | unpaced    |
+| ------------------------------------ | ---------------------------- | ---------- |
+| before (pass 5)                      | 3.16, 3.01, 4.02, 3.40, 3.08 | 2.77, 2.62 |
+| `c1`                                 | 3.44, 3.36, 3.12, 3.20, 3.91 | 3.40, 3.09 |
+| `c1`, own device (`YAP_ZERO_COPY=0`) | 4.06, 3.83, 3.87             |            |
+
+A last round, the three builds interleaved four times (vsync):
+
+| build             | CPU (one core)             | mean   |
+| ----------------- | -------------------------- | ------ |
+| before (pass 5)   | 3.24, 4.18, 4.34, 3.71     | 3.87 % |
+| `c1`              | 4.84, 3.32, 3.44, 3.24     | 3.71 % |
+| final (Qt `0004`) | **2.93**, 4.22, 3.79, 3.40 | 3.59 % |
+
+The machine's load moved single runs by up to a point, more than any
+difference between the builds. What the A/Bs show is that none of this
+pass's changes costs CPU at idle, and that the animated idle is at 3-4 %
+of a core, not the 5-7 % passes 4 and 5 reported.
+
+With the logging, as passes 4 and 5 measured: before 5.43 and 6.33 %
+paced, 5.19 and 5.51 % unpaced. The shared device's multithread
+protection costs nothing measurable: no lock shows in the samples, and the
+own-device runs are not lower.
+
+### Where a frame goes
+
+GUI-thread samples of the animated idle (`c1`, vsync, 483 and 518 running
+samples over 60 s):
+
+| area of the leaf frame                                             | share of the GUI thread |
+| ------------------------------------------------------------------ | ----------------------- |
+| the D3D11 runtime and the NVIDIA driver (draw submission, Present) | 41-43 %                 |
+| the logging write (gone without `QSG_RENDER_TIMING`)               | 13-19 %                 |
+| the batch renderer and QRhi                                        | 16-19 %                 |
+| of which, copying each SRB's batched bindings at every bind        | 9-11 %                  |
+| GIF decoding (`QGIFFormat::decode`, the streamed frames)           | 3-3.5 %                 |
+| sync, polish, QML, animations                                      | < 1 %                   |
+
+- **Scene-graph sync and our items cost almost nothing**: the animated
+  items change a texture, and the sync of the static subtrees is below
+  the sampling's resolution. Skipping their sync would gain nothing.
+- **`QRhiD3D11::setShaderResources` deep-copied the SRB's batched
+  bindings at every bind.** The batch renderer binds with dynamic offsets
+  for each draw, so each draw copied six stages of `QRhiBatchedBindings`
+  (`QVarLengthArray`s) into the command buffer's retain pool. **Qt patch
+  `0004`** makes the batches an immutable snapshot, rebuilt only when the
+  bindings change, and the command buffer keeps a reference. In the final build's samples
+  the copy constructors are gone (they were 10-11 % of the GUI thread);
+  `setShaderResources` itself stays at ~5 %. At the process level the
+  gain (~0.3 point, by the samples) is inside the machine's noise (table
+  above).
+- The rest is the driver submitting the frame's draws and presenting.
+  Fewer renders or fewer draws are what is left; see Targets.
+
+### Ideas from the brief, evaluated
+
+- **Only re-render the animated item's layer:** Qt Quick has no partial
+  update on D3D11; a frame re-records every batch. A `layer` over the
+  static chat would cache it as one texture (8 MB of video memory at this
+  size) but the GIFs sit inside the list, so the layer would be redrawn
+  with them. Not done.
+- **A slower tick for many GIFs on one clock:** pass 4 put chat GIFs on the
+  shared 30 Hz grid; the scene renders 25.5 times a second, which is the
+  GIFs' own frame rates on that grid. A 20 Hz grid stays a smoothness
+  trade the brief has not taken.
+- **Skipping the sync of static subtrees:** < 1 % of the GUI thread (above).
+- **Swapchain present mode, waitable objects, DirectComposition:** Qt 6.11
+  already presents with a flip-model swapchain, and the basic render loop
+  is paced by the DXGI vblank thread (pass 5). Present's own cost is in
+  the driver share above; a waitable object changes latency, not CPU.
+  Not changed.
+
+## 3. Idle memory
+
+On the static chat-10k fixture (traced heap, `heap-idle.ps1`, and the
+idle runs of §2):
+
+| build                   | live heap (traced) | private (idle runs) |
+| ----------------------- | ------------------ | ------------------- |
+| before                  | -                  | 190.8-193.1 MB      |
+| `url`                   | 76.4 MB            | 188.4-191.5 MB      |
+| `c1` (+ shared authors) | **57.1 MB**        | **168.5-171.1 MB**  |
+
+### Shared message authors (−19 MB on the fixture)
+
+The traced heap's largest owner was `MessageLog::upsert`: 24.7 MB for
+10,000 messages. `Message` held its author as a full `User` inline (~0.5 KB:
+some thirty `Option<String>` and JSON fields), and its `reply_to` held
+another, so each `Message` was ~1.5 KB before any of its strings, and the
+log's `Vec` doubled to 16,384 of them.
+
+- `Message::author` is now `Option<Arc<User>>` (serde's `rc` feature) and
+  `reply_to` is boxed (`yap-protocol`).
+- `MessageLog` interns authors: a message whose author equals the one
+  already held shares it (`MessageLog::intern`, on every insert path).
+- A profile update to one author's messages (`social.rs`) copies on write
+  (`Arc::make_mut`).
+
+`MessageLog` fell from 24.7 to 5.4 MB, and Rust's share of the heap from
+41.0 to 21.5 MB. A real channel holds hundreds of messages, not 10,000, so
+there the saving is ~1-2 KB a message of scrollback.
+
+### Cold screens by URL (−3 MB, −30 ms of startup)
+
+A type named in a document is compiled and linked when the document is,
+even inside a `Component` that is never made. `Shell.qml`,
+`ExtrasHost.qml`, `AdminHost.qml` and `JoinHost.qml` now load their cold
+screens by URL (`source:` instead of `sourceComponent: X {}`): Settings,
+the profile editor and modal, Shop and Friends, the server and channel
+settings, the create and invite dialogs, the quick switcher and the
+reaction, share, invite, voice status, voice switch and start-call
+dialogs. Their compilation units, property caches and types now load on
+first open.
+
+- Private −3 MB at idle (188.4-191.5 against 193.0-194.7 MB, same exe
+  otherwise).
+- `qml loaded` 232 → 202 ms, first frame 518 → 480 ms (6 interleaved runs
+  each, below).
+- First opens checked on the fixture (`tools/p6/popups.ps1`, posted
+  clicks; screenshots in `tmp/p6/pop/`): Settings, the invite dialog,
+  Friends, Shop and the quick switcher draw as before. The one QML
+  warning, `QuickSwitcher`'s `Window.window`, comes from the before build
+  too.
+
+### Not done
+
+- The bridge's message rows (`Vec<MessageRow>`, 5.3 MB on the fixture)
+  are the second copy of each message; sharing them with the core's view
+  needs `Arc` rows through the model macros.
+- The QML engine (16 MB of heap and 4 MB of JS pages) is the largest owner
+  left, then Qt core (8 MB) and the scene graph (6.6 MB).
+
+## 4. Awake displays
+
+- **Animated idle with vsync:** measured (§2). Paced and unpaced cost the
+  same within the noise once the logging is gone.
+- **A real 1440p60 window capture: not measured.** All three displays are
+  1920x1080, so no window or screen here is 1440p, and with
+  `YAP_SHARE_ONLY_OURS` the only windows a test may capture are our own
+  (1268x825, mostly static, so WGC delivers frames only when they change).
+  The synthetic 1440p60 source (pass 5: 60 fps, 47 % of a core) remains
+  the number.
+
+## 5. CI for the Qt 6.11 archive
+
+Written down in LIBRARIES.md §13.3. In short: pack the installed Qt with 7z
+(LZMA2 keeps 10 % of an LTCG library, ~0.9 GB for the 8.2 GB tree; zip's
+deflate keeps 26 %, ~2.1 GB, over GitHub's 2 GB asset limit), keep the
+private headers (`GuiPrivate` and `MultimediaPrivate` are now needed),
+unpack with `7z x` under `RUNNER_TEMP`, and build with Visual Studio 2022
+17.14 (MSVC 14.44, the Qt build's). Nothing was uploaded.
+
+## 6. Startup: bytecode-only QML
+
+Warm launches of the chat-10k fixture, six rounds interleaved:
+
+| build                                 | fonts    | qml loaded     | first frame    |
+| ------------------------------------- | -------- | -------------- | -------------- |
+| before (pass 5: all bytecode)         | 46-52 ms | 227-238 ms     | 503-542 ms     |
+| `url` (cold screens by URL)           | 45-52 ms | **194-213 ms** | **471-488 ms** |
+| `aot` (`url` + startup path compiled) | 46-52 ms | 194-208 ms     | 472-497 ms     |
+
+- **Compiling the startup path to C++ again does not pay.** Main, Shell,
+  the chat view, the rail, the sidebar, the composer and the message
+  delegate (with the Theme and ShellState singletons) as C++ gave the
+  same `qml loaded` as bytecode, for 0.6 MB of exe (59.78 MB, 0.2 MB under
+  the limit). The final build keeps every file bytecode.
+- **The 147 ms of 6.6.3 was the Qt version, not the compile mode:** pass 5
+  measured the same source on 6.11 at 15 % less scroll CPU with bytecode,
+  and here the compiled startup path loads no faster.
+- **The cold first run.** A fresh profile (`startup.ps1 -Fresh`) started
+  in 235 ms here, and a fresh copy of the exe in 221 ms. One first launch
+  right after a link took 1,993 ms, and others at 400-650 ms ran while
+  another agent's link used two cores: a cold disk and a loaded machine,
+  not the QML. The coordinator's 1,555 ms fresh-profile run is consistent
+  with that.
+
+## Before and after (pass 6)
+
+| metric                                        | before (pass 5)      | after (pass 6)                         |
+| --------------------------------------------- | -------------------- | -------------------------------------- |
+| watching a 1440p60 share, CPU per 25 s        | 10.4-10.8 s (42 %)   | **7.9-9.0 s (32-36 %)**                |
+| watching a 1440p60 share, private             | 337-346 MB           | **230-306 MB**                         |
+| watching a 1080p60 share, CPU per 25 s        | 8.6-8.8 s (35 %)     | **6.4-6.5 s (26 %)**                   |
+| watching a 1080p60 share, private             | 286-290 MB           | **238-267 MB**                         |
+| focused animated idle, as passes 4-5 measured | 5.4-6.3 % (vsync)    | a third of that was the logging        |
+| focused animated idle, without the logging    | 3.0-4.3 %            | 2.9-4.2 % (the same, within the noise) |
+| fixture idle private                          | 190.8-193.1 MB       | **168.5-171.8 MB** (−21 MB)            |
+| fixture traced heap                           | 76.4 MB (`url`)      | **57.1 MB**                            |
+| `qml loaded` / first frame, warm              | 228-238 / 487-542 ms | **195-204 / 456-482 ms**               |
+| exe                                           | 59,124,224 B         | 59,164,160 B                           |
+
+## Targets
+
+1. **Zero-copy decode: done.** −20 % CPU and −60 to −80 MB at 1440p60,
+   −26 % CPU at 1080p60, at 60 fps with the same picture. Left:
+   - the call's own cost while watching: WebRTC's network thread takes
+     2.4-2.8 s per 25 s at 14 Mbps, inside libwebrtc;
+   - VP8 and VP9 (the camera and software shares) still decode on the CPU
+     and go through I420; a Media Foundation VP9 decoder could use the
+     same path;
+   - device loss: Qt cannot recreate an imported device, so a driver reset
+     would leave the window without one (`YAP_ZERO_COPY=0` is the way
+     back). Not seen and not tested.
+2. **Animated idle under 3 %: about there, and not provable on this
+   machine.** A third of passes 4-5's 2.2 ms a frame was the measurement's
+   own logging. Without it the scene costs 3-4 % of a core under this
+   machine's load, and 2.9 % in the quietest run. What is left is the
+   driver (~42 % of the GUI thread) and Qt's batch renderer. Next, if it
+   must go lower:
+   - fewer renders: a 20 Hz grid for chat GIFs, a smoothness trade;
+   - fewer draws per frame: the scene's batch count
+     (`QSG_RENDERER_DEBUG=render`);
+   - a quiet machine (no VM, no other agent's builds) to resolve 0.2-point
+     differences at all, or WPR once it can be approved.
+3. **Idle memory towards 120 MB: 192 to 170 MB on the fixture.** Left,
+   largest first:
+   - the QML engine (16 MB of heap, 4 MB of JS pages);
+   - Qt core (8 MB);
+   - the scene graph (6.6 MB);
+   - the bridge's second copy of each message row (5.3 MB on this
+     fixture);
+   - the GPU driver's own memory outside the heap.
+4. **Awake displays:** the paced animated idle is measured. A real 1440p60
+   window capture cannot be made on 1080p displays with only our own
+   windows to capture.
+5. **CI: written down** in LIBRARIES.md §13.3. Nothing was uploaded.
+6. **Startup:** loading cold screens by URL took 30 ms off `qml loaded`.
+   Compiling the startup path to C++ did not help, and was reverted.
+
+## Files
+
+Source (worktree `native/perf3`):
+
+- C++:
+  - `cpp/videohub.cpp`, `cpp/videohub.h`: the shared device and the
+    zero-copy frames;
+  - `cpp/main.cpp`: `VideoHub::shareDevice` before the first show, and the
+    sampler;
+  - `cpp/sampler.cpp`, `cpp/sampler.h` (new): `YAP_DEBUG_SAMPLE`;
+  - `CMakeLists.txt`: `GuiPrivate`, `MultimediaPrivate`, the sampler.
+- QML (4 files, one line or block each):
+  - `screens/Shell/Shell.qml`: Friends and Shop, the profile modal,
+    Settings and the profile editor by URL;
+  - `screens/Shell/ExtrasHost.qml`: the seven extras dialogs by URL;
+  - `screens/Admin/AdminHost.qml`: the six admin dialogs by URL;
+  - `screens/Join/JoinHost.qml`: the two join dialogs by URL.
+- Rust:
+  - `crates/yap-protocol/src/rest.rs`: `Message::author` shared,
+    `reply_to` boxed;
+  - `crates/yap-core/src/store/state.rs`: `MessageLog` interns authors;
+  - `crates/yap-core/src/store/view.rs`, `store/reduce.rs`,
+    `store/reduce/social.rs`, `store/reduce/threads.rs`, `fixture.rs`
+    and `fixture/soak.rs`: the author's new type;
+  - `crates/yap-voice/src/engine/mod.rs` and `engine/webrtc.rs`:
+    `VideoOutput::native_frame`;
+  - `src/video.rs`: `QtOutput::native_frame`;
+  - `Cargo.toml` (serde's `rc`, the `libwebrtc` patch) and `Cargo.lock`;
+  - `build.rs`: the comment on the startup-path experiment.
+- Patches (LIBRARIES.md §12-13):
+  - `patches/webrtc-sys/0004-mf-h264-zero-copy.patch` (new);
+  - `patches/libwebrtc/0001-native-buffer-sys-ptr.patch` (new);
+  - `patches/qt/6.11.3/0004-d3d11-shared-resource-batches.patch` (new),
+    and `patches/qt/build-qt.ps1` (its comment);
+  - `patches/vendor.ps1`: `libwebrtc`, and the note on plain diffs.
+- Docs: this section, and LIBRARIES.md §12.1, §12.4, §13.1 and §13.3.

@@ -45,6 +45,7 @@
 #include "logfile.h"
 #include "mediashell.h"
 #include "profile.h"
+#include "sampler.h"
 #include "shareprovider.h"
 #include "thumbbar.h"
 #include "videohub.h"
@@ -317,6 +318,8 @@ int main(int argc, char* argv[])
 {
   // YAP_DEBUG_HEAP (diagnostics): allocation stacks from here on.
   heaptrace::install();
+  // YAP_DEBUG_SAMPLE (diagnostics): the GUI thread's CPU by stack.
+  sampler::install();
   // First, before Qt and the instance lock: a hook must not show a window
   // or hand its arguments to a running instance.
   yap_velopack_startup();
@@ -490,6 +493,9 @@ int main(int argc, char* argv[])
     // where it is (Qt's SW_SHOWNOACTIVATE switch).
     if (qEnvironmentVariableIntValue("YAP_DEBUG_NO_ACTIVATE") != 0)
       window->setProperty("_q_showWithoutActivating", true);
+    // Before the first show: the D3D11 device the H.264 decoder shares, so
+    // decoded video is drawn without a copy (VideoHub, zero copy).
+    VideoHub::shareDevice(window);
     chrome->attach(window);
     thumbbar->attach(window);
     // Deep links: our own yap-native:// (registered per user where it

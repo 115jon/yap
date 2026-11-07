@@ -1,0 +1,84 @@
+diff --git a/qtbase/src/gui/rhi/qrhid3d11.cpp b/qtbase/src/gui/rhi/qrhid3d11.cpp
+index fa1e845..30ced21 100644
+--- a/qtbase/src/gui/rhi/qrhid3d11.cpp
++++ b/qtbase/src/gui/rhi/qrhid3d11.cpp
+@@ -1178,7 +1178,9 @@ void QRhiD3D11::setShaderResources(QRhiCommandBuffer *cb, QRhiShaderResourceBind
+ 
+         QD3D11CommandBuffer::Command &cmd(cbD->commands.get());
+         cmd.cmd = QD3D11CommandBuffer::Command::BindShaderResources;
+-        cmd.args.bindShaderResources.resourceBatchesIndex = cbD->retainResourceBatches(srbD->resourceBatches);
++        if (!srbD->resourceBatchesSnapshot)
++            srbD->resourceBatchesSnapshot = std::make_shared<const QD3D11ShaderResourceBindings::ResourceBatches>(srbD->resourceBatches);
++        cmd.args.bindShaderResources.resourceBatchesIndex = cbD->retainResourceBatches(srbD->resourceBatchesSnapshot);
+         // dynamic offsets have to be applied at the time of executing the bind
+         // operations, not here
+         cmd.args.bindShaderResources.offsetOnlyChange = !srbChanged && !srbRebuilt && !srbUpdate && srbD->hasDynamicOffset;
+@@ -2408,6 +2410,9 @@ void QRhiD3D11::updateShaderResourceBindings(QD3D11ShaderResourceBindings *srbD,
+                                              const QShader::NativeResourceBindingMap *nativeResourceBindingMaps[])
+ {
+     srbD->resourceBatches.clear();
++    // Rebuilt below: the next bind takes a new snapshot (command buffers
++    // that bound the old one keep it).
++    srbD->resourceBatchesSnapshot.reset();
+ 
+     struct Stage {
+         struct Buffer {
+@@ -3048,7 +3053,7 @@ void QRhiD3D11::executeCommandBuffer(QD3D11CommandBuffer *cbD)
+         }
+             break;
+         case QD3D11CommandBuffer::Command::BindShaderResources:
+-            bindShaderResources(cbD->resourceBatchRetainPool[cmd.args.bindShaderResources.resourceBatchesIndex],
++            bindShaderResources(*cbD->resourceBatchRetainPool[cmd.args.bindShaderResources.resourceBatchesIndex],
+                                 cmd.args.bindShaderResources.dynamicOffsetPairs,
+                                 cmd.args.bindShaderResources.dynamicOffsetCount,
+                                 cmd.args.bindShaderResources.offsetOnlyChange,
+@@ -4232,6 +4237,7 @@ void QD3D11ShaderResourceBindings::destroy()
+ {
+     sortedBindings.clear();
+     boundResourceData.clear();
++    resourceBatchesSnapshot.reset();
+ 
+     QRHI_RES_RHI(QRhiD3D11);
+     if (rhiD)
+diff --git a/qtbase/src/gui/rhi/qrhid3d11_p.h b/qtbase/src/gui/rhi/qrhid3d11_p.h
+index 6006211..10d3771 100644
+--- a/qtbase/src/gui/rhi/qrhid3d11_p.h
++++ b/qtbase/src/gui/rhi/qrhid3d11_p.h
+@@ -22,6 +22,7 @@
+ #include <d3d11_1.h>
+ #include <dxgi1_6.h>
+ #include <dcomp.h>
++#include <memory>
+ 
+ QT_BEGIN_NAMESPACE
+ 
+@@ -320,6 +321,11 @@ struct QD3D11ShaderResourceBindings : public QRhiShaderResourceBindings
+             fsUavBatches.clear();
+         }
+     } resourceBatches;
++    // Yap patch: resourceBatches as of its last rebuild, shared with the
++    // command buffers that bind it, instead of a deep copy of every stage's
++    // batched bindings per bind (one per draw with dynamic offsets, as the
++    // Qt Quick batch renderer does).
++    std::shared_ptr<const ResourceBatches> resourceBatchesSnapshot;
+ 
+     friend class QRhiD3D11;
+ };
+@@ -561,7 +567,7 @@ struct QD3D11CommandBuffer : public QRhiCommandBuffer
+     QVarLengthArray<QByteArray, 4> dataRetainPool;
+     QVarLengthArray<QRhiBufferData, 4> bufferDataRetainPool;
+     QVarLengthArray<QImage, 4> imageRetainPool;
+-    QVarLengthArray<QD3D11ShaderResourceBindings::ResourceBatches, 4> resourceBatchRetainPool;
++    QVarLengthArray<std::shared_ptr<const QD3D11ShaderResourceBindings::ResourceBatches>, 4> resourceBatchRetainPool;
+ 
+     // relies heavily on implicit sharing (no copies of the actual data will be made)
+     const uchar *retainData(const QByteArray &data) {
+@@ -577,7 +583,7 @@ struct QD3D11CommandBuffer : public QRhiCommandBuffer
+         return imageRetainPool.last().constBits();
+     }
+     // except this one
+-    int retainResourceBatches(const QD3D11ShaderResourceBindings::ResourceBatches &resourceBatches) {
++    int retainResourceBatches(const std::shared_ptr<const QD3D11ShaderResourceBindings::ResourceBatches> &resourceBatches) {
+         resourceBatchRetainPool.append(resourceBatches);
+         return resourceBatchRetainPool.count() - 1;
+     }

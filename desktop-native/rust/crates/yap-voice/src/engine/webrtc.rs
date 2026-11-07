@@ -463,37 +463,48 @@ async fn pump_video(track: RtcVideoTrack, key: String) {
     let (mut frames, mut since) = (0u32, Instant::now());
     while let Some(frame) = stream.next().await {
         let buffer = frame.buffer.as_ref();
-        let converted;
-        let i420 = match buffer.as_i420() {
-            Some(i420) => i420,
-            None => {
-                converted = buffer.to_i420();
-                &converted
-            }
-        };
-        let (y, u, v) = i420.data();
-        let (stride_y, stride_u, stride_v) = i420.strides();
         let rotation = match frame.rotation {
             VideoRotation::VideoRotation0 => 0,
             VideoRotation::VideoRotation90 => 90,
             VideoRotation::VideoRotation180 => 180,
             VideoRotation::VideoRotation270 => 270,
         };
-        let size = (i420.width(), i420.height());
-        output.frame(
-            &key,
-            &I420Frame {
-                width: size.0,
-                height: size.1,
-                rotation,
-                y,
-                u,
-                v,
-                stride_y,
-                stride_u,
-                stride_v,
-            },
-        );
+        let size = (buffer.width(), buffer.height());
+        // A hardware-decoded frame (the patched webrtc-sys's D3D11 texture)
+        // goes to the output as it is; only an output that cannot take it
+        // gets it read back.
+        #[cfg(windows)]
+        let native = buffer
+            .as_native()
+            .is_some_and(|native| output.native_frame(&key, native.sys_ptr(), rotation));
+        #[cfg(not(windows))]
+        let native = false;
+        if !native {
+            let converted;
+            let i420 = match buffer.as_i420() {
+                Some(i420) => i420,
+                None => {
+                    converted = buffer.to_i420();
+                    &converted
+                }
+            };
+            let (y, u, v) = i420.data();
+            let (stride_y, stride_u, stride_v) = i420.strides();
+            output.frame(
+                &key,
+                &I420Frame {
+                    width: i420.width(),
+                    height: i420.height(),
+                    rotation,
+                    y,
+                    u,
+                    v,
+                    stride_y,
+                    stride_u,
+                    stride_v,
+                },
+            );
+        }
         frames += 1;
         let elapsed = since.elapsed();
         if elapsed >= VIDEO_STATS_EVERY {
