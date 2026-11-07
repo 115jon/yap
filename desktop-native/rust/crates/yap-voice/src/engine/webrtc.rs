@@ -85,10 +85,16 @@ use crate::share::live::{
 use crate::share::{ShareEncoding, SHARE_AUDIO_CHANNELS, SHARE_AUDIO_RATE};
 use crate::wire::IceServer;
 
+/// The process-wide factory, made by the first call (never before: its
+/// synthetic audio device wakes every 10 ms for as long as it lives).
+static FACTORY: OnceLock<PeerConnectionFactory> = OnceLock::new();
+
 /// One process-wide factory: it owns the platform ADM.
 fn factory() -> &'static PeerConnectionFactory {
-    static FACTORY: OnceLock<PeerConnectionFactory> = OnceLock::new();
-    FACTORY.get_or_init(PeerConnectionFactory::default)
+    FACTORY.get_or_init(|| {
+        eprintln!("[voice] webrtc factory created");
+        PeerConnectionFactory::default()
+    })
 }
 
 /// Keeps WebRTC's voice engine, and with it the platform ADM, up for the
@@ -325,10 +331,15 @@ impl LibwebrtcEngine {
             .unwrap_or_else(PoisonError::into_inner) = Some(output);
     }
 
-    /// The platform's input and output devices. Outside a call this opens
-    /// the ADM briefly (no capture or playout starts). Blocks on WebRTC's
-    /// worker thread: call it off the GUI thread.
+    /// The platform's input and output devices. Listed through WASAPI on
+    /// Windows (the ids and names the ADM lists), so no factory is made
+    /// for it; otherwise this opens the ADM briefly (no capture or playout
+    /// starts). Blocks: call it off the GUI thread.
     pub fn devices(&self) -> AudioDevices {
+        #[cfg(windows)]
+        if let Some(list) = super::wasapi::list_devices() {
+            return list;
+        }
         let f = factory();
         if !f.acquire_platform_adm() {
             return AudioDevices::default();
@@ -345,14 +356,14 @@ impl LibwebrtcEngine {
     /// calls; in a call it switches at once. A log line if it switched.
     /// Blocks like [`Self::devices`].
     pub fn choose_devices(&self, input: Option<String>, output: Option<String>) -> Option<String> {
-        let f = factory();
         let mut sel = lock(selection());
         sel.input = input;
         sel.output = output;
-        if f.is_platform_adm_active() {
-            apply(f, &mut sel)
-        } else {
-            None
+        // Before the first call there is no factory to tell: the call
+        // applies the choice when it opens the ADM.
+        match FACTORY.get() {
+            Some(f) if f.is_platform_adm_active() => apply(f, &mut sel),
+            _ => None,
         }
     }
 
@@ -822,7 +833,7 @@ impl MediaEngine for LibwebrtcEngine {
     }
 
     fn check_devices(&self) -> Option<String> {
-        let f = factory();
+        let f = FACTORY.get()?;
         if !f.is_platform_adm_active() {
             return None;
         }
@@ -1620,6 +1631,28 @@ mod tests {
         assert_eq!(
             before, after,
             "devices before and after a call's peer connection"
+        );
+    }
+
+    /// The device menus list through WASAPI (no factory for that), so its
+    /// ids and names must be the ADM's: a saved choice is applied to the
+    /// ADM by id. Needs the platform's audio stack; skipped without it.
+    #[cfg(windows)]
+    #[test]
+    fn wasapi_listing_should_match_the_adms() {
+        let Some(ours) = super::super::wasapi::list_devices() else {
+            return;
+        };
+        let f = factory();
+        if !f.acquire_platform_adm() {
+            return;
+        }
+        let adm = list_devices(f);
+        f.release_platform_adm();
+        assert_eq!(
+            (ours.inputs, ours.outputs),
+            (adm.inputs, adm.outputs),
+            "WASAPI and ADM device lists"
         );
     }
 }

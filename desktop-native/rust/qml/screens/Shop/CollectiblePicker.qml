@@ -251,7 +251,7 @@ Popup {
                             color: Theme.tint1
                             activeFocusOnTab: true
                             scale: chipTap.pressed ? Theme.scalePress : 1
-                            Behavior on scale { ScaleAnimator { duration: Theme.dur1 } }
+                            Behavior on scale { NumberAnimation { duration: Theme.dur1 } }
                             Accessible.role: Accessible.Button
                             Accessible.name: chip.modelData.name
                             Accessible.onPressAction: grid.jumpTo(chip.modelData.id)
@@ -642,7 +642,7 @@ Popup {
         width: grid.cellWidth
         height: root.kind === "nameplate" ? Math.max(72, plateBody.implicitHeight + 16) : thumb.height + captionColumn.implicitHeight + 6 + 16
         scale: cellTap.pressed ? Theme.scalePress : 1
-        Behavior on scale { ScaleAnimator { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+        Behavior on scale { NumberAnimation { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
         z: focused ? 1 : 0
 
         Accessible.role: Accessible.ListItem

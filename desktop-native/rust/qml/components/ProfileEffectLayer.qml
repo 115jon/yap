@@ -95,6 +95,6 @@ Item {
         asynchronous: true
         sourceSize.width: Math.ceil(width * 2)
         opacity: visible ? 1 : 0
-        Behavior on opacity { OpacityAnimator { duration: Theme.dur3 } }
+        Behavior on opacity { NumberAnimation { duration: Theme.dur3 } }
     }
 }

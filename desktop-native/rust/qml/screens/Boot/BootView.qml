@@ -211,7 +211,7 @@ Item {
                     cell: 6
                     barking: root.active
                     opacity: root.step >= 3 ? 0 : 1
-                    Behavior on opacity { OpacityAnimator { duration: Theme.reducedMotion ? 0 : 500; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+                    Behavior on opacity { NumberAnimation { duration: Theme.reducedMotion ? 0 : 500; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
                 }
                 Image {
                     anchors.fill: parent
@@ -219,7 +219,7 @@ Item {
                     sourceSize: Qt.size(32, 32)
                     smooth: false
                     opacity: root.step >= 3 ? 1 : 0
-                    Behavior on opacity { OpacityAnimator { duration: Theme.reducedMotion ? 0 : 500; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+                    Behavior on opacity { NumberAnimation { duration: Theme.reducedMotion ? 0 : 500; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
                 }
             }
             Row {

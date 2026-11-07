@@ -104,3 +104,15 @@ endif()
 
 # Static Qt: pull in the QML plugins the UI imports.
 qt_import_qml_plugins(YapNative)
+
+# A profiling build only (docs/PERFORMANCE.md): the QML profiler services,
+# for `qmlprofiler -- YapNative.exe` or `-qmljsdebugger=port:N,block`.
+# Never shipped: it opens a debug port on request.
+option(YAP_QML_PROFILER "Link the QML profiler services (QT_QML_DEBUG)" OFF)
+if(YAP_QML_PROFILER)
+  target_compile_definitions(YapNative PRIVATE QT_QML_DEBUG)
+  qt_import_plugins(YapNative INCLUDE_BY_TYPE qmltooling
+    Qt::QQmlDebugServerFactoryPlugin Qt::QQmlProfilerServiceFactoryPlugin
+    Qt::QQuickProfilerAdapterFactoryPlugin Qt::QTcpServerConnectionFactoryPlugin
+    Qt::QLocalClientConnectionFactoryPlugin)
+endif()

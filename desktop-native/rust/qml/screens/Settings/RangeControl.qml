@@ -66,7 +66,7 @@ Item {
             radius: Theme.radius
             color: Theme.ink1
             scale: slider.pressed && !Theme.reducedMotion ? 1.1 : 1
-            Behavior on scale { ScaleAnimator { duration: Theme.dur1 } }
+            Behavior on scale { NumberAnimation { duration: Theme.dur1 } }
             Rectangle {
                 anchors.fill: parent
                 anchors.margins: -4

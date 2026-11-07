@@ -18,7 +18,7 @@ Rectangle {
     color: Theme.tint2
     opacity: 0
     Component.onCompleted: opacity = 1
-    Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
+    Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
     Accessible.role: Accessible.StaticText
     Accessible.name: root.chip.key + ": " + root.chip.value
 

@@ -62,6 +62,12 @@ Item {
     // which must stay alive for the URL to load.
     property string endFrame: ""
     property var endGrab: null
+    // A preview's first frame, grabbed once Media Foundation shows it: the
+    // player then goes until Play (a paused player keeps its decoder and
+    // device, tens of MB each, for every video in the history), and this
+    // still stands in for it, as a `<video preload>` shows its first frame.
+    property string peekFrame: ""
+    property var peekGrab: null
     // The row is pooled (culled, not hidden): the player is let go.
     property bool pooled: false
     // This player's number in ShellState.activeVideo while it plays.
@@ -72,8 +78,24 @@ Item {
         errored = false
         endFrame = ""
         endGrab = null
+        peekFrame = ""
+        peekGrab = null
     }
     readonly property var player: engine.item ? engine.item.player : null
+    // A GIF-mode loop plays only while the app is in front, as decorations
+    // do: unfocused, hidden to the tray or minimised it holds its frame (a
+    // looping video decodes and draws every frame otherwise).
+    readonly property bool appActive: Qt.application.state === Qt.ApplicationActive
+    onAppActiveChanged: {
+        if (!root.animated || root.webm || root.player === null || root.errored)
+            return
+        if (root.appActive) {
+            root.player.peeking = false
+            root.player.play()
+        } else {
+            root.player.pause()
+        }
+    }
     // A preview's muted peek at the first frame is not playing.
     readonly property bool playing: player !== null && started && player.playbackState === MediaPlayer.PlayingState
     readonly property bool ended: player !== null && player.mediaStatus === MediaPlayer.EndOfMedia
@@ -89,6 +111,19 @@ Item {
     }
 
     // Keeps the picture on the output for the end of the video.
+    // The peek's frame is on screen: keep it as a still and let the player
+    // go (it comes back on Play).
+    function keepPeek() {
+        if (root.started || root.webm || root.animated || !root.visible || video.width <= 0 || video.height <= 0)
+            return
+        video.grabToImage(result => {
+            if (root.started)
+                return
+            root.peekGrab = result
+            root.peekFrame = result.url
+        }, Qt.size(Math.ceil(video.width * Screen.devicePixelRatio), Math.ceil(video.height * Screen.devicePixelRatio)))
+    }
+
     function grabFrame() {
         if (root.webm || root.animated || !root.visible || video.width <= 0 || video.height <= 0)
             return
@@ -207,6 +242,17 @@ Item {
             }
         }
 
+        // The preview's first frame while no player runs (and while a
+        // started one loads).
+        Image {
+            anchors.fill: parent
+            visible: root.peekFrame.length > 0 && (root.player === null || video.sourceRect.width <= 0)
+                && !root.ended
+            source: root.peekFrame
+            fillMode: Image.Stretch
+            cache: false
+        }
+
         // The end of a video: its last picture, as a `<video>` keeps it.
         Image {
             anchors.fill: parent
@@ -220,7 +266,8 @@ Item {
             id: engine
             // Hidden (a pooled row, another view): the player goes, so a
             // paused session costs nothing in the background.
-            active: (root.started || root.preview) && !root.errored && root.visible && !root.pooled
+            active: (root.started || (root.preview && root.peekFrame.length === 0)) && !root.errored
+                && root.visible && !root.pooled
             sourceComponent: root.webm ? webmEngine : mediaEngine
         }
 
@@ -281,7 +328,9 @@ Item {
                         // A preview plays muted just until its first frame
                         // is there (Media Foundation shows none while merely
                         // paused), then holds it.
-                        peeking = !root.started
+                        // So does a GIF-mode loop made while the app is
+                        // in the background.
+                        peeking = !root.started || (root.animated && !root.appActive)
                         play()
                     }
                 }
@@ -293,9 +342,12 @@ Item {
                 Connections {
                     target: video.videoSink
                     function onVideoSizeChanged() {
-                        if (mediaPlayer.peeking && !root.started && video.videoSink.videoSize.width > 0) {
+                        if (mediaPlayer.peeking && (!root.started || (root.animated && !root.appActive))
+                                && video.videoSink.videoSize.width > 0) {
                             mediaPlayer.peeking = false
                             mediaPlayer.pause()
+                            if (!root.started)
+                                Qt.callLater(root.keepPeek)
                         }
                     }
                 }

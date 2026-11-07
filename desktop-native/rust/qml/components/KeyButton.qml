@@ -33,7 +33,7 @@ Button {
             radius: Theme.radius
             color: control.primary ? Theme.primaryFillInk : Theme.ink1
             opacity: control.down ? 0.14 : control.hovered ? (control.primary ? 0.12 : 0.08) : 0
-            Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
+            Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
         }
         Rectangle {
             anchors.fill: parent

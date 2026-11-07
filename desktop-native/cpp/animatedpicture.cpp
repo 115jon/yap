@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <vector>
 
 // src/anim.rs
@@ -32,8 +33,10 @@ extern "C" void yap_anim_free(void* anim);
 
 namespace {
 
-// Decoded frames kept for pictures no item shows any more.
-constexpr qsizetype kCacheBudget = 96 * 1024 * 1024;
+// Decoded frames kept for pictures no item shows any more (hidden items
+// hand theirs back, so this is what browsing leaves behind): enough for
+// the decorations of a few screens, not for a history of GIFs.
+constexpr qsizetype kCacheBudget = 32 * 1024 * 1024;
 // A picture larger than this is not an avatar decoration or an effect.
 constexpr qint64 kMaxDownload = 24 * 1024 * 1024;
 // One animation's decoded frames (yap-anim stops at the same size).
@@ -166,6 +169,12 @@ void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
 
 void AnimationCache::insert(const QString& key, AnimationPtr data)
 {
+  const QSize size = data->frames.isEmpty() ? QSize() : data->frames.first().size();
+  std::fprintf(stderr, "[anim] %s: %lld frames at %dx%d, %.1f MB (cache %.1f MB)\n",
+               qPrintable(QUrl(key.section(QLatin1Char('|'), 0, 0)).fileName()),
+               static_cast<long long>(data->frames.size()), size.width(), size.height(),
+               double(data->bytes) / (1024 * 1024),
+               double(m_bytes + data->bytes) / (1024 * 1024));
   m_bytes += data->bytes;
   m_entries.insert(key, std::move(data));
   m_order.append(key);
@@ -279,7 +288,12 @@ void AnimatedPicture::load()
     update();
     return;
   }
-  const qreal dpr = window() ? window()->effectiveDevicePixelRatio() : 1.0;
+  // Shown items only: a picture in a closed popup or a page not shown
+  // (the profile editor's preview, a shop card) decodes when it first
+  // shows; a profile effect alone is tens of MB of frames.
+  if (!isVisible() || !window())
+    return;
+  const qreal dpr = window()->effectiveDevicePixelRatio();
   if (width() <= 0 || height() <= 0)
     return;
   // Sizes round up to 16 px so neighbouring sizes share one decode.
@@ -432,7 +446,25 @@ void AnimatedPicture::itemChange(ItemChange change, const ItemChangeData& value)
     watchWindow(value.window);
     load();
   } else if (change == ItemVisibleHasChanged) {
+    if (isVisible())
+      load();
+    else
+      release();
     schedule();
+  }
+}
+
+void AnimatedPicture::release()
+{
+  // Hidden: the frames go back to the cache, which keeps them within its
+  // budget for the next show (or forgets them), and the node with its
+  // textures goes too. A load still in flight is forgotten: showing again
+  // asks the cache afresh.
+  m_key.clear();
+  m_timer.stop();
+  if (m_anim) {
+    m_anim.reset();
+    update();
   }
 }
 

@@ -53,7 +53,7 @@ Item {
         radius: Theme.radius
         color: entry.active && picture.status !== Image.Ready ? Theme.primaryFill : Theme.tint1
         scale: tap.pressed ? Theme.scalePressIcon : 1
-        Behavior on scale { ScaleAnimator { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+        Behavior on scale { NumberAnimation { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
 
         Text {
             anchors.centerIn: parent
@@ -106,7 +106,7 @@ Item {
             radius: Theme.radius
             color: Theme.ink1
             opacity: tap.pressed ? 0.14 : hover.hovered ? 0.08 : 0
-            Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
+            Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
         }
     }
 

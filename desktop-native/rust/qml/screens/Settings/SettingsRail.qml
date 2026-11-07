@@ -231,7 +231,7 @@ Loader {
                 border.width: 1
                 border.color: Theme.lineStrong
                 opacity: alert.alertsOff ? 0.5 : 1
-                Behavior on opacity { OpacityAnimator { duration: 200 } }
+                Behavior on opacity { NumberAnimation { duration: 200 } }
                 Rectangle {
                     x: 12
                     y: 12

@@ -209,7 +209,7 @@ Item {
         border.width: 2
         border.color: Theme.talk
         opacity: root.speaking ? 1 : 0
-        Behavior on opacity { OpacityAnimator { duration: root.speaking ? Theme.speakOn : Theme.speakOff } }
+        Behavior on opacity { NumberAnimation { duration: root.speaking ? Theme.speakOn : Theme.speakOff } }
     }
 
     // Nameplate: h 24, px 6, on a black/60 chip over media.

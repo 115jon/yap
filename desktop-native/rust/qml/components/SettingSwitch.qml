@@ -16,7 +16,7 @@ T.AbstractButton {
     focusPolicy: Qt.StrongFocus
     opacity: enabled ? 1 : 0.45
     scale: down ? Theme.scalePress : 1
-    Behavior on scale { ScaleAnimator { duration: Theme.dur1 } }
+    Behavior on scale { NumberAnimation { duration: Theme.dur1 } }
 
     Accessible.role: Accessible.CheckBox
     Accessible.checkable: true
@@ -30,7 +30,7 @@ T.AbstractButton {
             radius: Theme.radius
             color: Theme.primaryFill
             opacity: control.checked ? 1 : 0
-            Behavior on opacity { OpacityAnimator { duration: Theme.dur2 } }
+            Behavior on opacity { NumberAnimation { duration: Theme.dur2 } }
         }
         Led {
             x: 8

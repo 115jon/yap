@@ -191,7 +191,7 @@ Popup {
                 radius: 1
                 color: Theme.ink1
                 opacity: tab.modelData.selected ? 1 : 0
-                Behavior on opacity { OpacityAnimator { duration: Theme.dur2 } }
+                Behavior on opacity { NumberAnimation { duration: Theme.dur2 } }
             }
             Rectangle {
                 anchors.fill: parent

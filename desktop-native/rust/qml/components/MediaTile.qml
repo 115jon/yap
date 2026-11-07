@@ -66,10 +66,16 @@ Rectangle {
         sourceComponent: AnimatedImage {
             id: anim
             asynchronous: true
-            cache: true
+            // Frames decode as they show (as a browser does): cached, every
+            // frame of every GIF stays in memory for as long as its row
+            // lives, pooled rows included (tens of MB per GIF).
+            cache: false
             source: root.item.url
             fillMode: root.fill ? Image.PreserveAspectCrop : Image.PreserveAspectFit
+            // Only while the app is in front (unfocused, hidden or
+            // minimised, a GIF holds its frame, as decorations do).
             playing: root.visible && status === AnimatedImage.Ready
+                && Qt.application.state === Qt.ApplicationActive
             onStatusChanged: root.learn(anim)
         }
     }

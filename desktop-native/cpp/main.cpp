@@ -3,6 +3,7 @@
 
 #include <QtCore/QDirIterator>
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QTimer>
 #include <QtGui/QFont>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
@@ -13,7 +14,13 @@
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
 #include <QtQml/QQmlApplicationEngine>
+#include <QtQml/QQmlContext>
 #include <QtQml/QQmlNetworkAccessManagerFactory>
+#ifdef QT_QML_DEBUG
+// The profiling build (CMake YAP_QML_PROFILER=ON): this header's static
+// enabler turns the debug services on.
+#include <QtQml/qqmldebug.h>
+#endif
 #include <QtQuick/QQuickWindow>
 #include <QtQuickControls2/QQuickStyle>
 
@@ -156,6 +163,51 @@ static void qtMessage(QtMsgType type, const QMessageLogContext&,
                qPrintable(message));
 }
 
+// YAP_DEBUG_ANIMATIONS=N (diagnostics): N seconds after launch, and every N
+// seconds after that, lists the QML animations that are running and where
+// they are declared. A running animation ticks every frame, so an idle
+// window should list none.
+static void dumpRunningAnimations(QQmlApplicationEngine& engine)
+{
+  int running = 0;
+  for (QObject* root : engine.rootObjects()) {
+    const auto all = root->findChildren<QObject*>();
+    for (QObject* object : all) {
+      const QMetaObject* meta = object->metaObject();
+      bool animation = false;
+      for (const QMetaObject* m = meta; m; m = m->superClass())
+        if (qstrcmp(m->className(), "QQuickAbstractAnimation") == 0)
+          animation = true;
+      if (!animation || !object->property("running").toBool())
+        continue;
+      ++running;
+      QQmlContext* context = qmlContext(object);
+      QObject* target = object->property("target").value<QObject*>();
+      QObject* owner = object->parent();
+      std::fprintf(stderr, "[anim-debug] %s in %s (parent %s, target %s, property %s, loops %d)\n",
+                   meta->className(),
+                   context ? qPrintable(context->baseUrl().fileName()) : "?",
+                   owner ? owner->metaObject()->className() : "-",
+                   target ? target->metaObject()->className() : "-",
+                   qPrintable(object->property("property").toString()),
+                   object->property("loops").toInt());
+    }
+  }
+  int ticking = 0;
+  for (QObject* root : engine.rootObjects())
+    for (AnimatedPicture* picture : root->findChildren<AnimatedPicture*>())
+      if (picture->ticking()) {
+        ++ticking;
+        std::fprintf(stderr, "[anim-debug] AnimatedPicture ticking: %s %gx%g\n",
+                     qPrintable(picture->source().fileName()), picture->width(),
+                     picture->height());
+      }
+  QWindow* focus = QGuiApplication::focusWindow();
+  std::fprintf(stderr, "[anim-debug] %d running, %d pictures ticking, app state %d, focus %s\n",
+               running, ticking, int(QGuiApplication::applicationState()),
+               focus ? qPrintable(focus->title()) : "none");
+}
+
 // Velopack's startup handling (rust/src/installer.rs): an install, update or
 // uninstall hook runs and exits here; any other launch returns at once.
 extern "C" void yap_velopack_startup();
@@ -218,6 +270,8 @@ int main(int argc, char* argv[])
     QGuiApplication::setFont(font);
   }
   registerFonts();
+  std::fprintf(stderr, "[startup] fonts after %lld ms\n",
+               static_cast<long long>(startup.elapsed()));
 
   auto* chrome = new WindowChrome(&app);
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "WindowChrome", chrome);
@@ -286,6 +340,9 @@ int main(int argc, char* argv[])
   }
 
   engine.loadFromModule("com.yap.native", "Main");
+  // Every Main.qml object created (the core started in its onCompleted).
+  std::fprintf(stderr, "[startup] qml loaded after %lld ms\n",
+               static_cast<long long>(startup.elapsed()));
 
   if (engine.rootObjects().isEmpty())
     return -1;
@@ -317,6 +374,11 @@ int main(int argc, char* argv[])
       Qt::SingleShotConnection);
   }
   CrashNotice::scheduleTestCrash();
+  if (const int every = qEnvironmentVariableIntValue("YAP_DEBUG_ANIMATIONS"); every > 0) {
+    auto* dump = new QTimer(&app);
+    QObject::connect(dump, &QTimer::timeout, &app, [&engine] { dumpRunningAnimations(engine); });
+    dump->start(every * 1000);
+  }
 
   const int code = app.exec();
   // The quit ends here, without the engine's teardown. Everything that

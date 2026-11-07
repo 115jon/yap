@@ -100,7 +100,7 @@ PlateDialog {
                 visible: preview.visible
                 color: Theme.scrim
                 opacity: iconHover.hovered || iconKey.activeFocus ? 1 : 0
-                Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
+                Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
             }
             Icon {
                 anchors.centerIn: parent

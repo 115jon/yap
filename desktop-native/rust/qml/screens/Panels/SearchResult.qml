@@ -157,7 +157,7 @@ Rectangle {
         radius: Theme.radius
         color: Theme.tint2
         opacity: hover.hovered || root.activeFocus ? 1 : 0
-        Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
+        Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
         Accessible.ignored: true
         Text {
             id: jump

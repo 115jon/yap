@@ -54,7 +54,7 @@ Column {
         horizontalAlignment: Image.AlignLeft
         source: root.media
         asynchronous: true
-        playing: visible && !Theme.reducedMotion
+        playing: visible && !Theme.reducedMotion && Qt.application.state === Qt.ApplicationActive
         Accessible.name: qsTr("Channel picture")
         HoverHandler { enabled: root.editable; cursorShape: Qt.PointingHandCursor }
         TapHandler {

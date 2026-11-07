@@ -53,7 +53,7 @@ Column {
                         height: thumb.height + 6 + 20
                         focusPolicy: Qt.StrongFocus
                         scale: down && !Theme.reducedMotion ? 0.97 : 1
-                        Behavior on scale { ScaleAnimator { duration: 150 } }
+                        Behavior on scale { NumberAnimation { duration: 150 } }
                         Accessible.role: Accessible.RadioButton
                         Accessible.name: modelData.label
                         Accessible.checkable: true

@@ -67,7 +67,7 @@ Rectangle {
             radius: Theme.radius
             color: Theme.ink1
             opacity: identityTap.pressed ? 0.12 : identityHover.hovered ? 0.06 : 0
-            Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
+            Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
         }
 
         Avatar {
@@ -86,7 +86,7 @@ Rectangle {
                 border.width: 2
                 border.color: Theme.talk
                 opacity: Voice.speaking && !Voice.muted ? 1 : 0
-                Behavior on opacity { OpacityAnimator { duration: Voice.speaking ? Theme.speakOn : Theme.speakOff } }
+                Behavior on opacity { NumberAnimation { duration: Voice.speaking ? Theme.speakOn : Theme.speakOff } }
             }
         }
         // Presence: an 8 px LED in a 14 px square cut out of the panel ply.

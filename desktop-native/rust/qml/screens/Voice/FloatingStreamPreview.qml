@@ -192,7 +192,7 @@ Item {
                 radius: Theme.radius
                 color: Qt.rgba(0, 0, 0, 0.6)
                 opacity: mediaHover.hovered ? 1 : 0
-                Behavior on opacity { OpacityAnimator { duration: Theme.dur2 } }
+                Behavior on opacity { NumberAnimation { duration: Theme.dur2 } }
                 Row {
                     id: pill
                     anchors.centerIn: parent

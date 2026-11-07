@@ -189,42 +189,49 @@ Popup {
                 width: parent.width
                 height: visible ? 40 : 0
                 Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.line }
-                Row {
+                // Made in voice mode only: the modes' emoji are the first
+                // the app lays out, and the first emoji costs the font
+                // fallback lookup (a quarter second at startup when the
+                // picker was built with the composer).
+                Loader {
                     x: 8
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: 4
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        rightPadding: 4
-                        textFormat: Text.PlainText
-                        text: qsTr("React mode")
-                        color: Theme.ink3
-                        font: Theme.type.captionStrong
-                    }
-                    Repeater {
-                        model: root.displayModes
-                        Rectangle {
-                            id: mode
-                            required property var modelData
-                            readonly property bool active: root.displayMode === modelData.id
-                            width: modeText.implicitWidth + 16
-                            height: 28
-                            radius: Theme.radius
-                            color: active ? Theme.tint2 : "transparent"
-                            Accessible.role: Accessible.Button
-                            Accessible.name: modelData.text
-                            Accessible.checkable: true
-                            Accessible.checked: active
-                            Text {
-                                id: modeText
-                                anchors.centerIn: parent
-                                textFormat: Text.PlainText
-                                text: mode.modelData.text
-                                color: mode.active || modeHover.hovered ? Theme.ink1 : Theme.ink3
-                                font: Theme.type.captionStrong
+                    active: root.voiceMode
+                    sourceComponent: Row {
+                        spacing: 4
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            rightPadding: 4
+                            textFormat: Text.PlainText
+                            text: qsTr("React mode")
+                            color: Theme.ink3
+                            font: Theme.type.captionStrong
+                        }
+                        Repeater {
+                            model: root.displayModes
+                            Rectangle {
+                                id: mode
+                                required property var modelData
+                                readonly property bool active: root.displayMode === modelData.id
+                                width: modeText.implicitWidth + 16
+                                height: 28
+                                radius: Theme.radius
+                                color: active ? Theme.tint2 : "transparent"
+                                Accessible.role: Accessible.Button
+                                Accessible.name: modelData.text
+                                Accessible.checkable: true
+                                Accessible.checked: active
+                                Text {
+                                    id: modeText
+                                    anchors.centerIn: parent
+                                    textFormat: Text.PlainText
+                                    text: mode.modelData.text
+                                    color: mode.active || modeHover.hovered ? Theme.ink1 : Theme.ink3
+                                    font: Theme.type.captionStrong
+                                }
+                                HoverHandler { id: modeHover; cursorShape: Qt.PointingHandCursor }
+                                TapHandler { onTapped: root.displayMode = mode.modelData.id }
                             }
-                            HoverHandler { id: modeHover; cursorShape: Qt.PointingHandCursor }
-                            TapHandler { onTapped: root.displayMode = mode.modelData.id }
                         }
                     }
                 }
@@ -302,7 +309,9 @@ Popup {
                     AnimatedImage {
                         anchors.fill: parent
                         asynchronous: true
-                        cache: true
+                        // Decoded as they show: the picker is never destroyed,
+                        // so cached frames of every result would stay.
+                        cache: false
                         fillMode: Image.PreserveAspectCrop
                         source: tile.near ? tile.preview : ""
                         playing: tile.near && root.visible && status === AnimatedImage.Ready

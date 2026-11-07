@@ -36,7 +36,7 @@ T.Button {
     implicitHeight: size
     padding: 0
     scale: down ? Theme.scalePressIcon : 1
-    Behavior on scale { ScaleAnimator { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+    Behavior on scale { NumberAnimation { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
 
     Accessible.role: Accessible.Button
     Accessible.name: tip
@@ -69,7 +69,7 @@ T.Button {
             radius: parent.radius
             color: control.ink
             opacity: control.down ? 0.14 : control.hovered ? 0.08 : 0
-            Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
+            Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
         }
         Rectangle {
             anchors.fill: parent

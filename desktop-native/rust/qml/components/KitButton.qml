@@ -41,7 +41,7 @@ T.Button {
         : size === "sm" ? Theme.type.controlSm : Theme.type.control
     opacity: enabled || filled ? 1 : 0.45
     scale: down ? Theme.scalePress : 1
-    Behavior on scale { ScaleAnimator { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+    Behavior on scale { NumberAnimation { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
 
     Accessible.role: Accessible.Button
     Accessible.name: text
@@ -129,7 +129,7 @@ T.Button {
             radius: Theme.radius
             color: control.filled ? control.ink : Theme.ink1
             opacity: !control.enabled ? 0 : control.down ? 0.14 : control.hovered ? (control.filled ? 0.12 : 0.08) : 0
-            Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
+            Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
         }
         Rectangle {
             visible: control.variant === "rule"

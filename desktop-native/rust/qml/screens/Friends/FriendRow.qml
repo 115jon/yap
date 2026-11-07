@@ -72,7 +72,7 @@ Rectangle {
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
         opacity: row.overlay ? 0.35 : 1
-        Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
+        Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
         Text {
             width: parent.width
             textFormat: Text.PlainText

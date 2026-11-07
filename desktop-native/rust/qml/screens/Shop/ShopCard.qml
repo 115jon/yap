@@ -39,7 +39,7 @@ FocusScope {
         border.color: Theme.line
         clip: true
         scale: tap.pressed ? Theme.scalePress : 1
-        Behavior on scale { ScaleAnimator { duration: Theme.dur1 } }
+        Behavior on scale { NumberAnimation { duration: Theme.dur1 } }
 
         CollectionGround {
             id: stage
@@ -149,7 +149,7 @@ FocusScope {
             radius: parent.radius
             color: Theme.tint1
             opacity: hover.hovered ? 1 : 0
-            Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
+            Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
         }
         // Equipped: the accent ring on the tile's own edge.
         Rectangle {

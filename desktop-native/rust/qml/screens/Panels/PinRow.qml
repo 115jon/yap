@@ -146,7 +146,7 @@ Item {
         border.color: Theme.line
         opacity: root.revealed ? 1 : 0
         visible: opacity > 0
-        Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
+        Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
         Row {
             id: keys
             anchors.centerIn: parent

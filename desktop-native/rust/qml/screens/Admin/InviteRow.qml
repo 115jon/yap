@@ -50,7 +50,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 12
             opacity: row.paused ? 0.5 : 1
-            Behavior on opacity { OpacityAnimator { duration: Theme.dur2 } }
+            Behavior on opacity { NumberAnimation { duration: Theme.dur2 } }
             Avatar {
                 anchors.verticalCenter: parent.verticalCenter
                 size: 32

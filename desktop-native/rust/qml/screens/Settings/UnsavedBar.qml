@@ -63,7 +63,7 @@ Rectangle {
         enabled: bar.shown
         visible: bar.height > 0
         opacity: bar.shown ? 1 : 0
-        Behavior on opacity { OpacityAnimator { duration: Theme.dur3 } }
+        Behavior on opacity { NumberAnimation { duration: Theme.dur3 } }
         transform: Translate { id: nudgeShift; x: 0 }
 
         Item {

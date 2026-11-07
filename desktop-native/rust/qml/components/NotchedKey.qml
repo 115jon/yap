@@ -21,7 +21,7 @@ T.Button {
     rightPadding: 12
     font: Theme.type.control
     scale: down ? Theme.scalePress : 1
-    Behavior on scale { ScaleAnimator { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+    Behavior on scale { NumberAnimation { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
 
     Accessible.role: Accessible.Button
     Accessible.name: text
@@ -75,7 +75,7 @@ T.Button {
             radius: Theme.radius
             color: Theme.primaryFillInk
             opacity: control.down ? 0.14 : control.hovered ? 0.12 : 0
-            Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
+            Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
         }
         // The notch: a square of the ground, turned 45 degrees on the corner.
         Rectangle {

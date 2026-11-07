@@ -58,7 +58,7 @@ Rectangle {
                     radius: Theme.radius
                     color: Nav.home ? Theme.tint3 : Theme.tint2
                     scale: homeTap.pressed ? Theme.scalePressIcon : 1
-                    Behavior on scale { ScaleAnimator { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+                    Behavior on scale { NumberAnimation { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
                     Image {
                         anchors.centerIn: parent
                         width: 24
@@ -71,7 +71,7 @@ Rectangle {
                         radius: Theme.radius
                         color: Theme.ink1
                         opacity: homeTap.pressed ? 0.14 : homeHover.hovered ? 0.08 : 0
-                        Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
+                        Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
                     }
                 }
                 CountBadge {
@@ -235,7 +235,7 @@ Rectangle {
             radius: Theme.radius
             color: key.open && picture.status !== Image.Ready ? Theme.primaryFill : Theme.tint1
             scale: keyTap.pressed ? Theme.scalePressIcon : 1
-            Behavior on scale { ScaleAnimator { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+            Behavior on scale { NumberAnimation { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
             Text {
                 anchors.centerIn: parent
                 visible: picture.status !== Image.Ready
@@ -259,7 +259,7 @@ Rectangle {
                 radius: Theme.radius
                 color: Theme.ink1
                 opacity: keyTap.pressed ? 0.14 : keyHover.hovered ? 0.08 : 0
-                Behavior on opacity { OpacityAnimator { duration: Theme.dur1 } }
+                Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
             }
         }
         CountBadge {

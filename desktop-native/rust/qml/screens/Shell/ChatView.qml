@@ -313,6 +313,11 @@ Rectangle {
         model: MessageListModel
         boundsBehavior: Flickable.StopAtBounds
         reuseItems: true
+        // Rows within this distance of the viewport are made ahead of the
+        // scroll, incubated across frames, so a row with embeds (6-8 ms to
+        // make) is ready before it shows instead of stalling the frame it
+        // enters on (the default is 320 px, outrun by a wheel scroll).
+        cacheBuffer: 1200
         topMargin: 0
         bottomMargin: 8
 
@@ -1021,7 +1026,7 @@ Rectangle {
             z: 30
             visible: opacity > 0
             opacity: shown ? 1 : 0
-            Behavior on opacity { OpacityAnimator { duration: Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+            Behavior on opacity { NumberAnimation { duration: Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
             color: Theme.scrim
             Accessible.ignored: true
 

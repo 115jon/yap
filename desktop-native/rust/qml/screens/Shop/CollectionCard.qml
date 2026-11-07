@@ -28,7 +28,7 @@ FocusScope {
         border.color: Theme.line
         clip: true
         scale: tap.pressed ? Theme.scalePress : 1
-        Behavior on scale { ScaleAnimator { duration: Theme.dur1 } }
+        Behavior on scale { NumberAnimation { duration: Theme.dur1 } }
         CollectionGround {
             anchors.fill: parent
             anchors.margins: 1

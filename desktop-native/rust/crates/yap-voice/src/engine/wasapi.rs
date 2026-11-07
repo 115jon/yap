@@ -12,16 +12,19 @@ use std::marker::PhantomData;
 use std::time::Duration;
 
 use windows::core::{w, PCWSTR};
+use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Media::Audio::{
     eCapture, eCommunications, eRender, EDataFlow, IAudioCaptureClient, IAudioClient,
     IAudioRenderClient, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
-    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, WAVEFORMATEX,
-    WAVE_FORMAT_PCM,
+    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+    DEVICE_STATE_ACTIVE, WAVEFORMATEX, WAVE_FORMAT_PCM,
 };
+use windows::Win32::System::Com::StructuredStorage::{PropVariantClear, PropVariantToStringAlloc};
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
+    COINIT_MULTITHREADED, STGM_READ,
 };
 use windows::Win32::System::Threading::{
     AvRevertMmThreadCharacteristics, AvSetMmThreadCharacteristicsW, CreateEventW,
@@ -29,6 +32,7 @@ use windows::Win32::System::Threading::{
 };
 
 use super::pipeline::OpenError;
+use crate::audio::{AudioDevice, AudioDevices};
 use crate::dsp::RATE;
 
 /// COM for the calling thread, for as long as this lives.
@@ -382,4 +386,69 @@ impl Drop for Render {
         // SAFETY: a plain call on the live client.
         let _ = unsafe { self.client.Stop() };
     }
+}
+
+/// An endpoint's id and friendly name, as the ADM reports them
+/// (`IMMDevice::GetId`, `PKEY_Device_FriendlyName`).
+fn describe(device: &IMMDevice) -> Option<AudioDevice> {
+    // SAFETY: plain COM calls on a live device. The id string is the
+    // callee's CoTaskMem allocation, freed here once copied; the property
+    // value is cleared once read, whether or not it held a string.
+    unsafe {
+        let raw = device.GetId().ok()?;
+        let id = raw.to_string().ok();
+        CoTaskMemFree(Some(raw.0.cast_const().cast()));
+        let store = device.OpenPropertyStore(STGM_READ).ok()?;
+        let mut value = store.GetValue(&PKEY_Device_FriendlyName).ok()?;
+        let name = PropVariantToStringAlloc(&value).ok().map(|text| {
+            let name = text.to_string().unwrap_or_default();
+            CoTaskMemFree(Some(text.0.cast_const().cast()));
+            name
+        });
+        let _ = PropVariantClear(&mut value);
+        Some(AudioDevice {
+            id: id?,
+            name: name.filter(|n| !n.is_empty())?,
+        })
+    }
+}
+
+/// The active endpoints of `flow`, in the ADM's order.
+fn endpoints(enumerator: &IMMDeviceEnumerator, flow: EDataFlow) -> Option<Vec<AudioDevice>> {
+    // SAFETY: plain COM calls; every index is below the collection's count.
+    unsafe {
+        let all = enumerator
+            .EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE)
+            .ok()?;
+        let count = all.GetCount().ok()?;
+        Some(
+            (0..count)
+                .filter_map(|i| all.Item(i).ok())
+                .filter_map(|device| describe(&device))
+                .collect(),
+        )
+    }
+}
+
+/// Both device lists and the default communications endpoints, the way
+/// the ADM lists them, without creating the WebRTC factory (whose synthetic
+/// audio device then wakes every 10 ms for the rest of the process). `None`
+/// if the enumerator is missing; the caller then asks the ADM.
+pub(super) fn list_devices() -> Option<AudioDevices> {
+    let _com = Com::init();
+    // SAFETY: COM is initialised on this thread for the enumerator's life.
+    let enumerator: IMMDeviceEnumerator =
+        unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()? };
+    let default = |flow| {
+        // SAFETY: a plain COM call on a live enumerator.
+        unsafe { enumerator.GetDefaultAudioEndpoint(flow, eCommunications) }
+            .ok()
+            .and_then(|device| describe(&device))
+    };
+    Some(AudioDevices {
+        inputs: endpoints(&enumerator, eCapture)?,
+        outputs: endpoints(&enumerator, eRender)?,
+        default_input: default(eCapture),
+        default_output: default(eRender),
+    })
 }

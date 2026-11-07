@@ -105,6 +105,8 @@ public:
 
   // Back to the first frame and play again (a replayed effect).
   Q_INVOKABLE void restart();
+  // Diagnostics (YAP_DEBUG_ANIMATIONS): the frame timer is running.
+  bool ticking() const { return m_timer.isActive(); }
 
 signals:
   void sourceChanged();
@@ -123,6 +125,7 @@ protected:
 
 private:
   void load();
+  void release();
   void onLoaded(const QString& key);
   void setStatus(Status status);
   void schedule();

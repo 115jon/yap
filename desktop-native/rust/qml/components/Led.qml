@@ -20,7 +20,7 @@ Item {
         radius: width / 2
         color: Qt.rgba(root.color.r, root.color.g, root.color.b, 0.45 * 0.35)
         opacity: root.lit ? 1 : 0
-        Behavior on opacity { OpacityAnimator { duration: root.lit ? Theme.speakOn : Theme.speakOff } }
+        Behavior on opacity { NumberAnimation { duration: root.lit ? Theme.speakOn : Theme.speakOff } }
     }
     Rectangle {
         anchors.centerIn: parent
@@ -29,7 +29,7 @@ Item {
         radius: width / 2
         color: Qt.rgba(root.color.r, root.color.g, root.color.b, 0.22)
         opacity: root.lit ? 1 : 0
-        Behavior on opacity { OpacityAnimator { duration: root.lit ? Theme.speakOn : Theme.speakOff } }
+        Behavior on opacity { NumberAnimation { duration: root.lit ? Theme.speakOn : Theme.speakOff } }
     }
     Rectangle {
         anchors.fill: parent
@@ -41,6 +41,6 @@ Item {
         radius: width / 2
         color: root.color
         opacity: root.lit ? 1 : 0
-        Behavior on opacity { OpacityAnimator { duration: root.lit ? Theme.speakOn : Theme.speakOff } }
+        Behavior on opacity { NumberAnimation { duration: root.lit ? Theme.speakOn : Theme.speakOff } }
     }
 }

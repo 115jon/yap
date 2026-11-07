@@ -25,7 +25,7 @@ T.Button {
     implicitHeight: 32
     padding: 0
     scale: down ? Theme.scalePressIcon : 1
-    Behavior on scale { ScaleAnimator { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+    Behavior on scale { NumberAnimation { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
 
     Component.onCompleted: Chat.loadGifFavorites()
     onClicked: if (control.favorite) Chat.toggleGifFavorite(JSON.stringify(control.favorite))
