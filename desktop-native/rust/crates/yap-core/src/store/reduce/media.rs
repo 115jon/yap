@@ -2,17 +2,58 @@
 //! (chat-actions.ts, useMessageInput.ts, GifPickerModal.tsx).
 
 use yap_protocol::payload::ReactionEvent;
-use yap_protocol::rest::{Attachment, UploadedFile};
+use yap_protocol::rest::{Attachment, GifItem, UploadedFile};
 
 use super::{Effects, ViewDiff};
 use crate::api::ApiError;
-use crate::store::state::{ReactionChange, State, Upload, UploadStatus};
+use crate::gif_favorite;
+use crate::store::favorites::FavoritesCommand;
+use crate::store::state::{GifOp, ReactionChange, State, Upload, UploadStatus};
 use crate::store::view::media::{self, MAX_UPLOAD_BYTES};
 use crate::store::view::{self, ViewUpdate};
 use crate::store::{ApiRequest, ApiResponse, Effect, RequestId, UploadFile};
 
-/// Media types the picker offers (clips are videos, which Qt does not play here).
-const GIF_MEDIA_TYPES: [&str; 3] = ["gifs", "stickers", "memes"];
+/// The picker's media tabs (GifPickerModal.tsx `MEDIA_TABS`).
+const GIF_MEDIA_TYPES: [&str; 4] = ["gifs", "stickers", "clips", "memes"];
+
+/// Media types only KLIPY has (`KLIPY_ONLY_MEDIA_TYPES`): Tenor has GIFs.
+const KLIPY_ONLY: [&str; 3] = ["stickers", "clips", "memes"];
+
+/// The media type asked for, `gifs` when unknown.
+fn gif_media_type(media_type: &str) -> &'static str {
+    GIF_MEDIA_TYPES
+        .into_iter()
+        .find(|m| *m == media_type)
+        .unwrap_or("gifs")
+}
+
+/// The provider asked for: `tenor` for GIFs only, else `klipy`.
+fn gif_provider(provider: &str, media_type: &str) -> &'static str {
+    if provider == "tenor" && !KLIPY_ONLY.contains(&media_type) {
+        "tenor"
+    } else {
+        "klipy"
+    }
+}
+
+/// `getGifProviderLabel`.
+fn provider_label(provider: &str) -> &'static str {
+    if provider == "tenor" {
+        "Tenor"
+    } else {
+        "KLIPY"
+    }
+}
+
+/// The picker's `mediaLabel`.
+fn media_label(media_type: &str) -> &'static str {
+    match media_type {
+        "stickers" => "stickers",
+        "clips" => "clips",
+        "memes" => "memes",
+        _ => "GIFs",
+    }
+}
 
 /// Pages fetched per "more" until this many new tiles arrived (GifPickerModal.tsx).
 const GIF_MIN_NEW: usize = 8;
@@ -335,47 +376,71 @@ impl State {
 
     // GIF picker
 
-    pub(super) fn gif_search(&mut self, fx: &mut Effects, query: &str, media_type: &str) {
-        let media_type = GIF_MEDIA_TYPES
-            .into_iter()
-            .find(|m| *m == media_type)
-            .unwrap_or("gifs");
+    pub(super) fn gif_search(
+        &mut self,
+        fx: &mut Effects,
+        query: &str,
+        media_type: &str,
+        provider: &str,
+    ) {
+        let media_type = gif_media_type(media_type);
+        let provider = gif_provider(provider, media_type);
         let query: String = query.trim().chars().take(80).collect();
-        let same = self.gifs.query == query && self.gifs.media_type == media_type;
+        let same = !self.gifs.favorites
+            && self.gifs.query == query
+            && self.gifs.media_type == media_type
+            && self.gifs.provider == provider;
         if same && (self.gifs.loading || !self.gifs.items.is_empty()) {
             return;
         }
+        self.leave_feed();
         self.gifs.query = query;
         self.gifs.media_type = media_type.to_owned();
-        self.gifs.items.clear();
-        self.gifs.next = None;
-        self.gifs.error.clear();
+        self.gifs.provider = provider.to_owned();
         self.fetch_gifs(fx, false);
     }
 
     pub(super) fn gif_more(&mut self, fx: &mut Effects) {
-        if !self.gifs.loading && self.gifs.next.is_some() && self.gifs.error.is_empty() {
+        // A failed "more" retries on the next scroll ("Scroll again to
+        // retry"); a failed first page waits for a new query.
+        let retry = self.gifs.error.is_empty() || !self.gifs.items.is_empty();
+        if !self.gifs.favorites && !self.gifs.loading && self.gifs.next.is_some() && retry {
             self.fetch_gifs(fx, true);
         }
     }
 
     fn fetch_gifs(&mut self, fx: &mut Effects, more: bool) {
+        let request = self.gifs_request(24, more);
+        if let Some(id) = self.http(fx, request) {
+            self.pending.gifs = Some((id, more));
+            self.gifs.loading = true;
+            self.gifs.rate_limited = false;
+            self.gifs.error.clear();
+            self.sync_gifs(fx);
+        }
+    }
+
+    /// A page of the current feed (`limit` 1: the Trending tile's GIF).
+    fn gifs_request(&self, limit: u32, more: bool) -> ApiRequest {
+        let (customer_id, content_filter) = self.gif_context();
+        ApiRequest::Gifs {
+            query: self.gifs.query.clone(),
+            media_type: self.gifs.media_type.clone(),
+            provider: self.gifs.provider.clone(),
+            limit,
+            next: if more { self.gifs.next.clone() } else { None },
+            customer_id,
+            content_filter,
+        }
+    }
+
+    /// The account id and media filter every `/api/gifs` call carries.
+    fn gif_context(&self) -> (String, String) {
         let customer_id = self.me().map(|me| me.id.clone()).unwrap_or_default();
         let content_filter = crate::settings::media_filter(
             self.me().and_then(|me| me.media_content_filter.as_deref()),
         );
-        let request = ApiRequest::Gifs {
-            query: self.gifs.query.clone(),
-            media_type: self.gifs.media_type.clone(),
-            next: if more { self.gifs.next.clone() } else { None },
-            customer_id,
-            content_filter: content_filter.to_owned(),
-        };
-        if let Some(id) = self.http(fx, request) {
-            self.pending.gifs = Some((id, more));
-            self.gifs.loading = true;
-            self.sync_gifs(fx);
-        }
+        (customer_id, content_filter.to_owned())
     }
 
     pub(super) fn on_gifs(
@@ -385,7 +450,7 @@ impl State {
         result: Result<ApiResponse, ApiError>,
     ) {
         self.gifs.loading = false;
-        let provider = "KLIPY";
+        let provider = provider_label(&self.gifs.provider);
         match result {
             Ok(ApiResponse::Gifs(page)) => {
                 let known: std::collections::HashSet<String> =
@@ -397,7 +462,11 @@ impl State {
                     .collect();
                 let added = fresh
                     .iter()
-                    .filter(|g| media::gif_preview(g).is_some())
+                    .filter(|g| {
+                        media::gif_preview(g).is_some()
+                            || gif_favorite::normalize_content_type(Some(&g.send.content_type))
+                                == "video/mp4"
+                    })
                     .count();
                 self.gifs.items.extend(fresh);
                 self.gifs.next = page.next.filter(|n| !n.is_empty());
@@ -412,14 +481,15 @@ impl State {
                 }
             }
             Err(error) if error.is_unauthorized() => return self.fail(fx, &error),
-            Err(ApiError::Http { status: 429, .. }) => {
-                self.gifs.error = format!("{provider} is rate limited. Try again shortly.");
+            // `isRateLimitError` on a "more": wait, then retry on scroll.
+            Err(ApiError::Http { status: 429, .. }) if more => {
+                self.gifs.rate_limited = true;
             }
             Ok(_) | Err(_) => {
                 self.gifs.error = if more {
                     format!(
                         "Could not load more {provider} {}. Scroll again to retry.",
-                        self.gifs.media_type
+                        media_label(&self.gifs.media_type)
                     )
                 } else {
                     format!("Could not load {provider} assets right now. Try again in a moment.")
@@ -429,8 +499,229 @@ impl State {
         self.sync_gifs(fx);
     }
 
+    /// The start screen (`mode === "categories"`): the provider's
+    /// categories for the media type and the Trending tile's GIF, each
+    /// fetched once per provider and media type.
+    pub(super) fn gif_start(&mut self, fx: &mut Effects, media_type: &str, provider: &str) {
+        let media_type = gif_media_type(media_type);
+        let provider = gif_provider(provider, media_type);
+        self.leave_feed();
+        self.gifs.query.clear();
+        self.gifs.media_type = media_type.to_owned();
+        self.gifs.provider = provider.to_owned();
+        let key = format!("{provider}:{media_type}");
+        self.gifs.start_key = key.clone();
+        let categories = GifOp::Categories(key.clone());
+        if !self.gifs.categories.contains_key(&key) && !self.gif_asked(&categories) {
+            let (customer_id, content_filter) = self.gif_context();
+            let request = ApiRequest::GifCategories {
+                media_type: media_type.to_owned(),
+                provider: provider.to_owned(),
+                customer_id,
+                content_filter,
+            };
+            if let Some(id) = self.http(fx, request) {
+                self.pending.gif_extra.insert(id, categories.clone());
+            }
+        }
+        self.gifs.categories_loading = self.gif_asked(&categories);
+        let trending = GifOp::Trending(key.clone());
+        if !self.gifs.trending.contains_key(&key) && !self.gif_asked(&trending) {
+            let request = self.gifs_request(1, false);
+            if let Some(id) = self.http(fx, request) {
+                self.pending.gif_extra.insert(id, trending);
+            }
+        }
+        // The Favorites tile shows the newest favourite.
+        self.on_favorites(fx, FavoritesCommand::Load);
+        self.sync_gifs(fx);
+    }
+
+    fn gif_asked(&self, op: &GifOp) -> bool {
+        self.pending.gif_extra.values().any(|o| o == op)
+    }
+
+    /// The saved favourites of a media type (`openFavorites`): no paging;
+    /// they follow the list as stars are pressed.
+    pub(super) fn gif_favorites(&mut self, fx: &mut Effects, media_type: &str) {
+        self.leave_feed();
+        self.gifs.favorites = true;
+        self.gifs.query.clear();
+        self.gifs.media_type = gif_media_type(media_type).to_owned();
+        self.gifs.items = self.favorite_gifs(&self.gifs.media_type);
+        self.on_favorites(fx, FavoritesCommand::Load);
+        self.sync_gifs(fx);
+    }
+
+    /// Drops the feed: its tiles, cursor, error and the page in flight.
+    fn leave_feed(&mut self) {
+        self.pending.gifs = None;
+        self.gifs.favorites = false;
+        self.gifs.loading = false;
+        self.gifs.rate_limited = false;
+        self.gifs.items.clear();
+        self.gifs.next = None;
+        self.gifs.error.clear();
+    }
+
+    /// The favourites of `media_type`, newest first, as picker items.
+    fn favorite_gifs(&self, media_type: &str) -> Vec<GifItem> {
+        let absolute = |url: &mut String| {
+            if url.starts_with('/') {
+                *url = format!("{}{url}", self.api_base);
+            }
+        };
+        self.favorites
+            .items
+            .iter()
+            .filter(|item| gif_favorite::picker_media_type(item) == media_type)
+            .filter_map(|item| serde_json::from_value::<GifItem>(item.clone()).ok())
+            .map(|mut item| {
+                absolute(&mut item.preview.url);
+                absolute(&mut item.send.url);
+                item
+            })
+            .collect()
+    }
+
+    /// The favourites changed: the stars, the Favorites view and tile.
+    pub(super) fn on_gif_favorites_changed(&mut self, fx: &mut Effects) {
+        if self.gifs.media_type.is_empty() {
+            return;
+        }
+        if self.gifs.favorites {
+            self.gifs.items = self.favorite_gifs(&self.gifs.media_type);
+        }
+        self.sync_gifs(fx);
+    }
+
+    /// A tile's star (`handleToggleFavorite`): the item as the server
+    /// keeps it, with its media type and a source URL (the server needs
+    /// one).
+    pub(super) fn gif_tile_favorite(&mut self, fx: &mut Effects, gif_id: &str) {
+        let Some(item) = self
+            .gifs
+            .items
+            .iter()
+            .find(|g| format!("{}:{}", g.provider, g.id) == gif_id)
+        else {
+            return;
+        };
+        let Ok(mut value) = serde_json::to_value(item) else {
+            return;
+        };
+        if value["mediaType"].as_str().is_none_or(str::is_empty) {
+            value["mediaType"] = self.gifs.media_type.clone().into();
+        }
+        if value["sourceUrl"].as_str().is_none_or(str::is_empty) {
+            value["sourceUrl"] = item.send.url.clone().into();
+        }
+        if item.alt_text.is_none() {
+            if let Some(map) = value.as_object_mut() {
+                map.remove("altText");
+            }
+        }
+        self.on_favorites(fx, FavoritesCommand::Toggle(value));
+    }
+
+    /// Search terms for a query (200 ms after typing, two characters or
+    /// more): autocomplete and suggestions, shown once both answered.
+    pub(super) fn gif_terms(&mut self, fx: &mut Effects, query: &str, provider: &str) {
+        let query: String = query.trim().chars().take(80).collect();
+        let provider = gif_provider(provider, "gifs");
+        if query.chars().count() < 2 {
+            self.gifs.terms_query.clear();
+            self.gifs.terms_next = [None, None];
+            self.pending
+                .gif_extra
+                .retain(|_, op| !matches!(op, GifOp::Terms { .. }));
+            if !self.gifs.autocomplete.is_empty() || !self.gifs.suggestions.is_empty() {
+                self.gifs.autocomplete.clear();
+                self.gifs.suggestions.clear();
+                self.sync_gifs(fx);
+            }
+            return;
+        }
+        let key = format!("{provider}\n{query}");
+        if self.gifs.terms_query == key {
+            return;
+        }
+        self.gifs.terms_query = key.clone();
+        self.gifs.terms_next = [None, None];
+        let (customer_id, content_filter) = self.gif_context();
+        for (mode, autocomplete) in [("autocomplete", true), ("suggestions", false)] {
+            let request = ApiRequest::GifTerms {
+                mode,
+                query: query.clone(),
+                provider: provider.to_owned(),
+                customer_id: customer_id.clone(),
+                content_filter: content_filter.clone(),
+            };
+            if let Some(id) = self.http(fx, request) {
+                let op = GifOp::Terms {
+                    query: key.clone(),
+                    autocomplete,
+                };
+                self.pending.gif_extra.insert(id, op);
+            }
+        }
+    }
+
+    pub(super) fn on_gif_extra(
+        &mut self,
+        fx: &mut Effects,
+        op: GifOp,
+        result: Result<ApiResponse, ApiError>,
+    ) {
+        if let Err(error) = &result {
+            if error.is_unauthorized() {
+                return self.fail(fx, error);
+            }
+        }
+        match op {
+            GifOp::Categories(key) => {
+                // A failure is not kept: the next visit asks again.
+                if let Ok(ApiResponse::GifCategories(list)) = result {
+                    self.gifs.categories.insert(key.clone(), list);
+                }
+                if key == self.gifs.start_key {
+                    self.gifs.categories_loading = false;
+                }
+            }
+            GifOp::Trending(key) => {
+                let first = match result {
+                    Ok(ApiResponse::Gifs(page)) => page.results.into_iter().next(),
+                    _ => None,
+                };
+                self.gifs.trending.insert(key, first);
+            }
+            GifOp::Terms {
+                query,
+                autocomplete,
+            } => {
+                if query != self.gifs.terms_query {
+                    return;
+                }
+                // A failed half counts as no terms (`Promise.allSettled`).
+                let terms = match result {
+                    Ok(ApiResponse::GifTerms(terms)) => terms,
+                    _ => Vec::new(),
+                };
+                self.gifs.terms_next[usize::from(!autocomplete)] = Some(terms);
+                let [Some(_), Some(_)] = &self.gifs.terms_next else {
+                    return;
+                };
+                let [a, s] = std::mem::take(&mut self.gifs.terms_next);
+                self.gifs.autocomplete = a.unwrap_or_default();
+                self.gifs.suggestions = s.unwrap_or_default();
+            }
+        }
+        self.sync_gifs(fx);
+    }
+
     fn sync_gifs(&mut self, fx: &mut Effects) {
-        let (rows, status) = media::gif_rows(&self.gifs);
+        let favorite = self.favorite_gifs(&self.gifs.media_type).into_iter().next();
+        let (rows, status) = media::gif_rows(&self.gifs, &self.view.favorites, favorite.as_ref());
         for diff in view::ordered_diff(&self.view.gifs, &rows) {
             fx.view(ViewUpdate::Gifs(diff));
         }

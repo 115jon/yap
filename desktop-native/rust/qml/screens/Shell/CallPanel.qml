@@ -48,7 +48,9 @@ Rectangle {
     // VoiceDashboard.tsx: the lit word ("Voice connected" where it fits
     // whole, else "Connected"), where the call is (" · server" only when
     // the server fits whole), then ping, the call's clock and the voice
-    // options key (here: the connection details).
+    // options key: its menu opens the connection details and spatial audio
+    // (VoiceDashboard.tsx DropdownMenu; noise suppression and the GIF and
+    // sticker row are not here yet).
     Item {
         x: 8
         y: 8
@@ -119,14 +121,42 @@ Rectangle {
                 id: optionsKey
                 anchors.verticalCenter: parent.verticalCenter
                 size: 24
-                tone: (details.item?.opened ?? false) ? "toggled" : "muted"
+                tone: (details.item?.opened ?? false) || (spatialPanel.item?.opened ?? false) ? "toggled" : "muted"
                 iconName: "sliders"
                 tip: qsTr("Voice options")
-                onClicked: details.load()?.toggleAt(optionsKey)
+                onClicked: {
+                    // side top, align end.
+                    const menu = optionsMenu.load()
+                    menu?.popup(optionsKey, optionsKey.width - menu.implicitWidth, -menu.implicitHeight - 8)
+                }
             }
         }
     }
     LazyPopup { id: details; sourceComponent: VoiceDetailsPopup {} }
+    LazyPopup {
+        id: spatialPanel
+        sourceComponent: SpatialAudioPopup { dmCall: root.dmCall }
+    }
+    LazyPopup {
+        id: optionsMenu
+        sourceComponent: MenuPanel {
+            MenuRow {
+                glyph: "signal"
+                text: qsTr("Connection details")
+                onTriggered: details.load()?.toggleAt(optionsKey)
+            }
+            // The call has a room map (every call does once it is up).
+            MenuRow {
+                visible: Voice.spatial.length > 0
+                glyph: "spatial"
+                text: qsTr("Spatial audio…")
+                // VoiceDashboard.tsx spatialOn: the room, us, high fidelity.
+                hint: (Voice.spatial.length > 0 && JSON.parse(Voice.spatial).state.enabled === true
+                    && Audio.spatialAudio && Audio.highFidelity) ? qsTr("On") : qsTr("Off")
+                onTriggered: spatialPanel.load()?.toggleAt(optionsKey)
+            }
+        }
+    }
 
     Item {
         id: actions
@@ -239,6 +269,7 @@ Rectangle {
         if (!inCall) {
             soundboardPopup.item?.close()
             activitiesPopup.item?.close()
+            spatialPanel.item?.close()
         }
     }
     Loader {

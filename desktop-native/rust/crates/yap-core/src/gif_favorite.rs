@@ -158,6 +158,15 @@ fn media_type(item: &Value) -> &'static str {
     "gifs"
 }
 
+/// `inferGifPickerMediaType` as the picker filters favourites: a saved
+/// `mediaType` first, else inferred from the item.
+pub fn picker_media_type(item: &Value) -> &str {
+    match item["mediaType"].as_str() {
+        Some(m @ ("gifs" | "stickers" | "clips" | "memes")) => m,
+        _ => media_type(item),
+    }
+}
+
 fn positive(value: Option<f64>, fallback: f64) -> f64 {
     value
         .filter(|v| v.is_finite() && *v > 0.0)

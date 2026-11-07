@@ -44,23 +44,36 @@ Rectangle {
 
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
     TapHandler { onTapped: row.selected() }
-    // Right click: the conversation's menu (Start call asks first).
+    // Right click: the conversation's menu (Start a call asks first).
     TapHandler {
         acceptedButtons: Qt.RightButton
         onTapped: eventPoint => rowMenu.load()?.popup(row, eventPoint.position.x, eventPoint.position.y)
     }
     LazyPopup {
         id: rowMenu
+        // DMSidebar.tsx: Profile (the full profile), Start a call (not
+        // while it rings or runs), Copy ID ("Channel ID copied").
         sourceComponent: MenuPanel {
             MenuRow {
-                text: qsTr("Start call")
+                text: qsTr("Profile")
+                glyph: "account"
+                onTriggered: ShellState.showFullProfile(row.userId, row)
+            }
+            MenuRow {
+                readonly property var call: JSON.parse(Calls.view)
+                visible: !(call.channelId === row.channelId && (call.status === "ringing_outgoing" || call.status === "ringing_incoming" || call.joined === true))
+                height: visible ? implicitHeight : 0
+                text: qsTr("Start a call")
                 glyph: "call"
                 onTriggered: ShellState.startCall(row.channelId, row.name, true)
             }
             MenuRow {
-                text: qsTr("Profile")
-                glyph: "profile"
-                onTriggered: row.profileRequested(row)
+                text: qsTr("Copy ID")
+                glyph: "copy"
+                onTriggered: {
+                    dmClipboard.copyText(row.channelId)
+                    Chat.notice(qsTr("Channel ID copied"))
+                }
             }
         }
     }
@@ -120,4 +133,5 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         count: row.active ? 0 : row.mentions
     }
+    ClipboardText { id: dmClipboard }
 }

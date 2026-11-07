@@ -459,10 +459,23 @@ impl State {
         row.status_media = status
             .and_then(|s| s.media.as_ref())
             .map(|m| {
-                view::absolute_url(
+                // The URL, then `#<type>;<w>x<h>` (VoiceChannelMediaDisplay
+                // sizes the picture at its preview's aspect and plays a clip
+                // only while hovered); the sidebar strips the fragment.
+                let url = view::absolute_url(
                     &self.api_base,
                     Some(&crate::store::extras::status_media_url(m)),
-                )
+                );
+                let (w, h) = crate::store::extras::status_media_size(m);
+                let kind = m
+                    .get("preview_content_type")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                if url.is_empty() {
+                    url
+                } else {
+                    format!("{url}#{kind};{w}x{h}")
+                }
             })
             .unwrap_or_default();
     }
@@ -670,6 +683,7 @@ impl State {
                 share: call.share.clone().unwrap_or_default(),
                 sharing: call.share.is_some(),
                 share_error: call.share_error.clone(),
+                spatial: call.spatial.clone(),
             },
             None => VoiceView {
                 muted: prefs.muted,
@@ -1369,7 +1383,18 @@ impl State {
             Command::SetUploadSensitive { local_id, nsfw } => {
                 self.set_upload_sensitive(fx, &local_id, nsfw);
             }
-            Command::GifSearch { query, media_type } => self.gif_search(fx, &query, &media_type),
+            Command::GifSearch {
+                query,
+                media_type,
+                provider,
+            } => self.gif_search(fx, &query, &media_type, &provider),
+            Command::GifStart {
+                media_type,
+                provider,
+            } => self.gif_start(fx, &media_type, &provider),
+            Command::GifFavorites { media_type } => self.gif_favorites(fx, &media_type),
+            Command::GifTerms { query, provider } => self.gif_terms(fx, &query, &provider),
+            Command::GifTileFavorite(gif_id) => self.gif_tile_favorite(fx, &gif_id),
             Command::GifMore => self.gif_more(fx),
             Command::SendGif {
                 gif_id,
@@ -1417,6 +1442,16 @@ impl State {
                     wanted.quality.clone_from(&quality);
                     Some(VoiceCommand::SetShareQuality(quality))
                 });
+            }
+            // SpatialAudioPanel.tsx `commit`: the call keeps the state, plays
+            // it and sends it to the room; its map comes back as an update.
+            Command::SetVoiceSpatial(state) => {
+                if let Some(call) = &self.voice {
+                    fx.push(Effect::Voice {
+                        call: call.id,
+                        command: VoiceCommand::SetSpatialRoom(state),
+                    });
+                }
             }
             Command::SetVoiceCamera(on) => self.set_voice_camera(fx, on, None),
             Command::VoiceCameraFailed(reason) => {
@@ -1933,6 +1968,9 @@ impl State {
         }
         if let Some((_, more)) = pending.gifs.take_if(|(slot, _)| *slot == id) {
             return self.on_gifs(fx, more, result);
+        }
+        if let Some(op) = pending.gif_extra.remove(&id) {
+            return self.on_gif_extra(fx, op, result);
         }
         if let Some(download) = pending.downloads.remove(&id) {
             self.on_downloaded(fx, download, result);
@@ -3614,6 +3652,7 @@ impl State {
             share_error: String::new(),
             dm,
             move_grant,
+            spatial: String::new(),
         });
         self.emit_voice(fx);
     }
@@ -3757,6 +3796,7 @@ impl State {
         match update {
             VoiceUpdate::Status(status) => current.status = status,
             VoiceUpdate::Roster(roster) => current.roster = roster,
+            VoiceUpdate::Spatial(map) => current.spatial = map,
             VoiceUpdate::Camera { on, error } => {
                 current.camera = on;
                 if let Some(error) = error {

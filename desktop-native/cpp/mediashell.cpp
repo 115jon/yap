@@ -216,6 +216,12 @@ QString MediaShell::openPath(const QString& name) const
   return freePath(cacheDir(QStringLiteral("open")), safeName(name));
 }
 
+QString MediaShell::copyPath(const QString& name) const
+{
+  pruneOld(QStringLiteral("copy"));
+  return freePath(cacheDir(QStringLiteral("copy")), safeName(name));
+}
+
 void MediaShell::reveal(const QString& path) const
 {
 #ifdef Q_OS_WIN
@@ -245,6 +251,28 @@ void MediaShell::openExternal(const QString& url) const
     return;
   }
   QDesktopServices::openUrl(target);
+}
+
+bool MediaShell::copyImage(const QString& path, bool dry) const
+{
+  // Only a file this app downloaded into its copy cache (copyPath),
+  // decoded as a picture (never run or opened): an animation's first frame.
+  const QString dir = QDir::cleanPath(QDir::fromNativeSeparators(cacheDir(QStringLiteral("copy"))));
+  const QFileInfo file(path);
+  if (!file.isFile() || file.absolutePath().compare(dir, Qt::CaseInsensitive) != 0)
+    return false;
+  const QImage image(path);
+  if (image.isNull())
+    return false;
+  if (dry) {
+    std::fprintf(stderr, "[clipboard] would copy an image %dx%d\n", image.width(),
+                 image.height());
+    std::fflush(stderr);
+  } else {
+    QGuiApplication::clipboard()->setImage(image);
+  }
+  QFile::remove(path);
+  return true;
 }
 
 void MediaShell::openMedia(const QString& path) const

@@ -81,6 +81,7 @@ Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
                     width: Math.min(implicitWidth, parent.width - time.implicitWidth - 32)
                     text: root.result.name
+                    playing: hover.hovered || root.activeFocus
                     nameStyle: root.result.nameStyle ?? ""
                     color: root.result.color.length > 0 ? root.result.color : Theme.ink1
                     // text-ui-sm font-semibold.

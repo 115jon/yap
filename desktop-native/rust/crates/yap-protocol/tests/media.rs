@@ -2,7 +2,7 @@
 
 use serde_json::json;
 use yap_protocol::payload::ReactionEvent;
-use yap_protocol::rest::{GifPage, Message, MessagePatch, UploadedFile};
+use yap_protocol::rest::{GifCategories, GifPage, GifTerms, Message, MessagePatch, UploadedFile};
 
 fn message(extra: serde_json::Value) -> Message {
     let mut body = json!({ "id": "m1", "channel_id": "c1", "content": "hi" });
@@ -114,4 +114,53 @@ fn a_gif_page_should_decode_its_items_and_cursor() {
         (page.results[0].send.size_bytes, page.next.as_deref()),
         (68275, Some("Mg=="))
     );
+}
+
+#[test]
+fn gif_categories_should_decode_and_skip_odd_entries() {
+    let list: GifCategories = serde_json::from_value(json!({
+        "categories": [
+            { "id": "hello", "label": "Hello", "query": "hello", "imageUrl": "https://static.klipy.com/h.gif" },
+            "not a category"
+        ]
+    }))
+    .expect("categories");
+    assert_eq!(
+        list.categories
+            .iter()
+            .map(|c| (c.label.as_str(), c.image_url.as_str()))
+            .collect::<Vec<_>>(),
+        [("Hello", "https://static.klipy.com/h.gif")]
+    );
+}
+
+#[test]
+fn a_clip_duration_should_read_a_number_or_a_numeric_string() {
+    let page: GifPage = serde_json::from_value(json!({
+        "results": [
+            { "id": "a", "duration": 12.5, "sourceUrl": "https://static.klipy.com/a.mp4" },
+            { "id": "b", "duration": "7" },
+            { "id": "c", "duration": "soon" }
+        ],
+        "next": null
+    }))
+    .expect("page");
+    assert_eq!(
+        page.results
+            .iter()
+            .map(|g| (g.duration, g.source_url.as_deref()))
+            .collect::<Vec<_>>(),
+        [
+            (Some(12.5), Some("https://static.klipy.com/a.mp4")),
+            (Some(7.0), None),
+            (None, None)
+        ]
+    );
+}
+
+#[test]
+fn gif_terms_should_keep_the_strings() {
+    let terms: GifTerms =
+        serde_json::from_value(json!({ "results": ["cat", 3, "cats"] })).expect("terms");
+    assert_eq!(terms.results, ["cat", "cats"]);
 }

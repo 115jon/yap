@@ -331,6 +331,77 @@ pub fn mixes(
         .collect()
 }
 
+/// One person on the room map as the spatial panel draws them: their seat
+/// (as [`positions`] gives it, so the map shows what the mix plays) and
+/// whether they hear spatial audio (the panel's "not hearing" note).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapSeat {
+    /// Yap user id (ours may be the participant id before we know it).
+    pub user_id: String,
+    pub me: bool,
+    pub position: Position,
+    /// Their "Spatial audio" switch (`spatial_audio_enabled`).
+    pub enabled: bool,
+    /// Their "High fidelity audio" switch.
+    pub high_fidelity: bool,
+}
+
+/// What the spatial panel (SpatialAudioPanel.tsx) shows: the room's state
+/// and everyone's seat, us first.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SpatialMap {
+    pub state: SpatialState,
+    pub seats: Vec<MapSeat>,
+}
+
+impl SpatialMap {
+    /// Seats `me` and then `peers` (user id, enabled, high fidelity), once
+    /// each, as [`mixes`] seats them.
+    pub fn new(state: &SpatialState, me: (&str, bool, bool), peers: &[(&str, bool, bool)]) -> Self {
+        let mut people = Vec::with_capacity(peers.len() + 1);
+        people.push(me);
+        people.extend(peers.iter().copied().filter(|p| p.0 != me.0));
+        let ids: Vec<&str> = people.iter().map(|p| p.0).collect();
+        let seats = positions(&ids, state);
+        Self {
+            state: state.clone(),
+            seats: people
+                .iter()
+                .enumerate()
+                .map(|(index, &(id, enabled, high_fidelity))| MapSeat {
+                    user_id: id.to_owned(),
+                    me: index == 0,
+                    position: seats
+                        .get(id)
+                        .copied()
+                        .unwrap_or(Position { x: 50.0, y: 50.0 }),
+                    enabled,
+                    high_fidelity,
+                })
+                .collect(),
+        }
+    }
+
+    /// `{state, seats: [{userId, me, x, y, enabled, highFidelity}]}`.
+    pub fn to_value(&self) -> Value {
+        let seats: Vec<Value> = self
+            .seats
+            .iter()
+            .map(|s| {
+                json!({
+                    "userId": s.user_id,
+                    "me": s.me,
+                    "x": s.position.x,
+                    "y": s.position.y,
+                    "enabled": s.enabled,
+                    "highFidelity": s.high_fidelity,
+                })
+            })
+            .collect();
+        json!({ "state": self.state.to_value(), "seats": seats })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -450,6 +521,78 @@ mod tests {
         assert!(!local.hears(&room, true));
         local.high_fidelity = false;
         assert!(!local.hears(&room, false));
+    }
+
+    fn mode(placement: Placement, distance: f64, arc_angle: f64) -> SpatialState {
+        SpatialState {
+            placement,
+            distance,
+            arc_angle,
+            ..SpatialState::default()
+        }
+    }
+
+    // spatial-audio.test.ts "places line participants evenly".
+    #[test]
+    fn a_line_should_space_people_evenly_at_one_depth() {
+        let seats = positions(&["u1", "u2", "u3"], &mode(Placement::Line, 60.0, 120.0));
+        let (u1, u2, u3) = (seats["u1"], seats["u2"], seats["u3"]);
+        assert!(u1.x < u2.x && close(u2.x, 50.0) && u3.x > u2.x);
+        assert!(close(u1.y, u3.y));
+    }
+
+    // "honors arc angle and distance".
+    #[test]
+    fn a_wider_arc_further_out_should_spread_people_further_apart() {
+        let narrow = positions(&["u1", "u2"], &mode(Placement::Arc, 40.0, 60.0));
+        let wide = positions(&["u1", "u2"], &mode(Placement::Arc, 80.0, 160.0));
+        assert!((wide["u2"].x - wide["u1"].x).abs() > (narrow["u2"].x - narrow["u1"].x).abs());
+    }
+
+    // "keeps grid positions within bounds".
+    #[test]
+    fn a_full_grid_should_stay_inside_the_room() {
+        let ids = ["u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8", "u9"];
+        let seats = positions(&ids, &mode(Placement::Grid, 95.0, 120.0));
+        for p in seats.values() {
+            assert!(
+                (8.0..=92.0).contains(&p.x) && (12.0..=70.0).contains(&p.y),
+                "{p:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_map_should_seat_us_first_with_the_mixes_seats() {
+        let room = SpatialState {
+            placement: Placement::Line,
+            ..SpatialState::default()
+        };
+        let map = SpatialMap::new(
+            &room,
+            ("me", true, true),
+            &[("a", true, false), ("me", true, true), ("b", false, true)],
+        );
+        let ids: Vec<&str> = map.seats.iter().map(|s| s.user_id.as_str()).collect();
+        assert_eq!(ids, ["me", "a", "b"]);
+        let seats = positions(&["me", "a", "b"], &room);
+        assert!(map.seats.iter().all(|s| s.position == seats[&s.user_id]));
+        assert!(map.seats[0].me && !map.seats[1].me);
+        assert_eq!(
+            (map.seats[1].high_fidelity, map.seats[2].enabled),
+            (false, false)
+        );
+    }
+
+    #[test]
+    fn the_map_json_should_carry_the_state_and_each_seat() {
+        let map = SpatialMap::new(&SpatialState::default(), ("me", false, true), &[]);
+        let v = map.to_value();
+        assert_eq!(v["state"]["placementMode"], json!("arc"));
+        assert_eq!(v["seats"][0]["userId"], json!("me"));
+        assert_eq!(v["seats"][0]["me"], json!(true));
+        assert_eq!(v["seats"][0]["enabled"], json!(false));
+        assert_eq!(v["seats"][0]["x"], json!(50.0));
     }
 
     #[test]

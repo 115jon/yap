@@ -84,6 +84,7 @@ impl State {
                     let pair = [me, &dm.recipient].map(|user| Member {
                         user: user.clone(),
                         roles: Vec::new(),
+                        joined_at: None,
                     });
                     (Cow::Owned(pair.to_vec()), None)
                 }
@@ -196,20 +197,75 @@ impl State {
                 ..ProfileView::default()
             };
         };
-        let roles = self
+        let member = self
             .active_server
             .as_deref()
             .filter(|_| !self.home)
             .and_then(|server| self.members.get(server))
-            .and_then(|list| list.iter().find(|m| &m.user.id == id))
-            .map_or(&[][..], |m| m.roles.as_slice());
+            .and_then(|list| list.iter().find(|m| &m.user.id == id));
+        let roles = member.map_or(&[][..], |m| m.roles.as_slice());
         let me = self.me().map_or("", |me| me.id.as_str());
         let mut view = view::profile_view(user, roles, me, &self.presence, &self.api_base);
         // ProfileCard.tsx "Mutual servers": not on your own card.
-        if let Some((_, mutuals)) = self
+        // resolveProfileReferenceDate: the join date in the shown server,
+        // else the account's creation, as `Nov 5, 2026` in UTC.
+        let date = |v: &serde_json::Value| match v {
+            serde_json::Value::String(s) => crate::store::time::parse_rfc3339(s),
+            serde_json::Value::Number(n) => n.as_f64().filter(|n| *n > 0.0).map(|n| n as i64),
+            _ => None,
+        };
+        let since = member
+            .and_then(|m| m.joined_at.as_ref())
+            .and_then(date)
+            .map(|ms| ("Member Since", ms))
+            .or_else(|| {
+                user.created_at
+                    .as_deref()
+                    .and_then(crate::store::time::parse_rfc3339)
+                    .map(|ms| ("Account Created", ms))
+            });
+        if let Some((label, ms)) = since {
+            let value =
+                crate::store::time::local_date(ms, crate::store::time::LocalOffset::UTC, false);
+            view.member_since = serde_json::json!({ "label": label, "value": value }).to_string();
+        }
+        if let Some((_, why)) = self.profile_error.as_ref().filter(|(owner, _)| owner == id) {
+            view.load_error = why.clone();
+        }
+        if let Some((_, _, friends)) = self
             .profile_mutuals
             .as_ref()
-            .filter(|(owner, m)| owner == id && !view.me && m.count > 0)
+            .filter(|(owner, _, f)| owner == id && !view.me && f.count > 0)
+        {
+            let items: Vec<serde_json::Value> = friends
+                .items
+                .iter()
+                .map(|f| {
+                    let name = f
+                        .display_name
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|n| !n.is_empty())
+                        .unwrap_or(&f.username);
+                    let avatar = view::absolute_url(&self.api_base, f.avatar_url.as_deref());
+                    let deco = if avatar.is_empty() {
+                        String::new()
+                    } else {
+                        crate::collectibles::decoration_url(f.avatar_display.as_ref())
+                    };
+                    serde_json::json!({
+                        "id": f.id, "name": name, "avatar": avatar, "deco": deco,
+                        "initial": view::initials(name).chars().next().map(String::from).unwrap_or_default(),
+                    })
+                })
+                .collect();
+            view.mutual_friends =
+                serde_json::json!({ "count": friends.count, "items": items }).to_string();
+        }
+        if let Some((_, mutuals, _)) = self
+            .profile_mutuals
+            .as_ref()
+            .filter(|(owner, m, _)| owner == id && !view.me && m.count > 0)
         {
             let items: Vec<serde_json::Value> = mutuals
                 .items
@@ -515,10 +571,21 @@ impl State {
             self.presence.live.insert(user.id.clone(), "online");
         }
         if let Some(list) = self.members.get_mut(&server_id) {
-            let member = Member { user, roles };
-            match list.iter().position(|m| m.user.id == member.user.id) {
-                Some(i) => list[i] = member,
-                None => list.push(member),
+            match list.iter().position(|m| m.user.id == user.id) {
+                // An update keeps when they joined.
+                Some(i) => {
+                    let joined_at = list[i].joined_at.take();
+                    list[i] = Member {
+                        user,
+                        roles,
+                        joined_at,
+                    };
+                }
+                None => list.push(Member {
+                    user,
+                    roles,
+                    joined_at: None,
+                }),
             }
         }
         self.sync_social(fx);
@@ -618,6 +685,7 @@ impl State {
     /// Opens a user's popout (and fetches their full profile), or closes it.
     pub(super) fn show_profile(&mut self, fx: &mut Effects, user_id: Option<String>) {
         self.pending.profile = None;
+        self.profile_error = None;
         self.profile = user_id.filter(|id| !id.is_empty()).map(|id| (id, None));
         let fetch = self
             .profile
@@ -640,16 +708,29 @@ impl State {
         result: Result<ApiResponse, ApiError>,
     ) {
         match result {
-            Ok(ApiResponse::Profile(user, mutuals)) => {
+            Ok(ApiResponse::Profile(user, mutuals, friends)) => {
                 if let Some((_, full)) = self.profile.as_mut().filter(|(id, _)| id == user_id) {
                     *full = Some(*user);
-                    self.profile_mutuals = Some((user_id.to_owned(), mutuals));
+                    self.profile_mutuals = Some((user_id.to_owned(), mutuals, friends));
                 }
                 self.emit_profile(fx);
             }
             Err(error) if error.is_unauthorized() => self.fail(fx, &error),
-            // The card keeps what the lists knew.
-            Ok(_) | Err(_) => {}
+            // The card keeps what the lists knew; the full profile says why
+            // the rest is missing and offers Try again.
+            Err(error) => {
+                if self.profile.as_ref().is_some_and(|(id, _)| id == user_id) {
+                    let name = self
+                        .known_user(user_id)
+                        .map(|u| u.label().to_owned())
+                        .unwrap_or_else(|| "this user".to_owned());
+                    let why =
+                        super::media::describe_error(&error, &format!("load {name}'s profile"));
+                    self.profile_error = Some((user_id.to_owned(), why));
+                }
+                self.emit_profile(fx);
+            }
+            Ok(_) => {}
         }
     }
 }

@@ -17,6 +17,11 @@
 //   Files.testDropUrls()       tests: YAP_TEST_DROP ("a.png;b.png") as file
 //                              URLs, for a drop onto the chat without a
 //                              real drag (empty when unset)
+//   Files.copyPath(name)       a path in YapNative's cache for Copy image
+//   Files.copyImage(path, dry) puts a downloaded picture on the clipboard as
+//                              an image (a GIF's or WebP's first frame), the
+//                              viewer's Copy image; `dry` (YAP_NO_CLIPBOARD)
+//                              only logs it. False when it does not decode.
 //   Files.openExternal(url)    an http(s) link in the system browser; with
 //                              YAP_LOG_EXTERNAL_OPEN=1 (tests) it is only
 //                              logged as "[external] open <host><path>"
@@ -39,10 +44,12 @@ public:
   Q_INVOKABLE QStringList clipboardFiles();
   Q_INVOKABLE QString downloadPath(const QString& name) const;
   Q_INVOKABLE QString openPath(const QString& name) const;
+  Q_INVOKABLE QString copyPath(const QString& name) const;
   Q_INVOKABLE void reveal(const QString& path) const;
   Q_INVOKABLE void openMedia(const QString& path) const;
   Q_INVOKABLE void clearImageCache();
   Q_INVOKABLE void openExternal(const QString& url) const;
+  Q_INVOKABLE bool copyImage(const QString& path, bool dry) const;
   Q_INVOKABLE QStringList testDropUrls() const;
 
 signals:

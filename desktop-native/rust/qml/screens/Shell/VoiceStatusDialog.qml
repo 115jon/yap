@@ -203,7 +203,7 @@ PlateDialog {
         // masonry scrolls in what is left after the rest of the plate.
         readonly property real fixedHeight: 50 + Theme.type.dialogTitleLine + 8 + Theme.type.dialogBodyLine
             + 16 + cards.height + 16 + 18 + 12
-            + (errorRow.visible ? errorRow.height + 16 : 0) + (removeRow.visible ? removeRow.height + 16 : 0)
+            + (errorRow.visible ? errorRow.height + 16 : 0)
         readonly property real maxHeight: (dialog.parent ? dialog.parent.height : 800) - Theme.chrome - 32 - fixedHeight
 
         Item {
@@ -293,37 +293,17 @@ PlateDialog {
                             asynchronous: true
                             playing: dialog.visible && !Theme.reducedMotion && status === AnimatedImage.Ready
                         }
-                        // Clips: this build plays no video, so the tile
-                        // keeps the clip's shape with its glyph.
-                        Icon {
+                        // Clips rest on their first frame and play only
+                        // while pointed at or focused (RecentMediaTile).
+                        ClipPreview {
                             visible: recent.modelData.video
-                            anchors.centerIn: parent
-                            name: "fileVideo"
-                            size: Theme.iconXl
-                            color: Theme.ink3
+                            anchors.fill: parent
+                            source: recent.modelData.video ? recent.modelData.url : ""
+                            active: (recent.hovered || recent.activeFocus) && dialog.visible && !Theme.reducedMotion
                         }
                     }
                 }
             }
-        }
-    }
-
-    // The sidebar's picture has no remove key in this build (the web's
-    // VoiceChannelMediaDisplay), so the dialog keeps one while there is a
-    // picture.
-    Item {
-        id: removeRow
-        visible: dialog.media && dialog.status.hasMedia
-        width: parent.width
-        height: removeKey.height
-        KitButton {
-            id: removeKey
-            size: "sm"
-            variant: "ghost"
-            iconName: "trash"
-            text: qsTr("Remove picture")
-            enabled: !dialog.mediaBusy
-            onClicked: Extras.removeVoiceMedia(dialog.channelId)
         }
     }
 
@@ -373,6 +353,8 @@ PlateDialog {
 
     GifPicker {
         id: gifs
+        // VoiceChannelMediaStatusModal.tsx: `initialExpanded lockExpanded`.
+        lockExpanded: true
         onPicked: gifId => Extras.setVoiceMediaGif(dialog.channelId, gifId)
     }
 

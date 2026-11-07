@@ -794,6 +794,37 @@ fn the_profile_answer_should_add_the_bio_and_banner() {
 }
 
 #[test]
+fn the_full_profile_should_list_mutual_friends_and_the_account_date() {
+    let mut client = Client::online();
+    client.command(Command::ShowProfile(Some(ALICE.into())));
+    let mut full = user(ALICE, "alice", Some("Alice"), "online");
+    full["created_at"] = json!("2026-11-05T02:40:01.498Z");
+    let fx = client.respond(
+        &ApiRequest::Profile {
+            user_id: ALICE.into(),
+        },
+        json!({ "user": full, "mutualServers": { "count": 0, "items": [] },
+            "mutualFriends": { "count": 3, "items": [{ "id": "f1", "username": "bob", "display_name": "Bobby" }] } }),
+    );
+    let view = profile(&fx).expect("profile");
+    let friends: Value = serde_json::from_str(&view.mutual_friends).expect("json");
+    assert_eq!(
+        (
+            friends["count"].as_i64(),
+            friends["items"][0]["name"].as_str(),
+            friends["items"][0]["initial"].as_str()
+        ),
+        (Some(3), Some("Bobby"), Some("B"))
+    );
+    // Not a member with a join date here: when the account was made.
+    let since: Value = serde_json::from_str(&view.member_since).expect("json");
+    assert_eq!(
+        (since["label"].as_str(), since["value"].as_str()),
+        (Some("Account Created"), Some("Nov 5, 2026"))
+    );
+}
+
+#[test]
 fn my_own_profile_should_not_be_fetched() {
     let mut client = Client::online();
     let fx = client.command(Command::ShowProfile(Some(ME.into())));

@@ -85,6 +85,7 @@ Loader {
                 lit: cell.lit
                 reconnecting: cell.reconnecting
             }
+            ListenLine {}
             StatusLines {}
         }
     }
@@ -112,8 +113,19 @@ Loader {
                 onDragMoved: scene => cell.dragMoved(scene)
                 onDragEnded: dropped => cell.dragEnded(dropped)
             }
+            ListenLine {}
             StatusLines {}
         }
+    }
+
+    // Our call's listen-together track, after its people and before the
+    // status (ChannelSidebar.tsx), on the row that draws the status.
+    component ListenLine: Loader {
+        readonly property string ownerId: cell.kind === "member" ? cell.itemId.slice(0, cell.itemId.indexOf("/")) : cell.itemId
+        width: cell.width
+        active: cell.statusHere && cell.callId.length > 0 && ownerId === cell.callId
+        visible: active && item !== null && item.shown
+        sourceComponent: ListenSidebarStatus {}
     }
 
     component StatusLines: VoiceStatusLine {

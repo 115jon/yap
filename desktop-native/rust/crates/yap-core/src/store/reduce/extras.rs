@@ -467,18 +467,24 @@ impl State {
                     &item.url
                 };
                 let page = item.source_url.as_deref().unwrap_or_default();
-                let url = if item.source_kind == "embed" && video {
-                    view::embeds::proxied(source, page, base)
-                } else {
-                    view::absolute_url(base, Some(source))
-                };
+                // MemberList.tsx proxies every embed video, but the proxy
+                // only serves its allowed hosts (proxy-media.ts
+                // `isAllowedMediaUrl`), so a direct link elsewhere (a plain
+                // .mp4) answered 400 and the viewer could not play it. The
+                // chat's own embed plays such a link straight; so does this.
+                let url =
+                    if item.source_kind == "embed" && video && view::media::needs_proxy(source) {
+                        view::embeds::proxied(source, page, base)
+                    } else {
+                        view::absolute_url(base, Some(source))
+                    };
                 let poster = item
                     .thumbnail_url
                     .as_deref()
                     .map(str::trim)
                     .filter(|t| !t.is_empty())
                     .map(|t| {
-                        if item.source_kind == "embed" {
+                        if item.source_kind == "embed" && view::media::needs_proxy(t) {
                             view::embeds::proxied(t, page, base)
                         } else {
                             view::absolute_url(base, Some(t))

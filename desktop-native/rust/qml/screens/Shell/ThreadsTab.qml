@@ -167,6 +167,9 @@ Item {
                     width: parent.width
                     textFormat: Text.PlainText
                     text: card.modelData.content
+                    // An attachment-only parent: the web's empty line box
+                    // collapses, leaving only its margins.
+                    height: text.trim().length > 0 ? implicitHeight : topPadding + bottomPadding
                     wrapMode: Text.Wrap
                     maximumLineCount: 2
                     elide: Text.ElideRight

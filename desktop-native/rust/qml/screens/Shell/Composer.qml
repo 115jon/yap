@@ -113,6 +113,8 @@ Item {
     }
     readonly property bool emojiOpen: emojiPicker.item?.visible ?? false
     readonly property bool gifOpen: gifPicker.item?.visible ?? false
+    // Which key opened it (InputControls.tsx `activeMediaButton`).
+    readonly property string gifMedia: gifOpen ? gifPicker.item.openedAs : ""
 
     // Mention suggestions (MentionAutocomplete.tsx): up to five members,
     // over the list, Up/Down to move, Enter or Tab to insert, Esc to close.
@@ -174,6 +176,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     width: Math.min(implicitWidth, parent.width - x - handle.width - 20)
                     text: suggestion.name
+                    playing: suggestionHover.hovered
                     nameStyle: suggestion.nameStyle
                     color: Theme.ink1
                     font: Theme.type.row
@@ -190,6 +193,7 @@ Item {
                     font: Theme.type.caption
                 }
                 HoverHandler {
+                    id: suggestionHover
                     cursorShape: Qt.PointingHandCursor
                     onHoveredChanged: if (hovered) root.mentionIndex = suggestion.index
                 }
@@ -408,13 +412,13 @@ Item {
                 Accessible.name: qsTr("Open GIF picker")
                 Rectangle {
                     anchors.fill: parent
-                    color: root.gifOpen ? Theme.tint2 : gifHover.hovered ? Theme.tint1 : "transparent"
+                    color: root.gifMedia === "gifs" ? Theme.tint2 : gifHover.hovered ? Theme.tint1 : "transparent"
                 }
                 Text {
                     id: gifText
                     anchors.centerIn: parent
                     text: "GIF"
-                    color: gifHover.hovered || root.gifOpen ? Theme.ink1 : Theme.ink2
+                    color: gifHover.hovered || root.gifMedia === "gifs" ? Theme.ink1 : Theme.ink2
                     font: Theme.type.silk
                 }
                 LazyPopup {
@@ -424,16 +428,25 @@ Item {
                 HoverHandler { id: gifHover; cursorShape: Qt.PointingHandCursor }
                 TapHandler {
                     onTapped: {
-                        if (root.gifOpen) {
-                            gifPicker.item.close()
-                        } else {
-                            emojiPicker.item?.close()
-                            gifPicker.load()?.openAt(gifKey)
-                        }
+                        emojiPicker.item?.close()
+                        gifPicker.load()?.toggleFor(gifKey, "gifs")
                     }
                 }
             }
-            IconKey { size: 46; glyph: Theme.iconXl; square: true; iconName: "sticker"; tip: qsTr("Open sticker picker") }
+            // Stickers: the GIF picker on its Stickers tab (`openGifPicker`).
+            IconKey {
+                id: stickerKey
+                size: 46
+                glyph: Theme.iconXl
+                square: true
+                iconName: "sticker"
+                tip: qsTr("Open sticker picker")
+                tone: root.gifMedia === "stickers" ? "toggled" : "ghost"
+                onClicked: {
+                    emojiPicker.item?.close()
+                    gifPicker.load()?.toggleFor(stickerKey, "stickers")
+                }
+            }
             IconKey {
                 id: emojiKey
                 size: 46

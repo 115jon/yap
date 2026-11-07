@@ -432,8 +432,17 @@ rows! {
     pub struct GifRow / GifRole {
         id: String => Id "gifId",
         title: String => Title "title",
-        /// What the tile shows (an image; video previews fall back to `send`).
+        /// The picture the tile shows (video previews fall back to the
+        /// `send` image); a clip's poster when it has one, else empty.
         preview: String => Preview "preview",
+        /// The mp4 the tile loops: a clip, or an item with no picture.
+        video: String => Video "video",
+        /// A clip (the speaker chip and hover sound).
+        clip: bool => Clip "clip",
+        /// `m:ss` for a clip, else empty.
+        duration: String => Duration "duration",
+        /// Its star is filled (a saved favourite).
+        saved: bool => Saved "saved",
         /// Height over width, in thousandths.
         aspect: i64 => Aspect "aspect",
         column: i64 => Column "column",
@@ -713,6 +722,15 @@ pub struct ProfileView {
     /// The servers you share, as JSON `{count, items: [{id, name, icon,
     /// initial}]}`, or empty.
     pub mutual_servers: String,
+    /// The friends you share, as JSON `{count, items: [{id, name, avatar,
+    /// initial, deco}]}`, or empty (the full profile's "Mutual friends").
+    pub mutual_friends: String,
+    /// `{label, value}`: "Member Since" (joined the shown server) or
+    /// "Account Created", `Nov 5, 2026` in UTC (profile-dates.ts), or empty
+    /// when neither date is known.
+    pub member_since: String,
+    /// Why the full profile did not load, or empty.
+    pub load_error: String,
 }
 
 /// The open DM's recipient, for the header and the title; empty in a
@@ -750,6 +768,9 @@ pub struct VoiceView {
     pub share: VoiceShare,
     /// Why the last share failed; empty otherwise.
     pub share_error: String,
+    /// The spatial panel's room map as JSON (`{state, seats}`), empty
+    /// outside a call or before the call has one.
+    pub spatial: String,
 }
 
 /// The open voice channel (its landing or the call), empty when none.
@@ -1197,6 +1218,9 @@ pub struct GifStatusView {
     /// tile count (QML adds the gaps).
     pub units: [i64; 2],
     pub counts: [i64; 2],
+    /// The rest as JSON (`gif_rows`): the provider, the start screen, the
+    /// search terms and the favourites mode.
+    pub browse: String,
 }
 
 /// Messages from the same author within this window share one header.
@@ -2267,6 +2291,9 @@ pub(super) fn profile_view(
         name_style: name_style(user.display_name_style.as_ref()),
         platforms: presence.platforms_of(&user.id, user.presence_platforms.as_deref()),
         mutual_servers: String::new(),
+        mutual_friends: String::new(),
+        member_since: String::new(),
+        load_error: String::new(),
     }
 }
 

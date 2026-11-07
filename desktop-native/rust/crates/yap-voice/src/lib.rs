@@ -97,7 +97,11 @@
 //!   (`spatial_audio_state`). Ready (and a standby's promotion) sends ours,
 //!   as `useSpatialAudioSync` does: op 15 with `spatial_audio_enabled`,
 //!   `spatial_audio_high_fidelity` and the room's state with our
-//!   `enabled`; so does a change of `SetSpatial`.
+//!   `enabled`; so does a change of `SetSpatial`. The spatial panel's
+//!   edits (`SetSpatialRoom`) replace the room's state at once (the mix
+//!   follows without waiting for an echo) and go out the same way.
+//!   `Notice::Spatial` reports the panel's map ([`spatial::SpatialMap`]:
+//!   the state and the mix's seats) whenever it changes.
 //!
 //! # Audio path
 //!
@@ -153,7 +157,7 @@ pub use share::{
     ShareRequest, SourceKind, DEFAULT_SHARE_QUALITY, LOCAL_SCREEN_KEY, SHARE_AUDIO_CHANNELS,
     SHARE_AUDIO_RATE, SHARE_QUALITIES,
 };
-pub use spatial::{SpatialLocal, SpatialState};
+pub use spatial::{MapSeat, SpatialLocal, SpatialMap, SpatialState};
 pub use tracks::{Kind, Offer, Pull, Remote, TrackTable};
 pub use vad::{
     level_percent, EnergyMeter, Sensitivity, Vad, AUTO_THRESHOLD, SILENCE_DELAY_MS, VAD_TICK,

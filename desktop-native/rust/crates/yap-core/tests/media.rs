@@ -449,6 +449,7 @@ fn with_gifs(client: &mut Client) -> Vec<Effect> {
     let fx = client.command(Command::GifSearch {
         query: String::new(),
         media_type: "gifs".into(),
+        provider: "klipy".into(),
     });
     let (id, _) = find(&fx, |r| matches!(r, ApiRequest::Gifs { .. }));
     client.answer(
@@ -466,6 +467,7 @@ fn trending_should_ask_klipy_for_24_gifs() {
     let fx = client.command(Command::GifSearch {
         query: String::new(),
         media_type: "gifs".into(),
+        provider: "klipy".into(),
     });
     let (_, request) = find(&fx, |r| matches!(r, ApiRequest::Gifs { .. }));
     assert_eq!(
@@ -749,4 +751,289 @@ fn a_klipy_video_attachment_should_carry_its_gif_star() {
         ),
         (&json!("klipy"), &json!("dancing-cat"))
     );
+}
+
+// The GIF picker's start screen, clips, providers, favourites and terms
+// (GifPickerModal.tsx)
+
+fn gif_status(fx: &[Effect]) -> Option<yap_core::store::GifStatusView> {
+    views(fx)
+        .filter_map(|v| match v {
+            ViewUpdate::GifStatus(status) => Some(status.clone()),
+            _ => None,
+        })
+        .last()
+}
+
+fn gif_browse(fx: &[Effect]) -> Value {
+    serde_json::from_str(&gif_status(fx).expect("status").browse).expect("browse json")
+}
+
+fn gif_tiles(fx: &[Effect]) -> Vec<yap_core::store::GifRow> {
+    views(fx)
+        .filter_map(|v| match v {
+            ViewUpdate::Gifs(ViewDiff::Insert { rows, .. }) => Some(rows.clone()),
+            ViewUpdate::Gifs(ViewDiff::Reset(rows)) => Some(rows.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+fn clip(id: &str) -> GifItem {
+    GifItem {
+        id: id.into(),
+        title: "Clip".into(),
+        provider: "klipy".into(),
+        preview: GifAsset {
+            url: "https://static.klipy.com/c.jpg".into(),
+            width: 320.0,
+            height: 180.0,
+            size_bytes: 1,
+            content_type: "image/webp".into(),
+        },
+        send: GifAsset {
+            url: "https://static.klipy.com/clips/c.mp4".into(),
+            width: 640.0,
+            height: 360.0,
+            size_bytes: 2,
+            content_type: "video/mp4".into(),
+        },
+        duration: Some(72.6),
+        ..GifItem::default()
+    }
+}
+
+#[test]
+fn the_start_screen_should_ask_for_categories_and_the_trending_gif_once() {
+    let mut client = Client::online();
+    let fx = client.command(Command::GifStart {
+        media_type: "gifs".into(),
+        provider: "klipy".into(),
+    });
+    let categories = find(&fx, |r| matches!(r, ApiRequest::GifCategories { .. }));
+    let trending = find(&fx, |r| matches!(r, ApiRequest::Gifs { limit: 1, .. }));
+    assert_eq!(
+        categories.1.path(),
+        format!("/api/gifs?mode=categories&provider=klipy&mediaType=gifs&contentFilter=high&customerId={ME}")
+    );
+    client.respond(
+        categories,
+        json!({ "categories": [
+            { "id": "hello", "label": "hello", "query": "hello", "imageUrl": "https://static.klipy.com/h.gif" },
+            { "id": "bad", "label": "", "query": "", "imageUrl": "" }
+        ] }),
+    );
+    let fx = client.answer(
+        trending.0,
+        Ok(ApiResponse::Gifs(GifPage {
+            results: vec![gif("t1")],
+            next: None,
+        })),
+    );
+    let browse = gif_browse(&fx);
+    assert_eq!(
+        (
+            browse["categories"].clone(),
+            browse["trending"]["image"].clone(),
+            browse["categoriesLoading"].clone()
+        ),
+        (
+            json!([{ "id": "hello", "label": "hello", "query": "hello", "image": "https://static.klipy.com/h.gif" }]),
+            json!("https://static.klipy.com/s.gif"),
+            json!(false)
+        )
+    );
+    // Kept: a second visit asks for neither.
+    let fx = client.command(Command::GifStart {
+        media_type: "gifs".into(),
+        provider: "klipy".into(),
+    });
+    assert!(!requests(&fx).iter().any(|(_, r)| matches!(
+        r,
+        ApiRequest::GifCategories { .. } | ApiRequest::Gifs { .. }
+    )));
+}
+
+#[test]
+fn clips_should_loop_their_mp4_with_its_length_and_poster() {
+    let mut client = Client::online();
+    let fx = client.command(Command::GifSearch {
+        query: "wow".into(),
+        media_type: "clips".into(),
+        // Tenor has no clips: KLIPY answers.
+        provider: "tenor".into(),
+    });
+    let (id, request) = find(&fx, |r| matches!(r, ApiRequest::Gifs { .. }));
+    assert!(request
+        .path()
+        .starts_with("/api/gifs?mode=search&provider=klipy&limit=24&mediaType=clips"));
+    let fx = client.answer(
+        id,
+        Ok(ApiResponse::Gifs(GifPage {
+            results: vec![clip("c1")],
+            next: None,
+        })),
+    );
+    let tile = gif_tiles(&fx).pop().expect("tile");
+    assert_eq!(
+        (
+            tile.video.as_str(),
+            tile.preview.as_str(),
+            tile.clip,
+            tile.duration.as_str(),
+            tile.aspect
+        ),
+        (
+            "https://static.klipy.com/clips/c.mp4",
+            "https://static.klipy.com/c.jpg",
+            true,
+            "1:12",
+            563
+        )
+    );
+}
+
+#[test]
+fn tenor_should_answer_gifs_when_chosen() {
+    let mut client = Client::online();
+    let fx = client.command(Command::GifSearch {
+        query: String::new(),
+        media_type: "gifs".into(),
+        provider: "tenor".into(),
+    });
+    let (_, request) = find(&fx, |r| matches!(r, ApiRequest::Gifs { .. }));
+    assert!(request
+        .path()
+        .starts_with("/api/gifs?mode=search&provider=tenor&limit=24&mediaType=gifs"));
+    assert_eq!(gif_browse(&fx)["provider"], json!("tenor"));
+}
+
+#[test]
+fn the_favorites_view_should_show_saved_items_of_the_tab_with_filled_stars() {
+    let mut client = Client::online();
+    let fx = client.command(Command::GifFavorites {
+        media_type: "stickers".into(),
+    });
+    let list = find(&fx, |r| {
+        matches!(r, ApiRequest::Favorites(FavoritesRequest::List))
+    });
+    let sticker = json!({ "provider": "klipy", "id": "s1", "title": "Sticker", "mediaType": "stickers",
+        "sourceUrl": "https://static.klipy.com/stickers/s1.gif",
+        "preview": { "url": "https://static.klipy.com/stickers/s1.gif", "width": 100, "height": 100, "contentType": "image/gif" },
+        "send": { "url": "https://static.klipy.com/stickers/s1.gif", "width": 100, "height": 100, "contentType": "image/gif" } });
+    let fx = client.respond(list, json!({ "favorites": [sticker, favourite("g1")] }));
+    let tiles = gif_tiles(&fx);
+    assert_eq!(
+        tiles
+            .iter()
+            .map(|t| (t.id.as_str(), t.saved))
+            .collect::<Vec<_>>(),
+        [("klipy:s1", true)]
+    );
+    assert_eq!(gif_browse(&fx)["favorites"], json!(true));
+}
+
+#[test]
+fn a_tile_star_should_save_the_item_with_its_tab_and_source() {
+    let mut client = Client::online();
+    with_gifs(&mut client);
+    let fx = client.command(Command::Favorites(FavoritesCommand::Load));
+    let list = find(&fx, |r| {
+        matches!(r, ApiRequest::Favorites(FavoritesRequest::List))
+    });
+    client.respond(list, json!({ "favorites": [] }));
+    let fx = client.command(Command::GifTileFavorite("klipy:g1".into()));
+    let (_, add) = find(&fx, |r| {
+        matches!(r, ApiRequest::Favorites(FavoritesRequest::Add(_)))
+    });
+    let item = &add.body()["favorite"];
+    assert_eq!(
+        (
+            item["id"].clone(),
+            item["mediaType"].clone(),
+            item["sourceUrl"].clone(),
+            item.get("altText").is_none()
+        ),
+        (
+            json!("g1"),
+            json!("gifs"),
+            json!("https://static.klipy.com/s.gif"),
+            true
+        )
+    );
+    // The tile's star fills at once.
+    assert!(gif_tiles(&fx).is_empty() || gif_tiles(&fx).iter().any(|t| t.saved));
+    assert!(client.state.gifs().items.iter().any(|g| g.id == "g1"));
+}
+
+#[test]
+fn search_terms_should_show_once_both_lists_answer_without_repeats() {
+    let mut client = Client::online();
+    let fx = client.command(Command::GifTerms {
+        query: "ca".into(),
+        provider: "klipy".into(),
+    });
+    let auto = find(&fx, |r| {
+        matches!(
+            r,
+            ApiRequest::GifTerms {
+                mode: "autocomplete",
+                ..
+            }
+        )
+    });
+    let more = find(&fx, |r| {
+        matches!(
+            r,
+            ApiRequest::GifTerms {
+                mode: "suggestions",
+                ..
+            }
+        )
+    });
+    assert_eq!(
+        auto.1.path(),
+        format!(
+            "/api/gifs?mode=autocomplete&q=ca&provider=klipy&contentFilter=high&customerId={ME}"
+        )
+    );
+    let fx = client.respond(auto, json!({ "results": ["cat", "car"] }));
+    assert!(gif_status(&fx).is_none());
+    let fx = client.respond(more, json!({ "results": ["cat", "cats dancing"] }));
+    assert_eq!(
+        gif_browse(&fx)["terms"],
+        json!(["cat", "car", "cats dancing"])
+    );
+    // One character clears them.
+    let fx = client.command(Command::GifTerms {
+        query: "c".into(),
+        provider: "klipy".into(),
+    });
+    assert_eq!(gif_browse(&fx)["terms"], json!([]));
+}
+
+#[test]
+fn a_rate_limited_page_should_wait_and_retry_on_scroll() {
+    let mut client = Client::online();
+    with_gifs(&mut client);
+    let fx = client.command(Command::GifMore);
+    let (id, _) = find(&fx, |r| matches!(r, ApiRequest::Gifs { next: Some(_), .. }));
+    let fx = client.answer(
+        id,
+        Err(ApiError::Http {
+            status: 429,
+            message: String::new(),
+        }),
+    );
+    let status = gif_status(&fx).expect("status");
+    assert_eq!(
+        (
+            status.error.as_str(),
+            gif_browse(&fx)["rateLimited"].clone()
+        ),
+        ("", json!(true))
+    );
+    let fx = client.command(Command::GifMore);
+    find(&fx, |r| matches!(r, ApiRequest::Gifs { next: Some(_), .. }));
 }

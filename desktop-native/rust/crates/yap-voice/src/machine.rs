@@ -22,7 +22,7 @@ use crate::sfu::LayerUpdate;
 use crate::share::{
     ShareCaptured, ShareEncoding, ShareNotice, SharePublished, ShareQuality, ShareRequest,
 };
-use crate::spatial::{self, SpatialLocal, SpatialState};
+use crate::spatial::{self, SpatialLocal, SpatialMap, SpatialState};
 use crate::tracks::{Kind, Offer, Remote, TrackTable};
 use crate::vad::{level_percent, Sensitivity, Vad};
 use crate::wire::{
@@ -178,8 +178,9 @@ pub enum UserCommand {
     /// Our spatial audio switches and who we are on the room's map. A
     /// change of either switch goes out in op 15 (`useSpatialAudioSync`).
     SetSpatial(SpatialLocal),
-    /// A new placement for the room (the spatial panel's `commit`): kept
-    /// and sent in op 15 for everyone.
+    /// A new state for the room (the spatial panel's `commit`, its switch
+    /// and Reset included): kept, heard at once, and sent in op 15 for
+    /// everyone (`updateSharedSpatialAudioState`).
     SetSpatialRoom(SpatialState),
     /// Rendered video and the stage.
     SetVideo(VideoIntent),
@@ -436,6 +437,9 @@ pub enum Notice {
     InboundAudioStalled(bool),
     /// Our unmuted mic sends nothing (OutboundAudioSentinel).
     MicStalled(bool),
+    /// The spatial panel's room map changed: the room's state, or who sits
+    /// where, or whether they hear it.
+    Spatial(SpatialMap),
 }
 
 /// Which of our publications a republish pushes again.
@@ -637,6 +641,8 @@ pub struct CallMachine {
     roster: Option<Roster>,
     /// The roster last reported.
     reported: Vec<Member>,
+    /// The spatial map last reported.
+    reported_spatial: Option<SpatialMap>,
     tracks: TrackTable,
     next_token: u64,
     vad: Vad,
@@ -714,6 +720,7 @@ impl CallMachine {
             deafened: false,
             roster: None,
             reported: Vec::new(),
+            reported_spatial: None,
             tracks: TrackTable::default(),
             next_token: 0,
             vad: Vad::default(),
@@ -827,6 +834,11 @@ impl CallMachine {
             if self.roster.is_some() && self.roster() != self.reported {
                 self.emit_roster(&mut fx);
             }
+            let map = self.spatial_map();
+            if map.is_some() && map != self.reported_spatial {
+                self.reported_spatial.clone_from(&map);
+                fx.extend(map.map(|m| Effect::Notify(Notice::Spatial(m))));
+            }
         }
         fx
     }
@@ -923,28 +935,58 @@ impl CallMachine {
     /// hear the room spatially). The map lists us first, then the others in
     /// roster order, once each.
     fn spatial_mixes(&self) -> HashMap<String, spatial::Mix> {
-        let local = &self.spatial_local;
-        if !local.hears(&self.spatial_room, self.deafened) {
+        if !self.spatial_local.hears(&self.spatial_room, self.deafened) {
             return HashMap::new();
         }
         let Some(roster) = &self.roster else {
             return HashMap::new();
         };
-        let me = if local.user_id.is_empty() {
+        let me = self.spatial_me();
+        let peers = Self::spatial_peers(roster, me);
+        let peers: Vec<&str> = peers.iter().map(String::as_str).collect();
+        spatial::mixes(me, &peers, &self.spatial_room, true)
+    }
+
+    /// Who we are on the room's map: our user id, else our participant.
+    fn spatial_me(&self) -> &str {
+        if self.spatial_local.user_id.is_empty() {
             self.me.as_str()
         } else {
-            local.user_id.as_str()
-        };
+            self.spatial_local.user_id.as_str()
+        }
+    }
+
+    /// The others on the map by user id, in roster order, once each.
+    fn spatial_peers(roster: &Roster, me: &str) -> Vec<String> {
         let mut seen = HashSet::new();
-        let peers: Vec<String> = roster
+        roster
             .snapshot()
             .into_iter()
             .filter(|m| !m.me && !m.user_id.is_empty() && m.user_id != me)
             .filter(|m| seen.insert(m.user_id.clone()))
             .map(|m| m.user_id)
+            .collect()
+    }
+
+    /// The spatial panel's map: the seats the mix uses (whether or not we
+    /// hear it), with each person's switches. `None` before the roster.
+    fn spatial_map(&self) -> Option<SpatialMap> {
+        let roster = self.roster.as_ref()?;
+        let me = self.spatial_me();
+        let peers = Self::spatial_peers(roster, me);
+        let peers: Vec<(&str, bool, bool)> = peers
+            .iter()
+            .map(|id| {
+                let (enabled, high_fidelity) = roster.spatial_switches(id);
+                (id.as_str(), enabled, high_fidelity)
+            })
             .collect();
-        let peers: Vec<&str> = peers.iter().map(String::as_str).collect();
-        spatial::mixes(me, &peers, &self.spatial_room, true)
+        let local = &self.spatial_local;
+        Some(SpatialMap::new(
+            &self.spatial_room,
+            (me, local.enabled, local.high_fidelity),
+            &peers,
+        ))
     }
 
     /// Op 15 with our spatial switches and the room's state (with our
@@ -1692,10 +1734,7 @@ impl CallMachine {
                 }
             }
             UserCommand::SetSpatialRoom(state) => {
-                self.spatial_room = SpatialState {
-                    enabled: self.spatial_room.enabled,
-                    ..state
-                };
+                self.spatial_room = state;
                 self.send_spatial(fx, false);
             }
             UserCommand::SetVideo(video) => self.video = video,

@@ -42,6 +42,10 @@ Popup {
     property bool dragging: false
     property bool swiping: false
     property real swipeOffset: 0
+    // The current video failed to load: the web's unplayable card
+    // (VideoAttachment.tsx `mediaError`) at its own size, no black stage.
+    property bool videoBroken: false
+    onCurrentChanged: videoBroken = false
 
     readonly property var current: images.length > 0 ? images[Math.min(index, images.length - 1)] : null
     readonly property bool many: images.length > 1
@@ -364,7 +368,10 @@ Popup {
             readonly property real maxW: width
             readonly property real maxH: Math.min(height, (root.parent ? root.parent.height : root.height) * 0.75)
             readonly property var known: root.current ? ShellState.mediaSize(root.current.url) : null
-            readonly property size box: root.isVideo
+            readonly property size box: root.isVideo && root.videoBroken
+                // A <video> that never loaded keeps its default 300 x 150.
+                ? Qt.size(Math.min(maxW, 300), Math.max(150, unplayable.implicitHeight))
+                : root.isVideo
                 ? (known ? root.fit(known.w, known.h, maxW, maxH) : root.fit(maxW, maxW * 9 / 16, maxW, maxH))
                 : root.loaded ? root.fit(root.natural.width, root.natural.height, maxW, maxH)
                 : root.hidden ? (known ? root.fit(known.w, known.h, maxW, maxH) : root.fit(480, 360, maxW, maxH))
@@ -464,6 +471,8 @@ Popup {
                             animated: modelData.gif === true
                             autoStart: true
                             onSizeKnown: (w, h) => ShellState.rememberSize(modelData.url, w, h)
+                            onFailed: root.videoBroken = true
+                            visible: !root.videoBroken
                             // Full Screen: the video alone, as the web's
                             // element fullscreen (not for a GIF's tap).
                             onExpandRequested: (source, position) => {
@@ -471,6 +480,12 @@ Popup {
                                     ShellState.videoViewerRequested(source, position)
                             }
                         }
+                    }
+                    VideoUnplayable {
+                        id: unplayable
+                        anchors.fill: parent
+                        visible: root.isVideo && root.videoBroken
+                        onDownloadRequested: root.fetch(false)
                     }
                     SensitiveMediaFrame {
                         attachmentId: root.current ? root.current.id : ""
@@ -812,6 +827,14 @@ Popup {
         // ---------- More (the toolbar's dropdown) ----------
         MenuPanel {
             id: moreMenu
+            // Not for a video (ImageViewerToolbar.tsx moreItems).
+            MenuRow {
+                visible: !root.isVideo
+                height: visible ? implicitHeight : 0
+                text: qsTr("Copy image")
+                glyph: "copy"
+                onTriggered: if (root.current) ShellState.copyImageRequested(root.current.url, root.fileName)
+            }
             MenuRow {
                 text: qsTr("Copy link")
                 glyph: "link"
@@ -933,6 +956,15 @@ Popup {
                 onTriggered: root.fetch(false)
             }
             MenuRule {}
+            // Native only: the web's right-click has no Copy image (its
+            // toolbar's More does).
+            MenuRow {
+                visible: !root.isVideo
+                height: visible ? implicitHeight : 0
+                text: qsTr("Copy image")
+                glyph: "copy"
+                onTriggered: if (root.current) ShellState.copyImageRequested(root.current.url, root.fileName)
+            }
             MenuRow {
                 text: qsTr("Copy media link")
                 glyph: "copy"

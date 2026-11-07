@@ -2541,3 +2541,85 @@ fn a_new_placement_should_be_sent_for_the_room() {
         json!(80.0)
     );
 }
+
+fn last_map(fx: &[Effect]) -> Option<yap_voice::SpatialMap> {
+    fx.iter().rev().find_map(|e| match e {
+        Effect::Notify(Notice::Spatial(map)) => Some(map.clone()),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_panel_edit_should_be_heard_at_once_without_waiting_for_the_echo() {
+    // useVoiceChannel.ts updateSharedSpatialAudioState dispatches the state
+    // locally and sends it; the mix follows the local state.
+    let mut m = joined_with_user();
+    m.handle(spatial_local(true, true));
+    m.handle(spatial_room(true));
+    let fx = m.handle(Input::Command(UserCommand::SetSpatialRoom(SpatialState {
+        enabled: true,
+        placement: yap_voice::spatial::Placement::Line,
+        // Close enough that the pan is not clamped at the edge either way.
+        distance: 10.0,
+        ..SpatialState::default()
+    })));
+    let pan = pans(&fx);
+    assert!(
+        pan.len() == 1 && pan[0].1 > 0.0 && pan[0].1 < 1.0,
+        "{pan:?}"
+    );
+    let map = last_map(&fx).expect("map");
+    assert_eq!(map.state.placement, yap_voice::spatial::Placement::Line);
+    assert_eq!(
+        sends(&fx, Socket::Room)[0]["d"]["spatial_audio_state"]["placementMode"],
+        json!("line")
+    );
+}
+
+#[test]
+fn reset_should_turn_the_room_off_as_the_web_does() {
+    // SpatialAudioPanel.tsx Reset commits the defaults, `enabled: false`.
+    let mut m = joined();
+    m.handle(spatial_local(true, true));
+    let fx = m.handle(Input::Command(UserCommand::SetSpatialRoom(
+        SpatialState::default(),
+    )));
+    let d = &sends(&fx, Socket::Room)[0]["d"];
+    assert_eq!(
+        (
+            &d["spatial_audio_enabled"],
+            &d["spatial_audio_state"]["enabled"]
+        ),
+        (&json!(true), &json!(false))
+    );
+}
+
+#[test]
+fn the_map_should_seat_us_first_and_carry_each_peers_switches() {
+    let mut m = joined_with_user();
+    m.handle(spatial_local(true, true));
+    let mut ana = participant("ana", None);
+    ana.spatial_enabled = Some(true);
+    ana.spatial_high_fidelity = Some(false);
+    let fx = m.handle(Input::Room(RoomEvent::VoiceState {
+        leave: false,
+        participant: ana,
+    }));
+    let map = last_map(&fx).expect("map");
+    let ids: Vec<(&str, bool)> = map
+        .seats
+        .iter()
+        .map(|s| (s.user_id.as_str(), s.me))
+        .collect();
+    assert_eq!(ids, [("u-me", true), ("u-ana", false)]);
+    assert!(map.seats[1].enabled && !map.seats[1].high_fidelity);
+    // The seats are the mix's: the default arc puts us left of Ana.
+    assert!(map.seats[0].position.x < map.seats[1].position.x);
+}
+
+#[test]
+fn an_unchanged_map_should_not_be_reported_again() {
+    let mut m = joined_with_user();
+    m.handle(spatial_local(true, true));
+    assert!(last_map(&m.handle(level(0.0, 0))).is_none());
+}

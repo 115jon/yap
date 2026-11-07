@@ -172,6 +172,10 @@ pub mod qobject {
         #[qproperty(i32, gif_count1, cxx_name = "gifCount1")]
         // The saved GIF and clip favourites, a JSON array of `provider:id`.
         #[qproperty(QString, gif_favorites, cxx_name = "gifFavorites")]
+        // The rest of the picker as JSON (yap-core `gif_rows`): provider,
+        // favourites mode, rate limit, the start screen's categories and
+        // Favorites/Trending media, and the search terms.
+        #[qproperty(QString, gif_browse, cxx_name = "gifBrowse")]
         type Chat = super::ChatRust;
 
         /// A download landed at `path`; `open` it (else reveal it).
@@ -201,10 +205,31 @@ pub mod qobject {
         #[cxx_name = "setUploadSensitive"]
         fn set_upload_sensitive(self: &Chat, id: &QString, nsfw: bool);
 
-        /// A GIF picker query (empty: trending) for `gifs`, `stickers` or `memes`.
+        /// A GIF picker query (empty: trending) for `gifs`, `stickers`,
+        /// `clips` or `memes`, from `klipy` or `tenor`.
         #[qinvokable]
         #[cxx_name = "searchGifs"]
-        fn search_gifs(self: &Chat, query: &QString, media_type: &QString);
+        fn search_gifs(self: &Chat, query: &QString, media_type: &QString, provider: &QString);
+
+        /// The picker's start screen: categories and the Trending tile.
+        #[qinvokable]
+        #[cxx_name = "startGifs"]
+        fn start_gifs(self: &Chat, media_type: &QString, provider: &QString);
+
+        /// The picker shows the saved favourites of a media type.
+        #[qinvokable]
+        #[cxx_name = "showGifFavorites"]
+        fn show_gif_favorites(self: &Chat, media_type: &QString);
+
+        /// Search terms for what is typed (`gifBrowse.terms`).
+        #[qinvokable]
+        #[cxx_name = "suggestGifs"]
+        fn suggest_gifs(self: &Chat, query: &QString, provider: &QString);
+
+        /// A tile's star (`GifListModel.gifId`).
+        #[qinvokable]
+        #[cxx_name = "toggleGifTileFavorite"]
+        fn toggle_gif_tile_favorite(self: &Chat, gif_id: &QString);
 
         #[qinvokable]
         #[cxx_name = "moreGifs"]
@@ -383,6 +408,11 @@ pub mod qobject {
         /// refreshes that landed (changed or not).
         #[qproperty(QString, share_sources, cxx_name = "shareSources")]
         #[qproperty(i32, share_sources_revision, cxx_name = "shareSourcesRevision")]
+        /// The spatial panel's room map as JSON, `{state, seats}`: the
+        /// room's `SharedSpatialAudioState` and everyone's seat as the mix
+        /// places them (`{userId, me, x, y, enabled, highFidelity}`, us
+        /// first); empty outside a call.
+        #[qproperty(QString, spatial)]
         type Voice = super::VoiceRust;
 
         #[qinvokable]
@@ -450,6 +480,13 @@ pub mod qobject {
         #[cxx_name = "changeShareQuality"]
         fn change_share_quality(self: &Voice, quality: &QString);
 
+        /// The spatial panel's edit (SpatialAudioPanel.tsx `commit`): the
+        /// room's whole new state as JSON. Heard at once and sent to the
+        /// room; `spatial` follows.
+        #[qinvokable]
+        #[cxx_name = "updateSpatial"]
+        fn update_spatial(self: &Voice, state: &QString);
+
         /// An id for a video surface to report its size under.
         #[qinvokable]
         #[cxx_name = "newSurface"]
@@ -503,6 +540,9 @@ pub mod qobject {
         /// The servers you share: `{count, items: [{id, name, icon,
         /// initial}]}`, or empty.
         #[qproperty(QString, mutual_servers, cxx_name = "mutualServers")]
+        #[qproperty(QString, mutual_friends, cxx_name = "mutualFriends")]
+        #[qproperty(QString, member_since, cxx_name = "memberSince")]
+        #[qproperty(QString, load_error, cxx_name = "loadError")]
         type Profile = super::ProfileRust;
 
         #[qinvokable]
@@ -616,6 +656,7 @@ pub struct ChatRust {
     gif_count0: i32,
     gif_count1: i32,
     gif_favorites: QString,
+    gif_browse: QString,
 }
 
 #[derive(Default)]
@@ -641,6 +682,7 @@ pub struct VoiceRust {
     share_error: QString,
     share_sources: QString,
     share_sources_revision: i32,
+    spatial: QString,
     /// A source refresh is running.
     share_refreshing: bool,
 }
@@ -749,6 +791,9 @@ pub struct ProfileRust {
     name_style: QString,
     platforms: QString,
     mutual_servers: QString,
+    mutual_friends: QString,
+    member_since: QString,
+    load_error: QString,
 }
 
 impl qobject::Profile {
@@ -828,11 +873,36 @@ impl qobject::Chat {
         });
     }
 
-    pub fn search_gifs(&self, query: &QString, media_type: &QString) {
+    pub fn search_gifs(&self, query: &QString, media_type: &QString, provider: &QString) {
         client::command(Command::GifSearch {
             query: query.to_string(),
             media_type: media_type.to_string(),
+            provider: provider.to_string(),
         });
+    }
+
+    pub fn start_gifs(&self, media_type: &QString, provider: &QString) {
+        client::command(Command::GifStart {
+            media_type: media_type.to_string(),
+            provider: provider.to_string(),
+        });
+    }
+
+    pub fn show_gif_favorites(&self, media_type: &QString) {
+        client::command(Command::GifFavorites {
+            media_type: media_type.to_string(),
+        });
+    }
+
+    pub fn suggest_gifs(&self, query: &QString, provider: &QString) {
+        client::command(Command::GifTerms {
+            query: query.to_string(),
+            provider: provider.to_string(),
+        });
+    }
+
+    pub fn toggle_gif_tile_favorite(&self, gif_id: &QString) {
+        client::command(Command::GifTileFavorite(gif_id.to_string()));
     }
 
     pub fn more_gifs(&self) {
@@ -1057,6 +1127,10 @@ impl qobject::Voice {
 
     pub fn change_share_quality(&self, quality: &QString) {
         client::command(Command::SetVoiceShareQuality(quality.to_string()));
+    }
+
+    pub fn update_spatial(&self, state: &QString) {
+        client::command(Command::SetVoiceSpatial(state.to_string()));
     }
 
     pub fn new_surface(&self) -> i32 {

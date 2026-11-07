@@ -114,11 +114,29 @@ pub enum Command {
         local_id: String,
         nsfw: bool,
     },
-    /// A new GIF picker query (empty: trending) for a media type.
+    /// A new GIF picker query (empty: trending) for a media type, from
+    /// `klipy` or `tenor`.
     GifSearch {
         query: String,
         media_type: String,
+        provider: String,
     },
+    /// The picker's start screen: the categories and the Trending tile.
+    GifStart {
+        media_type: String,
+        provider: String,
+    },
+    /// The picker shows the saved favourites of a media type.
+    GifFavorites {
+        media_type: String,
+    },
+    /// Search terms for what is typed (two characters or more).
+    GifTerms {
+        query: String,
+        provider: String,
+    },
+    /// A tile's star (its row id): saves or removes that item.
+    GifTileFavorite(String),
     /// The next page of the GIF picker.
     GifMore,
     /// Sends a GIF picker tile (its row id) to the open channel at once.
@@ -159,6 +177,8 @@ pub enum Command {
     SetVoiceShareAudio(bool),
     /// The share's quality preset.
     SetVoiceShareQuality(String),
+    /// The spatial panel's edit: the room's new state, as JSON.
+    SetVoiceSpatial(String),
     /// Settings → Account: the email and sign-in methods from Kova.
     LoadAccount,
     /// Settings → Sessions.

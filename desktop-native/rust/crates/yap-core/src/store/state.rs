@@ -5,7 +5,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use yap_cache::Snapshot;
 use yap_protocol::rest::Reaction;
 use yap_protocol::rest::{Category, Channel, ChannelType, ChannelsResponse, Message, MessagePatch};
-use yap_protocol::rest::{DmChannel, GifItem, Member, Notification, Server, UploadedFile, User};
+use yap_protocol::rest::{
+    DmChannel, GifCategory, GifItem, Member, Notification, Server, UploadedFile, User,
+};
 use yap_protocol::rest::{SessionInfo, ShareItem};
 
 use super::time::{is_after, LocalOffset};
@@ -329,6 +331,8 @@ pub struct VoiceCall {
     pub dm: bool,
     /// A moderator's move grant, offered once on this call's op 33.
     pub move_grant: Option<String>,
+    /// The spatial panel's room map (JSON), empty until the call has one.
+    pub spatial: String,
 }
 
 /// A hidden standby session warming a voice channel's join
@@ -493,6 +497,8 @@ pub(super) struct Pending {
     pub gif_uploads: HashMap<RequestId, String>,
     /// The GIF page being fetched (true: the next page, false: a new query).
     pub gifs: Option<(RequestId, bool)>,
+    /// The picker's start screen and search terms in flight.
+    pub gif_extra: HashMap<RequestId, GifOp>,
     /// request → (file name shown, open it when saved)
     pub downloads: HashMap<RequestId, (String, bool)>,
     pub settings: SettingsPending,
@@ -556,12 +562,43 @@ pub struct Upload {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GifBrowse {
     pub query: String,
-    /// `gifs`, `stickers` or `memes`.
+    /// `gifs`, `stickers`, `clips` or `memes`.
     pub media_type: String,
+    /// `klipy` or `tenor` (Tenor has GIFs only).
+    pub provider: String,
+    /// The tiles are the saved favourites of `media_type`, not a feed.
+    pub favorites: bool,
     pub items: Vec<GifItem>,
     pub next: Option<String>,
     pub loading: bool,
     pub error: String,
+    /// The last "more" was refused with 429 (the web waits 5 s to retry).
+    pub rate_limited: bool,
+    /// The start screen shown (`provider:mediaType`), the categories and
+    /// the Trending tile's GIF fetched per key (kept, as the web caches
+    /// them), and whether the shown key's categories are loading.
+    pub start_key: String,
+    pub categories: HashMap<String, Vec<GifCategory>>,
+    pub trending: HashMap<String, Option<GifItem>>,
+    pub categories_loading: bool,
+    /// Search terms for `terms_query` (autocomplete, then suggestions).
+    pub terms_query: String,
+    pub autocomplete: Vec<String>,
+    pub suggestions: Vec<String>,
+    /// Answers for `terms_query` so far (autocomplete, suggestions): the
+    /// shown terms change once both are in, as the web awaits both.
+    pub terms_next: [Option<Vec<String>>; 2],
+}
+
+/// A GIF picker request besides its pages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GifOp {
+    /// The categories of a start key.
+    Categories(String),
+    /// The Trending tile's GIF of a start key.
+    Trending(String),
+    /// Terms for a query: autocomplete (true) or suggestions.
+    Terms { query: String, autocomplete: bool },
 }
 
 /// A message this client posted that the server has not confirmed. Its row
@@ -753,7 +790,14 @@ pub struct State {
     /// The user whose popout is open, and their full profile once fetched.
     pub(super) profile: Option<(String, Option<User>)>,
     /// The servers shared with the popout's user, from their profile.
-    pub(super) profile_mutuals: Option<(String, yap_protocol::rest::MutualServers)>,
+    /// The full profile failed to load: whose, and why (UserProfileModal's
+    /// `profileError`).
+    pub(super) profile_error: Option<(String, String)>,
+    pub(super) profile_mutuals: Option<(
+        String,
+        yap_protocol::rest::MutualServers,
+        yap_protocol::rest::MutualFriends,
+    )>,
     pub(super) divider: Option<Divider>,
     /// The open channel's newest message time when it loaded: mentions on
     /// messages after it arrived while it was open (and were seen).
@@ -857,6 +901,7 @@ impl State {
             presence: Presence::default(),
             profile: None,
             profile_mutuals: None,
+            profile_error: None,
             divider: None,
             seen_floor: None,
             seen_from: None,

@@ -433,6 +433,9 @@ fn set_profile(mut profile: Pin<&mut Profile>, view: &ProfileView) {
     profile.as_mut().set_name_style(q(&view.name_style));
     profile.as_mut().set_platforms(q(&view.platforms));
     profile.as_mut().set_mutual_servers(q(&view.mutual_servers));
+    profile.as_mut().set_mutual_friends(q(&view.mutual_friends));
+    profile.as_mut().set_member_since(q(&view.member_since));
+    profile.as_mut().set_load_error(q(&view.load_error));
     profile.set_user_id(q(&view.user_id));
 }
 
@@ -448,6 +451,7 @@ fn set_gifs(mut chat: Pin<&mut Chat>, view: &GifStatusView) {
     chat.as_mut().set_gif_units1(int(view.units[1]));
     chat.as_mut().set_gif_count0(int(view.counts[0]));
     chat.as_mut().set_gif_count1(int(view.counts[1]));
+    chat.as_mut().set_gif_browse(q(&view.browse));
     chat.set_gif_loading(view.loading);
 }
 
@@ -499,6 +503,7 @@ fn set_voice(mut voice: Pin<&mut Voice>, view: &VoiceView) {
     voice.as_mut().set_share_audio(view.share.audio);
     voice.as_mut().set_share_error(q(&view.share_error));
     voice.as_mut().set_sharing(view.sharing);
+    voice.as_mut().set_spatial(q(&view.spatial));
     voice.set_channel_id(q(&view.channel_id));
 }
 

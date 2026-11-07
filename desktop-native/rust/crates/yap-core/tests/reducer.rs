@@ -3861,3 +3861,39 @@ fn share_audio_outside_a_share_should_do_nothing() {
     let fx = client.command(Command::SetVoiceShareAudio(false));
     assert!(!fx.iter().any(|e| matches!(e, Effect::Voice { .. })));
 }
+
+// The spatial panel (SpatialAudioPanel.tsx): edits go to the call, its map
+// comes back on the voice view.
+
+#[test]
+fn a_spatial_edit_should_go_to_the_call() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let state = r#"{"enabled":true,"placementMode":"grid"}"#.to_owned();
+    let fx = client.command(Command::SetVoiceSpatial(state.clone()));
+    assert!(fx.contains(&Effect::Voice {
+        call,
+        command: VoiceCommand::SetSpatialRoom(state),
+    }));
+}
+
+#[test]
+fn a_spatial_edit_outside_a_call_should_do_nothing() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SetVoiceSpatial("{}".into()));
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Voice { .. })));
+}
+
+#[test]
+fn the_calls_spatial_map_should_reach_the_voice_view_and_go_with_it() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let map = r#"{"state":{},"seats":[]}"#.to_owned();
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Spatial(map.clone()),
+    });
+    assert_eq!(last_voice_view(&fx).spatial, map);
+    let fx = client.command(Command::LeaveVoice);
+    assert_eq!(last_voice_view(&fx).spatial, "");
+}

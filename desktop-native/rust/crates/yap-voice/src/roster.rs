@@ -40,6 +40,9 @@ struct Row {
     me: bool,
     video: bool,
     stream: bool,
+    /// Their spatial audio switches, once a state carried them.
+    spatial_enabled: Option<bool>,
+    spatial_high_fidelity: Option<bool>,
 }
 
 /// The roster, ordered by participant id. Names come from full voice
@@ -118,6 +121,8 @@ impl Roster {
                     me: false,
                     video: p.self_video.unwrap_or(false),
                     stream: p.self_stream.unwrap_or(false),
+                    spatial_enabled: p.spatial_enabled,
+                    spatial_high_fidelity: p.spatial_high_fidelity,
                 },
             );
         }
@@ -154,6 +159,27 @@ impl Roster {
         if let Some(stream) = p.self_stream {
             row.stream = stream;
         }
+        if p.spatial_enabled.is_some() {
+            row.spatial_enabled = p.spatial_enabled;
+        }
+        if p.spatial_high_fidelity.is_some() {
+            row.spatial_high_fidelity = p.spatial_high_fidelity;
+        }
+    }
+
+    /// A user's spatial audio switches (`enabled`, `high_fidelity`) for the
+    /// spatial panel's notes. Unknown reads as on, as UserPanel.tsx's
+    /// `participantCapabilities` defaults a member without them.
+    pub fn spatial_switches(&self, user_id: &str) -> (bool, bool) {
+        self.rows
+            .values()
+            .find(|row| !row.me && row.user_id == user_id)
+            .map_or((true, true), |row| {
+                (
+                    row.spatial_enabled.unwrap_or(true),
+                    row.spatial_high_fidelity.unwrap_or(true),
+                )
+            })
     }
 
     /// A row exists for `id`.

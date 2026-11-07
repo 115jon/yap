@@ -9,8 +9,9 @@ import com.yap.native
 // px) and Add friend, which opens the form under it. Then the tab's rows,
 // capped at 720, under a branch label with the count (Pending splits into
 // Incoming and Sent), the loading rows while the list loads empty, or the
-// tab's empty state. Remove, Ignore and Cancel ask first. The web's
-// "Start a call" row menu item is left out: this build has no DM calls.
+// tab's empty state. The row menu: Profile (the full profile), Message,
+// Start a call (its DM opens first), then Remove, Ignore or Cancel, which
+// ask first.
 Rectangle {
     id: root
 
@@ -334,12 +335,20 @@ Rectangle {
         MenuRow {
             text: qsTr("Profile")
             glyph: "members"
-            onTriggered: ShellState.showProfile(rowMenu.person.userId, rowMenu.anchorItem, "right")
+            onTriggered: ShellState.showFullProfile(rowMenu.person.userId, rowMenu.anchorItem)
         }
         MenuRow {
             text: qsTr("Message")
             glyph: "chat"
             onTriggered: Nav.openDm(rowMenu.person.userId)
+        }
+        MenuRow {
+            readonly property var call: JSON.parse(Calls.view)
+            visible: !((call.status === "ringing_outgoing" || call.joined === true) && call.remote && call.remote.id === rowMenu.person.userId)
+            height: visible ? implicitHeight : 0
+            text: qsTr("Start a call")
+            glyph: "call"
+            onTriggered: ShellState.startCallWithRequested(rowMenu.person.userId, rowMenu.person.name)
         }
         MenuRow {
             visible: rowMenu.person.kind !== "blocked"

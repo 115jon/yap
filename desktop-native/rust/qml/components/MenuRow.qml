@@ -9,6 +9,8 @@ import com.yap.native
 // submenu (a MenuPanel child) takes the submenu's glyph and ends in a
 // chevron (dropdown-menu.tsx SubmenuTrigger). `image` puts a 16 px picture
 // in the glyph's place (an emoji), with `imageText` drawn while it loads.
+// `hint` is a trailing value (MENU_HINT: num-xs, ink-3, pl-3), as the
+// voice options' "Spatial audio…  On".
 T.MenuItem {
     id: control
 
@@ -23,13 +25,18 @@ T.MenuItem {
     // A second line under the label (12, ink-3), as StreamMenuEntries
     // draws an entry's description.
     property string description: ""
+    property string hint: ""
+    // ContextMenu.tsx `subtitle` (one line, 12 ink-2, the row min-h-11)
+    // and `rightIcon` (a trailing chevron on a row that is not a submenu).
+    property string subtitle: ""
+    property bool chevron: false
 
     implicitWidth: Math.max(200, implicitContentWidth + leftPadding + rightPadding)
-    implicitHeight: description.length > 0 ? 36 + 16 + 6 : 36
+    implicitHeight: description.length > 0 ? 36 + 16 + 6 : subtitle.length > 0 ? 44 : 36
     visible: subMenu ? subMenu.shown !== false : true
     height: visible ? implicitHeight : 0
     leftPadding: 12
-    rightPadding: switchable || subMenu ? 36 : 12
+    rightPadding: switchable || subMenu || chevron ? 36 : hint.length > 0 ? 12 + hintText.implicitWidth + 12 : 12
 
     Accessible.role: switchable ? Accessible.CheckBox : Accessible.MenuItem
     Accessible.checkable: switchable
@@ -38,10 +45,22 @@ T.MenuItem {
     arrow: Icon {
         x: control.width - width - 12
         y: (control.height - height) / 2
-        visible: control.subMenu !== null
+        visible: control.subMenu !== null || control.chevron
         name: "chevronRight"
         size: Theme.iconSm
         color: Theme.ink3
+    }
+
+    Text {
+        id: hintText
+        x: control.width - width - 12
+        y: (control.height - height) / 2
+        visible: control.hint.length > 0
+        textFormat: Text.PlainText
+        text: control.hint
+        color: Theme.ink3
+        font: Theme.type.numSm
+        Accessible.ignored: true
     }
 
     indicator: Led {
@@ -91,6 +110,13 @@ T.MenuItem {
                 text: control.text
                 color: control.danger ? Theme.dangerInk : control.enabled ? Theme.ink1 : Theme.ink3
                 font: control.bold ? Theme.type.panelTitle : Theme.type.row
+            }
+            Text {
+                visible: control.subtitle.length > 0
+                textFormat: Text.PlainText
+                text: control.subtitle
+                color: Theme.ink2
+                font: Theme.type.caption
             }
             Text {
                 visible: control.description.length > 0

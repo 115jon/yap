@@ -367,6 +367,7 @@ RowLayout {
         Layout.preferredHeight: 0
 
         LazyPopup { id: profile; host: root; sourceComponent: ProfilePopout {} }
+        LazyPopup { id: fullProfile; host: root; sourceComponent: ProfileModal {} }
         LazyPopup { id: peerMenu; host: root; sourceComponent: PeerMenu {} }
         // A call ringing for us while its DM is not open.
         LazyPopup {
@@ -421,10 +422,45 @@ RowLayout {
         }
     }
 
+    // "Start a call" from a person (MemberList.tsx, FriendsView.tsx): open
+    // their DM, then call there once it is the shown conversation (the web
+    // switches to the DM, then sends request-start-call).
+    property string callUserId: ""
+    property string callUserName: ""
+    function callWhenOpen() {
+        if (root.callUserId.length > 0 && Nav.home && Nav.dmUserId === root.callUserId
+                && Nav.activeChannelId.length > 0) {
+            const name = root.callUserName
+            root.callUserId = ""
+            ShellState.startCall(Nav.activeChannelId, name, true)
+        }
+    }
+    Connections {
+        target: Nav
+        function onActiveChannelIdChanged() { root.callWhenOpen() }
+        function onDmUserIdChanged() { root.callWhenOpen() }
+    }
+
     Connections {
         target: ShellState
+        function onStartCallWithRequested(userId, name) {
+            root.callUserId = userId
+            root.callUserName = name
+            Nav.openDm(userId)
+            Qt.callLater(root.callWhenOpen)
+        }
         function onProfileRequested(userId, anchor, side) {
             profile.load()?.openFor(userId, anchor, side)
+        }
+        function onFullProfileRequested(userId, anchor) {
+            // Never the modal for yourself (ChatPageClient): your popout.
+            if (userId === Session.meId) {
+                profile.load()?.openFor(userId, anchor, "right")
+                return
+            }
+            // One card at a time: the popout gives way (they share Profile).
+            profile.item?.close()
+            fullProfile.load()?.openFor(userId)
         }
         function onPeerMenuRequested(userId, name, anchor, at, channelId) {
             peerMenu.load()?.openFor(userId, name, anchor, at.x, at.y, channelId)

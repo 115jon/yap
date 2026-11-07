@@ -149,51 +149,13 @@ Column {
             }
 
             // The web's unplayable state.
-            Rectangle {
+            VideoUnplayable {
                 anchors.fill: parent
                 visible: video.broken
                 radius: Theme.radiusSheet * 2
-                color: Theme.ply2
                 border.width: 1
                 border.color: Theme.line
-                Column {
-                    anchors.centerIn: parent
-                    width: Math.min(parent.width - 40, 320)
-                    spacing: 12
-                    Icon {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        name: "alert"
-                        size: 32
-                        color: Theme.ink3
-                    }
-                    Column {
-                        width: parent.width
-                        spacing: 4
-                        Text {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            textFormat: Text.PlainText
-                            text: qsTr("This video cannot be played here")
-                            wrapMode: Text.Wrap
-                            color: Theme.ink1
-                            font: Theme.type.captionStrong
-                        }
-                        Text {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            textFormat: Text.PlainText
-                            text: qsTr("The desktop video engine may not support this file's codec.")
-                            wrapMode: Text.Wrap
-                            color: Theme.ink2
-                            font: Theme.type.caption
-                        }
-                    }
-                    KitButton {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: qsTr("Download video")
-                        onClicked: root.download(video.modelData)
-                    }
-                }
+                onDownloadRequested: root.download(video.modelData)
             }
 
             // Top right while hovered: Download (VideoDownloadButton).

@@ -296,7 +296,7 @@ pub(super) fn reactions_json(reactions: &[Reaction], ctx: &RowContext<'_>) -> St
 
 /// Hosts whose media only load through `/api/proxy-media` (X, TikTok,
 /// Instagram; proxy-media.ts allowlist).
-pub(super) fn needs_proxy(url: &str) -> bool {
+pub(crate) fn needs_proxy(url: &str) -> bool {
     host_of(url).is_some_and(|host| {
         matches!(
             host.as_str(),
@@ -602,21 +602,73 @@ pub fn gif_preview(item: &GifItem) -> Option<&str> {
     }
 }
 
-/// The two-column masonry, filled round-robin like the web's grid.
-pub(in crate::store) fn gif_rows(browse: &GifBrowse) -> (Vec<GifRow>, GifStatusView) {
+/// A tile's video: a clip's mp4 (GifPickerModal.tsx `ClipVideoPlayer` plays
+/// `gif.send`), else a video preview with no picture to fall back to
+/// (`GifPreviewMedia` loops it muted).
+fn gif_video<'a>(item: &'a GifItem, clip: bool) -> Option<&'a yap_protocol::rest::GifAsset> {
+    let video = |asset: &'a yap_protocol::rest::GifAsset| {
+        (gif_favorite::normalize_content_type(Some(&asset.content_type)) == "video/mp4"
+            && is_web_url(&asset.url))
+        .then_some(asset)
+    };
+    if clip {
+        video(&item.send).or_else(|| video(&item.preview))
+    } else if gif_preview(item).is_none() {
+        video(&item.preview).or_else(|| video(&item.send))
+    } else {
+        None
+    }
+}
+
+/// `formatDuration`: `m:ss`.
+pub fn gif_duration(seconds: Option<f64>) -> String {
+    match seconds {
+        Some(s) if s.is_finite() && s >= 0.0 => {
+            let s = s.floor() as i64;
+            format!("{}:{:02}", s / 60, s % 60)
+        }
+        _ => String::new(),
+    }
+}
+
+/// A shortcut tile's media (`GifShortcutCardMedia`): a picture, or a
+/// muted loop when the item has only video.
+fn shortcut_media(item: Option<&GifItem>) -> Value {
+    let Some(item) = item else {
+        return json!({ "image": "", "video": "" });
+    };
+    let image = gif_preview(item).unwrap_or_default();
+    let video = gif_video(item, false)
+        .map(|a| a.url.as_str())
+        .unwrap_or_default();
+    json!({ "image": image, "video": video })
+}
+
+/// The two-column masonry, filled round-robin like the web's grid, and
+/// the rest of the picker: its start screen (categories, the Favorites and
+/// Trending tiles' media), the provider and the search terms, as JSON.
+/// `saved` is every favourite's `provider:id` (the tiles' stars) and
+/// `favorite` the newest favourite of the media type.
+pub(in crate::store) fn gif_rows(
+    browse: &GifBrowse,
+    saved: &[String],
+    favorite: Option<&GifItem>,
+) -> (Vec<GifRow>, GifStatusView) {
     let mut units = [0i64; 2];
     let mut counts = [0i64; 2];
     let mut rows = Vec::new();
-    let shown = browse
-        .items
-        .iter()
-        .filter_map(|item| Some((item, gif_preview(item)?)));
-    for (i, (item, preview)) in shown.enumerate() {
+    let clips = browse.media_type == "clips";
+    let shown = browse.items.iter().filter_map(|item| {
+        let video = gif_video(item, clips);
+        let image = gif_preview(item);
+        (video.is_some() || image.is_some()).then_some((item, image, video))
+    });
+    for (i, (item, image, video)) in shown.enumerate() {
         let column = i % 2;
-        let asset = if item.preview.url == preview {
-            &item.preview
-        } else {
-            &item.send
+        let asset = match (video, image) {
+            (Some(video), _) => video,
+            (None, Some(url)) if item.preview.url == url => &item.preview,
+            _ => &item.send,
         };
         let aspect = if asset.width > 0.0 && asset.height > 0.0 {
             // Clamped so one odd asset cannot make a tile a sliver or a tower.
@@ -624,15 +676,20 @@ pub(in crate::store) fn gif_rows(browse: &GifBrowse) -> (Vec<GifRow>, GifStatusV
         } else {
             1000
         };
+        let id = format!("{}:{}", item.provider, item.id);
         rows.push(GifRow {
-            id: format!("{}:{}", item.provider, item.id),
+            saved: saved.contains(&id),
+            id,
             title: item
                 .alt_text
                 .as_deref()
                 .filter(|t| !t.is_empty())
                 .unwrap_or(&item.title)
                 .to_owned(),
-            preview: preview.to_owned(),
+            preview: image.unwrap_or_default().to_owned(),
+            video: video.map(|a| a.url.clone()).unwrap_or_default(),
+            clip: clips && video.is_some(),
+            duration: gif_duration(item.duration),
             aspect,
             column: column as i64,
             above: counts[column],
@@ -641,12 +698,51 @@ pub(in crate::store) fn gif_rows(browse: &GifBrowse) -> (Vec<GifRow>, GifStatusV
         units[column] += aspect;
         counts[column] += 1;
     }
+    let categories: Vec<Value> = browse
+        .categories
+        .get(&browse.start_key)
+        .map(|list| {
+            list.iter()
+                .filter(|c| !c.label.is_empty())
+                .map(|c| {
+                    let image = if is_web_url(&c.image_url) {
+                        c.image_url.as_str()
+                    } else {
+                        ""
+                    };
+                    json!({ "id": c.id, "label": c.label, "query": c.query, "image": image })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let trending = browse
+        .trending
+        .get(&browse.start_key)
+        .and_then(Option::as_ref);
+    let mut terms: Vec<&str> = Vec::new();
+    for term in browse.autocomplete.iter().chain(&browse.suggestions) {
+        let term = term.trim();
+        if !term.is_empty() && !terms.contains(&term) {
+            terms.push(term);
+        }
+    }
+    let browse_json = json!({
+        "provider": browse.provider,
+        "favorites": browse.favorites,
+        "rateLimited": browse.rate_limited,
+        "categoriesLoading": browse.categories_loading,
+        "categories": categories,
+        "trending": shortcut_media(trending),
+        "favorite": shortcut_media(favorite),
+        "terms": terms,
+    });
     let status = GifStatusView {
         loading: browse.loading,
         more: browse.next.is_some(),
         error: browse.error.clone(),
         units,
         counts,
+        browse: browse_json.to_string(),
     };
     (rows, status)
 }

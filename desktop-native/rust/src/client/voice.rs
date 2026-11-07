@@ -19,7 +19,7 @@ use yap_core::{
 use yap_voice::{
     run_call, AdmissionApi, ApiFailure, CallEnv, CallTarget, LibwebrtcEngine, Notice, Playback,
     Processing, Sensitivity, ShareEnd, ShareInfo, ShareNotice, ShareRequest, SourceKind,
-    SpatialLocal, UserCommand, VideoIntent,
+    SpatialLocal, SpatialState, UserCommand, VideoIntent,
 };
 
 pub use yap_core::VoiceTarget as Target;
@@ -108,36 +108,9 @@ impl yap_voice::Commands for Commands {
             }
             tokio::select! {
                 command = self.store.recv() => {
-                    return command.map(|command| match command {
-                        VoiceCommand::SetMuted(muted) => UserCommand::SetMuted(muted),
-                        VoiceCommand::SetDeafened(deafened) => UserCommand::SetDeafened(deafened),
-                        VoiceCommand::SetWatched(watched) => {
-                            UserCommand::SetWatched(watched.into_iter().collect())
-                        }
-                        VoiceCommand::SetCamera(on) => UserCommand::SetCamera(on),
-                        VoiceCommand::StartShare(share) => UserCommand::StartShare(ShareRequest {
-                            source_id: share.source_id,
-                            source_name: share.source_name,
-                            kind: if share.window {
-                                SourceKind::Window
-                            } else {
-                                SourceKind::Monitor
-                            },
-                            quality: share.quality,
-                            audio: share.audio,
-                        }),
-                        VoiceCommand::StopShare => UserCommand::StopShare,
-                        VoiceCommand::SetShareAudio(on) => UserCommand::SetShareAudio(on),
-                        VoiceCommand::SetShareQuality(quality) => {
-                            UserCommand::SetShareQuality(quality)
-                        }
-                        VoiceCommand::SendApp(frame) => UserCommand::SendApp(frame),
-                        VoiceCommand::SetSoundboardSpeaking(on) => {
-                            UserCommand::SetSoundboardSpeaking(on)
-                        }
-                        VoiceCommand::Promote => UserCommand::Promote,
-                        VoiceCommand::Leave => UserCommand::Leave,
-                    });
+                    if let Some(command) = user_command(command?) {
+                        return Some(command);
+                    }
                 }
                 Ok(()) = self.video.changed() => {
                     return Some(UserCommand::SetVideo(self.video.borrow_and_update().clone()));
@@ -150,6 +123,45 @@ impl yap_voice::Commands for Commands {
             }
         }
     }
+}
+
+/// A store command as the call takes it; `None` drops it (a spatial edit
+/// that is not a state: dropped, not sent as the defaults).
+fn user_command(command: VoiceCommand) -> Option<UserCommand> {
+    Some(match command {
+        VoiceCommand::SetMuted(muted) => UserCommand::SetMuted(muted),
+        VoiceCommand::SetDeafened(deafened) => UserCommand::SetDeafened(deafened),
+        VoiceCommand::SetWatched(watched) => UserCommand::SetWatched(watched.into_iter().collect()),
+        VoiceCommand::SetCamera(on) => UserCommand::SetCamera(on),
+        VoiceCommand::StartShare(share) => UserCommand::StartShare(ShareRequest {
+            source_id: share.source_id,
+            source_name: share.source_name,
+            kind: if share.window {
+                SourceKind::Window
+            } else {
+                SourceKind::Monitor
+            },
+            quality: share.quality,
+            audio: share.audio,
+        }),
+        VoiceCommand::StopShare => UserCommand::StopShare,
+        VoiceCommand::SetShareAudio(on) => UserCommand::SetShareAudio(on),
+        VoiceCommand::SetShareQuality(quality) => UserCommand::SetShareQuality(quality),
+        VoiceCommand::SendApp(frame) => UserCommand::SendApp(frame),
+        VoiceCommand::SetSoundboardSpeaking(on) => UserCommand::SetSoundboardSpeaking(on),
+        VoiceCommand::SetSpatialRoom(json) => {
+            let state = serde_json::from_str::<Value>(&json)
+                .ok()
+                .as_ref()
+                .and_then(SpatialState::from_value);
+            if state.is_none() {
+                eprintln!("[voice] spatial edit dropped: not a state");
+            }
+            UserCommand::SetSpatialRoom(state?)
+        }
+        VoiceCommand::Promote => UserCommand::Promote,
+        VoiceCommand::Leave => UserCommand::Leave,
+    })
 }
 
 /// A live share as the store keeps it.
@@ -477,6 +489,7 @@ pub async fn run(
         Notice::Stats(stats) => events.send(VoiceUpdate::Stats(Box::new(call_stats(stats)))),
         Notice::InboundAudioStalled(stalled) => events.send(VoiceUpdate::InboundStalled(stalled)),
         Notice::MicStalled(stalled) => events.send(VoiceUpdate::MicStalled(stalled)),
+        Notice::Spatial(map) => events.send(VoiceUpdate::Spatial(map.to_value().to_string())),
         Notice::App(d) => {
             if let Some(event) = yap_protocol::voice_app::AppEvent::decode(&d) {
                 events.send(VoiceUpdate::App {

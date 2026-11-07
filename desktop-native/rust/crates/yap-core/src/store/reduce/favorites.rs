@@ -112,6 +112,8 @@ impl State {
         if keys != self.view.favorites {
             self.view.favorites = keys.clone();
             fx.view(ViewUpdate::GifFavorites(keys));
+            // The picker's stars, Favorites view and Favorites tile.
+            self.on_gif_favorites_changed(fx);
         }
     }
 }

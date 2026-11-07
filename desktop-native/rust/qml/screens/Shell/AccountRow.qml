@@ -115,6 +115,7 @@ Rectangle {
 
             DisplayName {
                 id: nameText
+                playing: rowHover.hovered
                 width: Math.min(implicitWidth, parent.width)
                 text: Session.meName
                 nameStyle: Session.meNameStyle

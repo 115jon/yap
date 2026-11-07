@@ -5,8 +5,9 @@ use std::time::Duration;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use yap_protocol::rest::{
-    ChannelsResponse, DmChannel, GifPage, KovaAccount, KovaSession, Member, Message, MessagePatch,
-    Notification, ProfileResponse, ReadStates, Server, SessionInfo, ShareItem, UploadedFile, User,
+    ChannelsResponse, DmChannel, GifCategories, GifCategory, GifPage, GifTerms, KovaAccount,
+    KovaSession, Member, Message, MessagePatch, Notification, ProfileResponse, ReadStates, Server,
+    SessionInfo, ShareItem, UploadedFile, User,
 };
 use yap_protocol::Frame;
 
@@ -233,10 +234,13 @@ pub enum ApiRequest {
         add: bool,
     },
     /// A page of the GIF picker: trending (empty query) or a search, the
-    /// next page after `next`.
+    /// next page after `next`. `limit` 1 is the Trending tile's picture.
     Gifs {
         query: String,
         media_type: String,
+        /// `klipy` or `tenor`.
+        provider: String,
+        limit: u32,
         next: Option<String>,
         customer_id: String,
         /// The account's media filter (`high` unless chosen otherwise).
@@ -250,6 +254,21 @@ pub enum ApiRequest {
         content_type: String,
         provider: String,
         size_bytes: u64,
+    },
+    /// The picker's start screen: the provider's categories for a media type.
+    GifCategories {
+        media_type: String,
+        provider: String,
+        customer_id: String,
+        content_filter: String,
+    },
+    /// Search terms for a partial query: `autocomplete` or `suggestions`.
+    GifTerms {
+        mode: &'static str,
+        query: String,
+        provider: String,
+        customer_id: String,
+        content_filter: String,
     },
     /// Tells Klipy a GIF was shared (best effort, as the web does).
     GifShare {
@@ -366,10 +385,16 @@ pub enum ApiResponse {
     Dms(Vec<DmChannel>),
     Dm(Box<DmChannel>),
     /// The full user and the servers you share.
-    Profile(Box<User>, yap_protocol::rest::MutualServers),
+    Profile(
+        Box<User>,
+        yap_protocol::rest::MutualServers,
+        yap_protocol::rest::MutualFriends,
+    ),
     /// A file (or a GIF pick) the next message can link.
     Uploaded(UploadedFile),
     Gifs(GifPage),
+    GifCategories(Vec<GifCategory>),
+    GifTerms(Vec<String>),
     Sessions(Vec<SessionInfo>),
     Shares(Vec<ShareItem>),
     /// The account's email, when Kova has one.
@@ -474,6 +499,8 @@ impl ApiRequest {
             | Self::Dms
             | Self::Profile { .. }
             | Self::Gifs { .. }
+            | Self::GifCategories { .. }
+            | Self::GifTerms { .. }
             | Self::GifShare { .. } => Method::Get,
         }
     }
@@ -528,12 +555,15 @@ impl ApiRequest {
             Self::Gifs {
                 query,
                 media_type,
+                provider,
+                limit,
                 next,
                 customer_id,
                 content_filter,
             } => {
                 let mut path = format!(
-                    "/api/gifs?mode=search&provider=klipy&limit=24&mediaType={}&contentFilter={}",
+                    "/api/gifs?mode=search&provider={}&limit={limit}&mediaType={}&contentFilter={}",
+                    query_value(provider),
                     query_value(media_type),
                     query_value(content_filter)
                 );
@@ -545,6 +575,41 @@ impl ApiRequest {
                 }
                 if let Some(next) = next {
                     path.push_str(&format!("&next={}", query_value(next)));
+                }
+                path
+            }
+            Self::GifCategories {
+                media_type,
+                provider,
+                customer_id,
+                content_filter,
+            } => {
+                let mut path = format!(
+                    "/api/gifs?mode=categories&provider={}&mediaType={}&contentFilter={}",
+                    query_value(provider),
+                    query_value(media_type),
+                    query_value(content_filter)
+                );
+                if !customer_id.is_empty() {
+                    path.push_str(&format!("&customerId={}", query_value(customer_id)));
+                }
+                path
+            }
+            Self::GifTerms {
+                mode,
+                query,
+                provider,
+                customer_id,
+                content_filter,
+            } => {
+                let mut path = format!(
+                    "/api/gifs?mode={mode}&q={}&provider={}&contentFilter={}",
+                    query_value(query),
+                    query_value(provider),
+                    query_value(content_filter)
+                );
+                if !customer_id.is_empty() {
+                    path.push_str(&format!("&customerId={}", query_value(customer_id)));
                 }
                 path
             }
@@ -649,6 +714,8 @@ impl ApiRequest {
             | Self::Dms
             | Self::Profile { .. }
             | Self::Gifs { .. }
+            | Self::GifCategories { .. }
+            | Self::GifTerms { .. }
             | Self::GifShare { .. } => Value::Null,
         }
     }
@@ -711,7 +778,11 @@ impl ApiRequest {
             Self::Profile { .. } => {
                 let profile: ProfileResponse = serde_json::from_value(body)
                     .map_err(|e| ApiError::Decode(format!("profile: {e}")))?;
-                ApiResponse::Profile(Box::new(profile.user), profile.mutual_servers)
+                ApiResponse::Profile(
+                    Box::new(profile.user),
+                    profile.mutual_servers,
+                    profile.mutual_friends,
+                )
             }
             Self::GifUpload { .. } => ApiResponse::Uploaded(
                 serde_json::from_value(body)
@@ -719,6 +790,16 @@ impl ApiRequest {
             ),
             Self::Gifs { .. } => ApiResponse::Gifs(
                 serde_json::from_value(body).map_err(|e| ApiError::Decode(format!("gifs: {e}")))?,
+            ),
+            Self::GifCategories { .. } => ApiResponse::GifCategories(
+                serde_json::from_value::<GifCategories>(body)
+                    .map_err(|e| ApiError::Decode(format!("gif categories: {e}")))?
+                    .categories,
+            ),
+            Self::GifTerms { .. } => ApiResponse::GifTerms(
+                serde_json::from_value::<GifTerms>(body)
+                    .map(|terms| terms.results)
+                    .unwrap_or_default(),
             ),
             Self::Sessions => ApiResponse::Sessions(lenient_list(take(&mut body, "sessions"))),
             Self::Shares => ApiResponse::Shares(lenient_list(take(&mut body, "shares"))),

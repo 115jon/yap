@@ -583,6 +583,29 @@ fn a_link_item_should_list_its_urls() {
     assert_eq!(row.urls, ["https://a.example/x", "http://b.example"]);
 }
 
+#[test]
+fn an_embed_video_should_go_through_the_proxy_only_for_hosts_it_serves() {
+    let mut client = Client::online();
+    let fx = client.command(ExtrasCommand::LoadMedia(MediaTab::Media));
+    let item = |id: &str, url: &str| {
+        json!({ "id": id, "message_id": FIRST, "source_kind": "embed", "url": url, "content_type": "video/mp4",
+            "source_url": "https://x.com/a/status/1", "thumbnail_url": "https://i.ytimg.com/vi/a/hq.jpg",
+            "author": { "id": "u", "username": "bob" }, "created_at": "2026-11-04T12:00:00.000Z" })
+    };
+    let fx = client.reply(
+        extras_request(&fx),
+        json!({ "items": [item("v1", "https://www.w3schools.com/html/mov_bbb.mp4"), item("v2", "https://video.twimg.com/a.mp4")] }),
+    );
+    let rows = view(&fx).expect("view").media.rows;
+    // proxy-media.ts answers 400 for a host it does not serve.
+    assert_eq!(rows[0].url, "https://www.w3schools.com/html/mov_bbb.mp4");
+    assert_eq!(rows[0].poster, "https://i.ytimg.com/vi/a/hq.jpg");
+    assert!(rows[1]
+        .url
+        .contains("/api/proxy-media?url=https%3A%2F%2Fvideo.twimg.com"));
+    assert!(rows[1].video);
+}
+
 // Voice channel status
 
 #[test]

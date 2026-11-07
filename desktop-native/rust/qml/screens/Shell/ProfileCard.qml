@@ -3,11 +3,13 @@ import QtQuick.Effects
 import Yap.Media
 import com.yap.native
 
-// The profile card, popover size (ProfileCard.tsx): a 96 px banner (the
-// banner picture, else the banner colour, else accent-tint), a 72 px
-// avatar half over it with a 4 px ring of the card colour, the name at
-// 18/600, "@handle · pronouns" at 13 ink-2 and the status line (LED,
-// label, custom status). `statusLine` replaces that line (the account
+// The profile card (ProfileCard.tsx), at two sizes: `popover` has a 96 px
+// banner (the banner picture, else the banner colour, else accent-tint), a
+// 72 px avatar half over it with a 4 px ring of the card colour, the name
+// at 18/600 and a 16 px inset; `modal` (the full profile) has a 120 px
+// banner, an 88 px avatar, the name at 22/600 and a 20 px inset. Then
+// "@handle · pronouns" at 13 ink-2 and the status line (LED, label,
+// custom status). `statusLine` replaces that line (the account
 // card's custom-status field). Children go in the 16 px inset column
 // under it (actions, sections). A profile theme (`surfaceColor`,
 // `accentColor`, `#RRGGBB`) paints the card and the banner fallback, with
@@ -45,6 +47,12 @@ Item {
     property string platforms: ""
     property string effectPlayback: "once"
     property bool animate: true
+    // popover | modal
+    property string size: "popover"
+    readonly property bool modalSize: size === "modal"
+    readonly property int bannerHeight: modalSize ? 120 : 96
+    readonly property int avatarSize: modalSize ? 88 : 72
+    readonly property int pad: modalSize ? 20 : 16
 
     // `gif`, `anim` (APNG or WebP) or "" (a still or a video), from the
     // banner's extension or the type the core put in its fragment.
@@ -83,8 +91,8 @@ Item {
         y: root.inTop
         width: root.width - 2 * root.inSide
         height: root.height - root.inTop - root.inBottom
-        implicitHeight: 1 + bannerArea.height - 40 + identity.height
-            + (inset.implicitHeight > 0 ? 16 + inset.implicitHeight : 0) + 16
+        implicitHeight: 1 + bannerArea.height - (root.avatarSize / 2 + 4) + identity.height
+            + (inset.implicitHeight > 0 ? 16 + inset.implicitHeight : 0) + root.pad
         radius: Theme.radius
         color: root.themed ? root.surfaceColor : Theme.ply3
         border.width: 1
@@ -96,7 +104,7 @@ Item {
             x: 1
             y: 1
             width: parent.width - 2
-            height: 96
+            height: root.bannerHeight
             color: root.bannerColor.length > 0 ? root.bannerColor
                 : root.accentColor.length > 0 ? root.accentColor : Theme.accentTint
             Image {
@@ -156,23 +164,23 @@ Item {
         Column {
             id: identity
             anchors.top: bannerArea.bottom
-            // The 72 px avatar (inside its 4 px ring) centres on the banner edge.
-            anchors.topMargin: -40
-            x: 16
-            width: parent.width - 32
+            // The avatar (inside its 4 px ring) centres on the banner edge.
+            anchors.topMargin: -(root.avatarSize / 2 + 4)
+            x: root.pad
+            width: parent.width - 2 * root.pad
             spacing: 12
 
             // The avatar key: tint-2 over the card colour, a 4 px card ring.
             Rectangle {
-                width: 72 + 8
-                height: 72 + 8
+                width: root.avatarSize + 8
+                height: root.avatarSize + 8
                 x: -4
                 radius: Theme.radius
                 color: root.color
                 Rectangle {
                     anchors.centerIn: parent
-                    width: 72
-                    height: 72
+                    width: root.avatarSize
+                    height: root.avatarSize
                     radius: Theme.radius
                     color: Qt.tint(root.color, Theme.tint2)
                     Text {
@@ -192,8 +200,8 @@ Item {
                         visible: status === Image.Ready && root.deco.length === 0
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
-                        sourceSize.width: 144
-                        sourceSize.height: 144
+                        sourceSize.width: root.avatarSize * 2
+                        sourceSize.height: root.avatarSize * 2
                     }
                     // Decorated: the face crops round under the ring art.
                     Loader {
@@ -218,7 +226,7 @@ Item {
                     AnimatedPicture {
                         visible: root.deco.length > 0
                         anchors.centerIn: parent
-                        width: Math.round(72 * 1.24)
+                        width: Math.round(root.avatarSize * 1.24)
                         height: width
                         source: root.deco
                         playing: root.animate && !Theme.reducedMotion
@@ -234,16 +242,22 @@ Item {
                     spacing: 8
                     DisplayName {
                         id: nameLine
+                        // An open profile plays its name (data-decoration-play).
+                        playing: root.animate && root.visible
                         width: Math.min(implicitWidth, parent.width - (devices.visible ? devices.implicitWidth + 8 : 0))
                         text: root.name
                         nameStyle: root.nameStyle
                         color: root.ink
-                        font: Theme.type.profileName
+                        font: root.modalSize ? Theme.type.pageTitle : Theme.type.profileName
+                        // text-ui-xl's 28 px line (Geist's own is taller).
+                        height: root.modalSize ? 28 : implicitHeight
                         ground: root.color
                         Accessible.role: Accessible.Heading
                     }
                     PlatformIcons {
                         id: devices
+                        // The full profile has no adornment (UserProfileModal).
+                        visible: !root.modalSize
                         anchors.verticalCenter: nameLine.verticalCenter
                         platforms: root.platforms
                         presence: root.presence
@@ -312,8 +326,8 @@ Item {
             id: inset
             anchors.top: identity.bottom
             anchors.topMargin: 16
-            x: 16
-            width: parent.width - 32
+            x: root.pad
+            width: parent.width - 2 * root.pad
             spacing: 16
         }
 

@@ -87,7 +87,7 @@ MenuPanel {
         height: visible ? implicitHeight : 0
         text: qsTr("Profile")
         glyph: "account"
-        onTriggered: ShellState.showProfile(root.userId, root.anchorItem, "right")
+        onTriggered: ShellState.showFullProfile(root.userId, root.anchorItem)
     }
     MenuRow {
         visible: root.plain
@@ -192,7 +192,7 @@ MenuPanel {
         MenuRow {
             text: qsTr("Profile")
             glyph: "account"
-            onTriggered: ShellState.showProfile(root.userId, root.anchorItem, "right")
+            onTriggered: ShellState.showFullProfile(root.userId, root.anchorItem)
         }
         MenuRow {
             text: qsTr("Message")

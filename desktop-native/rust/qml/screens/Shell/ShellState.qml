@@ -125,6 +125,15 @@ QtObject {
     // `side`: where the card opens next to `anchor`: right, left or top.
     signal profileRequested(string userId, Item anchor, string side)
 
+    // The full profile (UserProfileModal.tsx): every "Profile" menu row.
+    // Your own opens the popout instead (the web never opens the modal for
+    // you).
+    signal fullProfileRequested(string userId, Item anchor)
+    function showFullProfile(userId, anchor) {
+        if (userId.length > 0)
+            fullProfileRequested(userId, anchor ?? null)
+    }
+
     function showProfile(userId, anchor, side) {
         if (userId.length > 0)
             profileRequested(userId, anchor, side ?? "right")
@@ -160,6 +169,8 @@ QtObject {
     function startCall(channelId, name, confirm) {
         startCallRequested(channelId, name, confirm)
     }
+    // A call with a person: their DM opens first (Shell does it).
+    signal startCallWithRequested(string userId, string name)
 
     // Home shows the collectibles shop instead of Friends (DMSidebar's
     // Shop row); opening a conversation or Friends leaves it.
@@ -172,6 +183,14 @@ QtObject {
     // YAP_NO_CLIPBOARD=1 (set by main.cpp): copies are only logged (tests
     // must not touch the user's clipboard).
     property bool clipboardOff: false
+    // YAP_TEST_HOVER_PLAY=1 (set by main.cpp, tests only): hover-only motion
+    // (name effects, resting clips) plays as if pointed at.
+    property bool testHoverPlay: false
+    // Copy image (ImageViewerToolbar.tsx handleCopyImage: the file itself,
+    // fetched, onto the clipboard). ChatView downloads it with the session
+    // into the copy cache and its `saved` handler puts it on the clipboard
+    // instead of revealing it. Only ever from a click.
+    signal copyImageRequested(string url, string name)
     property bool videoMuted: false
     property real videoVolume: 1
     // One thing plays at a time (a chat video or a web player): each takes a

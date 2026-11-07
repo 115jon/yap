@@ -10,11 +10,13 @@ import com.yap.native
 T.ToolTip {
     id: control
 
-    // top (default), bottom (items at the top of a column) or right (rail).
+    // top (default), bottom (items at the top of a column), right (rail)
+    // or left (a chip at a tile's right edge).
     property string side: "top"
 
-    x: !parent ? 0 : side === "right" ? parent.width + 8 : Math.round((parent.width - implicitWidth) / 2)
-    y: !parent ? 0 : side === "right" ? Math.round((parent.height - implicitHeight) / 2)
+    x: !parent ? 0 : side === "right" ? parent.width + 8 : side === "left" ? -implicitWidth - 8
+        : Math.round((parent.width - implicitWidth) / 2)
+    y: !parent ? 0 : side === "right" || side === "left" ? Math.round((parent.height - implicitHeight) / 2)
         : side === "bottom" ? parent.height + 6 : -implicitHeight - 6
     delay: 500
     margins: 8

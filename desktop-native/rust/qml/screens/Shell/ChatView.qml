@@ -192,6 +192,21 @@ Rectangle {
     function openVideo(item) {
         Chat.download(item.url, Files.openPath(item.name), true)
     }
+    // Copy image (ShellState.copyImageRequested, from the viewer and the
+    // message menu): downloaded into the copy cache, then onto the
+    // clipboard by `onSaved` below.
+    property var copyPaths: ({})
+    function copyImage(url, name) {
+        if (!url || url.length === 0)
+            return
+        const path = Files.copyPath(name && name.length > 0 ? name : (url.split(/[?#]/)[0].split("/").pop() || "image.png"))
+        copyPaths[path] = true
+        Chat.download(url, path, false)
+    }
+    Connections {
+        target: ShellState
+        function onCopyImageRequested(url, name) { root.copyImage(url, name) }
+    }
 
     // Files a public link leaves out (MessageShareModal.tsx): anything but
     // pictures and playable videos.
@@ -201,9 +216,14 @@ Rectangle {
         return JSON.parse(attachments).filter(a => a.kind !== "image" && a.kind !== "video").length
     }
 
-    function deleteMessage(id, author, text, confirm) {
+    // `row`: the message's delegate, for the dialog's preview card
+    // (avatar, time, attachments, edited).
+    function deleteMessage(id, author, text, confirm, row) {
         if (confirm)
-            deleteDialog.load()?.ask(id, author, text)
+            deleteDialog.load()?.ask(id, author, text, row ? {
+                avatar: row.avatar, initials: row.initials, time: row.time,
+                edited: row.edited, attachments: row.mediaItems
+            } : null)
         else
             Chat.deleteMessage(id)
     }
@@ -272,6 +292,12 @@ Rectangle {
             Qt.callLater(root.land)
         }
         function onSaved(path, open) {
+            if (root.copyPaths[path]) {
+                delete root.copyPaths[path]
+                if (!Files.copyImage(path, ShellState.clipboardOff))
+                    console.warn("[clipboard] the picture did not decode")
+                return
+            }
             if (open)
                 Files.openMedia(path)
             else
@@ -423,14 +449,14 @@ Rectangle {
             onEditSaved: (id, text) => {
                 if (text.trim().length === 0) {
                     root.endEdit()
-                    root.deleteMessage(id, row.author, row.body, true)
+                    root.deleteMessage(id, row.author, row.body, true, row)
                     return
                 }
                 Chat.editMessage(id, text)
                 root.endEdit()
             }
             onEditCancelled: root.endEdit()
-            onDeleteRequested: (id, author, text, confirm) => root.deleteMessage(id, author, text, confirm)
+            onDeleteRequested: (id, author, text, confirm) => root.deleteMessage(id, author, text, confirm, row)
             onMenuRequested: (id, author, text, mine, anchor, x, y) => {
                 const menu = messageMenuHost.load()
                 if (!menu)
@@ -441,6 +467,7 @@ Rectangle {
                 menu.hasReactions = row.reactions.length > 0
                 menu.omitted = root.omittedFiles(row.attachments)
                 menu.authorId = row.authorId
+                menu.row = row
                 const under = row.contextAt(anchor, x, y)
                 menu.link = under.link
                 menu.media = under.media
@@ -789,6 +816,8 @@ Rectangle {
                 // `publicMediaUrl` in MessageItem.tsx).
                 property string link
                 property string media
+                // The row it was opened on (the delete preview).
+                property Item row: null
                 property Item anchorItem: null
                 readonly property bool canBan: !mine && Admin.canBan && Nav.dmUsername.length === 0
                 readonly property bool hasDanger: settled && (mine || Chat.canManageMessages) || canBan
@@ -977,7 +1006,7 @@ Rectangle {
                 MenuRow {
                     text: qsTr("Profile")
                     glyph: "account"
-                    onTriggered: ShellState.showProfile(messageMenu.authorId, messageMenu.anchorItem, "right")
+                    onTriggered: ShellState.showFullProfile(messageMenu.authorId, messageMenu.anchorItem)
                 }
                 MenuRow {
                     text: qsTr("Copy ID")
@@ -996,7 +1025,7 @@ Rectangle {
                     danger: true
                     visible: messageMenu.settled && (messageMenu.mine || Chat.canManageMessages)
                     height: visible ? implicitHeight : 0
-                    onTriggered: root.deleteMessage(messageMenu.messageId, messageMenu.author, messageMenu.text, true)
+                    onTriggered: root.deleteMessage(messageMenu.messageId, messageMenu.author, messageMenu.text, true, messageMenu.row)
                 }
                 MenuRow {
                     text: qsTr("Ban user")
@@ -1005,6 +1034,24 @@ Rectangle {
                     visible: messageMenu.canBan
                     height: visible ? implicitHeight : 0
                     onTriggered: ShellState.banRequested(messageMenu.authorId, messageMenu.author)
+                }
+                MenuRule { visible: messageMenu.media.length > 0; height: visible ? implicitHeight : 0 }
+                // MessageItem.tsx: Save image | Copy media link, Open media
+                // link. Copy image is native's own (the web has it in the
+                // viewer only).
+                MenuRow {
+                    text: qsTr("Save image")
+                    glyph: "download"
+                    visible: messageMenu.media.length > 0
+                    height: visible ? implicitHeight : 0
+                    onTriggered: root.saveFile({ url: messageMenu.media, name: messageMenu.media.split(/[?#]/)[0].split("/").pop() || "image.png" })
+                }
+                MenuRow {
+                    text: qsTr("Copy image")
+                    glyph: "copy"
+                    visible: messageMenu.media.length > 0
+                    height: visible ? implicitHeight : 0
+                    onTriggered: root.copyImage(messageMenu.media, "")
                 }
                 MenuRule { visible: messageMenu.media.length > 0; height: visible ? implicitHeight : 0 }
                 MenuRow {

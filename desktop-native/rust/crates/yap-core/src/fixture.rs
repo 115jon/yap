@@ -120,6 +120,7 @@ impl Fixture {
                     .map(|&(id, username, display)| Member {
                         user: user(id, username, display),
                         roles: Vec::new(),
+                        joined_at: None,
                     })
                     .collect(),
             ),
@@ -161,6 +162,8 @@ impl Fixture {
             ApiRequest::KovaSession => ApiResponse::KovaEmail(None),
             ApiRequest::KovaAccounts => ApiResponse::KovaAccounts(Vec::new()),
             ApiRequest::Gifs { .. } => ApiResponse::Gifs(GifPage::default()),
+            ApiRequest::GifCategories { .. } => ApiResponse::GifCategories(Vec::new()),
+            ApiRequest::GifTerms { .. } => ApiResponse::GifTerms(Vec::new()),
             ApiRequest::GifUpload { source_url, .. } => ApiResponse::Uploaded(UploadedFile {
                 id: format!("att_fixture_gif_{serial}"),
                 file_url: source_url.clone(),

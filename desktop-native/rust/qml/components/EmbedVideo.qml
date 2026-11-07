@@ -68,6 +68,9 @@ Item {
     // still stands in for it, as a `<video preload>` shows its first frame.
     property string peekFrame: ""
     property var peekGrab: null
+    // The length the peek found (seconds), for the badge when the server
+    // gave none: a `<video preload="metadata">` knows it before Play.
+    property real peekDuration: 0
     // The row is pooled (culled, not hidden): the player is let go.
     property bool pooled: false
     // This player's number in ShellState.activeVideo while it plays.
@@ -80,6 +83,7 @@ Item {
         endGrab = null
         peekFrame = ""
         peekGrab = null
+        peekDuration = 0
     }
     readonly property var player: engine.item ? engine.item.player : null
     // A GIF-mode loop plays only while the app is in front, as decorations
@@ -353,6 +357,8 @@ Item {
                                 && video.videoSink.videoSize.width > 0) {
                             mediaPlayer.peeking = false
                             mediaPlayer.pause()
+                            if (mediaPlayer.duration > 0)
+                                root.peekDuration = mediaPlayer.duration / 1000
                             if (!root.started)
                                 Qt.callLater(root.keepPeek)
                         }
@@ -396,20 +402,22 @@ Item {
             hovered: hover.hovered
         }
         Rectangle {
-            visible: !root.started && root.durationHint > 0 && !root.animated
-            anchors.right: parent.right
+            visible: !root.started && (root.durationHint > 0 || root.peekDuration > 0) && !root.animated
+            // VideoAttachment.tsx durationBadge: bottom-2 left-2, ply-3,
+            // px-1.5 py-0.5, Num 11/14 in ink-1.
+            anchors.left: parent.left
             anchors.bottom: parent.bottom
             anchors.margins: 8
             width: badgeText.implicitWidth + 12
-            height: 20
+            height: 18
             radius: Theme.radius
-            color: Qt.rgba(0, 0, 0, 0.64)
+            color: Theme.ply3
             Text {
                 id: badgeText
                 anchors.centerIn: parent
                 textFormat: Text.PlainText
-                text: root.formatTime(root.durationHint)
-                color: "#ffffff"
+                text: root.formatTime(root.durationHint > 0 ? root.durationHint : root.peekDuration)
+                color: Theme.ink1
                 font: Theme.type.numSm
             }
         }

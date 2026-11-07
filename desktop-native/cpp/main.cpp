@@ -438,6 +438,10 @@ int main(int argc, char* argv[])
     state->setProperty("mediaMuted", qEnvironmentVariableIntValue("YAP_EMBED_MUTED") != 0);
     // YAP_NO_CLIPBOARD=1: copies are logged, never put on the clipboard.
     state->setProperty("clipboardOff", qEnvironmentVariableIntValue("YAP_NO_CLIPBOARD") != 0);
+    // YAP_TEST_HOVER_PLAY=1 (tests): what plays only while pointed at
+    // (name effects, resting clips) plays as if hovered, since posted mouse
+    // moves give a window behind others no hover.
+    state->setProperty("testHoverPlay", qEnvironmentVariableIntValue("YAP_TEST_HOVER_PLAY") != 0);
   }
 
   engine.loadFromModule("com.yap.native", "Main");

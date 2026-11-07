@@ -397,6 +397,7 @@ Item {
         // author's own style when they have one (ProfileDisplayName).
         DisplayName {
             id: authorText
+            playing: hover.hovered
             height: Theme.type.authorLine
             text: root.author
             nameStyle: root.nameStyle

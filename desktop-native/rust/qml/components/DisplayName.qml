@@ -3,9 +3,14 @@ import QtQuick.Effects
 import com.yap.native
 
 // A display name in its owner's style (ProfileDisplayName.tsx,
-// profile-customization.ts): the font, then the effect, drawn at rest (the
-// web plays gradient, neon and pop only while a row is hovered; native
-// keeps the resting frame). `nameStyle` is the core's normalised JSON
+// profile-customization.ts): the font, then the effect. Gradient, neon and
+// pop move only while `playing` (the host's row is hovered, or an open
+// profile shows it: useDecorationPlayback), the app is in front and motion
+// is allowed; at rest nothing runs. As on the web, gradient and neon play
+// on a stacked copy that only fades (styles.css rm-display-name-gradient
+// 7.5 s, rm-display-name-neon 2.9 s, both 0 -> 1 -> 0 ease-in-out) and pop
+// bobs the name (rm-display-name-pop 2.35 s: up 0.04em at 45 %, down
+// 0.01em at 70 %). `nameStyle` is the core's normalised JSON
 // `{font, effect, primary, secondary}`; empty draws `text` plainly in
 // `font` and `color`. The colours are pulled toward legible on `ground`
 // first (resolveReadableDisplayNameStyle, 3:1 by default).
@@ -22,6 +27,24 @@ Item {
     property color ground: Theme.ply0
     property real minContrast: 3
     property int elide: Text.ElideRight
+    // Play the effect (see above); the host binds its row's hover.
+    property bool playing: false
+    readonly property bool moving: (playing || ShellState.testHoverPlay) && style !== null && !Theme.reducedMotion
+        && Qt.application.state === Qt.ApplicationActive
+        && (effect === "gradient" || effect === "neon" || effect === "pop")
+    // Pop's lift, in pixels (translate on the name and its copies).
+    property real popY: 0
+    onMovingChanged: if (!moving) popY = 0
+
+    SequentialAnimation {
+        running: root.moving && root.effect === "pop"
+        loops: Animation.Infinite
+        // cubic-bezier(0.33, 1, 0.68, 1) over the whole cycle, split at
+        // the keyframes.
+        NumberAnimation { target: root; property: "popY"; to: -0.04 * root.font.pixelSize; duration: 1058; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.33, 1, 0.68, 1, 1, 1] }
+        NumberAnimation { target: root; property: "popY"; to: 0.01 * root.font.pixelSize; duration: 587; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.33, 1, 0.68, 1, 1, 1] }
+        NumberAnimation { target: root; property: "popY"; to: 0; duration: 705; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.33, 1, 0.68, 1, 1, 1] }
+    }
 
     readonly property var style: nameStyle.length > 0 ? JSON.parse(nameStyle) : null
     readonly property string effect: style ? style.effect : ""
@@ -123,7 +146,7 @@ Item {
         Text {
             required property var modelData
             x: label.x + modelData[0]
-            y: label.y + modelData[1]
+            y: label.y + modelData[1] + root.popY
             width: label.width
             rotation: label.rotation
             textFormat: Text.PlainText
@@ -137,6 +160,7 @@ Item {
 
     Text {
         id: label
+        y: root.popY
         width: root.width > 0 ? root.width : implicitWidth
         height: root.height > 0 ? root.height : implicitHeight
         verticalAlignment: Text.AlignVCenter
@@ -198,5 +222,81 @@ Item {
         shadowHorizontalOffset: 0
         shadowVerticalOffset: 0
         z: -1
+    }
+
+    // Gradient, playing: the far end of the sweep (background-position
+    // 100%: the mix at 25 %, the secondary at 68 %, the bright secondary at
+    // the end) fading in and out over the resting start.
+    Loader {
+        anchors.fill: label
+        active: root.moving && root.effect === "gradient"
+        sourceComponent: Item {
+            id: farEnd
+            opacity: 0
+            Rectangle {
+                id: farSweep
+                anchors.fill: parent
+                visible: false
+                layer.enabled: true
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0; color: root.mix(root.primary, root.mix(root.primary, root.secondary, 0.52), 0.6) }
+                    GradientStop { position: 0.245; color: root.mix(root.primary, root.secondary, 0.52) }
+                    GradientStop { position: 0.676; color: root.secondary }
+                    GradientStop { position: 1; color: root.mix(root.secondary, root.secondaryAnchor, 0.06) }
+                }
+            }
+            MultiEffect {
+                anchors.fill: parent
+                source: farSweep
+                maskEnabled: true
+                maskSource: label
+                maskThresholdMin: 0.5
+                maskSpreadAtMin: 1
+            }
+            SequentialAnimation on opacity {
+                loops: Animation.Infinite
+                NumberAnimation { to: 1; duration: 3750; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 0; duration: 3750; easing.type: Easing.InOutSine }
+            }
+        }
+    }
+
+    // Neon, playing: a brighter fill (the primary 30 % toward its anchor at
+    // .42) with a wider glow, breathing over the resting one.
+    Loader {
+        anchors.fill: label
+        active: root.moving && root.effect === "neon"
+        sourceComponent: Item {
+            opacity: 0
+            Text {
+                id: bright
+                anchors.fill: parent
+                verticalAlignment: Text.AlignVCenter
+                rotation: label.rotation
+                textFormat: Text.PlainText
+                text: root.text
+                elide: root.elide
+                font: root.styledFont
+                color: root.alpha(root.mix(root.primary, root.primaryAnchor, 0.3), 0.42)
+                visible: false
+                Accessible.ignored: true
+            }
+            MultiEffect {
+                anchors.fill: parent
+                source: bright
+                shadowEnabled: true
+                shadowColor: root.alpha(root.primary, 0.42)
+                shadowBlur: 0.8
+                shadowHorizontalOffset: 0
+                shadowVerticalOffset: 0
+                autoPaddingEnabled: true
+            }
+            SequentialAnimation on opacity {
+                loops: Animation.Infinite
+                NumberAnimation { to: 1; duration: 1450; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 0; duration: 1450; easing.type: Easing.InOutSine }
+            }
+        }
     }
 }

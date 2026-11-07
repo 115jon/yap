@@ -114,6 +114,8 @@ pub enum VoiceCommand {
     SendApp(String),
     /// Our own soundboard clip is audible (op 5 SOUNDSHARE).
     SetSoundboardSpeaking(bool),
+    /// The spatial panel's new room state (`SharedSpatialAudioState` JSON).
+    SetSpatialRoom(String),
     /// A standby becomes the join.
     Promote,
     Leave,
@@ -230,6 +232,8 @@ pub enum VoiceUpdate {
     InboundStalled(bool),
     /// Our unmuted mic sends nothing.
     MicStalled(bool),
+    /// The spatial panel's room map, as JSON (`yap_voice::SpatialMap`).
+    Spatial(String),
     /// The call is over; the error text if it failed.
     Ended(Option<String>),
     /// The call is over because the room lost our session and made a new

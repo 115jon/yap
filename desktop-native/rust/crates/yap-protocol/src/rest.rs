@@ -715,6 +715,63 @@ pub struct GifItem {
     pub send: GifAsset,
     #[serde(default)]
     pub media_type: Option<String>,
+    /// Where the asset lives on its provider (kept for the favourite).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    /// Width over height of the preview (kept for the favourite).
+    #[serde(
+        default,
+        deserialize_with = "opt_number",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub aspect_ratio: Option<f64>,
+    /// A clip's length in seconds (gif-picker.ts takes a number or a
+    /// numeric string).
+    #[serde(
+        default,
+        deserialize_with = "opt_number",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub duration: Option<f64>,
+}
+
+/// One start-screen category (`GifPickerCategory`): a GIF behind its label;
+/// a press searches `query`.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GifCategory {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub query: String,
+    #[serde(default)]
+    pub image_url: String,
+}
+
+/// `GET /api/gifs?mode=categories…`.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct GifCategories {
+    #[serde(default, deserialize_with = "lenient_list")]
+    pub categories: Vec<GifCategory>,
+}
+
+/// `GET /api/gifs?mode=autocomplete…` and `mode=suggestions`: search terms.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct GifTerms {
+    #[serde(default, deserialize_with = "lenient_list")]
+    pub results: Vec<String>,
+}
+
+/// A number, or a string that parses as one (`parseFloat`); else none.
+fn opt_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<f64>, D::Error> {
+    Ok(match Option::<Value>::deserialize(deserializer)? {
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::String(s)) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+    .filter(|n| n.is_finite()))
 }
 
 /// `GET /api/gifs?mode=search…`: a page and the cursor of the next one.
@@ -980,6 +1037,10 @@ pub struct Member {
     /// Highest position first, as the server sorts them.
     #[serde(default, deserialize_with = "lenient_list")]
     pub roles: Vec<Role>,
+    /// When they joined the server (an ISO string or epoch ms), for the
+    /// full profile's "Member Since".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joined_at: Option<Value>,
 }
 
 impl Member {
@@ -1032,13 +1093,33 @@ pub struct FriendRequestSent {
     pub kind: Option<i64>,
 }
 
-/// `GET /api/users/:id/profile`: the full user and the servers you share
-/// (user.service.ts `getUserProfileMutuals`; mutual friends are not read).
+/// `GET /api/users/:id/profile`: the full user and the servers and friends
+/// you share (user.service.ts `getUserProfileMutuals`).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ProfileResponse {
     pub user: User,
     #[serde(default, rename = "mutualServers")]
     pub mutual_servers: MutualServers,
+    #[serde(default, rename = "mutualFriends")]
+    pub mutual_friends: MutualFriends,
+}
+
+/// `mutualFriends`: how many, and the first few (UserProfileModal.tsx).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct MutualFriends {
+    pub count: i64,
+    pub items: Vec<MutualFriend>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct MutualFriend {
+    pub id: String,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub avatar_display: Option<Value>,
 }
 
 /// `mutualServers`: how many, and the first few.

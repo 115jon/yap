@@ -558,6 +558,7 @@ fn gif_search_should_use_the_media_filter() {
     let fx = client.command(Command::GifSearch {
         query: String::new(),
         media_type: "gifs".into(),
+        provider: "klipy".into(),
     });
     let (_, request) = find(&fx, |r| matches!(r, ApiRequest::Gifs { .. }));
     assert!(request.path().contains("contentFilter=off"));

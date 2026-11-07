@@ -45,22 +45,156 @@ Column {
         onClicked: ShellState.voiceStatusRequested(root.channelId, root.channelName, false, root.text)
     }
 
-    AnimatedImage {
-        id: picture
-        visible: root.media.length > 0 && status !== Image.Error
-        width: Math.min(96, implicitWidth > 0 ? implicitWidth * height / Math.max(1, implicitHeight) : 96)
-        height: 64
-        fillMode: Image.PreserveAspectFit
-        horizontalAlignment: Image.AlignLeft
-        source: root.media
-        asynchronous: true
-        playing: visible && !Theme.reducedMotion && Qt.application.state === Qt.ApplicationActive
-        Accessible.name: qsTr("Channel picture")
-        HoverHandler { enabled: root.editable; cursorShape: Qt.PointingHandCursor }
-        TapHandler {
-            enabled: root.editable
-            onTapped: ShellState.voiceStatusRequested(root.channelId, root.channelName, true, root.text)
+    // The channel picture (VoiceChannelMediaDisplay): the full width at
+    // its preview's aspect, contained on ply-2 inside a 1 px line. A
+    // picture plays as an <img> does; a clip rests on its first frame and
+    // plays only while pointed at. Ours to change: Change media and Remove
+    // media, 28 px ply-3 keys 6 px in at the top right, shown on hover or
+    // focus.
+    readonly property int hashAt: media.lastIndexOf("#")
+    readonly property string mediaUrl: hashAt >= 0 ? media.slice(0, hashAt) : media
+    readonly property var mediaInfo: {
+        const tail = hashAt >= 0 ? media.slice(hashAt + 1) : ""
+        const semi = tail.lastIndexOf(";")
+        const size = semi >= 0 ? tail.slice(semi + 1).split("x") : []
+        return {
+            type: semi >= 0 ? tail.slice(0, semi) : "",
+            w: Math.max(1, Number(size[0]) || 1),
+            h: Math.max(1, Number(size[1]) || 1)
         }
+    }
+    readonly property bool mediaIsVideo: mediaInfo.type.indexOf("video/") === 0
+    // Remove media is in flight until the picture goes.
+    property bool removing: false
+    onMediaChanged: removing = false
+
+    Rectangle {
+        id: plate
+        visible: root.mediaUrl.length > 0 && !(still.status === Image.Error && !root.mediaIsVideo)
+        // w-full of the pl-7 column: to the sidebar's edge.
+        width: root.width - root.leftPadding
+        height: Math.round(width * root.mediaInfo.h / root.mediaInfo.w)
+        radius: Theme.radius
+        color: Theme.ply2
+        border.width: 1
+        border.color: Theme.line
+        clip: true
+        Accessible.name: root.mediaIsVideo ? qsTr("Voice channel media preview") : qsTr("Voice channel status media")
+
+        HoverHandler { id: plateHover }
+        // YAP_TEST_HOVER_PLAY: as if pointed at (tests only).
+        readonly property bool pointed: plateHover.hovered || ShellState.testHoverPlay
+
+        AnimatedImage {
+            id: still
+            anchors.fill: parent
+            anchors.margins: 1
+            visible: !root.mediaIsVideo
+            fillMode: Image.PreserveAspectFit
+            source: root.mediaIsVideo ? "" : root.mediaUrl
+            asynchronous: true
+            playing: visible && !Theme.reducedMotion && Qt.application.state === Qt.ApplicationActive
+        }
+        ClipPreview {
+            anchors.fill: parent
+            anchors.margins: 1
+            visible: root.mediaIsVideo
+            source: root.mediaIsVideo ? root.mediaUrl : ""
+            contentType: root.mediaInfo.type
+            active: (plate.pointed || changeKey.activeFocus || removeKey.activeFocus) && !Theme.reducedMotion
+        }
+
+        Row {
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: 6
+            z: 2
+            spacing: 4
+            visible: root.editable
+            opacity: plate.pointed || changeKey.activeFocus || removeKey.activeFocus ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
+            PlateKey {
+                id: changeKey
+                glyph: "edit"
+                tip: qsTr("Change media")
+                onClicked: ShellState.voiceStatusRequested(root.channelId, root.channelName, true, root.text)
+            }
+            PlateKey {
+                id: removeKey
+                glyph: "trash"
+                tip: qsTr("Remove media")
+                danger: true
+                busy: root.removing
+                onClicked: {
+                    root.removing = true
+                    Extras.removeVoiceMedia(root.channelId)
+                }
+            }
+        }
+    }
+
+    // size-7, rounded-md, a 1 px line on ply-3 with shadow-float, ink-2
+    // (hover ink-1, or danger ink for Remove).
+    component PlateKey: Rectangle {
+        id: plateKey
+        property string glyph
+        property string tip
+        property bool danger: false
+        property bool busy: false
+        signal clicked()
+        width: 28
+        height: 28
+        radius: Theme.radius
+        color: Theme.ply3
+        border.width: 1
+        border.color: Theme.line
+        scale: plateTap.pressed ? Theme.scalePress : 1
+        activeFocusOnTab: true
+        Accessible.role: Accessible.Button
+        Accessible.name: tip
+        Keys.onReturnPressed: if (!busy) plateKey.clicked()
+        Keys.onSpacePressed: if (!busy) plateKey.clicked()
+        FloatShadow {}
+        Icon {
+            anchors.centerIn: parent
+            visible: !plateKey.busy
+            name: plateKey.glyph
+            size: Theme.iconSm
+            color: plateKeyHover.hovered ? (plateKey.danger ? Theme.dangerInk : Theme.ink1) : Theme.ink2
+        }
+        Icon {
+            id: plateSpin
+            anchors.centerIn: parent
+            visible: plateKey.busy
+            name: "loader"
+            size: Theme.iconSm
+            color: Theme.ink2
+            RotationAnimator on rotation {
+                from: 0
+                to: 360
+                duration: 900
+                loops: Animation.Infinite
+                running: plateSpin.visible && !Theme.reducedMotion
+            }
+        }
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -2
+            visible: plateKey.activeFocus
+            color: "transparent"
+            radius: Theme.radius
+            border.width: 2
+            border.color: Theme.focus
+        }
+        LazyPopup {
+            when: plateKeyHover.hovered
+            sourceComponent: Tooltip {
+                visible: plateKeyHover.hovered
+                text: plateKey.tip
+            }
+        }
+        HoverHandler { id: plateKeyHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { id: plateTap; enabled: !plateKey.busy; onTapped: plateKey.clicked() }
     }
 
     StatusKey {

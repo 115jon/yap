@@ -38,6 +38,10 @@ pub struct Participant {
     pub self_video: Option<bool>,
     /// Sharing their screen.
     pub self_stream: Option<bool>,
+    /// Their spatial audio switches (`spatial_audio_enabled`,
+    /// `spatial_audio_high_fidelity`), for the spatial panel's notes.
+    pub spatial_enabled: Option<bool>,
+    pub spatial_high_fidelity: Option<bool>,
 }
 
 /// A room Ready or Resumed `d`.
@@ -119,6 +123,10 @@ impl Participant {
             self_deaf: p.get("self_deaf").and_then(Value::as_bool),
             self_video: p.get("self_video").and_then(Value::as_bool),
             self_stream: p.get("self_stream").and_then(Value::as_bool),
+            spatial_enabled: p.get("spatial_audio_enabled").and_then(Value::as_bool),
+            spatial_high_fidelity: p
+                .get("spatial_audio_high_fidelity")
+                .and_then(Value::as_bool),
         }
     }
 }

@@ -151,6 +151,7 @@ Item {
                 // role colour (online, no plate, no style), 2.8:1 on a plate.
                 DisplayName {
                     id: nameText
+                    playing: hover.hovered
                     width: Math.min(implicitWidth, parent.width - (crown.visible ? crown.width + 6 : 0)
                         - (devices.visible ? devices.implicitWidth + 6 : 0))
                     text: root.name

@@ -62,13 +62,16 @@ MenuPanel {
         height: visible ? implicitHeight : 0
         text: qsTr("Mute channel")
         glyph: "speakerOff"
+        chevron: true
         enabled: false
     }
     MenuRow {
         visible: menu.onChannel
         height: visible ? implicitHeight : 0
         text: qsTr("Notification settings")
+        subtitle: qsTr("All messages")
         glyph: "bell"
+        chevron: true
         enabled: false
     }
     MenuRule { visible: menu.onChannel && (menu.manage || menu.manageAll); height: visible ? implicitHeight : 0 }

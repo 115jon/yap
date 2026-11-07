@@ -640,7 +640,7 @@ Rectangle {
     GifPicker {
         id: reactions
         voiceMode: true
-        mediaType: "stickers"
+        defaultMediaType: "stickers"
     }
     VoiceDetailsPopup { id: details }
 

@@ -10,12 +10,19 @@ Popup {
     property string messageId
     property string author
     property string text
+    // The preview's extras (MessagePreviewCard): avatar, initials, time,
+    // edited, attachments (the row's media items), or null.
+    property var info: null
+    readonly property var media: info && info.attachments
+        ? info.attachments.filter(a => a.kind === "image" || a.kind === "video") : []
+    readonly property int files: info && info.attachments ? info.attachments.length - media.length : 0
     signal confirmed(string id)
 
-    function ask(id, author, text) {
+    function ask(id, author, text, extra) {
         root.messageId = id
         root.author = author
         root.text = text
+        root.info = extra ?? null
         open()
     }
 
@@ -99,7 +106,11 @@ Popup {
             lineHeight: Theme.type.messageLine
             lineHeightMode: Text.FixedHeight
         }
-        // The message (MessagePreviewCard.tsx), inert.
+        // The message (MessagePreviewCard.tsx), inert: tint-1, p-3, gap-3;
+        // the 32 avatar, the name at 13/600 with the time in Num ink-3 on
+        // its baseline, the body at 13/20 ink-2 (4 lines) with "(edited)",
+        // then up to four 40 px media cells (a picture, or the play glyph
+        // for a video) and a count of the rest and of files.
         Rectangle {
             width: parent.width
             height: Math.max(32, quote.implicitHeight) + 24
@@ -109,8 +120,8 @@ Popup {
                 x: 12
                 y: 12
                 size: 32
-                initials: root.author
-                source: ""
+                initials: root.info ? root.info.initials : root.author
+                source: root.info ? root.info.avatar : ""
             }
             Column {
                 id: quote
@@ -118,27 +129,96 @@ Popup {
                 y: 12
                 width: parent.width - x - 12
                 spacing: 2
-                Text {
+                Row {
                     width: parent.width
-                    textFormat: Text.PlainText
-                    text: root.author
-                    elide: Text.ElideRight
-                    color: Theme.ink1
-                    font.family: "Yap Geist SemiBold"
-                    font.pixelSize: 13
-                    font.weight: Font.DemiBold
+                    spacing: 8
+                    Text {
+                        id: authorLine
+                        width: Math.min(implicitWidth, parent.width - stamp.implicitWidth - 8)
+                        textFormat: Text.PlainText
+                        text: root.author
+                        elide: Text.ElideRight
+                        color: Theme.ink1
+                        font: Theme.type.labelStrong
+                        lineHeight: 18
+                        lineHeightMode: Text.FixedHeight
+                    }
+                    Text {
+                        id: stamp
+                        anchors.baseline: authorLine.baseline
+                        textFormat: Text.PlainText
+                        text: root.info ? root.info.time : ""
+                        color: Theme.ink3
+                        font: Theme.type.numSm
+                    }
                 }
                 Text {
                     width: parent.width
-                    text: root.text
+                    visible: root.text.trim().length > 0
+                    text: root.text + (root.info && root.info.edited ? " (edited)" : "")
                     wrapMode: Text.Wrap
                     maximumLineCount: 4
                     elide: Text.ElideRight
                     textFormat: Text.PlainText
                     color: Theme.ink2
                     font: Theme.type.description
-                    lineHeight: Theme.type.descriptionLine
+                    lineHeight: 20
                     lineHeightMode: Text.FixedHeight
+                }
+                Item { width: 1; height: 6; visible: cells.visible }
+                Flow {
+                    id: cells
+                    visible: root.media.length > 0 || root.files > 0
+                    width: parent.width
+                    spacing: 4
+                    Repeater {
+                        model: root.media.slice(0, 4)
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: 40
+                            height: 40
+                            radius: Theme.radius
+                            color: Theme.tint2
+                            clip: true
+                            Icon {
+                                anchors.centerIn: parent
+                                visible: parent.modelData.kind === "video"
+                                name: "play"
+                                variant: "active"
+                                size: Theme.iconSm
+                                color: Theme.ink2
+                            }
+                            Image {
+                                anchors.fill: parent
+                                visible: parent.modelData.kind !== "video"
+                                source: parent.modelData.kind !== "video" ? parent.modelData.url : ""
+                                // A sensitive picture decodes tiny: the blur.
+                                sourceSize: parent.modelData.nsfw === true && ShellState.mediaFilter === "high" ? Qt.size(8, 8) : Qt.size(80, 80)
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                            }
+                        }
+                    }
+                    Row {
+                        visible: root.media.length > 4 || root.files > 0
+                        height: 40
+                        leftPadding: 4
+                        spacing: 4
+                        Icon {
+                            anchors.verticalCenter: parent.verticalCenter
+                            name: "paperclip"
+                            size: Theme.iconXs
+                            color: Theme.ink3
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            textFormat: Text.PlainText
+                            text: (root.media.length > 4 ? "+" + (root.media.length - 4) + " " : "")
+                                + (root.files > 0 ? root.files + (root.files === 1 ? qsTr(" file") : qsTr(" files")) : "")
+                            color: Theme.ink3
+                            font: Theme.type.caption
+                        }
+                    }
                 }
             }
         }
