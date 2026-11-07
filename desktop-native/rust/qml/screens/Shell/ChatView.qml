@@ -1135,44 +1135,49 @@ Rectangle {
             color: Theme.scrim
             Accessible.ignored: true
 
-            // The dashed frame: drawn once per size (static).
-            Canvas {
-                id: frame
+            // The dashed frame: drawn once per size (static), and only
+            // while a drag is over the chat: painted ahead, the canvas
+            // kept a window-sized image (and texture) for good.
+            Loader {
                 anchors.fill: parent
                 anchors.margins: 16
-                readonly property color ink: Theme.lineStrong
-                onInkChanged: requestPaint()
-                onWidthChanged: requestPaint()
-                onHeightChanged: requestPaint()
-                onPaint: {
-                    const ctx = getContext("2d")
-                    ctx.reset()
-                    ctx.strokeStyle = frame.ink
-                    ctx.lineWidth = 2
-                    // Dashes along each side (6 on, 4 off), solid corners.
-                    const r = 12, x0 = 1, y0 = 1, x1 = width - 1, y1 = height - 1
-                    ctx.beginPath()
-                    const dashes = (ax, ay, bx, by) => {
-                        const len = Math.hypot(bx - ax, by - ay)
-                        for (let t = 0; t < len; t += 10) {
-                            const e = Math.min(t + 6, len)
-                            ctx.moveTo(ax + (bx - ax) * t / len, ay + (by - ay) * t / len)
-                            ctx.lineTo(ax + (bx - ax) * e / len, ay + (by - ay) * e / len)
+                active: dropOverlay.visible
+                sourceComponent: Canvas {
+                    id: frame
+                    readonly property color ink: Theme.lineStrong
+                    onInkChanged: requestPaint()
+                    onWidthChanged: requestPaint()
+                    onHeightChanged: requestPaint()
+                    onPaint: {
+                        const ctx = getContext("2d")
+                        ctx.reset()
+                        ctx.strokeStyle = frame.ink
+                        ctx.lineWidth = 2
+                        // Dashes along each side (6 on, 4 off), solid corners.
+                        const r = 12, x0 = 1, y0 = 1, x1 = width - 1, y1 = height - 1
+                        ctx.beginPath()
+                        const dashes = (ax, ay, bx, by) => {
+                            const len = Math.hypot(bx - ax, by - ay)
+                            for (let t = 0; t < len; t += 10) {
+                                const e = Math.min(t + 6, len)
+                                ctx.moveTo(ax + (bx - ax) * t / len, ay + (by - ay) * t / len)
+                                ctx.lineTo(ax + (bx - ax) * e / len, ay + (by - ay) * e / len)
+                            }
                         }
+                        dashes(x0 + r, y0, x1 - r, y0)
+                        dashes(x1, y0 + r, x1, y1 - r)
+                        dashes(x1 - r, y1, x0 + r, y1)
+                        dashes(x0, y1 - r, x0, y0 + r)
+                        ctx.moveTo(x1 - r, y0)
+                        ctx.arcTo(x1, y0, x1, y0 + r, r)
+                        ctx.moveTo(x1, y1 - r)
+                        ctx.arcTo(x1, y1, x1 - r, y1, r)
+                        ctx.moveTo(x0 + r, y1)
+                        ctx.arcTo(x0, y1, x0, y1 - r, r)
+                        ctx.moveTo(x0, y0 + r)
+                        ctx.arcTo(x0, y0, x0 + r, y0, r)
+                        ctx.stroke()
                     }
-                    dashes(x0 + r, y0, x1 - r, y0)
-                    dashes(x1, y0 + r, x1, y1 - r)
-                    dashes(x1 - r, y1, x0 + r, y1)
-                    dashes(x0, y1 - r, x0, y0 + r)
-                    ctx.moveTo(x1 - r, y0)
-                    ctx.arcTo(x1, y0, x1, y0 + r, r)
-                    ctx.moveTo(x1, y1 - r)
-                    ctx.arcTo(x1, y1, x1 - r, y1, r)
-                    ctx.moveTo(x0 + r, y1)
-                    ctx.arcTo(x0, y1, x0, y1 - r, r)
-                    ctx.moveTo(x0, y0 + r)
-                    ctx.arcTo(x0, y0, x0 + r, y0, r)
-                    ctx.stroke()
                 }
             }
             Rectangle {

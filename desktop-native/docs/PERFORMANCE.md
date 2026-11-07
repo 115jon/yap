@@ -656,3 +656,330 @@ in the settings costs nothing while no camera runs.
    MFT) as the desktop app has would remove them.
 2. **Hardware decode** needs a patched webrtc-sys (LIBRARIES.md §12.4).
 3. **A 1440p60 after-number** on a source that delivers 60 fps.
+
+# Performance pass 3 (2026-11-07)
+
+This pass works on the brief's five targets:
+
+1. idle memory under 120 MB;
+2. the exe under 60 MB;
+3. the root cause of the Settings memory;
+4. focused animated idle under 3 %;
+5. a 1440p60 share number.
+
+Before is e1985388 (the 0.2.1 build); after is the final build of this pass
+(`F:/ct/yapn/tmp/p3-final.exe`). Both were built from the `native/perf3`
+worktree into `F:/ct/yapn/rel-perf`.
+
+## Conditions
+
+- **The displays slept for the whole session.** `vblank.ps1` showed vblank
+  waits returning at once, so DWM paced presents at ~4 Hz. Nothing that
+  depends on frame pacing could be measured honestly: scroll timing,
+  animated idle CPU or a 60 fps share. See the targets below.
+- **Another agent was using the owner test account for most of the
+  session.** A `--profile spike` process from `F:/ct/yapn/run/sweep7` was
+  running, and at 03:41 the sidebar showed a voice session as the owner, so
+  my session was stopped at once. Memory was therefore measured in two
+  ways:
+  - on the offline fixture (`YAP_FIXTURE=chat-10k`, our own profile
+    `perf3`: no token, gateway or voice), A/B against the baseline exe;
+  - on the owner account, once it was free.
+- **The user's own copy was read only** (`YapNativeMine.exe --profile jon`).
+  After 14.5 hours up it held 589 MB private: 548 MB committed private and
+  a 45 MB working set while hidden. Long-run growth matters more than the
+  fresh number, and the Settings finding below is one mechanism of it.
+
+## Method (new)
+
+The tools:
+
+- **`YAP_DEBUG_HEAP=<prefix>`** (`cpp/heaptrace.cpp`) gives live heap and
+  VirtualAlloc commit by allocating stack.
+  - The exe is one static module, so every Qt, CRT, Rust and libwebrtc
+    allocation goes through its own import slots for `HeapAlloc`,
+    `HeapReAlloc`, `HeapFree`, `VirtualAlloc` and `VirtualFree`. The tracer
+    points those slots at counting wrappers.
+  - A dump is written each time `<prefix>.now` appears. Its text is the
+    tag; `gc <tag>` runs the JS collector first.
+  - It needs no UMDH or `gflags` (gflags would apply to every exe of the
+    same name).
+- **`YAP_DEBUG_HEAP_HOOK=0`** installs no hooks and writes only the
+  whole-process breakdown, so the numbers carry none of the tracer's cost.
+  - Private commit is split by allocation into the heaps (HeapWalk
+    segments and large blocks), thread stacks (regions with a guard page),
+    write-combined memory (the GPU driver's upload memory) and the rest.
+  - The largest allocations in the rest are listed.
+- **`tools/p3/heapsym.py`** symbolizes dumps with the link map (`/MAP`).
+  Rust v0 names are read by hand and C++ names go through `undname`. It
+  groups stacks by their first frame that is not allocator plumbing, and by
+  category, and diffs two dumps.
+- **`tools/p3/heapgrep.py`** sums the stacks that pass through one symbol.
+- **`tools/p3/mapsize.py`** and **`catsize.py`** give exe size by library,
+  object and category (Rust crates, QML, libwebrtc, `cc` C/C++, Qt) from the
+  map.
+- **The `tools/p3` run scripts:**
+  - `run.ps1 [-Fixture]` launches and samples (measure-native and vmmap);
+  - `ab.ps1` alternates A/B runs;
+  - `settings-cycle.ps1` opens and closes Settings with a posted gear click
+    and Escape to our window;
+  - `settings-ab.ps1` and `tray.ps1` are the Settings and tray A/Bs;
+  - `build.ps1` is the pass build, with a map.
+- **`YAP_FIXTURE_ICON=<url>`** and **`YAP_FIXTURE_GIF=<url>`**
+  (`fixture.rs`) add a server icon (a GIF one animates) and two GIF
+  attachments to the fixture. They take local `file://` URLs
+  (`F:/ct/yapn/tmp/anim`), giving an animated scene without an account.
+
+## Where the idle memory goes
+
+On the fixture, with the baseline exe and no tracer, committed private
+memory is **164 MB**:
+
+| part                  | MB  | what it is                                                                                          |
+| --------------------- | --- | --------------------------------------------------------------------------------------------------- |
+| the process heap      | 115 | 96 allocated, 19 free inside it                                                                     |
+| write-combined memory | 14  | the GPU driver's upload memory                                                                      |
+| thread stacks         | 2.4 |                                                                                                     |
+| the rest              | 38  | the JS engine's two stacks (6.5), the GPU driver's own regions (~14), Media Foundation, system DLLs |
+
+`PrivateMemorySize64` reads 204 MB, ~40 MB above that. The writable image
+sections of every loaded DLL (the exe's own `.data` is 4.2 MB) and
+pagefile-backed sections are charged as well.
+
+The heap by owner (traced, 80 MB live):
+
+| owner                                                                                    | MB       |
+| ---------------------------------------------------------------------------------------- | -------- |
+| the fixture's own data (10,000 messages at ~1.5 KB each in `MessageLog`, and their rows) | ~35      |
+| QML engine (property caches, compilation units, bindings) and its JS heap                | 18 + 8.5 |
+| scene graph (batch buffers, glyph-cache update batches, nodes)                           | 10.4     |
+| text and fonts (2.25 MB of it is `registerFonts`' copies of the 22 faces)                | 3.7      |
+| Qt core                                                                                  | 3.5      |
+| images (2 MB of it a `Canvas` painted at startup, see below)                             | 2.7      |
+
+No single owner is large. The floor is the engine, the driver and the
+heap's slack.
+
+## Fixes
+
+### 1. Idle memory
+
+- **The segment heap** (`cpp/app.manifest`, `<heapType>SegmentHeap`).
+  - The NT heap kept ~20 MB of freed blocks committed; the segment heap
+    gives them back.
+  - Heap commit fell from 115 to 105 MB on the fixture, for the same
+    allocations.
+  - No CPU change was measurable at idle. The scroll test needs awake
+    displays.
+- **The JS engine's stacks** (`cpp/main.cpp`).
+  - V4 commits its whole JS stack (4 MB) and GC stack (2 MB) up front.
+  - Now `QV4_JS_MAX_STACK_SIZE` is 1 MB, still ~130,000 JS values, and
+    `QV4_GC_MAX_STACK_SIZE` is 512 KB; a full GC stack only means an extra
+    drain.
+  - Commit fell from 6.3 MB to 1.8 MB.
+- **The drop overlay's dashed frame** (`ChatView.qml`).
+  - A window-sized `Canvas`, inside an invisible overlay, was painted at
+    startup: 2 MB of image plus its texture.
+  - It is now made only while a drag is over the chat.
+- **Media Foundation at startup** (`CallPanel.qml`, `DesktopLink.qml`).
+  - Both files read `Camera.hasCamera` in bindings outside a call. The
+    first read lists the cameras, which starts Media Foundation. (Pass 2
+    made the list lazy; these readers came later.)
+  - Both now read it in a call only. Startup logs no `[camera] listed`, and
+    there are 87 fewer handles.
+- **The Settings memory** (below).
+
+### 2. The Settings memory: root cause
+
+**Measurement.** Ten opens with the dialog made per open, on stock Qt,
+under the tracer:
+
+- private bytes grew 44 MB;
+- the heap grew 8.9 MB, almost all in the window's batch renderer:
+  `QD3D11Buffer::create` from `uploadBatch` +3.6 MB, and queued
+  `updateDynamicBuffer` copies +2.8 MB;
+- write-combined memory, the driver's copies of the same buffers, grew
+  10.4 MB;
+- the rest of the growth is in the driver;
+- QML objects were freed every time (pass 2's counts).
+
+**The cause** is Qt Quick's batch renderer (`qsgbatchrenderer.cpp`):
+
+- Every batch that is no longer needed goes to `m_batchPool`, with its
+  vertex, index and uniform buffers, for reuse.
+- A reused batch grows its buffers to fit (`unmap` calls `setSize` when
+  larger, never smaller). After four changes a buffer turns Dynamic, which
+  adds a CPU shadow copy and driver write-combined memory.
+- Nothing frees the pool while the window lives.
+  `QQuickWindow::releaseResources()` on a shown window reaches
+  `Renderer::releaseCachedResources()`, which frees samplers and upload
+  pools but not the pooled batches.
+
+How that plays out:
+
+- A dialog opened once leaves its batches in the pool.
+- Each new instance lays out its batches differently, so the pooled
+  buffers keep growing to the largest content they ever held.
+- The growth is large at first and then slows. Over 30 cycles it was
+  +14.5 MB for the first open, ~1.6 MB an open up to the tenth, and ~0.4
+  after that.
+- Native-text glyph caches behave the same way: a font engine's cache goes
+  only on a font database change (`pendingFontUpdate`).
+- Pass 2's mitigation kept the dialog once made, so the same nodes came
+  back and reused their batches exactly. That is why it worked.
+
+**Fix.** A two-line Qt patch (`patches/qt/0001-...patch`, part of the custom
+Qt below):
+
+- `Renderer::releaseCachedResources()` also wipes the pooled batches;
+- the threaded render loop's release also drops the glyph caches of font
+  engines that no text uses.
+
+The app asks for the release:
+
+- `LazyPopup` calls `DesktopShell.releaseGraphicsSoon()` when it lets a
+  popup go. The call is debounced to at most once every 30 s, since a
+  release also drops the renderer's pipelines.
+- `hideToTray` releases before hiding.
+- Settings is made per open again (`Shell.qml`, no `keep`).
+
+| fixture, ws / private MB              | start         | after 1 open + close (+35 s) | after 11 opens (+35 s) |
+| ------------------------------------- | ------------- | ---------------------------- | ---------------------- |
+| before (stock Qt, Settings kept)      | 181.1 / 204.6 | 196.1 / 216.9 (+12.3)        | 208.8 / 230.3 (+25.7)  |
+| after (patched Qt, Settings per open) | 168.7 / 189.7 | 173.9 / 195.3 (+5.6)         | 183.9 / 205.7 (+16.0)  |
+
+About 1 MB an open is left, and it is outside Qt:
+
+- the GPU driver keeps the write-combined memory of freed buffers in its
+  own pools (14 MB grew to 23 MB, and it stays);
+- the heap fragments.
+
+Pass 2's "kept" mitigation was not flat on this build either: +13.4 MB over
+ten reopens.
+
+### 3. Exe size
+
+| step                                                                                                                      | exe                                                     |
+| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| before                                                                                                                    | 82,952,704 B (79.11 MiB)                                |
+| Rust `opt-level = "s"`, with the per-frame crates at 3 (audio, RNNoise, resampling, segmentation, decoders, capture)      | 73.0 MiB (Rust 19.2 to 14.4 MiB; yap_core 6.15 to 4.02) |
+| cold QML compiled to bytecode only (Settings, Admin, Shop, Panels, Apps, Friends, Join, SignIn, Boot and 23 Shell popups) | 71.1 MiB (QML 8.6 to 6.7 MiB)                           |
+| the custom Qt (`-optimize-size`, without OpenGL, FreeType, Widgets, D-Bus, SQL or FFmpeg)                                 | Qt and the rest 29.2 to 21.8 MiB                        |
+| no libaom AV1 encoder (webrtc-sys patch)                                                                                  | libwebrtc 16.2 to 12.8 MiB                              |
+| **after**                                                                                                                 | **62,895,104 B (59.98 MiB)**                            |
+
+- **Rust at "s".**
+  - The top-level `opt-level = "s"` also compiles the QML C++ at `/O1`,
+    since `cc` takes its level from the crate it builds for.
+  - With thin LTO, the final crate's level re-optimizes every module. The
+    hot crates therefore keep 3 before LTO but run the LTO stage at "s".
+  - RNNoise is 0.5 % of a core and the background blur ~3 %, so a 10–20 %
+    slowdown there would not show at the process level. Neither was
+    re-measured: there was no call and no camera this session.
+- **Bytecode-only QML.**
+  - It runs through the interpreter and the JIT (after 3 calls) instead of
+    compiled C++.
+  - It was applied only to screens and popups that open now and then. The
+    chat, sidebars, rail, composer, calls and shared components stay
+    compiled.
+  - After the change I opened and screenshotted Settings, the profile
+    editor, the emoji and GIF pickers and the menus.
+- **Encoders left in.**
+  - The VP9 encoder was tried and left in: other code still links it, so
+    removing it saved only 55 KB.
+  - OpenH264 stays, because hardware shares need some factory to advertise
+    H.264.
+
+### 4. The tray
+
+- `hideToTray` now releases the spare scene-graph memory before hiding. On
+  the fixture, 60 s after hiding, private went from 190.4 to 188.0 MB.
+- I also tried dropping the whole scene graph on hide
+  (`setPersistentSceneGraph(false)`). It saved 6.8 MB in the tray, but
+  shown again the process sat 17 MB above where it started: the rebuild
+  allocates while the freed memory sits in the heap and the driver's pools.
+  It was not kept.
+
+## Before and after (pass 3)
+
+| metric                                                          | before                           | after                                                                   |
+| --------------------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------- |
+| fixture idle ws / private (4 runs each, alternating A/B)        | 180.6 / 203.4 MB                 | **169.2 / 189.4 MB** (−11.4 / −14.0)                                    |
+| owner account idle in #general (one run each, A then B)         | 220.9 / 241.6 MB                 | **205.8 / 223.6 MB** (−15.1 / −18.0)                                    |
+| owner account, this morning, before another agent's video posts | 153.5 / 168.6 MB (baseline only) | n/a                                                                     |
+| handles at idle (fixture)                                       | 1,079                            | 992 (no Media Foundation)                                               |
+| process heap committed / allocated (fixture)                    | 115 / 96 MB                      | 105 / 92 MB                                                             |
+| JS engine stacks committed                                      | 6.3 MB                           | 1.8 MB                                                                  |
+| Settings, first open, kept after close                          | +12.3 MB                         | +5.6 MB                                                                 |
+| Settings, ten more opens                                        | +13.4 MB                         | +10.4 MB                                                                |
+| exe                                                             | 82,952,704 B (79.11 MiB)         | **62,895,104 B (59.98 MiB)**                                            |
+| first frame, fixture (4 runs)                                   | 746–966 ms                       | 641–948 ms (noise; the Qt build ran on the same machine for part of it) |
+| idle CPU (fixture, displays asleep)                             | 0.05–0.10 %                      | 0.00–0.05 %                                                             |
+
+The two owner-account runs were taken minutes apart, in the same channel
+state: #general showed two video previews that another agent had posted
+that morning. The morning baseline is listed to show how much the content
+moves the number.
+
+## Targets
+
+1. **Idle memory under 120 MB: not reached.** It is 205.8 / 223.6 MB on the
+   owner account in its current state, and 169.2 / 189.4 MB on the fixture.
+   What it would take, largest first:
+   - **The QML engine (~25 MB).** Every QML type referenced from an inline
+     `sourceComponent` is compiled and linked at startup, even when it is
+     never made. Loading the cold screens by URL would keep their
+     compilation units, property caches and types out until first use.
+   - **The GPU driver (~28 MB of write-combined and private memory on this
+     NVIDIA card).** It needs fewer dynamic buffers, which means batch
+     renderer changes in Qt.
+   - **The heap's own slack:** 12 MB at idle, even with the segment heap.
+   - **Smaller per-message state in the core:** `Message` is ~1.5 KB
+     inline.
+   - **Fonts loaded straight from uncompressed resources.** This saves
+     2 MB private but adds 0.78 MB to the exe, which does not fit under
+     60 MiB yet.
+   - **A newer Qt (6.8+):** a DirectWrite font database and the QML
+     engine's memory work. It is a migration in its own right.
+2. **Exe under 60 MB: reached, at 59.98 MiB (62.9 decimal MB), with no
+   margin.** More would come from, cheapest first:
+   - a Qt rebuild with `-no-feature-http2` and the other network features
+     the app does not use;
+   - bytecode-only for more QML;
+   - fewer `symphonia` formats;
+   - `panic = "abort"`, which is a behaviour change: a panic in a tokio
+     task would end the process.
+3. **The Settings memory: found and fixed** (above). The ~1 MB an open that
+   remains is the GPU driver's pooling, outside the app and Qt.
+4. **Focused animated idle under 3 %: not measured.**
+   - The displays slept all session. With presents paced at 4 Hz, neither
+     the render rate nor its cost is the real one.
+   - The animated fixture scene (a GIF rail icon and two chat GIFs) is
+     ready for it.
+   - The likely next step, from pass 2's numbers: chat GIF tiles still run
+     on `AnimatedImage`'s own QMovie clock, off the shared 30 Hz grid, so a
+     visible chat GIF adds renders of its own. A streaming GIF decoder on
+     the grid, decoding one frame at a time instead of every frame up
+     front, would fold them in.
+5. **1440p60 share with NVENC: not measured.** It needs awake displays and
+   both test accounts in a call, and the owner account was busy.
+
+## Files
+
+Source (worktree `native/perf3`):
+
+- C++:
+  - `cpp/heaptrace.cpp` and `cpp/heaptrace.h` (new);
+  - `cpp/main.cpp`, `cpp/desktopshell.cpp`, `cpp/desktopshell.h`;
+  - `cpp/app.manifest`, `CMakeLists.txt`.
+- QML (5 files):
+  - `components/LazyPopup.qml`;
+  - `screens/Shell/ChatView.qml`, `screens/Shell/Shell.qml`;
+  - `screens/Shell/CallPanel.qml`, `screens/Shell/DesktopLink.qml`.
+- Rust and build:
+  - `rust/Cargo.toml`, `rust/Cargo.lock`, `rust/build.rs`;
+  - `rust/crates/yap-core/src/fixture.rs`;
+  - `build.ps1`, `.gitignore`.
+- Patches (docs/LIBRARIES.md §13):
+  - `patches/vendor.ps1`;
+  - `patches/qt-build-utils/`, `patches/webrtc-sys/`, `patches/qt/`.

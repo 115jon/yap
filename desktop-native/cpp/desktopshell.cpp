@@ -241,6 +241,17 @@ DesktopShell::DesktopShell(QObject* parent)
   m_saveTimer.setSingleShot(true);
   m_saveTimer.setInterval(kSaveDebounceMs);
   connect(&m_saveTimer, &QTimer::timeout, this, &DesktopShell::saveNow);
+  m_releaseTimer.setSingleShot(true);
+  m_releaseTimer.setInterval(1500);
+  connect(&m_releaseTimer, &QTimer::timeout, this, [this] {
+    // Only a shown window: Qt releases nothing for a hidden one whose scene
+    // graph persists (hideToTray releases before it hides).
+    if (m_window && m_window->isVisible() && m_window->isExposed()) {
+      m_window->releaseResources();
+      m_lastRelease.start();
+      std::fprintf(stderr, "[window] released spare graphics memory\n");
+    }
+  });
   connect(qApp, &QCoreApplication::aboutToQuit, this, [this] {
     std::fprintf(stderr, "[quit] aboutToQuit\n");
     // The session ending (WM_ENDSESSION) quits without quit(): the window
@@ -571,11 +582,30 @@ void DesktopShell::reveal()
   SetForegroundWindow(hwnd);
 }
 
+void DesktopShell::releaseGraphicsSoon()
+{
+  // At most every 30 s: a release also drops the renderer's pipelines, so
+  // the next frame rebuilds them (a few ms), and tooltips come and go often.
+  constexpr qint64 kEveryMs = 30000;
+  if (m_releaseTimer.isActive())
+    return;
+  const qint64 since = m_lastRelease.isValid() ? m_lastRelease.elapsed() : kEveryMs;
+  m_releaseTimer.start(int(qMax<qint64>(1500, kEveryMs - since)));
+}
+
 void DesktopShell::hideToTray()
 {
   saveNow();
-  if (m_window)
+  if (m_window) {
+    // While it is still shown: hidden, its persistent scene graph keeps all
+    // of it (the pooled batches, glyph caches, pixmaps) until it shows again.
+    m_releaseTimer.stop();
+    if (m_window->isExposed())
+      m_window->releaseResources();
+    // (Not the whole scene graph: dropping it on hide saved ~7 MB in the
+    // tray and cost ~17 MB more once shown again; docs/PERFORMANCE.md.)
     m_window->hide();
+  }
   std::fprintf(stderr, "[window] closed to tray\n");
 }
 

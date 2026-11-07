@@ -13,14 +13,17 @@ QtObject {
     readonly property var listen: (JSON.parse(Apps.state || "{}").listen) ?? ({})
     readonly property bool hasMedia: inCall && (listen.now ?? null) !== null
     readonly property bool mediaPaused: listen.paused === true
+    // Read in a call only (the toolbar shows only then): the first read
+    // lists the cameras, which starts Media Foundation.
+    readonly property bool hasCamera: inCall && Camera.hasCamera
 
     function syncToolbar() {
-        Thumbbar.sync(root.inCall, Camera.hasCamera, Voice.cameraOn || Voice.cameraWanted,
+        Thumbbar.sync(root.inCall, root.hasCamera, Voice.cameraOn || Voice.cameraWanted,
                       Audio.inputIds.length > 0, Voice.muted || Voice.deafened, Voice.deafened,
                       root.hasMedia, root.mediaPaused)
     }
 
-    readonly property string toolbarKey: [inCall, Camera.hasCamera, Voice.cameraOn || Voice.cameraWanted,
+    readonly property string toolbarKey: [inCall, hasCamera, Voice.cameraOn || Voice.cameraWanted,
         Audio.inputIds.length > 0, Voice.muted, Voice.deafened, hasMedia, mediaPaused].join()
     onToolbarKeyChanged: syncToolbar()
     Component.onCompleted: syncToolbar()
