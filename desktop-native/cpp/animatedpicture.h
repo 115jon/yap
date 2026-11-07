@@ -33,6 +33,8 @@
 
 #include <memory>
 
+class QBuffer;
+class QImageReader;
 class QNetworkAccessManager;
 
 struct AnimationData
@@ -42,6 +44,12 @@ struct AnimationData
   // How many times it plays; 0 is forever.
   int loops = 0;
   qsizetype bytes = 0;
+  // A streamed GIF (`AnimatedPicture.stream`): the file itself, its size
+  // and frame count; `frames` stays empty and each item decodes its own
+  // frame as it plays.
+  QByteArray raw;
+  QSize rawSize;
+  int rawFrames = 0;
 };
 using AnimationPtr = std::shared_ptr<const AnimationData>;
 
@@ -56,9 +64,10 @@ public:
   AnimationPtr find(const QString& key);
   bool failed(const QString& key) const { return m_failed.contains(key); }
   // Starts loading `url` for a `box`-sized key unless it is cached or on
-  // its way; `loaded(key)` follows.
+  // its way; `loaded(key)` follows. `raw`: a GIF is kept as its file (a
+  // streamed item decodes it), anything else decodes as usual.
   void request(QNetworkAccessManager* network, const QUrl& url, QSize box,
-               const QString& key);
+               const QString& key, bool raw = false);
 
 signals:
   void loaded(const QString& key);
@@ -73,6 +82,8 @@ private:
   QSet<QString> m_pending;
   QSet<QString> m_failed;
   qsizetype m_bytes = 0;
+  // The part of m_bytes that is streamed GIF files.
+  qsizetype m_rawBytes = 0;
 };
 
 // Whether `item` shows any part of itself: inside its window and every
@@ -122,11 +133,16 @@ class AnimatedPicture : public QQuickItem
   Q_PROPERTY(int frameCount READ frameCount NOTIFY statusChanged)
   // The last loop ended (a play-once effect rests on its last frame).
   Q_PROPERTY(bool finished READ finished NOTIFY finishedChanged)
+  // A GIF is decoded one frame at a time as it plays (chat GIFs): the item
+  // holds the file and the frame on screen, never every frame. Frames land
+  // on the shared grid like the others. Other formats decode as usual.
+  Q_PROPERTY(bool stream READ stream WRITE setStream NOTIFY streamChanged)
 
 public:
   enum FillMode { PreserveAspectFit, PreserveAspectCrop, Stretch };
   Q_ENUM(FillMode)
-  enum Status { Null, Loading, Ready, Error };
+  // Image.Status's order, so QML can compare either with Image.Ready.
+  enum Status { Null, Ready, Loading, Error };
   Q_ENUM(Status)
 
   explicit AnimatedPicture(QQuickItem* parent = nullptr);
@@ -141,7 +157,9 @@ public:
   int loops() const { return m_loops; }
   void setLoops(int loops);
   Status status() const { return m_status; }
-  int frameCount() const { return m_anim ? int(m_anim->frames.size()) : 0; }
+  int frameCount() const;
+  bool stream() const { return m_stream; }
+  void setStream(bool stream);
   bool finished() const { return m_finished; }
 
   // Back to the first frame and play again (a replayed effect).
@@ -156,6 +174,7 @@ signals:
   void loopsChanged();
   void statusChanged();
   void finishedChanged();
+  void streamChanged();
 
 protected:
   QSGNode* updatePaintNode(QSGNode* old, UpdatePaintNodeData*) override;
@@ -176,6 +195,10 @@ private:
   bool shouldRun() const;
   void watchWindow(QQuickWindow* window);
   int playCount() const;
+  int delayOf(int frame) const;
+  // Streamed: the next frame into m_current; false at the end of the file.
+  bool decodeNext();
+  bool openStream();
 
   QUrl m_source;
   bool m_playing = false;
@@ -194,5 +217,12 @@ private:
   qint64 m_due = 0;
   QTimer m_timer;
   QPointer<QQuickWindow> m_window;
+  bool m_stream = false;
+  // Streamed: the reader over m_anim->raw, the frame it read last and that
+  // frame's delay.
+  std::unique_ptr<QBuffer> m_buffer;
+  std::unique_ptr<QImageReader> m_reader;
+  QImage m_current;
+  int m_currentDelay = 100;
   QMetaObject::Connection m_frameWatch;
 };

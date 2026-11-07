@@ -7,11 +7,19 @@
 //!
 //! It runs on ONNX Runtime 1.24 (the DirectML build), loaded at run time
 //! from the app's `segmentation` folder (`onnxruntime.dll`,
-//! `selfie_segmenter.onnx`; `YAP_SEGMENTATION_DIR` overrides it): DirectML
-//! on the GPU when it registers, ONNX Runtime's CPU provider otherwise
-//! (`YAP_SEGMENT_CPU=1` forces it). DirectML is the system's (Windows 10
-//! 1903 and later ship it in System32); a `DirectML.dll` in the folder wins
-//! if one is there. Windows also ships an `onnxruntime.dll` of its own
+//! `selfie_segmenter.onnx`; `YAP_SEGMENTATION_DIR` overrides it), on ONNX
+//! Runtime's CPU provider. `YAP_SEGMENT_GPU=1` runs it on DirectML instead
+//! (the CPU provider when DirectML does not register). DirectML is the
+//! system's (Windows 10 1903 and later ship it in System32); a
+//! `DirectML.dll` in the folder wins if one is there.
+//!
+//! Why the CPU by default (docs/PERFORMANCE.md, pass 4): this model is
+//! small (256x256), so DirectML saved no CPU at all. Process CPU with a
+//! blurred 720p30 camera was 9.7 s per 25 s on DirectML against 9.0 s on the
+//! CPU (its D3D12 submission and driver threads cost more than the
+//! inference), while DirectML added ~330 MB of private memory while it ran
+//! (~100 MB on the CPU) and kept ~93 MB after the camera stopped and the
+//! session was dropped (~21 MB on the CPU). Windows also ships an `onnxruntime.dll` of its own
 //! (Windows ML's), so ours is loaded by full path before anything asks for
 //! it by name.
 
@@ -128,8 +136,10 @@ fn session(model: &Path, gpu: bool) -> Result<Session, String> {
             .with_execution_providers([DirectML::default().build().error_on_failure()])
             .map_err(|e| e.to_string())?
     } else {
+        // No arena: a 256x256 model needs a few MB of tensors, and the
+        // arena kept its high-water mark for the session's life.
         builder
-            .with_execution_providers([CPU::default().build()])
+            .with_execution_providers([CPU::default().with_arena_allocator(false).build()])
             .map_err(|e| e.to_string())?
     };
     builder.commit_from_file(model).map_err(fail)
@@ -145,9 +155,10 @@ impl OrtSegmenter {
             return Err(format!("no model at {}", model.display()));
         }
         runtime(&dir)?;
-        // `YAP_SEGMENT_CPU=1`: the CPU provider, as on a machine whose
-        // DirectML is missing or too old (tests and comparisons).
-        let gpu = !std::env::var("YAP_SEGMENT_CPU").is_ok_and(|v| v == "1");
+        // `YAP_SEGMENT_GPU=1`: DirectML (comparisons; see the module docs).
+        // `YAP_SEGMENT_CPU=1`, the old switch, still forces the CPU.
+        let gpu = std::env::var("YAP_SEGMENT_GPU").is_ok_and(|v| v == "1")
+            && !std::env::var("YAP_SEGMENT_CPU").is_ok_and(|v| v == "1");
         match session(&model, gpu) {
             Ok(session) => Ok(Self {
                 session,

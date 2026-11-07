@@ -11,6 +11,7 @@
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QIcon>
+#include <QtGui/QSurfaceFormat>
 #include <QtGui/QWindow>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkDiskCache>
@@ -359,6 +360,14 @@ int main(int argc, char* argv[])
     qputenv("QV4_JS_MAX_STACK_SIZE", QByteArray::number(1024 * 1024));
   if (!qEnvironmentVariableIsSet("QV4_GC_MAX_STACK_SIZE"))
     qputenv("QV4_GC_MAX_STACK_SIZE", QByteArray::number(512 * 1024));
+  // YAP_DEBUG_NO_VSYNC=1 (measurements): presents never wait for the
+  // compositor, so a run on a sleeping display (DWM pacing presents at
+  // ~4 Hz) still renders every frame the content asks for.
+  if (qEnvironmentVariableIntValue("YAP_DEBUG_NO_VSYNC") != 0) {
+    QSurfaceFormat format = QSurfaceFormat::defaultFormat();
+    format.setSwapInterval(0);
+    QSurfaceFormat::setDefaultFormat(format);
+  }
   QGuiApplication app(argc, argv);
   // A second launch shows the first instance's window and exits.
   if (!first) {
@@ -465,6 +474,10 @@ int main(int argc, char* argv[])
     // Main.qml leaves the window hidden, so the first paint is already
     // captionless. The shell restores the saved rect and shows it (or
     // keeps it in the tray on an autostart launch with start minimized).
+    // YAP_DEBUG_NO_ACTIVATE=1 (test runs): every show leaves the focus
+    // where it is (Qt's SW_SHOWNOACTIVATE switch).
+    if (qEnvironmentVariableIntValue("YAP_DEBUG_NO_ACTIVATE") != 0)
+      window->setProperty("_q_showWithoutActivating", true);
     chrome->attach(window);
     thumbbar->attach(window);
     // Deep links: our own yap-native:// (registered per user where it
@@ -505,6 +518,31 @@ int main(int argc, char* argv[])
       dumpObjectCounts(engine);
     });
     dump->start(every * 1000);
+  }
+
+  // YAP_DEBUG_SOAK_TRAY=N (diagnostics, the soak in docs/PERFORMANCE.md):
+  // every N seconds the window goes to the tray, and 20 s later it comes
+  // back without taking the focus. Shown, it is told it is active (a posted
+  // WM_ACTIVATE to itself) so animations play as in front.
+  if (const int every = qEnvironmentVariableIntValue("YAP_DEBUG_SOAK_TRAY"); every > 0) {
+    auto* cycle = new QTimer(&app);
+    QObject::connect(cycle, &QTimer::timeout, &app, [&engine, shell] {
+      auto* window = engine.rootObjects().isEmpty()
+                       ? nullptr
+                       : qobject_cast<QQuickWindow*>(engine.rootObjects().first());
+      if (!window || !window->isVisible())
+        return;
+      shell->hideToTray();
+      QTimer::singleShot(20000, window, [window] {
+        window->setProperty("_q_showWithoutActivating", true);
+        window->show();
+#ifdef Q_OS_WIN
+        PostMessageW(reinterpret_cast<HWND>(window->winId()), WM_ACTIVATE, WA_ACTIVE, 0);
+#endif
+        std::fprintf(stderr, "[soak] shown from the tray\n");
+      });
+    });
+    cycle->start(qMax(every, 30) * 1000);
   }
 
   if (heaptrace::active()) {

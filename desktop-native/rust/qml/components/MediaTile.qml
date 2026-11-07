@@ -64,25 +64,19 @@ Rectangle {
         active: root.animated
         anchors.fill: parent
         anchors.margins: 1
-        sourceComponent: AnimatedImage {
+        // AnimatedPicture, not AnimatedImage: its frames land on the grid
+        // the decorations and icons share, so GIFs on screen share renders
+        // instead of each asking on its own QMovie clock. `stream` decodes
+        // one frame at a time as it plays (as a browser does), holding the
+        // file and the frame on screen, never every frame. It plays only
+        // while the app is in front and the tile is on screen (a row in the
+        // list's cache buffer is not; the web pauses offscreen GIFs too).
+        sourceComponent: AnimatedPicture {
             id: anim
-            asynchronous: true
-            // Frames decode as they show (as a browser does): cached, every
-            // frame of every GIF stays in memory for as long as its row
-            // lives, pooled rows included (tens of MB per GIF).
-            cache: false
+            stream: true
             source: root.item.url
-            fillMode: root.fill ? Image.PreserveAspectCrop : Image.PreserveAspectFit
-            // Only while the app is in front (unfocused, hidden or
-            // minimised, a GIF holds its frame, as decorations do) and the
-            // tile is on screen (a row in the list's cache buffer is not;
-            // the web pauses offscreen GIFs too).
-            playing: root.visible && status === AnimatedImage.Ready
-                && Qt.application.state === Qt.ApplicationActive && seen.inView
-            ViewportWatch {
-                id: seen
-                anchors.fill: parent
-            }
+            fillMode: root.fill ? AnimatedPicture.PreserveAspectCrop : AnimatedPicture.PreserveAspectFit
+            playing: root.visible
             onStatusChanged: root.learn(anim)
         }
     }

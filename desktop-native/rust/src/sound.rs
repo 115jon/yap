@@ -159,6 +159,11 @@ fn play_custom(id: String, group: &'static str, max_voices: usize, volume: u8) {
     }
 }
 
+fn null_speaker() -> bool {
+    static NULL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *NULL.get_or_init(|| std::env::var("YAP_NULL_SPEAKER").is_ok_and(|v| v == "1"))
+}
+
 fn start(sound: Sound, volume: u8, custom: bool) {
     if volume == 0 {
         return;
@@ -169,7 +174,9 @@ fn start(sound: Sound, volume: u8, custom: bool) {
         if !lock().gate.allow(sound, Instant::now()) {
             return;
         }
-        play_custom(id.to_owned(), spec.group, spec.max_voices, volume);
+        if !null_speaker() {
+            play_custom(id.to_owned(), spec.group, spec.max_voices, volume);
+        }
         return;
     }
     let samples = {
@@ -185,6 +192,10 @@ fn start(sound: Sound, volume: u8, custom: bool) {
                 .or_insert_with(|| Arc::new(pcm(sound, volume))),
         )
     };
+    // YAP_NULL_SPEAKER=1 (test runs): the sounds play to no device either.
+    if null_speaker() {
+        return;
+    }
     let spec = sound.spec();
     let spawned = std::thread::Builder::new()
         .name("yap-sound".into())

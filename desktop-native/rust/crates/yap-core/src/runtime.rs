@@ -250,6 +250,8 @@ pub struct Runner {
     /// Answers requests locally instead of the network (`YAP_FIXTURE`).
     fixture: Option<Fixture>,
     fixture_serial: u64,
+    /// The soak fixture's traffic, from its gateway connect.
+    soak: Option<JoinHandle<()>>,
     /// The local player, once an `Audio` effect started it.
     audio: Option<AudioHandle>,
     /// Where the snapshot cache lives; `None` runs without one.
@@ -284,6 +286,7 @@ impl Runner {
             batch: Vec::new(),
             fixture: None,
             fixture_serial: 0,
+            soak: None,
             audio: None,
             cache_path: None,
             cache: None,
@@ -332,10 +335,19 @@ impl Runner {
             // The fixture never reads or writes the snapshot cache.
             Effect::LoadSnapshot => self.send(Input::SnapshotLoaded(None)),
             Effect::LoadCatalog => self.send(Input::CatalogLoaded(None)),
-            Effect::GatewayConnect { session, .. } => self.send(Input::Gateway {
-                session: *session,
-                event: GatewayEvent::Ready,
-            }),
+            Effect::GatewayConnect { session, .. } => {
+                self.send(Input::Gateway {
+                    session: *session,
+                    event: GatewayEvent::Ready,
+                });
+                if fixture == Fixture::Soak {
+                    if let Some(old) = self.soak.take() {
+                        old.abort();
+                    }
+                    let soak = crate::fixture::soak::run(self.inbox.clone(), *session);
+                    self.soak = Some(tokio::spawn(soak));
+                }
+            }
             Effect::VoiceStart { call, target, .. } => {
                 let me = VoiceMember {
                     id: "fixture-me".into(),

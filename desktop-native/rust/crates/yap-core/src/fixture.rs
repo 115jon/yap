@@ -3,6 +3,15 @@
 //! messages (varied lengths, authors and grouping) and one voice channel.
 //! The keyring, the gateway and voice are never touched. Off unless the
 //! variable is set.
+//!
+//! `YAP_FIXTURE=soak` is the long-run memory fixture (docs/PERFORMANCE.md,
+//! pass 4): four text channels of 400 messages, and a driver ([`soak`])
+//! that replays gateway traffic at speed (messages with GIFs, pictures and
+//! embeds, edits, deletes, reactions, typing, presence, voice rosters) and
+//! switches channels. `YAP_FIXTURE_MEDIA=<http base>` serves the avatars
+//! and media from a local server (`tools/p4/media-server.mjs`).
+
+pub mod soak;
 
 use yap_protocol::rest::{
     Attachment, Category, Channel, ChannelType, ChannelsResponse, GifPage, Member, Message,
@@ -22,6 +31,7 @@ const START: &str = "2026-01-05T09:00:00.000Z";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fixture {
     Chat10k,
+    Soak,
 }
 
 impl Fixture {
@@ -31,6 +41,7 @@ impl Fixture {
         match name.trim() {
             "" => None,
             "chat-10k" => Some(Self::Chat10k),
+            "soak" => Some(Self::Soak),
             other => {
                 eprintln!("[fixture] unknown YAP_FIXTURE={other}; using the network");
                 None
@@ -41,6 +52,15 @@ impl Fixture {
     pub fn message_count(self) -> usize {
         match self {
             Self::Chat10k => 10_000,
+            Self::Soak => 400,
+        }
+    }
+
+    /// The text channels it serves, first one opened at launch.
+    pub fn text_channels(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Self::Chat10k => &[(TEXT, "general")],
+            Self::Soak => SOAK_TEXT,
         }
     }
 
@@ -70,16 +90,18 @@ impl Fixture {
                 show_source_in_shares: None,
                 allow_share_indexing: None,
             }]),
-            ApiRequest::Channels { .. } => ApiResponse::Channels(channels()),
+            ApiRequest::Channels { .. } => ApiResponse::Channels(channels(self)),
             // All of it on the first page, so a scroll test has the whole
             // channel at once.
             ApiRequest::Messages {
                 channel_id,
                 before: None,
-            } if channel_id == TEXT => ApiResponse::Messages(Page {
-                messages: messages(self.message_count()),
-                has_more_before: false,
-            }),
+            } if self.text_channels().iter().any(|(id, _)| id == channel_id) => {
+                ApiResponse::Messages(Page {
+                    messages: messages_in(self.message_count(), channel_id),
+                    has_more_before: false,
+                })
+            }
             ApiRequest::Messages { .. } => ApiResponse::Messages(Page {
                 messages: Vec::new(),
                 has_more_before: false,
@@ -173,12 +195,23 @@ impl Fixture {
     }
 }
 
-fn user(id: &str, username: &str, display_name: Option<&str>) -> User {
+/// `YAP_FIXTURE_MEDIA`: the local media server's base URL, if one is set.
+pub(crate) fn media_base() -> Option<String> {
+    std::env::var("YAP_FIXTURE_MEDIA")
+        .ok()
+        .map(|base| base.trim_end_matches('/').to_owned())
+        .filter(|base| !base.is_empty())
+}
+
+pub(crate) fn user(id: &str, username: &str, display_name: Option<&str>) -> User {
     User {
         id: id.into(),
         username: username.into(),
         display_name: display_name.map(Into::into),
-        avatar_url: None,
+        // With a media server, everyone but "me" has a picture.
+        avatar_url: media_base()
+            .filter(|_| id != ME)
+            .map(|base| format!("{base}/av/{username}.png")),
         avatar_display: None,
         status: None,
         custom_status: None,
@@ -186,7 +219,15 @@ fn user(id: &str, username: &str, display_name: Option<&str>) -> User {
     }
 }
 
-fn channels() -> ChannelsResponse {
+/// The soak fixture's text channels.
+pub const SOAK_TEXT: &[(&str, &str)] = &[
+    (TEXT, "general"),
+    ("chan_fixture_media", "media"),
+    ("chan_fixture_dev", "dev"),
+    ("chan_fixture_random", "random"),
+];
+
+fn channels(fixture: Fixture) -> ChannelsResponse {
     let channel = |id: &str, name: &str, kind, category: &str| Channel {
         id: id.into(),
         server_id: Some(SERVER.into()),
@@ -207,10 +248,12 @@ fn channels() -> ChannelsResponse {
         rank,
     };
     ChannelsResponse {
-        channels: vec![
-            channel(TEXT, "general", ChannelType::Text, "cat_fixture_text"),
-            channel(VOICE, "lounge", ChannelType::Voice, "cat_fixture_voice"),
-        ],
+        channels: fixture
+            .text_channels()
+            .iter()
+            .map(|&(id, name)| channel(id, name, ChannelType::Text, "cat_fixture_text"))
+            .chain([channel(VOICE, "lounge", ChannelType::Voice, "cat_fixture_voice")])
+            .collect(),
         categories: vec![
             category("cat_fixture_text", "Text", 0),
             category("cat_fixture_voice", "Voice", 1),
@@ -218,7 +261,7 @@ fn channels() -> ChannelsResponse {
     }
 }
 
-fn blank_message() -> Message {
+pub(crate) fn blank_message() -> Message {
     Message {
         id: String::new(),
         channel_id: String::new(),
@@ -241,17 +284,17 @@ fn blank_message() -> Message {
 }
 
 /// A small deterministic generator (xorshift64*), so runs are comparable.
-struct Rng(u64);
+pub(crate) struct Rng(pub(crate) u64);
 
 impl Rng {
-    fn next(&mut self) -> u64 {
+    pub(crate) fn next(&mut self) -> u64 {
         self.0 ^= self.0 >> 12;
         self.0 ^= self.0 << 25;
         self.0 ^= self.0 >> 27;
         self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
     }
 
-    fn below(&mut self, n: u64) -> u64 {
+    pub(crate) fn below(&mut self, n: u64) -> u64 {
         self.next() % n
     }
 }
@@ -299,7 +342,7 @@ const WORDS: &[&str] = &[
     "merging",
 ];
 
-const AUTHORS: &[(&str, &str, Option<&str>)] = &[
+pub(crate) const AUTHORS: &[(&str, &str, Option<&str>)] = &[
     (ME, "me", Some("Fixture Me")),
     ("user_fixture_alice", "alice", Some("Alice")),
     ("user_fixture_bob", "bob", None),
@@ -308,7 +351,7 @@ const AUTHORS: &[(&str, &str, Option<&str>)] = &[
     ("user_fixture_eli", "eli", Some("Eli")),
 ];
 
-fn sentence(rng: &mut Rng) -> String {
+pub(crate) fn sentence(rng: &mut Rng) -> String {
     // Mostly short lines, some paragraphs, a few walls of text.
     let words = match rng.below(20) {
         0 => 60 + rng.below(140),
@@ -328,7 +371,21 @@ fn sentence(rng: &mut Rng) -> String {
 /// `count` messages, oldest first, in bursts by one author (grouped) with
 /// longer gaps between bursts.
 pub fn messages(count: usize) -> Vec<Message> {
-    let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+    messages_in(count, TEXT)
+}
+
+/// [`messages`] for one channel; each channel has its own history.
+pub fn messages_in(count: usize, channel_id: &str) -> Vec<Message> {
+    let seed = channel_id
+        .bytes()
+        .fold(0x9E37_79B9_7F4A_7C15_u64, |h, b| {
+            if channel_id == TEXT {
+                h
+            } else {
+                (h ^ u64::from(b)).wrapping_mul(0x100_0000_01B3)
+            }
+        });
+    let mut rng = Rng(seed);
     let mut at = parse_rfc3339(START).unwrap_or_default();
     let mut author = 0;
     let mut out = Vec::with_capacity(count);
@@ -358,7 +415,10 @@ pub fn messages(count: usize) -> Vec<Message> {
                 id: Some(format!("att_fixture_{n}")),
                 filename: format!("capture-{n}.png"),
                 content_type: Some("image/png".into()),
-                url: Some("qrc:/app/yap-256.png".into()),
+                url: Some(media_base().map_or_else(
+                    || "qrc:/app/yap-256.png".into(),
+                    |base| format!("{base}/img/{}.png", n % 12),
+                )),
                 size_bytes: Some(1024),
                 ..Attachment::default()
             }]
@@ -366,8 +426,12 @@ pub fn messages(count: usize) -> Vec<Message> {
             Vec::new()
         };
         out.push(Message {
-            id: format!("msg_fixture_{n:05}"),
-            channel_id: TEXT.into(),
+            id: if channel_id == TEXT {
+                format!("msg_fixture_{n:05}")
+            } else {
+                format!("msg_{channel_id}_{n:05}")
+            },
+            channel_id: channel_id.into(),
             author_id: id.into(),
             author: Some(user(id, username, display)),
             content: sentence(&mut rng),

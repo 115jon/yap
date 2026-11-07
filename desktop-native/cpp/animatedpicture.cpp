@@ -40,6 +40,10 @@ namespace {
 // hand theirs back, so this is what browsing leaves behind): enough for
 // the decorations of a few screens, not for a history of GIFs.
 constexpr qsizetype kCacheBudget = 32 * 1024 * 1024;
+// Streamed GIFs' files (chat GIFs): a few screens' worth. A file is cheap
+// to read again from the disk cache, and chat brings new ones all the time
+// (a long soak filled the whole budget above with them, ~30 MB).
+constexpr qsizetype kRawBudget = 4 * 1024 * 1024;
 // A picture larger than this is not an avatar decoration or an effect.
 constexpr qint64 kMaxDownload = 24 * 1024 * 1024;
 // One animation's decoded frames (yap-anim stops at the same size).
@@ -79,6 +83,29 @@ AnimationPtr decodeGif(const QByteArray& bytes, QSize box)
   data->loops = repeats < 0 ? 0 : repeats + 1;
   if (data->frames.isEmpty())
     return nullptr;
+  return data;
+}
+
+// A GIF kept as its file for streamed items: only its size, frame count
+// and loops are read here (QGifHandler scans the blocks, no pixels).
+AnimationPtr scanGif(const QByteArray& bytes)
+{
+  QBuffer buffer;
+  buffer.setData(bytes);
+  buffer.open(QIODevice::ReadOnly);
+  QImageReader reader(&buffer, "gif");
+  const QSize size = reader.size();
+  const int count = reader.imageCount();
+  if (!reader.canRead() || size.isEmpty() || count <= 0)
+    return nullptr;
+  auto data = std::make_shared<AnimationData>();
+  const int repeats = reader.loopCount();
+  data->loops = repeats < 0 ? 0 : repeats + 1;
+  data->raw = bytes;
+  data->rawSize = size;
+  data->rawFrames = count;
+  // The file, plus the frame and the reader's canvas each item holds.
+  data->bytes = bytes.size();
   return data;
 }
 
@@ -162,7 +189,7 @@ AnimationPtr AnimationCache::find(const QString& key)
 }
 
 void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
-                             QSize box, const QString& key)
+                             QSize box, const QString& key, bool raw)
 {
   if (m_entries.contains(key) || m_pending.contains(key) || m_failed.contains(key))
     return;
@@ -178,7 +205,7 @@ void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
             if (received > kMaxDownload)
               reply->abort();
           });
-  connect(reply, &QNetworkReply::finished, this, [this, reply, box, key] {
+  connect(reply, &QNetworkReply::finished, this, [this, reply, box, key, raw] {
     reply->deleteLater();
     if (reply->error() != QNetworkReply::NoError) {
       std::fprintf(stderr, "[anim] %s: %s\n", qPrintable(reply->url().host()),
@@ -190,8 +217,8 @@ void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
     }
     const QByteArray bytes = reply->readAll();
     QPointer<AnimationCache> self(this);
-    QThreadPool::globalInstance()->start([self, bytes, box, key] {
-      AnimationPtr data = decodeBytes(bytes, box);
+    QThreadPool::globalInstance()->start([self, bytes, box, key, raw] {
+      AnimationPtr data = raw && bytes.startsWith("GIF8") ? scanGif(bytes) : decodeBytes(bytes, box);
       QMetaObject::invokeMethod(
         AnimationCache::instance(),
         [self, data, key] {
@@ -211,13 +238,16 @@ void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
 
 void AnimationCache::insert(const QString& key, AnimationPtr data)
 {
-  const QSize size = data->frames.isEmpty() ? QSize() : data->frames.first().size();
+  const QSize size = data->frames.isEmpty() ? data->rawSize : data->frames.first().size();
   std::fprintf(stderr, "[anim] %s: %lld frames at %dx%d, %.1f MB (cache %.1f MB)\n",
                qPrintable(QUrl(key.section(QLatin1Char('|'), 0, 0)).fileName()),
-               static_cast<long long>(data->frames.size()), size.width(), size.height(),
+               static_cast<long long>(data->frames.isEmpty() ? data->rawFrames : data->frames.size()),
+               size.width(), size.height(),
                double(data->bytes) / (1024 * 1024),
                double(m_bytes + data->bytes) / (1024 * 1024));
   m_bytes += data->bytes;
+  if (!data->raw.isEmpty())
+    m_rawBytes += data->bytes;
   m_entries.insert(key, std::move(data));
   m_order.append(key);
   trim();
@@ -227,13 +257,25 @@ void AnimationCache::trim()
 {
   // Entries an item still holds stay alive through its own pointer; the
   // cache only forgets them.
-  while (m_bytes > kCacheBudget && m_order.size() > 1) {
-    const QString oldest = m_order.takeFirst();
-    if (auto it = m_entries.find(oldest); it != m_entries.end()) {
+  auto forget = [this](qsizetype index) {
+    const QString key = m_order.takeAt(index);
+    if (auto it = m_entries.find(key); it != m_entries.end()) {
       m_bytes -= it.value()->bytes;
+      if (!it.value()->raw.isEmpty())
+        m_rawBytes -= it.value()->bytes;
       m_entries.erase(it);
     }
+  };
+  // Streamed files first, oldest first, within their own budget.
+  for (qsizetype i = 0; m_rawBytes > kRawBudget && i < m_order.size() - 1;) {
+    auto it = m_entries.constFind(m_order.at(i));
+    if (it != m_entries.constEnd() && !it.value()->raw.isEmpty())
+      forget(i);
+    else
+      ++i;
   }
+  while (m_bytes > kCacheBudget && m_order.size() > 1)
+    forget(0);
 }
 
 namespace {
@@ -276,6 +318,62 @@ AnimatedPicture::~AnimatedPicture()
   disconnect(m_frameWatch);
 }
 
+void AnimatedPicture::setStream(bool stream)
+{
+  if (m_stream == stream)
+    return;
+  m_stream = stream;
+  emit streamChanged();
+  m_key.clear();
+  load();
+}
+
+int AnimatedPicture::frameCount() const
+{
+  if (!m_anim)
+    return 0;
+  return m_anim->frames.isEmpty() ? m_anim->rawFrames : int(m_anim->frames.size());
+}
+
+int AnimatedPicture::delayOf(int frame) const
+{
+  if (!m_anim)
+    return 100;
+  if (m_anim->frames.isEmpty())
+    return m_currentDelay;
+  return m_anim->delays.value(frame, 100);
+}
+
+bool AnimatedPicture::openStream()
+{
+  m_reader.reset();
+  m_buffer = std::make_unique<QBuffer>();
+  m_buffer->setData(m_anim->raw);
+  m_buffer->open(QIODevice::ReadOnly);
+  m_reader = std::make_unique<QImageReader>(m_buffer.get(), "gif");
+  return decodeNext();
+}
+
+bool AnimatedPicture::decodeNext()
+{
+  if (!m_reader || !m_reader->canRead())
+    return false;
+  QImage frame = m_reader->read();
+  if (frame.isNull())
+    return false;
+  // The GPU scales it as it draws; only a GIF far larger than its tile
+  // (twice over) is scaled down here, so the texture stays small.
+  const qreal dpr = window() ? window()->effectiveDevicePixelRatio() : 1.0;
+  const QSize box(int(std::ceil(width() * dpr)), int(std::ceil(height() * dpr)));
+  if (box.width() > 0 && box.height() > 0 && frame.width() > 2 * box.width() &&
+      frame.height() > 2 * box.height())
+    frame = frame.scaled(frame.size().scaled(box, Qt::KeepAspectRatioByExpanding),
+                         Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+  m_current = std::move(frame);
+  m_currentDelay = qMax(m_reader->nextImageDelay(), 16);
+  return true;
+}
+
 void AnimatedPicture::setSource(const QUrl& source)
 {
   if (m_source == source)
@@ -316,6 +414,8 @@ void AnimatedPicture::restart()
 {
   m_frame = 0;
   m_played = 0;
+  if (m_anim && m_anim->frames.isEmpty())
+    openStream();
   if (m_finished) {
     m_finished = false;
     emit finishedChanged();
@@ -367,7 +467,8 @@ void AnimatedPicture::load()
   auto bucket = [](qreal v) { return (int(std::ceil(v)) + 15) / 16 * 16; };
   const QSize box(bucket(width() * dpr), bucket(height() * dpr));
   const QString key = m_source.toString() + QLatin1Char('|') + QString::number(box.width())
-                      + QLatin1Char('x') + QString::number(box.height());
+                      + QLatin1Char('x') + QString::number(box.height())
+                      + (m_stream ? QStringLiteral("|raw") : QString());
   if (key == m_key && (m_anim || m_status == Loading))
     return;
   m_key = key;
@@ -378,7 +479,7 @@ void AnimatedPicture::load()
   setStatus(Loading);
   QQmlEngine* engine = qmlEngine(this);
   AnimationCache::instance()->request(engine ? engine->networkAccessManager() : nullptr,
-                                      m_source, box, key);
+                                      m_source, box, key, m_stream);
   if (AnimationCache::instance()->failed(key))
     setStatus(Error);
 }
@@ -404,8 +505,19 @@ void AnimatedPicture::onLoaded(const QString& key)
       m_finished = false;
       emit finishedChanged();
     }
+    if (m_anim->frames.isEmpty() && !openStream()) {
+      m_anim.reset();
+      m_reader.reset();
+      m_buffer.reset();
+      setStatus(Error);
+      return;
+    }
   }
-  if (implicitWidth() <= 0 && !m_anim->frames.isEmpty()) {
+  if (m_anim->frames.isEmpty()) {
+    // Streamed: the file's own size, as AnimatedImage reports it.
+    if (implicitWidth() <= 0)
+      setImplicitSize(m_anim->rawSize.width(), m_anim->rawSize.height());
+  } else if (implicitWidth() <= 0) {
     const qreal dpr = window() ? window()->effectiveDevicePixelRatio() : 1.0;
     setImplicitSize(m_anim->frames.first().width() / dpr,
                     m_anim->frames.first().height() / dpr);
@@ -472,7 +584,7 @@ void ViewportWatch::check()
 
 bool AnimatedPicture::shouldRun() const
 {
-  if (!m_playing || !m_anim || m_anim->frames.size() < 2 || m_finished)
+  if (!m_playing || !m_anim || frameCount() < 2 || m_finished)
     return false;
   if (!isVisible() || opacity() <= 0)
     return false;
@@ -504,7 +616,7 @@ void AnimatedPicture::schedule()
   if (!m_timer.isActive()) {
     const qint64 now = animationNow();
     if (m_due == 0)
-      m_due = now + m_anim->delays.value(m_frame, 100);
+      m_due = now + delayOf(m_frame);
     startTimer(now);
   }
 }
@@ -523,7 +635,8 @@ void AnimatedPicture::advance()
     return;
   }
   const qint64 now = animationNow();
-  const int count = int(m_anim->frames.size());
+  const int count = frameCount();
+  const bool streamed = m_anim->frames.isEmpty();
   bool moved = false;
   // Every frame due by now: the slot may come after several.
   for (int skipped = 0; m_due <= now && skipped < count; ++skipped) {
@@ -539,9 +652,16 @@ void AnimatedPicture::advance()
       }
       next = 0;
     }
+    // Streamed: frames are deltas, so each one due is decoded in turn; the
+    // first comes from a fresh reader (also when the file ends early).
+    if (streamed && (next == 0 || !decodeNext())) {
+      next = 0;
+      if (!openStream())
+        break;
+    }
     m_frame = next;
     moved = true;
-    m_due += m_anim->delays.value(m_frame, 100);
+    m_due += delayOf(m_frame);
   }
   if (moved) {
     m_frameDirty = true;
@@ -551,7 +671,7 @@ void AnimatedPicture::advance()
     return;
   // Far behind (a long stall): carry on from now.
   if (m_due <= now)
-    m_due = now + m_anim->delays.value(m_frame, 100);
+    m_due = now + delayOf(m_frame);
   startTimer(now);
 }
 
@@ -596,6 +716,9 @@ void AnimatedPicture::release()
   // asks the cache afresh.
   m_key.clear();
   m_timer.stop();
+  m_reader.reset();
+  m_buffer.reset();
+  m_current = QImage();
   if (m_anim) {
     m_anim.reset();
     update();
@@ -616,7 +739,9 @@ void AnimatedPicture::releaseResources()
 QSGNode* AnimatedPicture::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
 {
   auto* node = static_cast<AnimationNode*>(old);
-  if (!m_anim || m_anim->frames.isEmpty() || width() <= 0 || height() <= 0) {
+  const bool streamed = m_anim && m_anim->frames.isEmpty();
+  if (!m_anim || (streamed ? m_current.isNull() : m_anim->frames.isEmpty()) || width() <= 0 ||
+      height() <= 0) {
     delete node;
     return nullptr;
   }
@@ -625,11 +750,16 @@ QSGNode* AnimatedPicture::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
     return node;
   if (!node)
     node = new AnimationNode(win->createImageNode());
-  node->reset(m_anim.get(), m_anim->frames.size());
-  const int index = qBound(0, m_frame, int(m_anim->frames.size()) - 1);
+  node->reset(m_anim.get(), streamed ? 1 : m_anim->frames.size());
+  const int index = streamed ? 0 : qBound(0, m_frame, int(m_anim->frames.size()) - 1);
   QSGTexture*& texture = node->textures[size_t(index)];
+  if (streamed && texture && m_frameDirty) {
+    // One texture, replaced by each frame (the old one is not drawn again).
+    delete texture;
+    texture = nullptr;
+  }
   if (!texture)
-    texture = win->createTextureFromImage(m_anim->frames.at(index),
+    texture = win->createTextureFromImage(streamed ? m_current : m_anim->frames.at(index),
                                           QQuickWindow::TextureHasAlphaChannel);
   m_frameDirty = false;
   QSGImageNode* image = node->image;

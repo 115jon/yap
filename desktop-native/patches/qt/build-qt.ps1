@@ -3,8 +3,11 @@
 # app uses, optimized for size, with the patches in this folder.
 #
 #   pwsh build-qt.ps1 [-Zip <qt-everywhere-src-6.6.3.zip>] [-Root F:/ct/qt-custom]
+#   pwsh build-qt.ps1 -Version 6.11.3 -Zip <...6.11.3.zip> -Root F:/ct/qt-custom-6.11
 #
-# Output: <Root>/6.6.3-yap (pass it to build.ps1 as -QtDir, or set
+# Patches: *.patch here for 6.6.3, <Version>/*.patch for any other version.
+#
+# Output: <Root>/<Version>-yap (pass it to build.ps1 as -QtDir, or set
 # YAP_QT_DIR). Intermediates: <Root>/src and <Root>/build, removed with
 # -Clean once installed. Needs Visual Studio 2022 (the MSVC the stock
 # static Qt was built with), CMake, Ninja and Python; ~25 GB while it
@@ -20,12 +23,14 @@
 #                             batch renderer's pooled batches and glyph caches
 #                             no text uses (the Settings memory, PERFORMANCE.md)
 param(
-    [string]$Zip = "F:/Files/Downloads/qt/src/qt-everywhere-src-6.6.3.zip",
+    [string]$Version = "6.6.3",
+    [string]$Zip = "F:/Files/Downloads/qt/src/qt-everywhere-src-$Version.zip",
     [string]$Root = "F:/ct/qt-custom",
     [switch]$Clean
 )
 $ErrorActionPreference = "Stop"
-$version = "6.6.3"
+$version = $Version
+$patches = if ($version -eq "6.6.3") { "$PSScriptRoot/*.patch" } else { "$PSScriptRoot/$version/*.patch" }
 $src = "$Root/src/qt-everywhere-src-$version"
 $build = "$Root/build"
 $prefix = "$Root/$version-yap"
@@ -43,7 +48,7 @@ if (-not (Test-Path "$src/qtbase")) {
 if (-not (Test-Path "$src/.yap-patched")) {
     Push-Location $src
     try {
-        foreach ($patch in Get-ChildItem "$PSScriptRoot/*.patch" | Sort-Object Name) {
+        foreach ($patch in Get-ChildItem $patches | Sort-Object Name) {
             git apply --ignore-whitespace -p1 $patch.FullName
             if ($LASTEXITCODE) { throw "failed to apply $($patch.Name)" }
             "applied $($patch.Name)"
