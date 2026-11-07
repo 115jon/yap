@@ -1,9 +1,11 @@
 # Builds YapNative.exe: CMake + Ninja, MSVC from the newest Visual Studio,
 # Qt from -QtDir (a static Qt gives one self-contained .exe).
 param(
-    # The size-optimized, patched static Qt 6.11.3 (patches/qt/build-qt.ps1).
+    # The size-optimized, patched static Qt 6.11.3 (patches/qt/build-qt.ps1);
+    # qt-custom-6.11p6 carries patch 0004 (pass 6), qt-custom-6.11 does not.
     # The stock static Qt 6.6.3 no longer builds the app (QML needs 6.9+).
     [string]$QtDir = $(if ($env:YAP_QT_DIR) { $env:YAP_QT_DIR }
+                       elseif (Test-Path "F:/ct/qt-custom-6.11p6/6.11.3-yap/bin/qmake.exe") { "F:/ct/qt-custom-6.11p6/6.11.3-yap" }
                        elseif (Test-Path "F:/ct/qt-custom-6.11/6.11.3-yap/bin/qmake.exe") { "F:/ct/qt-custom-6.11/6.11.3-yap" }
                        else { throw "No Qt 6.11.3: build it with patches/qt/build-qt.ps1, or pass -QtDir / set YAP_QT_DIR." }),
     [ValidateSet("Release", "RelWithDebInfo", "Debug")]
