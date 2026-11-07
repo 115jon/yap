@@ -67,7 +67,7 @@ Item {
         sequence: "/"
         context: Qt.WindowShortcut
         enabled: root.visible && !ShellState.searchOpen
-            && !(Window.activeFocusItem && "cursorPosition" in Window.activeFocusItem)
+            && !(root.Window.activeFocusItem && "cursorPosition" in root.Window.activeFocusItem)
         onActivated: root.openSearch("")
     }
     Connections {

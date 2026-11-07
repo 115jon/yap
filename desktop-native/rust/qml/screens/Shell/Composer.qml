@@ -521,6 +521,8 @@ Item {
             y: tray.y + tray.height
             height: parent.height - y
             TextArea {
+                // No Qt 6.9+ default edit menu (the web has none of its own).
+                ContextMenu.menu: null
                 id: input
                 focus: true
                 wrapMode: TextArea.Wrap

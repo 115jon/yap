@@ -7,6 +7,8 @@ import com.yap.native
 // 2 px focus outline around it (danger ink while `invalid`), Geist 15, 40 high (48 `large`, 32
 // `small`). `leadingInset` leaves room for a glyph or an "@".
 TextField {
+    // No Qt 6.9+ default edit menu (the web has none of its own).
+    ContextMenu.menu: null
     id: field
 
     property bool large: false

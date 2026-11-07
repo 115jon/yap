@@ -146,6 +146,8 @@ Rectangle {
             visible: false
             spacing: 8
             TextField {
+                // No Qt 6.9+ default edit menu (the web has none of its own).
+                ContextMenu.menu: null
                 id: tokenField
                 Layout.fillWidth: true
                 implicitHeight: 40

@@ -874,6 +874,8 @@ Popup {
                             }
                             HoverHandler { id: promptHover; cursorShape: Qt.IBeamCursor }
                             TextArea {
+                                // No Qt 6.9+ default edit menu (the web has none of its own).
+                                ContextMenu.menu: null
                                 id: prompt
                                 anchors.fill: parent
                                 leftPadding: 10

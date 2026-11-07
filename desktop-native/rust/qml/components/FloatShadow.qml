@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import com.yap.native
 
 // Elevation for floats (tokens.css): shadow-2 `0 8px 24px -6px` at .6 of
@@ -7,9 +8,10 @@ import com.yap.native
 // the first child of the float's opaque background (it draws beneath it at
 // z -1). The radius follows.
 //
-// The blurred shape is a nine-slice made once per style (image://shadow,
-// cpp/shadowprovider.h): no layer and no blur pass, so a float costs no
-// off-screen render to open or redraw (a MultiEffect over a layer did).
+// Qt Quick Effects' RectangularShadow (Qt 6.9): CSS box-shadow's offset,
+// spread and blur, computed in its fragment shader. No layer, no blur pass
+// and no texture, so a float costs no off-screen render to open or redraw.
+// Its blur is the shadow's reach; Qt's docs match CSS at 1.2 x the CSS blur.
 Item {
     id: root
 
@@ -20,28 +22,20 @@ Item {
     readonly property int blur: modal ? 64 : 24
     readonly property int spread: modal ? -12 : -6
     readonly property color color: modal ? Theme.shadow3 : Theme.shadow2
-    // The provider's geometry: the blur's reach (three sigma) and the
-    // corner of the shape, which is the plate (1 px in, as the float's edge
-    // may be translucent) grown by the spread.
-    readonly property int reach: Math.ceil(blur * 1.5)
-    readonly property int corner: Math.max(0, Math.round(radius - 1 + spread))
 
     anchors.fill: parent
     z: -1
     Accessible.ignored: true
 
-    BorderImage {
-        x: 1 - root.spread - root.reach
-        y: 1 - root.spread - root.reach + root.offset
-        width: root.width - 2 + 2 * (root.spread + root.reach)
-        height: root.height - 2 + 2 * (root.spread + root.reach)
+    RectangularShadow {
+        // The plate, 1 px in, as the float's edge may be translucent.
+        anchors.fill: parent
+        anchors.margins: 1
         visible: root.width > 0 && root.height > 0
-        source: "image://shadow/" + root.blur + "/" + root.corner + "/"
-            + Math.round(root.color.r * 255) + "/" + Math.round(root.color.g * 255) + "/"
-            + Math.round(root.color.b * 255) + "/" + Math.round(root.color.a * 255)
-        border.left: root.reach + root.corner
-        border.right: root.reach + root.corner
-        border.top: root.reach + root.corner
-        border.bottom: root.reach + root.corner
+        offset.y: root.offset
+        blur: root.blur * 1.2
+        spread: root.spread
+        radius: Math.max(0, root.radius - 1)
+        color: root.color
     }
 }

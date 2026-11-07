@@ -11,9 +11,11 @@
 param([switch]$Force)
 $ErrorActionPreference = "Stop"
 $crates = [ordered]@{
-    # qmlcachegen's bytecode-only mode for the QML files rust/build.rs names.
+    # qmlcachegen's bytecode-only mode for the QML files rust/build.rs names,
+    # and the .qml files in the resources left empty (DISCARD_QML_CONTENTS).
     "qt-build-utils" = "0.10.0"
-    # No AV1 (libaom) encoder in the encoder factory (exe size).
+    # No AV1 encoder or decoder (exe size); H.264 decoded by Media Foundation,
+    # on the GPU where it can.
     "webrtc-sys"     = "0.3.52"
 }
 $rust = Join-Path $PSScriptRoot "../rust"

@@ -1,0 +1,21 @@
+diff --git a/qtshadertools/tools/qsb/Qt6ShaderToolsMacros.cmake b/qtshadertools/tools/qsb/Qt6ShaderToolsMacros.cmake
+index 27350c8..2426388 100644
+--- a/qtshadertools/tools/qsb/Qt6ShaderToolsMacros.cmake
++++ b/qtshadertools/tools/qsb/Qt6ShaderToolsMacros.cmake
+@@ -129,6 +129,16 @@ function(_qt_internal_add_shaders_impl target resourcename)
+         # GL_OVR_multiview works best starting with these GLSL versions
+         set(multiview_glsl "330,300es")
+ 
++        # Yap patch (desktop-native/patches/qt): configured with
++        # -DQT_YAP_HLSL_ONLY=ON, Qt's own shaders carry SPIR-V and HLSL only.
++        # The app runs on Direct3D only (no OpenGL, Vulkan or Metal), so the
++        # GLSL and MSL variants were dead weight in the exe.
++        if (QT_YAP_HLSL_ONLY AND NOT arg_GLSL)
++            set(arg_NOGLSL TRUE)
++        endif()
++        if (QT_YAP_HLSL_ONLY AND NOT arg_MSL)
++            set(arg_NOMSL TRUE)
++        endif()
+         if (NOT arg_NOGLSL)
+             if (arg_GLSL)
+                 set(glsl_versions "${arg_GLSL}")

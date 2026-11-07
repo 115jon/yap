@@ -261,51 +261,21 @@ const QML: &[&str] = &[
     "qml/screens/Voice/VoiceView.qml",
 ];
 
-/// QML that qmlcachegen compiles to bytecode only, not to C++ (the patched
-/// qt-build-utils, patches/qt-build-utils): screens and popups that open
-/// now and then, where C++ bindings bought nothing but size
-/// (docs/PERFORMANCE.md, pass 3). The engine runs their bytecode and JITs
-/// the functions that run often. The chat, the sidebars, the rail, the
-/// composer, calls and the shared components stay compiled.
-const BYTECODE_ONLY: &[&str] = &[
-    "qml/screens/Admin/",
-    "qml/screens/Apps/",
-    "qml/screens/Boot/",
-    "qml/screens/Friends/",
-    "qml/screens/Join/",
-    "qml/screens/Panels/",
-    "qml/screens/Settings/",
-    "qml/screens/Shop/",
-    "qml/screens/SignIn/",
-    "qml/screens/Shell/AccountPopout.qml",
-    "qml/screens/Shell/CameraDialog.qml",
-    "qml/screens/Shell/ChannelInviteDialog.qml",
-    "qml/screens/Shell/CrashNoticeCard.qml",
-    "qml/screens/Shell/DeleteDialog.qml",
-    "qml/screens/Shell/DeviceMenu.qml",
-    "qml/screens/Shell/EmojiPicker.qml",
-    "qml/screens/Shell/GifPicker.qml",
-    "qml/screens/Shell/ImageViewer.qml",
-    "qml/screens/Shell/LeaveSiteDialog.qml",
-    "qml/screens/Shell/MediaTabs.qml",
-    "qml/screens/Shell/MessageMenu.qml",
-    "qml/screens/Shell/MessageShareDialog.qml",
-    "qml/screens/Shell/NotificationInbox.qml",
-    "qml/screens/Shell/PeerMenu.qml",
-    "qml/screens/Shell/ProfileCard.qml",
-    "qml/screens/Shell/ProfilePopout.qml",
-    "qml/screens/Shell/QuickSwitcher.qml",
-    "qml/screens/Shell/ReactionDetailsDialog.qml",
-    "qml/screens/Shell/RemoveEmbedsDialog.qml",
-    "qml/screens/Shell/SharePicker.qml",
-    "qml/screens/Shell/ThreadsTab.qml",
-    "qml/screens/Shell/VoiceStatusDialog.qml",
-    "qml/screens/Shell/VoiceSwitchDialog.qml",
-];
-
 fn main() {
     // Read by qt-build-utils' qmlcachegen step, in this same process.
-    std::env::set_var("QT_BUILD_UTILS_QMLCACHEGEN_BYTECODE_ONLY", BYTECODE_ONLY.join(";"));
+    // Every QML file is compiled to bytecode only, not to C++ (the patched
+    // qt-build-utils, patches/qt-build-utils). The engine runs the bytecode
+    // and JITs the functions that run often. Pass 3 kept the chat, sidebars,
+    // calls and shared components as C++; pass 5 measured no cost in making
+    // them bytecode too (a fast wheel scroll through the 10k-message fixture
+    // and the animated idle cost the same or less), and 2.8 MiB off the exe
+    // (docs/PERFORMANCE.md, pass 5).
+    std::env::set_var("QT_BUILD_UTILS_QMLCACHEGEN_BYTECODE_ONLY", "*");
+    // The patched qt-build-utils again: the .qml files go into the
+    // resources empty, as Qt 6.8's DISCARD_QML_CONTENTS does. Every file is
+    // compiled above, so the engine never reads their text
+    // (docs/PERFORMANCE.md, pass 5).
+    std::env::set_var("QT_BUILD_UTILS_DISCARD_QML_CONTENTS", "1");
     let files = QML.iter().map(|path| QmlFile::from(*path)).chain([
         QmlFile::from("qml/theme/Theme.qml").singleton(true),
         QmlFile::from("qml/screens/Shell/ShellState.qml").singleton(true),

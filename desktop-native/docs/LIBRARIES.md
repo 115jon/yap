@@ -414,6 +414,10 @@ readOnly: true }`. The `TextEdit` keeps text selectable.
 
 ## 6. Qt version: stay on 6.6.3 or build newer?
 
+**Settled in performance pass 5 (2026-11-07):** the app builds on a custom
+static Qt 6.11.3 (§13.3), with `RectangularShadow` adopted. 6.12 was not
+needed. The notes below are the original survey.
+
 Facts:
 
 - Qt 6.6 is out of support. 6.6.3 was its last release (2024).
@@ -912,9 +916,10 @@ ship), one code path for all three vendors, and the desktop app already
 proved it against the same SFU and web peers. `YAP_SHARE_ENCODER=software`
 keeps VP8 for comparisons; a failed or missing MFT falls back to VP8.
 
-Hardware decode was not done: D3D11VA needs a `VideoDecoderFactory` of our
-own inside libwebrtc, i.e. a patched webrtc-sys (§12.4). Incoming H.264
-decodes on FFmpeg (1.3 ms a 1080p frame here), VP8 on libvpx.
+Hardware decode (performance pass 5): incoming H.264 decodes on Media
+Foundation's H.264 MFT, on the GPU through a D3D11 device manager, in a
+patched webrtc-sys (§13.1). libwebrtc's FFmpeg decoder is no longer linked
+on Windows. VP8 and VP9 stay on libvpx.
 
 ### 12.2 Person segmentation for backgrounds
 
@@ -980,8 +985,9 @@ is 17.3 MB.
 
 ### 12.4 Left for later
 
-- D3D11VA decode: a webrtc-sys patch that takes a decoder factory (MF's
-  H.264 decoder MFT with a DXGI device manager), or NVDEC on Windows.
+- Zero-copy decode: the decoder's D3D11 texture handed to Qt Quick on a
+  shared device. The Media Foundation decoder (pass 5) still reads each
+  picture back and converts it to I420.
 - A zero-copy share: WGC texture to a D3D11 video processor (BGRA to NV12)
   to the MFT on the same device, as the desktop app does; today the frame
   is read back once for the preview and converted on the CPU.
@@ -1009,10 +1015,13 @@ overwritten.
 - On a fresh checkout, run it once before `cargo test` or `cargo clippy`.
 - After changing a patch, run it with `-Force`.
 
-| crate                   | patch                                  | why                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ----------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `qt-build-utils` 0.10.0 | `0001-qmlcachegen-bytecode-only.patch` | Reads `QT_BUILD_UTILS_QMLCACHEGEN_BYTECODE_ONLY`, a `;`-separated list of a file path suffix, a folder ending in `/`, or `*`. qmlcachegen then compiles those files with `--only-bytecode`. `rust/build.rs` sets the list (`BYTECODE_ONLY`) to the cold screens and popups. cxx-qt-build 0.10 has no option for it. QML: 8.6 to 6.7 MiB.                                                                                     |
-| `webrtc-sys` 0.3.52     | `0001-no-av1-encoder.patch`            | Takes the `LibaomAv1EncoderTemplateAdapter` out of the encoder factory, so the linker drops libaom's AV1 encoder: libwebrtc 16.2 to 12.8 MiB of the exe. The client never sends AV1: VP8 for the camera and software shares (yap-voice puts VP8 first), H.264 for hardware ones. AV1 still decodes (dav1d, `video_decoder_factory.cpp`), and the decoder factory's scalability list comes from `av1_svc_config`, not libaom. |
+| crate                   | patch                                  | why                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `qt-build-utils` 0.10.0 | `0001-qmlcachegen-bytecode-only.patch` | Reads `QT_BUILD_UTILS_QMLCACHEGEN_BYTECODE_ONLY`, a `;`-separated list of a file path suffix, a folder ending in `/`, or `*`. qmlcachegen then compiles those files with `--only-bytecode`. cxx-qt-build 0.10 has no option for it. Pass 3 set a list of cold screens (QML 8.6 to 6.7 MiB). Since pass 5, `rust/build.rs` sets `*`, every file: 2.8 MiB less, with no measured cost in scroll or animated idle.                                                                                                                                                                                                                                                                                                             |
+| `qt-build-utils` 0.10.0 | `0002-discard-qml-contents.patch`      | `QT_BUILD_UTILS_DISCARD_QML_CONTENTS=1` (set by `rust/build.rs`) does what Qt 6.8's `DISCARD_QML_CONTENTS` does for `qt_add_qml_module`. The `.qml` files go into the resources empty: rcc gets a second qrc whose `.qml` entries point at one empty file, under the same aliases and file name. qmlcachegen still reads the real qrc. Every file is compiled, so the engine never reads the text. 0.7 MiB.                                                                                                                                                                                                                                                                                                                 |
+| `webrtc-sys` 0.3.52     | `0001-no-av1-encoder.patch`            | Takes the `LibaomAv1EncoderTemplateAdapter` out of the encoder factory, so the linker drops libaom's AV1 encoder: libwebrtc 16.2 to 12.8 MiB of the exe. The client never sends AV1: VP8 for the camera and software shares (yap-voice puts VP8 first), H.264 for hardware ones. (AV1 decoding went in pass 5: `0003`.)                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `webrtc-sys` 0.3.52     | `0002-mf-h264-decoder.patch`           | `src/mf_h264_decoder.cpp` (new): a `VideoDecoder` on Media Foundation's H.264 MFT (`CLSID_MSH264DecoderMFT`). It decodes on the GPU through a D3D11 device manager (one device per stream, released with it) and reads each NV12 picture back with `IMF2DBuffer::Lock2D`, then libyuv converts it to I420. It runs in low-latency mode. Without a usable GPU, or with `YAP_H264_DECODER=software`, the same MFT decodes in software. On Windows the decoder factory uses it for H.264, and libwebrtc's FFmpeg decoder is no longer referenced, so the linker drops it (3.1 MiB). H.264 is offered only when the MFT can be made, which Windows N without the Media Feature Pack cannot do. Numbers: PERFORMANCE.md, pass 5. |
+| `webrtc-sys` 0.3.52     | `0003-no-av1-decoder.patch`            | AV1 is no longer offered or decoded, so dav1d leaves the exe (1.8 MiB). No Yap client sends AV1: the native one sends VP8 and H.264, and the web and mobile ones keep their stack's default, VP8. With Cloudflare's SFU the publisher alone picks the codec, so an AV1 publisher would show nothing here. To restore it, remove the patch.                                                                                                                                                                                                                                                                                                                                                                                  |
 
 Two webrtc-sys candidates were tried and dropped:
 
@@ -1032,12 +1041,8 @@ zip into `F:/ct/qt-custom/6.6.3-yap`.
 - **Cost:** about 2 h on this machine. It needs 32 GB of build tree and
   0.5 GB of extracted source while it builds, and installs to 8.4 GB (LTCG
   libraries). `-Clean` removes the intermediates after the install.
-- **Who uses it:**
-  - `build.ps1` uses it when it is there; `YAP_QT_DIR` or `-QtDir` still
-    wins;
-  - the release workflow still downloads the stock
-    `qt-6.6.3-static-msvc-x64.zip`. A zip of this build needs uploading
-    before releases use it.
+- **Who uses it:** nothing since performance pass 5, which moved to 6.11.3
+  (§13.3). `build-qt.ps1 -Version 6.6.3` still builds it.
 
 What changes from the stock static Qt (`F:/Files/Downloads/qt/src/6.6.3`):
 
@@ -1063,35 +1068,59 @@ camera both ways with no background and with the blur. No regression; the
 numbers are in PERFORMANCE.md, pass 4. Not checked yet: a screen share,
 WebView2 embeds and the media player.
 
-### 13.3 Qt 6.11.3, built and not adopted (performance pass 4)
+### 13.3 Qt 6.11.3, the default (performance pass 5)
 
-`build-qt.ps1 -Version 6.11.3 -Zip <qt-everywhere-src-6.11.3.zip> -Root
-F:/ct/qt-custom-6.11` builds the same configuration from Qt 6.11.3 into
-`F:/ct/qt-custom-6.11/6.11.3-yap` (about 1 h here). Patches for a version
-other than 6.6.3 live in `patches/qt/<version>/`:
+Pass 4 built it. Pass 5 adopted it, trimmed its configure and made it
+`build.ps1`'s default. The numbers are in PERFORMANCE.md, pass 5.
 
-- `6.11.3/0001-release-unused-glyph-caches.patch` is the glyph-cache half
-  of the 6.6.3 patch. The batch half is upstream in 6.11: recycled batches
-  hand their buffers to pools capped at 2 MB each, and
-  `releaseCachedResources()` empties those pools.
+`pwsh patches/qt/build-qt.ps1` builds it from
+`F:/ct/qt-dl/qt-everywhere-src-6.11.3.zip` into
+`F:/ct/qt-custom-6.11/6.11.3-yap`.
 
-The app builds against it unchanged (`build.ps1 -QtDir ...`). Against the
-custom 6.6.3, on the chat-10k fixture:
+- **Cost:** about 1 h with Visual Studio 2022 here. It needs 37 GB of build
+  tree and 0.6 GB of source while it builds, and installs to 8.2 GB.
+- **A fresh CMake cache each run.** CMake keeps every `FEATURE_*` from an
+  earlier configure, so a feature taken off the list would otherwise stay
+  off.
+- **The app links with the same MSVC.** `build.ps1` picks Visual Studio
+  2022, because Qt's libraries are LTCG and so is `cpp/` (`/GL`). The link
+  fails with C1047 if two compiler versions meet.
 
-| metric                                   | 6.6.3-yap         | 6.11.3-yap       |
-| ---------------------------------------- | ----------------- | ---------------- |
-| idle private / ws (2 runs each, A/B)     | 191.3 / 170.5 MB  | 177.5 / 162.7 MB |
-| animated idle (unpaced), renders and CPU | 25.8/s, 5.6-6.5 % | 25.9/s, 5.6 %    |
-| exe                                      | 62,939,136 B      | 71,678,976 B     |
+What differs from 6.6.3-yap (§13.2), besides the version:
 
-Before switching:
+| option or patch                                                    | effect                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-no-feature-freetype`                                             | 6.11 builds FreeType despite `-no-freetype`. The app draws with DirectWrite. 0.5 MiB.                                                                                                                                                                                                                                   |
+| `-no-feature-timezone_locale`                                      | CLDR time-zone display names, 3.75 MiB. The app formats dates in Rust and shows no zone names.                                                                                                                                                                                                                          |
+| other `-no-feature-*` (listed in the script)                       | Unused: calendars, PDF, ODF, Markdown, shared memory, system semaphores, SOCKS5, DNS lookups, the Network List Manager monitor, PPM and XBM, TableView/TreeView, sprites, particles, XMLHttpRequest, WorkerScript, and the Controls styles other than Basic. XPM stays: drag and drop needs it, and so does `DropArea`. |
+| `6.11.3/0001-release-unused-glyph-caches.patch`                    | The glyph-cache half of the 6.6.3 patch, in the threaded **and** basic render loops (the app runs the basic loop since pass 5). The batch half is upstream: recycled batches give their buffers to pools capped at 2 MB, which `releaseCachedResources()` empties.                                                      |
+| `6.11.3/0002-hlsl-only-shaders.patch` with `-DQT_YAP_HLSL_ONLY=ON` | Qt's own `.qsb` shaders carry SPIR-V and DXBC only, with no GLSL or MSL. The app runs on Direct3D only.                                                                                                                                                                                                                 |
+| `6.11.3/0003-timezone-without-locale-names.patch`                  | Windows' time-zone backend would not build without `timezone_locale`. It now falls back to Windows' own zone names, as before 6.8.                                                                                                                                                                                      |
 
-- `ChatHeader.qml`'s "/" `Shortcut` reads `Window.activeFocusItem`. Qt 6.11
-  no longer gives the `Window` attached property to a non-Item, so the
-  guard reads `undefined` and "/" typed in the composer would open search
-  (warning: "Window.window only supports types derived from Item"). It
-  needs `root.Window.activeFocusItem`.
-- The exe grows by 8.7 MB; the new features 6.11 turns on by default need
-  an audit against the configure flags above.
-- Calls, shares, WebView2 and the media player need the same checks as
-  6.6.3-yap.
+Checked on this build:
+
+- the shell, Settings, menus and the profile card draw as on 6.6.3, with no
+  QML warnings;
+- the shadows match (`RectangularShadow`);
+- GIFs animate;
+- a voice call between two native clients, one sharing at 1440p60 (and
+  1080p60) through NVENC, the other watching;
+- clippy and the workspace tests (PERFORMANCE.md, pass 5).
+
+**CI (not done; a later step).** `.github/workflows/desktop-native-release.yml`
+still downloads `qt-6.6.3-static-msvc-x64.zip` from the
+`native-build-assets` release, and builds with whatever Visual Studio the
+runner has. To move it:
+
+1. Zip `F:/ct/qt-custom-6.11/6.11.3-yap` (8.2 GB unpacked: the LTCG
+   libraries, `bin/`, `include/`, `lib/cmake`, `mkspecs`, `plugins`, `qml`,
+   `metatypes`, `modules`). The zip will likely be over GitHub's 2 GB asset
+   limit, so either split it, or leave out `doc/` and `sbom/` and check.
+   Upload it as `qt-6.11.3-yap-static-msvc-x64.zip` to `native-build-assets`.
+2. In the workflow: the step name, the asset name, the self-hosted message
+   ("a static Qt 6.11.3"), and `YAP_QT_DIR` pointing at the unzipped
+   folder.
+3. The runner needs Visual Studio 2022 (17.x) with the x64 C++ tools, the
+   same toolset as the Qt build (MSVC 14.44 here). `build.ps1` refuses to
+   run without it.
+4. The patched crates need nothing: `build.ps1` runs `patches/vendor.ps1`.

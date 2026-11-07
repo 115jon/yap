@@ -1306,3 +1306,331 @@ typed in the composer would open search.
 - Qt: `patches/qt/build-qt.ps1` (`-Version`) and `patches/qt/6.11.3/`
   (new).
 - Docs: this section, LIBRARIES.md §12 (segmentation) and §13.2-13.3.
+
+# Performance pass 5 (2026-11-07)
+
+The brief, in order:
+
+1. move to Qt 6.11.3 and make it the default;
+2. adopt what Qt 6.7-6.11 offers where it pays;
+3. bring the exe back under 60 MB;
+4. focused animated idle under 3 %;
+5. hardware decode for watched shares;
+6. a 1440p60 share number.
+
+Before is 04c8d8e5 built on the custom Qt 6.6.3 (`F:/ct/yapn/tmp/p5/before.exe`,
+63,847,424 B). After is this pass's final build on the custom Qt 6.11.3
+(`F:/ct/yapn/tmp/p5/c7.exe`, 59,124,224 B). Both were built from the
+`native/perf3` worktree.
+
+## Conditions
+
+- **The displays slept all session**, as in passes 3 and 4. DWM composed
+  one frame in 2 s and vblank waits returned at once.
+  - I ran a helper of my own that held
+    `SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED)`.
+    `PowerSetRequest(PowerRequestDisplayRequired)` and `SC_MONITORPOWER`
+    sent to a hidden window of mine did not wake the displays either. Only
+    real input would, and that is off limits.
+  - Frame-paced numbers are therefore taken unpaced
+    (`YAP_DEBUG_NO_VSYNC`). The share was measured with a synthetic source
+    (below), because Windows Graphics Capture delivers ~4 fps from a
+    sleeping display.
+- **The machine was shared.** Another agent's builds (`rustc`) and a `qemu`
+  VM used several cores for most of the afternoon. CPU numbers are
+  compared only within interleaved runs, and are repeated.
+- **A test-account collision, 15 s.** One owner launch started while
+  another agent's `--profile spike` session (the owner account) was
+  running. It reached "gateway ready", joined nothing, and was stopped by
+  PID at once. `tools/p5/app.ps1` now refuses to start while any other
+  agent's YapNative or node peer runs.
+
+## Method (new)
+
+Tools are in `F:/ct/yapn/tools/p5/`:
+
+- `build.ps1`: the pass build with a link map, VS 2022;
+- `anim-idle.ps1`: pass 4's, on profile `perf5`; it now waits for the
+  process to exit;
+- `scroll.ps1`: a fast wheel scroll (200 ticks up and down at 16 ms) over
+  the chat-10k fixture, with CPU and the basic loop's frame times;
+- `app.ps1`: an owner or peer instance, with the account guard;
+- `watch.ps1`: swaps the watcher instance and samples it;
+- `who.ps1`: read-only list of running Yap sessions;
+- `awake.ps1`: the display helper;
+- `test.ps1`: `cargo test` and clippy on the custom Qt.
+
+New test switches in the app (off unless set):
+
+- **`YAP_FAKE_SHARE_SOURCE=<w>x<h>`** (`yap-capture/src/win/fake.rs`): a
+  share replaces the picked source with a synthetic picture of that size.
+  - A bar sweeps across a fixed pattern, so the encoder sees motion in
+    every frame.
+  - Frames are pushed at the share's rate into the same
+    `push_screen_frame` the capture uses.
+  - Nothing of the picked source is read, so the only-ours check is
+    skipped. Audio follows only when it is synthetic too.
+- **`YAP_H264_DECODER=software`**: Media Foundation's H.264 decoder without
+  the GPU, for comparisons.
+
+The share and watch runs used two of our instances: the owner on profile
+`perf5` sharing, and the peer on `perf5peer` watching.
+
+## 1. Qt 6.11.3, the default
+
+- **`build.ps1`** now uses `F:/ct/qt-custom-6.11/6.11.3-yap` and refuses to
+  run without a Qt 6.11. It also takes Visual Studio 2022 explicitly, the
+  MSVC Qt is built with: Qt's libraries are link-time code (`-ltcg`), and
+  LTCG cannot mix two compiler versions. The newest Visual Studio here is
+  2026 (18.4).
+- **The `/` regression** (`ChatHeader.qml`): the `Shortcut`'s guard now
+  reads `root.Window.activeFocusItem`. The other `Window.*` readers are in
+  Items and were fine.
+- **Text fields got a context menu.** Qt 6.9 gives every Basic
+  `TextField` and `TextArea` a default Cut/Copy/Paste menu on a right
+  click. It is off-brand and would bypass `YAP_NO_CLIPBOARD`, so the base
+  fields set `ContextMenu.menu: null`. This keeps 6.6's behaviour; the web
+  shows none of its own either.
+- **QML warnings:** none at startup, in Settings, in the menus, or in a
+  call with a share and a watcher. Each run's log was checked.
+- **The Qt patches:**
+  - The batch half of pass 3's patch is upstream in 6.11.
+  - The glyph-cache half (`6.11.3/0001`) now also covers the basic render
+    loop (below).
+  - Two new ones: `0002` (HLSL-only shaders) and `0003` (time zones), in
+    LIBRARIES.md §13.
+- **qmlcachegen's bytecode-only mode** (the qt-build-utils patch) is still
+  needed: cxx-qt-build 0.10 has no option for it.
+- **cxx-qt 0.10** builds and runs on 6.11 unchanged, with no build warnings.
+- **CI** still downloads the 6.6.3 archive. LIBRARIES.md §13.3 lists what
+  has to be uploaded. Nothing was uploaded.
+
+## 2. Qt 6.7-6.11: adopted and rejected
+
+The sources: the What's New pages for 6.7 to 6.11, and the 6.11.3 sources.
+
+| feature                                                              | since    | verdict               | why                                                                                                                                                                                                                                                                                                                |
+| -------------------------------------------------------------------- | -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| DXGI vblank thread driving update requests (`QDxgiVSyncService`)     | 6.9      | **adopted**           | It paces the **basic** render loop, which is now our default. Focused animated idle fell 32-40 % (§4).                                                                                                                                                                                                             |
+| `RectangularShadow` (Qt Quick Effects)                               | 6.9      | **adopted**           | `FloatShadow.qml` maps CSS box-shadow onto it. `cpp/shadowprovider.*` (133 lines) is deleted, with its CPU Gaussian blur and nine-slice textures. A light-theme screenshot of a menu matches the old one.                                                                                                          |
+| `DISCARD_QML_CONTENTS` (`qt_add_qml_module`)                         | 6.8      | **adopted**           | The same done in the qt-build-utils patch: the `.qml` files stay in the resources, empty. 0.7 MiB.                                                                                                                                                                                                                 |
+| qmlsc / qmlcachegen improvements                                     | 6.7-6.8  | **adopted, inverted** | Every QML file is now bytecode only. A fast scroll through 10k messages cost 15 % of a core against 18-21 % compiled, and animated idle was within the noise. That is 2.8 MiB.                                                                                                                                     |
+| incremental GC, DirectWrite by default, batch-renderer pooling fixes | 6.8-6.9  | adopted (free)        | They come with the version. Pass 4 measured idle memory on the fixture at −14 MB; this pass's fixture idle is −5 MB private, with more UI since.                                                                                                                                                                   |
+| `Qt::ExpandedClientAreaHint` (frameless title bar)                   | 6.9-6.11 | rejected              | On Windows, Qt draws its own caption buttons into a layered child window, which it repaints on every resize and hit test. It closes the window on a raw `HTCLOSE`. We would lose the QML bar's hover and press states and the snap-layout flyout. `windowchrome.cpp` stays.                                        |
+| `VectorImage` / svgtoqml for Phosphor                                | 6.8      | rejected              | Each icon would be a Shape subtree with its own geometry nodes, against one raster per size and colour in the atlas today. The slash and the off-pair compositing would need QML per icon.                                                                                                                         |
+| Qt Multimedia FFmpeg backend                                         | 6.7+     | rejected              | On Windows it loads FFmpeg DLLs (tens of MB), or a static FFmpeg in the exe. FFmpeg's own VP9 decoder drops the BlockAdditional alpha that nameplates use, so `yap-webm` stays. The WMF backend still plays mp4.                                                                                                   |
+| HTTP/2 in `QNetworkAccessManager`                                    | -        | rejected              | 6.11 has no `http2` feature to configure out, so there is no size gain. The only client change since 6.6 is `setMaxConcurrentStreams` (6.9). Images are disk-cached and QML loads at most 8 at once, so I measured no reason to lift the HTTP/1.1 pin, which guards against the stall that froze the emoji picker. |
+| `SearchField`, `FlexboxLayout`                                       | 6.10     | rejected              | SearchField is a combo box with a suggestion popup and would need the design restyled onto it. FlexboxLayout is a tech preview, and nothing of ours needs flex.                                                                                                                                                    |
+| `Popup.popupType: Popup.Window`, variable fonts                      | 6.7-6.8  | not this pass         | These are UI features, not performance (LIBRARIES.md §6). Variable cuts would also be larger than our 1.2 MB of subset static cuts.                                                                                                                                                                                |
+| Text fields' default `ContextMenu`                                   | 6.9      | turned off            | See §1.                                                                                                                                                                                                                                                                                                            |
+| FluentWinUI3 / Windows 11 style, StyleKit                            | 6.8-6.11 | rejected              | We have our own design. Both are configured out.                                                                                                                                                                                                                                                                   |
+| `Loader`, `AnimatedImage`, image caching                             | -        | nothing to adopt      | No change in the notes except `Image.retainWhileLoading` (6.8), which fixes flicker, not cost.                                                                                                                                                                                                                     |
+
+## 3. Exe size: 63.8 to 59.1 MB
+
+| step                                                                                                                  | exe (B)        |
+| --------------------------------------------------------------------------------------------------------------------- | -------------- |
+| before (6.6.3)                                                                                                        | 63,847,424     |
+| the same source on pass 4's 6.11.3 build                                                                              | 72,761,344     |
+| the 6.11 configure trimmed (below), fat Rust LTO, `/GL` for `cpp/`, more cold QML as bytecode, empty `.qml` resources | 66,149,888     |
+| all QML bytecode only (−2.8 MiB); H.264 decoded by Media Foundation, so libwebrtc's FFmpeg is not linked (−3.1 MiB)   | 61,015,552     |
+| no AV1 decoder (dav1d)                                                                                                | **59,124,224** |
+
+By part (MiB, from the link map): Qt and the CRT 21.79 → 23.81, Rust
+14.58 → 14.21, libwebrtc 12.77 → 8.80, QML 7.38 → 5.16.
+
+- **The 6.11 configure** (`patches/qt/build-qt.ps1`):
+  - **`timezone_locale` off: 3.75 MiB.** It holds CLDR time-zone display
+    names, and the app never shows a zone name. Windows' backend required
+    it, so patch `0003` falls back to Windows' own zone names.
+  - **FreeType off: 0.5 MiB.** 6.11 turned it back on despite
+    `-no-freetype`, so it needs `-no-feature-freetype`.
+  - **Other features with no user** (each listed in the script): calendars,
+    the PDF writer, ODF and Markdown, shared memory, SOCKS5, DNS lookups,
+    the Network List Manager monitor, TableView/TreeView, sprites,
+    particles, XMLHttpRequest, WorkerScript, PPM and XBM. The unused
+    Controls styles are off too, which shortens the build. XPM has to stay:
+    drag and drop depends on it, and `DropArea` (file drops on the chat)
+    disappears without it.
+  - **Shaders without GLSL or MSL** (`0002`): little, since SPIR-V and DXBC
+    make up most of each `.qsb`.
+- **Rust LTO "fat"** instead of "thin": −0.4 MiB, and the release build
+  takes 5 minutes longer.
+- **`/GL` for our own C++** (`CMakeLists.txt`). It cannot be used for the
+  C++ that `cc` builds into the Rust static library: rustc's archive has no
+  symbol index for `/GL` objects, so the link cannot find them.
+- **Rejected:**
+  - `panic = "abort"`: `yap-capture`, `yap-webm`, the installer and
+    shutdown rely on `catch_unwind`;
+  - cross-language LTO: Qt is MSVC LTCG and Rust is LLVM bitcode;
+  - the QML compiler or JIT out of Qt: the engine needs them;
+  - libwebp's encoder: ~0.15 MiB, not worth a patch;
+  - fewer symphonia formats: 0.05-0.3 MiB each, and a behaviour change.
+
+**Decisions to confirm** (both are patches that can simply be removed):
+
+- **No AV1 decoder: 1.9 MB.** No Yap client sends AV1 today. The native
+  client sends VP8 and H.264, and the web and mobile ones leave the
+  browser's or libwebrtc's default, VP8 first: no `setCodecPreferences` in
+  their tracked sources. With Cloudflare's SFU the publisher alone picks
+  the codec, so a future AV1 publisher would show nothing here.
+- **No FFmpeg H.264 decoder: 3.3 MB.** Windows N without the Media Feature
+  Pack has no Media Foundation H.264 decoder. On such a machine H.264 is
+  not offered and a hardware share would not play. Video playback and the
+  hardware share encoder need Media Foundation there anyway.
+
+## 4. Focused animated idle: 7.25 % to 4.95 %, not under 3 %
+
+The scene is pass 3's: the chat-10k fixture, a GIF rail icon and two chat
+GIFs, with the window told it is active. Presents are unpaced and each run
+lasts 40 s. The three builds were interleaved, three rounds, under the
+shared-machine load:
+
+| build                               | CPU (one core)              | renders a second |
+| ----------------------------------- | --------------------------- | ---------------- |
+| before (6.6.3, threaded loop)       | 7.03, 7.38, 7.34 (7.25)     | 25.7             |
+| after, `QSG_RENDER_LOOP=threaded`   | 8.55, 6.01, 7.15 (7.24)     | 25.7             |
+| **after (basic loop, the default)** | **5.08, 5.39, 4.37 (4.95)** | 25.5             |
+
+On a quieter machine earlier in the session, the 6.11 build ran at 6.42 %
+threaded and 3.89 % basic.
+
+- **What changed:** the basic render loop (`main.cpp`). Our frames take
+  1-2 ms, so the threaded loop's overlap bought nothing, and its per-frame
+  handoff between the GUI and render threads cost more than that. Qt 6.9's
+  DXGI vblank thread now paces the basic loop on Direct3D, which made it
+  viable.
+- **Checked:** static idle stays at 0.00 % (0.03 % threaded), so the vblank
+  thread costs nothing at rest. A fast wheel scroll has a p99 frame of
+  2 ms and none over 16 ms. Settings, menus, a call with a 1440p60 share
+  and a watcher all drew correctly. Pass 3's glyph-cache release reaches
+  this loop through the extended `0001`.
+- **Why not under 3 %:** a frame still costs ~1.5-2 ms of CPU, and about
+  half of that is in the NVIDIA driver's threads with presents unpaced.
+  Next:
+  - measure on an awake display, since a paced present may cost less;
+  - profile the GUI thread with WPR (needs elevation, through the
+    elevate-broker);
+  - cut renders by moving chat GIFs to a 20 Hz grid. That is a smoothness
+    trade, and was not taken.
+
+## 5. Hardware decode for watched shares
+
+Patch `webrtc-sys/0002` adds a `VideoDecoder` on Media Foundation's H.264
+MFT:
+
+- it decodes on the GPU through a D3D11 device manager, made per stream and
+  released with it;
+- it reads each NV12 picture back with `IMF2DBuffer::Lock2D` and converts
+  it to I420 with libyuv;
+- low-latency mode is on;
+- without a usable GPU it runs the same MFT in software.
+
+The decoder factory uses it for every H.264 stream on Windows.
+
+The owner shared the synthetic source over NVENC. The peer, on our build or
+on the before build, watched it. CPU is per 25 s:
+
+| watching                     | before: FFmpeg                 | after: Media Foundation, GPU         | Media Foundation, software |
+| ---------------------------- | ------------------------------ | ------------------------------------ | -------------------------- |
+| 1440p60, process             | 14.1 s, 13.4 s (**55 %**)      | 10.5 s, 11.7 s, 11.6 s (**45 %**)    | 32.2 s (129 %)             |
+| 1440p60, decoder thread      | 4.1-4.3 s                      | 0.7-0.9 s                            | -                          |
+| 1080p60, process             | 7.7 s (**31 %**)               | 7.6 s (**30 %**)                     | -                          |
+| decode time (stats line)     | 2.4-2.6 ms 1440p, 1.0 ms 1080p | 7.0-7.4 ms (GPU decode and readback) | 4.1 ms                     |
+| private while watching 1440p | 233-237 MB                     | **330-339 MB**                       | 257 MB                     |
+| private 20 s after leaving   | 170.7 MB                       | 171.0 MB                             | -                          |
+
+- **CPU:** −15 to −20 % at 1440p60 and no change at 1080p60. The decoder
+  thread itself falls by 80 %. Media Foundation's own threads and the
+  readback take most of that back, and the GUI thread's upload of the
+  picture into Qt (~2.8 s per 25 s at 1440p) stays the same.
+- **Memory:** +100 MB while watching 1440p, from the D3D11 device and the
+  decoder's surfaces. All of it goes when the stream ends. A first version
+  kept one device for the process and held it; the device is now per
+  stream.
+- **The real gain needs zero copy:** the decoded D3D11 texture handed to Qt
+  Quick on a shared device, with no readback and no I420 upload. That
+  means a native-texture `QVideoFrame` path in `videohub.cpp` and its own
+  pass.
+
+## 6. 1440p60 share: 60 fps at 47 % of a core
+
+The owner shared the synthetic 2560x1440 source at the 1440p60 preset over
+NVENC (`NVIDIA H.264 Encoder MFT`), with one watcher:
+
+- **sent:** 2560x1440 at 60-61 fps, 14 Mbps, 6.5 ms an encode, with no
+  dropped input (in 16,446, out 16,439, 5 replaced);
+- **process CPU:** 11.7 s per 25 s, **47 % of one core**. The parts:
+  - the generator thread 3.6 s, which includes `push_screen_frame`'s BGRA
+    to NV12;
+  - the GUI thread 2.7 s, drawing the share's own preview;
+  - `yap-h264` 1.2 s;
+  - WebRTC's network and worker threads 1.7 s;
+- **private:** 351 MB while sharing, 196 MB 20 s after leaving;
+- **at 1080p60:** 61 fps, 8 Mbps, 4.8 ms an encode, 9.8 s per 25 s.
+
+A real WGC share adds the capture's GPU readback and drops the generator's
+pattern drawing, so its CPU should be close. It still needs an awake
+display.
+
+## Before and after (pass 5)
+
+| metric                                    | before                       | after                                               |
+| ----------------------------------------- | ---------------------------- | --------------------------------------------------- |
+| exe                                       | 63,847,424 B                 | **59,124,224 B** (−7.4 %)                           |
+| focused animated idle, unpaced (3 rounds) | 7.25 %                       | **4.95 %**                                          |
+| static idle CPU                           | 0.05-0.10 %                  | 0.00 %                                              |
+| fixture idle private / ws (4 runs each)   | 193.8-194.5 / 172.0-172.6 MB | **188.7-190.7** / 168.1-175.7 MB (−5 MB)            |
+| first frame, fixture                      | 677-945 ms                   | 540-663 ms (one run at 3.5 s, during a cargo build) |
+| watching a 1440p60 share, CPU             | 55 %                         | **45 %**                                            |
+| watching a 1440p60 share, private         | 233-237 MB                   | 330-339 MB (released on leaving)                    |
+| 1440p60 share                             | not measured                 | 60 fps, 47 % of a core (synthetic source)           |
+| Qt                                        | 6.6.3 (out of support)       | 6.11.3                                              |
+
+## Targets
+
+1. **Qt 6.11.3: done** and the default. The CI archive is still to upload
+   (LIBRARIES.md §13.3).
+2. **Qt 6.7-6.11: done** (§2). Adopted: the vblank-paced basic loop,
+   `RectangularShadow`, discarded QML contents and the 6.11 features
+   configured out.
+3. **Exe under 60 MB: reached, 59.1 MB (56.4 MiB),** after the two
+   decisions in §3.
+4. **Animated idle under 3 %: not reached.** 4.95 % under load, 3.89 % on a
+   quiet machine, from 7.25 % and 5.9 %. See §4 for what is next.
+5. **Hardware decode: done,** with a CPU gain only at 1440p and a memory
+   cost while watching. Zero copy is the next step.
+6. **1440p60 share: measured** with a synthetic source, at 60 fps and 47 %.
+   A WGC capture needs an awake display.
+
+## Files
+
+Source (worktree `native/perf3`):
+
+- C++:
+  - `cpp/main.cpp`: the basic render loop, and the shadow provider removed;
+  - `cpp/shadowprovider.cpp` and `cpp/shadowprovider.h` deleted;
+  - `CMakeLists.txt`: `/GL` and `mfplat mfuuid`.
+- QML (10 files):
+  - `components/FloatShadow.qml`: `RectangularShadow`;
+  - `screens/Shell/ChatHeader.qml`: the `/` guard;
+  - `ContextMenu.menu: null` in `components/KitField.qml`,
+    `components/MessageEditor.qml`, `screens/Panels/ThreadPanel.qml`,
+    `screens/Shell/AccountPopout.qml`, `screens/Shell/Composer.qml`,
+    `screens/Shell/EmojiPicker.qml`, `screens/Shell/QuickSwitcher.qml` and
+    `screens/SignIn/SignInView.qml`.
+- Rust and build:
+  - `rust/build.rs`: all QML bytecode only, the list deleted, and
+    `QT_BUILD_UTILS_DISCARD_QML_CONTENTS`;
+  - `rust/Cargo.toml`: fat LTO;
+  - `rust/crates/yap-capture/src/win/fake.rs` (new) and `win/mod.rs`:
+    `YAP_FAKE_SHARE_SOURCE`;
+  - `build.ps1`: Qt 6.11.3 and VS 2022.
+- Patches (LIBRARIES.md §13):
+  - `patches/qt/build-qt.ps1`;
+  - `patches/qt/6.11.3/0001` (extended), `0002` and `0003` (new);
+  - `patches/qt-build-utils/0002-discard-qml-contents.patch` (new);
+  - `patches/webrtc-sys/0002-mf-h264-decoder.patch` and
+    `0003-no-av1-decoder.patch` (new);
+  - `patches/vendor.ps1`.
+- Docs: this section, and LIBRARIES.md §6, §12 and §13.
