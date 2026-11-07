@@ -193,6 +193,13 @@ bool WindowChrome::nativeEventFilter(const QByteArray& eventType,
   const HWND hwnd = reinterpret_cast<HWND>(m_hwnd);
   if (msg->hwnd != hwnd)
     return false;
+  // A posted message (the WM_NCLBUTTON* a caption key gets) reaches the
+  // filter first from the event dispatcher's message loop, which passes no
+  // result; consuming it there skips the dispatch. Only messages sent to
+  // the window procedure come with one.
+  qintptr unused = 0;
+  if (!result)
+    result = &unused;
 
   const UINT dpi = GetDpiForWindow(hwnd);
   // The resize border Windows uses: frame plus padded border, per DPI.
