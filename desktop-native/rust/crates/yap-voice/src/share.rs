@@ -295,6 +295,9 @@ pub(crate) mod live {
     use libwebrtc::video_source::native::NativeVideoSource;
     use tokio::task::JoinHandle;
 
+    #[cfg(windows)]
+    use crate::engine::HwEncoder;
+
     use super::{
         ScreenFrame, LOCAL_SCREEN_KEY, REPEAT_AFTER, SHARE_AUDIO_CHANNELS, SHARE_AUDIO_RATE,
     };
@@ -318,16 +321,66 @@ pub(crate) mod live {
         ) -> i32;
     }
 
-    /// The live share's encoder source; `None` while no share is live.
-    static SINK: RwLock<Option<NativeVideoSource>> = RwLock::new(None);
+    /// Where the share's frames go: libwebrtc's own encoder (VP8) through
+    /// the source, or the hardware H.264 encoder, which hands its access
+    /// units to an encoded source itself.
+    #[derive(Clone)]
+    pub(crate) enum Sink {
+        Raw(NativeVideoSource),
+        #[cfg(windows)]
+        Hardware(Arc<HwEncoder>),
+    }
+
+    /// A shared frame as a buffer libwebrtc takes (the same frame goes to
+    /// the encoder, and later to the repeater).
+    struct Shared(Arc<I420Buffer>);
+
+    impl AsRef<dyn VideoBuffer> for Shared {
+        fn as_ref(&self) -> &(dyn VideoBuffer + 'static) {
+            &*self.0
+        }
+    }
+
+    impl Sink {
+        /// Hands a frame on. `true` if it was taken.
+        pub(crate) fn send(&self, frame: &Arc<I420Buffer>) -> bool {
+            match self {
+                Self::Raw(source) => source.capture_frame(&VideoFrame {
+                    rotation: VideoRotation::VideoRotation0,
+                    timestamp_us: 0,
+                    frame_metadata: None,
+                    buffer: Shared(Arc::clone(frame)),
+                }),
+                #[cfg(windows)]
+                Self::Hardware(encoder) => encoder.submit(Arc::clone(frame)),
+            }
+        }
+
+        /// The parked share's black frame: libwebrtc's encoders take any
+        /// size; a hardware one is kept at a size every vendor's MFT opens.
+        fn keepalive_size(&self) -> (u32, u32) {
+            match self {
+                Self::Raw(_) => KEEPALIVE_SIZE,
+                #[cfg(windows)]
+                Self::Hardware(_) => HARDWARE_KEEPALIVE_SIZE,
+            }
+        }
+    }
+
+    /// The parked hardware share's black frame size.
+    #[cfg(windows)]
+    const HARDWARE_KEEPALIVE_SIZE: (u32, u32) = (320, 180);
+
+    /// The live share's sink; `None` while no share is live.
+    static SINK: RwLock<Option<Sink>> = RwLock::new(None);
     static LIVE: AtomicBool = AtomicBool::new(false);
     /// The last frame sent, for the repeater.
-    static LAST: Mutex<Option<(Instant, VideoFrame<I420Buffer>)>> = Mutex::new(None);
+    static LAST: Mutex<Option<(Instant, Arc<I420Buffer>)>> = Mutex::new(None);
     /// The share's audio source while it carries audio, and the samples not
     /// yet a whole 10 ms frame.
     static AUDIO: Mutex<Option<(NativeAudioSource, Vec<i16>)>> = Mutex::new(None);
 
-    pub(crate) fn set_sink(source: Option<NativeVideoSource>) {
+    pub(crate) fn set_sink(source: Option<Sink>) {
         let mut sink = SINK.write().unwrap_or_else(PoisonError::into_inner);
         LIVE.store(source.is_some(), Ordering::Release);
         *sink = source;
@@ -384,16 +437,11 @@ pub(crate) mod live {
         // `set_sink` clears it under the write guard, so a push racing a
         // stop can never leave the stopped share's frame for the next one.
         let sink = SINK.read().unwrap_or_else(PoisonError::into_inner);
-        let Some(source) = sink.as_ref() else {
+        let Some(sink) = sink.as_ref() else {
             return false;
         };
-        let frame = VideoFrame {
-            rotation: VideoRotation::VideoRotation0,
-            timestamp_us: 0,
-            frame_metadata: None,
-            buffer,
-        };
-        let sent = source.capture_frame(&frame);
+        let frame = Arc::new(buffer);
+        let sent = sink.send(&frame);
         *LAST.lock().unwrap_or_else(PoisonError::into_inner) = Some((Instant::now(), frame));
         sent
     }
@@ -552,13 +600,13 @@ pub(crate) mod live {
 
     impl Refresher {
         /// Starts parked.
-        pub(crate) fn start(source: NativeVideoSource) -> Self {
+        pub(crate) fn start(sink: Sink) -> Self {
             let parked = Arc::new(AtomicBool::new(true));
             let longest_gap_ms = Arc::new(AtomicU64::new(0));
             let last_ms = Arc::new(AtomicU64::new(0));
             let epoch = Instant::now();
             let task = tokio::spawn(run(
-                source,
+                sink,
                 Arc::clone(&parked),
                 Arc::clone(&longest_gap_ms),
                 Arc::clone(&last_ms),
@@ -597,7 +645,7 @@ pub(crate) mod live {
     }
 
     async fn run(
-        source: NativeVideoSource,
+        sink: Sink,
         parked: Arc<AtomicBool>,
         longest_gap_ms: Arc<AtomicU64>,
         last_ms: Arc<AtomicU64>,
@@ -614,7 +662,7 @@ pub(crate) mod live {
                 let mut last = LAST.lock().unwrap_or_else(PoisonError::into_inner);
                 if let Some((at, frame)) = last.as_mut() {
                     if at.elapsed() >= REPEAT_AFTER {
-                        source.capture_frame(&*frame);
+                        sink.send(frame);
                         *at = Instant::now();
                     }
                 }
@@ -628,18 +676,13 @@ pub(crate) mod live {
             let last = last_ms.swap(now, Ordering::Relaxed);
             longest_gap_ms.fetch_max(now.saturating_sub(last), Ordering::Relaxed);
             odd = !odd;
-            let (w, h) = KEEPALIVE_SIZE;
+            let (w, h) = sink.keepalive_size();
             let mut buffer = I420Buffer::new(w, h);
             let (y, u, v) = buffer.data_mut();
             y.fill(keepalive_luma(odd));
             u.fill(128);
             v.fill(128);
-            source.capture_frame(&VideoFrame {
-                rotation: VideoRotation::VideoRotation0,
-                timestamp_us: 0,
-                frame_metadata: None,
-                buffer,
-            });
+            sink.send(&Arc::new(buffer));
         }
     }
 }

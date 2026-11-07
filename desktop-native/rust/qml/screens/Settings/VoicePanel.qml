@@ -8,9 +8,10 @@ import com.yap.native
 // Custom): automatic sensitivity, the sensitivity marker over the live
 // level, noise suppression (RNNoise), WebRTC noise suppression, echo
 // cancellation, high fidelity, spatial audio. Output: speaker and
-// volume. Camera: the preview, camera, capture quality and "Preview before
-// turning on camera". Everything applies at once, in a call too, and is
-// kept per user (`voice-settings.json`).
+// volume. Camera: the preview, camera, capture quality, the background
+// (none, blur, or an uploaded picture) and "Preview before turning on
+// camera". Everything applies at once, in a call too, and is kept per user
+// (`voice-settings.json`; uploads are the account's, on the server).
 Column {
     id: root
 
@@ -306,8 +307,12 @@ Column {
         }
         SettingsRow {
             rowId: "camera-background"
-            layout: "inline"
-            ComingLater {}
+            layout: "block"
+            description: !Camera.hasCamera ? qsTr("Plug in a camera first.") : ""
+            CameraBackgroundPicker {
+                width: parent.width
+                live: SettingsNav.open
+            }
         }
         SwitchSetting {
             rowId: "always-preview-video"

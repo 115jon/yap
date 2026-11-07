@@ -14,6 +14,8 @@ use crate::share::ShareEncoding;
 use crate::wire::IceServer;
 
 mod fake;
+#[cfg(all(feature = "libwebrtc", windows))]
+mod mf_h264;
 #[cfg(feature = "libwebrtc")]
 mod pipeline;
 #[cfg(all(feature = "libwebrtc", windows))]
@@ -22,6 +24,8 @@ mod wasapi;
 mod webrtc;
 
 pub use fake::{FakeEngine, FakeOp, FakeSession};
+#[cfg(all(feature = "libwebrtc", windows))]
+pub(crate) use mf_h264::{HwConfig, HwEncoder};
 #[cfg(feature = "libwebrtc")]
 pub(crate) use webrtc::installed_video_output as video_output;
 #[cfg(feature = "libwebrtc")]
@@ -76,11 +80,40 @@ pub struct OutboundVideo {
     pub width: u32,
     pub height: u32,
     pub fps: f64,
-    /// libwebrtc's `encoderImplementation` (`libvpx`, ...).
+    /// libwebrtc's `encoderImplementation` (`libvpx`, ...), or the
+    /// hardware encoder's name for a hardware share.
     pub encoder: String,
     /// `none`, `cpu`, `bandwidth` or `other`.
     pub limitation: String,
     pub active: bool,
+    /// The negotiated codec (`VP8`, `H264`).
+    pub codec: String,
+    /// The bandwidth estimate's target for it, bits per second.
+    pub target_bitrate: f64,
+    /// Frames the encoder skipped or that never reached it.
+    pub dropped: u64,
+    /// Mean encode time per frame, milliseconds.
+    pub encode_ms: f64,
+    /// Encoded by a hardware encoder (Media Foundation).
+    pub hardware: bool,
+}
+
+/// One inbound video stream, as the stats report it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InboundVideo {
+    pub mid: String,
+    /// The alias it shows under (`cam-video-<participant>`), when routed.
+    pub key: String,
+    pub width: u32,
+    pub height: u32,
+    pub fps: f64,
+    pub codec: String,
+    /// libwebrtc's `decoderImplementation` (`libvpx`, `FFmpeg`, ...).
+    pub decoder: String,
+    pub frames_decoded: u64,
+    pub frames_dropped: u64,
+    /// Mean decode time per frame, milliseconds.
+    pub decode_ms: f64,
 }
 
 /// One stats snapshot of a peer connection (the driver takes one every 5 s):
@@ -107,6 +140,8 @@ pub struct MediaStats {
     pub server: String,
     /// Our camera's and share's encodings.
     pub outbound_video: Vec<OutboundVideo>,
+    /// The video we receive, per stream.
+    pub inbound_video: Vec<InboundVideo>,
     /// The own audio path's mic, or its speaker, failed several tries in a
     /// row (it would not open, or delivered nothing); the call shows its
     /// stall banner for that side.

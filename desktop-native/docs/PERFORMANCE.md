@@ -291,7 +291,8 @@ How they compare:
 
 1. **Hardware encode (batch N6b).** Sharing 1080p30 in software (~47 % of a
    core in the video phase) is the known in-call CPU item. A camera publish
-   also encodes in software.
+   also encodes in software. Done for shares in N6b (see "In-call video"
+   below: 52.5 % to 33.4 %); the camera stays on libvpx simulcast.
 2. **Focused idle with animated content (~10 % at ~50 fps).**
    - Every frame of an on-screen GIF or APNG costs a full-window sync and
      render.
@@ -593,3 +594,65 @@ build.
    `opt-level = "s"` for cold crates.
 6. **The hidden-window standby** is covered by reducer tests, not yet by a
    live call with a second account in the channel.
+
+# In-call video (batch N6b, 2026-11-06)
+
+Hardware H.264 for shares and camera backgrounds. Before is the build of
+a9a54bd1 (kept as `F:/ct/yapn/n6b-before`), after is this batch's; same
+machine (Ryzen 9 7900X, RTX 3080, driver 32.0.16.1047), `--profile spike` on
+the owner test account in General (Native Spike Lab), the peer test account
+in headless Edge (`F:/ct/yapn/run/n6b/peer-n6b.mjs`: fake media, a 1920x1080
+canvas share, `getStats` every 5 s). CPU is the whole process over 15-20 s
+(`tools/measure-native.ps1 -Mode sample -TargetPid`), in % of one core.
+Shares are of `share-test-window.ps1` windows only (`YAP_SHARE_ONLY_OURS`).
+
+## Before and after
+
+| scenario (ours)                                     | before (VP8, libvpx)   | after                                                                                                                               |
+| --------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| share 1080p30 (1898x1080 window), web peer watching | **52.5 %**             | **33.4 %** (NVENC H.264, 2.3-4 ms per frame on the GPU, ~2-3.5 Mbit/s)                                                              |
+| share 1440p60 (2560x1092 window)                    | **111 %** at 56-58 fps | not comparable: in the later session WGC delivered ~4 fps from both test windows to both builds (A/B on the same window), see below |
+| watch one web camera (640x360 `h`, VP8)             | 17.1 %                 | 12.9 % (decode unchanged: libvpx 0.3 ms)                                                                                            |
+| watch one 1080p web share (VP8 1920x1080@29)        | 25.4 %                 | 16.4 % (decode unchanged: libvpx 1.7 ms)                                                                                            |
+| watch one 1080p native share (H.264, native peer)   | n/a                    | 8.5 % at ~4 fps (FFmpeg 1.3 ms per frame)                                                                                           |
+| camera on (720p30 VP8 simulcast)                    | n/a                    | 17.3 % none, 33.6 % blur                                                                                                            |
+| camera preview in Settings, no call                 | n/a                    | 5.2 % none, 11.7 % blur (25.5 % before tuning)                                                                                      |
+
+Watching costs the same code both ways (software decode); the differences
+in those rows are session-to-session noise on a machine doing other work
+(System CPU 26 %, `csrss` at 36 % of the 3D engine during the later
+session). The share rows are the change: the libvpx encode (the bulk of the
+47-52 %) moves to NVENC; what is left is the WGC readback, the BGRA to I420
+conversion and scale, the I420 to NV12 copy, the local preview tile, and
+the call's audio (RNNoise, APM, Opus).
+
+1440p60: the before build reached 56-58 fps from the 2560-wide test window
+at 21:47 (111 % of a core). Later the same window, then a fresh one on an
+unused virtual display, delivered ~4 fps to WGC for both builds (the window
+itself still painted at ~63 fps; its frame counter moved 8,489 in 134 s),
+so no after-number at 60 fps was taken. At 4 fps NVENC encoded 2560x1092 in
+6.6-7.3 ms per frame and the process sat at 12.8 %.
+
+Peers decode it: the web peer's `getStats` showed `video/H264` 1898x1080 at
+30 fps with `framesDecoded` rising ~150 every 5 s (and 2560x1092 H.264 at
+1440p60), the native peer `H264 1898x1080 FFmpeg`, and the web peer
+received our blurred camera as `video/VP8` 640x360 at 30 fps.
+
+## Camera background cost
+
+Per 1280x720 frame on the camera thread (the `[camera] background` line,
+every 10 s): model input 0.09 ms, blur 0.93-1.09 ms, blend 0.86-1.07 ms
+(after: 2.84 and 3.10 ms before the box blur lost its closure and the mask
+its per-frame float scaling). Segmentation on its own thread, 12 times a
+second: 3.5-4.2 ms with smoothing and the feather (0.87 ms of it is the
+DirectML run; 3.7 ms on the CPU provider). GPU: 4.2-4.4 % of the 3D engine
+while it runs. Nothing loads until a frame needs it: a background chosen
+in the settings costs nothing while no camera runs.
+
+## Left
+
+1. **Zero-copy share.** The rest of the share's CPU is the readback and
+   conversions; a D3D11 path (WGC texture to the video processor to the
+   MFT) as the desktop app has would remove them.
+2. **Hardware decode** needs a patched webrtc-sys (LIBRARIES.md §12.4).
+3. **A 1440p60 after-number** on a source that delivers 60 fps.

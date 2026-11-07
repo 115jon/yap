@@ -27,6 +27,8 @@ Claims marked UNVERIFIED were not checked against this build.
 | Images        | `QQmlNetworkAccessManagerFactory` + `QNetworkDiskCache` for public media; Rust fetch for authenticated media                                           | `QQuickAsyncImageProvider` backed by Rust                                           |
 | Long-tail web | `wry` 0.57 `build_as_child` on a child HWND (it uses `webview2-com` and links `WebView2LoaderStatic.lib`)                                              | `webview2-com` 0.39 directly                                                        |
 | Call audio    | Own path (§11): WASAPI mic and speaker, libwebrtc's standalone APM, `nnnoiseless` 0.5.2 for RNNoise, our per-track stereo mix                          | libwebrtc's ADM (mixed playout, no hook after its APM)                              |
+| Share encode  | Media Foundation hardware H.264 MFT into libwebrtc's pre-encoded pass-through (§12); VP8 without one                                                   | vendor SDKs, OpenH264                                                               |
+| Backgrounds   | MediaPipe selfie segmenter as ONNX on ONNX Runtime 1.24.4 DirectML (`ort` rc.12, loaded at run time), own compositor (§12)                             | tract, MediaPipe C API                                                              |
 | Qt            | Keep 6.6.3 for the parity sprint. Build a static **Qt 6.12 LTS** (6.12.1 is due 2026-11-12) in parallel, then switch                                   | Stay on 6.6.3 (EOL, no fixes)                                                       |
 
 ## 1. Fonts
@@ -885,3 +887,89 @@ banner instead. A missing device does not fall back (the ADM would find
 none either). Krisp is not offered: the web
 only knows its browser SDK and reports it unsupported, so the select lists
 Off and RNNoise only, as the web's does.
+
+## 12. Video engine: hardware share encode and camera backgrounds (batch N6b)
+
+### 12.1 Hardware H.264 for the share
+
+| piece         | pick                                                                                                                                                          | instead of                                                                       |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Encoder       | Media Foundation's hardware H.264 MFT (NVENC, AMF, Quick Sync), through `windows` 0.61 (`Win32_Media_MediaFoundation`), as the desktop app's `wmf_encoder.rs` | vendor SDKs (NVENC/AMF/oneVPL headers and DLLs), x264/OpenH264                   |
+| Into the call | libwebrtc 0.3.55's pre-encoded pass-through: `NativeVideoSource::new_encoded` + `capture_encoded_frame`, sender on `VideoEncoderBackend::PreEncoded`          | a custom `VideoEncoderFactory` (webrtc-sys builds its own; none can be injected) |
+| NV12          | libyuv's `I420ToNV12` from the prebuilt (`cpp/screen_i420.cpp`)                                                                                               | our own converter                                                                |
+
+What the prebuilt has (`webrtc-sys` 0.3.52, `win-x64-release-webrtc-a545de4`,
+`args.gn`: `rtc_use_h264 = true`, `ffmpeg_branding = "Chrome"`): software
+VP8/VP9 (libvpx), AV1 (libaom/dav1d), OpenH264 and FFmpeg's H.264 decoder.
+Its NVENC/NVDEC factories compile only on Linux (`build.rs` needs `cuda.h`
+there), VA-API is commented out for Windows, and the encoder and decoder
+factories are made inside `peer_connection_factory.cpp` with no hook. The
+pass-through (`passthrough_video_encoder.cpp`) is single-layer, which is
+what a share is (the camera's three simulcast layers stay on libvpx).
+
+Why MF over the vendor SDKs: built into Windows (nothing to download or
+ship), one code path for all three vendors, and the desktop app already
+proved it against the same SFU and web peers. `YAP_SHARE_ENCODER=software`
+keeps VP8 for comparisons; a failed or missing MFT falls back to VP8.
+
+Hardware decode was not done: D3D11VA needs a `VideoDecoderFactory` of our
+own inside libwebrtc, i.e. a patched webrtc-sys (§12.4). Incoming H.264
+decodes on FFmpeg (1.3 ms a 1080p frame here), VP8 on libvpx.
+
+### 12.2 Person segmentation for backgrounds
+
+| piece      | pick                                                                                                                                                                                                                    | instead of                                                                                        |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Model      | MediaPipe `selfie_segmenter.tflite` (the web's `/mediapipe` copy, 256x256, fp16), converted to ONNX by `tools/convert-selfie-segmenter.py` into `assets/models/selfie_segmenter.onnx` (427 KB)                          | PINTO's older selfie-segmentation ONNX; MediaPipe's C API                                         |
+| Runtime    | ONNX Runtime 1.24.4, the DirectML build (`Microsoft.ML.OnnxRuntime.DirectML`), loaded at run time by `ort` 2.0.0-rc.12 (`load-dynamic`, `directml`)                                                                     | `tract` (pure Rust, CPU only: several times slower); MediaPipe C API (Bazel, no Windows GPU path) |
+| GPU        | DirectML, the system's (`System32\DirectML.dll`, 1.15.6 here); ONNX Runtime's CPU provider where it is missing or too old                                                                                               | shipping `DirectML.dll` 1.15.4 (17.7 MB)                                                          |
+| Compositor | Our own (`yap_voice::background`): libyuv `ScalePlane` for the blur's shrink/grow, running-sum box blur, fixed-point mask scaling, run-skipping blend; image backgrounds decoded by `image` 0.25 (png, jpeg, webp, gif) | a D3D11 compute pass                                                                              |
+
+The converter maps the model's 11 op types (fp16 weights folded, NHWC to
+NCHW, TF `SAME` padding as explicit pads, half-pixel bilinear resizes, the
+custom `Convolution2DTransposeBias` as `ConvTranspose`) and was checked two
+ways: against a NumPy interpreter of the TFLite graph (max difference
+1.2e-5 on a photo, 1.6e-9 on noise) and on a Wikimedia Commons portrait
+(the mask covers the person). Input is RGB in 0..1, as MediaPipe feeds it.
+
+`ort` rc.12 because rc.13+ drive ONNX Runtime 1.28+ and 1.24.4 is the last
+release with a DirectML build. Loaded, not linked: the exe does not grow,
+starts without the DLL, and the settings row says when backgrounds are
+unavailable. Windows ships a Windows ML `onnxruntime.dll` in System32, so
+ours is loaded by full path.
+
+Costs (RTX 3080): a segmentation is 0.87 ms on DirectML in isolation
+(`cargo test --release -p yap-segment`, `YAP_SEGMENTATION_DIR` set), 3.7 ms
+on the CPU provider (`YAP_SEGMENT_CPU=1`); in the app 3.5-4.2 ms with
+smoothing and the feather, 12 times a second on its own thread. Per 720p
+frame: input 0.09 ms, blur 0.9-1.1 ms, blend 0.9-1.1 ms. See PERFORMANCE.md.
+
+### 12.3 Licences and size
+
+| file                                      | licence                                                                                 | size    |
+| ----------------------------------------- | --------------------------------------------------------------------------------------- | ------- |
+| `selfie_segmenter.onnx` (from MediaPipe)  | Apache-2.0 (MediaPipe models; the model card's terms)                                   | 427 KB  |
+| `onnxruntime.dll` 1.24.4 (DirectML build) | MIT, with its `ThirdPartyNotices.txt` (shipped beside it)                               | 16.5 MB |
+| DirectML                                  | the system's; not shipped (its redistributable is under the Microsoft DirectML licence) | 0       |
+| `ort` 2.0.0-rc.12                         | MIT OR Apache-2.0                                                                       | in exe  |
+
+`tools/package.ps1` stages `segmentation\` (runtime, model, the runtime's
+licence and notices; Microsoft's signature checked and kept, excluded from
+re-signing). `build.ps1` copies the runtime and model beside a dev build.
+`YAP_ORT_DIR` points both at the unpacked NuGet package
+(`F:/ct/onnxruntime/dml-1.24.4` here).
+
+Size: the exe grew 1.1 MiB (the MF encoder, `ort`'s loader, the JPEG and GIF
+decoders); Setup.exe for the same build grew 6.7 MB with the segmentation
+folder (45.8 to 52.5 MB, `-NoCaptureHook` both ways); installed, the folder
+is 17.3 MB.
+
+### 12.4 Left for later
+
+- D3D11VA decode: a webrtc-sys patch that takes a decoder factory (MF's
+  H.264 decoder MFT with a DXGI device manager), or NVDEC on Windows.
+- A zero-copy share: WGC texture to a D3D11 video processor (BGRA to NV12)
+  to the MFT on the same device, as the desktop app does; today the frame
+  is read back once for the preview and converted on the CPU.
+- Animated (GIF/WebP) background images play their first frame only; the
+  web animates them. AVIF backgrounds are refused at decode.

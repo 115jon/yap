@@ -9,6 +9,7 @@ members = [
     "crates/yap-audio",
     "crates/yap-anim",
     "crates/yap-webm",
+    "crates/yap-segment",
 ]
 
 [workspace.package]
@@ -33,6 +34,7 @@ yap-voice = { path = "crates/yap-voice" }
 yap-audio = { path = "crates/yap-audio" }
 yap-anim = { path = "crates/yap-anim" }
 yap-webm = { path = "crates/yap-webm" }
+yap-segment = { path = "crates/yap-segment" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "warn"
@@ -69,6 +71,9 @@ yap-voice.workspace = true
 yap-audio = { workspace = true, features = ["libopus"] }
 yap-anim.workspace = true
 yap-webm = { workspace = true, features = ["libvpx"] }
+yap-segment.workspace = true
+# Camera background pictures (the formats the web uploads, less AVIF).
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 # The loopback relay's path tokens (already in the lock through yap-voice).
 uuid = { version = "1.29.0", features = ["v4"] }
 

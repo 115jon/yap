@@ -6,6 +6,10 @@
 //! straight into the I420 buffer the encoder takes. While nothing is live,
 //! a frame costs one atomic load and nothing else.
 //!
+//! With a camera background on (`crate::background`), frames come here for
+//! the preview too: each is scaled to at most 1280x720, composited, shown
+//! under [`LOCAL_CAMERA_KEY`] and, while the camera is live, encoded.
+//!
 //! The call's camera publication owns the [`Keepalive`]: while the camera is
 //! off, its SFU track gets a 64x36 black frame each second
 //! (`video-keepalive.ts`), so the SFU keeps the track and turning the camera
@@ -29,6 +33,9 @@ pub enum PixelFormat {
     /// Packed R, G, B, A.
     Rgba,
 }
+
+/// The video key our own camera's preview shows under.
+pub const LOCAL_CAMERA_KEY: &str = "local-camera";
 
 /// One captured frame, borrowed for the length of [`push_camera_frame`].
 /// Unused planes are empty with stride 0.
@@ -107,13 +114,16 @@ pub(crate) mod live {
     use std::sync::{Arc, PoisonError, RwLock};
     use std::time::Instant;
 
-    use libwebrtc::video_frame::{I420Buffer, VideoFrame, VideoRotation};
+    use libwebrtc::video_frame::{I420Buffer, VideoBuffer, VideoFrame, VideoRotation};
     use libwebrtc::video_source::native::NativeVideoSource;
     use tokio::task::JoinHandle;
 
     use super::{
-        keepalive_luma, CameraFrame, PixelFormat, KEEPALIVE_EVERY, KEEPALIVE_SIZE, STALE_AFTER,
+        keepalive_luma, CameraFrame, PixelFormat, KEEPALIVE_EVERY, KEEPALIVE_SIZE,
+        LOCAL_CAMERA_KEY, STALE_AFTER,
     };
+    use crate::background::{camera_effect, effect_size, FrameMut};
+    use crate::engine::I420Frame;
 
     extern "C" {
         fn yap_camera_to_i420(
@@ -132,6 +142,24 @@ pub(crate) mod live {
             stride_u: i32,
             dst_v: *mut u8,
             stride_v: i32,
+        ) -> i32;
+        fn yap_i420_scale(
+            src_y: *const u8,
+            src_stride_y: i32,
+            src_u: *const u8,
+            src_stride_u: i32,
+            src_v: *const u8,
+            src_stride_v: i32,
+            src_width: i32,
+            src_height: i32,
+            dst_y: *mut u8,
+            dst_stride_y: i32,
+            dst_u: *mut u8,
+            dst_stride_u: i32,
+            dst_v: *mut u8,
+            dst_stride_v: i32,
+            dst_width: i32,
+            dst_height: i32,
         ) -> i32;
     }
 
@@ -163,12 +191,14 @@ pub(crate) mod live {
     }
 
     pub(crate) fn push(frame: &CameraFrame<'_>) -> bool {
-        if !LIVE.load(Ordering::Acquire) || !frame.is_valid() {
+        let effect = camera_effect();
+        if (effect.is_none() && !LIVE.load(Ordering::Acquire)) || !frame.is_valid() {
             return false;
         }
-        let Some(source) = SINK.read().unwrap_or_else(PoisonError::into_inner).clone() else {
+        let source = SINK.read().unwrap_or_else(PoisonError::into_inner).clone();
+        if source.is_none() && effect.is_none() {
             return false;
-        };
+        }
         let mut buffer = I420Buffer::new(frame.width, frame.height);
         let (sy, su, sv) = buffer.strides();
         let (y, u, v) = buffer.data_mut();
@@ -200,12 +230,93 @@ pub(crate) mod live {
         if converted != 0 {
             return false;
         }
+        if let Some(effect) = effect {
+            let (w, h) = effect_size(frame.width, frame.height);
+            if (w, h) != (frame.width, frame.height) {
+                match scaled(&buffer, w, h) {
+                    Some(smaller) => buffer = smaller,
+                    None => return false,
+                }
+            }
+            let (width, height) = (buffer.width() as usize, buffer.height() as usize);
+            let (sy, su, sv) = buffer.strides();
+            let (y, u, v) = buffer.data_mut();
+            effect.apply(&mut FrameMut {
+                width,
+                height,
+                y,
+                u,
+                v,
+                stride_y: sy as usize,
+                stride_u: su as usize,
+                stride_v: sv as usize,
+            });
+            preview(&buffer);
+        }
+        let Some(source) = source else {
+            return false;
+        };
         source.capture_frame(&VideoFrame {
             rotation: VideoRotation::VideoRotation0,
             timestamp_us: 0,
             frame_metadata: None,
             buffer,
         })
+    }
+
+    /// `buffer` scaled down to `w` x `h`.
+    fn scaled(buffer: &I420Buffer, w: u32, h: u32) -> Option<I420Buffer> {
+        let mut out = I420Buffer::new(w, h);
+        let (sy, su, sv) = buffer.strides();
+        let (y, u, v) = buffer.data();
+        let (dy, du, dv) = out.strides();
+        let (oy, ou, ov) = out.data_mut();
+        // SAFETY: both buffers are libwebrtc's own I420 at their sizes and
+        // strides; libyuv reads and writes nothing else.
+        let code = unsafe {
+            yap_i420_scale(
+                y.as_ptr(),
+                stride(sy),
+                u.as_ptr(),
+                stride(su),
+                v.as_ptr(),
+                stride(sv),
+                stride(buffer.width()),
+                stride(buffer.height()),
+                oy.as_mut_ptr(),
+                stride(dy),
+                ou.as_mut_ptr(),
+                stride(du),
+                ov.as_mut_ptr(),
+                stride(dv),
+                stride(w),
+                stride(h),
+            )
+        };
+        (code == 0).then_some(out)
+    }
+
+    /// The composited frame on our own camera tile and preview.
+    fn preview(buffer: &I420Buffer) {
+        let Some(output) = crate::engine::video_output() else {
+            return;
+        };
+        let (sy, su, sv) = buffer.strides();
+        let (y, u, v) = buffer.data();
+        output.frame(
+            LOCAL_CAMERA_KEY,
+            &I420Frame {
+                width: buffer.width(),
+                height: buffer.height(),
+                rotation: 0,
+                y,
+                u,
+                v,
+                stride_y: sy,
+                stride_u: su,
+                stride_v: sv,
+            },
+        );
     }
 
     /// The black frames a parked camera sends, and how well they kept time.

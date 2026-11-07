@@ -66,6 +66,15 @@ impl VideoOutput for QtOutput {
     }
 }
 
+/// Installs [`QtOutput`] as where call video and our own composited
+/// camera go (once; later calls do nothing).
+pub fn install_output() {
+    static OUTPUT: std::sync::Once = std::sync::Once::new();
+    OUTPUT.call_once(|| {
+        yap_voice::LibwebrtcEngine::set_video_output(std::sync::Arc::new(QtOutput));
+    });
+}
+
 /// What the visible surfaces show, by surface id.
 #[derive(Default)]
 struct Surfaces {

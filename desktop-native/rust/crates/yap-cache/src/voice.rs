@@ -96,6 +96,43 @@ impl Default for PeerSettings {
     }
 }
 
+/// The camera background (`CameraBackgroundSetting`), tagged by `type` as
+/// the web stores it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum CameraBackground {
+    #[default]
+    None,
+    /// `strength`: `light` or `strong` (the web's tile picks strong).
+    Blur { strength: String },
+    /// One of the account's uploaded backgrounds, by id.
+    Image { id: String },
+}
+
+impl CameraBackground {
+    /// The settings row's key: `none`, `blur` or `image:<id>`.
+    pub fn key(&self) -> String {
+        match self {
+            Self::None => "none".into(),
+            Self::Blur { .. } => "blur".into(),
+            Self::Image { id } => format!("image:{id}"),
+        }
+    }
+
+    /// From a row key (an unknown one is `None`).
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "blur" => Self::Blur {
+                strength: "strong".into(),
+            },
+            _ => key
+                .strip_prefix("image:")
+                .filter(|id| !id.is_empty())
+                .map_or(Self::None, |id| Self::Image { id: id.to_owned() }),
+        }
+    }
+}
+
 /// One user's voice settings, with the web's defaults.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -117,6 +154,8 @@ pub struct VoiceSettings {
     pub screen_share_quality: String,
     /// The share picker's "Include audio".
     pub screen_share_with_audio: bool,
+    /// What goes behind the camera's person.
+    pub camera_background: CameraBackground,
     pub input_profile: InputProfile,
     /// WebRTC's noise suppression (the web's "Browser noise suppression").
     pub noise_suppression: bool,
@@ -160,6 +199,7 @@ impl Default for VoiceSettings {
             always_preview_video: true,
             screen_share_quality: DEFAULT_SHARE_QUALITY.into(),
             screen_share_with_audio: true,
+            camera_background: CameraBackground::None,
             input_profile: InputProfile::Standard,
             noise_suppression: true,
             noise_reduction_enabled: false,
@@ -212,6 +252,11 @@ impl VoiceSettings {
         }
         if !SHARE_QUALITIES.contains(&self.screen_share_quality.as_str()) {
             self.screen_share_quality = DEFAULT_SHARE_QUALITY.into();
+        }
+        if let CameraBackground::Blur { strength } = &mut self.camera_background {
+            if strength != "light" && strength != "strong" {
+                *strength = "strong".into();
+            }
         }
         for id in [
             &mut self.input_device_id,
@@ -356,6 +401,29 @@ pub fn save_voice(dir: &Path, user_id: &str, settings: &VoiceSettings) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn camera_background_should_serialize_as_the_web_does() {
+        let blur = CameraBackground::Blur {
+            strength: "strong".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&blur).unwrap(),
+            serde_json::json!({ "type": "blur", "strength": "strong" })
+        );
+        assert_eq!(
+            serde_json::to_value(CameraBackground::None).unwrap(),
+            serde_json::json!({ "type": "none" })
+        );
+    }
+
+    #[test]
+    fn camera_background_keys_should_round_trip() {
+        for key in ["none", "blur", "image:abc"] {
+            assert_eq!(CameraBackground::from_key(key).key(), key);
+        }
+        assert_eq!(CameraBackground::from_key("image:"), CameraBackground::None);
+    }
 
     #[test]
     fn an_unknown_camera_quality_should_fall_back_to_720p30() {

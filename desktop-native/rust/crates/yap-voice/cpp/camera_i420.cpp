@@ -52,3 +52,46 @@ extern "C" int yap_camera_to_i420(int format,
       return -1;
   }
 }
+
+#include "third_party/libyuv/include/libyuv/scale.h"
+
+// One plane scaled: a box filter down (the background blur's shrink),
+// bilinear up. Returns 0 on success.
+extern "C" int yap_scale_plane(const uint8_t* src,
+                               int src_stride,
+                               int src_width,
+                               int src_height,
+                               uint8_t* dst,
+                               int dst_stride,
+                               int dst_width,
+                               int dst_height)
+{
+  const bool down = dst_width < src_width || dst_height < src_height;
+  libyuv::ScalePlane(src, src_stride, src_width, src_height, dst, dst_stride, dst_width,
+                     dst_height, down ? libyuv::kFilterBox : libyuv::kFilterBilinear);
+  return 0;
+}
+
+// A camera frame scaled down to the size a background effect runs at.
+// Returns 0 on success.
+extern "C" int yap_i420_scale(const uint8_t* src_y,
+                              int src_stride_y,
+                              const uint8_t* src_u,
+                              int src_stride_u,
+                              const uint8_t* src_v,
+                              int src_stride_v,
+                              int src_width,
+                              int src_height,
+                              uint8_t* dst_y,
+                              int dst_stride_y,
+                              uint8_t* dst_u,
+                              int dst_stride_u,
+                              uint8_t* dst_v,
+                              int dst_stride_v,
+                              int dst_width,
+                              int dst_height)
+{
+  return libyuv::I420Scale(src_y, src_stride_y, src_u, src_stride_u, src_v, src_stride_v,
+                           src_width, src_height, dst_y, dst_stride_y, dst_u, dst_stride_u,
+                           dst_v, dst_stride_v, dst_width, dst_height, libyuv::kFilterBox);
+}

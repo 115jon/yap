@@ -100,6 +100,8 @@ pub struct CallStats {
     pub remote_tracks: u32,
     /// Our outbound video layers (camera and share).
     pub video: Vec<CallVideoStat>,
+    /// The video we receive.
+    pub incoming: Vec<CallIncomingVideoStat>,
     /// The last 24 ticks, oldest first: `[bitrate, loss, jitter, rtt]`.
     pub samples: Vec<[f64; 4]>,
 }
@@ -117,6 +119,26 @@ pub struct CallVideoStat {
     pub limitation: String,
     pub frames: u64,
     pub active: bool,
+    pub codec: String,
+    pub bitrate_kbps: f64,
+    pub dropped: u64,
+    pub encode_ms: f64,
+    pub hardware: bool,
+}
+
+/// One inbound video stream.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallIncomingVideoStat {
+    pub key: String,
+    pub width: u32,
+    pub height: u32,
+    pub fps: f64,
+    pub codec: String,
+    pub decoder: String,
+    pub frames: u64,
+    pub dropped: u64,
+    pub decode_ms: f64,
 }
 
 /// A sticker that landed (the overlay plays each `seq` once).

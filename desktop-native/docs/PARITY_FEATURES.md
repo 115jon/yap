@@ -33,6 +33,12 @@ blocklists and OBS's preflight, behind the `gameCaptureHook` setting;
 frames read back to the CPU for the native encoder; no Vulkan layer) are
 done. The server menu opens at the pointer.
 
+Progress, 2026-11-06 (phase 5, N6b video engine): hardware H.264 for shares
+(Media Foundation, as the desktop app), per-stream video stats, and 3.8
+(camera backgrounds: blur and uploaded images, MediaPipe's segmenter on ONNX
+Runtime/DirectML) are done. Hardware decode is not (webrtc-sys has no
+decoder hook). See "Phase 5 N6b" at the end.
+
 Read alongside:
 
 - [../FEASIBILITY.md](../FEASIBILITY.md): auth, gateway basics, REST basics.
@@ -364,7 +370,7 @@ Code: `src/hooks/useVoiceChannel.ts` (5,700 lines), `src/lib/sfu-client.ts`,
 | Input / output volume                        | C                  | `inputVolume`, `outputVolume`, `setMasterVolume` (`useVoiceChannel.ts:3780`)                                                                                                                                                                                                                                                                                                                                                                                                  | S                                                                                                                                                    |
 | Camera                                       | P                  | track `cam-video-<pid>`, op 12, op 15 `self_video`; quality profiles 480p30…1080p60, default 720p30 (`src/lib/camera-quality.ts`)                                                                                                                                                                                                                                                                                                                                             | L; libwebrtc video capturer + Qt video sink                                                                                                          |
 | Camera preview / "preview before turning on" | C                  | `alwaysPreviewVideo`                                                                                                                                                                                                                                                                                                                                                                                                                                                          | S after camera                                                                                                                                       |
-| Camera background blur/replace               | C                  | MediaPipe selfie segmenter WASM (`src/lib/camera-background-effects.ts:10-11`)                                                                                                                                                                                                                                                                                                                                                                                                | XL natively; defer                                                                                                                                   |
+| Camera background blur/replace               | **done (N6b)**     | MediaPipe selfie segmenter WASM (`src/lib/camera-background-effects.ts:10-11`)                                                                                                                                                                                                                                                                                                                                                                                                | XL natively; defer                                                                                                                                   |
 | Simulcast                                    | -                  | **none found**: no `sendEncodings`/`rid` in `src/` (only test mocks). Screen sender sets `maxBitrate`/`maxFramerate` per quality (`useVoiceChannel.ts:578-595`)                                                                                                                                                                                                                                                                                                               | nothing to match                                                                                                                                     |
 | Screen share (web/CEF path)                  | P                  | `getDisplayMedia` with a custom picker of OS sources (`get_screen_sources`, `get_source_thumbnail`), tracks `screen-video-<pid>` / `screen-audio-<pid>`, op 15 `self_stream`, `self_stream_audio`, `stream_preview_url`; quality `480p…4k` × 30/60                                                                                                                                                                                                                            | covered by native share below                                                                                                                        |
 | Screen share (native, default on Windows)    | P                  | Rust publisher in the Tauri process: WGC capture → WMF H.264 hardware encoder → `webrtc` crate PC, WASAPI loopback + Opus audio. SDP goes over the voice socket: SelectProtocol (op 1, `push_prefix:"screen"`, `push_tracks`) → SessionDescription (4) → NegotiationDone (10) → TracksReady (102) (`desktop/src-tauri/src/native_share/mod.rs:1-16`, `src/lib/voice/native-screen-share-transport.ts`, `client-payloads.ts:275-291`). Presets `native_share/quality.rs:28-45` | L; **reuse `native_share/` nearly as-is** (it is already Rust and has no CEF dependency). UNVERIFIED how much depends on Tauri types                 |
@@ -539,19 +545,19 @@ handed over; that hand-off is itself a Tier 1 item).
 
 ### Tier 3: rare or admin
 
-| #    | item                                                           | effort | depends on | WV2?                |
-| ---- | -------------------------------------------------------------- | ------ | ---------- | ------------------- |
-| 3.1  | Server create, settings, icon, delete                          | M      | -          | yes                 |
-| 3.2  | Channel/category create, edit, delete, reorder (drag)          | M      | -          | yes                 |
-| 3.3  | Roles and permissions (bitmask, channel overwrites)            | L      | -          | yes                 |
-| 3.4  | Members: kick, ban/unban, role assign                          | M      | -          | yes                 |
-| 3.5  | Invites management (create with expiry/uses, pause, revoke)    | S      | -          | yes                 |
-| 3.6  | Audit log                                                      | S      | -          | yes                 |
-| 3.7  | Server soundboard management (upload, edit, delete)            | S      | -          | yes                 |
-| 3.8  | Camera background effects (MediaPipe segmentation)             | XL     | 1.4        | no (pipeline), skip |
-| 3.9  | Account: email, sign-in methods, account claims, sessions list | S      | -          | yes (Kova)          |
-| 3.10 | Anonymous rooms (`/room/$slug`), public demo rooms             | M      | voice      | yes                 |
-| 3.11 | Legacy migration (Ralph Meet data, `Update.exe` launcher)      | S      | installer  | n/a                 |
+| #    | item                                                           | effort | depends on | WV2?       |
+| ---- | -------------------------------------------------------------- | ------ | ---------- | ---------- |
+| 3.1  | Server create, settings, icon, delete                          | M      | -          | yes        |
+| 3.2  | Channel/category create, edit, delete, reorder (drag)          | M      | -          | yes        |
+| 3.3  | Roles and permissions (bitmask, channel overwrites)            | L      | -          | yes        |
+| 3.4  | Members: kick, ban/unban, role assign                          | M      | -          | yes        |
+| 3.5  | Invites management (create with expiry/uses, pause, revoke)    | S      | -          | yes        |
+| 3.6  | Audit log                                                      | S      | -          | yes        |
+| 3.7  | Server soundboard management (upload, edit, delete)            | S      | -          | yes        |
+| 3.8  | Camera background effects (MediaPipe segmentation)             | XL     | 1.4        | done (N6b) |
+| 3.9  | Account: email, sign-in methods, account claims, sessions list | S      | -          | yes (Kova) |
+| 3.10 | Anonymous rooms (`/room/$slug`), public demo rooms             | M      | voice      | yes        |
+| 3.11 | Legacy migration (Ralph Meet data, `Update.exe` launcher)      | S      | installer  | n/a        |
 
 ### Suggested order
 
@@ -710,3 +716,37 @@ Evidence (2026-11-06, Native Spike Lab / General, headless Edge peer, fake mic
   the default arc: the peer sits hard right of us. Speaker tap: L 0.0000,
   R 0.031 (gain 0.17 = 30 % output x 0.57 distance); switched off in the
   call, L 0.027 = R 0.027 (gain 0.30).
+
+## Phase 5 N6b: the video engine (hardware share encode, camera backgrounds)
+
+| Feature                      | Native                                                                                                                                                                                                                    | Web / desktop                                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Share encode                 | Hardware H.264 (Media Foundation MFT, NVENC/AMF/Quick Sync, `engine/mf_h264.rs`) through libwebrtc's pre-encoded pass-through; VP8 when there is no hardware encoder or it fails (`YAP_SHARE_ENCODER=software` forces it) | desktop: WMF H.264 native publisher when a hardware encoder probes, else the browser path (VP8) |
+| Share codec negotiation      | H.264 only on a hardware share (constrained baseline 42e01f, mode 1, RTX); VP8 first otherwise                                                                                                                            | desktop native: H.264 (`42e01f`); browser: VP8 first                                            |
+| Content hint                 | software: maintain-resolution (detail, monitors) / maintain-framerate (motion, windows); hardware: the encoder halves or thirds a detail share's frame rate under a tight estimate (it cannot scale)                      | `contentHint` detail/motion                                                                     |
+| Share presets                | 720p-4K at 30/60 (`SHARE_QUALITIES`), in place on the hardware path (a new size or rate opens a fresh MFT)                                                                                                                | `STREAMING_PROFILES`                                                                            |
+| Share simulcast              | none (one layer), as the web                                                                                                                                                                                              | none                                                                                            |
+| Per-stream stats             | voice details: each outbound layer with codec, size, fps, target kbps, encoder (hardware marked), encode ms, dropped; each incoming stream with codec, size, fps, decoder, decode ms, dropped                             | StreamingStatsPanel (native share: encoder, fps, fwd/drop, encode ms, negotiated size)          |
+| Incoming H.264               | decoded (FFmpeg in the prebuilt), software; no D3D11VA (webrtc-sys has no decoder hook)                                                                                                                                   | browser: hardware where the browser has it                                                      |
+| Camera backgrounds           | None / Blur (strong) / uploaded images; upload (25 MB, gif/webp/png/jpeg/avif), list, delete (hover trash), select; an upload is selected at once; Settings row and the Camera dialog                                     | `CameraCard.tsx`, `/api/camera-backgrounds`                                                     |
+| Segmentation                 | MediaPipe `selfie_segmenter` as ONNX on ONNX Runtime 1.24.4 DirectML (CPU fallback), 12 fps, temporal smoothing, the web's smoothstep and feather                                                                         | MediaPipe Tasks WASM (GPU delegate, CPU fallback), 12 fps                                       |
+| Effect output                | composited I420 at up to 1280x720 into the camera's VP8 simulcast and the local preview                                                                                                                                   | canvas `captureStream(24)` at up to 1280x720                                                    |
+| Animated backgrounds         | first frame only                                                                                                                                                                                                          | animated (ImageDecoder)                                                                         |
+| Profile editor from Settings | Escape closes it (or nudges the unsaved bar), as the web's dialog                                                                                                                                                         | Radix Dialog `onOpenChange`                                                                     |
+
+Evidence (2026-11-06, Native Spike Lab / General, owner and peer test
+accounts; PERFORMANCE.md "In-call video" has the CPU table):
+
+- Hardware share, 1080p30: `[share] publishing hardware H.264`, NVIDIA H.264
+  Encoder MFT, 1898x1080@30, 2.3-4 ms per frame, a keyframe a second. The
+  web peer's `getStats`: `video/H264` 1898x1080@30, `framesDecoded` +150 per
+  5 s. 1440p60 window: `video/H264` 2560x1092 on the web peer. A second
+  native client (peer account) watched the hardware share: `H264 1898x1080
+FFmpeg 1.3ms`.
+- Camera background: a still portrait as the fake camera
+  (`YAP_FAKE_CAMERA_IMAGE`): the image background replaced the room and kept
+  the person in the preview; blur in a call; the web peer received the
+  composited camera as `video/VP8` 640x360@30 (`h`). Upload, select,
+  thumbnail and delete against `/api/camera-backgrounds` on the test account.
+- Escape on the profile editor opened from Settings closes it; Settings
+  stays open.

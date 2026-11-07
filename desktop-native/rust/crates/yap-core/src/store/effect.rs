@@ -125,6 +125,15 @@ pub enum Effect {
         content_type: String,
         fields: Vec<(String, String)>,
     },
+    /// Upload a camera background as multipart `file` to
+    /// `/api/camera-backgrounds` (at most 25 MB). Answered by `Input::Http`
+    /// with `ApiResponse::Backgrounds(Uploaded)`.
+    BackgroundUpload {
+        id: RequestId,
+        token: Token,
+        path: String,
+        content_type: String,
+    },
     /// Tell the local player (soundboard clips, the Listen Together
     /// stream). `token` fetches our own media.
     Audio {
@@ -299,6 +308,8 @@ pub enum ApiRequest {
     Embeds(super::embeds::EmbedsRequest),
     /// The GIF and clip favourites.
     Favorites(super::favorites::FavoritesRequest),
+    /// The account's camera backgrounds.
+    Backgrounds(super::backgrounds::BackgroundsRequest),
     /// `PATCH /api/channels/{id}/messages {message_id, embeds: []}`.
     RemoveEmbeds {
         channel_id: String,
@@ -355,6 +366,7 @@ pub enum ApiResponse {
     Embeds(Value),
     /// The whole favourites list.
     Favorites(Vec<Value>),
+    Backgrounds(super::backgrounds::BackgroundsResponse),
     Extras(super::extras::ExtrasResponse),
     /// A call whose body the store does not read.
     Done,
@@ -415,6 +427,7 @@ impl ApiRequest {
             Self::Shop(request) => request.method(),
             Self::Embeds(request) => request.method(),
             Self::Favorites(request) => request.method(),
+            Self::Backgrounds(request) => request.method(),
             Self::RemoveEmbeds { .. } => Method::Patch,
             Self::VoiceMove(_) => Method::Post,
             Self::SendMessage { .. }
@@ -456,6 +469,7 @@ impl ApiRequest {
             Self::Shop(request) => request.path(),
             Self::Embeds(request) => request.path(),
             Self::Favorites(request) => request.path(),
+            Self::Backgrounds(request) => request.path(),
             Self::RemoveEmbeds { channel_id, .. } => format!("/api/channels/{channel_id}/messages"),
             Self::VoiceMove(_) => "/api/voice/move".into(),
             Self::Me => "/api/users/me".into(),
@@ -542,6 +556,7 @@ impl ApiRequest {
             Self::Shop(request) => request.body(),
             Self::Embeds(_) => Value::Null,
             Self::Favorites(request) => request.body(),
+            Self::Backgrounds(request) => request.body(),
             Self::VoiceMove(request) => serde_json::to_value(request).unwrap_or(Value::Null),
             Self::RemoveEmbeds { message_id, .. } => {
                 json!({ "message_id": message_id, "embeds": [] })
@@ -630,6 +645,7 @@ impl ApiRequest {
             Self::Shop(request) => ApiResponse::Shop(request.decode(body)?),
             Self::Embeds(_) => ApiResponse::Embeds(body),
             Self::Favorites(request) => ApiResponse::Favorites(request.decode(body)?),
+            Self::Backgrounds(request) => ApiResponse::Backgrounds(request.decode(body)?),
             Self::RemoveEmbeds { .. } | Self::VoiceMove(_) => ApiResponse::Done,
             Self::Me => ApiResponse::Me(Box::new(
                 serde_json::from_value(body).map_err(|e| ApiError::Decode(format!("me: {e}")))?,

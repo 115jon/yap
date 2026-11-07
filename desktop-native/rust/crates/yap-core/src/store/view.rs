@@ -1133,6 +1133,8 @@ pub enum ViewUpdate {
     Shop(Box<super::shop::ShopView>),
     /// The saved GIF and clip favourites (`provider:id`).
     GifFavorites(Vec<String>),
+    /// The account's camera backgrounds.
+    CameraBackgrounds(Box<super::backgrounds::BackgroundsView>),
     /// The inbox, reactions, details tabs and the other extras.
     Extras(Box<super::extras::ExtrasView>),
     /// DM calls, moves, stickers and the voice details.

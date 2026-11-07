@@ -5,10 +5,10 @@ import Yap.Chrome
 import com.yap.native
 
 // Camera (CameraSettingsModal.tsx with CameraCard's rows): the preview,
-// which starts as the dialog opens; the camera; the capture quality; and
-// "Preview before turning on camera". From the camera key while the camera
-// is off it ends with Not now and Turn on camera, otherwise Done. Changes
-// save as you go. Backgrounds are not in this build.
+// which starts as the dialog opens; the camera; the capture quality; the
+// background; and "Preview before turning on camera". From the camera key
+// while the camera is off it ends with Not now and Turn on camera,
+// otherwise Done. Changes save as you go.
 Popup {
     id: root
 
@@ -88,6 +88,7 @@ Popup {
 
         // Header: the title, what this is, and Close.
         Item {
+            id: header
             width: parent.width
             height: heading.implicitHeight + 32
             Column {
@@ -104,7 +105,7 @@ Popup {
                 }
                 Text {
                     width: parent.width
-                    text: qsTr("Pick a camera and its quality. Changes save as you go.")
+                    text: qsTr("Pick a camera and background. Changes save as you go.")
                     wrapMode: Text.Wrap
                     color: Theme.ink2
                     font: Theme.type.description
@@ -122,153 +123,173 @@ Popup {
         }
         Rectangle { width: parent.width; height: 1; color: Theme.line }
 
-        Column {
-            x: 20
-            width: parent.width - 40
-            topPadding: 16
-            bottomPadding: 16
-            spacing: 16
+        // The rows scroll when the window is too short for them all.
+        Flickable {
+            width: parent.width
+            height: Math.min(body.implicitHeight, (root.parent ? root.parent.height - 64 : 800) - header.height - footer.implicitHeight - 2)
+            contentWidth: width
+            contentHeight: body.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
 
-            // The preview: a media surface, so its black and white are the
-            // video's, not the theme's.
-            Rectangle {
-                id: preview
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: Math.min(parent.width, 480)
-                height: Math.round(width * 9 / 16)
-                radius: Theme.radius
-                color: "black"
-                Accessible.role: Accessible.Graphic
-                Accessible.name: qsTr("Camera preview")
+            Column {
+                id: body
+                x: 20
+                width: parent.width - 40
+                topPadding: 16
+                bottomPadding: 16
+                spacing: 16
 
-                Loader {
-                    anchors.fill: parent
-                    active: root.previewOn && Camera.running && Camera.hasCamera
-                    sourceComponent: VideoSurface {
-                        videoKey: "local-camera"
-                        fillMode: QM.VideoOutput.PreserveAspectFit
-                    }
-                }
-
-                Icon {
-                    id: spinner
-                    anchors.centerIn: parent
-                    visible: root.starting
-                    name: "loader"
-                    smooth: true
-                    size: Theme.iconXl
-                    color: Qt.rgba(1, 1, 1, 0.7)
-                    Accessible.ignored: false
-                    Accessible.role: Accessible.StaticText
-                    Accessible.name: qsTr("Starting camera")
-                    RotationAnimator on rotation {
-                        from: 0
-                        to: 360
-                        duration: 900
-                        loops: Animation.Infinite
-                        running: spinner.visible && !Theme.reducedMotion
-                    }
-                }
-
-                Icon {
-                    anchors.centerIn: parent
-                    visible: Camera.hasCamera && !root.starting && !(root.previewOn && Camera.running)
-                    name: "cameraOff"
-                    variant: "active"
-                    size: 32
-                    color: Qt.rgba(1, 1, 1, 0.4)
-                }
-
-                // No camera: say so, and offer to look again.
-                Column {
-                    visible: !Camera.hasCamera
-                    anchors.centerIn: parent
-                    width: parent.width - 48
-                    spacing: 8
-                    Text {
-                        width: parent.width
-                        horizontalAlignment: Text.AlignHCenter
-                        text: qsTr("No camera found")
-                        color: "white"
-                        font: Theme.type.captionStrong
-                    }
-                    Text {
-                        width: parent.width
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.Wrap
-                        text: qsTr("Plug in a camera, then try again.")
-                        color: Qt.rgba(1, 1, 1, 0.7)
-                        font: Theme.type.caption
-                    }
-                }
-
-                PreviewKey {
+                // The preview: a media surface, so its black and white are the
+                // video's, not the theme's.
+                Rectangle {
+                    id: preview
                     anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 12
-                    onMedia: root.previewOn && Camera.hasCamera
-                    text: !Camera.hasCamera ? qsTr("Try again")
-                        : root.previewOn ? qsTr("Stop preview") : qsTr("Preview camera")
-                    glyph: root.previewOn && Camera.hasCamera ? "cameraOff" : "camera"
-                    Accessible.checkable: Camera.hasCamera
-                    Accessible.checked: root.previewOn
-                    onClicked: {
-                        if (!Camera.hasCamera || root.problem.length > 0) {
-                            root.previewOn = true
-                            Camera.retry()
-                        } else {
-                            root.previewOn = !root.previewOn
+                    width: Math.min(parent.width, 480)
+                    height: Math.round(width * 9 / 16)
+                    radius: Theme.radius
+                    color: "black"
+                    Accessible.role: Accessible.Graphic
+                    Accessible.name: qsTr("Camera preview")
+
+                    Loader {
+                        anchors.fill: parent
+                        active: root.previewOn && Camera.running && Camera.hasCamera
+                        sourceComponent: VideoSurface {
+                            videoKey: "local-camera"
+                            fillMode: QM.VideoOutput.PreserveAspectFit
+                        }
+                    }
+
+                    Icon {
+                        id: spinner
+                        anchors.centerIn: parent
+                        visible: root.starting
+                        name: "loader"
+                        smooth: true
+                        size: Theme.iconXl
+                        color: Qt.rgba(1, 1, 1, 0.7)
+                        Accessible.ignored: false
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: qsTr("Starting camera")
+                        RotationAnimator on rotation {
+                            from: 0
+                            to: 360
+                            duration: 900
+                            loops: Animation.Infinite
+                            running: spinner.visible && !Theme.reducedMotion
+                        }
+                    }
+
+                    Icon {
+                        anchors.centerIn: parent
+                        visible: Camera.hasCamera && !root.starting && !(root.previewOn && Camera.running)
+                        name: "cameraOff"
+                        variant: "active"
+                        size: 32
+                        color: Qt.rgba(1, 1, 1, 0.4)
+                    }
+
+                    // No camera: say so, and offer to look again.
+                    Column {
+                        visible: !Camera.hasCamera
+                        anchors.centerIn: parent
+                        width: parent.width - 48
+                        spacing: 8
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            text: qsTr("No camera found")
+                            color: "white"
+                            font: Theme.type.captionStrong
+                        }
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            text: qsTr("Plug in a camera, then try again.")
+                            color: Qt.rgba(1, 1, 1, 0.7)
+                            font: Theme.type.caption
+                        }
+                    }
+
+                    PreviewKey {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 12
+                        onMedia: root.previewOn && Camera.hasCamera
+                        text: !Camera.hasCamera ? qsTr("Try again")
+                            : root.previewOn ? qsTr("Stop preview") : qsTr("Preview camera")
+                        glyph: root.previewOn && Camera.hasCamera ? "cameraOff" : "camera"
+                        Accessible.checkable: Camera.hasCamera
+                        Accessible.checked: root.previewOn
+                        onClicked: {
+                            if (!Camera.hasCamera || root.problem.length > 0) {
+                                root.previewOn = true
+                                Camera.retry()
+                            } else {
+                                root.previewOn = !root.previewOn
+                            }
                         }
                     }
                 }
-            }
 
-            Text {
-                visible: text.length > 0
-                width: parent.width
-                textFormat: Text.PlainText
-                text: root.problemText(root.problem)
-                wrapMode: Text.Wrap
-                color: Theme.dangerInk
-                font: Theme.type.caption
-                Accessible.role: Accessible.AlertMessage
-            }
-
-            Field {
-                visible: Camera.hasCamera
-                label: qsTr("Camera")
-                SelectField {
+                Text {
+                    visible: text.length > 0
                     width: parent.width
-                    text: qsTr("Camera")
-                    ids: ["default"].concat(Camera.deviceIds)
-                    names: [""].concat(Camera.deviceNames)
-                    current: Audio.cameraDevice
-                    fallback: qsTr("Default camera")
-                    onPicked: id => Audio.selectCamera(id, id === "default" ? "" : Camera.deviceNames[Camera.deviceIds.indexOf(id)] ?? "")
+                    textFormat: Text.PlainText
+                    text: root.problemText(root.problem)
+                    wrapMode: Text.Wrap
+                    color: Theme.dangerInk
+                    font: Theme.type.caption
+                    Accessible.role: Accessible.AlertMessage
                 }
-            }
 
-            Field {
-                label: qsTr("Capture quality")
-                description: qsTr("Higher quality uses more bandwidth.")
-                SelectField {
-                    width: parent.width
-                    text: qsTr("Capture quality")
-                    firstIsDefault: false
-                    ids: root.qualityIds
-                    names: root.qualityNames
-                    current: Audio.cameraQuality
-                    onPicked: id => Audio.changeCameraQuality(id)
+                Field {
+                    visible: Camera.hasCamera
+                    label: qsTr("Camera")
+                    SelectField {
+                        width: parent.width
+                        text: qsTr("Camera")
+                        ids: ["default"].concat(Camera.deviceIds)
+                        names: [""].concat(Camera.deviceNames)
+                        current: Audio.cameraDevice
+                        fallback: qsTr("Default camera")
+                        onPicked: id => Audio.selectCamera(id, id === "default" ? "" : Camera.deviceNames[Camera.deviceIds.indexOf(id)] ?? "")
+                    }
                 }
-            }
 
-            SwitchRow {
-                x: -12
-                width: parent.width + 24
-                text: qsTr("Preview before turning on camera")
-                description: qsTr("Shows a preview before your camera goes live.")
-                on: Audio.alwaysPreviewVideo
-                onClicked: Audio.changeAlwaysPreviewVideo(!Audio.alwaysPreviewVideo)
+                Field {
+                    label: qsTr("Capture quality")
+                    description: qsTr("Higher quality uses more bandwidth.")
+                    SelectField {
+                        width: parent.width
+                        text: qsTr("Capture quality")
+                        firstIsDefault: false
+                        ids: root.qualityIds
+                        names: root.qualityNames
+                        current: Audio.cameraQuality
+                        onPicked: id => Audio.changeCameraQuality(id)
+                    }
+                }
+
+                Field {
+                    label: qsTr("Background")
+                    description: qsTr("Blur your surroundings or use your own image.")
+                    CameraBackgroundPicker {
+                        width: parent.width
+                        live: root.visible
+                    }
+                }
+
+                SwitchRow {
+                    x: -12
+                    width: parent.width + 24
+                    text: qsTr("Preview before turning on camera")
+                    description: qsTr("Shows a preview before your camera goes live.")
+                    on: Audio.alwaysPreviewVideo
+                    onClicked: Audio.changeAlwaysPreviewVideo(!Audio.alwaysPreviewVideo)
+                }
             }
         }
 
@@ -276,6 +297,7 @@ Popup {
 
         // Footer: Not now and Turn on camera, or Done.
         Column {
+            id: footer
             x: 20
             width: parent.width - 40
             topPadding: 12

@@ -8,6 +8,7 @@ const QML: &[&str] = &[
     "qml/chrome/WindowKey.qml",
     "qml/components/Avatar.qml",
     "qml/components/CallKey.qml",
+    "qml/components/CameraBackgroundPicker.qml",
     "qml/components/CountBadge.qml",
     "qml/components/DeviceCaret.qml",
     "qml/components/DialogKey.qml",

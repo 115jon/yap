@@ -612,6 +612,7 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             scalars(|s| s.gif_favorites = text);
         }
         ViewUpdate::Apps(view) => crate::apps::on_view(*view),
+        ViewUpdate::CameraBackgrounds(view) => crate::audio::on_backgrounds(*view),
         ViewUpdate::Extras(view) => crate::extras::on_view(*view),
         ViewUpdate::Invites(view) => crate::invites::on_view(*view),
         ViewUpdate::Toast(toast) => crate::desktop::on_toast(&toast),

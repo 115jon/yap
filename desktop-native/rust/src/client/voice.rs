@@ -11,7 +11,7 @@ use std::time::Duration;
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::watch;
-use yap_core::store::calls::{CallStats, CallVideoStat};
+use yap_core::store::calls::{CallIncomingVideoStat, CallStats, CallVideoStat};
 use yap_core::VoiceShare;
 use yap_core::{
     config, Api, ApiError, VoiceCommand, VoiceEvents, VoiceMember, VoiceMoved, VoiceUpdate,
@@ -377,6 +377,26 @@ fn call_stats(stats: yap_voice::VoiceStats) -> CallStats {
                 limitation: v.limitation,
                 frames: v.frames_encoded,
                 active: v.active,
+                codec: v.codec,
+                bitrate_kbps: v.target_bitrate / 1000.0,
+                dropped: v.dropped,
+                encode_ms: v.encode_ms,
+                hardware: v.hardware,
+            })
+            .collect(),
+        incoming: stats
+            .inbound_video
+            .into_iter()
+            .map(|v| CallIncomingVideoStat {
+                key: v.key,
+                width: v.width,
+                height: v.height,
+                fps: v.fps,
+                codec: v.codec,
+                decoder: v.decoder,
+                frames: v.frames_decoded,
+                dropped: v.frames_dropped,
+                decode_ms: v.decode_ms,
             })
             .collect(),
         samples: stats
@@ -395,10 +415,7 @@ pub async fn run(
     commands: UnboundedReceiver<VoiceCommand>,
     events: VoiceEvents,
 ) {
-    static OUTPUT: std::sync::Once = std::sync::Once::new();
-    OUTPUT.call_once(|| {
-        LibwebrtcEngine::set_video_output(std::sync::Arc::new(crate::video::QtOutput))
-    });
+    crate::video::install_output();
     let cfg = config::get();
     let beacon_api = api.clone();
     let env = CallEnv {

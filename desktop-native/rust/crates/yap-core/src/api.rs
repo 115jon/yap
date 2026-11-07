@@ -110,7 +110,9 @@ pub fn is_api_url(api_base: &str, url: &str) -> bool {
 pub fn media_needs_auth(api_base: &str, url: &str) -> bool {
     let base = api_base.trim_end_matches('/');
     url.strip_prefix(base).is_some_and(|rest| {
-        rest.starts_with("/api/attachments/") || rest.starts_with("/api/emojis/assets/")
+        rest.starts_with("/api/attachments/")
+            || rest.starts_with("/api/emojis/assets/")
+            || rest.starts_with("/api/camera-backgrounds/")
     })
 }
 
@@ -335,5 +337,35 @@ impl Api {
             .and_then(Value::as_str)
             .map(str::to_owned)
             .ok_or_else(|| ApiError::Decode("socket ticket missing".into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::media_needs_auth;
+
+    const BASE: &str = "https://yap.test";
+
+    #[test]
+    fn private_media_should_need_the_session() {
+        for path in [
+            "/api/attachments/c/a/x.png",
+            "/api/emojis/assets/e.png",
+            "/api/camera-backgrounds/id/beach.png",
+        ] {
+            assert!(media_needs_auth(BASE, &format!("{BASE}{path}")), "{path}");
+        }
+    }
+
+    #[test]
+    fn other_urls_should_not_get_the_session() {
+        assert!(!media_needs_auth(
+            BASE,
+            "https://yap.test/api/avatars/u.png"
+        ));
+        assert!(!media_needs_auth(
+            BASE,
+            "https://elsewhere.test/api/camera-backgrounds/id/x.png"
+        ));
     }
 }

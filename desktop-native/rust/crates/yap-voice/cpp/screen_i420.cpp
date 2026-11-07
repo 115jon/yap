@@ -48,3 +48,24 @@ extern "C" int yap_screen_to_i420(const uint8_t* bgra,
                            stride_u, dst_v, stride_v, dst_width, dst_height,
                            libyuv::kFilterBox);
 }
+
+#include "third_party/libyuv/include/libyuv/convert_from.h"
+
+// The share's I420 frame as NV12 (Y, then interleaved U/V), the layout the
+// Media Foundation H.264 encoders take. Returns 0 on success.
+extern "C" int yap_i420_to_nv12(const uint8_t* src_y,
+                                int stride_y,
+                                const uint8_t* src_u,
+                                int stride_u,
+                                const uint8_t* src_v,
+                                int stride_v,
+                                uint8_t* dst_y,
+                                int dst_stride_y,
+                                uint8_t* dst_uv,
+                                int dst_stride_uv,
+                                int width,
+                                int height)
+{
+  return libyuv::I420ToNV12(src_y, stride_y, src_u, stride_u, src_v, stride_v, dst_y, dst_stride_y,
+                            dst_uv, dst_stride_uv, width, height);
+}

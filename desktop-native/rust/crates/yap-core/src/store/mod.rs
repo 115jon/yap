@@ -11,6 +11,7 @@
 
 mod admin;
 pub mod apps;
+pub mod backgrounds;
 pub mod calls;
 mod effect;
 pub mod embeds;

@@ -15,7 +15,12 @@
 // which converts it to I420 straight into the encoder's buffer.
 //
 // YAP_FAKE_CAMERA=1 never creates a QCamera: a moving NV12 test pattern at
-// the chosen size and rate goes through the same frame path instead.
+// the chosen size and rate goes through the same frame path instead
+// (YAP_FAKE_CAMERA_IMAGE=<path>: that still picture instead of the pattern).
+//
+// With a camera background on (src/camera.rs), frames go to Rust while the
+// preview shows too, and the preview shows the composited frames Rust hands
+// back under the same key.
 //
 // Device choice follows packages/voice/DEVICES.md: a saved camera is found
 // by id, then by name (its id refreshed, emitted as `refreshed`); one that

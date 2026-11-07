@@ -34,6 +34,9 @@ extern "C" bool yap_camera_frame(int32_t format,
                                  const uint8_t* p2,
                                  size_t len2,
                                  uint32_t stride2);
+// A camera background is on (src/camera.rs): frames go to Rust for the
+// preview too, and the preview shows the composited ones it hands back.
+extern "C" bool yap_camera_effect_active();
 
 namespace {
 
@@ -151,8 +154,45 @@ public:
   }
 
 private:
+  // YAP_FAKE_CAMERA_IMAGE=<path>: that picture, scaled to cover the
+  // profile's size, at its rate (tests of camera backgrounds need a person
+  // in frame). False if it would not load.
+  bool runImage(const QString& path)
+  {
+    QImage image(path);
+    if (image.isNull())
+      return false;
+    const int w = m_width;
+    const int h = m_height;
+    image = image.scaled(w, h, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation)
+              .convertToFormat(QImage::Format_ARGB32);
+    image = image.copy((image.width() - w) / 2, (image.height() - h) / 2, w, h);
+    const auto period = std::chrono::microseconds(1000000 / std::max(1, m_fps));
+    auto due = std::chrono::steady_clock::now();
+    while (!m_stop.load()) {
+      QVideoFrame frame(QVideoFrameFormat(QSize(w, h), QVideoFrameFormat::Format_BGRA8888));
+      if (frame.map(QVideoFrame::WriteOnly)) {
+        // ARGB32 is B, G, R, A in memory on little-endian: BGRA8888.
+        for (int row = 0; row < h; ++row)
+          std::memcpy(frame.bits(0) + static_cast<size_t>(row) * frame.bytesPerLine(0),
+                      image.constScanLine(row), static_cast<size_t>(w) * 4);
+        frame.unmap();
+        m_owner->deliver(frame, m_generation);
+      }
+      due += period;
+      const auto now = std::chrono::steady_clock::now();
+      if (due < now)
+        due = now;
+      std::this_thread::sleep_until(due);
+    }
+    return true;
+  }
+
   void run()
   {
+    const QString picture = qEnvironmentVariable("YAP_FAKE_CAMERA_IMAGE");
+    if (!picture.isEmpty() && runImage(picture))
+      return;
     // BT.601 limited-range 75% bars: white, yellow, cyan, green, magenta,
     // red, blue, black.
     static constexpr uint8_t Y[8] = { 180, 162, 131, 112, 84, 65, 35, 16 };
@@ -561,11 +601,16 @@ void CameraCapture::deliver(const QVideoFrame& frame, quint64 generation)
       return;
     m_nextDueUs = std::max(m_nextDueUs + m_frameUs, now);
   }
+  const bool effect = yap_camera_effect_active();
+  bool previewWanted = false;
   if (VideoHub* hub = VideoHub::instance()) {
-    if (VideoFeed* feed = hub->wantedFeed(kLocalKey))
-      feed->push(frame);
+    if (VideoFeed* feed = hub->wantedFeed(kLocalKey)) {
+      previewWanted = true;
+      if (!effect)
+        feed->push(frame);
+    }
   }
-  const bool toCall = publishing() && sendToCall(frame);
+  const bool toCall = (publishing() || (effect && previewWanted)) && sendToCall(frame) && publishing();
   {
     std::lock_guard lock(m_paceMutex);
     if (toCall)

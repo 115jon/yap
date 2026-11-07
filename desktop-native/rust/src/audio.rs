@@ -67,6 +67,11 @@ pub mod qobject {
         /// "Include audio".
         #[qproperty(QString, screen_share_quality, cxx_name = "screenShareQuality")]
         #[qproperty(bool, screen_share_with_audio, cxx_name = "screenShareWithAudio")]
+        /// The camera background: `none`, `blur` or `image:<id>`.
+        #[qproperty(QString, camera_background, cxx_name = "cameraBackground")]
+        /// The account's uploaded backgrounds and their state, as JSON
+        /// (`BackgroundsView`: items, loading, uploading, error, ready).
+        #[qproperty(QString, camera_backgrounds, cxx_name = "cameraBackgrounds")]
         type Audio = super::AudioRust;
 
         /// Loads the settings of this user (empty: signed out).
@@ -196,6 +201,32 @@ pub mod qobject {
         #[cxx_name = "changeScreenShareDefaults"]
         fn set_screen_share_defaults(self: Pin<&mut Audio>, quality: &QString, with_audio: bool);
 
+        /// Picks a camera background (`none`, `blur`, `image:<id>`).
+        #[qinvokable]
+        #[cxx_name = "selectCameraBackground"]
+        fn select_camera_background(self: Pin<&mut Audio>, key: &QString);
+
+        /// Loads the uploaded backgrounds (once; the camera settings call
+        /// it when they show).
+        #[qinvokable]
+        #[cxx_name = "loadCameraBackgrounds"]
+        fn load_camera_backgrounds(self: &Audio);
+
+        /// Uploads a picture; the reason it cannot, or "" once it is sent.
+        #[qinvokable]
+        #[cxx_name = "uploadCameraBackground"]
+        fn upload_camera_background(self: &Audio, path: &QString) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "removeCameraBackground"]
+        fn remove_camera_background(self: Pin<&mut Audio>, id: &QString);
+
+        /// The background effect's state as JSON: available, active,
+        /// backend, error, segmentMs, frameMs.
+        #[qinvokable]
+        #[cxx_name = "backgroundEffectInfo"]
+        fn background_effect_info(self: &Audio) -> QString;
+
         /// Copies the call's latest mic level into `level`.
         #[qinvokable]
         fn sample(self: Pin<&mut Audio>);
@@ -217,7 +248,44 @@ use yap_voice::{
     peer_gain, AudioDevices, LibwebrtcEngine, Playback, Processing, Sensitivity, SpatialLocal,
 };
 
+use yap_core::store::backgrounds::{
+    background_type, BackgroundsCommand, BackgroundsView, MAX_BACKGROUND_BYTES,
+};
+
 use crate::client::voice::{set_call_audio, CallAudio};
+
+/// The `Audio` singleton's thread, for updates that come from the store.
+static AUDIO: std::sync::Mutex<Option<cxx_qt::CxxQtThread<qobject::Audio>>> =
+    std::sync::Mutex::new(None);
+
+/// An upload was in flight at the last view.
+static UPLOADING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The store's camera backgrounds changed.
+pub(crate) fn on_backgrounds(view: BackgroundsView) {
+    let text = serde_json::to_string(&view).unwrap_or_else(|_| "{}".into());
+    // An upload that went through is chosen at once, as on the web (the
+    // store puts it first).
+    let was_uploading = UPLOADING.swap(view.uploading, Ordering::Relaxed);
+    let uploaded = (was_uploading && !view.uploading && view.error.is_empty())
+        .then(|| view.items.first().map(|a| format!("image:{}", a.id)))
+        .flatten();
+    let thread = AUDIO
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    if let Some(thread) = thread {
+        let _ = thread.queue(move |mut audio| {
+            audio
+                .as_mut()
+                .set_camera_backgrounds(QString::from(text.as_str()));
+            if let Some(key) = uploaded {
+                audio.select_camera_background(&QString::from(key.as_str()));
+            }
+        });
+    }
+    crate::camera::set_background_ready(view.ready);
+}
 
 /// Whose soundboard the voice settings mute, for the store's filter.
 fn send_soundboard_muted(settings: &VoiceSettings) {
@@ -269,6 +337,8 @@ pub struct AudioRust {
     always_preview_video: bool,
     screen_share_quality: QString,
     screen_share_with_audio: bool,
+    camera_background: QString,
+    camera_backgrounds: QString,
 
     dir: Option<PathBuf>,
     user_id: String,
@@ -396,6 +466,9 @@ impl qobject::Audio {
             .set_screen_share_quality(QString::from(s.screen_share_quality.as_str()));
         self.as_mut()
             .set_screen_share_with_audio(s.screen_share_with_audio);
+        self.as_mut()
+            .set_camera_background(QString::from(s.camera_background.key().as_str()));
+        crate::camera::set_background_choice(s.camera_background.clone(), self.rust().dir.clone());
         self.show_devices();
     }
 
@@ -689,6 +762,54 @@ impl qobject::Audio {
         }
     }
 
+    pub fn select_camera_background(self: Pin<&mut Self>, key: &QString) {
+        let choice = voice::CameraBackground::from_key(&key.to_string());
+        self.edit(|s| s.camera_background = choice);
+    }
+
+    pub fn load_camera_backgrounds(&self) {
+        crate::client::command(yap_core::Command::Backgrounds(BackgroundsCommand::Load));
+    }
+
+    pub fn upload_camera_background(&self, path: &QString) -> QString {
+        let path = path.to_string();
+        let file = std::path::Path::new(&path);
+        let name = file
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        // `getCameraBackgroundValidationError`.
+        let Some(content_type) = background_type(&name) else {
+            return QString::from("Use a GIF, WebP, PNG, JPEG or AVIF image.");
+        };
+        if std::fs::metadata(file).map_or(0, |m| m.len()) > MAX_BACKGROUND_BYTES {
+            return QString::from("Backgrounds must be 25 MB or smaller.");
+        }
+        crate::client::command(yap_core::Command::Backgrounds(BackgroundsCommand::Upload {
+            path,
+            content_type: content_type.to_owned(),
+        }));
+        QString::default()
+    }
+
+    pub fn remove_camera_background(mut self: Pin<&mut Self>, id: &QString) {
+        let id = id.to_string();
+        // Removing the chosen one turns the background off, as the web does.
+        if self.rust().settings.camera_background
+            == (voice::CameraBackground::Image { id: id.clone() })
+        {
+            self.as_mut()
+                .edit(|s| s.camera_background = voice::CameraBackground::None);
+        }
+        crate::client::command(yap_core::Command::Backgrounds(BackgroundsCommand::Delete(
+            id,
+        )));
+    }
+
+    pub fn background_effect_info(&self) -> QString {
+        QString::from(crate::camera::background_effect_info().as_str())
+    }
+
     pub fn set_always_preview_video_from_ui(self: Pin<&mut Self>, on: bool) {
         self.edit(|s| s.always_preview_video = on);
     }
@@ -718,6 +839,9 @@ impl qobject::Audio {
 
 impl cxx_qt::Initialize for qobject::Audio {
     fn initialize(mut self: Pin<&mut Self>) {
+        *AUDIO
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(self.qt_thread());
         self.as_mut().rust_mut().dir = settings::app_dir();
         self.show();
     }

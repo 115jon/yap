@@ -3,6 +3,7 @@
 
 mod admin;
 mod apps;
+mod backgrounds;
 mod calls;
 mod embeds;
 mod extras;
@@ -1474,6 +1475,7 @@ impl State {
             Command::Shop(command) => self.on_shop(fx, command),
             Command::Embeds(command) => self.on_embeds(fx, command),
             Command::Favorites(command) => self.on_favorites(fx, command),
+            Command::Backgrounds(command) => self.on_backgrounds(fx, command),
             Command::RemoveEmbeds(id) => self.remove_embeds(fx, &id),
             Command::Extras(command) => self.on_extras(fx, command),
             Command::Calls(command) => self.on_calls(fx, command),
@@ -1853,6 +1855,7 @@ impl State {
             || self.route_shop_http(fx, id, &mut answer)
             || self.route_embeds_http(fx, id, &mut answer)
             || self.route_favorites_http(fx, id, &mut answer)
+            || self.route_backgrounds_http(fx, id, &mut answer)
             || self.route_extras_http(fx, id, &mut answer)
         {
             return;

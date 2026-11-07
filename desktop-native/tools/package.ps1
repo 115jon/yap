@@ -34,7 +34,15 @@ param(
     [string]$ObsCacheDir = $(if ($env:YAP_OBS_CACHE_DIR) { $env:YAP_OBS_CACHE_DIR } else { Join-Path $env:TEMP "ralph-obs-signed-hook" }),
     [string]$ObsZip,
     # Leave the hook files out (the hook then always falls back to WGC).
-    [switch]$NoCaptureHook
+    [switch]$NoCaptureHook,
+    # Camera backgrounds (docs/LIBRARIES.md): ONNX Runtime 1.24.4's DirectML
+    # build (Microsoft.ML.OnnxRuntime.DirectML), unpacked from its NuGet
+    # package with its licence files. DirectML is the system's (Windows 10
+    # 1903 and later ship it); where it is missing or too old, segmentation
+    # runs on ONNX Runtime's CPU provider. The model comes from assets/models.
+    [string]$OrtDir = $(if ($env:YAP_ORT_DIR) { $env:YAP_ORT_DIR } else { "F:/ct/onnxruntime/dml-1.24.4" }),
+    # Leave the segmentation runtime out (backgrounds are then unavailable).
+    [switch]$NoSegmentation
 )
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -88,8 +96,8 @@ if (-not $SkipBuild) {
 $exe = Join-Path $BuildDir "YapNative.exe"
 if (-not (Test-Path $exe)) { throw "No $exe; build first or drop -SkipBuild." }
 
-# The package is exactly what is staged: the one static exe, and the game
-# capture hook's six OBS-signed files.
+# The package is exactly what is staged: the one static exe, the game
+# capture hook's six OBS-signed files, and the camera background runtime.
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
 $stage = Join-Path $OutDir "stage-$PackId-$Version"
@@ -116,6 +124,28 @@ if (-not $NoCaptureHook) {
         if ($sha -ne $file.sha256) { throw "Staged $($file.name) does not match the lock" }
     }
     Write-Host "==> OBS-signed capture hook $($lock.obs_version) staged and checked"
+}
+
+# Camera backgrounds: ONNX Runtime (Microsoft-signed, kept as shipped), the
+# converted MediaPipe model, and the runtime's licences, in the
+# segmentation folder (yap-segment loads them from there by full path).
+if (-not $NoSegmentation) {
+    $segDir = Join-Path $stage "segmentation"
+    New-Item -ItemType Directory $segDir | Out-Null
+    foreach ($file in @("onnxruntime.dll", "LICENSE-onnxruntime.txt", "ThirdPartyNotices-onnxruntime.txt")) {
+        $src = Join-Path $OrtDir $file
+        if (-not (Test-Path $src)) { throw "Missing $src (see -OrtDir, or pass -NoSegmentation)" }
+        Copy-Item $src $segDir
+    }
+    Copy-Item "$root/assets/models/selfie_segmenter.onnx" $segDir
+    foreach ($dll in @("onnxruntime.dll")) {
+        $sig = Get-AuthenticodeSignature (Join-Path $segDir $dll)
+        if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "Microsoft Corporation") {
+            throw "$dll is not Microsoft-signed ($($sig.Status))"
+        }
+    }
+    $segMb = [math]::Round(((Get-ChildItem $segDir | Measure-Object Length -Sum).Sum) / 1MB, 1)
+    Write-Host "==> segmentation runtime staged ($segMb MB)"
 }
 
 $packArgs = @(
@@ -149,7 +179,8 @@ if ($Sign) {
     $packArgs += @("--azureTrustedSignFile", $metadata)
     # Never re-sign OBS's files: a changed byte voids the OBS Project
     # signature that anti-cheat vendors allowlist.
-    $packArgs += @("--signExclude", "obs-capture[\\/]")
+    # Microsoft's ONNX Runtime keeps its own signature.
+    $packArgs += @("--signExclude", "(obs-capture|segmentation)[\\/]")
 }
 
 & $vpk.Path @packArgs

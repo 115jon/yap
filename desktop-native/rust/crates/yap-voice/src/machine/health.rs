@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use yap_protocol::payload::RepublishRequest;
 
 use super::{camera_alias, CallMachine, Effect, Notice, Republish, Socket, Timer};
-use crate::engine::{MediaStats, OutboundVideo};
+use crate::engine::{InboundVideo, MediaStats, OutboundVideo};
 use crate::tracks::Kind;
 use crate::wire::{self, Announced};
 
@@ -54,6 +54,8 @@ pub struct VoiceStats {
     pub remote_tracks: u32,
     /// Our camera and share encodings.
     pub outbound_video: Vec<OutboundVideo>,
+    /// The video we receive.
+    pub inbound_video: Vec<InboundVideo>,
     /// The last [`STATS_SAMPLES`] ticks, oldest first.
     pub samples: Vec<StatsSample>,
 }
@@ -211,6 +213,7 @@ impl CallMachine {
             server: stats.server.clone(),
             remote_tracks: stats.inbound_streams,
             outbound_video: stats.outbound_video.clone(),
+            inbound_video: stats.inbound_video.clone(),
             samples: self.health.samples.iter().copied().collect(),
         })));
         let first = previous.is_none();

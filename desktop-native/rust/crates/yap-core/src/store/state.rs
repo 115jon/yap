@@ -508,6 +508,8 @@ pub(super) struct Pending {
     pub shop: HashMap<RequestId, super::shop::ShopOp>,
     /// GIF and clip favourites.
     pub favorites: HashMap<RequestId, super::favorites::FavoritesOp>,
+    /// Camera backgrounds.
+    pub backgrounds: HashMap<RequestId, super::backgrounds::BackgroundsOp>,
     /// The inbox, details tabs, voice status and the other extras.
     pub extras: HashMap<RequestId, super::extras::ExtrasOp>,
     /// TikTok and Instagram lookups.
@@ -811,6 +813,8 @@ pub struct State {
     pub(super) shop: super::shop::ShopState,
     /// GIF and clip favourites.
     pub(super) favorites: super::favorites::FavoritesState,
+    /// The account's camera backgrounds.
+    pub(super) backgrounds: super::backgrounds::BackgroundsState,
     pub(super) extras: super::extras::ExtrasState,
     /// TikTok and Instagram lookups, by link.
     pub(super) hydrations: super::embeds::Hydrations,
@@ -887,6 +891,7 @@ impl State {
             apps: super::apps::AppsState::new(),
             shop: Default::default(),
             favorites: Default::default(),
+            backgrounds: Default::default(),
             extras: Default::default(),
             hydrations: Default::default(),
             view: Projection::default(),

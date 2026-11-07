@@ -19,12 +19,17 @@
 //! nothing feeds it any more. (Not `set_track(None)`: webrtc-sys 0.3.52's
 //! `RtpSender::set_track` dereferences the null track and crashes.)
 //!
-//! Share: one send-only VP8 transceiver with a single encoding at the
+//! Share: one send-only video transceiver with a single encoding at the
 //! preset's caps, fed by `crate::share` (captured frames while live, the
 //! last one repeated while the source is still, the keepalive's black
 //! frames while parked), and an Opus transceiver for the source's audio fed
 //! from a `NativeAudioSource`. Stopping parks the video for the next share
-//! and retires the audio.
+//! and retires the audio. With a hardware H.264 encoder (`mf_h264.rs`, as
+//! the desktop app's native share) the video is H.264 only: the frames go
+//! to the encoder, its access units to an encoded source, and the sender
+//! runs libwebrtc's pre-encoded pass-through. Without one (or with
+//! `YAP_SHARE_ENCODER=software`) it is libwebrtc's VP8, as the browser path
+//! sends.
 //!
 //! Video: each routed remote video track gets a `NativeVideoStream` (a
 //! WebRTC sink with a one-frame queue: a slow consumer sees the newest frame,
@@ -59,7 +64,7 @@ use libwebrtc::peer_connection_factory::{
 };
 use libwebrtc::prelude::RtcAudioTrack;
 use libwebrtc::rtp_parameters::{DegradationPreference, RtpCodecCapability, RtpEncodingParameters};
-use libwebrtc::rtp_sender::RtpSender;
+use libwebrtc::rtp_sender::{RtpSender, VideoEncoderBackend};
 use libwebrtc::rtp_transceiver::{RtpTransceiver, RtpTransceiverDirection, RtpTransceiverInit};
 use libwebrtc::session_description::{SdpType, SessionDescription};
 use libwebrtc::stats::RtcStats;
@@ -69,9 +74,11 @@ use libwebrtc::MediaType;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use super::pipeline::{self, pipeline};
+#[cfg(windows)]
+use super::{HwConfig, HwEncoder};
 use super::{
-    I420Frame, LocalOffer, MediaEngine, MediaError, MediaSession, MediaStats, OutboundVideo,
-    VideoOutput,
+    I420Frame, InboundVideo, LocalOffer, MediaEngine, MediaError, MediaSession, MediaStats,
+    OutboundVideo, VideoOutput,
 };
 use crate::audio::{resolve, AudioDevice, AudioDevices, Processing};
 use crate::camera::live::{set_sink, Keepalive};
@@ -81,6 +88,7 @@ use crate::layers::CAMERA_SIMULCAST;
 use crate::machine::MediaState;
 use crate::share::live::{
     set_audio as set_share_audio, set_sink as set_share_sink, AudioKeepalive, Refresher,
+    Sink as ShareSink,
 };
 use crate::share::{ShareEncoding, SHARE_AUDIO_CHANNELS, SHARE_AUDIO_RATE};
 use crate::wire::IceServer;
@@ -673,9 +681,34 @@ struct CameraSend {
 
 /// Our share's video send side.
 struct ScreenSend {
-    source: NativeVideoSource,
+    sink: ShareSink,
     transceiver: RtpTransceiver,
     refresher: Refresher,
+}
+
+impl ScreenSend {
+    #[cfg(windows)]
+    fn encoder(&self) -> Option<&HwEncoder> {
+        match &self.sink {
+            ShareSink::Hardware(encoder) => Some(encoder),
+            ShareSink::Raw(_) => None,
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn encoder(&self) -> Option<&std::convert::Infallible> {
+        None
+    }
+}
+
+#[cfg(windows)]
+fn hw_config(encoding: &ShareEncoding) -> HwConfig {
+    HwConfig {
+        max_bitrate: encoding.max_bitrate,
+        // Presets are 30 or 60 fps; the cap is a whole number.
+        fps: encoding.max_framerate.round().clamp(1.0, 240.0) as u32,
+        detail: encoding.detail,
+    }
 }
 
 /// Our share's audio send side, while the share carries audio.
@@ -691,7 +724,12 @@ struct ScreenAudioSend {
 /// The share's one encoding, and its degradation preference: `detail`
 /// keeps the resolution, `motion` the frame rate (what Chrome derives from
 /// the track's `contentHint`).
-fn apply_screen_encoding(sender: &RtpSender, encoding: &ShareEncoding) {
+///
+/// A hardware share's encoder owns the frame rate and the size (frames the
+/// pass-through never sees cannot be dropped or scaled without breaking the
+/// H.264 reference chain), so its sender adapts nothing and has no frame
+/// rate cap; the bitrate cap still bounds the estimate it reports.
+fn apply_screen_encoding(sender: &RtpSender, encoding: &ShareEncoding, hardware: bool) {
     let mut parameters = sender.parameters();
     if parameters.encodings.is_empty() {
         parameters.encodings.push(RtpEncodingParameters::default());
@@ -699,10 +737,12 @@ fn apply_screen_encoding(sender: &RtpSender, encoding: &ShareEncoding) {
     for e in &mut parameters.encodings {
         e.active = true;
         e.max_bitrate = Some(encoding.max_bitrate);
-        e.max_framerate = Some(encoding.max_framerate);
+        e.max_framerate = (!hardware).then_some(encoding.max_framerate);
         e.scale_resolution_down_by = Some(1.0);
     }
-    parameters.set_degradation_preference(if encoding.detail {
+    parameters.set_degradation_preference(if hardware {
+        DegradationPreference::MaintainFramerateAndResolution
+    } else if encoding.detail {
         DegradationPreference::MaintainResolution
     } else {
         DegradationPreference::MaintainFramerate
@@ -741,6 +781,29 @@ fn vp8_first() -> Vec<RtpCodecCapability> {
         .get_rtp_sender_capabilities(MediaType::Video)
         .codecs;
     codecs.sort_by_key(|c| !c.mime_type.eq_ignore_ascii_case("video/vp8"));
+    codecs
+}
+
+/// H.264 alone (constrained baseline, mode 1 first), with RTX, for a
+/// hardware share: the SFU must not pick another codec, since the
+/// pass-through forwards H.264 only.
+fn h264_only() -> Vec<RtpCodecCapability> {
+    let mut codecs: Vec<_> = factory()
+        .get_rtp_sender_capabilities(MediaType::Video)
+        .codecs
+        .into_iter()
+        .filter(|c| {
+            c.mime_type.eq_ignore_ascii_case("video/h264")
+                || c.mime_type.eq_ignore_ascii_case("video/rtx")
+        })
+        .collect();
+    codecs.sort_by_key(|c| {
+        if c.mime_type.eq_ignore_ascii_case("video/rtx") {
+            u8::MAX
+        } else {
+            crate::h264::h264_rank(c.sdp_fmtp_line.as_deref().unwrap_or_default())
+        }
+    });
     codecs
 }
 
@@ -1242,15 +1305,32 @@ impl MediaSession for LibwebrtcSession {
             // Its refresher goes with it: the old sender gets no frames.
             lock(&self.retired).push(old.transceiver);
         }
-        // A screencast source (`getDisplayMedia` tracks are); the size is a
-        // hint, frames bring their own.
-        let source = NativeVideoSource::new(
-            VideoResolution {
-                width: 1920,
-                height: 1080,
-            },
-            true,
-        );
+        // The size is a hint, frames bring their own.
+        let hint = VideoResolution {
+            width: 1920,
+            height: 1080,
+        };
+        // A hardware encoder when there is one: an encoded source (no raw
+        // keepalive), fed the H.264 access units of the encoder thread.
+        #[cfg(windows)]
+        let hardware = super::mf_h264::probe().and_then(|_| {
+            let source = NativeVideoSource::new_encoded(hint.clone());
+            match HwEncoder::start(source.clone(), hw_config(encoding)) {
+                Ok(encoder) => Some((source, ShareSink::Hardware(Arc::new(encoder)))),
+                Err(why) => {
+                    eprintln!("[share] hardware encoder refused ({why}); VP8");
+                    None
+                }
+            }
+        });
+        #[cfg(not(windows))]
+        let hardware: Option<(NativeVideoSource, ShareSink)> = None;
+        let is_hardware = hardware.is_some();
+        let (source, sink) = hardware.unwrap_or_else(|| {
+            // A screencast source (`getDisplayMedia` tracks are).
+            let source = NativeVideoSource::new(hint, true);
+            (source.clone(), ShareSink::Raw(source))
+        });
         let track = factory().create_video_track("screen-video", source.clone());
         let transceiver = self
             .pc
@@ -1262,20 +1342,34 @@ impl MediaSession for LibwebrtcSession {
                     send_encodings: vec![RtpEncodingParameters {
                         active: true,
                         max_bitrate: Some(encoding.max_bitrate),
-                        max_framerate: Some(encoding.max_framerate),
+                        max_framerate: (!is_hardware).then_some(encoding.max_framerate),
                         scale_resolution_down_by: Some(1.0),
                         ..RtpEncodingParameters::default()
                     }],
                 },
             )
             .map_err(err("add share transceiver"))?;
-        if transceiver.set_codec_preferences(vp8_first()).is_err() {
+        let codecs = if is_hardware {
+            h264_only()
+        } else {
+            vp8_first()
+        };
+        if is_hardware {
+            transceiver
+                .sender()
+                .set_video_encoder_backend(VideoEncoderBackend::PreEncoded);
+        }
+        if transceiver.set_codec_preferences(codecs).is_err() {
             eprintln!("[share] codec preferences refused; libwebrtc's order stands");
         }
-        apply_screen_encoding(&transceiver.sender(), encoding);
+        apply_screen_encoding(&transceiver.sender(), encoding, is_hardware);
+        eprintln!(
+            "[share] publishing {}",
+            if is_hardware { "hardware H.264" } else { "VP8" }
+        );
         *lock(&self.screen) = Some(ScreenSend {
-            refresher: Refresher::start(source.clone()),
-            source,
+            refresher: Refresher::start(sink.clone()),
+            sink,
             transceiver: transceiver.clone(),
         });
         let offer = self
@@ -1298,7 +1392,15 @@ impl MediaSession for LibwebrtcSession {
 
     fn set_screen_encoding(&self, encoding: &ShareEncoding) {
         if let Some(screen) = lock(&self.screen).as_ref() {
-            apply_screen_encoding(&screen.transceiver.sender(), encoding);
+            #[cfg(windows)]
+            if let Some(encoder) = screen.encoder() {
+                encoder.set_config(hw_config(encoding));
+            }
+            apply_screen_encoding(
+                &screen.transceiver.sender(),
+                encoding,
+                screen.encoder().is_some(),
+            );
         }
     }
 
@@ -1306,16 +1408,22 @@ impl MediaSession for LibwebrtcSession {
         let screen = lock(&self.screen);
         if let Some(screen) = screen.as_ref() {
             screen.refresher.park(!live);
-            set_share_sink(live.then(|| screen.source.clone()));
+            set_share_sink(live.then(|| screen.sink.clone()));
         } else if !live {
             set_share_sink(None);
         }
     }
 
     fn screen_stale(&self) -> bool {
+        // A hardware encoder that failed cannot be revived: the next share
+        // pushes afresh, on VP8 (the probe remembers the failure).
+        #[cfg(windows)]
+        let broken = |screen: &ScreenSend| screen.encoder().is_some_and(HwEncoder::failed);
+        #[cfg(not(windows))]
+        let broken = |_: &ScreenSend| false;
         lock(&self.screen)
             .as_ref()
-            .is_none_or(|screen| screen.refresher.stale())
+            .is_none_or(|screen| screen.refresher.stale() || broken(screen))
     }
 
     async fn publish_screen_audio(&self, stream_id: &str) -> Result<LocalOffer, MediaError> {
@@ -1537,10 +1645,35 @@ impl MediaSession for LibwebrtcSession {
             .get_stats()
             .await
             .map_err(|e| MediaError(format!("{e:?}")))?;
-        let gains = lock(&self.remotes).gains.clone();
+        let (gains, routes) = {
+            let remotes = lock(&self.remotes);
+            (remotes.gains.clone(), remotes.routes.clone())
+        };
         let mic_mid = lock(&self.mic_transceiver)
             .as_ref()
             .and_then(RtpTransceiver::mid);
+        // The hardware share's own numbers, by its mid.
+        #[cfg(windows)]
+        let hardware = lock(&self.screen)
+            .as_ref()
+            .and_then(|screen| Some((screen.transceiver.mid()?, screen.encoder()?.stats())));
+        // Codec ids to names (`VP8`, `H264`).
+        let codecs: HashMap<String, String> = stats
+            .iter()
+            .filter_map(|stat| match stat {
+                RtcStats::Codec(c) => Some((
+                    c.rtc.id.clone(),
+                    c.codec
+                        .mime_type
+                        .split('/')
+                        .next_back()
+                        .unwrap_or_default()
+                        .to_owned(),
+                )),
+                _ => None,
+            })
+            .collect();
+        let codec_of = |id: &str| codecs.get(id).cloned().unwrap_or_default();
         let mut out = MediaStats::default();
         let mut line = String::from("[voice] stats");
         let mut pair: Option<(f64, String)> = None;
@@ -1549,23 +1682,7 @@ impl MediaSession for LibwebrtcSession {
             match stat {
                 RtcStats::OutboundRtp(o) if o.stream.kind == "video" => {
                     let v = &o.outbound;
-                    line += &format!(
-                        " out[{}{}]={}B {}x{}@{:.0} {} limit={:?}{}",
-                        v.mid,
-                        if v.rid.is_empty() {
-                            String::new()
-                        } else {
-                            format!("/{}", v.rid)
-                        },
-                        o.sent.bytes_sent,
-                        v.frame_width,
-                        v.frame_height,
-                        v.frames_per_second,
-                        v.encoder_implementation,
-                        v.quality_limitation_reason,
-                        if v.active { "" } else { " off" },
-                    );
-                    out.outbound_video.push(OutboundVideo {
+                    let mut video = OutboundVideo {
                         mid: v.mid.clone(),
                         rid: v.rid.clone(),
                         bytes_sent: o.sent.bytes_sent,
@@ -1576,7 +1693,52 @@ impl MediaSession for LibwebrtcSession {
                         encoder: v.encoder_implementation.clone(),
                         limitation: format!("{:?}", v.quality_limitation_reason).to_lowercase(),
                         active: v.active,
-                    });
+                        codec: codec_of(&o.stream.codec_id),
+                        target_bitrate: v.target_bitrate,
+                        dropped: 0,
+                        encode_ms: if v.frames_encoded > 0 {
+                            v.total_encode_time * 1000.0 / f64::from(v.frames_encoded)
+                        } else {
+                            0.0
+                        },
+                        hardware: false,
+                    };
+                    #[cfg(windows)]
+                    if let Some((_, hw)) = hardware.as_ref().filter(|(mid, _)| *mid == v.mid) {
+                        // The pass-through reports itself; the encoder is ours.
+                        video.encoder.clone_from(&hw.name);
+                        video.hardware = true;
+                        video.dropped = hw.replaced;
+                        video.encode_ms = hw.latency_us as f64 / 1000.0;
+                        line += &format!(
+                            " hw[{} in={} out={} key={} replaced={} rate={}k {:.1}ms]",
+                            hw.name,
+                            hw.frames_in,
+                            hw.frames_out,
+                            hw.keyframes,
+                            hw.replaced,
+                            hw.bitrate / 1000,
+                            video.encode_ms
+                        );
+                    }
+                    line += &format!(
+                        " out[{}{}]={}B {} {}x{}@{:.0} {} limit={:?}{}",
+                        v.mid,
+                        if v.rid.is_empty() {
+                            String::new()
+                        } else {
+                            format!("/{}", v.rid)
+                        },
+                        o.sent.bytes_sent,
+                        video.codec,
+                        v.frame_width,
+                        v.frame_height,
+                        v.frames_per_second,
+                        video.encoder,
+                        v.quality_limitation_reason,
+                        if v.active { "" } else { " off" },
+                    );
+                    out.outbound_video.push(video);
                 }
                 RtcStats::OutboundRtp(o) => {
                     line += &format!(" out[{}]={}B", o.outbound.mid, o.sent.bytes_sent);
@@ -1584,6 +1746,38 @@ impl MediaSession for LibwebrtcSession {
                         out.mic_bytes_sent = o.sent.bytes_sent;
                         out.mic_packets_sent = o.sent.packets_sent;
                     }
+                }
+                RtcStats::InboundRtp(inbound) if inbound.stream.kind == "video" => {
+                    let v = &inbound.inbound;
+                    out.inbound_streams += 1;
+                    let video = InboundVideo {
+                        mid: v.mid.clone(),
+                        key: routes.get(&v.mid).cloned().unwrap_or_default(),
+                        width: v.frame_width,
+                        height: v.frame_height,
+                        fps: v.frames_per_second,
+                        codec: codec_of(&inbound.stream.codec_id),
+                        decoder: v.decoder_implementation.clone(),
+                        frames_decoded: u64::from(v.frames_decoded),
+                        frames_dropped: u64::from(v.frames_dropped),
+                        decode_ms: if v.frames_decoded > 0 {
+                            v.total_decode_time * 1000.0 / f64::from(v.frames_decoded)
+                        } else {
+                            0.0
+                        },
+                    };
+                    line += &format!(
+                        " in[{}]={}B {} {}x{}@{:.0} {} {:.1}ms",
+                        v.mid,
+                        v.bytes_received,
+                        video.codec,
+                        v.frame_width,
+                        v.frame_height,
+                        v.frames_per_second,
+                        video.decoder,
+                        video.decode_ms
+                    );
+                    out.inbound_video.push(video);
                 }
                 RtcStats::InboundRtp(inbound) => {
                     let mid = &inbound.inbound.mid;
@@ -1681,6 +1875,20 @@ mod tests {
         assert_eq!(
             before, after,
             "devices before and after a call's peer connection"
+        );
+    }
+
+    /// A hardware H.264 share is only watchable by other native clients if
+    /// this build decodes H.264 (webrtc-sys drops it from the receive
+    /// formats when the prebuilt's FFmpeg lacks the codec).
+    #[test]
+    fn receiver_should_decode_h264() {
+        let caps = factory().get_rtp_receiver_capabilities(MediaType::Video);
+        let names: Vec<String> = caps.codecs.iter().map(|c| c.mime_type.clone()).collect();
+        eprintln!("receive video codecs: {names:?}");
+        assert!(
+            names.iter().any(|n| n.eq_ignore_ascii_case("video/h264")),
+            "no H.264 decoder in {names:?}"
         );
     }
 

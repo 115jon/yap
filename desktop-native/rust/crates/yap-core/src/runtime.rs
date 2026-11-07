@@ -369,6 +369,7 @@ impl Runner {
                 })),
             }),
             Effect::Download { id, .. }
+            | Effect::BackgroundUpload { id, .. }
             | Effect::ProfileUpload { id, .. }
             | Effect::SoundUpload { id, .. } => self.send(Input::Http {
                 id: *id,
@@ -583,6 +584,30 @@ impl Runner {
                 let inbox = self.inbox.clone();
                 tokio::spawn(async move {
                     let result = download(&api, &url, dest).await.map(|()| ApiResponse::Done);
+                    let _ = inbox.send(Input::Http { id, result });
+                });
+            }
+            Effect::BackgroundUpload {
+                id,
+                token,
+                path,
+                content_type,
+            } => {
+                let api = Api::new(self.http.clone(), token);
+                let inbox = self.inbox.clone();
+                tokio::spawn(async move {
+                    let result =
+                        background_upload(&api, path, content_type)
+                            .await
+                            .and_then(|body| {
+                                crate::store::backgrounds::decode_asset(body).map(|asset| {
+                                    ApiResponse::Backgrounds(
+                                        crate::store::backgrounds::BackgroundsResponse::Uploaded(
+                                            asset,
+                                        ),
+                                    )
+                                })
+                            });
                     let _ = inbox.send(Input::Http { id, result });
                 });
             }
@@ -836,6 +861,35 @@ async fn sound_upload(
 
 /// Posts a profile picture or banner: the file as `file`, with `kind` for a
 /// banner and the kept collectibles for an avatar.
+/// `POST /api/camera-backgrounds` with the picture as multipart `file`.
+async fn background_upload(
+    api: &Api,
+    path: String,
+    content_type: String,
+) -> Result<Value, crate::api::ApiError> {
+    let name = Path::new(&path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "background".into());
+    check_size(
+        Path::new(&path),
+        crate::store::backgrounds::MAX_BACKGROUND_BYTES,
+    )
+    .await?;
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|error| crate::api::ApiError::Network(error.to_string()))?;
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name(name)
+        .mime_str(&content_type)
+        .map_err(|_| crate::api::ApiError::Decode("bad content type".into()))?;
+    api.upload(
+        "/api/camera-backgrounds",
+        reqwest::multipart::Form::new().part("file", part),
+    )
+    .await
+}
+
 async fn profile_upload(
     api: &Api,
     asset: crate::store::ProfileAsset,

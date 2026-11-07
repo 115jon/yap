@@ -4,7 +4,12 @@ param(
     [string]$QtDir = $(if ($env:YAP_QT_DIR) { $env:YAP_QT_DIR } else { "F:/Files/Downloads/qt/src/6.6.3" }),
     [ValidateSet("Release", "RelWithDebInfo", "Debug")]
     [string]$Config = "Release",
-    [string]$BuildDir = $(if ($env:YAP_NATIVE_BUILD_DIR) { $env:YAP_NATIVE_BUILD_DIR } else { "$PSScriptRoot/build/$Config" })
+    [string]$BuildDir = $(if ($env:YAP_NATIVE_BUILD_DIR) { $env:YAP_NATIVE_BUILD_DIR } else { "$PSScriptRoot/build/$Config" }),
+    # ONNX Runtime 1.24.4 (its DirectML build), for camera backgrounds
+    # (docs/LIBRARIES.md). Copied with the model into <BuildDir>/segmentation,
+    # where the app looks; without it the background row says it cannot
+    # apply one. DirectML itself is the system's (System32).
+    [string]$OrtDir = $(if ($env:YAP_ORT_DIR) { $env:YAP_ORT_DIR } else { "F:/ct/onnxruntime/dml-1.24.4" })
 )
 $ErrorActionPreference = "Stop"
 
@@ -22,4 +27,14 @@ Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-ar
 cmake -S $PSScriptRoot -B $BuildDir -G Ninja "-DCMAKE_BUILD_TYPE=$Config" "-DCMAKE_PREFIX_PATH=$QtDir"
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 cmake --build $BuildDir
-exit $LASTEXITCODE
+if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+$segmentation = Join-Path $BuildDir "segmentation"
+if (Test-Path "$OrtDir/onnxruntime.dll") {
+    New-Item -ItemType Directory -Force $segmentation | Out-Null
+    Copy-Item "$OrtDir/onnxruntime.dll" $segmentation
+    Copy-Item "$PSScriptRoot/assets/models/selfie_segmenter.onnx" $segmentation
+} else {
+    Write-Warning "No ONNX Runtime in $OrtDir; camera backgrounds will be unavailable in this build."
+}
+exit 0

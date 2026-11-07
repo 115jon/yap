@@ -208,6 +208,8 @@ pub enum Command {
     Embeds(super::embeds::EmbedsCommand),
     /// The GIF and clip favourites' stars.
     Favorites(super::favorites::FavoritesCommand),
+    /// The account's camera backgrounds.
+    Backgrounds(super::backgrounds::BackgroundsCommand),
     /// Clear one of our messages' link previews (the embed's x).
     RemoveEmbeds(String),
     /// The inbox, who reacted, the details tabs and the other extras.

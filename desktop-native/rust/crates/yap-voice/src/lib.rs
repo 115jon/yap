@@ -67,6 +67,9 @@
 //!   it goes out as [`Notice::MicLevel`] for the meter, and through the
 //!   web's hysteresis ([`Vad`], threshold from `SetSensitivity`) into our
 //!   roster row and op 5 `{speaking: 1|0}`. Muting turns speaking off.
+//! - Camera backgrounds ([`background`]): blur or a picture composited on
+//!   the camera's frames before they are encoded, from a person mask the
+//!   app's [`background::Segmenter`] computes.
 //! - `SetCamera(true)` pushes our camera once the mic is published (one
 //!   send-only VP8 transceiver, simulcast `f`/`h`/`q` as
 //!   [`CAMERA_SIMULCAST`]), or resumes the SFU track it kept; when that
@@ -78,8 +81,10 @@
 //! - `StartShare` / `StopShare` / `SetShareAudio` / `SetShareQuality` run
 //!   our screen share by SCREEN_SHARE.md (browser path, one step at a
 //!   time, latest request wins): the app's [`ShareCapturer`] captures, the
-//!   share publishes `screen-video-<pid>` (one VP8 layer at the preset's
-//!   caps, parked and resumed between shares like the camera) and, with
+//!   share publishes `screen-video-<pid>` (one layer at the preset's caps:
+//!   hardware H.264 through Media Foundation when there is an encoder,
+//!   `engine/mf_h264.rs`, else VP8; parked and resumed between shares like
+//!   the camera) and, with
 //!   source audio, `screen-audio-<pid>`; op 12 announces them and op 15
 //!   says `self_stream` / `self_stream_audio`. See `machine/share.rs`.
 //! - After every input each pulled track's gain follows its owner's volume
@@ -105,10 +110,12 @@
 //! playout, no RNNoise or panning).
 
 mod audio;
+pub mod background;
 mod camera;
 mod driver;
 pub mod dsp;
 mod engine;
+pub mod h264;
 pub mod layers;
 mod machine;
 mod roster;
@@ -120,11 +127,11 @@ mod vad;
 pub mod wire;
 
 pub use audio::{peer_gain, resolve, AudioDevice, AudioDevices, Playback, Processing, MAX_VOLUME};
-pub use camera::{push_camera_frame, CameraFrame, PixelFormat};
+pub use camera::{push_camera_frame, CameraFrame, PixelFormat, LOCAL_CAMERA_KEY};
 pub use driver::{run_call, AdmissionApi, ApiFailure, CallEnv, Commands};
 pub use engine::{
-    FakeEngine, FakeOp, FakeSession, I420Frame, LocalOffer, MediaEngine, MediaError, MediaSession,
-    MediaStats, OutboundVideo, VideoOutput,
+    FakeEngine, FakeOp, FakeSession, I420Frame, InboundVideo, LocalOffer, MediaEngine, MediaError,
+    MediaSession, MediaStats, OutboundVideo, VideoOutput,
 };
 #[cfg(feature = "libwebrtc")]
 pub use engine::{LibwebrtcEngine, LibwebrtcSession};

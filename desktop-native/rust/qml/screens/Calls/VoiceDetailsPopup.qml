@@ -287,11 +287,35 @@ Popup {
                         width: parent.width
                         elide: Text.ElideRight
                         textFormat: Text.PlainText
-                        text: qsTr("Video %1%2: %3×%4 at %5 fps, %6%7")
+                        text: qsTr("Video %1%2: %3 %4×%5 at %6 fps, %7 kbps, %8%9, %10 ms, %11 dropped%12")
                             .arg(modelData.mid).arg(modelData.rid.length > 0 ? "/" + modelData.rid : "")
+                            .arg(modelData.codec)
                             .arg(modelData.width).arg(modelData.height).arg(Math.round(modelData.fps))
+                            .arg(Math.round(modelData.bitrateKbps))
                             .arg(modelData.encoder || qsTr("encoder pending"))
+                            .arg(modelData.hardware ? qsTr(" (hardware)") : "")
+                            .arg(modelData.encodeMs.toFixed(1))
+                            .arg(modelData.dropped)
                             .arg(modelData.limitation !== "none" ? qsTr(", limited by %1").arg(modelData.limitation) : "")
+                        color: Theme.ink2
+                        font: Theme.type.caption
+                    }
+                }
+                // What we receive, per stream.
+                Repeater {
+                    model: root.stats && root.stats.incoming ? root.stats.incoming.filter(v => v.width > 0) : []
+                    Text {
+                        required property var modelData
+                        width: parent.width
+                        elide: Text.ElideRight
+                        textFormat: Text.PlainText
+                        text: qsTr("Incoming %1: %2 %3×%4 at %5 fps, %6, %7 ms, %8 dropped")
+                            .arg(modelData.key || qsTr("unrouted"))
+                            .arg(modelData.codec)
+                            .arg(modelData.width).arg(modelData.height).arg(Math.round(modelData.fps))
+                            .arg(modelData.decoder || qsTr("decoder pending"))
+                            .arg(modelData.decodeMs.toFixed(1))
+                            .arg(modelData.dropped)
                         color: Theme.ink2
                         font: Theme.type.caption
                     }

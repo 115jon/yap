@@ -119,6 +119,9 @@ T.Popup {
     focus: true
     closePolicy: T.Popup.NoAutoClose
     onAboutToShow: reset()
+    // Opened over Settings, the focus stays in Settings unless the editor
+    // takes it: Escape (handled by the content scope) would never reach it.
+    onOpened: contentItem.forceActiveFocus()
 
     T.Overlay.modal: Scrim {
         color: Theme.scrimStacked
@@ -159,6 +162,7 @@ T.Popup {
     }
 
     contentItem: FocusScope {
+        focus: true
         Keys.onEscapePressed: event => {
             event.accepted = true
             editor.requestClose()
