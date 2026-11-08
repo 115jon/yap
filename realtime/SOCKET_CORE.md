@@ -236,6 +236,7 @@ socket's), which this close is none of.
 | 38  | CallDecline             |   ✓    |      |       |
 | 39  | CallEnd                 |   ✓    |      |       |
 | 40  | RefreshVoiceCredentials |        |  ✓   |       |
+| 43  | ActivityUpdate          |   ✓    |      |       |
 | 100 | VoiceIdentify           |        |      |   ✓   |
 | 102 | TracksReady             |        |      |   ✓   |
 | 106 | VoiceAppEvent           |        |      |   ✓   |
@@ -248,7 +249,7 @@ and share go on the room socket.
 Rate limits (per minute):
 
 - global: 20, 21 and 22 at 30; 24 and 25 at 60; 36 at 6; 37, 38 and 39 at
-  12; 15 at 60.
+  12; 15 at 60; 26 at 30; 43 at 12.
 - room: 15 at 60.
 - voice: 1 at 20, 12 at 20, 13 at 40, 102 at 60, 106 at 60, 109 at 30.
 
@@ -264,7 +265,8 @@ persisted channel messages, which belong to the global gateway.
 releases send the same set):
 
 - global (`src/stores/chat-gateway.ts`): 0, 3, 7, 15, 26, 27, 28, 33, 34,
-  35, 36, 37, 38, 39.
+  35, 36, 37, 38, 39, 43 (43 from the game-activity release on; no shipped
+  build sent it before).
 - room (`src/lib/voice/gateways/room-gateway.ts`, `src/lib/sfu-client.ts`):
   0, 3, 7, 11, 15, 17, 40.
   - Builds up to v3.12.0 also defined `SFUClient.sendChatMessage` (op 20 on

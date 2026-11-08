@@ -3663,6 +3663,7 @@ describe("MeetingRoom gateway protocol edge", () => {
     [GatewayOp.ChannelSubscribe, {}],
     [GatewayOp.ChannelUnsubscribe, { channel_id: ["c"] }],
     [GatewayOp.PresenceUpdate, { status: 1 }],
+    [GatewayOp.ActivityUpdate, { game_activity: { kind: "playing" } }],
     [GatewayOp.VoiceChannelJoin, { channel_id: "c", self_mute: "no" }],
     [GatewayOp.VoiceChannelLeave, { channel_id: 5 }],
     [GatewayOp.ServerSubscribe, { server_id: [] }],

@@ -37,6 +37,8 @@ export interface UserProfile {
   theme_preference: string | null;
   theme_sync_enabled: number;
   media_content_filter: string;
+  /** "Share my activity": others may see the game this user is playing. */
+  share_activity: boolean;
   updated_at: string | null;
   created_at: string | null;
   bio: string | null;
@@ -45,8 +47,12 @@ export interface UserProfile {
   custom_status: string | null;
 }
 
-type UserProfileRow = Omit<UserProfile, "display_name_style"> & {
+type UserProfileRow = Omit<
+  UserProfile,
+  "display_name_style" | "share_activity"
+> & {
   display_name_style: string | null;
+  share_activity: number | null;
 };
 
 export interface MutualInfo {
@@ -79,7 +85,7 @@ export async function getMe(
 
   const user = await db
     .prepare(
-      `SELECT id, username, display_name, avatar_url, avatar_display, banner_url, banner_content_type, nameplate_url, nameplate_content_type, profile_accent_color, profile_background_color, profile_banner_color, display_name_style, theme_preference, theme_sync_enabled, media_content_filter, updated_at, created_at, bio, pronouns, status, custom_status FROM users WHERE id = ?`,
+      `SELECT id, username, display_name, avatar_url, avatar_display, banner_url, banner_content_type, nameplate_url, nameplate_content_type, profile_accent_color, profile_background_color, profile_banner_color, display_name_style, theme_preference, theme_sync_enabled, media_content_filter, share_activity, updated_at, created_at, bio, pronouns, status, custom_status FROM users WHERE id = ?`,
     )
     .bind(userId)
     .first<UserProfileRow>();
@@ -97,6 +103,7 @@ export async function getMe(
     profile_banner_color: resolvedTheme.profile_banner_color,
     avatar_display: normalizeAvatarDisplay(user.avatar_display),
     display_name_style: normalizeDisplayNameStyle(user.display_name_style),
+    share_activity: user.share_activity !== 0,
   };
 }
 

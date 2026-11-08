@@ -1,6 +1,6 @@
 # Yap Privacy Policy
 
-Effective date: July 10, 2026
+Effective date: November 8, 2026
 
 Yap is operated by 115jon. Questions about this policy, privacy requests,
 or data deletion requests can be sent to <115jon@proton.me>.
@@ -17,6 +17,26 @@ chooses to send.
 The desktop application may store account-session information and application
 settings on the user's device. Browser and CEF runtime data, such as cached web
 resources and local storage, may also be stored locally.
+
+## Game activity
+
+Yap can show others the game a user is playing ("Playing X"): the game's
+name, an icon from Yap's game catalog, and when it started. Yap shares it only
+with people who share a server, a direct message or a friendship with the
+user, keeps it only while the user's connection is open, does not store it with
+the account, and never shows it while the user's status is invisible. "Share my
+activity" is on by default and can be turned off at any time in Privacy &
+safety settings; while it is off, Yap shows no game activity for the user.
+Game icons are served from Yap's own storage, so viewing someone's activity
+does not contact a third party.
+
+Automatic game detection is planned for the Yap desktop application and is not
+part of the current release. When the desktop application supports it, it will
+compare the names of running programs on the user's device against Yap's
+published game catalog; the list of running programs will stay on the device,
+and only a matched game's name, catalog icon and start time will be sent.
+Hiding a single game will be a setting of the desktop application on that
+device. This section will be updated when detection ships.
 
 ## Where information is sent
 

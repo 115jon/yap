@@ -33,6 +33,7 @@ import { dispatchOpenProfileEditorEvent } from "@/lib/profile-editor-events";
 import type { Role, User } from "@/lib/types";
 import InlineEmojiText from "./InlineEmojiText";
 import { useChatActions, useChatStore } from "@/stores/chat-store";
+import { useGameActivity } from "@/hooks/useGameActivity";
 import { Icon } from "@/components/ui/icon";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
@@ -265,6 +266,7 @@ function DesktopUserProfilePopover({
   const liveProfileUser =
     localState.profileUser?.id === userId ? localState.profileUser : null;
   const resolvedUser = liveProfileUser ?? seededUser;
+  const gameActivity = useGameActivity(userId);
   const resolvedUsername = resolvedUser.username ?? username;
   const resolvedDisplayName =
     resolvedUser.display_name?.trim() || displayName || resolvedUsername;
@@ -484,6 +486,7 @@ function DesktopUserProfilePopover({
           <ProfileActionNotices controller={actions} />
           {error ? <RowError className="mt-0">{error}</RowError> : null}
           <ProfileSections
+            gameActivity={gameActivity}
             bio={resolvedUser.bio}
             roles={
               showRoles ? (

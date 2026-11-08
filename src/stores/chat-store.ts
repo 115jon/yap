@@ -51,6 +51,12 @@ export const useChatStore = create<ChatStore>()(
 
       const actions = createChatActions(get, dispatch);
       const gateway = createChatGateway(get, dispatch, actions);
+      if (import.meta.env.DEV) {
+        // __yapPlaying("Minecraft") in the console (lib/dev-game-activity).
+        void import("@/lib/dev-game-activity").then((mod) =>
+          mod.installDevGameActivity(gateway.setGameActivity),
+        );
+      }
 
       return {
         ...initialState,

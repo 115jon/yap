@@ -6,7 +6,9 @@ import { authorName } from "@/features/chat/authors";
 import { LONG_PRESS_MS } from "@/features/chat/long-press";
 import {
   presenceLedOf,
+  gameActivityLabel,
   useCustomStatus,
+  useGameActivity,
   usePresence,
 } from "@/features/presence/live";
 import {
@@ -53,6 +55,7 @@ export const MemberRow = memo(function MemberRow({
   const { user } = member;
   const presence = usePresence(user.id, user.status);
   const custom = useCustomStatus(user.id, user.custom_status);
+  const game = useGameActivity(user.id);
   const speaking = useIsUserSpeaking(user.id);
   const name = authorName(user);
   const style = parseDisplayNameStyle(user.display_name_style);
@@ -66,6 +69,7 @@ export const MemberRow = memo(function MemberRow({
   let line: { text: string; voice: boolean } | null = null;
   if (typing && online) line = { text: "typing…", voice: false };
   else if (voiceChannel) line = { text: voiceChannel, voice: true };
+  else if (game) line = { text: gameActivityLabel(game), voice: false };
   else if (custom) line = { text: custom, voice: false };
 
   return (

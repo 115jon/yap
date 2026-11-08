@@ -27,6 +27,7 @@ import { getDisplayName } from "@/lib/display-name";
 import { resolveProfileReferenceDate } from "@/lib/profile-dates";
 import type { User } from "@/lib/types";
 import { useChatActions, useChatStore } from "@/stores/chat-store";
+import { useGameActivity } from "@/hooks/useGameActivity";
 import { useCallback, useEffect, useState } from "react";
 
 interface Props {
@@ -77,6 +78,7 @@ export default function UserProfileModal({
   const seededUser =
     memberRecord?.user ?? (currentUser?.id === user.id ? currentUser : user);
   const resolvedUser = profileData?.user ?? seededUser;
+  const gameActivity = useGameActivity(user.id);
   const isMe = currentUser?.id === resolvedUser.id;
   const displayName = getDisplayName(resolvedUser);
   const fallbackName = getDisplayName(user);
@@ -190,6 +192,7 @@ export default function UserProfileModal({
             <RowError className="mt-0">{profileError}</RowError>
           ) : null}
           <ProfileSections
+            gameActivity={gameActivity}
             bio={resolvedUser.bio}
             mutualServers={isMe ? null : profileData?.mutualServers}
             mutualFriends={isMe ? null : profileData?.mutualFriends}

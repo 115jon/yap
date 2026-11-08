@@ -205,6 +205,17 @@ const VALID_MAIN_CLIENT_PAYLOADS = {
   [GatewayOp.ChannelSubscribe]: [{ channel_id: "c" }],
   [GatewayOp.ChannelUnsubscribe]: [{ channel_id: "c" }],
   [GatewayOp.PresenceUpdate]: [{ status: "idle" }, { status: "invisible" }],
+  [GatewayOp.ActivityUpdate]: [
+    { game_activity: null },
+    {
+      game_activity: {
+        kind: "playing",
+        name: "Minecraft",
+        started_at: 1_700_000_000_000,
+        source: "detected",
+      },
+    },
+  ],
   [GatewayOp.VoiceChannelJoin]: [
     { channel_id: "c", self_mute: true },
     { channel_id: "c", self_mute: false, started_at: 1_700_000_000_000 },

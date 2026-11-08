@@ -22,6 +22,7 @@ import { CountBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { UserDisplayName } from "./UserDisplayName";
+import { GameActivityText } from "./GameActivity";
 
 /**
  * Phone list grammar (shared with MobileYouPage): an inset grouped card,
@@ -70,6 +71,7 @@ export function DMListPanel({
   // Compute per-DM unread notification counts
   const notifications = useChatStore((s) => s.notifications);
   const onlineUsers = useChatStore((s) => s.onlineUsers);
+  const gameActivities = useChatStore((s) => s.gameActivityByUserId);
   const dmUnreadCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const n of notifications) {
@@ -117,10 +119,15 @@ export function DMListPanel({
       dm.recipient?.status,
       onlineUsers.has(dm.recipient?.id),
     );
-    // One line unless the person set a custom status; presence already
-    // shows as the dot, so it is never repeated as text.
+    // One line unless the person is playing something or set a custom
+    // status (the game first, as on Discord); presence already shows as the
+    // dot, so it is never repeated as text.
+    const gameActivity = dm.recipient?.id
+      ? gameActivities[dm.recipient.id]
+      : undefined;
     const customStatus: string | null =
       dm.recipient?.custom_status?.trim() || null;
+    const secondLine = Boolean(gameActivity || customStatus);
     return (
       <div
         key={dm.id}
@@ -128,13 +135,13 @@ export function DMListPanel({
           phone
             ? cn(
                 PHONE_DM_ROW,
-                customStatus && "min-h-14",
+                secondLine && "min-h-14",
                 selected && "bg-tint-2 text-ink-1",
               )
             : sidebarRowClass({
                 selected,
                 unread: dmIsUnread,
-                tall: !!customStatus,
+                tall: secondLine,
               })
         }
       >
@@ -208,11 +215,13 @@ export function DMListPanel({
               dmIsUnread ? "font-semibold text-ink-1" : "font-medium",
             )}
           />
-          {customStatus && (
+          {gameActivity ? (
+            <GameActivityText activity={gameActivity} />
+          ) : customStatus ? (
             <span className="block truncate text-ui-xs font-normal text-ink-3">
               {customStatus}
             </span>
-          )}
+          ) : null}
         </div>
         {dmNotifCount > 0 && !selected && (
           <CountBadge count={dmNotifCount} className="shrink-0" />

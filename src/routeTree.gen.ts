@@ -56,6 +56,7 @@ import { Route as ApiMyinstantsFavoritesRouteImport } from './routes/api/myinsta
 import { Route as ApiListenTogetherStreamRouteImport } from './routes/api/listen-together/stream'
 import { Route as ApiListenTogetherSearchRouteImport } from './routes/api/listen-together/search'
 import { Route as ApiListenTogetherResolveRouteImport } from './routes/api/listen-together/resolve'
+import { Route as ApiGameIconsSplatRouteImport } from './routes/api/game-icons/$'
 import { Route as ApiCollectiblesSyncRouteImport } from './routes/api/collectibles/sync'
 import { Route as ApiCollectiblesIngestRouteImport } from './routes/api/collectibles/ingest'
 import { Route as ApiCollectiblesCatalogRouteImport } from './routes/api/collectibles/catalog'
@@ -346,6 +347,11 @@ const ApiListenTogetherResolveRoute =
     path: '/api/listen-together/resolve',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiGameIconsSplatRoute = ApiGameIconsSplatRouteImport.update({
+  id: '/api/game-icons/$',
+  path: '/api/game-icons/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiCollectiblesSyncRoute = ApiCollectiblesSyncRouteImport.update({
   id: '/api/collectibles/sync',
   path: '/api/collectibles/sync',
@@ -662,6 +668,7 @@ export interface FileRoutesByFullPath {
   '/api/collectibles/catalog': typeof ApiCollectiblesCatalogRoute
   '/api/collectibles/ingest': typeof ApiCollectiblesIngestRoute
   '/api/collectibles/sync': typeof ApiCollectiblesSyncRoute
+  '/api/game-icons/$': typeof ApiGameIconsSplatRoute
   '/api/listen-together/resolve': typeof ApiListenTogetherResolveRoute
   '/api/listen-together/search': typeof ApiListenTogetherSearchRoute
   '/api/listen-together/stream': typeof ApiListenTogetherStreamRoute
@@ -763,6 +770,7 @@ export interface FileRoutesByTo {
   '/api/collectibles/catalog': typeof ApiCollectiblesCatalogRoute
   '/api/collectibles/ingest': typeof ApiCollectiblesIngestRoute
   '/api/collectibles/sync': typeof ApiCollectiblesSyncRoute
+  '/api/game-icons/$': typeof ApiGameIconsSplatRoute
   '/api/listen-together/resolve': typeof ApiListenTogetherResolveRoute
   '/api/listen-together/search': typeof ApiListenTogetherSearchRoute
   '/api/listen-together/stream': typeof ApiListenTogetherStreamRoute
@@ -865,6 +873,7 @@ export interface FileRoutesById {
   '/api/collectibles/catalog': typeof ApiCollectiblesCatalogRoute
   '/api/collectibles/ingest': typeof ApiCollectiblesIngestRoute
   '/api/collectibles/sync': typeof ApiCollectiblesSyncRoute
+  '/api/game-icons/$': typeof ApiGameIconsSplatRoute
   '/api/listen-together/resolve': typeof ApiListenTogetherResolveRoute
   '/api/listen-together/search': typeof ApiListenTogetherSearchRoute
   '/api/listen-together/stream': typeof ApiListenTogetherStreamRoute
@@ -968,6 +977,7 @@ export interface FileRouteTypes {
     | '/api/collectibles/catalog'
     | '/api/collectibles/ingest'
     | '/api/collectibles/sync'
+    | '/api/game-icons/$'
     | '/api/listen-together/resolve'
     | '/api/listen-together/search'
     | '/api/listen-together/stream'
@@ -1069,6 +1079,7 @@ export interface FileRouteTypes {
     | '/api/collectibles/catalog'
     | '/api/collectibles/ingest'
     | '/api/collectibles/sync'
+    | '/api/game-icons/$'
     | '/api/listen-together/resolve'
     | '/api/listen-together/search'
     | '/api/listen-together/stream'
@@ -1170,6 +1181,7 @@ export interface FileRouteTypes {
     | '/api/collectibles/catalog'
     | '/api/collectibles/ingest'
     | '/api/collectibles/sync'
+    | '/api/game-icons/$'
     | '/api/listen-together/resolve'
     | '/api/listen-together/search'
     | '/api/listen-together/stream'
@@ -1270,6 +1282,7 @@ export interface RootRouteChildren {
   ApiCollectiblesCatalogRoute: typeof ApiCollectiblesCatalogRoute
   ApiCollectiblesIngestRoute: typeof ApiCollectiblesIngestRoute
   ApiCollectiblesSyncRoute: typeof ApiCollectiblesSyncRoute
+  ApiGameIconsSplatRoute: typeof ApiGameIconsSplatRoute
   ApiListenTogetherResolveRoute: typeof ApiListenTogetherResolveRoute
   ApiListenTogetherSearchRoute: typeof ApiListenTogetherSearchRoute
   ApiListenTogetherStreamRoute: typeof ApiListenTogetherStreamRoute
@@ -1623,6 +1636,13 @@ declare module '@tanstack/react-router' {
       path: '/api/listen-together/resolve'
       fullPath: '/api/listen-together/resolve'
       preLoaderRoute: typeof ApiListenTogetherResolveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/game-icons/$': {
+      id: '/api/game-icons/$'
+      path: '/api/game-icons/$'
+      fullPath: '/api/game-icons/$'
+      preLoaderRoute: typeof ApiGameIconsSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/collectibles/sync': {
@@ -2265,6 +2285,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiCollectiblesCatalogRoute: ApiCollectiblesCatalogRoute,
   ApiCollectiblesIngestRoute: ApiCollectiblesIngestRoute,
   ApiCollectiblesSyncRoute: ApiCollectiblesSyncRoute,
+  ApiGameIconsSplatRoute: ApiGameIconsSplatRoute,
   ApiListenTogetherResolveRoute: ApiListenTogetherResolveRoute,
   ApiListenTogetherSearchRoute: ApiListenTogetherSearchRoute,
   ApiListenTogetherStreamRoute: ApiListenTogetherStreamRoute,

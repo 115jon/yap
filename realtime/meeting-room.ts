@@ -96,6 +96,7 @@ import {
   type SocketRole,
 } from "./socket-core";
 import { resolveMeetingProfile } from "./meeting-room/profile-resolver";
+import { GameActivityRegistry } from "./meeting-room/game-activity";
 import { ProfileRequestCoordinator } from "./meeting-room/profile-request-coordinator";
 import { getCachedTurnCredentials as resolveTurnCredentials } from "./meeting-room/turn-credentials";
 import { mintVoiceMedia, type VoiceMedia } from "./voice-media";
@@ -396,6 +397,8 @@ const WS_RATE_LIMITS: Record<number, number> = {
   [Op.CallDecline]: 12,
   [Op.CallEnd]: 12,
   [Op.VoiceStateUpdate]: 60,
+  [Op.PresenceUpdate]: 30,
+  [Op.ActivityUpdate]: 12,
 };
 
 type PresenceStatus = "online" | "idle" | "dnd" | "offline";
@@ -431,6 +434,8 @@ export class MeetingRoom extends DurableObject<Env> {
   /** Global gateway: each user's latest move grant, spent once per use. */
   private readonly voiceMoveGrants: VoiceMoveGrantLedger;
   private readonly rateLimiter: SocketRateLimiter;
+  /** Global gateway: each session's game activity (realtime/meeting-room/game-activity.ts). */
+  private readonly gameActivity: GameActivityRegistry;
   /** Non-standby Identify calls in flight: participantId -> admitted subject. */
   private identifyingVoiceJoins = new Map<string, string>();
   private readonly nextVoiceJoinGrantSeq = createVoiceJoinGrantSequence();
@@ -543,6 +548,18 @@ export class MeetingRoom extends DurableObject<Env> {
       this.ctx.storage.sql,
       WS_RATE_LIMITS,
     );
+    this.gameActivity = new GameActivityRegistry({
+      storage: this.ctx.storage,
+      db: this.env.DB,
+      waitUntil: (promise) => this.ctx.waitUntil(promise),
+      sessions: () => this.sessions.entries(),
+      canDeliver: (ws) =>
+        !this.closedSockets.has(ws) && !this.resumingSockets.has(ws),
+      presenceSnapshot: (userId) => this.buildPresenceSnapshotForUser(userId),
+      send: (ws, msg) => this.sendTo(ws, msg),
+      dispatchOp: Op.Dispatch,
+      log: presenceLog,
+    });
 
     // Cloudflare's auto-response absorbs messages at the edge, preventing the DO
     // from updating the `last_heartbeat` timestamp, which causes the zombie
@@ -611,6 +628,20 @@ export class MeetingRoom extends DurableObject<Env> {
             this.normalizeReplayPersistWrites(restored.persistWrites),
           );
         }
+      }
+
+      // Game activities of sessions that survived hibernation.
+      try {
+        await this.gameActivity.restore(
+          new Map(
+            [...this.sessions.values()].map((session) => [
+              session.id,
+              session.user_id,
+            ]),
+          ),
+        );
+      } catch (error) {
+        log.error("Failed to restore game activities", error);
       }
 
       // Restore voice channel members from per-channel keys (vc:members:*)
@@ -914,6 +945,17 @@ export class MeetingRoom extends DurableObject<Env> {
           )
         ) {
           await this.applyPartialProfileIdentity(body.data.user_id, body.data);
+        }
+        if (
+          body.event === "USER_PROFILE_UPDATE" &&
+          this.isPlainObject(body.data) &&
+          typeof body.data.user_id === "string" &&
+          typeof body.data.share_activity === "boolean"
+        ) {
+          this.gameActivity.setShare(
+            body.data.user_id,
+            body.data.share_activity,
+          );
         }
         log.info(
           `Internal broadcast: event=${body.event}, type=${body.broadcast_all ? "all" : body.target_user_id ? "user" : "channel"}, recipient=${body.target_user_id || body.channel_id || "all"}`,
@@ -1320,6 +1362,10 @@ export class MeetingRoom extends DurableObject<Env> {
         this.handlePresenceUpdate(ws, msg.d);
         break;
 
+      case Op.ActivityUpdate:
+        await this.handleActivityUpdate(ws, msg.d);
+        break;
+
       case Op.VoiceChannelJoin:
         this.handleVoiceChannelJoin(ws, msg.d);
         break;
@@ -1407,6 +1453,13 @@ export class MeetingRoom extends DurableObject<Env> {
         } catch (e) {
           log.error(`alarm: handleLeave threw for zombie session:`, e);
         }
+      }
+
+      // Activities of sessions that left some other way than handleLeave.
+      if (this.gameActivity.size > 0) {
+        this.gameActivity.prune(
+          new Set([...this.sessions.values()].map((session) => session.id)),
+        );
       }
 
       // Prune expired resumable sessions
@@ -1749,7 +1802,12 @@ export class MeetingRoom extends DurableObject<Env> {
     };
   }
 
-  private buildPresenceListPayload() {
+  /**
+   * Everyone connected, with each user's game activity as `viewerId` may see
+   * it (null when there is none to show). Load the viewer's audience first
+   * (gameActivity.prefetchAudience); then use sendPresenceList.
+   */
+  private buildPresenceListPayload(viewerId?: string) {
     const userIds = new Set<string>();
 
     for (const [, session] of this.sessions) {
@@ -1758,15 +1816,41 @@ export class MeetingRoom extends DurableObject<Env> {
       }
     }
 
-    const users = Array.from(userIds).map((userId) =>
-      this.buildPresenceSnapshotForUser(userId),
+    const { activities, catchUp } = this.gameActivity.forPresenceList(
+      viewerId,
+      userIds,
     );
+    const users = Array.from(userIds).map((userId) => ({
+      ...this.buildPresenceSnapshotForUser(userId),
+      game_activity: activities.get(userId) ?? null,
+    }));
     return {
-      user_ids: users
-        .filter((user) => user.status !== "offline")
-        .map((user) => user.user_id),
-      users,
+      payload: {
+        user_ids: users
+          .filter((user) => user.status !== "offline")
+          .map((user) => user.user_id),
+        users,
+      },
+      catchUp,
     };
+  }
+
+  /** PRESENCE_LIST to one socket (not replayed: it is a full snapshot). */
+  private sendPresenceList(ws: WebSocket, viewerId?: string) {
+    const { payload, catchUp } = this.buildPresenceListPayload(viewerId);
+    this.sendTo(ws, {
+      op: Op.Dispatch,
+      d: { event: "PRESENCE_LIST", data: payload },
+    });
+    if (catchUp && viewerId) {
+      this.ctx.waitUntil(
+        this.gameActivity
+          .catchUp(ws, viewerId)
+          .catch((error) =>
+            presenceLog.error("Game activity catch-up failed", error),
+          ),
+      );
+    }
   }
 
   /** Persist voice channel members to per-channel storage keys */
@@ -3466,6 +3550,10 @@ export class MeetingRoom extends DurableObject<Env> {
                 return null;
               })
           : null,
+        // Who may see others' game activity in the PRESENCE_LIST below.
+        this.roomSlug === VOICE_ROSTER_GATEWAY
+          ? this.gameActivity.prefetchAudience(admittedUserId)
+          : null,
       ]);
       if (this.abandonStaleIdentify(ws, voiceJoin)) return;
 
@@ -3575,13 +3663,7 @@ export class MeetingRoom extends DurableObject<Env> {
       // client's DM and friends rows read live presence from this list, not
       // users.status (the status a person last chose, kept after they leave).
       if (attachment.user_id) {
-        this.sendTo(ws, {
-          op: Op.Dispatch,
-          d: {
-            event: "PRESENCE_LIST",
-            data: this.buildPresenceListPayload(),
-          },
-        });
+        this.sendPresenceList(ws, attachment.user_id);
       }
 
       // Op 2: Ready — with the voice credentials when Identify minted them
@@ -3990,6 +4072,15 @@ export class MeetingRoom extends DurableObject<Env> {
         },
       });
 
+      // Game activity updates are not replayed: a resumed chat session gets
+      // the presence (and activity) snapshot instead.
+      if (this.roomSlug === VOICE_ROSTER_GATEWAY && resumedAttachment.user_id) {
+        await this.gameActivity.prefetchAudience(resumedAttachment.user_id);
+        if (!this.isSocketClosed(ws)) {
+          this.sendPresenceList(ws, resumedAttachment.user_id);
+        }
+      }
+
       // Re-announce the resumed participant in full. Its abrupt close sent no
       // leave, but a client that took a roster in the meantime (its own
       // Ready or Resumed) may have dropped it; an update with the full state
@@ -4081,6 +4172,15 @@ export class MeetingRoom extends DurableObject<Env> {
     this.cleanupChannelSubscriptions(oldWs);
     this.cleanupServerSubscriptions(oldWs);
     this.sessions.delete(oldWs);
+    // The resuming client sends its activity again after Resumed. Others
+    // hear the change only after a broadcast interval, so a re-sent, same
+    // activity is no change to them and nothing flickers.
+    if (this.gameActivity.removeSession(session.id) && session.user_id) {
+      this.gameActivity.schedule(
+        session.user_id,
+        this.gameActivity.broadcastIntervalMs,
+      );
+    }
     try {
       oldWs.serializeAttachment(null);
     } catch {
@@ -4291,11 +4391,38 @@ export class MeetingRoom extends DurableObject<Env> {
           data: presenceSnapshot,
         },
       });
+      // Invisible hides the activity; coming back shows it again.
+      if (this.gameActivity.hasActivityFor(session.user_id)) {
+        this.gameActivity.schedule(session.user_id);
+      }
       return;
     }
 
     session.status = status;
     this.persist(ws, session);
+  }
+
+  // ── Op 43: ActivityUpdate (C→S) ──────────────────────────────────────────
+
+  private async handleActivityUpdate(
+    ws: WebSocket,
+    d: MainClientPayload<Op.ActivityUpdate>,
+  ) {
+    const session = this.requireSession(ws);
+    const userId = session?.user_id;
+    if (!session || !userId) return;
+
+    const changed = await this.gameActivity.set(
+      session.id,
+      userId,
+      d.game_activity,
+    );
+    // Closed while share_activity was read: the close dropped its activity.
+    if (this.getSession(ws) !== session) {
+      this.gameActivity.removeSession(session.id);
+      return;
+    }
+    if (changed) this.gameActivity.schedule(userId);
   }
 
   /** Persist presence immediately without blocking the WebSocket response. */
@@ -4373,6 +4500,8 @@ export class MeetingRoom extends DurableObject<Env> {
     if (!session) return;
     // The socket is done: no later persist may bring the session back.
     this.closedSockets.add(ws);
+    // Its game activity goes with it (the client re-sends after a resume).
+    const hadGameActivity = this.gameActivity.removeSession(session.id);
 
     // Broadcast updated presence/platform state before cleanup
     if (session.user_id && !session.standby) {
@@ -4426,6 +4555,12 @@ export class MeetingRoom extends DurableObject<Env> {
     const participantId = session.id;
     this.sessions.delete(ws);
     this.profileRefreshCooldowns.delete(participantId);
+    if (
+      session.user_id &&
+      (hadGameActivity || this.gameActivity.hasActivityFor(session.user_id))
+    ) {
+      this.gameActivity.schedule(session.user_id);
+    }
 
     if (shouldKeepResumableSession(intentional)) {
       // Keep resumable session alive for RESUME_GRACE_PERIOD_MS so the client
@@ -4905,11 +5040,10 @@ export class MeetingRoom extends DurableObject<Env> {
     const session = this.requireSession(ws);
     if (!session || !d.channel_id || !session.user_id) return;
 
-    const access = await resolveChannelAccess(
-      this.env.DB,
-      session.user_id,
-      d.channel_id,
-    );
+    const [access] = await Promise.all([
+      resolveChannelAccess(this.env.DB, session.user_id, d.channel_id),
+      this.gameActivity.prefetchAudience(session.user_id),
+    ]);
     if (!access || !hasChannelPermission(access, PERMISSIONS.VIEW_CHANNELS)) {
       this.sendTo(ws, {
         op: Op.Error,
@@ -4936,13 +5070,7 @@ export class MeetingRoom extends DurableObject<Env> {
     }
 
     // Send PRESENCE_LIST to the subscribing client with live platform/session metadata.
-    this.sendTo(ws, {
-      op: Op.Dispatch,
-      d: {
-        event: "PRESENCE_LIST",
-        data: this.buildPresenceListPayload(),
-      },
-    });
+    this.sendPresenceList(ws, session.user_id);
 
     // Send current voice channel states to the subscribing client
     this.ctx.waitUntil(this.sendVoiceChannelStates(ws));

@@ -18,6 +18,7 @@
 import { Schema } from "effect";
 import { GatewayOp } from "./opcodes";
 import type { PayloadRules } from "./codec";
+import { GameActivity } from "./game-activity";
 
 // ── Limits shared with the handlers ────────────────────────────────────────
 
@@ -115,6 +116,11 @@ const PresenceUpdateClientPayload = Schema.Struct({
   status: Schema.String,
 });
 
+/** `null` clears the session's activity. Fields are capped in game-activity.ts. */
+const ActivityUpdateClientPayload = Schema.Struct({
+  game_activity: Schema.NullOr(GameActivity),
+});
+
 const VoiceChannelJoinPayload = Schema.Struct({
   channel_id: Schema.String,
   self_mute: Schema.optional(Schema.Boolean),
@@ -201,6 +207,10 @@ export const mainGatewayClientRules = {
   [GatewayOp.PresenceUpdate]: {
     schema: PresenceUpdateClientPayload,
     invalid: "Invalid presence payload",
+  },
+  [GatewayOp.ActivityUpdate]: {
+    schema: ActivityUpdateClientPayload,
+    invalid: "Invalid activity payload",
   },
   [GatewayOp.VoiceChannelJoin]: {
     schema: VoiceChannelJoinPayload,
@@ -368,6 +378,7 @@ type MessageDeletePayload = typeof MessageDeletePayload.Type;
 type ChannelPayload = typeof ChannelPayload.Type;
 type ReactionPayload = typeof ReactionPayload.Type;
 type PresenceUpdateClientPayload = typeof PresenceUpdateClientPayload.Type;
+type ActivityUpdateClientPayload = typeof ActivityUpdateClientPayload.Type;
 type VoiceChannelJoinPayload = typeof VoiceChannelJoinPayload.Type;
 type VoiceChannelLeavePayload = typeof VoiceChannelLeavePayload.Type;
 type ServerSubscribePayload = typeof ServerSubscribePayload.Type;

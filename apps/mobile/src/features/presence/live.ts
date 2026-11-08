@@ -1,3 +1,4 @@
+import { parseGameActivity, type GameActivity } from "@ralph/protocol";
 import { useMemo } from "react";
 import { create } from "zustand";
 
@@ -17,9 +18,16 @@ interface LivePresenceState {
   readonly status: Readonly<Record<string, LiveStatus>>;
   /** userId → a custom status a live update carried (null: cleared). */
   readonly custom: Readonly<Record<string, string | null>>;
+  /** userId → what they are playing ("Playing X"), for people connected now. */
+  readonly activity: Readonly<Record<string, GameActivity>>;
 }
 
-const INITIAL: LivePresenceState = { listed: false, status: {}, custom: {} };
+const INITIAL: LivePresenceState = {
+  listed: false,
+  status: {},
+  custom: {},
+  activity: {},
+};
 
 const useLivePresenceStore = create<LivePresenceState>()(() => INITIAL);
 
@@ -33,16 +41,39 @@ function live(status: string | null | undefined): LiveStatus | null {
     : null;
 }
 
+/**
+ * A presence entry's `game_activity`: undefined when absent (status-only
+ * updates and older servers: keep what is known), null when cleared or not
+ * valid (an icon that is not our own path, an oversized name).
+ */
+export function readGameActivity(
+  value: unknown,
+): GameActivity | null | undefined {
+  if (value === undefined) return undefined;
+  return parseGameActivity(value) ?? null;
+}
+
 /** PRESENCE_LIST: everyone connected, replacing what was known. */
 export function setPresenceList(
-  users: readonly { user_id: string; status?: string | null }[],
+  users: readonly {
+    user_id: string;
+    status?: string | null;
+    game_activity?: unknown;
+  }[],
 ): void {
-  const status: Record<string, LiveStatus> = {};
-  for (const user of users) {
-    const value = live(user.status ?? "online");
-    if (value) status[user.user_id] = value;
-  }
-  useLivePresenceStore.setState({ listed: true, status });
+  useLivePresenceStore.setState((s) => {
+    const status: Record<string, LiveStatus> = {};
+    const activity: Record<string, GameActivity> = {};
+    for (const user of users) {
+      const value = live(user.status ?? "online");
+      if (!value) continue;
+      status[user.user_id] = value;
+      const game = readGameActivity(user.game_activity);
+      const kept = game === undefined ? s.activity[user.user_id] : game;
+      if (kept) activity[user.user_id] = kept;
+    }
+    return { listed: true, status, activity };
+  });
 }
 
 /** PRESENCE_UPDATE for anyone. */
@@ -50,20 +81,45 @@ export function applyPresence(
   userId: string,
   status: string,
   customStatus: string | null | undefined,
+  gameActivity?: unknown,
 ): void {
   useLivePresenceStore.setState((s) => {
     const next = { ...s.status };
     const value = live(status);
     if (value) next[userId] = value;
     else delete next[userId];
+    const game = value ? readGameActivity(gameActivity) : null;
+    let activity = s.activity;
+    if (game === null && userId in activity) {
+      const { [userId]: _gone, ...rest } = activity;
+      activity = rest;
+    } else if (game) {
+      activity = { ...activity, [userId]: game };
+    }
     return {
       status: next,
       custom:
         customStatus === undefined
           ? s.custom
           : { ...s.custom, [userId]: customStatus },
+      activity,
     };
   });
+}
+
+/** What someone is playing, while they are connected and sharing it. */
+export function useGameActivity(userId: string): GameActivity | undefined {
+  return useLivePresenceStore((s) => s.activity[userId]);
+}
+
+/** "Playing Minecraft". */
+export function gameActivityLabel(activity: GameActivity): string {
+  return `Playing ${activity.name}`;
+}
+
+/** Test and debug access to the live state. */
+export function getLivePresence(): LivePresenceState {
+  return useLivePresenceStore.getState();
 }
 
 export type Presence = LiveStatus | "offline";

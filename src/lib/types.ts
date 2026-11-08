@@ -130,6 +130,8 @@ export interface User {
   theme_preference?: string | null;
   theme_sync_enabled?: boolean;
   media_content_filter?: MediaContentFilter | null;
+  /** Own account only: "Share my activity" (default on). */
+  share_activity?: boolean;
   updated_at?: string;
   created_at?: string | null;
   bio?: string | null;
