@@ -11,7 +11,9 @@ import com.yap.native
 // on hover, a black/60 pill: Stream settings (the person's menu) and Stop
 // streaming / Stop watching. Dragged, it settles in the nearest corner;
 // minimised, it is a 48 px bubble that opens it again. A right click opens
-// the same menu.
+// the same menu. The corners keep 8 px clear of the composer and the stage
+// bar and cards that share a corner stack (the FloatingArea's geometry,
+// floating-geometry.ts).
 Item {
     id: root
 
@@ -21,40 +23,45 @@ Item {
     required property string memberId
     required property bool me
     property string channelName
+    // Our share first, a watched one above it (the stack's rank).
     property int slot: 0
     // The view it floats over (its corners); the card is placed in it.
-    property Item area: parent
+    required property FloatingArea area
 
     signal goToChannel()
 
     property bool minimized: false
     // 0 bottom-left, 1 bottom-right, 2 top-left, 3 top-right.
     property int corner: 0
-    readonly property int margin: 16
     readonly property int cardW: 360
     readonly property int cardH: 36 + Math.round(cardW * 9 / 16) + 2
-    readonly property int stackOffset: slot * ((minimized ? 48 : cardH) + 8)
+    readonly property string stackId: "stream:" + videoKey
 
-    function cornerX(c) { return c % 2 === 0 ? margin : area.width - width - margin }
-    function cornerY(c) {
-        return c < 2 ? area.height - height - margin - stackOffset : margin + stackOffset
+    function placeX() { return area.cornerX(corner, width) }
+    function placeY() {
+        return area.cornerY(corner, width, height, area.stackOffset(stackId, corner))
     }
     function settle() {
-        const cx = x + width / 2
-        const cy = y + height / 2
-        corner = (cy < area.height / 2 ? 2 : 0) + (cx < area.width / 2 ? 0 : 1)
-        x = Qt.binding(() => cornerX(corner))
-        y = Qt.binding(() => cornerY(corner))
+        corner = area.cornerFor(x, y, width, height)
+        x = Qt.binding(() => placeX())
+        y = Qt.binding(() => placeY())
     }
+    function publish() { area.publish(stackId, corner, height, slot) }
     function openMenu(at) {
         ShellState.showPeerMenu(root.memberId, root.displayName, root, at, Voice.channelId)
     }
 
     width: minimized ? 48 : cardW
     height: minimized ? 48 : cardH
-    x: cornerX(corner)
-    y: cornerY(corner)
+    x: placeX()
+    y: placeY()
     z: 20
+
+    onCornerChanged: publish()
+    onHeightChanged: publish()
+    onSlotChanged: publish()
+    Component.onCompleted: publish()
+    Component.onDestruction: area?.withdraw(stackId)
 
     Accessible.role: Accessible.Pane
     Accessible.name: qsTr("Stream preview")
@@ -128,13 +135,20 @@ Item {
                     onClicked: root.minimized = true
                 }
             }
-            DragHandler {
-                target: root
-                xAxis.minimum: 0
-                xAxis.maximum: root.area.width - root.width
-                yAxis.minimum: 0
-                yAxis.maximum: root.area.height - root.height
-                onActiveChanged: if (!active) root.settle()
+            // Behind the keys, and never taking a press from an item (the
+            // default let it cancel the keys' presses).
+            Item {
+                anchors.fill: parent
+                z: -1
+                DragHandler {
+                    grabPermissions: PointerHandler.CanTakeOverFromHandlersOfSameType | PointerHandler.ApprovesTakeOverByAnything
+                    target: root
+                    xAxis.minimum: 0
+                    xAxis.maximum: root.area.width - root.width
+                    yAxis.minimum: 0
+                    yAxis.maximum: root.area.height - root.height
+                    onActiveChanged: if (!active) root.settle()
+                }
             }
         }
 

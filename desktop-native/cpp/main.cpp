@@ -7,6 +7,7 @@
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
 #include <QtCore/QHash>
+#include <QtCore/QMetaProperty>
 #include <QtCore/QSet>
 #include <QtCore/QTimer>
 #include <QtGui/QFont>
@@ -330,6 +331,105 @@ private:
 
 // The brand faces, one static cut per family (assets/fonts, built by
 // tools/build-fonts.py). Registered before QML so Theme's families resolve.
+// The text hinting for a screen at this device pixel ratio (see main's
+// font block): vertical below 125 %, none from 125 %.
+// YAP_TEXT_HINTING=none|vertical|full|default forces one.
+static QFont::HintingPreference textHintingFor(qreal dpr)
+{
+  const QString forced = qEnvironmentVariable("YAP_TEXT_HINTING");
+  if (forced == QLatin1String("none"))
+    return QFont::PreferNoHinting;
+  if (forced == QLatin1String("vertical"))
+    return QFont::PreferVerticalHinting;
+  if (forced == QLatin1String("full"))
+    return QFont::PreferFullHinting;
+  if (forced == QLatin1String("default"))
+    return QFont::PreferDefaultHinting;
+  return dpr >= 1.25 ? QFont::PreferNoHinting : QFont::PreferVerticalHinting;
+}
+
+// Picks the hinting again when the window reaches a screen at another scale
+// (moved to another monitor, or the monitor's scale changed). Qt Quick
+// items keep the font they resolved when they were made, so the
+// application font alone would reach only new ones: the type roles follow
+// Theme.hinting, and every item already made with a `font` is given the
+// new preference. YAP_TEST_HINTING_FLIP_SECS=<n> (tests): n s after the
+// first show, re-pick as if the scale had crossed 125 % (none <-> vertical).
+class TextHintingFollower : public QObject
+{
+public:
+  TextHintingFollower(QQuickWindow* window, QObject* theme)
+    : QObject(window), m_window(window), m_theme(theme)
+  {
+    m_current = QGuiApplication::font().hintingPreference();
+    if (m_theme)
+      m_theme->setProperty("hinting", int(m_current));
+    connect(window, &QWindow::screenChanged, this, &TextHintingFollower::follow);
+    for (QScreen* screen : QGuiApplication::screens())
+      watch(screen);
+    connect(qApp, &QGuiApplication::screenAdded, this, [this](QScreen* screen) { watch(screen); });
+    // The window's first screen may not be the primary one.
+    QTimer::singleShot(0, this, &TextHintingFollower::follow);
+    const int flip = qEnvironmentVariableIntValue("YAP_TEST_HINTING_FLIP_SECS");
+    if (flip > 0)
+      QTimer::singleShot(flip * 1000, this, [this] {
+        apply(m_current == QFont::PreferNoHinting ? QFont::PreferVerticalHinting
+                                                  : QFont::PreferNoHinting);
+      });
+  }
+
+private:
+  void watch(QScreen* screen)
+  {
+    connect(screen, &QScreen::logicalDotsPerInchChanged, this, &TextHintingFollower::follow);
+    connect(screen, &QScreen::physicalDotsPerInchChanged, this, &TextHintingFollower::follow);
+  }
+  void follow()
+  {
+    QScreen* screen = m_window->screen();
+    apply(textHintingFor(screen ? screen->devicePixelRatio() : m_window->devicePixelRatio()));
+  }
+  void apply(QFont::HintingPreference hinting)
+  {
+    if (hinting == m_current)
+      return;
+    m_current = hinting;
+    QFont font = QGuiApplication::font();
+    font.setHintingPreference(hinting);
+    QGuiApplication::setFont(font);
+    if (m_theme)
+      m_theme->setProperty("hinting", int(hinting));
+    int changed = 0;
+    std::function<void(QQuickItem*)> visit = [&](QQuickItem* item) {
+      const QMetaObject* meta = item->metaObject();
+      // Controls inherit their font (from the window and the app font):
+      // writing it would freeze that inheritance, so only their parts are
+      // given it.
+      const int index = item->inherits("QQuickControl") ? -1 : meta->indexOfProperty("font");
+      if (index >= 0) {
+        const QMetaProperty property = meta->property(index);
+        if (property.metaType() == QMetaType::fromType<QFont>() && property.isWritable()) {
+          QFont itemFont = property.read(item).value<QFont>();
+          if (itemFont.hintingPreference() != hinting) {
+            itemFont.setHintingPreference(hinting);
+            property.write(item, itemFont);
+            ++changed;
+          }
+        }
+      }
+      for (QQuickItem* child : item->childItems())
+        visit(child);
+    };
+    visit(m_window->contentItem());
+    std::fprintf(stderr, "[text] hinting %d on %s (dpr %.2f), %d items updated\n", int(hinting),
+                 m_window->screen() ? qPrintable(m_window->screen()->name()) : "?",
+                 m_window->devicePixelRatio(), changed);
+  }
+
+  QQuickWindow* m_window;
+  QPointer<QObject> m_theme;
+  QFont::HintingPreference m_current;
+};
 static void registerFonts()
 {
   QDirIterator it(QStringLiteral(":/fonts"), { QStringLiteral("*.ttf") });
@@ -673,21 +773,14 @@ int main(int argc, char* argv[])
   // is small at 100% and large from 125% up, so the hinting follows the
   // primary screen's scale: at 150% vertical hinting left ~25% fewer edge
   // pixels than Chromium (stair-stepped curves), no hinting matched it
-  // within 4%; at 100% no hinting blurred every baseline. Set once: Qt
-  // Quick text does not re-resolve a changed application font.
+  // within 4%; at 100% no hinting blurred every baseline. The window's
+  // screen picks it again when it moves to a screen at another scale
+  // (TextHintingFollower).
   // YAP_TEXT_HINTING=none|vertical|full|default forces one.
   {
-    QFont font = QGuiApplication::font();
-    const QString hinting = qEnvironmentVariable("YAP_TEXT_HINTING");
     const QScreen* screen = QGuiApplication::primaryScreen();
-    const bool scaled = screen && screen->devicePixelRatio() >= 1.25;
-    font.setHintingPreference(
-      hinting == QLatin1String("none")       ? QFont::PreferNoHinting
-      : hinting == QLatin1String("vertical") ? QFont::PreferVerticalHinting
-      : hinting == QLatin1String("full")     ? QFont::PreferFullHinting
-      : hinting == QLatin1String("default")  ? QFont::PreferDefaultHinting
-      : scaled                               ? QFont::PreferNoHinting
-                                             : QFont::PreferVerticalHinting);
+    QFont font = QGuiApplication::font();
+    font.setHintingPreference(textHintingFor(screen ? screen->devicePixelRatio() : 1.0));
     QGuiApplication::setFont(font);
   }
   registerFonts();
@@ -795,6 +888,7 @@ int main(int argc, char* argv[])
     chrome->attach(window);
     thumbbar->attach(window);
     new PopupPressSink(&engine, window);
+    new TextHintingFollower(window, engine.singletonInstance<QObject*>("com.yap.native", "Theme"));
 #ifdef Q_OS_WIN
     if (qEnvironmentVariableIntValue("YAP_TEST_POINTER") != 0) {
       app.installNativeEventFilter(new TestPointer(window));

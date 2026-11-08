@@ -20,6 +20,11 @@ PlateDialog {
     // InviteClient.tsx INVITE_REDIRECT_MS.
     readonly property int redirectMs: 1500
 
+    // The page's poster anatomy in the dialog (PublicFrame.tsx parts): the
+    // display title over the dithered rule, the close key, top placed.
+    c1: true
+    placeTop: true
+    rule: step === "preview" || step === "joining"
     kicker: step === "preview" || step === "joining"
         ? qsTr("Invite · %1").arg(landing.inviter)
         : step === "loading" ? qsTr("Invite") : ""

@@ -152,6 +152,7 @@ QVideoFrame::RotationAngle rotationAngle(uint16_t degrees)
 
 void VideoFeed::push(QVideoFrame frame)
 {
+  m_frames.fetch_add(1, std::memory_order_relaxed);
   bool post = false;
   {
     QMutexLocker lock(&m_mutex);
@@ -192,6 +193,13 @@ void VideoFeed::detach(QVideoSink* sink)
   m_sinks.removeAll(sink);
   m_sinks.removeAll(nullptr);
   m_attached.store(static_cast<int>(m_sinks.size()), std::memory_order_relaxed);
+}
+
+double VideoHub::frames(const QString& key)
+{
+  QMutexLocker lock(&m_mutex);
+  const VideoFeed* feed = m_feeds.value(key, nullptr);
+  return feed ? double(feed->frames()) : 0.0;
 }
 
 VideoHub::VideoHub(QObject* parent) : QObject(parent)

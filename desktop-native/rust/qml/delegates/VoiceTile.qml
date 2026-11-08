@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import QtMultimedia
+import Yap.Chrome
 import com.yap.native
 
 // One tile on the call stage (ParticipantCard.tsx, TileParts.tsx): a person,
@@ -53,6 +54,34 @@ Item {
     readonly property bool overMedia: showsVideo && surface.item !== null && surface.item.hasFrame
     readonly property string ownerName: name
 
+    // A camera that is playing: its resolution and frame rate on the
+    // nameplate (ParticipantCard.tsx meta, QualityMonitor.tsx with
+    // formatQuality, "720P / 30 FPS"). The size is the frame's; the rate is
+    // counted over 2 s from VideoHub's per-key frame count (the web reads
+    // its 2 s stats snapshot), so no QML runs per frame.
+    readonly property bool cameraLive: !screen && !tray && overMedia
+    property double framesAt: 0
+    property int fps: 0
+    Timer {
+        interval: 2000
+        repeat: true
+        running: root.cameraLive
+        onRunningChanged: { root.framesAt = VideoHub.frames(root.videoKey); root.fps = 0 }
+        onTriggered: {
+            const now = VideoHub.frames(root.videoKey)
+            root.fps = Math.max(0, Math.round((now - root.framesAt) / 2))
+            root.framesAt = now
+        }
+    }
+    readonly property string qualityText: {
+        const r = root.cameraLive && surface.item ? surface.item.sourceRect : Qt.rect(0, 0, 0, 0)
+        const h = Math.round(r.height), w = Math.round(r.width)
+        if (h <= 0 || w <= 0)
+            return "HD"
+        const res = h >= 2160 || w >= 3840 ? "4K" : h >= 1440 || w >= 2560 ? "1440"
+            : h >= 1080 || w >= 1920 ? "1080" : h >= 720 || w >= 1280 ? "720" : String(h)
+        return root.fps > 0 ? "%1P / %2 FPS".arg(res).arg(root.fps) : "%1P".arg(res)
+    }
     Accessible.role: Accessible.Button
     Accessible.name: ownShare ? qsTr("Your stream") : screen ? qsTr("%1's stream").arg(name) : name
     Accessible.onPressAction: ShellState.toggleFocus(tileId)
@@ -237,7 +266,8 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 // Room for the chip's padding, the LED and the glyphs.
                 width: Math.max(0, Math.min(implicitWidth, root.width - (root.tray ? 8 : 48) - 12 - 12
-                    - (root.screen ? 18 : 0) - (root.muted ? 18 : 0) - (root.deafened ? 18 : 0)))
+                    - (root.screen ? 18 : 0) - (root.muted ? 18 : 0) - (root.deafened ? 18 : 0)
+                    - (root.cameraLive ? quality.width + 6 : 0)))
                 // A share is named for its owner (TileNameplate's ownerName).
                 textFormat: Text.PlainText
                 text: root.me && !root.screen ? qsTr("%1 (you)").arg(root.name) : root.name
@@ -269,6 +299,23 @@ Item {
                 variant: "off"
                 size: Theme.iconXs
                 color: Theme.mutedState
+            }            // The quality readout: rounded-xs px-1 num-xs on white/15.
+            Rectangle {
+                id: quality
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.cameraLive
+                width: qualityLabel.implicitWidth + 8
+                height: 16
+                radius: 2
+                color: Qt.rgba(1, 1, 1, 0.15)
+                Text {
+                    id: qualityLabel
+                    anchors.centerIn: parent
+                    textFormat: Text.PlainText
+                    text: root.qualityText
+                    color: "white"
+                    font: Theme.type.numSm
+                }
             }
         }
     }
@@ -281,5 +328,35 @@ Item {
         width: Math.min(implicitWidth, parent.width * 0.75)
         visible: root.screen && !root.tray && (root.me || root.watching) && root.watchers.length > 0
         watchers: root.watchers
+    }
+
+    // "More options for <name>" (ParticipantCard.tsx 402-416): bottom right
+    // on black/60, shown while the tile is hovered or the key has focus
+    // (REVEAL), not on tray tiles. It opens their call menu at the click,
+    // as a right click does. The web also shows it on our own tile (the
+    // local menu); native has no local call menu, so it is not drawn there.
+    // Faded, not hidden, so it can take keyboard focus and reveal itself.
+    IconKey {
+        id: moreKey
+        visible: !root.tray && !root.me
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 8
+        z: 4
+        size: 24
+        tone: "onMedia"
+        iconName: "more"
+        opacity: hover.hovered || visualFocus ? 1 : 0
+        Accessible.name: qsTr("More options for %1").arg(root.name)
+        // Where the pointer is on the key, for the menu to open at.
+        HoverHandler { id: moreHover }
+        onClicked: ShellState.showPeerMenu(root.memberId, root.name, root,
+            moreKey.mapToItem(root, moreHover.point.position), Voice.channelId)
+        background: Rectangle {
+            radius: Theme.radius
+            color: Qt.rgba(0, 0, 0, moreKey.down ? 0.75 : moreKey.hovered ? 0.7 : 0.6)
+            border.width: moreKey.visualFocus ? 2 : 0
+            border.color: Theme.focus
+        }
     }
 }

@@ -18,6 +18,12 @@ Rectangle {
     readonly property string activity: joined ? (JSON.parse(Apps.state || "{}").activity ?? "") : ""
     // When a popover last closed, so its key's click does not reopen it.
     property double popoverClosedAt: 0
+    // The members tray above the stage bar while a tile is on stage (the
+    // dock's "Hide members"; VoiceStage.tsx `showMembers`, on by default).
+    property bool membersShown: true
+    // The stage bar's height: the floating players keep 8 px above it
+    // (VoiceControls.tsx `data-floating-avoid`). Nothing while not joined.
+    readonly property real avoidBottom: dock.height
 
     function togglePopover(loader, key) {
         if (Date.now() - popoverClosedAt < 300)
@@ -494,19 +500,12 @@ Rectangle {
         visible: root.joined
     }
 
-    NowPlayingCard {
-        id: nowPlaying
-        anchors.bottom: dock.top
-        width: parent.width
-        visible: root.joined && now !== null
-    }
-
     MembersTray {
         id: tray
-        anchors.bottom: nowPlaying.top
+        anchors.bottom: dock.top
         width: parent.width
-        height: root.focused ? implicitHeight : 0
-        visible: root.focused
+        height: root.focused && root.membersShown ? implicitHeight : 0
+        visible: root.focused && root.membersShown
         z: 1
         Rectangle {
             anchors.fill: parent
@@ -631,15 +630,29 @@ Rectangle {
                 }
             }
         }
-        // Trailing: fullscreen.
-        IconKey {
+        // Trailing (VoiceControls.tsx): fullscreen, then, with a tile on
+        // stage, "Hide members" / "Show members" last (showMembersToggle).
+        Row {
             anchors.right: parent.right
             anchors.rightMargin: 24
             anchors.verticalCenter: parent.verticalCenter
-            size: 48
-            iconName: ShellState.stageFullscreen ? "minimize" : "maximize"
-            tip: ShellState.stageFullscreen ? qsTr("Exit fullscreen") : qsTr("Fullscreen")
-            onClicked: ShellState.stageFullscreen = !ShellState.stageFullscreen
+            spacing: 8
+            IconKey {
+                size: 48
+                iconName: ShellState.stageFullscreen ? "minimize" : "maximize"
+                tip: ShellState.stageFullscreen ? qsTr("Exit fullscreen") : qsTr("Fullscreen")
+                onClicked: ShellState.stageFullscreen = !ShellState.stageFullscreen
+            }
+            IconKey {
+                visible: root.focused
+                size: 48
+                iconName: "members"
+                tone: root.membersShown ? "toggled" : "rest"
+                tip: root.membersShown ? qsTr("Hide members") : qsTr("Show members")
+                Accessible.checkable: true
+                Accessible.checked: root.membersShown
+                onClicked: root.membersShown = !root.membersShown
+            }
         }
     }
 

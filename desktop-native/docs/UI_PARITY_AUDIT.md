@@ -780,7 +780,7 @@ parity.
   still flags `rust/build.rs` and `yap-core/src/fixture.rs`, as at 0.2.2.
 - `cargo test -p yap-core -p yap-protocol -p yap-cache -p yap-voice`
   (`LK_CUSTOM_WEBRTC` set): 1644 passed, 0 failed.
-- `build.ps1` into `F:/ct/yapn/rel` is green (6 builds this pass).
+- `build.ps1` into `F:/ct/yapn/rel` is green (7 builds this pass).
 
 ## Pass 10 (pass 9 gaps F13-F20, profile editor, sweep)
 
@@ -864,7 +864,7 @@ Web paths are under `src/`, native paths under `desktop-native/`.
   (`LK_CUSTOM_WEBRTC` set): 1669 passed, 0 failed. New tests cover the voice
   chat, scroll restore, call records, the composer's emoji, the cache round
   trip and the profile editor.
-- `build.ps1` into `F:/ct/yapn/rel` is green (6 builds this pass); the QML
+- `build.ps1` into `F:/ct/yapn/rel` is green (7 builds this pass); the QML
   log has no warnings.
 - A review pass found three issues, fixed: the newest page shown while a
   saved window loads no longer overwrites the position or marks the channel
@@ -963,3 +963,165 @@ New switches: `YAP_TEXT_HINTING`, `YAP_QT_WHEEL=1`, `YAP_DEBUG_OFFLINE_SECS`
 - `rustfmt --check` is clean for the Rust files this pass changed.
 - `build.ps1` into `F:/ct/yapn/rel` is green (7 builds this pass), and the
   runs' logs have no QML warnings.
+
+## Pass 12 (calls sweep, profile editor on screen, wider sweep)
+
+Pass of 2026-11-07, on the 0.2.5 build (HEAD 5519fa3d, kept in
+`F:/ct/yapn/run/sweep12/before/`). Native ran as copies in
+`F:/ct/yapn/run/sweep12/bin-<tag>/` (`F:/ct/yapn/tools/run-p12.ps1`; the
+wrapper `F:/ct/yapn/tmp/p12/start.ps1` adds the test devices below). The test
+owner ran on profile `spike`, Spike Peer on `spikepeer`, both native; the web
+side is `web-shot.mjs` at 1268 x 825 `--scheme dark`, as the peer
+(`peer.json`, `--media`, `--fake-share`) for call references and as the owner
+for read-only views. jontest was not used. Captures stay local in
+`F:/ct/yapn/run/sweep12/` (`calls/`, `dm/`, `profile/`, `invite/`,
+`create/`, `notify/`, `sweep/`, `text/`).
+
+Test devices for every voice run from build 1 on: `YAP_FAKE_MIC` (a
+synthetic 140 Hz voiced burst, `F:/ct/yapn/tmp/p12/fake-voice.wav`),
+`YAP_NULL_SPEAKER`, `YAP_FAKE_CAMERA`, `YAP_FAKE_SHARE_SOURCE=1280x720`,
+`YAP_SHARE_ONLY_OURS`, `YAP_FAKE_SHARE_AUDIO`, `YAP_NO_CLIPBOARD`,
+`YAP_LOG_EXTERNAL_OPEN`, `YAP_NO_TOASTS`. `web-shot.mjs` leaves voice more
+reliably now: it presses Escape (a modal over the keys) and tries every
+matching leave key, last first, then forced.
+
+New switches: `YAP_TEST_HINTING_FLIP_SECS=<n>` (n s after the first show,
+the text hinting is re-picked as if the scale had crossed 125 %). New tool:
+`VideoHub.frames(key)` (frames a video key has received).
+
+### Calls sweep (item 1)
+
+| #   | screen                                                                     | difference (web reference)                                                                                                                                                                                                                                                                                                   | fix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | captures (`sweep12/`)                                                                                                         |
+| --- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| C1  | Now Playing                                                                | Native drew it as a full-width bar above the stage bar, which took the grid's height (tiles 504 wide, web 560) and was missing off the stage. The web floats it (FloatingListenTogetherPlayer.tsx on FloatingSurface.tsx) whenever a track is current in the call.                                                           | `screens/Apps/NowPlayingCard.qml` is the mini card (header with grip, "Now playing", Minimise; artwork, title, Live Radio, requester, the status chip "Paused"/"In sync"; clock and seek; Queue, play, skip), 340 wide (280-440 by the edge), parked in a corner, dragged and snapped, minimised to a 48 px artwork bubble. It is mounted by the shell over every view of the call. `screens/Shell/FloatingArea.qml` is the shared ground: corners 16 px in, 8 px clear of the stage bar or the composer, cards in one corner stack. The bar is gone from VoiceView. | `calls/web-grid.png` vs `calls/native-grid-after.png`, `native-np-minimised-after.png`, `native-pip-after.png`                |
+| C2  | call strip                                                                 | The action row (and the stream row) stayed while the stage was on screen; the web collapses them (VoiceDashboard.tsx `rm-collapse`, UserPanel.tsx `channelStageOnScreen`).                                                                                                                                                   | CallPanel.qml `collapsed` (the voice view or the DM call on screen), a dur-3 ease-out height reveal, the keys disabled while closed.                                                                                                                                                                                                                                                                                                                                                                                                                                 | `calls/web-grid.png` vs `calls/native-grid-after.png`; `dm/native-owner-incall-after.png`                                     |
+| C3  | voice options                                                              | The menu opened over its key (its height was unknown at the first popup), and Noise suppression… and GIF & sticker reactions were missing.                                                                                                                                                                                   | `openAbove` (right edge on the key's, 8 px above), 240 wide; the two rows; the compact noise suppression popover (NoiseReductionPanel.tsx); the voice-mode GIF picker. The More call actions menu had the same placement bug.                                                                                                                                                                                                                                                                                                                                        | `calls/web-voice-options.png` vs `native-voice-options-before.png` → `native-voice-options-after.png`                         |
+| C4  | tile "More options"                                                        | Missing (ParticipantCard.tsx 402-416).                                                                                                                                                                                                                                                                                       | VoiceTile.qml: the 24 px black/60 key bottom right, shown on hover or focus, not on tray tiles; it opens their call menu at the click. Not on our own tile: native has no local call menu.                                                                                                                                                                                                                                                                                                                                                                           | `calls/web-tile-hover.png` vs `native-tile-hover-after.png`, `native-tile-more-menu-after.png`                                |
+| C5  | call menu                                                                  | Leading glyphs on every row, 248 wide; the web's (RemoteMenu.tsx) has none, is 208 wide, Copy user ID ends in an "ID" badge and Watch/Stop watching in a stream glyph.                                                                                                                                                       | PeerMenu.qml as the web; MenuRow `badge` and `trailingIcon`, and labels elide before the trailing parts.                                                                                                                                                                                                                                                                                                                                                                                                                                                             | `calls/web-tile-ctx.png` vs `native-tile-ctx-before.png` → `native-tile-ctx-after.png`                                        |
+| C6  | focused share                                                              | The slider said "User volume" and moved the person's volume.                                                                                                                                                                                                                                                                 | FocusedStage.qml: "Stream volume" on the share's stream volume (VoiceGrid.tsx 497). The web hides it for a share without audio; native cannot tell yet.                                                                                                                                                                                                                                                                                                                                                                                                              | `calls/native-share-focus-hover.png`                                                                                          |
+| C7  | members toggle                                                             | Missing while a tile is on stage (VoiceControls.tsx `showMembersToggle`).                                                                                                                                                                                                                                                    | VoiceView.qml: the members key after Fullscreen hides and shows the tray.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | —                                                                                                                             |
+| C8  | stream row                                                                 | Missing in the call strip while we share (VoiceDashboard.tsx 682-723).                                                                                                                                                                                                                                                       | CallPanel.qml: source glyph, title, Live, the quality badge, and Stream settings (Change source, Stream audio, Quality, Stop streaming). "Always show stream preview" is left out: there is no setting behind it yet.                                                                                                                                                                                                                                                                                                                                                | `calls/web-pip.png` vs `calls/native-pip-after.png`, `native-stream-settings-after.png`                                       |
+| C9  | camera quality                                                             | The nameplate had no "720P / 30 FPS" readout (QualityMonitor.tsx).                                                                                                                                                                                                                                                           | VoiceTile.qml chip (num-xs on white/15): the frame's size, and the rate from VideoHub's per-key frame count every 2 s (no QML per frame).                                                                                                                                                                                                                                                                                                                                                                                                                            | `calls/web-camera-hover.png` vs `native-peer-camera-after.png` ("180P / 16 FPS": the layer pulled for a window behind others) |
+| C10 | floating previews                                                          | The stream preview sat over the composer. Its header keys (Go to, Minimise), and the Now Playing card's, never clicked: the header's DragHandler may take over from items by default and cancelled their presses.                                                                                                            | Bottom corners keep 8 px above the composer (FloatingArea `avoids`); the DragHandlers sit behind the keys with `grabPermissions` that cannot take a press from an item.                                                                                                                                                                                                                                                                                                                                                                                              | `calls/native-pip.png` → `native-pip-after.png`, `native-np-minimised-after.png`                                              |
+| C11 | DM call tiles                                                              | Two tiles ran past the chat column (316-1036 in a 325-1027 column), ringing and in the call.                                                                                                                                                                                                                                 | DmCallRegion.qml: in the call, VoiceGrid "row" (flex-1 tiles of at most 400); the lobby shares the row too (the web lets it overflow).                                                                                                                                                                                                                                                                                                                                                                                                                               | `dm/native-owner-start.png` → `native-owner-ringing-after.png`, `native-owner-incall.png` → `native-owner-incall-after.png`   |
+| C12 | grid, focus, PiP, share view, speaking rings, ring/accept/decline, records | Match: 16:9 fit (1 col x 560 at this size), focus with the tray, the "is sharing / Watch stream" tile, watcher card, the floating preview, the speaking ring and LED, the incoming card, the call records. The web's grid and tray sit left in headless Edge although their CSS asks for `safe center`; native centres them. | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | `calls/web-*` vs `calls/native-*`                                                                                             |
+
+Calls were kept short and left from the dock each time. Two web sessions
+were dropped without leaving (`no leave key`; fixed in `web-shot.mjs`) and
+left a ghost Spike Peer in General until the native peer rejoined.
+
+### Server emoji (item 2)
+
+Not done: there is no server emoji. Custom emoji are per user and made by
+KLIPY's generator (`src/routes/api/emojis.ts`: GET and POST, no DELETE), and
+neither test account has one. Making one would call a paid third-party API
+and leave an emoji that cannot be removed, so the add, use and remove cycle
+the item asks for is not possible; the composer path (pass 10 T4) stays
+untested live.
+
+### Profile editor on screen (item 3, pass 11 W4)
+
+On the test owner, then restored (the API snapshot before and after matches
+apart from `updated_at`; the uploaded avatar stays in "Recent avatars").
+
+| check                    | result                                                                                                                                                       | captures (`sweep12/profile/`)                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| crop in rows and popouts | Seen: message rows, the member list, the account row, the popout, the peer's view and the web all show the crop.                                             | `crop-rows-after.png`, `crop-popout-after.png`, `crop-peer-view.png`, `web-crop-rows.png` |
+| nameplate fade           | Seen: the uploaded plate fades from the left in the preview.                                                                                                 | `plate-upload-1.png`                                                                      |
+| neon glow                | Seen in the style dialog's preview and tiles.                                                                                                                | `style-neon-picked-after.png`                                                             |
+| Remove waits for Save    | Seen: a collectible plate's Remove shows Unsaved changes and the server keeps the plate until Save. (Choosing a collectible applies at once, as on the web.) | `plate-collectible-draft.png`, `plate-remove-draft-after.png`                             |
+| dialog position          | Seen: the crop dialog's top is at 99 (12vh).                                                                                                                 | `crop-dialog-after.png`                                                                   |
+| colour picker            | Seen through `YAP_PICK_COLOR` (the stand-in for the system dialog): the custom base colour became #33CCFF.                                                   | `style-colour-picked-after.png`                                                           |
+
+### Sweep (item 4)
+
+| #   | screen                                                        | difference                                                                                                                                                                                                                        | fix                                                                                                                                                                                                                                                                                          | captures (`sweep12/`)                                                                                                                                                                                                               |
+| --- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1  | desktop sign-in                                               | Native's was an old centred layout ("Yap · desktop", "Sign in", "Get a sign-in code"). The web's DesktopLogin.tsx is the public frame: the dither panel, the lockup, "Sign in to Yap", the dithered rule, "Sign in with browser". | SignInView.qml ported (idle, pending with the code and Open browser again / Copy link / Cancel, and the status panels). The browser opens once per verification URL (it can land after the code) through `Files.openExternal`, and Copy link uses ClipboardText, so test runs only log both. | `sweep/web-signin.png`, `native-signin-before.png` → `text/flip-after.png`, `sweep/native-signin-pending-after.png`                                                                                                                 |
+| S2  | no server open                                                | After leaving the last server native kept an empty header, header keys and a live composer. The web shows "No server open" in the column and EmptyChatArea ("No channel", the mark, "No channel selected").                       | ChannelSidebar.qml and Shell.qml empty states; a channel or voice panel of the server just left no longer lingers behind them.                                                                                                                                                               | `invite/peer-add-server.png` (before) vs `invite/web-no-servers.png`, `invite/native-no-servers-b7.png`                                                                                                                             |
+| S3  | invite dialog, create server/channel/category, invite landing | Native drew the small 20 px plate; the web's are DialogContent as it stands (28/32 title, close key, top at 12vh).                                                                                                                | `c1: true` and `placeTop: true` on InviteDialog, CreateServerDialog, CreateChannelDialog, CreateCategoryDialog and InviteLanding (with the rule). The web's invite page is a full public page; native keeps it a dialog.                                                                     | `invite/web-invite-dialog.png` vs `native-invite-dialog.png`; `invite/web-create-server.png`; `create/web-create-channel.png` vs `native-create-channel-before.png`; `invite/web-invite-landing.png` vs `native-invite-landing.png` |
+| S4  | invites and joining                                           | Works: invite made natively, posted in the test DM, the peer left the server, opened the link, accepted, and was back in General. The message was deleted and the invite revoked.                                                 | —                                                                                                                                                                                                                                                                                            | `invite/native-invite-link.png`, `native-invite-after.png`                                                                                                                                                                          |
+| S5  | create server and channel                                     | Works: "P12 Temp" made, "p12-temp" added (its layout matches the web's), then deleted from Server settings.                                                                                                                       | —                                                                                                                                                                                                                                                                                            | `create/native-server-created.png`, `native-channel-created.png`, `web-p12-temp.png`, `native-after-delete.png`                                                                                                                     |
+| S6  | server menu, inbox                                            | Match. A DM to the owner built a toast silently (`YAP_NO_TOASTS`), raised the DM bubble and the inbox, and was deleted.                                                                                                           | —                                                                                                                                                                                                                                                                                            | `invite/web-server-menu.png` vs `native-server-menu.png`; `notify/web-inbox.png` vs `native-inbox.png`                                                                                                                              |
+| S7  | tray and title bar                                            | Match by source: the tray menu is "Show Yap"/"Quit" (tray.rs); the web's title bar has no menu, native's caption gives Windows' system menu. Not opened (it needs the real cursor).                                               | —                                                                                                                                                                                                                                                                                            | —                                                                                                                                                                                                                                   |
+| S8  | about                                                         | The version sits in Settings > Desktop app > Updates ("v0.2.5", updates coming later), as designed.                                                                                                                               | —                                                                                                                                                                                                                                                                                            | `sweep/native-about.png`                                                                                                                                                                                                            |
+| S9  | onboarding                                                    | The web has no onboarding flow beyond the empty states of S2.                                                                                                                                                                     | S2                                                                                                                                                                                                                                                                                           | —                                                                                                                                                                                                                                   |
+
+### Pass 11 leftovers (item 5)
+
+- Hinting re-pick: `cpp/main.cpp` TextHintingFollower re-picks the hinting
+  when the window changes screen or a screen's DPI changes: the
+  application font, `Theme.hinting` (the type roles carry it) and every item
+  already made with a `font` (controls excepted: they inherit). Seen with
+  `YAP_TEST_HINTING_FLIP_SECS` at 150 %: none → vertical in place, after
+  which the paragraph matches a launch with vertical hinting pixel for pixel
+  (2341/2530 → 2519/2123 solid/edge; `text/flip15-before.png`,
+  `flip15-after.png`). At 100 % vertical and none draw identically on the
+  p7 Qt (`text/start-none.png`), so the re-pick only shows across 125 %.
+- The details sheet over a voice channel's chat now takes the voice glyph
+  (MemberPanel.qml). The web's DesktopHeader shows `#` there too; this is a
+  native improvement.
+
+### Text on the p7 Qt (item 6)
+
+Native (b0 and b5, patch 0005 in) against headless Edge on the same page
+(`F:/ct/yapn/tmp/text/page.html`), sign-in text, ink as the sum of covered
+pixels over the line box:
+
+| scale | body (native / web)      | edge pixels | title  |
+| ----- | ------------------------ | ----------- | ------ |
+| 100 % | 981.6 / 1042.3 (-5.8 %)  | 1479 / 1742 | -5.8 % |
+| 150 % | 2191.3 / 2261.5 (-3.1 %) | 2610 / 2592 | -4.6 % |
+
+Pass 11 measured -13 % at 100 % before the patch; the enhanced contrast
+brings light text on dark within 3-6 % of Chromium. At 150 % the edges match
+within 1 %; at 100 % native keeps 15 % fewer partial pixels (crisper stems).
+Zooms: `text/cmp-1x.png`, `text/cmp-15x.png` (web above, native below).
+Qt was not changed.
+
+### Totals
+
+- Calls: 11 fixed (C1-C11), the rest matching (C12). Profile editor: all six
+  pass 11 changes seen on screen. Sweep: 3 fixed (S1-S3), 6 matching or
+  working.
+- Not at parity:
+  - The soundboard picker: the web's is a popover above its key with a
+    server rail, tile grid and a Send/Soundboard footer
+    (SoundboardPicker.tsx); native's is a centred dialog with rows
+    (`calls/web-soundboard.png` vs `native-soundboard-before.png`).
+  - Voice details: the web's stat cards are larger with min/avg/max/guide
+    rows, "Samples as a table" and Debug; native's are compact; the server
+    reads as an address, and Remote tracks read 0 with a peer in the call
+    (`calls/web-conn-details.png` vs `native-conn-details-before.png`).
+  - Floating cards: no flick momentum or entry fade; they drag from the
+    header, the track and the bubble only; corners are the content area's
+    (the web's are the window's, so its preview can sit over the sidebar);
+    the requester has no avatar (the state carries none).
+  - The camera dialog's layout (the web's title, "Camera preview" section
+    and fieldset labels).
+  - Field labels in create channel/server are fieldset legends; the web's
+    are plain labels there (its invite dialog uses legends).
+  - The invite landing is a dialog, not the web's public page.
+  - Our own tile has no "More options" (no local call menu).
+  - A share's stream volume shows even when the share has no audio.
+  - The Now Playing clock shows the room's stale position (0:05) where the
+    web shows 0:00.
+  - Server emoji (above), and the composer's emoji path live.
+  - The tray menu and system menu were not opened.
+
+### Checks
+
+- `cargo test -p yap-core -p yap-protocol -p yap-cache -p yap-voice -p yap-realtime`
+  (`LK_CUSTOM_WEBRTC` set): 1695 passed, 0 failed.
+- `cargo clippy --workspace --all-targets -- -D warnings` passes (`QMAKE` set
+  to the p7 qmake).
+- `build.ps1` into `F:/ct/yapn/rel` is green (7 builds this pass); the runs'
+  logs have no QML warnings.
+- A review pass found, and this pass fixed: the sign-in browser open never
+  had its URL (now follows the URL); `Theme.hinting` started at vertical and
+  relaid every Text out once at 150 % (it starts from the app font); the
+  quality chip ran JS per frame (now VideoHub's counter); "4k60" options
+  (now "4K 60"); the queue panel squashed under a top-corner card (it opens
+  below when there is no room above); the card glided while resized from
+  the keyboard; the hinting walk froze controls' font inheritance (controls
+  are skipped).

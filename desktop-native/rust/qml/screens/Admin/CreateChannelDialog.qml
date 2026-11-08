@@ -34,6 +34,10 @@ PlateDialog {
             Admin.createChannel(nameField.text, voice, categoryId)
     }
 
+    // DialogContent as it stands (the 28/32 title, the close key), top
+    // placed as the web's form dialogs are.
+    c1: true
+    placeTop: true
     title: qsTr("Create channel")
     busy: act.busy
     onOpened: nameField.forceActiveFocus()

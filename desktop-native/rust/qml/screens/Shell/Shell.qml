@@ -11,10 +11,13 @@ import com.yap.native
 RowLayout {
     id: root
 
-    readonly property bool chatShown: Nav.voicePanelId.length === 0 && Nav.activeChannelId.length > 0
+    readonly property bool chatShown: Nav.voicePanelId.length === 0 && Nav.activeChannelId.length > 0 && !noChannel
+    // Nothing to open: no server and not at Home (EmptyChatArea). A channel
+    // or voice panel of a server just left can linger in Nav; it is not shown.
+    readonly property bool noChannel: !Nav.home && Nav.activeServerId.length === 0
     // A voice channel's text chat beside its view (ChatPageClient.tsx, the
     // "Voice chat" SidePanel): a 360 column with a seam on its left.
-    readonly property bool voiceChat: Nav.voicePanelId.length > 0 && Nav.voicePanelChat
+    readonly property bool voiceChat: Nav.voicePanelId.length > 0 && Nav.voicePanelChat && !noChannel
         && Nav.activeChannelId === Nav.voicePanelId
     readonly property bool docked: width >= 1024
     // Search, a thread or pins take the members' place (ChatArea.tsx). In
@@ -179,6 +182,7 @@ RowLayout {
         Layout.fillWidth: true
 
         ChatView {
+            id: chatView
             // Beside the voice view: 360 with its seam (border-l) included.
             // Below 1024 the same view moves into the voice chat's sheet
             // (one instance, so its list and composer keep their state).
@@ -190,7 +194,7 @@ RowLayout {
             docked: root.voiceChat
             inSheet: root.voiceSheetShown
             headerSpan: root.voiceChat ? 0 : root.docked ? (root.membersShown ? (ShellState.showDetails ? 360 : 240) : root.panelShown ? (root.searchShown ? 380 : 360) : 0) : 0
-            visible: root.voiceChat || (Nav.voicePanelId.length === 0 && (!Nav.home || Nav.activeChannelId.length > 0))
+            visible: !root.noChannel && (root.voiceChat || (Nav.voicePanelId.length === 0 && (!Nav.home || Nav.activeChannelId.length > 0)))
             Rectangle {
                 visible: root.voiceChat && !root.voiceSheetShown
                 x: -1
@@ -199,7 +203,59 @@ RowLayout {
                 color: Theme.line
             }
         }
-        // Home with no conversation open: Friends (it loads as it opens),
+        // EmptyChatArea.tsx: the column's 48 px header ("No channel"), then
+        // the still mark, "No channel selected" and one line, centred.
+        Item {
+            anchors.fill: parent
+            visible: root.noChannel
+            Rectangle { anchors.fill: parent; color: Theme.ply0 }
+            Item {
+                id: emptyHeader
+                width: parent.width
+                height: Theme.header
+                Text {
+                    x: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: qsTr("No channel")
+                    color: Theme.ink1
+                    font: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 15, weight: Font.DemiBold })
+                }
+                Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.line }
+            }
+            Column {
+                anchors.centerIn: parent
+                anchors.verticalCenterOffset: Theme.header / 2
+                width: Math.min(parent.width - 48, 400)
+                spacing: 16
+                // DitherGlyph "mark", md: 3 px cells, still.
+                YapBark {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    cell: 3
+                }
+                Column {
+                    width: parent.width
+                    spacing: 4
+                    Text {
+                        width: parent.width
+                        horizontalAlignment: Text.AlignHCenter
+                        textFormat: Text.PlainText
+                        text: qsTr("No channel selected")
+                        color: Theme.ink1
+                        font: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 15, weight: Font.DemiBold })
+                    }
+                    Text {
+                        width: parent.width
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                        text: qsTr("Pick a server and a channel to start chatting.")
+                        color: Theme.ink2
+                        font: Theme.type.description
+                    }
+                }
+            }
+        }        // Home with no conversation open: Friends (it loads as it opens),
         // or the shop from the sidebar's Shop row.
         Loader {
             anchors.fill: parent
@@ -211,18 +267,33 @@ RowLayout {
         // Below 1024 the voice chat is a sheet over the view (voiceSheet);
         // docked, the view gives it the column.
         Loader {
+            id: voiceLoader
             width: parent.width - (root.voiceChat && root.docked ? 360 : 0)
             height: parent.height
-            active: Nav.voicePanelId.length > 0
+            active: Nav.voicePanelId.length > 0 && !root.noChannel
             sourceComponent: VoiceView {}
         }
         // In the call but looking elsewhere: our share, and each share we
         // watch, float over the view (ChatPageClient.tsx
-        // `shouldRenderFloatingStreamPreview`, `...WatchedStreamPreviews`).
-        Item {
+        // `shouldRenderFloatingStreamPreview`, `...WatchedStreamPreviews`),
+        // and the Now Playing card floats over any view of the call
+        // (VoiceDashboard.tsx mounts FloatingListenTogetherPlayer). The
+        // corners keep 8 px clear of the chrome now on screen
+        // (`data-floating-avoid`): the stage bar over the voice view, the
+        // composer over a chat (the voice chat's column as well).
+        FloatingArea {
             id: floatingPreviews
             anchors.fill: parent
             z: 2
+            avoids: {
+                const list = []
+                const voice = voiceLoader.item
+                if (voice && Nav.voicePanelId.length > 0 && voice.avoidBottom > 0)
+                    list.push({ left: voiceLoader.x, right: voiceLoader.x + voiceLoader.width, bottom: voice.avoidBottom })
+                if (chatView.visible && !root.voiceSheetShown)
+                    list.push({ left: chatView.x, right: chatView.x + chatView.width, bottom: chatView.composerAvoid })
+                return list
+            }
             readonly property bool away: Voice.channelId.length > 0 && Nav.voicePanelId !== Voice.channelId
                 && !ShellState.stageFullscreen
             Repeater {
@@ -254,6 +325,11 @@ RowLayout {
                         onGoToChannel: Nav.selectChannel(Voice.channelId)
                     }
                 }
+            }
+            // What the room is listening to, while we are in the call.
+            Loader {
+                active: Voice.channelId.length > 0
+                sourceComponent: NowPlayingCard { area: floatingPreviews }
             }
         }
     }
@@ -495,6 +571,13 @@ RowLayout {
             sourceComponent: IncomingCallCard {}
         }
         LazyPopup { id: memberMenu; host: root; sourceComponent: MemberMenu {} }
+        // Listen Together, from the Now Playing card's Queue key (the
+        // stage bar's own key opens one of its own on the stage).
+        LazyPopup {
+            id: listenPanel
+            host: root
+            sourceComponent: ListenPanel { onClosed: root.listenClosedAt = Date.now() }
+        }
         // User settings (kept while the theme preview hides it), the profile
         // editor over it (or alone, from the account card) and the theme
         // preview sheet.
@@ -542,6 +625,10 @@ RowLayout {
         }
     }
 
+    // When the Listen Together panel last closed, so the key that opened it
+    // does not reopen it on the click that dismissed it.
+    property double listenClosedAt: 0
+
     // "Start a call" from a person (MemberList.tsx, FriendsView.tsx): open
     // their DM, then call there once it is the shown conversation (the web
     // switches to the DM, then sends request-start-call).
@@ -581,6 +668,11 @@ RowLayout {
             // One card at a time: the popout gives way (they share Profile).
             profile.item?.close()
             fullProfile.load()?.openFor(userId)
+        }
+        function onListenPanelRequested(anchor) {
+            if (Date.now() - root.listenClosedAt < 300)
+                return
+            listenPanel.load()?.openAt(anchor)
         }
         function onPeerMenuRequested(userId, name, anchor, at, channelId) {
             peerMenu.load()?.openFor(userId, name, anchor, at.x, at.y, channelId)

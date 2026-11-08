@@ -41,6 +41,8 @@ public:
   // Any thread.
   bool wanted() const { return m_attached.load(std::memory_order_relaxed) > 0; }
   void push(QVideoFrame frame);
+  // Frames pushed so far (any thread): a tile's frame rate, read every 2 s.
+  quint64 frames() const { return m_frames.load(std::memory_order_relaxed); }
 
   // GUI thread.
   void attach(QVideoSink* sink);
@@ -53,6 +55,7 @@ private:
   QVideoFrame m_latest;
   bool m_posted = false;
   std::atomic<int> m_attached{ 0 };
+  std::atomic<quint64> m_frames{ 0 };
   QList<QPointer<QVideoSink>> m_sinks;
 };
 
@@ -73,6 +76,9 @@ public:
 
   Q_INVOKABLE void attach(const QString& key, QVideoSink* sink);
   Q_INVOKABLE void detach(const QString& key, QVideoSink* sink);
+  // Frames key has received so far (0 for an unknown key): the camera
+  // tile's quality chip diffs it every 2 s, so no QML runs per frame.
+  Q_INVOKABLE double frames(const QString& key);
 
   // Any thread: the feed for `key` if something shows it.
   VideoFeed* wantedFeed(const QString& key);

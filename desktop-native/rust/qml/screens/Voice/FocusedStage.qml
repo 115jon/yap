@@ -100,7 +100,10 @@ Item {
         }
     }
 
-    // Their volume, bottom-right on ply-3 (a share follows its owner's).
+    // Their volume, bottom-right on ply-3 (VoiceGrid.tsx 497-503): "Stream
+    // volume" on a share (the stream's own level, as the call menu's), "User
+    // volume" on a person. The web hides it for a share with no audio track;
+    // native cannot tell, so it always shows.
     Rectangle {
         visible: !root.tile.me
         anchors.right: parent.right
@@ -116,9 +119,13 @@ Item {
             id: slider
             anchors.centerIn: parent
             width: parent.width - 8
-            label: qsTr("User volume")
-            value: Audio.peersRevision >= 0 ? Audio.peerVolume(root.tile.memberId) : 100
-            onMoved: Audio.setPeerVolume(root.tile.memberId, Math.round(value))
+            label: root.screen ? qsTr("Stream volume") : qsTr("User volume")
+            value: Audio.peersRevision >= 0
+                ? (root.screen ? Audio.peerStreamVolume(root.tile.memberId) : Audio.peerVolume(root.tile.memberId))
+                : 100
+            onMoved: root.screen
+                ? Audio.setPeerStreamVolume(root.tile.memberId, Math.round(value))
+                : Audio.setPeerVolume(root.tile.memberId, Math.round(value))
         }
     }
 }

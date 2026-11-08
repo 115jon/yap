@@ -29,8 +29,10 @@ Popup {
     readonly property var qualityIds: ["720p30", "720p60", "1080p30", "1080p60", "1440p30", "1440p60", "4k30", "4k60"]
 
     function openPicker() {
-        quality = qualityIds.includes(Audio.screenShareQuality) ? Audio.screenShareQuality : "720p30"
-        withAudio = Audio.screenShareWithAudio
+        // Changing the source of a live share keeps its quality and audio.
+        const base = Voice.sharing ? Voice.shareQuality : Audio.screenShareQuality
+        quality = qualityIds.includes(base) ? base : "720p30"
+        withAudio = Voice.sharing ? Voice.shareAudio : Audio.screenShareWithAudio
         selectedId = ""
         loading = true
         nonce++

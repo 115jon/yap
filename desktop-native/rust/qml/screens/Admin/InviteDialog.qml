@@ -32,6 +32,10 @@ PlateDialog {
         open()
     }
 
+    // DialogContent as it stands (the 28/32 title, the close key) at its
+    // top placement (InviteModal.tsx size md: top at max(48, 12vh)).
+    c1: true
+    placeTop: true
     kicker: qsTr("Invite · %1").arg(serverName)
     title: qsTr("Invite people to %1").arg(serverName)
     rule: true

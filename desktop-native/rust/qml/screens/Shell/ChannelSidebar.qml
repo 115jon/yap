@@ -72,6 +72,25 @@ Rectangle {
         dropY = -1
     }
 
+    // No server open and not at Home (the last server left, or none yet):
+    // ChatPageClient.tsx's EmptyState sm in the column, "No server open".
+    readonly property bool noServer: !Nav.home && Nav.activeServerId.length === 0
+    Item {
+        visible: root.noServer
+        width: parent.width - 1
+        anchors.top: parent.top
+        anchors.bottom: callPanel.top
+        z: 1
+        Rectangle { anchors.fill: parent; color: Theme.ply1 }
+        PageState {
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width - 32
+            x: 16
+            small: true
+            title: qsTr("No server open")
+            message: qsTr("Pick a server from the rail, or open Direct messages.")
+        }
+    }
     // Seam to the chat column.
     Rectangle {
         anchors.right: parent.right
@@ -85,7 +104,7 @@ Rectangle {
     // the server menu.
     Rectangle {
         id: header
-        visible: !Nav.home
+        visible: !Nav.home && !root.noServer
         width: parent.width - 1
         height: Theme.header
         color: (serverMenu.item?.visible ?? false) ? Theme.tint2 : headerHover.hovered ? Theme.tint1 : "transparent"

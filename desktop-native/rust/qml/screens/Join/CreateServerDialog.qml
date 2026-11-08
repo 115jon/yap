@@ -51,6 +51,10 @@ PlateDialog {
             iconPath = path
     }
 
+    // DialogContent as it stands (the 28/32 title, the close key), top
+    // placed as the web's form dialogs are.
+    c1: true
+    placeTop: true
     title: qsTr("Create a server")
     description: qsTr("Your server is where you and your friends hang out.")
     busy: act.busy

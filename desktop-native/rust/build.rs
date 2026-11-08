@@ -177,6 +177,7 @@ const QML: &[&str] = &[
     "qml/screens/Shell/DmSidebar.qml",
     "qml/screens/Shell/EmojiPicker.qml",
     "qml/screens/Shell/ExtrasHost.qml",
+    "qml/screens/Shell/FloatingArea.qml",
     "qml/screens/Shell/GifPicker.qml",
     "qml/screens/Shell/ImageViewer.qml",
     "qml/screens/Shell/MemberPanel.qml",

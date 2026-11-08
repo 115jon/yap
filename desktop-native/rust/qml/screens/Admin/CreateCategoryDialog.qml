@@ -24,6 +24,10 @@ PlateDialog {
             Admin.createCategory(nameField.text)
     }
 
+    // DialogContent as it stands (the 28/32 title, the close key), top
+    // placed as the web's form dialogs are.
+    c1: true
+    placeTop: true
     title: qsTr("Create category")
     description: qsTr("Categories help you organize your channels and keep things tidy.")
     busy: act.busy

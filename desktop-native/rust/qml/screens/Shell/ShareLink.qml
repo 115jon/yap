@@ -12,6 +12,9 @@ Item {
             else
                 picker.load()?.openPicker()
         }
+        function onShareSourceChangeRequested() {
+            picker.load()?.openPicker()
+        }
     }
     Connections {
         target: Voice

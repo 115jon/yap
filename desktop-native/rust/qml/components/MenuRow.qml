@@ -10,7 +10,9 @@ import com.yap.native
 // chevron (dropdown-menu.tsx SubmenuTrigger). `image` puts a 16 px picture
 // in the glyph's place (an emoji), with `imageText` drawn while it loads.
 // `hint` is a trailing value (MENU_HINT: num-xs, ink-3, pl-3), as the
-// voice options' "Spatial audio…  On".
+// voice options' "Spatial audio…  On". `trailingIcon` (ContextMenu
+// `trailing`: a 16 px ink-2 glyph) and `badge` (RemoteMenu ID_BADGE: a
+// tint-2 chip, 11/600 ink-3) sit at the right end.
 T.MenuItem {
     id: control
 
@@ -26,6 +28,8 @@ T.MenuItem {
     // draws an entry's description.
     property string description: ""
     property string hint: ""
+    property string trailingIcon: ""
+    property string badge: ""
     // ContextMenu.tsx `subtitle` (one line, 12 ink-2, the row min-h-11)
     // and `rightIcon` (a trailing chevron on a row that is not a submenu).
     property string subtitle: ""
@@ -40,7 +44,10 @@ T.MenuItem {
     visible: subMenu ? subMenu.shown !== false : true
     height: visible ? implicitHeight : 0
     leftPadding: 12
-    rightPadding: switchable || subMenu || chevron ? 36 : hint.length > 0 ? 12 + hintText.implicitWidth + 12 : 12
+    rightPadding: switchable || subMenu || chevron ? 36
+        : trailingIcon.length > 0 ? 12 + Theme.iconSm + 12
+        : badge.length > 0 ? 12 + badgeChip.width + 12
+        : hint.length > 0 ? 12 + hintText.implicitWidth + 12 : 12
 
     Accessible.role: switchable ? Accessible.CheckBox : Accessible.MenuItem
     Accessible.checkable: switchable
@@ -65,6 +72,35 @@ T.MenuItem {
         color: Theme.ink3
         font: Theme.type.numSm
         Accessible.ignored: true
+    }
+
+    Icon {
+        x: control.width - width - 12
+        y: (control.height - height) / 2
+        visible: control.trailingIcon.length > 0
+        name: control.trailingIcon
+        size: Theme.iconSm
+        color: control.danger ? Theme.dangerInk : Theme.ink2
+    }
+
+    Rectangle {
+        id: badgeChip
+        x: control.width - width - 12
+        y: (control.height - height) / 2
+        visible: control.badge.length > 0
+        width: badgeText.implicitWidth + 8
+        height: 14
+        radius: 1
+        color: Theme.tint2
+        Text {
+            id: badgeText
+            anchors.centerIn: parent
+            textFormat: Text.PlainText
+            text: control.badge
+            color: Theme.ink3
+            font: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 11, weight: Font.DemiBold })
+            Accessible.ignored: true
+        }
     }
 
     indicator: Led {
@@ -110,6 +146,11 @@ T.MenuItem {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 2
             Text {
+                // Truncates before the trailing LED, icon or badge, as the
+                // web's `truncate`.
+                width: Math.min(implicitWidth, Math.max(0, control.availableWidth
+                    - (control.glyph.length > 0 || control.image.toString().length > 0 || control.imageText.length > 0 ? 28 : 0)))
+                elide: Text.ElideRight
                 textFormat: Text.PlainText
                 text: control.text
                 color: control.danger ? Theme.dangerInk : control.enabled ? Theme.ink1 : Theme.ink3

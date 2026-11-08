@@ -14,9 +14,14 @@ Popup {
     function openAt(anchor) {
         const win = Overlay.overlay
         const at = anchor.mapToItem(win, 0, 0)
-        height = Math.max(160, Math.min(maxHeight, at.y - 24))
+        // Above the key; below it when there is little room above (a key
+        // near the top, as a floating card's in a top corner).
+        const above = at.y - 24
+        const below = win.height - (at.y + anchor.height) - 24
+        const under = above < 320 && below > above
+        height = Math.max(160, Math.min(maxHeight, under ? below : above))
         x = Math.max(10, Math.min(win.width - width - 10, at.x + anchor.width / 2 - width / 2))
-        y = Math.max(10, at.y - height - 8)
+        y = under ? Math.min(win.height - height - 10, at.y + anchor.height + 8) : Math.max(10, at.y - height - 8)
         open()
     }
 

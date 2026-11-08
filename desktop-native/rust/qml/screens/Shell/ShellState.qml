@@ -52,6 +52,17 @@ QtObject {
     property bool stageLive: false
     property bool stageRemoteStream: false
 
+    // The floating Now Playing card (FloatingSurface.tsx prefs; the web keeps
+    // them per player in localStorage, here for the session): its corner
+    // (0 bottom-left, 1 bottom-right, 2 top-left, 3 top-right), whether it is
+    // the 48 px bubble, and its width (280 to 440).
+    property int nowPlayingCorner: 1
+    property bool nowPlayingMinimized: false
+    property int nowPlayingWidth: 340
+    // The card's Queue key: the Listen Together panel opens above `anchor`
+    // (Shell hosts it, so it opens off the stage too).
+    signal listenPanelRequested(Item anchor)
+
     function toggleFocus(tileId) {
         focusedTile = focusedTile === tileId ? "" : tileId
     }
@@ -102,6 +113,11 @@ QtObject {
 
     function toggleShare() {
         shareToggleRequested()
+    }
+    // The stream settings' "Change source": the picker, while we share.
+    signal shareSourceChangeRequested()
+    function changeShareSource() {
+        shareSourceChangeRequested()
     }
 
     // Server administration (AdminHost opens these): server settings on a

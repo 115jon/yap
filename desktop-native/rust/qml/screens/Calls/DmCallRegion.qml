@@ -26,6 +26,8 @@ Rectangle {
     readonly property bool micStalled: joined && !Voice.muted && calls.micStalled === true
     readonly property bool inboundStalled: joined && calls.inboundStalled === true
     readonly property int tileHeight: (Window.height >= 800 ? 224 : 176) - 24
+    // The tiles' row inside the stage's px-4.
+    readonly property int rowWidth: Math.max(0, width - 32)
 
     implicitHeight: shown ? banner.height + stageArea.height + dock.height + 1 : 0
     visible: shown
@@ -98,8 +100,11 @@ Rectangle {
                 LobbyTile {
                     required property var modelData
                     readonly property bool ringingTile: (root.ringingOut || root.ringingIn) && !modelData.me
-                    height: root.tileHeight
-                    width: Math.round(height * 16 / 9)
+                    // aspect-video h-full max-w-full; two that would run past the
+                    // column (web: they overflow it) share the row instead.
+                    width: Math.min(Math.round(root.tileHeight * 16 / 9),
+                        Math.floor((root.rowWidth - ((root.calls.lobby ?? []).length - 1) * 8) / Math.max(1, (root.calls.lobby ?? []).length)))
+                    height: Math.min(root.tileHeight, Math.round(width * 9 / 16))
                     name: modelData.name
                     avatar: modelData.avatar
                     initials: modelData.initials
@@ -125,10 +130,14 @@ Rectangle {
             height: root.tileHeight
             spacing: 8
             Repeater {
+                id: inCallTiles
                 model: root.joined ? VoiceTileModel : null
+                // VoiceGrid layoutMode "row": flex-1 tiles of at most 400 px,
+                // sharing the row (px-4) instead of running past the column.
                 delegate: VoiceTile {
-                    height: root.tileHeight
-                    width: Math.round(height * 16 / 9)
+                    width: Math.min(400, Math.round(root.tileHeight * 16 / 9),
+                        Math.floor((root.rowWidth - (inCallTiles.count - 1) * 8) / Math.max(1, inCallTiles.count)))
+                    height: Math.min(root.tileHeight, Math.round(width * 9 / 16))
                 }
             }
         }

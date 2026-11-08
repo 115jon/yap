@@ -3,7 +3,8 @@ import com.yap.native
 
 // Someone's menu in a call (StreamContextMenu.tsx, ContextMenu/RemoteMenu.tsx)
 // on their tile, their voice row or their floating stream, with no name
-// header, in the web's three shapes. Someone not sharing: Profile, Message,
+// header and no leading glyphs, 208 wide (w-52), in the web's three shapes.
+// Someone not sharing: Profile, Message,
 // the "User volume" slider (0-200 %), "Mute" (silences them for you only),
 // "Mute soundboard", then Copy user ID. Sharing, not watched: Watch stream
 // and "Always hear stream audio". Sharing and watched: Stop watching, Mute,
@@ -65,7 +66,7 @@ MenuPanel {
         popup(anchor, x, y)
     }
 
-    implicitWidth: 248
+    implicitWidth: 208
 
     ClipboardText { id: clipboard }
 
@@ -77,7 +78,8 @@ MenuPanel {
         visible: root.sharing
         height: visible ? implicitHeight : 0
         text: root.shareWatched ? qsTr("Stop watching") : qsTr("Watch stream")
-        glyph: root.shareWatched ? "streamOff" : "stream"
+        // RemoteMenu.tsx `trailing`.
+        trailingIcon: root.shareWatched ? "streamOff" : "stream"
         bold: true
         onTriggered: Voice.watch(root.shareParticipant, !root.shareWatched)
     }
@@ -86,14 +88,12 @@ MenuPanel {
         visible: root.plain
         height: visible ? implicitHeight : 0
         text: qsTr("Profile")
-        glyph: "account"
         onTriggered: ShellState.showFullProfile(root.userId, root.anchorItem)
     }
     MenuRow {
         visible: root.plain
         height: visible ? implicitHeight : 0
         text: qsTr("Message")
-        glyph: "chat"
         onTriggered: Nav.openDm(root.userId)
     }
     MenuRule { visible: root.plain; height: visible ? implicitHeight : 0 }
@@ -109,7 +109,6 @@ MenuPanel {
         visible: !root.sharing || root.watching
         height: visible ? implicitHeight : 0
         text: qsTr("Mute")
-        glyph: "speakerOff"
         switchable: true
         on: Audio.peersRevision >= 0 && Audio.peerMuted(root.userId)
         onTriggered: Audio.setPeerMuted(root.userId, !Audio.peerMuted(root.userId))
@@ -118,7 +117,6 @@ MenuPanel {
         visible: !root.sharing || root.watching
         height: visible ? implicitHeight : 0
         text: qsTr("Mute soundboard")
-        glyph: "soundboard"
         switchable: true
         on: Audio.peersRevision >= 0 && Audio.peerSoundboardMuted(root.userId)
         onTriggered: Audio.setPeerSoundboardMuted(root.userId, !Audio.peerSoundboardMuted(root.userId))
@@ -163,7 +161,8 @@ MenuPanel {
         visible: root.plain
         height: visible ? implicitHeight : 0
         text: qsTr("Copy user ID")
-        glyph: "copyId"
+        // RemoteMenu.tsx ID_BADGE.
+        badge: qsTr("ID")
         onTriggered: clipboard.copyText(root.userId)
     }
     // "More options" (Profile, Message), in Copy user ID's place while we
@@ -188,15 +187,13 @@ MenuPanel {
     readonly property MenuPanel moreOptions: MenuPanel {
         id: moreOptions
         title: qsTr("More options")
-        implicitWidth: 220
+        implicitWidth: 208
         MenuRow {
             text: qsTr("Profile")
-            glyph: "account"
             onTriggered: ShellState.showFullProfile(root.userId, root.anchorItem)
         }
         MenuRow {
             text: qsTr("Message")
-            glyph: "chat"
             onTriggered: Nav.openDm(root.userId)
         }
     }
@@ -205,13 +202,12 @@ MenuPanel {
     readonly property MenuPanel moveMenu: MenuPanel {
         id: moveMenu
         title: qsTr("Move to…")
-        implicitWidth: 220
+        implicitWidth: 208
         Instantiator {
             model: root.moveTargets
             delegate: MenuRow {
                 required property var modelData
                 text: modelData.name
-                glyph: "voiceChannel"
                 onTriggered: Calls.moveMember(root.userId, root.channelId, modelData.id)
             }
             onObjectAdded: (index, object) => moveMenu.insertItem(index, object)

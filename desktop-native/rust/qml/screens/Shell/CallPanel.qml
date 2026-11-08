@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 import Yap.Chrome
 import com.yap.native
 
@@ -8,14 +9,32 @@ import com.yap.native
 // Soundboard and Leave, the one solid danger fill in a call surface. The
 // row steps down so Leave is always whole: 48 px keys from 248 px of row,
 // 40 px below that, and under 208 px Activities and Soundboard fold into
-// a More menu. Mic and deafen live in the account row.
+// a More menu. Mic and deafen live in the account row. While we share, the
+// stream row sits above the actions. Both collapse while the call's stage
+// is on screen (the stage bar owns them there).
 Rectangle {
     id: root
 
     readonly property bool inCall: Voice.channelId.length > 0
     readonly property bool callLive: inCall && Voice.live
+    // UserPanel.tsx 204 and 392 `collapsed`: this call's own view is open.
+    readonly property bool collapsed: inCall
+        && (Nav.voicePanelId === Voice.channelId || Nav.activeChannelId === Voice.channelId)
+    // `rm-collapse` (motion.css): 0 to 1 over dur-3, ease-out; the content
+    // fades with it and is inert (disabled, so out of the tab order) while
+    // collapsed.
+    // Joining from the call's own view starts collapsed, with no motion.
+    property real reveal: collapsed ? 0 : 1
+    Behavior on reveal {
+        enabled: root.callLive
+        NumberAnimation { duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+    }
 
-    implicitHeight: inCall ? 56 + actions.height + 8 : 0
+    // The strip's own height steps with the collapse; what is below the
+    // header is clipped, not moved, as the web's inner overflow-hidden.
+    implicitHeight: inCall
+        ? 56 + Math.round(((streamBox.visible ? streamBox.height + 10 : 0) + actions.height + 8) * reveal) : 0
+    clip: true
     visible: inCall
     color: Theme.ply1
 
@@ -48,9 +67,9 @@ Rectangle {
     // VoiceDashboard.tsx: the lit word ("Voice connected" where it fits
     // whole, else "Connected"), where the call is (" · server" only when
     // the server fits whole), then ping, the call's clock and the voice
-    // options key: its menu opens the connection details and spatial audio
-    // (VoiceDashboard.tsx DropdownMenu; noise suppression and the GIF and
-    // sticker row are not here yet).
+    // options key: its menu opens the connection details, noise
+    // suppression, spatial audio and the GIF and sticker reactions
+    // (VoiceDashboard.tsx DropdownMenu).
     Item {
         x: 8
         y: 8
@@ -121,17 +140,34 @@ Rectangle {
                 id: optionsKey
                 anchors.verticalCenter: parent.verticalCenter
                 size: 24
-                tone: (details.item?.opened ?? false) || (spatialPanel.item?.opened ?? false) ? "toggled" : "muted"
+                tone: (details.item?.opened ?? false) || (noisePanel.item?.opened ?? false)
+                    || (spatialPanel.item?.opened ?? false) ? "toggled" : "muted"
                 iconName: "sliders"
                 tip: qsTr("Voice options")
-                onClicked: {
-                    // side top, align end.
-                    const menu = optionsMenu.load()
-                    menu?.popup(optionsKey, optionsKey.width - menu.implicitWidth, -menu.implicitHeight - 8)
-                }
+                onClicked: root.openAbove(optionsMenu.load(), optionsKey, true)
             }
         }
     }
+    // A menu above its key (side top, 8 px off; `alignEnd`: its right edge
+    // on the key's). Its height is only known once its rows are laid out,
+    // so the position follows it rather than using the height at the open.
+    function openAbove(menu, key, alignEnd) {
+        if (!menu)
+            return
+        menu.parent = key
+        menu.x = alignEnd ? Qt.binding(() => key.width - menu.width) : 0
+        menu.y = Qt.binding(() => -menu.height - 8)
+        menu.open()
+    }
+
+    // "Quality" in the stream settings (screen-share-support.ts presets).
+    readonly property var shareQualities: ["720p30", "720p60", "1080p30", "1080p60", "1440p30", "1440p60", "4k30", "4k60"]
+    // formatScreenQualityBadge: "1080p60", "4K60".
+    function qualityBadge(quality) {
+        const k = /^4k(\d+)$/i.exec(quality)
+        return k ? "4K" + k[1] : quality
+    }
+
     LazyPopup { id: details; sourceComponent: VoiceDetailsPopup {} }
     // The spatial map's zoom and pan outlive the panel (the web keeps the
     // panel mounted for the call and only hides it).
@@ -148,10 +184,19 @@ Rectangle {
     LazyPopup {
         id: optionsMenu
         sourceComponent: MenuPanel {
+            // As wide as the web's (237 at these labels and hints): MenuPanel
+            // cannot read its rows' widths from the list.
+            implicitWidth: 240
             MenuRow {
                 glyph: "signal"
                 text: qsTr("Connection details")
                 onTriggered: details.load()?.toggleAt(optionsKey)
+            }
+            MenuRow {
+                glyph: "noiseSuppression"
+                text: qsTr("Noise suppression…")
+                hint: Audio.noiseReduction === "rnnoise" ? qsTr("On") : qsTr("Off")
+                onTriggered: noisePanel.load()?.toggleAt(optionsKey)
             }
             // The call has a room map (every call does once it is up).
             MenuRow {
@@ -163,15 +208,205 @@ Rectangle {
                     && Audio.spatialAudio && Audio.highFidelity) ? qsTr("On") : qsTr("Off")
                 onTriggered: spatialPanel.load()?.toggleAt(optionsKey)
             }
+            MenuRow {
+                glyph: "sticker"
+                text: qsTr("GIF & sticker reactions")
+                onTriggered: reactions.load()?.openAt(optionsKey)
+            }
+        }
+    }
+    // The compact noise suppression popover (NoiseReductionPanel.tsx
+    // `compact` in a rich ResponsivePopover, side top): a switch row and the
+    // provider footnote. Turning it on turns the browser's own noise
+    // suppression off (the core does, as the web's `toggle`).
+    LazyPopup {
+        id: noisePanel
+        sourceComponent: Popup {
+            id: noisePopup
+            property real anchorTop: 0
+            property real anchorCenter: 0
+            readonly property bool enabledNow: Audio.noiseReduction === "rnnoise"
+            function toggleAt(anchor) {
+                if (noisePopup.opened) {
+                    noisePopup.close()
+                    return
+                }
+                const at = anchor.mapToItem(Overlay.overlay, 0, 0)
+                anchorTop = at.y
+                anchorCenter = at.x + anchor.width / 2
+                open()
+            }
+
+            parent: Overlay.overlay
+            width: Math.min(360, Overlay.overlay.width - 16)
+            x: Math.max(8, Math.min(Overlay.overlay.width - width - 8, anchorCenter - width / 2))
+            y: Math.max(Theme.chrome + 12, anchorTop - height - 8)
+            padding: 12
+            focus: true
+            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+            enter: Transition {
+                ParallelAnimation {
+                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+                    NumberAnimation { property: "scale"; from: Theme.scaleIn; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+                }
+            }
+            exit: Transition {
+                NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur3Exit }
+            }
+
+            // MENU_PANEL: ply-3, a 1 px line-strong edge and the 2 px ink-1 rule.
+            background: Rectangle {
+                radius: Theme.radius
+                color: Theme.ply3
+                border.width: 1
+                border.color: Theme.lineStrong
+                FloatShadow {}
+                Rectangle { width: parent.width; height: 2; color: Theme.ink1 }
+            }
+
+            contentItem: Column {
+                spacing: 8
+                Accessible.role: Accessible.Dialog
+                Accessible.name: qsTr("Noise suppression")
+                Item {
+                    width: parent.width
+                    height: Math.max(copy.implicitHeight, noiseSwitch.height)
+                    Column {
+                        id: copy
+                        anchors.left: parent.left
+                        anchors.right: noiseSwitch.left
+                        anchors.rightMargin: 16
+                        spacing: 2
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.Wrap
+                            textFormat: Text.PlainText
+                            text: qsTr("Noise suppression")
+                            color: Theme.ink1
+                            font: Theme.type.labelStrong
+                        }
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.Wrap
+                            textFormat: Text.PlainText
+                            text: qsTr("Removes background noise from your mic.")
+                            color: Theme.ink2
+                            font: Theme.type.description
+                        }
+                    }
+                    SettingSwitch {
+                        id: noiseSwitch
+                        anchors.right: parent.right
+                        y: 2
+                        checked: noisePopup.enabledNow
+                        Accessible.name: qsTr("Noise suppression")
+                        onClicked: Audio.changeNoiseReduction(noisePopup.enabledNow ? "none" : "rnnoise")
+                    }
+                }
+                Text {
+                    textFormat: Text.PlainText
+                    text: qsTr("Powered by RNNoise")
+                    color: Theme.ink3
+                    font: Theme.type.caption
+                }
+            }
+        }
+    }
+    // GIF & sticker reactions: the stage bar's picker, at the options key.
+    LazyPopup {
+        id: reactions
+        sourceComponent: GifPicker {
+            voiceMode: true
+            defaultMediaType: "stickers"
+        }
+    }
+
+    // The stream row (VoiceDashboard.tsx, while we share): mx-2 mb-1,
+    // rounded-md on tint-1, p-2. A 28 px live-tint square with the source's
+    // glyph, the source's title, "Live" and the preset, and the stream
+    // settings key.
+    Rectangle {
+        id: streamBox
+        visible: Voice.sharing && root.reveal > 0
+        x: 8
+        y: 56
+        width: parent.width - 16
+        height: visible ? Math.max(28, streamText.implicitHeight) + 16 : 0
+        radius: Theme.radiusSheet
+        color: Theme.tint1
+        opacity: root.reveal
+        enabled: !root.collapsed
+        Rectangle {
+            id: sourceIcon
+            x: 8
+            anchors.verticalCenter: parent.verticalCenter
+            width: 28
+            height: 28
+            radius: Theme.radius
+            color: Theme.liveTint
+            Icon {
+                anchors.centerIn: parent
+                name: Voice.shareWindow ? "window" : "monitor"
+                variant: "active"
+                size: Theme.iconSm
+                color: Theme.liveInk
+            }
+        }
+        Column {
+            id: streamText
+            anchors.left: sourceIcon.right
+            anchors.leftMargin: 8
+            anchors.right: streamKey.left
+            anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: Voice.shareSourceName.trim().length > 0 ? Voice.shareSourceName.trim()
+                    : Voice.shareWindow ? qsTr("An application") : qsTr("Your screen")
+                elide: Text.ElideRight
+                color: Theme.ink1
+                font: Theme.type.occupant
+            }
+            Row {
+                spacing: 8
+                LedLabel {
+                    text: qsTr("Live")
+                    ledState: "live"
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: root.qualityBadge(Voice.shareQuality)
+                    color: Theme.ink3
+                    font: Theme.type.numSm
+                }
+            }
+        }
+        IconKey {
+            id: streamKey
+            anchors.right: parent.right
+            anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            size: 28
+            tone: streamMenu.item?.visible ? "toggled" : "muted"
+            iconName: "more"
+            tip: qsTr("Stream settings")
+            onClicked: root.openAbove(streamMenu.load(), streamKey, true)
         }
     }
 
     Item {
         id: actions
         x: 8
-        y: 56
+        // Under the stream row (its mb-1 and the row's pt-1.5).
+        y: 56 + (streamBox.visible ? streamBox.height + 10 : 0)
         width: parent.width - 16
         height: key
+        visible: root.reveal > 0
+        opacity: root.reveal
+        enabled: !root.collapsed
         readonly property int key: width >= 248 ? 48 : 40
         readonly property bool wide: width >= 208
         Row {
@@ -231,10 +466,7 @@ Rectangle {
                 iconName: "more"
                 tone: (moreMenu.item?.visible ?? false) || soundboardPopup.item?.opened ? "toggled" : "rest"
                 tip: qsTr("More call actions")
-                onClicked: {
-                    const menu = moreMenu.load()
-                    menu?.popup(moreKey, 0, -menu.implicitHeight - 8)
-                }
+                onClicked: root.openAbove(moreMenu.load(), moreKey, false)
             }
         }
         IconKey {
@@ -281,6 +513,8 @@ Rectangle {
             soundboardPopup.item?.close()
             activitiesPopup.item?.close()
             spatialPanel.item?.close()
+            noisePanel.item?.close()
+            reactions.item?.close()
         }
     }
     Loader {
@@ -294,6 +528,51 @@ Rectangle {
         sourceComponent: ActivitiesDialog {
             people: Nav.voicePanelId === Voice.channelId ? Math.max(1, Nav.voicePanelCount) : 1
             onClosed: root.popoverClosedAt = Date.now()
+        }
+    }
+    // The stream settings menu (VoiceDashboard.tsx, side top, align end).
+    // "Always show stream preview" is left out: native has no such setting
+    // yet (Settings > Voice shows it as coming later).
+    LazyPopup {
+        id: streamMenu
+        sourceComponent: MenuPanel {
+            id: streamPanel
+            MenuLabel { text: qsTr("Stream settings") }
+            MenuRow {
+                glyph: "screenShare"
+                text: qsTr("Change source")
+                onTriggered: ShellState.changeShareSource()
+            }
+            MenuRow {
+                glyph: "speaker"
+                text: qsTr("Stream audio")
+                switchable: true
+                on: Voice.shareAudio
+                onTriggered: Voice.changeShareAudio(!Voice.shareAudio)
+            }
+            MenuRule {}
+            MenuLabel { text: qsTr("Quality") }
+            // After the five rows above.
+            Instantiator {
+                model: root.shareQualities
+                delegate: MenuChoice {
+                    required property string modelData
+                    // formatQualityOption ("1080p 60"); 4K is spaced the same way
+                    // (the web leaves "4k60" as it is).
+                    text: /^4k(\d+)$/i.test(modelData) ? modelData.replace(/^4k/i, "4K ") : modelData.replace("p", "p ")
+                    selected: Voice.shareQuality === modelData
+                    onTriggered: Voice.changeShareQuality(modelData)
+                }
+                onObjectAdded: (index, object) => streamPanel.insertItem(index + 5, object)
+                onObjectRemoved: (index, object) => streamPanel.removeItem(object)
+            }
+            MenuRule {}
+            MenuRow {
+                danger: true
+                glyph: "streamOff"
+                text: qsTr("Stop streaming")
+                onTriggered: Voice.stopShare()
+            }
         }
     }
     LazyPopup {

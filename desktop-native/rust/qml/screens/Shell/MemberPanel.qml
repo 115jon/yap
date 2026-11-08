@@ -43,7 +43,10 @@ Item {
                 id: glyph
                 x: 16
                 anchors.verticalCenter: parent.verticalCenter
-                name: Nav.dmUsername.length > 0 ? "mention" : "textChannel"
+                // A voice channel's chat (its details over the voice view) takes
+                // the voice glyph (MemberList.tsx DesktopHeader's channel icon).
+                name: Nav.dmUsername.length > 0 ? "mention"
+                    : Nav.voicePanelId.length > 0 && Nav.activeChannelId === Nav.voicePanelId ? "voiceChannel" : "textChannel"
                 size: Theme.iconMd
                 color: Theme.ink3
             }

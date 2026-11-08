@@ -40,6 +40,9 @@ Rectangle {
     // The user scrolled since the list landed: a late divider must not
     // move it.
     property bool userMoved: false
+    // How far the composer's top stands above this view's foot: the floating
+    // players keep clear of it (MessageInput.tsx `data-floating-avoid`).
+    readonly property real composerAvoid: height - composer.y
 
     color: Theme.ply0
 
