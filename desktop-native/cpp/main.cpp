@@ -782,10 +782,14 @@ int main(int argc, char* argv[])
     // First frame on screen: printed for the cold-start measurement.
     QObject::connect(
       window, &QQuickWindow::frameSwapped, window,
-      [&startup] {
+      [&startup, shell] {
         std::fprintf(stderr, "[startup] first frame after %lld ms\n",
                      static_cast<long long>(startup.elapsed()));
         std::fflush(stderr);
+        // Once startup has settled: the first frames' upload batches
+        // (grown op lists), pooled buffers and unused glyph caches go back
+        // (performance pass 7). The next frame rebuilds its pipelines once.
+        QTimer::singleShot(20000, shell, [shell] { shell->releaseGraphicsSoon(); });
       },
       Qt::SingleShotConnection);
   }

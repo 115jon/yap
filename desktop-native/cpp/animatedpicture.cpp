@@ -12,6 +12,7 @@
 #include <QtQuick/QQuickWindow>
 #include <QtQuick/QSGImageNode>
 #include <QtQuick/QSGTexture>
+#include <QtQuick/private/qsgplaintexture_p.h>
 
 #include <cmath>
 #include <cstdint>
@@ -782,9 +783,17 @@ QSGNode* AnimatedPicture::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
   const int index = streamed ? 0 : qBound(0, m_frame, int(m_anim->frames.size()) - 1);
   QSGTexture*& texture = node->textures[size_t(index)];
   if (streamed && texture && m_frameDirty) {
-    // One texture, replaced by each frame (the old one is not drawn again).
-    delete texture;
-    texture = nullptr;
+    // One texture, given each frame in turn. A plain texture of the same
+    // size uploads into its QRhiTexture again; making a new one per frame
+    // cost a D3D11 texture create and release each time (performance pass
+    // 7: ~5 % of the GUI thread in the animated idle, plus driver work).
+    if (auto* plain = qobject_cast<QSGPlainTexture*>(texture);
+        plain && plain->textureSize() == m_current.size()) {
+      plain->setImage(m_current);
+    } else {
+      delete texture;
+      texture = nullptr;
+    }
   }
   if (!texture)
     texture = win->createTextureFromImage(streamed ? m_current : m_anim->frames.at(index),

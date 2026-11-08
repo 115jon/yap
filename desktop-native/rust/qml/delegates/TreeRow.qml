@@ -128,15 +128,20 @@ Loader {
         sourceComponent: ListenSidebarStatus {}
     }
 
-    component StatusLines: VoiceStatusLine {
-        // Member rows are keyed `<channel>/<user>`.
-        readonly property string ownerId: cell.kind === "member" ? cell.itemId.slice(0, cell.itemId.indexOf("/")) : cell.itemId
-        visible: cell.statusHere && (cell.voiceStatusEditable || cell.voiceStatus.length > 0 || cell.voiceStatusMedia.length > 0)
+    // Made only on the row that draws the status (performance pass 7: every
+    // channel and member row built a hidden one).
+    component StatusLines: Loader {
         width: cell.width
-        channelId: ownerId
-        channelName: cell.statusChannel
-        text: cell.voiceStatus
-        media: cell.voiceStatusMedia
-        editable: cell.voiceStatusEditable
+        active: cell.statusHere && (cell.voiceStatusEditable || cell.voiceStatus.length > 0 || cell.voiceStatusMedia.length > 0)
+        visible: active
+        sourceComponent: VoiceStatusLine {
+            width: cell.width
+            // Member rows are keyed `<channel>/<user>`.
+            channelId: cell.kind === "member" ? cell.itemId.slice(0, cell.itemId.indexOf("/")) : cell.itemId
+            channelName: cell.statusChannel
+            text: cell.voiceStatus
+            media: cell.voiceStatusMedia
+            editable: cell.voiceStatusEditable
+        }
     }
 }

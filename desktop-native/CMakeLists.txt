@@ -21,8 +21,9 @@ add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 find_package(Qt6 REQUIRED COMPONENTS
   Core Gui Multimedia Network Qml Quick QuickControls2 Svg QmlImportScanner)
 # Private: QHwVideoBuffer and QRhi's native handles, for decoded video
-# drawn from its D3D11 texture (cpp/videohub.cpp).
-find_package(Qt6 REQUIRED COMPONENTS GuiPrivate MultimediaPrivate)
+# drawn from its D3D11 texture (cpp/videohub.cpp); QSGPlainTexture, so a
+# streamed GIF uploads each frame into one texture (cpp/animatedpicture.cpp).
+find_package(Qt6 REQUIRED COMPONENTS GuiPrivate MultimediaPrivate QuickPrivate)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -77,7 +78,7 @@ set_property(TARGET YapNative PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 target_link_libraries(YapNative PRIVATE
   yap_native_qml
   Qt::Gui Qt::Multimedia Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg
-  Qt::GuiPrivate Qt::MultimediaPrivate)
+  Qt::GuiPrivate Qt::MultimediaPrivate Qt::QuickPrivate)
 
 # Brand fonts, Phosphor icons and brand SVGs (assets/, built by tools/),
 # embedded as :/fonts, :/icons and :/svg.

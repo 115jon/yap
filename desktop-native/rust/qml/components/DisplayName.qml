@@ -211,17 +211,20 @@ Item {
         }
     }
 
-    // Neon: the glow under the fill.
-    MultiEffect {
+    // Neon: the glow under the fill. Made only for a neon name (performance
+    // pass 7: every name built one).
+    Loader {
         anchors.fill: label
-        visible: root.effect === "neon"
-        source: label
-        shadowEnabled: visible
-        shadowColor: root.alpha(root.primary, 0.54)
-        shadowBlur: 0.5
-        shadowHorizontalOffset: 0
-        shadowVerticalOffset: 0
         z: -1
+        active: root.effect === "neon"
+        sourceComponent: MultiEffect {
+            source: label
+            shadowEnabled: true
+            shadowColor: root.alpha(root.primary, 0.54)
+            shadowBlur: 0.5
+            shadowHorizontalOffset: 0
+            shadowVerticalOffset: 0
+        }
     }
 
     // Gradient, playing: the far end of the sweep (background-position

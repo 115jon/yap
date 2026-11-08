@@ -1,0 +1,59 @@
+--- a/qtbase/src/gui/text/windows/qwindowsfontenginedirectwrite_p.h
++++ b/qtbase/src/gui/text/windows/qwindowsfontenginedirectwrite_p.h
+@@ -179,6 +179,9 @@
+     QString m_uniqueFamilyName;
+     QList<QFontVariableAxis> m_variableAxes;
+     DWRITE_PIXEL_GEOMETRY m_pixelGeometry = DWRITE_PIXEL_GEOMETRY_RGB;
++    // Yap patch: the coverage curve DirectWrite's enhanced contrast gives
++    // (as Direct2D and Chromium apply it), indexed by raw coverage.
++    uchar m_contrastLut[256];
+ };
+ 
+ QT_END_NAMESPACE
+--- a/qtbase/src/gui/text/windows/qwindowsfontenginedirectwrite.cpp
++++ b/qtbase/src/gui/text/windows/qwindowsfontenginedirectwrite.cpp
+@@ -231,11 +231,31 @@
+     m_fontEngineData->directWriteFactory->AddRef();
+     m_directWriteFontFace->AddRef();
+ 
++    // Yap patch: CreateAlphaTexture gives raw linear coverage, and Qt
++    // Quick blends it as is, so light text on a dark ground came out thin
++    // and broken beside Direct2D and Chromium, which first apply the
++    // system's enhanced contrast (1.0 by default) to it. The same curve is
++    // applied here: c' = c (k + 1) / (c k + 1). QT_DWRITE_ENHANCED_CONTRAST
++    // overrides k (0 turns it off).
++    float enhancedContrast = 1.0f;
+     IDWriteRenderingParams *renderingParams = nullptr;
+     if (SUCCEEDED(m_fontEngineData->directWriteFactory->CreateRenderingParams(&renderingParams))) {
+         m_pixelGeometry = renderingParams->GetPixelGeometry();
++        enhancedContrast = renderingParams->GetEnhancedContrast();
+         renderingParams->Release();
+     }
++    {
++        bool ok = false;
++        const float forced = qEnvironmentVariable("QT_DWRITE_ENHANCED_CONTRAST").toFloat(&ok);
++        if (ok)
++            enhancedContrast = forced;
++        enhancedContrast = qBound(0.0f, enhancedContrast, 10.0f);
++        for (int i = 0; i < 256; ++i) {
++            const float c = i / 255.0f;
++            const float boosted = c * (enhancedContrast + 1.0f) / (c * enhancedContrast + 1.0f);
++            m_contrastLut[i] = uchar(qBound(0, qRound(boosted * 255.0f), 255));
++        }
++    }
+ 
+     fontDef.pixelSize = pixelSize;
+     collectMetrics();
+@@ -1785,9 +1805,9 @@
+                     BYTE *src = alphaValues + width * 3 * y;
+ 
+                     for (int x = 0; x < width; ++x) {
+-                        BYTE redAlpha   = *(src + 0);
+-                        BYTE greenAlpha = *(src + 1);
+-                        BYTE blueAlpha  = *(src + 2);
++                        BYTE redAlpha   = m_contrastLut[*(src + 0)];
++                        BYTE greenAlpha = m_contrastLut[*(src + 1)];
++                        BYTE blueAlpha  = m_contrastLut[*(src + 2)];
+ 
+                         if (m_pixelGeometry == DWRITE_PIXEL_GEOMETRY_BGR)
+                             qSwap(redAlpha, blueAlpha);

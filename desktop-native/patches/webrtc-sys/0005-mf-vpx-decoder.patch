@@ -1,0 +1,314 @@
+--- a/src/mf_h264_decoder.cpp
++++ b/src/mf_h264_decoder.cpp
+@@ -17,6 +17,12 @@
+ // frame carries that texture as a native buffer (D3D11Nv12Buffer), which the
+ // UI samples as it is (cpp/videohub.cpp). Nothing is read back unless a
+ // consumer asks for I420 (ToI420).
++//
++// VP8 and VP9 (performance pass 7): the same decoder on the MFT of the VP9
++// Video Extensions (MFVideoFormat_VP80/VP90, found with MFTEnumEx), GPU
++// only: the extension's software path is no faster than libvpx, so without
++// DXVA for the codec Configure fails and the factory's fallback wrapper
++// keeps libvpx. A decode error asks for that fallback too.
+ 
+ #include "livekit/mf_h264_decoder.h"
+ #include "livekit/video_frame_buffer.h"
+@@ -59,6 +65,56 @@
+   return value != nullptr && std::strcmp(value, "software") == 0;
+ }
+ 
++// YAP_VPX_DECODER=software: VP8 and VP9 stay on libvpx (comparisons).
++bool VpxSoftwareRequested() {
++  const char* value = std::getenv("YAP_VPX_DECODER");
++  return value != nullptr && std::strcmp(value, "software") == 0;
++}
++
++const char* CodecTag(webrtc::VideoCodecType codec) {
++  switch (codec) {
++    case webrtc::kVideoCodecVP8:
++      return "[mf-vp8]";
++    case webrtc::kVideoCodecVP9:
++      return "[mf-vp9]";
++    default:
++      return "[mf-h264]";
++  }
++}
++
++GUID InputSubtype(webrtc::VideoCodecType codec) {
++  switch (codec) {
++    case webrtc::kVideoCodecVP8:
++      return MFVideoFormat_VP80;
++    case webrtc::kVideoCodecVP9:
++      return MFVideoFormat_VP90;
++    default:
++      return MFVideoFormat_H264;
++  }
++}
++
++// The decoder MFT for `codec`: Windows' own H.264 decoder, or the first
++// registered decoder for VP8/VP9 (the VP9 Video Extensions' MFT).
++HRESULT CreateMft(webrtc::VideoCodecType codec, ComPtr<IMFTransform>& out) {
++  if (codec == webrtc::kVideoCodecH264)
++    return CoCreateInstance(CLSID_MSH264DecoderMFT, nullptr, CLSCTX_INPROC_SERVER,
++                            IID_PPV_ARGS(&out));
++  MFT_REGISTER_TYPE_INFO input{MFMediaType_Video, InputSubtype(codec)};
++  IMFActivate** activates = nullptr;
++  UINT32 count = 0;
++  HRESULT hr = MFTEnumEx(MFT_CATEGORY_VIDEO_DECODER,
++                         MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_LOCALMFT |
++                             MFT_ENUM_FLAG_SORTANDFILTER,
++                         &input, nullptr, &activates, &count);
++  if (FAILED(hr))
++    return hr;
++  hr = count ? activates[0]->ActivateObject(IID_PPV_ARGS(&out)) : MF_E_TOPO_CODEC_NOT_FOUND;
++  for (UINT32 i = 0; i < count; ++i)
++    activates[i]->Release();
++  CoTaskMemFree(activates);
++  return hr;
++}
++
+ // The device the app's UI renders with, if it registered one: made with
+ // video support and multithread protection (the MFT needs both).
+ std::mutex g_shared_mutex;
+@@ -207,6 +263,8 @@
+ 
+ class MfH264Decoder : public webrtc::VideoDecoder {
+  public:
++  explicit MfH264Decoder(webrtc::VideoCodecType codec = webrtc::kVideoCodecH264)
++      : codec_(codec) {}
+   ~MfH264Decoder() override { Release(); }
+ 
+   bool Configure(const Settings& settings) override {
+@@ -216,9 +274,9 @@
+     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+     if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET)))
+       return false;
+-    if (FAILED(CoCreateInstance(CLSID_MSH264DecoderMFT, nullptr,
+-                                CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&mft_))))
++    if (FAILED(CreateMft(codec_, mft_)))
+       return false;
++    const bool h264 = codec_ == webrtc::kVideoCodecH264;
+     ComPtr<IMFAttributes> attributes;
+     if (FAILED(mft_->GetAttributes(&attributes))) {
+       mft_.Reset();
+@@ -229,11 +287,17 @@
+     UINT32 aware = 0;
+     if (SUCCEEDED(attributes->GetUINT32(MF_SA_D3D11_AWARE, &aware)) && aware &&
+         MakeGpuDevice(gpu_device_)) {
+-      attributes->SetUINT32(CODECAPI_AVDecVideoAcceleration_H264, TRUE);
++      if (h264)
++        attributes->SetUINT32(CODECAPI_AVDecVideoAcceleration_H264, TRUE);
+       gpu_ = SUCCEEDED(mft_->ProcessMessage(
+           MFT_MESSAGE_SET_D3D_MANAGER,
+           reinterpret_cast<ULONG_PTR>(gpu_device_.manager.Get())));
+     }
++    if (!gpu_ && !h264) {
++      // VP8/VP9 on the GPU only (libvpx is the software path).
++      Release();
++      return false;
++    }
+     if (!gpu_) {
+       gpu_device_ = {};
+       // Software: as many threads as libwebrtc gives the decoder.
+@@ -243,16 +307,26 @@
+     ComPtr<IMFMediaType> input;
+     MFCreateMediaType(&input);
+     input->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+-    input->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
++    input->SetGUID(MF_MT_SUBTYPE, InputSubtype(codec_));
+     input->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
++    if (!h264) {
++      // The VPx MFT wants a size up front; a different one in the stream is
++      // a format change it reports (MF_E_TRANSFORM_STREAM_CHANGE).
++      const webrtc::RenderResolution size = settings.max_render_resolution();
++      MFSetAttributeSize(input.Get(), MF_MT_FRAME_SIZE,
++                         size.Valid() ? UINT32(size.Width()) : 1280,
++                         size.Valid() ? UINT32(size.Height()) : 720);
++    }
+     if (FAILED(mft_->SetInputType(0, input.Get(), 0)) || !SetOutputType()) {
+-      mft_.Reset();
++      // Without DXVA for the codec the VPx MFT refuses the type here
++      // (MF_E_UNSUPPORTED_D3D_TYPE).
++      Release();
+       return false;
+     }
+     mft_->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
+     mft_->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
+     buffer_pool_size_ = settings.buffer_pool_size();
+-    RTC_LOG(LS_INFO) << "[mf-h264] Media Foundation H.264 decoder, "
++    RTC_LOG(LS_INFO) << CodecTag(codec_) << " Media Foundation decoder, "
+                      << (gpu_ ? (gpu_device_.shared ? "on the GPU, zero copy" : "on the GPU")
+                               : "in software");
+     return true;
+@@ -289,14 +363,14 @@
+     HRESULT hr = mft_->ProcessInput(0, sample.Get(), 0);
+     if (hr == MF_E_NOTACCEPTING) {
+       if (!Drain())
+-        return WEBRTC_VIDEO_CODEC_ERROR;
++        return Failed();
+       hr = mft_->ProcessInput(0, sample.Get(), 0);
+     }
+     if (FAILED(hr)) {
+-      RTC_LOG(LS_WARNING) << "[mf-h264] ProcessInput failed " << hr;
+-      return WEBRTC_VIDEO_CODEC_ERROR;
++      RTC_LOG(LS_WARNING) << CodecTag(codec_) << " ProcessInput failed " << hr;
++      return Failed();
+     }
+-    return Drain() ? WEBRTC_VIDEO_CODEC_OK : WEBRTC_VIDEO_CODEC_ERROR;
++    return Drain() ? WEBRTC_VIDEO_CODEC_OK : Failed();
+   }
+ 
+   int32_t RegisterDecodeCompleteCallback(
+@@ -335,6 +409,13 @@
+     std::optional<webrtc::ColorSpace> color;
+   };
+ 
++  // H.264 has no other decoder here; VP8/VP9 go to libvpx (the fallback
++  // wrapper, from the next key frame).
++  int32_t Failed() const {
++    return codec_ == webrtc::kVideoCodecH264 ? WEBRTC_VIDEO_CODEC_ERROR
++                                             : WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
++  }
++
+   bool SetOutputType() {
+     for (DWORD i = 0;; ++i) {
+       ComPtr<IMFMediaType> type;
+@@ -393,7 +474,7 @@
+         continue;
+       }
+       if (FAILED(hr)) {
+-        RTC_LOG(LS_WARNING) << "[mf-h264] ProcessOutput failed " << hr;
++        RTC_LOG(LS_WARNING) << CodecTag(codec_) << " ProcessOutput failed " << hr;
+         return false;
+       }
+       ComPtr<IMFSample> sample;
+@@ -507,6 +588,7 @@
+     return webrtc::make_ref_counted<D3D11Nv12Buffer>(std::move(texture), textures_);
+   }
+ 
++  const webrtc::VideoCodecType codec_;
+   ComPtr<IMFTransform> mft_;
+   GpuDevice gpu_device_;
+   ComPtr<ID3D11DeviceContext> context_;
+@@ -544,6 +626,56 @@
+   return std::make_unique<MfH264Decoder>();
+ }
+ 
++bool MfVpxHardwareAvailable(webrtc::VideoCodecType codec) {
++  // Once per codec: does the MFT exist, and does it take the codec with a
++  // D3D11 device manager (DXVA for it on this GPU)? It is asked when the
++  // first stream of the codec arrives, after the UI registered its device.
++  auto probe = [codec] {
++    if (VpxSoftwareRequested() || SoftwareRequested())
++      return false;
++    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
++    if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET)))
++      return false;
++    ComPtr<IMFTransform> mft;
++    if (FAILED(CreateMft(codec, mft)))
++      return false;
++    ComPtr<IMFAttributes> attributes;
++    UINT32 aware = 0;
++    GpuDevice gpu;
++    bool ok = SUCCEEDED(mft->GetAttributes(&attributes)) &&
++              SUCCEEDED(attributes->GetUINT32(MF_SA_D3D11_AWARE, &aware)) && aware &&
++              MakeGpuDevice(gpu) &&
++              SUCCEEDED(mft->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER,
++                                            reinterpret_cast<ULONG_PTR>(gpu.manager.Get())));
++    if (ok) {
++      ComPtr<IMFMediaType> input;
++      MFCreateMediaType(&input);
++      input->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
++      input->SetGUID(MF_MT_SUBTYPE, InputSubtype(codec));
++      MFSetAttributeSize(input.Get(), MF_MT_FRAME_SIZE, 1280, 720);
++      ok = SUCCEEDED(mft->SetInputType(0, input.Get(), 0));
++    }
++    mft->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, 0);
++    RTC_LOG(LS_INFO) << CodecTag(codec)
++                     << (ok ? " the GPU decodes it through Media Foundation"
++                            : " no GPU decoder through Media Foundation: libvpx");
++    return ok;
++  };
++  if (codec == webrtc::kVideoCodecVP8) {
++    static const bool vp8 = probe();
++    return vp8;
++  }
++  if (codec == webrtc::kVideoCodecVP9) {
++    static const bool vp9 = probe();
++    return vp9;
++  }
++  return false;
++}
++
++std::unique_ptr<webrtc::VideoDecoder> CreateMfVpxDecoder(webrtc::VideoCodecType codec) {
++  return std::make_unique<MfH264Decoder>(codec);
++}
++
+ }  // namespace livekit_ffi
+ 
+ // The app's UI device, for decoders configured from now on (nullptr: each
+--- a/src/video_decoder_factory.cpp
++++ b/src/video_decoder_factory.cpp
+@@ -41,6 +41,7 @@
+ 
+ #if defined(_WIN32)
+ // Yap patch (desktop-native/patches/webrtc-sys): H.264 on the GPU.
++#include "api/video_codecs/video_decoder_software_fallback_wrapper.h"
+ #include "livekit/mf_h264_decoder.h"
+ #endif
+ 
+@@ -181,6 +182,22 @@
+     }
+   }
+ 
++#if defined(_WIN32)
++  // Yap patch (performance pass 7): VP9 profile 0, and VP8, on the GPU
++  // through Media Foundation where it decodes them, libvpx otherwise and
++  // whenever the GPU decoder fails.
++  if (absl::EqualsIgnoreCase(format.name, webrtc::kVp9CodecName)) {
++    auto profile = format.parameters.find("profile-id");
++    if ((profile == format.parameters.end() || profile->second == "0") &&
++        MfVpxHardwareAvailable(webrtc::kVideoCodecVP9))
++      return webrtc::CreateVideoDecoderSoftwareFallbackWrapper(
++          env, webrtc::VP9Decoder::Create(), CreateMfVpxDecoder(webrtc::kVideoCodecVP9));
++  }
++  if (absl::EqualsIgnoreCase(format.name, webrtc::kVp8CodecName) &&
++      MfVpxHardwareAvailable(webrtc::kVideoCodecVP8))
++    return webrtc::CreateVideoDecoderSoftwareFallbackWrapper(
++        env, webrtc::CreateVp8Decoder(env), CreateMfVpxDecoder(webrtc::kVideoCodecVP8));
++#endif
+   if (absl::EqualsIgnoreCase(format.name, webrtc::kVp8CodecName))
+     return webrtc::CreateVp8Decoder(env);
+   if (absl::EqualsIgnoreCase(format.name, webrtc::kVp9CodecName))
+--- a/include/livekit/mf_h264_decoder.h
++++ b/include/livekit/mf_h264_decoder.h
+@@ -2,10 +2,15 @@
+ // through Media Foundation's H.264 decoder MFT, on the GPU (DXVA, with a
+ // D3D11 device manager) where it can, in software otherwise. libwebrtc's
+ // own FFmpeg decoder is not linked on Windows (1.5 MiB of the exe).
++//
++// Performance pass 7: VP9 (and VP8 where the GPU decodes it) through the
++// VP9 Video Extension's MFT, on the GPU only, with the same zero-copy
++// output. libvpx stays the fallback.
+ #pragma once
+ 
+ #include <memory>
+ 
++#include "api/video_codecs/video_codec.h"
+ #include "api/video_codecs/video_decoder.h"
+ 
+ namespace livekit_ffi {
+@@ -16,4 +21,13 @@
+ 
+ std::unique_ptr<webrtc::VideoDecoder> CreateMfH264Decoder();
+ 
++// VP8 or VP9: true when a Media Foundation decoder for it is installed (the
++// VP9 Video Extensions) and decodes on this machine's GPU. Probed once per
++// codec. YAP_VPX_DECODER=software keeps libvpx (comparisons).
++bool MfVpxHardwareAvailable(webrtc::VideoCodecType codec);
++
++// A GPU-only Media Foundation decoder for VP8 or VP9. Configure fails
++// without the GPU, so wrap it in a software fallback.
++std::unique_ptr<webrtc::VideoDecoder> CreateMfVpxDecoder(webrtc::VideoCodecType codec);
++
+ }  // namespace livekit_ffi
