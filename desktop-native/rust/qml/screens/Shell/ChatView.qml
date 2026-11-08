@@ -51,7 +51,10 @@ Rectangle {
     color: Theme.ply0
 
     onWindowActiveChanged: Chat.setFocused(windowActive)
-    Component.onCompleted: Chat.setFocused(windowActive)
+    Component.onCompleted: {
+        Chat.setFocused(windowActive)
+        root.draftChannel = Nav.activeChannelId
+    }
 
     // Within 12 px of the newest end counts as there (VirtualMessageList.tsx);
     // a delegate that settles its height after a jump must not undo it.
@@ -354,11 +357,78 @@ Rectangle {
         onTriggered: root.highlightId = ""
     }
 
+    // Each channel's unsent text and reply target, kept while the app runs
+    // and put back on return (Discord's drafts); a send clears it. The
+    // composer is one instance, so nothing typed for one channel can be
+    // posted in the next.
+    property var drafts: ({})
+    // The channel the composer's text belongs to: set here, never bound,
+    // so it still names the channel being left when the switch arrives.
+    property string draftChannel
+    function keepDraft(channelId) {
+        const draft = composer.takeDraft()
+        if (channelId.length === 0)
+            return
+        if (draft.text.length > 0 || root.replyToId.length > 0) {
+            root.drafts[channelId] = {
+                text: draft.text, map: draft.map, replyToId: root.replyToId,
+                replyToName: root.replyToName, replyToStyle: root.replyToStyle,
+                replyToText: root.replyToText, replyToFiles: root.replyToFiles
+            }
+        } else {
+            delete root.drafts[channelId]
+        }
+    }
+    function restoreDraft(channelId) {
+        const draft = root.drafts[channelId]
+        composer.putDraft(draft ?? null)
+        root.replyToId = draft ? draft.replyToId : ""
+        root.replyToName = draft ? draft.replyToName : ""
+        root.replyToStyle = draft ? draft.replyToStyle : ""
+        root.replyToText = draft ? draft.replyToText : ""
+        root.replyToFiles = draft ? draft.replyToFiles : 0
+    }
+    function isInside(item) {
+        for (let at = item; at; at = at.parent) {
+            if (at === root)
+                return true
+        }
+        return false
+    }
+    // After a switch the composer takes the keys, unless a dialog or popup
+    // is up or something outside the chat holds them on purpose (a
+    // sidebar row reached with Tab, the search field): focus stays there.
+    function focusAfterSwitch() {
+        if (!root.visible || ShellState.modalCount > 0 || SettingsNav.open || composer.readOnly)
+            return
+        const win = root.Window.window
+        const focused = root.Window.activeFocusItem
+        if (win && !win.active)
+            return
+        if (focused && focused !== root.Window.contentItem && !root.isInside(focused))
+            return
+        composer.focusInput()
+    }
+    // Signed out: nothing typed by one account waits for the next.
+    Connections {
+        target: Session
+        function onPhaseChanged() {
+            if (Session.phase === Session.Ready)
+                return
+            root.drafts = ({})
+            composer.putDraft(null)
+            root.replyToId = ""
+        }
+    }
     Connections {
         target: Nav
         function onActiveChannelIdChanged() {
             root.editingId = ""
-            root.replyToId = ""
+            root.keepDraft(root.draftChannel)
+            root.draftChannel = Nav.activeChannelId
+            root.restoreDraft(Nav.activeChannelId)
+            if (Nav.activeChannelId.length > 0)
+                Qt.callLater(root.focusAfterSwitch)
         }
     }
 
@@ -1132,9 +1202,12 @@ Rectangle {
         onSend: (text, replyToId) => {
             Chat.sendMessage(text, replyToId)
             root.replyToId = ""
+            delete root.drafts[Nav.activeChannelId]
         }
         onCancelReply: root.replyToId = ""
         onEditLast: root.startEdit(Chat.lastEditableId())
+        // Esc with nothing to close (ChatView's other Esc uses come first).
+        onMarkRead: if (root.editingId.length === 0) Chat.markRead()
     }
 
     // The message menu (MessageMenu.qml), one for the list.

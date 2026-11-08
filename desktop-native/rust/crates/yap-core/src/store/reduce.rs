@@ -16,6 +16,7 @@ mod settings;
 mod shop;
 mod social;
 mod threads;
+mod warm;
 
 use std::time::Duration;
 
@@ -36,9 +37,9 @@ use super::view::{
 };
 use super::view::{MeView, MemberKind, MemberRole, Seat, UnreadView, VoicePanelView, VoiceView};
 use super::{
-    ApiRequest, ApiResponse, CacheWrite, CallId, Command, Dispatch, Effect, GatewayEvent, Input,
-    Occupant, Page, RequestId, SessionId, SignInEvent, SignInId, Snapshot, VoiceCommand,
-    VoiceTarget, VoiceUpdate,
+    ApiRequest, ApiResponse, CacheWrite, CallId, Command, Dispatch, Effect, GatewayEvent,
+    HttpReason, Input, Occupant, Page, RequestId, SessionId, SignInEvent, SignInId, Snapshot,
+    SwitchSource, VoiceCommand, VoiceTarget, VoiceUpdate,
 };
 use crate::api::{ApiError, Token};
 use crate::command_menu::RecentTarget;
@@ -89,6 +90,15 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
     let mut fx = Effects(Vec::new());
     match input {
         Input::User(command) => state.on_command(&mut fx, command),
+        Input::UserAt { command, now_ms } => {
+            state.now_ms = Some(now_ms);
+            state.on_command(&mut fx, command);
+            state.now_ms = None;
+        }
+        Input::WindowLoaded {
+            channel_id,
+            messages,
+        } => state.on_window(&mut fx, &channel_id, messages),
         Input::TokenLoaded(token) => state.on_token(&mut fx, token),
         Input::SnapshotLoaded(snapshot) => state.on_snapshot(&mut fx, snapshot),
         Input::CatalogLoaded(stored) => state.on_catalog_loaded(&mut fx, stored),
@@ -188,9 +198,24 @@ impl State {
     }
 
     fn http(&mut self, fx: &mut Effects, request: ApiRequest) -> Option<RequestId> {
+        self.http_for(fx, request, HttpReason::Other)
+    }
+
+    /// [`Self::http`] with the reason the `[http]` trace shows.
+    fn http_for(
+        &mut self,
+        fx: &mut Effects,
+        request: ApiRequest,
+        reason: HttpReason,
+    ) -> Option<RequestId> {
         let token = self.session.as_ref()?.token.clone();
         let id = RequestId(self.next_id());
-        fx.push(Effect::Http { id, token, request });
+        fx.push(Effect::Http {
+            id,
+            token,
+            request,
+            reason,
+        });
         Some(id)
     }
 
@@ -1433,7 +1458,13 @@ impl State {
             }
             Command::SelectServer(id) => self.select_server(fx, id),
             Command::SelectHome => self.select_home(fx),
+            Command::SelectHomeLast => self.select_home_last(fx),
+            Command::NavigateChannel { forward, unread } => {
+                self.navigate_channel(fx, forward, unread);
+            }
+            Command::NavigateServer { forward } => self.navigate_server(fx, forward),
             Command::SelectChannel(id) => self.select_channel(fx, &id),
+            Command::PrefetchChannel(id) => self.prefetch_channel(fx, &id),
             Command::OpenChannel {
                 channel_id,
                 server_id,
@@ -1763,9 +1794,11 @@ impl State {
             messages,
             voice,
             scroll_positions,
+            last_channels,
             ..
         } = snapshot;
         self.scroll_positions = scroll_positions.into_iter().collect();
+        self.last_channels = last_channels.into_iter().collect();
         if let Some(prefs) = voice.filter(|p| *p != self.voice_prefs) {
             self.voice_prefs = prefs;
             self.emit_voice(fx);
@@ -1931,6 +1964,12 @@ impl State {
         if self.messages.take().is_some() {
             fx.messages(ViewDiff::Reset(Vec::new()));
         }
+        // Nothing of this account's stays in memory for the next one.
+        self.warm.clear();
+        self.last_channels.clear();
+        self.open_confirmed = (0, 0);
+        self.disk_shown = false;
+        self.forget_volatile_caches();
         self.names.clear();
         self.clear_typing(fx);
         self.scroll_positions.clear();
@@ -1974,10 +2013,7 @@ impl State {
             // transport error never reaches the header (api-errors.ts).
             self.set_status(fx, "");
         } else {
-            self.set_status(
-                fx,
-                crate::settings::describe_api_error(error, "load this"),
-            );
+            self.set_status(fx, crate::settings::describe_api_error(error, "load this"));
         }
     }
 
@@ -2037,7 +2073,8 @@ impl State {
         result: Result<ApiResponse, ApiError>,
     ) {
         let mut answer = Some(result);
-        if self.route_calls_http(fx, id, &mut answer)
+        if self.route_prefetch(fx, id, &mut answer)
+            || self.route_calls_http(fx, id, &mut answer)
             || self.route_settings_http(fx, id, &mut answer)
             || self.route_admin_http(fx, id, &mut answer)
             || self.route_thread_http(fx, id, &mut answer)
@@ -2278,7 +2315,11 @@ impl State {
         session.id = id;
         let offline = session.gateway.offline;
         let token = session.token.clone();
-        let user_id = session.me.as_ref().map(|me| me.id.clone()).unwrap_or_default();
+        let user_id = session
+            .me
+            .as_ref()
+            .map(|me| me.id.clone())
+            .unwrap_or_default();
         fx.push(Effect::GatewayConnect {
             session: id,
             token,
@@ -2376,10 +2417,10 @@ impl State {
         self.persist_route(fx);
     }
 
-    /// No text channel is open.
+    /// No text channel is open (its log is kept warm).
     fn clear_channel(&mut self, fx: &mut Effects) {
         self.active_channel = None;
-        self.messages = None;
+        self.stash_open_log();
         self.pending.page = None;
         fx.view(ViewUpdate::PageLoading(false));
         self.pending.older = None;
@@ -2416,10 +2457,21 @@ impl State {
         });
         self.persist_route(fx);
         self.request_members(fx, &id);
+        // A tree already loaded shows at once with its channel; the fetch
+        // below revalidates it (`on_channels` keeps the open channel).
+        let known = self.channels.contains_key(&id);
+        if known {
+            self.show_known_server(fx, &id);
+        }
         let request = ApiRequest::Channels {
             server_id: id.clone(),
         };
-        self.pending.channels = self.http(fx, request).map(|req| (req, id));
+        let reason = if known {
+            HttpReason::Revalidate
+        } else {
+            HttpReason::Open
+        };
+        self.pending.channels = self.http_for(fx, request, reason).map(|req| (req, id));
     }
 
     /// A server's members, once per session; dispatches keep them current.
@@ -2456,8 +2508,11 @@ impl State {
             .and_then(|id| list.get(id))
             .filter(|c| c.channel_type == ChannelType::Text)
             .map(|c| (c.id.clone(), c.name.clone()));
-        let first_text = list.first_text().map(|c| c.id.clone());
+        let first_text = self
+            .remembered_channel(&server_id, &list)
+            .or_else(|| list.first_text().map(|c| c.id.clone()));
         let same_tree = self.tree_server.as_deref() == Some(server_id.as_str());
+        self.forget_lost_channels(&server_id, &list);
         let tree = list.to_response();
         self.persist(
             fx,
@@ -2548,15 +2603,25 @@ impl State {
     /// channel's chat): subscribe, an empty list, the page. `recent`: it
     /// goes on the switcher's Recent list.
     fn open_messages(&mut self, fx: &mut Effects, id: &str, name: String, recent: bool) {
-        if let Some(previous) = self.active_channel.replace(id.to_owned()) {
-            if previous != id {
-                self.gateway_send(
-                    fx,
-                    Self::channel_frame(GatewayOp::ChannelUnsubscribe, &previous),
-                );
-            }
+        fx.push(Effect::SwitchMark {
+            channel_id: id.to_owned(),
+            source: None,
+            rows: 0,
+        });
+        let previous = self.active_channel.replace(id.to_owned());
+        if let Some(previous) = previous.as_deref().filter(|p| *p != id) {
+            self.gateway_send(
+                fx,
+                Self::channel_frame(GatewayOp::ChannelUnsubscribe, previous),
+            );
         }
-        self.messages = Some(MessageLog::new(id));
+        // The list on screen is kept warm for a return. The open channel
+        // chosen again loads afresh, as before.
+        if previous.as_deref() == Some(id) {
+            self.messages = None;
+        } else {
+            self.stash_open_log();
+        }
         self.pending.older = None;
         self.seen_floor = None;
         self.seen_from = None;
@@ -2569,11 +2634,35 @@ impl State {
         self.emit_active_channel(fx, id.to_owned(), name);
         self.emit_active_dm(fx);
         self.clear_typing(fx);
-        fx.messages(ViewDiff::Reset(Vec::new()));
+        if recent {
+            self.remember_channel(fx, id);
+        }
+        // Warm: its rows at once, then (unless fresh) the page revalidates
+        // them through `on_page`'s row diff. Otherwise an empty list, the
+        // window kept on disk if there is one, and the page.
+        let warm = self.open_warm(fx, id);
+        if warm.is_none() {
+            self.messages = Some(MessageLog::new(id));
+            self.open_confirmed = (0, 0);
+            self.disk_shown = false;
+            self.open_at_end = false;
+            fx.messages(ViewDiff::Reset(Vec::new()));
+        }
         self.emit_history(fx);
         self.persist_route(fx);
         self.gateway_send(fx, Self::channel_frame(GatewayOp::ChannelSubscribe, id));
-        self.load_page(fx, id);
+        match warm {
+            Some(true) => {
+                self.pending.page = None;
+                self.open_at_end = false;
+                fx.view(ViewUpdate::PageLoading(false));
+            }
+            Some(false) => self.load_page_for(fx, id, HttpReason::Revalidate, false),
+            None => {
+                self.load_page_for(fx, id, HttpReason::Open, true);
+                self.load_window(fx, id);
+            }
+        }
         // The open channel stops showing as unread.
         self.sync_badges(fx);
         self.sync_members(fx);
@@ -2609,14 +2698,34 @@ impl State {
 
     /// Fetches the newest page of a channel; the result replaces the list.
     fn load_page(&mut self, fx: &mut Effects, channel_id: &str) {
+        let reason = if self.messages.as_ref().is_some_and(|l| !l.is_empty()) {
+            HttpReason::Revalidate
+        } else {
+            HttpReason::Open
+        };
+        self.load_page_for(fx, channel_id, reason, true);
+    }
+
+    /// [`Self::load_page`]; `loading`: the list shows its skeleton until
+    /// the page answers (never over rows already on screen).
+    fn load_page_for(
+        &mut self,
+        fx: &mut Effects,
+        channel_id: &str,
+        reason: HttpReason,
+        loading: bool,
+    ) {
         let request = ApiRequest::Messages {
             channel_id: channel_id.to_owned(),
             before: None,
         };
+        self.page_asked_ms = self.now_ms.unwrap_or(0);
         self.pending.page = self
-            .http(fx, request)
+            .http_for(fx, request, reason)
             .map(|req| (req, channel_id.to_owned()));
-        fx.view(ViewUpdate::PageLoading(self.pending.page.is_some()));
+        fx.view(ViewUpdate::PageLoading(
+            loading && self.pending.page.is_some(),
+        ));
     }
 
     fn on_page(
@@ -2676,20 +2785,18 @@ impl State {
         let old = self.messages.take();
         let mut log = MessageLog::new(channel_id);
         log.has_more_before = has_more_before;
-        // A refetch keeps the older pages already loaded.
-        let oldest = messages
-            .iter()
-            .map(|m| m.created_at.as_str())
-            .min_by_key(|at| parse_rfc3339(at));
-        if let (Some(old), Some(oldest)) = (old.as_ref().filter(|_| shown), oldest) {
-            let older = old
-                .iter()
-                .filter(|m| !is_pending(m) && is_after(oldest, &m.created_at));
-            for message in older {
+        // A refetch keeps the older pages already loaded, when they join
+        // up with this page: it overlaps them, or does not start after
+        // their newest message. A page entirely newer than what was kept
+        // (more than a page arrived since) leaves a gap: those rows go.
+        if let Some(old) = old.as_ref().filter(|_| shown) {
+            for message in warm::older_kept(old, &messages) {
                 log.upsert(message.clone());
                 log.has_more_before = old.has_more_before;
             }
         }
+        self.open_confirmed = (self.gateway_generation, self.page_asked_ms);
+        self.disk_shown = false;
         for message in messages {
             self.remember_author(&message);
             log.upsert(message);
@@ -2743,12 +2850,14 @@ impl State {
         // the read mark (useChatArea.ts), cached rows on screen or not.
         let placed = match &self.divider {
             Some(_) => false,
-            None if at_end && self.focused => false,
+            None if (at_end || (shown && self.open_at_end)) && self.focused => false,
             None => {
                 self.divider = self.divider_for(&log);
                 self.divider.is_some()
             }
         };
+        // Where cached rows landed counts for their own refetch only.
+        self.open_at_end = false;
         if self.seen_floor.is_none() {
             self.seen_floor = log
                 .iter()
@@ -2786,6 +2895,11 @@ impl State {
                 fx.messages(diff);
             }
         } else {
+            fx.push(Effect::SwitchMark {
+                channel_id: channel_id.to_owned(),
+                source: Some(SwitchSource::Cold),
+                rows: rows.len(),
+            });
             fx.view(ViewUpdate::ScrollRestore(restore));
             fx.messages(ViewDiff::Reset(rows));
         }
@@ -3326,6 +3440,9 @@ impl State {
         if patch.channel_id.is_some() && patch.channel_id.as_deref() != active {
             return;
         }
+        if self.position_of(&patch.id).is_none() {
+            self.warm_patch(fx, patch);
+        }
         self.patch_thread_copy(patch);
         let Some(at) = self.position_of(&patch.id) else {
             return;
@@ -3347,7 +3464,8 @@ impl State {
 
     /// Upserts into the open channel (by id, so the POST answer and the
     /// gateway echo of the same message end up as one row). Our own send
-    /// coming back takes its pending row's place (chat-reducer.ts).
+    /// coming back takes its pending row's place (chat-reducer.ts). A
+    /// channel kept warm takes it at its newest end.
     fn upsert_if_open(&mut self, fx: &mut Effects, message: Message) {
         let nonce = message.nonce.clone().filter(|_| !is_pending(&message));
         if let Some(nonce) = nonce.filter(|n| self.outbox.contains_key(n)) {
@@ -3372,7 +3490,7 @@ impl State {
         }
         let open = self.messages.as_ref();
         let Some(log) = open.filter(|log| log.channel_id == message.channel_id) else {
-            return;
+            return self.warm_upsert(fx, message);
         };
         let before = log
             .position(&message.id)
@@ -3442,14 +3560,22 @@ impl State {
                 self.sync_subscriptions(fx);
                 self.expect_voice_rosters(fx);
                 self.flush_preview_clear(fx);
+                // Every warm log needs its refetch from here on: events of
+                // the old session may be lost.
+                self.gateway_generation += 1;
                 // A fresh session after a drop (Resume failed or was not
                 // possible): events during the gap are lost, so refetch what
-                // is on screen.
+                // is on screen, and the shown server's members (the DM list
+                // comes with the unread state).
                 if reconnect {
                     if let Some(channel) = self.active_channel.clone() {
-                        self.load_page(fx, &channel);
+                        self.load_page_for(fx, &channel, HttpReason::Revalidate, false);
                     }
                     self.load_unread(fx);
+                    if let Some(server) = self.active_server.clone() {
+                        self.refetch_members(fx, &server);
+                    }
+                    self.forget_volatile_caches();
                 }
             }
             GatewayEvent::Resumed => {
@@ -3499,6 +3625,8 @@ impl State {
             Dispatch::MessagePatch(patch) => {
                 if patch.channel_id.as_deref() == Some(active.as_str()) {
                     self.apply_patch(fx, &patch);
+                } else {
+                    self.warm_patch(fx, &patch);
                 }
             }
             Dispatch::ReadStateUpdate(read) => {
@@ -3557,7 +3685,7 @@ impl State {
                     .filter(|_| here)
                     .and_then(|log| log.position(&delete.id))
                 else {
-                    return;
+                    return self.warm_delete(fx, delete.channel_id.as_deref(), &delete.id);
                 };
                 // The row below moves up into `at` and may regroup.
                 let below = self.message_row_at(at + 1);
@@ -3874,6 +4002,7 @@ impl State {
             Err(_) => return,
         };
         let list = ServerChannels::new(response);
+        self.forget_lost_channels(&server_id, &list);
         let tree = list.to_response();
         self.persist(
             fx,
@@ -4166,11 +4295,7 @@ impl State {
         let Some(call) = self.voice.as_mut() else {
             return;
         };
-        let url = url.filter(|url| {
-            call.joined
-                && call.share.is_some()
-                && view::is_still_url(url)
-        });
+        let url = url.filter(|url| call.joined && call.share.is_some() && view::is_still_url(url));
         if url.is_none() && !ready {
             // Ended while the gateway is down: forget the still now and
             // clear it once the gateway is back (Ready / Resumed).

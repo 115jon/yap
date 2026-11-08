@@ -110,6 +110,7 @@ Loader {
                 onMenuRequested: (row, at) => cell.menuRequested(row, at)
                 onSettingsRequested: cell.settingsRequested()
                 onInviteRequested: ShellState.channelInviteRequested(cell.itemId, cell.name, cell.voice)
+                onRested: Nav.prefetchChannel(cell.itemId)
                 onDragMoved: scene => cell.dragMoved(scene)
                 onDragEnded: dropped => cell.dragEnded(dropped)
             }

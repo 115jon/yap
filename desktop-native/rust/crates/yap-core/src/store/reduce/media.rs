@@ -211,8 +211,15 @@ impl State {
                 .as_deref()
                 .is_none_or(|c| c == log.channel_id)
         });
-        if open {
+        let ids = (
+            event.message_id.as_str(),
+            event.emoji.as_str(),
+            event.user_id.as_str(),
+        );
+        if open && self.position_of(&event.message_id).is_some() {
             self.react_row(fx, &event.message_id, &event.emoji, &event.user_id, add);
+        } else {
+            self.warm_react(fx, event.channel_id.as_deref(), ids, add);
         }
     }
 

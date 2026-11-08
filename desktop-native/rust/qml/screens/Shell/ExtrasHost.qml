@@ -4,8 +4,8 @@ import com.yap.native
 // The shell's extra dialogs, opened through ShellState from anywhere: the
 // quick switcher (Ctrl+K, CommandMenu.tsx), who reacted, Share message,
 // the channel's quick invite, the voice channel status and the voice
-// switch confirm. (The places its Recent lists are recorded by the core
-// when a channel or DM opens.)
+// switch confirm, and the channel and server keys. (The places its Recent
+// lists are recorded by the core when a channel or DM opens.)
 Item {
     id: root
 
@@ -22,6 +22,50 @@ Item {
             else
                 switcher.load()?.show()
         }
+    }
+
+    // Keyboard navigation (beyond the web, after Discord's keys): Alt+Up and
+    // Alt+Down the previous and next channel in the sidebar (DMs at Home),
+    // with Shift the previous and next unread one; Ctrl+Alt+Up and
+    // Ctrl+Alt+Down the previous and next server (Home first). Not while a
+    // dialog, Settings or the switcher is up. Text fields do not use these.
+    readonly property bool navAllowed: Session.phase === Session.Ready
+        && ShellState.modalCount === 0 && !SettingsNav.open && !(switcher.item?.opened ?? false)
+    Shortcut {
+        sequence: "Alt+Up"
+        context: Qt.WindowShortcut
+        enabled: root.navAllowed
+        onActivated: Nav.navigateChannel(false, false)
+    }
+    Shortcut {
+        sequence: "Alt+Down"
+        context: Qt.WindowShortcut
+        enabled: root.navAllowed
+        onActivated: Nav.navigateChannel(true, false)
+    }
+    Shortcut {
+        sequence: "Alt+Shift+Up"
+        context: Qt.WindowShortcut
+        enabled: root.navAllowed
+        onActivated: Nav.navigateChannel(false, true)
+    }
+    Shortcut {
+        sequence: "Alt+Shift+Down"
+        context: Qt.WindowShortcut
+        enabled: root.navAllowed
+        onActivated: Nav.navigateChannel(true, true)
+    }
+    Shortcut {
+        sequence: "Ctrl+Alt+Up"
+        context: Qt.WindowShortcut
+        enabled: root.navAllowed
+        onActivated: Nav.navigateServer(false)
+    }
+    Shortcut {
+        sequence: "Ctrl+Alt+Down"
+        context: Qt.WindowShortcut
+        enabled: root.navAllowed
+        onActivated: Nav.navigateServer(true)
     }
 
     Connections {

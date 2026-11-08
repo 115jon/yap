@@ -977,11 +977,13 @@ fn a_server_channel_from_home_should_leave_home() {
 }
 
 #[test]
-fn select_server_from_a_dm_should_close_the_dm_at_once() {
+fn select_server_from_a_dm_should_close_the_dm_and_open_its_channel_at_once() {
     let mut client = Client::online();
     client.command(Command::SelectChannel(DM.into()));
     let fx = client.command(Command::SelectServer(SERVER.into()));
-    assert_eq!(client.state.active_channel(), None);
+    // The server's tree is loaded: its last channel opens in the same
+    // batch, before the tree's refetch answers.
+    assert_eq!(client.state.active_channel(), Some(TEXT));
     assert!(views(&fx)
         .iter()
         .any(|v| matches!(v, ViewUpdate::ActiveDm(dm) if dm.user_id.is_empty())));

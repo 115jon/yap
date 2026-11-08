@@ -49,7 +49,7 @@ Rectangle {
                     hovered: homeHover.hovered
                 }
                 HoverHandler { id: homeHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { id: homeTap; onTapped: Nav.selectHome() }
+                TapHandler { id: homeTap; onTapped: Nav.selectHomeLast() }
                 Rectangle {
                     id: homeTile
                     anchors.centerIn: parent

@@ -132,6 +132,28 @@ pub mod qobject {
         #[cxx_name = "selectHome"]
         fn select_home(self: &Nav);
 
+        /// The rail's Home key: the DM opened last, or Home.
+        #[qinvokable]
+        #[cxx_name = "selectHomeLast"]
+        fn select_home_last(self: &Nav);
+
+        /// Alt+Up/Down: the previous or next text channel in the sidebar
+        /// (DMs at Home); `unread`: the previous or next unread one.
+        #[qinvokable]
+        #[cxx_name = "navigateChannel"]
+        fn navigate_channel(self: &Nav, forward: bool, unread: bool);
+
+        /// Ctrl+Alt+Up/Down: the previous or next server, Home first.
+        #[qinvokable]
+        #[cxx_name = "navigateServer"]
+        fn navigate_server(self: &Nav, forward: bool);
+
+        /// The pointer rests on a channel row (or the switcher highlights
+        /// it): its newest page is fetched into the warm cache.
+        #[qinvokable]
+        #[cxx_name = "prefetchChannel"]
+        fn prefetch_channel(self: &Nav, id: &QString);
+
         /// The DM with a user, created when there is none.
         #[qinvokable]
         #[cxx_name = "openDm"]
@@ -848,6 +870,22 @@ impl qobject::Nav {
 
     pub fn select_home(&self) {
         client::command(Command::SelectHome);
+    }
+
+    pub fn select_home_last(&self) {
+        client::command(Command::SelectHomeLast);
+    }
+
+    pub fn navigate_channel(&self, forward: bool, unread: bool) {
+        client::command(Command::NavigateChannel { forward, unread });
+    }
+
+    pub fn navigate_server(&self, forward: bool) {
+        client::command(Command::NavigateServer { forward });
+    }
+
+    pub fn prefetch_channel(&self, id: &QString) {
+        client::command(Command::PrefetchChannel(id.to_string()));
     }
 
     pub fn open_dm(&self, user_id: &QString) {
