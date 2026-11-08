@@ -37,6 +37,7 @@ T.AbstractButton {
         color: Theme.ply2
         border.width: 1
         border.color: root.selected ? "transparent" : root.hovered ? Theme.lineStrong : Theme.line
+        EaseColor on border.color {}
     }
 
     contentItem: Item {

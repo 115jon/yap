@@ -65,12 +65,15 @@ Column {
                     width: parent.width
                     height: 36
                     Row {
+                        id: shareTabs
                         height: parent.height
                         Accessible.role: Accessible.PageTabList
                         Accessible.name: qsTr("Shared links to show")
                         Tab { value: "current"; text: qsTr("Live"); count: root.live.length }
                         Tab { value: "all"; text: qsTr("All"); count: root.shares.length }
                     }
+                    // The chosen tab's rule slides between tabs.
+                    TabRule { row: shareTabs }
                     KitButton {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
@@ -98,7 +101,7 @@ Column {
                         RotationAnimator on rotation {
                             from: 0
                             to: 360
-                            duration: 900
+                            duration: Theme.durSpin
                             loops: Animation.Infinite
                             running: spinner.visible && !Theme.reducedMotion
                         }
@@ -158,6 +161,7 @@ Column {
                 textFormat: Text.PlainText
                 text: tab.text
                 color: tab.on || tab.hovered ? Theme.ink1 : Theme.ink2
+                EaseColor on color {}
                 font: Theme.type.controlSm
             }
             Rectangle {
@@ -176,13 +180,8 @@ Column {
                 }
             }
         }
+        // The rule is the strip's TabRule.
         background: Item {
-            Rectangle {
-                anchors.bottom: parent.bottom
-                width: parent.width
-                height: 2
-                color: tab.on ? Theme.ink1 : "transparent"
-            }
             Rectangle {
                 anchors.fill: parent
                 visible: tab.visualFocus

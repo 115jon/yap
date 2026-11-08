@@ -93,12 +93,8 @@ T.Popup {
         onTriggered: if (page.step === "joined") Invites.openServer(page.landing.serverId)
     }
 
-    enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-    }
-    exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur3Exit }
-    }
+    enter: PresenceIn { fromScale: 1 }
+    exit: PresenceOut { toScale: 1 }
 
     background: Rectangle {
         color: Theme.ply0

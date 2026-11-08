@@ -206,6 +206,7 @@ Column {
             color: Theme.ply2
             border.width: 1
             border.color: cardHover.containsMouse ? Theme.lineStrong : Theme.line
+            EaseColor on border.color {}
             Accessible.role: Accessible.Button
             Accessible.name: qsTr("Download %1").arg(card.modelData.name)
 

@@ -101,7 +101,8 @@ Popup {
         returnFocus = null
     }
 
-    Overlay.modal: Scrim { color: Theme.scrim }
+    // CommandMenu.tsx: the overlay does not animate either.
+    Overlay.modal: Scrim { color: Theme.scrim; enterDuration: 0; exitDuration: 0 }
 
     background: Rectangle {
         radius: Theme.radius

@@ -37,14 +37,16 @@ Popup {
         FloatShadow {}
         Rectangle { width: parent.width; height: 2; color: Theme.ink1 }
     }
+    // IncomingCallModal.tsx: fade in and drop the last 8 px over 200 ms
+    // (slide-in-from-top-2, the house ease-out); out, a 100 ms fade.
     enter: Transition {
         ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 200; easing.type: Easing.OutCubic }
-            NumberAnimation { property: "y"; from: 40; to: 48; duration: 200; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+            NumberAnimation { property: "y"; from: 48 - Theme.callShift; to: 48; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
         }
     }
     exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur3Exit }
+        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur2Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
     }
 
     contentItem: Column {

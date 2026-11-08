@@ -142,7 +142,7 @@ Item {
                             RotationAnimator on rotation {
                                 from: 0
                                 to: 360
-                                duration: 900
+                                duration: Theme.durSpin
                                 loops: Animation.Infinite
                                 running: tileSpinner.visible && !Theme.reducedMotion
                             }
@@ -255,6 +255,7 @@ Item {
                     border.color: tile.hovered
                         ? Qt.rgba(Theme.primaryFill.r, Theme.primaryFill.g, Theme.primaryFill.b, 0.4)
                         : Qt.rgba(Theme.line.r, Theme.line.g, Theme.line.b, Theme.line.a * 0.2)
+                    EaseColor on border.color {}
                 }
                 Rectangle {
                     anchors.fill: face
@@ -325,7 +326,7 @@ Item {
         RotationAnimator on rotation {
             from: 0
             to: 360
-            duration: 900
+            duration: Theme.durSpin
             loops: Animation.Infinite
             running: spinner.visible && !Theme.reducedMotion
         }
@@ -465,6 +466,7 @@ Item {
         background: Rectangle {
             radius: Theme.radiusSheet * 2
             color: file.hovered ? Qt.tint(Theme.ply2, Theme.tint1) : Theme.ply2
+            EaseColor on color {}
             border.width: file.visualFocus ? 2 : 1
             border.color: file.visualFocus ? Theme.focus : Theme.line
         }

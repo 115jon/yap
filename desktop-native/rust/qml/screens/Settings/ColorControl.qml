@@ -63,6 +63,8 @@ Flow {
                 padding: 12
                 focus: true
                 closePolicy: T.Popup.CloseOnEscape | T.Popup.CloseOnPressOutside
+                enter: PresenceIn { duration: Theme.durPopover; fromScale: Theme.scalePopover }
+                exit: PresenceOut { duration: Theme.durPopoverExit }
                 onOpened: {
                     hex.text = root.value.replace(/^#/, "")
                     hex.forceActiveFocus()

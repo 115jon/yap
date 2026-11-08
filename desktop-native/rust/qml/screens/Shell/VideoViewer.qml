@@ -31,7 +31,8 @@ Popup {
     closePolicy: Popup.CloseOnEscape
     onClosed: source = ""
 
-    Overlay.modal: Scrim { color: "#000000" }
+    // An element going full screen: no fade.
+    Overlay.modal: Scrim { color: "#000000"; enterDuration: 0; exitDuration: 0 }
     background: Rectangle { color: "#000000" }
 
     contentItem: Item {

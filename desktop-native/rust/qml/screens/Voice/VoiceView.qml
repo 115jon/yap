@@ -104,6 +104,7 @@ Rectangle {
                 height: 28
                 radius: Theme.radius
                 color: detailsHover.hovered ? Theme.tint1 : "transparent"
+                EaseColor on color {}
                 activeFocusOnTab: true
                 Accessible.role: Accessible.Button
                 Accessible.name: qsTr("Voice details")
@@ -438,6 +439,11 @@ Rectangle {
             y: stage.fit.scrolls ? 0 : Math.max(0, (stage.height - height) / 2)
             columns: stage.fit.cols
             spacing: 8
+            // Tiles join with a staggered fade and grow (ParticipantCard.tsx).
+            // The web's glide of the others to new cells is not done: a
+            // positioner's move also runs on every resize.
+            populate: TileEnter {}
+            add: TileEnter {}
             Repeater {
                 id: tiles
                 model: root.joined && !root.focused ? VoiceTileModel : null

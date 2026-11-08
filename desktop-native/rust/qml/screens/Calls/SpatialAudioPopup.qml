@@ -83,15 +83,8 @@ Popup {
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
-    enter: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-            NumberAnimation { property: "scale"; from: Theme.scaleIn; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-        }
-    }
-    exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur3Exit }
-    }
+    enter: PresenceIn { duration: Theme.durPopover; fromScale: Theme.scalePopover }
+    exit: PresenceOut { duration: Theme.durPopoverExit }
 
     // MENU_PANEL: ply-3, a 1 px line-strong edge and the 2 px ink-1 rule.
     background: Rectangle {
@@ -290,6 +283,7 @@ Popup {
                                 textFormat: Text.PlainText
                                 text: modeKey.text
                                 color: modeKey.active ? Theme.accentInk : modeKey.hovered ? Theme.ink1 : Theme.ink2
+                                EaseColor on color {}
                                 font: modeKey.active ? Theme.type.labelStrong : Theme.type.occupant
                             }
                             HoverHandler { cursorShape: Qt.PointingHandCursor }
@@ -720,6 +714,7 @@ Popup {
                                 textFormat: Text.PlainText
                                 text: Math.round(root.totalZoom * 100) + "%"
                                 color: zoomReset.hovered ? Theme.ink1 : Theme.ink2
+                                EaseColor on color {}
                                 font: Theme.type.numSm
                             }
                             background: Rectangle {

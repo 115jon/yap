@@ -16,6 +16,10 @@ Rectangle {
 
     // Whether the list was at its end right before the latest append.
     property bool stickToEnd: true
+    // The row a live append made, to play its entrance (onRowsInserted).
+    property bool appending: false
+    property int enterRow: -1
+    property double enterAt: 0
     property string editingId
     property string highlightId
     property string replyToId
@@ -370,11 +374,24 @@ Rectangle {
         // A jump's window grows at its end without following it.
         function onAboutToAppend() {
             root.stickToEnd = (root.nearEnd || root.followEnd) && !Chat.hasNewer
+            root.appending = true
+        }
+
+        // One message appended live to a list that already has rows enters
+        // (VirtualMessageList.tsx: tail appends only, never the first fill,
+        // a page of history or a jump's window). The row is made after this,
+        // at the list's next layout, and plays it once if that is soon.
+        function onRowsInserted(parent, first, last) {
+            if (root.appending && first === last && first > 0) {
+                root.enterRow = first
+                root.enterAt = Date.now()
+            }
         }
 
         // Follow new messages when already at the end, and always after
         // our own send.
         function onAppended(mine) {
+            root.appending = false
             if (root.stickToEnd || mine)
                 Qt.callLater(() => {
                     if (!root.stickToEnd && !mine)
@@ -642,7 +659,14 @@ Rectangle {
 
         delegate: MessageDelegate {
             id: row
+            required property int index
             width: view.width
+            Component.onCompleted: {
+                if (index === root.enterRow && Date.now() - root.enterAt < 500) {
+                    root.enterRow = -1
+                    row.enter()
+                }
+            }
             today: Chat.today
             keyFocused: view.activeFocus && ListView.isCurrentItem
             editingId: root.editingId
@@ -818,7 +842,12 @@ Rectangle {
             toastText.text = cut < 0 ? text : text.slice(0, cut)
             toastDesc.text = cut < 0 ? "" : text.slice(cut + 1)
             toast.failure = failure === true
-            toast.visible = true
+            // A toast already up swaps its text in place; a new one rises in.
+            if (!toast.visible || toastOut.running) {
+                toastOut.stop()
+                toast.visible = true
+                toastIn.restart()
+            }
             if (toast.failure) {
                 toastTimer.stop()
                 toastRun.stop()
@@ -826,6 +855,29 @@ Rectangle {
                 toastTimer.restart()
                 toastRun.restart()
             }
+        }
+        // Sonner's card, as rm-toaster sets it (styles/foundation.css):
+        // it rises its own height and fades in over 200 ms, ease-out, and
+        // leaves the same way in 140 ms.
+        function hide() {
+            if (toast.visible && !toastOut.running) {
+                toastIn.stop()
+                toastOut.restart()
+            }
+        }
+        transform: Translate { id: toastLift }
+        ParallelAnimation {
+            id: toastIn
+            NumberAnimation { target: toast; property: "opacity"; from: 0; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+            NumberAnimation { target: toastLift; property: "y"; from: Theme.reducedMotion ? 0 : toast.height; to: 0; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+        }
+        SequentialAnimation {
+            id: toastOut
+            ParallelAnimation {
+                NumberAnimation { target: toast; property: "opacity"; to: 0; duration: Theme.dur3Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+                NumberAnimation { target: toastLift; property: "y"; to: Theme.reducedMotion ? 0 : toast.height; duration: Theme.dur3Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+            }
+            PropertyAction { target: toast; property: "visible"; value: false }
         }
         visible: false
         z: 3
@@ -880,7 +932,7 @@ Rectangle {
             size: 32
             iconName: "close"
             tip: qsTr("Dismiss")
-            onClicked: toast.visible = false
+            onClicked: toast.hide()
         }
         // The time left: accent dither, 2 px cells, emptying left to right.
         Item {
@@ -910,7 +962,7 @@ Rectangle {
         Timer {
             id: toastTimer
             interval: 4000
-            onTriggered: toast.visible = false
+            onTriggered: toast.hide()
         }
     }
 

@@ -193,6 +193,7 @@ Column {
             height: Math.round(width * 9 / 16)
             radius: Theme.radius
             color: uploadMouse.containsMouse && enabled ? Theme.tint1 : "transparent"
+            EaseColor on color {}
             enabled: !busy && !root.disabledTiles
             opacity: enabled ? 1 : 0.45
             activeFocusOnTab: enabled
@@ -221,6 +222,7 @@ Column {
                     textFormat: Text.PlainText
                     text: upload.busy ? qsTr("Uploading…") : qsTr("Upload image")
                     color: uploadMouse.containsMouse ? Theme.ink1 : Theme.ink2
+                    EaseColor on color {}
                     font: Theme.type.caption
                 }
             }

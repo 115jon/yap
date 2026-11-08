@@ -176,7 +176,7 @@ Column {
             RotationAnimator on rotation {
                 from: 0
                 to: 360
-                duration: 900
+                duration: Theme.durSpin
                 loops: Animation.Infinite
                 running: plateSpin.visible && !Theme.reducedMotion
             }
@@ -250,6 +250,7 @@ Column {
                 textFormat: Text.PlainText
                 text: key.label
                 color: key.leadingGlyph.length > 0 && keyHover.hovered ? Theme.ink1 : key.labelInk
+                EaseColor on color {}
                 font: Theme.type.captionStrong
             }
             Icon {

@@ -42,15 +42,8 @@ Popup {
         }
     }
 
-    enter: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-            NumberAnimation { property: "scale"; from: Theme.scaleIn; to: 1; duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-        }
-    }
-    exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: 120 }
-    }
+    enter: PresenceIn { duration: Theme.reducedMotion ? 100 : 180 }
+    exit: PresenceOut { duration: Theme.reducedMotion ? 100 : 120; toScale: Theme.scaleIn }
 
     Timer {
         interval: 30000

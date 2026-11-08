@@ -129,6 +129,8 @@ Rectangle {
             anchors.centerIn: parent
             height: root.tileHeight
             spacing: 8
+            populate: TileEnter {}
+            add: TileEnter {}
             Repeater {
                 id: inCallTiles
                 model: root.joined ? VoiceTileModel : null
@@ -200,6 +202,7 @@ Rectangle {
                 height: 28
                 radius: Theme.radius
                 color: detailsHover.hovered ? Theme.tint1 : "transparent"
+                EaseColor on color {}
                 activeFocusOnTab: true
                 Accessible.role: Accessible.Button
                 Accessible.name: qsTr("Voice details")

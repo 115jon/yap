@@ -97,7 +97,7 @@ T.Button {
             RotationAnimator on rotation {
                 from: 0
                 to: 360
-                duration: 900
+                duration: Theme.durSpin
                 loops: Animation.Infinite
                 running: spinner.visible && !Theme.reducedMotion
             }

@@ -10,6 +10,7 @@ Rectangle {
     height: 48
     radius: 24
     color: hovered ? Theme.ply4 : Theme.ply3
+    EaseColor on color {}
     border.width: 1
     border.color: Theme.line
     Accessible.ignored: true

@@ -244,7 +244,10 @@ Item {
     // over the list, Up/Down to move, Enter or Tab to insert, Esc to close.
     Rectangle {
         id: mentionPanel
-        visible: root.mentionOpen
+        // MentionAutocomplete.tsx: an opacity fade at dur-1, in and out.
+        opacity: root.mentionOpen ? 1 : 0
+        EaseNumber on opacity {}
+        visible: opacity > 0
         z: 2
         x: 0
         width: Math.min(root.width, 360)
@@ -700,15 +703,8 @@ Item {
                         radius: Theme.radius
                         color: Theme.ink1
                     }
-                    enter: Transition {
-                        ParallelAnimation {
-                            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-                            NumberAnimation { property: "scale"; from: Theme.scaleIn; to: 1; duration: Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-                        }
-                    }
-                    exit: Transition {
-                        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur2Exit }
-                    }
+                    enter: PresenceIn { duration: Theme.dur2 }
+                    exit: PresenceOut { duration: Theme.durTipExit; toScale: 1 }
                 }
 
                 onTextChanged: {
@@ -846,6 +842,7 @@ Item {
                     anchors.centerIn: parent
                     text: "GIF"
                     color: gifHover.hovered || root.gifMedia === "gifs" ? Theme.ink1 : Theme.ink2
+                    EaseColor on color {}
                     font: Theme.type.silk
                 }
                 LazyPopup {

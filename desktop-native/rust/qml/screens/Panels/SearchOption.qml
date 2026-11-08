@@ -18,6 +18,7 @@ Rectangle {
     implicitHeight: Theme.keySm
     radius: Theme.radius
     color: lit || activeFocus ? Theme.tint2 : hover.hovered ? Theme.tint1 : "transparent"
+    EaseColor on color {}
     Accessible.role: Accessible.ListItem
     Accessible.name: root.option.label + (root.option.hint ? " " + root.option.hint : "")
         + (root.option.meta ? ", " + root.option.meta : "")

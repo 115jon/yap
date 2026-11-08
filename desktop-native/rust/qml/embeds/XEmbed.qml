@@ -140,6 +140,7 @@ Rectangle {
             textFormat: Text.PlainText
             text: qsTr("From %1").arg(root.embed.cardDomain)
             color: fromHover.hovered ? Theme.ink1 : Theme.ink3
+            EaseColor on color {}
             font: Theme.type.caption
             HoverHandler { id: fromHover; cursorShape: Qt.PointingHandCursor }
             TapHandler { onTapped: root.openLink(root.embed.cardUrl) }
@@ -202,6 +203,7 @@ Rectangle {
                     textFormat: Text.PlainText
                     text: quote.open ? qsTr("Show less") : "..."
                     color: quoteMore.hovered ? Theme.ink1 : Theme.ink3
+                    EaseColor on color {}
                     font: Theme.type.captionStrong
                     HoverHandler { id: quoteMore; cursorShape: Qt.PointingHandCursor }
                     TapHandler { onTapped: quote.open = !quote.open }

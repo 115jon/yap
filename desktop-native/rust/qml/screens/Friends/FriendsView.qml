@@ -251,15 +251,23 @@ Rectangle {
 
     Component {
         id: tabs
-        Row {
-            spacing: 24
-            Accessible.role: Accessible.PageTabList
-            Accessible.name: qsTr("Friends")
-            FriendsTab { value: "online"; text: qsTr("Online") }
-            FriendsTab { value: "all"; text: qsTr("All") }
-            // Incoming requests need you, so they earn the count badge.
-            FriendsTab { value: "pending"; text: qsTr("Pending"); count: Friends.pending }
-            FriendsTab { value: "blocked"; text: qsTr("Blocked") }
+        Item {
+            implicitWidth: friendTabs.implicitWidth
+            implicitHeight: 44
+            Row {
+                id: friendTabs
+                height: parent.height
+                spacing: 24
+                Accessible.role: Accessible.PageTabList
+                Accessible.name: qsTr("Friends")
+                FriendsTab { value: "online"; text: qsTr("Online") }
+                FriendsTab { value: "all"; text: qsTr("All") }
+                // Incoming requests need you, so they earn the count badge.
+                FriendsTab { value: "pending"; text: qsTr("Pending"); count: Friends.pending }
+                FriendsTab { value: "blocked"; text: qsTr("Blocked") }
+            }
+            // The chosen tab's rule slides between tabs.
+            TabRule { row: friendTabs }
         }
     }
 
@@ -395,13 +403,8 @@ Rectangle {
                 count: tabKey.count
             }
         }
+        // The rule is the strip's TabRule.
         background: Item {
-            Rectangle {
-                anchors.bottom: parent.bottom
-                width: parent.width
-                height: 2
-                color: tabKey.on ? Theme.ink1 : "transparent"
-            }
             Rectangle {
                 anchors.fill: parent
                 anchors.margins: -2

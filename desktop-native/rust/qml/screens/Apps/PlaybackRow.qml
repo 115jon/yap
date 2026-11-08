@@ -12,6 +12,7 @@ Rectangle {
     implicitHeight: 40 + volume.height
     radius: Theme.radius
     color: hover.hovered ? Theme.tint1 : "transparent"
+    EaseColor on color {}
 
     HoverHandler { id: hover }
 

@@ -32,6 +32,8 @@ Popup {
     onClosed: if (shown) Shop.openDetail("")
 
     Overlay.modal: Scrim { color: Theme.scrim }
+    enter: PresenceIn { fromScale: Theme.scaleDialog }
+    exit: PresenceOut { toScale: Theme.scaleDialogOut }
 
     background: Rectangle {
         radius: Theme.radiusSheet * 3
@@ -177,6 +179,7 @@ Popup {
                                 color: "transparent"
                                 border.width: modelData.selected ? 2 : 1
                                 border.color: modelData.selected ? Theme.accentInk : swatchHover.hovered ? Theme.lineStrong : Theme.line
+                                EaseColor on border.color {}
                                 Rectangle {
                                     anchors.fill: parent
                                     anchors.margins: 4

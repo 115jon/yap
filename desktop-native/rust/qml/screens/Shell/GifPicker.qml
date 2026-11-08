@@ -513,15 +513,8 @@ Popup {
             color: Theme.ink1
         }
     }
-    enter: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-            NumberAnimation { property: "scale"; from: Theme.scaleIn; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-        }
-    }
-    exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur3Exit }
-    }
+    enter: PresenceIn {}
+    exit: PresenceOut {}
 
     Timer {
         id: debounce
@@ -977,6 +970,7 @@ Popup {
                                     textFormat: Text.PlainText
                                     text: mode.modelData.text
                                     color: mode.active || modeHover.hovered ? Theme.ink1 : Theme.ink3
+                                    EaseColor on color {}
                                     font: Theme.type.captionStrong
                                 }
                                 HoverHandler { id: modeHover; cursorShape: Qt.PointingHandCursor }
@@ -1082,6 +1076,7 @@ Popup {
                             textFormat: Text.PlainText
                             text: qsTr("Clear all")
                             color: clearHover.hovered ? Theme.ink1 : Theme.ink3
+                            EaseColor on color {}
                             font: Theme.type.captionStrong
                             Accessible.role: Accessible.Button
                             Accessible.name: text
@@ -1514,7 +1509,7 @@ Popup {
                         RotationAnimator on rotation {
                             from: 0
                             to: 360
-                            duration: 900
+                            duration: Theme.durSpin
                             loops: Animation.Infinite
                             running: moreSpinner.visible && root.visible && !Theme.reducedMotion
                         }
@@ -1644,6 +1639,7 @@ Popup {
                     height: 24
                     radius: Theme.radius
                     color: switchable && (providerHover.hovered || providerMenu.visible) ? Theme.tint1 : "transparent"
+                    EaseColor on color {}
                     activeFocusOnTab: switchable
                     Accessible.role: switchable ? Accessible.ComboBox : Accessible.StaticText
                     Accessible.name: switchable ? qsTr("GIF provider") : root.providerLabel

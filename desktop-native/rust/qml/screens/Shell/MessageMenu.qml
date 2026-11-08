@@ -87,6 +87,7 @@ MenuPanel {
                 height: 32
                 radius: Theme.radius
                 color: quickArea.pressed ? Theme.tint3 : quickArea.containsMouse ? Theme.tint2 : Theme.tint1
+                EaseColor on color {}
                 scale: quickArea.pressed ? Theme.scalePressIcon : 1
                 Accessible.role: Accessible.Button
                 Accessible.name: qsTr("React with %1").arg(":" + modelData.s + ":")

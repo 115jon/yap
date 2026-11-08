@@ -146,6 +146,7 @@ Rectangle {
         height: root.collection === null ? 40 : 0
         visible: height > 0
         Row {
+            id: shopTabs
             x: 24
             height: parent.height
             spacing: 20
@@ -157,6 +158,8 @@ Rectangle {
             ShopTab { value: "nameplate"; text: qsTr("Nameplates"); count: root.model.counts.nameplate }
             ShopTab { value: "profile_frame"; text: qsTr("Frames"); count: root.model.counts.profile_frame }
         }
+        // The chosen tab's rule slides between tabs.
+        TabRule { row: shopTabs }
         Rectangle {
             anchors.bottom: parent.bottom
             width: parent.width
@@ -208,6 +211,7 @@ Rectangle {
                 text: tabKey.text
                 // ui/tabs.tsx: Bricolage 15/600, ink-3 until chosen or hovered.
                 color: tabKey.on || tabKey.hovered ? Theme.ink1 : Theme.ink3
+                EaseColor on color {}
                 font: Theme.type.control
             }
             Text {
@@ -219,13 +223,8 @@ Rectangle {
                 font: Theme.type.numSm
             }
         }
+        // The rule is the strip's TabRule.
         background: Item {
-            Rectangle {
-                anchors.bottom: parent.bottom
-                width: parent.width
-                height: 2
-                color: tabKey.on ? Theme.ink1 : "transparent"
-            }
             Rectangle {
                 anchors.fill: parent
                 anchors.margins: -2

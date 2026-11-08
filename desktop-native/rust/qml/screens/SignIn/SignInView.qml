@@ -414,6 +414,7 @@ Rectangle {
                     textFormat: Text.PlainText
                     text: tokenRow.visible ? qsTr("Hide token sign-in") : qsTr("Developer: use a session token")
                     color: devHover.hovered ? Theme.ink2 : Theme.ink3
+                    EaseColor on color {}
                     font: Theme.type.caption
                     HoverHandler { id: devHover; cursorShape: Qt.PointingHandCursor }
                     TapHandler { onTapped: tokenRow.visible = !tokenRow.visible }

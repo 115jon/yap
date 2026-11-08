@@ -189,6 +189,7 @@ Item {
             text: row.name
             elide: Text.ElideRight
             color: row.current || row.hovered ? Theme.ink1 : Theme.ink2
+            EaseColor on color {}
             font: row.current ? Theme.type.rowUnread : Theme.type.row
         }
         Text {

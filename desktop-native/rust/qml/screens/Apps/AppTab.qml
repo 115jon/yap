@@ -26,6 +26,7 @@ T.AbstractButton {
             textFormat: Text.PlainText
             text: tab.text
             color: tab.on || tab.hovered ? Theme.ink1 : Theme.ink2
+            EaseColor on color {}
             font: Theme.type.controlSm
         }
         Text {

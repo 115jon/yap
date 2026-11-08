@@ -59,13 +59,6 @@ T.ToolTip {
         radius: Theme.radius
         color: Theme.ink1
     }
-    enter: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-            NumberAnimation { property: "scale"; from: Theme.scaleIn; to: 1; duration: Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-        }
-    }
-    exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur2Exit }
-    }
+    enter: PresenceIn { duration: Theme.dur2 }
+    exit: PresenceOut { duration: Theme.durTipExit; toScale: 1 }
 }

@@ -204,6 +204,38 @@ Rectangle {
         interactive: root.dragId.length === 0
         reuseItems: true
 
+        // Rows that join after the tree has painted (someone entering a
+        // voice channel, a new channel, a category opening) fade in and
+        // rise 4 px, the rows they push glide, and a leaving row fades
+        // (tree.tsx join motion, motion.css list-row). Never on the first
+        // fill or a server switch: the list arms itself 400 ms after.
+        property bool armed: false
+        add: armed ? treeEnter : null
+        remove: armed ? treeRemove : null
+        displaced: armed ? treeDisplaced : null
+        ViewEnter { id: treeEnter }
+        ViewRemove { id: treeRemove }
+        ViewDisplaced { id: treeDisplaced }
+        Timer {
+            id: treeArm
+            interval: 400
+            running: true
+            onTriggered: list.armed = true
+        }
+        function disarm() {
+            list.armed = false
+            treeArm.restart()
+        }
+        Connections {
+            target: Nav
+            function onActiveServerIdChanged() { list.disarm() }
+            function onHomeChanged() { list.disarm() }
+        }
+        Connections {
+            target: ChannelTreeModel
+            function onModelReset() { list.disarm() }
+        }
+
         // The id of a row the list has created, for the drop line.
         function indexOfId(id) {
             for (let i = 0; i < count; ++i) {
@@ -225,7 +257,12 @@ Rectangle {
                     ShellState.voiceChannelNames[treeRow.itemId] = treeRow.name
             }
             Component.onCompleted: remember()
-            ListView.onReused: remember()
+            // A row pooled at the end of a remove transition is still faded
+            // out (ViewRemove); the row it becomes must show.
+            ListView.onReused: {
+                treeRow.opacity = 1
+                remember()
+            }
             onSettingsRequested: ShellState.channelSettingsRequested(treeRow.itemId)
             onMenuRequested: (row, at) => {
                 if (treeRow.kind === "channel")

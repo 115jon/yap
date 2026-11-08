@@ -129,7 +129,10 @@ Rectangle {
     IconKey {
         id: invite
         z: 1
-        visible: (hover.hovered || hovered || gear.hovered) && !drag.active
+        // Revealed on row hover with a dur-1 fade (ui/interaction.ts REVEAL).
+        opacity: (hover.hovered || hovered || gear.hovered) && !drag.active ? 1 : 0
+        EaseNumber on opacity {}
+        visible: opacity > 0
         // ChannelSidebar.tsx: Channel settings, then Invite at the end.
         anchors.right: parent.right
         anchors.rightMargin: 4
@@ -143,7 +146,10 @@ Rectangle {
     IconKey {
         id: gear
         z: 1
-        visible: row.manage && (hover.hovered || hovered || invite.hovered) && !drag.active
+        // Revealed on row hover with a dur-1 fade (ui/interaction.ts REVEAL).
+        opacity: row.manage && (hover.hovered || hovered || invite.hovered) && !drag.active ? 1 : 0
+        EaseNumber on opacity {}
+        visible: opacity > 0
         anchors.right: invite.left
         anchors.rightMargin: 2
         anchors.verticalCenter: parent.verticalCenter

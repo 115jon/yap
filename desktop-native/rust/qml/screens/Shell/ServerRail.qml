@@ -127,6 +127,7 @@ Rectangle {
                         textFormat: Text.PlainText
                         text: "+" + root.dmOverflow
                         color: moreHover.hovered ? Theme.ink1 : Theme.ink2
+                        EaseColor on color {}
                         font: Theme.type.kbd
                     }
                 }
@@ -144,6 +145,7 @@ Rectangle {
                     anchors.centerIn: parent
                     text: qsTr("Less")
                     color: lessHover.hovered ? Theme.ink1 : Theme.ink3
+                    EaseColor on color {}
                     font: Theme.type.captionStrong
                 }
                 HoverHandler { id: lessHover; cursorShape: Qt.PointingHandCursor }

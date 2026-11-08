@@ -329,15 +329,8 @@ Popup {
             color: Theme.ink1
         }
     }
-    enter: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-            NumberAnimation { property: "scale"; from: Theme.scaleIn; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-        }
-    }
-    exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur3Exit }
-    }
+    enter: PresenceIn {}
+    exit: PresenceOut {}
 
     // `rm-spinner`: a turning loader glyph in ink-3.
     component Spin: Icon {
@@ -349,7 +342,7 @@ Popup {
         RotationAnimator on rotation {
             from: 0
             to: 360
-            duration: 900
+            duration: Theme.durSpin
             loops: Animation.Infinite
             running: spin.visible && !Theme.reducedMotion
         }
@@ -1137,6 +1130,8 @@ Popup {
             padding: 4
             topPadding: 6
             closePolicy: Popup.NoAutoClose
+            enter: PresenceIn {}
+            exit: PresenceOut {}
             background: Rectangle {
                 radius: Theme.radius
                 color: Theme.ply3
@@ -1159,6 +1154,7 @@ Popup {
                         height: 36
                         radius: Theme.radius
                         color: toneRowHover.hovered || Emoji.skinTone === index ? Theme.tint2 : "transparent"
+                        EaseColor on color {}
                         Accessible.role: Accessible.MenuItem
                         Accessible.name: root.tones[index]
                         Accessible.checked: Emoji.skinTone === index

@@ -56,6 +56,7 @@ T.AbstractButton {
     background: Rectangle {
         radius: Theme.radius
         color: control.hovered || control.down ? Theme.tint1 : "transparent"
+        EaseColor on color {}
         border.width: control.visualFocus ? 2 : 0
         border.color: Theme.focus
     }

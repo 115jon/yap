@@ -83,6 +83,7 @@ Rectangle {
             height: 24
             radius: 12
             color: artHover.hovered ? Theme.ply4 : Theme.ply3
+            EaseColor on color {}
             Icon {
                 anchors.centerIn: parent
                 name: root.playing ? "pause" : "play"

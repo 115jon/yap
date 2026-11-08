@@ -175,6 +175,7 @@ Rectangle {
                 height: 32
                 radius: 16
                 color: prevHover.hovered ? Theme.ply4 : Theme.ply3
+                EaseColor on color {}
                 border.width: 1
                 border.color: Theme.line
                 Icon { anchors.centerIn: parent; name: "chevronLeft"; size: Theme.iconSm; color: Theme.ink1 }
@@ -192,6 +193,7 @@ Rectangle {
                 height: 32
                 radius: 16
                 color: nextHover.hovered ? Theme.ply4 : Theme.ply3
+                EaseColor on color {}
                 border.width: 1
                 border.color: Theme.line
                 Icon { anchors.centerIn: parent; name: "chevronRight"; size: Theme.iconSm; color: Theme.ink1 }
@@ -323,6 +325,7 @@ Rectangle {
             textFormat: Text.PlainText
             text: root.embed.commentsLink
             color: commentsHover.hovered ? Theme.ink1 : Theme.ink3
+            EaseColor on color {}
             font: Theme.type.caption
             HoverHandler { id: commentsHover; cursorShape: Qt.PointingHandCursor }
             TapHandler { onTapped: root.openLink(root.embed.url) }

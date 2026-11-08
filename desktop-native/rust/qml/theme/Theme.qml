@@ -299,6 +299,12 @@ QtObject {
 
     // ---------- Motion (styles/motion.css:20-41) ----------
     // Reduced motion caps durations at 100 ms and drops travel and scale.
+    // It follows Windows' "Animation effects" live (cpp/main.cpp
+    // MotionWatch); YAP_REDUCED_MOTION=1|0 overrides it (tests).
+    // The primitives that read these: PresenceIn/PresenceOut (popups),
+    // EaseColor/EaseNumber (hover and state Behaviors), ListEnter (one
+    // row's entrance) and ViewEnter/ViewRemove/ViewDisplaced (list and
+    // positioner transitions). Nothing here loops at rest.
     property bool reducedMotion: false
     readonly property int dur1: 100
     readonly property int dur2: reducedMotion ? 100 : 150
@@ -307,17 +313,41 @@ QtObject {
     readonly property int dur3Exit: reducedMotion ? 100 : 140
     readonly property int dur4: reducedMotion ? 100 : 250
     readonly property int dur4Exit: reducedMotion ? 100 : 180
+    // Tooltip exit (tooltip.tsx data-[state=closed]:duration-80).
+    readonly property int durTipExit: 80
+    // Popover presence (popover.tsx POPOVER_PRESENCE_VARS): 160 in, 100
+    // out, from 0.96.
+    readonly property int durPopover: reducedMotion ? 100 : 160
+    readonly property int durPopoverExit: 100
+    readonly property real scalePopover: reducedMotion ? 1 : 0.96
+    // Sheets (sheet.tsx duration-260, ease-drawer; out at dur-4-exit).
+    readonly property int durSheet: reducedMotion ? 100 : 260
+    // The pending spinner (motion.css .rm-spinner, 700 ms linear).
+    readonly property int durSpin: 700
+    // A pending send dims only after this (MessageItem.tsx delay-400).
+    readonly property int pendingDelay: 400
+    // The jump highlight lets go over this (data-[highlight=off]:duration-300).
+    readonly property int durHighlightOff: 300
+    // Voice tiles join 30 ms apart, the sixth and later together
+    // (ParticipantCard.tsx enterDelay).
+    readonly property int tileStagger: reducedMotion ? 0 : 30
     readonly property int speakOn: reducedMotion ? 0 : 60
     readonly property int speakOff: reducedMotion ? 0 : 220
     readonly property real scaleIn: reducedMotion ? 1 : 0.97
     readonly property real scaleOut: reducedMotion ? 1 : 0.985
     readonly property real scaleDialog: reducedMotion ? 1 : 0.96
-    // The media viewer's exit (ImageViewerModal.tsx MEDIA_PRESENCE zoom-out-[0.98]).
-    readonly property real scaleViewerOut: reducedMotion ? 1 : 0.98
+    // A dialog's exit (dialog.tsx DIALOG_SURFACE zoom-out-[0.98]); the media
+    // viewer's too (ImageViewerModal.tsx MEDIA_PRESENCE).
+    readonly property real scaleDialogOut: reducedMotion ? 1 : 0.98
+    readonly property real scaleViewerOut: scaleDialogOut
+    // A reaction chip you take back (MessageItem.tsx data-leaving:scale-90).
+    readonly property real scaleLeave: reducedMotion ? 1 : 0.9
     readonly property real scalePress: reducedMotion ? 1 : 0.97
     readonly property real scalePressIcon: reducedMotion ? 1 : 0.96
     readonly property int shift: reducedMotion ? 0 : 4
     readonly property int panelShift: reducedMotion ? 0 : 16
+    // The incoming call card drops in 8 px (slide-in-from-top-2).
+    readonly property int callShift: reducedMotion ? 0 : 8
     // For `easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut`.
     readonly property var easeOut: [0.23, 1, 0.32, 1, 1, 1]
     readonly property var easeInOut: [0.65, 0, 0.35, 1, 1, 1]

@@ -205,6 +205,7 @@ T.Popup {
                 height: 28
                 radius: Theme.radius
                 color: keyHover.hovered ? Theme.tint1 : "transparent"
+                EaseColor on color {}
                 Accessible.role: Accessible.Button
                 Accessible.name: qsTr("Edit custom status")
                 Row {
@@ -273,15 +274,8 @@ T.Popup {
 
     background: null
 
-    enter: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-            NumberAnimation { property: "scale"; from: Theme.scaleIn; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-        }
-    }
-    exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur3Exit }
-    }
+    enter: PresenceIn { duration: Theme.durPopover; fromScale: Theme.scalePopover }
+    exit: PresenceOut { duration: Theme.durPopoverExit }
 
     // A 36 px menu row (ui/menu.ts MENU_ITEM): a 16 px glyph (or an LED)
     // column, Geist 14/500, an optional trailing glyph; tint-2 on hover.

@@ -254,6 +254,23 @@ Item {
         + (failedLine.visible ? failedLine.height + 2 : 0), headerTop + (grouped ? 28 : 2 + 40))
     implicitHeight: isCall ? dividerHeight + 8 + 44 : contentBottom + 2 + footSlot.height
     opacity: dim ? 0.6 : 1
+    // The dim eases in at dur-2 (data-pending:duration-(--dur-2)).
+    EaseNumber on opacity { duration: Theme.dur2 }
+
+    // A message that arrives at the tail after the list has painted fades
+    // in and rises 4 px (VirtualMessageList.tsx `entering`, rm-list-enter);
+    // the list calls enter() as it makes that row. The entrance writes the
+    // opacity itself, so the dim's binding goes back on when it ends.
+    transform: Translate { id: lift }
+    function enter() {
+        entrance.restart()
+    }
+    ListEnter {
+        id: entrance
+        target: root
+        lift: lift
+        onStopped: root.opacity = Qt.binding(() => root.dim ? 0.6 : 1)
+    }
 
     // The row ground: a mention in accent-tint, hover tint-1.
     Rectangle {
@@ -263,6 +280,7 @@ Item {
         height: parent.height - y - footSlot.height
         color: root.isCall ? "transparent" : root.mentioned ? Theme.accentTint
              : hover.hovered ? Theme.tint1 : "transparent"
+        EaseColor on color {}
     }
 
     // CallRecordRow.tsx: px-4, the call glyph in a 32 px box (danger ink
@@ -335,7 +353,7 @@ Item {
         transitions: Transition {
             from: "on"
             to: ""
-            OpacityAnimator { target: jumpTint; duration: 300; easing.type: Easing.OutCubic }
+            NumberAnimation { target: jumpTint; property: "opacity"; duration: Theme.durHighlightOff; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
         }
     }
 
@@ -410,6 +428,7 @@ Item {
             width: 1
             height: root.headerTop + 2 - root.padTop - 10
             color: replyHover.containsMouse ? Theme.lineStrong : Theme.guide
+            EaseColor on color {}
         }
         Rectangle {
             x: 36
@@ -417,6 +436,7 @@ Item {
             width: 28
             height: 1
             color: replyHover.containsMouse ? Theme.lineStrong : Theme.guide
+            EaseColor on color {}
         }
         Row {
             id: replyLine
@@ -447,6 +467,7 @@ Item {
                 elide: Text.ElideRight
                 maximumLineCount: 1
                 color: replyHover.containsMouse ? Theme.ink2 : Theme.ink3
+                EaseColor on color {}
                 font.family: Theme.type.caption.family
                 font.pixelSize: Theme.type.caption.pixelSize
                 font.italic: root.replyPlaceholder
@@ -698,6 +719,7 @@ Item {
                     visible: root.mine && !root.pending
                     opacity: embedHover.hovered || activeFocus ? 1 : 0
                     color: removeArea.containsMouse ? Theme.tint1 : "transparent"
+                    EaseColor on color {}
                     activeFocusOnTab: root.mine
                     Accessible.role: Accessible.Button
                     Accessible.name: qsTr("Remove embeds")
@@ -796,6 +818,7 @@ Item {
                             textFormat: Text.PlainText
                             text: root.replyCount === 1 ? qsTr("1 reply") : qsTr("%1 replies").arg(root.replyCount)
                             color: chipTap.containsMouse ? Theme.ink1 : Theme.ink2
+                            EaseColor on color {}
                             font: Theme.type.captionStrong
                         }
                         Icon {
@@ -915,6 +938,7 @@ Item {
                             anchors.fill: parent
                             radius: Theme.radius
                             color: quickTap.pressed ? Theme.tint3 : quickTap.containsMouse ? Theme.tint2 : "transparent"
+                            EaseColor on color {}
                         }
                         Image {
                             anchors.centerIn: parent

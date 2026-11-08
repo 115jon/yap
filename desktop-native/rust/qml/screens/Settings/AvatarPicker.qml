@@ -61,6 +61,7 @@ PlateDialog {
         background: Rectangle {
             radius: Theme.radiusSheet
             color: upload.hovered ? Theme.tint2 : Theme.tint1
+            EaseColor on color {}
             border.width: upload.visualFocus ? 2 : 1
             border.color: upload.visualFocus ? Theme.focus : Theme.line
         }
@@ -100,7 +101,7 @@ PlateDialog {
                 RotationAnimator on rotation {
                     from: 0
                     to: 360
-                    duration: 900
+                    duration: Theme.durSpin
                     loops: Animation.Infinite
                     running: spinner.visible && !Theme.reducedMotion
                 }

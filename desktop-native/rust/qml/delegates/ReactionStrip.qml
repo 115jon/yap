@@ -20,6 +20,23 @@ Flow {
     spacing: 6
     topPadding: 6
 
+    // Motion (MessageItem.tsx): a reaction added after the strip has
+    // painted enters (rm-list-enter); taking back your own last one shrinks
+    // it to 0.9 and fades it (100 ms) before the toggle goes out. Chips are
+    // made again whenever `chips` changes, so the emoji already shown are
+    // remembered and only a new one plays.
+    property var shown: ({})
+    property bool painted: false
+    Component.onCompleted: remember()
+    onChipsChanged: Qt.callLater(remember)
+    function remember() {
+        const next = {}
+        for (const chip of root.chips)
+            next[chip.emoji] = true
+        root.shown = next
+        root.painted = true
+    }
+
     Repeater {
         model: root.chips
         Rectangle {
@@ -33,9 +50,54 @@ Flow {
             color: mine ? Theme.accentTint : "transparent"
             border.width: 1
             border.color: mine ? Theme.accentInk : chipHover.containsMouse ? Theme.ink2 : Theme.lineStrong
+            EaseColor on color {}
+            EaseColor on border.color {}
+            // PRESS: 0.97 while held.
+            scale: chipHover.pressed ? Theme.scalePress : 1
+            EaseNumber on scale {}
+            transform: Translate { id: lift }
+            Component.onCompleted: if (root.painted && root.shown[modelData.emoji] !== true) entrance.start()
+            ListEnter {
+                id: entrance
+                target: chip
+                lift: lift
+            }
+            ParallelAnimation {
+                id: leave
+                NumberAnimation { target: chip; property: "opacity"; to: 0; duration: Theme.dur2Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+                NumberAnimation { target: chip; property: "scale"; to: Theme.scaleLeave; duration: Theme.dur2Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+                onFinished: {
+                    chip.toggleSent = true
+                    root.toggled(chip.modelData.emoji)
+                    restore.start()
+                }
+            }
+            // The strip rebuilt (someone else reacted) during the leave: the
+            // click still counts.
+            property bool toggleSent: false
+            Component.onDestruction: if (leave.running && !toggleSent) root.toggled(modelData.emoji)
+            // The update normally rebuilds the strip first; if the reaction
+            // stays (the toggle failed), the chip comes back.
+            Timer {
+                id: restore
+                interval: 400
+                onTriggered: {
+                    chip.opacity = 1
+                    chip.scale = Qt.binding(() => chipHover.pressed ? Theme.scalePress : 1)
+                }
+            }
             Accessible.role: Accessible.Button
             Accessible.name: (mine ? qsTr("Remove %1 reaction, %2") : qsTr("Add %1 reaction, %2"))
                 .arg(modelData.label).arg(modelData.count)
+
+            // The hover and press ink (PRESS: currentColor at 8 / 14 %).
+            Rectangle {
+                anchors.fill: parent
+                radius: parent.radius
+                color: chip.ink
+                opacity: chipHover.pressed ? 0.14 : chipHover.containsMouse ? 0.08 : 0
+                EaseNumber on opacity {}
+            }
 
             Row {
                 id: chipRow
@@ -87,7 +149,9 @@ Flow {
                 onClicked: mouse => {
                     if (mouse.button === Qt.RightButton)
                         root.detailsRequested(chip.modelData.emoji)
-                    else
+                    else if (chip.mine && chip.modelData.count <= 1 && !leave.running)
+                        leave.start()
+                    else if (!leave.running)
                         root.toggled(chip.modelData.emoji)
                 }
             }

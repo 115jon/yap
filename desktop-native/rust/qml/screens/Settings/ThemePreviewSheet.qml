@@ -33,7 +33,7 @@ T.Drawer {
     onClosed: SettingsNav.previewing = false
 
     enter: Transition {
-        NumberAnimation { property: "position"; to: 1; duration: Theme.dur4; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
+        NumberAnimation { property: "position"; to: 1; duration: Theme.durSheet; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
     }
     exit: Transition {
         NumberAnimation { property: "position"; to: 0; duration: Theme.dur4Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }

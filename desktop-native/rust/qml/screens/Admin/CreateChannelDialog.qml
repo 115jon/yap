@@ -189,6 +189,7 @@ PlateDialog {
         background: Rectangle {
             radius: Theme.radius
             color: card.checked ? Theme.accentTint : card.hovered ? Theme.tint1 : "transparent"
+            EaseColor on color {}
             border.width: card.checked ? 2 : 1
             border.color: card.checked ? Theme.accentInk : Theme.line
             Rectangle {

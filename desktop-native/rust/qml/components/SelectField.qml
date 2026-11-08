@@ -60,6 +60,7 @@ T.AbstractButton {
         color: Theme.ply2
         border.width: control.visualFocus ? 2 : 1
         border.color: control.visualFocus ? Theme.ink1 : control.hovered || list.visible ? Theme.ink2 : Theme.lineField
+        EaseColor on border.color {}
     }
 
     MenuPanel {

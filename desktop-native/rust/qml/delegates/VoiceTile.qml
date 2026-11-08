@@ -115,6 +115,7 @@ Item {
         color: root.overMedia ? "black" : Theme.ply2
         border.width: 1
         border.color: root.focused ? Theme.accentInk : hover.hovered ? Theme.lineStrong : Theme.line
+        EaseColor on border.color {}
 
         Loader {
             id: surface
@@ -251,6 +252,7 @@ Item {
         background: Rectangle {
             radius: Theme.radius
             color: Qt.rgba(0, 0, 0, previewKey.down ? 0.75 : previewKey.hovered ? 0.7 : 0.6)
+            EaseColor on color {}
             border.width: previewKey.visualFocus ? 2 : 0
             border.color: Theme.focus
         }
@@ -393,6 +395,7 @@ Item {
         background: Rectangle {
             radius: Theme.radius
             color: Qt.rgba(0, 0, 0, moreKey.down ? 0.75 : moreKey.hovered ? 0.7 : 0.6)
+            EaseColor on color {}
             border.width: moreKey.visualFocus ? 2 : 0
             border.color: Theme.focus
         }

@@ -161,6 +161,7 @@ PlateDialog {
             anchors.fill: parent
             radius: Theme.radius
             color: lineHover.hovered ? Theme.tint1 : "transparent"
+            EaseColor on color {}
         }
         Avatar {
             id: face

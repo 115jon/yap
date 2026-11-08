@@ -207,6 +207,7 @@ ListView {
                     height: 56
                     radius: Theme.radiusSheet * 2
                     color: noneHover.hovered ? Theme.tint1 : Theme.ply2
+                    EaseColor on color {}
                     border.width: slot.modelData.equipped ? 2 : 1
                     border.color: slot.modelData.equipped ? Theme.accentInk : Theme.line
                     Row {

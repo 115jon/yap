@@ -102,6 +102,7 @@ PlateDialog {
             font: trust.font
             wrapMode: Text.WrapAnywhere
             color: trust.hovered ? Theme.ink1 : Theme.ink2
+            EaseColor on color {}
         }
     }
 

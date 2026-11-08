@@ -60,6 +60,7 @@ PlateDialog {
             text: dontAsk.text
             font: dontAsk.font
             color: dontAsk.hovered ? Theme.ink1 : Theme.ink2
+            EaseColor on color {}
         }
     }
 

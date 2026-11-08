@@ -78,15 +78,8 @@ Popup {
 
     // Over the profile editor: the lighter stacked scrim.
     Overlay.modal: Scrim { color: Theme.scrimStacked }
-    enter: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur4; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-            NumberAnimation { property: "scale"; from: Theme.reducedMotion ? 1 : 0.98; to: 1; duration: Theme.dur4; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-        }
-    }
-    exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur4Exit }
-    }
+    enter: PresenceIn { duration: Theme.dur4; fromScale: Theme.scaleDialogOut }
+    exit: PresenceOut { duration: Theme.dur4Exit; toScale: Theme.scaleDialogOut }
 
     background: Rectangle {
         radius: Theme.radius
@@ -263,6 +256,7 @@ Popup {
                                 textFormat: Text.PlainText
                                 text: chip.modelData.name
                                 color: chipHover.hovered ? Theme.ink1 : Theme.ink2
+                                EaseColor on color {}
                                 font.family: Theme.type.row.family
                                 font.weight: Font.Medium
                                 font.pixelSize: 13

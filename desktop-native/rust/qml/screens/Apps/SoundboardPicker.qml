@@ -321,15 +321,8 @@ Popup {
             color: Theme.ink1
         }
     }
-    enter: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-            NumberAnimation { property: "scale"; from: Theme.scaleIn; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-        }
-    }
-    exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur3Exit }
-    }
+    enter: PresenceIn {}
+    exit: PresenceOut {}
 
     // `rm-spinner`: a turning loader glyph in ink-3.
     component Spin: Icon {
@@ -341,7 +334,7 @@ Popup {
         RotationAnimator on rotation {
             from: 0
             to: 360
-            duration: 900
+            duration: Theme.durSpin
             loops: Animation.Infinite
             running: spin.visible && !Theme.reducedMotion
         }
@@ -531,6 +524,7 @@ Popup {
             anchors.fill: parent
             radius: Theme.radius
             color: addArea.containsMouse ? Theme.tint1 : "transparent"
+            EaseColor on color {}
         }
         // A dashed edge: a Canvas-free dash of short segments.
         Repeater {
@@ -583,6 +577,7 @@ Popup {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: qsTr("Add sound")
                 color: addArea.containsMouse ? Theme.ink1 : Theme.ink3
+                EaseColor on color {}
                 font: Theme.type.occupant
             }
         }

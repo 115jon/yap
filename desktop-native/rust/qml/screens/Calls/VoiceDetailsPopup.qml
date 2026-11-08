@@ -16,6 +16,10 @@ import com.yap.native
 Popup {
     id: root
 
+    // Popover presence (popover.tsx): 160 ms in from 0.96, 100 ms out.
+    enter: PresenceIn { duration: Theme.durPopover; fromScale: Theme.scalePopover }
+    exit: PresenceOut { duration: Theme.durPopoverExit }
+
     readonly property var calls: JSON.parse(Calls.view)
     readonly property var stats: calls.stats ?? null
     readonly property var samples: stats ? stats.samples : []
@@ -278,6 +282,7 @@ Popup {
             height: visible ? 40 : 0
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.line }
             Row {
+                id: sectionTabs
                 x: 16
                 height: parent.height
                 spacing: 24
@@ -310,13 +315,6 @@ Popup {
                             Behavior on color { ColorAnimation { duration: Theme.dur1 } }
                         }
                         Rectangle {
-                            visible: tabKey.active
-                            anchors.bottom: parent.bottom
-                            width: parent.width
-                            height: 2
-                            color: Theme.ink1
-                        }
-                        Rectangle {
                             visible: tabKey.activeFocus
                             anchors.fill: parent
                             anchors.topMargin: 6
@@ -333,6 +331,8 @@ Popup {
                     }
                 }
             }
+            // The chosen tab's rule slides between tabs.
+            TabRule { row: sectionTabs; flag: "active" }
         }
 
         // The body scrolls when the window is too short for it.
@@ -653,6 +653,7 @@ Popup {
                                     textFormat: Text.PlainText
                                     text: qsTr("Samples as a table")
                                     color: toggleHover.hovered ? Theme.ink1 : Theme.ink2
+                                    EaseColor on color {}
                                     font: Theme.type.silk
                                 }
                             }

@@ -31,6 +31,9 @@ Item {
             id: flow
             width: parent.width
             spacing: 8
+            // Each file attached fades in and rises 4 px (AttachmentList.tsx
+            // rm-list-enter).
+            add: ViewEnter {}
 
             Repeater {
                 id: tiles
@@ -109,7 +112,7 @@ Item {
                                 running: tile.uploadState === "uploading" && tile.visible
                                 from: 0
                                 to: 360
-                                duration: 900
+                                duration: Theme.durSpin
                                 loops: Animation.Infinite
                             }
                         }

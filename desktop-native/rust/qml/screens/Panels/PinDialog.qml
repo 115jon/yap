@@ -44,15 +44,8 @@ Popup {
         border.color: Theme.lineStrong
     }
 
-    enter: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-            NumberAnimation { property: "scale"; from: Theme.scaleDialog; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-        }
-    }
-    exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur3Exit }
-    }
+    enter: PresenceIn { fromScale: Theme.scaleDialog }
+    exit: PresenceOut { toScale: Theme.scaleDialogOut }
 
     contentItem: Column {
         spacing: 16

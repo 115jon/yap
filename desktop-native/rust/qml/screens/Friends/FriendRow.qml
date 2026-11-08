@@ -79,6 +79,7 @@ Rectangle {
             text: row.person.name
             elide: Text.ElideRight
             color: hover.hovered ? Theme.ink1 : Theme.ink2
+            EaseColor on color {}
             font: Theme.type.row
         }
         Text {

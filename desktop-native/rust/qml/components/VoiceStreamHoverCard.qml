@@ -50,12 +50,8 @@ T.Popup {
         FloatShadow { radius: Theme.radiusSheet }
     }
 
-    enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-    }
-    exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur2Exit }
-    }
+    enter: PresenceIn { duration: Theme.dur2; fromScale: 1 }
+    exit: PresenceOut { duration: Theme.dur2Exit; toScale: 1 }
 
     contentItem: Column {
         spacing: 0

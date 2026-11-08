@@ -79,6 +79,7 @@ PlateDialog {
             height: 64
             radius: Theme.radius
             color: iconHover.hovered ? Theme.tint1 : Theme.ply2
+            EaseColor on color {}
             activeFocusOnTab: true
             Accessible.role: Accessible.Button
             Accessible.name: qsTr("Server icon, optional")

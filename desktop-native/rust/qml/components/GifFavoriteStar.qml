@@ -47,6 +47,7 @@ T.Button {
     background: Rectangle {
         radius: Theme.radius
         color: Qt.rgba(0, 0, 0, control.hovered ? 0.72 : 0.6)
+        EaseColor on color {}
         Rectangle {
             anchors.fill: parent
             anchors.margins: -2

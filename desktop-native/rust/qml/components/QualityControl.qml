@@ -137,6 +137,7 @@ Column {
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             color: chip.checked ? Theme.accentInk : chip.hovered && chip.enabled ? Theme.ink1 : Theme.ink2
+            EaseColor on color {}
             font.family: chip.checked ? "Yap Geist SemiBold" : "Yap Geist Medium"
             font.pixelSize: 14
             font.weight: chip.checked ? Font.DemiBold : Font.Medium

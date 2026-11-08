@@ -1220,3 +1220,224 @@ New switches:
     these cleared on their own within minutes.
   - One system-menu capture was a screen copy of our menu's rectangle. That
     copy is deleted and the code is removed.
+
+## Motion pass
+
+Pass of 2026-11-08, on 0.2.7 (HEAD e4b92620). The user's report: next to
+the web and Tauri app, native felt animation-less. Earlier passes matched
+pixels at rest; this one matches motion.
+
+Native ran on the offline fixture only (`YAP_FIXTURE=chat-10k`, profiles
+`motion`, `motion2`, `motion3`, with `YAP_TEST_POINTER`, `YAP_NO_TOASTS`,
+`YAP_NO_CLIPBOARD`, `YAP_LOG_EXTERNAL_OPEN`, `YAP_NULL_SPEAKER`). No call
+was made and jontest was not used. The baseline is the 0.2.7 exe, copied to
+`F:/ct/yapn/tmp/motion/base/` before any change. The web side is headless
+Edge as Spike Peer (`peer.json`), dark, 1280 x 800. Everything stays in
+`F:/ct/yapn/tmp/motion/`.
+
+### Method
+
+- **Native frames.** `seq.ps1` posts in-process pointer and key events to
+  our window and captures our window with PrintWindow (never the screen),
+  stamping each frame from the trigger. It gets a frame every 16-33 ms.
+- **Web frames.** `webmotion.mjs` records a CDP screencast (one frame per
+  compositor frame).
+- **Web timing.** `webtiming.mjs` reads `document.getAnimations()` mid-run:
+  each running animation's real duration, delay and easing. This is more
+  exact than frames.
+- **Progress.** `progress.py` rates each frame's distance from the first
+  frame to the last inside a crop. Smaller probes measure the scrim's
+  darkness, a new row's ink and rise, a chip's ink, and the tab rule's x.
+
+### Inventory: web motion against native
+
+Status: **match** (already matched before this pass), **fixed** (this
+pass), **partial**, **gap** (not done), **n/a** (no motion on the web
+either). Durations are in ms. "House ease-out" is
+`cubic-bezier(0.23, 1, 0.32, 1)`.
+
+| group                    | web motion (source)                                                                                                                                              | native before                                                                                                     | native now                                                                                                                                                                                                                                                                                                       | status                        |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| tokens                   | `--dur-1..4` and their exits, speak 60/220, the scales, shift 4/16, ease-out, ease-in-out and ease-drawer (`motion.css`, `styles.css`)                           | most were already in Theme.qml                                                                                    | Added the tooltip exit (80), popover 160/100 from 0.96, sheet 260, spinner 700, pending delay 400, highlight 300, tile stagger 30, dialog out 0.98, leave 0.9 and call shift 8                                                                                                                                   | fixed                         |
+| reduced motion           | `prefers-reduced-motion`: travel and scale go to zero, durations cap at 100, live                                                                                | SPI_GETCLIENTAREAANIMATION read once at start                                                                     | The same, plus it follows WM_SETTINGCHANGE live (`MotionWatch`, cpp/main.cpp). `YAP_REDUCED_MOTION=1` or `0` overrides it                                                                                                                                                                                        | fixed                         |
+| menus, pickers           | `.rm-presence`: in 200 (fade, scale from 0.97); out 140 (fade, scale to 0.985), house ease-out                                                                   | in matched; out was a linear fade with no scale                                                                   | `PresenceIn` / `PresenceOut`                                                                                                                                                                                                                                                                                     | fixed                         |
+| popovers                 | popover.tsx: 160 in from 0.96, 100 out                                                                                                                           | 200 from 0.97                                                                                                     | `PresenceIn { durPopover, scalePopover }` (profile, account, spatial audio, call panel, voice details, colour)                                                                                                                                                                                                   | fixed                         |
+| notification inbox       | NotificationBell: 180 in, 120 out, 0.97. Live: 180, CSS `ease`, no exit                                                                                          | 180 in; out was a linear fade                                                                                     | 180 in, 120 out, house ease-out                                                                                                                                                                                                                                                                                  | fixed                         |
+| tooltips                 | 150 in (fade, scale 0.97), out an 80 fade (live: the same)                                                                                                       | out 100                                                                                                           | out 80, no scale                                                                                                                                                                                                                                                                                                 | fixed                         |
+| dialog scrim             | DialogOverlay: fade in 200, out 140 (live in: 200, CSS `ease`)                                                                                                   | **snapped in one frame**, both ways                                                                               | `Scrim` fades through a Behavior (QQuickPopup writes the dimmer's opacity through QQmlProperty). The viewer's scrim goes out at 150; the quick switcher and video full screen have none, as on the web                                                                                                           | fixed                         |
+| dialog surface           | in 200 (fade, scale from 0.96), out 140 to 0.98. Live: 200, CSS `ease`, and no exit seen (Create server, Cancel/Escape)                                          | in matched; out was a fade with no scale                                                                          | `PresenceIn { scaleDialog }` / `PresenceOut { scaleDialogOut }`. Also added to the shop item detail, which had no motion                                                                                                                                                                                         | fixed                         |
+| wide surfaces            | settings, profile editor, workbench, collectible picker                                                                                                          | 250 in from 0.98; out was a fade                                                                                  | 250 in, 180 out to 0.98                                                                                                                                                                                                                                                                                          | fixed                         |
+| incoming call card       | IncomingCallModal: fade, drops 8 px over 200; out a 100 fade                                                                                                     | OutCubic, 140 out                                                                                                 | house ease-out, `callShift`, 100 out                                                                                                                                                                                                                                                                             | fixed                         |
+| sheets, drawers          | sheet.tsx: in 260, out 180, ease-drawer                                                                                                                          | 260, 250 and 250                                                                                                  | all `durSheet` (260)                                                                                                                                                                                                                                                                                             | fixed                         |
+| side panels (dock)       | none: SidePanel dock mounts and unmounts; the view-transition rule is not wired                                                                                  | none                                                                                                              | none                                                                                                                                                                                                                                                                                                             | n/a                           |
+| stacked dialogs          | BEHIND_CUE: the layer behind moves up 6 px and scales to 0.985 over 200                                                                                          | none                                                                                                              | none                                                                                                                                                                                                                                                                                                             | gap                           |
+| buttons                  | PRESS: scale 0.97 (icons 0.96) and a currentColor overlay at 8 or 14 %, 100                                                                                      | KitButton, IconKey, KeyButton and the rail matched                                                                | unchanged                                                                                                                                                                                                                                                                                                        | match                         |
+| rows, links, chips       | transition-colors at 100, ease-out (sidebar-row.ts, MessageItem, ChatHeader, tabs, embeds and more)                                                              | about 80 colour bindings snapped (message row ground, channel and DM names, member names, embeds, settings, shop) | `EaseColor on color {}` on 78 Rectangle and Text bindings. Names driven by a pooled row's roles (channel, DM, voice member) stay instant, so a reused row never fades from its last owner's ink. Icons stay instant too: an Icon's colour is part of its raster key, so easing it would re-rasterise every frame | fixed (not icons)             |
+| hover reveal             | REVEAL: row keys fade in 100                                                                                                                                     | the channel row's invite and settings keys popped                                                                 | fade at 100 (`EaseNumber`)                                                                                                                                                                                                                                                                                       | fixed                         |
+| message hover bar        | REVEAL plus the bar's own fade and scale                                                                                                                         | 100 fade and scale                                                                                                | unchanged                                                                                                                                                                                                                                                                                                        | match                         |
+| new message (tail)       | rm-list-enter: fade, rises 4 px over 200; live tail appends only                                                                                                 | none                                                                                                              | ChatView `onRowsInserted` marks a single live append; the row's `enter()` plays `ListEnter` once                                                                                                                                                                                                                 | fixed                         |
+| pending send             | dims to 60 % after 400, over 150                                                                                                                                 | dimmed after 400, at once                                                                                         | eases over 150 (`EaseNumber`)                                                                                                                                                                                                                                                                                    | fixed                         |
+| jump highlight           | accent tint at once, then a 300 fade                                                                                                                             | 300 OutCubic, as an OpacityAnimator                                                                               | 300 house ease-out, as a NumberAnimation (no Animator left in a hidden row)                                                                                                                                                                                                                                      | fixed                         |
+| reactions                | a chip added after paint enters (rm-list-enter); your last one shrinks to 0.9 and fades over 100, then toggles; PRESS                                            | no motion, no press                                                                                               | Only new emoji enter. Taking back your last one plays the leave, then toggles (it comes back after 400 if the toggle fails). Press 0.97 with an overlay, colours eased                                                                                                                                           | fixed                         |
+| deleting a message       | fades over 140, then hides                                                                                                                                       | gone at once                                                                                                      | unchanged                                                                                                                                                                                                                                                                                                        | gap                           |
+| members, occupants       | tree.tsx: a joining row fades in and rises 4 px over 200; leaving rows fade while the rest glide over 200 (ease-in-out); category collapse is rm-collapse at 200 | none                                                                                                              | Channel tree ListView: `add` ViewEnter, `remove` ViewRemove, `displaced` ViewDisplaced. Armed 400 after the first fill, a server switch or a reset. The member panel has no motion on the web either                                                                                                             | fixed (collapse approximated) |
+| attachments              | each new tile enters (rm-list-enter)                                                                                                                             | none                                                                                                              | UploadTray Flow `add: ViewEnter`                                                                                                                                                                                                                                                                                 | fixed                         |
+| reply bar                | rm-list-enter                                                                                                                                                    | 200 fade and shift                                                                                                | unchanged                                                                                                                                                                                                                                                                                                        | match                         |
+| mention autocomplete     | fades over 100, in and out                                                                                                                                       | popped                                                                                                            | `EaseNumber` on opacity                                                                                                                                                                                                                                                                                          | fixed                         |
+| toasts                   | sonner via rm-toaster: rises its height and fades in over 200; out 140                                                                                           | popped                                                                                                            | ChatView toast `toastIn` / `toastOut` (Translate plus opacity)                                                                                                                                                                                                                                                   | fixed                         |
+| speaking LED and ring    | 60 on, 220 off, opacity only                                                                                                                                     | Led, VoiceTile, AccountRow                                                                                        | unchanged                                                                                                                                                                                                                                                                                                        | match                         |
+| voice tiles join         | ParticipantCard: fade, scale from 0.97 over 200, 30 apart (from the sixth, together)                                                                             | none                                                                                                              | `TileEnter` on the stage Grid and the DM call Row (`populate` and `add`)                                                                                                                                                                                                                                         | fixed                         |
+| tiles moving             | `.tile` view transition: glide over 200, ease-in-out                                                                                                             | none                                                                                                              | Not done: a positioner's `move` also runs on every resize                                                                                                                                                                                                                                                        | gap                           |
+| call panel expanding     | rm-collapse at 200                                                                                                                                               | `reveal` Behavior at 200                                                                                          | unchanged                                                                                                                                                                                                                                                                                                        | match                         |
+| route changes            | none (server, channel and settings switches have no transition)                                                                                                  | none                                                                                                              | none                                                                                                                                                                                                                                                                                                             | n/a                           |
+| skeletons                | static, no shimmer                                                                                                                                               | static                                                                                                            | static                                                                                                                                                                                                                                                                                                           | match                         |
+| spinners                 | rm-spinner: 700 linear while mounted                                                                                                                             | 900 (or 800)                                                                                                      | `Theme.durSpin` (700) on all 16                                                                                                                                                                                                                                                                                  | fixed                         |
+| loading mark             | yap-bark: steps over 1.4 s                                                                                                                                       | YapBark                                                                                                           | unchanged                                                                                                                                                                                                                                                                                                        | match                         |
+| unread pill, badges      | rail pill colour and height eased; count badges static                                                                                                           | RailPill size eased; colour snapped                                                                               | colour eased                                                                                                                                                                                                                                                                                                     | fixed                         |
+| jump to present          | fades and rises 4 px over 200                                                                                                                                    | the same                                                                                                          | unchanged                                                                                                                                                                                                                                                                                                        | match                         |
+| new-messages divider     | static                                                                                                                                                           | static                                                                                                            | static                                                                                                                                                                                                                                                                                                           | n/a                           |
+| tabs (`rule`)            | the 2 px indicator slides and resizes over 200, ease-in-out                                                                                                      | a rule per tab that jumped (the GIF picker already slid)                                                          | `TabRule` in the member panel, shop, friends, voice details and privacy                                                                                                                                                                                                                                          | fixed                         |
+| switch                   | thumb 150, fill and LED 150, press 0.97                                                                                                                          | SettingSwitch                                                                                                     | unchanged                                                                                                                                                                                                                                                                                                        | match                         |
+| emoji, GIF, stickers     | PickerSurface: menu presence                                                                                                                                     | in matched; out was a linear fade                                                                                 | `PresenceIn` / `PresenceOut` (the skin-tone menu too)                                                                                                                                                                                                                                                            | fixed                         |
+| image viewer             | surface in 200 / out 150; media scales from 0.96 and to 0.98; zoom eased over 200                                                                                | matched, but the scrim snapped                                                                                    | the scrim fades (out at 150)                                                                                                                                                                                                                                                                                     | fixed                         |
+| name effects, nameplates | play while hovered, never at rest                                                                                                                                | pass 7, X6                                                                                                        | unchanged                                                                                                                                                                                                                                                                                                        | match                         |
+
+### What changed
+
+- **Tokens.** `rust/qml/theme/Theme.qml` (the motion block) holds every
+  value above, each with its web source.
+- **Primitives.** These are new in `rust/qml/components/` and registered in
+  `rust/build.rs`.
+  - `PresenceIn` and `PresenceOut`: popup `enter` and `exit` Transitions.
+  - `EaseColor` and `EaseNumber`: Behaviors at dur-1, house ease-out. They
+    are always NumberAnimation or ColorAnimation, never an Animator.
+  - `ListEnter`: one row's fade-and-rise, on a Translate.
+  - `ViewEnter`, `ViewRemove` and `ViewDisplaced`: transitions for ListViews
+    and positioners.
+  - `TileEnter`: the staggered tile join.
+  - `TabRule`: the sliding tab indicator.
+- **Applied.**
+  - 32 popups and dialogs, plus the scrims of the image viewer, video
+    full screen and quick switcher.
+  - `Scrim.qml`.
+  - ChatView: tail entrance, toast, and the eased message row in
+    `MessageDelegate.qml`.
+  - `ReactionStrip.qml`.
+  - `ChannelSidebar.qml`, `ChannelRow.qml`, `UploadTray.qml`,
+    `Composer.qml`, `VoiceView.qml` and `DmCallRegion.qml`.
+  - Five tab strips.
+  - 78 hover-colour Behaviors.
+  - 16 spinners.
+  - `cpp/main.cpp` (`MotionWatch`, `YAP_REDUCED_MOTION`).
+
+### Evidence
+
+All of these frame sequences are in `F:/ct/yapn/tmp/motion/`. `b-*` is the
+0.2.7 baseline, `n-*` and `n2-*` are this build, and `web/` is the live
+web. Native times count from the posted event.
+
+- **Dialog scrim** (mean ink over the member list, 4.7 is undimmed and 2.0
+  is dimmed).
+  - Baseline open: 4.7 then 2.0 at once, at +3 ms. Baseline close: 2.0 then
+    4.7 at once.
+  - Now, open: 4.7 at 46 ms, 2.6 at 78, 2.2 at 110, 2.1 at 144, 2.0 at 177.
+  - Now, close: 2.0 at 32 ms, 3.6 at 49, 4.2 at 66, 4.6 at 99, 4.7 at 148.
+  - Web open: frame progress 0.07, 0.22, 0.40, 0.55, 0.66, 0.77, 0.84, 0.90,
+    0.95 and 0.98 at about 17 ms apart, done about 200 ms after it starts.
+    `getAnimations`: `enter` 200 on the overlay and the content.
+- **Dialog surface.** Native progress reaches 0.96 at about 100 ms after it
+  starts and 1.0 by about 250 ms (200 ms of house ease-out).
+  - The live web runs the same 200 ms, but on CSS `ease` (see below).
+  - Reduced motion (`motion3`) finishes in about 100 ms.
+- **New message** (`n-send`, the new row's brightest ink and its top
+  line):
+  - 0 at the first frame;
+  - 168 (69 %) at +52 ms, 1 px low;
+  - 202 at +68 ms;
+  - 229 at +84 ms;
+  - 239 at +118 ms;
+  - 242, in place, by +150 ms.
+- **Reaction added** (`n-react-add`, the new chip's ink): 140, then 191 at
+  +79 ms, 208 at +112 ms and 216 at +180 ms.
+- **Reaction taken back** (`n-react-leave`): 53, then 22 at +30 ms and 14 at
+  +46 ms. The strip then reflows once the toggle lands.
+- **Channel row hover** (`n-row-hover`): progress 0.17, 0.26, 0.50, 0.64,
+  then 1.0 at about +133 ms (100 ms from the first change).
+- **Tab rule** (`n-tabs`, Online to All on Friends): the left edge moves
+  478, 480, 482, 487, 494, 506, 532, 544, 548 over about 200 ms, with a
+  slow start and end. Its width eases from 46 to 19 at the same time.
+- **Tooltip.** The baseline already matched: 500 ms delay, then about
+  100 ms to full. The web is the same (`enter` 150, `exit` 80).
+- **Inbox.** The web is 180 in on CSS `ease`. Native fades in about 150 ms
+  and out about 100 ms, house ease-out.
+
+### Performance
+
+Focused idle on the fixture, 60 s after a 60 s settle
+(`measure-native.ps1 -Mode sample`, a window the harness started):
+
+| build        | CPU (one core) | GPU | working set | private  | running animations (`YAP_DEBUG_ANIMATIONS`)                           |
+| ------------ | -------------- | --- | ----------- | -------- | --------------------------------------------------------------------- |
+| 0.2.7 before | 0.08 %         | 0 % | 157.8 MB    | 167.2 MB | 0                                                                     |
+| motion pass  | 0.03 %         | 0 % | 158.0 MB    | 168.8 MB | 0, also after the dialog, bell, tooltip, reaction, hover and tab runs |
+
+Nothing loops at rest. Every new Behavior and Transition is a
+NumberAnimation or ColorAnimation that runs only while a value changes. No
+Animator was added, and the jump highlight's Animator became a
+NumberAnimation. The scrim, tiles and rows animate opacity, scale and
+Translate only. Text and Rectangle colours ease; Icons do not.
+
+### Findings on the web
+
+- **Dialog, inbox and picker entrances run on CSS `ease`.** `getAnimations`
+  reports keyframe easing `ease`, not the house ease-out. This covers the
+  tw-animate `animate-in` surfaces (dialog overlay and content, the inbox).
+  The `:where(.animate-in) { --tw-ease: var(--ease-out) }` default in
+  styles.css does not reach the keyframes.
+  - Native follows the spec's ease-out. Over 200 ms the two curves differ
+    only in the first third.
+- **The live dialog and the inbox showed no exit animation.** Create
+  server closed by Cancel or Escape, and the inbox by Escape, were gone in
+  the next frame. Native runs the specified exits (140 ms to 0.98, and
+  120 ms).
+
+### Not matching yet
+
+- The stacked dialog's behind cue (scale 0.985, up 6 px) is not done.
+- A deleted message's 140 ms fade-out is not done.
+- Tiles do not glide to new cells.
+- Positioning popups from the trigger's edge is not done: native scales
+  popups from their centre, while the web uses the anchor
+  (`--transform-origin`).
+- Keyboard-opened popups (fade only, 100 ms) are not done.
+- Icon colour changes on hover snap; see the rows entry above.
+- The tree's guide segments do not draw in.
+- A voice app's tab strip (`AppTab`) still jumps.
+- Not captured this pass, and checked by code only:
+  - toasts, which need a copy action;
+  - tree joins and tiles, which need a call;
+  - attachments and the mention list.
+
+### Checks
+
+- `build.ps1` into `F:/ct/yapn/rel` was green three times
+  (`F:/ct/yapn/build-motion-1.log` to `-3.log`). The runs' logs have no QML
+  warnings.
+- `cargo test -p yap-core -p yap-protocol -p yap-cache -p yap-voice -p yap-realtime`
+  (`CARGO_TARGET_DIR=F:/ct/yapn/check`, `LK_CUSTOM_WEBRTC` set): 1336
+  passed, 0 failed.
+- `cargo clippy --workspace --all-targets -- -D warnings` (`QMAKE` set to
+  the p7 qmake) is clean.
+- One `critic` review of the diff. Fixed from it:
+  - A tree row pooled at the end of a remove transition stayed at
+    opacity 0 when it was reused. `ListView.onReused` now restores it.
+  - A reaction leave cut short by a rebuild (someone else reacting) dropped
+    the click. The chip now sends the toggle as it is destroyed.
+  - EaseColor on role-driven names in pooled rows cross-faded from the
+    previous row's ink. It is removed from those three.
+- Two findings were left on purpose:
+  - The first reaction on a message does not play an entrance. The web's
+    strip also mounts with it (`MessageItem.tsx:1676`), so it does not
+    animate there either.
+  - The upload tile's spinner keeps turning under reduced motion. The web
+    exempts the spinner (`motion.css`: "it carries state").

@@ -88,6 +88,7 @@ Item {
                 text: qsTr("Find or start a conversation")
                 elide: Text.ElideRight
                 color: finderHover.hovered ? Theme.ink1 : Theme.ink3
+                EaseColor on color {}
                 font: Theme.type.description
             }
         }
@@ -154,6 +155,7 @@ Item {
                     text: qsTr("Friends")
                     elide: Text.ElideRight
                     color: friendsRow.selected || friendsHover.hovered ? Theme.ink1 : Theme.ink2
+                    EaseColor on color {}
                     font: Theme.type.row
                 }
                 CountBadge {
@@ -207,6 +209,7 @@ Item {
                     text: qsTr("Shop")
                     elide: Text.ElideRight
                     color: shopRow.selected || shopHover.hovered ? Theme.ink1 : Theme.ink2
+                    EaseColor on color {}
                     font: Theme.type.row
                 }
                 Rectangle {

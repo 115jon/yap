@@ -192,7 +192,7 @@ Popup {
     }
 
     // bg-scrim on the surface and again on its ::before.
-    Overlay.modal: Scrim { color: Qt.rgba(0, 0, 0, 1 - Math.pow(1 - Theme.scrim.a, 2)) }
+    Overlay.modal: Scrim { color: Qt.rgba(0, 0, 0, 1 - Math.pow(1 - Theme.scrim.a, 2)); exitDuration: Theme.dur2 }
     background: Item {}
 
     // The surface fades (dur-3 in, dur-2 out); the media scales from .96

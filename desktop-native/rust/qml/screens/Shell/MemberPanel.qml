@@ -89,6 +89,7 @@ Item {
             width: parent.width - 32
             height: 40
             Row {
+                id: detailTabs
                 height: parent.height
                 spacing: 20
                 Accessible.role: Accessible.PageTabList
@@ -99,6 +100,8 @@ Item {
                 DetailsTab { value: "links"; text: qsTr("Links") }
                 DetailsTab { value: "files"; text: qsTr("Files") }
             }
+            // The chosen tab's rule slides between tabs.
+            TabRule { row: detailTabs }
             Rectangle {
                 anchors.bottom: parent.bottom
                 width: parent.width
@@ -216,12 +219,7 @@ Item {
             font: Theme.type.control
         }
         background: Item {
-            Rectangle {
-                anchors.bottom: parent.bottom
-                width: parent.width
-                height: 2
-                color: tabKey.on ? Theme.ink1 : "transparent"
-            }
+            // The rule is the strip's TabRule.
             Rectangle {
                 anchors.fill: parent
                 anchors.margins: -2

@@ -325,6 +325,7 @@ Item {
                     width: parent.width - 16 - 8 - 8 - slash.width
                     text: qsTr("Search")
                     color: searchHover.hovered ? Theme.ink2 : Theme.ink3
+                    EaseColor on color {}
                     font: Theme.type.description
                 }
                 Rectangle {

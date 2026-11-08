@@ -195,15 +195,8 @@ T.Popup {
         stepsBack: true
         onTapped: editor.requestClose()
     }
-    enter: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur4; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-            NumberAnimation { property: "scale"; from: Theme.reducedMotion ? 1 : 0.98; to: 1; duration: Theme.dur4; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-        }
-    }
-    exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur4Exit }
-    }
+    enter: PresenceIn { duration: Theme.dur4; fromScale: Theme.scaleDialogOut }
+    exit: PresenceOut { duration: Theme.dur4Exit; toScale: Theme.scaleDialogOut }
     background: Rectangle {
         radius: Theme.radiusSheet
         color: Theme.ply0
@@ -803,6 +796,7 @@ T.Popup {
             color: Theme.ply2
             border.width: 1
             border.color: area.activeFocus ? Theme.ink1 : areaHover.hovered ? Theme.ink2 : Theme.lineField
+            EaseColor on border.color {}
             // styles.css :focus-visible: a focused input wears the 2 px --focus
             // outline outside its 1 px ink-1 edge (offset 0).
             Rectangle {

@@ -61,6 +61,7 @@ Rectangle {
                 height: 28
                 radius: Theme.radius
                 color: showHover.containsMouse ? Theme.tint3 : Theme.tint2
+                EaseColor on color {}
                 scale: showHover.pressed ? Theme.scalePress : 1
                 activeFocusOnTab: root.hidden
                 Accessible.role: Accessible.Button

@@ -430,7 +430,7 @@ PlateDialog {
                 RotationAnimator on rotation {
                     from: 0
                     to: 360
-                    duration: 800
+                    duration: Theme.durSpin
                     loops: Animation.Infinite
                     running: spinner.visible && !Theme.reducedMotion
                 }

@@ -79,6 +79,7 @@ Rectangle {
         height: 24
         radius: Theme.radius
         color: markHover.hovered ? Theme.tint1 : "transparent"
+        EaseColor on color {}
         Accessible.role: Accessible.Button
         Accessible.name: qsTr("Mark as read")
         Row {
@@ -89,6 +90,7 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 text: qsTr("Mark as read")
                 color: markHover.hovered ? Theme.ink1 : Theme.ink2
+                EaseColor on color {}
                 font: Theme.type.captionStrong
             }
             Icon {

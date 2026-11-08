@@ -520,6 +520,9 @@ public:
 
 static bool reducedMotion()
 {
+  // YAP_REDUCED_MOTION=1 or 0 (tests) wins over the system setting.
+  if (qEnvironmentVariableIsSet("YAP_REDUCED_MOTION"))
+    return qEnvironmentVariableIntValue("YAP_REDUCED_MOTION") != 0;
 #ifdef Q_OS_WIN
   // The switch Windows' "Animation effects" setting flips (DESIGN.md:480).
   BOOL animate = TRUE;
@@ -529,6 +532,34 @@ static bool reducedMotion()
   return false;
 #endif
 }
+
+#ifdef Q_OS_WIN
+// Theme.reducedMotion follows "Animation effects" while the app runs, as
+// the web's prefers-reduced-motion does: flipping it broadcasts
+// WM_SETTINGCHANGE (SPI_SETCLIENTAREAANIMATION) to our windows, and Qt
+// hands each window message to the native event filters.
+class MotionWatch : public QAbstractNativeEventFilter
+{
+public:
+  explicit MotionWatch(QObject* theme) : m_theme(theme) {}
+
+  bool nativeEventFilter(const QByteArray&, void* message, qintptr*) override
+  {
+    const auto* msg = static_cast<const MSG*>(message);
+    if (msg->message != WM_SETTINGCHANGE || msg->wParam != SPI_SETCLIENTAREAANIMATION || !m_theme)
+      return false;
+    const bool reduced = reducedMotion();
+    if (m_theme->property("reducedMotion").toBool() != reduced) {
+      m_theme->setProperty("reducedMotion", reduced);
+      std::fprintf(stderr, "[motion] reduced motion %s\n", reduced ? "on" : "off");
+    }
+    return false;
+  }
+
+private:
+  QPointer<QObject> m_theme;
+};
+#endif
 
 // Qt's messages go to stderr (and so into the log file) whatever the
 // subsystem; Windows would otherwise send them to the debugger only.
@@ -890,6 +921,9 @@ int main(int argc, char* argv[])
     new PopupPressSink(&engine, window);
     new TextHintingFollower(window, engine.singletonInstance<QObject*>("com.yap.native", "Theme"));
 #ifdef Q_OS_WIN
+    app.installNativeEventFilter(new MotionWatch(
+      engine.singletonInstance<QObject*>("com.yap.native", "Theme")));
+    std::fprintf(stderr, "[motion] reduced motion %s at start\n", reducedMotion() ? "on" : "off");
     if (qEnvironmentVariableIntValue("YAP_TEST_POINTER") != 0) {
       app.installNativeEventFilter(new TestPointer(window));
       std::fprintf(stderr, "[test] in-process pointer on (YAP_TEST_POINTER)\n");

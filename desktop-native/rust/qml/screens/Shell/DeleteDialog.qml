@@ -47,15 +47,8 @@ Popup {
         FloatShadow { modal: true; radius: Theme.radiusSheet }
     }
 
-    enter: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-            NumberAnimation { property: "scale"; from: Theme.scaleDialog; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-        }
-    }
-    exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur3Exit }
-    }
+    enter: PresenceIn { fromScale: Theme.scaleDialog }
+    exit: PresenceOut { toScale: Theme.scaleDialogOut }
 
     // ResponsiveDialogContent sm: the title at Bricolage 22/700 beside a
     // 40 px close key, the consequence at 15 in ink-2, the message as a

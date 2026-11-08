@@ -17,6 +17,7 @@ Rectangle {
     height: 32
     radius: 2
     color: selected ? Theme.path : unread && !hovered ? Theme.ink1 : Theme.ink2
+    EaseColor on color {}
     transform: Scale {
         origin.y: pill.height / 2
         yScale: pill.selected ? 1 : pill.hovered ? 0.5 : pill.unread ? 0.25 : 0

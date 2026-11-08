@@ -18,10 +18,25 @@ Item {
 
     property color color: Theme.scrim
     property bool stepsBack: false
+    // The scrim fades in with its dialog and out ahead of it (dialog.tsx
+    // DialogOverlay: in at dur-3, out at dur-3-exit; the media viewer's
+    // goes out at dur-2). QQuickPopup writes the dimmer's opacity through
+    // QQmlProperty, so this Behavior runs on every open and close.
+    property int enterDuration: Theme.dur3
+    property int exitDuration: Theme.dur3Exit
     readonly property bool isScrim: true
     signal tapped()
 
     Accessible.ignored: true
+
+    Behavior on opacity {
+        id: fade
+        NumberAnimation {
+            duration: fade.targetValue > 0 ? root.enterDuration : root.exitDuration
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Theme.easeOut
+        }
+    }
 
     // Above this scrim: a higher z, or the same z and later in the layer.
     function above(layer, i, mine) {

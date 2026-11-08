@@ -121,15 +121,8 @@ Popup {
         border.color: Theme.lineStrong
     }
 
-    enter: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-            NumberAnimation { property: "scale"; from: Theme.scaleDialog; to: 1; duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
-        }
-    }
-    exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur3Exit }
-    }
+    enter: PresenceIn { fromScale: Theme.scaleDialog }
+    exit: PresenceOut { toScale: Theme.scaleDialogOut }
 
     contentItem: Item {
         // Header: 24 px inset, Close at the right.
@@ -254,7 +247,7 @@ Popup {
                         RotationAnimator on rotation {
                             from: 0
                             to: 360
-                            duration: 900
+                            duration: Theme.durSpin
                             loops: Animation.Infinite
                             running: finding.visible && !Theme.reducedMotion
                         }
@@ -449,6 +442,7 @@ Popup {
             text: tab.text
             verticalAlignment: Text.AlignVCenter
             color: tab.current || tab.hovered ? Theme.ink1 : Theme.ink2
+            EaseColor on color {}
             font: Theme.type.controlSm
         }
         background: Rectangle {
