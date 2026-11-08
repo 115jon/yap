@@ -11,7 +11,8 @@ import com.yap.native
 // slots at both ends (attach; GIF, stickers, emoji) with the text between
 // at 15/22 with 13 px vertical padding. Enter sends (text, finished
 // uploads, or both), Shift+Enter adds a line, Up in an empty composer
-// edits your last message, Esc drops the reply. `@` opens member
+// edits your last message, Esc drops the reply (in an empty composer
+// with no reply, Esc marks the channel read). `@` opens member
 // suggestions above it. Ctrl+V with files or a picture on the clipboard
 // uploads them; the + key opens the file dialog. Without Send messages
 // it is ComposerReadOnly: the lock and why, nothing to type in.
@@ -35,6 +36,8 @@ Item {
     signal send(string text, string replyToId)
     signal cancelReply()
     signal editLast()
+    // Esc in an empty composer with nothing else to close.
+    signal markRead()
 
     // The `@` token before the cursor: where it starts, and what follows it.
     property int mentionStart: -1
@@ -47,6 +50,28 @@ Item {
 
     function focusInput() {
         input.forceActiveFocus()
+    }
+
+    // The unsent text of the channel being left (with its server emoji
+    // placeholders), and the composer emptied for the next one.
+    function takeDraft() {
+        const draft = { text: input.text, map: root.customMap }
+        input.clear()
+        root.customMap = ({})
+        root.typingSentAt = 0
+        root.mentionDismissed = false
+        return draft
+    }
+    // A channel's kept draft back, the cursor at its end (no typing ping:
+    // nobody typed).
+    property bool puttingDraft: false
+    function putDraft(draft) {
+        root.puttingDraft = true
+        root.customMap = draft ? draft.map : ({})
+        input.text = draft ? draft.text : ""
+        input.cursorPosition = input.length
+        root.updateEmoji()
+        root.puttingDraft = false
     }
 
     // The + key: the system's file dialog.
@@ -713,7 +738,7 @@ Item {
                     input.layoutTick++
                     root.updateMention()
                     const now = Date.now()
-                    if (text.trim().length > 0 && now - root.typingSentAt > 3000) {
+                    if (!root.puttingDraft && text.trim().length > 0 && now - root.typingSentAt > 3000) {
                         root.typingSentAt = now
                         Chat.sendTyping()
                     }
@@ -809,6 +834,10 @@ Item {
                         event.accepted = true
                     } else if (event.key === Qt.Key_Escape && root.replyToId.length > 0) {
                         root.cancelReply()
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Escape && event.modifiers === Qt.NoModifier
+                               && input.length === 0 && !root.emojiOpen && !root.gifOpen) {
+                        root.markRead()
                         event.accepted = true
                     }
                 }

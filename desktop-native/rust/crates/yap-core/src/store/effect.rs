@@ -25,6 +25,22 @@ pub enum Effect {
         id: RequestId,
         token: Token,
         request: ApiRequest,
+        /// Why it is asked (the `YAP_TRACE_HTTP` trace; a prefetch is
+        /// answered with an error at once when the runner is busy).
+        reason: HttpReason,
+    },
+    /// Read a channel's newest window kept on disk; answered by
+    /// `Input::WindowLoaded` (empty when there is none).
+    LoadWindow {
+        user_id: String,
+        channel_id: String,
+    },
+    /// Logs `[switch] <channel> <source> rows=N <ms>`, timed from the
+    /// switch's start (`source` `None`) to the rows shown.
+    SwitchMark {
+        channel_id: String,
+        source: Option<SwitchSource>,
+        rows: usize,
     },
     /// Open the gateway for a session (replacing any open one).
     GatewayConnect {
@@ -171,6 +187,54 @@ pub enum Effect {
     RemoveCachedBackground {
         id: String,
     },
+}
+
+/// Why a request is made, for the `[http]` trace.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum HttpReason {
+    #[default]
+    Other,
+    /// A channel opened with nothing to show yet.
+    Open,
+    /// A refetch of rows already on screen (warm, disk, a tree).
+    Revalidate,
+    /// A channel the pointer rests on, fetched into the warm cache only.
+    Prefetch,
+    /// The saved scroll position's window (`around=`).
+    Window,
+}
+
+impl HttpReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Other => "other",
+            Self::Open => "open",
+            Self::Revalidate => "revalidate",
+            Self::Prefetch => "prefetch",
+            Self::Window => "window",
+        }
+    }
+}
+
+/// Where a switched-to channel's first rows came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwitchSource {
+    /// The warm cache: shown in the same reduce.
+    Warm,
+    /// The window kept on disk.
+    Disk,
+    /// The network page.
+    Cold,
+}
+
+impl SwitchSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Warm => "warm",
+            Self::Disk => "disk",
+            Self::Cold => "cold",
+        }
+    }
 }
 
 /// Which profile image an upload replaces.

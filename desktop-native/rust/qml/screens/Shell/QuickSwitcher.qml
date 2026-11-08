@@ -23,6 +23,20 @@ Popup {
     property int active: 0
     property Item returnFocus: null
 
+    // The highlighted channel or DM, once it stays 120 ms, is fetched
+    // ahead of Enter (like a row the pointer rests on).
+    onActiveChanged: prefetch.restart()
+    onFlatChanged: prefetch.restart()
+    Timer {
+        id: prefetch
+        interval: 120
+        onTriggered: {
+            const item = root.opened && root.rows.length > 0 ? root.flat[root.rows[root.active]] : null
+            if (item && (item.kind === "channel" || item.kind === "dm") && item.channelId)
+                Nav.prefetchChannel(item.channelId)
+        }
+    }
+
     function show() {
         // A Popup is no Item, so `Window` cannot attach to it ("Window.window"
         // warning); read the focus item through the popup's parent Item.

@@ -17,7 +17,10 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use yap_protocol::rest::{Message, ThreadSummary};
 
-use super::state::MessageLog;
+use super::state::{Lru, MessageLog};
+
+/// Channels whose pins are kept (besides the panel's own).
+pub const PINS_CACHED: usize = 16;
 use super::view::{Load, MessageRow};
 use super::{Method, RequestId};
 use crate::api::ApiError;
@@ -321,6 +324,10 @@ pub struct JumpState {
 pub struct PanelsState {
     pub thread: ThreadState,
     pub pins: PinsState,
+    /// The pins of channels whose panel opened before, newest first:
+    /// shown at once when it opens there again, then asked for anew. A
+    /// pin event for one drops it.
+    pub(super) pins_cache: Lru<String, Vec<Message>, PINS_CACHED>,
     pub threads: ThreadListState,
     pub jump: JumpState,
     pub(super) pending: HashMap<RequestId, PanelOp>,

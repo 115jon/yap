@@ -1180,9 +1180,11 @@ fn a_channel_should_reopen_at_the_message_it_was_left_on() {
     let fx = client.command(Command::ScrollAt("m2".into()));
     assert_eq!(scroll_writes(&fx), vec![(A, "m2")]);
     client.command(Command::SelectChannel(B.into()));
-    client.command(Command::SelectChannel(A.into()));
-    let fx = client.respond(&messages_of(A), page(three(), true));
+    // Warm: it lands there at once; the refetch does not move it.
+    let fx = client.command(Command::SelectChannel(A.into()));
     assert_eq!(restores(&fx), vec!["m2"]);
+    let fx = client.respond(&messages_of(A), page(three(), true));
+    assert!(restores(&fx).is_empty(), "{:?}", restores(&fx));
 }
 
 #[test]
@@ -1193,12 +1195,22 @@ fn a_channel_left_at_its_end_should_reopen_at_the_end_without_a_divider() {
     // Alice wrote while A was closed: the read mark is behind.
     client.dispatch("MESSAGE_CREATE", msg(A, "m4", ALICE, 3));
     assert!(client.state.is_unread(A));
-    client.command(Command::SelectChannel(A.into()));
-    let mut newer = three();
-    newer.push(msg(A, "m4", ALICE, 3));
-    let fx = client.respond(&messages_of(A), page(newer, true));
+    // Warm (and kept current by the message): at its end at once.
+    let fx = client.command(Command::SelectChannel(A.into()));
     assert_eq!(restores(&fx), vec![""]);
     assert!(client.state.divider().is_none());
+    let mut newer = three();
+    newer.push(msg(A, "m4", ALICE, 3));
+    client.respond(&messages_of(A), page(newer, true));
+    assert!(client.state.divider().is_none());
+}
+
+/// Leaves A for B with A's warm copy no longer holding `m1` (deleted
+/// meanwhile), so A opens cold: what a saved position outside the newest
+/// page does.
+fn leave_a_cold(client: &mut Client) {
+    client.command(Command::SelectChannel(B.into()));
+    client.dispatch("MESSAGE_DELETE", json!({ "id": "m1", "channel_id": A }));
 }
 
 #[test]
@@ -1206,7 +1218,7 @@ fn a_saved_message_outside_the_newest_page_should_load_its_window_unhighlighted(
     let mut client = Client::online(three(), 0);
     client.command(Command::SetAtBottom(false));
     client.command(Command::ScrollAt("m1".into()));
-    client.command(Command::SelectChannel(B.into()));
+    leave_a_cold(&mut client);
     client.command(Command::SelectChannel(A.into()));
     // The newest page no longer holds m1.
     client.respond(&messages_of(A), page(vec![msg(A, "m3", ALICE, 2)], true));
@@ -1222,7 +1234,7 @@ fn the_newest_page_should_not_paint_while_a_saved_window_loads() {
     let mut client = Client::online(three(), 0);
     client.command(Command::SetAtBottom(false));
     client.command(Command::ScrollAt("m1".into()));
-    client.command(Command::SelectChannel(B.into()));
+    leave_a_cold(&mut client);
     client.command(Command::SelectChannel(A.into()));
     let fx = client.respond(&messages_of(A), page(vec![msg(A, "m3", ALICE, 2)], true));
     assert!(
@@ -1246,7 +1258,7 @@ fn a_failed_saved_window_should_load_the_newest_page_again() {
     let mut client = Client::online(three(), 0);
     client.command(Command::SetAtBottom(false));
     client.command(Command::ScrollAt("m1".into()));
-    client.command(Command::SelectChannel(B.into()));
+    leave_a_cold(&mut client);
     client.command(Command::SelectChannel(A.into()));
     client.respond(&messages_of(A), page(vec![msg(A, "m3", ALICE, 2)], true));
     client.fail(&around(A, "m1"), 404);
@@ -1275,7 +1287,7 @@ fn the_newest_page_shown_while_a_saved_window_loads_should_not_overwrite_the_pos
     let mut client = Client::online(three(), 0);
     client.command(Command::SetAtBottom(false));
     client.command(Command::ScrollAt("m1".into()));
-    client.command(Command::SelectChannel(B.into()));
+    leave_a_cold(&mut client);
     client.command(Command::SelectChannel(A.into()));
     client.respond(&messages_of(A), page(vec![msg(A, "m3", ALICE, 2)], true));
     // The list lands on the newest page and says it is at its end.

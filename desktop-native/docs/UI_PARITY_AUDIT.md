@@ -1515,3 +1515,16 @@ Translate only. Text and Rectangle colours ease; Icons do not.
     animate there either.
   - The upload tile's spinner keeps turning under reduced motion. The web
     exempts the spinner (`motion.css`: "it carries state").
+
+## Switching pass (2026-11-08)
+
+Behaviour, not pixels: what a channel or server switch does on each side.
+
+| #   | Area              | Difference and outcome                                                                                                                                                                                                                                                   |
+| --- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| S1  | server switch     | Native always opened a server's first text channel. The web opens the one opened there last (`useChatPageLogic.ts` `lastActiveChannels:<userId>`, text channels only, `@me` for the last DM). Native now keeps the same map per user in `snapshot.db` (`last_channels`). |
+| S2  | Home key          | The rail's Home key opens the last DM when it is still listed, as the web's `handleSelectServer("@me")` does; the DM list's Friends row still shows Friends.                                                                                                             |
+| S3  | server switch     | Native showed the new server's name over the old server's sidebar, messages and members until `GET /channels` answered, then fetched the page: two round trips. With the tree loaded it switches in one batch now, and the tree is refetched behind it.                  |
+| S4  | channel switch    | A channel visited before cost a skeleton and a page each time (the web keeps the store's messages per channel). Native shows it from its warm cache at once and refetches quietly.                                                                                       |
+| S5  | composer          | The one composer kept its text across channels (a risk of posting in the wrong one). Each channel keeps its own draft and reply now (kept in memory while the app runs, cleared by a send), and the composer takes the keys after a switch.                              |
+| S6  | keys (beyond web) | Alt+Up/Down, Alt+Shift+Up/Down (unread) and Ctrl+Alt+Up/Down (servers), and Esc in an empty composer to mark the channel read. None of them was bound before; Esc keeps its earlier uses (reply, mention list, pickers, popups) first.                                   |

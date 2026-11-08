@@ -266,7 +266,7 @@ impl State {
     }
 
     /// A server's members afresh (their roles changed).
-    fn refetch_members(&mut self, fx: &mut Effects, server_id: &str) {
+    pub(super) fn refetch_members(&mut self, fx: &mut Effects, server_id: &str) {
         if self.pending.members.values().any(|s| s == server_id) {
             return;
         }
@@ -344,6 +344,8 @@ impl State {
                 }
             }
         }
+        // Left the screen above: no cache keeps it.
+        self.forget_channel(channel_id);
     }
 
     /// A server is gone for this user (deleted, or they left it).
@@ -364,6 +366,7 @@ impl State {
             .filter(|s| s.id != server_id)
             .cloned()
             .collect();
+        self.forget_server_channels(server_id);
         self.channels.remove(server_id);
         self.members.remove(server_id);
         self.select_servers(fx, rest);

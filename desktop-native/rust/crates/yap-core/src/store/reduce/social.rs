@@ -407,6 +407,7 @@ impl State {
             self.remember_user(&dm.recipient);
         }
         self.dms = dms;
+        self.forget_lost_dms();
         self.sync_social(fx);
         self.emit_active_dm(fx);
     }

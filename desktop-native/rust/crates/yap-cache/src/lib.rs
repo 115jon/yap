@@ -70,6 +70,9 @@ pub struct Snapshot {
     /// Where each channel was left: its top message on screen, or
     /// `BOTTOM` (the web's persisted `scrollPositions`).
     pub scroll_positions: Vec<(String, String)>,
+    /// The text channel each server opens on, and the last DM under `@me`
+    /// (the web's `lastActiveChannels:<userId>`).
+    pub last_channels: Vec<(String, String)>,
 }
 
 /// One replacement for part of a user's snapshot. Each replaces what was
@@ -98,6 +101,11 @@ pub enum Write {
     Scroll {
         channel_id: String,
         message_id: String,
+    },
+    /// The channel a server (or `@me`) opens on next.
+    LastChannel {
+        server_id: String,
+        channel_id: String,
     },
 }
 

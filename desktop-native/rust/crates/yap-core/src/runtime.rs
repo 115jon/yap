@@ -23,9 +23,9 @@ use crate::auth::{self, TokenStore};
 use crate::config;
 use crate::fixture::Fixture;
 use crate::store::{
-    reduce, ApiResponse, CallId, Command, Dispatch, Effect, GatewayEvent, Input, LocalOffset,
-    RequestId, SessionId, SignInEvent, SignInId, State, ViewUpdate, VoiceCommand, VoiceMember,
-    VoiceTarget, VoiceUpdate,
+    reduce, ApiResponse, CallId, Command, Dispatch, Effect, GatewayEvent, HttpReason, Input,
+    LocalOffset, RequestId, SessionId, SignInEvent, SignInId, State, ViewUpdate, VoiceCommand,
+    VoiceMember, VoiceTarget, VoiceUpdate,
 };
 use yap_protocol::rest::UploadedFile;
 
@@ -39,6 +39,19 @@ const MAX_INPUTS_PER_BATCH: usize = 64;
 
 /// HTTP requests in flight at once; more wait for a slot.
 const MAX_HTTP_IN_FLIGHT: usize = 8;
+
+/// A prefetch is dropped (answered as busy at once) while more requests
+/// than this hold a slot: it must never delay what the user asked for.
+const PREFETCH_BUSY_ABOVE: usize = 4;
+
+/// `YAP_TRACE_HTTP=1`: one `[http]` line per request, as it answers.
+fn trace_http() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("YAP_TRACE_HTTP").is_ok_and(|v| v == "1"))
+}
+
+/// The answer to a prefetch the runner dropped.
+pub const PREFETCH_BUSY: &str = "prefetch skipped: busy";
 
 /// The snapshot writer commits at most this often.
 const CACHE_WRITE_INTERVAL: Duration = Duration::from_millis(500);
@@ -271,6 +284,13 @@ pub struct Runner {
     cache_path: Option<PathBuf>,
     /// The writer thread, once `LoadSnapshot` started it.
     cache: Option<yap_cache::Writer>,
+    /// A read-only connection for channel windows (opened on first use).
+    reader: Arc<std::sync::Mutex<Option<Cache>>>,
+    /// The channel switch being timed for `[switch]`, and when it began.
+    switch: Option<(String, Instant)>,
+    /// When the input being reduced arrived (a switch is timed from there,
+    /// so a warm one counts the reduce that built its rows).
+    input_at: Instant,
 }
 
 impl Runner {
@@ -303,7 +323,15 @@ impl Runner {
             audio: None,
             cache_path: None,
             cache: None,
+            reader: Arc::new(std::sync::Mutex::new(None)),
+            switch: None,
+            input_at: Instant::now(),
         }
+    }
+
+    /// The next effects come from an input taken at `at`.
+    pub fn input_taken(&mut self, at: Instant) {
+        self.input_at = at;
     }
 
     /// Keeps the snapshot cache at `path` (`None`: no cache).
@@ -347,6 +375,10 @@ impl Runner {
             Effect::LoadToken => self.send(Input::TokenLoaded(Some(Token::new("fixture")))),
             // The fixture never reads or writes the snapshot cache.
             Effect::LoadSnapshot => self.send(Input::SnapshotLoaded(None)),
+            Effect::LoadWindow { channel_id, .. } => self.send(Input::WindowLoaded {
+                channel_id: channel_id.clone(),
+                messages: Vec::new(),
+            }),
             Effect::LoadCatalog => self.send(Input::CatalogLoaded(None)),
             Effect::GatewayConnect { session, .. } => {
                 self.send(Input::Gateway {
@@ -418,7 +450,10 @@ impl Runner {
             | Effect::SaveLocal { .. }
             | Effect::RemoveCachedBackground { .. }
             | Effect::Audio { .. } => {}
-            Effect::View(_) | Effect::Later { .. } | Effect::StartupMark(_) => return false,
+            Effect::View(_)
+            | Effect::Later { .. }
+            | Effect::StartupMark(_)
+            | Effect::SwitchMark { .. } => return false,
         }
         true
     }
@@ -440,10 +475,28 @@ impl Runner {
                     let _ = inbox.send(*input);
                 });
             }
-            Effect::Http { id, token, request } => {
+            Effect::Http {
+                id,
+                token,
+                request,
+                reason,
+            } => {
                 let inbox = self.inbox.clone();
                 if self.realtime.offline() {
                     let result = Err(crate::api::ApiError::Network("offline (debug)".into()));
+                    let _ = inbox.send(Input::Http { id, result });
+                    return;
+                }
+                let busy = MAX_HTTP_IN_FLIGHT - self.http_slots.available_permits();
+                if reason == HttpReason::Prefetch && busy > PREFETCH_BUSY_ABOVE {
+                    if trace_http() {
+                        eprintln!(
+                            "[http] {:?} {} reason=prefetch skipped ({busy} busy)",
+                            request.method(),
+                            request.path()
+                        );
+                    }
+                    let result = Err(crate::api::ApiError::Network(PREFETCH_BUSY.into()));
                     let _ = inbox.send(Input::Http { id, result });
                     return;
                 }
@@ -452,7 +505,10 @@ impl Runner {
                 tokio::spawn(async move {
                     // The semaphore is never closed, so a permit always comes.
                     let _permit = slots.acquire_owned().await;
+                    let started = Instant::now();
                     let (method, path, body) = (request.method(), request.path(), request.body());
+                    let traced = trace_http()
+                        .then(|| format!("{} {path}", format!("{method:?}").to_uppercase()));
                     let body = if let Some(url) = request.public_url() {
                         api.get_public(&url).await
                     } else if request.on_kova() {
@@ -462,9 +518,40 @@ impl Runner {
                             .await
                     };
                     let result = body.and_then(|body| request.decode(body));
+                    if let Some(line) = traced {
+                        let outcome = match &result {
+                            Ok(_) => "ok".to_owned(),
+                            Err(error) => format!("failed ({error})"),
+                        };
+                        eprintln!(
+                            "[http] {line} reason={} {} ms {outcome}",
+                            reason.as_str(),
+                            started.elapsed().as_millis()
+                        );
+                    }
                     let _ = inbox.send(Input::Http { id, result });
                 });
             }
+            Effect::LoadWindow {
+                user_id,
+                channel_id,
+            } => self.load_window(user_id, channel_id),
+            Effect::SwitchMark {
+                channel_id,
+                source,
+                rows,
+            } => match source {
+                None => self.switch = Some((channel_id, self.input_at)),
+                Some(source) => {
+                    if let Some((_, at)) = self.switch.take_if(|(id, _)| *id == channel_id) {
+                        let ms = at.elapsed().as_secs_f64() * 1000.0;
+                        eprintln!(
+                            "[switch] {channel_id} {} rows={rows} {ms:.1} ms",
+                            source.as_str()
+                        );
+                    }
+                }
+            },
             Effect::GatewayConnect {
                 session,
                 token,
@@ -809,6 +896,46 @@ impl Runner {
         });
     }
 
+    /// Reads a channel's newest window kept on disk through a read-only
+    /// connection (WAL: the writer never blocks it); always answers with
+    /// `Input::WindowLoaded`, empty without a cache or a window.
+    fn load_window(&mut self, user_id: String, channel_id: String) {
+        let inbox = self.inbox.clone();
+        let Some(path) = self.cache_path.clone().filter(|_| self.cache.is_some()) else {
+            let _ = inbox.send(Input::WindowLoaded {
+                channel_id,
+                messages: Vec::new(),
+            });
+            return;
+        };
+        let reader = Arc::clone(&self.reader);
+        tokio::task::spawn_blocking(move || {
+            let started = Instant::now();
+            let messages = {
+                let mut slot = reader
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if slot.is_none() {
+                    *slot = Cache::open_read_only(&path).ok();
+                }
+                slot.as_ref()
+                    .and_then(|cache| cache.window(&user_id, &channel_id).ok())
+                    .unwrap_or_default()
+            };
+            if trace_http() {
+                eprintln!(
+                    "[cache] window {channel_id} rows={} {} ms",
+                    messages.len(),
+                    started.elapsed().as_millis()
+                );
+            }
+            let _ = inbox.send(Input::WindowLoaded {
+                channel_id,
+                messages,
+            });
+        });
+    }
+
     fn keyring(&self, op: KeyringOp) {
         let _ = self.keyring.send(op);
     }
@@ -1110,6 +1237,7 @@ async fn actor(mut state: State, mut runner: Runner, mut inbox: UnboundedReceive
         let mut next = Some(first);
         let mut reduced = 0;
         while let Some(input) = next.take() {
+            runner.input_taken(Instant::now());
             for effect in reduce(&mut state, input) {
                 runner.run(effect);
             }
@@ -1161,10 +1289,14 @@ pub fn spawn(
         let runner = Runner::new(http, inbox.clone(), sink, realtime, tokens)
             .with_fixture(fixture)
             .with_cache(cache);
-        // Commands join the same queue as effect results, in arrival order.
+        // Commands join the same queue as effect results, in arrival order,
+        // stamped with the wall clock (the store has none).
         tokio::spawn(async move {
             while let Some(command) = command_rx.recv().await {
-                if inbox.send(Input::User(command)).is_err() {
+                let now_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+                if inbox.send(Input::UserAt { command, now_ms }).is_err() {
                     break;
                 }
             }

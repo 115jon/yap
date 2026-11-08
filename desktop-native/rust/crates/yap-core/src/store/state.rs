@@ -323,6 +323,278 @@ impl MessageLog {
         self.messages[i] = message;
         Some(i)
     }
+
+    /// The newest message that is not a pending send.
+    pub fn newest_sent(&self) -> Option<&Message> {
+        self.messages
+            .iter()
+            .rev()
+            .find(|m| !m.id.starts_with("pending-"))
+    }
+
+    /// Drops pending sends (their rows come back from the outbox) and
+    /// keeps only the newest `keep` messages; trimmed older ones can be
+    /// paged in again, so the log then has more before.
+    pub(super) fn trim_for_warm(&mut self, keep: usize) {
+        let before = self.messages.len();
+        self.messages.retain(|m| !m.id.starts_with("pending-"));
+        let extra = self.messages.len().saturating_sub(keep);
+        if extra > 0 {
+            self.messages.drain(..extra);
+            self.has_more_before = true;
+        }
+        if self.messages.len() != before {
+            self.index.clear();
+            self.reindex(0);
+            let used: HashSet<&str> = self
+                .messages
+                .iter()
+                .filter_map(|m| m.author.as_ref().map(|a| a.id.as_str()))
+                .collect();
+            self.authors.retain(|id, _| used.contains(id.as_str()));
+        }
+    }
+
+    /// A rough heap size of the log, for the warm cache's byte cap: each
+    /// message's strings, attachments, reactions and embeds, plus one copy
+    /// of each author (the log shares them).
+    pub fn estimated_bytes(&self) -> usize {
+        const MESSAGE: usize = 480;
+        const ATTACHMENT: usize = 160;
+        const EMBED: usize = 1024;
+        const REACTION: usize = 64;
+        const AUTHOR: usize = 640;
+        let messages: usize = self
+            .messages
+            .iter()
+            .map(|m| {
+                let attachments: usize = m
+                    .attachments
+                    .iter()
+                    .map(|a| {
+                        ATTACHMENT
+                            + a.filename.len()
+                            + a.url.as_ref().map_or(0, String::len)
+                            + a.file_key.as_ref().map_or(0, String::len)
+                    })
+                    .sum();
+                let reactions: usize = m
+                    .reactions
+                    .iter()
+                    .map(|r| REACTION + r.emoji.len() + r.users.len() * 32)
+                    .sum();
+                let embeds: usize = m.embeds.iter().map(|e| EMBED + e.url.len()).sum();
+                let reply = m.reply_to.as_ref().map_or(0, |_| AUTHOR);
+                MESSAGE + m.content.len() + attachments + reactions + embeds + reply
+            })
+            .sum();
+        messages + self.authors.len() * AUTHOR
+    }
+}
+
+/// A small least-recently-used map of at most `CAP` entries (the pins and
+/// media tabs of channels left).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Lru<K, V, const CAP: usize> {
+    /// Least recently used first.
+    entries: Vec<(K, V)>,
+}
+
+impl<K, V, const CAP: usize> Default for Lru<K, V, CAP> {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+}
+
+impl<K: PartialEq, V, const CAP: usize> Lru<K, V, CAP> {
+    pub fn take(&mut self, key: &K) -> Option<V> {
+        let at = self.entries.iter().position(|(k, _)| k == key)?;
+        Some(self.entries.remove(at).1)
+    }
+
+    /// Stores `value` as the most recently used, dropping the least
+    /// recently used one over `CAP`.
+    pub fn put(&mut self, key: K, value: V) {
+        let _ = self.take(&key);
+        self.entries.push((key, value));
+        if self.entries.len() > CAP {
+            self.entries.remove(0);
+        }
+    }
+
+    pub fn retain(&mut self, mut keep: impl FnMut(&K, &V) -> bool) {
+        self.entries.retain(|(k, v)| keep(k, v));
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
+/// Channels kept warm at most (besides the open one).
+pub const WARM_ENTRIES: usize = 24;
+
+/// The warm cache's estimated size at most ([`MessageLog::estimated_bytes`]).
+pub const WARM_BYTES: usize = 6 * 1024 * 1024;
+
+/// A warm channel's newest messages kept (as many as the disk keeps).
+pub const WARM_WINDOW: usize = yap_cache::MESSAGE_WINDOW;
+
+/// A warm channel is shown without a refetch for this long after its page
+/// was confirmed, in the same gateway session (server channels only).
+pub const WARM_FRESH_MS: i64 = 30_000;
+
+/// A channel left recently: its newest window, kept current by live
+/// events, shown at once when it opens again (and then revalidated).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WarmEntry {
+    pub log: MessageLog,
+    /// The gateway session ([`State::gateway_generation`]) the log was last
+    /// confirmed in: events from an older one may have been missed.
+    pub generation: u64,
+    /// When its page was asked for (epoch ms; 0: unknown, never fresh).
+    pub confirmed_at_ms: i64,
+    /// [`MessageLog::estimated_bytes`] when it was stored or changed.
+    pub bytes: usize,
+}
+
+/// The channels left recently, least recently used first, within
+/// [`WARM_ENTRIES`] and [`WARM_BYTES`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WarmCache {
+    entries: Vec<WarmEntry>,
+    bytes: usize,
+}
+
+impl WarmCache {
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// The estimated size of every entry.
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    pub fn get(&self, channel_id: &str) -> Option<&WarmEntry> {
+        self.entries.iter().find(|e| e.log.channel_id == channel_id)
+    }
+
+    pub fn contains(&self, channel_id: &str) -> bool {
+        self.get(channel_id).is_some()
+    }
+
+    /// Channel ids, least recently used first.
+    pub fn channel_ids(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(|e| e.log.channel_id.as_str())
+    }
+
+    /// Takes a channel's entry out (it becomes the open log).
+    pub(super) fn take(&mut self, channel_id: &str) -> Option<WarmEntry> {
+        let at = self
+            .entries
+            .iter()
+            .position(|e| e.log.channel_id == channel_id)?;
+        let entry = self.entries.remove(at);
+        self.bytes = self.bytes.saturating_sub(entry.bytes);
+        Some(entry)
+    }
+
+    /// Stores a log left on screen: pending rows dropped, trimmed to its
+    /// newest `keep` (at least [`WARM_WINDOW`]). A jump's window is not the newest one and
+    /// is not kept. Evicts the least recently used entries over the caps,
+    /// except `protect`ed channels; returns the evicted channel ids.
+    pub(super) fn put(
+        &mut self,
+        mut log: MessageLog,
+        keep: usize,
+        generation: u64,
+        confirmed_at_ms: i64,
+        protect: &[&str],
+    ) -> Vec<String> {
+        let _ = self.take(&log.channel_id);
+        if log.has_more_after || log.channel_id.is_empty() {
+            return Vec::new();
+        }
+        log.trim_for_warm(keep.max(WARM_WINDOW));
+        if log.is_empty() {
+            return Vec::new();
+        }
+        let bytes = log.estimated_bytes();
+        self.bytes += bytes;
+        self.entries.push(WarmEntry {
+            log,
+            generation,
+            confirmed_at_ms,
+            bytes,
+        });
+        self.enforce(protect)
+    }
+
+    /// Changes one entry's log in place (a live event) and keeps it within
+    /// the window; `None` when the channel is not warm.
+    pub(super) fn update<R>(
+        &mut self,
+        channel_id: &str,
+        protect: &[&str],
+        change: impl FnOnce(&mut MessageLog) -> R,
+    ) -> Option<R> {
+        let entry = self
+            .entries
+            .iter_mut()
+            .find(|e| e.log.channel_id == channel_id)?;
+        let result = change(&mut entry.log);
+        if entry.log.len() > WARM_WINDOW + WARM_WINDOW / 4 {
+            entry.log.trim_for_warm(WARM_WINDOW);
+        }
+        let bytes = entry.log.estimated_bytes();
+        self.bytes = self.bytes.saturating_sub(entry.bytes) + bytes;
+        entry.bytes = bytes;
+        // Growth from live events counts against the caps too.
+        self.enforce(protect);
+        Some(result)
+    }
+
+    /// The warm channel that holds a message.
+    pub(super) fn channel_of(&self, message_id: &str) -> Option<String> {
+        self.entries
+            .iter()
+            .find(|e| e.log.get(message_id).is_some())
+            .map(|e| e.log.channel_id.clone())
+    }
+
+    pub(super) fn remove(&mut self, channel_id: &str) -> bool {
+        self.take(channel_id).is_some()
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.entries.clear();
+        self.bytes = 0;
+    }
+
+    /// Evicts least recently used entries until both caps hold.
+    fn enforce(&mut self, protect: &[&str]) -> Vec<String> {
+        let mut evicted = Vec::new();
+        while self.entries.len() > WARM_ENTRIES || self.bytes > WARM_BYTES {
+            let Some(at) = self
+                .entries
+                .iter()
+                .position(|e| !protect.contains(&e.log.channel_id.as_str()))
+            else {
+                break;
+            };
+            let entry = self.entries.remove(at);
+            self.bytes = self.bytes.saturating_sub(entry.bytes);
+            evicted.push(entry.log.channel_id);
+        }
+        evicted
+    }
 }
 
 /// The call as the sidebar shows it.
@@ -541,6 +813,9 @@ pub(super) struct Pending {
     pub profile: Option<(RequestId, String)>,
     /// request → user id of a hover's profile prefetch
     pub profile_prefetch: HashMap<RequestId, String>,
+    /// request → (channel id, asked at ms, gateway generation then) of a
+    /// hovered channel's page
+    pub prefetch: HashMap<RequestId, (String, i64, u64)>,
     /// request → the reaction change to undo if it fails
     pub reactions: HashMap<RequestId, ReactionChange>,
     /// request → local id of the upload
@@ -952,6 +1227,26 @@ pub struct State {
     pub(super) startup: Startup,
     /// The view came from the cache and is being revalidated.
     pub(super) refreshing: bool,
+    /// Channels left recently, shown at once when they open again.
+    pub(super) warm: WarmCache,
+    /// Counts fresh gateway sessions (Ready, not Resumed): warm logs from an
+    /// older one may have missed events.
+    pub(super) gateway_generation: u64,
+    /// The open log's (generation, confirmed at ms), as a warm entry keeps it.
+    pub(super) open_confirmed: (u64, i64),
+    /// When the open channel's page was asked for (epoch ms, 0: unknown).
+    pub(super) page_asked_ms: i64,
+    /// The wall clock of the command being reduced (`Input::UserAt`).
+    pub(super) now_ms: Option<i64>,
+    /// The last text channel opened per server, and the last DM under
+    /// `@me` (useChatPageLogic.ts `lastActiveChannels`).
+    pub(super) last_channels: HashMap<String, String>,
+    /// The open channel's rows came from the disk window (not yet confirmed).
+    pub(super) disk_shown: bool,
+    /// The open channel landed at its end when its cached rows showed: the
+    /// refetch places no divider there in a focused window (as `on_page`
+    /// does for a channel left at its end).
+    pub(super) open_at_end: bool,
     pub(super) next_id: u64,
 }
 
@@ -1035,6 +1330,14 @@ impl State {
             first_page_shown: false,
             startup: Startup::Idle,
             refreshing: false,
+            warm: WarmCache::default(),
+            gateway_generation: 0,
+            open_confirmed: (0, 0),
+            page_asked_ms: 0,
+            now_ms: None,
+            last_channels: HashMap::new(),
+            disk_shown: false,
+            open_at_end: false,
             next_id: 0,
         }
     }
@@ -1090,6 +1393,21 @@ impl State {
 
     pub fn messages(&self) -> Option<&MessageLog> {
         self.messages.as_ref()
+    }
+
+    /// Channels left recently and kept warm.
+    pub fn warm(&self) -> &WarmCache {
+        &self.warm
+    }
+
+    /// Fresh gateway sessions so far.
+    pub fn gateway_generation(&self) -> u64 {
+        self.gateway_generation
+    }
+
+    /// The channel a server (or `@me`) opens on next.
+    pub fn last_channel(&self, server_key: &str) -> Option<&str> {
+        self.last_channels.get(server_key).map(String::as_str)
     }
 
     /// `true` while a view shown from the cache waits for the network.

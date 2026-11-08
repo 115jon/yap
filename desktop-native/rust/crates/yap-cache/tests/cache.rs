@@ -133,6 +133,7 @@ fn a_snapshot_should_round_trip_through_the_file() {
             written_at_ms: 1_000,
             voice: None,
             scroll_positions: Vec::new(),
+            last_channels: Vec::new(),
         }
     );
 }
@@ -392,4 +393,94 @@ fn scroll_positions_should_round_trip_and_replace_per_channel() {
             ("chan_two".to_owned(), "BOTTOM".to_owned()),
         ]
     );
+}
+
+#[test]
+fn the_channel_each_server_opens_on_should_round_trip_and_clear() {
+    let (_dir, path) = temp();
+    let mut cache = Cache::open(&path).expect("open");
+    write_snapshot(&mut cache, ALICE, 1_000);
+    let mut batch = Batch::default();
+    for (server_id, channel_id) in [("srv", "chan_a"), ("@me", "dm_a"), ("srv", "chan_b")] {
+        batch.push(
+            ALICE,
+            Write::LastChannel {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+            },
+        );
+    }
+    cache.apply_at(batch, 2_000).expect("apply");
+    let mut last = load(&reopen(&path), ALICE).expect("snapshot").last_channels;
+    last.sort();
+    assert_eq!(
+        last,
+        vec![
+            ("@me".to_owned(), "dm_a".to_owned()),
+            ("srv".to_owned(), "chan_b".to_owned())
+        ]
+    );
+    cache.clear(ALICE).expect("clear");
+    write_snapshot(&mut cache, ALICE, 3_000);
+    assert!(load(&cache, ALICE)
+        .expect("snapshot")
+        .last_channels
+        .is_empty());
+}
+
+#[test]
+fn a_version_3_cache_should_be_upgraded_in_place() {
+    let (_dir, path) = temp();
+    let mut cache = Cache::open(&path).expect("open");
+    write_snapshot(&mut cache, ALICE, 1_000);
+    drop(cache);
+    // What version 3 had: no last_channels table.
+    {
+        let conn = Connection::open(&path).expect("raw");
+        conn.execute_batch("DROP TABLE last_channels; PRAGMA user_version = 3;")
+            .expect("downgrade");
+    }
+    let cache = Cache::open(&path).expect("upgrade");
+    assert_eq!(cache.schema_version().expect("version"), SCHEMA_VERSION);
+    let snapshot = load(&cache, ALICE).expect("kept");
+    assert_eq!(snapshot.messages.len(), 3);
+    assert!(snapshot.last_channels.is_empty());
+}
+
+#[test]
+fn a_window_should_read_through_a_read_only_connection_while_the_writer_holds_the_file() {
+    let (_dir, path) = temp();
+    let mut cache = Cache::open(&path).expect("open");
+    write_snapshot(&mut cache, ALICE, 1_000);
+    let reader = Cache::open_read_only(&path).expect("reader");
+    let window = reader.window(ALICE, "chan_text").expect("window");
+    assert_eq!(
+        window.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        ["msg_0000", "msg_0001", "msg_0002"]
+    );
+    assert!(reader.window(BOB, "chan_text").expect("other").is_empty());
+    assert!(reader.window(ALICE, "chan_none").expect("none").is_empty());
+    // A later commit is visible to the same reader.
+    let mut batch = Batch::default();
+    batch.push(
+        ALICE,
+        Write::Messages {
+            channel_id: "chan_text".into(),
+            messages: (0..5).map(|n| message("chan_text", n)).collect(),
+        },
+    );
+    cache.apply_at(batch, 2_000).expect("apply");
+    assert_eq!(reader.window(ALICE, "chan_text").expect("window").len(), 5);
+}
+
+#[test]
+fn a_read_only_connection_should_refuse_another_schema() {
+    let (_dir, path) = temp();
+    drop(Cache::open(&path).expect("open"));
+    {
+        let conn = Connection::open(&path).expect("raw");
+        conn.execute_batch("PRAGMA user_version = 99;")
+            .expect("bump");
+    }
+    assert!(Cache::open_read_only(&path).is_err());
 }

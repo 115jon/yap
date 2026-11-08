@@ -32,10 +32,29 @@ pub enum Command {
     SelectServer(String),
     /// Home: the DM list instead of a server, no conversation open.
     SelectHome,
+    /// The rail's Home key (useChatPageLogic.ts `handleSelectServer("@me")`):
+    /// the DM opened last, when it is still in the list, else Home.
+    SelectHomeLast,
+    /// Alt+Up/Down (native only): the previous or next text channel in the
+    /// sidebar's order (the DM list at Home), wrapping; `unread`: only
+    /// unread ones.
+    NavigateChannel {
+        forward: bool,
+        unread: bool,
+    },
+    /// Ctrl+Alt+Up/Down: the previous or next server in the rail, Home
+    /// first, wrapping.
+    NavigateServer {
+        forward: bool,
+    },
     /// A text channel, a voice channel's view, or a DM.
     SelectChannel(String),
     /// Opens the DM with a user, creating it when there is none.
     OpenDm(String),
+    /// The pointer rests on a channel row (or the switcher highlights it):
+    /// fetch its newest page into the warm cache, unless it is warm and
+    /// fresh. Never changes what is on screen.
+    PrefetchChannel(String),
     /// Opens a channel or DM by id from anywhere, switching servers first
     /// when it is in another one (a toast click). `server_id` is the toast's
     /// hint, used when no loaded tree has the channel.
@@ -306,6 +325,18 @@ pub struct UploadFile {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Input {
     User(Command),
+    /// A command stamped with the wall clock it was given at (epoch ms):
+    /// what decides whether a warm channel needs its refetch.
+    UserAt {
+        command: Command,
+        now_ms: i64,
+    },
+    /// A channel's newest window read from disk (`Effect::LoadWindow`),
+    /// oldest first; empty when there was none.
+    WindowLoaded {
+        channel_id: String,
+        messages: Vec<Message>,
+    },
     /// The stored session, if there is one.
     TokenLoaded(Option<Token>),
     /// The last session's snapshot, if the cache has one.

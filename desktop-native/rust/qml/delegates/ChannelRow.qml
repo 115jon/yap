@@ -31,6 +31,9 @@ Rectangle {
     signal inviteRequested()
     signal dragMoved(point scene)
     signal dragEnded(bool dropped)
+    // The pointer rested on a text channel that is not open (120 ms): its
+    // newest page can be fetched ahead of the click.
+    signal rested()
 
     height: Theme.treeRow
     radius: Theme.radius
@@ -160,6 +163,11 @@ Rectangle {
         onClicked: row.settingsRequested()
     }
     HoverHandler { id: hover; cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.PointingHandCursor }
+    Timer {
+        interval: 120
+        running: hover.hovered && !row.voice && !row.active && !drag.active
+        onTriggered: row.rested()
+    }
     TapHandler { onTapped: row.selected() }
     TapHandler {
         acceptedButtons: Qt.RightButton

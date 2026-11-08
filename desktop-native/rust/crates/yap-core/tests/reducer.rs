@@ -2262,6 +2262,7 @@ fn snapshot() -> Snapshot {
         written_at_ms: 0,
         voice: None,
         scroll_positions: Vec::new(),
+        last_channels: Vec::new(),
     }
 }
 

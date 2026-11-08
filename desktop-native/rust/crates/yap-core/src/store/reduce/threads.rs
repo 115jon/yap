@@ -244,12 +244,23 @@ impl State {
         let Some(channel_id) = self.active_channel.clone() else {
             return;
         };
-        let pins = &mut self.panels.pins;
+        let panels = &mut self.panels;
+        let pins = &mut panels.pins;
         if pins.channel_id == channel_id && !matches!(pins.load, Load::Idle) {
             return;
         }
+        // The list shown so far is kept for a return; a kept one for this
+        // channel shows at once while it is asked for again.
+        if let Load::Ready(list) = std::mem::take(&mut pins.load) {
+            if !pins.channel_id.is_empty() {
+                panels.pins_cache.put(pins.channel_id.clone(), list);
+            }
+        }
         pins.channel_id.clone_from(&channel_id);
-        pins.load = Load::Loading;
+        pins.load = match panels.pins_cache.take(&channel_id) {
+            Some(list) => Load::Ready(list),
+            None => Load::Loading,
+        };
         self.panels.pins_dirty = true;
         self.panels
             .pending
@@ -303,6 +314,11 @@ impl State {
     /// `PIN_MESSAGE` (chat-reducer.ts): the flag on every copy, and the
     /// pins list (newest first) when it is the message's channel's.
     fn apply_pin(&mut self, fx: &mut Effects, id: &str, pinned: bool, full: Option<Message>) {
+        // A kept list of another channel is stale now.
+        let channel = full.as_ref().map(|m| m.channel_id.clone());
+        self.panels.pins_cache.retain(|kept, list| {
+            channel.as_deref() != Some(kept.as_str()) && list.iter().all(|m| m.id != id)
+        });
         if let Some(at) = self.position_of(id) {
             let before = [self.message_row_at(at), None];
             if let Some(message) = self.messages.as_mut().and_then(|log| log.get_mut(id)) {
@@ -828,6 +844,8 @@ impl State {
                 }
                 Load::Ready(list)
             }
+            // A kept list stays when its refetch fails.
+            _ if matches!(pins.load, Load::Ready(_)) => return,
             // The web keeps "No pinned messages" and asks again next time.
             _ => {
                 pins.channel_id.clear();

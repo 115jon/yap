@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use yap_protocol::rest::{Channel, Notification, ReadState, User};
 
+use super::state::Lru;
 use super::time::{local_date, parse_rfc3339, LocalOffset};
 use super::view::query_value;
 use super::{Method, RequestId};
@@ -32,6 +33,9 @@ pub const MAX_EMOJI_PROMPT: usize = 300;
 pub const RECENT_AVATARS: usize = 6;
 /// The channel invite's lifetime (ChannelInviteModal.tsx: 7 days).
 pub const CHANNEL_INVITE_MAX_AGE: i64 = 604_800;
+
+/// Channel details tabs kept (channel and tab), besides the one shown.
+pub const TABS_CACHED: usize = 8;
 
 /// A tab of the channel details (MemberList.tsx `TabId`, the media ones).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -620,6 +624,8 @@ pub struct ExtrasState {
     pub(super) media_tab: Option<MediaTab>,
     pub(super) media: Vec<MediaItem>,
     pub(super) media_fetch: Fetch,
+    /// The details tabs of channels left (by channel and tab).
+    pub(super) tab_cache: Lru<(String, MediaTab), Vec<MediaItem>, TABS_CACHED>,
     pub(super) status_saving: Option<RequestId>,
     pub(super) status_error: String,
     /// The status that saved, for the dialog to close on.

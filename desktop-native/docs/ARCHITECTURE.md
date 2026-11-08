@@ -401,6 +401,93 @@ revalidation finishes. Mark cached views "syncing" and drop servers or
 channels the user lost access to on the first `servers` response. A
 corrupt-DB fallback is to delete and continue.
 
+#### As built: switching channels and servers (2026-11-08)
+
+The snapshot cache above serves the launch. Switching while the app runs
+goes through a second, in-memory layer in the store
+(`store/state.rs` `WarmCache`, `store/reduce/warm.rs`):
+
+- **The warm cache.** The open channel's `MessageLog` is the only log on
+  screen. When another channel opens, the log that was open moves into
+  `State::warm`, an LRU of channels left recently. Each entry keeps:
+  - the log, trimmed to its newest 100 messages (more when the channel was
+    left scrolled up: down to the top message on screen, at most 400), with
+    `has_more_before` set when anything was cut;
+  - the gateway generation it was confirmed in (`State::gateway_generation`,
+    bumped by every fresh Ready, not by a Resume);
+  - when its page was asked for (epoch ms, from `Input::UserAt`);
+  - its estimated size (`MessageLog::estimated_bytes`: the strings,
+    attachments, reactions, embeds and one copy per author).
+
+  Caps: 24 entries or 6 MB estimated, whichever comes first, checked when
+  an entry is stored and when a live event grows one; the least recently
+  used goes. The open channel is never in it (it is
+  `State::messages`), and the call's channel and the open voice view's are
+  never evicted. Pending sends are not stored (the outbox puts them back
+  when the channel opens). A jump's window (`has_more_after`) is not the
+  newest window and is not stored. Entries go when the channel is deleted,
+  when a refetched tree no longer lists it (access lost), when the server
+  goes (deleted or left), when a refetched DM list drops a DM, and on
+  sign-out.
+
+- **Stale-while-revalidate.** `open_messages` asks the warm cache first. A
+  hit puts the rows on screen in the same reduce: `ScrollRestore` (where
+  the channel was left, as `scrollPositions` keeps it), `Reset(rows)`, the
+  "New" divider placed as `on_page` places it, and `PageLoading(false)`.
+  Then the newest page is asked for anyway (`HttpReason::Revalidate`); its
+  answer goes through `on_page`'s row diff (`ordered_diff`), so a refetch
+  that changes nothing changes no row. The refetch is skipped only for a
+  server channel confirmed in the current gateway session less than 30 s
+  ago: server channels' message events reach every member of the server
+  (the client subscribes to every server), DMs' edits and deletes and all
+  reactions reach only a channel's subscribers. A miss, a pending jump into
+  the channel, or a saved scroll position the warm log no longer holds
+  takes the cold path: the empty list and its skeleton, the window kept on
+  disk, and the page.
+- **The clock.** The store still has none. The runtime stamps each command
+  with the wall clock (`Input::UserAt { command, now_ms }`); `Input::User`
+  (tests, tools) has no clock, and a warm entry is then never fresh.
+- **Live events on warm logs.** `MESSAGE_CREATE` (at the newest end only),
+  full `MESSAGE_UPDATE` (only a message already there), partial updates,
+  `MESSAGE_DELETE` and reactions apply to a warm log as to the open one,
+  and the changed log goes to disk through the batched writer.
+- **The disk window.** On a miss, `Effect::LoadWindow` reads the channel's
+  newest window from `snapshot.db` through a second, read-only SQLite
+  connection (WAL, so the writer never blocks it). `Input::WindowLoaded`
+  shows it when the page has not answered and the list is still empty;
+  the page then revalidates it like the launch's cached rows.
+- **The page merge.** A refetched newest page keeps the older rows already
+  loaded only when it joins up with them: it shares a message with them, or
+  its oldest message is not after their newest. A page entirely newer (more
+  than a page arrived since they were confirmed) used to leave the messages
+  between them missing while the list read as continuous; those rows are
+  dropped now and paged in again on scroll.
+- **Server switches.** A server whose tree is loaded (every server's is,
+  for its unread pill) shows its tree, its members and its channel in the
+  same batch; `GET /channels` revalidates the tree in the background and
+  `on_channels` keeps the open channel. The channel is the text channel
+  opened last in that server (`State::last_channels`, the web's
+  `lastActiveChannels:<userId>`, with `@me` for the last DM), else the
+  first text channel; it is kept in `snapshot.db` (`last_channels`, schema
+  4, migrated in place from 3). The server already shown, chosen again
+  (its rail key, the switcher, a refetched server list), keeps its open
+  channel and only refetches the tree.
+- **Prefetch.** A channel row the pointer rests on for 120 ms, and the
+  quick switcher's highlighted channel or DM, send `PrefetchChannel`: the
+  newest page, into the warm cache only, unless the channel is open, warm
+  and fresh, or already asked for. At most 2 are in flight, and the runner
+  answers one as busy at once while more than 4 of its 8 request slots are
+  taken. A prefetched page stays in memory (the disk keeps the windows of
+  channels opened), stamped with the gateway session it was asked in.
+- **The details panels.** The pins of the 16 channels whose pins panel
+  opened last (a pin event for one drops it) and the media, links and files
+  tabs of the last 8 channel and tab pairs are kept the same way: shown at
+  once when they open again, then asked for anew.
+- **Traces.** `YAP_TRACE_HTTP=1` logs `[http] METHOD path reason=... N ms`
+  for every request as it answers, at the one place they all pass
+  (`Runner::run`); every switch logs `[switch] <channel> warm|disk|cold
+rows=N <ms>` from the switch to its first rows.
+
 ---
 
 ### 5. Voice engine: state machine, track table, media adapter

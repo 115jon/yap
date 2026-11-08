@@ -2846,3 +2846,87 @@ Source (worktree `native/resize`):
 Tools (outside the repo, `F:/ct/yapn/tools/rs/`): `rsprobe.cpp` and
 `rsprobe.exe`, `sweep.ps1`, `thumb.ps1`, `app.ps1`, `build.ps1` (with
 `/MAP`), `test.ps1`, `anim-idle.ps1`, `static-idle.ps1` and `scroll.ps1`.
+
+# Switching (2026-11-08)
+
+Channel and server switches from memory (docs/ARCHITECTURE.md, "As built:
+switching channels and servers").
+
+## Method
+
+- Build: `F:/ct/yapn/rel-cache` (worktree `native/cache`), profile `spike`
+  (the test owner) in "Native Spike Lab", whose #general holds 18 messages
+  with a YouTube card and #cache-test (made for the run, 3 messages,
+  deleted after) holds 3.
+- Posted pointer and key input stopped reaching the window early in this
+  session: the build before the change took one test-pointer click in its
+  first run and none in its second, and this build none (the window,
+  the accessibility tree and the message loop were otherwise fine), so
+  the tours ran through `YAP_TEST_SWITCHES`, which
+  sends the same commands the sidebar, the rail and the keys send
+  (`src/client/mod.rs`). The click handlers themselves were not exercised.
+- `YAP_TRACE_HTTP=1` for the `[http]` lines; `[switch]` lines are always
+  logged. A switch is timed from the input that started it to the effect
+  that put its rows in the view batch: the store's share, not the QML
+  delegates' (the batch reaches the Qt thread on its next turn).
+- Memory: `Get-Process` private bytes every 3 s.
+
+## Results
+
+| switch                              | before                                                                 | now                                                                                                          |
+| ----------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| a channel visited before            | skeleton, `GET /messages` (185-938 ms here)                            | its rows in the same reduce: 0.1-0.4 ms, avg 0.21 ms (44 switches)                                           |
+| a channel left < 30 s ago (server)  | the same                                                               | no request at all                                                                                            |
+| a channel not warm, window on disk  | skeleton until the page                                                | the disk window in 1.2 ms (page answered after 938 ms, merged by diff)                                       |
+| a channel never seen                | skeleton, page (231 ms)                                                | the same (cold)                                                                                              |
+| Home → a server whose tree is known | header first, then `GET /channels`, then the first text channel's page | tree, members and the last channel in one batch (0.2 ms); `GET /channels` (223-394 ms) revalidates behind it |
+
+Requests, one tour of 45 switches between #general and #cache-test with
+two Home / server round trips: 8 page requests in all (the launch's
+revalidate, the disk window's page, and one revalidate per channel each
+time it was left for more than 30 s), and 3 tree revalidates. Before the
+change the same tour costs 45 page requests and 2 tree requests on top.
+
+Memory (private bytes, settled):
+
+| point                                                    | MB    |
+| -------------------------------------------------------- | ----- |
+| idle on #general after launch                            | 145.6 |
+| after one visit each to #cache-test, Home and the server | 150.9 |
+| after 39 more switches and two more Home / server trips  | 153.8 |
+
+The first visits cost what any build pays to make those views (+5.3 MB);
+the warm cache itself is bounded at 6 MB estimated and held 21 messages
+here. The tour added +2.9 MB, inside the +6 MB budget.
+
+## Not measured
+
+- Clicks, hovers and keys: the 120 ms hover prefetch, the switcher's
+  highlight prefetch, Alt / Ctrl+Alt navigation, Esc to mark read, drafts
+  per channel and the composer's focus after a switch (the store side of
+  the navigation keys and the prefetch is covered by `tests/switching.rs`).
+- Switching between two servers (the test account has one); Home to the
+  server takes the same path.
+- A full 24-channel warm cache in the app (the caps are covered by tests).
+
+## Files
+
+- Store: `store/state.rs` (`WarmCache`, `Lru`, `MessageLog::trim_for_warm`,
+  `estimated_bytes`), `store/reduce/warm.rs` (new), `store/reduce.rs`
+  (`open_messages`, `select_server`, `on_page`'s merge, the fresh Ready),
+  `store/reduce/{threads,extras,media,admin,social}.rs` (pins and tab
+  caches, warm reactions, eviction), `store/{effect,input}.rs`
+  (`HttpReason`, `LoadWindow`, `SwitchMark`, `Input::UserAt`,
+  `WindowLoaded`, `PrefetchChannel`, `SelectHomeLast`, `NavigateChannel`,
+  `NavigateServer`).
+- Runtime: `runtime.rs` (the stamp on commands, the `[http]` and
+  `[switch]` traces, the prefetch drop when busy, the read-only window
+  reader).
+- Cache: `yap-cache` `db.rs` (schema 4: `last_channels`, migrated from 3;
+  `Cache::window`, `Cache::open_read_only`), `lib.rs`.
+- App: `src/bridge.rs` (`prefetchChannel`, `selectHomeLast`,
+  `navigateChannel`, `navigateServer`), `src/client/mod.rs`
+  (`YAP_TEST_SWITCHES`), QML `ChannelRow`, `TreeRow`, `ChatView`,
+  `Composer`, `ExtrasHost`, `QuickSwitcher`, `ServerRail`.
+- Tests: `tests/switching.rs` (new), `yap-cache` `tests/cache.rs`, and
+  `tests/{threads,social}.rs` where a revisit now opens warm.

@@ -82,7 +82,58 @@ pub fn start(sink: Sink) -> bool {
         LOCAL,
     );
     let _ = tx.send(Command::Start);
+    test_switches(&tx);
     COMMANDS.set(tx).is_ok()
+}
+
+/// `YAP_TEST_SWITCHES` (tests): a script of navigation commands sent on
+/// the command channel the QML singletons use, each after its delay, for
+/// switching tours where posted input cannot reach the window. Steps are
+/// comma separated `<delay ms>:<kind>[:<id>]`: `c` select a channel or DM,
+/// `s` select a server, `h` the Home key, `p` prefetch a channel, `n` / `b`
+/// the next / previous channel, `u` the next unread one, `v` / `w` the next
+/// / previous server.
+fn test_switches(tx: &UnboundedSender<Command>) {
+    let Ok(script) = std::env::var("YAP_TEST_SWITCHES") else {
+        return;
+    };
+    let tx = tx.clone();
+    let _ = std::thread::Builder::new()
+        .name("yap-test-switches".into())
+        .spawn(move || {
+            for step in script.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                let mut parts = step.splitn(3, ':');
+                let delay = parts
+                    .next()
+                    .and_then(|d| d.parse::<u64>().ok())
+                    .unwrap_or(0);
+                let kind = parts.next().unwrap_or_default();
+                let id = parts.next().unwrap_or_default().to_owned();
+                std::thread::sleep(std::time::Duration::from_millis(delay));
+                let command = match kind {
+                    "c" => Command::SelectChannel(id.clone()),
+                    "s" => Command::SelectServer(id.clone()),
+                    "h" => Command::SelectHomeLast,
+                    "p" => Command::PrefetchChannel(id.clone()),
+                    "n" | "b" | "u" => Command::NavigateChannel {
+                        forward: kind != "b",
+                        unread: kind == "u",
+                    },
+                    "v" | "w" => Command::NavigateServer {
+                        forward: kind == "v",
+                    },
+                    _ => {
+                        eprintln!("[test] switches: unknown step {step}");
+                        continue;
+                    }
+                };
+                eprintln!("[test] switches: {kind} {id}");
+                if tx.send(command).is_err() {
+                    return;
+                }
+            }
+            eprintln!("[test] switches: done");
+        });
 }
 
 /// The core's way out, once per process (later calls return at once): a

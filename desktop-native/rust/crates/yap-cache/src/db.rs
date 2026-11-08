@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -13,9 +13,20 @@ use crate::{
     CHANNEL_WINDOWS, MESSAGE_WINDOW,
 };
 
-/// Bumped whenever the tables or the JSON in them change shape. Any other
-/// version on disk is dropped and recreated.
-pub const SCHEMA_VERSION: i32 = 3;
+/// Bumped whenever the tables or the JSON in them change shape. A version
+/// with a migration below is upgraded in place; any other version on disk
+/// is dropped and recreated.
+pub const SCHEMA_VERSION: i32 = 4;
+
+/// Version 3 to 4: the channel each server opens on.
+const MIGRATE_3_TO_4: &str = "
+CREATE TABLE last_channels (
+    user_id    TEXT NOT NULL,
+    server_id  TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    PRIMARY KEY (user_id, server_id)
+) WITHOUT ROWID;
+";
 
 const SCHEMA: &str = "
 CREATE TABLE users (
@@ -52,6 +63,12 @@ CREATE TABLE scroll_positions (
     message_id TEXT NOT NULL,
     PRIMARY KEY (user_id, channel_id)
 ) WITHOUT ROWID;
+CREATE TABLE last_channels (
+    user_id    TEXT NOT NULL,
+    server_id  TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    PRIMARY KEY (user_id, server_id)
+) WITHOUT ROWID;
 ";
 
 /// Coalesced writes: per user, the newest value per key, plus whether the
@@ -72,6 +89,7 @@ struct UserBatch {
     channels: HashMap<String, ChannelsResponse>,
     messages: HashMap<String, Vec<Message>>,
     scroll: HashMap<String, String>,
+    last_channels: HashMap<String, String>,
 }
 
 impl UserBatch {
@@ -83,6 +101,7 @@ impl UserBatch {
             || !self.channels.is_empty()
             || !self.messages.is_empty()
             || !self.scroll.is_empty()
+            || !self.last_channels.is_empty()
     }
 }
 
@@ -116,6 +135,12 @@ impl Batch {
                 message_id,
             } => {
                 user.scroll.insert(channel_id, message_id);
+            }
+            Write::LastChannel {
+                server_id,
+                channel_id,
+            } => {
+                user.last_channels.insert(server_id, channel_id);
             }
         }
     }
@@ -179,6 +204,23 @@ impl Cache {
         Self::init(Connection::open_in_memory()?)
     }
 
+    /// A second, read-only connection to a cache the writer owns: in WAL
+    /// mode it reads the last committed state without waiting on writes.
+    /// Only for [`Self::window`] and other reads; a file of another
+    /// version reads as empty.
+    pub fn open_read_only(path: &Path) -> Result<Self, CacheError> {
+        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_URI;
+        let conn = Connection::open_with_flags(path, flags)?;
+        conn.busy_timeout(Duration::from_millis(250))?;
+        let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if version != SCHEMA_VERSION {
+            return Err(CacheError::Sqlite(rusqlite::Error::InvalidQuery));
+        }
+        Ok(Self { conn })
+    }
+
     fn init(conn: Connection) -> Result<Self, CacheError> {
         conn.busy_timeout(Duration::from_secs(2))?;
         // Readers never wait on the writer, and a crash mid-write keeps the
@@ -187,10 +229,31 @@ impl Cache {
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         let mut cache = Self { conn };
-        if version != SCHEMA_VERSION {
+        if version == 3 {
+            cache.migrate(MIGRATE_3_TO_4)?;
+        } else if version != SCHEMA_VERSION {
             cache.recreate()?;
         }
         Ok(cache)
+    }
+
+    /// Upgrades the previous version in place (keeping what it holds).
+    fn migrate(&mut self, sql: &str) -> Result<(), CacheError> {
+        let tx = self.conn.transaction()?;
+        tx.execute_batch(sql)?;
+        tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// A channel's newest window as stored for a user, oldest first; empty
+    /// when none is kept.
+    pub fn window(&self, user_id: &str, channel_id: &str) -> Result<Vec<Message>, CacheError> {
+        self.bodies(
+            "SELECT body FROM messages WHERE user_id = ?1 AND channel_id = ?2
+             ORDER BY position",
+            params![user_id, channel_id],
+        )
     }
 
     /// Drops every table and creates the current schema.
@@ -302,6 +365,15 @@ impl Cache {
             })?;
             rows.collect::<Result<Vec<_>, _>>()?
         };
+        let last_channels = {
+            let mut query = self
+                .conn
+                .prepare("SELECT server_id, channel_id FROM last_channels WHERE user_id = ?1")?;
+            let rows = query.query_map([user_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
         Ok(Some(Snapshot {
             me,
             servers,
@@ -312,6 +384,7 @@ impl Cache {
             written_at_ms,
             voice: voice.as_deref().and_then(decode),
             scroll_positions,
+            last_channels,
         }))
     }
 
@@ -367,6 +440,7 @@ fn delete_user(tx: &Transaction<'_>, user_id: &str) -> Result<(), CacheError> {
         "channel_trees",
         "messages",
         "scroll_positions",
+        "last_channels",
     ] {
         tx.execute(
             &format!("DELETE FROM {table} WHERE user_id = ?1"),
@@ -418,6 +492,13 @@ fn write_user(
             "INSERT OR REPLACE INTO scroll_positions (user_id, channel_id, message_id)
              VALUES (?1, ?2, ?3)",
             params![user_id, channel_id, message_id],
+        )?;
+    }
+    for (server_id, channel_id) in &user.last_channels {
+        tx.execute(
+            "INSERT OR REPLACE INTO last_channels (user_id, server_id, channel_id)
+             VALUES (?1, ?2, ?3)",
+            params![user_id, server_id, channel_id],
         )?;
     }
     for (server_id, tree) in &user.channels {

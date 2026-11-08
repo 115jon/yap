@@ -439,8 +439,22 @@ impl State {
         let Some(channel_id) = self.active_channel.clone() else {
             return;
         };
-        if self.extras.media_channel != channel_id || self.extras.media_tab != Some(tab) {
-            self.extras.media.clear();
+        // The list shown so far is kept for a return (by channel and tab);
+        // a kept one shows at once while it is asked for again.
+        let extras = &mut self.extras;
+        if extras.media_channel != channel_id || extras.media_tab != Some(tab) {
+            let shown = std::mem::take(&mut extras.media);
+            if let (Some(old), Fetch::Ready) = (extras.media_tab, &extras.media_fetch) {
+                if !extras.media_channel.is_empty() {
+                    extras
+                        .tab_cache
+                        .put((extras.media_channel.clone(), old), shown);
+                }
+            }
+            if let Some(kept) = extras.tab_cache.take(&(channel_id.clone(), tab)) {
+                extras.media = kept;
+                extras.media_fetch = Fetch::Ready;
+            }
         }
         self.extras.media_channel = channel_id.clone();
         self.extras.media_tab = Some(tab);
@@ -524,7 +538,8 @@ impl State {
                 MediaTab::Files => "files",
             }
             .into(),
-            loading: self.extras.media_fetch.is_loading(),
+            // Kept rows stay up while they are asked for again.
+            loading: self.extras.media_fetch.is_loading() && self.extras.media.is_empty(),
             error: self.extras.media_fetch.error(),
             rows,
         }
@@ -761,6 +776,10 @@ impl State {
                         self.extras.media_fetch = Fetch::Ready;
                     }
                     Ok(_) => self.extras.media_fetch = Fetch::Ready,
+                    // Kept rows stay when their refetch fails.
+                    Err(_) if !self.extras.media.is_empty() => {
+                        self.extras.media_fetch = Fetch::Ready;
+                    }
                     Err(error) => {
                         self.extras.media_fetch =
                             Fetch::Failed(describe_api_error(&error, tab_action(tab)));
