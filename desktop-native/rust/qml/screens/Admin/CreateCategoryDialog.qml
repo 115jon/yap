@@ -1,9 +1,11 @@
 import QtQuick
 import com.yap.native
 
-// Create category (CreateCategoryModal.tsx): the name, Cancel and Create
-// category. The server stores it in capitals. An empty name is caught
-// inline.
+// Create category (CreateCategoryModal.tsx): "Category name" as a plain
+// label over a 40 px input (Label + Input, gap 6, no legend plate), the
+// name error and the create error (8 more above it), then Cancel and
+// Create category as 48 px footer keys. The server stores it in capitals.
+// An empty name is caught inline.
 PlateDialog {
     id: dialog
 
@@ -41,13 +43,23 @@ PlateDialog {
         }
     }
 
-    FieldPlate {
+    Column {
         width: parent.width
-        label: qsTr("Category name")
-        ground: Theme.ply3
+        spacing: 6
+        Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            text: qsTr("Category name")
+            elide: Text.ElideRight
+            color: Theme.ink1
+            font: Theme.type.occupant
+            lineHeight: 18
+            lineHeightMode: Text.FixedHeight
+            Accessible.ignored: true
+        }
         KitField {
             id: nameField
-            large: true
+            width: parent.width
             maximumLength: 100
             placeholderText: qsTr("New category")
             invalid: dialog.nameError.length > 0
@@ -55,30 +67,41 @@ PlateDialog {
             onTextEdited: Admin.clear("create-category.name")
             Keys.onReturnPressed: dialog.create()
         }
-    }
-    Text {
-        visible: dialog.nameError.length > 0
-        textFormat: Text.PlainText
-        text: dialog.nameError
-        color: Theme.dangerInk
-        font: Theme.type.caption
-        Accessible.role: Accessible.AlertMessage
-        Accessible.name: text
-    }
-    RowError {
-        above: 0
-        text: dialog.act.error
+        Text {
+            visible: dialog.nameError.length > 0
+            textFormat: Text.PlainText
+            text: dialog.nameError
+            color: Theme.dangerInk
+            font: Theme.type.caption
+            Accessible.role: Accessible.AlertMessage
+            Accessible.name: text
+        }
+        // mt-2 text-ui-xs text-danger-ink.
+        Text {
+            visible: dialog.act.error.length > 0
+            width: parent.width
+            topPadding: 8
+            textFormat: Text.PlainText
+            text: dialog.act.error
+            wrapMode: Text.Wrap
+            color: Theme.dangerInk
+            font: Theme.type.caption
+            Accessible.role: Accessible.AlertMessage
+            Accessible.name: text
+        }
     }
 
     footer: [
         KitButton {
             variant: "ghost"
+            size: "lg"
             text: qsTr("Cancel")
             enabled: !dialog.act.busy
             onClicked: dialog.close()
         },
         KitButton {
             variant: "primary"
+            size: "lg"
             ground: Theme.ply3
             text: qsTr("Create category")
             loading: dialog.act.busy

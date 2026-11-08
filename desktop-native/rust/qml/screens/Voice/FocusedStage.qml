@@ -16,6 +16,8 @@ Item {
     required property var tile
 
     readonly property bool screen: tile.kind === "screen"
+    // Our own share on stage: its call menu is ours on a share (PeerMenu).
+    readonly property bool ownShare: screen && tile.me
     // Our own share's preview can be paused (the tile's Pause).
     readonly property bool showsVideo: tile.video && tile.videoKey.length > 0
         && !(screen && tile.me && ShellState.sharePreviewPaused)
@@ -40,8 +42,8 @@ Item {
     TapHandler {
         onTapped: ShellState.focusedTile = ""
     }
+    // Their call menu, or ours on our own tile (VoiceGrid.tsx 507-518).
     TapHandler {
-        enabled: !root.tile.me
         acceptedButtons: Qt.RightButton
         onTapped: eventPoint => ShellState.showPeerMenu(root.tile.memberId, root.tile.name, root, eventPoint.position, Voice.channelId)
     }
@@ -102,10 +104,10 @@ Item {
 
     // Their volume, bottom-right on ply-3 (VoiceGrid.tsx 497-503): "Stream
     // volume" on a share (the stream's own level, as the call menu's), "User
-    // volume" on a person. The web hides it for a share with no audio track;
-    // native cannot tell, so it always shows.
+    // volume" on a person. A share without audio has none (VoiceGrid.tsx
+    // 350-352 `hasLiveAudioTrack`): `hasAudio` is its `screen-audio` offer.
     Rectangle {
-        visible: !root.tile.me
+        visible: !root.tile.me && (!root.screen || root.tile.hasAudio)
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 12

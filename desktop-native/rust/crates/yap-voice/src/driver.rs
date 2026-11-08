@@ -154,6 +154,20 @@ fn test_fail_after() -> Option<Duration> {
         .map(Duration::from_secs_f64)
 }
 
+/// `YAP_TEST_VOICE_FAIL=ice` (or `media`): a test hook, read once. The
+/// peer connection never comes up: each time it reports connected, the
+/// call sees it fail instead, so a join is rebuilt and finally given up
+/// ("Media connection failed"), as a network that blocks ICE would. The
+/// other stage, `admission`, is the app's (yap_core::faults). Unset: off.
+fn test_ice_fail() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| is_ice_stage(&std::env::var("YAP_TEST_VOICE_FAIL").unwrap_or_default()))
+}
+
+fn is_ice_stage(value: &str) -> bool {
+    matches!(value.trim().to_ascii_lowercase().as_str(), "ice" | "media")
+}
+
 /// What the worker reports back.
 #[derive(Debug, PartialEq)]
 enum Done {
@@ -353,6 +367,10 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
                     None => Input::Voice(VoiceEvent::Closed),
                 },
                 state = recv(&mut inbox.media) => Input::Media(match state {
+                    Some(MediaState::Connected) if test_ice_fail() => {
+                        eprintln!("[voice] test hook: ICE fails (YAP_TEST_VOICE_FAIL)");
+                        MediaEvent::State(MediaState::Failed)
+                    }
                     Some(state) => {
                         if state == MediaState::Connected && std::mem::take(&mut self.fail_armed) {
                             if let Some(after) = test_fail_after() {
@@ -1440,6 +1458,15 @@ mod tests {
     use super::*;
     use crate::engine::{FakeEngine, FakeOp};
     use crate::sfu::Pulled;
+
+    #[test]
+    fn the_ice_stage_should_parse() {
+        assert!(is_ice_stage("ice"));
+        assert!(is_ice_stage(" ICE "));
+        assert!(is_ice_stage("media"));
+        assert!(!is_ice_stage("admission"));
+        assert!(!is_ice_stage(""));
+    }
 
     /// Records SFU calls; the first pull of `flaky` fails once, and the
     /// next `failing_pushes` pushes fail.

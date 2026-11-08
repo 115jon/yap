@@ -324,10 +324,11 @@ Column {
     SettingsCard {
         width: parent.width
         sectionId: "screen-share"
-        SettingsRow {
+        // VoiceVideoPanel.tsx "stream-preview" (off by default).
+        SwitchSetting {
             rowId: "stream-preview"
-            layout: "inline"
-            ComingLater {}
+            checked: Audio.alwaysShowStreamPreview
+            onToggled: Audio.changeAlwaysShowStreamPreview(!Audio.alwaysShowStreamPreview)
         }
     }
 }

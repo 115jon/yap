@@ -1121,6 +1121,60 @@ pub fn lt_position(snapshot: &LtSnapshot, now_ms: i64) -> f64 {
     }
 }
 
+/// What the now-playing clock needs from the [`ListenView`], small enough to
+/// copy each second.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct LtClock {
+    /// The room position and the wall clock it was taken at.
+    pub position_ms: f64,
+    pub position_at: i64,
+    /// The room's `positionMs` as it sent it.
+    pub snapshot_position_ms: f64,
+    /// 0 for a track without a length.
+    pub duration_ms: f64,
+    pub paused: bool,
+    /// A track is current.
+    pub current: bool,
+}
+
+impl LtClock {
+    pub fn of(view: &ListenView) -> Self {
+        Self {
+            position_ms: view.position_ms,
+            position_at: view.position_at,
+            snapshot_position_ms: view.snapshot_position_ms,
+            duration_ms: view.duration_ms,
+            paused: view.paused,
+            current: view.now.is_some(),
+        }
+    }
+
+    /// `getListenTogetherLivePositionMs` (listen-together-playback.ts): the
+    /// room's position run on from its anchor while it plays, never below
+    /// the position the room sent, clamped to the track as
+    /// `clampListenTogetherPosition(position, durationMs)` clamps it. The
+    /// web's `durationMs` is `snapshot.durationMs ?? 0`, so a track without
+    /// a length (a live radio) reads 0:00, playing or paused.
+    pub fn live_ms(&self, now_ms: i64) -> f64 {
+        if !self.current {
+            return 0.0;
+        }
+        #[expect(clippy::cast_precision_loss, reason = "epoch ms fit f64 exactly")]
+        let since = if self.paused || self.position_at <= 0 {
+            0.0
+        } else {
+            (now_ms - self.position_at).max(0) as f64
+        };
+        let raw = self.snapshot_position_ms.max(self.position_ms + since);
+        raw.max(0.0).floor().min(self.duration_ms.max(0.0).floor())
+    }
+
+    /// `isListenTogetherProgressRunning`.
+    pub fn running(&self) -> bool {
+        self.current && !self.paused && self.duration_ms > 0.0
+    }
+}
+
 /// `getListenTogetherPlaybackPlan`, as commands for the player.
 pub fn lt_plan(
     snapshot: Option<&LtSnapshot>,
@@ -1196,6 +1250,19 @@ pub struct SoundTile {
     pub volume: f64,
 }
 
+/// One server's sounds in the picker (a rail key and a section).
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SoundSection {
+    pub server_id: String,
+    pub name: String,
+    /// The server icon's absolute URL, or empty (the initial shows).
+    pub icon: String,
+    /// The call's own server: its section leads with Add sound.
+    pub own: bool,
+    pub sounds: Vec<SoundTile>,
+}
+
 /// A playing row.
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1230,6 +1297,9 @@ pub struct QueueRow {
     pub artwork: String,
     pub duration_ms: f64,
     pub requester: String,
+    /// The requester's picture (`requester.avatarUrl`, absolute, with its
+    /// avatar crop on the URL), or empty: the initial shows.
+    pub requester_avatar: String,
     pub current: bool,
     pub radio: bool,
     /// The collection it came in with (`importBatchLabel`).
@@ -1313,6 +1383,10 @@ pub struct AppsView {
     pub server_id: String,
     pub defaults: Vec<SoundTile>,
     pub sounds: Vec<SoundTile>,
+    /// The picker's server sections and rail (SoundboardPicker.tsx
+    /// `serverSoundSections`): the call's server, or in a DM call every
+    /// member server, in the rail's order.
+    pub sections: Vec<SoundSection>,
     pub favorites: Vec<SoundTile>,
     /// Custom sounds on this device for the call's scope.
     pub local: Vec<SoundTile>,
@@ -1388,7 +1462,14 @@ pub struct ListenView {
     /// (the card runs its own clock between updates).
     pub position_ms: f64,
     pub position_at: i64,
+    /// The room's own `positionMs` (taken when it sent the state): the live
+    /// position never reads below it.
+    pub snapshot_position_ms: f64,
+    /// The track's length, 0 for one without (a live radio).
     pub duration_ms: f64,
+    /// `isListenTogetherProgressRunning`: the position moves on its own
+    /// (a track with a length, playing), so the clock ticks.
+    pub running: bool,
     pub query: String,
     pub searching: bool,
     pub results: Vec<ResultRow>,

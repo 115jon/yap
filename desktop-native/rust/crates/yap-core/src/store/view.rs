@@ -348,6 +348,15 @@ rows! {
         /// Shares: who watches, as JSON `[{userId, name, avatar,
         /// initials}]` (StreamWatcherList.tsx), empty when nobody.
         watchers: String => Watchers "watchers",
+        /// A share carries audio: ours as we capture it, someone else's
+        /// once it offers `screen-audio-<pid>` (the stage's stream volume
+        /// shows only then, VoiceGrid.tsx `hasLiveAudioTrack`). False on a
+        /// person.
+        has_audio: bool => HasAudio "hasAudio",
+        /// Someone else's share: its still (a `data:image/` URL from the
+        /// gateway roster, refreshed by its owner every 8 s), shown behind
+        /// Watch stream (ParticipantCard.tsx). Empty otherwise.
+        preview: String => Preview "preview",
     }
     key(row) -> String { row.id.clone() }
 
@@ -1108,6 +1117,13 @@ pub enum ViewUpdate {
     },
     Status(String),
     Connected(bool),
+    /// The link's retries for the connection strip and the cold load:
+    /// the attempt since the last ready (0: none) and whether the last
+    /// try found no network.
+    Link {
+        attempt: u32,
+        offline: bool,
+    },
     Me(MeView),
     ActiveServer {
         id: String,
@@ -1374,6 +1390,9 @@ pub(super) struct Seat {
     pub me: bool,
     /// Their avatar decoration, filled in by the store.
     pub deco: String,
+    /// Their share's still from the gateway roster (never ours: our tile
+    /// shows our capture).
+    pub preview: String,
     /// Dimmed with its LED off and no live glyph (voice-presence.ts):
     /// their session is coming back, or this is us listed while this
     /// client is not in the call.
@@ -1418,6 +1437,11 @@ pub(super) fn seats(
                         speaking: member.is_some_and(|m| m.speaking) && !reconnecting,
                         me,
                         deco: String::new(),
+                        preview: if me {
+                            String::new()
+                        } else {
+                            o.stream_preview.clone()
+                        },
                         live: live && !reconnecting,
                         reconnecting,
                     }
@@ -1474,8 +1498,25 @@ fn call_seat(m: &VoiceMember, key: String, call: &VoiceCall) -> Seat {
         speaking: m.speaking,
         me: m.me,
         deco: String::new(),
+        preview: String::new(),
         reconnecting: false,
     }
+}
+
+/// The longest share still the gateway takes (meeting-room.ts
+/// `MAX_STREAM_PREVIEW_URL_BYTES`); a longer one is not sent, and one from
+/// the server past it is dropped, never decoded on the GUI thread.
+pub(crate) const STREAM_PREVIEW_MAX_BYTES: usize = 4096;
+
+/// A share still the tiles may show: an inline JPEG, PNG or WebP
+/// (`data:image/...;base64,`, what the web's capture sends). Anything else
+/// (a remote URL) is not loaded: it would fetch from wherever another user
+/// pointed it.
+pub(crate) fn is_still_url(url: &str) -> bool {
+    url.len() <= STREAM_PREVIEW_MAX_BYTES
+        && ["jpeg", "png", "webp"]
+        .iter()
+        .any(|kind| url.starts_with(&format!("data:image/{kind};base64,")))
 }
 
 /// A badge: unread, and the mention count.
@@ -1759,6 +1800,8 @@ pub(super) fn tile_rows(seats: &[Seat], call: &VoiceCall) -> Vec<VoiceTileRow> {
             watching: false,
             deco: s.deco.clone(),
             watchers: String::new(),
+            has_audio: false,
+            preview: String::new(),
         };
         // Our own share shows its capture as sent (VoiceGrid's local
         // stream tile), live as soon as the share is.
@@ -1785,6 +1828,16 @@ pub(super) fn tile_rows(seats: &[Seat], call: &VoiceCall) -> Vec<VoiceTileRow> {
                 key("screen-video")
             },
             watching: !s.me && call.watched.contains(&pid),
+            has_audio: if s.me {
+                call.share.as_ref().is_some_and(|share| share.audio)
+            } else {
+                member.is_some_and(|m| m.screen_audio)
+            },
+            preview: if s.me {
+                String::new()
+            } else {
+                s.preview.clone()
+            },
             ..person.clone()
         });
         rows.push(person);

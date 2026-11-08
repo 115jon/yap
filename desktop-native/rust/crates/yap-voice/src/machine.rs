@@ -763,7 +763,7 @@ impl CallMachine {
     }
 
     /// The roster so far (empty before the admission), with whose camera and
-    /// share are live.
+    /// share are live and whose share offers its audio.
     pub fn roster(&self) -> Vec<Member> {
         let mut members = self
             .roster
@@ -773,6 +773,7 @@ impl CallMachine {
         for m in &mut members {
             m.camera_live = self.tracks.is_live(&camera_alias(&m.id));
             m.screen_live = self.tracks.is_live(&screen_alias(&m.id));
+            m.screen_audio = self.tracks.offer_of(&screen_audio_alias(&m.id)).is_some();
         }
         members
     }

@@ -9,9 +9,12 @@ import com.yap.native
 // header with "<name>'s stream", Go to <channel> and Minimise, then the
 // 16:9 video on black (the paused card until a frame comes). Over the video,
 // on hover, a black/60 pill: Stream settings (the person's menu) and Stop
-// streaming / Stop watching. Dragged, it settles in the nearest corner;
-// minimised, it is a 48 px bubble that opens it again. A right click opens
-// the same menu. The corners keep 8 px clear of the composer and the stage
+// streaming / Stop watching. It drags from anywhere that is not a control
+// and, let go, snaps to the corner its flick points at (FloatingDrag); it
+// enters with a fade and scale(.97) from its corner over 200 ms ease-out
+// (each face minimise or restore swaps in too), with no exit. Minimised, it
+// is a 48 px round bubble that opens it again. A right click opens the same
+// menu. The corners keep 8 px clear of the composer and the stage
 // bar and cards that share a corner stack (the FloatingArea's geometry,
 // floating-geometry.ts).
 Item {
@@ -22,6 +25,8 @@ Item {
     required property string participantId
     required property string memberId
     required property bool me
+    // Our own stream: its call menu is ours on a share (PeerMenu).
+    readonly property bool ownShare: me
     property string channelName
     // Our share first, a watched one above it (the stack's rank).
     property int slot: 0
@@ -41,8 +46,8 @@ Item {
     function placeY() {
         return area.cornerY(corner, width, height, area.stackOffset(stackId, corner))
     }
-    function settle() {
-        corner = area.cornerFor(x, y, width, height)
+    function settle(to) {
+        corner = to
         x = Qt.binding(() => placeX())
         y = Qt.binding(() => placeY())
     }
@@ -57,24 +62,67 @@ Item {
     y: placeY()
     z: 20
 
+    // Placed once, so the first layout does not glide in from the origin;
+    // corner to corner is a dur-4 ease-in-out glide, never while dragged.
+    property bool placed: false
+    Behavior on x {
+        enabled: root.placed && !drag.active
+        NumberAnimation { duration: Theme.dur4; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeInOut }
+    }
+    Behavior on y {
+        enabled: root.placed && !drag.active
+        NumberAnimation { duration: Theme.dur4; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeInOut }
+    }
+
+    // Presence (FloatingSurface.tsx `presence`): fade and scale(.97) from
+    // its corner, dur-3 ease-out, on arrival and on each face swap.
+    property real presence: 0
+    opacity: presence
+    scale: Theme.scaleIn + (1 - Theme.scaleIn) * presence
+    transformOrigin: corner === 0 ? Item.BottomLeft : corner === 1 ? Item.BottomRight
+        : corner === 2 ? Item.TopLeft : Item.TopRight
+    NumberAnimation {
+        id: enter
+        target: root
+        property: "presence"
+        from: 0
+        to: 1
+        duration: Theme.dur3
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: Theme.easeOut
+    }
+    onMinimizedChanged: enter.restart()
+
     onCornerChanged: publish()
     onHeightChanged: publish()
     onSlotChanged: publish()
-    Component.onCompleted: publish()
+    Component.onCompleted: {
+        publish()
+        enter.restart()
+        Qt.callLater(() => root.placed = true)
+    }
     Component.onDestruction: area?.withdraw(stackId)
 
     Accessible.role: Accessible.Pane
     Accessible.name: qsTr("Stream preview")
 
-    // Minimised: the bubble.
+    // Drag from anywhere that is not a control (the bubble included).
+    FloatingDrag {
+        id: drag
+        card: root
+        area: root.area
+        onSettled: corner => root.settle(corner)
+    }
+
+    // Minimised: the 48 px round bubble.
     Rectangle {
         visible: root.minimized
         anchors.fill: parent
-        radius: Theme.radiusSheet
+        radius: width / 2
         color: Theme.ply3
         border.width: 1
         border.color: Theme.lineStrong
-        FloatShadow { radius: Theme.radiusSheet }
+        FloatShadow { radius: parent.radius }
         Icon {
             anchors.centerIn: parent
             name: "screenShare"
@@ -135,21 +183,6 @@ Item {
                     onClicked: root.minimized = true
                 }
             }
-            // Behind the keys, and never taking a press from an item (the
-            // default let it cancel the keys' presses).
-            Item {
-                anchors.fill: parent
-                z: -1
-                DragHandler {
-                    grabPermissions: PointerHandler.CanTakeOverFromHandlersOfSameType | PointerHandler.ApprovesTakeOverByAnything
-                    target: root
-                    xAxis.minimum: 0
-                    xAxis.maximum: root.area.width - root.width
-                    yAxis.minimum: 0
-                    yAxis.maximum: root.area.height - root.height
-                    onActiveChanged: if (!active) root.settle()
-                }
-            }
         }
 
         Rectangle {
@@ -176,6 +209,7 @@ Item {
                     width: parent.width
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
+                    textFormat: Text.PlainText
                     text: root.me ? qsTr("Your stream is still running!") : qsTr("%1 is still live").arg(root.displayName)
                     color: "#ffffff"
                     font: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 15, weight: Font.DemiBold })
@@ -184,6 +218,7 @@ Item {
                     width: parent.width
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
+                    textFormat: Text.PlainText
                     text: root.me ? qsTr("We've paused this preview to save your resources.")
                                   : qsTr("We're waiting for this stream preview to be available again.")
                     color: Qt.rgba(1, 1, 1, 0.7)

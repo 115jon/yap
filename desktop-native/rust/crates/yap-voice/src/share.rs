@@ -446,6 +446,33 @@ pub(crate) mod live {
         sent
     }
 
+    /// A still of the last frame the live share sent, at most `max_width`
+    /// wide (`crate::still`). The frame is shared, not copied; the
+    /// shrinking runs on the caller's thread.
+    pub(crate) fn still(max_width: u32) -> Option<crate::still::Still> {
+        let frame = LAST
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|(_, frame)| Arc::clone(frame))?;
+        let (sy, su, sv) = frame.strides();
+        let (y, u, v) = frame.data();
+        crate::still::i420_to_rgb(
+            &I420Frame {
+                width: frame.width(),
+                height: frame.height(),
+                rotation: 0,
+                y,
+                u,
+                v,
+                stride_y: sy,
+                stride_u: su,
+                stride_v: sv,
+            },
+            max_width,
+        )
+    }
+
     /// Our own share's tile.
     fn preview(buffer: &I420Buffer) {
         let Some(output) = crate::engine::video_output() else {

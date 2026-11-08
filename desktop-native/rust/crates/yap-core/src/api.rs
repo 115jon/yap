@@ -53,6 +53,20 @@ impl ApiError {
         matches!(self, Self::Unauthorized)
     }
 
+    /// The request never left this device: the host name did not resolve
+    /// (no network, the usual case `navigator.onLine` covers on the web),
+    /// or a debug switch took the process offline. A refused or timed-out
+    /// connection is not this: the network is up, the server is not.
+    pub fn is_offline(&self) -> bool {
+        match self {
+            Self::Network(text) => {
+                let text = text.to_ascii_lowercase();
+                text.contains("dns error") || text.starts_with("offline")
+            }
+            _ => false,
+        }
+    }
+
     /// Keeps the whole cause chain, like `anyhow`'s `{:#}` did.
     fn network(error: &reqwest::Error) -> Self {
         let mut text = error.to_string();
@@ -152,8 +166,16 @@ impl Api {
     }
 
     async fn send(&self, builder: RequestBuilder) -> Result<Value, ApiError> {
-        let response = builder
-            .send()
+        let (client, request) = builder.build_split();
+        let request = request.map_err(|error| ApiError::network(&error))?;
+        // The test switches (crate::faults); none set: never a fault.
+        if let Some(error) =
+            crate::faults::intercept(request.method().as_str(), request.url().as_str())
+        {
+            return Err(error);
+        }
+        let response = client
+            .execute(request)
             .await
             .map_err(|error| ApiError::network(&error))?;
         let status = response.status();
@@ -178,6 +200,9 @@ impl Api {
     /// A GET of `url` on another host: no session, no publishable key
     /// (radio-browser, as the web fetches it from the page).
     pub async fn get_public(&self, url: &str) -> Result<Value, ApiError> {
+        if let Some(error) = crate::faults::intercept("GET", url) {
+            return Err(error);
+        }
         let response = self
             .http
             .get(url)
@@ -304,6 +329,9 @@ impl Api {
     /// behind on any failure. The session goes along only when `url` is the
     /// API's own (attachments and emoji need it; nothing else may see it).
     pub async fn download(&self, url: &str, dest: &Path, cap: u64) -> Result<(), ApiError> {
+        if let Some(error) = crate::faults::intercept("GET", url) {
+            return Err(error);
+        }
         let cfg = config::get();
         let builder = if is_api_url(&cfg.api_base, url) {
             self.http
@@ -375,6 +403,25 @@ mod tests {
         ] {
             assert!(media_needs_auth(BASE, &format!("{BASE}{path}")), "{path}");
         }
+    }
+
+    #[test]
+    fn a_dns_failure_should_read_as_offline() {
+        use super::ApiError;
+        let dns = "error sending request for url (https://yap.test/api/users/me): client error \
+                   (Connect): dns error: No such host is known. (os error 11001)";
+        assert!(ApiError::Network(dns.into()).is_offline());
+        assert!(ApiError::Network("offline (debug)".into()).is_offline());
+        let refused = "error sending request: client error (Connect): tcp connect error: \
+                       No connection could be made (os error 10061)";
+        assert!(!ApiError::Network(refused.into()).is_offline());
+        assert!(!ApiError::Network("operation timed out".into()).is_offline());
+        assert!(!ApiError::Unauthorized.is_offline());
+        assert!(!ApiError::Http {
+            status: 503,
+            message: String::new()
+        }
+        .is_offline());
     }
 
     #[test]

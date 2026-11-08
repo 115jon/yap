@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "profile.h"
 #include "toast_win.h"
@@ -181,6 +182,56 @@ QString readRegString(const std::wstring& key, const std::wstring& name)
                    nullptr, buffer.data(), &size) != ERROR_SUCCESS)
     return QString();
   return QString::fromWCharArray(buffer.c_str());
+}
+
+// Tests (YAP_TEST_MENU): the file our open menu window is saved to, and
+// how long it stays open (YAP_TEST_MENU_HOLD_MS, default 900).
+QString g_menuDump;
+
+BOOL CALLBACK collectMenus(HWND hwnd, LPARAM out)
+{
+  wchar_t name[16] = {};
+  if (IsWindowVisible(hwnd) && GetClassNameW(hwnd, name, 16) &&
+      wcscmp(name, L"#32768") == 0)
+    reinterpret_cast<std::vector<HWND>*>(out)->push_back(hwnd);
+  return TRUE;
+}
+
+// Fires inside the menu's modal loop (a thread timer): saves every popup
+// menu window of this thread, each through PrintWindow (its own pixels,
+// never the screen's), then closes the menu without choosing anything.
+void CALLBACK dumpMenuTimer(HWND, UINT, UINT_PTR id, DWORD)
+{
+  KillTimer(nullptr, id);
+  std::vector<HWND> menus;
+  EnumThreadWindows(GetCurrentThreadId(), collectMenus,
+                    reinterpret_cast<LPARAM>(&menus));
+  std::fprintf(stderr, "[test-menu] %zu menu window(s) open\n", menus.size());
+  int n = 0;
+  for (HWND menu : menus) {
+    RECT r {};
+    GetWindowRect(menu, &r);
+    const int w = r.right - r.left;
+    const int h = r.bottom - r.top;
+    HDC screen = GetDC(nullptr);
+    HDC dc = CreateCompatibleDC(screen);
+    HBITMAP bitmap = CreateCompatibleBitmap(screen, w, h);
+    HGDIOBJ old = SelectObject(dc, bitmap);
+    const BOOL printed = PrintWindow(menu, dc, 2 /* PW_RENDERFULLCONTENT */);
+    // Deselected first: GetDIBits reads a bitmap no DC holds.
+    SelectObject(dc, old);
+    const QImage image = QImage::fromHBITMAP(bitmap);
+    DeleteObject(bitmap);
+    DeleteDC(dc);
+    ReleaseDC(nullptr, screen);
+    QString path = g_menuDump;
+    if (n++ > 0)
+      path.replace(QStringLiteral(".png"), QStringLiteral("-%1.png").arg(n));
+    const bool saved = !path.isEmpty() && image.save(path);
+    std::fprintf(stderr, "[test-menu] menu %dx%d at %ld,%ld printed=%d saved=%d %s\n",
+                 w, h, r.left, r.top, int(printed), int(saved), qPrintable(path));
+  }
+  EndMenu();
 }
 
 LRESULT CALLBACK trayProc(HWND hwnd, UINT message, WPARAM wParam,
@@ -362,6 +413,15 @@ void DesktopShell::attach(QQuickWindow* window, QObject* desktop)
       std::fprintf(stderr, "[quit] test hook: tray Quit\n");
       trayCommand(kMenuQuit);
     });
+
+  // Tests (YAP_TEST_MENU=tray|system|systemkey, YAP_TEST_MENU_AFTER_SECS,
+  // YAP_TEST_MENU_DUMP=<png>): opens that menu of ours without the real
+  // cursor, keyboard or foreground, saves its window and closes it; no
+  // command runs. Inert unless the variable is set.
+  if (qEnvironmentVariableIsSet("YAP_TEST_MENU"))
+    QTimer::singleShot(
+      (std::max)(1, qEnvironmentVariableIntValue("YAP_TEST_MENU_AFTER_SECS")) * 1000,
+      this, &DesktopShell::runMenuTest);
 
   restoreGeometry();
   bool toTray = false;
@@ -731,7 +791,7 @@ void DesktopShell::updateTrayIcon()
                qPrintable(trayTooltip(m_badgeTooltip)));
 }
 
-void DesktopShell::showTrayMenu()
+void DesktopShell::showTrayMenu(bool test, int x, int y)
 {
   const HWND hwnd = reinterpret_cast<HWND>(m_trayHwnd);
   HMENU menu = CreatePopupMenu();
@@ -739,15 +799,49 @@ void DesktopShell::showTrayMenu()
   AppendMenuW(menu, MF_STRING, kMenuShow,
               (L"Show " + profile::displayName()).c_str());
   AppendMenuW(menu, MF_STRING, kMenuQuit, L"Quit");
-  POINT at;
-  GetCursorPos(&at);
-  SetForegroundWindow(hwnd);
+  POINT at { x, y };
+  if (!test) {
+    GetCursorPos(&at);
+    SetForegroundWindow(hwnd);
+  }
   const UINT chosen =
     TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, at.x,
                    at.y, 0, hwnd, nullptr);
   DestroyMenu(menu);
   PostMessageW(hwnd, WM_NULL, 0, 0);
-  trayCommand(chosen);
+  if (test)
+    std::fprintf(stderr, "[test-menu] tray menu closed, chose %u (ignored)\n", chosen);
+  else
+    trayCommand(chosen);
+}
+
+void DesktopShell::runMenuTest()
+{
+  if (!m_window)
+    return;
+  const QString which = qEnvironmentVariable("YAP_TEST_MENU");
+  const HWND hwnd = reinterpret_cast<HWND>(m_window->winId());
+  RECT frame {};
+  GetWindowRect(hwnd, &frame);
+  // A point inside our own caption, clear of the window keys.
+  const int x = frame.left + 120;
+  const int y = frame.top + 12;
+  g_menuDump = qEnvironmentVariable("YAP_TEST_MENU_DUMP");
+  const int hold = qEnvironmentVariableIsSet("YAP_TEST_MENU_HOLD_MS")
+                     ? qEnvironmentVariableIntValue("YAP_TEST_MENU_HOLD_MS")
+                     : 900;
+  SetTimer(nullptr, 0, UINT((std::max)(hold, 200)), dumpMenuTimer);
+  std::fprintf(stderr, "[test-menu] opening %s at %d,%d\n", qPrintable(which), x, y);
+  if (which == QLatin1String("tray")) {
+    showTrayMenu(true, x, y);
+  } else if (which == QLatin1String("system")) {
+    // What Windows does after a right-click on HTCAPTION: WM_CONTEXTMENU
+    // at that point, which DefWindowProc turns into the system menu.
+    PostMessageW(hwnd, WM_CONTEXTMENU, WPARAM(hwnd), MAKELPARAM(x, y));
+  } else if (which == QLatin1String("systemkey")) {
+    // Alt+Space's path.
+    PostMessageW(hwnd, WM_SYSCOMMAND, SC_KEYMENU, LPARAM(VK_SPACE));
+  }
 }
 
 void DesktopShell::trayCommand(unsigned chosen)

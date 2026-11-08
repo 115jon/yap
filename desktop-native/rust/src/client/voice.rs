@@ -54,6 +54,16 @@ struct Admission(Api);
 
 impl AdmissionApi for Admission {
     async fn admission(&self, body: Value) -> Result<Value, ApiFailure> {
+        // `YAP_TEST_VOICE_FAIL=admission` (yap_core::faults): the join's
+        // admission answers 500, as a broken voice backend would.
+        if yap_core::faults::voice_fail() == Some(yap_core::faults::VoiceFail::Admission) {
+            let error = yap_core::faults::status_error(500);
+            eprintln!("[voice] test switch: admission fails ({error})");
+            return Err(ApiFailure {
+                unauthorized: false,
+                message: error.to_string(),
+            });
+        }
         self.0
             .post("/api/voice/admission", &body)
             .await
@@ -196,6 +206,42 @@ fn share_update(notice: ShareNotice) -> VoiceUpdate {
             }
         }
     }
+}
+
+/// Our live share's stills for everyone's roster (`yap_voice::still`, the
+/// web's `STREAM_PREVIEW_CAPTURE_*`): the first shortly after it goes live,
+/// then one every 8 s, each the last frame it sent at most 224 wide as a
+/// JPEG `data:` URL the gateway takes. The store sends it on (op 15
+/// `stream_preview_url`) when it changed. Aborted when the share ends.
+fn share_stills(events: VoiceEvents) -> tokio::task::JoinHandle<()> {
+    use yap_voice::still::{fit_still_url, STILL_EVERY, STILL_FIRST_AFTER};
+    tokio::spawn(async move {
+        tokio::time::sleep(STILL_FIRST_AFTER).await;
+        loop {
+            let url = tokio::task::spawn_blocking(|| fit_still_url(yap_voice::share_still, still_jpeg))
+                .await
+                .ok()
+                .flatten();
+            if let Some(url) = url {
+                events.send(VoiceUpdate::SharePreview(url));
+            }
+            tokio::time::sleep(STILL_EVERY).await;
+        }
+    })
+}
+
+/// A share still as a JPEG at `quality` (1-100).
+fn still_jpeg(still: &yap_voice::Still, quality: u8) -> Option<Vec<u8>> {
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, quality)
+        .encode(
+            &still.rgb,
+            still.width,
+            still.height,
+            image::ExtendedColorType::Rgb8,
+        )
+        .ok()?;
+    Some(jpeg)
 }
 
 /// The wall clock in epoch ms (app events are stamped with it; the store
@@ -368,6 +414,12 @@ pub fn send_disconnect_beacon(wait: Duration) {
 }
 
 fn call_stats(stats: yap_voice::VoiceStats) -> CallStats {
+    let ticks: Vec<(u64, [f64; 4])> = stats
+        .samples
+        .iter()
+        .map(|s| (s.at_ms, [s.bitrate, s.loss, s.jitter, s.rtt]))
+        .collect();
+    let (samples, window_s) = yap_core::store::calls::chart_samples(&ticks);
     CallStats {
         quality: stats.quality.to_owned(),
         rtt_ms: stats.rtt_ms,
@@ -375,6 +427,7 @@ fn call_stats(stats: yap_voice::VoiceStats) -> CallStats {
         jitter_ms: stats.jitter_ms,
         bitrate_kbps: stats.bitrate_kbps,
         server: stats.server,
+        room: stats.room,
         remote_tracks: stats.remote_tracks,
         video: stats
             .outbound_video
@@ -411,11 +464,8 @@ fn call_stats(stats: yap_voice::VoiceStats) -> CallStats {
                 decode_ms: v.decode_ms,
             })
             .collect(),
-        samples: stats
-            .samples
-            .into_iter()
-            .map(|s| [s.bitrate, s.loss, s.jitter, s.rtt])
-            .collect(),
+        samples,
+        window_s,
     }
 }
 
@@ -440,6 +490,8 @@ pub async fn run(
     };
     // Our voice session in this call, once the voice socket is ready.
     let my_participant: Mutex<Option<String>> = Mutex::new(None);
+    // Our live share's still task (`share_stills`).
+    let stills: Mutex<Option<tokio::task::JoinHandle<()>>> = Mutex::new(None);
     let (beacon_channel, beacon_server) = (target.channel_id.clone(), target.server_id.clone());
     let beacon_user = target.me_id.clone();
     let target = CallTarget {
@@ -458,7 +510,24 @@ pub async fn run(
         Notice::Rejoined => events.send(VoiceUpdate::Rejoined),
         Notice::MicLevel(level) => crate::audio::set_live_level(Some(level)),
         Notice::Camera { on, error } => events.send(VoiceUpdate::Camera { on, error }),
-        Notice::Share(notice) => events.send(share_update(notice)),
+        Notice::Share(notice) => {
+            let mut task = stills.lock().unwrap_or_else(PoisonError::into_inner);
+            match &notice {
+                ShareNotice::Started(_) => {
+                    if let Some(old) = task.replace(share_stills(events.clone())) {
+                        old.abort();
+                    }
+                }
+                ShareNotice::Ended { .. } => {
+                    if let Some(old) = task.take() {
+                        old.abort();
+                    }
+                }
+                ShareNotice::Updated(_) => {}
+            }
+            drop(task);
+            events.send(share_update(notice));
+        }
         Notice::VoiceReady { participant_id } => {
             *my_participant
                 .lock()
@@ -513,11 +582,15 @@ pub async fn run(
                     stream: m.stream,
                     camera_live: m.camera_live,
                     screen_live: m.screen_live,
+                    screen_audio: m.screen_audio,
                 })
                 .collect(),
         )),
     };
     let error = run_call(env, target, Commands::new(commands), notify).await;
+    if let Some(task) = stills.lock().unwrap_or_else(PoisonError::into_inner).take() {
+        task.abort();
+    }
     // Only our own beacon: a newer call (a move, a standby promotion) may
     // already have replaced it.
     let mine = my_participant

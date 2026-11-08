@@ -28,6 +28,9 @@ pub struct Member {
     pub camera_live: bool,
     /// Their share is pulled and showing (`screen-video-<id>`).
     pub screen_live: bool,
+    /// Their share offers its audio (`screen-audio-<id>`): the stage's
+    /// stream volume shows only then (VoiceGrid.tsx `hasLiveAudioTrack`).
+    pub screen_audio: bool,
 }
 
 #[derive(Debug, Default)]
@@ -90,6 +93,7 @@ impl Roster {
                 stream: row.stream,
                 camera_live: false,
                 screen_live: false,
+                screen_audio: false,
             })
             .collect()
     }

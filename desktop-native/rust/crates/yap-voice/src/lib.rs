@@ -126,6 +126,7 @@ mod roster;
 mod sfu;
 mod share;
 pub mod spatial;
+pub mod still;
 mod tracks;
 mod vad;
 pub mod wire;
@@ -158,6 +159,7 @@ pub use share::{
     SHARE_AUDIO_RATE, SHARE_QUALITIES,
 };
 pub use spatial::{MapSeat, SpatialLocal, SpatialMap, SpatialState};
+pub use still::{share_still, Still};
 pub use tracks::{Kind, Offer, Pull, Remote, TrackTable};
 pub use vad::{
     level_percent, EnergyMeter, Sensitivity, Vad, AUTO_THRESHOLD, SILENCE_DELAY_MS, VAD_TICK,

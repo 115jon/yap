@@ -38,6 +38,11 @@ pub struct GatewayStatus {
     pub ready: bool,
     /// Set after the first Ready; a later Ready is a reconnect.
     pub was_ready: bool,
+    /// The retry scheduled since the last ready (0: none), for the
+    /// connection strip's "Try N" and its turn to "No chat link".
+    pub attempt: u32,
+    /// The last try found no network (the strip's "Offline").
+    pub offline: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -350,6 +355,12 @@ pub struct VoiceCall {
     pub share: Option<super::VoiceShare>,
     /// Why the last share failed; empty otherwise.
     pub share_error: String,
+    /// The share still last sent to the gateway (`stream_preview_url`),
+    /// cleared with `null` when the share ends.
+    pub share_preview: Option<String>,
+    /// A sent still to clear (`null`) once the gateway is back: the share
+    /// ended while it was down.
+    pub share_preview_clear: bool,
     /// A 1:1 DM call (`channel_id` is the DM channel, no server).
     pub dm: bool,
     /// A moderator's move grant, offered once on this call's op 33.
@@ -776,6 +787,9 @@ pub(super) struct Boot {
     pub me_done: bool,
     /// A servers result that arrived before `me`; applied right after it.
     pub early_servers: Option<Result<Vec<Server>, ApiError>>,
+    /// `me` could not be reached this many times in a row (no network, the
+    /// server down): the session is kept and asked again after a backoff.
+    pub retries: u32,
 }
 
 /// The launch: the stored token and the cached snapshot are read in
@@ -809,6 +823,8 @@ pub struct State {
     /// that is gone answers 403), cleared once a page loads.
     pub(super) page_status: bool,
     pub(super) connected: bool,
+    /// The link retries the view shows (`ViewUpdate::Link`), across sessions.
+    pub(super) link_shown: (u32, bool),
     pub(super) session: Option<Session>,
     pub(super) sign_in: Option<SignInId>,
     pub(super) servers: Vec<Server>,
@@ -946,6 +962,7 @@ impl State {
             status: String::new(),
             page_status: false,
             connected: false,
+            link_shown: (0, false),
             session: None,
             sign_in: None,
             servers: Vec::new(),

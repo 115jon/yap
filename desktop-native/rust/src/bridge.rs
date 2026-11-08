@@ -93,6 +93,10 @@ pub mod qobject {
         #[qml_element]
         #[qml_singleton]
         #[qproperty(bool, connected)]
+        /// The link's retry since the last ready (0: none), and whether the
+        /// last try found no network (ConnectionStrip, BootView).
+        #[qproperty(i32, link_attempt, cxx_name = "linkAttempt")]
+        #[qproperty(bool, link_offline, cxx_name = "linkOffline")]
         #[qproperty(QString, active_server_id, cxx_name = "activeServerId")]
         #[qproperty(QString, active_server_name, cxx_name = "activeServerName")]
         #[qproperty(QString, active_channel_id, cxx_name = "activeChannelId")]
@@ -137,6 +141,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "showVoiceChat"]
         fn show_voice_chat(self: &Nav, show: bool);
+
+        /// The connection strip's Retry: the gateway connects again now.
+        #[qinvokable]
+        #[cxx_name = "retryLink"]
+        fn retry_link(self: &Nav);
     }
 
     impl cxx_qt::Initialize for Nav {}
@@ -685,6 +694,8 @@ impl Drop for SessionRust {
 #[derive(Default)]
 pub struct NavRust {
     connected: bool,
+    link_attempt: i32,
+    link_offline: bool,
     active_server_id: QString,
     active_server_name: QString,
     active_channel_id: QString,
@@ -845,6 +856,10 @@ impl qobject::Nav {
 
     pub fn show_voice_chat(&self, show: bool) {
         client::command(Command::ShowVoiceChat(show));
+    }
+
+    pub fn retry_link(&self) {
+        client::command(Command::RetryGateway);
     }
 }
 

@@ -168,6 +168,8 @@ pub struct VoiceMember {
     pub camera_live: bool,
     /// Their share's frames arrive.
     pub screen_live: bool,
+    /// Their share offers its audio (`screen-audio-<id>`).
+    pub screen_audio: bool,
 }
 
 /// Someone in a server voice channel, as the gateway reports it for the
@@ -183,6 +185,9 @@ pub struct Occupant {
     pub deafened: bool,
     pub video: bool,
     pub stream: bool,
+    /// Their share's still (`stream_preview_url`), a `data:image/` URL;
+    /// empty when there is none (or it is anything else).
+    pub stream_preview: String,
     /// Their voice session is coming back (`isVoiceMemberReconnecting`).
     pub reconnecting: bool,
 }
@@ -207,6 +212,11 @@ pub enum VoiceUpdate {
     /// Our live share moved to a new capture, or its audio or quality
     /// changed.
     ShareUpdated(VoiceShare),
+    /// A fresh still of our live share (a `data:image/jpeg` URL, at most
+    /// 4096 bytes), taken every 8 s while it is live (`yap_voice::still`).
+    /// It goes to the global gateway as op 15 `stream_preview_url`, the
+    /// still other people see behind Watch stream.
+    SharePreview(String),
     /// Our share is over. `stop_sound`: a live share the user stopped;
     /// `error` when it failed.
     ShareEnded {

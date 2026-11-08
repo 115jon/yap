@@ -25,9 +25,9 @@ use crate::store::apps::{
     trigger_map, trigger_sound, wordle_view, AppsCommand, AppsOp, AppsRequest, AppsResponse,
     AppsView, AudioCommand, AudioEvent, ClipSource, CollectionRow, Favorite, ListenView,
     LocalSound, LtContext, LtResults, PickerSearchView, Playback, PlaybackRow, QueueRow, RecentRow,
-    ResolveJob, ResolveThen, ResultRow, ServerSound, SoundRef, SoundTile, Trigger, TriggerConfig,
-    TriggerRow, TriggerSound, WordleState, ALL_SERVERS, MAX_LOCAL_SOUND_BYTES, MAX_UPLOAD_BYTES,
-    SOUNDS_FILE,
+    ResolveJob, ResolveThen, ResultRow, ServerSound, SoundRef, SoundSection, SoundTile, Trigger,
+    TriggerConfig, TriggerRow, TriggerSound, WordleState, ALL_SERVERS, MAX_LOCAL_SOUND_BYTES,
+    MAX_UPLOAD_BYTES, SOUNDS_FILE,
 };
 use crate::store::state::State;
 use crate::store::view::ViewUpdate;
@@ -84,7 +84,13 @@ struct Pick {
     source: ClipSource,
     /// The sound's own volume (before the send volume).
     volume: f64,
+    /// The server whose catalog a DM call's sound comes from
+    /// (`source_server_id`).
+    source_server: Option<String>,
 }
+
+/// SoundboardPicker.tsx `broadcastSound` / `previewSound` in a DM call.
+const DM_ONLY: &str = "Only default and member-server sounds are available in DMs.";
 
 /// The tile kind of a favourite's `soundType`.
 fn kind_name(sound_type: &str) -> &'static str {
@@ -749,8 +755,21 @@ impl State {
                 s.soundboard_volume = soundboard_volume.min(100);
             }
             AppsCommand::LoadSounds => {
+                // SoundboardPicker.tsx `catalogServerIds`: the call's server,
+                // or in a DM call every member server.
                 if let Some((server_id, _)) = self.apps_call() {
-                    self.load_catalog(fx, &server_id);
+                    if server_id.is_empty() {
+                        let servers: Vec<String> = self
+                            .servers
+                            .iter()
+                            .map(|server| server.id.clone())
+                            .collect();
+                        for server in servers {
+                            self.load_catalog(fx, &server);
+                        }
+                    } else {
+                        self.load_catalog(fx, &server_id);
+                    }
                 }
             }
             AppsCommand::LoadCatalog(server_id) => self.load_catalog(fx, &server_id),
@@ -1102,6 +1121,7 @@ impl State {
                 sound_id: tone.id.to_owned(),
                 source: ClipSource::Tone(tone.id.into()),
                 volume: 1.0,
+                source_server: None,
             });
         }
         let sound = self
@@ -1116,7 +1136,20 @@ impl State {
             sound_id: sound.id.clone(),
             source: ClipSource::Media(wire::upload_url(&sound.id)),
             volume: sound.volume,
+            source_server: Some(server_id.to_owned()),
         })
+    }
+
+    /// The member server whose loaded catalog holds `sound_id` (a DM
+    /// call's server sections, `isDmPlayableSound`).
+    fn catalog_server_of(&self, sound_id: &str) -> Option<String> {
+        let catalogs = &self.apps.soundboard.catalogs;
+        let mut servers: Vec<&String> = catalogs.keys().collect();
+        servers.sort();
+        servers
+            .into_iter()
+            .find(|server| catalogs[*server].iter().any(|sound| sound.id == sound_id))
+            .cloned()
     }
 
     /// What a picker reference plays in `server_id`'s call, or the web's
@@ -1132,8 +1165,15 @@ impl State {
                 sound_id: id.to_owned(),
                 source: ClipSource::Media(url),
                 volume: 1.0,
+                source_server: None,
             })
         };
+        // A DM call has no server of its own: the default tones and the
+        // sounds of a member server whose catalog is loaded, sent with
+        // their source server (`isDmPlayableSound`); nothing else.
+        if server_id.is_empty() {
+            return self.pick_dm_sound(sound);
+        }
         match sound {
             SoundRef::Catalog(id) => self
                 .pick_catalog(server_id, id)
@@ -1162,6 +1202,7 @@ impl State {
                     sound_id: sound.id.clone(),
                     source: ClipSource::Data(url),
                     volume: sound.volume.map_or(1.0, clamp01),
+                    source_server: None,
                 })
             }
             SoundRef::Favorite(id) => {
@@ -1196,6 +1237,7 @@ impl State {
                             sound_id: fav.id.clone(),
                             source: ClipSource::Data(url),
                             volume: 1.0,
+                            source_server: None,
                         })
                     }
                     _ => instant(&fav.id, &fav.title, &fav.url),
@@ -1203,6 +1245,40 @@ impl State {
             }
             SoundRef::Radio(_) => Err("Could not play this sound."),
         }
+    }
+
+    /// `pick_sound` in a DM call.
+    fn pick_dm_sound(&self, sound: &SoundRef) -> Result<Pick, &'static str> {
+        let s = &self.apps.soundboard;
+        let (id, source) = match sound {
+            SoundRef::Catalog(id) => (id.as_str(), None),
+            SoundRef::Favorite(id) => {
+                let fav = s.favorites.iter().find(|f| f.id == *id).ok_or(DM_ONLY)?;
+                match fav.sound_type.as_str() {
+                    "default" if fav.url.is_empty() => {
+                        return self.pick_catalog("", &fav.id).ok_or(DM_ONLY);
+                    }
+                    "server" if fav.url == wire::upload_url(&fav.id) => {
+                        let source = fav
+                            .source_server()
+                            .filter(|x| !x.is_empty())
+                            .ok_or(DM_ONLY)?;
+                        (fav.id.as_str(), Some(source.to_owned()))
+                    }
+                    _ => return Err(DM_ONLY),
+                }
+            }
+            _ => return Err(DM_ONLY),
+        };
+        if DEFAULT_SOUNDS.iter().any(|t| t.id == id) {
+            return self.pick_catalog("", id).ok_or(DM_ONLY);
+        }
+        let source = source
+            .or_else(|| self.catalog_server_of(id))
+            .ok_or(DM_ONLY)?;
+        self.pick_catalog(&source, id)
+            .filter(|pick| !matches!(pick.source, ClipSource::Tone(_)))
+            .ok_or(DM_ONLY)
     }
 
     /// A station a reference names: (uuid, name).
@@ -1262,6 +1338,8 @@ impl State {
             sound_id: Some(pick.sound_id),
             media_url,
             data_url,
+            // `dmSourceServer`: only a DM call names the sound's server.
+            source_server_id: pick.source_server.filter(|_| server_id.is_empty()),
             volume: Some(self.apps.soundboard.send_volume * pick.volume),
             ..SoundboardPlay::default()
         }));
@@ -1306,8 +1384,15 @@ impl State {
         let Some((server_id, _)) = self.apps_call() else {
             return;
         };
-        let Ok(pick) = self.pick_sound(&SoundRef::parse(reference), &server_id) else {
-            return;
+        let pick = match self.pick_sound(&SoundRef::parse(reference), &server_id) {
+            Ok(pick) => pick,
+            Err(reason) => {
+                // previewSound reports only the DM rule; other misses stay quiet.
+                if reason == DM_ONLY {
+                    self.apps.soundboard.error = reason.into();
+                }
+                return;
+            }
         };
         let send_volume = self.apps.soundboard.send_volume;
         let server_key = wire::server_key(Some(&server_id));
@@ -1341,6 +1426,12 @@ impl State {
                         ..plain(tone.id, tone.name)
                     }
                 } else {
+                    // A DM call's sections hold every member server's sounds.
+                    let server_id = if server_id.is_empty() {
+                        self.catalog_server_of(id)?
+                    } else {
+                        server_id.clone()
+                    };
                     let sound = s.catalogs.get(&server_id)?.iter().find(|x| x.id == *id)?;
                     Favorite {
                         url: wire::upload_url(&sound.id),
@@ -2627,6 +2718,41 @@ impl State {
                     .collect()
             })
             .unwrap_or_default();
+        // `catalogServerIds`: the call's server, else (a DM call) every
+        // member server; a server we know nothing of shows its id.
+        // `canManage` holds only for the call's own server.
+        let section_ids: Vec<String> = match &call {
+            Some(_) if server_id.is_empty() => self.servers.iter().map(|x| x.id.clone()).collect(),
+            Some(_) => vec![server_id.clone()],
+            None => Vec::new(),
+        };
+        let sections = section_ids
+            .into_iter()
+            .map(|id| {
+                let server = self.servers.iter().find(|x| x.id == id);
+                let own = !server_id.is_empty() && id == server_id;
+                SoundSection {
+                    name: server.map_or_else(|| id.clone(), |x| x.name.clone()),
+                    icon: crate::store::view::absolute_url(
+                        &self.api_base,
+                        server.and_then(|x| x.icon_url.as_deref()),
+                    ),
+                    own,
+                    sounds: s
+                        .catalogs
+                        .get(&id)
+                        .map(|list| {
+                            list.iter()
+                                .map(|sound| {
+                                    tile(sound, own && (manage_all || sound.user_id == me))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    server_id: id,
+                }
+            })
+            .collect();
         let mut defaults = default_tiles(&playing_ids);
         for tile in &mut defaults {
             tile.favorite = favorite(&tile.id);
@@ -2798,6 +2924,7 @@ impl State {
             server_id,
             defaults,
             sounds,
+            sections,
             favorites,
             local,
             instants,
@@ -2828,6 +2955,17 @@ impl State {
             artwork: entry.track.artwork_url.clone().unwrap_or_default(),
             duration_ms: entry.track.duration().unwrap_or(0.0),
             requester: entry.requester.display_name.clone(),
+            // ListenTogetherNowPlayingCard.tsx requesterAvatar.
+            requester_avatar: crate::store::view::avatar_url(
+                &self.api_base,
+                entry.requester.avatar_url.as_deref(),
+                entry
+                    .requester
+                    .avatar_display
+                    .as_deref()
+                    .and_then(|d| serde_json::from_str::<serde_json::Value>(d).ok())
+                    .as_ref(),
+            ),
             current,
             radio: entry.track.is_radio(),
             batch: entry.import_batch_label.clone().unwrap_or_default(),
@@ -2896,10 +3034,18 @@ impl State {
             // reports must not change the view.
             position_ms: if snapshot.is_some() { l.clock.0 } else { 0.0 },
             position_at: l.clock.1,
+            snapshot_position_ms: snapshot.map_or(0.0, |s| s.position_ms),
             duration_ms: snapshot
                 .and_then(|s| s.current_entry.as_ref())
                 .and_then(|e| e.track.duration())
                 .unwrap_or(0.0),
+            running: snapshot.is_some_and(|s| {
+                !s.paused
+                    && s.current_entry
+                        .as_ref()
+                        .and_then(|e| e.track.duration())
+                        .is_some_and(|d| d > 0.0)
+            }),
             query: l.query.clone(),
             searching: l.searching,
             results: l

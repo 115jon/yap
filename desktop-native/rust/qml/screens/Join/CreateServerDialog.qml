@@ -2,12 +2,13 @@ import QtQuick
 import Yap.Chrome
 import com.yap.native
 
-// Create a server (CreateServerModal.tsx): the icon key (64 px, Upload
-// image or Change, and Remove), "Server icon, optional" with the formats,
-// the icon or create error, then Server name; Cancel and Create server. An
-// empty name is caught inline. The icon goes up first, then the server;
-// it opens once created. No templates and no join path: the web's modal
-// has neither.
+// Create a server (CreateServerModal.tsx): the icon key (64 px, a dashed
+// edge; Upload image or Change, and Remove), "Server icon, optional" with
+// the formats, the icon or create error, then Server name as a plain label
+// over a 40 px input (Label + Input, gap 6: no legend here, unlike the
+// invite dialog); Cancel and Create server as 48 px footer keys. An empty
+// name is caught inline. The icon goes up first, then the server; it opens
+// once created. No templates and no join path: the web's modal has neither.
 PlateDialog {
     id: dialog
 
@@ -78,8 +79,6 @@ PlateDialog {
             height: 64
             radius: Theme.radius
             color: iconHover.hovered ? Theme.tint1 : Theme.ply2
-            border.width: 1
-            border.color: Theme.lineStrong
             activeFocusOnTab: true
             Accessible.role: Accessible.Button
             Accessible.name: qsTr("Server icon, optional")
@@ -88,6 +87,8 @@ PlateDialog {
             Keys.onSpacePressed: dialog.pickIcon()
             Keys.onReturnPressed: dialog.pickIcon()
 
+            // border border-dashed border-line-strong.
+            DashedEdge { color: Theme.lineStrong }
             Image {
                 id: preview
                 anchors.fill: parent
@@ -102,7 +103,8 @@ PlateDialog {
                 anchors.fill: parent
                 anchors.margins: 1
                 visible: preview.visible
-                color: Theme.scrim
+                // A media overlay: bg-black/48 whatever the theme.
+                color: Qt.rgba(0, 0, 0, 0.48)
                 opacity: iconHover.hovered || iconKey.activeFocus ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
             }
@@ -111,7 +113,7 @@ PlateDialog {
                 visible: !preview.visible || iconHover.hovered || iconKey.activeFocus
                 name: "image"
                 size: Theme.iconLg
-                color: preview.visible ? Theme.ink1 : iconHover.hovered ? Theme.ink1 : Theme.ink3
+                color: preview.visible ? "white" : iconHover.hovered ? Theme.ink1 : Theme.ink3
             }
             Rectangle {
                 anchors.fill: parent
@@ -130,12 +132,16 @@ PlateDialog {
             width: parent.width - iconKey.width - parent.spacing
             anchors.verticalCenter: parent.verticalCenter
             spacing: 2
+            // text-ui-sm font-medium.
             Text {
                 width: parent.width
+                textFormat: Text.PlainText
                 text: qsTr("Server icon, optional")
                 elide: Text.ElideRight
                 color: Theme.ink1
-                font: Theme.type.setting
+                font: Theme.type.occupant
+                lineHeight: 18
+                lineHeightMode: Text.FixedHeight
             }
             Text {
                 width: parent.width
@@ -178,24 +184,31 @@ PlateDialog {
         Accessible.name: text
     }
 
+    // Label + Input (gap-1.5): a plain 13/500 label over the 40 px field.
     Column {
         width: parent.width
         spacing: 6
-        FieldPlate {
+        Text {
             width: parent.width
-            label: qsTr("Server name")
-            ground: Theme.ply3
-            KitField {
-                id: nameField
-                large: true
-                maximumLength: 100
-                placeholderText: qsTr("My Awesome Server")
-                invalid: dialog.nameError.length > 0
-                Accessible.name: qsTr("Server name")
-                onTextEdited: dialog.nameEdited = true
-                Keys.onReturnPressed: dialog.create()
-                Keys.onEnterPressed: dialog.create()
-            }
+            textFormat: Text.PlainText
+            text: qsTr("Server name")
+            elide: Text.ElideRight
+            color: Theme.ink1
+            font: Theme.type.occupant
+            lineHeight: 18
+            lineHeightMode: Text.FixedHeight
+            Accessible.ignored: true
+        }
+        KitField {
+            id: nameField
+            width: parent.width
+            maximumLength: 100
+            placeholderText: qsTr("My Awesome Server")
+            invalid: dialog.nameError.length > 0
+            Accessible.name: qsTr("Server name")
+            onTextEdited: dialog.nameEdited = true
+            Keys.onReturnPressed: dialog.create()
+            Keys.onEnterPressed: dialog.create()
         }
         Text {
             visible: dialog.nameError.length > 0
@@ -212,12 +225,14 @@ PlateDialog {
     footer: [
         KitButton {
             variant: "ghost"
+            size: "lg"
             text: qsTr("Cancel")
             enabled: !dialog.act.busy
             onClicked: dialog.close()
         },
         KitButton {
             variant: "primary"
+            size: "lg"
             ground: Theme.ply3
             text: qsTr("Create server")
             loading: dialog.act.busy

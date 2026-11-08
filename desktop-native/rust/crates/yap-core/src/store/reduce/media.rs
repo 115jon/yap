@@ -68,6 +68,9 @@ pub(super) fn describe_error(error: &ApiError, action: &str) -> String {
     match error {
         ApiError::Unauthorized => format!("Your session has ended. Sign in again to {action}."),
         ApiError::Http { status: 403, .. } => format!("You don't have permission to {action}."),
+        ApiError::Http {
+            status: 404 | 410, ..
+        } => format!("Unable to {action}. It may have been deleted."),
         ApiError::Http { status: 413, .. } => {
             format!("Unable to {action}. The file is too large.")
         }

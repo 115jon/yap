@@ -5,7 +5,8 @@ import com.yap.native
 // middle of the window over a dimmed, still outline of the app, so it reads
 // as an overlay over the app that is coming. Yappy barks while the steps run
 // over a three-cell step meter, a silkscreen kicker and one Bricolage line
-// that changes as the steps complete. Past 10 s it says the server is slow.
+// that changes as the steps complete. Past 10 s it says the server is slow;
+// with no network (the last try never left the device) it waits for one.
 // When the app is ready the mark settles into the logo, the line says
 // "You're in", and the layer holds, then fades (rm-loading-exit, 1.2 s) over
 // the live app. The bark is the only loop, and only while loading.
@@ -31,12 +32,17 @@ Item {
         { line: qsTr("Loading messages"), detail: qsTr("Fetching your servers and what you missed.") },
         { line: qsTr("You're in"), detail: qsTr("Welcome back.") }
     ]
-    readonly property bool showSlow: slow && step < 3
-    readonly property var copy: showSlow
+    // ColdLoad.tsx `error`: offline outranks slow (useOnline).
+    readonly property bool showOffline: Nav.linkOffline && step < 3
+    readonly property bool showSlow: slow && step < 3 && !showOffline
+    readonly property bool warned: showOffline || showSlow
+    readonly property var copy: showOffline
+        ? { line: qsTr("Waiting for network"), detail: qsTr("Yap connects on its own as soon as this device is back online.") }
+        : showSlow
         ? { line: qsTr("Taking longer than usual"), detail: qsTr("The server is slow to answer. Yap keeps trying on its own.") }
         : lines[step]
     readonly property string kicker: step >= 3 ? qsTr("03 / 03 · Ready")
-        : "0" + (step + 1) + " / 03" + (showSlow ? " · " + qsTr("Slow") : "")
+        : "0" + (step + 1) + " / 03" + (showOffline ? " · " + qsTr("Offline") : showSlow ? " · " + qsTr("Slow") : "")
 
     onActiveChanged: {
         if (active) {
@@ -235,7 +241,7 @@ Item {
                             width: 24
                             height: 2
                             color: index < root.step ? Theme.ink1
-                                : index === root.step ? (root.showSlow ? Theme.warningInk : Theme.ink3)
+                                : index === root.step ? (root.warned ? Theme.warningInk : Theme.ink3)
                                 : Theme.lineStrong
                         }
                     }
@@ -244,7 +250,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     textFormat: Text.PlainText
                     text: root.kicker
-                    color: root.showSlow ? Theme.warningInk : Theme.ink3
+                    color: root.warned ? Theme.warningInk : Theme.ink3
                     font: Theme.type.silk
                 }
             }

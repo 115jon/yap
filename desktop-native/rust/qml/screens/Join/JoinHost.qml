@@ -2,9 +2,9 @@ import QtQuick
 import com.yap.native
 
 // Where creating and joining open from: the rail's Create a server
-// (ShellState.createServerRequested), the invite landing a link opens
-// (Invites.landingRequested), and a message link's jump
-// (Invites.jumpRequested). Each dialog is created on first use.
+// (ShellState.createServerRequested), the invite page a link opens over
+// the whole window (Invites.landingRequested), and a message link's jump
+// (Invites.jumpRequested). Each is created on first use.
 Item {
     id: host
 

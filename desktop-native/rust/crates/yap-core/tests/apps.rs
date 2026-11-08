@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 use yap_core::store::apps::{
-    AppsCommand, AppsRequest, AppsView, AudioCommand, AudioEvent, ClipSource, Trigger,
+    AppsCommand, AppsRequest, AppsView, AudioCommand, AudioEvent, ClipSource, LtClock, Trigger,
 };
 use yap_core::store::{
     reduce, ApiRequest, CallId, Command, Effect, GatewayEvent, Input, Method, RequestId, State,
@@ -1391,4 +1391,256 @@ fn one_bad_custom_sound_should_not_wipe_the_file() {
     // A file of the wrong shape is empty, not a failure.
     assert!(yap_core::store::apps::parse_local_sounds(json!([1, 2])).is_empty());
     assert!(yap_core::store::apps::parse_local_sounds(json!({ key: 5 })).is_empty());
+}
+
+/// A Listen Together state for the fixture call: one entry (`track`), its
+/// anchor and play state.
+fn lt_snapshot(track: &Value, paused: bool, anchor_ms: f64, anchor_at: i64, requester: &Value) -> AppEvent {
+    let entry = json!({
+        "entryId": "e_1", "requestedAt": NOW, "track": track, "requester": requester,
+    });
+    let duration = track.get("durationMs").cloned().unwrap_or(Value::Null);
+    AppEvent::decode(&json!({
+        "type": "listen_together.snapshot", "room_slug": format!("voice-{SERVER}-{VOICE}"),
+        "snapshot": {
+            "roomSlug": format!("voice-{SERVER}-{VOICE}"), "revision": 1, "paused": paused,
+            "currentEntryId": "e_1", "anchorPositionMs": anchor_ms, "anchorUpdatedAt": anchor_at,
+            "lastUpdatedAt": anchor_at, "queue": [entry.clone()], "currentEntry": entry,
+            "positionMs": anchor_ms, "durationMs": duration,
+        },
+    }))
+    .expect("a snapshot")
+}
+
+fn lt_music() -> Value {
+    json!({
+        "kind": "music", "id": "youtube:dQw4w9WgXcQ", "provider": "youtube",
+        "videoId": "dQw4w9WgXcQ", "title": "Never Gonna Give You Up", "artist": "Rick Astley",
+        "durationMs": 213_000, "canonicalUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "sourceLabel": "YouTube",
+    })
+}
+
+fn lt_radio() -> Value {
+    json!({
+        "kind": "radio", "id": STATION, "provider": "radio", "station_uuid": STATION,
+        "title": "SWR3", "canonicalUrl": "https://example.org",
+        "streamUrl": "https://stream.example.org/swr3.mp3", "sourceLabel": "Live Radio",
+    })
+}
+
+fn peer() -> Value {
+    json!({ "userId": PEER, "displayName": "Spike Peer" })
+}
+
+#[test]
+fn a_paused_radio_should_read_zero_however_long_it_played() {
+    // The pass 13 stale clock: a radio paused 5 s in keeps
+    // `anchorPositionMs` 5000; the web clamps to `durationMs ?? 0` and reads
+    // 0:00, the card read 0:05.
+    let mut client = Client::in_call();
+    client.event(lt_snapshot(&lt_radio(), true, 5_000.0, NOW, &peer()), NOW + 1_000);
+    let clock = LtClock::of(&client.view.listen);
+    assert_eq!(clock.live_ms(NOW + 60_000), 0.0);
+    assert!(!clock.running());
+    // Playing, it still reads 0:00 and does not tick.
+    client.event(lt_snapshot(&lt_radio(), false, 5_000.0, NOW, &peer()), NOW + 1_000);
+    let clock = LtClock::of(&client.view.listen);
+    assert_eq!(clock.live_ms(NOW + 60_000), 0.0);
+    assert!(!clock.running());
+}
+
+#[test]
+fn a_playing_track_should_run_on_from_its_anchor() {
+    let mut client = Client::in_call();
+    // Anchored at 10 s two seconds before it reached us.
+    client.event(lt_snapshot(&lt_music(), false, 10_000.0, NOW, &peer()), NOW + 2_000);
+    let clock = LtClock::of(&client.view.listen);
+    assert!(clock.running());
+    assert_eq!(clock.live_ms(NOW + 2_000), 12_000.0);
+    assert_eq!(clock.live_ms(NOW + 5_500), 15_500.0);
+    // Never past the end.
+    assert_eq!(clock.live_ms(NOW + 10_000_000), 213_000.0);
+}
+
+#[test]
+fn a_paused_track_should_hold_its_anchor() {
+    let mut client = Client::in_call();
+    client.event(lt_snapshot(&lt_music(), true, 0.0, NOW - 30_000, &peer()), NOW);
+    let clock = LtClock::of(&client.view.listen);
+    assert!(!clock.running());
+    assert_eq!(clock.live_ms(NOW + 60_000), 0.0);
+    client.event(lt_snapshot(&lt_music(), true, 42_000.0, NOW, &peer()), NOW);
+    assert_eq!(LtClock::of(&client.view.listen).live_ms(NOW + 60_000), 42_000.0);
+}
+
+#[test]
+fn the_live_position_should_not_read_below_the_rooms() {
+    // `Math.max(snapshot.positionMs, …)`: a room position ahead of the
+    // anchor's run (our clock behind the server's) wins.
+    let clock = LtClock {
+        position_ms: 1_000.0,
+        position_at: NOW,
+        snapshot_position_ms: 4_000.0,
+        duration_ms: 213_000.0,
+        paused: false,
+        current: true,
+    };
+    assert_eq!(clock.live_ms(NOW + 1_000), 4_000.0);
+    assert_eq!(clock.live_ms(NOW + 5_000), 6_000.0);
+    assert_eq!(LtClock::default().live_ms(NOW), 0.0);
+}
+
+#[test]
+fn the_requester_should_carry_their_picture() {
+    let mut client = Client::in_call();
+    let requester = json!({
+        "userId": PEER, "displayName": "Spike Peer", "avatarUrl": "/api/avatars/alice.png",
+    });
+    client.event(lt_snapshot(&lt_music(), true, 0.0, NOW, &requester), NOW);
+    let now = client.view.listen.now.as_ref().expect("a current entry");
+    assert_eq!(now.requester, "Spike Peer");
+    assert_eq!(now.requester_avatar, format!("{BASE}/api/avatars/alice.png"));
+    client.event(lt_snapshot(&lt_music(), true, 0.0, NOW, &peer()), NOW);
+    assert_eq!(client.view.listen.now.as_ref().expect("entry").requester_avatar, "");
+}
+
+/// Out of the fixture server's call into a DM call with the peer (rung,
+/// accepted, the DM room joined), as `calls.rs` does it.
+fn into_dm_call(client: &mut Client) {
+    const DM: &str = "dm_fixture_alice";
+    if client.asked.iter().any(|(_, r)| *r == ApiRequest::Dms) {
+        client.respond(
+            &ApiRequest::Dms,
+            json!([{ "id": DM, "channel_type": "dm", "name": "x", "created_at": null,
+                     "recipient": { "id": PEER, "username": "alice", "display_name": "Alice",
+                                    "avatar_url": null, "status": "online", "custom_status": null } }]),
+        );
+    }
+    let session = client.state.session().expect("session").id;
+    let dispatch = |client: &mut Client, event: &str, data: Value| {
+        let dispatch = yap_core::store::Dispatch::decode(event, data).expect("decodes");
+        client.input(Input::Gateway {
+            session,
+            event: GatewayEvent::Dispatch(dispatch),
+        });
+    };
+    dispatch(
+        client,
+        "CALL_RING",
+        json!({ "call_id": "call-1", "caller_id": PEER, "caller_name": "alice",
+                "caller_display_name": "Alice", "caller_avatar": null, "channel_id": DM }),
+    );
+    client.input(Input::User(Command::Calls(
+        yap_core::store::calls::CallsCommand::Accept { video: false },
+    )));
+    dispatch(
+        client,
+        "CALL_RING_STOP",
+        json!({ "call_id": "call-1", "reason": "accepted" }),
+    );
+    client.voice(VoiceUpdate::Connected);
+    client.voice(VoiceUpdate::VoiceReady {
+        participant_id: PID.into(),
+    });
+    assert!(
+        client.view.in_call && client.view.server_id.is_empty(),
+        "in the DM call"
+    );
+}
+
+#[test]
+fn a_server_call_should_show_one_section_for_its_server() {
+    let client = Client::in_call_with(Value::Null, airhorn());
+    let sections = &client.view.sections;
+    assert_eq!(sections.len(), 1);
+    assert_eq!(
+        (
+            sections[0].server_id.as_str(),
+            sections[0].name.as_str(),
+            sections[0].icon.as_str(),
+            sections[0].own,
+        ),
+        (
+            SERVER,
+            "Fixture Server",
+            "https://api.fixture.invalid/api/media/icons/srv_fixture.png",
+            true
+        )
+    );
+    assert_eq!(sections[0].sounds[0].id, "snd_9");
+}
+
+#[test]
+fn a_dm_call_should_load_and_section_every_member_servers_sounds() {
+    let mut client = Client::in_call_with(Value::Null, airhorn());
+    into_dm_call(&mut client);
+    client.apps(AppsCommand::LoadSounds);
+    let asked: Vec<ApiRequest> = client.asked.iter().map(|(_, r)| r.clone()).collect();
+    assert!(asked.contains(&ApiRequest::Apps(AppsRequest::Catalog {
+        server_id: "srv_fixture_two".into(),
+    })));
+    client.respond(&catalog_request(), airhorn());
+    let ids: Vec<(&str, bool, usize)> = client
+        .view
+        .sections
+        .iter()
+        .map(|x| (x.server_id.as_str(), x.own, x.sounds.len()))
+        .collect();
+    assert_eq!(ids, [(SERVER, false, 1), ("srv_fixture_two", false, 0)]);
+    // Nobody manages a server's sounds from a DM call.
+    let tile = &client.view.sections[0].sounds[0];
+    assert!(!tile.can_edit && !tile.can_delete);
+}
+
+#[test]
+fn a_dm_call_should_send_a_server_sound_with_its_source_server() {
+    let mut client = Client::in_call_with(Value::Null, airhorn());
+    into_dm_call(&mut client);
+    let fx = client.apps(AppsCommand::Play("snd_9".into()));
+    let frame = &Client::frames(&fx)[0];
+    assert_eq!(
+        (
+            &frame["server_key"],
+            &frame["source_server_id"],
+            &frame["media_url"]
+        ),
+        (
+            &json!("dm-call"),
+            &json!(SERVER),
+            &json!("/api/soundboard/uploads/snd_9")
+        )
+    );
+}
+
+#[test]
+fn a_dm_call_should_refuse_a_myinstants_favourite() {
+    let mut client = Client::in_call();
+    client.apps(AppsCommand::LoadFavorites);
+    client.respond(
+        &ApiRequest::Apps(AppsRequest::Favorites),
+        json!({ "favorites": [
+            { "id": "bruh", "title": "Bruh", "url": "https://www.myinstants.com/media/sounds/bruh.mp3",
+              "color": "", "soundType": "myinstants" },
+        ]}),
+    );
+    into_dm_call(&mut client);
+    let fx = client.apps(AppsCommand::Play("fav:bruh".into()));
+    assert!(Client::frames(&fx).is_empty());
+    assert_eq!(
+        client.view.sound_error,
+        "Only default and member-server sounds are available in DMs."
+    );
+}
+
+#[test]
+fn a_tone_should_still_play_in_a_dm_call() {
+    let mut client = Client::in_call();
+    into_dm_call(&mut client);
+    let fx = client.apps(AppsCommand::Play("ping".into()));
+    let frame = &Client::frames(&fx)[0];
+    assert_eq!(
+        (&frame["sound_id"], frame.get("source_server_id")),
+        (&json!("ping"), None)
+    );
 }

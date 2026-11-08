@@ -172,6 +172,12 @@ impl GatewayEvents {
         self.send(GatewayEvent::Closed);
     }
 
+    /// Retry `attempt` is scheduled; `offline` when the last try found no
+    /// network.
+    pub fn reconnecting(&self, attempt: u32, offline: bool) {
+        self.send(GatewayEvent::Reconnecting { attempt, offline });
+    }
+
     pub fn session_expired(&self) {
         self.send(GatewayEvent::SessionExpired);
     }

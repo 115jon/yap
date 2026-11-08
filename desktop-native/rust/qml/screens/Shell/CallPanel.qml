@@ -511,6 +511,7 @@ Rectangle {
     onInCallChanged: {
         if (!inCall) {
             soundboardPopup.item?.close()
+            listenPopup.item?.close()
             activitiesPopup.item?.close()
             spatialPanel.item?.close()
             noisePanel.item?.close()
@@ -520,7 +521,20 @@ Rectangle {
     Loader {
         id: soundboardPopup
         active: false
-        sourceComponent: SoundboardPicker { onClosed: root.popoverClosedAt = Date.now() }
+        sourceComponent: SoundboardPicker {
+            onClosed: root.popoverClosedAt = Date.now()
+            // VoiceDashboard.tsx openListenTogetherPicker: at the soundboard
+            // key, or at More when the key is folded away.
+            onListenTogether: {
+                listenPopup.active = true
+                listenPopup.item?.openAt(soundboardKey.visible ? soundboardKey : moreKey)
+            }
+        }
+    }
+    Loader {
+        id: listenPopup
+        active: false
+        sourceComponent: ListenPanel { onClosed: root.popoverClosedAt = Date.now() }
     }
     Loader {
         id: activitiesPopup
@@ -531,8 +545,6 @@ Rectangle {
         }
     }
     // The stream settings menu (VoiceDashboard.tsx, side top, align end).
-    // "Always show stream preview" is left out: native has no such setting
-    // yet (Settings > Voice shows it as coming later).
     LazyPopup {
         id: streamMenu
         sourceComponent: MenuPanel {
@@ -550,9 +562,17 @@ Rectangle {
                 on: Voice.shareAudio
                 onTriggered: Voice.changeShareAudio(!Voice.shareAudio)
             }
+            // VoiceDashboard.tsx 414-421 (Settings > Voice's switch).
+            MenuRow {
+                glyph: "monitor"
+                text: qsTr("Always show stream preview")
+                switchable: true
+                on: Audio.alwaysShowStreamPreview
+                onTriggered: Audio.changeAlwaysShowStreamPreview(!Audio.alwaysShowStreamPreview)
+            }
             MenuRule {}
             MenuLabel { text: qsTr("Quality") }
-            // After the five rows above.
+            // After the six rows above.
             Instantiator {
                 model: root.shareQualities
                 delegate: MenuChoice {
@@ -563,7 +583,7 @@ Rectangle {
                     selected: Voice.shareQuality === modelData
                     onTriggered: Voice.changeShareQuality(modelData)
                 }
-                onObjectAdded: (index, object) => streamPanel.insertItem(index + 5, object)
+                onObjectAdded: (index, object) => streamPanel.insertItem(index + 6, object)
                 onObjectRemoved: (index, object) => streamPanel.removeItem(object)
             }
             MenuRule {}

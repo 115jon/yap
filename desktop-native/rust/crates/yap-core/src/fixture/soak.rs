@@ -113,6 +113,7 @@ fn roster(rng: &mut Rng) -> VoiceChannelStateUpdate {
             self_deaf: Some(false),
             self_video: Some(false),
             self_stream: Some(false),
+            stream_preview_url: None,
             joined_at: None,
             connection_state: None,
             connected: Some(true),
