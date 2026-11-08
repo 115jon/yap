@@ -613,6 +613,32 @@ static void dumpRunningAnimations(QQmlApplicationEngine& engine)
   for (QObject* root : engine.rootObjects())
     if (auto* window = qobject_cast<QQuickWindow*>(root))
       walk(window->contentItem());
+  // Live media players (the GIF picker's clips, embeds, previews): each
+  // one is a Media Foundation session or a libvpx decoder. Through the
+  // whole item tree, popups' overlay included (players are QObject
+  // children of their items).
+  int players = 0, playing = 0, webms = 0, audio = 0;
+  std::function<void(QQuickItem*)> media = [&](QQuickItem* item) {
+    for (QObject* child : item->children()) {
+      if (child->inherits("QMediaPlayer") || child->inherits("WebmPlayer")) {
+        ++players;
+        webms += child->inherits("WebmPlayer");
+        playing += child->property("playbackState").toInt() == 1;
+        for (QObject* sub : child->children())
+          audio += sub->inherits("QAudioOutput");
+      } else if (child->inherits("QAudioOutput")) {
+        ++audio;
+      }
+    }
+    for (QQuickItem* child : item->childItems())
+      media(child);
+  };
+  for (QObject* root : engine.rootObjects())
+    if (auto* window = qobject_cast<QQuickWindow*>(root))
+      media(window->contentItem()->parentItem() ? window->contentItem()->parentItem()
+                                                : window->contentItem());
+  std::fprintf(stderr, "[anim-debug] media: %d players (%d playing, %d webm), %d audio outputs\n",
+               players, playing, webms, audio);
   QWindow* focus = QGuiApplication::focusWindow();
   std::fprintf(stderr, "[anim-debug] %d running, %d pictures ticking, app state %d, focus %s\n",
                running, ticking, int(QGuiApplication::applicationState()),

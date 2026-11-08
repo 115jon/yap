@@ -8,7 +8,7 @@
 // use it (`stream`) instead of AnimatedImage: Qt 6.11's AnimatedImage plays
 // a network GIF from its QNetworkReply, which cannot rewind, so it stops
 // after one pass. A large APNG or WebP shows its first frame while the rest
-// decode.
+// decode; a long looping WebP plays its first frames meanwhile.
 //
 //   AnimatedPicture { source: url; playing: hovered; fillMode: ... }
 //
@@ -55,6 +55,9 @@ struct AnimationData
   QByteArray raw;
   QSize rawSize;
   int rawFrames = 0;
+  // One pass, in ms (0: not known). A still (`AnimatedPicture.still`)
+  // knows it from the file's header without decoding the frames.
+  int duration = 0;
 };
 using AnimationPtr = std::shared_ptr<const AnimationData>;
 
@@ -76,8 +79,10 @@ public:
   // `cover`: decode to cover the box (a cropped fill), not to fit it.
   // `raw`: a GIF is kept as its file (a streamed item decodes it), anything
   // else decodes as usual.
+  // `still`: the first frame only (and the length of a pass).
   void request(QNetworkAccessManager* network, const QUrl& url, QSize box,
-               const QString& key, bool cover = false, bool raw = false);
+               const QString& key, bool cover = false, bool raw = false,
+               bool still = false);
 
 signals:
   void loaded(const QString& key);
@@ -148,6 +153,13 @@ class AnimatedPicture : public QQuickItem
   // holds the file and the frame on screen, never every frame. Frames land
   // on the shared grid like the others. Other formats decode as usual.
   Q_PROPERTY(bool stream READ stream WRITE setStream NOTIFY streamChanged)
+  // Only the first frame is decoded (a resting clip's poster in the GIF
+  // picker): no other frame is held or played. Turning it off decodes the
+  // whole animation, and the first frame shows until that lands.
+  Q_PROPERTY(bool still READ still WRITE setStill NOTIFY stillChanged)
+  // One pass in ms once known (an animated WebP's from its header, even
+  // `still`; a decoded animation's from its frames), else 0.
+  Q_PROPERTY(int duration READ duration NOTIFY durationChanged)
 
 public:
   enum FillMode { PreserveAspectFit, PreserveAspectCrop, Stretch };
@@ -172,6 +184,9 @@ public:
   bool stream() const { return m_stream; }
   void setStream(bool stream);
   bool finished() const { return m_finished; }
+  bool still() const { return m_still; }
+  void setStill(bool still);
+  int duration() const { return m_duration; }
 
   // Back to the first frame and play again (a replayed effect).
   Q_INVOKABLE void restart();
@@ -186,6 +201,8 @@ signals:
   void statusChanged();
   void finishedChanged();
   void streamChanged();
+  void stillChanged();
+  void durationChanged();
 
 protected:
   QSGNode* updatePaintNode(QSGNode* old, UpdatePaintNodeData*) override;
@@ -233,6 +250,8 @@ private:
   QTimer m_timer;
   QPointer<QQuickWindow> m_window;
   bool m_stream = false;
+  bool m_still = false;
+  int m_duration = 0;
   // Streamed: the reader over m_anim->raw, the frame it read last and that
   // frame's delay.
   std::unique_ptr<QBuffer> m_buffer;

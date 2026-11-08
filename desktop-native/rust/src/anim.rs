@@ -17,9 +17,9 @@ pub struct YapAnimInfo {
     pub loops: u32,
 }
 
-/// Decodes `len` bytes at `data` to fit `max_w x max_h` (0: no bound).
-/// Null when the bytes are not a PNG/APNG or WebP. Free with
-/// [`yap_anim_free`].
+/// Decodes `len` bytes at `data` to fit `max_w x max_h` (0: no bound),
+/// its first `max_frames` frames (0: every frame). Null when the bytes are
+/// not a PNG/APNG or WebP. Free with [`yap_anim_free`].
 ///
 /// # Safety
 /// `data` must point to `len` readable bytes.
@@ -29,13 +29,18 @@ pub unsafe extern "C" fn yap_anim_decode(
     len: usize,
     max_w: u32,
     max_h: u32,
+    max_frames: u32,
 ) -> *mut c_void {
     if data.is_null() || len == 0 {
         return std::ptr::null_mut();
     }
     // SAFETY: the caller guarantees `len` readable bytes at `data`.
     let bytes = unsafe { std::slice::from_raw_parts(data, len) };
-    match yap_anim::decode(bytes, max_w, max_h) {
+    let limit = match max_frames {
+        0 => yap_anim::MAX_FRAMES,
+        n => usize::try_from(n).unwrap_or(yap_anim::MAX_FRAMES),
+    };
+    match yap_anim::decode_frames(bytes, max_w, max_h, limit) {
         Ok(anim) => Box::into_raw(Box::new(anim)).cast(),
         Err(error) => {
             eprintln!("[anim] {error}");
