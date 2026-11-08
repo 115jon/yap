@@ -86,6 +86,45 @@ export function shouldTryAlternateListenTogetherFormat(
   );
 }
 
+/**
+ * The YouTube video queued right after the current entry, or null. Radio and
+ * the last entry have no next video to warm.
+ */
+export function getNextListenTogetherVideoId(
+  snapshot: Pick<ListenTogetherStateSnapshot, "queue" | "currentEntry"> | null,
+): string | null {
+  const current = snapshot?.currentEntry;
+  if (!snapshot || !current) return null;
+  const index = snapshot.queue.findIndex(
+    (entry) => entry.entryId === current.entryId,
+  );
+  const next = index >= 0 ? snapshot.queue[index + 1] : undefined;
+  return next?.track.kind === "music" ? next.track.videoId : null;
+}
+
+/** How long the current track plays before the next one is warmed. */
+export const LISTEN_TOGETHER_PREFETCH_DELAY_MS = 8_000;
+/** Spread so a room of listeners does not resolve the next track at once. */
+export const LISTEN_TOGETHER_PREFETCH_JITTER_MS = 6_000;
+
+/**
+ * Warm the stream route for a track that is about to play: a HEAD resolves
+ * the video on the server and caches its media URL, so the track starts
+ * without the resolve (several seconds through the egress VPN) when its turn
+ * comes. Best effort: failures are ignored.
+ */
+export async function prefetchListenTogetherStream(src: string): Promise<void> {
+  try {
+    await fetch(src, {
+      method: "HEAD",
+      cache: "no-store",
+      credentials: "include",
+    });
+  } catch {
+    // Warming is best effort; the real request resolves again if needed.
+  }
+}
+
 /** What the stream route said when asked again; null when it was unreachable. */
 export type ListenTogetherStreamProbe = {
   status: number;
