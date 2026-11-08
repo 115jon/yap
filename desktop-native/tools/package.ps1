@@ -148,6 +148,20 @@ if (-not $NoSegmentation) {
     Write-Host "==> segmentation runtime staged ($segMb MB)"
 }
 
+# The splash Setup.exe shows while it installs (docs/INSTALLER.md,
+# "Splash"): the old installer's card with this version stamped on it,
+# rendered by tools/build-splash.py (Python with Pillow). Velopack paints its
+# progress bar over the card's bottom track, in the accent.
+$splash = Join-Path $OutDir "splash-$PackId-$Version.png"
+$python = Get-Command python -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($python) {
+    & $python.Source "$root/tools/build-splash.py" --version $Version --out $splash
+}
+if (-not $python -or $LASTEXITCODE -or -not (Test-Path $splash)) {
+    Write-Warning "Could not render the splash (needs Python with Pillow: pip install pillow); Setup.exe shows the plain icon."
+    $splash = "$root/assets/app/yap-256.png"
+}
+
 $packArgs = @(
     "pack", "--skip-updates",
     "--packId", $PackId,
@@ -160,7 +174,8 @@ $packArgs = @(
     # the update stub would say so).
     "--runtime", "win-x64",
     "--icon", "$root/assets/app/yap.ico",
-    "--splashImage", "$root/assets/app/yap-256.png",
+    "--splashImage", $splash,
+    "--splashProgressColor", "#ff8ad8",
     # The default profile's AUMID (cpp/desktopshell.cpp), so a pinned
     # shortcut and the running window group together.
     "--aumid", "com.115jon.yap.native",
@@ -186,6 +201,7 @@ if ($Sign) {
 & $vpk.Path @packArgs
 $code = $LASTEXITCODE
 Remove-Item -Recurse -Force $stage
+if ($splash -like "$OutDir*") { Remove-Item -Force -ErrorAction SilentlyContinue $splash }
 if ($code) { throw "vpk pack failed ($code)" }
 
 $setup = Join-Path $OutDir "$PackId-win-Setup.exe"

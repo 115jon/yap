@@ -1186,3 +1186,165 @@ the move needs:
 5. **The Rust cache** (`swatinem/rust-cache`) keys on `Cargo.lock`, which
    pass 6 changes (`libwebrtc` now builds from `rust/vendor`), so the first
    run after the move rebuilds everything (~40 min with fat LTO here).
+
+## 14. Compatibility: GPU safe mode, device loss, Windows N (2026-11-08)
+
+`cpp/compat.*` and `cpp/mediafoundation.*`, the patch
+`patches/webrtc-sys/0006-mf-optional-device-loss.patch`, and the notices in
+`rust/qml/screens/Shell/CompatNoticeCard.qml`.
+
+### 14.1 Startup probes
+
+Before `QGuiApplication`, in the first instance only (`Compat::prepare`):
+
+- **The adapter, once in the log**: `[gpu] adapter <name> (<vendor>:<device>:<subsys>:<rev> driver a.b.c.d), feature level 12_1`.
+  The driver version is DXGI's UMD version (`CheckInterfaceSupport(IDXGIDevice)`).
+- **The feature level**: `D3D11CreateDevice` on the default adapter with
+  levels 12_1 down to 10_0 and no device kept. Qt's shaders are SM 5, so
+  below 11_0 (or with no hardware D3D11 device) Qt would get a device and
+  then fail every pipeline: the run goes to safe mode instead. The probe
+  loads the driver (103-112 ms here), so its result is kept in
+  `gpu-compat.json` (`probedAdapter`, `featureLevel`) and probed again only
+  when the adapter identity changes; a start then spends 10-16 ms on the
+  DXGI identity read. First frame over three starts: 605, 654, 672 ms
+  before, 583, 594, 626 ms with the cached level.
+- **Media Foundation** (§14.4).
+
+### 14.2 GPU safe mode
+
+Safe mode sets, unless already set: `QSG_RHI_PREFER_SOFTWARE_RENDERER=1`
+(Qt Quick on WARP), `YAP_ZERO_COPY=0` (no shared device),
+`YAP_H264_DECODER=software`, `YAP_VPX_DECODER=software` and
+`YAP_SHARE_ENCODER=software`. Camera backgrounds (DirectML) are not
+touched. `VideoHub::shareDevice` also stays off whenever the software
+renderer is preferred: our own hardware device would override Qt's choice.
+
+When it is on, and why:
+
+| trigger                                                          | kept                  | ends                                                            |
+| ---------------------------------------------------------------- | --------------------- | --------------------------------------------------------------- |
+| feature level below 11_0, or no hardware D3D11 device            | decided per run       | a better GPU or driver                                          |
+| `sceneGraphError` (the QRhi could not be made)                   | saved, restart        | adapter or driver change, `--no-gpu-safe-mode`, notice          |
+| a lost device that could not be replaced, or 3 losses in a run   | saved, restart        | the same                                                        |
+| two starts in a row ended before their first frame (crash guard) | saved                 | the same                                                        |
+| a scene graph error while already in safe mode                   | saved, quits (code 3) | the same; the next start shows the reason                       |
+| Settings > Desktop app > Hardware acceleration off               | saved                 | only that switch (or `--no-gpu-safe-mode`); not a driver change |
+| `--gpu-safe-mode`, `YAP_GPU_SAFE_MODE=1`                         | this run              | -                                                               |
+| `QSG_RHI_PREFER_SOFTWARE_RENDERER` set by the user               | this run              | -                                                               |
+
+The saved state is `gpu-compat.json` in the profile's data folder
+(`safeMode`, `user`, `reason`, `adapter`, `since`, `noticeSeen`,
+`startsWithoutFrame`, `mediaNoticeSeen`, `probedAdapter`, `featureLevel`).
+A safe mode the app saved remembers the adapter identity (ids and driver
+version) it was saved on; a start on a different identity clears it and
+tries the GPU again (the crash guard still covers that start). One saved
+from Settings (`user`) stays until the switch is turned back on. The
+notice card says why (once per saved safe mode; Settings saved ones show
+none) and offers "Use the graphics card next time"; after it is dismissed,
+**Settings > Desktop app > Hardware acceleration** is the way back. That
+switch (the web's row, label and help text) shows the next start's choice:
+off saves safe mode, on clears any saved one. The web restarts the app on
+the spot; here the change applies at the next start, and the row says
+"Restart Yap Native to apply this." while it differs from how the run
+draws.
+
+**Restart.** Without a `sceneGraphError` handler Qt shows a message box and
+`qFatal`s. Ours logs, saves safe mode, starts the exe again and quits
+through the event loop (so `aboutToQuit` leaves a call and commits the
+cache), once per process. The new command line keeps the switches and
+`--profile <name>`, drops `--autostart` (so the window shows, never only
+the tray) and every link or other plain argument (a `yap-native://` link
+was handled once), and adds `--yap-relaunched-from=<pid>`. The new process
+waits for that pid (at most 60 s) before taking the instance lock. A
+failure while already in safe mode saves that reason and quits (exit code
+3), so the next start says why; the test switches are removed from the new
+process's environment.
+
+**Crash guard.** `prepare` writes `startsWithoutFrame = n + 1`; the first
+`frameSwapped`, a clean quit and an early return from `main` (QML failed to
+load: not a GPU death) write 0. A start into the tray (start minimized)
+puts the count back at once and arms it again when the window is first
+shown, so autostart runs that never show the window do not count.
+
+### 14.3 Device loss
+
+On `DXGI_ERROR_DEVICE_REMOVED` (a failed Present or `beginFrame`), Qt's
+basic render loop releases the swapchain and the QRhi and makes a new QRhi
+at the next frame, from the window's `QQuickGraphicsDevice`. With zero copy
+that is our device, now dead. `sceneGraphInvalidated` (direct connection,
+inside that frame, before the QRhi is gone) checks
+`GetDeviceRemovedReason` on our shared device and `QRhi::isDeviceLost()`
+(Qt's own device, without zero copy), and counts the loss on the GUI
+thread (the threaded loop invalidates on its render thread, so it posts
+there). If the shared device is removed,
+`VideoHub::replaceDevice` makes a new one (same flags), gives it to the
+window with `setGraphicsDevice`, registers it with the decoders
+(`yap_mf_set_shared_device`), drops every feed's current frame and asks
+for a frame. The old device and context are kept (frames and Qt's teardown
+may still hold them). Without zero copy Qt makes its own new device and
+nothing else is needed. A frame wrapper only hands Qt its texture when the
+QRhi's device is the one the texture was made on, so a frame from before
+the loss is never sampled on the new device.
+
+The decoders (patch 0006) keep the shared device's generation; at the next
+`Decode` a decoder whose device was removed, or whose shared device was
+replaced, configures itself again (new MFT, device manager and texture
+pool) and returns an error for that frame, so libwebrtc asks for a key
+frame. The threaded render loop (`QSG_RENDER_LOOP=threaded`) is not
+recovered in place: it restarts in safe mode.
+
+### 14.4 Media Foundation optional (Windows N/KN)
+
+The exe imported `mfplat`, `mf`, `mfreadwrite`, `evr`, `dxva2` and `msdmo`
+(Qt Multimedia's static windows backend, the H.264 MFT decoder and
+encoder, libwebrtc's DMO audio), so on N/KN without the Media Feature Pack
+it would not start. All six are `/DELAYLOAD` (`CMakeLists.txt`, with
+`delayimp`). `mediafoundation::probe()` maps `mfplat`, `mf`, `mfreadwrite`
+and `evr` from System32 (`LoadLibraryExW`, as data); if one is missing:
+
+- the delay-load notify hook resolves those DLLs to the exe and every
+  import to a stub returning `E_NOTIMPL` (all 31 imports return an
+  HRESULT; one stub fits them on x64), and the failure hook does the same
+  for anything unforeseen, so no call raises 0xC06D007E;
+- `yap_mf_set_available(false)`: H.264 is not offered (calls use VP8/VP9
+  on libvpx), no MF decoder is configured;
+- `YAP_SHARE_ENCODER=software`: shares encode VP8;
+- the camera list is empty (Qt captures through Media Foundation); the
+  test pattern still works;
+- QML (`Compat.mediaPlayback`): no mp4 `MediaPlayer` is made (chat videos
+  show "Playing this video needs the Media Feature Pack" once started; GIF
+  picker loops, clips, nameplates and profile videos rest on their stills;
+  audio previews are not playable; video stickers are skipped). WebM plays
+  (libvpx), call video draws (VideoOutput needs no MF: Qt's windows
+  integration still loads, and its `MFStartup` gets the stub);
+- a one-time notice card, "Video playback needs the Media Feature Pack".
+
+Qt Multimedia's core library loads Media Foundation itself with
+`QSystemLibrary` (camera and audio-format helpers) and copes with it being
+absent; only the static windows plugin imports it, and that is covered by
+the delay-load. `YAP_TEST_NO_MF=1` takes the same path on a PC that has
+Media Foundation (the delay-loaded imports become the stubs), except that
+Qt's `QSystemLibrary` loads still succeed there.
+
+### 14.5 Checked (2026-11-08, RTX 3080, driver 32.0.16.1047)
+
+Profile `spike`, copies of the build, each switch on its own:
+
+| run                                                   | result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| normal start                                          | adapter line logged, no safe mode, first frame 926 ms, no notice; `startsWithoutFrame` back to 0                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `YAP_TEST_DEVICE_LOSS=5`                              | Qt: "Graphics device lost, cleaning up scenegraph and releasing RHIs"; a new shared device; the window kept drawing (a closed side sheet, a tooltip)                                                                                                                                                                                                                                                                                                                                                             |
+| `YAP_TEST_GPU_FAIL=1`                                 | safe mode saved, the app restarted itself (the new pid waited for the old one, ~340 ms), the old one quit with code 3, the new one drew on WARP with the notice                                                                                                                                                                                                                                                                                                                                                  |
+| "Use the graphics card next time"                     | `safeMode` false in the file, the card gone                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `--gpu-safe-mode` + `QSG_INFO=1`                      | Qt chose adapter 3, "Microsoft Basic Render Driver"; the window draws; no notice (asked for)                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `YAP_TEST_STARTUP_CRASH=1` twice, then a normal start | the count went 1, 2; the third start: "crash guard: 2 starts in a row", safe mode, first frame 537 ms                                                                                                                                                                                                                                                                                                                                                                                                            |
+| saved safe mode with another driver version           | "safe mode cleared: the adapter or its driver changed", GPU again                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `YAP_TEST_NO_MF=1`                                    | the notice (shown once, dismissed); GIF picker GIFs and clip tiles show stills, hovering a clip makes no player; Settings > Voice & video: Qt's `MFStartup` got the stub ("mfplat.dll is not used"), 0 cameras listed; no crash                                                                                                                                                                                                                                                                                  |
+| review fixes, same day                                | restart from `--autostart yap-native://invite/compattest`: new command line `--profile spike --yap-relaunched-from=<pid>`, link handled once, window shown; a failure under `--gpu-safe-mode` saved its reason, the next start showed it; the Hardware acceleration switch on cleared the file, off saved `user: true`, kept across a changed driver identity, no notice; `YAP_ZERO_COPY=0` + `YAP_TEST_DEVICE_LOSS`: "device lost (0x00000000)" from `isDeviceLost()`, Qt's new device, the window kept drawing |
+| `dumpbin /dependents`                                 | the six DLLs only under "delay load dependencies"                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+
+Not checked: a real device removal (forcing a TDR resets the whole GPU,
+which was in use), a real Windows N install, the decoders' restart on a new
+shared device during a call with H.264 video (no call was made), a chat
+mp4 under `YAP_TEST_NO_MF` (the test channel has none), and the threaded
+render loop's restart.

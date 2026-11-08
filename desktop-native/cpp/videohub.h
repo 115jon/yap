@@ -47,6 +47,8 @@ public:
   // GUI thread.
   void attach(QVideoSink* sink);
   void detach(QVideoSink* sink);
+  // The latest frame and the sinks' current ones go (a lost device).
+  void drop();
 
 private:
   void deliver();
@@ -71,8 +73,21 @@ public:
 
   // Before `window` is first shown: render it on a device the video
   // decoder shares (zero copy). Does nothing off Direct3D 11, with
-  // YAP_ZERO_COPY=0, or when the device cannot be made.
+  // YAP_ZERO_COPY=0, with the software renderer
+  // (QSG_RHI_PREFER_SOFTWARE_RENDERER, GPU safe mode), or when the device
+  // cannot be made.
   static void shareDevice(QQuickWindow* window);
+  // The window draws on our shared device.
+  static bool sharing();
+  // The shared device was removed (a TDR, a driver update): true, with
+  // GetDeviceRemovedReason in `reason`.
+  static bool deviceRemoved(long* reason);
+  // After a device loss, while the window has no QRhi (from
+  // sceneGraphInvalidated, on the GUI thread): a new device for the
+  // window's next QRhi and for the decoders, which start again on it
+  // (patches/webrtc-sys/0006); frames on the old device are dropped. False
+  // when no device can be made.
+  static bool replaceDevice(QQuickWindow* window);
 
   Q_INVOKABLE void attach(const QString& key, QVideoSink* sink);
   Q_INVOKABLE void detach(const QString& key, QVideoSink* sink);
@@ -82,6 +97,8 @@ public:
 
   // Any thread: the feed for `key` if something shows it.
   VideoFeed* wantedFeed(const QString& key);
+  // GUI thread: every feed lets go of its frame (textures on a lost device).
+  void dropFrames();
 
 private:
   QMutex m_mutex;

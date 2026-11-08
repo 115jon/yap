@@ -10,6 +10,7 @@
 #include <QtQuick/QQuickWindow>
 #include <rhi/qrhi.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -40,8 +41,32 @@ namespace {
 VideoHub* g_hub = nullptr;
 #ifdef Q_OS_WIN
 // The device the window renders with and the decoder decodes on; never
-// released (the window and the decoders use it until the process ends).
-ID3D11Device* g_device = nullptr;
+// released (the window and the decoders use it until the process ends; a
+// device replaced after a loss is kept too, since frames and Qt's teardown
+// of its QRhi may still hold it). Read on media threads.
+std::atomic<ID3D11Device*> g_device{ nullptr };
+
+// As Qt would make it (BGRA for its text and images, the first hardware
+// adapter), plus video support for the decoder; multithread protected,
+// since the decoder's thread and the GUI thread both use it.
+bool makeSharedDevice(ComPtr<ID3D11Device>& device, ComPtr<ID3D11DeviceContext>& context)
+{
+  const D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0 };
+  if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+                               D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+                               levels, UINT(std::size(levels)), D3D11_SDK_VERSION, &device,
+                               nullptr, &context))) {
+    std::fprintf(stderr, "[video] no D3D11 video device; decoded video is copied\n");
+    return false;
+  }
+  ComPtr<ID3D10Multithread> multithread;
+  if (FAILED(context.As(&multithread))) {
+    std::fprintf(stderr, "[video] no multithread protection; decoded video is copied\n");
+    return false;
+  }
+  multithread->SetMultithreadProtected(TRUE);
+  return true;
+}
 
 // One decoded picture as Qt sees it: an NV12 texture on our device, which
 // VideoOutput samples as it is (two views of the one texture: R8 for luma,
@@ -54,6 +79,11 @@ public:
     : QHwVideoBuffer(QVideoFrame::RhiTextureHandle)
     , m_frame(frame)
   {
+    // The device the texture lives on (alive as long as the texture): a
+    // frame from before a device loss is never handed to the new device.
+    ComPtr<ID3D11Device> device;
+    static_cast<ID3D11Texture2D*>(m_frame.texture)->GetDevice(&device);
+    m_device = device.Get();
   }
   ~D3D11FrameBuffer() override { m_frame.release(m_frame.hold); }
 
@@ -67,7 +97,7 @@ public:
     if (plane > 1 || rhi.backend() != QRhi::D3D11)
       return 0;
     const auto* native = static_cast<const QRhiD3D11NativeHandles*>(rhi.nativeHandles());
-    if (!native || native->dev != g_device)
+    if (!native || native->dev != m_device)
       return 0;
     return quint64(reinterpret_cast<quintptr>(m_frame.texture));
   }
@@ -119,6 +149,7 @@ private:
   }
 
   YapD3D11Frame m_frame;
+  ID3D11Device* m_device = nullptr;
   QByteArray m_pixels;
   int m_pitch = 0;
 };
@@ -188,6 +219,18 @@ void VideoFeed::attach(QVideoSink* sink)
   m_attached.store(static_cast<int>(m_sinks.size()), std::memory_order_relaxed);
 }
 
+void VideoFeed::drop()
+{
+  {
+    QMutexLocker lock(&m_mutex);
+    m_latest = QVideoFrame();
+  }
+  for (const QPointer<QVideoSink>& sink : std::as_const(m_sinks)) {
+    if (sink)
+      sink->setVideoFrame(QVideoFrame());
+  }
+}
+
 void VideoFeed::detach(QVideoSink* sink)
 {
   m_sinks.removeAll(sink);
@@ -215,36 +258,83 @@ VideoHub* VideoHub::instance()
 void VideoHub::shareDevice(QQuickWindow* window)
 {
 #ifdef Q_OS_WIN
-  if (!window || g_device || qEnvironmentVariable("YAP_ZERO_COPY") == QLatin1String("0") ||
+  if (!window || g_device.load() || qEnvironmentVariable("YAP_ZERO_COPY") == QLatin1String("0") ||
+      qEnvironmentVariableIntValue("QSG_RHI_PREFER_SOFTWARE_RENDERER") != 0 ||
       QQuickWindow::graphicsApi() != QSGRendererInterface::Direct3D11)
     return;
-  // As Qt would make it (BGRA for its text and images, the first hardware
-  // adapter), plus video support for the decoder; multithread protected,
-  // since the decoder's thread and the GUI thread both use it.
-  const D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0 };
   ComPtr<ID3D11Device> device;
   ComPtr<ID3D11DeviceContext> context;
-  if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-                               D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
-                               levels, UINT(std::size(levels)), D3D11_SDK_VERSION, &device,
-                               nullptr, &context))) {
-    std::fprintf(stderr, "[video] no D3D11 video device; decoded video is copied\n");
+  if (!makeSharedDevice(device, context))
     return;
-  }
-  ComPtr<ID3D10Multithread> multithread;
-  if (FAILED(context.As(&multithread))) {
-    std::fprintf(stderr, "[video] no multithread protection; decoded video is copied\n");
-    return;
-  }
-  multithread->SetMultithreadProtected(TRUE);
   window->setGraphicsDevice(QQuickGraphicsDevice::fromDeviceAndContext(device.Get(), context.Get()));
   // Both kept for the process's life: Qt does not take a reference.
-  g_device = device.Detach();
+  g_device.store(device.Detach());
   context.Detach();
-  yap_mf_set_shared_device(g_device);
+  yap_mf_set_shared_device(g_device.load());
 #else
   Q_UNUSED(window);
 #endif
+}
+
+bool VideoHub::sharing()
+{
+#ifdef Q_OS_WIN
+  return g_device.load() != nullptr;
+#else
+  return false;
+#endif
+}
+
+bool VideoHub::deviceRemoved(long* reason)
+{
+#ifdef Q_OS_WIN
+  ID3D11Device* device = g_device.load();
+  const HRESULT hr = device ? device->GetDeviceRemovedReason() : S_OK;
+  if (reason)
+    *reason = long(hr);
+  return hr != S_OK;
+#else
+  if (reason)
+    *reason = 0;
+  return false;
+#endif
+}
+
+bool VideoHub::replaceDevice(QQuickWindow* window)
+{
+#ifdef Q_OS_WIN
+  if (!window)
+    return false;
+  ComPtr<ID3D11Device> device;
+  ComPtr<ID3D11DeviceContext> context;
+  if (!makeSharedDevice(device, context))
+    return false;
+  // Taken by the window's next QRhi, made at its next frame.
+  window->setGraphicsDevice(QQuickGraphicsDevice::fromDeviceAndContext(device.Get(), context.Get()));
+  g_device.store(device.Detach());
+  context.Detach();
+  // The decoders see the new device at their next frame and start again
+  // on it, with a fresh texture pool (patches/webrtc-sys/0006).
+  yap_mf_set_shared_device(g_device.load());
+  if (VideoHub* hub = instance())
+    QMetaObject::invokeMethod(hub, &VideoHub::dropFrames, Qt::QueuedConnection);
+  std::fprintf(stderr, "[video] a new shared D3D11 device for the window and the decoders\n");
+  return true;
+#else
+  Q_UNUSED(window);
+  return false;
+#endif
+}
+
+void VideoHub::dropFrames()
+{
+  QList<VideoFeed*> feeds;
+  {
+    QMutexLocker lock(&m_mutex);
+    feeds = m_feeds.values();
+  }
+  for (VideoFeed* feed : std::as_const(feeds))
+    feed->drop();
 }
 
 void VideoHub::attach(const QString& key, QVideoSink* sink)
@@ -284,7 +374,7 @@ extern "C" bool yap_video_native_frame(const char* key, size_t keyLen, const voi
 {
 #ifdef Q_OS_WIN
   VideoHub* hub = VideoHub::instance();
-  if (!hub || !g_device)
+  if (!hub || !g_device.load())
     return false;
   VideoFeed* feed = hub->wantedFeed(QString::fromUtf8(key, static_cast<qsizetype>(keyLen)));
   if (!feed)

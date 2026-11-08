@@ -1,11 +1,12 @@
 import QtQuick
+import Yap.Chrome
 import com.yap.native
 
 // Desktop app (DesktopPanel.tsx): startup and closing, kept in
-// `desktop-settings.json` (open on startup is the `YapNative` Run value)
-// and the game capture hook; hardware acceleration and updates are not in
-// this build yet. The version
-// is this build's.
+// `desktop-settings.json` (open on startup is the `YapNative` Run value),
+// the game capture hook, and hardware acceleration (GPU safe mode in
+// `gpu-compat.json`, cpp/compat.*); updates are not in this build yet. The
+// version is this build's.
 Column {
     spacing: 40
 
@@ -32,7 +33,17 @@ Column {
     SettingsCard {
         width: parent.width
         sectionId: "performance"
-        SettingsRow { rowId: "hardware-acceleration"; layout: "inline"; ComingLater {} }
+        // Off saves GPU safe mode (WARP, no GPU decode or encode) for the
+        // next start; on clears a saved one (cpp/compat.*). The web asks to
+        // restart at once; here the change waits for the next start.
+        SwitchSetting {
+            rowId: "hardware-acceleration"
+            checked: Compat.hardwareAcceleration
+            description: Compat.accelerationPending
+                ? SettingsNav.desc("hardware-acceleration") + " " + qsTr("Restart Yap Native to apply this.")
+                : ""
+            onToggled: Compat.setHardwareAcceleration(!Compat.hardwareAcceleration)
+        }
         SwitchSetting {
             rowId: "game-capture-hook"
             checked: Desktop.gameCaptureHook

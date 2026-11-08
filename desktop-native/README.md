@@ -132,6 +132,14 @@ the decisions.
   kept, nothing uploaded). The next launch shows "Yap Native closed
   unexpectedly" with Open folder (`cpp/crashnotice.*`) until dismissed.
   `YAP_TEST_CRASH=1` crashes on purpose 4 s after start.
+- Compatibility guards (`cpp/compat.*`, `cpp/mediafoundation.*`,
+  docs/LIBRARIES.md §14): the adapter, driver and feature level in the log;
+  GPU safe mode (WARP, no GPU decode or encode) below feature level 11_0,
+  after a scene graph error (the app restarts itself in it), after two
+  starts in a row that drew nothing, or with `--gpu-safe-mode`; a lost
+  device replaced in place (window and decoders); and Windows N/KN without
+  the Media Feature Pack: Media Foundation is delay-loaded, mp4 playback,
+  H.264 and cameras turn off, and a notice says why.
 - The game capture hook (`crates/yap-capture/src/hook`, the desktop app's
   `game_capture` ported): a shared window is also tried with OBS Studio's
   own signed `graphics-hook`, behind Settings > Desktop app > Game capture
@@ -535,6 +543,11 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_MIC_RAW_TAP`               | unset                     | `<file.wav>`: records the mic as it comes in (before the APM), up to 120 s (tests)                                                                                                                                             |
 | `YAP_MIC_TAP`                   | unset                     | `<file.wav>`: records the mic as it is sent (after the APM and RNNoise), up to 120 s (tests)                                                                                                                                   |
 | `YAP_RENDER_TAP`                | unset                     | `<file.wav>`: records the stereo speaker mix as it is played, up to 120 s (tests)                                                                                                                                              |
+| `YAP_TEST_NO_MF`                | unset                     | `1`: Media Foundation counts as missing, as on Windows N without the Media Feature Pack: no mp4 playback, no H.264, no cameras, the notice (tests)                                                                             |
+| `YAP_GPU_SAFE_MODE`             | unset                     | `1` (or `--gpu-safe-mode`): this run draws with WARP and keeps every GPU user of ours off (`--no-gpu-safe-mode` clears a saved safe mode)                                                                                      |
+| `YAP_TEST_GPU_FAIL`             | unset                     | `1`: 2 s after the first frame the scene graph error handler runs: safe mode is saved and the app restarts itself in it (tests)                                                                                                |
+| `YAP_TEST_DEVICE_LOSS`          | unset                     | `<n>`: `n` s after the first frame Qt's QRhi reports its device lost, as after a TDR; the device is replaced in place (tests)                                                                                                  |
+| `YAP_TEST_STARTUP_CRASH`        | unset                     | `1`: the process ends after the crash guard counted the start, before the window shows; two in a row give safe mode (tests)                                                                                                    |
 
 The defaults mirror `src/lib/site-defaults.ts`.
 

@@ -44,6 +44,7 @@
 #include "animatedpicture.h"
 #include "authmedia.h"
 #include "camera.h"
+#include "compat.h"
 #include "composerhighlighter.h"
 #include "crashnotice.h"
 #include "desktopshell.h"
@@ -734,6 +735,9 @@ int main(int argc, char* argv[])
   // First, before Qt and the instance lock: a hook must not show a window
   // or hand its arguments to a running instance.
   yap_velopack_startup();
+  // A restart into GPU safe mode (cpp/compat.*) waits for the process it
+  // replaces to let go of the instance lock.
+  Compat::awaitPredecessor();
   QElapsedTimer startup;
   startup.start();
   DesktopShell::setProcessIdentity();
@@ -743,6 +747,9 @@ int main(int argc, char* argv[])
     logfile::start();
     // Minidumps from here on, into the profile's crashes folder.
     CrashNotice::install();
+    // Before Qt: Media Foundation's presence, the GPU (adapter, feature
+    // level, the crash guard) and, when needed, safe mode's environment.
+    Compat::prepare();
   }
   qInstallMessageHandler(qtMessage);
 
@@ -849,6 +856,9 @@ int main(int argc, char* argv[])
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "Thumbbar", thumbbar);
   auto* crashes = new CrashNotice(&app);
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "CrashNotice", crashes);
+  // GPU safe mode and Media Foundation, with their notices.
+  auto* compat = new Compat(&app);
+  qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "Compat", compat);
   auto* files = new MediaShell(&app);
   static CachedNetworkFactory networkFactory;
   networkFactory.shell = files;
@@ -922,8 +932,11 @@ int main(int argc, char* argv[])
   std::fprintf(stderr, "[startup] qml loaded after %lld ms\n",
                static_cast<long long>(startup.elapsed()));
 
-  if (engine.rootObjects().isEmpty())
+  if (engine.rootObjects().isEmpty()) {
+    // Not a GPU death: the crash guard does not count this run.
+    Compat::quitting();
     return -1;
+  }
 
   if (auto* window =
         qobject_cast<QQuickWindow*>(engine.rootObjects().first())) {
@@ -934,6 +947,9 @@ int main(int argc, char* argv[])
     // where it is (Qt's SW_SHOWNOACTIVATE switch).
     if (qEnvironmentVariableIntValue("YAP_DEBUG_NO_ACTIVATE") != 0)
       window->setProperty("_q_showWithoutActivating", true);
+    // Before the first show: the scene graph's error and device loss, and
+    // the crash guard's first frame.
+    compat->attach(window);
     // Before the first show: the D3D11 device the H.264 decoder shares, so
     // decoded video is drawn without a copy (VideoHub, zero copy).
     VideoHub::shareDevice(window);
@@ -1051,6 +1067,8 @@ int main(int argc, char* argv[])
   // QNetworkConnectionMonitor), an RPC to the network service each, and a
   // thread inside that RPC holds up even TerminateProcess.
   std::fprintf(stderr, "[quit] event loop ended (%d); exiting\n", code);
+  // The crash guard's marker goes with a clean quit (cpp/compat.*).
+  Compat::quitting();
 #ifdef Q_OS_WIN
   logfile::finish(500);
   TerminateProcess(GetCurrentProcess(), UINT(code));

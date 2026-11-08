@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtMultimedia
+import Yap.Chrome
 import Yap.Media
 import com.yap.native
 
@@ -114,7 +115,7 @@ Item {
             }
             Loader {
                 anchors.fill: parent
-                active: p.video
+                active: p.video && Compat.mediaPlayback
                 sourceComponent: Video {
                     source: p.url
                     muted: true

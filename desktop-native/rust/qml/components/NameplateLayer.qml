@@ -1,5 +1,6 @@
 import QtQuick
 import QtMultimedia
+import Yap.Chrome
 import Yap.Media
 import com.yap.native
 
@@ -70,7 +71,8 @@ Item {
     // at the plate's right end).
     Loader {
         anchors.fill: parent
-        active: root.motion
+        // An mp4 plate needs Media Foundation; without it the still stays.
+        active: root.motion && (root.webm || Compat.mediaPlayback)
         sourceComponent: root.webm ? webmMotion : mp4Motion
     }
     Component {

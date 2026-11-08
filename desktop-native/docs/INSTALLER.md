@@ -116,7 +116,8 @@ Dropped on purpose:
   brings its own stub at the root, and the real exe path
   (`current\YapNative.exe`) is stable across updates.
 - **RMPK payload, LZMA blocks, lock diagnostics, WPF window**: Velopack's
-  package format and its own UI (splash with `assets/app/yap-256.png`).
+  package format and its own UI: a splash drawn after the WPF window (see
+  "Splash").
 - **Vulkan layer cleanup**: the native client's game capture hook registers
   no Vulkan layer (see "Game capture hook payload"), so there is nothing to
   remove.
@@ -126,7 +127,8 @@ Dropped on purpose:
 ## Building
 
 Needs what `build.ps1` needs (MSVC, CMake, Ninja, Rust, static Qt 6.6.3,
-libwebrtc) plus `vpk`, a .NET global tool used only at build time:
+libwebrtc) plus `vpk`, a .NET global tool used only at build time, and
+Python with Pillow for the splash (see "Splash"):
 
 ```powershell
 dotnet tool install -g vpk --version 1.3.39-g8d2844f   # the script does this if vpk is missing
@@ -140,6 +142,41 @@ nothing else from the build dir ships.
 Output: `<packId>-win-Setup.exe`, `<packId>-win-Portable.zip`,
 `<packId>-<version>-full.nupkg`, `releases.win.json`, `assets.win.json`,
 `RELEASES`.
+
+## Splash
+
+Velopack's Setup shows one image while it installs: a borderless, topmost
+layered window with no text of its own. It treats the image as 96 DPI and
+scales it by the monitor's DPI with Lanczos (at most 70 % of the monitor),
+and paints its progress bar as a solid strip along the image's bottom edge,
+12 px x DPI tall and the full width, in `--splashProgressColor`.
+
+`tools/package.ps1` renders that image at pack time with
+`tools/build-splash.py` (Python with Pillow) and passes
+`--splashProgressColor "#ff8ad8"` (the accent; vpk 1.3.39 takes `#RRGGBB`
+or `None`). The card is the Tauri installer's window (`desktop/installer`:
+`MainWindow.xaml`, `Ui/Styles.xaml`, `Ui/Theme.cs`, `Ui/Dither.cs`) in its
+dark palette, on 440 x 300:
+
+| part         | old window                                        | splash                                                                                  |
+| ------------ | ------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| ground, edge | Ply-0 `#000000`, 1 px line-strong (ink-1 14 %)    | same                                                                                    |
+| title bar    | "YAP SETUP", Martian Silk 11 px, ink-3; keys      | "YAP SETUP", Martian Silk 12 px, 0.08 em; the version where the keys were (Martian Num) |
+| mark         | Yappy 96 px, accent `#ff8ad8`, 32-cell Bayer ramp | same cells (3 px each), from `assets/svg/splash-logo.svg`, jaw open                     |
+| kicker       | talk LED (`#3ddc84`, 22 % halo) and status word   | LED and "INSTALLING"                                                                    |
+| title        | "Installing Yap", Bricolage Title 800, 28 px      | "Installing Yap Native" (the installer's title), 30 px                                  |
+| status       | Geist 15 px, ink-2, live text                     | "Setting it up for this Windows account.", Geist Medium 15 px                           |
+| meter        | 4 px tint-2 track, accent fill                    | 12 px tint-2 track at the bottom edge; Velopack's accent bar fills it                   |
+
+Everything is drawn at 4x and box-filtered down, so shapes stay on whole
+pixels and the dither cells keep hard edges when Velopack upscales. Type is
+a step larger and heavier than the WPF window's for the same reason. Without
+Python or Pillow the script warns and packs the old `assets/app/yap-256.png`
+(the bar is still the accent). To look at it:
+
+```powershell
+python tools/build-splash.py --version 0.2.12 --out F:/ct/yapn/tmp/splash.png
+```
 
 ## Game capture hook payload
 

@@ -1,5 +1,7 @@
 #include "camera.h"
 
+#include "mediafoundation.h"
+
 #include "videohub.h"
 
 #include <QtCore/QMetaObject>
@@ -312,7 +314,9 @@ CameraCapture::Profile CameraCapture::profileFor(const QString& quality)
 
 void CameraCapture::listDevices(bool notify)
 {
-  m_cameras = QMediaDevices::videoInputs();
+  // Capture is Media Foundation's (Qt's windows backend): without it no
+  // camera can open, so none is listed (the test pattern still is).
+  m_cameras = mediafoundation::available() ? QMediaDevices::videoInputs() : QList<QCameraDevice>();
   QStringList ids;
   QStringList names;
   QStringList found;
@@ -417,6 +421,8 @@ QCameraDevice CameraCapture::resolve(bool* fellBack)
     // Not listed: the system default, the saved choice left as it is.
     *fellBack = true;
   }
+  if (!mediafoundation::available())
+    return QCameraDevice();
   return QMediaDevices::defaultVideoInput();
 }
 

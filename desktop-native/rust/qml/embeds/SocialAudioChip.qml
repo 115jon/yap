@@ -1,5 +1,6 @@
 import QtQuick
 import QtMultimedia
+import Yap.Chrome
 import com.yap.native
 
 // The post's sound (LinkEmbed.tsx SocialAudioChip): tint-1, the 40 px art
@@ -12,7 +13,9 @@ Rectangle {
     property var audio: null
     property Item clipTo: null
 
-    readonly property bool playable: audio !== null && audio.src.length > 0
+    // The preview plays through Media Foundation (none on Windows N without
+    // the Media Feature Pack).
+    readonly property bool playable: audio !== null && audio.src.length > 0 && Compat.mediaPlayback
     readonly property bool playing: loader.item !== null && loader.item.playbackState === MediaPlayer.PlayingState
 
     implicitHeight: 56
