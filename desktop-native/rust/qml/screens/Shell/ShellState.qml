@@ -50,6 +50,8 @@ QtObject {
     property string stageName: ""
     property string stageAvatar: ""
     property bool stageLive: false
+    // Its resolution and frame rate ("1080P / 60 FPS", QualityMonitor.tsx).
+    property string stageQuality: ""
     property bool stageRemoteStream: false
 
     // The floating Now Playing card (FloatingSurface.tsx prefs; the web keeps

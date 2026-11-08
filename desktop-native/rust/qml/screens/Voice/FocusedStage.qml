@@ -1,5 +1,6 @@
 import QtQuick
 import QtMultimedia
+import Yap.Chrome
 import com.yap.native
 
 // The tile on stage (VoiceGrid.tsx FocusedStage): media letterboxed in its
@@ -38,6 +39,34 @@ Item {
     Binding { target: ShellState; property: "stageAvatar"; value: root.tile.avatar; restoreMode: Binding.RestoreNone }
     Binding { target: ShellState; property: "stageLive"; value: root.showsVideo; restoreMode: Binding.RestoreNone }
     Binding { target: ShellState; property: "stageRemoteStream"; value: root.screen && !root.tile.me; restoreMode: Binding.RestoreNone }
+    Binding { target: ShellState; property: "stageQuality"; value: root.qualityText; restoreMode: Binding.RestoreNone }
+
+    // The header's quality readout (VoiceHeader.tsx QualityMonitor,
+    // formatQuality "1080P / 60 FPS"), as VoiceTile's: the size is the
+    // frame's, the rate counted over 2 s from VideoHub's per-key frame count,
+    // so no QML runs per frame.
+    property double framesAt: 0
+    property int fps: 0
+    Timer {
+        interval: 2000
+        repeat: true
+        running: root.hasFrame
+        onRunningChanged: { root.framesAt = VideoHub.frames(root.tile.videoKey); root.fps = 0 }
+        onTriggered: {
+            const now = VideoHub.frames(root.tile.videoKey)
+            root.fps = Math.max(0, Math.round((now - root.framesAt) / 2))
+            root.framesAt = now
+        }
+    }
+    readonly property string qualityText: {
+        const r = root.hasFrame ? media.item.sourceRect : Qt.rect(0, 0, 0, 0)
+        const h = Math.round(r.height), w = Math.round(r.width)
+        if (h <= 0 || w <= 0)
+            return ""
+        const res = h >= 2160 || w >= 3840 ? "4K" : h >= 1440 || w >= 2560 ? "1440"
+            : h >= 1080 || w >= 1920 ? "1080" : h >= 720 || w >= 1280 ? "720" : String(h)
+        return root.fps > 0 ? "%1P / %2 FPS".arg(res).arg(root.fps) : "%1P".arg(res)
+    }
 
     TapHandler {
         onTapped: ShellState.focusedTile = ""

@@ -58,6 +58,7 @@ Rectangle {
             ShellState.stageName = ""
             ShellState.stageAvatar = ""
             ShellState.stageLive = false
+            ShellState.stageQuality = ""
             ShellState.stageRemoteStream = false
         }
     }
@@ -142,6 +143,15 @@ Rectangle {
                 font.family: "Yap Bricolage Key Bold"
                 font.pixelSize: 14
                 font.weight: Font.Bold
+            }
+            // Its resolution and frame rate: text-num-xs, ink-3.
+            Text {
+                visible: root.focused && ShellState.stageLive && ShellState.stageQuality.length > 0
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
+                text: ShellState.stageQuality
+                color: Theme.ink3
+                font: Theme.type.numSm
             }
             Row {
                 visible: root.focused && ShellState.stageLive
