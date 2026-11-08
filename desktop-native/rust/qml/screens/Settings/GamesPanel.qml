@@ -96,13 +96,6 @@ Column {
                                 fillMode: Image.PreserveAspectCrop
                                 asynchronous: true
                             }
-                            Icon {
-                                anchors.centerIn: parent
-                                visible: picture.status !== Image.Ready
-                                name: "gamepad"
-                                size: Theme.iconSm
-                                color: Theme.ink2
-                            }
                         }
                         Column {
                             anchors.left: tile.right

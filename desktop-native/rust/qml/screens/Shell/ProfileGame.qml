@@ -2,8 +2,8 @@ import QtQuick
 import com.yap.native
 
 // The profile card's "Playing a game" (ProfileCard.tsx, GameActivityCard):
-// the game's 40 px icon (the gamepad on a tint when it has none or it
-// fails), its name, Rich Presence details and state when present, and a
+// the game's 40 px icon (left out when it has none or it fails, so the
+// text takes the room), its name, Rich Presence details and state when present, and a
 // live elapsed time. `game` is the core's JSON `{name, icon, details,
 // state, startedAt}`, or empty (the section hides). The shared GameClock
 // ticks only while this shows.
@@ -48,6 +48,8 @@ Column {
         spacing: 12
 
         Rectangle {
+            id: tile
+            visible: picture.status === Image.Ready
             width: 40
             height: 40
             radius: Theme.radius
@@ -57,7 +59,6 @@ Column {
             Image {
                 id: picture
                 anchors.fill: parent
-                visible: status === Image.Ready
                 source: root.info?.icon ?? ""
                 sourceSize.width: 80
                 sourceSize.height: 80
@@ -65,18 +66,11 @@ Column {
                 asynchronous: true
                 cache: true
             }
-            Icon {
-                anchors.centerIn: parent
-                visible: picture.status !== Image.Ready
-                name: "gamepad"
-                size: 20
-                color: Theme.ink2
-            }
         }
 
         Column {
             anchors.verticalCenter: parent.verticalCenter
-            width: parent.width - 52
+            width: parent.width - (tile.visible ? 52 : 0)
             Text {
                 width: parent.width
                 textFormat: Text.PlainText
