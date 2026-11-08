@@ -29,6 +29,16 @@ Rectangle {
     // The tiles' row inside the stage's px-4.
     readonly property int rowWidth: Math.max(0, width - 32)
 
+    // The stagger of tiles made together (VoiceView.tileEnterDelay).
+    property double tileEnterAt: 0
+    property int tileEnterRank: 0
+    function tileEnterDelay() {
+        const now = Date.now()
+        root.tileEnterRank = now - root.tileEnterAt < 100 ? root.tileEnterRank + 1 : 0
+        root.tileEnterAt = now
+        return Math.min(root.tileEnterRank, 5) * Theme.tileStagger
+    }
+
     implicitHeight: shown ? banner.height + stageArea.height + dock.height + 1 : 0
     visible: shown
     color: Theme.ply0
@@ -129,14 +139,26 @@ Rectangle {
             anchors.centerIn: parent
             height: root.tileHeight
             spacing: 8
-            populate: TileEnter {}
-            add: TileEnter {}
             Repeater {
                 id: inCallTiles
                 model: root.joined ? VoiceTileModel : null
                 // VoiceGrid layoutMode "row": flex-1 tiles of at most 400 px,
                 // sharing the row (px-4) instead of running past the column.
+                // Each tile plays its own entrance (TileEnter), never the
+                // Row's populate/add, which a relayout cuts short.
                 delegate: VoiceTile {
+                    id: tile
+                    transform: Scale {
+                        id: grow
+                        origin.x: tile.width / 2
+                        origin.y: tile.height / 2
+                    }
+                    TileEnter {
+                        id: enter
+                        target: tile
+                        grow: grow
+                    }
+                    Component.onCompleted: enter.play(root.tileEnterDelay())
                     width: Math.min(400, Math.round(root.tileHeight * 16 / 9),
                         Math.floor((root.rowWidth - (inCallTiles.count - 1) * 8) / Math.max(1, inCallTiles.count)))
                     height: Math.min(root.tileHeight, Math.round(width * 9 / 16))

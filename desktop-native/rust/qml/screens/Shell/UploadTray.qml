@@ -31,9 +31,12 @@ Item {
             id: flow
             width: parent.width
             spacing: 8
-            // Each file attached fades in and rises 4 px (AttachmentList.tsx
-            // rm-list-enter).
-            add: ViewEnter {}
+            // Each file attached once the tray shows fades in and rises 4 px
+            // (AttachmentList.tsx rm-list-enter): the tile plays it itself
+            // (ListEnter on a Translate), never the Flow's add, which a
+            // relayout cuts short and leaves offset or faded.
+            property bool painted: false
+            Component.onCompleted: Qt.callLater(() => flow.painted = true)
 
             Repeater {
                 id: tiles
@@ -52,6 +55,17 @@ Item {
                     required property bool nsfw
                     readonly property bool done: uploadState === "done"
                     readonly property bool failed: uploadState === "failed"
+                    transform: Translate { id: lift }
+                    ListEnter {
+                        id: entrance
+                        target: tile
+                        lift: lift
+                        onStopped: {
+                            tile.opacity = 1
+                            lift.y = 0
+                        }
+                    }
+                    Component.onCompleted: if (flow.painted) entrance.start()
                     width: 96
                     height: 96
                     radius: Theme.radius

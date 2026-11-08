@@ -397,6 +397,18 @@ Rectangle {
         return best
     }
 
+    // The stagger of tiles made together (a join's first fill): each one
+    // 30 ms after the one before, the sixth and later with the fifth; a tile
+    // made on its own (someone joining) enters at once.
+    property double tileEnterAt: 0
+    property int tileEnterRank: 0
+    function tileEnterDelay() {
+        const now = Date.now()
+        root.tileEnterRank = now - root.tileEnterAt < 100 ? root.tileEnterRank + 1 : 0
+        root.tileEnterAt = now
+        return Math.min(root.tileEnterRank, 5) * Theme.tileStagger
+    }
+
     // Watch stream from the sidebar's card: once that share's tile is in
     // the call, it goes on stage (`attemptPendingStreamFocus`); given up
     // after 10 s.
@@ -439,15 +451,27 @@ Rectangle {
             y: stage.fit.scrolls ? 0 : Math.max(0, (stage.height - height) / 2)
             columns: stage.fit.cols
             spacing: 8
-            // Tiles join with a staggered fade and grow (ParticipantCard.tsx).
-            // The web's glide of the others to new cells is not done: a
-            // positioner's move also runs on every resize.
-            populate: TileEnter {}
-            add: TileEnter {}
+            // Tiles join with a staggered fade and grow (ParticipantCard.tsx),
+            // which each tile plays itself (TileEnter): never the Grid's
+            // populate/add, which a relayout cuts short (0.2.9's invisible
+            // tiles). The web's glide of the others to new cells is not done:
+            // a positioner's move also runs on every resize.
             Repeater {
                 id: tiles
                 model: root.joined && !root.focused ? VoiceTileModel : null
                 delegate: VoiceTile {
+                    id: tile
+                    transform: Scale {
+                        id: grow
+                        origin.x: tile.width / 2
+                        origin.y: tile.height / 2
+                    }
+                    TileEnter {
+                        id: enter
+                        target: tile
+                        grow: grow
+                    }
+                    Component.onCompleted: enter.play(root.tileEnterDelay())
                     width: stage.fit.tileW
                     height: stage.fit.tileH !== undefined ? stage.fit.tileH : Math.round(stage.fit.tileW * 9 / 16)
                     solo: tiles.count === 1

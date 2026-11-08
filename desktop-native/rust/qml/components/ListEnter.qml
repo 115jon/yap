@@ -7,8 +7,11 @@ import com.yap.native
 //   transform: Translate { id: lift }
 //   ListEnter { id: enter; target: row; lift: lift }
 //   ... enter.start() for a row that arrived after the first paint
-// (a new message at the tail, a reaction added, a file attached). Under
-// reduced motion it only fades (100 ms).
+// (a new message at the tail, a reaction added, a file attached, a row
+// joining the channel tree). Under reduced motion it only fades (100 ms).
+// Played by the row, never as a view's or positioner's add transition (a
+// relayout cuts those short and leaves the row offset or faded). A row
+// that may be stopped early (pooled, restarted) resets itself in onStopped.
 ParallelAnimation {
     id: enter
 

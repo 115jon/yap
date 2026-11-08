@@ -300,9 +300,11 @@ QtObject {
     // It follows Windows' "Animation effects" live (cpp/main.cpp
     // MotionWatch); YAP_REDUCED_MOTION=1|0 overrides it (tests).
     // The primitives that read these: PresenceIn/PresenceOut (popups),
-    // EaseColor/EaseNumber (hover and state Behaviors), ListEnter (one
-    // row's entrance) and ViewEnter/ViewRemove/ViewDisplaced (list and
-    // positioner transitions). Nothing here loops at rest.
+    // EaseColor/EaseNumber (hover and state Behaviors), and ListEnter and
+    // TileEnter (a row's or tile's own entrance, on a transform). No
+    // ListView or positioner add/remove/displaced/populate transitions: a
+    // relayout while one runs is lost or cuts it short (0.2.9). Nothing
+    // here loops at rest.
     property bool reducedMotion: false
     readonly property int dur1: 100
     readonly property int dur2: reducedMotion ? 100 : 150

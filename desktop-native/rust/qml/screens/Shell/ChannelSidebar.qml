@@ -206,16 +206,29 @@ Rectangle {
 
         // Rows that join after the tree has painted (someone entering a
         // voice channel, a new channel, a category opening) fade in and
-        // rise 4 px, the rows they push glide, and a leaving row fades
-        // (tree.tsx join motion, motion.css list-row). Never on the first
-        // fill or a server switch: the list arms itself 400 ms after.
+        // rise 4 px (tree.tsx join motion, motion.css list-row). Never on
+        // the first fill or a server switch: the list arms itself 400 ms
+        // after.
+        //
+        // The entrance is the row's own (ListEnter on a Translate), and the
+        // list has no view transitions at all: rows below an insert or a
+        // removal take their place at once, and a leaving row goes at once.
+        // While a ListView transition runs, the view parks that row's next
+        // position, and a relayout in the meantime (a voice status GIF
+        // arriving, another join, a resize) was lost: 0.2.9's add/displaced
+        // left rows overlapping or with a gap under them, and its remove
+        // fade, cut short, left the leaving row half drawn over the next.
         property bool armed: false
-        add: armed ? treeEnter : null
-        remove: armed ? treeRemove : null
-        displaced: armed ? treeDisplaced : null
-        ViewEnter { id: treeEnter }
-        ViewRemove { id: treeRemove }
-        ViewDisplaced { id: treeDisplaced }
+        // The row ranges the model has just inserted (one update can insert
+        // several), which enter as the list makes them; a row made by
+        // scrolling does not.
+        property var entering: []
+        function shouldEnter(row) {
+            if (!list.armed)
+                return false
+            const now = Date.now()
+            return list.entering.some(r => now - r.at < 500 && row >= r.first && row <= r.last)
+        }
         Timer {
             id: treeArm
             interval: 400
@@ -234,6 +247,11 @@ Rectangle {
         Connections {
             target: ChannelTreeModel
             function onModelReset() { list.disarm() }
+            function onRowsInserted(parent, first, last) {
+                const now = Date.now()
+                list.entering = list.entering.filter(r => now - r.at < 500)
+                    .concat([{ first: first, last: last, at: now }])
+            }
         }
 
         // The id of a row the list has created, for the drop line.
@@ -256,12 +274,30 @@ Rectangle {
                 if (treeRow.kind === "channel" && treeRow.voice)
                     ShellState.voiceChannelNames[treeRow.itemId] = treeRow.name
             }
-            Component.onCompleted: remember()
-            // A row pooled at the end of a remove transition is still faded
-            // out (ViewRemove); the row it becomes must show.
-            ListView.onReused: {
-                treeRow.opacity = 1
+            transform: Translate { id: lift }
+            ListEnter {
+                id: entrance
+                target: treeRow
+                lift: lift
+                // Finished, cut short or the row pooled: always fully shown
+                // and in place.
+                onStopped: {
+                    treeRow.opacity = 1
+                    lift.y = 0
+                }
+            }
+            function enterIfNew() {
+                if (list.shouldEnter(treeRow.index))
+                    entrance.restart()
+            }
+            Component.onCompleted: {
                 remember()
+                enterIfNew()
+            }
+            ListView.onPooled: entrance.stop()
+            ListView.onReused: {
+                remember()
+                enterIfNew()
             }
             onSettingsRequested: ShellState.channelSettingsRequested(treeRow.itemId)
             onMenuRequested: (row, at) => {
