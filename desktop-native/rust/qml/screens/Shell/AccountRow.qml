@@ -146,6 +146,7 @@ Rectangle {
                             icon: Session.meGameIcon
                             ink: Theme.ink2
                             strongInk: Theme.ink1
+                            compact: true
                         }
                     }
                     Text {

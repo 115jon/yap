@@ -13,6 +13,9 @@ Row {
     property font font: Theme.type.caption
     property color ink: Theme.ink3
     property color strongInk: Theme.ink2
+    // Only the name after the icon (UserPanel.tsx): in a narrow row
+    // "Playing" would take the room and elide to "Playi…".
+    property bool compact: false
 
     height: 16
     spacing: 4
@@ -48,7 +51,8 @@ Row {
     Text {
         id: lead
         anchors.verticalCenter: parent.verticalCenter
-        width: Math.max(0, Math.min(implicitWidth, root.width - 16 - root.spacing))
+        visible: !root.compact
+        width: root.compact ? 0 : Math.max(0, Math.min(implicitWidth, root.width - 16 - root.spacing))
         textFormat: Text.PlainText
         text: qsTr("Playing")
         elide: Text.ElideRight
@@ -58,7 +62,8 @@ Row {
     Text {
         anchors.verticalCenter: parent.verticalCenter
         visible: width > 0
-        width: Math.max(0, Math.min(implicitWidth, root.width - 16 - lead.width - 2 * root.spacing))
+        width: Math.max(0, Math.min(implicitWidth, root.width - 16
+            - (root.compact ? root.spacing : lead.width + 2 * root.spacing)))
         textFormat: Text.PlainText
         text: root.game
         elide: Text.ElideRight
