@@ -5,7 +5,6 @@ import { DeferredToaster } from "@/components/DeferredToaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAppSessionRecovery } from "@/hooks/useAppSessionRecovery";
 import { useExternalLinkHandler } from "@/hooks/useExternalLinkHandler";
-import { useNativeAppLinkHandler } from "@/hooks/useNativeAppLinkHandler";
 import {
   DEBUG_DESKTOP_AUTH,
   getDesktopAuthHandoffToken,
@@ -145,8 +144,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 function RootComponent() {
   // Intercept external link clicks on desktop → open in system browser
   useExternalLinkHandler();
-  // Web on Windows, setting on: Yap message links go to Yap Native
-  useNativeAppLinkHandler();
   const [sessionToken, setSessionToken] = useState<string | undefined>();
   const sessionTokenStateRef = useRef({ seenSessionToken: false });
 

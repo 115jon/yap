@@ -26,11 +26,6 @@ export type SettingsEnvironment = {
   desktop: boolean;
   /** Touch-only device (no hover, coarse pointer): no keyboard pages. */
   touch?: boolean;
-  /**
-   * A browser that can hand links to Yap Native, the Windows app: not the
-   * Tauri or mobile apps (native-app-link.ts canOfferNativeApp).
-   */
-  nativeApp?: boolean;
 };
 
 export type SettingsRowDef = {
@@ -39,8 +34,6 @@ export type SettingsRowDef = {
   desc?: string;
   keywords?: string[];
   desktopOnly?: boolean;
-  /** Only where `env.nativeApp` (a browser on Windows). */
-  nativeAppOnly?: boolean;
   /** Lives in the panel's preview rail rather than a card. */
   rail?: boolean;
 };
@@ -50,8 +43,6 @@ type SettingsSectionDef = {
   title: string;
   desc?: string;
   desktopOnly?: boolean;
-  /** Only where `env.nativeApp` (a browser on Windows). */
-  nativeAppOnly?: boolean;
   rows: SettingsRowDef[];
 };
 
@@ -559,20 +550,6 @@ const SETTINGS_PANELS: SettingsPanelDef[] = [
           },
         ],
       },
-      {
-        id: "links",
-        title: "Links",
-        nativeAppOnly: true,
-        rows: [
-          {
-            id: "open-links-in-native",
-            label: "Open links in Yap Native",
-            desc: "Yap message and invite links open in the Windows app. Your browser asks first.",
-            keywords: ["native", "windows", "app", "links", "invite", "open"],
-            nativeAppOnly: true,
-          },
-        ],
-      },
     ],
   },
   {
@@ -825,19 +802,8 @@ export function isRowAvailable(
   const location = ROW_INDEX.get(rowId);
   if (!location) return false;
   if (!isPanelAvailable(location.panel, env)) return false;
-  if (location.section && !isSectionAvailable(location.section, env)) {
-    return false;
-  }
-  if (location.row.nativeAppOnly && !env.nativeApp) return false;
+  if (location.section?.desktopOnly && !env.desktop) return false;
   return !location.row.desktopOnly || env.desktop;
-}
-
-function isSectionAvailable(
-  section: SettingsSectionDef,
-  env: SettingsEnvironment,
-): boolean {
-  if (section.nativeAppOnly && !env.nativeApp) return false;
-  return !section.desktopOnly || env.desktop;
 }
 
 /* ------------------------------------------------------------------ */
@@ -917,7 +883,7 @@ export function getSectionPosition(
   if (!entry) return null;
   const sections = entry.panel.sections.filter(
     (section) =>
-      isSectionAvailable(section, env) && !exclude.includes(section.id),
+      (!section.desktopOnly || env.desktop) && !exclude.includes(section.id),
   );
   const at = sections.findIndex((section) => section.id === sectionId);
   return at < 0 ? null : { index: at + 1, total: sections.length };
@@ -931,7 +897,7 @@ export function visibleSectionRows(
 ): SettingsRowDef[] {
   const entry = SECTION_INDEX.get(sectionId);
   if (!entry) return [];
-  if (!isSectionAvailable(entry.section, env)) return [];
+  if (entry.section.desktopOnly && !env.desktop) return [];
   return entry.section.rows.filter(
     (row) => isRowAvailable(row.id, env) && rowMatches(row.id, query),
   );

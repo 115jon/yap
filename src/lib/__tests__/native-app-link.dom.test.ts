@@ -7,15 +7,9 @@ import {
   isNativeAppDevice,
   launchNativeApp,
   NATIVE_APP_SCHEME,
-  nativeChatLink,
   nativeInviteLink,
-  nativeLinkForWebUrl,
   nativeSignInLink,
-  OPEN_LINKS_IN_NATIVE_KEY,
-  readOpenLinksInNative,
   setNativeAppLauncherForTests,
-  subscribeOpenLinksInNative,
-  writeOpenLinksInNative,
 } from "@/lib/native-app-link";
 
 describe("native app links", () => {
@@ -49,8 +43,6 @@ describe("native app links", () => {
 });
 
 describe("native app links for web pages", () => {
-  const origins = ["https://yap.example.com"];
-
   it("builds invite links only for codes the app takes", () => {
     expect(nativeInviteLink("quiet-pro_7")).toBe(
       "yap-native://invite/quiet-pro_7",
@@ -60,91 +52,6 @@ describe("native app links for web pages", () => {
     expect(nativeInviteLink("a b")).toBeNull();
     expect(nativeInviteLink("x".repeat(64))).not.toBeNull();
     expect(nativeInviteLink("x".repeat(65))).toBeNull();
-  });
-
-  it("builds chat links in the app's forms", () => {
-    expect(nativeChatLink({ server: "@me" })).toBe("yap-native://chat/@me");
-    expect(nativeChatLink({ server: "@me", channel: "dm1" })).toBe(
-      "yap-native://chat/@me/dm1",
-    );
-    expect(nativeChatLink({ server: "s1" })).toBe("yap-native://chat/s1");
-    expect(nativeChatLink({ server: "s1", channel: "c1", message: "m1" })).toBe(
-      "yap-native://chat/s1/c1?message=m1",
-    );
-  });
-
-  it("refuses chat links the app would refuse", () => {
-    expect(nativeChatLink({ server: "s1", message: "m1" })).toBeNull();
-    expect(nativeChatLink({ server: "@you" })).toBeNull();
-    expect(nativeChatLink({ server: "s1", channel: "c.1" })).toBeNull();
-    expect(
-      nativeChatLink({ server: "s1", channel: "c1", message: "m?1" }),
-    ).toBeNull();
-    expect(nativeChatLink({ server: "x".repeat(128) })).not.toBeNull();
-    expect(nativeChatLink({ server: "x".repeat(129) })).toBeNull();
-  });
-
-  it("maps Yap web URLs to app links", () => {
-    const map = (href: string) => nativeLinkForWebUrl(href, origins);
-    expect(map("https://yap.example.com/invite/quiet-pro")).toBe(
-      "yap-native://invite/quiet-pro",
-    );
-    expect(map("https://yap.example.com/chat/@me")).toBe(
-      "yap-native://chat/@me",
-    );
-    expect(map("https://yap.example.com/chat/%40me/dm-1?message=m-2")).toBe(
-      "yap-native://chat/@me/dm-1?message=m-2",
-    );
-    expect(map("https://yap.example.com/chat/s1/c1/")).toBe(
-      "yap-native://chat/s1/c1",
-    );
-    // Other parameters and the fragment are dropped, never passed on.
-    expect(
-      map("https://yap.example.com/chat/s1/c1?message=m1&token=secret#x"),
-    ).toBe("yap-native://chat/s1/c1?message=m1");
-  });
-
-  it("leaves every other URL alone", () => {
-    const map = (href: string) => nativeLinkForWebUrl(href, origins);
-    expect(map("https://evil.example.com/invite/quiet-pro")).toBeNull();
-    expect(map("https://yap.example.com/")).toBeNull();
-    expect(map("https://yap.example.com/chat")).toBeNull();
-    expect(map("https://yap.example.com/invite")).toBeNull();
-    expect(map("https://yap.example.com/invite/a/b")).toBeNull();
-    expect(map("https://yap.example.com/chat/s1/c1/extra")).toBeNull();
-    expect(map("https://yap.example.com/chat/s1?message=m1")).toBeNull();
-    expect(map("https://yap.example.com/share/abc")).toBeNull();
-    expect(map("https://yap.example.com/chat/s%2F1")).toBeNull();
-    expect(map("https://yap.example.com/chat/%E0%A4%A")).toBeNull();
-    expect(map("javascript:alert(1)")).toBeNull();
-    expect(map("not a url")).toBeNull();
-  });
-
-  it("counts this page's origin as Yap by default", () => {
-    expect(nativeLinkForWebUrl(`${window.location.origin}/invite/abc`)).toBe(
-      "yap-native://invite/abc",
-    );
-  });
-});
-
-describe("open links in Yap Native setting", () => {
-  afterEach(() => {
-    window.localStorage.clear();
-  });
-
-  it("is off by default and remembers a change", () => {
-    expect(readOpenLinksInNative()).toBe(false);
-    const listener = vi.fn();
-    const unsubscribe = subscribeOpenLinksInNative(listener);
-    writeOpenLinksInNative(true);
-    expect(readOpenLinksInNative()).toBe(true);
-    expect(window.localStorage.getItem(OPEN_LINKS_IN_NATIVE_KEY)).toBe("1");
-    writeOpenLinksInNative(false);
-    expect(readOpenLinksInNative()).toBe(false);
-    expect(listener).toHaveBeenCalledTimes(2);
-    unsubscribe();
-    writeOpenLinksInNative(true);
-    expect(listener).toHaveBeenCalledTimes(2);
   });
 });
 
