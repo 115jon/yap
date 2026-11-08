@@ -50,15 +50,19 @@ The hooks act only when the exe really sits in `<root>\current\` next to
 `<root>\Update.exe`, and only on values that belong to that root. The rules
 are in `yap_core::install` (tested in `crates/yap-core/tests/install.rs`).
 
-| hook             | does                                                                                                                                                                                                                                                                                        |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| after install    | Registers `yap-native://` (the same values the app writes, `yap_core::links::scheme_registration`) unless a live exe outside this root owns it. Creates `HKCU\Software\Classes\AppUserModelId\com.115jon.yap.native` with `DisplayName` and a `YapInstallRoot` marker if the key is absent. |
-| after update     | Logs only. The exe path under `current\` does not change, so the scheme and Run values stay valid.                                                                                                                                                                                          |
-| before uninstall | Removes the `yap-native` key if its open command runs an exe in this root; removes the AUMID key and the default profile's `toast-icon.png` if the marker names this root; removes every `YapNative` / `YapNative-<profile>` Run value whose command runs an exe in this root.              |
+| hook             | does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| after install    | Registers `yap-native://` to `current\YapNative.exe` (the same values the app writes, `yap_core::links::scheme_registration`). The released install (packId `YapNative.App`) always does, taking it back from a dev build that had it; another packId only when the scheme is free, dangling or already its own (`yap_core::install::hook_may_take_scheme`). Creates `HKCU\Software\Classes\AppUserModelId\com.115jon.yap.native` with `DisplayName` and a `YapInstallRoot` marker if the key is absent. |
+| after update     | Registers the scheme again, by the same rule. The exe path under `current\` does not change, so the scheme and Run values stay valid across updates.                                                                                                                                                                                                                                                                                                                                                     |
+| before uninstall | Removes the `yap-native` key if its open command runs an exe in this root; removes the AUMID key and the default profile's `toast-icon.png` if the marker names this root; removes every `YapNative` / `YapNative-<profile>` Run value whose command runs an exe in this root.                                                                                                                                                                                                                           |
 
-The app itself still registers on every start, as before: the AUMID key
-(`DisplayName`, `IconUri`), the scheme (default profile only), the Run value
-when autostart is on. A key written by another copy (a dev build, the
+The app itself still registers on every start: the AUMID key (`DisplayName`,
+`IconUri`) and the Run value when autostart is on. The scheme is rewritten
+at start only by the released install running as the default profile
+(`<root named YapNative.App>\current\YapNative.exe` next to
+`Update.exe`, `yap_core::install::may_register_at_launch`); a dev build, a
+copy, a test install or any named profile never writes it, so the
+installed app keeps it. A key written by another copy (a dev build, the
 user's own profile) is never removed: a profile's AUMID key carries no
 owner, so uninstall leaves `com.115jon.yap.native.<name>` alone.
 

@@ -14,7 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use tokio::sync::Semaphore;
+use tokio::sync::{Notify, Semaphore};
 use tokio::task::JoinHandle;
 use yap_cache::{Cache, Snapshot};
 
@@ -253,7 +253,8 @@ pub struct Runner {
     http_slots: Arc<Semaphore>,
     gateway: Option<GatewayHandle>,
     calls: HashMap<CallId, UnboundedSender<VoiceCommand>>,
-    sign_in: Option<JoinHandle<()>>,
+    /// The running device sign-in, and what wakes its poll early.
+    sign_in: Option<(JoinHandle<()>, Arc<Notify>)>,
     /// Uploads in flight, so a cancel can stop them.
     uploads: HashMap<RequestId, JoinHandle<()>>,
     startup_marks: Vec<&'static str>,
@@ -408,6 +409,7 @@ impl Runner {
             | Effect::Revoke(_)
             | Effect::SignInStart(_)
             | Effect::SignInCancel
+            | Effect::SignInPollNow
             | Effect::Voice { .. }
             | Effect::VoiceForget(_)
             | Effect::CacheWrite { .. }
@@ -536,13 +538,21 @@ impl Runner {
             }
             Effect::SignInStart(attempt) => {
                 self.cancel_sign_in();
-                self.sign_in = Some(tokio::spawn(sign_in(
+                let nudge = Arc::new(Notify::new());
+                let task = tokio::spawn(sign_in(
                     self.http.clone(),
                     attempt,
                     self.inbox.clone(),
-                )));
+                    nudge.clone(),
+                ));
+                self.sign_in = Some((task, nudge));
             }
             Effect::SignInCancel => self.cancel_sign_in(),
+            Effect::SignInPollNow => {
+                if let Some((_, nudge)) = &self.sign_in {
+                    nudge.notify_one();
+                }
+            }
             Effect::VoiceStart {
                 call,
                 token,
@@ -810,7 +820,7 @@ impl Runner {
     }
 
     fn cancel_sign_in(&mut self) {
-        if let Some(task) = self.sign_in.take() {
+        if let Some((task, _)) = self.sign_in.take() {
             task.abort();
         }
     }
@@ -1057,7 +1067,12 @@ async fn download(api: &Api, url: &str, dest: String) -> Result<(), crate::api::
 }
 
 /// One device sign-in; reports the code, then the outcome.
-async fn sign_in(http: reqwest::Client, attempt: SignInId, inbox: UnboundedSender<Input>) {
+async fn sign_in(
+    http: reqwest::Client,
+    attempt: SignInId,
+    inbox: UnboundedSender<Input>,
+    nudge: Arc<Notify>,
+) {
     let send = |event: SignInEvent| {
         let _ = inbox.send(Input::SignIn { attempt, event });
     };
@@ -1079,7 +1094,7 @@ async fn sign_in(http: reqwest::Client, attempt: SignInId, inbox: UnboundedSende
         }
     }
     let mut guard = CancelOnDrop(Some((http.clone(), started.device_code.clone())));
-    let result = auth::wait_for_approval(&http, &started).await;
+    let result = auth::wait_for_approval(&http, &started, &nudge).await;
     guard.0 = None;
     send(match result {
         Ok(token) => SignInEvent::Approved(token),

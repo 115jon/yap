@@ -20,7 +20,8 @@ pub mod qobject {
         /// `{create: {busy, error, done}, createNameError, landing: {code,
         /// step, expired, hasInvite, serverId, serverName, serverIcon,
         /// serverInitial, members, inviter} | null, landingSeq,
-        /// jumpChannelId, jumpMessageId, jumpSeq}`.
+        /// jumpChannelId, jumpMessageId, jumpSeq, settingsPanel,
+        /// settingsRow, settingsSeq, navSeq}`.
         #[qproperty(QString, state)]
         type Invites = super::InvitesRust;
 
@@ -34,6 +35,18 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "jumpRequested"]
         fn jump_requested(self: Pin<&mut Invites>, channel_id: QString, message_id: QString);
+
+        /// A settings link: open Settings on `panel` and land on `row` (none
+        /// when empty).
+        #[qsignal]
+        #[cxx_name = "settingsRequested"]
+        fn settings_requested(self: Pin<&mut Invites>, panel: QString, row: QString);
+
+        /// A link led somewhere in the app (an invite, Home, a server, a
+        /// channel): what covers the chat closes.
+        #[qsignal]
+        #[cxx_name = "linkFollowed"]
+        fn link_followed(self: Pin<&mut Invites>);
 
         /// The Create a server dialog opened.
         #[qinvokable]
@@ -84,7 +97,9 @@ pub mod qobject {
         fn open_server(self: &Invites, server_id: &QString);
 
         /// The `yap-native://` registration for `exe` as `key\tname\tdata`
-        /// lines under HKCU (the shell writes the ones that differ).
+        /// lines under HKCU (the shell writes the ones that differ). Empty
+        /// unless `exe` is the released install (`install::PACK_ID`) as the
+        /// default profile: no other build takes the scheme at launch.
         #[qinvokable]
         #[cxx_name = "schemeRegistration"]
         fn scheme_registration(self: &Invites, exe: &QString) -> QString;
@@ -111,8 +126,8 @@ pub struct InvitesRust {
 
 thread_local! {
     /// The last view, for an object QML creates later, and the bumps the
-    /// signals were sent for.
-    static LAST: RefCell<(InviteView, u64, u64)> = RefCell::new(Default::default());
+    /// signals were sent for (landing, jump, settings, nav).
+    static LAST: RefCell<(InviteView, [u64; 4])> = RefCell::new(Default::default());
 }
 
 fn q(text: &str) -> QString {
@@ -129,22 +144,38 @@ fn state_json(view: &InviteView) -> String {
 
 /// The store's view changed: the JSON, then the signals for new bumps.
 pub(crate) fn on_view(view: InviteView) {
-    let (landing, jump) = LAST.with(|last| {
+    let [landing, jump, settings, nav] = LAST.with(|last| {
         let mut last = last.borrow_mut();
-        let landing = view.landing_seq > last.1;
-        let jump = view.jump_seq > last.2;
-        *last = (view.clone(), view.landing_seq, view.jump_seq);
-        (landing, jump)
+        let seqs = [
+            view.landing_seq,
+            view.jump_seq,
+            view.settings_seq,
+            view.nav_seq,
+        ];
+        let bumped = std::array::from_fn(|i| seqs[i] > last.1[i]);
+        *last = (view.clone(), seqs);
+        bumped
     });
     let Some(mut object) = gui::object::<qobject::Invites>() else {
         return;
     };
     object.as_mut().set_state(q(&state_json(&view)));
+    // First, so a landing or settings the same link opens stays open.
+    if nav {
+        object.as_mut().link_followed();
+    }
     if landing {
         object.as_mut().landing_requested();
     }
     if jump {
-        object.jump_requested(q(&view.jump_channel_id), q(&view.jump_message_id));
+        object
+            .as_mut()
+            .jump_requested(q(&view.jump_channel_id), q(&view.jump_message_id));
+    }
+    if settings {
+        object
+            .as_mut()
+            .settings_requested(q(&view.settings_panel), q(&view.settings_row));
     }
 }
 
@@ -181,6 +212,20 @@ fn open(link: Option<Link>) -> bool {
     }
 }
 
+/// The run's test scheme (`YAP_TEST_SCHEME=yap-native-<name>`), read once:
+/// deep links in it read as `yap-native://` ones, so an end-to-end test can
+/// point a scheme of its own at a build. The app never registers it.
+fn test_scheme() -> Option<&'static str> {
+    static SCHEME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    SCHEME
+        .get_or_init(|| {
+            std::env::var("YAP_TEST_SCHEME")
+                .ok()
+                .and_then(|v| links::test_scheme(&v))
+        })
+        .as_deref()
+}
+
 fn web_origin() -> &'static str {
     &yap_core::config::get().api_base
 }
@@ -212,7 +257,15 @@ impl qobject::Invites {
     }
 
     pub fn open_arg(&self, arg: &QString) -> bool {
-        open(links::deep_link_arg(&arg.to_string()))
+        let arg = arg.to_string();
+        let link = links::deep_link_arg_with(&arg, test_scheme());
+        match &link {
+            Some(link) => eprintln!("[link] deep link: {}", link.kind()),
+            // A flag or a path says nothing; a URL we refused does.
+            None if arg.contains("://") => eprintln!("[link] deep link refused"),
+            None => {}
+        }
+        open(link)
     }
 
     pub fn open_invite(&self, text: &QString) -> bool {
@@ -236,6 +289,15 @@ impl qobject::Invites {
     }
 
     pub fn scheme_registration(&self, exe: &QString) -> QString {
-        q(&links::scheme_registration_lines(&exe.to_string()))
+        let exe = exe.to_string();
+        let default_profile = yap_cache::profile::current().is_none();
+        let released = yap_core::install::may_register_at_launch(&exe, default_profile, |p| {
+            std::path::Path::new(p).is_file()
+        });
+        if released {
+            q(&links::scheme_registration_lines(&exe))
+        } else {
+            QString::default()
+        }
     }
 }

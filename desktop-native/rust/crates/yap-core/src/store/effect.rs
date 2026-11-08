@@ -64,6 +64,9 @@ pub enum Effect {
     /// Start a device sign-in (cancelling any running one).
     SignInStart(SignInId),
     SignInCancel,
+    /// Poll the running sign-in's code now instead of at its next interval
+    /// (a `signin` link: the browser just approved it).
+    SignInPollNow,
     VoiceStart {
         call: CallId,
         token: Token,

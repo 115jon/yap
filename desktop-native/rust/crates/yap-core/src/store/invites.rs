@@ -166,6 +166,12 @@ pub struct InviteState {
     /// The message a channel link points at, and a bump per link.
     pub jump: Option<(String, String)>,
     pub jump_seq: u64,
+    /// The settings panel and row a link asked for, and a bump per link.
+    pub settings: (String, String),
+    pub settings_seq: u64,
+    /// Bumped when a link leads somewhere in the app (an invite, Home, a
+    /// server or a channel): what covers the chat (Settings) closes.
+    pub nav_seq: u64,
     pub(super) pending: HashMap<RequestId, InviteOp>,
     /// The view as last sent.
     pub(super) shown: InviteView,
@@ -217,6 +223,10 @@ pub struct InviteView {
     pub jump_channel_id: String,
     pub jump_message_id: String,
     pub jump_seq: u64,
+    pub settings_panel: String,
+    pub settings_row: String,
+    pub settings_seq: u64,
+    pub nav_seq: u64,
 }
 
 /// `Intl.NumberFormat("en-US")` with the plural (InviteClient.tsx

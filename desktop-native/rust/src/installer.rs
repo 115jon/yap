@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use velopack::VelopackApp;
 use yap_core::install::{
-    command_is_ours, is_run_value, may_take_scheme, same_path, AUMID_DISPLAY_NAME, AUMID_KEY,
+    command_is_ours, hook_may_take_scheme, is_run_value, same_path, AUMID_DISPLAY_NAME, AUMID_KEY,
     AUMID_OWNER_VALUE, RUN_KEY,
 };
 use yap_core::links::{scheme_registration, SCHEME_KEY};
@@ -37,11 +37,13 @@ pub extern "C" fn yap_velopack_startup() {
                     install.after_install();
                 }
             })
-            // Nothing changes between versions yet: the exe path under
-            // `current` is stable, so the scheme and Run values stay valid.
+            // The exe path under `current` is stable across updates, so the
+            // Run values stay valid; the scheme is written again in case a
+            // dev build took it since the install.
             .on_after_update_fast_callback(|version| {
                 if let Some(install) = Install::current() {
                     install.log(&format!("after update {version}"));
+                    install.register_scheme();
                 }
             })
             .on_before_uninstall_fast_callback(|version| {
@@ -92,12 +94,14 @@ impl Install {
         })
     }
 
-    fn after_install(&self) {
-        // The scheme is the default profile's; the app rewrites it on every
-        // default-profile start. Here it is registered before the first run
-        // unless another live copy owns it.
+    /// The scheme, pointing at `current\YapNative.exe` (stable across
+    /// updates): always for the released install, which owns it (and so
+    /// takes it back from a dev build); for a test install only unless
+    /// another live copy has it. The released app also rewrites it on
+    /// every default-profile start.
+    fn register_scheme(&self) {
         let current = reg::read(&scheme_command_key(), "");
-        if may_take_scheme(current.as_deref(), &self.root, |p| Path::new(p).exists()) {
+        if hook_may_take_scheme(&self.root, current.as_deref(), |p| Path::new(p).exists()) {
             let written = scheme_registration(&self.exe)
                 .iter()
                 .filter(|v| reg::write(&v.key, &v.name, &v.data))
@@ -106,6 +110,10 @@ impl Install {
         } else {
             self.log("scheme: owned by another copy, left alone");
         }
+    }
+
+    fn after_install(&self) {
+        self.register_scheme();
         // The toast identity, marked as ours so uninstall can tell. A key
         // that is already there (a dev build's) is left as it is; the app
         // sets the icon on its first start.

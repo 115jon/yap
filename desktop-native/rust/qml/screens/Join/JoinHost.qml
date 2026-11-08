@@ -3,8 +3,9 @@ import com.yap.native
 
 // Where creating and joining open from: the rail's Create a server
 // (ShellState.createServerRequested), the invite page a link opens over
-// the whole window (Invites.landingRequested), and a message link's jump
-// (Invites.jumpRequested). Each is created on first use.
+// the whole window (Invites.landingRequested), a message link's jump
+// (Invites.jumpRequested) and a settings link (Invites.settingsRequested).
+// Each is created on first use.
 Item {
     id: host
 
@@ -13,10 +14,22 @@ Item {
         return loader.status === Loader.Ready ? loader.item : null
     }
 
-    // A landing a link opened while the shell was being built.
+    // Settings on the panel and row the latest settings link names, once
+    // per link (SettingsNav outlives a rebuilt shell, so a link is never
+    // shown twice).
+    function showSettingsLink() {
+        const state = JSON.parse(Invites.state)
+        if (state.settingsSeq > SettingsNav.linkSeq) {
+            SettingsNav.linkSeq = state.settingsSeq
+            SettingsNav.show(state.settingsPanel, state.settingsRow)
+        }
+    }
+
+    // A landing or settings a link opened while the shell was being built.
     Component.onCompleted: {
         if (JSON.parse(Invites.state).landing)
             host.dialog(inviteLanding)?.open()
+        host.showSettingsLink()
     }
 
     Connections {
@@ -34,6 +47,13 @@ Item {
         }
         function onJumpRequested(channelId, messageId) {
             Chat.jumpToMessage(channelId, messageId)
+        }
+        function onSettingsRequested(panel, row) {
+            host.showSettingsLink()
+        }
+        // A link into the chat: Settings, if open, would hide where it led.
+        function onLinkFollowed() {
+            SettingsNav.close()
         }
     }
     // Signed out or another account: nothing stays open.

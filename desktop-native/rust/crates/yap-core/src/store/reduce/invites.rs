@@ -63,6 +63,10 @@ impl State {
 
     pub(super) fn on_invites(&mut self, fx: &mut Effects, command: InviteCommand) {
         match command {
+            // Never held: it only matters while a sign-in is waiting.
+            InviteCommand::OpenLink(Link::SignIn { user_code }) => {
+                self.nudge_sign_in(fx, user_code.as_deref());
+            }
             InviteCommand::OpenLink(link) => {
                 if self.links_ready() {
                     self.follow_link(fx, link);
@@ -111,12 +115,45 @@ impl State {
         }
     }
 
+    /// A `signin` link: the browser approved a code. When it is the one
+    /// this sign-in shows (or names none), poll now rather than at the next
+    /// interval. Any other code, or no sign-in running, changes nothing;
+    /// the shell has brought the window forward either way.
+    fn nudge_sign_in(&mut self, fx: &mut Effects, user_code: Option<&str>) {
+        if self.sign_in.is_none() {
+            return;
+        }
+        let ours = match (user_code, self.sign_in_code.as_deref()) {
+            (None, _) => true,
+            (Some(asked), Some(shown)) => asked == shown,
+            (Some(_), None) => false,
+        };
+        if ours {
+            fx.push(Effect::SignInPollNow);
+        }
+    }
+
     fn follow_link(&mut self, fx: &mut Effects, link: Link) {
+        if !matches!(link, Link::Settings { .. } | Link::SignIn { .. }) {
+            self.invites.nav_seq += 1;
+        }
         match link {
             Link::Invite(code) => {
                 self.invites.landing_seq += 1;
                 self.load_preview(fx, code);
             }
+            Link::Home => self.select_home(fx),
+            Link::Server(server_id) => {
+                if self.servers.iter().any(|s| s.id == server_id) {
+                    self.select_server(fx, server_id);
+                }
+            }
+            Link::Settings { panel, row } => {
+                self.invites.settings = (panel, row);
+                self.invites.settings_seq += 1;
+            }
+            // Handled as it comes (`on_invites`), never held.
+            Link::SignIn { .. } => {}
             Link::Channel {
                 server_id,
                 channel_id,
@@ -398,6 +435,10 @@ impl State {
             jump_channel_id,
             jump_message_id,
             jump_seq: s.jump_seq,
+            settings_panel: s.settings.0.clone(),
+            settings_row: s.settings.1.clone(),
+            settings_seq: s.settings_seq,
+            nav_seq: s.nav_seq,
         }
     }
 

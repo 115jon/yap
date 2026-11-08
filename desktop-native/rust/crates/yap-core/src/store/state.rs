@@ -827,6 +827,9 @@ pub struct State {
     pub(super) link_shown: (u32, bool),
     pub(super) session: Option<Session>,
     pub(super) sign_in: Option<SignInId>,
+    /// The user code the running sign-in shows (`XXXX-XXXX`), once Kova
+    /// gave one: a `signin` link naming it polls at once.
+    pub(super) sign_in_code: Option<String>,
     pub(super) servers: Vec<Server>,
     /// Channel trees by server id, as last fetched.
     pub(super) channels: HashMap<String, ServerChannels>,
@@ -965,6 +968,7 @@ impl State {
             link_shown: (0, false),
             session: None,
             sign_in: None,
+            sign_in_code: None,
             servers: Vec::new(),
             channels: HashMap::new(),
             active_server: None,

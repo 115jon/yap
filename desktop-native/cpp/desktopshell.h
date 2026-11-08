@@ -11,8 +11,9 @@
 // com.115jon.yap, the Run value "Yap", the yap:// scheme and its folders;
 // none of them is read or written here. Deep links use our own
 // yap-native:// (HKCU\Software\Classes\yap-native only, and only the
-// default profile registers it). A named profile (profile.h) suffixes every
-// name that identifies the app, so two profiles run side by side.
+// released install's default profile registers it at launch). A named
+// profile (profile.h) suffixes every name that identifies the app, so two
+// profiles run side by side.
 //
 // QML (import Yap.Chrome):
 //   DesktopShell.badgeCount / badgeDot / badgeTooltip   (bind from Desktop)
@@ -67,7 +68,8 @@ public:
   // `openArg`, and `registerUrlScheme` asks it for the registration.
   void setLinkHandler(QObject* links);
   // Writes the per-user yap-native:// registration (HKCU) where it differs
-  // from what `Invites.schemeRegistration` asks for. Idempotent.
+  // from what `Invites.schemeRegistration` asks for: only from the released
+  // install, as the default profile. Idempotent.
   void registerUrlScheme();
   // Hands one command-line argument to the link handler.
   void openArg(const QString& arg);

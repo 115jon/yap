@@ -2,18 +2,36 @@
 //! and reads, our own `yap-native://` deep links, and that scheme's
 //! per-user registration. Pure: no I/O, no registry access.
 //!
-//! The forms:
+//! The web forms (`<site>` is the configured web origin,
+//! `config::get().api_base`, never a literal here):
 //! - an invite: `<site>/invite/<code>` (`invite.$code.tsx`, `invite_link`),
-//!   the desktop app's `yap://invite/<code>` (`desktop-deep-link.ts`
-//!   `inviteCodeFromDeepLink`), `yap-native://invite/<code>`, or a bare code;
-//! - a channel: `<site>/chat/<server>/<channel>` (ChannelSidebar.tsx "Copy
-//!   link"), with `?message=<id>` for a message (MessageItem.tsx
-//!   `buildMessageLink`; `@me` is a DM), and `yap-native://chat/...` with the
-//!   same path. The web reads the path as `useChatPageLogic.ts` does.
+//!   or the desktop app's `yap://invite/<code>` (`desktop-deep-link.ts`
+//!   `inviteCodeFromDeepLink`; the desktop app reads nothing else);
+//! - `<site>/chat/<server>[/<channel>]` (ChannelSidebar.tsx "Copy link"),
+//!   with `?message=<id>` for a message (MessageItem.tsx `buildMessageLink`);
+//!   `@me` is Home and its DMs. The web reads the path as
+//!   `useChatPageLogic.ts` does: a voice channel is opened, never joined.
 //!
-//! `<site>` is the configured web origin (`config::get().api_base`), never
-//! a literal here. The desktop app's `yap://` handles invites only, and
-//! this app never registers or reads `yap://` in the registry.
+//! Our own `yap-native://` links, read strictly: one form each, and an
+//! unknown or repeated query parameter, an empty value, a fragment or an
+//! extra segment makes it no link at all.
+//!
+//! | link                                                  | opens                               |
+//! | ----------------------------------------------------- | ----------------------------------- |
+//! | `yap-native://invite/<code>`                          | the invite landing                  |
+//! | `yap-native://chat/@me`                               | Home (the DM list)                  |
+//! | `yap-native://chat/@me/<dm>[?message=<id>]`           | a DM, at a message                  |
+//! | `yap-native://chat/<server>`                          | a server, on its last channel       |
+//! | `yap-native://chat/<server>/<channel>[?message=<id>]` | a channel (voice: its panel, no join), at a message |
+//! | `yap-native://settings[/<panel>][?row=<row>]`         | Settings, on a panel and row        |
+//! | `yap-native://signin[?code=XXXX-XXXX]`                | the window; polls a waiting sign-in |
+//!
+//! `signin` never carries a token: the browser page that approved a device
+//! code opens it to bring the app forward, and the app, which polls that
+//! code anyway, polls at once. The app never registers or reads `yap://`
+//! in the registry.
+
+use crate::settings;
 
 /// Our own scheme (the installed Yap app owns `yap://`).
 pub const SCHEME: &str = "yap-native";
@@ -23,12 +41,40 @@ pub const SCHEME: &str = "yap-native";
 pub enum Link {
     /// The invite landing for a code.
     Invite(String),
+    /// Home: the DM list, no conversation open (`chat/@me`).
+    Home,
+    /// A server, on the channel it last showed.
+    Server(String),
     /// A channel, and a message in it. `server_id` is `@me` for a DM.
     Channel {
         server_id: String,
         channel_id: String,
         message_id: Option<String>,
     },
+    /// The settings dialog on `panel`; `row` (or empty) is the row it lands
+    /// on. Both are ids from `settings::PANELS`.
+    Settings { panel: String, row: String },
+    /// A device sign-in was approved in the browser: show the window, and
+    /// poll now if `user_code` is the code this app is waiting on.
+    SignIn { user_code: Option<String> },
+}
+
+impl Link {
+    /// What kind of link it is, for the log (never its ids).
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Link::Invite(_) => "invite",
+            Link::Home => "home",
+            Link::Server(_) => "server",
+            Link::Channel {
+                message_id: Some(_),
+                ..
+            } => "message",
+            Link::Channel { .. } => "channel",
+            Link::Settings { .. } => "settings",
+            Link::SignIn { .. } => "signin",
+        }
+    }
 }
 
 /// `scheme://rest` split at the first `://`; the scheme lowercased.
@@ -69,58 +115,207 @@ fn query_param(query: &str, key: &str) -> Option<String> {
     })
 }
 
+/// A strict query: every pair decodes, names one of `allowed` once and has
+/// a value. `None` for anything else; the pairs otherwise.
+fn strict_query(query: &str, allowed: &[&str]) -> Option<Vec<(String, String)>> {
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for pair in query.split('&').filter(|p| !p.is_empty()) {
+        let (name, value) = pair.split_once('=')?;
+        let name = decode(name)?;
+        let value = decode(&value.replace('+', " "))?;
+        if !allowed.contains(&name.as_str())
+            || value.is_empty()
+            || pairs.iter().any(|(n, _)| *n == name)
+        {
+            return None;
+        }
+        pairs.push((name, value));
+    }
+    Some(pairs)
+}
+
+fn take(pairs: &[(String, String)], key: &str) -> Option<String> {
+    pairs.iter().find(|(n, _)| n == key).map(|(_, v)| v.clone())
+}
+
 /// The longest invite code taken: far past any the server makes, short of
 /// a paste or argument being passed to the API whole.
 const MAX_CODE_LEN: usize = 64;
 
-/// An invite code as the server stores them: letters, digits, `-`, `_`.
-fn is_code(text: &str) -> bool {
+/// The longest server, channel or message id taken (the server's are UUIDs).
+const MAX_ID_LEN: usize = 128;
+
+/// Letters, digits, `-` and `_`, 1 to `max` long.
+fn is_token(text: &str, max: usize) -> bool {
     !text.is_empty()
-        && text.len() <= MAX_CODE_LEN
+        && text.len() <= max
         && text
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
 }
 
-/// The link a path (after the origin or scheme) names: `invite/<code>` or
-/// `chat/<server>/<channel>`, with the query for the message.
-fn from_path(path: &str, query: &str) -> Option<Link> {
+/// An invite code as the server stores them: letters, digits, `-`, `_`.
+fn is_code(text: &str) -> bool {
+    is_token(text, MAX_CODE_LEN)
+}
+
+/// A server, channel or message id.
+fn is_id(text: &str) -> bool {
+    is_token(text, MAX_ID_LEN)
+}
+
+/// A device user code as Kova shows it, `XXXX-XXXX` in its alphabet (no 0,
+/// O, 1, I), in any case and with or without the dash, as `XXXX-XXXX`;
+/// `None` for anything else (`device-code-format.ts`, without its
+/// leniency for a partial code).
+pub fn user_code(text: &str) -> Option<String> {
+    const ALPHABET: &str = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let upper = text.trim().to_ascii_uppercase();
+    let bare = match upper.split_once('-') {
+        Some((a, b)) if a.len() == 4 && b.len() == 4 => format!("{a}{b}"),
+        Some(_) => return None,
+        None => upper,
+    };
+    (bare.len() == 8 && bare.chars().all(|c| ALPHABET.contains(c)))
+        .then(|| format!("{}-{}", &bare[..4], &bare[4..]))
+}
+
+/// `chat/<server>[/<channel>]`: `@me` alone is Home; a message needs a
+/// channel.
+fn chat_link(server: &str, channel: Option<&str>, message: Option<String>) -> Option<Link> {
+    let server_id = decode(server)?;
+    let dm = server_id == "@me";
+    if !dm && !is_id(&server_id) {
+        return None;
+    }
+    let Some(channel) = channel else {
+        return match message {
+            Some(_) => None,
+            None if dm => Some(Link::Home),
+            None => Some(Link::Server(server_id)),
+        };
+    };
+    let channel_id = decode(channel)?;
+    if !is_id(&channel_id) || message.as_deref().is_some_and(|m| !is_id(m)) {
+        return None;
+    }
+    Some(Link::Channel {
+        server_id,
+        channel_id,
+        message_id: message,
+    })
+}
+
+/// The link a site path names (a link clicked in the app): `invite/<code>`
+/// or `chat/<server>[/<channel>]`, read as the web reads them (`?message=`
+/// is the only parameter looked at, later segments are ignored).
+fn from_site_path(path: &str, query: &str) -> Option<Link> {
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    let message = || query_param(query, "message").filter(|m| !m.is_empty());
     match parts.as_slice() {
         ["invite", code] => {
             let code = decode(code)?;
             is_code(&code).then_some(Link::Invite(code))
         }
-        ["chat", server, channel, ..] => {
-            let server_id = decode(server)?;
-            let channel_id = decode(channel)?;
-            if server_id.is_empty() || channel_id.is_empty() {
-                return None;
-            }
-            Some(Link::Channel {
-                server_id,
-                channel_id,
-                message_id: query_param(query, "message").filter(|m| !m.is_empty()),
-            })
+        ["chat", server] => chat_link(server, None, None),
+        ["chat", server, channel, ..] => chat_link(server, Some(channel), message()),
+        _ => None,
+    }
+}
+
+/// A `yap-native://` link after the scheme, strictly (the table above).
+fn from_native(rest: &str) -> Option<Link> {
+    if rest.contains('#') {
+        return None;
+    }
+    let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
+    // One trailing slash is fine (`invite/x/`); an empty segment is not.
+    let path = path.strip_suffix('/').unwrap_or(path);
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts.iter().any(|p| p.is_empty()) {
+        return None;
+    }
+    let route = parts[0].to_ascii_lowercase();
+    match (route.as_str(), &parts[1..]) {
+        ("invite", [code]) => {
+            strict_query(query, &[])?;
+            let code = decode(code)?;
+            is_code(&code).then_some(Link::Invite(code))
+        }
+        ("chat", [server]) => {
+            strict_query(query, &[])?;
+            chat_link(server, None, None)
+        }
+        ("chat", [server, channel]) => {
+            let pairs = strict_query(query, &["message"])?;
+            chat_link(server, Some(channel), take(&pairs, "message"))
+        }
+        ("settings", panel) if panel.len() <= 1 => {
+            let pairs = strict_query(query, &["row"])?;
+            let panel = match panel.first() {
+                Some(p) => Some(decode(p)?),
+                None => None,
+            };
+            settings_link(panel.as_deref(), take(&pairs, "row").as_deref())
+        }
+        ("signin", []) => {
+            let pairs = strict_query(query, &["code"])?;
+            let user_code = match take(&pairs, "code") {
+                Some(code) => Some(user_code(&code)?),
+                None => None,
+            };
+            Some(Link::SignIn { user_code })
         }
         _ => None,
     }
 }
 
+/// Settings on `panel` and `row`, as the web's `resolveSettingsLocation`:
+/// a row picks its own panel (the row is the more specific ask), and no
+/// panel is the account panel. An unknown panel or row is no link.
+fn settings_link(panel: Option<&str>, row: Option<&str>) -> Option<Link> {
+    if let Some(panel) = panel {
+        settings::panel(panel)?;
+    }
+    if let Some(row) = row {
+        let location = settings::row_location(row)?;
+        return Some(Link::Settings {
+            panel: location.panel.id.to_owned(),
+            row: row.to_owned(),
+        });
+    }
+    let panel = settings::panel(panel.unwrap_or("account"))?;
+    Some(Link::Settings {
+        panel: panel.id.to_owned(),
+        row: String::new(),
+    })
+}
+
+/// A scheme that reads as ours: `yap-native`, or the run's test scheme.
+fn is_native_scheme(scheme: &str, test: Option<&str>) -> bool {
+    scheme == SCHEME || test.is_some_and(|t| t == scheme)
+}
+
 /// The link a URL is, for links clicked in the app (message text, embeds)
-/// and deep links: our site's invite and channel links, `yap-native://`
+/// and deep links: our site's invite and chat links, `yap-native://`
 /// links, and `yap://invite/<code>`. Anything else is `None` and opens as
 /// it would have (in the browser).
 pub fn parse_link(url: &str, web_origin: &str) -> Option<Link> {
+    parse_link_with(url, web_origin, None)
+}
+
+fn parse_link_with(url: &str, web_origin: &str, test: Option<&str>) -> Option<Link> {
     let url = url.trim().trim_matches('"');
     let (scheme, rest) = split_scheme(url)?;
+    if is_native_scheme(&scheme, test) {
+        return from_native(rest);
+    }
     let rest = rest.split('#').next().unwrap_or_default();
     let (rest, query) = rest.split_once('?').unwrap_or((rest, ""));
     let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
     match scheme.as_str() {
-        SCHEME => from_path(&format!("{authority}/{path}"), query),
         // The desktop app's scheme: invites only, as it reads them.
-        "yap" => match from_path(&format!("{authority}/{path}"), "") {
+        "yap" => match from_site_path(&format!("{authority}/{path}"), "") {
             Some(Link::Invite(code)) => Some(Link::Invite(code)),
             _ => None,
         },
@@ -129,7 +324,7 @@ pub fn parse_link(url: &str, web_origin: &str) -> Option<Link> {
             let (site_scheme, site_host) = split_scheme(origin)?;
             let ours = site_scheme == scheme && site_host.eq_ignore_ascii_case(authority);
             if ours {
-                from_path(path, query)
+                from_site_path(path, query)
             } else {
                 None
             }
@@ -147,19 +342,38 @@ pub fn invite_code(text: &str, web_origin: &str) -> Option<String> {
     }
     match parse_link(text, web_origin)? {
         Link::Invite(code) => Some(code),
-        Link::Channel { .. } => None,
+        _ => None,
     }
+}
+
+/// A run's test scheme (`YAP_TEST_SCHEME`): `yap-native-<name>`, the name
+/// lowercase `[a-z0-9-]`, so a test can point a scheme of its own at a
+/// build and never touch `yap-native://`. Anything else is `None`.
+pub fn test_scheme(value: &str) -> Option<String> {
+    let value = value.trim();
+    let name = value.strip_prefix("yap-native-")?;
+    let valid = !name.is_empty()
+        && name.len() <= 32
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    valid.then(|| value.to_owned())
 }
 
 /// A command-line argument that is one of our deep links (what Windows
 /// passes as `%1`). Only `yap-native:` arguments count, so a stray path or
 /// flag is never taken for a link.
 pub fn deep_link_arg(arg: &str) -> Option<Link> {
+    deep_link_arg_with(arg, None)
+}
+
+/// [`deep_link_arg`], also reading the run's [`test_scheme`] as ours.
+pub fn deep_link_arg_with(arg: &str, test: Option<&str>) -> Option<Link> {
     let arg = arg.trim().trim_matches('"');
     let (scheme, _) = split_scheme(arg)?;
-    if scheme == SCHEME {
+    if is_native_scheme(&scheme, test) {
         // Our scheme's links never need the site.
-        parse_link(arg, "")
+        parse_link_with(arg, "", test)
     } else {
         None
     }

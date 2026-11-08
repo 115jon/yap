@@ -1407,6 +1407,7 @@ impl State {
             Command::StartSignIn => {
                 let attempt = SignInId(self.next_id());
                 self.sign_in = Some(attempt);
+                self.sign_in_code = None;
                 self.set_phase(fx, Phase::DeviceCode);
                 fx.view(ViewUpdate::DeviceCode {
                     user_code: String::new(),
@@ -2005,14 +2006,17 @@ impl State {
         }
         match event {
             SignInEvent::DeviceCode { user_code, url } => {
+                self.sign_in_code = crate::links::user_code(&user_code);
                 fx.view(ViewUpdate::DeviceCode { user_code, url });
             }
             SignInEvent::Approved(token) => {
                 self.sign_in = None;
+                self.sign_in_code = None;
                 self.begin_session(fx, token);
             }
             SignInEvent::Failed(message) => {
                 self.sign_in = None;
+                self.sign_in_code = None;
                 self.set_phase(fx, Phase::SignedOut);
                 self.set_status(fx, message);
             }
