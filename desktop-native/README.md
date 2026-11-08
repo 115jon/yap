@@ -161,6 +161,24 @@ the decisions.
   devices" is on, and the preview sheet), Notifications (desktop alerts,
   sound volume and each sound category, Test) and Desktop app (startup and
   closing, the version). What this build cannot do shows "Coming later".
+- Game activity ("Playing X", `crates/yap-games`, docs/ARCHITECTURE.md
+  "As built: game activity"): the game running on this PC, from the
+  process list (a ToolHelp snapshot; only a process the catalog names is
+  opened, with `PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE`, for its
+  path), Steam's `RunningAppID` and the foreground window, matched against
+  the web's game catalog with arRPC's rules. The catalog ships gzipped in
+  the exe and is refreshed at most daily (ETag) from
+  `/desktop/game-catalog.json`. Ours goes out with op 43 only when it
+  changes and again after every Ready and Resumed, `null` once while
+  "Share my activity" is off or we are invisible, and only to a gateway
+  whose `PRESENCE_LIST` carries `game_activity`. Others' activity shows as
+  "Playing **Name**" with the game's icon in the custom status's place
+  (member list, DMs, Friends, the account row) and as "Playing a game"
+  with a live elapsed time on profile cards. Settings: Privacy > Share my
+  activity (the account's `share_activity`) and App > Registered games
+  (detection on/off, the games seen with when they last ran and Hide, and
+  Add it from what has a window), kept in the profile's `games.json`.
+  `cargo run --release -p yap-games --example probe` measures its cost.
 
 - Media in messages as the web draws it: pictures (one fitted in 640 x 400,
   or the 2-10 tile grid; GIFs animate; sensitive ones blurred behind
@@ -535,6 +553,9 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_MIC_RAW_TAP`               | unset                     | `<file.wav>`: records the mic as it comes in (before the APM), up to 120 s (tests)                                                                                                                                             |
 | `YAP_MIC_TAP`                   | unset                     | `<file.wav>`: records the mic as it is sent (after the APM and RNNoise), up to 120 s (tests)                                                                                                                                   |
 | `YAP_RENDER_TAP`                | unset                     | `<file.wav>`: records the stereo speaker mix as it is played, up to 120 s (tests)                                                                                                                                              |
+| `YAP_TEST_GAME_PROCESSES`       | unset                     | `name.exe\|C:/path/name.exe;...`: game detection sees this process list instead of the system's (an entry without `\|path` cannot be opened), with no Steam; Add it lists the same (tests)                                     |
+| `YAP_GAME_ACTIVITY_SEND`        | on                        | `off`: our game activity (op 43) is never sent, even to a gateway that takes it; it still shows here                                                                                                                           |
+| `YAP_TRACE_GAMES`               | unset                     | `1`: each detection scan (counts, time) and the game keys it reports, in the log                                                                                                                                               |
 
 The defaults mirror `src/lib/site-defaults.ts`.
 
@@ -657,6 +678,9 @@ rust/src/client/      core: config, api (REST), auth (device flow), gateway,
 rust/src/desktop.rs   Desktop QObject: shell settings, badge, toasts, window rect
 rust/src/crash.rs     minidumps on a crash (crash-handler + minidump-writer)
 rust/crates/yap-capture/src/hook/  game capture hook (OBS-signed graphics-hook)
+rust/crates/yap-games/  game detection: catalog index, matcher, detector thread
+rust/src/games.rs     Games QObject: detection prefs, catalog refresh, op 43 input
+assets/games/         the bundled game catalog (tools/pack-game-catalog.mjs)
 rust/src/installer.rs Velopack startup and install/uninstall hooks (docs/INSTALLER.md)
 tools/package.ps1     release build + vpk pack into Setup.exe (optionally signed)
 rust/src/video.rs     video frames to the hub; render demand to the call
