@@ -109,7 +109,7 @@ describe("game icon GET", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
     const [url, init] = fetcher.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(UPSTREAM_URL);
-    expect(init.redirect).toBe("error");
+    expect(init.redirect).toBe("manual");
     expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(init.headers).toBeUndefined();
     expect(init.credentials).toBeUndefined();
@@ -204,6 +204,16 @@ describe("game icon GET", () => {
     ["an oversized body", upstreamResponse(new Uint8Array(256 * 1024 + 1))],
   ])("answers 502 and stores nothing for %s", async (_label, upstream) => {
     fetcher.mockResolvedValue(upstream);
+
+    const response = await call(SPLAT);
+
+    expect(response.status).toBe(502);
+    expect(bucket.put).not.toHaveBeenCalled();
+  });
+
+  it("refuses a redirect from Discord and stores nothing", async () => {
+    const headers = new Headers({ location: "https://example.com/x.png" });
+    fetcher.mockResolvedValue(new Response(null, { status: 302, headers }));
 
     const response = await call(SPLAT);
 
