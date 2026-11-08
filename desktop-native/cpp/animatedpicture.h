@@ -67,7 +67,10 @@ public:
   static AnimationCache* instance();
 
   AnimationPtr find(const QString& key);
-  bool failed(const QString& key) const { return m_failed.contains(key); }
+  // A load of `key` failed lately. A failure is tried again once it is a
+  // while old: one dropped request (the network not up yet) left a
+  // picture blank until the app restarted.
+  bool failed(const QString& key) const;
   // Starts loading `url` for a `box`-sized key unless it is cached or on
   // its way; `loaded(key)` follows.
   // `cover`: decode to cover the box (a cropped fill), not to fit it.
@@ -87,7 +90,8 @@ private:
   // Least recently used first.
   QList<QString> m_order;
   QSet<QString> m_pending;
-  QSet<QString> m_failed;
+  // When each failed (ms since the epoch).
+  QHash<QString, qint64> m_failed;
   qsizetype m_bytes = 0;
   // The part of m_bytes that is streamed GIF files.
   qsizetype m_rawBytes = 0;

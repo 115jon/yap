@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Templates as T
+import Yap.Chrome
 import com.yap.native
 
 // The soundboard picker (SoundboardPicker.tsx, PickerSurface.tsx,

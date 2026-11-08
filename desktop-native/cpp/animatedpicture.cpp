@@ -1,6 +1,7 @@
 #include "animatedpicture.h"
 
 #include <QtCore/QBuffer>
+#include <QtCore/QDateTime>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QThreadPool>
 #include <QtGui/QGuiApplication>
@@ -51,6 +52,8 @@ constexpr qint64 kMaxDownload = 24 * 1024 * 1024;
 constexpr qsizetype kMaxAnimation = 48 * 1024 * 1024;
 // A file this large shows its first frame before the whole decodes.
 constexpr qsizetype kPreviewBytes = 64 * 1024;
+// A picture that failed to load is asked for again after this long.
+constexpr qint64 kRetryFailedMs = 30 * 1000;
 
 // A GIF (server icons): Qt's own decoder, every frame, fitted into `box`
 // like yap-anim's (never scaled up), so it plays on the shared grid.
@@ -258,6 +261,13 @@ AnimationCache* AnimationCache::instance()
   return cache;
 }
 
+bool AnimationCache::failed(const QString& key) const
+{
+  const auto it = m_failed.constFind(key);
+  return it != m_failed.constEnd()
+         && QDateTime::currentMSecsSinceEpoch() - it.value() < kRetryFailedMs;
+}
+
 AnimationPtr AnimationCache::find(const QString& key)
 {
   auto it = m_entries.constFind(key);
@@ -271,8 +281,9 @@ AnimationPtr AnimationCache::find(const QString& key)
 void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
                              QSize box, const QString& key, bool cover, bool raw)
 {
-  if (m_entries.contains(key) || m_pending.contains(key) || m_failed.contains(key))
+  if (m_entries.contains(key) || m_pending.contains(key) || failed(key))
     return;
+  m_failed.remove(key);
   if (!network || !url.isValid())
     return;
   m_pending.insert(key);
@@ -291,7 +302,7 @@ void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
       std::fprintf(stderr, "[anim] %s: %s\n", qPrintable(reply->url().host()),
                    qPrintable(reply->errorString()));
       m_pending.remove(key);
-      m_failed.insert(key);
+      m_failed.insert(key, QDateTime::currentMSecsSinceEpoch());
       emit loaded(key);
       return;
     }
@@ -311,7 +322,7 @@ void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
             if (data)
               self->insert(key, data);
             else if (last)
-              self->m_failed.insert(key);
+              self->m_failed.insert(key, QDateTime::currentMSecsSinceEpoch());
             if (data || last)
               emit self->loaded(key);
           },
@@ -330,7 +341,13 @@ void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
       if (!gif && bytes.size() > kPreviewBytes && pngDefaultIsFirstFrame(bytes))
         if (AnimationPtr first = decodeStill(bytes, target))
           post(first, false);
-      post(decodeBytes(bytes, target), true);
+      AnimationPtr whole = decodeBytes(bytes, target);
+      if (!whole)
+        std::fprintf(stderr, "[anim] %s: not a picture (%lld bytes, starts \"%s\")\n",
+                     qPrintable(QUrl(key.section(QLatin1Char('|'), 0, 0)).fileName()),
+                     static_cast<long long>(bytes.size()),
+                     qPrintable(QString::fromLatin1(bytes.left(12).toHex())));
+      post(whole, true);
     });
   });
 }
@@ -487,6 +504,11 @@ void AnimatedPicture::setSource(const QUrl& source)
     return;
   m_source = source;
   emit sourceChanged();
+  // The old picture's Error is not the new one's. QML that hides the item
+  // on Error (the sidebar's channel picture) would otherwise keep it hidden,
+  // and a hidden item never loads, so the new picture never showed.
+  if (m_status == Error)
+    setStatus(Null);
   load();
 }
 
