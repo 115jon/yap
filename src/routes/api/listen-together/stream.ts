@@ -284,6 +284,8 @@ export async function streamListenTogetherAudio(args: {
   preferredFormat: "mp4" | "webm";
   range: string | null;
   includeBody: boolean;
+  /** Resolve and cache the track only; googlevideo is not asked (a prefetch). */
+  warmOnly?: boolean;
   logContext?: Record<string, unknown>;
 }): Promise<Response> {
   const { videoId, preferredFormat, range, includeBody } = args;
@@ -311,6 +313,13 @@ export async function streamListenTogetherAudio(args: {
       "HOST_NOT_ALLOWED",
       "Resolved stream host is not allowed",
     );
+  }
+
+  if (args.warmOnly) {
+    return new Response(null, {
+      status: 204,
+      headers: { "Cache-Control": "no-store" },
+    });
   }
 
   const upstreamRange = normalizeListenTogetherUpstreamRange(range, {
@@ -490,6 +499,8 @@ export async function proxyListenTogetherStream(
       preferredFormat,
       range,
       includeBody,
+      // HEAD only: a warm never moves media bytes.
+      warmOnly: !includeBody && url.searchParams.get("warm") === "1",
       logContext: {
         userId: auth.userId,
         roomSlug,

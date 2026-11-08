@@ -108,14 +108,16 @@ export const LISTEN_TOGETHER_PREFETCH_DELAY_MS = 8_000;
 export const LISTEN_TOGETHER_PREFETCH_JITTER_MS = 6_000;
 
 /**
- * Warm the stream route for a track that is about to play: a HEAD resolves
- * the video on the server and caches its media URL, so the track starts
- * without the resolve (several seconds through the egress VPN) when its turn
- * comes. Best effort: failures are ignored.
+ * Warm the stream route for a track that is about to play: the server
+ * resolves the video and caches its media URL, so the track starts without
+ * the resolve (seconds through the egress VPN) when its turn comes. Best
+ * effort: failures are ignored.
  */
 export async function prefetchListenTogetherStream(src: string): Promise<void> {
   try {
-    await fetch(src, {
+    // `warm=1`: the route resolves and caches the track, and skips the
+    // googlevideo request a plain HEAD would make.
+    await fetch(`${src}${src.includes("?") ? "&" : "?"}warm=1`, {
       method: "HEAD",
       cache: "no-store",
       credentials: "include",
