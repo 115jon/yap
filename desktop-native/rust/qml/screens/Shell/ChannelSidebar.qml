@@ -286,6 +286,10 @@ Rectangle {
         anchors.bottom: account.top
         width: parent.width - 1
     }
+    // The call strip, for the floating players to keep clear of (the web's
+    // VoiceDashboard section marks itself `data-floating-avoid`).
+    readonly property real callStripTop: callPanel.y
+    readonly property real callStripHeight: callPanel.visible ? callPanel.height : 0
 
     // The account row, then the 8 px spacer under it.
     AccountRow {

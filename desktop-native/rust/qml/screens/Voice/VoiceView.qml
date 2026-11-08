@@ -445,6 +445,8 @@ Rectangle {
                     width: stage.fit.tileW
                     height: stage.fit.tileH !== undefined ? stage.fit.tileH : Math.round(stage.fit.tileW * 9 / 16)
                     solo: tiles.count === 1
+                    // Scrolled out of the stage: its share still is not decoded.
+                    inView: grid.y + y + height > stage.contentY && grid.y + y < stage.contentY + stage.height
                 }
             }
         }
@@ -470,6 +472,7 @@ Rectangle {
                 required property bool me
                 required property bool video
                 required property string videoKey
+                required property bool hasAudio
                 anchors.fill: parent
                 active: tileId === ShellState.focusedTile
                 sourceComponent: FocusedStage { tile: slot }
@@ -666,7 +669,14 @@ Rectangle {
     Loader {
         id: soundboardPopup
         active: false
-        sourceComponent: SoundboardPicker { onClosed: root.popoverClosedAt = Date.now() }
+        sourceComponent: SoundboardPicker {
+            onClosed: root.popoverClosedAt = Date.now()
+            // VoiceDashboard.tsx openListenTogetherPicker: at the same key.
+            onListenTogether: {
+                listenPopup.active = true
+                listenPopup.item?.openAt(soundboardKey)
+            }
+        }
     }
     Loader {
         id: listenPopup

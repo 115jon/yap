@@ -15,6 +15,7 @@ pub mod command_menu;
 pub mod config;
 pub mod custom_sounds;
 pub mod emoji;
+pub mod faults;
 pub mod fixture;
 pub mod gif_favorite;
 pub mod install;

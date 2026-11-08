@@ -127,7 +127,12 @@ private:
   void createTray();
   void removeTray();
   void updateTrayIcon();
-  void showTrayMenu();
+  // At the cursor; `test` (YAP_TEST_MENU=tray) opens it at `at` without
+  // taking the foreground and runs no command.
+  void showTrayMenu(bool test = false, int x = 0, int y = 0);
+  // Tests (YAP_TEST_MENU): opens the tray or the caption's system menu in
+  // process and saves our own menu window (YAP_TEST_MENU_DUMP).
+  void runMenuTest();
   // A tray menu command (kMenuShow, kMenuQuit), chosen or from the test hook.
   void trayCommand(unsigned chosen);
   void flashTaskbar(bool on);

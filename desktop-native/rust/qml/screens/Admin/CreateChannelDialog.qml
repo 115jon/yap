@@ -4,10 +4,12 @@ import QtQuick.Templates as T
 import com.yap.native
 
 // Create channel (CreateChannelModal.tsx): the type as two choice cards
-// (Text: messages, images, GIFs; Voice: voice, video and screen share),
-// the name with the type's glyph (text names turn lowercase with dashes as
-// you type), "In CATEGORY" or "Not in a category", then Cancel and Create
-// channel. An empty name is caught inline; a new text channel opens.
+// under the fieldset's "Channel type" legend (13/500, 8 above the cards),
+// then "Channel name" as a plain label (Label, not a legend plate) over a
+// 40 px input with the type's glyph (text names turn lowercase with dashes
+// as you type), the name error and "In CATEGORY" or "Not in a category",
+// 6 apart; the create error; then Cancel and Create channel as 48 px
+// footer keys. An empty name is caught inline; a new text channel opens.
 PlateDialog {
     id: dialog
 
@@ -55,11 +57,13 @@ PlateDialog {
         spacing: 8
         Accessible.role: Accessible.Grouping
         Accessible.name: qsTr("Channel type")
+        // <legend className="mb-2 text-ui-sm font-medium">.
         Text {
-            bottomPadding: 4
             text: qsTr("Channel type")
             color: Theme.ink1
             font: Theme.type.occupant
+            lineHeight: 18
+            lineHeightMode: Text.FixedHeight
         }
         ChoiceCard {
             width: parent.width
@@ -82,14 +86,26 @@ PlateDialog {
         }
     }
 
-    FieldPlate {
+    // Label + Input + error + helper (gap-1.5).
+    Column {
         width: parent.width
-        label: qsTr("Channel name")
-        ground: Theme.ply3
+        spacing: 6
+        Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            text: qsTr("Channel name")
+            elide: Text.ElideRight
+            color: Theme.ink1
+            font: Theme.type.occupant
+            lineHeight: 18
+            lineHeightMode: Text.FixedHeight
+            Accessible.ignored: true
+        }
         KitField {
             id: nameField
-            large: true
-            leadingInset: 24
+            width: parent.width
+            // ps-8: 32 in, the glyph at start-2.5.
+            leadingInset: 20
             placeholderText: dialog.voice ? qsTr("General Voice") : qsTr("new-channel")
             invalid: dialog.nameError.length > 0
             Accessible.name: qsTr("Channel name")
@@ -104,17 +120,13 @@ PlateDialog {
             }
             Keys.onReturnPressed: dialog.create()
             Icon {
-                x: 16
+                x: 10
                 anchors.verticalCenter: parent.verticalCenter
                 name: dialog.voice ? "voiceChannel" : "textChannel"
                 size: Theme.iconSm
                 color: Theme.ink3
             }
         }
-    }
-    Column {
-        width: parent.width
-        spacing: 4
         Text {
             visible: dialog.nameError.length > 0
             textFormat: Text.PlainText
@@ -131,20 +143,29 @@ PlateDialog {
             font: Theme.type.description
         }
     }
-    RowError {
-        above: 0
+    Text {
+        visible: dialog.act.error.length > 0
+        width: parent.width
+        textFormat: Text.PlainText
         text: dialog.act.error
+        wrapMode: Text.Wrap
+        color: Theme.dangerInk
+        font: Theme.type.caption
+        Accessible.role: Accessible.AlertMessage
+        Accessible.name: text
     }
 
     footer: [
         KitButton {
             variant: "ghost"
+            size: "lg"
             text: qsTr("Cancel")
             enabled: !dialog.act.busy
             onClicked: dialog.close()
         },
         KitButton {
             variant: "primary"
+            size: "lg"
             ground: Theme.ply3
             text: qsTr("Create channel")
             loading: dialog.act.busy

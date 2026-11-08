@@ -48,6 +48,8 @@ pub struct Rows {
 #[derive(Default)]
 struct Scalars {
     connected: bool,
+    /// (attempt, offline) of the link's retries.
+    link: (u32, bool),
     server: (String, String),
     channel: (String, String),
     typing: String,
@@ -286,10 +288,11 @@ impl Slot for Nav {
     }
 
     fn restore(mut self: Pin<&mut Self>) {
-        let (connected, server, channel, panel, home, dm, unread) = GUI.with(|gui| {
+        let (connected, link, server, channel, panel, home, dm, unread) = GUI.with(|gui| {
             let s = &gui.borrow().scalars;
             (
                 s.connected,
+                s.link,
                 s.server.clone(),
                 s.channel.clone(),
                 s.panel.clone(),
@@ -299,6 +302,9 @@ impl Slot for Nav {
             )
         });
         self.as_mut().set_connected(connected);
+        self.as_mut()
+            .set_link_attempt(i32::try_from(link.0).unwrap_or(i32::MAX));
+        self.as_mut().set_link_offline(link.1);
         self.as_mut().set_home(home);
         self.as_mut().set_dm_unread(int(unread));
         set_dm(self.as_mut(), &dm);
@@ -550,6 +556,14 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::Connected(connected) => {
             scalars(|s| s.connected = connected);
             with::<Nav>(|nav| nav.set_connected(connected));
+        }
+        ViewUpdate::Link { attempt, offline } => {
+            scalars(|s| s.link = (attempt, offline));
+            with::<Nav>(|mut nav| {
+                nav.as_mut()
+                    .set_link_attempt(i32::try_from(attempt).unwrap_or(i32::MAX));
+                nav.set_link_offline(offline);
+            });
         }
         ViewUpdate::ActiveServer { id, name } => {
             with::<Nav>(|nav| set_server(nav, &id, &name));

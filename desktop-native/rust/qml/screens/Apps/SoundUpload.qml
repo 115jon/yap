@@ -12,6 +12,17 @@ Column {
     property bool busy: false
     property bool local: false
     property string path: ""
+    // The form closed (saved, uploading or cancelled).
+    signal done()
+
+    // The picker's Add sound cell chose `file`: the name starts from it.
+    function start(file) {
+        root.path = file
+        name.text = file.split(/[\\/]/).pop().replace(/\.[^.]+$/, "")
+        emoji.text = ""
+        volume.value = 100
+        name.forceActiveFocus()
+    }
 
     spacing: 8
 
@@ -84,6 +95,7 @@ Column {
                     else
                         Apps.upload(root.path, name.text, emoji.text, volume.value / 100)
                     root.path = ""
+                    root.done()
                 }
             }
             KitButton {
@@ -91,7 +103,10 @@ Column {
                 size: "sm"
                 text: qsTr("Cancel")
                 enabled: !root.busy
-                onClicked: root.path = ""
+                onClicked: {
+                    root.path = ""
+                    root.done()
+                }
             }
         }
     }

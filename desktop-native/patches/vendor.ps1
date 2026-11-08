@@ -23,7 +23,9 @@ $crates = [ordered]@{
     # (and VP8 where the GPU decodes it) the same way, libvpx otherwise.
     "webrtc-sys"     = "0.3.52"
     # The C++ buffer behind a native video frame, so the UI can draw the
-    # decoder's D3D11 textures without a copy (zero copy, pass 6).
+    # decoder's D3D11 textures without a copy (zero copy, pass 6); and
+    # offers that leave the receive directions alone (offer_to_receive_*
+    # unset, not 0: every offer we made turned the pulled tracks inactive).
     "libwebrtc"      = "0.3.55"
 }
 $rust = Join-Path $PSScriptRoot "../rust"

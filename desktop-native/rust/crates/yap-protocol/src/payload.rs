@@ -362,6 +362,11 @@ pub struct VoiceChannelMember {
     pub self_deaf: Option<bool>,
     pub self_video: Option<bool>,
     pub self_stream: Option<bool>,
+    /// The still of their live share (a `data:` URL their client refreshes
+    /// every 8 s while sharing), shown behind an unwatched share's Watch
+    /// prompt. Not a profile field: deltas carry it too.
+    #[serde(default)]
+    pub stream_preview_url: Option<String>,
     /// When they joined (ms), for the channel's call clock.
     #[serde(default)]
     pub joined_at: Option<Value>,
@@ -445,6 +450,14 @@ pub struct ClientVoiceState {
     pub self_stream: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub self_stream_audio: Option<bool>,
+}
+
+/// VoiceStateUpdate (op 15) on the global gateway: our live share's still
+/// for the sidebar roster (chat-gateway.ts `sendVoiceStateUpdate({
+/// stream_preview_url })`); `None` sends `null`, which clears it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct StreamPreviewUpdate {
+    pub stream_preview_url: Option<String>,
 }
 
 /// MediaReady (op 41): media credentials before the full Ready.

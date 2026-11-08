@@ -4,11 +4,19 @@ import QtMultimedia as QM
 import Yap.Chrome
 import com.yap.native
 
-// Camera (CameraSettingsModal.tsx with CameraCard's rows): the preview,
-// which starts as the dialog opens; the camera; the capture quality; the
-// background; and "Preview before turning on camera". From the camera key
-// while the camera is off it ends with Not now and Turn on camera,
-// otherwise Done. Changes save as you go.
+// Camera (CameraSettingsModal.tsx: ResponsiveDialogContent size lg,
+// placement top, p-0), with CameraCard's rows bare as its body. The header
+// (px-5 pt-5 pb-3): the 28/32 title, "Pick a camera and background.
+// Changes save as you go." and the 40 px close key; a hairline; then the
+// rows, scrolling, 4 px in (md:px-1), as settings rows (primitives.tsx
+// SettingsRow, py-4 with a hairline under each): "Camera preview" (block:
+// its label and description over the preview, which starts as the dialog
+// opens), "Camera" (a field row: the legend on the select's top edge, on
+// ply-3), "Capture quality" (stack: under its text at this width),
+// "Background" (block: the tiles, two across under 560) and "Preview before
+// turning on camera" (inline: the switch). A hairline, then the footer
+// (px-5 pt-4 pb-5): from the camera key while the camera is off, Not now
+// and Turn on camera (48 px keys), otherwise Done.
 Popup {
     id: root
 
@@ -25,6 +33,10 @@ Popup {
         qsTr("480p, 30 fps"), qsTr("720p, 30 fps"), qsTr("720p, 60 fps"),
         qsTr("1080p, 30 fps"), qsTr("1080p, 60 fps"),
     ]
+    // dialog.tsx placement "top": top at max(48px, 12vh), and at most the
+    // window less that and 24 px.
+    readonly property int topAt: parent ? Math.max(48, Math.round(parent.height * 0.12)) : 48
+    readonly property int maxHeight: parent ? parent.height - topAt - 24 : 800
 
     function openFor(turnOn) {
         offersTurnOn = turnOn
@@ -32,29 +44,18 @@ Popup {
         open()
     }
 
-    function problemText(reason) {
-        switch (reason) {
-        case "":
-        case "missing":
-            return ""
-        case "busy":
-            return qsTr("Your camera is in use by another app. Close that app, then try again.")
-        case "unknown":
-            return qsTr("Unable to reach your camera. Try again.")
-        default:
-            return qsTr("Your camera couldn't go live. Try again.")
-        }
-    }
-
     parent: Overlay.overlay
-    anchors.centerIn: parent
-    width: 560
-    height: Math.min(implicitHeight, parent.height - 64)
+    x: parent ? Math.round((parent.width - width) / 2) : 0
+    y: topAt
+    // size lg: md:max-w-[560px], inside max-w-[calc(100%-2rem)].
+    width: parent ? Math.min(560, parent.width - 32) : 560
+    height: Math.min(implicitHeight, maxHeight)
     modal: true
     // Ctrl+K stays shut while a modal is up (ExtrasHost).
     onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
     focus: true
-    padding: 0
+    // The 1 px edge; everything else lays itself out (p-0).
+    padding: 1
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
     Overlay.modal: Scrim { color: Theme.scrim }
@@ -71,6 +72,20 @@ Popup {
         color: Theme.ply3
         border.width: 1
         border.color: Theme.lineStrong
+
+        // DialogPrimitive.Close: top-4 right-4 inside the 1 px edge.
+        IconKey {
+            x: parent.width - width - 17
+            y: 17
+            z: 2
+            size: 40
+            glyph: Theme.iconMd
+            tone: "toggled"
+            iconVariant: "idle"
+            iconName: "close"
+            tip: qsTr("Close")
+            onClicked: root.close()
+        }
     }
 
     enter: Transition {
@@ -85,171 +100,215 @@ Popup {
 
     contentItem: Column {
         spacing: 0
+        Accessible.role: Accessible.Dialog
+        Accessible.name: qsTr("Camera")
 
-        // Header: the title, what this is, and Close.
-        Item {
+        // Header (ResponsiveDialogHeader px-5 pt-5 pb-3; DialogHeader gap-2
+        // pr-12).
+        Column {
             id: header
-            width: parent.width
-            height: heading.implicitHeight + 32
-            Column {
-                id: heading
-                x: 20
-                y: 20
-                width: parent.width - 40 - 40
-                spacing: 4
-                Text {
-                    text: qsTr("Camera")
-                    color: Theme.ink1
-                    font: Theme.type.sectionTitle
-                    Accessible.role: Accessible.Heading
-                }
-                Text {
-                    width: parent.width
-                    text: qsTr("Pick a camera and background. Changes save as you go.")
-                    wrapMode: Text.Wrap
-                    color: Theme.ink2
-                    font: Theme.type.description
-                }
+            x: 20
+            width: parent.width - 40
+            topPadding: 20
+            bottomPadding: 12
+            rightPadding: 48
+            spacing: 8
+            Text {
+                width: parent.width - parent.rightPadding
+                textFormat: Text.PlainText
+                text: qsTr("Camera")
+                wrapMode: Text.Wrap
+                color: Theme.ink1
+                font: Theme.type.dialogTitle
+                lineHeight: Theme.type.dialogTitleLine
+                lineHeightMode: Text.FixedHeight
+                Accessible.role: Accessible.Heading
             }
-            IconKey {
-                anchors.right: parent.right
-                anchors.rightMargin: 16
-                y: 16
-                size: 32
-                iconName: "close"
-                tip: qsTr("Close")
-                onClicked: root.close()
+            Text {
+                width: parent.width - parent.rightPadding
+                textFormat: Text.PlainText
+                text: qsTr("Pick a camera and background. Changes save as you go.")
+                wrapMode: Text.Wrap
+                color: Theme.ink2
+                font: Theme.type.dialogBody
+                lineHeight: Theme.type.dialogBodyLine
+                lineHeightMode: Text.FixedHeight
             }
         }
         Rectangle { width: parent.width; height: 1; color: Theme.line }
 
-        // The rows scroll when the window is too short for them all.
+        // The rows (CameraCard bare): only built while open, so the preview
+        // never runs hidden. They scroll when the window is too short.
         Flickable {
+            id: flick
             width: parent.width
-            height: Math.min(body.implicitHeight, (root.parent ? root.parent.height - 64 : 800) - header.height - footer.implicitHeight - 2)
+            height: Math.max(0, Math.min(rows.implicitHeight,
+                root.maxHeight - 2 - header.implicitHeight - footer.implicitHeight - 2))
             contentWidth: width
-            contentHeight: body.implicitHeight
+            contentHeight: rows.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ThinScrollBar {}
 
             Column {
-                id: body
-                x: 20
-                width: parent.width - 40
-                topPadding: 16
-                bottomPadding: 16
-                spacing: 16
+                id: rows
+                // md:px-1.
+                x: 4
+                width: parent.width - 8
 
-                // The preview: a media surface, so its black and white are the
-                // video's, not the theme's.
-                Rectangle {
-                    id: preview
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    width: Math.min(parent.width, 480)
-                    height: Math.round(width * 9 / 16)
-                    radius: Theme.radius
-                    color: "black"
-                    Accessible.role: Accessible.Graphic
-                    Accessible.name: qsTr("Camera preview")
+                SettingsRow {
+                    custom: true
+                    layout: "block"
+                    label: qsTr("Camera preview")
+                    description: qsTr("Check your framing and background before you go live.")
 
-                    Loader {
-                        anchors.fill: parent
-                        active: root.previewOn && Camera.running && Camera.hasCamera
-                        sourceComponent: VideoSurface {
-                            videoKey: "local-camera"
-                            fillMode: QM.VideoOutput.PreserveAspectFit
+                    // A media surface: its black and white are the video's,
+                    // not the theme's.
+                    Rectangle {
+                        visible: Camera.hasCamera
+                        width: Math.min(parent.width, 480)
+                        height: visible ? Math.round(width * 9 / 16) : 0
+                        radius: Theme.radius
+                        color: "black"
+                        clip: true
+                        Accessible.role: Accessible.Graphic
+                        Accessible.name: qsTr("Camera preview")
+
+                        Loader {
+                            anchors.fill: parent
+                            active: root.previewOn && Camera.running && Camera.hasCamera
+                            sourceComponent: VideoSurface {
+                                videoKey: "local-camera"
+                                fillMode: QM.VideoOutput.PreserveAspectFit
+                            }
                         }
-                    }
 
-                    Icon {
-                        id: spinner
-                        anchors.centerIn: parent
-                        visible: root.starting
-                        name: "loader"
-                        smooth: true
-                        size: Theme.iconXl
-                        color: Qt.rgba(1, 1, 1, 0.7)
-                        Accessible.ignored: false
-                        Accessible.role: Accessible.StaticText
-                        Accessible.name: qsTr("Starting camera")
-                        RotationAnimator on rotation {
-                            from: 0
-                            to: 360
-                            duration: 900
-                            loops: Animation.Infinite
-                            running: spinner.visible && !Theme.reducedMotion
-                        }
-                    }
-
-                    Icon {
-                        anchors.centerIn: parent
-                        visible: Camera.hasCamera && !root.starting && !(root.previewOn && Camera.running)
-                        name: "cameraOff"
-                        variant: "active"
-                        size: 32
-                        color: Qt.rgba(1, 1, 1, 0.4)
-                    }
-
-                    // No camera: say so, and offer to look again.
-                    Column {
-                        visible: !Camera.hasCamera
-                        anchors.centerIn: parent
-                        width: parent.width - 48
-                        spacing: 8
-                        Text {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            text: qsTr("No camera found")
-                            color: "white"
-                            font: Theme.type.captionStrong
-                        }
-                        Text {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            wrapMode: Text.Wrap
-                            text: qsTr("Plug in a camera, then try again.")
+                        Icon {
+                            id: spinner
+                            anchors.centerIn: parent
+                            visible: root.starting
+                            name: "loader"
+                            smooth: true
+                            size: Theme.iconXl
                             color: Qt.rgba(1, 1, 1, 0.7)
-                            font: Theme.type.caption
+                            Accessible.ignored: false
+                            Accessible.role: Accessible.StaticText
+                            Accessible.name: qsTr("Starting camera")
+                            RotationAnimator on rotation {
+                                from: 0
+                                to: 360
+                                duration: 900
+                                loops: Animation.Infinite
+                                running: spinner.visible && !Theme.reducedMotion
+                            }
                         }
-                    }
 
-                    PreviewKey {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        anchors.bottom: parent.bottom
-                        anchors.bottomMargin: 12
-                        onMedia: root.previewOn && Camera.hasCamera
-                        text: !Camera.hasCamera ? qsTr("Try again")
-                            : root.previewOn ? qsTr("Stop preview") : qsTr("Preview camera")
-                        glyph: root.previewOn && Camera.hasCamera ? "cameraOff" : "camera"
-                        Accessible.checkable: Camera.hasCamera
-                        Accessible.checked: root.previewOn
-                        onClicked: {
-                            if (!Camera.hasCamera || root.problem.length > 0) {
-                                root.previewOn = true
-                                Camera.retry()
-                            } else {
-                                root.previewOn = !root.previewOn
+                        Icon {
+                            anchors.centerIn: parent
+                            visible: !root.starting && !(root.previewOn && Camera.running)
+                            name: "cameraOff"
+                            variant: "active"
+                            size: Theme.icon2xl
+                            color: Qt.rgba(1, 1, 1, 0.4)
+                        }
+
+                        PreviewKey {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 12
+                            onMedia: root.previewOn
+                            text: root.problem.length > 0 ? qsTr("Try again")
+                                : root.previewOn ? qsTr("Stop preview") : qsTr("Preview camera")
+                            glyph: root.previewOn ? "cameraOff" : "camera"
+                            Accessible.checkable: true
+                            Accessible.checked: root.previewOn
+                            onClicked: {
+                                if (root.problem.length > 0) {
+                                    root.previewOn = true
+                                    Camera.retry()
+                                } else {
+                                    root.previewOn = !root.previewOn
+                                }
                             }
                         }
                     }
+
+                    // No camera (CameraCard PreviewState): the compact empty
+                    // block in the preview's place.
+                    Rectangle {
+                        visible: !Camera.hasCamera
+                        width: Math.min(parent.width, 480)
+                        height: visible ? empty.implicitHeight + 64 : 0
+                        radius: Theme.radius
+                        color: Theme.tint1
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: qsTr("No camera found")
+                        Column {
+                            id: empty
+                            x: 24
+                            y: 32
+                            width: parent.width - 48
+                            spacing: 12
+                            Icon {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                name: "cameraOff"
+                                size: Theme.icon2xl
+                                color: Theme.ink3
+                            }
+                            Column {
+                                width: parent.width
+                                spacing: 4
+                                Text {
+                                    width: parent.width
+                                    horizontalAlignment: Text.AlignHCenter
+                                    textFormat: Text.PlainText
+                                    text: qsTr("No camera found")
+                                    color: Theme.ink1
+                                    font: Theme.type.menuTitle
+                                }
+                                Text {
+                                    // max-w-[36ch].
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    width: Math.min(parent.width, 260)
+                                    horizontalAlignment: Text.AlignHCenter
+                                    wrapMode: Text.Wrap
+                                    textFormat: Text.PlainText
+                                    text: qsTr("Plug in a camera, then try again.")
+                                    color: Theme.ink2
+                                    font: Theme.type.description
+                                    lineHeight: Theme.type.descriptionLine
+                                    lineHeightMode: Text.FixedHeight
+                                }
+                            }
+                            KitButton {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                variant: "secondary"
+                                text: qsTr("Try again")
+                                onClicked: {
+                                    root.previewOn = true
+                                    Camera.retry()
+                                }
+                            }
+                        }
+                    }
+
+                    footer: RowError {
+                        text: root.problem === "busy" ? qsTr("Your camera is in use by another app. Close that app, then try again.")
+                            : root.problem === "unknown" ? qsTr("Unable to reach your camera. Try again.")
+                            : root.problem.length > 0 && root.problem !== "missing" ? qsTr("Your camera couldn't go live. Try again.")
+                            : ""
+                    }
                 }
 
-                Text {
-                    visible: text.length > 0
-                    width: parent.width
-                    textFormat: Text.PlainText
-                    text: root.problemText(root.problem)
-                    wrapMode: Text.Wrap
-                    color: Theme.dangerInk
-                    font: Theme.type.caption
-                    Accessible.role: Accessible.AlertMessage
-                }
-
-                Field {
+                SettingsRow {
                     visible: Camera.hasCamera
+                    custom: true
+                    layout: "field"
+                    ground: Theme.ply3
                     label: qsTr("Camera")
                     SelectField {
                         width: parent.width
+                        large: true
                         text: qsTr("Camera")
                         ids: ["default"].concat(Camera.deviceIds)
                         names: [""].concat(Camera.deviceNames)
@@ -259,10 +318,12 @@ Popup {
                     }
                 }
 
-                Field {
+                SettingsRow {
+                    custom: true
                     label: qsTr("Capture quality")
                     description: qsTr("Higher quality uses more bandwidth.")
                     SelectField {
+                        // Under the text below 560 (stack), so full width.
                         width: parent.width
                         text: qsTr("Capture quality")
                         firstIsDefault: false
@@ -273,47 +334,56 @@ Popup {
                     }
                 }
 
-                Field {
+                SettingsRow {
+                    custom: true
+                    layout: "block"
                     label: qsTr("Background")
-                    description: qsTr("Blur your surroundings or use your own image.")
+                    description: !Camera.hasCamera ? qsTr("Plug in a camera first.")
+                        : qsTr("Blur your surroundings or use your own image.")
                     CameraBackgroundPicker {
                         width: parent.width
                         live: root.visible
+                        // The dialog's body is under 560: two across.
+                        wideAt: 560
                     }
                 }
 
-                SwitchRow {
-                    x: -12
-                    width: parent.width + 24
-                    text: qsTr("Preview before turning on camera")
+                SwitchSetting {
+                    custom: true
+                    rule: false
+                    label: qsTr("Preview before turning on camera")
                     description: qsTr("Shows a preview before your camera goes live.")
-                    on: Audio.alwaysPreviewVideo
-                    onClicked: Audio.changeAlwaysPreviewVideo(!Audio.alwaysPreviewVideo)
+                    checked: Audio.alwaysPreviewVideo
+                    onToggled: Audio.changeAlwaysPreviewVideo(!Audio.alwaysPreviewVideo)
                 }
             }
         }
 
         Rectangle { width: parent.width; height: 1; color: Theme.line }
 
-        // Footer: Not now and Turn on camera, or Done.
+        // Footer (px-5 pt-4 pb-5; DialogFooter pt-2, 48 px keys 8 apart).
         Column {
             id: footer
             x: 20
             width: parent.width - 40
-            topPadding: 12
+            topPadding: 24
             bottomPadding: 20
             spacing: 8
             Row {
                 anchors.right: parent.right
                 spacing: 8
-                DialogKey {
+                KitButton {
                     visible: root.offersTurnOn && !Voice.cameraOn
+                    variant: "ghost"
+                    size: "lg"
                     text: qsTr("Not now")
                     onClicked: root.close()
                 }
-                DialogKey {
+                KitButton {
                     visible: root.offersTurnOn && !Voice.cameraOn
-                    primary: true
+                    variant: "primary"
+                    size: "lg"
+                    ground: Theme.ply3
                     enabled: root.blocker.length === 0 && Voice.channelId.length > 0
                     text: qsTr("Turn on camera")
                     Accessible.description: root.blocker
@@ -322,13 +392,16 @@ Popup {
                         root.close()
                     }
                 }
-                DialogKey {
+                KitButton {
                     visible: !root.offersTurnOn || Voice.cameraOn
-                    primary: true
+                    variant: "primary"
+                    size: "lg"
+                    ground: Theme.ply3
                     text: qsTr("Done")
                     onClicked: root.close()
                 }
             }
+            // The reason under the footer (mt-2 text-ui-xs ink-3, end).
             Text {
                 visible: root.offersTurnOn && !Voice.cameraOn && root.blocker.length > 0
                 anchors.right: parent.right
@@ -337,29 +410,6 @@ Popup {
                 color: Theme.ink3
                 font: Theme.type.caption
             }
-        }
-    }
-
-    // A labelled field: the Geist label (and description) over its control.
-    component Field: Column {
-        property string label
-        property string description
-        width: parent.width
-        spacing: 6
-        Text {
-            textFormat: Text.PlainText
-            text: parent.label
-            color: Theme.ink2
-            font: Theme.type.captionStrong
-        }
-        Text {
-            visible: text.length > 0
-            width: parent.width
-            textFormat: Text.PlainText
-            text: parent.description
-            wrapMode: Text.Wrap
-            color: Theme.ink3
-            font: Theme.type.caption
         }
     }
 

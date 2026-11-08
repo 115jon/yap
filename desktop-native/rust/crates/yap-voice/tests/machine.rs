@@ -630,6 +630,36 @@ fn stop_tracks_should_close_only_the_named_tracks() {
 }
 
 #[test]
+fn a_share_offering_its_audio_should_mark_the_roster_until_withdrawn() {
+    let mut m = joined();
+    let shares_audio = |roster: &[Member]| roster.iter().any(|r| r.id == "ana" && r.screen_audio);
+    assert!(!shares_audio(&m.roster()));
+    let fx = m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![track("ana", "screen-audio-ana", "sfu-ana-sa")],
+    }));
+    assert!(shares_audio(&last_roster(&fx).expect("roster")));
+    let fx = m.handle(Input::Voice(VoiceEvent::StopTracks {
+        participant_id: "ana".into(),
+        names: vec!["screen-audio-ana".into()],
+    }));
+    assert!(!shares_audio(&last_roster(&fx).expect("roster")));
+}
+
+#[test]
+fn a_share_without_audio_should_not_mark_the_roster() {
+    let mut m = joined();
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![Track {
+            kind: "video".into(),
+            ..track("ana", "screen-video-ana", "sfu-ana-sv")
+        }],
+    }));
+    assert!(m.roster().iter().any(|r| r.id == "ana" && !r.screen_audio));
+}
+
+#[test]
 fn stop_tracks_without_names_should_close_all_of_the_sender() {
     let mut m = joined();
     let fx = m.handle(Input::Voice(VoiceEvent::StopTracks {
@@ -1564,6 +1594,29 @@ fn their_share_tile_on_stage_should_pull_it_unwatched() {
 }
 
 #[test]
+fn an_unwatched_share_showing_its_still_should_never_be_pulled() {
+    // The still behind Watch stream comes with the gateway roster
+    // (`stream_preview_url`); its tile draws no video surface, so the
+    // intent never names the share and no transceiver opens or closes.
+    let mut m = joined_with_user();
+    let fx = m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![share("ana", "sfu-ana-share")],
+    }));
+    assert!(pulls(&fx).is_empty());
+    for intent in [
+        show(&[], None),
+        show(&[("cam-video-ana", 320, 180)], None),
+        show(&[("cam-video-bob", 640, 360)], Some("bob")),
+        show(&[], None),
+    ] {
+        let fx = m.handle(intent);
+        assert!(pulls(&fx).is_empty(), "{fx:#?}");
+        assert!(closes(&fx).is_empty(), "{fx:#?}");
+    }
+}
+
+#[test]
 fn share_audio_should_be_silent_until_the_share_is_on_stage() {
     let mut m = joined_with_user();
     m.handle(Input::Voice(VoiceEvent::Video {
@@ -2350,8 +2403,34 @@ fn stats_should_report_bitrate_round_trip_and_the_server() {
     assert!((s.bitrate_kbps - 40.0).abs() < 1e-9, "{}", s.bitrate_kbps);
     assert_eq!(s.rtt_ms, Some(40.0));
     assert_eq!(s.server, "203.0.113.5:3478 udp");
+    assert_eq!(s.room, "voice-s1-c1");
     assert_eq!(s.quality, "good");
     assert_eq!(s.samples.len(), 1);
+    assert_eq!(s.samples[0].at_ms, 5_000);
+}
+
+#[test]
+fn remote_tracks_should_count_live_pulls_not_inbound_rtp_entries() {
+    let mut m = joined();
+    // One pull, and no inbound-rtp entry yet (no packet arrived).
+    let none_yet = |at_ms| Input::Stats {
+        stats: yap_voice::MediaStats {
+            round_trip: Some(0.04),
+            ..yap_voice::MediaStats::default()
+        },
+        at_ms,
+    };
+    m.handle(none_yet(0));
+    let s = voice_stats(&m.handle(none_yet(5_000))).expect("stats");
+    assert_eq!(s.remote_tracks, 1);
+    // Their reconnect grace runs out: the row stays, the pull goes.
+    let fx = m.handle(Input::Voice(VoiceEvent::ClientDisconnect {
+        participant_id: "ana".into(),
+    }));
+    m.handle(Input::Timer(grace_timer(&fx)));
+    assert!(m.roster().iter().any(|r| r.id == "ana"));
+    let s = voice_stats(&m.handle(stats(10_000, 0, 0))).expect("stats");
+    assert_eq!(s.remote_tracks, 0);
 }
 
 #[test]

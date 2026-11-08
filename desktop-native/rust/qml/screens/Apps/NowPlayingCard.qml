@@ -11,9 +11,14 @@ import com.yap.native
 // playing" and Minimise. The body: the 48 px artwork, title, artist,
 // "Requested by" and the play state; the clock either side of the progress
 // bar, which seeks for everyone; the Queue key (opens Listen Together) and
-// play or pause and skip. Dragged, it settles in the nearest corner;
-// minimised, it is a 48 px bubble with the artwork that opens it again. The
-// clock runs locally from the room's position between updates.
+// play or pause and skip. It drags from anywhere that is not a control and,
+// let go, snaps to the corner its flick points at (FloatingDrag); it enters
+// with a fade and scale(.97) from its corner over 200 ms ease-out (and so
+// does each face as minimise or restore swaps it in), with no exit.
+// Minimised, it is a 48 px bubble with the artwork that opens it again. The
+// clock is the room's live position (Apps.ltPositionMs, the web's
+// getListenTogetherLivePositionMs), ticking on the second while a track
+// with a length plays.
 Item {
     id: root
 
@@ -45,11 +50,16 @@ Item {
     property real previewMs: -1
     readonly property real shownMs: previewMs >= 0 ? previewMs : position
 
+    // The position is the core's (clamped to the track; 0:00 for a live
+    // radio, playing or paused, as the web's clamp to `durationMs ?? 0`).
+    // While it runs, the next tick lands just after the label flips
+    // (useListenTogetherClockNow aligns to the second the same way).
     function tick() {
-        const base = l.positionMs ?? 0
-        const since = l.paused ? 0 : Math.max(0, Apps.nowMs() - (l.positionAt ?? 0))
-        const duration = l.durationMs ?? 0
-        position = duration > 0 ? Math.min(duration, base + since) : base + since
+        position = Apps.ltPositionMs()
+        if (visible && l.running === true)
+            clockTimer.restart()
+        else
+            clockTimer.stop()
     }
     function clock(ms) {
         const total = Math.max(0, Math.floor(ms / 1000))
@@ -69,14 +79,14 @@ Item {
     // Placed once, so the first layout does not glide in from the origin.
     property bool placed: false
     // A keyboard resize (resizer focused) moves it without the glide too.
-    readonly property bool interacting: headerDrag.active || infoDrag.active || bubbleDrag.active || resizer.pressed || resizer.activeFocus
+    readonly property bool interacting: cardDrag.active || gripDrag.active || resizer.pressed || resizer.activeFocus
 
     function placeX() { return area.cornerX(corner, width) }
     function placeY() {
         return area.cornerY(corner, width, height, area.stackOffset(stackId, corner))
     }
-    function settle() {
-        ShellState.nowPlayingCorner = area.cornerFor(x, y, width, height)
+    function settle(to) {
+        ShellState.nowPlayingCorner = to
         x = Qt.binding(() => placeX())
         y = Qt.binding(() => placeY())
     }
@@ -97,22 +107,53 @@ Item {
     y: placeY()
     z: 20
 
+    // Presence (FloatingSurface.tsx `presence`): fade and scale(.97) from
+    // the corner it is parked in, dur-3 ease-out; a face swapped in by
+    // minimise or restore starts from the same state.
+    property real presence: 0
+    opacity: presence
+    scale: Theme.scaleIn + (1 - Theme.scaleIn) * presence
+    transformOrigin: corner === 0 ? Item.BottomLeft : corner === 1 ? Item.BottomRight
+        : corner === 2 ? Item.TopLeft : Item.TopRight
+    NumberAnimation {
+        id: enter
+        target: root
+        property: "presence"
+        from: 0
+        to: 1
+        duration: Theme.dur3
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: Theme.easeOut
+    }
+    function present() {
+        if (visible)
+            enter.restart()
+        else
+            presence = 0
+    }
+    onMinimizedChanged: present()
+
     Behavior on x {
-        enabled: root.placed && !root.interacting
+        enabled: root.placed && root.visible && !root.interacting
         NumberAnimation { duration: Theme.dur4; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeInOut }
     }
     Behavior on y {
-        enabled: root.placed && !root.interacting
+        enabled: root.placed && root.visible && !root.interacting
         NumberAnimation { duration: Theme.dur4; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeInOut }
     }
 
     onLChanged: tick()
-    onVisibleChanged: syncStack()
+    onVisibleChanged: {
+        syncStack()
+        present()
+        tick()
+    }
     onCornerChanged: syncStack()
     onHeightChanged: syncStack()
     Component.onCompleted: {
         syncL()
         syncStack()
+        present()
         Qt.callLater(() => root.placed = true)
     }
     Component.onDestruction: area?.withdraw(stackId)
@@ -121,10 +162,17 @@ Item {
     Accessible.name: qsTr("Now playing")
 
     Timer {
-        interval: 1000
-        repeat: true
-        running: root.visible && root.l.paused === false
+        id: clockTimer
+        interval: 1000 - root.position % 1000 + 5
         onTriggered: root.tick()
+    }
+
+    // Drag from anywhere that is not a control (the bubble included).
+    FloatingDrag {
+        id: cardDrag
+        card: root
+        area: root.area
+        onSettled: corner => root.settle(corner)
     }
 
     // A round 32 px key (IconButton shape="circle").
@@ -170,6 +218,13 @@ Item {
         Keys.onPressed: event => {
             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
                 ShellState.nowPlayingMinimized = false
+                event.accepted = true
+                return
+            }
+            // An arrow sends it to the corner it points at, as the handle's.
+            const to = root.area.cornerForArrow(root.corner, event.key)
+            if (to >= 0) {
+                ShellState.nowPlayingCorner = to
                 event.accepted = true
             }
         }
@@ -225,15 +280,6 @@ Item {
         }
         HoverHandler { cursorShape: Qt.PointingHandCursor }
         TapHandler { onTapped: ShellState.nowPlayingMinimized = false }
-        DragHandler {
-            id: bubbleDrag
-            target: root
-            xAxis.minimum: 0
-            xAxis.maximum: root.area.width - root.width
-            yAxis.minimum: 0
-            yAxis.maximum: root.area.height - root.height
-            onActiveChanged: if (!active) root.settle()
-        }
     }
 
     Rectangle {
@@ -264,17 +310,19 @@ Item {
                 onClicked: ShellState.nowPlayingCorner = root.area.nextCorner(root.corner)
                 // An arrow sends it to the corner it points at.
                 Keys.onPressed: event => {
-                    const c = root.corner
-                    let to = -1
-                    switch (event.key) {
-                    case Qt.Key_Up: to = c | 2; break
-                    case Qt.Key_Down: to = c & 1; break
-                    case Qt.Key_Left: to = c & 2; break
-                    case Qt.Key_Right: to = c | 1; break
-                    default: return
-                    }
+                    const to = root.area.cornerForArrow(root.corner, event.key)
+                    if (to < 0)
+                        return
                     ShellState.nowPlayingCorner = to
                     event.accepted = true
+                }
+                // The handle drags too (`data-floating-handle`).
+                FloatingDrag {
+                    id: gripDrag
+                    card: root
+                    area: root.area
+                    fromItems: true
+                    onSettled: corner => root.settle(corner)
                 }
             }
             Text {
@@ -306,23 +354,6 @@ Item {
                 width: parent.width
                 height: 1
                 color: Theme.line
-            }
-            // Behind the keys, and never taking a press from an item: a
-            // DragHandler may take over from items by default, and it took
-            // (cancelled) the keys' presses, so Move and Minimise never clicked.
-            Item {
-                anchors.fill: parent
-                z: -1
-                DragHandler {
-                    id: headerDrag
-                    grabPermissions: PointerHandler.CanTakeOverFromHandlersOfSameType | PointerHandler.ApprovesTakeOverByAnything
-                    target: root
-                    xAxis.minimum: 0
-                    xAxis.maximum: root.area.width - root.width
-                    yAxis.minimum: 0
-                    yAxis.maximum: root.area.height - root.height
-                    onActiveChanged: if (!active) root.settle()
-                }
             }
         }
 
@@ -424,10 +455,12 @@ Item {
                         Row {
                             y: 4
                             spacing: 6
+                            // The requester's picture from the queue entry
+                            // (`requester.avatarUrl`), else the initial.
                             Avatar {
                                 size: 16
                                 initials: root.now?.requester ?? ""
-                                source: ""
+                                source: root.now?.requesterAvatar ?? ""
                             }
                             Text {
                                 width: trackText.width - 22
@@ -440,17 +473,6 @@ Item {
                             }
                         }
                     }
-                }
-                // The track is not a control: it drags the card too.
-                DragHandler {
-                    id: infoDrag
-                    grabPermissions: PointerHandler.CanTakeOverFromHandlersOfSameType | PointerHandler.ApprovesTakeOverByAnything
-                    target: root
-                    xAxis.minimum: 0
-                    xAxis.maximum: root.area.width - root.width
-                    yAxis.minimum: 0
-                    yAxis.maximum: root.area.height - root.height
-                    onActiveChanged: if (!active) root.settle()
                 }
             }
 
@@ -532,7 +554,10 @@ Item {
                     anchors.right: total.left
                     anchors.rightMargin: 8
                     height: parent.height
+                    // No track for one without a length (ListenTogetherProgress
+                    // renders nothing for a live radio).
                     Rectangle {
+                        visible: seekBar.duration > 0
                         anchors.verticalCenter: parent.verticalCenter
                         width: parent.width
                         height: 3

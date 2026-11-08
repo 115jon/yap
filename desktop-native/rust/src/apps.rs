@@ -229,6 +229,14 @@ pub mod qobject {
         #[cxx_name = "nowMs"]
         fn now_ms(self: &Apps) -> f64;
 
+        /// Where the room's track is now, in ms (`getListenTogetherLivePositionMs`:
+        /// run on from the anchor while it plays, clamped to the track, 0
+        /// for a track without a length). The now-playing clock reads it
+        /// each tick.
+        #[qinvokable]
+        #[cxx_name = "ltPositionMs"]
+        fn lt_position_ms(self: &Apps) -> f64;
+
         /// Reads the player's meter into `level` (a timer calls it while
         /// the meter shows).
         #[qinvokable]
@@ -243,7 +251,9 @@ use core::pin::Pin;
 use cxx_qt_lib::QString;
 use std::io::Read as _;
 
-use yap_core::store::apps::{AppsCommand, AppsView, Trigger, MAX_LOCAL_SOUND_BYTES, SOUNDS_FILE};
+use yap_core::store::apps::{
+    AppsCommand, AppsView, LtClock, Trigger, MAX_LOCAL_SOUND_BYTES, SOUNDS_FILE,
+};
 use yap_core::Command;
 
 use crate::client;
@@ -268,8 +278,14 @@ fn apply(object: Pin<&mut qobject::Apps>, view: &AppsView) {
     object.set_state(QString::from(&state));
 }
 
+thread_local! {
+    /// The Listen Together clock of the last view (the GUI thread's).
+    static LT_CLOCK: core::cell::Cell<LtClock> = core::cell::Cell::new(LtClock::default());
+}
+
 /// The store's apps view changed.
 pub(crate) fn on_view(view: AppsView) {
+    LT_CLOCK.with(|clock| clock.set(LtClock::of(&view.listen)));
     if let Some(object) = gui::object::<qobject::Apps>() {
         apply(object, &view);
     }
@@ -589,5 +605,10 @@ impl qobject::Apps {
         #[expect(clippy::cast_precision_loss, reason = "epoch ms fit f64 exactly")]
         let now = client::voice::now_ms() as f64;
         now
+    }
+
+    pub fn lt_position_ms(&self) -> f64 {
+        let now = client::voice::now_ms();
+        LT_CLOCK.with(|clock| clock.get().live_ms(now))
     }
 }

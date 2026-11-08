@@ -178,6 +178,33 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// `YAP_DEBUG_SDP=<dir>` (test runs): each description the call sets is
+/// written there (`<pid>-<n>-<what>.sdp`; they hold ICE credentials, so
+/// never in a shared place), and the transceivers are logged after it.
+fn debug_sdp(pc: &PeerConnection, what: &str, sdp: &str) {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let Some(dir) = std::env::var_os("YAP_DEBUG_SDP") else {
+        return;
+    };
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let path = std::path::Path::new(&dir).join(format!("{}-{n:03}-{what}.sdp", std::process::id()));
+    let _ = std::fs::write(path, sdp);
+    let list: Vec<String> = pc
+        .transceivers()
+        .iter()
+        .map(|t| {
+            // Not `current_direction`: webrtc-sys reads its optional
+            // unchecked, which aborts before the first negotiation.
+            format!(
+                "{}:{:?}",
+                t.mid().unwrap_or_else(|| "-".into()),
+                t.direction()
+            )
+        })
+        .collect();
+    eprintln!("[voice] sdp {n} {what}: {}", list.join(" "));
+}
+
 extern "C" {
     fn yap_audio_track_set_volume(
         track: *const c_void,
@@ -1032,6 +1059,13 @@ impl LibwebrtcEngine {
         let remotes = Arc::new(Mutex::new(Remotes::new(Handle::current())));
         let kept = Arc::clone(&remotes);
         pc.on_track(Some(Box::new(move |event| {
+            if std::env::var_os("YAP_DEBUG_SDP").is_some() {
+                eprintln!(
+                    "[voice] on_track mid {:?} {}",
+                    event.transceiver.mid(),
+                    event.track.id()
+                );
+            }
             lock(&kept).add(event.transceiver.mid(), event.track);
         })));
         Ok((
@@ -1090,6 +1124,7 @@ impl LibwebrtcSession {
             .set_local_description(offer.clone())
             .await
             .map_err(err("local offer"))?;
+        debug_sdp(&self.pc, "mic-offer", &offer.to_string());
         Ok(LocalOffer {
             sdp: offer.to_string(),
             mid: transceiver.mid().unwrap_or_else(|| "0".into()),
@@ -1182,7 +1217,9 @@ impl MediaSession for LibwebrtcSession {
         self.pc
             .set_remote_description(answer)
             .await
-            .map_err(|e| MediaError(format!("remote {what}: {e:?}")))
+            .map_err(|e| MediaError(format!("remote {what}: {e:?}")))?;
+        debug_sdp(&self.pc, &what.replace(' ', "-"), sdp);
+        Ok(())
     }
 
     fn start_capture(&self) {
@@ -1203,6 +1240,7 @@ impl MediaSession for LibwebrtcSession {
             .set_remote_description(offer)
             .await
             .map_err(err("remote offer"))?;
+        debug_sdp(&self.pc, "sfu-offer", sdp);
         let answer = self
             .pc
             .create_answer(AnswerOptions::default())
@@ -1212,6 +1250,7 @@ impl MediaSession for LibwebrtcSession {
             .set_local_description(answer.clone())
             .await
             .map_err(err("local answer"))?;
+        debug_sdp(&self.pc, "our-answer", &answer.to_string());
         Ok(answer.to_string())
     }
 
@@ -1231,6 +1270,7 @@ impl MediaSession for LibwebrtcSession {
             .set_local_description(offer.clone())
             .await
             .map_err(err("local close offer"))?;
+        debug_sdp(&self.pc, "close-offer", &offer.to_string());
         Ok(offer.to_string())
     }
 
@@ -1277,6 +1317,7 @@ impl MediaSession for LibwebrtcSession {
             .set_local_description(offer.clone())
             .await
             .map_err(err("local camera offer"))?;
+        debug_sdp(&self.pc, "camera-offer", &offer.to_string());
         let mid = transceiver
             .mid()
             .ok_or_else(|| MediaError("camera transceiver without a mid".into()))?;
@@ -1440,6 +1481,7 @@ impl MediaSession for LibwebrtcSession {
             .set_local_description(offer.clone())
             .await
             .map_err(err("local share offer"))?;
+        debug_sdp(&self.pc, "share-offer", &offer.to_string());
         let mid = transceiver
             .mid()
             .ok_or_else(|| MediaError("share transceiver without a mid".into()))?;
@@ -1537,6 +1579,7 @@ impl MediaSession for LibwebrtcSession {
             .set_local_description(offer.clone())
             .await
             .map_err(err("local share audio offer"))?;
+        debug_sdp(&self.pc, "share-audio-offer", &offer.to_string());
         let mid = transceiver
             .mid()
             .ok_or_else(|| MediaError("share audio transceiver without a mid".into()))?;
@@ -1941,6 +1984,227 @@ mod tests {
             before, after,
             "devices before and after a call's peer connection"
         );
+    }
+
+    /// Sends each candidate `from` gathers to `to` (retrying while `to` has
+    /// no remote description yet).
+    fn trickle(from: &PeerConnection, to: &PeerConnection) {
+        let to = to.clone();
+        let runtime = Handle::current();
+        from.on_ice_candidate(Some(Box::new(move |candidate| {
+            let to = to.clone();
+            let (mid, index, sdp) = (
+                candidate.sdp_mid(),
+                candidate.sdp_mline_index(),
+                candidate.candidate(),
+            );
+            runtime.spawn(async move {
+                for _ in 0..50 {
+                    let Ok(candidate) =
+                        libwebrtc::ice_candidate::IceCandidate::parse(&mid, index, &sdp)
+                    else {
+                        return;
+                    };
+                    if to.add_ice_candidate(candidate).await.is_ok() {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            });
+        })));
+    }
+
+    /// `offerer` offers, `answerer` answers; both applied.
+    async fn negotiate(offerer: &PeerConnection, answerer: &PeerConnection) -> (String, String) {
+        let offer = offerer.create_offer(OfferOptions::default()).await.unwrap();
+        offerer.set_local_description(offer.clone()).await.unwrap();
+        answerer
+            .set_remote_description(offer.clone())
+            .await
+            .unwrap();
+        let answer = answerer
+            .create_answer(AnswerOptions::default())
+            .await
+            .unwrap();
+        answerer
+            .set_local_description(answer.clone())
+            .await
+            .unwrap();
+        offerer
+            .set_remote_description(answer.clone())
+            .await
+            .unwrap();
+        (offer.to_string(), answer.to_string())
+    }
+
+    /// Bytes received on each inbound audio stream, by mid.
+    async fn inbound_audio(pc: &PeerConnection) -> HashMap<String, u64> {
+        pc.get_stats()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter_map(|stat| match stat {
+                RtcStats::InboundRtp(i) if i.stream.kind == "audio" => {
+                    Some((i.inbound.mid.clone(), i.inbound.bytes_received))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The m-section direction an SDP gives `mid`.
+    fn direction_of(sdp: &str, mid: &str) -> String {
+        sdp.split("\nm=")
+            .find(|m| m.lines().any(|l| l.trim() == format!("a=mid:{mid}")))
+            .and_then(|m| {
+                m.lines()
+                    .map(str::trim)
+                    .find(|l| ["a=sendrecv", "a=sendonly", "a=recvonly", "a=inactive"].contains(l))
+            })
+            .unwrap_or("none")
+            .to_owned()
+    }
+
+    /// An "SFU" track for the client: the SFU side adds it and offers (a
+    /// Cloudflare pull). Returns its source.
+    async fn sfu_pushes(
+        f: &PeerConnectionFactory,
+        sfu: &PeerConnection,
+        client: &PeerConnection,
+        name: &str,
+    ) -> NativeAudioSource {
+        let source = NativeAudioSource::new(AudioSourceOptions::default(), 48_000, 1, 0);
+        sfu.add_transceiver(
+            MediaStreamTrack::Audio(f.create_audio_track(name, source.clone())),
+            RtpTransceiverInit {
+                direction: RtpTransceiverDirection::SendOnly,
+                stream_ids: vec![name.into()],
+                send_encodings: vec![],
+            },
+        )
+        .unwrap();
+        negotiate(sfu, client).await;
+        source
+    }
+
+    /// Feeds a tone to each source every 10 ms until aborted.
+    fn tone(sources: Vec<NativeAudioSource>) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut n = 0u32;
+            let mut tick = tokio::time::interval(Duration::from_millis(10));
+            loop {
+                tick.tick().await;
+                let data: Vec<i16> = (0..480)
+                    .map(|i| {
+                        let t = f64::from(n * 480 + i) / 48_000.0;
+                        ((t * 440.0 * std::f64::consts::TAU).sin() * 8000.0) as i16
+                    })
+                    .collect();
+                n += 1;
+                for source in &sources {
+                    let frame = libwebrtc::audio_frame::AudioFrame {
+                        data: data.as_slice().into(),
+                        sample_rate: 48_000,
+                        num_channels: 1,
+                        samples_per_channel: 480,
+                    };
+                    let _ = source.capture_frame(&frame).await;
+                }
+            }
+        })
+    }
+
+    /// Whether `mid`'s inbound audio grows over a second.
+    async fn audio_flows(pc: &PeerConnection, mid: &str) -> bool {
+        let before = inbound_audio(pc).await.get(mid).copied();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let after = inbound_audio(pc).await.get(mid).copied();
+        matches!((before, after), (Some(b), Some(a)) if a > b)
+    }
+
+    /// The Cloudflare pattern on two local peer connections: we push the
+    /// mic (we offer), the "SFU" offers two pulled tracks, then we offer
+    /// again: a share push, then the close of one pull. Each of our offers
+    /// must keep the other pulls receiving. (libwebrtc's `OfferOptions`
+    /// default sent `offer_to_receive_audio: 0`, which under Unified Plan
+    /// turned every receiving transceiver inactive: the joi2 and Anthony
+    /// reports, patches/libwebrtc/0002.)
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn our_offers_should_keep_pulled_audio_flowing() {
+        let f = factory();
+        let client = f
+            .create_peer_connection(RtcConfiguration::default())
+            .unwrap();
+        let sfu = f
+            .create_peer_connection(RtcConfiguration::default())
+            .unwrap();
+        trickle(&client, &sfu);
+        trickle(&sfu, &client);
+        let mic = NativeAudioSource::new(AudioSourceOptions::default(), 48_000, 1, 0);
+        client
+            .add_transceiver(
+                MediaStreamTrack::Audio(f.create_audio_track("mic", mic)),
+                RtpTransceiverInit {
+                    direction: RtpTransceiverDirection::SendOnly,
+                    stream_ids: vec!["mic".into()],
+                    send_encodings: vec![],
+                },
+            )
+            .unwrap();
+        negotiate(&client, &sfu).await;
+        let voice = sfu_pushes(&f, &sfu, &client, "voice").await;
+        let stream = sfu_pushes(&f, &sfu, &client, "stream").await;
+        let feeding = tone(vec![voice, stream]);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(
+            audio_flows(&client, "1").await,
+            "no pulled audio to begin with"
+        );
+
+        // A share push: we offer.
+        let share = NativeVideoSource::new(
+            VideoResolution {
+                width: 640,
+                height: 360,
+            },
+            true,
+        );
+        client
+            .add_transceiver(
+                MediaStreamTrack::Video(f.create_video_track("screen", share)),
+                RtpTransceiverInit {
+                    direction: RtpTransceiverDirection::SendOnly,
+                    stream_ids: vec!["screen".into()],
+                    send_encodings: vec![],
+                },
+            )
+            .unwrap();
+        let (offer, answer) = negotiate(&client, &sfu).await;
+        let push = (direction_of(&offer, "1"), direction_of(&answer, "1"));
+
+        // The close of the second pull: we offer again.
+        for transceiver in client.transceivers() {
+            if transceiver.mid().as_deref() == Some("2") {
+                transceiver.stop().unwrap();
+            }
+        }
+        let (offer, _) = negotiate(&client, &sfu).await;
+        let close = direction_of(&offer, "1");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let flowing = audio_flows(&client, "1").await;
+        feeding.abort();
+        client.close();
+        sfu.close();
+        assert_eq!(
+            push,
+            ("a=recvonly".to_owned(), "a=sendonly".to_owned()),
+            "the push's offer and answer for the pulled audio"
+        );
+        assert_eq!(
+            close, "a=recvonly",
+            "the close's offer for the pulled audio"
+        );
+        assert!(flowing, "pulled audio stopped after our offers");
     }
 
     /// A hardware H.264 share is only watchable by other native clients if

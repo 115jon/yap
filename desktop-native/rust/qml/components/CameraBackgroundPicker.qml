@@ -14,6 +14,10 @@ Column {
 
     // Poll the effect's state (for its error line) only while it shows.
     property bool live: true
+    // Four across from this width, two below (the web's grid-cols-2
+    // @min-[560px]:grid-cols-4 on its container; the Camera dialog's body
+    // is narrower than 560, so it asks for 560).
+    property int wideAt: 480
 
     readonly property var view: {
         try {
@@ -63,7 +67,7 @@ Column {
         id: tiles
         width: parent.width
         spacing: 12
-        readonly property int columns: width >= 480 ? 4 : 2
+        readonly property int columns: width >= root.wideAt ? 4 : 2
         readonly property real tileWidth: Math.floor((width - spacing * (columns - 1)) / columns)
         Accessible.role: Accessible.Grouping
         Accessible.name: qsTr("Background")
@@ -189,8 +193,6 @@ Column {
             height: Math.round(width * 9 / 16)
             radius: Theme.radius
             color: uploadMouse.containsMouse && enabled ? Theme.tint1 : "transparent"
-            border.width: 1
-            border.color: Theme.lineField
             enabled: !busy && !root.disabledTiles
             opacity: enabled ? 1 : 0.45
             activeFocusOnTab: enabled
@@ -198,6 +200,8 @@ Column {
             Accessible.name: qsTr("Upload a background image")
             Keys.onSpacePressed: choose()
             Keys.onReturnPressed: choose()
+            // border border-dashed border-line-field.
+            DashedEdge { color: Theme.lineField }
             function choose() {
                 const paths = Files.pickFiles(qsTr("Choose a background image"))
                 if (paths.length > 0)

@@ -16,14 +16,9 @@ Item {
     readonly property var now: l.now ?? null
     property real position: 0
 
-    function tick() {
-        const base = l.positionMs ?? 0
-        const since = l.paused ? 0 : Math.max(0, Apps.nowMs() - (l.positionAt ?? 0))
-        // clampListenTogetherPosition: a track with no length (a live
-        // radio) reads 0:00, playing or paused, as on the web.
-        const duration = Math.max(0, l.durationMs ?? 0)
-        position = Math.min(duration, Math.max(0, base + since))
-    }
+    // getListenTogetherLivePositionMs, clamped as the web clamps it (a live
+    // radio reads 0:00): the core's clock, shared with the Now Playing card.
+    function tick() { position = Apps.ltPositionMs() }
     function clock(ms) {
         const total = Math.max(0, Math.floor(ms / 1000))
         return Math.floor(total / 60) + ":" + String(total % 60).padStart(2, "0")

@@ -20,6 +20,9 @@ use crate::api::{ApiError, Token};
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Start,
+    /// The connection strip's Retry / Retry now (ConnectionBanner.tsx
+    /// `wake`): the gateway tries again at once instead of after its backoff.
+    RetryGateway,
     /// The window is on screen (`false`: minimised or hidden to the tray).
     WindowShown(bool),
     StartSignIn,
@@ -347,6 +350,11 @@ pub enum Input {
     StandbyHidden {
         generation: u64,
     },
+    /// A launch without a cached view could not reach `me` (no network, the
+    /// server down): ask again, if this session is still booting.
+    BootRetry {
+        session: SessionId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -366,6 +374,13 @@ pub enum GatewayEvent {
     Resumed,
     /// The socket dropped; the gateway reconnects on its own.
     Closed,
+    /// A connect failed or the socket dropped, and retry `attempt` (from 1
+    /// since the last ready) is scheduled. `offline`: the last try never
+    /// left the device (no network), as `navigator.onLine` would say.
+    Reconnecting {
+        attempt: u32,
+        offline: bool,
+    },
     /// A ticket fetch got a 401.
     SessionExpired,
     Dispatch(Dispatch),

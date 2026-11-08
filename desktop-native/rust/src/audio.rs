@@ -67,6 +67,9 @@ pub mod qobject {
         /// "Include audio".
         #[qproperty(QString, screen_share_quality, cxx_name = "screenShareQuality")]
         #[qproperty(bool, screen_share_with_audio, cxx_name = "screenShareWithAudio")]
+        /// "Always show stream preview" (off: our share's preview pauses
+        /// while Yap isn't focused).
+        #[qproperty(bool, always_show_stream_preview, cxx_name = "alwaysShowStreamPreview")]
         /// The camera background: `none`, `blur` or `image:<id>`.
         #[qproperty(QString, camera_background, cxx_name = "cameraBackground")]
         /// The account's uploaded backgrounds and their state, as JSON
@@ -194,6 +197,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "changeAlwaysPreviewVideo"]
         fn set_always_preview_video_from_ui(self: Pin<&mut Audio>, on: bool);
+
+        #[qinvokable]
+        #[cxx_name = "changeAlwaysShowStreamPreview"]
+        fn set_always_show_stream_preview_from_ui(self: Pin<&mut Audio>, on: bool);
 
         /// Keeps the picker's choice for the next share
         /// (`setScreenShareDefaults`).
@@ -343,6 +350,7 @@ pub struct AudioRust {
     always_preview_video: bool,
     screen_share_quality: QString,
     screen_share_with_audio: bool,
+    always_show_stream_preview: bool,
     camera_background: QString,
     camera_backgrounds: QString,
 
@@ -472,6 +480,8 @@ impl qobject::Audio {
             .set_screen_share_quality(QString::from(s.screen_share_quality.as_str()));
         self.as_mut()
             .set_screen_share_with_audio(s.screen_share_with_audio);
+        self.as_mut()
+            .set_always_show_stream_preview(s.always_show_stream_preview);
         self.as_mut()
             .set_camera_background(QString::from(s.camera_background.key().as_str()));
         crate::camera::set_background_choice(s.camera_background.clone(), self.rust().dir.clone());
@@ -825,6 +835,10 @@ impl qobject::Audio {
 
     pub fn set_always_preview_video_from_ui(self: Pin<&mut Self>, on: bool) {
         self.edit(|s| s.always_preview_video = on);
+    }
+
+    pub fn set_always_show_stream_preview_from_ui(self: Pin<&mut Self>, on: bool) {
+        self.edit(|s| s.always_show_stream_preview = on);
     }
 
     pub fn set_screen_share_defaults(self: Pin<&mut Self>, quality: &QString, with_audio: bool) {

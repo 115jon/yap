@@ -9,13 +9,16 @@ import com.yap.native
 // stage) and 2 px corners. A camera that is on shows its video cropped to
 // the tile, a watched share letterboxed on black; until the first frame a
 // spinner stands in. An unwatched share shows "<name> is sharing" and
-// Watch. Our own share shows its capture as sent, with Pause / Resume for
+// Watch, over its owner's still under a ply-2/85 scrim; a watched one shows
+// the still until its first frame (ParticipantCard.tsx 220-278). The still
+// comes with the gateway roster (`stream_preview_url`, refreshed by its
+// owner every 8 s): nothing is pulled for it. Our own share shows its capture as sent, with Pause / Resume for
 // the preview at the top left (on hover). Anyone without media gets the
 // 64 px avatar (80 alone). The
 // nameplate sits bottom-left: LED, Bricolage 13/700 name, state glyphs, on a
 // black/60 chip over media. A person's speaking ring is a 2 px talk outline
 // outside the tile. Click puts the tile on stage (or takes it off); right
-// click opens their call menu.
+// click opens their call menu (ours on our own tile: LocalMenu.tsx).
 Item {
     id: root
 
@@ -38,10 +41,15 @@ Item {
     // Shares: who watches (JSON), shown top right while it is ours or
     // watched (ParticipantCard.tsx `shouldShowWatchers`).
     required property string watchers
+    // Someone else's share: its still (a data:image URL), or empty.
+    required property string preview
 
     property bool solo: false
     // A members-tray thumbnail (144 px): small avatar, no Watch prompt.
     property bool tray: false
+    // The tile is in the visible part of a scrolling grid: its still is
+    // decoded only then.
+    property bool inView: true
     readonly property bool focused: ShellState.focusedTile === tileId
     readonly property bool screen: kind === "screen"
     // Our own share, and its preview paused.
@@ -51,7 +59,12 @@ Item {
     readonly property bool showsVideo: video && videoKey.length > 0 && !(tray && focused)
         && (!screen || me || watching || focused) && !previewPaused
     readonly property bool watchPrompt: screen && !me && !watching && !focused && !tray
-    readonly property bool overMedia: showsVideo && surface.item !== null && surface.item.hasFrame
+    readonly property bool playing: showsVideo && surface.item !== null && surface.item.hasFrame
+    readonly property bool hasStill: screen && !me && !tray && inView && preview.length > 0
+    // A watched share before its first frame: the still stands in for the
+    // spinner (`shouldRenderThumbnailPoster`), and counts as media.
+    readonly property bool poster: hasStill && showsVideo && !playing
+    readonly property bool overMedia: playing || poster
     readonly property string ownerName: name
 
     // A camera that is playing: its resolution and frame rate on the
@@ -90,7 +103,6 @@ Item {
         onTapped: ShellState.toggleFocus(root.tileId)
     }
     TapHandler {
-        enabled: !root.me
         acceptedButtons: Qt.RightButton
         onTapped: eventPoint => ShellState.showPeerMenu(root.memberId, root.name, root, eventPoint.position, Voice.channelId)
     }
@@ -119,6 +131,33 @@ Item {
             anchors.fill: parent
             visible: root.showsVideo && !root.overMedia
             name: root.ownerName
+        }
+
+        // The share's still: behind Watch under the scrim, or the poster
+        // on black until the video plays (object-cover both ways).
+        Loader {
+            anchors.fill: parent
+            anchors.margins: 1
+            active: root.hasStill && (root.watchPrompt || root.poster)
+            sourceComponent: Image {
+                clip: true
+                source: root.preview
+                fillMode: Image.PreserveAspectCrop
+                // A data: URL decodes at once; the old still stays up until
+                // the new one is in (every 8 s), and none is kept cached.
+                asynchronous: false
+                cache: false
+                retainWhileLoading: true
+                smooth: true
+                Accessible.ignored: true
+            }
+        }
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 1
+            visible: root.watchPrompt && root.hasStill
+            color: Theme.ply2
+            opacity: 0.85
         }
     }
 
@@ -333,12 +372,11 @@ Item {
     // "More options for <name>" (ParticipantCard.tsx 402-416): bottom right
     // on black/60, shown while the tile is hovered or the key has focus
     // (REVEAL), not on tray tiles. It opens their call menu at the click,
-    // as a right click does. The web also shows it on our own tile (the
-    // local menu); native has no local call menu, so it is not drawn there.
+    // as a right click does; on our own tile, our menu (LocalMenu.tsx).
     // Faded, not hidden, so it can take keyboard focus and reveal itself.
     IconKey {
         id: moreKey
-        visible: !root.tray && !root.me
+        visible: !root.tray
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 8

@@ -170,6 +170,7 @@ RowLayout {
         Layout.preferredWidth: Theme.rail
     }
     ChannelSidebar {
+        id: sidebar
         visible: !ShellState.stageFullscreen
         Layout.fillHeight: true
         Layout.preferredWidth: Theme.treePanel
@@ -279,19 +280,31 @@ RowLayout {
         // and the Now Playing card floats over any view of the call
         // (VoiceDashboard.tsx mounts FloatingListenTogetherPlayer). The
         // corners keep 8 px clear of the chrome now on screen
-        // (`data-floating-avoid`): the stage bar over the voice view, the
-        // composer over a chat (the voice chat's column as well).
+        // (`data-floating-avoid`): the composer over a chat (the voice
+        // chat's column as well), the sidebar's call strip, and the stage
+        // bar over the voice view (the web's card covers that one). The
+        // area is the window's (FloatingSurface.tsx portals to body): its
+        // corners are the window's and it floats over the sidebar and a
+        // docked member panel; the rects are in the shell's coordinates,
+        // which are the window content's.
         FloatingArea {
             id: floatingPreviews
+            parent: root.parent
             anchors.fill: parent
-            z: 2
+            visible: root.visible
             avoids: {
                 const list = []
+                const hostX = chatHost.x
                 const voice = voiceLoader.item
                 if (voice && Nav.voicePanelId.length > 0 && voice.avoidBottom > 0)
-                    list.push({ left: voiceLoader.x, right: voiceLoader.x + voiceLoader.width, bottom: voice.avoidBottom })
+                    list.push({ left: hostX + voiceLoader.x, right: hostX + voiceLoader.x + voiceLoader.width,
+                                top: voiceLoader.height - voice.avoidBottom, bottom: voiceLoader.height })
                 if (chatView.visible && !root.voiceSheetShown)
-                    list.push({ left: chatView.x, right: chatView.x + chatView.width, bottom: chatView.composerAvoid })
+                    list.push({ left: hostX + chatView.x, right: hostX + chatView.x + chatView.width,
+                                top: chatView.height - chatView.composerAvoid, bottom: chatView.height })
+                if (sidebar.visible && sidebar.callStripHeight > 0)
+                    list.push({ left: sidebar.x, right: sidebar.x + sidebar.width,
+                                top: sidebar.callStripTop, bottom: sidebar.callStripTop + sidebar.callStripHeight })
                 return list
             }
             readonly property bool away: Voice.channelId.length > 0 && Nav.voicePanelId !== Voice.channelId

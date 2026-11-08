@@ -20,7 +20,9 @@ mod threads;
 use std::time::Duration;
 
 use serde::Serialize;
-use yap_protocol::payload::{ChannelRef, ServerSubscribe, VoiceChannelJoin, VoiceChannelLeave};
+use yap_protocol::payload::{
+    ChannelRef, ServerSubscribe, StreamPreviewUpdate, VoiceChannelJoin, VoiceChannelLeave,
+};
 use yap_protocol::rest::{ChannelType, Message, MessagePatch, ReplyTo, Server, User};
 use yap_protocol::{Frame, GatewayOp};
 
@@ -117,6 +119,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
                 state.sync_standby(&mut fx);
             }
         }
+        Input::BootRetry { session } => state.on_boot_retry(&mut fx, session),
     }
     state.sync_settings(&mut fx);
     state.sync_admin(&mut fx);
@@ -164,6 +167,18 @@ impl State {
     fn set_connected(&mut self, fx: &mut Effects, connected: bool) {
         self.connected = connected;
         fx.view(ViewUpdate::Connected(connected));
+    }
+
+    /// The session's link retries (the gateway's, or the launch's `me`).
+    fn set_link(&mut self, fx: &mut Effects, attempt: u32, offline: bool) {
+        if let Some(session) = self.session.as_mut() {
+            session.gateway.attempt = attempt;
+            session.gateway.offline = offline;
+        }
+        if self.link_shown != (attempt, offline) {
+            self.link_shown = (attempt, offline);
+            fx.view(ViewUpdate::Link { attempt, offline });
+        }
     }
 
     /// The session once `me` is known (what the old core called a session).
@@ -960,6 +975,10 @@ impl State {
                     deafened: m.self_deaf.unwrap_or(false),
                     video: m.self_video.unwrap_or(false),
                     stream: m.self_stream.unwrap_or(false),
+                    stream_preview: m
+                        .stream_preview_url
+                        .filter(|url| view::is_still_url(url))
+                        .unwrap_or_default(),
                     reconnecting: m.connection_state.as_deref() == Some("reconnecting")
                         || m.connected == Some(false),
                     user_id: m.user_id,
@@ -1384,6 +1403,7 @@ impl State {
                 fx.push(Effect::LoadToken);
                 fx.push(Effect::LoadSnapshot);
             }
+            Command::RetryGateway => self.retry_gateway(fx),
             Command::StartSignIn => {
                 let attempt = SignInId(self.next_id());
                 self.sign_in = Some(attempt);
@@ -1865,6 +1885,8 @@ impl State {
     }
 
     fn end_session(&mut self, fx: &mut Effects, revoke: bool) {
+        // A sign-out during a drop: the next session starts with no strip.
+        self.set_link(fx, 0, false);
         self.clear_settings();
         self.clear_admin();
         self.clear_panels();
@@ -1946,8 +1968,15 @@ impl State {
             self.end_session(fx, false);
             fx.push(Effect::ClearToken);
             self.set_status(fx, SESSION_ENDED);
+        } else if matches!(error, ApiError::Network(_)) {
+            // The connection strip says offline or unreachable; the raw
+            // transport error never reaches the header (api-errors.ts).
+            self.set_status(fx, "");
         } else {
-            self.set_status(fx, error.to_string());
+            self.set_status(
+                fx,
+                crate::settings::describe_api_error(error, "load this"),
+            );
         }
     }
 
@@ -2148,6 +2177,8 @@ impl State {
         });
         session.me = Some(me.clone());
         self.persist(fx, CacheWrite::Me(Box::new(me)));
+        // Reached after launch retries: the gateway reports its own now.
+        self.set_link(fx, 0, false);
         self.load_unread(fx);
         self.set_status(fx, "Loading servers…");
         let early = self.boot.as_mut().and_then(|boot| {
@@ -2166,7 +2197,18 @@ impl State {
             if !error.is_unauthorized() {
                 self.refreshing = false;
             }
+            if matches!(error, ApiError::Network(_)) {
+                // The connection strip says it ("Offline", "Reconnecting");
+                // the raw error never reaches the header.
+                return self.set_status(fx, "");
+            }
             return self.fail(fx, error);
+        }
+        if unreachable(error) && self.session.is_some() {
+            // Offline at launch keeps the stored session (DesktopLogin.tsx:95
+            // "unreachable"): the cold load waits for the network and asks
+            // again, instead of showing sign-in.
+            return self.retry_boot_later(fx, error);
         }
         self.session = None;
         self.boot = None;
@@ -2174,6 +2216,71 @@ impl State {
         self.set_phase(fx, Phase::SignedOut);
         // On a 401 this ends the session and clears the stored token.
         self.fail(fx, error);
+    }
+
+    /// `me` could not be reached at launch: keep booting, say whether the
+    /// device is offline (the cold load's "Waiting for network"), and ask
+    /// again after a backoff.
+    fn retry_boot_later(&mut self, fx: &mut Effects, error: &ApiError) {
+        let Some(session) = self.session.as_ref().map(|s| s.id) else {
+            return;
+        };
+        let boot = self.boot.get_or_insert_with(Boot::default);
+        boot.retries += 1;
+        let retries = boot.retries;
+        self.set_link(fx, retries, error.is_offline());
+        fx.push(Effect::Later {
+            delay: boot_backoff(retries),
+            input: Box::new(Input::BootRetry { session }),
+        });
+    }
+
+    fn on_boot_retry(&mut self, fx: &mut Effects, session: SessionId) {
+        let booting = self
+            .session
+            .as_ref()
+            .is_some_and(|s| s.id == session && s.me.is_none());
+        if !booting || self.boot.is_none() || self.pending.me.is_some() {
+            return;
+        }
+        self.pending.me = self.http(fx, ApiRequest::Me);
+        let servers_ok = self
+            .boot
+            .as_ref()
+            .is_some_and(|b| matches!(b.early_servers, Some(Ok(_))));
+        if !servers_ok && self.pending.servers.is_none() {
+            if let Some(boot) = &mut self.boot {
+                boot.early_servers = None;
+            }
+            self.pending.servers = self.http(fx, ApiRequest::Servers);
+        }
+    }
+
+    /// The strip's Retry: a new gateway connection now (the old one and
+    /// its backoff go), keeping what the strip says until it answers.
+    fn retry_gateway(&mut self, fx: &mut Effects) {
+        let Some((session, _)) = self.signed_in() else {
+            return;
+        };
+        if session.gateway.ready {
+            return;
+        }
+        // A fresh id for the new connection: events the old one queued
+        // (a late `Reconnecting { attempt: 6 }`) no longer match it.
+        let id = SessionId(self.next_id());
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        session.id = id;
+        let offline = session.gateway.offline;
+        let token = session.token.clone();
+        let user_id = session.me.as_ref().map(|me| me.id.clone()).unwrap_or_default();
+        fx.push(Effect::GatewayConnect {
+            session: id,
+            token,
+            user_id,
+        });
+        self.set_link(fx, 0, offline);
     }
 
     fn on_servers(&mut self, fx: &mut Effects, result: Result<Vec<Server>, ApiError>) {
@@ -2525,9 +2632,21 @@ impl State {
                 self.page_status = true;
                 return;
             }
+            Err(error) if error.is_unauthorized() => return self.chain_failed(fx, &error),
             Err(error) => {
-                self.chain_failed(fx, &error);
-                self.page_status = !error.is_unauthorized();
+                if self.boot.take().is_some() {
+                    self.set_phase(fx, Phase::Ready);
+                }
+                // A channel opened by id or link that is gone (404) or not
+                // ours (403) says so in the web's words (api-errors.ts);
+                // server text never reaches the screen, and a network
+                // failure is the connection strip's to say.
+                let copy = match error {
+                    ApiError::Network(_) => String::new(),
+                    _ => crate::settings::describe_api_error(&error, "open this channel"),
+                };
+                self.set_status(fx, copy);
+                self.page_status = true;
                 return;
             }
         };
@@ -3313,10 +3432,12 @@ impl State {
                 current.gateway.ready = true;
                 let reconnect = std::mem::replace(&mut current.gateway.was_ready, true);
                 self.set_connected(fx, true);
+                self.set_link(fx, 0, false);
                 // A fresh gateway session starts online: say otherwise.
                 self.send_status(fx);
                 self.sync_subscriptions(fx);
                 self.expect_voice_rosters(fx);
+                self.flush_preview_clear(fx);
                 // A fresh session after a drop (Resume failed or was not
                 // possible): events during the gap are lost, so refetch what
                 // is on screen.
@@ -3331,15 +3452,26 @@ impl State {
                 current.gateway.ready = true;
                 current.gateway.was_ready = true;
                 self.set_connected(fx, true);
+                self.set_link(fx, 0, false);
                 // The server restored the old subscriptions and voice
                 // presence; resend the subscriptions anyway, since switches
                 // made while offline were not sent (they are idempotent).
                 self.sync_subscriptions(fx);
                 self.expect_voice_rosters(fx);
+                self.flush_preview_clear(fx);
             }
             GatewayEvent::Closed => {
                 current.gateway.ready = false;
                 self.set_connected(fx, false);
+            }
+            GatewayEvent::Reconnecting { attempt, offline } => {
+                // Also before the first ready (a launch from the cache with
+                // no network): the shell is up, so the strip says why.
+                current.gateway.ready = false;
+                if self.connected {
+                    self.set_connected(fx, false);
+                }
+                self.set_link(fx, attempt, offline);
             }
             GatewayEvent::SessionExpired => {
                 self.forget_user(fx);
@@ -3875,6 +4007,8 @@ impl State {
             share_wanted: None,
             share: None,
             share_error: String::new(),
+            share_preview: None,
+            share_preview_clear: false,
             dm,
             move_grant,
             spatial: String::new(),
@@ -4006,6 +4140,52 @@ impl State {
         self.emit_voice(fx);
     }
 
+    /// Our share's still to the global gateway (useVoiceChannel.ts
+    /// `pushStreamPreviewUpdate`): op 15 `stream_preview_url`, only when it
+    /// changed, only while the share is live and the call joined; `None`
+    /// clears one that was sent. A frame the gateway is not up for is not
+    /// counted as sent, so the next still goes out.
+    /// The `null` a share that ended while the gateway was down still owes.
+    fn flush_preview_clear(&mut self, fx: &mut Effects) {
+        let Some(call) = self.voice.as_mut().filter(|c| c.share_preview_clear) else {
+            return;
+        };
+        call.share_preview_clear = false;
+        let update = StreamPreviewUpdate {
+            stream_preview_url: None,
+        };
+        self.gateway_send(fx, frame(GatewayOp::VoiceStateUpdate, &update));
+    }
+
+    fn send_share_preview(&mut self, fx: &mut Effects, url: Option<String>) {
+        let ready = self.session.as_ref().is_some_and(|s| s.gateway.ready);
+        let Some(call) = self.voice.as_mut() else {
+            return;
+        };
+        let url = url.filter(|url| {
+            call.joined
+                && call.share.is_some()
+                && view::is_still_url(url)
+        });
+        if url.is_none() && !ready {
+            // Ended while the gateway is down: forget the still now and
+            // clear it once the gateway is back (Ready / Resumed).
+            if call.share_preview.take().is_some() {
+                call.share_preview_clear = true;
+            }
+            return;
+        }
+        if url == call.share_preview || !ready {
+            return;
+        }
+        call.share_preview_clear = false;
+        call.share_preview.clone_from(&url);
+        let update = StreamPreviewUpdate {
+            stream_preview_url: url,
+        };
+        self.gateway_send(fx, frame(GatewayOp::VoiceStateUpdate, &update));
+    }
+
     fn on_voice(&mut self, fx: &mut Effects, call: CallId, update: VoiceUpdate) {
         if self.standby.as_ref().is_some_and(|s| s.id == call) {
             // Hidden until promoted: only its end matters.
@@ -4034,6 +4214,7 @@ impl State {
                 current.share = Some(share);
             }
             VoiceUpdate::ShareUpdated(share) => current.share = Some(share),
+            VoiceUpdate::SharePreview(url) => return self.send_share_preview(fx, Some(url)),
             VoiceUpdate::ShareEnded { stop_sound, error } => {
                 if stop_sound {
                     fx.view(ViewUpdate::Sound(Sound::ScreenShareStop));
@@ -4041,6 +4222,7 @@ impl State {
                 current.share = None;
                 current.share_wanted = None;
                 current.share_error = error.unwrap_or_default();
+                self.send_share_preview(fx, None);
             }
             VoiceUpdate::Connected => {
                 // `joined`: the connect sound and one presence join (op 33),
@@ -4136,6 +4318,12 @@ fn join_error_copy(error: &str) -> String {
     if has(&["403", "forbidden", "connect_denied"]) {
         return "You can't join this channel.".to_owned();
     }
+    if has(&["media connection"]) {
+        // yap-voice's "Media connection failed / ended": the peer
+        // connection (ICE) gave up, the web's "Call lost" detail
+        // (ConnectionBanner.tsx callConnectionIssue).
+        return "Couldn't reconnect to the call.".to_owned();
+    }
     if has(&[
         "error sending request",
         "connect",
@@ -4151,6 +4339,23 @@ fn join_error_copy(error: &str) -> String {
 
 fn unexpected(response: &ApiResponse) -> ApiError {
     ApiError::Decode(format!("unexpected response: {response:?}"))
+}
+
+/// The server could not be reached or could not answer (no network, a
+/// refused connection, 429, 5xx): a launch keeps its session and retries
+/// (DesktopLogin.tsx `validateDesktopSession` "unreachable").
+fn unreachable(error: &ApiError) -> bool {
+    match error {
+        ApiError::Network(_) => true,
+        ApiError::Http { status, .. } => *status == 429 || *status >= 500,
+        ApiError::Unauthorized | ApiError::Decode(_) => false,
+    }
+}
+
+/// The wait before launch retry `retries` (from 1): 1, 2, 4, 8, 16, then
+/// every 30 s.
+fn boot_backoff(retries: u32) -> Duration {
+    Duration::from_secs((1u64 << retries.saturating_sub(1).min(5)).min(30))
 }
 
 /// The call's start for the sidebar clock (chat-reducer.ts

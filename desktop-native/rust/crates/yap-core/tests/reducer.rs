@@ -580,9 +580,10 @@ fn a_failed_page_should_leave_the_status_once_another_channel_loads() {
         message: "Channel not found or access denied".into(),
     };
     client.fail(page, error);
+    // In the web's words (api-errors.ts), never the server's.
     assert_eq!(
         client.state.status(),
-        "HTTP 403: Channel not found or access denied"
+        "You don't have permission to open this channel."
     );
     let second = ApiRequest::Messages {
         channel_id: SECOND_TEXT.into(),
@@ -2490,7 +2491,8 @@ fn a_network_error_on_me_should_keep_the_cached_view() {
     );
     assert!(!cleared(&fx, ME), "{fx:#?}");
     assert_eq!(client.state.phase(), Phase::Ready);
-    assert_eq!(client.state.status(), "offline");
+    // The connection strip says it, not the header.
+    assert_eq!(client.state.status(), "");
     assert_eq!(client.message_count(), 2);
 }
 
@@ -3726,6 +3728,59 @@ fn the_call_stage_should_get_a_tile_per_person_and_per_share() {
 }
 
 #[test]
+fn a_share_tile_should_say_whether_it_carries_audio() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let sharer = |id: &str, audio: bool| {
+        let mut m = member(id, false);
+        m.user_id = format!("user_{id}");
+        m.stream = true;
+        m.screen_audio = audio;
+        m
+    };
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Roster(vec![
+            member("p_me", false),
+            sharer("p_ana", true),
+            sharer("p_bo", false),
+        ]),
+    });
+    let tiles = tiles_of(&fx);
+    let audio: Vec<_> = tiles
+        .iter()
+        .map(|t| (t.kind.as_str(), t.member_id.as_str(), t.has_audio))
+        .filter(|(kind, ..)| *kind == "screen")
+        .collect();
+    assert_eq!(
+        audio,
+        [("screen", "user_p_ana", true), ("screen", "user_p_bo", false)]
+    );
+}
+
+#[test]
+fn our_share_tile_should_carry_audio_only_when_we_capture_it() {
+    for with_audio in [true, false] {
+        let mut client = Client::online();
+        let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+        client.input(Input::Voice {
+            call,
+            update: VoiceUpdate::Roster(vec![member("p_me", false)]),
+        });
+        client.command(Command::StartVoiceShare(share(with_audio)));
+        let fx = client.input(Input::Voice {
+            call,
+            update: VoiceUpdate::ShareStarted(share(with_audio)),
+        });
+        let tile = tiles_of(&fx)
+            .into_iter()
+            .find(|t| t.kind == "screen")
+            .expect("our share tile");
+        assert_eq!(tile.has_audio, with_audio);
+    }
+}
+
+#[test]
 fn watching_should_mark_the_share_tile() {
     let mut client = Client::online();
     let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
@@ -4043,4 +4098,219 @@ fn a_dm_call_record_should_read_as_the_viewer_sees_it() {
         })
         .expect("a row");
     assert!(ended.contains(r#""duration":"4:12""#) && ended.contains("Alice called"), "{ended}");
+}
+
+// Share stills (stream_preview_url)
+
+const STILL: &str = "data:image/jpeg;base64,/9j/4AAQ";
+
+fn sharing_occupant(user: &str, name: &str, preview: Value) -> Value {
+    let mut o = occupant(user, name);
+    o["self_stream"] = json!(true);
+    o["stream_preview_url"] = preview;
+    o
+}
+
+fn screen_tiles(fx: &[Effect]) -> Vec<yap_core::store::view::VoiceTileRow> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::View(ViewUpdate::Tiles(ViewDiff::Insert { rows, .. }))
+            | Effect::View(ViewUpdate::Tiles(ViewDiff::Reset(rows))) => Some(rows.clone()),
+            Effect::View(ViewUpdate::Tiles(ViewDiff::Update { row, .. })) => Some(vec![row.clone()]),
+            _ => None,
+        })
+        .flatten()
+        .filter(|t| t.kind == "screen")
+        .collect()
+}
+
+/// In VOICE with Ada sharing (participant `p_ada`).
+fn call_with_ada_sharing(preview: Value) -> (Client, CallId, Vec<Effect>) {
+    let mut client = Client::online();
+    client.gateway(GatewayEvent::Dispatch(voice_states(json!({
+        VOICE: [sharing_occupant("user_ada", "Ada", preview)],
+    }))));
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    let mut ada = member("p_ada", false);
+    ada.user_id = "user_ada".into();
+    ada.stream = true;
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Roster(vec![member("p_me", false), ada]),
+    });
+    (client, call, fx)
+}
+
+#[test]
+fn an_unwatched_share_tile_should_carry_its_owners_still_from_the_roster() {
+    let (_, _, fx) = call_with_ada_sharing(json!(STILL));
+    let tile = screen_tiles(&fx).pop().expect("Ada's share tile");
+    assert_eq!(
+        (tile.member_id.as_str(), tile.watching, tile.preview.as_str()),
+        ("user_ada", false, STILL)
+    );
+}
+
+#[test]
+fn a_new_still_should_update_only_the_share_tile_and_no_pull() {
+    let (mut client, _, _) = call_with_ada_sharing(json!(STILL));
+    let next = "data:image/jpeg;base64,/9j/4BBQ";
+    let fx = client.gateway(GatewayEvent::Dispatch(voice_state(
+        VOICE,
+        json!([{ "user_id": "user_ada", "self_stream": true, "stream_preview_url": next }]),
+    )));
+    assert!(
+        fx.iter().any(|e| matches!(
+            e,
+            Effect::View(ViewUpdate::Tiles(ViewDiff::Update { row, roles, .. }))
+                if row.kind == "screen" && row.preview == next && roles == &vec![yap_core::store::view::VoiceTileRole::Preview]
+        )),
+        "{fx:#?}"
+    );
+    // The still is the roster's: nothing is asked of the call.
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Voice { .. })));
+}
+
+#[test]
+fn a_still_that_is_not_an_inline_image_should_not_reach_the_tile() {
+    for preview in [
+        json!("https://example.com/preview.png"),
+        json!("data:text/html;base64,PGI+"),
+        // Past the 4 KB cap: never decoded on the GUI thread.
+        json!(format!("data:image/jpeg;base64,{}", "A".repeat(5000))),
+        Value::Null,
+    ] {
+        let (_, _, fx) = call_with_ada_sharing(preview);
+        let tile = screen_tiles(&fx).pop().expect("Ada's share tile");
+        assert_eq!(tile.preview, "");
+    }
+}
+
+/// Joined in VOICE with our share live.
+fn sharing_call() -> (Client, CallId) {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Connected,
+    });
+    client.command(Command::StartVoiceShare(share(false)));
+    client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::ShareStarted(share(false)),
+    });
+    (client, call)
+}
+
+fn preview_frames(fx: &[Effect]) -> Vec<Value> {
+    frames(fx)
+        .into_iter()
+        .filter(|(code, _)| *code == op(GatewayOp::VoiceStateUpdate))
+        .map(|(_, d)| d)
+        .collect()
+}
+
+#[test]
+fn our_shares_still_should_go_to_the_gateway_once_per_change() {
+    let (mut client, call) = sharing_call();
+    let still = |url: &str| Input::Voice {
+        call,
+        update: VoiceUpdate::SharePreview(url.into()),
+    };
+    let fx = client.input(still(STILL));
+    assert_eq!(
+        preview_frames(&fx),
+        vec![json!({ "stream_preview_url": STILL })]
+    );
+    // The same picture again (a still screen): nothing new to say.
+    assert!(preview_frames(&client.input(still(STILL))).is_empty());
+    let next = "data:image/jpeg;base64,/9j/4BBQ";
+    assert_eq!(
+        preview_frames(&client.input(still(next))),
+        vec![json!({ "stream_preview_url": next })]
+    );
+}
+
+#[test]
+fn ending_our_share_should_clear_its_still() {
+    let (mut client, call) = sharing_call();
+    client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::SharePreview(STILL.into()),
+    });
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::ShareEnded {
+            stop_sound: true,
+            error: None,
+        },
+    });
+    assert_eq!(
+        preview_frames(&fx),
+        vec![json!({ "stream_preview_url": null })]
+    );
+}
+
+#[test]
+fn a_share_that_ends_while_the_gateway_is_down_should_clear_its_still_on_resume() {
+    let (mut client, call) = sharing_call();
+    client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::SharePreview(STILL.into()),
+    });
+    client.gateway(GatewayEvent::Reconnecting {
+        attempt: 1,
+        offline: false,
+    });
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::ShareEnded {
+            stop_sound: true,
+            error: None,
+        },
+    });
+    assert!(preview_frames(&fx).is_empty(), "the gateway is down");
+    let fx = client.gateway(GatewayEvent::Resumed);
+    assert_eq!(
+        preview_frames(&fx),
+        vec![json!({ "stream_preview_url": null })]
+    );
+    // Once only.
+    assert!(preview_frames(&client.gateway(GatewayEvent::Resumed)).is_empty());
+}
+
+#[test]
+fn a_share_that_never_sent_a_still_should_end_without_a_clear() {
+    let (mut client, call) = sharing_call();
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::ShareEnded {
+            stop_sound: true,
+            error: None,
+        },
+    });
+    assert!(preview_frames(&fx).is_empty());
+}
+
+#[test]
+fn a_still_should_wait_for_a_live_share_and_fit_the_gateway() {
+    let mut client = Client::online();
+    let call = voice_call(&client.command(Command::JoinVoice(VOICE.into())));
+    client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Connected,
+    });
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::SharePreview(STILL.into()),
+    });
+    assert!(preview_frames(&fx).is_empty(), "not sharing");
+
+    let (mut client, call) = sharing_call();
+    let huge = format!("data:image/jpeg;base64,{}", "A".repeat(4096));
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::SharePreview(huge),
+    });
+    assert!(preview_frames(&fx).is_empty(), "the gateway would refuse it");
 }

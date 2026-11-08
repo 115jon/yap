@@ -37,6 +37,9 @@ pub struct StatsSample {
     pub jitter: f64,
     /// Round trip to the SFU, ms.
     pub rtt: f64,
+    /// When the tick was taken (the stats clock, ms), for the chart's
+    /// window and the samples table's ages (dither-chart-model.ts).
+    pub at_ms: u64,
 }
 
 /// What the voice details and streaming stats show.
@@ -51,6 +54,9 @@ pub struct VoiceStats {
     pub bitrate_kbps: f64,
     /// The SFU edge we talk to (remote candidate).
     pub server: String,
+    /// The call's room (`serverIdentifier`: the web shows its room slug,
+    /// stats-monitor.ts `getRoomSlug()`).
+    pub room: String,
     pub remote_tracks: u32,
     /// Our camera and share encodings.
     pub outbound_video: Vec<OutboundVideo>,
@@ -186,6 +192,7 @@ impl CallMachine {
             loss: tick_loss,
             jitter: stats.audio_jitter * 1000.0,
             rtt: rtt_ms.unwrap_or(0.0),
+            at_ms,
         };
         if previous.is_some() {
             if self.health.samples.len() == super::health::STATS_SAMPLES {
@@ -211,7 +218,17 @@ impl CallMachine {
             jitter_ms: sample.jitter,
             bitrate_kbps: bitrate,
             server: stats.server.clone(),
-            remote_tracks: stats.inbound_streams,
+            room: self.target.slug(),
+            // The web's `getPulledTracks().length` (stats-monitor.ts): the
+            // pulls with a transceiver, not the inbound-rtp count, which
+            // has no entry until a track's first packet arrives.
+            remote_tracks: u32::try_from(
+                self.tracks
+                    .pulls()
+                    .filter(|(_, p)| p.mid.is_some() && !p.parked)
+                    .count(),
+            )
+            .unwrap_or(u32::MAX),
             outbound_video: stats.outbound_video.clone(),
             inbound_video: stats.inbound_video.clone(),
             samples: self.health.samples.iter().copied().collect(),

@@ -13,6 +13,10 @@ import com.yap.native
 // Message). All are kept per Yap user id. A moderator also gets "Move to…"
 // (voice-move-targets.ts): the open server's other voice channels they may
 // move members into, when they may move members out of this one.
+// Our own (ContextMenu/LocalMenu.tsx), on our tile, the stage or our
+// floating stream: Profile, Mute, Deafen, Leave call, Copy user ID; on our
+// share: Stop streaming, Change stream, Stream quality, Share stream audio,
+// Always show stream preview and Leave call.
 MenuPanel {
     id: root
 
@@ -23,6 +27,15 @@ MenuPanel {
     // Their share in our call: its participant, and whether we watch it.
     property string shareParticipant: ""
     property bool shareWatched: false
+    // Our own menu, and whether it opened on our share (the anchor's
+    // `ownShare`: our share tile, the stage showing it, our floating
+    // stream), as the web passes `isStreaming` for a screen item.
+    readonly property bool local: userId.length > 0 && userId === Session.meId
+    property bool fromOwnShare: false
+    readonly property bool localPlain: local && !(fromOwnShare && Voice.sharing)
+    readonly property bool localShare: local && fromOwnShare && Voice.sharing
+    // useVoiceChannel availableQualities (the call panel's list).
+    readonly property var shareQualities: ["720p30", "720p60", "1080p30", "1080p60", "1440p30", "1440p60", "4k30", "4k60"]
     readonly property var calls: JSON.parse(Calls.view)
     readonly property var moveTargets: {
         const channels = calls.voiceChannels ?? []
@@ -62,6 +75,7 @@ MenuPanel {
         root.name = name
         root.channelId = channelId ?? ""
         root.anchorItem = anchor
+        root.fromOwnShare = anchor !== null && anchor.ownShare === true
         findShare()
         popup(anchor, x, y)
     }
@@ -70,9 +84,70 @@ MenuPanel {
 
     ClipboardText { id: clipboard }
 
-    readonly property bool sharing: shareParticipant.length > 0
+    readonly property bool sharing: !local && shareParticipant.length > 0
     readonly property bool watching: sharing && shareWatched
-    readonly property bool plain: !sharing
+    readonly property bool plain: !local && !sharing
+
+    // Our share (LocalMenu.tsx `isStreaming`).
+    MenuRow {
+        visible: root.localShare
+        height: visible ? implicitHeight : 0
+        text: qsTr("Stop streaming")
+        danger: true
+        trailingIcon: "streamOff"
+        onTriggered: Voice.stopShare()
+    }
+    MenuRow {
+        visible: root.localShare
+        height: visible ? implicitHeight : 0
+        text: qsTr("Change stream")
+        trailingIcon: "screenShare"
+        onTriggered: ShellState.changeShareSource()
+    }
+    MenuPanel {
+        id: qualityMenu
+        title: qsTr("Stream quality")
+        implicitWidth: 208
+        shown: root.localShare
+        Instantiator {
+            model: root.shareQualities
+            delegate: MenuChoice {
+                required property string modelData
+                // `q.replace("p", "p ")`; 4K spaced the same way (CallPanel).
+                text: /^4k(\d+)$/i.test(modelData) ? modelData.replace(/^4k/i, "4K ") : modelData.replace("p", "p ")
+                selected: Voice.shareQuality === modelData
+                onTriggered: Voice.changeShareQuality(modelData)
+            }
+            onObjectAdded: (index, object) => qualityMenu.insertItem(index, object)
+            onObjectRemoved: (index, object) => qualityMenu.removeItem(object)
+        }
+    }
+    MenuRow {
+        visible: root.localShare
+        height: visible ? implicitHeight : 0
+        text: qsTr("Share stream audio")
+        switchable: true
+        on: Voice.shareAudio
+        onTriggered: Voice.changeShareAudio(!Voice.shareAudio)
+    }
+    // LocalMenu.tsx 122-134: its own group, checked when on.
+    MenuRule { visible: root.localShare; height: visible ? implicitHeight : 0 }
+    MenuRow {
+        visible: root.localShare
+        height: visible ? implicitHeight : 0
+        text: qsTr("Always show stream preview")
+        switchable: true
+        on: Audio.alwaysShowStreamPreview
+        onTriggered: Audio.changeAlwaysShowStreamPreview(!Audio.alwaysShowStreamPreview)
+    }
+    MenuRule { visible: root.localShare; height: visible ? implicitHeight : 0 }
+    MenuRow {
+        visible: root.localShare
+        height: visible ? implicitHeight : 0
+        text: qsTr("Leave call")
+        danger: true
+        onTriggered: Voice.leave()
+    }
 
     MenuRow {
         visible: root.sharing
@@ -85,7 +160,7 @@ MenuPanel {
     }
     MenuRule { visible: root.sharing; height: visible ? implicitHeight : 0 }
     MenuRow {
-        visible: root.plain
+        visible: root.plain || root.localPlain
         height: visible ? implicitHeight : 0
         text: qsTr("Profile")
         onTriggered: ShellState.showFullProfile(root.userId, root.anchorItem)
@@ -96,7 +171,32 @@ MenuPanel {
         text: qsTr("Message")
         onTriggered: Nav.openDm(root.userId)
     }
-    MenuRule { visible: root.plain; height: visible ? implicitHeight : 0 }
+    MenuRule { visible: root.plain || root.localPlain; height: visible ? implicitHeight : 0 }
+    // Ours: Mute, Deafen, then Leave call (LocalMenu.tsx).
+    MenuRow {
+        visible: root.localPlain
+        height: visible ? implicitHeight : 0
+        text: qsTr("Mute")
+        switchable: true
+        on: Voice.muted
+        onTriggered: Voice.requestMute(!Voice.muted)
+    }
+    MenuRow {
+        visible: root.localPlain
+        height: visible ? implicitHeight : 0
+        text: qsTr("Deafen")
+        switchable: true
+        on: Voice.deafened
+        onTriggered: Voice.requestDeafen(!Voice.deafened)
+    }
+    MenuRule { visible: root.localPlain; height: visible ? implicitHeight : 0 }
+    MenuRow {
+        visible: root.localPlain
+        height: visible ? implicitHeight : 0
+        text: qsTr("Leave call")
+        danger: true
+        onTriggered: Voice.leave()
+    }
     VolumeSlider {
         visible: root.plain
         height: visible ? implicitHeight : 0
@@ -106,7 +206,7 @@ MenuPanel {
     }
     MenuRule { visible: root.plain; height: visible ? implicitHeight : 0 }
     MenuRow {
-        visible: !root.sharing || root.watching
+        visible: !root.local && (!root.sharing || root.watching)
         height: visible ? implicitHeight : 0
         text: qsTr("Mute")
         switchable: true
@@ -114,7 +214,7 @@ MenuPanel {
         onTriggered: Audio.setPeerMuted(root.userId, !Audio.peerMuted(root.userId))
     }
     MenuRow {
-        visible: !root.sharing || root.watching
+        visible: !root.local && (!root.sharing || root.watching)
         height: visible ? implicitHeight : 0
         text: qsTr("Mute soundboard")
         switchable: true
@@ -155,10 +255,10 @@ MenuPanel {
         value: Audio.peersRevision >= 0 ? Audio.peerAttenuationStrength(root.userId) : 50
         onMoved: Audio.setPeerAttenuationStrength(root.userId, Math.round(value))
     }
-    MenuRule { visible: !root.sharing || root.watching; height: visible ? implicitHeight : 0 }
+    MenuRule { visible: !root.localShare && (!root.sharing || root.watching); height: visible ? implicitHeight : 0 }
     MenuRow {
         id: copyRow
-        visible: root.plain
+        visible: root.plain || root.localPlain
         height: visible ? implicitHeight : 0
         text: qsTr("Copy user ID")
         // RemoteMenu.tsx ID_BADGE.

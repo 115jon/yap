@@ -154,6 +154,10 @@ pub struct VoiceSettings {
     pub screen_share_quality: String,
     /// The share picker's "Include audio".
     pub screen_share_with_audio: bool,
+    /// "Always show stream preview": our share's own preview keeps playing
+    /// while Yap isn't focused (stream-preview-automation.ts); off, it
+    /// pauses until Yap is focused again.
+    pub always_show_stream_preview: bool,
     /// What goes behind the camera's person.
     pub camera_background: CameraBackground,
     pub input_profile: InputProfile,
@@ -199,6 +203,7 @@ impl Default for VoiceSettings {
             always_preview_video: true,
             screen_share_quality: DEFAULT_SHARE_QUALITY.into(),
             screen_share_with_audio: true,
+            always_show_stream_preview: false,
             camera_background: CameraBackground::None,
             input_profile: InputProfile::Standard,
             noise_suppression: true,
@@ -442,6 +447,17 @@ mod tests {
             (&json["screenShareQuality"], &json["screenShareWithAudio"]),
             (&serde_json::json!("720p30"), &serde_json::json!(true))
         );
+    }
+
+    #[test]
+    fn always_show_stream_preview_should_default_off_under_the_web_name() {
+        // useVoiceSettingsStore.ts: `alwaysShowStreamPreview: false`.
+        let json = serde_json::to_value(VoiceSettings::default()).expect("json");
+        assert_eq!(json["alwaysShowStreamPreview"], serde_json::json!(false));
+        let on: VoiceSettings =
+            serde_json::from_value(serde_json::json!({ "alwaysShowStreamPreview": true }))
+                .expect("parses");
+        assert!(on.always_show_stream_preview);
     }
 
     #[test]
