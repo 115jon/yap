@@ -360,6 +360,115 @@ describe("yt-dlp YouTube helpers", () => {
     expect(resolved.selectedFormat?.itag).toBe(18);
   });
 
+  it("asks the visitor id endpoint once a minute at most when it fails", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = requestUrl(input);
+        urls.push(url);
+        if (url.startsWith(VISITOR_ID_URL)) {
+          return new Response("unavailable", { status: 503 });
+        }
+        return Response.json({
+          streamingData: {
+            formats: [
+              {
+                itag: 18,
+                url: "https://rr1---sn.example.googlevideo.com/videoplayback?itag=18",
+                mimeType: 'video/mp4; codecs="avc1.42001E, mp4a.40.2"',
+                bitrate: 503000,
+                audioQuality: "AUDIO_QUALITY_LOW",
+              },
+            ],
+          },
+        });
+      }),
+    );
+
+    await resolveYouTubePlayback("dQw4w9WgXcQ", { preferredKind: "audio" });
+    await resolveYouTubePlayback("dQw4w9WgXcQ", { preferredKind: "audio" });
+
+    expect(urls.filter((url) => url.startsWith(VISITOR_ID_URL))).toHaveLength(
+      1,
+    );
+  });
+
+  it("drops a refused visitor id without calling it a bot wall", async () => {
+    const visitorIds: Array<string | null> = [];
+    let visitorCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = requestUrl(input);
+        if (url.startsWith(VISITOR_ID_URL)) {
+          visitorCalls += 1;
+          return visitorIdAnswer();
+        }
+        const headers = new Headers(init?.headers);
+        if (headers.get("X-YouTube-Client-Name") === "101") {
+          visitorIds.push(headers.get("X-Goog-Visitor-Id"));
+          return Response.json({
+            ...BOT_WALL,
+            responseContext: { visitorData: "visitor-123" },
+          });
+        }
+        if (headers.get("X-YouTube-Client-Name") === "3") {
+          return Response.json({
+            streamingData: {
+              formats: [
+                {
+                  itag: 18,
+                  url: "https://rr1---sn.example.googlevideo.com/videoplayback?itag=18",
+                  mimeType: 'video/mp4; codecs="avc1.42001E, mp4a.40.2"',
+                  bitrate: 503000,
+                  audioQuality: "AUDIO_QUALITY_LOW",
+                },
+              ],
+            },
+          });
+        }
+        return Response.json({
+          playabilityStatus: { status: "ERROR", reason: "Video unavailable" },
+        });
+      }),
+    );
+
+    const first = await resolveYouTubePlayback("dQw4w9WgXcQ", {
+      preferredKind: "audio",
+    });
+    expect(first.selectedFormat?.itag).toBe(18);
+
+    // The refused id is not kept: the next resolve asks for a fresh one.
+    await resolveYouTubePlayback("dQw4w9WgXcQ", { preferredKind: "audio" });
+    expect(visitorCalls).toBe(2);
+    expect(visitorIds).toEqual(["visitor-123", "visitor-123"]);
+  });
+
+  it("does not call a refused visitor id YouTube's bot wall", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = requestUrl(input);
+        if (url.startsWith(VISITOR_ID_URL)) return visitorIdAnswer();
+        const client = new Headers(init?.headers).get("X-YouTube-Client-Name");
+        if (client === "101") return Response.json(BOT_WALL);
+        if (url.startsWith("https://www.youtube.com/youtubei/v1/player?")) {
+          return Response.json({
+            playabilityStatus: { status: "ERROR", reason: "Video unavailable" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    const error = await resolveYouTubePlayback("dQw4w9WgXcQ", {
+      preferredKind: "audio",
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(YouTubeBotCheckError);
+  });
+
   it("stops at YouTube's bot wall without asking the walled web pages too", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = requestUrl(input);

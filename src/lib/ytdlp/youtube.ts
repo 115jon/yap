@@ -278,28 +278,42 @@ let cachedWebInnertubeConfig: {
  */
 const VISITOR_DATA_TTL_MS = 6 * 60 * 60 * 1000;
 const VISITOR_ID_TIMEOUT_MS = 5_000;
+/** After the visitor id endpoint fails, resolves skip it for this long. */
+const VISITOR_ID_FAILURE_BACKOFF_MS = 60_000;
 
 let cachedVisitorData: { value: string; expiresAt: number } | null = null;
 let visitorDataInFlight: Promise<string | null> | null = null;
+let visitorDataFailedUntil = 0;
 
 export function __resetYouTubeInnertubeCacheForTests() {
   cachedWebInnertubeConfig = null;
   cachedVisitorData = null;
   visitorDataInFlight = null;
+  visitorDataFailedUntil = 0;
 }
 
 function rememberVisitorData(payload: unknown) {
   if (!isRecord(payload) || !isRecord(payload.responseContext)) return;
   const value = toStringValue(payload.responseContext.visitorData);
-  if (value && value.length <= 512) {
+  // YouTube echoes the id it was sent: only a new id restarts the clock.
+  if (value && value.length <= 512 && value !== cachedVisitorData?.value) {
     cachedVisitorData = { value, expiresAt: Date.now() + VISITOR_DATA_TTL_MS };
   }
+}
+
+/** Drop an id YouTube refused, so the next resolve asks for a fresh one. */
+function forgetVisitorData(value: string) {
+  if (cachedVisitorData?.value === value) cachedVisitorData = null;
 }
 
 async function getVisitorData(): Promise<string | null> {
   if (cachedVisitorData && cachedVisitorData.expiresAt > Date.now()) {
     return cachedVisitorData.value;
   }
+  // Ids live for months: past the TTL a stale one beats none, and a failing
+  // endpoint is not asked again on every resolve.
+  const stale = cachedVisitorData?.value ?? null;
+  if (Date.now() < visitorDataFailedUntil) return stale;
   visitorDataInFlight ??= (async () => {
     try {
       const response = await youtubeFetch(
@@ -318,14 +332,17 @@ async function getVisitorData(): Promise<string | null> {
           signal: AbortSignal.timeout(VISITOR_ID_TIMEOUT_MS),
         },
       );
-      if (!response.ok) return null;
-      rememberVisitorData(await response.json());
-      return cachedVisitorData?.value ?? null;
+      if (response.ok) rememberVisitorData(await response.json());
     } catch {
-      return null;
+      // Handled below as a failure.
     } finally {
       visitorDataInFlight = null;
     }
+    if (cachedVisitorData && cachedVisitorData.value !== stale) {
+      return cachedVisitorData.value;
+    }
+    visitorDataFailedUntil = Date.now() + VISITOR_ID_FAILURE_BACKOFF_MS;
+    return stale;
   })();
   return visitorDataInFlight;
 }
@@ -1071,9 +1088,21 @@ async function fetchPlayerResponseFromInnertube(
       }
 
       const payload = (await response.json()) as Record<string, unknown>;
+      const formatCount = getStreamFormats(payload).length;
+      if (attempt.needsVisitorData && visitorData && formatCount === 0) {
+        // This client's wall is about the visitor id, not the egress IP: drop
+        // the id, and keep its "not a bot" text out of the bot-wall verdict.
+        forgetVisitorData(visitorData);
+        diagnostics.push({
+          client: attempt.name,
+          httpStatus: response.status,
+          playability: "refused the visitor id",
+          formatCount,
+        });
+        continue;
+      }
       rememberVisitorData(payload);
       lastSuccessfulPayload = payload;
-      const formatCount = getStreamFormats(payload).length;
       diagnostics.push({
         client: attempt.name,
         httpStatus: response.status,
