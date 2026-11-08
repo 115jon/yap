@@ -150,7 +150,9 @@ async function fetchUpstreamIcon(
     // A bare request: no cookies, no auth, nothing forwarded from the client.
     response = await fetch(url, {
       method: "GET",
-      redirect: "error",
+      // Workers implement only "follow" and "manual" ("error" throws); a
+      // redirect comes back as a 3xx and is refused below.
+      redirect: "manual",
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
   } catch (error) {
