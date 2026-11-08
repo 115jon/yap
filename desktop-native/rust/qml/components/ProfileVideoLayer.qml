@@ -1,5 +1,6 @@
 import QtQuick
 import QtMultimedia
+import Yap.Chrome
 import Yap.Media
 import com.yap.native
 
@@ -60,6 +61,7 @@ Item {
         id: mp4Loader
         anchors.fill: parent
         active: !root.webm && root.source.length > 0 && root.playing && !Theme.reducedMotion
+            && Compat.mediaPlayback
         sourceComponent: Item {
             VideoOutput {
                 id: mp4Output

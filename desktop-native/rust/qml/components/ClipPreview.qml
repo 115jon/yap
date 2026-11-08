@@ -1,5 +1,6 @@
 import QtQuick
 import QtMultimedia
+import Yap.Chrome
 import Yap.Media
 import com.yap.native
 
@@ -58,8 +59,11 @@ Item {
     Loader {
         id: engine
         anchors.fill: parent
+        // An mp4 needs Media Foundation (Windows N without the Media
+        // Feature Pack has none): without it the clip stays as it is.
         active: root.source.length > 0 && !root.failed && root.visible
             && (root.webm || root.playing || root.still.length === 0)
+            && (root.webm || Compat.mediaPlayback)
         sourceComponent: root.webm ? webmEngine : mp4Engine
     }
 

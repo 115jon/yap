@@ -171,6 +171,7 @@ const QML: &[&str] = &[
     "qml/screens/Shell/CallPanel.qml",
     "qml/screens/Shell/CameraDialog.qml",
     "qml/screens/Shell/CameraLink.qml",
+    "qml/screens/Shell/CompatNoticeCard.qml",
     "qml/screens/Shell/CrashNoticeCard.qml",
     "qml/screens/Shell/DesktopLink.qml",
     "qml/screens/Shell/ChannelSidebar.qml",

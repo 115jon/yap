@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtMultimedia
+import Yap.Chrome
 import Yap.Media
 import com.yap.native
 
@@ -58,6 +59,9 @@ Item {
     // WebM plays through WebmPlayer; the API's private files through
     // AuthMedia's loopback relay; anything else by URL.
     readonly property bool webm: contentType === "video/webm" || /\.webm($|[?#])/i.test(source)
+    // Not WebM, and no Media Foundation to play it (Windows N without the
+    // Media Feature Pack): the poster, and a note once it is started.
+    readonly property bool unplayable: !webm && !Compat.mediaPlayback
 
     signal expandRequested(string source, int position)
     signal failed()
@@ -305,7 +309,7 @@ Item {
             // Hidden (a pooled row, another view): the player goes, so a
             // paused session costs nothing in the background.
             active: (root.started || root.warm || (root.preview && root.peekFrame.length === 0)) && !root.errored
-                && root.visible && !root.pooled
+                && root.visible && !root.pooled && !root.unplayable
             sourceComponent: root.webm ? webmEngine : mediaEngine
         }
 
@@ -464,9 +468,15 @@ Item {
         }
         Text {
             anchors.centerIn: parent
-            visible: root.errored && root.poster.length === 0 && !root.bare
+            width: Math.min(implicitWidth, parent.width - 24)
+            visible: !root.bare && ((root.errored && root.poster.length === 0)
+                || (root.unplayable && root.started && (!root.animated || root.poster.length === 0)))
             textFormat: Text.PlainText
-            text: qsTr("Media unavailable")
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+            style: Text.Outline
+            styleColor: "#000000"
+            text: root.unplayable ? qsTr("Playing this video needs the Media Feature Pack") : qsTr("Media unavailable")
             color: "#b4b4ba"
             font: Theme.type.captionStrong
         }

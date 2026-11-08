@@ -168,10 +168,16 @@ ApplicationWindow {
     // Toast actions and the taskbar thumbnail toolbar.
     DesktopLink {}
 
-    CrashNoticeCard {
+    // The notices, stacked at the bottom right: GPU safe mode, Media
+    // Foundation missing (cpp/compat.*), the last run's crash.
+    Column {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 16
+        spacing: 8
         z: 10
+        CompatNoticeCard { kind: "gpu" }
+        CompatNoticeCard { kind: "media" }
+        CrashNoticeCard {}
     }
 }

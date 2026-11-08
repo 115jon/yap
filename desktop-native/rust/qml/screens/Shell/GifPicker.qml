@@ -4,6 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Effects
 import QtQuick.Layouts
 import QtMultimedia
+import Yap.Chrome
 import Yap.Media
 import com.yap.native
 
@@ -738,7 +739,7 @@ Popup {
         Loader {
             anchors.fill: parent
             active: root.visible && root.mode === "categories" && (cell.media?.image ?? "").length === 0
-                && (cell.media?.video ?? "").length > 0
+                && (cell.media?.video ?? "").length > 0 && Compat.mediaPlayback
             sourceComponent: LoopVideo { source: cell.media.video }
         }
         MediaScrim { visible: cell.hasMedia }
@@ -1448,7 +1449,7 @@ Popup {
                                 id: clipLoader
                                 anchors.fill: parent
                                 active: tile.video.length > 0 && !tile.isClip && tile.preview.length === 0
-                                    && tile.inView && root.visible
+                                    && tile.inView && root.visible && Compat.mediaPlayback
                                 sourceComponent: LoopVideo {
                                     source: tile.video
                                 }
@@ -1580,7 +1581,9 @@ Popup {
                             root.clipFrame = false
                             clipPlayer.release()
                             const tile = root.clipPlaying
-                            if (!tile)
+                            // No Media Foundation (Windows N without the
+                            // Media Feature Pack): the tile keeps its still.
+                            if (!tile || !Compat.mediaPlayback)
                                 return
                             if (AuthMedia.needsAuth(tile.video)) {
                                 clipPlayer.leased = tile.video

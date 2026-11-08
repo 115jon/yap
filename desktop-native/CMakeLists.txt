@@ -50,6 +50,7 @@ qt_add_executable(YapNative WIN32
   cpp/animatedpicture.cpp cpp/animatedpicture.h
   cpp/authmedia.cpp cpp/authmedia.h
   cpp/camera.cpp cpp/camera.h
+  cpp/compat.cpp cpp/compat.h
   cpp/composerhighlighter.cpp cpp/composerhighlighter.h
   cpp/crashnotice.cpp cpp/crashnotice.h
   cpp/desktopshell.cpp cpp/desktopshell.h
@@ -57,6 +58,7 @@ qt_add_executable(YapNative WIN32
   cpp/heaptrace.cpp cpp/heaptrace.h
   cpp/iconprovider.cpp cpp/iconprovider.h
   cpp/logfile.cpp cpp/logfile.h
+  cpp/mediafoundation.cpp cpp/mediafoundation.h
   cpp/mediashell.cpp cpp/mediashell.h
   cpp/profile.cpp cpp/profile.h
   cpp/sampler.cpp cpp/sampler.h
@@ -122,6 +124,17 @@ if(WIN32)
   target_link_libraries(YapNative PRIVATE
     dwmapi comctl32 shell32 user32 advapi32 runtimeobject msdmo wmcodecdspuuid dmoguids crypt32 iphlpapi ole32 secur32
     winmm ws2_32 strmiids d3d11 gdi32 dxgi shcore userenv dbghelp mfplat mfuuid dwrite)
+  # Media Foundation is delay-loaded, so the exe starts on Windows N/KN
+  # without the Media Feature Pack, where these DLLs are missing (and
+  # dxva2/msdmo, which only Media Foundation code calls). Qt Multimedia's
+  # windows backend (static), the H.264 decoder and encoder and libwebrtc
+  # import them; cpp/mediafoundation.cpp decides at startup whether any of
+  # it may run, and its delay-load hooks answer any call that still comes
+  # with an E_NOTIMPL stub instead of the helper's 0xC06D007E exception.
+  target_link_libraries(YapNative PRIVATE delayimp)
+  target_link_options(YapNative PRIVATE
+    /DELAYLOAD:mfplat.dll /DELAYLOAD:mf.dll /DELAYLOAD:mfreadwrite.dll
+    /DELAYLOAD:evr.dll /DELAYLOAD:dxva2.dll /DELAYLOAD:msdmo.dll)
 endif()
 
 # Static Qt: pull in the QML plugins the UI imports.
