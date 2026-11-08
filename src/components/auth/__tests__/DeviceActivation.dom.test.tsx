@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   releaseDeviceRequest: vi.fn(),
   markAuthLogoutIntent: vi.fn(),
   endKovaBrowserSession: vi.fn(async () => undefined),
+  launchNativeApp: vi.fn(),
   auth: { isLoaded: true, isSignedIn: true },
 }));
 
@@ -46,6 +47,11 @@ vi.mock("@/lib/desktop-auth", () => ({
 
 vi.mock("@/lib/kova-sign-out", () => ({
   endKovaBrowserSession: mocks.endKovaBrowserSession,
+}));
+
+vi.mock("@/lib/native-app-link", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/native-app-link")>()),
+  launchNativeApp: mocks.launchNativeApp,
 }));
 
 vi.mock("@/lib/kova-auth-config", () => ({
@@ -237,6 +243,75 @@ describe("DeviceActivation", () => {
     expect(bars).toHaveLength(1);
     expect(bars[0]!.getAttribute("aria-hidden")).toBe("true");
     expect(bars[0]!.style.width).toBe("42%");
+  });
+
+  it("does not open any app for the Tauri desktop app", async () => {
+    mocks.getDeviceRequest.mockResolvedValue({ ok: true, request: REQUEST });
+    mocks.approveDeviceRequest.mockResolvedValue({
+      ok: true,
+      status: "approved",
+    });
+    render(<DeviceActivation initialCode="ABCD-EFGH" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Approve sign-in" }),
+    );
+    await screen.findByRole("heading", {
+      name: "You're signed in on Yap Desktop",
+    });
+    expect(mocks.launchNativeApp).not.toHaveBeenCalled();
+    expect(screen.queryByRole("link", { name: "Open Yap" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Open Yap here" })).toHaveAttribute(
+      "href",
+      "/chat",
+    );
+  });
+
+  it("opens the native app once, with the code and nothing else", async () => {
+    mocks.getDeviceRequest.mockResolvedValue({
+      ok: true,
+      request: {
+        ...REQUEST,
+        device: { label: "Yap Native", platform: "windows", hostname: "pc" },
+      },
+    });
+    mocks.approveDeviceRequest.mockResolvedValue({
+      ok: true,
+      status: "approved",
+    });
+    const view = render(<DeviceActivation initialCode="ABCD-EFGH" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Approve sign-in" }),
+    );
+    await screen.findByRole("heading", {
+      name: "You're signed in on Yap Native",
+    });
+    const link = "yap-native://signin?code=ABCD-EFGH";
+    expect(mocks.launchNativeApp).toHaveBeenCalledTimes(1);
+    expect(mocks.launchNativeApp).toHaveBeenCalledWith(link);
+    expect(screen.getByRole("link", { name: "Open Yap" })).toHaveAttribute(
+      "href",
+      link,
+    );
+    expect(screen.getByRole("link", { name: "Open Yap here" })).toHaveAttribute(
+      "href",
+      "/chat",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Opening the app.");
+    // A re-render does not ask the browser again.
+    view.rerender(<DeviceActivation initialCode="ABCD-EFGH" />);
+    expect(mocks.launchNativeApp).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not open the native app when it is denied", async () => {
+    mocks.getDeviceRequest.mockResolvedValue({
+      ok: true,
+      request: { ...REQUEST, device: { label: "Yap Native" } },
+    });
+    mocks.denyDeviceRequest.mockResolvedValue({ ok: true, status: "denied" });
+    render(<DeviceActivation initialCode="ABCD-EFGH" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Deny" }));
+    await screen.findByRole("heading", { name: "Sign-in denied" });
+    expect(mocks.launchNativeApp).not.toHaveBeenCalled();
   });
 
   it("denies", async () => {
