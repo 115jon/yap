@@ -247,10 +247,12 @@ Item {
     // A grouped row is at least 28 inside its padding: the web's hidden
     // gutter time (pt-1 over a 24 px line) holds it open, so follow-ups sit
     // 32 apart there (MessageItem.tsx).
+    // A header row is at least its avatar (mt-0.5, size-10): a message
+    // with no text, media or reactions keeps its avatar inside the row.
     // A call record is mt-2 and a py-1.5 line around its 32 px glyph box.
-    implicitHeight: isCall ? dividerHeight + 8 + 44
-        : Math.max(extras.y + extras.height
-        + (failedLine.visible ? failedLine.height + 2 : 0), grouped ? headerTop + 28 : 0) + 2 + footSlot.height
+    readonly property real contentBottom: Math.max(extras.y + extras.height
+        + (failedLine.visible ? failedLine.height + 2 : 0), headerTop + (grouped ? 28 : 2 + 40))
+    implicitHeight: isCall ? dividerHeight + 8 + 44 : contentBottom + 2 + footSlot.height
     opacity: dim ? 0.6 : 1
 
     // The row ground: a mention in accent-tint, hover tint-1.
@@ -856,7 +858,7 @@ Item {
 
     Loader {
         id: footSlot
-        y: extras.y + extras.height + (failedLine.visible ? failedLine.height + 2 : 0) + 2
+        y: root.contentBottom + 2
         width: parent.width
         height: item ? item.implicitHeight : 0
         active: root.foot !== null
