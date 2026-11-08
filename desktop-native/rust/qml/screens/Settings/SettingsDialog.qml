@@ -563,6 +563,7 @@ T.Popup {
         case "keybinds": return keybindsPanel
         case "appearance": return appearancePanel
         case "notifications": return notificationsPanel
+        case "games": return gamesPanel
         default: return desktopPanel
         }
     }
@@ -575,6 +576,7 @@ T.Popup {
     Component { id: appearancePanel; AppearancePanel {} }
     Component { id: notificationsPanel; NotificationsPanel {} }
     Component { id: desktopPanel; DesktopPanel {} }
+    Component { id: gamesPanel; GamesPanel {} }
 
     // Scrolls a landed row to the middle of the page (and to the top
     // otherwise), once its panel has laid out.

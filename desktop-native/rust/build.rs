@@ -16,6 +16,7 @@ const QML: &[&str] = &[
     "qml/components/DialogKey.qml",
     "qml/components/DisplayName.qml",
     "qml/components/Icon.qml",
+    "qml/components/GameLine.qml",
     "qml/components/GifFavoriteStar.qml",
     "qml/components/IconKey.qml",
     "qml/components/FieldPlate.qml",
@@ -200,6 +201,7 @@ const QML: &[&str] = &[
     "qml/screens/Shell/ProfileModal.qml",
     "qml/screens/Shell/ProfileMutuals.qml",
     "qml/screens/Shell/ProfilePopout.qml",
+    "qml/screens/Shell/ProfileGame.qml",
     "qml/screens/Shell/QuickSwitcher.qml",
     "qml/screens/Shell/ReactionDetailsDialog.qml",
     "qml/screens/Shell/ServerRail.qml",
@@ -236,6 +238,7 @@ const QML: &[&str] = &[
     "qml/screens/Settings/ConfirmStrip.qml",
     "qml/screens/Settings/CustomSoundsCard.qml",
     "qml/screens/Settings/DesktopPanel.qml",
+    "qml/screens/Settings/GamesPanel.qml",
     "qml/screens/Settings/DitherRule.qml",
     "qml/screens/Settings/KeybindsPanel.qml",
     "qml/screens/Settings/LegendPlate.qml",
@@ -294,6 +297,7 @@ fn main() {
         QmlFile::from("qml/theme/Theme.qml").singleton(true),
         QmlFile::from("qml/screens/Shell/ShellState.qml").singleton(true),
         QmlFile::from("qml/screens/Settings/SettingsNav.qml").singleton(true),
+        QmlFile::from("qml/components/GameClock.qml").singleton(true),
     ]);
     CxxQtBuilder::new_qml_module(QmlModule::new("com.yap.native").qml_files(files))
         .files([
@@ -307,6 +311,7 @@ fn main() {
             "src/desktop.rs",
             "src/extras.rs",
             "src/friends.rs",
+            "src/games.rs",
             "src/invites.rs",
             "src/models.rs",
             "src/panels.rs",

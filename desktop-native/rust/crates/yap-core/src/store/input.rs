@@ -229,6 +229,11 @@ pub enum Command {
     SaveProfile(Box<ProfileDraft>),
     /// The media filter level (`high`, `medium`, `low`, `off`).
     SetMediaFilter(String),
+    /// Settings → Privacy → "Share my activity".
+    SetShareActivity(bool),
+    /// What local game detection sees now (`None`: no game, detection off
+    /// or the game hidden). Sent to the gateway only when it changes.
+    SetGameActivity(Option<Box<yap_protocol::game_activity::GameActivity>>),
     /// Save the theme to the account (useAppearanceTheme `persistAppearance`):
     /// `sync` off clears the saved theme.
     SaveTheme {

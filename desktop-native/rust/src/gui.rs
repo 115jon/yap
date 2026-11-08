@@ -428,6 +428,7 @@ fn set_profile(mut profile: Pin<&mut Profile>, view: &ProfileView) {
     profile.as_mut().set_initials(q(&view.initials));
     profile.as_mut().set_presence(q(&view.presence));
     profile.as_mut().set_custom_status(q(&view.custom_status));
+    profile.as_mut().set_game(q(&view.game));
     profile.as_mut().set_pronouns(q(&view.pronouns));
     profile.as_mut().set_bio(q(&view.bio));
     profile.as_mut().set_banner(q(&view.banner));
@@ -553,6 +554,10 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             session.set_verification_url(q(&url));
         }
         ViewUpdate::Me(me) => set_me(session, &me),
+        ViewUpdate::MyGame { name, icon } => {
+            session.as_mut().set_me_game(q(&name));
+            session.set_me_game_icon(q(&icon));
+        }
         ViewUpdate::Connected(connected) => {
             scalars(|s| s.connected = connected);
             with::<Nav>(|nav| nav.set_connected(connected));

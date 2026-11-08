@@ -18,6 +18,7 @@ pub const EMOJI_FILE: &str = "emoji-prefs.json";
 pub const APPEARANCE_FILE: &str = "appearance.json";
 pub const SEARCH_FILE: &str = "search-recent.json";
 pub const TRUSTED_LINKS_FILE: &str = "trusted-links.json";
+pub const GAMES_FILE: &str = "games.json";
 
 /// The theme picked on this device (next-themes' `theme` key on the web):
 /// a theme id or `system`. App-wide, like the web's origin storage.
@@ -131,6 +132,84 @@ impl Default for DesktopSettings {
     }
 }
 
+/// Game detection's local choices (Settings > Registered games): whether it
+/// runs, the games never to show, the ones added by hand, and when each
+/// game was last seen running. Kept on this device only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct GamesPrefs {
+    /// Detect the game being played (on by default).
+    pub detection: bool,
+    /// Game keys (`app:<id>`, `exe:<file name>`, `steam:<id>`) never shown.
+    pub hidden: Vec<String>,
+    /// Programs the user registered as games, by executable.
+    pub added: Vec<AddedGame>,
+    /// Every game seen running, most recent first.
+    pub played: Vec<PlayedGame>,
+}
+
+impl Default for GamesPrefs {
+    fn default() -> Self {
+        Self {
+            detection: true,
+            hidden: Vec::new(),
+            added: Vec::new(),
+            played: Vec::new(),
+        }
+    }
+}
+
+/// A program added by hand: its executable's file name (lower case) and
+/// the name shown for it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AddedGame {
+    pub exe: String,
+    pub name: String,
+}
+
+/// A game seen running: its key, name, catalog icon path (our
+/// `/api/game-icons/...`, or empty) and when it last ran (epoch ms).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PlayedGame {
+    pub key: String,
+    pub name: String,
+    pub icon: String,
+    pub last_played: i64,
+}
+
+/// The most games remembered as played.
+pub const PLAYED_GAMES_MAX: usize = 200;
+
+impl GamesPrefs {
+    /// `key` ran at `at` (ms): it goes first, its name and icon updated.
+    pub fn played(&mut self, key: &str, name: &str, icon: &str, at: i64) {
+        self.played.retain(|game| game.key != key);
+        self.played.insert(
+            0,
+            PlayedGame {
+                key: key.to_owned(),
+                name: name.to_owned(),
+                icon: icon.to_owned(),
+                last_played: at,
+            },
+        );
+        self.played.truncate(PLAYED_GAMES_MAX);
+    }
+
+    pub fn is_hidden(&self, key: &str) -> bool {
+        self.hidden.iter().any(|hidden| hidden == key)
+    }
+
+    pub fn set_hidden(&mut self, key: &str, hidden: bool) {
+        self.hidden.retain(|k| k != key);
+        if hidden {
+            self.hidden.push(key.to_owned());
+        }
+    }
+}
+
 /// The main window's last normal rect (Qt's device-independent pixels) and
 /// whether it was maximized.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -214,6 +293,15 @@ pub fn save_window_state(dir: &Path, state: &WindowState) -> Result<(), CacheErr
     write(&dir.join(WINDOW_STATE_FILE), state)
 }
 
+/// Game detection's choices in `dir`; the defaults when missing or unreadable.
+pub fn load_games(dir: &Path) -> GamesPrefs {
+    read(&dir.join(GAMES_FILE)).unwrap_or_default()
+}
+
+pub fn save_games(dir: &Path, prefs: &GamesPrefs) -> Result<(), CacheError> {
+    write(&dir.join(GAMES_FILE), prefs)
+}
+
 /// The theme picked on this device; the default when missing or unreadable.
 pub fn load_appearance(dir: &Path) -> AppearancePrefs {
     read(&dir.join(APPEARANCE_FILE)).unwrap_or_default()
@@ -294,6 +382,25 @@ mod tests {
         assert!(save_app_file(dir.path(), "a/b.json", "{}").is_err());
         assert!(save_app_file(dir.path(), "x.json", "not json").is_err());
         assert!(load_app_file(dir.path(), "missing.json").is_none());
+    }
+
+    #[test]
+    fn games_prefs_should_round_trip_and_keep_the_newest_first() {
+        let dir = tempfile::tempdir().expect("dir");
+        let mut prefs = load_games(dir.path());
+        assert!(prefs.detection && prefs.played.is_empty());
+        prefs.played("app:1", "Celeste", "", 10);
+        prefs.played("app:2", "Hades", "", 20);
+        prefs.played("app:1", "Celeste", "/api/game-icons/1/x.png", 30);
+        prefs.set_hidden("app:2", true);
+        prefs.set_hidden("app:2", true);
+        save_games(dir.path(), &prefs).expect("save");
+        let back = load_games(dir.path());
+        assert_eq!(back, prefs);
+        assert_eq!(back.played[0].key, "app:1");
+        assert_eq!(back.played[0].last_played, 30);
+        assert_eq!(back.hidden, vec!["app:2".to_owned()]);
+        assert!(back.is_hidden("app:2") && !back.is_hidden("app:1"));
     }
 
     #[test]

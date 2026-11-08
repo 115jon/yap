@@ -342,6 +342,100 @@ voice sockets reconnect in place while the peer connection stays up.
 
 ---
 
+#### As built: game activity (2026-11-08)
+
+"Playing X", phase 2: the server, web and mobile side is phase 1
+(`packages/protocol/src/game-activity.ts`, `realtime/meeting-room/game-activity.ts`).
+The native client detects the game itself and reports it with op 43.
+
+- **Detection** (`crates/yap-games`, no Qt, no network). One thread
+  (`detector.rs`) keeps the answer and calls back only when it changes.
+  - A scan is a ToolHelp snapshot: pids and executable names, no process
+    opened. Only a pid not seen before, whose name the catalog lists (or
+    the user added), is opened, with
+    `PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE`, for its image path.
+    The handle stays open so the exit wakes the thread. Nothing reads
+    another process's memory or command line.
+  - Matching (`matcher.rs`) follows arRPC's `src/process/index.js`: the
+    lower-cased path with `/`, every suffix from the file name to the path
+    without its drive, each also with the first `64`, `.x64`, `x64` or `_64`
+    taken out; `>name` must equal the file name. Launchers and entries that
+    need `arguments` are dropped at load. Two rules of ours: a file name
+    several apps list (428 of them, `game.exe`, `hl2.exe`, ...) or a generic
+    one (`SHARED_NAMES`) matches only through an entry with its folders; and
+    a process that refuses the open (anti-cheat, elevated) matches only a
+    folderless, unshared name one app lists. The deepest entry wins.
+  - Ignored: launchers and their helpers (`IGNORED_PROCESSES`: Steam,
+    Epic, Battle.net, EA, Ubisoft, GOG, Riot), anything under `%WINDIR%`,
+    and Yap itself.
+  - Triggers: `SetWinEventHook(EVENT_SYSTEM_FOREGROUND, WINEVENT_OUTOFCONTEXT)`
+    (a scan 2 s after the first change, at most one per 2 s), Steam's
+    `HKCU\Software\Valve\Steam` `RunningAppID` through
+    `RegNotifyChangeKeyValue`, a game process's exit (its `SYNCHRONIZE`
+    handle in `MsgWaitForMultipleObjects`), and the poll: 20 s with no
+    game, 60 s while one runs. With several games running, the one most
+    recently in the foreground is reported.
+  - Steam: a `RunningAppID` the catalog lists through its Steam ids is that
+    app; one it does not is named from `appmanifest_<id>.acf` in the Steam
+    libraries (`steam:<id>`). A process match wins over Steam, and takes
+    the running Steam id when the app lists it.
+- **Catalog** (`catalog.rs`). The web's `game-catalog.json` (Discord's
+  detectable list, trimmed) read in one streaming pass into flat arrays:
+  one string arena, the apps, the executables and a sorted array of
+  file-name hashes. It is loaded on the first scan with detection on and
+  freed when detection is turned off. The exe bundles it gzipped
+  (`assets/games`, `tools/pack-game-catalog.mjs`; flate2 is linked
+  already). `refresh.rs` asks `{YAP_API_URL}/desktop/game-catalog.json` at
+  most daily with the last ETag (45 s after start, then hourly checks),
+  keeps a good body in the profile's `game-catalog.json` and hands it to
+  the detector; a failure or a body that does not parse (a page) keeps
+  what there is, and a cache older than the bundle loses to it.
+- **The store** (`store/reduce/games.rs`). `Presence::games` holds what
+  others play, as chat-reducer.ts `gameActivityByUserId` does: a
+  `PRESENCE_UPDATE` with `game_activity` sets or clears it, one without
+  leaves it, offline or invisible clears it; a `PRESENCE_LIST` rebuilds it
+  (an entry without the field keeps what was known). Ours
+  (`Command::SetGameActivity` from the detector) is shown as others would
+  see it: nothing while "Share my activity" (`share_activity` from
+  users/me, `USER_PROFILE_UPDATE`, Settings > Privacy) is off or we are
+  invisible. `sync_activity` runs after every input and sends op 43 only
+  when that changes; Ready and Resumed restate it (`null` too) once
+  anything was sent; a drop forgets what the socket was told.
+- **The gate.** The deployed gateway answers an op it does not know with an
+  Error frame (4001, `unknownOpcodeError`) and keeps the socket, and the
+  client only logs Error frames, so a stray op 43 would not loop. Still,
+  op 43 goes only to a server that says it takes it: `ActivityState::server`
+  is set when the last `PRESENCE_LIST` entries carry `game_activity` (the
+  phase 1 gateway always sends the field, `null` included; older ones never
+  do, and the list arrives before Ready and after Resumed). A list without
+  it turns sending off again. `YAP_GAME_ACTIVITY_SEND=off` never sends.
+- **The UI.** Rows (MemberEntry, DmRow, FriendRow, the account row) show
+  `GameLine.qml`, "Playing **Name**" with the 16 px icon, in the custom
+  status's place, and never tick. Profile cards show `ProfileGame.qml`
+  with the 40 px icon and the elapsed time from the one `GameClock`
+  singleton, which runs only while a card that shows a game is visible.
+  Icons are our `/api/game-icons/{app}/{hash}.png` through the image
+  loader, else the Phosphor gamepad. Settings > App > Registered games
+  (`GamesPanel.qml`, the `Games` QObject in `src/games.rs`): the detection
+  switch, the games seen (last played, Hide) and Add it from the programs
+  with a window, in the profile's `games.json` (yap-cache `GamesPrefs`).
+- **Cost** (this PC: 24 threads, about 600 processes; `probe`):
+  - The catalog: 628 KiB gzipped in the exe (the exe grew by 1,023,488
+    bytes with the code and QML); loaded in 28-30 ms; 1,465 KiB kept on
+    the heap, 2,816 KiB at the peak of the load.
+  - A scan with nothing new: 13-16 ms, nearly all of it the ToolHelp
+    snapshot (the kernel walks every thread of every process). At the
+    20 s poll that is 0.08 % of one core, 0.003 % of the machine; over
+    600 s (30 scans, the catalog load included) the thread used 547 ms,
+    0.09 % of one core, 0.004 % of all 24. Foreground changes add at most
+    one scan per 2 s while someone switches windows.
+  - Opens: 104 in 600 s, all `QUERY_LIMITED_INFORMATION | SYNCHRONIZE`,
+    of short-lived processes whose names some catalog entry lists.
+- **Tests.** `cargo test -p yap-games` (matcher, catalog, refresh, the
+  test switch), `cargo test -p yap-core --test games` (presence, sending
+  on change, the restate, sharing off, invisible, the gate).
+  `YAP_TEST_GAME_PROCESSES` stands in for the process list end to end.
+
 ### 4. Local snapshot cache and parallel boot (instant startup)
 
 **Evidence**

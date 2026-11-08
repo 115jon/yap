@@ -83,7 +83,10 @@ pub fn start(sink: Sink) -> bool {
     );
     let _ = tx.send(Command::Start);
     test_switches(&tx);
-    COMMANDS.set(tx).is_ok()
+    let started = COMMANDS.set(tx).is_ok();
+    // Game detection reports through the command channel above.
+    crate::games::start();
+    started
 }
 
 /// `YAP_TEST_SWITCHES` (tests): a script of navigation commands sent on

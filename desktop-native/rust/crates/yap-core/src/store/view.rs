@@ -6,6 +6,7 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::hash::Hash;
 
+use yap_protocol::game_activity::GameActivity;
 use yap_protocol::rest::{Channel, ChannelType, DmChannel, Member, Message, Role, Server, User};
 
 use std::collections::HashMap;
@@ -372,6 +373,10 @@ rows! {
         /// `online`, `idle`, `dnd` or `offline`.
         presence: String => Presence "presence",
         custom_status: String => CustomStatus "customStatus",
+        /// What they are playing (shown in the custom status's place), or
+        /// empty; its icon (absolute, our `/api/game-icons` path) or empty.
+        game: String => Game "game",
+        game_icon: String => GameIcon "gameIcon",
         /// Newer messages than the read mark (never the open one).
         unread: bool => Unread "unread",
         /// Unread DM, mention and reply notifications (DMListPanel.tsx).
@@ -399,6 +404,9 @@ rows! {
         initials: String => Initials "initials",
         presence: String => Presence "presence",
         custom_status: String => CustomStatus "customStatus",
+        /// What they are playing, or empty, and its icon (absolute) or empty.
+        game: String => Game "game",
+        game_icon: String => GameIcon "gameIcon",
         /// The highest role's colour (`#rrggbb`) for online members, else empty.
         color: String => Color "roleColor",
         online: bool => Online "online",
@@ -709,6 +717,9 @@ pub struct ProfileView {
     pub initials: String,
     pub presence: String,
     pub custom_status: String,
+    /// What they are playing ("Playing a game"), as JSON `{name, icon,
+    /// details, state, startedAt}` ([`game_json`]), or empty.
+    pub game: String,
     pub pronouns: String,
     pub bio: String,
     /// The banner picture (absolute), or empty.
@@ -1102,6 +1113,10 @@ pub struct SettingsView {
     /// The level being saved, if one is.
     pub media_filter_saving: String,
     pub media_filter_error: String,
+    /// "Share my activity" (on when the account has no say yet).
+    pub share_activity: bool,
+    pub share_activity_saving: bool,
+    pub share_activity_error: String,
     pub revoking_share: String,
     /// (share id, error copy) of the last failed revoke.
     pub share_error: (String, String),
@@ -1125,6 +1140,12 @@ pub enum ViewUpdate {
         offline: bool,
     },
     Me(MeView),
+    /// What we are playing as others see it (empty when nothing is shown:
+    /// not playing, sharing off or invisible), and its icon (absolute).
+    MyGame {
+        name: String,
+        icon: String,
+    },
     ActiveServer {
         id: String,
         name: String,
@@ -1281,6 +1302,40 @@ pub(super) fn avatar_url(
     display: Option<&serde_json::Value>,
 ) -> String {
     crate::collectibles::with_avatar_crop(absolute_url(api_base, url), display)
+}
+
+/// What someone is playing, for a row's line, or empty.
+pub(super) fn game_name(presence: &Presence, user_id: &str) -> String {
+    presence
+        .game_of(user_id)
+        .map(|game| game.name.clone())
+        .unwrap_or_default()
+}
+
+/// The icon of what someone is playing (absolute), or empty.
+pub(super) fn game_icon(presence: &Presence, user_id: &str, api_base: &str) -> String {
+    presence
+        .game_of(user_id)
+        .and_then(|game| game.icon_url.as_deref())
+        .map(|icon| absolute_url(api_base, Some(icon)))
+        .unwrap_or_default()
+}
+
+/// The profile card's "Playing a game" (GameActivityCard): `{name, icon,
+/// details, state, startedAt}`, the icon absolute or empty.
+pub fn game_json(game: &GameActivity, api_base: &str) -> String {
+    serde_json::json!({
+        "name": game.name,
+        "icon": game
+            .icon_url
+            .as_deref()
+            .map(|icon| absolute_url(api_base, Some(icon)))
+            .unwrap_or_default(),
+        "details": game.details.clone().unwrap_or_default(),
+        "state": game.state.clone().unwrap_or_default(),
+        "startedAt": game.started_at,
+    })
+    .to_string()
 }
 
 pub(super) fn absolute_url(api_base: &str, url: Option<&str>) -> String {
@@ -2179,6 +2234,8 @@ pub(super) fn dm_rows(
                     .of_recipient(&user.id, user.status.as_deref())
                     .to_owned(),
                 custom_status: presence.custom_status(&user.id, user.custom_status.as_deref()),
+                game: game_name(presence, &user.id),
+                game_icon: game_icon(presence, &user.id, api_base),
                 unread: badge.unread,
                 mentions: badge.mentions,
                 rail: rank,
@@ -2227,6 +2284,8 @@ fn label_row(id: String, name: &str, count: usize, online: bool) -> MemberListRo
         initials: String::new(),
         presence: String::new(),
         custom_status: String::new(),
+        game: String::new(),
+        game_icon: String::new(),
         color: String::new(),
         online,
         owner: false,
@@ -2306,6 +2365,8 @@ fn member_row(m: &Member, online: bool, ctx: &MemberContext<'_>) -> MemberListRo
         custom_status: ctx
             .presence
             .custom_status(&user.id, user.custom_status.as_deref()),
+        game: game_name(ctx.presence, &user.id),
+        game_icon: game_icon(ctx.presence, &user.id, ctx.api_base),
         color: m
             .highest_role()
             .filter(|_| online)
@@ -2443,6 +2504,10 @@ pub(super) fn profile_view(
         initials: initials(name),
         presence: presence.of(&user.id, user.status.as_deref()).to_owned(),
         custom_status: presence.custom_status(&user.id, user.custom_status.as_deref()),
+        game: presence
+            .game_of(&user.id)
+            .map(|game| game_json(game, api_base))
+            .unwrap_or_default(),
         pronouns: trimmed(&user.pronouns),
         bio: trimmed(&user.bio),
         banner: match user.banner_url.as_deref() {

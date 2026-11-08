@@ -28,7 +28,8 @@ Rectangle {
     readonly property string removeLabel: person.kind === "friend" ? qsTr("Remove friend")
         : person.kind === "incoming" ? qsTr("Ignore") : qsTr("Cancel")
 
-    height: person.statusLine.length > 0 ? 40 : Theme.treeRow
+    readonly property string game: person.game ?? ""
+    height: person.statusLine.length > 0 || game.length > 0 ? 40 : Theme.treeRow
     radius: Theme.radius
     color: hover.hovered ? Theme.tint1 : "transparent"
     Behavior on color { ColorAnimation { duration: Theme.dur1 } }
@@ -82,9 +83,19 @@ Rectangle {
             EaseColor on color {}
             font: Theme.type.row
         }
+        // What they play takes the custom status's line (GameActivity.tsx).
+        Loader {
+            width: parent.width
+            active: row.game.length > 0
+            visible: active
+            sourceComponent: GameLine {
+                game: row.game
+                icon: row.person.gameIcon ?? ""
+            }
+        }
         Text {
             width: parent.width
-            visible: row.person.statusLine.length > 0
+            visible: row.game.length === 0 && row.person.statusLine.length > 0
             textFormat: Text.PlainText
             text: row.person.statusLine
             elide: Text.ElideRight

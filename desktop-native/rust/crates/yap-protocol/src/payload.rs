@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::game_activity::GameActivity;
 use crate::opcode::GatewayCloseCode;
 use crate::rest::IceServer;
 
@@ -164,6 +165,11 @@ pub struct PresenceUpdateEvent {
     /// Where they are signed in now; absent leaves the known ones.
     #[serde(default)]
     pub platforms: Option<Vec<String>>,
+    /// What they are playing, as this viewer may see it: absent leaves it
+    /// unchanged, `null` (or an invalid value) clears it. Boxed: most
+    /// updates carry none, and the event rides in every dispatch enum.
+    #[serde(default, deserialize_with = "crate::game_activity::present_activity")]
+    pub game_activity: Option<Option<Box<GameActivity>>>,
 }
 
 /// One connected user in a [`PresenceList`].
@@ -175,6 +181,10 @@ pub struct PresenceEntry {
     pub custom_status: Option<Option<String>>,
     #[serde(default)]
     pub platforms: Option<Vec<String>>,
+    /// Absent from servers that predate game activity; `null` when there
+    /// is none to show this viewer.
+    #[serde(default, deserialize_with = "crate::game_activity::present_activity")]
+    pub game_activity: Option<Option<GameActivity>>,
 }
 
 /// `PRESENCE_LIST` dispatch data (after every channel subscribe): everyone
@@ -270,6 +280,9 @@ pub struct UserProfileUpdate {
     /// Sent only to the user's own sessions.
     #[serde(default, deserialize_with = "present")]
     pub media_content_filter: Option<Option<String>>,
+    /// "Share my activity", sent only to the user's own sessions.
+    #[serde(default)]
+    pub share_activity: Option<bool>,
     /// The serialized avatar display (crop and collectibles), as stored.
     #[serde(default, deserialize_with = "present")]
     pub avatar_display: Option<Option<Value>>,
@@ -313,6 +326,9 @@ impl UserProfileUpdate {
         }
         if let Some(sync) = &self.theme_sync_enabled {
             user.theme_sync_enabled = Some(sync.clone());
+        }
+        if let Some(share) = self.share_activity {
+            user.share_activity = Some(share);
         }
         if let Some(display) = &self.avatar_display {
             user.avatar_display.clone_from(display);

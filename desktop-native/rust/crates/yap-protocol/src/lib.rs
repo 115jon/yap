@@ -8,6 +8,7 @@
 
 pub mod collectibles;
 pub mod frame;
+pub mod game_activity;
 pub mod opcode;
 pub mod payload;
 pub mod rest;

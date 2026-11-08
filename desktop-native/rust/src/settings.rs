@@ -62,6 +62,10 @@ pub mod qobject {
         #[qproperty(i32, profile_saved, cxx_name = "profileSaved")]
         #[qproperty(QString, media_filter_saving, cxx_name = "mediaFilterSaving")]
         #[qproperty(QString, media_filter_error, cxx_name = "mediaFilterError")]
+        /// "Share my activity", its save in flight and its error copy.
+        #[qproperty(bool, share_activity, cxx_name = "shareActivity")]
+        #[qproperty(bool, share_activity_saving, cxx_name = "shareActivitySaving")]
+        #[qproperty(QString, share_activity_error, cxx_name = "shareActivityError")]
         #[qproperty(QString, revoking_share, cxx_name = "revokingShare")]
         #[qproperty(QString, share_error_id, cxx_name = "shareErrorId")]
         #[qproperty(QString, share_error, cxx_name = "shareError")]
@@ -137,6 +141,11 @@ pub mod qobject {
         #[cxx_name = "changeMediaFilter"]
         fn change_media_filter(self: &Settings, level: &QString);
 
+        /// Settings > Privacy > "Share my activity".
+        #[qinvokable]
+        #[cxx_name = "shareMyActivity"]
+        fn share_my_activity(self: &Settings, on: bool);
+
         /// Picks a theme on this device (and on the account when synced).
         #[qinvokable]
         #[cxx_name = "chooseTheme"]
@@ -203,6 +212,9 @@ pub struct SettingsRust {
     profile_saved: i32,
     media_filter_saving: QString,
     media_filter_error: QString,
+    share_activity: bool,
+    share_activity_saving: bool,
+    share_activity_error: QString,
     revoking_share: QString,
     share_error_id: QString,
     share_error: QString,
@@ -374,6 +386,10 @@ fn apply(mut object: Pin<&mut qobject::Settings>, view: &SettingsView) {
         .set_media_filter_saving(q(&view.media_filter_saving));
     o.as_mut()
         .set_media_filter_error(q(&view.media_filter_error));
+    o.as_mut().set_share_activity(view.share_activity);
+    o.as_mut().set_share_activity_saving(view.share_activity_saving);
+    o.as_mut()
+        .set_share_activity_error(q(&view.share_activity_error));
     o.as_mut().set_revoking_share(q(&view.revoking_share));
     o.as_mut().set_share_error_id(q(&view.share_error.0));
     o.set_share_error(q(&view.share_error.1));
@@ -563,6 +579,10 @@ impl qobject::Settings {
 
     pub fn change_media_filter(&self, level: &QString) {
         client::command(Command::SetMediaFilter(level.to_string()));
+    }
+
+    pub fn share_my_activity(&self, on: bool) {
+        client::command(Command::SetShareActivity(on));
     }
 
     pub fn choose_theme(mut self: Pin<&mut Self>, theme: &QString) {

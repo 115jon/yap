@@ -23,6 +23,9 @@ Item {
     required property string initials
     required property string presence
     required property string customStatus
+    // What they are playing (in the custom status's place), and its icon.
+    required property string game
+    required property string gameIcon
     required property string roleColor
     // Light themes darken it (styles.css .rm-role-name).
     readonly property color roleInk: roleColor.length > 0 ? Theme.roleName(roleColor) : Theme.ink2
@@ -195,9 +198,19 @@ Item {
                     }
                 }
             }
+            // What they play takes the custom status's line (GameActivity.tsx).
+            Loader {
+                width: parent.width
+                active: root.game.length > 0
+                visible: active
+                sourceComponent: GameLine {
+                    game: root.game
+                    icon: root.gameIcon
+                }
+            }
             Text {
                 width: parent.width
-                visible: root.customStatus.length > 0
+                visible: root.game.length === 0 && root.customStatus.length > 0
                 textFormat: Text.PlainText
                 text: root.customStatus
                 elide: Text.ElideRight

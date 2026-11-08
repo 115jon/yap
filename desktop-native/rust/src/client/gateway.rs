@@ -74,7 +74,13 @@ pub async fn run(
     loop {
         tokio::select! {
             out = outgoing.recv() => match out {
-                Some(text) => connection.send(text),
+                Some(text) => {
+                    // Our game activity (op 43) is logged when it leaves.
+                    if text.starts_with(r#"{"op":43,"#) {
+                        eprintln!("[games] op 43 sent");
+                    }
+                    connection.send(text)
+                }
                 None => return,
             },
             event = rx.recv() => {

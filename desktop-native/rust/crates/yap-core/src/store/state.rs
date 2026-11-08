@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use yap_cache::Snapshot;
+use yap_protocol::game_activity::GameActivity;
 use yap_protocol::rest::Reaction;
 use yap_protocol::rest::{Category, Channel, ChannelType, ChannelsResponse, Message, MessagePatch};
 use yap_protocol::rest::{
@@ -757,6 +758,9 @@ pub struct SettingsState {
     /// (level being saved, the level before it).
     pub media_filter_saving: Option<(String, Option<String>)>,
     pub media_filter_error: String,
+    /// "Share my activity" being saved: the value before it.
+    pub share_activity_saving: Option<Option<bool>>,
+    pub share_activity_error: String,
     pub revoking_share: Option<String>,
     pub share_error: (String, String),
 }
@@ -773,6 +777,7 @@ pub(super) struct SettingsPending {
     pub theme: Option<RequestId>,
     pub media_filter: Option<RequestId>,
     pub revoke: Option<RequestId>,
+    pub share_activity: Option<RequestId>,
 }
 
 /// The request id each slot is waiting for. A result for any other id is stale.
@@ -989,6 +994,10 @@ pub struct Presence {
     /// User id → where they are signed in, as presence last said
     /// (chat-reducer.ts `presencePlatformsByUserId`).
     pub platforms: HashMap<String, Vec<String>>,
+    /// User id → what they are playing (chat-reducer.ts
+    /// `gameActivityByUserId`): absent when not playing, offline, invisible
+    /// or not sharing. Ours is what we report, not what the server echoes.
+    pub games: HashMap<String, GameActivity>,
 }
 
 /// The platforms presence names, known ones only, in the indicators'
@@ -1045,6 +1054,11 @@ impl Presence {
         presence_platforms(list).join(",")
     }
 
+    /// What they are playing, if anything is shown.
+    pub fn game_of(&self, user_id: &str) -> Option<&GameActivity> {
+        self.games.get(user_id)
+    }
+
     /// The live custom status when an update carried one, else `fallback`.
     pub fn custom_status(&self, user_id: &str, fallback: Option<&str>) -> String {
         let value = match self.custom.get(user_id) {
@@ -1053,6 +1067,26 @@ impl Presence {
         };
         value.unwrap_or_default().trim().to_owned()
     }
+}
+
+/// Our own game activity, and what the global gateway was told of it
+/// (op 43, chat-gateway.ts `setGameActivity`). The server drops a socket's
+/// activity when it closes, so every Ready and Resumed restates it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct ActivityState {
+    /// What local detection reports now, before sharing and invisible apply.
+    pub own: Option<GameActivity>,
+    /// The server takes op 43: its last `PRESENCE_LIST` entries carried
+    /// `game_activity` (servers that predate it never send the field, and
+    /// answer an unknown op with an Error frame).
+    pub server: bool,
+    /// Op 43 may be sent at all (`YAP_GAME_ACTIVITY_SEND=off` turns it off).
+    pub enabled: bool,
+    /// What this socket was last sent; `None` since the last Ready, Resumed
+    /// or drop.
+    pub sent: Option<Option<GameActivity>>,
+    /// An activity was sent once: Ready and Resumed restate it, null too.
+    pub used: bool,
 }
 
 /// The sign-in chain (me + servers, then channels, then the first page).
@@ -1133,6 +1167,7 @@ pub struct State {
     /// DM channels, newest first (as `/api/dms` sorts them; new ones go on top).
     pub(super) dms: Vec<DmChannel>,
     pub(super) presence: Presence,
+    pub(super) activity: ActivityState,
     /// The user whose popout is open, and their full profile once fetched.
     pub(super) profile: Option<(String, Option<User>)>,
     /// Full profiles fetched this session (a popout, or a hover's
@@ -1280,6 +1315,10 @@ impl State {
             home: false,
             dms: Vec::new(),
             presence: Presence::default(),
+            activity: ActivityState {
+                enabled: true,
+                ..ActivityState::default()
+            },
             profile: None,
             profile_cache: HashMap::new(),
             profile_mutuals: None,
@@ -1346,6 +1385,13 @@ impl State {
     /// default).
     pub fn with_voice_standby(mut self, enabled: bool) -> Self {
         self.standby_enabled = enabled;
+        self
+    }
+
+    /// Whether op 43 (our game activity) may go to a server that takes it
+    /// (`YAP_GAME_ACTIVITY_SEND=off`: never).
+    pub fn with_activity_send(mut self, enabled: bool) -> Self {
+        self.activity.enabled = enabled;
         self
     }
 

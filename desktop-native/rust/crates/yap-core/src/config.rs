@@ -21,6 +21,10 @@ pub struct Config {
     /// Hidden standby sessions on occupied voice landings, as on the web;
     /// `YAP_VOICE_STANDBY=off` turns them off.
     pub voice_standby: bool,
+    /// Our game activity (op 43) may go to a gateway that takes it;
+    /// `YAP_GAME_ACTIVITY_SEND=off` never sends it. Either way it is sent
+    /// only to a server whose presence carries `game_activity`.
+    pub activity_send: bool,
 }
 
 fn env_or(name: &str, default: &str) -> String {
@@ -48,6 +52,8 @@ pub fn get() -> &'static Config {
             ),
             dev_token: std::env::var("YAP_TOKEN").ok().filter(|v| !v.is_empty()),
             voice_standby: !std::env::var("YAP_VOICE_STANDBY")
+                .is_ok_and(|v| v.trim().eq_ignore_ascii_case("off")),
+            activity_send: !std::env::var("YAP_GAME_ACTIVITY_SEND")
                 .is_ok_and(|v| v.trim().eq_ignore_ascii_case("off")),
         }
     })

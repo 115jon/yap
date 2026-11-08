@@ -135,7 +135,8 @@ fn nav_groups_should_list_the_web_panels_in_order() {
             "keybinds",
             "appearance",
             "notifications",
-            "desktop"
+            "desktop",
+            "games"
         ]
     );
 }

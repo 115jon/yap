@@ -29,6 +29,7 @@ Claims marked UNVERIFIED were not checked against this build.
 | Call audio    | Own path (§11): WASAPI mic and speaker, libwebrtc's standalone APM, `nnnoiseless` 0.5.2 for RNNoise, our per-track stereo mix                          | libwebrtc's ADM (mixed playout, no hook after its APM)                              |
 | Share encode  | Media Foundation hardware H.264 MFT into libwebrtc's pre-encoded pass-through (§12); VP8 without one                                                   | vendor SDKs, OpenH264                                                               |
 | Backgrounds   | MediaPipe selfie segmenter as ONNX on ONNX Runtime 1.24.4 DirectML (`ort` rc.12, loaded at run time), own compositor (§12)                             | tract, MediaPipe C API                                                              |
+| Game catalog  | `yap-games`: the web's catalog JSON parsed into a flat index, gzipped in the exe with `flate2` (linked already), Win32 through `windows-sys` (§15)     | `sysinfo` for processes                                                             |
 | Qt            | Keep 6.6.3 for the parity sprint. Build a static **Qt 6.12 LTS** (6.12.1 is due 2026-11-12) in parallel, then switch                                   | Stay on 6.6.3 (EOL, no fixes)                                                       |
 
 ## 1. Fonts
@@ -1348,3 +1349,22 @@ which was in use), a real Windows N install, the decoders' restart on a new
 shared device during a call with H.264 video (no call was made), a chat
 mp4 under `YAP_TEST_NO_MF` (the test channel has none), and the threaded
 render loop's restart.
+
+## 15. Game detection (`yap-games`, 2026-11-08)
+
+What the detector needs is small: process ids and names, one image path
+per candidate, the foreground window, a registry value and a JSON file.
+No new third-party crate came in for it.
+
+| need              | pick                                                                                                                             | not picked                                                                                                                                                                                                                                                       |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| process list      | `windows-sys` 0.61 (in the tree): `CreateToolhelp32Snapshot`, `Process32FirstW`/`NextW`: 13-15 ms a call with 626 processes here | `sysinfo`: opens every process on each refresh. `NtQuerySystemInformation(SystemProcessInformation)` into a reused buffer: 8.1 ms, our session only (class 53) 6.4 ms, both with a 2 MB buffer; the kernel's walk of every thread is most of the cost either way |
+| image path, exit  | `OpenProcess(QUERY_LIMITED_INFORMATION \| SYNCHRONIZE)`, `QueryFullProcessImageNameW`, the handle in `MsgWaitForMultipleObjects` | `RegisterWaitForSingleObject` (a thread-pool callback; the detector already waits on its own handles)                                                                                                                                                            |
+| foreground, Steam | `SetWinEventHook` out of context, `RegNotifyChangeKeyValue` (both `windows-sys`)                                                 | polling `GetForegroundWindow`                                                                                                                                                                                                                                    |
+| matching rules    | arRPC's `src/process/index.js`, ported (`matcher.rs`)                                                                            | running arRPC (Node, and it reads command lines)                                                                                                                                                                                                                 |
+| catalog parse     | `serde_json` streaming into flat arrays (one pass, no `Value` tree)                                                              | `serde_json::Value` (a tree several times the file), `simd-json`                                                                                                                                                                                                 |
+| bundled snapshot  | gzip -9 through `flate2` 1.1 (already linked by `png` and velopack): 628 KiB in the exe                                          | xz (lzma-rs): 516 KiB, but a decoder the exe does not have                                                                                                                                                                                                       |
+
+The probe (`cargo run --release -p yap-games --example probe [s]`) prints
+the catalog's load time and heap and the detector's CPU over the real
+process list, counts only.

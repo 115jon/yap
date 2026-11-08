@@ -96,7 +96,7 @@ pub const NAV_GROUPS: &[NavGroup] = &[
     },
     NavGroup {
         title: "App",
-        ids: &["appearance", "notifications", "desktop"],
+        ids: &["appearance", "notifications", "desktop", "games"],
     },
 ];
 
@@ -225,9 +225,28 @@ pub const PANELS: &[PanelDef] = &[
         title: "Privacy & safety",
         icon: "privacy",
         headline: "What you see and what you share.",
-        blurb: "The media you see, and the messages you've shared publicly.",
+        blurb: "What others see you playing, the media you see, and the messages you've shared publicly.",
         rail_rows: &[],
         sections: &[
+            section(
+                "activity",
+                "Activity",
+                "The game you're playing: its name, icon and how long you've been playing.",
+                &[row(
+                    "share-activity",
+                    "Share my activity",
+                    "Show what you're playing to people who share a server, a DM or a friendship with you. Invisible always hides it.",
+                    &[
+                        "activity",
+                        "game",
+                        "playing",
+                        "now playing",
+                        "rich presence",
+                        "status",
+                        "detection",
+                    ],
+                )],
+            ),
             section(
                 "media-filter",
                 "Media filter",
@@ -748,6 +767,51 @@ pub const PANELS: &[PanelDef] = &[
                     "Version",
                     "",
                     &["update", "upgrade", "release", "check for updates", "about"],
+                )],
+            ),
+        ],
+    },
+    // This client's own page (the web has no game detection): Discord's
+    // "Registered games", in the app group.
+    PanelDef {
+        id: "games",
+        title: "Registered games",
+        icon: "gamepad",
+        headline: "The games Yap sees you play.",
+        blurb: "Games Yap noticed on this computer, and the ones you added. What people see is under Privacy & safety.",
+        rail_rows: &[],
+        sections: &[
+            section(
+                "game-detection",
+                "Detection",
+                "Yap checks which program is running, never what it's doing. Nothing leaves this computer unless you share your activity.",
+                &[row(
+                    "game-detection",
+                    "Detect my games",
+                    "Shows what you're playing while a game is open.",
+                    &["activity", "playing", "game", "detect", "status", "rich presence"],
+                )],
+            ),
+            section(
+                "detected-games",
+                "Your games",
+                "",
+                &[row(
+                    "detected-games",
+                    "Games",
+                    "Hide one and it's never shown, even while it runs.",
+                    &["hide", "hidden", "last played", "game", "list"],
+                )],
+            ),
+            section(
+                "add-game",
+                "Not seeing your game?",
+                "",
+                &[row(
+                    "add-game",
+                    "Add it",
+                    "Pick it from what's running now.",
+                    &["add", "manual", "program", "process", "running", "game"],
                 )],
             ),
         ],

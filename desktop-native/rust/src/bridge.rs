@@ -45,6 +45,10 @@ pub mod qobject {
         /// `online`, `idle`, `dnd` or `offline`.
         #[qproperty(QString, me_status, cxx_name = "meStatus")]
         #[qproperty(QString, me_custom_status, cxx_name = "meCustomStatus")]
+        /// What we are playing as others see it ("Playing X" in the
+        /// account row), or empty; its icon (absolute) or empty.
+        #[qproperty(QString, me_game, cxx_name = "meGame")]
+        #[qproperty(QString, me_game_icon, cxx_name = "meGameIcon")]
         /// Our avatar decoration (APNG URL), or empty.
         #[qproperty(QString, me_deco, cxx_name = "meDeco")]
         /// Our nameplate as JSON `{still, motion, border}`, or empty.
@@ -612,6 +616,9 @@ pub mod qobject {
         #[qproperty(QString, initials)]
         #[qproperty(QString, presence)]
         #[qproperty(QString, custom_status, cxx_name = "customStatus")]
+        /// "Playing a game": JSON `{name, icon, details, state, startedAt}`,
+        /// or empty.
+        #[qproperty(QString, game)]
         #[qproperty(QString, pronouns)]
         #[qproperty(QString, bio)]
         #[qproperty(QString, banner)]
@@ -699,6 +706,8 @@ pub struct SessionRust {
     me_initials: QString,
     me_status: QString,
     me_custom_status: QString,
+    me_game: QString,
+    me_game_icon: QString,
     me_deco: QString,
     me_plate: QString,
     me_effect: QString,
@@ -910,6 +919,7 @@ pub struct ProfileRust {
     initials: QString,
     presence: QString,
     custom_status: QString,
+    game: QString,
     pronouns: QString,
     bio: QString,
     banner: QString,

@@ -445,6 +445,37 @@ impl State {
         self.settings.media_filter_error.clear();
     }
 
+    /// "Share my activity" (PrivacyPanel.tsx `ShareActivityRow`): applied at
+    /// once (our activity stops or comes back), rolled back if the save
+    /// fails.
+    pub(super) fn set_share_activity(&mut self, fx: &mut Effects, on: bool) {
+        if self.settings.share_activity_saving.is_some() {
+            return;
+        }
+        let Some(before) = self.me().map(|me| me.share_activity) else {
+            return;
+        };
+        if (before != Some(false)) == on {
+            return;
+        }
+        self.edit_me(fx, |me| me.share_activity = Some(on));
+        let request = ApiRequest::UpdateProfile(json!({ "shareActivity": on }));
+        self.pending.settings.share_activity = self.http(fx, request);
+        self.settings.share_activity_saving = Some(before);
+        self.settings.share_activity_error.clear();
+    }
+
+    fn on_share_activity_saved(&mut self, fx: &mut Effects, result: Result<ApiResponse, ApiError>) {
+        let Some(before) = self.settings.share_activity_saving.take() else {
+            return;
+        };
+        if let Err(error) = result {
+            self.edit_me(fx, |me| me.share_activity = before);
+            self.settings.share_activity_error =
+                describe_api_error(&error, "save your activity setting");
+        }
+    }
+
     pub(super) fn save_theme(&mut self, fx: &mut Effects, theme: Option<String>, sync: bool) {
         let theme = theme.filter(|theme| is_app_theme(theme));
         let preference = theme.clone();
@@ -477,6 +508,7 @@ impl State {
             &mut pending.theme,
             &mut pending.media_filter,
             &mut pending.revoke,
+            &mut pending.share_activity,
         ]
         .into_iter()
         .position(|slot| {
@@ -537,7 +569,8 @@ impl State {
                 }
             }
             7 => self.on_media_filter_saved(fx, result),
-            _ => self.on_share_revoked(result),
+            8 => self.on_share_revoked(result),
+            _ => self.on_share_activity_saved(fx, result),
         }
         true
     }
@@ -656,6 +689,8 @@ impl State {
                 .map(|(level, _)| level.clone())
                 .unwrap_or_default(),
             media_filter_error: s.media_filter_error.clone(),
+            share_activity_saving: s.share_activity_saving.is_some(),
+            share_activity_error: s.share_activity_error.clone(),
             revoking_share: s.revoking_share.clone().unwrap_or_default(),
             share_error: s.share_error.clone(),
             ..SettingsView::default()
@@ -711,6 +746,7 @@ impl State {
                 .unwrap_or_default();
             view.theme_sync = me.theme_sync();
             view.media_filter = media_filter(me.media_content_filter.as_deref()).to_owned();
+            view.share_activity = me.share_activity != Some(false);
             view.created_at = text(&me.created_at);
             // The editor's preview card (SettingsAccountTab.tsx
             // `referenceDate`): joined the shown server, else created.

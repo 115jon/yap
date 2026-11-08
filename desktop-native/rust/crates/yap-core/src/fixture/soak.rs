@@ -197,6 +197,7 @@ pub async fn run(inbox: UnboundedSender<Input>, session: SessionId) {
                 status: pick(&mut rng, STATUS).into(),
                 custom_status: (rng.below(4) == 0).then(|| Some(format!("soak {serial}"))),
                 platforms: None,
+                game_activity: None,
             }),
             93..=99 => Dispatch::VoiceChannelState(roster(&mut rng)),
             // New messages: 0..=29, and the rolls above whose condition failed.

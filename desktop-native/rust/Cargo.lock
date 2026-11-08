@@ -3936,6 +3936,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "yap-games"
+version = "0.2.12"
+dependencies = [
+ "flate2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "windows-sys 0.61.2",
+ "yap-protocol",
+]
+
+[[package]]
 name = "yap-protocol"
 version = "0.2.12"
 dependencies = [
@@ -4023,6 +4035,7 @@ dependencies = [
  "yap-cache",
  "yap-capture",
  "yap-core",
+ "yap-games",
  "yap-protocol",
  "yap-realtime",
  "yap-segment",

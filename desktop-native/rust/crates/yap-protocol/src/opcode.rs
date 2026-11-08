@@ -182,6 +182,9 @@ int_enum! {
         MediaReady = 41,
         /// S->C room: a moderator moved this voice session to another channel.
         VoiceMove = 42,
+        /// C->S main (global gateway): set or clear this session's game
+        /// activity ("Playing X"); others see it on `PRESENCE_UPDATE`.
+        ActivityUpdate = 43,
 
         // Voice gateway specific (100+).
 
