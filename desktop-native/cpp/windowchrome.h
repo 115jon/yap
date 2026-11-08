@@ -23,6 +23,7 @@
 #include <QtCore/QSize>
 #include <QtGui/QColor>
 #include <QtQuick/QQuickItem>
+#include <utility>
 
 class QQuickWindow;
 
@@ -74,6 +75,14 @@ public:
   // a modal popup's overlay reports a press on its scrim without one.
   Q_INVOKABLE QPointF lastPress() const { return m_lastPress; }
 
+  // The window procedure's: true once, shortly after renderResize()
+  // presented a size, so the WM_PAINT that follows it is only validated.
+  bool takePresentedResize(quint64 nowMs)
+  {
+    const quint64 at = std::exchange(m_presentedResize, 0);
+    return at && nowMs - at < 250;
+  }
+
   bool nativeEventFilter(const QByteArray& eventType, void* message,
                          qintptr* result) override;
 
@@ -96,6 +105,10 @@ private:
   bool contains(QQuickItem* item, const QPointF& scenePos) const;
   // The window size that keeps the client's logical size at `newDpi`.
   QSize scaledWindowSize(unsigned newDpi) const;
+  // A size change, rendered before the SetWindowPos that made it returns.
+  void renderResize();
+  // The redirection surface under the swapchain, in the window colour.
+  void eraseBackground(void* hdc);
 
   QPointer<QQuickWindow> m_window;
   // Set once the native window exists, so the filter never creates it.
@@ -112,4 +125,17 @@ private:
   QPointF m_lastPress;
   bool m_dark = true;
   QColor m_borderColor = QColor(0x1b, 0x1b, 0x1f);
+  // Resizing (docs/PERFORMANCE.md, resize pass): render each new size
+  // inside its WM_WINDOWPOSCHANGED, and erase the redirection surface in
+  // the window colour. YAP_RESIZE_SYNC=0 / YAP_RESIZE_ERASE=0 turn them off.
+  bool m_syncResize = true;
+  bool m_eraseBackground = true;
+  bool m_inResize = false;
+  // When renderResize() last presented (GetTickCount64), or 0.
+  quint64 m_presentedResize = 0;
+  // YAP_DEBUG_RESIZE=1 (diagnostics): each step's timings on stderr.
+  bool m_debugResize = false;
+  quint64 m_framesEnded = 0;
+  void* m_groundBrush = nullptr;
+  QRgb m_groundRgb = 0;
 };

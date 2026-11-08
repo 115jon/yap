@@ -1,17 +1,46 @@
 #include "windowchrome.h"
 
+#include <QtCore/QElapsedTimer>
+#include <QtCore/QEventLoop>
+#include <QtGui/qpa/qwindowsysteminterface.h>
 #include <QtQuick/QQuickWindow>
+
+#include <cstdio>
 
 #ifdef Q_OS_WIN
 #include <dwmapi.h>
 #include <windows.h>
 #include <windowsx.h>
+#include <commctrl.h>
 #endif
 
 WindowChrome::WindowChrome(QObject* parent)
   : QObject(parent)
 {
 }
+
+#ifdef Q_OS_WIN
+// Ahead of Qt's window procedure (WM_PAINT from a move/size loop never
+// reaches an application event filter): the WM_PAINT a resize queues
+// after its WM_WINDOWPOSCHANGED, when renderResize() already presented
+// that size, only validates. Qt would render and present the same frame
+// again, and that second Present waits for the first to reach the screen
+// (a vblank per resize step).
+static LRESULT CALLBACK chromeSubclass(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam,
+                                       UINT_PTR, DWORD_PTR data)
+{
+  auto* chrome = reinterpret_cast<WindowChrome*>(data);
+  if (message == WM_PAINT && chrome->takePresentedResize(GetTickCount64())) {
+    PAINTSTRUCT ps;
+    BeginPaint(hwnd, &ps);
+    EndPaint(hwnd, &ps);
+    return 0;
+  }
+  if (message == WM_NCDESTROY)
+    RemoveWindowSubclass(hwnd, chromeSubclass, 1);
+  return DefSubclassProc(hwnd, message, wParam, lParam);
+}
+#endif
 
 void WindowChrome::attach(QQuickWindow* window)
 {
@@ -20,6 +49,14 @@ void WindowChrome::attach(QQuickWindow* window)
   m_window = window;
   m_hwnd = reinterpret_cast<quintptr>(hwnd);
   m_dpi = GetDpiForWindow(hwnd);
+  m_syncResize = qEnvironmentVariable("YAP_RESIZE_SYNC") != QLatin1String("0");
+  m_eraseBackground = qEnvironmentVariable("YAP_RESIZE_ERASE") != QLatin1String("0");
+  m_debugResize = qEnvironmentVariableIntValue("YAP_DEBUG_RESIZE") != 0;
+  // Counts finished frames, so a resize knows whether Qt already drew the
+  // new size (a shrink: Qt's own expose) or it still has to.
+  connect(window, &QQuickWindow::afterFrameEnd, this, [this] { ++m_framesEnded; },
+          Qt::DirectConnection);
+  SetWindowSubclass(hwnd, chromeSubclass, 1, reinterpret_cast<DWORD_PTR>(this));
   applyFrameColors();
   // Re-run WM_NCCALCSIZE now that the filter is in place.
   SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
@@ -169,6 +206,50 @@ QSize WindowChrome::scaledWindowSize(unsigned newDpi) const
 #endif
 }
 
+void WindowChrome::renderResize()
+{
+#ifdef Q_OS_WIN
+  // WM_SIZE has queued the new geometry. Deliver it now (the QML layout
+  // follows), then draw and present a frame at that size before
+  // SetWindowPos returns, so DWM gets the window's new bounds and its new
+  // content together. Qt alone draws a grown window only at the WM_PAINT
+  // that comes once the move loop is idle again, and a shrunk one at the
+  // next pass of the event loop: until then DWM shows the old frame
+  // pinned to the top left, next to a strip nothing has drawn.
+  const quint64 before = m_framesEnded;
+  QWindowSystemInterface::flushWindowSystemEvents(QEventLoop::ExcludeUserInputEvents);
+  if (!m_window || !m_window->isExposed())
+    return;
+  if (m_framesEnded == before) {
+    QWindowSystemInterface::handleExposeEvent<QWindowSystemInterface::SynchronousDelivery>(
+      m_window, QRect(QPoint(), m_window->size()));
+  }
+  // Drawn: the WM_PAINT this resize queues would only draw it again.
+  if (m_framesEnded != before) {
+    ValidateRect(reinterpret_cast<HWND>(m_hwnd), nullptr);
+    m_presentedResize = GetTickCount64();
+  }
+#endif
+}
+
+void WindowChrome::eraseBackground(void* hdc)
+{
+#ifdef Q_OS_WIN
+  const QRgb rgb = m_window ? m_window->color().rgb() : qRgb(0, 0, 0);
+  if (!m_groundBrush || rgb != m_groundRgb) {
+    if (m_groundBrush)
+      DeleteObject(static_cast<HBRUSH>(m_groundBrush));
+    m_groundBrush = CreateSolidBrush(RGB(qRed(rgb), qGreen(rgb), qBlue(rgb)));
+    m_groundRgb = rgb;
+  }
+  RECT client{};
+  GetClientRect(reinterpret_cast<HWND>(m_hwnd), &client);
+  FillRect(static_cast<HDC>(hdc), &client, static_cast<HBRUSH>(m_groundBrush));
+#else
+  Q_UNUSED(hdc);
+#endif
+}
+
 bool WindowChrome::contains(QQuickItem* item, const QPointF& scenePos) const
 {
   if (!item || !item->isVisible())
@@ -284,6 +365,52 @@ bool WindowChrome::nativeEventFilter(const QByteArray& eventType,
       if (IsZoomed(hwnd))
         params->rgrc[0].top += frameY;
       *result = 0;
+      return true;
+    }
+
+    // Where no frame has reached yet (a grown window before its first
+    // frame at the new size), DWM shows the redirection surface. Qt leaves
+    // it unpainted, so those strips showed through (white, or what was
+    // behind); paint it the window colour.
+    case WM_ERASEBKGND:
+      if (!m_eraseBackground)
+        return false;
+      eraseBackground(reinterpret_cast<void*>(msg->wParam));
+      *result = 1;
+      return true;
+
+    case WM_WINDOWPOSCHANGED: {
+      const auto* pos = reinterpret_cast<const WINDOWPOS*>(msg->lParam);
+      m_presentedResize = 0;
+      if (!m_syncResize || m_inResize || (pos->flags & SWP_NOSIZE) || IsIconic(hwnd))
+        return false;
+      // Inside Qt's own WM_DPICHANGED handling (its SetWindowPos to the new
+      // rect) the window's scale is not Qt's yet: leave that resize to Qt.
+      if (qRound(m_window->devicePixelRatio() * USER_DEFAULT_SCREEN_DPI) != int(GetDpiForWindow(hwnd)))
+        return false;
+      // DefWindowProc turns this into WM_SIZE and WM_MOVE (Qt's), then the
+      // new size is drawn here.
+      m_inResize = true;
+      QElapsedTimer timer;
+      timer.start();
+      *result = DefWindowProcW(hwnd, msg->message, msg->wParam, msg->lParam);
+      const qint64 tDef = timer.nsecsElapsed();
+      // The surface first: the WM_PAINT that would erase it is validated
+      // away once the frame is drawn.
+      if (m_eraseBackground) {
+        if (HDC dc = GetDC(hwnd)) {
+          eraseBackground(dc);
+          ReleaseDC(hwnd, dc);
+        }
+      }
+      const qint64 tErase = timer.nsecsElapsed();
+      const quint64 framesBefore = m_framesEnded;
+      renderResize();
+      if (m_debugResize)
+        std::fprintf(stderr, "[resize] %dx%d def %.2f erase %.2f render %.2f ms (%d frames)\n",
+                     pos->cx, pos->cy, tDef / 1e6, (tErase - tDef) / 1e6,
+                     (timer.nsecsElapsed() - tErase) / 1e6, int(m_framesEnded - framesBefore));
+      m_inResize = false;
       return true;
     }
 

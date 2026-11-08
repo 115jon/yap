@@ -2634,3 +2634,215 @@ file.md.mp4`, so HD first). A KLIPY still or an `sm`/`md` mp4 as a
 Tools (outside the repo, `F:/ct/yapn/tmp/clips/`): `launch.ps1`,
 `nav.ps1`, `tap.ps1`, `measure.ps1`, `scroll.ps1`, `hover2.ps1`,
 `test.ps1`.
+
+# Resize pass (2026-11-08)
+
+Resizing the window was laggy, jumped, and showed a strip trailing the
+moving edge (white on the user's machine). This pass measured why and fixed
+it in `cpp/` with no Qt patch and no new Qt build.
+
+## Method
+
+Tools are in `F:/ct/yapn/tools/rs/`:
+
+- `rsprobe.exe` (`rsprobe.cpp`): resizes **our** window by PID with
+  `SetWindowPos`, wrapped in `WM_ENTERSIZEMOVE` / `WM_EXITSIZEMOVE` as a
+  drag sends them. Each step comes 8 ms after the last one returns, and
+  each `SetWindowPos` blocks until our GUI thread has handled it.
+  - It captures our window only, with Windows.Graphics.Capture, one frame
+    per DWM composition.
+  - For each frame it finds the user panel (bottom left) and the
+    composer's end keys (bottom right). Where they sit against the
+    window's edges gives how many steps the content trails the window.
+  - It also logs each step's `SetWindowPos` time: the GUI thread's cost
+    per step.
+  - Modes: `br` drags the bottom-right corner, 1150x750 to 1550x1000 and
+    back, twice. `left` drags the left edge, which moves the origin too.
+- `--thumb 1` shows a DWM thumbnail of our window in a window of the
+  probe's own, beside it, over magenta, and captures that window instead.
+  A thumbnail is drawn the way DWM composes the window, so a strip with no
+  surface under it shows as black or magenta there. A direct window capture
+  shows it only as alpha 0.
+- `sweep.ps1` runs both modes on the chat-10k fixture, profile `resize`,
+  on the test display at 100%. It adds the basic render loop's frame times
+  (`QSG_RENDER_TIMING`).
+- `thumb.ps1` runs a thumbnail sweep in miku-dark (the ground is not pure
+  black there).
+- `anim-idle.ps1` and `static-idle.ps1` measure idle CPU. `scroll.ps1` is
+  pass 5's wheel test.
+- The GUI thread was sampled with `YAP_DEBUG_SAMPLE` and
+  `tools/p6/samplesym.py`, using a `/MAP` build.
+- **New diagnostic switch:** `YAP_DEBUG_RESIZE=1` prints each resize
+  step's timings (DefWindowProc, erase, render) to stderr.
+
+## Root causes
+
+1. **The flip-model swapchain trails the window.**
+   - Qt's D3D11 swapchain is `FLIP_DISCARD` with `SCALING_NONE`. DWM
+     composes the flip buffer on its own, apart from the window's bounds.
+   - Captured frames showed the content 2 or more steps behind the edge in
+     30 % of frames. The `left` drag's p95 was 14 px.
+   - In the thumbnail capture, 35 % of the frames had a strip along the
+     right or bottom edge that no surface covered: black or transparent.
+     That is the trailing canvas (white on the user's display).
+   - Rendering synchronously and erasing the background did not change
+     this under the flip model. Black and transparent strips stayed.
+2. **Two vblanks per resize step.**
+   - Each `SetWindowPos` took 30-33 ms (p50), so a drag ran at about 36
+     steps a second.
+   - The sampler put most of it in `Present` waiting (`endFrame` under
+     `handleWmPaint`). Qt rendered each size once from the expose and
+     again from the `WM_PAINT` that followed.
+   - Under the flip model, each `Present` after a `ResizeBuffers` waits for
+     the previous frame to reach the screen.
+   - The basic loop's frame time during a resize was 10 ms (p50), almost
+     all of it the frame-latency wait.
+3. **1-second stalls in a move-and-resize.** In the `left` drag (the origin
+   moves), the flip model's frame-latency waitable object often never
+   signalled. `beginFrame` sat out its full 1000 ms timeout:
+   `SetWindowPos` p95 was 1038 ms, and the drag ran at 5-7 steps a second.
+   That was the "skips around". `QT_D3D_MAX_FRAME_LATENCY=0` removed the
+   stalls but not the lag.
+4. **An unpainted redirection surface.** Qt answers `WM_ERASEBKGND`
+   without painting and registers no class brush. Wherever the frame had
+   not reached, the redirection surface showed through: magenta in the
+   thumbnail without the erase below.
+
+Ruled out:
+
+- **Threaded render loop:** no stalls, but the same 28-30 ms steps, and
+  content 2 or more steps behind in about 90 % of frames.
+- **DirectComposition** (`CreateSwapChainForComposition` with
+  `QT_QPA_DISABLE_REDIRECTION_SURFACE=1`): 33 ms steps, and transparent
+  strips in about a third of the edge samples. With no redirection
+  surface, nothing fills the gap.
+- **QML layout:** `polish` was about 0 ms per step. The text and the list
+  are not the cost.
+
+## Fix
+
+- **`cpp/main.cpp`: the blt-model swapchain.**
+  - `QT_D3D_NO_FLIP=1` is the default; `QT_D3D_NO_FLIP=0` brings back the
+    flip model.
+  - A blt `Present` lands in the redirection surface, which DWM resizes
+    along with the window.
+  - Qt sets no frame-latency waitable object on a blt swapchain, so the
+    stall in cause 3 cannot happen.
+- **`cpp/windowchrome.cpp`: each size is drawn before `SetWindowPos`
+  returns.**
+  - `WM_WINDOWPOSCHANGED` with a size change:
+    1. `DefWindowProc` sends `WM_SIZE` to Qt.
+    2. The redirection surface is filled with the window colour.
+    3. `QWindowSystemInterface::flushWindowSystemEvents()` delivers the
+       geometry, and the QML layout follows.
+    4. If Qt's own expose did not draw a frame, a synchronous expose
+       renders and presents one at the new size.
+    5. The window is validated.
+  - It is skipped while minimised, while hidden, inside Qt's own
+    `WM_DPICHANGED` resize, and when re-entered.
+  - `YAP_RESIZE_SYNC=0` turns it off.
+- **`cpp/windowchrome.cpp`: no second render per step.**
+  - A window subclass (`SetWindowSubclass`, linking `comctl32`) runs ahead
+    of Qt's window procedure.
+  - The `WM_PAINT` that a resize queues after `WM_WINDOWPOSCHANGED` is
+    only validated, and only within 250 ms of the resize's own present.
+  - A `WM_PAINT` from the move/size loop never reaches an application
+    event filter, which is why this needs a subclass.
+- **`cpp/windowchrome.cpp`: `WM_ERASEBKGND` paints the window colour.**
+  - The colour is `QQuickWindow::color()`, which is `Theme.ply0`.
+  - `YAP_RESIZE_ERASE=0` turns it off.
+
+No Qt patch was needed and no new Qt root was built: `QT_D3D_NO_FLIP` is
+Qt's own switch.
+
+## Before and after (100 %, chat-10k, two runs each)
+
+| measure (probe drag)                             | before (spike 0.2.9)    | after              |
+| ------------------------------------------------ | ----------------------- | ------------------ |
+| `SetWindowPos` per step p50 / p95, corner drag   | 30-31 / 45 ms           | 13-14 / 18-19 ms   |
+| steps a second, corner drag                      | 35-36                   | 68-72              |
+| `SetWindowPos` p95 / max, left-edge drag         | 1022-1038 / 1040 ms     | 15 / 24 ms         |
+| steps a second, left-edge drag                   | 5.2-6.6                 | 81-83              |
+| render-loop frame time p50 / p95 during the drag | 10 / 15 ms (left: 1011) | 2-3 / 3-6 ms       |
+| frames with content 2+ steps behind (corner)     | 30 %                    | 0 %                |
+| thumbnail frames with an uncovered edge strip    | 59-62 of 173 (35 %)     | 0-3 of ~55 (0-6 %) |
+
+- **Effect on content lag:** the content is now at most one step behind
+  the edge, and a step is half as long. One step is what DWM itself
+  allows: the new bounds are composed a frame before the content drawn for
+  them.
+- **Captures:** `F:/ct/yapn/tmp/resize/captures/before-thumb.png` shows the
+  black strips along the right and bottom edges, about 16 px wide.
+  `after-thumb.png` has none.
+- **Raw data:** per-run frames, steps and saved frames are in
+  `F:/ct/yapn/tmp/resize/run-*` and `thumb-*`.
+
+Idle and scroll, same machine, interleaved:
+
+| measure                                           | before                      | after                                               |
+| ------------------------------------------------- | --------------------------- | --------------------------------------------------- |
+| static idle, 60 s (fixture, unfocused)            | 0.10 / 0.05 %               | 0.00 / 0.00 %                                       |
+| focused animated idle (pass 6 scene), % of a core | 2.6-4.6, mean 3.70 (5 runs) | 3.2-4.4, mean 3.73 (5 runs)                         |
+| animated idle private bytes                       | 171-173 MB                  | 177 MB                                              |
+| fast wheel scroll, % of a core / frame p99        | 46.6, 42.7 % / 2 ms         | 43.2, 46.1 % / 2 ms (blt build before the subclass) |
+
+- **Idle CPU:** unchanged. The spread within each column is bigger than
+  the difference between them.
+- **Memory:** about +5 MB private in animated idle, which is likely the
+  redirection surface that blt presents into.
+- **Static idle:** private memory is 4 MB lower.
+
+At 150 % (the test display set to 150 % for the run, then restored). The
+window was 1450x850 to 1850x1040 physical, so the members column stays
+docked:
+
+| measure                                 | before         | after          |
+| --------------------------------------- | -------------- | -------------- |
+| `SetWindowPos` p50 / p95, corner drag   | 31.7 / 44.7 ms | 13.9 / 22.9 ms |
+| steps a second, corner / left-edge drag | 34.9 / 6.2     | 69.1 / 84.5    |
+| `SetWindowPos` p95, left-edge drag      | 1021 ms        | 15 ms          |
+
+- The synchronous path ran: 484 `[resize]` lines over the two drags.
+- The patch-tracking metric does not apply at 150 %: its references are
+  100 % layouts.
+
+What is left: a one-step strip along the moving edge, about 7 px at the
+probe's step size.
+
+- It is DWM's own frame between the new bounds and the content drawn for
+  them.
+- In the thumbnail capture it shows the window colour. A direct window
+  capture shows it as alpha 0.
+- Avoiding it would need DWM to apply the window's bounds and its content
+  together, and no swapchain model here does that. DirectComposition was
+  worse (above).
+
+Not measured: resizing with the voice grid open. That needs the test
+accounts, and the cost per step here is presentation, not layout.
+
+Checks:
+
+- `cargo test --workspace --exclude yap_native --exclude yap-audio` and
+  `cargo test -p yap-audio` (`CARGO_TARGET_DIR=F:/ct/yapn/check-resize`,
+  `LK_CUSTOM_WEBRTC` as `build.ps1` sets it): all passed
+  (`F:/ct/yapn/test-resize.log`).
+- `cargo clippy --workspace --all-targets -- -D warnings`: exit 0
+  (`F:/ct/yapn/clippy-resize.log`).
+
+## Files
+
+Source (worktree `native/resize`):
+
+- `cpp/main.cpp`: `QT_D3D_NO_FLIP=1` by default.
+- `cpp/windowchrome.cpp` and `cpp/windowchrome.h`:
+  - the synchronous resize render (`renderResize`);
+  - the `WM_PAINT` subclass;
+  - the `WM_ERASEBKGND` fill (`eraseBackground`);
+  - the switches `YAP_RESIZE_SYNC`, `YAP_RESIZE_ERASE` and
+    `YAP_DEBUG_RESIZE`.
+- `CMakeLists.txt`: links `comctl32`.
+- Docs: this section, and LIBRARIES.md §13.3 (the swapchain note).
+
+Tools (outside the repo, `F:/ct/yapn/tools/rs/`): `rsprobe.cpp` and
+`rsprobe.exe`, `sweep.ps1`, `thumb.ps1`, `app.ps1`, `build.ps1` (with
+`/MAP`), `test.ps1`, `anim-idle.ps1`, `static-idle.ps1` and `scroll.ps1`.
