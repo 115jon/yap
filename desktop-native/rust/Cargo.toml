@@ -174,7 +174,8 @@ opt-level = 3
 #   webrtc-sys: no AV1 encoder or decoder, and H.264 decoded by Media
 #   Foundation (on the GPU where it can) instead of FFmpeg, into D3D11
 #   textures the UI draws without a copy.
-#   libwebrtc: the C++ buffer behind a native frame (those textures).
+#   libwebrtc: the C++ buffer behind a native frame (those textures), and
+#   offers that keep pulled tracks receiving (offer_to_receive_* unset).
 [patch.crates-io]
 qt-build-utils = { path = "vendor/qt-build-utils" }
 webrtc-sys = { path = "vendor/webrtc-sys" }
