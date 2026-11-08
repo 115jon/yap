@@ -581,11 +581,17 @@ node tools/build-icons.mjs
 - `cpp/windowchrome.cpp` removes the caption (`WM_NCCALCSIZE`) and hit-tests
   the QML title bar (`WM_NCHITTEST`, `HTMAXBUTTON` for snap layouts).
 - `YAP_TEXT=qt` switches text from native glyph rendering to distance fields.
-- Text hinting follows the primary screen's scale at launch: vertical
-  hinting below 125%, none from 125% up (Chromium's DirectWrite modes).
-  `YAP_TEXT_HINTING=none|vertical|full|default` forces one. Light text on
-  dark needs the Qt patch `patches/qt/6.11.3/0005` (DirectWrite's enhanced
-  contrast); `QT_DWRITE_ENHANCED_CONTRAST=<k>` overrides its 1.0 there.
+- Text draws as Chromium draws it on Windows: DirectWrite with no hinting
+  (natural symmetric, subpixel glyph positions) at every scale, ClearType
+  subpixel coverage blended through Skia's per-colour contrast and gamma
+  correction (Qt patch `patches/qt/6.11.3/0006`), grayscale inside layers,
+  under a scale or rotation, and when ClearType is off.
+  `YAP_TEXT_HINTING=none|vertical|full|default` forces a hinting.
+  `cpp/main.cpp` sets the contrast and gamma as Chromium picks them
+  (contrast 1.0 and the sRGB curve, or the ClearType Tuner's values for the
+  primary monitor when it has saved some); `QSG_TEXT_CONTRAST=<k>`,
+  `QSG_TEXT_GAMMA=<g>` (0: sRGB), `QSG_TEXT_GRAYSCALE=1` and
+  `QSG_TEXT_PREBLEND=0` (Qt's raw blend) override them.
 - `cpp/wheelscroll.cpp` scrolls every Flickable as Chromium does: 100 px a
   notch (Windows' 3 lines), eased over 150 ms, touchpads 1:1.
   `YAP_QT_WHEEL=1` puts back Qt's own wheel handling.

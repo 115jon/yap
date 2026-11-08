@@ -1125,3 +1125,77 @@ Qt was not changed.
   below when there is no room above); the card glided while resized from
   the keyboard; the hinting walk froze controls' font inheritance (controls
   are skipped).
+
+## Text pass (native text vs Chromium at 100 %)
+
+The user still found native text jagged beside the web and Tauri apps on
+joi2 (100 % on every monitor, ClearType on). Captures and tools stay local:
+`F:/ct/yapn/run/text13/` (captures, `zoom/`, `measure-*.txt`) and
+`F:/ct/yapn/tmp/text/` (`probe/dwprobe.cpp`: DirectWrite rasterizer with a
+chosen mode, used to fit Chromium's output; `lab/`: a reference page and a
+Qt text lab on the app's Qt and fonts, same blocks in dark and light).
+
+### What Chromium does (fitted on Edge 157, headless, ClearType)
+
+- **Mode:** DirectWrite natural symmetric (antialiased across and down),
+  ClearType 3x1 coverage, glyphs at their exact subpixel x. Natural
+  (asymmetric, what vertical hinting gives) fits worse (error 3.6 vs 1.6 on
+  a body line); grid fitting changes nothing on our unhinted fonts.
+- **Blend:** Skia's per-colour preblend (`SkTMaskGamma`), not a fixed curve:
+  light text on dark is boosted, dark text on light is not. Over 14 blocks
+  (head, body, body2, row, caption, code, title; both themes) the best fit
+  is contrast 1.0 with the sRGB curve (total error 11.3); DirectWrite's own
+  untuned values here (contrast 0.5, gamma 1.8) give 15.1.
+- Headless Edge renders ClearType (edge chroma ~120), so the comparison is
+  LCD against LCD.
+
+### What native did
+
+- Qt Quick NativeRendering already draws DirectWrite text as subpixel
+  `Format_A32` (`QSGTextMaskMaterial::updateCache`: an engine format of
+  `Format_None` becomes A32), blended with constant colour /
+  one-minus-source-colour (`24bittextmask.frag`), so ClearType was on. But:
+  - vertical hinting below 125 % is DirectWrite natural: no AA down, so
+    17-20 % fewer edge pixels than Chromium (crisp stems, stepped curves);
+  - patch `0005` boosted every colour the same way: light-on-dark 10 %
+    thin and dark-on-light 9 % heavy at once;
+  - A32 text was also subpixel inside layers (`layer.enabled`, effect
+    sources) and under scales, where its fringes land on the wrong ground.
+
+### Changes
+
+- `cpp/main.cpp`: no hinting at every scale; the scale follower
+  (TextHintingFollower, `YAP_TEST_HINTING_FLIP_SECS`) is gone. The text
+  contrast and gamma are set as Chromium picks them (`[text]` line).
+- Qt `patches/qt/6.11.3/0006-quick-text-preblend.patch` (LIBRARIES.md):
+  Skia's preblend in the A32 shader; grayscale into translucent targets,
+  under a scale or rotation, and with ClearType off. `0005` is retired.
+  Built into `F:/ct/qt-custom-6.11p8/6.11.3-yap`, now `build.ps1`'s default.
+- `Theme.qml`: the `hinting` comment only.
+
+### Results (`zoom/final100-*.png`, `zoom/final150-*.png`: web, before, after)
+
+Text lab against the reference page, totals over the seven blocks:
+
+| scale | theme | before ink / edge | after ink / edge | error before → after |
+| ----- | ----- | ----------------- | ---------------- | -------------------- |
+| 100 % | dark  | -10.2 % / -19.5 % | -0.3 % / +1.7 %  | 3.45 → 2.50          |
+| 100 % | light | +8.8 % / -16.4 %  | +0.1 % / +1.4 %  | 3.32 → 2.62          |
+| 150 % | dark  | -6.3 % / -1.0 %   | -0.2 % / +1.2 %  | 2.46 → 2.15          |
+| 150 % | light | +7.0 % / +0.7 %   | +0.1 % / +1.4 %  | 2.50 → 2.28          |
+
+Every block (12 px caption, bold heads, the mono code line) is within
+0.7 % of Chromium's ink after, at both scales; edges within -4 to +6 %. Layered text went
+from edge chroma 144 to 1.8 (grayscale), scaled text from 133 to 1.6.
+Mid-scroll frames are as sharp as settled ones. The app on the chat-10k
+fixture: `zoom/app-{dark,light}-100.png`, `zoom/app-light-150.png`.
+
+Performance (focused animated idle, chat-10k with GIFs, 7 interleaved
+40 s rounds): before 3.87 %, after 4.09 % of one core, inside the
+run-to-run spread (2.9-5.0 %); frames stay under 1 ms; 78 alpha batches
+instead of 77 (a scaled text node is no longer merged).
+
+Not done: the ClearType Tuner path (registry values present) follows the
+tuner's numbers but was not checked against Chromium, since tuning the
+user's system was out of bounds. Contrast and gamma are the primary
+monitor's, read at launch.

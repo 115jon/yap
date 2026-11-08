@@ -2,11 +2,14 @@
 # Qt from -QtDir (a static Qt gives one self-contained .exe).
 param(
     # The size-optimized, patched static Qt 6.11.3 (patches/qt/build-qt.ps1);
-    # qt-custom-6.11p7 carries patches 0001-0005 (0005: DirectWrite's
-    # enhanced contrast, pass 7), qt-custom-6.11p6 0001-0004, and
+    # qt-custom-6.11p8 carries patches 0001-0004 and 0006 (0006: Chromium's
+    # text contrast and gamma, the text pass), qt-custom-6.11p7 0001-0005
+    # (0005, retired: DirectWrite's enhanced contrast), qt-custom-6.11p6
+    # 0001-0004, and
     # qt-custom-6.11 0001-0003. The stock static Qt 6.6.3 no longer builds the
     # app (QML needs 6.9+).
     [string]$QtDir = $(if ($env:YAP_QT_DIR) { $env:YAP_QT_DIR }
+                       elseif (Test-Path "F:/ct/qt-custom-6.11p8/6.11.3-yap/bin/qmake.exe") { "F:/ct/qt-custom-6.11p8/6.11.3-yap" }
                        elseif (Test-Path "F:/ct/qt-custom-6.11p7/6.11.3-yap/bin/qmake.exe") { "F:/ct/qt-custom-6.11p7/6.11.3-yap" }
                        elseif (Test-Path "F:/ct/qt-custom-6.11p6/6.11.3-yap/bin/qmake.exe") { "F:/ct/qt-custom-6.11p6/6.11.3-yap" }
                        elseif (Test-Path "F:/ct/qt-custom-6.11/6.11.3-yap/bin/qmake.exe") { "F:/ct/qt-custom-6.11/6.11.3-yap" }
