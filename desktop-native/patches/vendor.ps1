@@ -19,7 +19,8 @@ $crates = [ordered]@{
     # and the .qml files in the resources left empty (DISCARD_QML_CONTENTS).
     "qt-build-utils" = "0.10.0"
     # No AV1 encoder or decoder (exe size); H.264 decoded by Media Foundation,
-    # on the GPU where it can, into textures the UI draws as they are.
+    # on the GPU where it can, into textures the UI draws as they are; VP9
+    # (and VP8 where the GPU decodes it) the same way, libvpx otherwise.
     "webrtc-sys"     = "0.3.52"
     # The C++ buffer behind a native video frame, so the UI can draw the
     # decoder's D3D11 textures without a copy (zero copy, pass 6).

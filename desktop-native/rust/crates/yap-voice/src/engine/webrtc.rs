@@ -812,6 +812,18 @@ fn vp8_first() -> Vec<RtpCodecCapability> {
     codecs
 }
 
+/// A software share's codecs: VP8 first, or VP9 first with
+/// `YAP_DEBUG_SHARE_CODEC=vp9` (a test switch: a VP9 stream to watch, for
+/// the Media Foundation VP9 decoder; no Yap client sends VP9 today).
+fn share_codecs() -> Vec<RtpCodecCapability> {
+    let vp9 = std::env::var("YAP_DEBUG_SHARE_CODEC").is_ok_and(|v| v.eq_ignore_ascii_case("vp9"));
+    let mut codecs = vp8_first();
+    if vp9 {
+        codecs.sort_by_key(|c| !c.mime_type.eq_ignore_ascii_case("video/vp9"));
+    }
+    codecs
+}
+
 /// H.264 alone (constrained baseline, mode 1 first), with RTX, for a
 /// hardware share: the SFU must not pick another codec, since the
 /// pass-through forwards H.264 only.
@@ -1397,7 +1409,7 @@ impl MediaSession for LibwebrtcSession {
         let codecs = if is_hardware {
             h264_only()
         } else {
-            vp8_first()
+            share_codecs()
         };
         if is_hardware {
             transceiver

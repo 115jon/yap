@@ -93,11 +93,14 @@ Item {
 
         HoverHandler { id: hover; enabled: !root.label; cursorShape: Qt.PointingHandCursor }
 
-        NameplateLayer {
+        // Made only for a member with a nameplate (performance pass 7).
+        Loader {
             anchors.fill: parent
-            visible: root.plate.length > 0
-            plate: root.plate
-            playing: hover.hovered
+            active: root.plate.length > 0
+            sourceComponent: NameplateLayer {
+                plate: root.plate
+                playing: hover.hovered
+            }
         }
         Rectangle {
             anchors.fill: parent

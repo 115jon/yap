@@ -46,9 +46,26 @@ Rectangle {
 
     function learn(img) {
         // Only a decode at its own size tells the real size (a grid tile
-        // decodes at the tile's).
-        if (img && img.status === Image.Ready && !hidden && !fill)
+        // decodes at the tile's, a capped one at the box's).
+        if (img && img.status === Image.Ready && !hidden && !fill && fitCap.width <= 0)
             ShellState.rememberSize(item.url, img.implicitWidth, img.implicitHeight)
+    }
+
+    // A fitted picture larger than its box, once its real size is known,
+    // decodes at the box's size (in 128 px steps, so a resize does not
+    // decode again at every pixel): Qt keeps the decoded image while it is
+    // shown, and a 12 MP photo is ~48 MB at its own size. Never scaled up.
+    // Performance pass 7.
+    readonly property var knownSize: ShellState.mediaSize(item.url)
+    readonly property size fitCap: {
+        const known = knownSize
+        const dpr = Screen.devicePixelRatio
+        const bw = Math.ceil(Math.ceil((width - 2) * dpr) / 128) * 128
+        const bh = Math.ceil(Math.ceil((height - 2) * dpr) / 128) * 128
+        if (fill || hidden || !known || bw <= 0 || bh <= 0 || (known.w <= bw && known.h <= bh))
+            return Qt.size(0, 0)
+        const s = Math.min(bw / known.w, bh / known.h)
+        return Qt.size(Math.ceil(known.w * s), Math.ceil(known.h * s))
     }
 
     Image {
@@ -69,7 +86,9 @@ Rectangle {
         // A fitted one decodes at its own size (a cap would scale small
         // pictures up, and the learnt size must be the real one).
         sourceSize: root.hidden ? Qt.size(16, 16)
-            : root.fill ? Qt.size(Math.ceil(width), Math.ceil(height)) : Qt.size(0, 0)
+            : root.fill ? Qt.size(Math.ceil(width), Math.ceil(height)) : root.fitCap
+        // The full decode stays up while the capped one loads.
+        retainWhileLoading: true
         onStatusChanged: root.learn(still)
     }
 

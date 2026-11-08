@@ -131,19 +131,33 @@ ApplicationWindow {
         onCloseRequested: window.close()
     }
 
-    // Over the shell while it fades out on the first Ready.
-    BootView {
+    // Over the shell while it fades out on the first Ready. Unloaded once
+    // the fade ends, and made again if the session boots again (performance
+    // pass 7: it kept ~90 objects alive in the signed-in shell).
+    Loader {
         id: boot
         z: 1
         anchors.fill: parent
-        visible: window.booting || boot.exiting
-        active: window.booting
-        status: Session.status
+        property bool held: true
+        readonly property bool exiting: item ? item.exiting : false
+        active: held
+        visible: window.booting || exiting
+        sourceComponent: BootView {
+            active: window.booting
+            status: Session.status
+            onExitingChanged: if (!exiting && !active) boot.held = false
+        }
+        Connections {
+            target: window
+            function onBootingChanged() { if (window.booting) boot.held = true }
+        }
     }
 
-    SignInView {
+    // Made only while signed out (performance pass 7).
+    Loader {
         anchors.fill: parent
-        visible: Session.phase === Session.SignedOut || Session.phase === Session.DeviceCode
+        active: Session.phase === Session.SignedOut || Session.phase === Session.DeviceCode
+        sourceComponent: SignInView {}
     }
 
     Shell {

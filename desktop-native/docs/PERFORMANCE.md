@@ -2065,3 +2065,470 @@ Source (worktree `native/perf3`):
     and `patches/qt/build-qt.ps1` (its comment);
   - `patches/vendor.ps1`: `libwebrtc`, and the note on plain diffs.
 - Docs: this section, and LIBRARIES.md §12.1, §12.4, §13.1 and §13.3.
+
+# Performance pass 7 (2026-11-07)
+
+The brief, in order:
+
+1. a real window-capture share at 1440p60;
+2. hardware decode for VP8 and VP9;
+3. idle memory under 120 MB;
+4. animated idle under 3 %, proven with a WPR trace or by fewer draws;
+5. CI, already written down (nothing uploaded).
+
+The coordinator added a sixth: a Qt rebuild with UI pass 11's DirectWrite
+contrast patch (§6).
+
+Before is c4e8c212 with the one-line `view.rs` fix that spike/qt-desktop
+also carries (`F:/ct/yapn/tmp/p7/before/`, 59,525,120 B). The other builds
+are from the `native/perf3` worktree, on the pass 6 Qt
+(`F:/ct/qt-custom-6.11p6`) unless noted:
+
+| build   | what it adds                                                                                |
+| ------- | ------------------------------------------------------------------------------------------- |
+| `vp9`   | Media Foundation VP9/VP8 decode (§2) and the VP9 share test switch                          |
+| `b3`    | `vp9` + one texture per streamed GIF, the QML trims, capped picture decodes, settle release |
+| `final` | `b3` on the Qt with patch `0005` (§6)                                                       |
+
+## Conditions
+
+- **The displays were awake** (60.0 Hz vblanks). DISPLAY15 (a Parsec
+  virtual display, 1920x1080 at 100 %) ran at 2560x1440@60 for the share
+  test, at 100 % scaling, and was restored afterwards (`display.ps1 restore`,
+  verified).
+- **The machine was shared:** a `qemu` VM, and UI pass 11's sessions and
+  builds. CPU is compared only within interleaved runs.
+- **UI pass 11 used the same test accounts.** The pass 7 tools refuse to start
+  while any other agent's `YapNative.exe` or node peer runs, and waited for
+  free windows. Early in the pass two of my exes were named `before.exe` and
+  `vp9.exe`, which other agents' checks for `YapNative` do not see. UI pass 11
+  ran the owner account once while my `vp9.exe --profile perf7` was running.
+  From then on every exe of mine is `tmp/p7/<build>/YapNative.exe`.
+- **WPR was approved** by phone (the second request; the first ran as SYSTEM
+  without `pwsh` on its PATH). One kernel trace of the animated idle was taken
+  (§4).
+
+## Method (new)
+
+Tools are in `F:/ct/yapn/tools/p7/`, copied from p6 with paths and profiles
+moved to `tmp/p7` and `perf7`:
+
+- `idle.ps1`: idle memory on `-Fixture chat-10k` or `soak`. Soak is the
+  real-account-like fixture: four channels, members, media from
+  `tools/p4/media-server.mjs`, and 1 event/s with no channel switches. It
+  takes optional QML object counts (`YAP_DEBUG_OBJECTS`) and a heap dump;
+- `etlstacks.py`: our process's samples out of an xperf kernel trace
+  (`xperf -i <etl> -quiet` piped in), named from the link map, per thread and
+  per stack;
+- `mft-probe.ps1`: the video decoder MFTs for H.264, VP8 and VP9;
+- `cam.ps1`: watching the headless web peer's camera, with the codec it
+  negotiated;
+- `share-test-window.ps1`: pass N6b's test window, borderless, so it is
+  exactly 2560x1440 (run it with Windows PowerShell 5.1: its WinForms
+  types do not compile under pwsh 7);
+- `wgc-start.ps1`: waits for the accounts to be free, then starts the owner
+  and opens the share picker;
+- `build.ps1` and `test.ps1`: on the pass 6 Qt by default.
+
+New in the app (test switches, off unless set):
+
+- `YAP_DEBUG_SHARE_CODEC=vp9`: a software share is published with VP9 first.
+  No Yap client sends VP9, so this makes a VP9 stream to watch;
+- `YAP_VPX_DECODER=software`: VP8 and VP9 stay on libvpx (comparisons).
+
+## 1. Real window-capture share at 1440p60
+
+The source was `share-test-window.ps1` at 2560x1440 on DISPLAY15, set to
+2560x1440@60. It is a borderless window of ours that paints a moving pattern
+at about 60 Hz and sits at the bottom of the Z order. The owner (`b3`,
+profile `perf7`) shared it through the picker at 1440p 60 fps. WGC captured
+it at 2560x1440 and NVENC encoded it (`NVIDIA H.264 Encoder MFT`). The peer
+(`b3`, `perf7peer`) watched.
+
+| per 25 s                     | sharer, no watcher | sharer, one watcher | watcher               |
+| ---------------------------- | ------------------ | ------------------- | --------------------- |
+| process CPU                  | 10.70 s (**43 %**) | 11.11 s (**44 %**)  | 6.94 s (**28 %**)     |
+| frames                       | sent at 46-58 fps  | sent at 57-59 fps   | received at 53-58 fps |
+| encode (NVENC) / decode (MF) | 6.9-8.7 ms         | 6.7-6.8 ms          | 0.1-0.2 ms, zero copy |
+| private                      | 352-361 MB         | -                   | 272 MB                |
+| threads                      | 202-210, steady    | 205                 | 123                   |
+
+- **Sharer.** This matches pass 5's synthetic 1440p60 number (47 %) with a
+  real capture. Its largest threads are:
+  - the WGC frame callback, 2.6-3.1 s. It copies each frame to a staging
+    texture, maps it (a GPU sync) and converts 2560x1440 BGRA to I420 on the
+    CPU;
+  - the GUI thread, 2.0-2.2 s, drawing the share's own preview;
+  - two more, 1.2-1.8 s and 0.9-1.0 s;
+  - `yap-h264`, 0.7 s, the I420 to NV12 copy into the MFT;
+  - WebRTC's network and worker threads, 1.1 s.
+- **166 of the sharer's threads are the NVIDIA driver's.** The count is
+  steady over minutes, so it is a pool (NVENC's MFT and the capture's
+  device), not a leak.
+- **Watcher.** Pass 6's zero-copy H.264 path at 2560x1440. What is left is
+  the call: WebRTC's network thread, 1.36 s at 14 Mbps.
+- The screenshots are `tmp/p7/share/wgc-live.png` (sharer) and
+  `w-wgc-b3.png` (watcher).
+- **What would lower the sharer:** the zero-copy share in LIBRARIES.md §12.4.
+  The WGC texture would go through a D3D11 video processor (BGRA to NV12 on
+  the GPU) into the MFT on the same device, and NVENC takes D3D11 input. That
+  removes the readback, both conversions and the NV12 upload: about half of
+  the 43 %. It needs the encoder's input path in `mf_h264.rs` rewritten for
+  textures, and the preview fed the same texture. It was not done this pass.
+
+## 2. Hardware decode for VP8 and VP9
+
+**What the machine has** (`tools/p7/mft-probe.ps1`, and a D3D11 probe in
+`tmp/p7/probe/dxva.cpp`):
+
+- The RTX 3080 has D3D11 decoder profiles for H.264 and VP9 profile 0, but
+  not for VP9 profile 2 (10-bit) or VP8.
+- The VP8 and VP9 decoder MFT is the VP9 Video Extensions' one
+  (`VP9VideoExtensionDecoder`). It is D3D11-aware.
+- Given a D3D11 device manager, it takes VP9. It refuses VP8 with
+  `MF_E_UNSUPPORTED_D3D_TYPE`, since NVIDIA has no VP8 DXVA. Intel GPUs
+  decode VP8.
+
+**Patch `webrtc-sys/0005`** (LIBRARIES.md §13.1):
+
+- Pass 5-6's Media Foundation decoder now takes a codec. For VP9 profile 0,
+  and for VP8, it runs the VP9 Video Extensions' MFT on the GPU through the
+  same zero-copy path (NV12 textures on the UI's device, sampled by Qt).
+- It is GPU only. A probe, once per codec, checks that the MFT takes the
+  codec with a D3D11 device manager. libwebrtc's software-fallback wrapper
+  puts libvpx behind it: a failed Configure or any decode error (returned as
+  `FALLBACK_SOFTWARE`) moves the stream to libvpx from the next key frame.
+- The patch reproduces the vendored crate: `vendor.ps1 -Force`, then
+  compared byte for byte.
+
+**VP9, watching a 1080p60 share** (owner: software share with
+`YAP_DEBUG_SHARE_CODEC=vp9`; watcher: `vp9`, alternating):
+
+| per 25 s, watcher          | libvpx (`YAP_VPX_DECODER=software`) | Media Foundation, GPU, zero copy |
+| -------------------------- | ----------------------------------- | -------------------------------- |
+| process CPU                | 10.66 s (**43 %**)                  | 5.83 s, 5.19 s (**21-23 %**)     |
+| `VideoDecoderQueue` thread | 1.25 s                              | (not in the top six)             |
+| frames                     | 1920x1080 at 60 fps                 | 1920x1080 at 59-60 fps           |
+| private while watching     | 212.5 MB                            | 276-277 MB                       |
+| private 20 s after leaving | -                                   | 185.3 MB                         |
+
+- **CPU: −45 to −51 %.** libvpx's frame threads and the I420 upload into Qt
+  are gone. The picture is the same (`tmp/p7/share/w-vp9-mf.png`).
+- **Memory: +64 MB while watching**, from the DXVA decoder's surfaces. It
+  goes when the stream ends. This is the same trade as pass 6's H.264 (which
+  is 238-267 MB at 1080p60).
+
+**VP8: what the browsers send.** The web peer (headless Edge, the
+production web client) publishes VP8 simulcast:
+
+- `f` 1280x720, `h` 640x360 and `q` 320x180, each at 15 fps;
+- the SFU forwarded `h` to our grid tile: `VP8 640x360@15 libvpx 0.1ms`;
+- watching it cost 4.05 s per 25 s (16 %), most of it the call itself
+  (WebRTC's threads, the mic and the audio device).
+
+The web client sets no codec preference, so Chromium's order puts VP8
+first. Mobile uses libwebrtc's default order, also VP8 first. VP8 has no
+DXVA profile on this GPU, so it stays on libvpx here. A 640x360 VP8 decode
+takes 0.1 ms, so the GPU would save little per camera.
+
+## 3. Idle memory
+
+**Baseline owners** (traced heap at idle):
+
+| owner          | chat-10k (60.4 MB live) | soak (52.1 MB live) |
+| -------------- | ----------------------- | ------------------- |
+| QML engine     | 17.2 + 4.4 V            | 19.5 + 5.2 V        |
+| Qt core        | 8.0                     | 9.6                 |
+| scene graph    | 6.7                     | 9.3                 |
+| pictures       | 1.3                     | 6.2                 |
+| Rust core      | 23.5                    | 2.8                 |
+| text and fonts | 2.4                     | 2.7                 |
+
+**What is outside the heap.** `PrivateMemorySize` is 172 MB on chat-10k
+with 134 MB of private allocations; the other ~37 MB is image copy-on-write
+pages and pagefile sections (mostly the GPU driver's). Of the 134 MB:
+
+- ~86 MB is the heap;
+- ~13 MB is write-combined memory;
+- the rest is the driver's own regions (`tools/vmmap.ps1`).
+
+### What changed
+
+- **Capped picture decodes** (`MediaTile.qml`):
+  - A fitted chat picture was decoded at its own size, to learn its real
+    size. Qt keeps the decoded image while it is shown: a 1280x720 picture
+    cost 3.5 MB of heap, and a 12 MP phone photo would cost ~48 MB.
+  - Once the real size is known (from that first decode, or learnt
+    earlier), a picture larger than its box decodes at the box's size. The
+    box is taken in 128 px steps, so a resize does not decode again at every
+    pixel.
+  - It never scales up. A capped decode does not overwrite the learnt size.
+    `retainWhileLoading` keeps the first decode up while the capped one
+    loads.
+- **One texture per streamed GIF** (`cpp/animatedpicture.cpp`): §4.
+- **A settle release** (`cpp/main.cpp`):
+  - 20 s after the first frame, the debounced `releaseGraphicsSoon()` runs
+    once.
+  - It frees what startup's frames left behind:
+    `QRhiResourceUpdateBatch` op lists grown to 1.35 MB, pooled buffers and
+    unused glyph caches.
+  - It costs one pipeline rebuild on the next frame.
+- **Fewer live QML objects** (6,362 to 5,392 on soak, −15 %). These are
+  made only while they are used:
+  - `BootView`: after its fade (92 objects in the signed-in shell);
+  - `SignInView`: while signed out (43);
+  - each tree row's `VoiceStatusLine`: on the row that draws a status (282);
+  - each member's `NameplateLayer`: for a member with a nameplate;
+  - each `DisplayName`'s neon `MultiEffect`: for a neon name.
+
+| idle, private (2 runs each, interleaved) | before         | after (`b3`)                    |
+| ---------------------------------------- | -------------- | ------------------------------- |
+| chat-10k                                 | 170.8-173.0 MB | **163.6-165.4 MB** (−7)         |
+| soak (real-account-like)                 | 174.8-177.4 MB | **157.0-158.7 MB** (−17 to −20) |
+| soak, traced live heap                   | 52.1 MB        | **41.1 MB**                     |
+
+On soak the heap fell by owner as follows:
+
+- pictures, 6.2 to 2.1 MB;
+- scene graph, 9.3 to 6.4;
+- QML engine, 19.5 to 17.6;
+- Qt core, 9.6 to 8.1;
+- Quick items, 1.6 to 1.2.
+
+### Not done, and why
+
+- **The bridge's second copy of the message rows.** It is 9 MB on chat-10k
+  (the `Vec<MessageRow>`, 557 B a row inline, plus its strings). On soak all
+  of the Rust core is 2.8 MB, and a real channel holds hundreds of rows, not
+  10,000: under 1 MB.
+  - The core keeps no rows of its own. It builds them from `MessageLog` and
+    ships diffs.
+  - For the model to read from the core instead, the GUI thread would have
+    to reach the core's state, behind a lock, on every `data()` call.
+  - That cost is out of proportion to the gain on real data.
+- **Fonts from uncompressed resources** would save 2.2 MB of heap and add
+  0.8 MB to the exe. That would take it over 60 MB.
+- **A smaller chat `cacheBuffer`** (1,200 px; MessageDelegate is 1,104
+  objects) would trade scroll smoothness, which the user has just reported
+  as worse.
+
+## 4. Animated idle
+
+### The WPR trace
+
+One kernel trace was taken: CPU sampling every 0.12 ms with stacks, 60 s of
+pass 3's animated scene on the before build, analysed with `etlstacks.py`.
+It finds what pass 6's in-process sampler could not: time spent outside the
+GUI thread, and frames without unwind data. Our process's samples split as:
+
+- GUI thread, 60 %;
+- the NVIDIA driver's worker thread, 28 %;
+- DXGI and vblank threads, 7 %.
+
+On the GUI thread:
+
+| area (inclusive)                                                    | share         |
+| ------------------------------------------------------------------- | ------------- |
+| rendering (`renderWindow`)                                          | 61.5 %        |
+| of which the batch renderer (`render`)                              | 30.2 %        |
+| of which `endFrame` (command buffer execution, Present)             | 22.4 %        |
+| **GIF decoding** (`AnimatedPicture::advance`, `QGIFFormat::decode`) | **14.6-18 %** |
+| **a new D3D11 texture per GIF frame** (`QD3D11Texture::create`)     | **4.5 %**     |
+
+Notes on the table:
+
+- Pass 6 put GIF decoding at 3 %. The in-process sampler missed Qt's GIF
+  decoder, which has no unwind data.
+- The streamed GIF tile deleted its texture and made a new one for every
+  frame. Each one was a D3D11 create, plus the driver's allocation and
+  release.
+- The scene draws **83 batches a frame** for 153 nodes
+  (`QSG_RENDERER_DEBUG=render`). The alpha pass merges poorly: every
+  differently coloured text run and every rounded rectangle is its own
+  draw (`tmp/p7/vis-batches.png`).
+
+### What changed
+
+**One texture per streamed GIF** (`AnimatedPicture::updatePaintNode`):
+
+- A new frame of the same size goes into the existing `QSGPlainTexture`
+  (`setImage`), which uploads into its `QRhiTexture` again.
+- `Qt::QuickPrivate` is now linked, for `qsgplaintexture_p.h`.
+- The GIF still animates and loops (screenshots `tmp/p7/gif-1..3.png`: the
+  tile changes between captures 0.7 s and 6 s apart).
+
+Paced animated idle, 40 s runs, the builds interleaved over three rounds:
+
+| build  | CPU (one core)       | mean   | private        |
+| ------ | -------------------- | ------ | -------------- |
+| before | 4.76, 4.49, 3.24     | 4.16 % | 174.4-175.2 MB |
+| `b3`   | 4.49, 4.10, **2.89** | 3.83 % | 167.6-169.3 MB |
+
+`b3` is lower in every round, by 0.27-0.39 points (−8 %), and 6-7 MB lower.
+
+### Why not under 3 %, and what would get there
+
+- **The machine's load moves a run by more than a point**: the same build
+  ran at 3.24 and 4.76 %. A best of 2.89 % is not a proof.
+- **GIF decoding is 15 % of the GUI thread.** A 360x240 GIF of 24 frames
+  is 8 MB decoded, so caching frames would trade too much memory. Decoding
+  on a worker thread would move the time, not remove it.
+- **Fewer draws.** Caching static panels in layers would turn 83 draws into
+  a few, but it renders their text into textures. UI pass 11 is
+  investigating the text's look, so that was not tried; it needs a pixel
+  diff of the text first.
+- The DXGI vblank threads wake 60 times a second while anything animates
+  (one per monitor the window has been on). They cost nothing at static
+  idle, which measured 0.00 %.
+
+## 5. CI
+
+LIBRARIES.md §13.3 has the steps. Nothing was uploaded. The archive to pack
+is now `F:/ct/qt-custom-6.11p7/6.11.3-yap` (§6).
+
+## 6. Qt rebuild with DirectWrite's enhanced contrast
+
+UI pass 11 wrote `patches/qt/6.11.3/0005-directwrite-enhanced-contrast.patch`
+(spike/qt-desktop, db5834f7); it is copied here unchanged. It applies the
+system's enhanced-contrast curve to DirectWrite's glyph coverage, as
+Direct2D and Chromium do (LIBRARIES.md §13.3).
+
+- **Built** with `build-qt.ps1 -Root F:/ct/qt-custom-6.11p7 -Clean`:
+  `0001`-`0005` on the 6.11.3 source zip, into
+  `F:/ct/qt-custom-6.11p7/6.11.3-yap`. `F:/ct/qt-custom-6.11` and `-6.11p6`
+  were not touched.
+- **The patches applied in full.** `0005` is a plain diff. `0001`, `0002`
+  and `0004` carry `diff --git` headers, but the source is extracted outside
+  any repository, where `git apply` reads them as it should. Every added
+  line of every patch was then found in the extracted tree (a script, before
+  the build), and `.yap-patched` was written.
+- **The exe links it:** `QT_DWRITE_ENHANCED_CONTRAST` is in the final exe
+  and not in `b3`'s.
+- **`build.ps1`'s default Qt is now `qt-custom-6.11p7`** (then `p6`, then
+  `6.11`).
+
+**Text against the web** (`tools/p7/web-shot.mjs`, a copy of
+`web-shot.mjs` with `--dpr`, dark scheme, at the native window's logical
+size). The crop is "final smoke: hidden toast" in #general, zoomed 4x with
+nearest neighbour: `tmp/p7/text/cmp-1x.png` and `cmp-15x.png`. The number
+is the mean luminance of the brightest 10 % of the crop's pixels, which
+measures how heavy light-on-dark glyphs are:
+
+| scale | web   | native, pass 6 Qt | native, `0005` |
+| ----- | ----- | ----------------- | -------------- |
+| 100 % | 221.8 | 207.9             | **215.9**      |
+| 150 % | 226.8 | 225.5             | **229.5**      |
+
+- At 100 % the strokes are visibly fuller, and most of the gap to the web
+  closes. At 150 % they are a touch heavier than the web's.
+- The sidebar's bold labels are the same in all three (241 against 241).
+- One difference remains. Native draws ClearType's colour fringes, and
+  headless Edge draws grayscale, so the screenshots cannot settle subpixel
+  rendering.
+- **No CPU cost:** the final build's animated idle ran at 3.87 and 2.77 %,
+  against `b3`'s 4.33 and 3.09 % in the same rounds.
+
+## Before and after (pass 7)
+
+| metric                                          | before                  | after                                              |
+| ----------------------------------------------- | ----------------------- | -------------------------------------------------- |
+| sharing a real 2560x1440 window at 1440p60, CPU | not measured            | **43-44 %** at 54-59 fps (NVENC)                   |
+| watching it (H.264, zero copy)                  | not measured            | **28 %** at 53-58 fps                              |
+| watching a VP9 1080p60 share, CPU per 25 s      | 10.66 s (43 %, libvpx)  | **5.19-5.83 s (21-23 %, GPU)**                     |
+| watching a VP9 1080p60 share, private           | 212.5 MB                | 276-277 MB (released on leaving)                   |
+| idle private, chat-10k                          | 170.8-173.0 MB          | **163.6-165.4 MB**                                 |
+| idle private, soak                              | 174.8-177.4 MB          | **157.0-158.7 MB**                                 |
+| soak traced live heap                           | 52.1 MB                 | **41.1 MB**                                        |
+| QML objects alive, soak                         | 6,362                   | **5,392**                                          |
+| animated idle, paced (interleaved)              | 4.16 % mean (3.24-4.76) | **3.83 % mean** (2.89-4.49); final build 2.77-3.87 |
+| text ink at 100 % (web 221.8)                   | 207.9                   | **215.9**                                          |
+| exe                                             | 59,525,120 B            | 59,544,576 B                                       |
+
+## Targets
+
+1. **Real 1440p60 window share: measured.** The sharer runs at 43-44 % of a
+   core and the watcher at 28 %, at 54-59 fps. Next: the zero-copy share
+   (§1), about half of the sharer's CPU.
+2. **Hardware VP9 decode: done**, at −45 to −51 % CPU while watching, on the
+   GPU through Media Foundation. **VP8:** the code path is there, but this
+   GPU has no VP8 decoder, so on NVIDIA it stays on libvpx (Intel decodes
+   it). The browsers and mobile send VP8 simulcast. A camera tile is 640x360
+   at 15 fps and 0.1 ms a frame to decode, so the GPU would save little.
+   - Not checked: VP8 on an Intel GPU, and a VP9 stream from a browser (no
+     client publishes VP9).
+3. **Idle memory under 120 MB: not reached.**
+   - It is 157-159 MB on soak (−17 to −20) and 164-165 MB on chat-10k (−7).
+   - About 37 MB of `PrivateMemorySize` is DLL and driver pages that the app
+     does not allocate, so the target as measured would need the heap at
+     ~70 MB.
+   - What is left, largest first:
+     - the QML engine (17.6 MB heap and 5 MB JS pages): fewer types loaded
+       at startup;
+     - Qt core (8 MB);
+     - the scene graph (6.4 MB);
+     - the driver's regions;
+     - fonts (2.2 MB, which needs exe room);
+     - the bridge's row copy (under 1 MB on real data, §3).
+   - Real accounts gain most from the capped picture decode: a phone photo
+     on screen no longer costs ~48 MB.
+4. **Animated idle under 3 %: not proven.**
+   - The WPR trace found two costs and one is fixed (a texture per GIF
+     frame). The scene now runs at 2.77-4.49 % depending on the machine's
+     load.
+   - What is left: the GIF decode (15 % of the GUI thread) and 83 draws a
+     frame. Layer-caching the static panels is the lever, once the text in
+     a layer can be pixel-checked.
+5. **CI: written down** (LIBRARIES.md §13.3). The archive to pack is now the
+   p7 Qt. Nothing was uploaded.
+6. **Qt with `0005`: built, linked, verified** against the web at 100 % and
+   150 %, and the default.
+
+## Build, tests, clippy
+
+- Builds: `tools/p7/build.ps1`, which is `build.ps1` with a link map, into
+  `F:/ct/yapn/rel-perf` (logs `F:/ct/yapn/build-perf7-1..5.log`; all exit 0).
+  `Qt6_DIR` is `F:/ct/qt-custom-6.11p7/6.11.3-yap/lib/cmake/Qt6` after build 5.
+- Qt: `F:/ct/yapn/qt-p7-build.log` (exit 0).
+- Tests (`CARGO_TARGET_DIR=F:/ct/yapn/check-perf`, `LK_CUSTOM_WEBRTC` as
+  `build.ps1` sets it): the workspace without `yap_native`, plus `yap-audio`
+  on its own. 1,464 passed, 0 failed, on the pass 6 Qt and again on the p7 Qt (`F:/ct/yapn/test-perf7.log`).
+- `cargo clippy --workspace --all-targets -- -D warnings`, with QMAKE at the
+  p7 Qt: exit 0, no warnings (`F:/ct/yapn/clippy-perf7.log`).
+
+## Files
+
+Source (worktree `native/perf3`):
+
+- C++ and build:
+  - `cpp/animatedpicture.cpp`: one texture per streamed GIF
+    (`QSGPlainTexture::setImage`);
+  - `cpp/main.cpp`: the settle release 20 s after the first frame;
+  - `CMakeLists.txt`: `Qt::QuickPrivate`;
+  - `build.ps1`: the p7 Qt by default.
+- QML (5 files, each a Loader around what it already had, or one binding):
+  - `rust/qml/Main.qml`: `BootView` and `SignInView` behind Loaders;
+  - `rust/qml/delegates/TreeRow.qml`: `VoiceStatusLine` only on the row that
+    draws it;
+  - `rust/qml/delegates/MemberEntry.qml`: `NameplateLayer` only with a
+    nameplate;
+  - `rust/qml/components/DisplayName.qml`: the neon `MultiEffect` only for a
+    neon name;
+  - `rust/qml/components/MediaTile.qml`: the capped decode (`fitCap`,
+    `retainWhileLoading`).
+- Rust:
+  - `crates/yap-voice/src/engine/webrtc.rs`: `YAP_DEBUG_SHARE_CODEC=vp9`;
+  - `crates/yap-core/src/store/view.rs`: the `User::label` fix from spike
+    (`.map(|u| u.label())`).
+- Patches (LIBRARIES.md §12.1, §13.1 and §13.3):
+  - `patches/webrtc-sys/0005-mf-vpx-decoder.patch` (new);
+  - `patches/qt/6.11.3/0005-directwrite-enhanced-contrast.patch` (UI pass
+    11's, copied unchanged);
+  - `patches/vendor.ps1`: its comment.
+- Docs: this section, and LIBRARIES.md §12.1, §13.1 and §13.3.
+
+Tools (outside the repo, `F:/ct/yapn/tools/p7/`): `idle.ps1`,
+`etlstacks.py`, `mft-probe.ps1`, `cam.ps1`, `share-test-window.ps1`,
+`wgc-start.ps1`, `text-shot.ps1`, `textcmp.py`, `web-shot.mjs` (with `--dpr`),
+and the p6 copies (`app.ps1`, `owner.ps1`, `watch.ps1`, `leave.ps1`,
+`anim-idle.ps1`, `anim-ab.ps1`, `heap-idle.ps1`, `build.ps1`, `test.ps1`,
+`xperf-session.ps1`).
