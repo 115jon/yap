@@ -418,6 +418,8 @@ RowLayout {
         background: Rectangle {
             objectName: "yapNoPressSink"
             color: Theme.ply3
+            // sheet.tsx shadow-modal.
+            FloatShadow { modal: true; radius: 0 }
         }
         T.Overlay.modal: Scrim { color: Theme.scrim }
         contentItem: Item {
@@ -458,6 +460,8 @@ RowLayout {
             // A drawer drags from its own item (main.cpp PopupPressSink).
             objectName: "yapNoPressSink"
             color: Theme.ply3
+            // sheet.tsx shadow-modal.
+            FloatShadow { modal: true; radius: 0 }
             Rectangle {
                 width: 1
                 height: parent.height
@@ -499,6 +503,8 @@ RowLayout {
             // A drawer drags from its own item (main.cpp PopupPressSink).
             objectName: "yapNoPressSink"
             color: Theme.ply3
+            // sheet.tsx shadow-modal.
+            FloatShadow { modal: true; radius: 0 }
             Rectangle {
                 width: 1
                 height: parent.height

@@ -86,9 +86,14 @@ Item {
         }
     }
 
+    // The bar's height in window terms: a Drawer's dimmer already starts at
+    // the drawer's own top (QQuickDrawerPrivate::resizeDimmer), which for
+    // the shell's sheets is the bar's bottom, so a fixed margin left a
+    // 32 px band of the headers undimmed. The overlay sits at the window's
+    // origin, so `y` is the window offset.
     Rectangle {
         anchors.fill: parent
-        anchors.topMargin: ShellState.stageFullscreen ? 0 : Theme.chrome
+        anchors.topMargin: Math.max(0, (ShellState.stageFullscreen ? 0 : Theme.chrome) - root.y)
         color: root.color
     }
 }
