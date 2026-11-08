@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "generated_at": "2026-11-08T00:00:00.000Z",
+  "source": "discord-detectable",
+  "etag": "fixture0001",
+  "count": 13,
+  "apps": [
+    {
+      "id": "356875221078245376",
+      "name": "Overwatch",
+      "icon_hash": "a60bb76ba4d4acafbd4cb9aad6e61739",
+      "executables": [{ "name": "overwatch.exe" }],
+      "steam_app_ids": ["2357570"]
+    },
+    {
+      "id": "356875762940379136",
+      "name": "World of Warcraft",
+      "aliases": ["World of Warcraft™"],
+      "icon_hash": "fc92f820c44e72085dc6205e5e746850",
+      "executables": [
+        { "name": "_retail_/wow.exe" },
+        { "name": "_retail_/wow-64.exe" }
+      ]
+    },
+    {
+      "id": "356875988589740042",
+      "name": "Dota 2",
+      "icon_hash": "6b4b3fa4c83555d3008de69d33a60588",
+      "executables": [{ "name": "dota2.exe" }],
+      "steam_app_ids": ["570"]
+    },
+    {
+      "id": "356876000000000001",
+      "name": "Battle.net",
+      "executables": [{ "name": "battle.net.exe", "is_launcher": true }]
+    },
+    {
+      "id": "356876000000000002",
+      "name": "Half-Life 2",
+      "executables": [
+        { "name": ">hl2.exe" },
+        { "name": "half-life 2/hl2.exe" }
+      ],
+      "steam_app_ids": ["220"]
+    },
+    {
+      "id": "356876000000000003",
+      "name": "Celeste",
+      "icon_hash": "0123456789abcdef0123456789abcdef",
+      "executables": [{ "name": "celeste.exe" }]
+    },
+    {
+      "id": "356876000000000004",
+      "name": "Exact Game",
+      "executables": [{ "name": ">launch.exe" }]
+    },
+    {
+      "id": "356876000000000005",
+      "name": "Sunless Sea",
+      "executables": [
+        { "name": "game.exe" },
+        { "name": "sunless sea/game.exe" }
+      ]
+    },
+    {
+      "id": "356876000000000006",
+      "name": "Other Game",
+      "executables": [{ "name": "game.exe" }]
+    },
+    {
+      "id": "356876000000000007",
+      "name": "NW App",
+      "executables": [{ "name": "nw.exe" }]
+    },
+    {
+      "id": "356876000000000008",
+      "name": "Argued",
+      "executables": [{ "name": "argued.exe", "arguments": "--mode game" }]
+    },
+    { "id": "abc", "name": "Bad id", "executables": [{ "name": "bad.exe" }] },
+    42
+  ]
+}

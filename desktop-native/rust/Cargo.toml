@@ -3,6 +3,7 @@ members = [
     "crates/yap-cache",
     "crates/yap-capture",
     "crates/yap-core",
+    "crates/yap-games",
     "crates/yap-protocol",
     "crates/yap-realtime",
     "crates/yap-voice",
@@ -28,6 +29,7 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "
 yap-cache = { path = "crates/yap-cache" }
 yap-capture = { path = "crates/yap-capture" }
 yap-core = { path = "crates/yap-core" }
+yap-games = { path = "crates/yap-games" }
 yap-protocol = { path = "crates/yap-protocol" }
 yap-realtime = { path = "crates/yap-realtime" }
 yap-voice = { path = "crates/yap-voice" }
@@ -65,6 +67,7 @@ tokio-tungstenite = { version = "0.30.0", features = ["native-tls"] }
 yap-cache.workspace = true
 yap-capture.workspace = true
 yap-core.workspace = true
+yap-games.workspace = true
 yap-protocol.workspace = true
 yap-realtime.workspace = true
 yap-voice.workspace = true

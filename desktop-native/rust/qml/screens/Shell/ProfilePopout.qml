@@ -117,6 +117,11 @@ T.Popup {
             }
         }
 
+        // "Playing a game", first of the sections (ProfileSections).
+        ProfileGame {
+            game: Profile.game
+        }
+
         Column {
             visible: Profile.bio.length > 0
             width: parent.width

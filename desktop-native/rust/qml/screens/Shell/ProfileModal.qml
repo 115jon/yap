@@ -113,6 +113,10 @@ T.Popup {
                 text: Profile.loadError
             }
 
+            ProfileGame {
+                game: Profile.game
+            }
+
             Column {
                 visible: Profile.bio.length > 0
                 width: parent.width

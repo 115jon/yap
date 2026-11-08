@@ -25,6 +25,7 @@ mod custom_sounds;
 mod desktop;
 mod extras;
 mod friends;
+mod games;
 mod gui;
 #[cfg(windows)]
 mod installer;

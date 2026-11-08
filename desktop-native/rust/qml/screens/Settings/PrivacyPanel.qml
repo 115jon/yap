@@ -3,7 +3,8 @@ import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
 
-// Privacy & safety (PrivacyPanel.tsx). Media filter: the four levels as a
+// Privacy & safety (PrivacyPanel.tsx). Activity: "Share my activity",
+// saved to the account. Media filter: the four levels as a
 // segmented rail, saved to the account at once (rolled back with the
 // reason if it fails). Shared messages: the links from `/api/shares`, Live
 // or All, each with Copy link, Open and Revoke (an inline confirm).
@@ -24,6 +25,20 @@ Column {
             return qsTr("Never")
         const date = new Date(iso)
         return isNaN(date) ? qsTr("Never") : date.toLocaleDateString(Qt.locale(), "MMM d, yyyy")
+    }
+
+    // Activity (PrivacyPanel.tsx ShareActivityRow): applied at once,
+    // rolled back with the reason if the account does not take it.
+    SettingsCard {
+        width: parent.width
+        sectionId: "activity"
+        SwitchSetting {
+            rowId: "share-activity"
+            checked: Settings.shareActivity
+            disabled: Settings.shareActivitySaving
+            onToggled: Settings.shareMyActivity(!Settings.shareActivity)
+            footer: RowError { text: Settings.shareActivityError }
+        }
     }
 
     SettingsCard {

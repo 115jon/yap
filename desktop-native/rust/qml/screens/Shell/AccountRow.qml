@@ -134,9 +134,24 @@ Rectangle {
                     y: identityHover.hovered ? -16 : 0
                     width: parent.width
                     Behavior on y { NumberAnimation { duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+                    // What we play, as others see it, before the custom
+                    // status (UserPanel.tsx).
+                    Loader {
+                        width: parent.width
+                        height: 16
+                        active: Session.meGame.length > 0
+                        visible: active
+                        sourceComponent: GameLine {
+                            game: Session.meGame
+                            icon: Session.meGameIcon
+                            ink: Theme.ink2
+                            strongInk: Theme.ink1
+                        }
+                    }
                     Text {
                         width: parent.width
                         height: 16
+                        visible: Session.meGame.length === 0
                         verticalAlignment: Text.AlignVCenter
                         textFormat: Text.PlainText
                         text: Session.meCustomStatus.length > 0 ? Session.meCustomStatus : root.presenceWord
@@ -164,7 +179,8 @@ Rectangle {
             when: identityHover.hovered && !(account.item?.visible ?? false)
             sourceComponent: Tooltip {
                 visible: identityHover.hovered && !(account.item?.visible ?? false)
-                text: qsTr("View profile · %1").arg(Session.meCustomStatus.length > 0 ? root.presenceWord + ": " + Session.meCustomStatus : root.presenceWord)
+                readonly property string line: Session.meGame.length > 0 ? qsTr("Playing %1").arg(Session.meGame) : Session.meCustomStatus
+                text: qsTr("View profile · %1").arg(line.length > 0 ? root.presenceWord + ": " + line : root.presenceWord)
             }
         }
 

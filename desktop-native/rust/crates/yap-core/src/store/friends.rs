@@ -262,6 +262,10 @@ pub struct FriendRow {
     /// The second line: a friend's custom status, else empty
     /// (FriendsView.tsx `statusLine`).
     pub status_line: String,
+    /// What a friend is playing (in the second line's place), or empty,
+    /// and its icon (absolute) or empty.
+    pub game: String,
+    pub game_icon: String,
     /// `friend`, `blocked`, `incoming` or `sent`.
     pub kind: &'static str,
 }
@@ -326,10 +330,19 @@ fn row(rel: &Relationship, presence: &Presence, api_base: &str) -> FriendRow {
         Relationship::INCOMING => "incoming",
         _ => "sent",
     };
-    let status_line = if rel.kind == Relationship::FRIEND {
+    let friend = rel.kind == Relationship::FRIEND;
+    let status_line = if friend {
         presence.custom_status(&user.id, user.custom_status.as_deref())
     } else {
         String::new()
+    };
+    let (game, game_icon) = if friend {
+        (
+            super::view::game_name(presence, &user.id),
+            super::view::game_icon(presence, &user.id, api_base),
+        )
+    } else {
+        Default::default()
     };
     FriendRow {
         user_id: user.id.clone(),
@@ -343,6 +356,8 @@ fn row(rel: &Relationship, presence: &Presence, api_base: &str) -> FriendRow {
         ),
         presence: presence_of(presence, &user.id).to_owned(),
         status_line,
+        game,
+        game_icon,
         kind,
     }
 }

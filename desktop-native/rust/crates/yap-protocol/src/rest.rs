@@ -237,6 +237,10 @@ pub struct User {
     /// `high`, `medium`, `low` or `off` (the GIF search filter).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media_content_filter: Option<String>,
+    /// "Share my activity" (`GET /api/users/me` only); absent from servers
+    /// that predate it, which means on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share_activity: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
     /// The synced join and leave sounds and the soundboard volume

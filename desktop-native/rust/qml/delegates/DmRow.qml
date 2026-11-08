@@ -16,6 +16,9 @@ Rectangle {
     required property string initials
     required property string presence
     required property string customStatus
+    // What the recipient plays (in the custom status's place), and its icon.
+    required property string game
+    required property string gameIcon
     // The recipient's avatar decoration (APNG), or empty.
     required property string deco
     required property bool unread
@@ -24,7 +27,7 @@ Rectangle {
     signal selected()
     signal profileRequested(Item anchor)
 
-    height: customStatus.length > 0 ? 40 : Theme.treeRow
+    height: customStatus.length > 0 || game.length > 0 ? 40 : Theme.treeRow
     radius: Theme.radius
     color: active ? Theme.tint2 : hover.hovered ? Theme.tint1 : "transparent"
     Behavior on color { ColorAnimation { duration: Theme.dur1 } }
@@ -115,9 +118,19 @@ Rectangle {
             color: row.active || hover.hovered || row.unread ? Theme.ink1 : Theme.ink2
             font: row.unread && !row.active ? Theme.type.rowUnread : Theme.type.row
         }
+        // What they play takes the custom status's line (GameActivity.tsx).
+        Loader {
+            width: parent.width
+            active: row.game.length > 0
+            visible: active
+            sourceComponent: GameLine {
+                game: row.game
+                icon: row.gameIcon
+            }
+        }
         Text {
             width: parent.width
-            visible: row.customStatus.length > 0
+            visible: row.game.length === 0 && row.customStatus.length > 0
             textFormat: Text.PlainText
             text: row.customStatus
             elide: Text.ElideRight

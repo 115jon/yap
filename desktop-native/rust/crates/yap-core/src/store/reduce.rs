@@ -9,6 +9,7 @@ mod embeds;
 mod extras;
 mod favorites;
 mod friends;
+mod games;
 mod invites;
 mod media;
 mod search;
@@ -131,6 +132,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
         }
         Input::BootRetry { session } => state.on_boot_retry(&mut fx, session),
     }
+    state.sync_activity(&mut fx);
     state.sync_settings(&mut fx);
     state.sync_admin(&mut fx);
     state.sync_panels(&mut fx);
@@ -1581,6 +1583,8 @@ impl State {
             Command::SaveDisplayName(name) => self.save_display_name(fx, &name),
             Command::SaveProfile(draft) => self.save_profile(fx, &draft),
             Command::SetMediaFilter(level) => self.set_media_filter(fx, &level),
+            Command::SetShareActivity(on) => self.set_share_activity(fx, on),
+            Command::SetGameActivity(activity) => self.set_game_activity(activity.map(|a| *a)),
             Command::SaveTheme { theme, sync } => self.save_theme(fx, theme, sync),
             Command::JoinVoice(id) => self.join_voice(fx, id),
             Command::WatchStream {
@@ -3557,6 +3561,9 @@ impl State {
                 self.set_link(fx, 0, false);
                 // A fresh gateway session starts online: say otherwise.
                 self.send_status(fx);
+                // And with no activity: what we play is restated (the
+                // end of this input sends it).
+                self.activity_socket_changed();
                 self.sync_subscriptions(fx);
                 self.expect_voice_rosters(fx);
                 self.flush_preview_clear(fx);
@@ -3581,6 +3588,8 @@ impl State {
             GatewayEvent::Resumed => {
                 current.gateway.ready = true;
                 current.gateway.was_ready = true;
+                // The old socket's activity went with it: restated below.
+                self.activity_socket_changed();
                 self.set_connected(fx, true);
                 self.set_link(fx, 0, false);
                 // The server restored the old subscriptions and voice
@@ -3592,6 +3601,7 @@ impl State {
             }
             GatewayEvent::Closed => {
                 current.gateway.ready = false;
+                self.activity_socket_changed();
                 self.set_connected(fx, false);
             }
             GatewayEvent::Reconnecting { attempt, offline } => {

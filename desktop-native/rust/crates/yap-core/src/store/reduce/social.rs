@@ -33,6 +33,7 @@ impl State {
     pub(super) fn clear_social(&mut self, fx: &mut Effects) {
         self.dms.clear();
         self.presence = Presence::default();
+        self.clear_activity();
         self.profile = None;
         if std::mem::replace(&mut self.home, false) {
             fx.view(ViewUpdate::Home(false));
@@ -495,7 +496,9 @@ impl State {
             status,
             custom_status,
             platforms,
+            game_activity,
         } = update;
+        self.apply_presence_game(&user_id, &status, game_activity.map(|g| g.map(|g| *g)));
         self.presence.reported.insert(user_id.clone());
         if let Some(platforms) = platforms {
             self.presence.platforms.insert(user_id.clone(), platforms);
@@ -524,6 +527,7 @@ impl State {
 
     /// Everyone connected: anyone missing is offline from now on.
     pub(super) fn on_presence_list(&mut self, fx: &mut Effects, list: PresenceList) {
+        self.apply_presence_list_games(&list);
         self.presence.listed = true;
         self.presence.live.clear();
         match list.users {
