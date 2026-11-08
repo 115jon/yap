@@ -839,8 +839,11 @@ Popup {
                     bottomPadding: 20
                     spacing: 12
                     Row {
+                        id: privacyHead
+                        width: parent.width
                         spacing: 12
                         Rectangle {
+                            id: privacyBadge
                             width: 40
                             height: 40
                             radius: 20
@@ -852,15 +855,22 @@ Popup {
                                 color: Theme.successInk
                             }
                         }
+                        // The popup is narrower than the line: it wraps
+                        // instead of running past the edge.
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
+                            width: privacyHead.width - privacyBadge.width - privacyHead.spacing
                             Text {
+                                width: parent.width
+                                wrapMode: Text.Wrap
                                 textFormat: Text.PlainText
                                 text: qsTr("End-to-end encrypted")
                                 color: Theme.ink1
                                 font: Theme.type.labelStrong
                             }
                             Text {
+                                width: parent.width
+                                wrapMode: Text.Wrap
                                 textFormat: Text.PlainText
                                 text: qsTr("Your voice connection is secured with DTLS-SRTP encryption.")
                                 color: Theme.ink3
@@ -925,7 +935,8 @@ Popup {
                             StatRow {
                                 required property var modelData
                                 required property int index
-                                last: index === (root.stats.video.filter(v => v.active && v.width > 0).length - 1)
+                                // The stats clear on leaving before the rows go.
+                                last: !!root.stats && index === (root.stats.video.filter(v => v.active && v.width > 0).length - 1)
                                 label: qsTr("Video %1%2").arg(modelData.mid).arg(modelData.rid.length > 0 ? "/" + modelData.rid : "")
                                 value: qsTr("%1 %2×%3 · %4 fps · %5 kbps · %6%7 · %8 ms · %9 dropped%10")
                                     .arg(modelData.codec)
