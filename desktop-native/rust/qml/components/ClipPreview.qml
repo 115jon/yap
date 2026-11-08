@@ -33,6 +33,14 @@ Item {
         still = ""
         stillGrab = null
         failed = false
+        // A new clip gets a new engine. The MP4 player takes its source
+        // once, so a running one kept playing the old clip, and its error
+        // (a format it could not open) came after the change and marked the
+        // new clip failed: the sidebar's channel picture stayed blank.
+        if (engine.item) {
+            engine.sourceComponent = null
+            engine.sourceComponent = Qt.binding(() => root.webm ? webmEngine : mp4Engine)
+        }
     }
 
     clip: true
@@ -62,10 +70,14 @@ Item {
             readonly property bool showing: output.sourceRect.width > 0 && (root.playing || peeking)
             property bool peeking: !root.playing
             property string leased: ""
+            // The clip this player was made for.
+            property string madeFor: ""
             function grab() {
                 if (root.still.length > 0 || output.width <= 0 || output.height <= 0)
                     return
                 output.grabToImage(result => {
+                    if (holder.madeFor !== root.source)
+                        return
                     root.stillGrab = result
                     root.still = result.url
                 }, Qt.size(Math.ceil(output.width * Screen.devicePixelRatio), Math.ceil(output.height * Screen.devicePixelRatio)))
@@ -82,9 +94,11 @@ Item {
                 audioOutput: AudioOutput { muted: true }
                 onErrorOccurred: (error, message) => {
                     console.warn("[clip]", error, message)
-                    root.failed = true
+                    if (holder.madeFor === root.source)
+                        root.failed = true
                 }
                 Component.onCompleted: {
+                    holder.madeFor = root.source
                     if (AuthMedia.needsAuth(root.source)) {
                         const local = AuthMedia.localUrl(root.source)
                         if (local !== root.source)

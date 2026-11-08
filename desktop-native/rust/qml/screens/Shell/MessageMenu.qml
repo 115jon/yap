@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import Yap.Chrome
 import com.yap.native
 
 // The message menu (MessageItem.tsx `handleContextMenu`), for the chat and
