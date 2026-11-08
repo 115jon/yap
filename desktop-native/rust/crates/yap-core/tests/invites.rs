@@ -336,10 +336,10 @@ fn dm_link_should_decode_its_server_segment() {
 }
 
 #[test]
-fn server_link_without_a_channel_should_not_be_a_link() {
+fn server_link_without_a_channel_should_open_the_server() {
     assert_eq!(
         parse_link("https://yap.fixture.invalid/chat/srv", SITE),
-        None
+        Some(Link::Server("srv".into()))
     );
 }
 

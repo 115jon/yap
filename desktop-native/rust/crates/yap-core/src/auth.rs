@@ -75,13 +75,32 @@ pub async fn start(http: &Client) -> Result<DeviceStart, AuthError> {
     Ok(serde_json::from_value(body)?)
 }
 
-/// Polls until the code is approved and returns the session token.
-pub async fn wait_for_approval(http: &Client, start: &DeviceStart) -> Result<Token, AuthError> {
+/// The shortest gap between two polls, however often `nudge` fires.
+const MIN_POLL_GAP: Duration = Duration::from_secs(1);
+
+/// Polls until the code is approved and returns the session token. A
+/// `nudge` (a `signin` link: the browser just approved the code) polls at
+/// once instead of at the end of the interval, at most once a second.
+pub async fn wait_for_approval(
+    http: &Client,
+    start: &DeviceStart,
+    nudge: &tokio::sync::Notify,
+) -> Result<Token, AuthError> {
     let deadline = Instant::now() + Duration::from_secs(start.expires_in);
     let mut interval = Duration::from_secs(start.interval.max(1));
     let mut failures = 0u32;
+    let mut last_poll = Instant::now();
     loop {
-        tokio::time::sleep(interval).await;
+        tokio::select! {
+            () = tokio::time::sleep(interval) => {}
+            () = nudge.notified() => {
+                let since = last_poll.elapsed();
+                if since < MIN_POLL_GAP {
+                    tokio::time::sleep(MIN_POLL_GAP - since).await;
+                }
+            }
+        }
+        last_poll = Instant::now();
         if Instant::now() >= deadline {
             return Err(AuthError::Expired);
         }

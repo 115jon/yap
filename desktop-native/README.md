@@ -393,11 +393,21 @@ the decisions.
     and dock as the web has them;
   - the server menu opens at the pointer, 205 wide, as on the web (the
     keyboard opens it under the header).
-- Deep links on our own scheme, `yap-native://invite/<code>` and
-  `yap-native://chat/<server>/<channel>[?message=<id>]`, registered per
-  user at startup under `HKCU\Software\Classes\yap-native` (only the
-  values that differ are written). A link on the command line, or one a
-  second launch hands over, opens in the running app.
+- Deep links on our own scheme, `yap-native://` (the table and the strict
+  rules are in `crates/yap-core/src/links.rs`): `invite/<code>`,
+  `chat/@me`, `chat/@me/<dm>`, `chat/<server>`,
+  `chat/<server>/<channel>[?message=<id>]` (a voice channel opens its
+  panel, never joins), `settings[/<panel>][?row=<row>]` and
+  `signin[?code=XXXX-XXXX]` (brings the window up and polls a waiting
+  device sign-in at once; it never carries a token). Anything else is
+  refused. A link on the command line, or one a second launch hands over
+  through the instance pipe, opens in the running app and brings it to the
+  front. The scheme lives under `HKCU\Software\Classes\yap-native` and
+  belongs to the released install (`YapNative.App`): its install and update
+  hooks write it, its uninstall hook removes it, and it rewrites what
+  differs at every default-profile start. No other build or profile writes
+  it (docs/INSTALLER.md). The web's /activate page opens
+  `yap-native://signin?code=…` after approving a "Yap Native" device code.
 
 The shell has its own identity, apart from the installed Yap app: AUMID
 and single-instance name `com.115jon.yap.native` (registered under
@@ -535,7 +545,7 @@ nothing changes.
 | tray window class                                     | `YapNativeTrayWindow`                                     | `YapNativeTrayWindow-<name>`                              |
 | tray tooltip, title                                   | "Yap Native", the location                                | "Yap Native (`<name>`)", the location with `(<name>)`     |
 | Run (autostart) value                                 | `YapNative`                                               | `YapNative-<name>`, launching with `--profile <name>`     |
-| `yap-native://` scheme                                | registered                                                | never registered                                          |
+| `yap-native://` scheme                                | registered by the released install only                   | never registered                                          |
 | Qt `applicationName`                                  | `YapNative`                                               | `YapNative-<name>` (Qt's own cache folders)               |
 
 Two profiles can run at once; a second launch of the same profile shows the
@@ -556,7 +566,11 @@ $env:YAP_TOKEN = (Get-Content -Raw F:/ct/yapn/secrets/owner.json | ConvertFrom-J
 
 The default profile, and with it the `yap-native://` scheme and the
 `YapNative` Run value, belongs to the user's installed copy: agents never
-launch it without `--profile`. Never print the token files. An installer
+launch it without `--profile`. To test deep links, point a scheme of your
+own at the build (`HKCU\Software\Classes\yap-native-test`, open command
+`"<exe>" --profile <name> "%1"`), run with `YAP_TEST_SCHEME=yap-native-test`
+(read as `yap-native://`) and `YAP_DEBUG_NO_ACTIVATE=1` (links reveal the
+window without taking the focus), and delete the key afterwards. Never print the token files. An installer
 test uses its own pack id and title (`-PackId YapNative.InstallTest -Title
 "Yap Native InstallTest"`), launches with `--profile spike`, and is
 uninstalled afterwards (docs/INSTALLER.md, "Local test").

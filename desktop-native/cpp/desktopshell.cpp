@@ -4,7 +4,6 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
-#include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
 #include <QtCore/QStringList>
 #include <QtGui/QFont>
@@ -558,37 +557,20 @@ void DesktopShell::registerUrlScheme()
     return;
   const QString exe =
     QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
+  // Empty unless this is the released install (Invites.schemeRegistration,
+  // yap_core::install::may_register_at_launch): a dev build, a copy or a
+  // test install never takes the scheme from the installed app, which
+  // also writes it in its install and update hooks (installer.rs).
   QString lines;
   QMetaObject::invokeMethod(m_links, "schemeRegistration", Qt::DirectConnection,
                             Q_RETURN_ARG(QString, lines), Q_ARG(QString, exe));
+  if (lines.isEmpty()) {
+    std::fprintf(stderr, "[scheme] yap-native: not the installed app, "
+                         "left to it\n");
+    return;
+  }
   // Only ever our own key, whatever the list says.
   const QString root = QString::fromWCharArray(kSchemeKey);
-  // An isolated run (a `--config` argument) must not take the scheme from
-  // another build that is still there: leave a registration whose
-  // executable exists and is not this one.
-  const QStringList args = QCoreApplication::arguments();
-  const bool isolated =
-    std::any_of(args.cbegin(), args.cend(), [](const QString& a) {
-      return a == QLatin1String("--config") ||
-             a.startsWith(QLatin1String("--config="));
-    });
-  if (isolated) {
-    // The open command is `"<exe>" "%1"`: its quoted first token.
-    QString other = readRegString(
-                      wide(root + QLatin1String("\\shell\\open\\command")), L"")
-                      .trimmed();
-    if (other.startsWith(QLatin1Char('"')))
-      other = other.mid(1, other.indexOf(QLatin1Char('"'), 1) - 1);
-    else
-      other = other.section(QLatin1Char(' '), 0, 0);
-    if (!other.isEmpty() && QFileInfo::exists(other) &&
-        QDir::cleanPath(other).compare(QDir::cleanPath(exe),
-                                       Qt::CaseInsensitive) != 0) {
-      std::fprintf(stderr, "[scheme] yap-native: isolated run, keeping the "
-                           "existing registration\n");
-      return;
-    }
-  }
   int written = 0;
   for (const QString& line : lines.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
     const QStringList parts = line.split(QLatin1Char('\t'));
@@ -634,6 +616,14 @@ void DesktopShell::reveal()
       m_window->showMaximized();
     else
       m_window->show();
+  }
+  // YAP_DEBUG_NO_ACTIVATE=1 (test runs, as in main.cpp): shown where it
+  // was, never brought to the front, so a test never takes the focus.
+  if (qEnvironmentVariableIntValue("YAP_DEBUG_NO_ACTIVATE") != 0) {
+    if (IsIconic(hwnd))
+      ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    std::fprintf(stderr, "[instance] revealed without activating\n");
+    return;
   }
   if (IsIconic(hwnd))
     ShowWindow(hwnd, SW_RESTORE);

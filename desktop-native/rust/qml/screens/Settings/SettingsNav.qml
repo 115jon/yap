@@ -42,6 +42,8 @@ QtObject {
     property string target: ""
     // The theme preview sheet hides the dialog without closing it.
     property bool previewing: false
+    // The last settings link shown (Invites state `settingsSeq`).
+    property int linkSeq: 0
 
     readonly property string trimmed: query.trim()
     readonly property var hits: trimmed.length > 0 ? JSON.parse(Settings.search(trimmed)) : []
