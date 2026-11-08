@@ -13,7 +13,6 @@
  *   rows never show a clock, so a long member list runs no timers.
  */
 
-import { Icon } from "@/components/ui/icon";
 import { NumClock } from "@/components/ui/num";
 import { gameActivityLabel } from "@/lib/game-activity";
 import type { GameActivity } from "@/lib/gateway-protocol";
@@ -42,28 +41,25 @@ export function GameActivityText({
   );
 }
 
+/** The game's 40 px icon; nothing at all when it has none or it fails. */
 function GameIcon({ activity }: { activity: GameActivity }) {
   const [failed, setFailed] = useState(false);
-  const src = activity.icon_url && !failed ? activity.icon_url : null;
+  if (!activity.icon_url || failed) return null;
   return (
     <span
       aria-hidden="true"
-      className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-avatar bg-tint-2 text-ink-2"
+      className="flex size-10 shrink-0 overflow-hidden rounded-avatar bg-tint-2"
     >
-      {src ? (
-        <img
-          src={getAuthAssetUrl(src)}
-          alt=""
-          width={40}
-          height={40}
-          loading="lazy"
-          decoding="async"
-          className="size-full object-cover"
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        <Icon name="gamepad" size="md" />
-      )}
+      <img
+        src={getAuthAssetUrl(activity.icon_url)}
+        alt=""
+        width={40}
+        height={40}
+        loading="lazy"
+        decoding="async"
+        className="size-full object-cover"
+        onError={() => setFailed(true)}
+      />
     </span>
   );
 }

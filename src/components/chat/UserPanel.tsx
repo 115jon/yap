@@ -498,11 +498,11 @@ export default function UserPanel({
   const isMicMuted = settings.isMuted || !effectiveHasMic;
   const presenceStatus = normalizeUserStatus(currentStatus);
   // What you are playing takes the custom status's line, as others see it;
-  // invisible shows it to no one, so not here either. The line is narrow:
-  // it prints the game alone, and the label says "Playing".
+  // invisible shows it to no one, so not here either. "Playing Name", as
+  // on every other row; a narrow column truncates the name.
   const playing = presenceStatus === "offline" ? undefined : gameActivity;
   const customStatus = playing
-    ? playing.name
+    ? gameActivityLabel(playing)
     : (user.custom_status?.trim() ?? "");
   const statusWord = STATUS_WORD[presenceStatus];
   const statusSummary = playing
