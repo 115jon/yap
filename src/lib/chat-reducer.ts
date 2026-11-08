@@ -9,6 +9,7 @@ import type {
   User,
 } from "@/lib/types";
 import { getDisplayName } from "@/lib/display-name";
+import type { GameActivity } from "@/lib/gateway-protocol";
 import type { PresencePlatform } from "@/lib/presence-platform";
 import type { SharedSpatialAudioState } from "@/lib/voice/spatial-audio";
 
@@ -78,6 +79,11 @@ export interface ChatState {
   onlineUsers: Set<string>;
   /** Live platform presence per user (desktop/web/mobile) */
   presencePlatformsByUserId: Record<string, PresencePlatform[]>;
+  /**
+   * What each user is playing ("Playing X"), from presence. Kept out of
+   * User, which is cached and persisted; absent means not playing.
+   */
+  gameActivityByUserId: Record<string, GameActivity>;
   /** Read states: channelId → ISO timestamp of last read */
   readStates: Record<string, string>;
   /** Latest message timestamp per channel: channelId → ISO timestamp */
@@ -182,6 +188,7 @@ export const initialState: ChatState = {
   membersLoadedByServerId: {},
   onlineUsers: new Set(),
   presencePlatformsByUserId: {},
+  gameActivityByUserId: {},
   readStates: {},
   lastMessageAt: {},
   dmChannels: [],
@@ -350,6 +357,8 @@ export type ChatAction =
         | null;
       bio?: string | null;
       pronouns?: string | null;
+      /** The signed-in user's own "Share my activity" setting. */
+      share_activity?: boolean;
       updated_at?: string;
       created_at?: string | null;
     }
@@ -368,6 +377,8 @@ export type ChatAction =
         status: "online" | "idle" | "dnd" | "offline";
         customStatus?: string | null;
         platforms?: PresencePlatform[];
+        /** undefined: keep what is known (an older server sent no field). */
+        gameActivity?: GameActivity | null;
       }>;
     }
   | { type: "USER_ONLINE"; userId: string }
@@ -378,6 +389,8 @@ export type ChatAction =
       status: "online" | "idle" | "dnd" | "offline";
       customStatus?: string | null;
       platforms?: PresencePlatform[];
+      /** undefined: unchanged (status-only updates carry no activity). */
+      gameActivity?: GameActivity | null;
     }
   | { type: "UPDATE_SERVER"; serverId: string; updates: Partial<Server> }
   | { type: "REMOVE_SERVER"; serverId: string }
@@ -629,6 +642,24 @@ function mapMessageCaches(
     if (mapped !== messages) changed = true;
   }
   return changed ? next : caches;
+}
+
+/**
+ * The activity map with one user's entry set (object), removed (null) or
+ * left as it is (undefined). Returns the same object when nothing changes.
+ */
+function withGameActivity(
+  map: ChatState["gameActivityByUserId"],
+  userId: string,
+  activity: GameActivity | null | undefined,
+): ChatState["gameActivityByUserId"] {
+  if (activity === undefined) return map;
+  if (activity === null) {
+    if (!(userId in map)) return map;
+    const { [userId]: _removed, ...rest } = map;
+    return rest;
+  }
+  return { ...map, [userId]: activity };
 }
 
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
@@ -1346,6 +1377,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           newUser.theme_sync_enabled = action.theme_sync_enabled;
         if (action.media_content_filter !== undefined)
           newUser.media_content_filter = action.media_content_filter;
+        if (action.share_activity !== undefined)
+          newUser.share_activity = action.share_activity;
         if (action.bio !== undefined) newUser.bio = action.bio;
         if (action.pronouns !== undefined) newUser.pronouns = action.pronouns;
         if (action.updated_at !== undefined)
@@ -1821,9 +1854,16 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const nextPresencePlatformsByUserId: Record<string, PresencePlatform[]> =
         {};
 
+      const nextGameActivityByUserId: Record<string, GameActivity> = {};
+
       for (const user of action.users) {
         if (user.status !== "offline") {
           nextOnlineUsers.add(user.userId);
+          const activity =
+            user.gameActivity === undefined
+              ? state.gameActivityByUserId[user.userId]
+              : user.gameActivity;
+          if (activity) nextGameActivityByUserId[user.userId] = activity;
         }
         nextPresencePlatformsByUserId[user.userId] = user.platforms ?? [];
       }
@@ -1912,6 +1952,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         onlineUsers: nextOnlineUsers,
         presencePlatformsByUserId: nextPresencePlatformsByUserId,
+        gameActivityByUserId: nextGameActivityByUserId,
         user: state.user
           ? applyPresenceToUser(state.user, presenceByUserId.get(state.user.id))
           : state.user,
@@ -1937,7 +1978,15 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "USER_OFFLINE": {
       const updated = new Set(state.onlineUsers);
       updated.delete(action.userId);
-      return { ...state, onlineUsers: updated };
+      return {
+        ...state,
+        onlineUsers: updated,
+        gameActivityByUserId: withGameActivity(
+          state.gameActivityByUserId,
+          action.userId,
+          null,
+        ),
+      };
     }
     case "UPDATE_USER_STATUS": {
       const isMe = state.user?.id === action.userId;
@@ -2041,6 +2090,11 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         dmChannels: updatedDmChannels,
         relationships: updatedRelationships,
         presencePlatformsByUserId: nextPresencePlatformsByUserId,
+        gameActivityByUserId: withGameActivity(
+          state.gameActivityByUserId,
+          action.userId,
+          action.status === "offline" ? null : action.gameActivity,
+        ),
         user: updatedUser,
       };
     }

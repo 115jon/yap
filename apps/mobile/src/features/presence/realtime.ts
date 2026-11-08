@@ -13,6 +13,8 @@ const PresenceSchema = Schema.Struct({
   user_id: Schema.String,
   status: Schema.String,
   custom_status: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Checked by readGameActivity (live.ts); absent keeps what is known. */
+  game_activity: Schema.optional(Schema.Unknown),
 });
 /** PRESENCE_LIST: everyone connected, sent on each channel subscribe. */
 const PresenceListSchema = Schema.Struct({
@@ -20,6 +22,7 @@ const PresenceListSchema = Schema.Struct({
     Schema.Struct({
       user_id: Schema.String,
       status: Schema.optional(Schema.NullOr(Schema.String)),
+      game_activity: Schema.optional(Schema.Unknown),
     }),
   ),
 });
@@ -35,7 +38,7 @@ function handle(event: string, data: unknown): void {
   if (event !== "PRESENCE_UPDATE") return;
   const d = decodePresence(data);
   if (!d) return;
-  applyPresence(d.user_id, d.status, d.custom_status);
+  applyPresence(d.user_id, d.status, d.custom_status, d.game_activity);
   if (!isUserStatus(d.status)) return;
   if (d.user_id !== useSession.getState().user?.id) return;
   applySelfPresence(d.status, d.custom_status);

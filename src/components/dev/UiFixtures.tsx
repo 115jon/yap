@@ -131,7 +131,11 @@ import { VoiceHeader } from "@/components/voice/VoiceHeader";
 import { VoiceLanding } from "@/components/voice/VoiceLanding";
 import { ConnectionBanner } from "@/components/voice/ConnectionBanner";
 import type { GridItem } from "@/components/voice/types";
-import type { ChatMember, VoiceChannelMember } from "@/lib/chat-reducer";
+import type {
+  ChatMember,
+  ChatState,
+  VoiceChannelMember,
+} from "@/lib/chat-reducer";
 import type { Category, Channel, Message, Server, User } from "@/lib/types";
 import { useChatStore } from "@/stores/chat-store";
 import { type MobileTab, useMobileTabStore } from "@/stores/useMobileTabStore";
@@ -510,6 +514,45 @@ const voiceMembers: VoiceChannelMember[] = [
   },
 ];
 
+/**
+ * `games=1`: game activity ("Playing X") on the fixture people: an icon
+ * (Jon), no icon with Rich Presence details and state (Ada), and a long name
+ * over a custom status (Grace). Icons are catalog paths; the capture script
+ * answers /api/game-icons itself, so nothing reaches Discord.
+ */
+function fixtureGameActivities(): ChatState["gameActivityByUserId"] {
+  if (fixtureParam("games") !== "1") return {};
+  const started = (minutesAgo: number) => Date.now() - minutesAgo * 60_000;
+  return {
+    "u-me": {
+      kind: "playing",
+      name: "Overwatch",
+      app_id: "356875221078245376",
+      icon_url:
+        "/api/game-icons/356875221078245376/a60bb76ba4d4acafbd4cb9aad6e61739.png",
+      started_at: started(12.5),
+      source: "detected",
+    },
+    "u-ada": {
+      kind: "playing",
+      name: "Celeste",
+      details: "Chapter 7: The Summit",
+      state: "B-side, 1,204 deaths",
+      started_at: started(83),
+      source: "rpc",
+    },
+    "u-grace": {
+      kind: "playing",
+      name: "The Elder Scrolls V: Skyrim Special Edition Anniversary Upgrade",
+      app_id: "356875762940379136",
+      icon_url:
+        "/api/game-icons/356875762940379136/fc92f820c44e72085dc6205e5e746850.png",
+      started_at: started(2),
+      source: "detected",
+    },
+  };
+}
+
 function seedStore(surface: string) {
   const isEmpty = surface === "shell-empty";
   // DM call fixtures render the DM shell: the call's conversation is the
@@ -556,6 +599,7 @@ function seedStore(surface: string) {
     membersByServerId: { "s-1": members },
     membersLoadedByServerId: { "s-1": true },
     onlineUsers: new Set(["u-me", "u-ada", "u-grace", "u-linus"]),
+    gameActivityByUserId: fixtureGameActivities(),
     readStates: { "ch-general": at(0), "ch-welcome": at(0) },
     lastMessageAt: {
       "ch-general": at(3),

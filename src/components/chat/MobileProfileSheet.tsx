@@ -24,6 +24,7 @@ import type { Role, User } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { normalizeUserStatus, type UserStatus } from "./UserStatusDot";
 import { useChatActions, useChatStore } from "@/stores/chat-store";
+import { useGameActivity } from "@/hooks/useGameActivity";
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/IconButton";
 
@@ -96,6 +97,7 @@ export default function MobileProfileSheet({
   const activeProfileData =
     profileData?.userId === user.id ? profileData : null;
   const resolvedUser = activeProfileData?.user ?? user;
+  const gameActivity = useGameActivity(user.id);
   const displayName = getDisplayName(resolvedUser);
   const theme = resolveProfileCardTheme(resolvedUser);
   const isOnline = onlineUsers.has(user.id);
@@ -281,6 +283,7 @@ export default function MobileProfileSheet({
         >
           <ProfileActionNotices controller={actions} />
           <ProfileSections
+            gameActivity={gameActivity}
             bio={resolvedUser.bio}
             roles={
               memberRoles && memberRoles.length > 0 ? (

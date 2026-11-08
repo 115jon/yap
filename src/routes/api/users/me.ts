@@ -42,6 +42,7 @@ type UserProfileRow = {
   theme_preference: string | null;
   theme_sync_enabled: number;
   media_content_filter: string;
+  share_activity?: boolean;
   updated_at: string | null;
   created_at: string | null;
   bio: string | null;
@@ -392,6 +393,7 @@ async function syncUserFromRalphAuth(
     theme_preference: null,
     theme_sync_enabled: 0,
     media_content_filter: DEFAULT_MEDIA_CONTENT_FILTER,
+    share_activity: true,
     updated_at: now,
     created_at: now,
     bio,

@@ -44,6 +44,7 @@ import type { Relationship } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { livePresenceStatus, UserStatusDot } from "./UserStatusDot";
 import { useChatActions, useChatStore } from "@/stores/chat-store";
+import { GameActivityText } from "@/components/chat/GameActivity";
 import { useCallStore } from "@/stores/useCallStore";
 import {
   useCallback,
@@ -216,10 +217,11 @@ export default function FriendsView({
   onSelectDm,
   initialTab = "online",
 }: Props) {
-  const { relationships, onlineUsers } = useChatStore(
+  const { relationships, onlineUsers, gameActivities } = useChatStore(
     useShallow((s) => ({
       relationships: s.relationships,
       onlineUsers: s.onlineUsers,
+      gameActivities: s.gameActivityByUserId,
     })),
   );
   const presenceOf = (user: Relationship["user"]) =>
@@ -472,6 +474,9 @@ export default function FriendsView({
   const renderRow = (rel: Relationship) => {
     const displayName = getDisplayName(rel.user);
     const status = statusLine(rel);
+    // Friends only: what they are playing comes before a custom status.
+    const gameActivity =
+      rel.type === 0 ? gameActivities[rel.user.id] : undefined;
     const incoming = rel.type === 2;
     // Friends and sent requests keep their actions in a hover overlay;
     // incoming requests always show Accept and Ignore.
@@ -481,7 +486,7 @@ export default function FriendsView({
         key={rel.user.id}
         data-testid="friend-row"
         className={cn(
-          sidebarRowClass({ tall: !!status }),
+          sidebarRowClass({ tall: Boolean(status || gameActivity) }),
           "gap-2.5",
           LONG_PRESS_TARGET,
         )}
@@ -539,11 +544,13 @@ export default function FriendsView({
             user={rel.user}
             className="block truncate text-ui-row font-medium"
           />
-          {status && (
+          {gameActivity ? (
+            <GameActivityText activity={gameActivity} />
+          ) : status ? (
             <span className="block truncate text-ui-xs font-normal text-ink-3">
               {status}
             </span>
-          )}
+          ) : null}
         </div>
 
         {incoming && (

@@ -22,6 +22,7 @@ export * from "./codec";
 export * from "./client-payloads";
 export * from "./server-payloads";
 export * from "./call-record";
+export * from "./game-activity";
 
 // ── Decoders, built once ───────────────────────────────────────────────────
 

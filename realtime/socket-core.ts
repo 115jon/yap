@@ -87,6 +87,7 @@ const GLOBAL_OPCODES = [
   Op.ReactionAdd,
   Op.ReactionRemove,
   Op.PresenceUpdate,
+  Op.ActivityUpdate,
   Op.ChannelSubscribe,
   Op.ChannelUnsubscribe,
   Op.VoiceChannelJoin,

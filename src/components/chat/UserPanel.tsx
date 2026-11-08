@@ -24,6 +24,8 @@ import {
   type OpenProfileEditorEventDetail,
 } from "@/lib/profile-editor-events";
 import { useUserResolution } from "@/hooks/useUserResolution";
+import { useGameActivity } from "@/hooks/useGameActivity";
+import { gameActivityLabel } from "@/lib/game-activity";
 import { openSettings as openSettingsAt } from "@/components/chat/settings/settings-links";
 import { getAuthAssetUrl } from "@/lib/platform";
 import type {
@@ -478,6 +480,7 @@ export default function UserPanel({
   // mute button so it stays accurate even when no VC/call is active.
   // When a VC IS active, the prop overrides (it comes from the same store anyway).
   const globalDevices = useDeviceAvailability();
+  const gameActivity = useGameActivity(user?.id);
   const effectiveHasMic = hasMicrophone ?? globalDevices.hasMicrophone;
   const showIdentity =
     !sidebarWidthPx || sidebarWidthPx > USER_PANEL_IDENTITY_HIDE_WIDTH_PX;
@@ -494,11 +497,19 @@ export default function UserPanel({
   const nameplateTheme = hasNameplate ? nameplatePresentation.theme : null;
   const isMicMuted = settings.isMuted || !effectiveHasMic;
   const presenceStatus = normalizeUserStatus(currentStatus);
-  const customStatus = user.custom_status?.trim() ?? "";
+  // What you are playing takes the custom status's line, as others see it;
+  // invisible shows it to no one, so not here either. The line is narrow:
+  // it prints the game alone, and the label says "Playing".
+  const playing = presenceStatus === "offline" ? undefined : gameActivity;
+  const customStatus = playing
+    ? playing.name
+    : (user.custom_status?.trim() ?? "");
   const statusWord = STATUS_WORD[presenceStatus];
-  const statusSummary = customStatus
-    ? `${currentStatusLabel}: ${customStatus}`
-    : currentStatusLabel;
+  const statusSummary = playing
+    ? `${currentStatusLabel}: ${gameActivityLabel(playing)}`
+    : customStatus
+      ? `${currentStatusLabel}: ${customStatus}`
+      : currentStatusLabel;
   /* The line under the name (STATUS_WORD): a custom status when one is set
    * and the column has room (Geist, it is a sentence: it ellipsizes), else the
    * state as an LED label that only shows whole words. Its own LED is dropped:

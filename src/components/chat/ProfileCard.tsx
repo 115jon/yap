@@ -11,7 +11,7 @@
  *
  * One section order: banner, avatar (ring in the card colour, overlapping
  * the banner by half), name, `@handle · pronouns`, status line, one row of
- * actions, then About me, Roles, Mutual servers, Mutual friends and Member
+ * actions, then Playing a game, About me, Roles, Mutual servers, Mutual friends and Member
  * since (only when known). Headings are sentence-case 12/16 500 ink-2.
  *
  * The card is ply-3 (a float). A profile with custom colours re-points the
@@ -20,6 +20,7 @@
  */
 
 import { AvatarImage } from "@/components/chat/AvatarImage";
+import { GameActivityCard } from "@/components/chat/GameActivity";
 import { avatarShape, isAvatarDecorated } from "@/components/ui/avatar-shape";
 import {
   DECORATION_PLAY_ATTR,
@@ -57,6 +58,7 @@ import { apiDelete, apiPost, apiPut } from "@/lib/api-client";
 import { describeApiError } from "@/lib/api-errors";
 import { getAvatarDecoration, type AvatarDisplay } from "@/lib/avatar-display";
 import { getDisplayInitial, getDisplayName } from "@/lib/display-name";
+import type { GameActivity } from "@/lib/gateway-protocol";
 import { getAuthAssetUrl } from "@/lib/platform";
 import {
   resolveProfileTheme,
@@ -543,6 +545,7 @@ export function ProfileRoleChips({
  * render, and Member since needs a real date.
  */
 export function ProfileSections({
+  gameActivity,
   bio,
   roles,
   mutualServers,
@@ -550,6 +553,8 @@ export function ProfileSections({
   memberSince,
   limit = 8,
 }: {
+  /** What they are playing now (presence); first, as on Discord. */
+  gameActivity?: GameActivity | null;
   bio?: string | null;
   roles?: ReactNode;
   mutualServers?: MutualSummary<MutualServer> | null;
@@ -561,6 +566,11 @@ export function ProfileSections({
   const about = bio?.trim() ?? "";
   return (
     <>
+      {gameActivity ? (
+        <ProfileSection title="Playing a game">
+          <GameActivityCard activity={gameActivity} />
+        </ProfileSection>
+      ) : null}
       {about ? (
         <ProfileSection title="About me">
           <p className="max-w-[62ch] text-ui-sm whitespace-pre-line text-pretty break-words text-ink-1">

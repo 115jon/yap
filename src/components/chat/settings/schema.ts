@@ -191,8 +191,30 @@ const SETTINGS_PANELS: SettingsPanelDef[] = [
     title: "Privacy & safety",
     icon: "privacy",
     headline: "What you see and what you share.",
-    blurb: "The media you see, and the messages you've shared publicly.",
+    blurb:
+      "What others see you playing, the media you see, and the messages you've shared publicly.",
     sections: [
+      {
+        id: "activity",
+        title: "Activity",
+        desc: "The game you're playing: its name, icon and how long you've been playing.",
+        rows: [
+          {
+            id: "share-activity",
+            label: "Share my activity",
+            desc: "Show what you're playing to people who share a server, a DM or a friendship with you. Invisible always hides it.",
+            keywords: [
+              "activity",
+              "game",
+              "playing",
+              "now playing",
+              "rich presence",
+              "status",
+              "detection",
+            ],
+          },
+        ],
+      },
       {
         id: "media-filter",
         title: "Media filter",

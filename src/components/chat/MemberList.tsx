@@ -33,6 +33,8 @@ import {
 import { useContextMenu } from "@/hooks/useContextMenu";
 import { apiDelete, apiGet } from "@/lib/api-client";
 import { clog } from "@/lib/console-logger";
+import { GameActivityText } from "@/components/chat/GameActivity";
+import { useGameActivity } from "@/hooks/useGameActivity";
 import { getFileIcon } from "@/lib/file-icons";
 import { isVideo } from "@/lib/media";
 import { getAuthAssetUrl, getDownloadUrl, getMediaUrl } from "@/lib/platform";
@@ -1743,6 +1745,7 @@ const MemberItem = memo(function MemberItem({
     (state) => state.presencePlatformsByUserId[userId],
   );
   const platforms = livePlatforms ?? member.user.presence_platforms;
+  const gameActivity = useGameActivity(userId);
   const inCall = useChatStore((state) =>
     callChannelId
       ? (state.voiceChannelStates[callChannelId]?.some(
@@ -1949,11 +1952,13 @@ const MemberItem = memo(function MemberItem({
               ) : null}
             </div>
           </span>
-          {member.user.custom_status && (
+          {gameActivity ? (
+            <GameActivityText activity={gameActivity} />
+          ) : member.user.custom_status ? (
             <span className="truncate text-ui-xs font-normal text-ink-3">
               {member.user.custom_status}
             </span>
-          )}
+          ) : null}
         </span>
       </ButtonBase>
     </TreeLeaf>

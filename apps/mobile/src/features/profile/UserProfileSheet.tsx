@@ -25,7 +25,9 @@ import { useServerMember } from "@/features/members/store";
 import {
   PRESENCE_LABEL,
   presenceLedOf,
+  gameActivityLabel,
   useCustomStatus,
+  useGameActivity,
   usePresence,
 } from "@/features/presence/live";
 import { useChannelServer, useServersStore } from "@/features/servers/store";
@@ -220,10 +222,11 @@ function StatusLine({
 }) {
   const presence = usePresence(userId, fallbackStatus);
   const custom = useCustomStatus(userId, fallbackCustom);
+  const game = useGameActivity(userId);
   const voice = useVoiceWhere(userId);
   const led = voice ? "talk" : (presenceLedOf(presence) ?? "off");
   const word = voice ? "In voice" : PRESENCE_LABEL[presence];
-  const detail = voice ?? custom;
+  const detail = voice ?? (game ? gameActivityLabel(game) : custom);
   return (
     <View
       accessible

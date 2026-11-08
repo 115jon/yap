@@ -214,6 +214,7 @@ describe("socket role opcode tables", () => {
       { channel_id: "c", message_id: "m", emoji: "👍" },
     ],
     [GatewayOp.PresenceUpdate, { status: "dnd" }],
+    [GatewayOp.ActivityUpdate, { game_activity: null }],
     [GatewayOp.ChannelSubscribe, { channel_id: "c" }],
     [GatewayOp.ChannelUnsubscribe, { channel_id: "c" }],
     [GatewayOp.VoiceChannelJoin, { channel_id: "c" }],

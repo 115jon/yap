@@ -111,6 +111,11 @@ export enum GatewayOp {
    * it and stop as on a device takeover.
    */
   VoiceMove = 42,
+  /**
+   * C→S main (global gateway): set or clear this session's game activity
+   * ("Playing X"). Others see it as `game_activity` on PRESENCE_UPDATE.
+   */
+  ActivityUpdate = 43,
 
   // ── Voice Gateway specific (100+) ─────────────────────────────────
 

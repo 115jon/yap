@@ -10,6 +10,10 @@ compatibility_flags = [
 # upload check fails anyway: the bundled RNNoise worklet asset ends with a
 # sourceMappingURL to a .map file that is not emitted.
 upload_source_maps = false
+# The built site's static files, readable from the Worker (the game icon
+# route reads public/desktop/game-catalog.json through it). The Cloudflare
+# Vite plugin fills in the directory.
+assets = { binding = "ASSETS" }
 
 # Custom Domains: yap.115jon.com (the public home) and meet.115jon.site
 # (the pre-rename host; every request there 301s to the same path on Yap:
