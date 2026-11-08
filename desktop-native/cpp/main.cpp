@@ -749,6 +749,18 @@ int main(int argc, char* argv[])
   // Qt's default.
   if (!qEnvironmentVariableIsSet("QSG_RENDER_LOOP"))
     qputenv("QSG_RENDER_LOOP", "basic");
+  // D3D11's blt-model swapchain (DXGI_SWAP_EFFECT_DISCARD) instead of Qt's
+  // flip model. A blt Present lands in the window's redirection surface,
+  // which DWM resizes together with the window, so a resize shows the new
+  // frame with the new bounds; a flip-model buffer is composed on its own
+  // and trailed the edge by two or more steps, over strips no surface
+  // covered (black or white). Each resize step also took two vblanks
+  // instead of one, and the flip model's frame-latency wait stalled for its
+  // full 1 s timeout during a move-and-resize. Idle and scroll CPU are
+  // unchanged (docs/PERFORMANCE.md, resize pass). QT_D3D_NO_FLIP=0 keeps
+  // the flip model.
+  if (!qEnvironmentVariableIsSet("QT_D3D_NO_FLIP"))
+    qputenv("QT_D3D_NO_FLIP", "1");
   // The JS engine commits its whole JS and GC stacks up front (4 + 2 MB by
   // default, plus guards), every page charged to the process whether it is
   // touched or not. Our QML never recurses deeply: 1 MB of JS stack is
