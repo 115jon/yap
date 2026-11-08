@@ -31,7 +31,6 @@ import { PRESS } from "@/components/ui/interaction";
 import { Kbd } from "@/components/ui/kbd";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/useMediaQuery";
-import { useCanOfferNativeApp } from "@/hooks/useNativeAppLinkHandler";
 import { isDesktop } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { useUser } from "@kova/react";
@@ -177,20 +176,12 @@ export default function SettingsModal({
   const titleId = useId();
   const searchId = `${titleId}-search`;
   const touchOnly = useTouchOnly();
-  const nativeApp = useCanOfferNativeApp();
   const env = useMemo<SettingsEnvironment>(
     () => ({
       desktop: environment?.desktop ?? isDesktop(),
       touch: environment?.touch ?? touchOnly,
-      nativeApp: environment?.nativeApp ?? nativeApp,
     }),
-    [
-      environment?.desktop,
-      environment?.touch,
-      environment?.nativeApp,
-      touchOnly,
-      nativeApp,
-    ],
+    [environment?.desktop, environment?.touch, touchOnly],
   );
   const narrow = useIsMobile();
 

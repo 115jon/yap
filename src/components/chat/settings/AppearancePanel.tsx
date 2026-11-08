@@ -1,8 +1,6 @@
 import { SettingsSwitch } from "@/components/chat/SettingsSwitch";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { useOpenLinksInNative } from "@/hooks/useNativeAppLinkHandler";
-import { writeOpenLinksInNative } from "@/lib/native-app-link";
 import { APP_THEMES, type AppTheme } from "@/lib/theme-preferences";
 import { cn } from "@/lib/utils";
 import { useMemo } from "react";
@@ -189,7 +187,6 @@ export default function AppearancePanel() {
     useAppearanceTheme();
   const visibleTheme = useVisibleTheme();
   const { openThemePreview } = useSettings();
-  const openLinksInNative = useOpenLinksInNative();
 
   return (
     <>
@@ -291,19 +288,6 @@ export default function AppearancePanel() {
       <SettingsCard id="motion">
         <SettingsRow id="reduced-motion" layout="inline">
           {() => <ValueText>Follows your device</ValueText>}
-        </SettingsRow>
-      </SettingsCard>
-
-      <SettingsCard id="links">
-        <SettingsRow id="open-links-in-native" layout="inline">
-          {(ids) => (
-            <SettingsSwitch
-              checked={openLinksInNative}
-              onChange={() => writeOpenLinksInNative(!openLinksInNative)}
-              labelledBy={ids.labelId}
-              describedBy={ids.descId}
-            />
-          )}
         </SettingsRow>
       </SettingsCard>
     </>

@@ -13,7 +13,7 @@ import { HomeLink, PageState } from "@/components/PageState";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useCanOfferNativeApp } from "@/hooks/useNativeAppLinkHandler";
+import { useCanOfferNativeApp } from "@/hooks/useCanOfferNativeApp";
 import { nativeInviteLink } from "@/lib/native-app-link";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";

@@ -132,7 +132,6 @@ function renderInline(
           <a
             key={`a-${key}`}
             href={linkMatch[2]}
-            data-message-link=""
             target="_blank"
             rel="noopener noreferrer"
             className={LINK_CLASS}
@@ -173,7 +172,6 @@ function renderInline(
         <a
           key={`url-${key}`}
           href={cleanUrl}
-          data-message-link=""
           target="_blank"
           rel="noopener noreferrer"
           className={cn(LINK_CLASS, "wrap-anywhere")}
