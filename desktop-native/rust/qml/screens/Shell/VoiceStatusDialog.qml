@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
+import Yap.Chrome
 import Yap.Media
 import com.yap.native
 
