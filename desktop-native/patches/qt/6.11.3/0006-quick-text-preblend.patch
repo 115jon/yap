@@ -1,0 +1,180 @@
+--- a/qtdeclarative/src/quick/scenegraph/coreapi/qsgmaterialshader.h
++++ b/qtdeclarative/src/quick/scenegraph/coreapi/qsgmaterialshader.h
+@@ -56,6 +56,7 @@
+ 
+     private:
+         friend class QSGRenderer;
++        friend class QSGTextMaskRhiShader; // Yap patch: reads the renderer
+         DirtyStates m_dirty;
+         const void *m_data;
+     };
+--- a/qtdeclarative/src/quick/scenegraph/qsgdefaultglyphnode_p.cpp
++++ b/qtdeclarative/src/quick/scenegraph/qsgdefaultglyphnode_p.cpp
+@@ -11,6 +11,7 @@
+ #include <QtQuick/qquickwindow.h>
+ #include <QtQuick/private/qsgtexture_p.h>
+ #include <QtQuick/private/qsgdefaultrendercontext_p.h>
++#include <QtQuick/private/qsgrenderer_p.h>
+ 
+ #include <private/qrawfont_p.h>
+ #include <QtCore/qmath.h>
+@@ -23,6 +24,46 @@
+     return QVector4D(c.x() * o, c.y() * o, c.z() * o, o);
+ }
+ 
++// Yap patch: subpixel (Format_A32) text as Chromium draws it. Skia does not
++// blend DirectWrite's raw coverage as is: it first runs it through a
++// per-colour table (SkTMaskGamma_build_correcting_lut) so that the plain
++// blend that follows looks like a blend in linear light, with a contrast
++// boost. Without it light text on a dark ground is thin and dark text on a
++// light one heavy. 24bittextmask.frag computes that table per fragment from
++// the text colour. Chromium falls back to grayscale where subpixel coverage
++// would fringe; so does this: into a translucent target (a layer), under a
++// scale or rotation, and when ClearType is off.
++//   QSG_TEXT_CONTRAST    Skia's contrast (default 1.0, Chromium's)
++//   QSG_TEXT_GAMMA       the gamma; 0 (default) is the sRGB curve, Skia's
++//   QSG_TEXT_PREBLEND=0  blends the raw coverage (Qt's own behaviour)
++//   QSG_TEXT_GRAYSCALE=1 grayscale everywhere (ClearType off)
++struct QSGYapTextSettings
++{
++    float contrast = 1.0f;
++    float gamma = 0.0f;
++    bool preblend = true;
++    bool grayscale = false;
++};
++
++static const QSGYapTextSettings &qsg_yapTextSettings()
++{
++    static const QSGYapTextSettings settings = [] {
++        QSGYapTextSettings s;
++        bool ok = false;
++        float v = qEnvironmentVariable("QSG_TEXT_CONTRAST").toFloat(&ok);
++        if (ok)
++            s.contrast = qBound(0.0f, v, 10.0f);
++        v = qEnvironmentVariable("QSG_TEXT_GAMMA").toFloat(&ok);
++        if (ok)
++            s.gamma = v >= 1.0f ? qMin(v, 5.0f) : 0.0f;
++        if (qEnvironmentVariableIsSet("QSG_TEXT_PREBLEND"))
++            s.preblend = qEnvironmentVariableIntValue("QSG_TEXT_PREBLEND") != 0;
++        s.grayscale = qEnvironmentVariableIntValue("QSG_TEXT_GRAYSCALE") != 0;
++        return s;
++    }();
++    return settings;
++}
++
+ class QSGTextMaskRhiShader : public QSGMaterialShader
+ {
+ public:
+@@ -34,6 +75,12 @@
+                             QSGMaterial *newMaterial, QSGMaterial *oldMaterial) override;
+ 
+ protected:
++    // Yap patch: the renderer drawing this pass.
++    static const QSGRenderer *renderer(const RenderState &state)
++    {
++        return static_cast<const QSGRenderer *>(state.m_data);
++    }
++
+     QFontEngine::GlyphFormat m_glyphFormat;
+     quint32 m_currentUbufOffset;
+ };
+@@ -194,6 +241,28 @@
+     }
+     m_currentUbufOffset += 16; // now at StyleColor
+ 
++    // Yap patch: yapText = (contrast, gamma, grayscale, preblend). Checked
++    // every time: the uniform data is the shader's, shared by every batch
++    // and every renderer (the window's and each layer's).
++    const QSGYapTextSettings &settings = qsg_yapTextSettings();
++    bool grayscale = settings.grayscale;
++    // A layer (ShaderEffectSource, layer.enabled) clears to transparent.
++    if (const QSGRenderer *r = renderer(state); r && r->clearColor().alpha() < 255)
++        grayscale = true;
++    // Scaled or rotated (the material keeps such text out of merged
++    // batches, so this is the node's own matrix).
++    const QMatrix4x4 mv = state.modelViewMatrix();
++    if (!qFuzzyCompare(mv(0, 0), 1.0f) || !qFuzzyCompare(mv(1, 1), 1.0f)
++        || !qFuzzyIsNull(mv(0, 1)) || !qFuzzyIsNull(mv(1, 0)))
++        grayscale = true;
++    const QVector4D text(settings.contrast, settings.gamma, grayscale ? 1.0f : 0.0f,
++                         settings.preblend ? 1.0f : 0.0f);
++    if (memcmp(buf->data() + m_currentUbufOffset, &text, 16) != 0) {
++        memcpy(buf->data() + m_currentUbufOffset, &text, 16);
++        changed = true;
++    }
++    m_currentUbufOffset += 16;
++
+     return changed;
+ }
+ 
+@@ -367,6 +436,10 @@
+                         : QFontEngine::Format_A32;
+         }
+ 
++        // Yap patch: subpixel text under a scale or rotation draws in
++        // grayscale (24bittextmask.frag), which needs its own matrix.
++        setFlag(RequiresFullMatrixExceptTranslate, glyphFormat == QFontEngine::Format_A32);
++
+         qreal devicePixelRatio;
+         void *cacheKey;
+         Q_ASSERT(m_rhi);
+--- a/qtdeclarative/src/quick/scenegraph/shaders_ng/24bittextmask.frag
++++ b/qtdeclarative/src/quick/scenegraph/shaders_ng/24bittextmask.frag
+@@ -18,10 +18,56 @@
+     vec2 textureScale;
+     float dpr;
+     vec4 color;
++    // Yap patch (qsgdefaultglyphnode_p.cpp): x contrast, y gamma (0: sRGB),
++    // z 1: grayscale, w 1: preblend the coverage.
++    vec4 yapText;
+ };
+ 
++vec3 yapToLinear(vec3 v, float g)
++{
++    if (g > 0.0)
++        return pow(v, vec3(g));
++    return mix(v / 12.92, pow((v + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), v));
++}
++
++vec3 yapFromLinear(vec3 v, float g)
++{
++    v = clamp(v, 0.0, 1.0);
++    if (g > 0.0)
++        return pow(v, vec3(1.0 / g));
++    return mix(v * 12.92, 1.055 * pow(v, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), v));
++}
++
++// Skia's SkTMaskGamma_build_correcting_lut, per channel: the coverage that,
++// blended plainly, gives what blending in linear light (gamma g) with the
++// contrast boost would. The text colour is Skia's canonical luminance colour
++// (3 bits a channel) and the ground is guessed as its inverse, as in Skia.
++vec3 yapPreblend(vec3 a, vec3 textColor)
++{
++    vec3 q = floor(floor(textColor * 255.0 + 0.5) / 32.0);
++    vec3 src = (q * 36.0 + floor(q / 2.0)) / 255.0;
++    vec3 dst = 1.0 - src;
++    vec3 linSrc = yapToLinear(src, yapText.y);
++    vec3 linDst = yapToLinear(dst, yapText.y);
++    vec3 s = a + (1.0 - a) * (yapText.x * linDst) * a;
++    vec3 wanted = yapFromLinear(linSrc * s + (1.0 - s) * linDst, yapText.y);
++    vec3 d = src - dst;
++    vec3 level = step(abs(d), vec3(1.0 / 256.0));
++    vec3 r = (wanted - dst) / mix(d, vec3(1.0), level);
++    return clamp(mix(r, s, level), 0.0, 1.0);
++}
++
+ void main()
+ {
+     vec4 glyph = texture(_qt_texture, sampleCoord);
+-    fragColor = glyph * color.a;
++    bool gray = yapText.z > 0.5;
++    // The texture's alpha is the mean of the three subpixel coverages.
++    vec3 m = gray ? vec3(glyph.a) : glyph.rgb;
++    if (yapText.w > 0.5) {
++        vec3 c = color.rgb / max(color.a, 1.0 / 255.0);
++        if (gray)
++            c = vec3(dot(c, vec3(0.2126, 0.7152, 0.0722)));
++        m = yapPreblend(m, c);
++    }
++    fragColor = vec4(m, gray ? m.r : (m.r + m.g + m.b) / 3.0) * color.a;
+ }

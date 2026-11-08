@@ -116,11 +116,12 @@ qt_import_plugins(YapNative INCLUDE Qt::QWindowsMediaPlugin
   EXCLUDE_BY_TYPE iconengines networkinformation)
 if(WIN32)
   # dwmapi for the title bar; shell32, advapi32 and runtimeobject for the
-  # tray, the Run key and WinRT toasts; the rest is what libwebrtc (static)
+  # tray, the Run key and WinRT toasts; dwrite for the monitor's ClearType
+  # settings (main.cpp); the rest is what libwebrtc (static)
   # needs (mfplat and mfuuid: its H.264 decoder, patches/webrtc-sys).
   target_link_libraries(YapNative PRIVATE
     dwmapi shell32 user32 advapi32 runtimeobject msdmo wmcodecdspuuid dmoguids crypt32 iphlpapi ole32 secur32
-    winmm ws2_32 strmiids d3d11 gdi32 dxgi shcore userenv dbghelp mfplat mfuuid)
+    winmm ws2_32 strmiids d3d11 gdi32 dxgi shcore userenv dbghelp mfplat mfuuid dwrite)
 endif()
 
 # Static Qt: pull in the QML plugins the UI imports.

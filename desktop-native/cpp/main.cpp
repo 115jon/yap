@@ -65,6 +65,8 @@
 #ifdef Q_OS_WIN
 #include <qpa/qwindowsysteminterface.h>
 #include <windows.h>
+#include <dwrite.h>
+#include <string>
 #endif
 
 #ifdef Q_OS_WIN
@@ -329,107 +331,88 @@ private:
   QPointer<QQuickItem> m_overlay;
 };
 
-// The brand faces, one static cut per family (assets/fonts, built by
-// tools/build-fonts.py). Registered before QML so Theme's families resolve.
-// The text hinting for a screen at this device pixel ratio (see main's
-// font block): vertical below 125 %, none from 125 %.
-// YAP_TEXT_HINTING=none|vertical|full|default forces one.
-static QFont::HintingPreference textHintingFor(qreal dpr)
+// The text hinting (see main's font block): none, as Chromium draws our
+// fonts. YAP_TEXT_HINTING=none|vertical|full|default forces one.
+static QFont::HintingPreference textHinting()
 {
   const QString forced = qEnvironmentVariable("YAP_TEXT_HINTING");
-  if (forced == QLatin1String("none"))
-    return QFont::PreferNoHinting;
   if (forced == QLatin1String("vertical"))
     return QFont::PreferVerticalHinting;
   if (forced == QLatin1String("full"))
     return QFont::PreferFullHinting;
   if (forced == QLatin1String("default"))
     return QFont::PreferDefaultHinting;
-  return dpr >= 1.25 ? QFont::PreferNoHinting : QFont::PreferVerticalHinting;
+  return QFont::PreferNoHinting;
 }
 
-// Picks the hinting again when the window reaches a screen at another scale
-// (moved to another monitor, or the monitor's scale changed). Qt Quick
-// items keep the font they resolved when they were made, so the
-// application font alone would reach only new ones: the type roles follow
-// Theme.hinting, and every item already made with a `font` is given the
-// new preference. YAP_TEST_HINTING_FLIP_SECS=<n> (tests): n s after the
-// first show, re-pick as if the scale had crossed 125 % (none <-> vertical).
-class TextHintingFollower : public QObject
+#ifdef Q_OS_WIN
+// The contrast and gamma subpixel text is blended with, and whether it is
+// subpixel at all, as Chromium picks them (Qt patch 0006 reads them from
+// QSG_TEXT_*; docs/LIBRARIES.md). Chromium (Skia) blends with contrast 1.0
+// and the sRGB curve unless the ClearType Tuner has saved values for the
+// monitor (HKCU\Software\Microsoft\Avalon.Graphics\DISPLAYn), and then
+// follows those: DirectWrite's monitor rendering params carry them
+// (EnhancedContrastLevel / 100, GammaLevel / 1000). Untuned, DirectWrite
+// reports its own defaults (0.5, 1.8), which Chromium does not use: blended
+// with them our text measured further from Edge's than with Skia's (text
+// pass, docs/UI_PARITY_AUDIT.md). With font smoothing off or set to
+// Standard, text is grayscale. The primary monitor's settings, read once
+// at launch. An explicit QSG_TEXT_* in the environment wins.
+static void setTextContrastAndGamma()
 {
-public:
-  TextHintingFollower(QQuickWindow* window, QObject* theme)
-    : QObject(window), m_window(window), m_theme(theme)
-  {
-    m_current = QGuiApplication::font().hintingPreference();
-    if (m_theme)
-      m_theme->setProperty("hinting", int(m_current));
-    connect(window, &QWindow::screenChanged, this, &TextHintingFollower::follow);
-    for (QScreen* screen : QGuiApplication::screens())
-      watch(screen);
-    connect(qApp, &QGuiApplication::screenAdded, this, [this](QScreen* screen) { watch(screen); });
-    // The window's first screen may not be the primary one.
-    QTimer::singleShot(0, this, &TextHintingFollower::follow);
-    const int flip = qEnvironmentVariableIntValue("YAP_TEST_HINTING_FLIP_SECS");
-    if (flip > 0)
-      QTimer::singleShot(flip * 1000, this, [this] {
-        apply(m_current == QFont::PreferNoHinting ? QFont::PreferVerticalHinting
-                                                  : QFont::PreferNoHinting);
-      });
-  }
+  BOOL smoothing = TRUE;
+  UINT type = FE_FONTSMOOTHINGCLEARTYPE;
+  SystemParametersInfoW(SPI_GETFONTSMOOTHING, 0, &smoothing, 0);
+  SystemParametersInfoW(SPI_GETFONTSMOOTHINGTYPE, 0, &type, 0);
+  const bool clearType = smoothing && type == FE_FONTSMOOTHINGCLEARTYPE;
+  if (!clearType && !qEnvironmentVariableIsSet("QSG_TEXT_GRAYSCALE"))
+    qputenv("QSG_TEXT_GRAYSCALE", "1");
 
-private:
-  void watch(QScreen* screen)
-  {
-    connect(screen, &QScreen::logicalDotsPerInchChanged, this, &TextHintingFollower::follow);
-    connect(screen, &QScreen::physicalDotsPerInchChanged, this, &TextHintingFollower::follow);
+  MONITORINFOEXW info{};
+  info.cbSize = sizeof info;
+  const HMONITOR primary = MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
+  if (!GetMonitorInfoW(primary, &info))
+    return;
+  // "\\.\DISPLAY3" -> "DISPLAY3", the tuner's key.
+  const std::wstring device(info.szDevice);
+  const std::wstring key = L"Software\\Microsoft\\Avalon.Graphics\\" +
+                           device.substr(device.find_last_of(L'\\') + 1);
+  DWORD contrastLevel = 0, gammaLevel = 0, size = sizeof(DWORD);
+  const bool tunedContrast =
+    RegGetValueW(HKEY_CURRENT_USER, key.c_str(), L"EnhancedContrastLevel", RRF_RT_REG_DWORD,
+                 nullptr, &contrastLevel, &size) == ERROR_SUCCESS;
+  size = sizeof(DWORD);
+  const bool tunedGamma = RegGetValueW(HKEY_CURRENT_USER, key.c_str(), L"GammaLevel",
+                                       RRF_RT_REG_DWORD, nullptr, &gammaLevel, &size) == ERROR_SUCCESS;
+  float contrast = 1.0f, gamma = 0.0f; // Skia's: 0 is the sRGB curve
+  if (tunedContrast || tunedGamma) {
+    IDWriteFactory* factory = nullptr;
+    IDWriteRenderingParams* params = nullptr;
+    if (SUCCEEDED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+                                      reinterpret_cast<IUnknown**>(&factory))) &&
+        SUCCEEDED(factory->CreateMonitorRenderingParams(primary, &params))) {
+      if (tunedContrast)
+        contrast = params->GetEnhancedContrast();
+      if (tunedGamma)
+        gamma = params->GetGamma();
+      params->Release();
+    }
+    if (factory)
+      factory->Release();
   }
-  void follow()
-  {
-    QScreen* screen = m_window->screen();
-    apply(textHintingFor(screen ? screen->devicePixelRatio() : m_window->devicePixelRatio()));
-  }
-  void apply(QFont::HintingPreference hinting)
-  {
-    if (hinting == m_current)
-      return;
-    m_current = hinting;
-    QFont font = QGuiApplication::font();
-    font.setHintingPreference(hinting);
-    QGuiApplication::setFont(font);
-    if (m_theme)
-      m_theme->setProperty("hinting", int(hinting));
-    int changed = 0;
-    std::function<void(QQuickItem*)> visit = [&](QQuickItem* item) {
-      const QMetaObject* meta = item->metaObject();
-      // Controls inherit their font (from the window and the app font):
-      // writing it would freeze that inheritance, so only their parts are
-      // given it.
-      const int index = item->inherits("QQuickControl") ? -1 : meta->indexOfProperty("font");
-      if (index >= 0) {
-        const QMetaProperty property = meta->property(index);
-        if (property.metaType() == QMetaType::fromType<QFont>() && property.isWritable()) {
-          QFont itemFont = property.read(item).value<QFont>();
-          if (itemFont.hintingPreference() != hinting) {
-            itemFont.setHintingPreference(hinting);
-            property.write(item, itemFont);
-            ++changed;
-          }
-        }
-      }
-      for (QQuickItem* child : item->childItems())
-        visit(child);
-    };
-    visit(m_window->contentItem());
-    std::fprintf(stderr, "[text] hinting %d on %s (dpr %.2f), %d items updated\n", int(hinting),
-                 m_window->screen() ? qPrintable(m_window->screen()->name()) : "?",
-                 m_window->devicePixelRatio(), changed);
-  }
+  if (!qEnvironmentVariableIsSet("QSG_TEXT_CONTRAST"))
+    qputenv("QSG_TEXT_CONTRAST", QByteArray::number(contrast));
+  if (!qEnvironmentVariableIsSet("QSG_TEXT_GAMMA"))
+    qputenv("QSG_TEXT_GAMMA", QByteArray::number(gamma));
+  std::fprintf(stderr, "[text] %s, contrast %s, gamma %s (%s)\n",
+               clearType ? "subpixel" : "grayscale", qgetenv("QSG_TEXT_CONTRAST").constData(),
+               qgetenv("QSG_TEXT_GAMMA").constData(),
+               tunedContrast || tunedGamma ? "ClearType Tuner" : "Chromium's defaults");
+}
+#endif
 
-  QQuickWindow* m_window;
-  QPointer<QObject> m_theme;
-  QFont::HintingPreference m_current;
-};
+// The brand faces, one static cut per family (assets/fonts, built by
+// tools/build-fonts.py). Registered before QML so Theme's families resolve.
 static void registerFonts()
 {
   QDirIterator it(QStringLiteral(":/fonts"), { QStringLiteral("*.ttf") });
@@ -782,6 +765,9 @@ int main(int argc, char* argv[])
     format.setSwapInterval(0);
     QSurfaceFormat::setDefaultFormat(format);
   }
+#ifdef Q_OS_WIN
+  setTextContrastAndGamma();
+#endif
   QGuiApplication app(argc, argv);
   // A second launch shows the first instance's window and exits.
   if (!first) {
@@ -794,24 +780,21 @@ int main(int argc, char* argv[])
   // closer to Chromium's DirectWrite output. YAP_TEXT=qt for the other.
   if (qEnvironmentVariable("YAP_TEXT") != QLatin1String("qt"))
     QQuickWindow::setTextRenderType(QQuickWindow::NativeTextRendering);
-  // DirectWrite with vertical-only hinting at every scale, as Chromium
-  // draws text. Qt's default picks GDI's full hinting while every monitor
-  // is at 100% and DirectWrite once one is scaled, so glyph widths (and
-  // with them every wrapped line) changed with the monitor setup.
-  // Chromium (Skia's DirectWrite path) grid-fits vertically only while
-  // glyphs are small (ClearType natural) and stops hinting once they are
-  // large (natural symmetric, antialiased both ways). Our 11-18 px text
-  // is small at 100% and large from 125% up, so the hinting follows the
-  // primary screen's scale: at 150% vertical hinting left ~25% fewer edge
-  // pixels than Chromium (stair-stepped curves), no hinting matched it
-  // within 4%; at 100% no hinting blurred every baseline. The window's
-  // screen picks it again when it moves to a screen at another scale
-  // (TextHintingFollower).
+  // DirectWrite with no hinting at every scale, as Chromium draws our
+  // fonts. Qt's default picks GDI's full hinting while every monitor is at
+  // 100% and DirectWrite once one is scaled, so glyph widths (and with them
+  // every wrapped line) changed with the monitor setup. No hinting is
+  // DirectWrite's natural symmetric mode (antialiased both ways) with
+  // subpixel glyph positions, which is what Chromium (Skia) uses for fonts
+  // like ours that carry no hints of their own: matched against Edge's
+  // output glyph by glyph it fits at 100% and 150% alike. Vertical hinting
+  // (natural, antialiased across only) left ~17-20% fewer edge pixels than
+  // Chromium at 100%: crisper stems, jagged curves (text pass,
+  // docs/UI_PARITY_AUDIT.md).
   // YAP_TEXT_HINTING=none|vertical|full|default forces one.
   {
-    const QScreen* screen = QGuiApplication::primaryScreen();
     QFont font = QGuiApplication::font();
-    font.setHintingPreference(textHintingFor(screen ? screen->devicePixelRatio() : 1.0));
+    font.setHintingPreference(textHinting());
     QGuiApplication::setFont(font);
   }
   registerFonts();
@@ -919,7 +902,6 @@ int main(int argc, char* argv[])
     chrome->attach(window);
     thumbbar->attach(window);
     new PopupPressSink(&engine, window);
-    new TextHintingFollower(window, engine.singletonInstance<QObject*>("com.yap.native", "Theme"));
 #ifdef Q_OS_WIN
     app.installNativeEventFilter(new MotionWatch(
       engine.singletonInstance<QObject*>("com.yap.native", "Theme")));

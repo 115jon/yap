@@ -12,11 +12,9 @@ QtObject {
     // dark | light | miku-dark | miku-light | spiderman-dark | spiderman-light
     property string themeId: "dark"
 
-    // The hinting text uses (a QFont::HintingPreference): main.cpp sets it
-    // at launch and again when the window moves to a screen at another
-    // scale (vertical below 125 %, none from 125 %). The type roles carry it.
-    // Starts as the application font's (set before QML loads), so the
-    // first layout already has it.
+    // The hinting text uses (a QFont::HintingPreference): the application
+    // font's, which main.cpp sets before QML loads (none, as Chromium draws
+    // our fonts; YAP_TEXT_HINTING overrides). The type roles carry it.
     property int hinting: Qt.application.font.hintingPreference
 
     // ---------- Layer 1: inputs (tokens.css:21-275) ----------
