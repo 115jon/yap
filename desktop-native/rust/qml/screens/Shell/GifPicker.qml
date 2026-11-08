@@ -15,8 +15,8 @@ import com.yap.native
 // then a two-column grid of 96 px cells, Favorites and Trending first, then
 // the provider's categories; a cell searches its query. Results are a
 // two-column masonry (round-robin, 2 px gaps, tint-1 tiles) that pages in
-// within 320 px of its end; each tile has a star, and a clip loops muted
-// with a speaker chip (its sound on hover once unmuted) and its length.
+// within 320 px of its end; each tile has a star, and a clip has a speaker
+// chip (its sound on hover once unmuted) and its length.
 // Typing searches after 300 ms and offers terms (history, autocomplete,
 // suggestions) after 200 ms. The foot says "Powered by" with the provider's
 // mark, which switches KLIPY and Tenor for GIFs. `expanded` is a centred
@@ -24,8 +24,13 @@ import com.yap.native
 // over the stacked scrim, with 4 columns at 1024 px (3 at 768); the voice
 // channel vibe's picker is `lockExpanded`.
 //
-// Video cost is bounded: a clip plays only while its tile is in view and
-// the picker is open, and holds while the app is in the background.
+// Video cost is bounded. The web autoplays every clip's mp4; here a clip
+// rests on its first frame and only the one pointed at (or focused) plays:
+// its animated WebP preview, decoded off the GUI thread, or with sound on,
+// its mp4 in the picker's one player. A Media Foundation player per tile in
+// view (UI pass 7) built a D3D device and topology on the GUI thread for
+// each clip scrolled in (docs/PERFORMANCE.md, Clips). Nothing plays while
+// the picker is shut or the app is in the background.
 Popup {
     id: root
 
@@ -72,6 +77,57 @@ Popup {
     // The picker-wide clip mute (`chat:clips:muted`, muted by default).
     property bool clipsMuted: true
     onClipsMutedChanged: saveMemory()
+    // The clip that plays (the Clips tab): the one pointed at or focused.
+    // Every other clip rests on its first frame (the tiles' `still`).
+    property Item clipTile: null
+    // Wanted with sound (ClipVideoPlayer: a fine pointer hears the clip it
+    // hovers once the picker is unmuted), or a clip with no picture: then
+    // its mp4 plays too, in the picker's one player (`clipPlayer`), once
+    // the pointer has settled on it (`clipPlaying`).
+    readonly property bool clipVideoWanted: clipTile !== null && visible
+        && Qt.application.state === Qt.ApplicationActive
+        && (!clipsMuted && !ShellState.videoMuted || clipTile.preview.length === 0)
+    property Item clipPlaying: null
+    // The player has drawn the playing clip's first frame.
+    property bool clipFrame: false
+    // When the pointer came to `clipTile` (Date.now()), for `yap.clips`
+    // (QT_LOGGING_RULES="yap.clips.info=true": how long until it moved).
+    property real clipPointedAt: 0
+    onClipTileChanged: clipPointedAt = Date.now()
+    onClipFrameChanged: if (clipFrame)
+        console.info(clipLog, "[clips] player's first frame", Date.now() - clipPointedAt, "ms after pointing")
+    LoggingCategory {
+        id: clipLog
+        name: "yap.clips"
+        defaultLogLevel: LoggingCategory.Warning
+    }
+    // Heard (YAP_EMBED_MUTED's mediaMuted silences it, tests only).
+    readonly property bool clipSound: !clipsMuted && !ShellState.videoMuted && !ShellState.mediaMuted
+    // Clip lengths in seconds by tile id, learnt from their previews or the
+    // player (KLIPY sends none; the web reads the <video>'s duration).
+    property var clipLengths: ({})
+    function pointClip(tile, on) {
+        if (on)
+            clipTile = tile
+        else if (clipTile === tile)
+            clipTile = null
+    }
+    function settleClip() {
+        if (!clipVideoWanted) {
+            clipSettle.stop()
+            clipPlaying = null
+        } else if (clipPlaying !== clipTile) {
+            clipPlaying = null
+            clipSettle.restart()
+        }
+    }
+    function learnClipLength(id, seconds) {
+        if (clipLengths[id] === seconds)
+            return
+        const next = Object.assign({}, clipLengths)
+        next[id] = seconds
+        clipLengths = next
+    }
     // Recent searches per media type (`chat:gifs:recent:<type>`), five.
     property var recents: ({})
     onRecentsChanged: saveMemory()
@@ -1338,6 +1394,11 @@ Popup {
                             readonly property bool near: cellTop + height > flick.contentY - 200 && cellTop < flick.contentY + flick.height + 200
                             readonly property bool inView: cellTop + height > flick.contentY && cellTop < flick.contentY + flick.height
                             readonly property bool hovered: tileHover.hovered
+                            // The clip that plays: the one pointed at (or
+                            // focused), never every clip in view.
+                            readonly property bool pointed: isClip && (hovered || activeFocus)
+                            onPointedChanged: root.pointClip(tile, pointed)
+                            readonly property Item slot: videoSlot
                             x: (root.isExpanded ? index % root.columns : column) * (root.colW + root.gap)
                             y: root.isExpanded ? (root.tops[index] ?? 0) / 1000 * root.colW + Math.floor(index / root.columns) * root.gap
                                 : offset / 1000 * root.colW + above * root.gap
@@ -1355,25 +1416,41 @@ Popup {
                             Keys.onPressed: event => event.accepted = root.moveFocus(tile, event.key)
                             // Streamed (one frame held, never every frame: the
                             // picker is never destroyed) so it loops; see
-                            // ShortcutCell.
+                            // ShortcutCell. A clip's is its animated WebP
+                            // (KLIPY's 320 px, 10 fps rendition of the whole
+                            // clip): at rest only its first frame is decoded
+                            // (`still`, off the GUI thread), and it plays while
+                            // pointed at. See `clipTile`.
                             AnimatedPicture {
+                                id: picture
+                                readonly property bool live: !tile.isClip || root.clipTile === tile
                                 anchors.fill: parent
                                 visible: tile.preview.length > 0
                                 stream: true
+                                still: !live
                                 fillMode: AnimatedPicture.PreserveAspectCrop
                                 source: tile.near && root.visible ? tile.preview : ""
-                                // A clip's poster holds still under its video.
-                                playing: tile.near && root.visible && tile.video.length === 0
+                                playing: tile.near && root.visible && tile.video.length === 0 || tile.isClip && live
+                                onDurationChanged: if (tile.isClip && duration > 0) root.learnClipLength(tile.gifId, duration / 1000)
+                                onFrameCountChanged: if (tile.isClip && live && !still && frameCount > 1)
+                                    console.info(clipLog, "[clips] preview moving,", frameCount, "frames,",
+                                        Date.now() - root.clipPointedAt, "ms after pointing")
                             }
+                            // Where the picker's one clip player draws while
+                            // this clip plays with sound (`clipOut`).
+                            Item {
+                                id: videoSlot
+                                anchors.fill: parent
+                            }
+                            // A video with no picture to rest on (not a clip):
+                            // GifPreviewMedia loops it muted.
                             Loader {
                                 id: clipLoader
                                 anchors.fill: parent
-                                active: tile.video.length > 0 && tile.inView && root.visible
+                                active: tile.video.length > 0 && !tile.isClip && tile.preview.length === 0
+                                    && tile.inView && root.visible
                                 sourceComponent: LoopVideo {
                                     source: tile.video
-                                    // ClipVideoPlayer: a fine pointer hears the
-                                    // clip it hovers once the picker is unmuted.
-                                    muted: !tile.isClip || !tile.hovered || root.clipsMuted
                                 }
                             }
                             MediaHover { on: tile.hovered }
@@ -1403,7 +1480,8 @@ Popup {
                                 onTapped: root.clipsMuted = !root.clipsMuted
                             }
                             Rectangle {
-                                readonly property real seconds: clipLoader.item ? clipLoader.item.seconds : 0
+                                readonly property real seconds: clipLoader.item ? clipLoader.item.seconds
+                                    : root.clipLengths[tile.gifId] ?? 0
                                 readonly property string label: tile.duration.length > 0 ? tile.duration
                                     : seconds > 0 ? Math.floor(seconds / 60) + ":" + String(Math.floor(seconds % 60)).padStart(2, "0") : ""
                                 visible: tile.isClip && label.length > 0
@@ -1438,6 +1516,82 @@ Popup {
                             }
                         }
                     }
+                    // The picker's one clip player (ClipVideoPlayer's mp4),
+                    // for the clip pointed at when it should be heard: the
+                    // picker unmuted (or a clip with no picture). Its output
+                    // moves into that tile's slot, under the chips. A Media
+                    // Foundation session costs the GUI thread a D3D9 device
+                    // and a topology (~20 ms alone, hundreds when ten start
+                    // together), so it starts only once the pointer settles,
+                    // and nothing else in the grid ever makes one
+                    // (docs/PERFORMANCE.md, Clips).
+                    Item {
+                        id: clipPark
+                        visible: false
+                    }
+                    VideoOutput {
+                        id: clipOut
+                        parent: root.clipPlaying?.slot ?? clipPark
+                        anchors.fill: parent
+                        fillMode: VideoOutput.PreserveAspectCrop
+                        visible: root.clipFrame
+                    }
+                    Timer {
+                        id: clipSettle
+                        interval: 120
+                        onTriggered: root.clipPlaying = root.clipVideoWanted ? root.clipTile : null
+                    }
+                    MediaPlayer {
+                        id: clipPlayer
+                        property string leased: ""
+                        videoOutput: clipOut
+                        loops: MediaPlayer.Infinite
+                        audioOutput: AudioOutput {
+                            muted: !root.clipSound
+                            volume: ShellState.videoVolume
+                        }
+                        onErrorOccurred: (error, message) => console.warn("[gif] clip:", error, message)
+                        onDurationChanged: if (duration > 0 && root.clipPlaying)
+                            root.learnClipLength(root.clipPlaying.gifId, duration / 1000)
+                        function release() {
+                            stop()
+                            source = ""
+                            if (leased.length > 0)
+                                AuthMedia.release(leased)
+                            leased = ""
+                        }
+                    }
+                    // The first frame of this source (the renderer clears the
+                    // sink when a session goes, so each source's size arrives
+                    // anew). Never videoFrameChanged here (LIBRARIES.md
+                    // "Frozen mp4s").
+                    Connections {
+                        target: clipOut.videoSink
+                        function onVideoSizeChanged() {
+                            if (clipOut.videoSink.videoSize.width > 0 && root.clipPlaying)
+                                root.clipFrame = true
+                        }
+                    }
+                    Connections {
+                        target: root
+                        function onClipVideoWantedChanged() { root.settleClip() }
+                        function onClipTileChanged() { root.settleClip() }
+                        function onClipPlayingChanged() {
+                            root.clipFrame = false
+                            clipPlayer.release()
+                            const tile = root.clipPlaying
+                            if (!tile)
+                                return
+                            if (AuthMedia.needsAuth(tile.video)) {
+                                clipPlayer.leased = tile.video
+                                clipPlayer.source = AuthMedia.localUrl(tile.video)
+                            } else {
+                                clipPlayer.source = tile.video
+                            }
+                            clipPlayer.play()
+                        }
+                    }
+                    Component.onDestruction: clipPlayer.release()
                 }
 
                 // No results (search or featured, settled, no error).

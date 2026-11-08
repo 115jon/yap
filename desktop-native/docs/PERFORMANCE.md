@@ -2532,3 +2532,105 @@ Tools (outside the repo, `F:/ct/yapn/tools/p7/`): `idle.ps1`,
 and the p6 copies (`app.ps1`, `owner.ps1`, `watch.ps1`, `leave.ps1`,
 `anim-idle.ps1`, `anim-ab.ps1`, `heap-idle.ps1`, `build.ps1`, `test.ps1`,
 `xperf-session.ps1`).
+
+# Clips tab (2026-11-08)
+
+The GIF picker's Clips tab (UI pass 7) was "incredibly laggy". Measured on
+`native/perf3` at c6735a84 (spike/qt-desktop 690b8546 + native/text), the
+owner test account on profile `perfclips`, Trending clips in the picker
+at its normal size (two columns, 10 tiles in view), unpaced presents
+(`YAP_DEBUG_NO_VSYNC`), `QSG_RENDER_TIMING`, the test pointer and posted
+wheel ticks only. Media counts come from the `YAP_DEBUG_ANIMATIONS` dump,
+which now also counts live `MediaPlayer`/`WebmPlayer` objects, how many
+play, and their `AudioOutput`s.
+
+## Cause
+
+Every tile in view had its own `LoopVideo`: a Media Foundation
+`MediaPlayer` with an `AudioOutput`, playing KLIPY's `send` mp4 (854x480
+or 720x404) looped at rest. A tile scrolled into view made a new one, and
+a tile scrolled out destroyed it. The GUI-thread sampler while scrolling
+(`YAP_DEBUG_SAMPLE`, 12 s): 75 % of the GUI thread was inside
+`MFPlayerSession::handleMediaSourceReady` → `setupPlaybackTopology` →
+`EVRCustomPresenter` → `D3DPresentEngine::createD3DDevice`, so each new
+player built a D3D9 device on the GUI thread. The top leaves were
+`NtGdiDdDDICreateContextVirtual` (20.5 %), `CreateAllocation` (9.0 %),
+`QueryAdapterInfo` (6.9 %) and `EnumDisplayDevices` (6.1 %). At rest, 10
+players decoded and 10 audio streams stayed open. Each clip's
+animated-WebP preview, used as its poster, was also decoded whole: 44-120
+frames per tile, never shown.
+
+The web (`GifPickerModal.tsx` `ClipVideoPlayer`) autoplays every clip's
+`send` mp4, muted, and unmutes the hovered one when the picker is
+unmuted. A browser decodes those in its GPU process; the native app pays
+the topology on its GUI thread.
+
+## What changed
+
+- A clip rests on its first frame: `AnimatedPicture.still` decodes only
+  frame 0 of the WebP preview (KLIPY's 320x180, 10 fps rendition of the
+  whole clip), off the GUI thread. The preview's length comes from its
+  ANMF headers (`duration`), so the length chip shows at rest without a
+  player.
+- Only the clip pointed at (or focused) plays (`GifPicker.clipTile`). Its
+  WebP animates (`still` off). A long looping WebP posts its first 10
+  frames first, and the whole carries on from the frame showing
+  (`yap_anim::decode_frames`, `kStartFrames`).
+- With sound on (the picker unmuted, video not muted), the pointed clip's
+  mp4 also plays, in the picker's one `MediaPlayer`. Its `VideoOutput`
+  moves into that tile's slot, under the chips, and the player starts
+  once the pointer has rested 120 ms. That is one Media Foundation session
+  per settled hover, never one per tile.
+- `LoopVideo` per tile remains only for a non-clip video with no picture
+  (rare).
+
+## Before and after
+
+| metric (Trending clips, 10 tiles in view)          | before                      | after                                  |
+| -------------------------------------------------- | --------------------------- | -------------------------------------- |
+| live players at rest (playing / audio outputs)     | 10 (10 / 10)                | **1 idle, no source (0 / 1)**          |
+| process CPU at rest, 10 s                          | 53-68 % of a core           | **0.5-0.6 %**                          |
+| threads                                            | 403-434                     | **105-122**                            |
+| continuous wheel, 6 x 60 ticks at 16 ms: CPU       | 522 % of a core             | **61-68 %**                            |
+| same: frames rendered                              | 62 in 11.1 s (6/s)          | **1,962-1,964 in 10.7-10.8 s (182/s)** |
+| same: GUI frame gap p50 / p95 / p99                | 94 / 457 / 632 ms           | **5 / 6 / 7-8 ms**                     |
+| same: gaps over 50 ms                              | 34                          | **1** (the first frame after idle)     |
+| GUI thread busy while scrolling (sampler)          | 70 % (75 % of that MF/D3D9) | **35 %** (scene-graph render, no MF)   |
+| hover, muted: pointing to motion                   | n/a (all looped)            | **0-40 ms** (whole preview 70-366 ms)  |
+| hover, sound on: pointing to the mp4's first frame | n/a                         | 263-311 ms (120 ms of it the settle)   |
+| hover, sound on: GUI time per session              | n/a                         | ~15-22 ms (26 % of 391 samples, 7)     |
+
+The "after" scroll frames are paced only by the work (unpaced presents);
+p99 8 ms leaves 60 Hz with room. At rest the window renders only the caret
+(2 frames/s). Process reads while scrolling are dominated by new pages'
+posters (each a whole animated WebP, 80-560 KB), which the old code also
+fetched for every nearby tile, on top of an mp4 stream per tile entering
+view. Its idle reads (6.9-7.7 MB per 10 s, the looping mp4s) are gone.
+
+## Not done
+
+- A smaller still. The server (`src/routes/api/gifs.ts`) gives clips only
+  `preview` (the animated WebP) and `send` (`file.mp4 || file.hd.mp4 ||
+file.md.mp4`, so HD first). A KLIPY still or an `sm`/`md` mp4 as a
+  separate field would cut poster bytes and the sound-on decode.
+- The sound-on session still builds a D3D9 device on the GUI thread per
+  hover (Qt's WMF `D3DPresentEngine`). Sharing one device across
+  presenters would need a Qt patch.
+- The length chip comes from the 10 fps preview and can read a second
+  under the mp4's (1.9 s against 2.03 s shows 0:01, not 0:02). Once the
+  mp4 has played, its own duration replaces it.
+
+## Files
+
+- `rust/qml/screens/Shell/GifPicker.qml`: `clipTile`, `clipPlaying`, the
+  shared `clipPlayer`/`clipOut`, the tiles' `still` pictures and slots,
+  learnt lengths, the `yap.clips` timing log.
+- `cpp/animatedpicture.{h,cpp}`: `still`, `duration`, WebP header scan,
+  start-first decode of long looping WebPs, carrying on into the whole.
+- `rust/src/anim.rs`, `rust/crates/yap-anim/src/lib.rs`:
+  `yap_anim_decode`'s `max_frames`, `decode_frames` (with a test).
+- `cpp/main.cpp`: media counts in the `YAP_DEBUG_ANIMATIONS` dump.
+
+Tools (outside the repo, `F:/ct/yapn/tmp/clips/`): `launch.ps1`,
+`nav.ps1`, `tap.ps1`, `measure.ps1`, `scroll.ps1`, `hover2.ps1`,
+`test.ps1`.

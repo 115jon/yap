@@ -18,6 +18,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <limits>
 #include <vector>
 
 // src/anim.rs
@@ -29,7 +31,7 @@ struct YapAnimInfo
   uint32_t loops;
 };
 extern "C" void* yap_anim_decode(const uint8_t* data, size_t len, uint32_t max_w,
-                                 uint32_t max_h);
+                                 uint32_t max_h, uint32_t max_frames);
 extern "C" void yap_anim_info(const void* anim, YapAnimInfo* out);
 extern "C" const uint8_t* yap_anim_frame(const void* anim, uint32_t index,
                                          uint32_t* delay_ms);
@@ -52,6 +54,9 @@ constexpr qint64 kMaxDownload = 24 * 1024 * 1024;
 constexpr qsizetype kMaxAnimation = 48 * 1024 * 1024;
 // A file this large shows its first frame before the whole decodes.
 constexpr qsizetype kPreviewBytes = 64 * 1024;
+// The frames of a long looping WebP that play first (about a second of a
+// KLIPY clip preview's 10 fps) while the rest decode.
+constexpr int kStartFrames = 10;
 // A picture that failed to load is asked for again after this long.
 constexpr qint64 kRetryFailedMs = 30 * 1000;
 
@@ -92,7 +97,44 @@ AnimationPtr decodeGif(const QByteArray& bytes, QSize box)
   data->loops = repeats < 0 ? 0 : repeats + 1;
   if (data->frames.isEmpty())
     return nullptr;
+  for (int delay : std::as_const(data->delays))
+    data->duration += delay;
   return data;
+}
+
+// An animated WebP's frames, play count (0 forever) and pass in ms, from
+// its chunk headers (ANIM, ANMF; no pixels). All 0 for anything else.
+struct WebpInfo
+{
+  int frames = 0;
+  int loops = 0;
+  int duration = 0;
+};
+
+WebpInfo scanWebp(const QByteArray& bytes)
+{
+  WebpInfo info;
+  const auto* p = reinterpret_cast<const uchar*>(bytes.constData());
+  if (bytes.size() < 12 || std::memcmp(p, "RIFF", 4) != 0 || std::memcmp(p + 8, "WEBP", 4) != 0)
+    return info;
+  qint64 total = 0;
+  qsizetype at = 12;
+  while (at + 8 <= bytes.size()) {
+    const quint32 length = quint32(p[at + 4]) | (quint32(p[at + 5]) << 8) |
+                           (quint32(p[at + 6]) << 16) | (quint32(p[at + 7]) << 24);
+    // ANIM: background colour (4 bytes), then the 2-byte loop count.
+    if (std::memcmp(p + at, "ANIM", 4) == 0 && at + 8 + 6 <= bytes.size())
+      info.loops = int(quint32(p[at + 12]) | (quint32(p[at + 13]) << 8));
+    // ANMF: X, Y, width, height (3 bytes each), then the 3-byte duration.
+    if (std::memcmp(p + at, "ANMF", 4) == 0 && at + 8 + 15 <= bytes.size()) {
+      const uchar* d = p + at + 8 + 12;
+      total += quint32(d[0]) | (quint32(d[1]) << 8) | (quint32(d[2]) << 16);
+      ++info.frames;
+    }
+    at += 8 + qsizetype(length) + qsizetype(length & 1);
+  }
+  info.duration = int(qMin<qint64>(total, std::numeric_limits<int>::max()));
+  return info;
 }
 
 // The box to fit a picture into so it covers `box` (a cropped fill): the
@@ -192,13 +234,14 @@ bool pngDefaultIsFirstFrame(const QByteArray& bytes)
   return !animated;
 }
 
-AnimationPtr decodeBytes(const QByteArray& bytes, QSize box)
+// `maxFrames`: only the first so many (0: every frame; a GIF is whole).
+AnimationPtr decodeBytes(const QByteArray& bytes, QSize box, int maxFrames = 0)
 {
   if (bytes.startsWith("GIF8"))
     return decodeGif(bytes, box);
   void* anim = yap_anim_decode(reinterpret_cast<const uint8_t*>(bytes.constData()),
                                size_t(bytes.size()), uint32_t(qMax(0, box.width())),
-                               uint32_t(qMax(0, box.height())));
+                               uint32_t(qMax(0, box.height())), uint32_t(qMax(0, maxFrames)));
   if (!anim)
     return decodeStill(bytes, box);
   YapAnimInfo info{};
@@ -224,6 +267,9 @@ AnimationPtr decodeBytes(const QByteArray& bytes, QSize box)
   yap_anim_free(anim);
   if (data->frames.isEmpty())
     return nullptr;
+  if (data->frames.size() > 1)
+    for (int delay : std::as_const(data->delays))
+      data->duration += delay;
   return data;
 }
 
@@ -279,7 +325,8 @@ AnimationPtr AnimationCache::find(const QString& key)
 }
 
 void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
-                             QSize box, const QString& key, bool cover, bool raw)
+                             QSize box, const QString& key, bool cover, bool raw,
+                             bool still)
 {
   if (m_entries.contains(key) || m_pending.contains(key) || failed(key))
     return;
@@ -296,7 +343,7 @@ void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
             if (received > kMaxDownload)
               reply->abort();
           });
-  connect(reply, &QNetworkReply::finished, this, [this, reply, box, key, cover, raw] {
+  connect(reply, &QNetworkReply::finished, this, [this, reply, box, key, cover, raw, still] {
     reply->deleteLater();
     if (reply->error() != QNetworkReply::NoError) {
       std::fprintf(stderr, "[anim] %s: %s\n", qPrintable(reply->url().host()),
@@ -308,7 +355,7 @@ void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
     }
     const QByteArray bytes = reply->readAll();
     QPointer<AnimationCache> self(this);
-    QThreadPool::globalInstance()->start([self, bytes, box, key, cover, raw] {
+    QThreadPool::globalInstance()->start([self, bytes, box, key, cover, raw, still] {
       // `last`: the whole animation (or the failure); otherwise a first
       // frame to show while the rest decode.
       auto post = [self, key](AnimationPtr data, bool last) {
@@ -334,13 +381,36 @@ void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
         return;
       }
       const QSize target = cover ? coverBox(bytes, box) : box;
-      // A large APNG or WebP (a banner, a profile effect, a decoration)
-      // takes a while to decode whole: its first frame (Qt's reader, one
-      // frame) shows meanwhile, as a browser paints it before the rest.
-      // An APNG whose default image is not a frame has no preview.
-      if (!gif && bytes.size() > kPreviewBytes && pngDefaultIsFirstFrame(bytes))
+      if (still) {
+        // The first frame alone (Qt's reader stops after one), and the
+        // pass's length from the header: a resting clip's poster.
+        AnimationPtr first = decodeStill(bytes, target);
+        if (first) {
+          auto data = std::make_shared<AnimationData>(*first);
+          data->duration = scanWebp(bytes).duration;
+          first = std::move(data);
+        }
+        post(first, true);
+        return;
+      }
+      const WebpInfo webp = scanWebp(bytes);
+      if (webp.loops == 0 && webp.frames > 2 * kStartFrames) {
+        // A long looping WebP (a pointed-at clip, a long chat GIF): its
+        // first frames play while the rest decode (a 120-frame clip took
+        // ~340 ms whole), and the whole carries on from the frame showing.
+        if (AnimationPtr start = decodeBytes(bytes, target, kStartFrames)) {
+          auto data = std::make_shared<AnimationData>(*start);
+          data->duration = webp.duration;
+          post(std::move(data), false);
+        }
+      } else if (!gif && bytes.size() > kPreviewBytes && pngDefaultIsFirstFrame(bytes)) {
+        // A large APNG or WebP (a banner, a profile effect, a decoration)
+        // takes a while to decode whole: its first frame (Qt's reader, one
+        // frame) shows meanwhile, as a browser paints it before the rest.
+        // An APNG whose default image is not a frame has no preview.
         if (AnimationPtr first = decodeStill(bytes, target))
           post(first, false);
+      }
       AnimationPtr whole = decodeBytes(bytes, target);
       if (!whole)
         std::fprintf(stderr, "[anim] %s: not a picture (%lld bytes, starts \"%s\")\n",
@@ -452,6 +522,16 @@ void AnimatedPicture::setStream(bool stream)
   load();
 }
 
+void AnimatedPicture::setStill(bool still)
+{
+  if (m_still == still)
+    return;
+  m_still = still;
+  emit stillChanged();
+  // The shown frame stays until the other decode lands (load keeps it).
+  load();
+}
+
 int AnimatedPicture::frameCount() const
 {
   if (!m_anim)
@@ -504,6 +584,10 @@ void AnimatedPicture::setSource(const QUrl& source)
     return;
   m_source = source;
   emit sourceChanged();
+  if (m_duration != 0) {
+    m_duration = 0;
+    emit durationChanged();
+  }
   // The old picture's Error is not the new one's. QML that hides the item
   // on Error (the sidebar's channel picture) would otherwise keep it hidden,
   // and a hidden item never loads, so the new picture never showed.
@@ -604,7 +688,8 @@ void AnimatedPicture::load()
   const QString key = m_source.toString() + QLatin1Char('|') + QString::number(box.width())
                       + QLatin1Char('x') + QString::number(box.height())
                       + (cover ? QStringLiteral("c") : QString())
-                      + (m_stream ? QStringLiteral("|raw") : QString());
+                      + (m_stream ? QStringLiteral("|raw") : QString())
+                      + (m_still ? QStringLiteral("|still") : QString());
   if (key == m_key && (m_anim || m_status == Loading))
     return;
   m_key = key;
@@ -619,7 +704,7 @@ void AnimatedPicture::load()
     setStatus(Loading);
   QQmlEngine* engine = qmlEngine(this);
   AnimationCache::instance()->request(engine ? engine->networkAccessManager() : nullptr,
-                                      m_source, box, key, cover, m_stream);
+                                      m_source, box, key, cover, m_stream, m_still);
   if (AnimationCache::instance()->failed(key) && !sameSourceShown())
     setStatus(Error);
 }
@@ -640,9 +725,19 @@ void AnimatedPicture::onLoaded(const QString& key)
     return;
   }
   const bool fresh = data != m_anim;
+  // The whole animation after its start (the same picture, at the same
+  // size, with more frames): it carries on from the frame showing.
+  const bool extends = fresh && m_anim && m_animSource == m_source && !m_finished &&
+                       !m_anim->frames.isEmpty() && !data->frames.isEmpty() &&
+                       data->frames.size() > m_anim->frames.size() &&
+                       data->frames.first().size() == m_anim->frames.first().size();
   m_anim = data;
   m_animSource = m_source;
-  if (fresh) {
+  if (data->duration > 0 && data->duration != m_duration) {
+    m_duration = data->duration;
+    emit durationChanged();
+  }
+  if (fresh && !extends) {
     m_frame = 0;
     m_played = 0;
     m_timer.stop();

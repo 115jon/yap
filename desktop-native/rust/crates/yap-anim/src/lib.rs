@@ -165,16 +165,18 @@ fn premultiply(image: &mut RgbaImage) {
 struct Collector {
     max_w: u32,
     max_h: u32,
+    max_frames: usize,
     size: Option<(u32, u32)>,
     bytes: usize,
     frames: Vec<AnimFrame>,
 }
 
 impl Collector {
-    fn new(max_w: u32, max_h: u32) -> Self {
+    fn new(max_w: u32, max_h: u32, max_frames: usize) -> Self {
         Self {
             max_w,
             max_h,
+            max_frames: max_frames.clamp(1, MAX_FRAMES),
             size: None,
             bytes: 0,
             frames: Vec::new(),
@@ -198,7 +200,7 @@ impl Collector {
         }
         self.bytes += rgba.len();
         self.frames.push(AnimFrame { rgba, delay_ms });
-        self.frames.len() < MAX_FRAMES
+        self.frames.len() < self.max_frames
     }
 
     fn finish(self, loops: u32) -> Result<Animation, AnimError> {
@@ -244,7 +246,19 @@ fn check_size(width: u32, height: u32) -> Result<(), AnimError> {
 /// (0 for no bound). A picture whose header declares more than
 /// [`MAX_SIDE`] a side or [`MAX_PIXELS`] is refused before decoding.
 pub fn decode(bytes: &[u8], max_w: u32, max_h: u32) -> Result<Animation, AnimError> {
-    let out = Collector::new(max_w, max_h);
+    decode_frames(bytes, max_w, max_h, MAX_FRAMES)
+}
+
+/// [`decode`], stopping after the first `max_frames` frames (at most
+/// [`MAX_FRAMES`]): the start of a long animation, to play while the rest
+/// decodes.
+pub fn decode_frames(
+    bytes: &[u8],
+    max_w: u32,
+    max_h: u32,
+    max_frames: usize,
+) -> Result<Animation, AnimError> {
+    let out = Collector::new(max_w, max_h, max_frames);
     if is_png(bytes) {
         let mut limits = Limits::no_limits();
         limits.max_image_width = Some(MAX_SIDE);
@@ -297,6 +311,16 @@ mod tests {
     fn apng_should_decode_every_frame() {
         let anim = decode(&apng(8, 3, 0), 0, 0).expect("decode");
         assert_eq!(anim.frames.len(), 3);
+    }
+
+    #[test]
+    fn decode_frames_should_stop_at_its_limit() {
+        let start = decode_frames(&apng(8, 5, 0), 0, 0, 2).expect("decode");
+        assert_eq!(start.frames.len(), 2);
+        // The start is the whole animation's first frames.
+        let whole = decode(&apng(8, 5, 0), 0, 0).expect("decode");
+        assert_eq!(whole.frames.len(), 5);
+        assert_eq!(start.frames[1].rgba, whole.frames[1].rgba);
     }
 
     #[test]
