@@ -1,0 +1,21 @@
+--- a/src/native/peer_connection.rs
++++ b/src/native/peer_connection.rs
+@@ -53,9 +53,16 @@ impl From<OfferOptions> for sys_pc::ffi::RtcOfferAnswerOptions {
+     fn from(options: OfferOptions) -> Self {
+         Self {
+             ice_restart: options.ice_restart,
+-            offer_to_receive_audio: options.offer_to_receive_audio as i32,
+-            offer_to_receive_video: options.offer_to_receive_video as i32,
++            // Yap patch (desktop-native/patches/libwebrtc): `false` is "not
++            // set" (RTCOfferAnswerOptions::kUndefined, -1), as a browser's
++            // createOffer() without options. `false as i32` sent 0, and under
++            // Unified Plan an offer_to_receive of 0 takes the receive
++            // direction off every receiving transceiver of that kind
++            // (HandleLegacyOfferOptions): each offer we made turned the
++            // pulled tracks inactive, and the SFU stopped sending them.
++            offer_to_receive_audio: if options.offer_to_receive_audio { 1 } else { -1 },
++            offer_to_receive_video: if options.offer_to_receive_video { 1 } else { -1 },
+             ..Default::default()
+         }
+     }
+ }
