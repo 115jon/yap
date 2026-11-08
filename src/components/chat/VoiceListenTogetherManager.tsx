@@ -16,9 +16,13 @@ import {
   alternateListenTogetherAudioFormat,
   detectPreferredListenTogetherAudioFormat,
   getListenTogetherPlaybackPlan,
+  getNextListenTogetherVideoId,
   isExpectedListenTogetherPlayCancellation,
+  LISTEN_TOGETHER_PREFETCH_DELAY_MS,
+  LISTEN_TOGETHER_PREFETCH_JITTER_MS,
   type ListenTogetherRecoveryState,
   planListenTogetherPlaybackRecovery,
+  prefetchListenTogetherStream,
   probeListenTogetherStream,
   shouldTryAlternateListenTogetherFormat,
 } from "@/lib/voice/listen-together-player";
@@ -355,6 +359,40 @@ export function VoiceListenTogetherManager({
     snapshotRef.current = snapshot;
     roomSlugRef.current = roomSlug ?? null;
   }, [roomSlug, snapshot]);
+
+  // Warm the next queued track while this one plays, so it starts without
+  // waiting for the server to resolve it. Paused rooms are left alone.
+  const nextVideoId = getNextListenTogetherVideoId(snapshot);
+  const roomPaused = snapshot?.paused ?? true;
+  useEffect(() => {
+    if (!roomSlug || !voiceSessionId || !currentEntryId) return;
+    if (!nextVideoId || roomPaused) return;
+    const timer = setTimeout(
+      () => {
+        void prefetchListenTogetherStream(
+          buildListenTogetherStreamUrl({
+            videoId: nextVideoId,
+            roomSlug,
+            voiceSessionId,
+            serverId,
+            channelId,
+            preferredFormat: preferredFormatRef.current,
+          }),
+        );
+      },
+      LISTEN_TOGETHER_PREFETCH_DELAY_MS +
+        Math.random() * LISTEN_TOGETHER_PREFETCH_JITTER_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [
+    channelId,
+    currentEntryId,
+    nextVideoId,
+    roomPaused,
+    roomSlug,
+    serverId,
+    voiceSessionId,
+  ]);
 
   useEffect(() => {
     preferredFormatRef.current = detectPreferredListenTogetherAudioFormat();

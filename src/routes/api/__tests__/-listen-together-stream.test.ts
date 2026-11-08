@@ -334,4 +334,20 @@ describe("streamListenTogetherAudio", () => {
     const [, init] = fetchMock.mock.calls[0]!;
     expect(new Headers(init?.headers).get("Range")).toBe("bytes=0-1");
   });
+
+  it("warms a track by resolving it without asking googlevideo", async () => {
+    resolveMock.mockResolvedValue(resolvedStream(FRESH_URL));
+
+    const response = await streamListenTogetherAudio({
+      videoId: "video-1",
+      preferredFormat: "mp4",
+      range: null,
+      includeBody: false,
+      warmOnly: true,
+    });
+
+    expect(response.status).toBe(204);
+    expect(resolveMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
