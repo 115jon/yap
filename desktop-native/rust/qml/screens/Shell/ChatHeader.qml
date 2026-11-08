@@ -15,6 +15,9 @@ Item {
     // `docked`, a 360 column): search is a key like the others, there is
     // no members key, and a close key ends the row.
     property bool docked: false
+    // That chat as a sheet (below 1024): the details open as a sheet over
+    // it (ChatArea.tsx's members SidePanel).
+    property bool inSheet: false
     signal closeRequested()
 
     implicitHeight: Theme.header
@@ -29,8 +32,9 @@ Item {
 
     // ChatHeader.tsx `onToggleChannelDetails`.
     function toggleDetails() {
-        // The docked chat has no column for the details.
-        if (root.docked)
+        // The docked chat has no column for the details; as a sheet they
+        // stack over it.
+        if (root.docked && !root.inSheet)
             return
         ShellState.showDetails = !ShellState.showDetails
     }

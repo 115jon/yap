@@ -91,6 +91,12 @@ pub trait Realtime: Send + 'static {
     /// returned task is aborted; frames sent on `outgoing` go out as text.
     fn spawn_gateway(&self, api: Api, user_id: String, events: GatewayEvents) -> GatewayHandle;
 
+    /// Debug only: the process is offline (`YAP_DEBUG_OFFLINE_SECS`), so
+    /// requests fail as on a lost network. The default is never.
+    fn offline(&self) -> bool {
+        false
+    }
+
     /// Starts one voice call. It runs until `Leave`, until `commands` closes,
     /// or until it fails, and always ends with `VoiceUpdate::Ended`.
     fn spawn_voice(
@@ -427,8 +433,13 @@ impl Runner {
                 });
             }
             Effect::Http { id, token, request } => {
-                let api = Api::new(self.http.clone(), token);
                 let inbox = self.inbox.clone();
+                if self.realtime.offline() {
+                    let result = Err(crate::api::ApiError::Network("offline (debug)".into()));
+                    let _ = inbox.send(Input::Http { id, result });
+                    return;
+                }
+                let api = Api::new(self.http.clone(), token);
                 let slots = Arc::clone(&self.http_slots);
                 tokio::spawn(async move {
                     // The semaphore is never closed, so a permit always comes.

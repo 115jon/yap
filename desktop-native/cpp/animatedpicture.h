@@ -2,8 +2,13 @@
 
 // An animated picture Qt's image plugins cannot animate: APNG (avatar
 // decorations, profile effects) and animated WebP (X GIFs). A still PNG or
-// WebP works too, as one frame. A small GIF (a server icon) plays here too,
-// decoded by Qt's reader, so it shares the frame grid below.
+// WebP works too, as one frame, and so does anything else Qt reads (a JPEG
+// poster). A small GIF (a server icon) plays here too, decoded by Qt's
+// reader, so it shares the frame grid below. Network GIFs that must loop
+// use it (`stream`) instead of AnimatedImage: Qt 6.11's AnimatedImage plays
+// a network GIF from its QNetworkReply, which cannot rewind, so it stops
+// after one pass. A large APNG or WebP shows its first frame while the rest
+// decode.
 //
 //   AnimatedPicture { source: url; playing: hovered; fillMode: ... }
 //
@@ -201,8 +206,12 @@ private:
   // Streamed: the next frame into m_current; false at the end of the file.
   bool decodeNext();
   bool openStream();
+  // What shows is `m_source` (at another size, or its first frame).
+  bool sameSourceShown() const;
 
   QUrl m_source;
+  // The source `m_anim` was loaded for.
+  QUrl m_animSource;
   bool m_playing = false;
   FillMode m_fillMode = PreserveAspectFit;
   int m_loops = -1;

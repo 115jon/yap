@@ -613,6 +613,11 @@ pub mod qobject {
         /// Closes the popout if it still shows `user_id`.
         #[qinvokable]
         fn close(self: &Profile, user_id: &QString);
+
+        /// The pointer rests on what opens `user_id`'s popout: their
+        /// profile loads now, so the card opens with its banner.
+        #[qinvokable]
+        fn prefetch(self: &Profile, user_id: &QString);
     }
 
     impl cxx_qt::Initialize for Profile {}
@@ -877,6 +882,10 @@ impl qobject::Profile {
 
     pub fn close(&self, user_id: &QString) {
         client::command(Command::HideProfile(user_id.to_string()));
+    }
+
+    pub fn prefetch(&self, user_id: &QString) {
+        client::command(Command::PrefetchProfile(user_id.to_string()));
     }
 }
 

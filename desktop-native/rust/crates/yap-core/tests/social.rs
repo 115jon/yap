@@ -825,6 +825,48 @@ fn the_full_profile_should_list_mutual_friends_and_the_account_date() {
 }
 
 #[test]
+fn a_prefetched_profile_should_open_with_its_banner_at_once() {
+    let mut client = Client::online();
+    client.command(Command::PrefetchProfile(ALICE.into()));
+    let mut full = user(ALICE, "alice", Some("Alice"), "online");
+    full["profile_banner_color"] = json!("#123456");
+    client.respond(
+        &ApiRequest::Profile {
+            user_id: ALICE.into(),
+        },
+        json!({ "user": full, "mutualServers": { "count": 0, "items": [] } }),
+    );
+    // A second hover asks nothing.
+    let fx = client.command(Command::PrefetchProfile(ALICE.into()));
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Http { .. })));
+    let fx = client.command(Command::ShowProfile(Some(ALICE.into())));
+    assert_eq!(profile(&fx).expect("profile").banner_color, "#123456");
+}
+
+#[test]
+fn a_prefetch_that_lands_after_the_popout_opened_should_fill_it() {
+    let mut client = Client::online();
+    client.command(Command::PrefetchProfile(ALICE.into()));
+    // Opening asks again (the prefetch is still out); its answer is ignored
+    // here, and the prefetch fills the card.
+    client.command(Command::ShowProfile(Some(ALICE.into())));
+    let mut full = user(ALICE, "alice", Some("Alice"), "online");
+    full["bio"] = json!("early");
+    let request = ApiRequest::Profile {
+        user_id: ALICE.into(),
+    };
+    let (first, _) = *client
+        .asked
+        .iter()
+        .find(|(_, r)| *r == request)
+        .expect("prefetch asked");
+    let result =
+        request.decode(json!({ "user": full, "mutualServers": { "count": 0, "items": [] } }));
+    let fx = client.input(Input::Http { id: first, result });
+    assert_eq!(profile(&fx).expect("profile").bio, "early");
+}
+
+#[test]
 fn my_own_profile_should_not_be_fetched() {
     let mut client = Client::online();
     let fx = client.command(Command::ShowProfile(Some(ME.into())));

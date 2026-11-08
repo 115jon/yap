@@ -21,9 +21,39 @@ RowLayout {
     // the voice chat's column they open as the sheet.
     readonly property bool panelShown: ShellState.sidePanel.length > 0 && (chatShown || voiceChat)
     readonly property bool searchShown: ShellState.sidePanel === "search"
-    readonly property bool membersShown: (ShellState.showMembers || ShellState.showDetails) && chatShown && !panelShown
+    // Below 1024 the voice chat is a right sheet over the view with a scrim
+    // (side-panel.tsx `sheet`); its title opens the details as a second
+    // sheet stacked over it (ChatArea.tsx's members SidePanel).
+    readonly property bool voiceSheetWanted: voiceChat && !docked
+    property bool voiceSheetShown: false
+    readonly property bool membersShown: ((ShellState.showMembers || ShellState.showDetails) && chatShown
+            || ShellState.showDetails && voiceSheetWanted) && !panelShown
     readonly property bool sheetWanted: membersShown && !docked
     readonly property bool panelSheetWanted: panelShown && (!docked || voiceChat)
+
+    // Closing the voice chat's sheet for a layout change (the window
+    // widened) keeps the chat open in its column; a dismissal closes it.
+    property bool closingVoiceForLayout: false
+    onVoiceSheetWantedChanged: {
+        if (voiceSheetWanted) {
+            voiceSheetShown = true
+            voiceSheet.open()
+        } else if (voiceSheet.visible) {
+            closingVoiceForLayout = true
+            voiceSheet.close()
+        }
+    }
+    Component.onCompleted: {
+        Audio.setUser(Session.meId)
+        if (voiceSheetWanted) {
+            voiceSheetShown = true
+            voiceSheet.open()
+        }
+    }
+    onVoiceChatChanged: {
+        if (!voiceChat)
+            ShellState.showDetails = false
+    }
 
     // Closing the sheet for a layout change (the chat went away, the window
     // widened) keeps the preference; only a dismissal turns it off.
@@ -90,11 +120,34 @@ RowLayout {
 
     spacing: 0
 
-    // The voice settings follow the signed-in user.
-    Component.onCompleted: Audio.setUser(Session.meId)
+    // The voice settings follow the signed-in user (Component.onCompleted
+    // above).
     Connections {
         target: Session
         function onMeIdChanged() { Audio.setUser(Session.meId) }
+    }
+    // A hover's profile prefetch (ShellState.prefetchProfile).
+    Connections {
+        target: ShellState
+        function onProfilePrefetchRequested(userId) { Profile.prefetch(userId) }
+    }
+    // The hovered author's picture, decoded at the popout's size (its 72 px
+    // face at 2x, scaled up by a crop as ProfileCard.qml does), so the
+    // card's picture comes from the pixmap cache when it opens.
+    Image {
+        readonly property var crop: {
+            const s = ShellState.warmAvatar
+            const at = s.indexOf("#crop=")
+            const v = at < 0 ? [] : s.slice(at + 6).split(",").map(Number)
+            return v.length === 4 && v.every(n => isFinite(n) && n > 0) ? v : null
+        }
+        visible: false
+        Layout.preferredWidth: 0
+        Layout.preferredHeight: 0
+        asynchronous: true
+        source: ShellState.warmAvatar
+        sourceSize.width: Math.min(2048, Math.ceil((crop ? 7200 / crop[2] : 72) * 2))
+        sourceSize.height: Math.min(2048, Math.ceil((crop ? 7200 / crop[3] : 72) * 2))
     }
 
     // The camera's capture, its saved choice and the Camera dialog.
@@ -119,6 +172,7 @@ RowLayout {
         Layout.preferredWidth: Theme.treePanel
     }
     Item {
+        id: chatHost
         // Over the docked column, so the chat header can span it.
         z: 1
         Layout.fillHeight: true
@@ -126,15 +180,19 @@ RowLayout {
 
         ChatView {
             // Beside the voice view: 360 with its seam (border-l) included.
-            x: root.voiceChat ? parent.width - width : 0
+            // Below 1024 the same view moves into the voice chat's sheet
+            // (one instance, so its list and composer keep their state).
+            parent: root.voiceSheetShown ? voiceSheetSlot : chatHost
+            x: root.voiceChat && !root.voiceSheetShown ? parent.width - width : 0
             z: root.voiceChat ? 1 : 0
-            width: root.voiceChat ? Math.min(359, parent.width) : parent.width
+            width: root.voiceSheetShown ? parent.width : root.voiceChat ? Math.min(359, parent.width) : parent.width
             height: parent.height
             docked: root.voiceChat
+            inSheet: root.voiceSheetShown
             headerSpan: root.voiceChat ? 0 : root.docked ? (root.membersShown ? (ShellState.showDetails ? 360 : 240) : root.panelShown ? (root.searchShown ? 380 : 360) : 0) : 0
             visible: root.voiceChat || (Nav.voicePanelId.length === 0 && (!Nav.home || Nav.activeChannelId.length > 0))
             Rectangle {
-                visible: root.voiceChat
+                visible: root.voiceChat && !root.voiceSheetShown
                 x: -1
                 width: 1
                 height: parent.height
@@ -150,8 +208,8 @@ RowLayout {
             // use, not at startup (docs/PERFORMANCE.md, pass 6).
             source: ShellState.shopOpen ? "../Shop/ShopView.qml" : "../Friends/FriendsView.qml"
         }
-        // Below 1024 the voice chat covers the view's right side (the web's
-        // sheet); docked, the view gives it the column.
+        // Below 1024 the voice chat is a sheet over the view (voiceSheet);
+        // docked, the view gives it the column.
         Loader {
             width: parent.width - (root.voiceChat && root.docked ? 360 : 0)
             height: parent.height
@@ -240,6 +298,48 @@ RowLayout {
             anchors.leftMargin: 1
             active: root.panelShown && root.docked && !root.voiceChat
             sourceComponent: root.sidePanelComponent
+        }
+    }
+
+    // Below 1024: the voice channel's chat as a right sheet over the view
+    // (side-panel.tsx `sheet`: 360 with its border-l, the modal scrim,
+    // ply-3 under the chat). The ChatView moves in while it shows and back
+    // once it has gone.
+    T.Drawer {
+        id: voiceSheet
+        edge: Qt.RightEdge
+        width: Math.min(360, root.width)
+        height: root.height
+        y: 0
+        modal: true
+        onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
+        interactive: false
+        onClosed: {
+            root.voiceSheetShown = false
+            if (!root.closingVoiceForLayout && root.voiceChat)
+                Nav.showVoiceChat(false)
+            root.closingVoiceForLayout = false
+        }
+        enter: Transition {
+            NumberAnimation { property: "position"; to: 1; duration: 260; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
+        }
+        exit: Transition {
+            NumberAnimation { property: "position"; to: 0; duration: Theme.dur4Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
+        }
+        background: Rectangle {
+            objectName: "yapNoPressSink"
+            color: Theme.ply3
+        }
+        T.Overlay.modal: Scrim { color: Theme.scrim }
+        contentItem: Item {
+            id: voiceSheetSlot
+            // The seam (border-l in line) over the chat's left edge.
+            Rectangle {
+                z: 10
+                width: 1
+                height: parent.height
+                color: Theme.line
+            }
         }
     }
 
@@ -384,7 +484,8 @@ RowLayout {
         Layout.preferredWidth: 0
         Layout.preferredHeight: 0
 
-        LazyPopup { id: profile; host: root; sourceComponent: ProfilePopout {} }
+        // Kept once made: a reopened card keeps its decoded banner and face.
+        LazyPopup { id: profile; host: root; keep: true; sourceComponent: ProfilePopout {} }
         LazyPopup { id: fullProfile; host: root; source: "ProfileModal.qml" }
         LazyPopup { id: peerMenu; host: root; sourceComponent: PeerMenu {} }
         // A call ringing for us while its DM is not open.

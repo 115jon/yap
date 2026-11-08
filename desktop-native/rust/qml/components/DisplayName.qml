@@ -211,17 +211,44 @@ Item {
         }
     }
 
-    // Neon: the glow under the fill.
-    MultiEffect {
-        anchors.fill: label
-        visible: root.effect === "neon"
-        source: label
-        shadowEnabled: visible
-        shadowColor: root.alpha(root.primary, 0.54)
-        shadowBlur: 0.5
-        shadowHorizontalOffset: 0
-        shadowVerticalOffset: 0
-        z: -1
+    // Neon: the glow under the fill, the web's three text-shadows (0 0 5px
+    // primary .54, 0 0 12px primary .30, 0 0 20px secondary .16). Each is
+    // what a text-shadow is: a copy of the glyphs in that colour, blurred
+    // by its radius. (One wide drop shadow at .54 spread the light too thin
+    // and read weaker than the web's.)
+    Repeater {
+        model: root.effect === "neon"
+            ? [[5, root.primary, 0.54], [12, root.primary, 0.3], [20, root.secondary, 0.16]] : []
+        Item {
+            id: glow
+            required property var modelData
+            x: label.x
+            y: label.y
+            width: label.width
+            height: label.height
+            z: -1
+            Text {
+                id: glowText
+                anchors.fill: parent
+                verticalAlignment: Text.AlignVCenter
+                rotation: label.rotation
+                textFormat: Text.PlainText
+                text: root.text
+                elide: root.elide
+                font: root.styledFont
+                color: root.alpha(glow.modelData[1], glow.modelData[2])
+                visible: false
+                Accessible.ignored: true
+            }
+            MultiEffect {
+                anchors.fill: parent
+                source: glowText
+                blurEnabled: true
+                blur: 1
+                blurMax: glow.modelData[0]
+                autoPaddingEnabled: true
+            }
+        }
     }
 
     // Gradient, playing: the far end of the sweep (background-position
@@ -268,7 +295,40 @@ Item {
         anchors.fill: label
         active: root.moving && root.effect === "neon"
         sourceComponent: Item {
+            id: breath
             opacity: 0
+            // Its glow (0 0 4px primary .42, 0 0 14px primary .34, 0 0 24px
+            // secondary .2), each a blurred copy as above, under the fill.
+            Repeater {
+                model: [[4, root.primary, 0.42], [14, root.primary, 0.34], [24, root.secondary, 0.2]]
+                Item {
+                    id: breathGlow
+                    required property var modelData
+                    width: breath.width
+                    height: breath.height
+                    Text {
+                        id: breathText
+                        anchors.fill: parent
+                        verticalAlignment: Text.AlignVCenter
+                        rotation: label.rotation
+                        textFormat: Text.PlainText
+                        text: root.text
+                        elide: root.elide
+                        font: root.styledFont
+                        color: root.alpha(breathGlow.modelData[1], breathGlow.modelData[2])
+                        visible: false
+                        Accessible.ignored: true
+                    }
+                    MultiEffect {
+                        anchors.fill: parent
+                        source: breathText
+                        blurEnabled: true
+                        blur: 1
+                        blurMax: breathGlow.modelData[0]
+                        autoPaddingEnabled: true
+                    }
+                }
+            }
             Text {
                 id: bright
                 anchors.fill: parent
@@ -279,18 +339,7 @@ Item {
                 elide: root.elide
                 font: root.styledFont
                 color: root.alpha(root.mix(root.primary, root.primaryAnchor, 0.3), 0.42)
-                visible: false
                 Accessible.ignored: true
-            }
-            MultiEffect {
-                anchors.fill: parent
-                source: bright
-                shadowEnabled: true
-                shadowColor: root.alpha(root.primary, 0.42)
-                shadowBlur: 0.8
-                shadowHorizontalOffset: 0
-                shadowVerticalOffset: 0
-                autoPaddingEnabled: true
             }
             SequentialAnimation on opacity {
                 loops: Animation.Infinite

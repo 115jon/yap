@@ -23,7 +23,7 @@ use crate::store::search::{
     SearchState, SearchStatus, SearchView, SuggestionGroupView, SuggestionRow,
 };
 use crate::store::state::State;
-use crate::store::view::{absolute_url, initials, ViewUpdate};
+use crate::store::view::{absolute_url, avatar_url, initials, ViewUpdate};
 use crate::store::{ApiRequest, ApiResponse, Effect, Input, RequestId, SearchCommand};
 
 /// SearchPanel.tsx `DEBOUNCE_MS`.
@@ -82,7 +82,11 @@ impl State {
             id: user.id.clone(),
             username: user.username.clone(),
             display_name: user.display_name.clone(),
-            avatar: absolute_url(&self.api_base, user.avatar_url.as_deref()),
+            avatar: avatar_url(
+                &self.api_base,
+                user.avatar_url.as_deref(),
+                user.avatar_display.as_ref(),
+            ),
             initials: initials(user.label()),
             role_color: color,
         };

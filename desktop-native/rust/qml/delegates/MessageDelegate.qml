@@ -478,6 +478,12 @@ Item {
             cursorShape: Qt.PointingHandCursor
             onClicked: root.profileRequested(root.authorId, authorAvatar)
         }
+        // Resting on it loads the profile, so the popout opens with its
+        // banner playing (the web's hover prefetch).
+        HoverHandler {
+            enabled: !root.pending && !root.failed
+            onHoveredChanged: ShellState.prefetchProfile(hovered ? root.authorId : "", root.avatar)
+        }
     }
 
     Text {
@@ -521,6 +527,9 @@ Item {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: root.profileRequested(root.authorId, authorAvatar)
+            }
+            HoverHandler {
+                onHoveredChanged: ShellState.prefetchProfile(hovered ? root.authorId : "", root.avatar)
             }
         }
         Text {
@@ -1009,23 +1018,26 @@ Item {
                 IconKey {
                     size: 28
                     iconName: "edit"
-                    tip: qsTr("Edit")
+                    tip: qsTr("Edit message")
                     visible: root.mine
                     onClicked: root.editRequested(root.messageId)
                 }
                 IconKey {
                     size: 28
                     iconName: "trash"
-                    tip: qsTr("Delete")
+                    tone: "destructive"
+                    tip: qsTr("Delete message")
                     visible: root.canDelete && root.shiftHeld
                     onClicked: root.deleteRequested(root.messageId, root.author, root.body, false)
                 }
+                // Hidden whenever Shift is held, delete rights or not
+                // (MessageItem.tsx `[:root[data-shift]_&]:hidden`).
                 IconKey {
                     id: moreKey
                     size: 28
                     iconName: "more"
                     tip: qsTr("More")
-                    visible: !(root.canDelete && root.shiftHeld)
+                    visible: !root.shiftHeld
                     onClicked: root.menuRequested(root.messageId, root.author, root.body, root.mine,
                                                   moreKey, moreKey.width - 200, moreKey.height + 4)
                 }

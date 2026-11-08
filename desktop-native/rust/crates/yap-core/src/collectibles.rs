@@ -142,6 +142,34 @@ fn collectibles_of(display: Option<&Value>) -> Map<String, Value> {
         .unwrap_or_default()
 }
 
+/// The avatar display's crop, `[x, y, width, height]` in percent of the
+/// picture, when it is valid (`normalizeAvatarDisplay`: each finite, the
+/// size 1-100, inside the picture).
+pub fn avatar_crop(display: Option<&Value>) -> Option<[f64; 4]> {
+    let crop = display_object(display)?.remove("crop")?;
+    let field = |name: &str| {
+        crop.get(name)
+            .and_then(Value::as_f64)
+            .filter(|v| v.is_finite())
+    };
+    let (x, y, w, h) = (field("x")?, field("y")?, field("width")?, field("height")?);
+    let sized = (1.0..=100.0).contains(&w) && (1.0..=100.0).contains(&h);
+    let inside = x >= 0.0 && y >= 0.0 && x + w <= 100.0 && y + h <= 100.0;
+    (sized && inside).then_some([x, y, w, h])
+}
+
+/// A picture URL that carries its avatar crop as `#crop=x,y,w,h` (a
+/// fragment never goes over the wire), so every Avatar that draws the URL
+/// shows the crop (AvatarImage.tsx `avatarDisplayToImageStyle`).
+pub fn with_avatar_crop(url: String, display: Option<&Value>) -> String {
+    match avatar_crop(display) {
+        Some([x, y, w, h]) if !url.is_empty() && !url.contains('#') => {
+            format!("{url}#crop={x},{y},{w},{h}")
+        }
+        _ => url,
+    }
+}
+
 /// The decoration an avatar wears: its APNG (`imageUrl`).
 pub fn decoration_url(display: Option<&Value>) -> String {
     let collectibles = collectibles_of(display);
@@ -933,6 +961,22 @@ mod tests {
             decoration_url(Some(&display)),
             "https://cdn.discordapp.com/d.png"
         );
+    }
+
+    #[test]
+    fn an_avatar_crop_should_ride_on_the_picture_url() {
+        let display = json!({"version": 1, "crop": {"x": 10, "y": 5.5, "width": 50, "height": 50}});
+        assert_eq!(
+            with_avatar_crop("https://x.invalid/a.png".into(), Some(&display)),
+            "https://x.invalid/a.png#crop=10,5.5,50,50"
+        );
+        // Outside the picture, or no picture: nothing is added.
+        let bad = json!({"version": 1, "crop": {"x": 60, "y": 0, "width": 50, "height": 50}});
+        assert_eq!(
+            with_avatar_crop("https://x.invalid/a.png".into(), Some(&bad)),
+            "https://x.invalid/a.png"
+        );
+        assert_eq!(with_avatar_crop(String::new(), Some(&display)), "");
     }
 
     #[test]

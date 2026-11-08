@@ -111,6 +111,12 @@ Item {
             enabled: !root.label
             onTapped: root.profileRequested(root.userId, face)
         }
+        // Resting on the row loads the profile for its popout (banner and
+        // effect ready as it opens).
+        HoverHandler {
+            enabled: !root.label
+            onHoveredChanged: ShellState.prefetchProfile(hovered ? root.userId : "", root.avatar)
+        }
         TapHandler {
             enabled: !root.label
             acceptedButtons: Qt.RightButton

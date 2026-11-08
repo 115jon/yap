@@ -1257,6 +1257,16 @@ pub struct GifStatusView {
 /// Messages from the same author within this window share one header.
 pub const GROUP_WINDOW_MS: i64 = 5 * 60 * 1000;
 
+/// A user's picture with its avatar crop on the URL (`#crop=`), so every
+/// Avatar that draws it shows the crop.
+pub(super) fn avatar_url(
+    api_base: &str,
+    url: Option<&str>,
+    display: Option<&serde_json::Value>,
+) -> String {
+    crate::collectibles::with_avatar_crop(absolute_url(api_base, url), display)
+}
+
 pub(super) fn absolute_url(api_base: &str, url: Option<&str>) -> String {
     match url.unwrap_or_default() {
         url if url.starts_with('/') => format!("{api_base}{url}"),
@@ -1318,7 +1328,11 @@ pub(super) fn me(user: &User, api_base: &str) -> MeView {
         id: user.id.clone(),
         name: user.label().to_owned(),
         username: user.username.clone(),
-        avatar: absolute_url(api_base, user.avatar_url.as_deref()),
+        avatar: avatar_url(
+            api_base,
+            user.avatar_url.as_deref(),
+            user.avatar_display.as_ref(),
+        ),
         initials: initials(user.label()),
         status: status.to_owned(),
         custom_status: user
@@ -2001,7 +2015,11 @@ pub(super) fn message_row(
         author: author_name.to_owned(),
         author_color: top_role_color(ctx.members, &message.author_id),
         initials: initials(author_name),
-        avatar: absolute_url(ctx.api_base, author.and_then(|a| a.avatar_url.as_deref())),
+        avatar: avatar_url(
+            ctx.api_base,
+            author.and_then(|a| a.avatar_url.as_deref()),
+            author.and_then(|a| a.avatar_display.as_ref()),
+        ),
         body: message.content.clone(),
         // MentionBadge.tsx: a mention resolves to a member by username,
         // ignoring case.
@@ -2098,7 +2116,11 @@ pub(super) fn dm_rows(
                 user_id: user.id.clone(),
                 name: name.to_owned(),
                 username: user.username.clone(),
-                avatar: absolute_url(api_base, user.avatar_url.as_deref()),
+                avatar: avatar_url(
+                    api_base,
+                    user.avatar_url.as_deref(),
+                    user.avatar_display.as_ref(),
+                ),
                 initials: initials(name),
                 presence: presence
                     .of_recipient(&user.id, user.status.as_deref())
@@ -2217,7 +2239,11 @@ fn member_row(m: &Member, online: bool, ctx: &MemberContext<'_>) -> MemberListRo
         user_id: user.id.clone(),
         name: name.to_owned(),
         count: 0,
-        avatar: absolute_url(ctx.api_base, user.avatar_url.as_deref()),
+        avatar: avatar_url(
+            ctx.api_base,
+            user.avatar_url.as_deref(),
+            user.avatar_display.as_ref(),
+        ),
         initials: initials(name),
         presence: if online {
             ctx.presence.of(&user.id, user.status.as_deref()).to_owned()
@@ -2356,7 +2382,11 @@ pub(super) fn profile_view(
         user_id: user.id.clone(),
         name: name.to_owned(),
         username: user.username.clone(),
-        avatar: absolute_url(api_base, user.avatar_url.as_deref()),
+        avatar: avatar_url(
+            api_base,
+            user.avatar_url.as_deref(),
+            user.avatar_display.as_ref(),
+        ),
         initials: initials(name),
         presence: presence.of(&user.id, user.status.as_deref()).to_owned(),
         custom_status: presence.custom_status(&user.id, user.custom_status.as_deref()),
@@ -2427,7 +2457,7 @@ pub(super) fn mention_rows(users: &[&User], api_base: &str) -> Vec<MentionRow> {
             id: u.id.clone(),
             username: u.username.clone(),
             name: u.label().to_owned(),
-            avatar: absolute_url(api_base, u.avatar_url.as_deref()),
+            avatar: avatar_url(api_base, u.avatar_url.as_deref(), u.avatar_display.as_ref()),
             initials: initials(u.label()),
             name_style: name_style(u.display_name_style.as_ref()),
         })
@@ -2437,7 +2467,11 @@ pub(super) fn mention_rows(users: &[&User], api_base: &str) -> Vec<MentionRow> {
 /// The composer mention tooltip's member (HoveredMentionTooltip.tsx):
 /// `{name, avatar, deco}`. Only a face with a picture wears its decoration.
 pub(super) fn mention_hover_json(user: &User, api_base: &str) -> String {
-    let avatar = absolute_url(api_base, user.avatar_url.as_deref());
+    let avatar = avatar_url(
+        api_base,
+        user.avatar_url.as_deref(),
+        user.avatar_display.as_ref(),
+    );
     let deco = if avatar.is_empty() {
         String::new()
     } else {

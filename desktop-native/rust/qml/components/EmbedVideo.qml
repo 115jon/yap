@@ -47,6 +47,14 @@ Item {
     property bool preview: false
     // The file's type when known (an attachment's), else the URL decides.
     property string contentType: ""
+    // Only the picture: a preview's first frame, cropped to fill, with no
+    // disc, badge, frame, "Media unavailable" or pointer handling (a media
+    // tile, MemberList.tsx MediaGridImage's `<video preload="metadata">`,
+    // draws its own; a load error still says `failed`).
+    property bool bare: false
+    // A picture is on the stage (the peek's still or a live frame): the
+    // web's `onLoadedData`.
+    readonly property bool pictureShown: root.peekFrame.length > 0 || (root.player !== null && video.sourceRect.width > 0)
     // WebM plays through WebmPlayer; the API's private files through
     // AuthMedia's loopback relay; anything else by URL.
     readonly property bool webm: contentType === "video/webm" || /\.webm($|[?#])/i.test(source)
@@ -73,6 +81,25 @@ Item {
     property real peekDuration: 0
     // The row is pooled (culled, not hidden): the player is let go.
     property bool pooled: false
+    // Warm: the pointer is on a video not started yet, so its player loads
+    // now (source set, not playing) and Play only has to start it. Qt's
+    // Media Foundation player takes 0.4 s (local) to 1.2 s (cold HTTPS) from
+    // setSource to its first frame, but 40 ms from play() once loaded; the
+    // web's <video> pays its own start in ~0.2 s. Kept a moment after the
+    // pointer leaves, so passing over and back does not reload it.
+    // A bare tile never plays in place (it opens the viewer): nothing to warm.
+    readonly property bool warm: !started && !errored && !webm && !bare && (hover.hovered || warmGrace.running)
+    Timer {
+        id: warmGrace
+        interval: 3000
+    }
+    Connections {
+        target: hover
+        function onHoveredChanged() {
+            if (!hover.hovered && !root.started)
+                warmGrace.restart()
+        }
+    }
     // This player's number in ShellState.activeVideo while it plays.
     property int claim: 0
     // A pooled row reused for another video starts over, paused.
@@ -236,7 +263,7 @@ Item {
             visible: root.poster.length > 0 && (!root.player || root.player.mediaStatus < MediaPlayer.BufferedMedia || video.sourceRect.width <= 0
                 || (root.ended && root.endFrame.length === 0))
             source: root.poster
-            fillMode: Image.PreserveAspectFit
+            fillMode: root.bare ? Image.PreserveAspectCrop : Image.PreserveAspectFit
             asynchronous: true
             sourceSize: Qt.size(Math.ceil(width * 2), Math.ceil(height * 2))
         }
@@ -244,7 +271,7 @@ Item {
         VideoOutput {
             id: video
             anchors.fill: parent
-            fillMode: VideoOutput.PreserveAspectFit
+            fillMode: root.bare ? VideoOutput.PreserveAspectCrop : VideoOutput.PreserveAspectFit
             // A transparent webm blends only below full opacity (Qt 6.6).
             opacity: root.player && root.player.hasAlpha === true ? 0.99 : 1
             onSourceRectChanged: {
@@ -277,7 +304,7 @@ Item {
             id: engine
             // Hidden (a pooled row, another view): the player goes, so a
             // paused session costs nothing in the background.
-            active: (root.started || (root.preview && root.peekFrame.length === 0)) && !root.errored
+            active: (root.started || root.warm || (root.preview && root.peekFrame.length === 0)) && !root.errored
                 && root.visible && !root.pooled
             sourceComponent: root.webm ? webmEngine : mediaEngine
         }
@@ -341,6 +368,11 @@ Item {
                         // paused), then holds it.
                         // So does a GIF-mode loop made while the app is
                         // in the background.
+                        // Warmed by the pointer only (no preview to show,
+                        // or its still already taken): load, do not play;
+                        // start() plays it.
+                        if (!root.started && !(root.preview && root.peekFrame.length === 0))
+                            return
                         peeking = !root.started || (root.animated && !root.appActive)
                         play()
                     }
@@ -398,11 +430,11 @@ Item {
         // Not started: the play disc and the duration badge.
         PlayDisc {
             anchors.centerIn: parent
-            visible: !root.started && !root.errored
+            visible: !root.started && !root.errored && !root.bare
             hovered: hover.hovered
         }
         Rectangle {
-            visible: !root.started && (root.durationHint > 0 || root.peekDuration > 0) && !root.animated
+            visible: !root.started && (root.durationHint > 0 || root.peekDuration > 0) && !root.animated && !root.bare
             // VideoAttachment.tsx durationBadge: bottom-2 left-2, ply-3,
             // px-1.5 py-0.5, Num 11/14 in ink-1.
             anchors.left: parent.left
@@ -432,7 +464,7 @@ Item {
         }
         Text {
             anchors.centerIn: parent
-            visible: root.errored && root.poster.length === 0
+            visible: root.errored && root.poster.length === 0 && !root.bare
             textFormat: Text.PlainText
             text: qsTr("Media unavailable")
             color: "#b4b4ba"
@@ -454,7 +486,7 @@ Item {
         MouseArea {
             anchors.fill: parent
             cursorShape: root.errored ? Qt.ArrowCursor : Qt.PointingHandCursor
-            enabled: !root.errored
+            enabled: !root.errored && !root.bare
             onClicked: root.animated ? root.expandRequested(root.source, root.player ? root.player.position : 0) : root.toggle()
         }
         HoverHandler { id: hover }

@@ -31,6 +31,14 @@ Item {
     // The avatar display's crop (`{x, y, width, height}` in percent), or
     // null (Avatar.qml).
     property var crop: null
+    readonly property var urlCrop: {
+        const s = avatar
+        const at = s.indexOf("#crop=")
+        if (at < 0)
+            return null
+        const v = s.slice(at + 6).split(",").map(Number)
+        return v.length === 4 && v.every(n => isFinite(n)) ? { x: v[0], y: v[1], width: v[2], height: v[3] } : null
+    }
     property string initials
     property string pronouns
     property string presence
@@ -113,7 +121,7 @@ Item {
             Image {
                 anchors.fill: parent
                 visible: root.banner.length > 0 && status === Image.Ready && !bannerVideo.shown
-                    && !(bannerGif.item && bannerGif.item.status === AnimatedImage.Ready)
+                    && !(bannerGif.item && bannerGif.item.status === AnimatedPicture.Ready)
                     && !(bannerAnim.item && bannerAnim.item.status === AnimatedPicture.Ready)
                 source: bannerVideo.isVideo(root.banner) ? "" : root.banner
                 fillMode: Image.PreserveAspectCrop
@@ -121,21 +129,28 @@ Item {
                 clip: true
                 sourceSize.width: 680
             }
-            // An animated banner plays like the web's <img>: a GIF through
-            // AnimatedImage, an APNG or animated WebP through AnimatedPicture,
-            // over the still while the card is shown (never under reduced
-            // motion). The still above covers the load and anything else.
+            // An animated banner plays like the web's <img>, over the still
+            // while the card is shown (never under reduced motion); the
+            // still above covers the load and anything else. A GIF streams
+            // through AnimatedPicture: Qt 6.11's AnimatedImage played it from
+            // its network reply, which cannot rewind (it stopped after one
+            // pass), and fetched and decoded it afresh at every open. The
+            // file stays in the picture cache, so a reopened card shows its
+            // first frame at once.
             Loader {
                 id: bannerGif
                 anchors.fill: parent
                 active: root.animatedBanner === "gif"
-                sourceComponent: AnimatedImage {
+                sourceComponent: AnimatedPicture {
                     source: root.banner
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
+                    fillMode: AnimatedPicture.PreserveAspectCrop
+                    stream: true
                     clip: true
-                    visible: status === AnimatedImage.Ready
+                    // Opacity, not visible (AnimatedPicture loads only while
+                    // visible; see bannerAnim).
+                    opacity: status === AnimatedPicture.Ready ? 1 : 0
                     playing: root.animate && root.visible && !Theme.reducedMotion
+                    Accessible.ignored: true
                 }
             }
             Loader {
@@ -203,7 +218,10 @@ Item {
                         clip: true
                         Image {
                             id: picture
-                            readonly property var c: root.crop && root.crop.width > 0 && root.crop.height > 0 ? root.crop : null
+                            // The editor's crop, else the one on the URL
+                            // (`#crop=x,y,w,h`, Avatar.qml).
+                            readonly property var shown: root.crop || root.urlCrop
+                            readonly property var c: shown && shown.width > 0 && shown.height > 0 ? shown : null
                             x: c ? -c.x / c.width * face.width : 0
                             y: c ? -c.y / c.height * face.height : 0
                             width: c ? face.width * 100 / c.width : face.width

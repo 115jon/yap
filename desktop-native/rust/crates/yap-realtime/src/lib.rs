@@ -8,8 +8,8 @@ pub mod connection;
 pub mod policy;
 
 pub use connection::{
-    debug_drop_after, Config, Connection, Event, Reconnect, StopReason, TicketError, TicketFuture,
-    TicketSource, SUBPROTOCOL,
+    debug_drop_after, debug_offline, debug_offline_for, Config, Connection, Event, Reconnect,
+    StopReason, TicketError, TicketFuture, TicketSource, SUBPROTOCOL,
 };
 pub use policy::{close_action, Backoff, CloseAction, Policy};
 

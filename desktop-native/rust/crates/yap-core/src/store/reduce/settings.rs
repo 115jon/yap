@@ -8,11 +8,13 @@ use yap_protocol::rest::{SessionInfo, ShareItem, User};
 
 use super::Effects;
 use crate::api::ApiError;
+use crate::collectibles::{self as c, Kind};
 use crate::settings::{
     avatar_display, describe_api_error, editor_colors, is_app_theme, is_managed_nameplate,
     media_filter, name_style_patch, normalize_hex_color, sign_in_method_labels,
     validate_display_name, BIO_MAX, CUSTOM_STATUS_MAX, MEDIA_FILTERS, PRONOUNS_MAX,
 };
+use crate::store::shop::ShopRequest;
 use crate::store::state::{ProfileStep, State};
 use crate::store::time::parse_rfc3339;
 use crate::store::view::{
@@ -51,6 +53,29 @@ pub(crate) fn collectibles_only(display: Option<&Value>) -> Option<Value> {
     let collectibles = display.get("collectibles")?;
     let any = collectibles.as_object().is_some_and(|map| !map.is_empty());
     any.then(|| json!({ "version": 1, "collectibles": collectibles }))
+}
+
+/// A stored display as an object (the column may hold its JSON text).
+fn stored_display(display: Option<&Value>) -> Option<Value> {
+    match display? {
+        Value::String(text) => serde_json::from_str(text).ok(),
+        Value::Null => None,
+        other => Some(other.clone()),
+    }
+}
+
+/// `removeCollectibleFromAvatarDisplay(display, "nameplate")`: the display
+/// without its nameplate; `None` once nothing is left in it.
+fn without_nameplate(display: &Value) -> Option<Value> {
+    let mut display = stored_display(Some(display))?;
+    let object = display.as_object_mut()?;
+    if let Some(Value::Object(collectibles)) = object.get_mut("collectibles") {
+        collectibles.remove("nameplate");
+        if collectibles.is_empty() {
+            object.remove("collectibles");
+        }
+    }
+    (object.len() > 1).then_some(display)
 }
 
 /// A session's last activity as epoch ms: a number, a numeric string or an
@@ -260,10 +285,31 @@ impl State {
         if let Some(style) = &draft.name_style {
             patch.insert("displayNameStyle".into(), name_style_patch(style));
         }
-        let kept = collectibles_only(me.avatar_display.as_ref());
+        // A removed collectible nameplate leaves the draft's display at once
+        // (`handleRemoveNameplate` strips it and marks the display changed),
+        // so every display this save sends goes without it.
+        let worn_plate = c::selected_sku(me.avatar_display.as_ref(), Kind::Nameplate).is_some();
+        let strip_plate = draft.remove_nameplate && draft.nameplate.is_none() && worn_plate;
+        let strip = |display: Option<Value>| {
+            if strip_plate {
+                display.and_then(|d| without_nameplate(&d))
+            } else {
+                display
+            }
+        };
+        let kept = strip(collectibles_only(me.avatar_display.as_ref()));
         // The frame editor's crop over the collectibles (the upload's
         // `avatar_display`, or the patch's).
-        let cropped = avatar_display(me.avatar_display.as_ref(), draft.avatar_crop.flatten());
+        let cropped = strip(avatar_display(
+            me.avatar_display.as_ref(),
+            draft.avatar_crop.flatten(),
+        ));
+        // The display as the draft holds it (`currentAvatarDisplay`).
+        let current = if draft.avatar_crop.is_some() {
+            cropped.clone()
+        } else {
+            strip(stored_display(me.avatar_display.as_ref()))
+        };
         if draft.remove_avatar {
             patch.insert("removeAvatar".into(), Value::Bool(true));
             if let Some(kept) = &kept {
@@ -282,6 +328,12 @@ impl State {
             patch.insert(
                 "avatarDisplay".into(),
                 cropped.clone().unwrap_or(Value::Null),
+            );
+        } else if strip_plate && draft.avatar.is_none() {
+            // Only the nameplate came off: the changed display alone.
+            patch.insert(
+                "avatarDisplay".into(),
+                current.clone().unwrap_or(Value::Null),
             );
         }
         let status = clip(&draft.custom_status, CUSTOM_STATUS_MAX);
@@ -310,21 +362,30 @@ impl State {
         } else if draft.remove_banner && me.banner_url.is_some() {
             steps.push(ProfileStep::DeleteBanner);
         }
-        // A collectible nameplate is unequipped from the shop at once; only
-        // an uploaded file waits for Save.
+        // A nameplate, uploaded or collectible, comes off on Save
+        // (`handleSave`): a managed upload is deleted, and the slot is
+        // emptied unless the plate was only that upload.
         if let Some((path, content_type)) = &draft.nameplate {
             steps.push(ProfileStep::Upload {
                 asset: ProfileAsset::Nameplate,
                 path: path.clone(),
                 content_type: content_type.clone(),
             });
-        } else if draft.remove_nameplate
-            && me
-                .nameplate_url
-                .as_deref()
-                .is_some_and(is_managed_nameplate)
-        {
-            steps.push(ProfileStep::DeleteNameplate);
+        } else if draft.remove_nameplate {
+            let saved = me.nameplate_url.as_deref().filter(|url| !url.is_empty());
+            let managed = saved.is_some_and(is_managed_nameplate);
+            if managed {
+                steps.push(ProfileStep::DeleteNameplate);
+            }
+            if !managed || worn_plate {
+                steps.push(ProfileStep::ClearNameplate {
+                    body: json!({
+                        "kind": "nameplate",
+                        "skuId": Value::Null,
+                        "avatarDisplay": current.clone().unwrap_or(Value::Null),
+                    }),
+                });
+            }
         }
         steps.push(ProfileStep::Refresh);
         self.settings.profile_steps = steps.into();
@@ -344,6 +405,9 @@ impl State {
             ProfileStep::Patch { patch, .. } => self.http(fx, ApiRequest::UpdateProfile(patch)),
             ProfileStep::DeleteBanner => self.http(fx, ApiRequest::DeleteBanner),
             ProfileStep::DeleteNameplate => self.http(fx, ApiRequest::DeleteNameplate),
+            ProfileStep::ClearNameplate { body } => {
+                self.http(fx, ApiRequest::Shop(ShopRequest::Apply(body)))
+            }
             ProfileStep::Refresh => self.http(fx, ApiRequest::Me),
             ProfileStep::Upload {
                 asset,

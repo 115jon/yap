@@ -20,12 +20,16 @@ T.Popup {
     property bool rule: false
     property bool busy: false
     property bool c1: false
+    // A C1 content or form dialog (DialogContent placement "top"): its top
+    // at max(48px, 12vh) of the window, not centred.
+    property bool placeTop: false
     default property alias content: fields.data
     property alias footer: footerRow.data
 
     parent: T.Overlay.overlay
     x: Math.round((parent.width - width) / 2)
-    y: c1 ? Math.max(Theme.chrome + 16, Math.round((parent.height - height) / 2 + Theme.chrome / 2))
+    y: c1 && placeTop ? Math.max(48, Math.round(parent.height * 0.12))
+        : c1 ? Math.max(Theme.chrome + 16, Math.round((parent.height - height) / 2 + Theme.chrome / 2))
         : Math.max(Theme.chrome + 32, Math.round(parent.height * 0.14))
     width: Math.min(480, parent.width - 32)
     // Templates popups have no implicit size of their own.

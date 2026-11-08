@@ -1218,6 +1218,48 @@ fn a_saved_message_outside_the_newest_page_should_load_its_window_unhighlighted(
 }
 
 #[test]
+fn the_newest_page_should_not_paint_while_a_saved_window_loads() {
+    let mut client = Client::online(three(), 0);
+    client.command(Command::SetAtBottom(false));
+    client.command(Command::ScrollAt("m1".into()));
+    client.command(Command::SelectChannel(B.into()));
+    client.command(Command::SelectChannel(A.into()));
+    let fx = client.respond(&messages_of(A), page(vec![msg(A, "m3", ALICE, 2)], true));
+    assert!(
+        client.seen.rows.is_empty(),
+        "{:?}",
+        Client::ids(&client.seen.rows)
+    );
+    assert!(fx
+        .iter()
+        .any(|e| matches!(e, Effect::View(ViewUpdate::PageLoading(true)))));
+    // A live message meanwhile belongs to a page not on screen yet.
+    client.dispatch("MESSAGE_CREATE", msg(A, "m4", ALICE, 3));
+    assert!(client.seen.rows.is_empty());
+    let window = json!({ "messages": three(), "hasMoreBefore": false, "hasMoreAfter": true });
+    client.respond(&around(A, "m1"), window);
+    assert_eq!(Client::ids(&client.seen.rows), ["m1", "m2", "m3"]);
+}
+
+#[test]
+fn a_failed_saved_window_should_load_the_newest_page_again() {
+    let mut client = Client::online(three(), 0);
+    client.command(Command::SetAtBottom(false));
+    client.command(Command::ScrollAt("m1".into()));
+    client.command(Command::SelectChannel(B.into()));
+    client.command(Command::SelectChannel(A.into()));
+    client.respond(&messages_of(A), page(vec![msg(A, "m3", ALICE, 2)], true));
+    client.fail(&around(A, "m1"), 404);
+    let fx = client.respond(&messages_of(A), page(vec![msg(A, "m3", ALICE, 2)], true));
+    assert_eq!(Client::ids(&client.seen.rows), ["m3"]);
+    assert!(
+        restores(&fx).iter().all(|id| id.is_empty()),
+        "{:?}",
+        restores(&fx)
+    );
+}
+
+#[test]
 fn scrolling_a_jumps_window_should_keep_the_jumped_position() {
     let mut client = Client::online(three(), 0);
     client.command(jump(A, "m9"));

@@ -1,4 +1,5 @@
 import QtQuick
+import Yap.Media
 import com.yap.native
 
 // A voice channel's status after its people (ChannelSidebar.tsx), indented
@@ -85,15 +86,18 @@ Column {
         // YAP_TEST_HOVER_PLAY: as if pointed at (tests only).
         readonly property bool pointed: plateHover.hovered || ShellState.testHoverPlay
 
-        AnimatedImage {
+        // A status GIF loops (AnimatedPicture `stream`: Qt 6.11's
+        // AnimatedImage plays a network file from its reply, which cannot
+        // rewind, so it stopped after one pass). Its Error is Image.Error's.
+        AnimatedPicture {
             id: still
             anchors.fill: parent
             anchors.margins: 1
             visible: !root.mediaIsVideo
-            fillMode: Image.PreserveAspectFit
+            fillMode: AnimatedPicture.PreserveAspectFit
+            stream: true
             source: root.mediaIsVideo ? "" : root.mediaUrl
-            asynchronous: true
-            playing: visible && !Theme.reducedMotion && Qt.application.state === Qt.ApplicationActive
+            playing: visible && !Theme.reducedMotion
         }
         ClipPreview {
             anchors.fill: parent

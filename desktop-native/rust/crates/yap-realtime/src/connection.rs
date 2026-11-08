@@ -117,6 +117,39 @@ pub fn debug_drop_after() -> Option<Duration> {
     })
 }
 
+/// `YAP_DEBUG_OFFLINE_SECS=<m>`, read once, with `YAP_DEBUG_DROP_AFTER_SECS`:
+/// the debug drop also takes this process offline for `m` s. Its sockets
+/// fail to connect and [`debug_offline`] tells the HTTP client to fail
+/// too, as a lost network would (the offline and reconnect states).
+pub fn debug_offline_for() -> Option<Duration> {
+    static FOR: OnceLock<Option<Duration>> = OnceLock::new();
+    *FOR.get_or_init(|| {
+        std::env::var("YAP_DEBUG_OFFLINE_SECS")
+            .ok()
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .filter(|secs| secs.is_finite() && *secs > 0.0)
+            .map(Duration::from_secs_f64)
+    })
+}
+
+static OFFLINE_UNTIL: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Whether the debug offline window ([`debug_offline_for`]) is running.
+pub fn debug_offline() -> bool {
+    OFFLINE_UNTIL
+        .lock()
+        .ok()
+        .and_then(|until| *until)
+        .is_some_and(|until| std::time::Instant::now() < until)
+}
+
+fn start_debug_offline() {
+    if let (Some(span), Ok(mut until)) = (debug_offline_for(), OFFLINE_UNTIL.lock()) {
+        eprintln!("[realtime] debug: offline for {:.0} s", span.as_secs_f64());
+        *until = Some(std::time::Instant::now() + span);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     /// The socket opened (Hello comes next).
@@ -298,6 +331,9 @@ impl<T: TicketSource> Actor<T> {
 
     /// One ticket, one socket.
     async fn attempt(&mut self) -> Ended {
+        if debug_offline() {
+            return Ended::Failed("offline (debug)".into());
+        }
         let ticket = self.tickets.ticket();
         let ticket = match self.idle(ticket).await {
             None => return Ended::Shutdown,
@@ -411,6 +447,7 @@ impl<T: TicketSource> Actor<T> {
                 () = sleep_until_some(drop_at) => {
                     // No close frame: the server sees a lost connection.
                     eprintln!("[realtime] debug: dropping {}", url_path(&self.config.url));
+                    start_debug_offline();
                     return closed("debug drop".into());
                 }
                 _ = tick(&mut link.heartbeat) => {

@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
+import Yap.Media
 import com.yap.native
 
 // A voice channel's status (VoiceChannelTextStatusModal.tsx and
@@ -285,13 +286,15 @@ PlateDialog {
                         radius: Theme.radius
                         color: Theme.tint1
                         clip: true
-                        AnimatedImage {
+                        // Streamed so a GIF loops (AnimatedImage played it
+                        // from its reply, which cannot rewind).
+                        AnimatedPicture {
                             visible: !recent.modelData.video
                             anchors.fill: parent
                             source: recent.modelData.video ? "" : recent.modelData.url
-                            fillMode: Image.PreserveAspectFit
-                            asynchronous: true
-                            playing: dialog.visible && !Theme.reducedMotion && status === AnimatedImage.Ready
+                            fillMode: AnimatedPicture.PreserveAspectFit
+                            stream: true
+                            playing: dialog.visible && !Theme.reducedMotion
                         }
                         // Clips rest on their first frame and play only
                         // while pointed at or focused (RecentMediaTile).

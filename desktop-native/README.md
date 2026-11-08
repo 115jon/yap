@@ -581,6 +581,17 @@ node tools/build-icons.mjs
 - `cpp/windowchrome.cpp` removes the caption (`WM_NCCALCSIZE`) and hit-tests
   the QML title bar (`WM_NCHITTEST`, `HTMAXBUTTON` for snap layouts).
 - `YAP_TEXT=qt` switches text from native glyph rendering to distance fields.
+- Text hinting follows the primary screen's scale at launch: vertical
+  hinting below 125%, none from 125% up (Chromium's DirectWrite modes).
+  `YAP_TEXT_HINTING=none|vertical|full|default` forces one. Light text on
+  dark needs the Qt patch `patches/qt/6.11.3/0005` (DirectWrite's enhanced
+  contrast); `QT_DWRITE_ENHANCED_CONTRAST=<k>` overrides its 1.0 there.
+- `cpp/wheelscroll.cpp` scrolls every Flickable as Chromium does: 100 px a
+  notch (Windows' 3 lines), eased over 150 ms, touchpads 1:1.
+  `YAP_QT_WHEEL=1` puts back Qt's own wheel handling.
+- `YAP_DEBUG_DROP_AFTER_SECS=<n>` drops the gateway `n` s after it is
+  ready; with `YAP_DEBUG_OFFLINE_SECS=<m>` the process then stays offline
+  for `m` s (its sockets and requests fail), for the offline states.
 
 ## Layout
 

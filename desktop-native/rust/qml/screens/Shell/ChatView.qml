@@ -72,7 +72,7 @@ Rectangle {
         Qt.callLater(() => {
             root.reflowPending = false
             // Unless a jump, a reland or the user moved it meanwhile.
-            if (root.landed && root.followEnd && !Chat.hasNewer && !view.moving)
+            if (root.landed && root.followEnd && !Chat.hasNewer && !view.moving && !WheelScroll.active(view))
                 view.positionViewAtEnd()
             root.updateNearEnd()
         })
@@ -423,12 +423,16 @@ Rectangle {
     property real headerSpan: 0
     // The voice channel's chat beside its view (ChatHeader.tsx `docked`).
     property bool docked: false
+    // That chat as the sheet below 1024 (Shell.qml voiceSheet): its title
+    // opens the details as a sheet over it.
+    property bool inSheet: false
 
     ChatHeader {
         id: header
         z: 3
         width: parent.width + root.headerSpan
         docked: root.docked
+        inSheet: root.inSheet
         onCloseRequested: Nav.showVoiceChat(false)
     }
 
@@ -609,7 +613,9 @@ Rectangle {
         onContentYChanged: {
             // Only the user's own scrolling (wheel, drag, flick, the bar)
             // decides whether the end is followed.
-            if (view.moving || view.ScrollBar.vertical.pressed)
+            // (The wheel's eased scroll is WheelScroll's, not Flickable's
+            // own movement: `moving` stays false for it.)
+            if (view.moving || WheelScroll.active(view) || view.ScrollBar.vertical.pressed)
                 root.followEnd = root.isNearEnd()
             root.updateNearEnd()
             if (root.landed && !root.nearEnd)

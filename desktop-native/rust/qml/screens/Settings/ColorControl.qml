@@ -1,10 +1,12 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
+import Yap.Chrome
 import com.yap.native
 
 // A profile colour (SettingsAccountTab.tsx ColorControl): the 8 preset
-// swatches, a "+" chip that opens the custom colour (a hex field), and
+// swatches, a "+" chip that opens the custom colour (the system picker
+// behind an eyedropper key, and a hex field), and
 // "Auto" while it follows the app theme, or a ghost Reset back to Auto.
 // `value` is `#RRGGBB` or empty for Auto. Without `allowAuto` (the name
 // style's colours) there is no Auto: Reset shows while the value is not
@@ -95,13 +97,62 @@ Flow {
                     }
                     Row {
                         spacing: 8
-                        Rectangle {
+                        // The system picker (the web's <input type=color>
+                        // behind an eyedropper key, which Chromium opens as
+                        // Windows' colour dialog), on the colour in use.
+                        T.AbstractButton {
+                            id: eyedropper
+                            readonly property string resolved: root.value.length > 0 ? root.value
+                                : Settings.normalizeColor(root.fallback)
                             width: 32
                             height: 32
-                            radius: Theme.radius
-                            color: Settings.normalizeColor(hex.text).length > 0 ? Settings.normalizeColor(hex.text) : Theme.tint1
-                            border.width: 1
-                            border.color: Theme.lineStrong
+                            focusPolicy: Qt.StrongFocus
+                            scale: down ? Theme.scalePress : 1
+                            Accessible.role: Accessible.Button
+                            Accessible.name: qsTr("Pick a custom %1").arg(root.name)
+                            background: Item {
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 4
+                                    color: eyedropper.resolved.length > 0 ? eyedropper.resolved : "#000000"
+                                    border.width: 1
+                                    border.color: Theme.lineStrong
+                                }
+                                Rectangle {
+                                    anchors.fill: parent
+                                    anchors.margins: -4
+                                    visible: eyedropper.visualFocus
+                                    radius: 6
+                                    color: "transparent"
+                                    border.width: 2
+                                    border.color: Theme.accentInk
+                                }
+                                // rounded-xs bg-ply-3/80 p-0.5 under the glyph.
+                                Rectangle {
+                                    anchors.centerIn: parent
+                                    width: Theme.iconSm + 4
+                                    height: width
+                                    radius: 2
+                                    color: Qt.rgba(Theme.ply3.r, Theme.ply3.g, Theme.ply3.b, 0.8)
+                                    Icon {
+                                        anchors.centerIn: parent
+                                        name: "eyedropper"
+                                        size: Theme.iconSm
+                                        color: Theme.ink2
+                                    }
+                                }
+                            }
+                            HoverHandler { cursorShape: Qt.PointingHandCursor }
+                            onClicked: {
+                                const from = eyedropper.resolved
+                                const picked = Files.pickColor(from.length > 0 ? from : "#000000")
+                                const next = Settings.normalizeColor(picked)
+                                if (next.length === 0)
+                                    return
+                                hex.text = next.replace(/^#/, "")
+                                if (next !== root.value)
+                                    root.picked(next)
+                            }
                         }
                         KitField {
                             id: hex

@@ -544,18 +544,28 @@ impl State {
         restore: bool,
         result: Result<ThreadResponse, ApiError>,
     ) {
-        // A failed jump changes nothing, as on the web.
-        let Ok(ThreadResponse::Window {
-            messages,
-            has_more_before,
-            has_more_after,
-        }) = result
-        else {
-            return;
-        };
-        if self.active_channel.as_deref() != Some(channel_id) || messages.is_empty() {
+        if self.active_channel.as_deref() != Some(channel_id) {
             return;
         }
+        // A failed jump changes nothing, as on the web. A failed restore
+        // held the newest page back (`on_page`): forget the position and
+        // load that page again.
+        let window = match result {
+            Ok(ThreadResponse::Window {
+                messages,
+                has_more_before,
+                has_more_after,
+            }) if !messages.is_empty() => Some((messages, has_more_before, has_more_after)),
+            _ => None,
+        };
+        let Some((messages, has_more_before, has_more_after)) = window else {
+            if restore && self.messages.as_ref().is_some_and(|log| log.is_empty()) {
+                self.scroll_positions.remove(channel_id);
+                self.load_page(fx, channel_id);
+            }
+            return;
+        };
+        fx.view(ViewUpdate::PageLoading(false));
         let mut log = MessageLog::new(channel_id);
         log.has_more_before = has_more_before;
         log.has_more_after = has_more_after;
@@ -980,7 +990,11 @@ impl State {
                     id: thread.id.clone(),
                     author: author.to_owned(),
                     initials: view::initials(author),
-                    avatar: view::absolute_url(&self.api_base, thread.author.avatar_url.as_deref()),
+                    avatar: view::avatar_url(
+                        &self.api_base,
+                        thread.author.avatar_url.as_deref(),
+                        thread.author.avatar_display.as_ref(),
+                    ),
                     content: thread.content.clone(),
                     replies: thread.reply_count,
                     last_reply: parse_rfc3339(&thread.last_reply_at)

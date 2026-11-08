@@ -191,7 +191,8 @@ Rectangle {
             anchors.centerIn: parent
             height: 14
             width: Math.round(14 * 375.1 / 102.5)
-            sourceSize: Qt.size(width * 2, height * 2)
+            sourceSize: Qt.size(Math.ceil(width * Screen.devicePixelRatio), Math.ceil(height * Screen.devicePixelRatio))
+            smooth: true
             source: "qrc:/svg/klipy-text-light.svg"
             opacity: 0.9
             Accessible.name: "KLIPY"

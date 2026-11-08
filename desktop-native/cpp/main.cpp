@@ -11,6 +11,7 @@
 #include <QtCore/QTimer>
 #include <QtGui/QFont>
 #include <QtGui/QFontDatabase>
+#include <QtGui/QScreen>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QIcon>
 #include <QtGui/QSurfaceFormat>
@@ -57,6 +58,7 @@
 #include "videohub.h"
 #include "webembed.h"
 #include "webmplayer.h"
+#include "wheelscroll.h"
 #include "windowchrome.h"
 
 #ifdef Q_OS_WIN
@@ -267,11 +269,15 @@ private:
       if (!layer->isVisible() || layer->opacity() <= 0
           || !layer->contains(layer->mapFromScene(scenePos)))
         continue;
-      if (layer->inherits("QQuickPopupItem") && optedOut(layer))
-        continue;
       if (!top || layer->z() >= top->z())
         top = layer;
     }
+    // An opted-out popup on top (a drawer) takes the press the usual way.
+    // Skipping it made its own modal dimmer the owner, and every passive
+    // grab inside the drawer was cancelled: a TapHandler in a sheet (the
+    // voice chat's title) never tapped.
+    if (top && top->inherits("QQuickPopupItem") && optedOut(top))
+      return nullptr;
     return top;
   }
 
@@ -661,9 +667,27 @@ int main(int argc, char* argv[])
   // draws text. Qt's default picks GDI's full hinting while every monitor
   // is at 100% and DirectWrite once one is scaled, so glyph widths (and
   // with them every wrapped line) changed with the monitor setup.
+  // Chromium (Skia's DirectWrite path) grid-fits vertically only while
+  // glyphs are small (ClearType natural) and stops hinting once they are
+  // large (natural symmetric, antialiased both ways). Our 11-18 px text
+  // is small at 100% and large from 125% up, so the hinting follows the
+  // primary screen's scale: at 150% vertical hinting left ~25% fewer edge
+  // pixels than Chromium (stair-stepped curves), no hinting matched it
+  // within 4%; at 100% no hinting blurred every baseline. Set once: Qt
+  // Quick text does not re-resolve a changed application font.
+  // YAP_TEXT_HINTING=none|vertical|full|default forces one.
   {
     QFont font = QGuiApplication::font();
-    font.setHintingPreference(QFont::PreferVerticalHinting);
+    const QString hinting = qEnvironmentVariable("YAP_TEXT_HINTING");
+    const QScreen* screen = QGuiApplication::primaryScreen();
+    const bool scaled = screen && screen->devicePixelRatio() >= 1.25;
+    font.setHintingPreference(
+      hinting == QLatin1String("none")       ? QFont::PreferNoHinting
+      : hinting == QLatin1String("vertical") ? QFont::PreferVerticalHinting
+      : hinting == QLatin1String("full")     ? QFont::PreferFullHinting
+      : hinting == QLatin1String("default")  ? QFont::PreferDefaultHinting
+      : scaled                               ? QFont::PreferNoHinting
+                                             : QFont::PreferVerticalHinting);
     QGuiApplication::setFont(font);
   }
   registerFonts();
@@ -707,6 +731,13 @@ int main(int argc, char* argv[])
   // Items QML draws over the chat list that a web player (a native child
   // window) must stay out from under: the unread banner.
   qmlRegisterSingletonInstance("Yap.Media", 1, 0, "PlayerCover", PlayerCover::instance());
+  // The mouse wheel as Chromium scrolls (cpp/wheelscroll.h): 100 px a
+  // notch eased over 150 ms, for every Flickable. YAP_QT_WHEEL=1 keeps Qt's
+  // own wheel flick (the singleton is still there and reads inactive).
+  auto* wheelScroll = new WheelScroll(&app);
+  if (qEnvironmentVariableIntValue("YAP_QT_WHEEL") == 0)
+    app.installEventFilter(wheelScroll);
+  qmlRegisterSingletonInstance("Yap.Media", 1, 0, "WheelScroll", wheelScroll);
 
   QQmlApplicationEngine engine;
   // Not owned by the engine; it outlives it here.

@@ -19,8 +19,8 @@ use crate::store::admin::{AdminOp, AdminThen};
 use crate::store::state::{ServerChannels, State};
 use crate::store::time::{local_date, local_date_time, parse_rfc3339};
 use crate::store::view::{
-    absolute_url, initials, AdminChannelView, AdminServerView, AdminView, AuditRow, BanRow,
-    InviteRow, Load, MemberOption, NamedOption, OverrideRow, RoleRow, ViewUpdate,
+    absolute_url, avatar_url, initials, AdminChannelView, AdminServerView, AdminView, AuditRow,
+    BanRow, InviteRow, Load, MemberOption, NamedOption, OverrideRow, RoleRow, ViewUpdate,
 };
 use crate::store::{
     AdminCommand, AdminList, AdminRequest, AdminResponse, ApiRequest, ApiResponse, CacheWrite,
@@ -1599,7 +1599,11 @@ impl State {
             .map(|m| MemberOption {
                 id: m.user.id.clone(),
                 name: m.user.label().to_owned(),
-                avatar: absolute_url(base, m.user.avatar_url.as_deref()),
+                avatar: avatar_url(
+                    base,
+                    m.user.avatar_url.as_deref(),
+                    m.user.avatar_display.as_ref(),
+                ),
                 initials: initials(m.user.label()),
                 role_ids: m.roles.iter().map(|r| r.id.clone()).collect(),
             })

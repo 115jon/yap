@@ -97,6 +97,9 @@ PlateDialog {
 
     // ResponsiveDialog at md: the C1 plate (28/32 title, the close key).
     c1: true
+    // AvatarFrameEditor.tsx asks for placement "top" (it sat ~24 px low
+    // centred).
+    placeTop: true
     title: qsTr("Frame your avatar")
     description: qsTr("Drag to reposition and zoom to crop. The original image stays unchanged.")
     onAboutToShow: reset()

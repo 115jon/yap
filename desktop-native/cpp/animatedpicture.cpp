@@ -48,6 +48,8 @@ constexpr qsizetype kRawBudget = 4 * 1024 * 1024;
 constexpr qint64 kMaxDownload = 24 * 1024 * 1024;
 // One animation's decoded frames (yap-anim stops at the same size).
 constexpr qsizetype kMaxAnimation = 48 * 1024 * 1024;
+// A file this large shows its first frame before the whole decodes.
+constexpr qsizetype kPreviewBytes = 64 * 1024;
 
 // A GIF (server icons): Qt's own decoder, every frame, fitted into `box`
 // like yap-anim's (never scaled up), so it plays on the shared grid.
@@ -129,6 +131,63 @@ AnimationPtr scanGif(const QByteArray& bytes)
   return data;
 }
 
+// Anything else Qt reads (a JPEG poster, a BMP): one still frame, fitted
+// into `box` like the others (never scaled up), so the item can stand in
+// for an AnimatedImage whatever the picture turns out to be.
+AnimationPtr decodeStill(const QByteArray& bytes, QSize box)
+{
+  QBuffer buffer;
+  buffer.setData(bytes);
+  buffer.open(QIODevice::ReadOnly);
+  QImageReader reader(&buffer);
+  reader.setAutoTransform(true);
+  const QSize full = reader.size();
+  if (!full.isEmpty()) {
+    const qreal sx = box.width() > 0 ? qreal(box.width()) / full.width() : 1.0;
+    const qreal sy = box.height() > 0 ? qreal(box.height()) / full.height() : 1.0;
+    const qreal scale = qMin<qreal>(1.0, qMin(sx, sy));
+    if (scale < 1.0)
+      reader.setScaledSize(QSize(qMax(1, qRound(full.width() * scale)),
+                                 qMax(1, qRound(full.height() * scale))));
+  }
+  QImage frame = reader.read();
+  if (frame.isNull())
+    return nullptr;
+  frame = frame.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+  auto data = std::make_shared<AnimationData>();
+  data->bytes = frame.sizeInBytes();
+  data->frames.append(std::move(frame));
+  data->delays.append(100);
+  data->loops = 1;
+  return data;
+}
+
+// What Qt's reader shows of a PNG is its default image (IDAT). In an APNG
+// that is the first frame only when an fcTL chunk comes before the first
+// IDAT; otherwise it is a fallback outside the animation (some profile
+// effects carry a solid placeholder there), never to be shown.
+bool pngDefaultIsFirstFrame(const QByteArray& bytes)
+{
+  static const char kSignature[] = "\x89PNG\r\n\x1a\n";
+  if (!bytes.startsWith(QByteArray::fromRawData(kSignature, 8)))
+    return true;
+  bool animated = false;
+  qsizetype at = 8;
+  while (at + 8 <= bytes.size()) {
+    const auto* p = reinterpret_cast<const uchar*>(bytes.constData() + at);
+    const quint32 length = (quint32(p[0]) << 24) | (quint32(p[1]) << 16) | (quint32(p[2]) << 8) | p[3];
+    const QByteArray type = bytes.mid(at + 4, 4);
+    if (type == "acTL")
+      animated = true;
+    else if (type == "fcTL")
+      return true;
+    else if (type == "IDAT")
+      return !animated;
+    at += 12 + qsizetype(length);
+  }
+  return !animated;
+}
+
 AnimationPtr decodeBytes(const QByteArray& bytes, QSize box)
 {
   if (bytes.startsWith("GIF8"))
@@ -137,7 +196,7 @@ AnimationPtr decodeBytes(const QByteArray& bytes, QSize box)
                                size_t(bytes.size()), uint32_t(qMax(0, box.width())),
                                uint32_t(qMax(0, box.height())));
   if (!anim)
-    return nullptr;
+    return decodeStill(bytes, box);
   YapAnimInfo info{};
   yap_anim_info(anim, &info);
   auto data = std::make_shared<AnimationData>();
@@ -238,27 +297,53 @@ void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
     const QByteArray bytes = reply->readAll();
     QPointer<AnimationCache> self(this);
     QThreadPool::globalInstance()->start([self, bytes, box, key, cover, raw] {
-      AnimationPtr data = raw && bytes.startsWith("GIF8") ? scanGif(bytes)
-                          : decodeBytes(bytes, cover ? coverBox(bytes, box) : box);
-      QMetaObject::invokeMethod(
-        AnimationCache::instance(),
-        [self, data, key] {
-          if (!self)
-            return;
-          self->m_pending.remove(key);
-          if (data)
-            self->insert(key, data);
-          else
-            self->m_failed.insert(key);
-          emit self->loaded(key);
-        },
-        Qt::QueuedConnection);
+      // `last`: the whole animation (or the failure); otherwise a first
+      // frame to show while the rest decode.
+      auto post = [self, key](AnimationPtr data, bool last) {
+        QMetaObject::invokeMethod(
+          AnimationCache::instance(),
+          [self, data, key, last] {
+            if (!self || !self->m_pending.contains(key))
+              return;
+            if (last)
+              self->m_pending.remove(key);
+            if (data)
+              self->insert(key, data);
+            else if (last)
+              self->m_failed.insert(key);
+            if (data || last)
+              emit self->loaded(key);
+          },
+          Qt::QueuedConnection);
+      };
+      const bool gif = bytes.startsWith("GIF8");
+      if (raw && gif) {
+        post(scanGif(bytes), true);
+        return;
+      }
+      const QSize target = cover ? coverBox(bytes, box) : box;
+      // A large APNG or WebP (a banner, a profile effect, a decoration)
+      // takes a while to decode whole: its first frame (Qt's reader, one
+      // frame) shows meanwhile, as a browser paints it before the rest.
+      // An APNG whose default image is not a frame has no preview.
+      if (!gif && bytes.size() > kPreviewBytes && pngDefaultIsFirstFrame(bytes))
+        if (AnimationPtr first = decodeStill(bytes, target))
+          post(first, false);
+      post(decodeBytes(bytes, target), true);
     });
   });
 }
 
 void AnimationCache::insert(const QString& key, AnimationPtr data)
 {
+  // The whole animation replaces its first-frame preview.
+  if (auto old = m_entries.find(key); old != m_entries.end()) {
+    m_bytes -= old.value()->bytes;
+    if (!old.value()->raw.isEmpty())
+      m_rawBytes -= old.value()->bytes;
+    m_entries.erase(old);
+    m_order.removeOne(key);
+  }
   const QSize size = data->frames.isEmpty() ? data->rawSize : data->frames.first().size();
   std::fprintf(stderr, "[anim] %s: %lld frames at %dx%d, %.1f MB (cache %.1f MB)\n",
                qPrintable(QUrl(key.section(QLatin1Char('|'), 0, 0)).fileName()),
@@ -504,12 +589,21 @@ void AnimatedPicture::load()
     onLoaded(key);
     return;
   }
-  setStatus(Loading);
+  // The same picture at a new size keeps showing (and stays Ready) until
+  // the new decode lands: a layout that waits for Ready (the viewer's box)
+  // would otherwise shrink back and ask for the old size again.
+  if (!sameSourceShown())
+    setStatus(Loading);
   QQmlEngine* engine = qmlEngine(this);
   AnimationCache::instance()->request(engine ? engine->networkAccessManager() : nullptr,
                                       m_source, box, key, cover, m_stream);
-  if (AnimationCache::instance()->failed(key))
+  if (AnimationCache::instance()->failed(key) && !sameSourceShown())
     setStatus(Error);
+}
+
+bool AnimatedPicture::sameSourceShown() const
+{
+  return m_anim && m_animSource == m_source;
 }
 
 void AnimatedPicture::onLoaded(const QString& key)
@@ -518,12 +612,13 @@ void AnimatedPicture::onLoaded(const QString& key)
     return;
   AnimationPtr data = AnimationCache::instance()->find(key);
   if (!data) {
-    if (AnimationCache::instance()->failed(key))
+    if (AnimationCache::instance()->failed(key) && !sameSourceShown())
       setStatus(Error);
     return;
   }
   const bool fresh = data != m_anim;
   m_anim = data;
+  m_animSource = m_source;
   if (fresh) {
     m_frame = 0;
     m_played = 0;

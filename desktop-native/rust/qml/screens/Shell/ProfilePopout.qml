@@ -66,6 +66,19 @@ T.Popup {
     closePolicy: T.Popup.CloseOnEscape | T.Popup.CloseOnPressOutside
     onHeightChanged: if (visible) place()
     onClosed: Profile.close(shownId)
+    // The last banner shown (see the card's `banner`).
+    property string lastBanner: ""
+    Connections {
+        target: Profile
+        function onBannerChanged() {
+            if (Profile.userId.length > 0)
+                popup.lastBanner = Profile.banner
+        }
+        function onUserIdChanged() {
+            if (Profile.userId.length > 0)
+                popup.lastBanner = Profile.banner
+        }
+    }
 
     contentItem: ProfileCard {
         floating: true
@@ -77,7 +90,11 @@ T.Popup {
         pronouns: Profile.pronouns
         presence: Profile.presence
         customStatus: Profile.customStatus
-        banner: Profile.banner
+        // The card is kept (Shell.qml): while no profile is shown (closed,
+        // or the next one is loading) it keeps the last banner, so
+        // reopening that person's card plays it at once instead of
+        // decoding it again. Another person's banner replaces it.
+        banner: Profile.userId.length === 0 ? popup.lastBanner : Profile.banner
         bannerColor: Profile.bannerColor
         deco: Profile.deco
         effect: Profile.effect

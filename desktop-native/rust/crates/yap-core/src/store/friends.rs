@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use yap_protocol::rest::{FriendRequestSent, Relationship};
 
 use super::state::Presence;
-use super::view::{absolute_url, initials};
+use super::view::{avatar_url, initials};
 use super::{Method, RequestId};
 use crate::api::ApiError;
 use crate::settings::describe_api_error;
@@ -336,7 +336,11 @@ fn row(rel: &Relationship, presence: &Presence, api_base: &str) -> FriendRow {
         initials: initials(&name),
         name,
         username: user.username.clone(),
-        avatar: absolute_url(api_base, user.avatar_url.as_deref()),
+        avatar: avatar_url(
+            api_base,
+            user.avatar_url.as_deref(),
+            user.avatar_display.as_ref(),
+        ),
         presence: presence_of(presence, &user.id).to_owned(),
         status_line,
         kind,

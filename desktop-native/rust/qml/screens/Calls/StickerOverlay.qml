@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtMultimedia
+import Yap.Media
 import com.yap.native
 
 // Floating sticker reactions over the call (StickerReactionsOverlay.tsx):
@@ -101,13 +102,15 @@ Item {
             opacity: 0
             rotation: mode === "single" || mode === "bounce" ? turn : 0
 
-            AnimatedImage {
+            // Streamed so a GIF sticker loops for its whole flight
+            // (AnimatedImage played it from its reply, which cannot rewind).
+            AnimatedPicture {
                 anchors.fill: parent
                 visible: !p.video
                 source: p.video ? "" : p.url
-                fillMode: Image.PreserveAspectFit
-                asynchronous: true
-                playing: status === AnimatedImage.Ready
+                fillMode: AnimatedPicture.PreserveAspectFit
+                stream: true
+                playing: true
             }
             Loader {
                 anchors.fill: parent

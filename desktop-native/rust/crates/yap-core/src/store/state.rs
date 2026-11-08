@@ -425,6 +425,12 @@ pub enum ProfileStep {
     },
     DeleteBanner,
     DeleteNameplate,
+    /// `PATCH /api/collectibles/apply` with the nameplate slot emptied
+    /// (SettingsAccountTab.tsx `handleSave`: a removed collectible
+    /// nameplate, or a plate that is not a managed upload).
+    ClearNameplate {
+        body: serde_json::Value,
+    },
     /// Read the profile back.
     Refresh,
 }
@@ -444,7 +450,7 @@ impl ProfileStep {
             } => "upload your nameplate",
             Self::Upload { .. } => "upload your banner",
             Self::DeleteBanner => "remove your banner",
-            Self::DeleteNameplate => "remove your nameplate",
+            Self::DeleteNameplate | Self::ClearNameplate { .. } => "remove your nameplate",
             Self::Refresh => "refresh your profile",
         }
     }
@@ -522,6 +528,8 @@ pub(super) struct Pending {
     pub open_dm: Option<(RequestId, String)>,
     /// (request, user id) of the popout's profile
     pub profile: Option<(RequestId, String)>,
+    /// request → user id of a hover's profile prefetch
+    pub profile_prefetch: HashMap<RequestId, String>,
     /// request → the reaction change to undo if it fails
     pub reactions: HashMap<RequestId, ReactionChange>,
     /// request → local id of the upload
@@ -833,6 +841,9 @@ pub struct State {
     pub(super) presence: Presence,
     /// The user whose popout is open, and their full profile once fetched.
     pub(super) profile: Option<(String, Option<User>)>,
+    /// Full profiles fetched this session (a popout, or a hover's
+    /// prefetch), so a card opens with its banner before the refetch.
+    pub(super) profile_cache: HashMap<String, User>,
     /// The servers shared with the popout's user, from their profile.
     /// The full profile failed to load: whose, and why (UserProfileModal's
     /// `profileError`).
@@ -954,6 +965,7 @@ impl State {
             dms: Vec::new(),
             presence: Presence::default(),
             profile: None,
+            profile_cache: HashMap::new(),
             profile_mutuals: None,
             profile_error: None,
             divider: None,

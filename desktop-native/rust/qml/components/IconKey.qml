@@ -29,6 +29,8 @@ T.Button {
         : tone === "onMedia" ? (hovered || down ? "#ffffff" : "#e6e6e6")
         : tone === "off" ? Theme.mutedState
         : tone === "live" ? Theme.liveInk
+        // IconButton `destructive`: ink-3, danger ink hovered or focused.
+        : tone === "destructive" ? (hovered || down || visualFocus ? Theme.dangerInk : Theme.ink3)
         : tone === "rest" || tone === "toggled" || hovered || down ? Theme.ink1
         : tone === "muted" ? Theme.ink3 : Theme.ink2
 

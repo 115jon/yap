@@ -139,6 +139,30 @@ QtObject {
             profileRequested(userId, anchor, side ?? "right")
     }
 
+    // The pointer rests (120 ms) on a name or avatar that opens a popout:
+    // the shell loads that profile (Profile.prefetch), so the card opens
+    // with its banner. An empty id (the pointer left) cancels.
+    signal profilePrefetchRequested(string userId)
+    property string prefetchId: ""
+    property Timer prefetchTimer: Timer {
+        interval: 120
+        onTriggered: if (state.prefetchId.length > 0) state.profilePrefetchRequested(state.prefetchId)
+    }
+    function prefetchProfile(userId, avatar) {
+        prefetchId = userId
+        if (userId.length > 0) {
+            prefetchTimer.restart()
+            // The card's 72 px face decodes at 144 (ProfileCard.qml): the
+            // shell warms that decode so the card's picture is cached.
+            if (avatar !== undefined && avatar.length > 0)
+                warmAvatar = avatar
+        } else {
+            prefetchTimer.stop()
+        }
+    }
+    // The picture the shell decodes ahead of a popout (Shell.qml).
+    property string warmAvatar: ""
+
     // `at` is a point in `anchor`; `channelId` is the voice channel they
     // are in (for "Move to"), empty when unknown.
     signal peerMenuRequested(string userId, string name, Item anchor, point at, string channelId)

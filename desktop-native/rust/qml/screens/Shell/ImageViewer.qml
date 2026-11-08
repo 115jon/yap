@@ -76,6 +76,9 @@ Popup {
     readonly property bool canJump: current !== null && !!current.messageId && current.messageId.length > 0
     // The picture's own size once it has loaded (the toolbar's pixels).
     readonly property bool webp: current !== null && (current.mime === "image/webp" || /\.webp($|[?#])/i.test(current.url))
+    // A GIF by its type or name (KLIPY and Tenor URLs end in .gif).
+    readonly property bool gif: current !== null && (current.mime === "image/gif" || current.gif === true
+        || /\.gif($|[?#])/i.test(current.url))
     readonly property Image shown: animated ? anim : picture
     readonly property bool loaded: !isVideo && !hidden && shown.status === Image.Ready
     readonly property size natural: loaded ? Qt.size(shown.implicitWidth, shown.implicitHeight) : Qt.size(0, 0)
@@ -419,11 +422,28 @@ Popup {
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
                         source: root.animated && !root.hidden ? root.current.url : ""
-                        // A WebP is drawn by webpPlayer below; this one only
-                        // gives its size and status.
-                        playing: root.animated && !root.webp && root.opened && Qt.application.state === Qt.ApplicationActive
-                        opacity: status === Image.Ready && !(root.webp && webpPlayer.status === AnimatedPicture.Ready) ? 1 : 0
+                        // A WebP is drawn by webpPlayer and a GIF by gifPlayer
+                        // below; for those this one only gives the size and
+                        // status (it plays a network file from its reply,
+                        // which cannot rewind: a GIF stopped after one pass).
+                        playing: root.animated && !root.webp && !root.gif && root.opened && Qt.application.state === Qt.ApplicationActive
+                        opacity: status === Image.Ready && !(root.webp && webpPlayer.status === AnimatedPicture.Ready)
+                            && !(root.gif && gifPlayer.status === AnimatedPicture.Ready) ? 1 : 0
                         Behavior on opacity { NumberAnimation { duration: Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+                    }
+                    // A GIF loops from its own buffer (AnimatedPicture
+                    // `stream`), as the web's <img> does.
+                    AnimatedPicture {
+                        id: gifPlayer
+                        anchors.fill: parent
+                        visible: root.animated && root.gif && !root.hidden
+                        fillMode: AnimatedPicture.PreserveAspectFit
+                        stream: true
+                        // Once the box has its size (anim's), so the frames
+                        // are not first fitted into the 48 px placeholder.
+                        source: visible && anim.status === Image.Ready ? root.current.url : ""
+                        playing: root.opened && Qt.application.state === Qt.ApplicationActive
+                        opacity: status === AnimatedPicture.Ready ? 1 : 0
                     }
                     // An animated WebP plays through AnimatedPicture
                     // (yap-anim): Qt's WebP reader stops after one pass even
@@ -451,7 +471,8 @@ Popup {
                             anchors.centerIn: parent
                             height: 14
                             width: Math.round(14 * 375.1 / 102.5)
-                            sourceSize: Qt.size(width * 2, height * 2)
+                            sourceSize: Qt.size(Math.ceil(width * Screen.devicePixelRatio), Math.ceil(height * Screen.devicePixelRatio))
+                            smooth: true
                             source: "qrc:/svg/klipy-text-light.svg"
                             opacity: 0.9
                             Accessible.name: "KLIPY"

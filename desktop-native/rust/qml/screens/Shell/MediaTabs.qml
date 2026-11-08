@@ -85,24 +85,80 @@ Item {
             onClicked: root.openMedia(index)
             HoverHandler { cursorShape: Qt.PointingHandCursor }
             contentItem: Item {}
+            // MediaGridImage: a picture, a video's poster, or (no poster) the
+            // video's first frame as `<video preload="metadata">` shows it.
+            // One that fails to load is the broken glyph on the tile
+            // (`onError`), never a play key on a blank tile.
+            readonly property bool peeks: modelData.video && (modelData.poster ?? "").length === 0
+            property bool broken: false
+            readonly property bool loaded: tile.animated
+                || (tile.peeks ? (peekLoader.item !== null && peekLoader.item.pictureShown) : still.status === Image.Ready)
+            onModelDataChanged: broken = false
             background: Item {
                 Rectangle {
                     id: face
                     anchors.fill: parent
                     anchors.margins: 3
-                    radius: 12
+                    // rounded-xl is 2 px in the theme (styles.css), on
+                    // ply-2 with a border-line/20 edge (primary/40 hovered).
+                    radius: Theme.radius
                     color: Theme.ply2
-                    border.width: 1
-                    border.color: tile.hovered ? Theme.ink2 : Theme.line
                     clip: true
                     Image {
+                        id: still
                         anchors.fill: parent
-                        anchors.margins: 1
-                        visible: !tile.animated
-                        source: tile.animated ? "" : tile.modelData.video ? tile.modelData.poster : tile.modelData.url
+                        visible: !tile.animated && !tile.peeks && !tile.broken
+                        source: tile.animated || tile.peeks ? "" : tile.modelData.video ? tile.modelData.poster : tile.modelData.url
                         sourceSize: Qt.size(240, 240)
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
+                        onStatusChanged: if (status === Image.Error) tile.broken = true
+                    }
+                    Loader {
+                        id: peekLoader
+                        anchors.fill: parent
+                        active: tile.peeks && !tile.broken
+                        sourceComponent: EmbedVideo {
+                            source: tile.modelData.url
+                            name: tile.modelData.name
+                            bare: true
+                            framed: false
+                            preview: true
+                            clipTo: grid
+                            onFailed: tile.broken = true
+                        }
+                    }
+                    // Loading: tint-1 with the spinner until the picture is in.
+                    Rectangle {
+                        anchors.fill: parent
+                        visible: !tile.loaded && !tile.broken
+                        color: Theme.tint1
+                        Icon {
+                            id: tileSpinner
+                            anchors.centerIn: parent
+                            name: "loader"
+                            size: Theme.iconSm
+                            color: Theme.ink3
+                            RotationAnimator on rotation {
+                                from: 0
+                                to: 360
+                                duration: 900
+                                loops: Animation.Infinite
+                                running: tileSpinner.visible && !Theme.reducedMotion
+                            }
+                        }
+                    }
+                    // Failed: the broken glyph (lg, ink-3 at 30 %) on ply-2.
+                    Rectangle {
+                        anchors.fill: parent
+                        visible: tile.broken
+                        color: Theme.ply2
+                        Icon {
+                            anchors.centerIn: parent
+                            name: "imageBroken"
+                            size: Theme.iconLg
+                            color: Qt.rgba(Theme.ink3.r, Theme.ink3.g, Theme.ink3.b, 0.3)
+                        }
                     }
                     // A GIF plays in its tile, as the web's <img> does, while
                     // on screen and the app is in front; an animated WebP
@@ -124,32 +180,41 @@ Item {
                     }
                     Component {
                         id: gifTile
-                        AnimatedImage {
+                        // Streamed, not AnimatedImage: Qt 6.11's AnimatedImage
+                        // plays a network GIF from its reply, which cannot
+                        // rewind, so it stopped after one pass. AnimatedPicture
+                        // pauses off screen and behind other apps by itself.
+                        AnimatedPicture {
                             source: tile.modelData.url
-                            fillMode: Image.PreserveAspectCrop
-                            asynchronous: true
-                            cache: false
-                            playing: status === AnimatedImage.Ready && tileSeen.inView
-                                && Qt.application.state === Qt.ApplicationActive
-                            ViewportWatch {
-                                id: tileSeen
-                                anchors.fill: parent
-                            }
+                            fillMode: AnimatedPicture.PreserveAspectCrop
+                            stream: true
+                            playing: true
                         }
                     }
-                    Icon {
-                        anchors.centerIn: parent
-                        visible: tile.modelData.video
-                        name: "play"
-                        variant: "active"
-                        size: Theme.iconXl
-                        color: "#ffffff"
-                    }
+                    // A video's play mark: a 40 px black/60 disc with a
+                    // white/10 edge carrying the 20 px filled play in white.
                     Rectangle {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        height: 32
+                        anchors.centerIn: parent
+                        visible: tile.modelData.video && !tile.broken
+                        width: 40
+                        height: 40
+                        radius: 20
+                        color: Qt.rgba(0, 0, 0, 0.6)
+                        border.width: 1
+                        border.color: Qt.rgba(1, 1, 1, 0.1)
+                        Icon {
+                            anchors.centerIn: parent
+                            anchors.horizontalCenterOffset: 1
+                            name: "play"
+                            variant: "active"
+                            size: Theme.iconLg
+                            color: "#ffffff"
+                        }
+                    }
+                    // Hovered: black/60 to clear over the whole tile, the
+                    // name in 11/600 white at its foot (p-2).
+                    Rectangle {
+                        anchors.fill: parent
                         visible: tile.hovered
                         gradient: Gradient {
                             GradientStop { position: 0; color: "transparent" }
@@ -159,12 +224,14 @@ Item {
                             x: 8
                             width: parent.width - 16
                             anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 6
+                            anchors.bottomMargin: 8
                             elide: Text.ElideRight
                             textFormat: Text.PlainText
                             text: tile.modelData.name
                             color: "#ffffff"
-                            font: Theme.type.captionStrong
+                            font.family: "Yap Geist SemiBold"
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
                         }
                     }
                     Avatar {
@@ -178,11 +245,22 @@ Item {
                         border.color: Qt.rgba(0, 0, 0, 0.3)
                     }
                 }
+                // The tile's edge over its picture: line/20, primary/40
+                // while hovered.
+                Rectangle {
+                    anchors.fill: face
+                    color: "transparent"
+                    radius: face.radius
+                    border.width: 1
+                    border.color: tile.hovered
+                        ? Qt.rgba(Theme.primaryFill.r, Theme.primaryFill.g, Theme.primaryFill.b, 0.4)
+                        : Qt.rgba(Theme.line.r, Theme.line.g, Theme.line.b, Theme.line.a * 0.2)
+                }
                 Rectangle {
                     anchors.fill: face
                     visible: tile.visualFocus
                     color: "transparent"
-                    radius: 12
+                    radius: face.radius
                     border.width: 2
                     border.color: Theme.focus
                 }
@@ -229,7 +307,8 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     anchors.margins: 3
-                    radius: 12
+                    // MediaSkeletonGrid: rounded-lg (2 px), tint-1.
+                    radius: Theme.radius
                     color: Theme.tint1
                 }
             }

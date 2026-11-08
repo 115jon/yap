@@ -21,6 +21,10 @@ pub use yap_core::{Command, Sink};
 struct NativeRealtime;
 
 impl Realtime for NativeRealtime {
+    fn offline(&self) -> bool {
+        yap_realtime::debug_offline()
+    }
+
     fn spawn_gateway(&self, api: Api, user_id: String, events: GatewayEvents) -> GatewayHandle {
         // Signed in: if the last process died in a call, the room hears it
         // left now (its first sign-in only).

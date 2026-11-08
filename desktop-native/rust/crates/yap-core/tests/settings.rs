@@ -848,6 +848,42 @@ fn removing_an_uploaded_nameplate_should_delete_it() {
 }
 
 #[test]
+fn removing_a_collectible_nameplate_should_wait_for_save_and_empty_the_slot() {
+    let mut me = me_json();
+    me["avatar_display"] = json!({
+        "version": 1,
+        "collectibles": {
+            "nameplate": { "skuId": "77", "name": "Koi", "staticUrl": "https://cdn.discordapp.com/p.png" },
+            "avatarDecoration": { "skuId": "5", "name": "Duck", "asset": "a_1", "imageUrl": "https://cdn.discordapp.com/d.png" },
+        },
+    });
+    me["nameplate_url"] = json!("https://cdn.discordapp.com/p.png");
+    let mut client = Client::online_as(me);
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        remove_nameplate: true,
+        ..draft()
+    })));
+    // The patch carries the display without the plate (the draft's).
+    let (id, body) = patch(&fx);
+    let without = json!({
+        "version": 1,
+        "collectibles": {
+            "avatarDecoration": { "skuId": "5", "name": "Duck", "asset": "a_1", "imageUrl": "https://cdn.discordapp.com/d.png" },
+        },
+    });
+    assert_eq!(body["avatarDisplay"], without);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    assert!(requests(&fx)
+        .iter()
+        .all(|(_, r)| *r != ApiRequest::DeleteNameplate));
+    let (_, request) = find(&fx, |r| matches!(r, ApiRequest::Shop(_)));
+    assert_eq!(
+        request.body(),
+        json!({ "kind": "nameplate", "skuId": null, "avatarDisplay": without })
+    );
+}
+
+#[test]
 fn removing_without_an_uploaded_nameplate_should_delete_nothing() {
     let mut client = Client::online();
     let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {

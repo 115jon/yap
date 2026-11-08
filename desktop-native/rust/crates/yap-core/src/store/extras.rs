@@ -1170,7 +1170,11 @@ pub(super) fn person(user_id: &str, user: Option<&User>, api_base: &str) -> Reac
         user_id: user_id.to_owned(),
         name: name.to_owned(),
         username: user.map(|u| u.username.clone()).unwrap_or_default(),
-        avatar: super::view::absolute_url(api_base, user.and_then(|u| u.avatar_url.as_deref())),
+        avatar: super::view::avatar_url(
+            api_base,
+            user.and_then(|u| u.avatar_url.as_deref()),
+            user.and_then(|u| u.avatar_display.as_ref()),
+        ),
         initials: super::view::initials(name),
     }
 }

@@ -675,14 +675,16 @@ Popup {
         Keys.onEnterPressed: activated()
         Keys.onSpacePressed: activated()
         Keys.onPressed: event => event.accepted = root.moveFocus(cell, event.key)
-        AnimatedImage {
+        // AnimatedPicture, not AnimatedImage: Qt 6.11's AnimatedImage plays
+        // a network GIF from its QNetworkReply, which cannot rewind, so the
+        // GIF stopped after one pass. A streamed GIF loops from its buffer.
+        AnimatedPicture {
             anchors.fill: parent
             visible: (cell.media?.image ?? "").length > 0
-            asynchronous: true
-            cache: false
-            fillMode: Image.PreserveAspectCrop
+            stream: true
+            fillMode: AnimatedPicture.PreserveAspectCrop
             source: root.visible && root.mode === "categories" ? (cell.media?.image ?? "") : ""
-            playing: root.visible && status === AnimatedImage.Ready
+            playing: root.visible
         }
         Loader {
             anchors.fill: parent
@@ -1184,13 +1186,13 @@ Popup {
                             Keys.onEnterPressed: activate()
                             Keys.onSpacePressed: activate()
                             Keys.onPressed: event => event.accepted = root.moveFocus(category, event.key)
-                            AnimatedImage {
+                            // Streamed so it loops (see ShortcutCell).
+                            AnimatedPicture {
                                 anchors.fill: parent
-                                asynchronous: true
-                                cache: false
-                                fillMode: Image.PreserveAspectCrop
+                                stream: true
+                                fillMode: AnimatedPicture.PreserveAspectCrop
                                 source: category.near && root.visible ? category.modelData.image : ""
-                                playing: category.near && root.visible && status === AnimatedImage.Ready
+                                playing: category.near && root.visible
                             }
                             MediaScrim {}
                             MediaHover { on: categoryHover.hovered }
@@ -1356,17 +1358,17 @@ Popup {
                             Keys.onEnterPressed: root.select(tile)
                             Keys.onSpacePressed: root.select(tile)
                             Keys.onPressed: event => event.accepted = root.moveFocus(tile, event.key)
-                            AnimatedImage {
+                            // Streamed (one frame held, never every frame: the
+                            // picker is never destroyed) so it loops; see
+                            // ShortcutCell.
+                            AnimatedPicture {
                                 anchors.fill: parent
                                 visible: tile.preview.length > 0
-                                asynchronous: true
-                                // Decoded as they show: the picker is never destroyed,
-                                // so cached frames of every result would stay.
-                                cache: false
-                                fillMode: Image.PreserveAspectCrop
+                                stream: true
+                                fillMode: AnimatedPicture.PreserveAspectCrop
                                 source: tile.near && root.visible ? tile.preview : ""
                                 // A clip's poster holds still under its video.
-                                playing: tile.near && root.visible && tile.video.length === 0 && status === AnimatedImage.Ready
+                                playing: tile.near && root.visible && tile.video.length === 0
                             }
                             Loader {
                                 id: clipLoader
@@ -1674,9 +1676,13 @@ Popup {
                                 id: klipyMask
                                 anchors.fill: parent
                                 source: "qrc:/svg/klipy-text-light.svg"
-                                sourceSize: Qt.size(width * 2, height * 2)
+                                // Rasterized at the screen's pixels, not a
+                                // fixed 2x scaled down.
+                                sourceSize: Qt.size(Math.ceil(width * Screen.devicePixelRatio), Math.ceil(height * Screen.devicePixelRatio))
+                                smooth: true
                                 visible: false
                                 layer.enabled: true
+                                layer.smooth: true
                             }
                             Rectangle {
                                 id: klipyInk
@@ -1690,6 +1696,15 @@ Popup {
                                 source: klipyInk
                                 maskEnabled: true
                                 maskSource: klipyMask
+                                // The wordmark's alpha as coverage: MultiEffect
+                                // takes smoothstep(min (1 + s) - s, min (1 + s)),
+                                // here 0..0.5, so the ground stays clear, edges
+                                // ramp and the 12 px strokes (alpha ~0.7 at
+                                // most) reach full ink-2. The default hard
+                                // threshold at 0 turned every edge pixel
+                                // solid (the jagged mark).
+                                maskThresholdMin: 0.3334
+                                maskSpreadAtMin: 0.5
                             }
                             Accessible.role: Accessible.Graphic
                             Accessible.name: "KLIPY"

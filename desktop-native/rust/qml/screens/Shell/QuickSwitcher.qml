@@ -24,7 +24,9 @@ Popup {
     property Item returnFocus: null
 
     function show() {
-        returnFocus = root.Window.activeFocusItem
+        // A Popup is no Item, so `Window` cannot attach to it ("Window.window"
+        // warning); read the focus item through the popup's parent Item.
+        returnFocus = root.parent ? root.parent.Window.activeFocusItem : null
         CommandMenu.snapshot()
         field.text = ""
         search = ""

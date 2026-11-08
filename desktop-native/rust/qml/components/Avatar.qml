@@ -25,6 +25,16 @@ Rectangle {
     // The avatar display's crop (avatar-display.ts, `{x, y, width,
     // height}` in percent of the picture), or null: the picture covers.
     property var crop: null
+    // Else the crop the core put on the picture's URL (`#crop=x,y,w,h`).
+    readonly property var urlCrop: {
+        const s = String(source)
+        const at = s.indexOf("#crop=")
+        if (at < 0)
+            return null
+        const v = s.slice(at + 6).split(",").map(Number)
+        return v.length === 4 && v.every(n => isFinite(n)) ? { x: v[0], y: v[1], width: v[2], height: v[3] } : null
+    }
+    readonly property var shownCrop: crop || urlCrop
 
     readonly property bool decorated: deco.length > 0
     readonly property bool roundFace: decorated || round
@@ -56,7 +66,7 @@ Rectangle {
         clip: true
         Image {
             id: picture
-            readonly property var c: root.crop && root.crop.width > 0 && root.crop.height > 0 ? root.crop : null
+            readonly property var c: root.shownCrop && root.shownCrop.width > 0 && root.shownCrop.height > 0 ? root.shownCrop : null
             x: c ? -c.x / c.width * face.width : 0
             y: c ? -c.y / c.height * face.height : 0
             width: c ? face.width * 100 / c.width : face.width

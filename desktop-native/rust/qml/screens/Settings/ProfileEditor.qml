@@ -55,7 +55,8 @@ T.Popup {
         || cropChanged || nameStyle !== Session.meNameStyle
         || nameplatePath.length > 0 || removeNameplate
     readonly property string error: localError.length > 0 ? localError : Settings.profileError
-    // What the profile wears (collectibles apply at once, not on Save).
+    // What the profile wears (collectibles apply at once, not on Save; a
+    // removed nameplate waits for Save, removePlate).
     readonly property var worn: Session.meDisplay.length > 0 ? (JSON.parse(Session.meDisplay).collectibles ?? {}) : ({})
     readonly property string shownAvatar: removeAvatar ? "" : avatarPath.length > 0 ? "file:///" + avatarPath
         : avatarUrlShown.length > 0 ? avatarUrlShown : Settings.avatar
@@ -162,16 +163,14 @@ T.Popup {
         removeNameplate = false
         nameplatePath = path
     }
-    // handleRemoveNameplate: a picked file is dropped, an uploaded one is
-    // deleted on Save; a collectible comes off at once, as the other slots.
+    // handleRemoveNameplate: a picked file is dropped, and the saved plate,
+    // uploaded or collectible, comes off on Save (the draft; the core
+    // deletes the upload and empties the slot).
     function removePlate() {
         localError = ""
-        if (nameplatePath.length > 0)
-            nameplatePath = ""
-        else if (worn.nameplate === undefined && Settings.customNameplate)
+        nameplatePath = ""
+        if (Session.mePlate.length > 0 || worn.nameplate !== undefined)
             removeNameplate = true
-        else
-            Shop.remove("nameplate")
     }
 
     parent: T.Overlay.overlay
@@ -396,6 +395,9 @@ T.Popup {
                         anchors.margins: 1
                         plate: editor.shownPlate
                         playing: editor.visible
+                        // A custom plate fades in from the left
+                        // (UserNameplateLayer.tsx nameplateIdentity mask).
+                        identityFade: true
                         ground: Theme.ply2
                     }
                     Avatar {

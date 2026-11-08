@@ -158,7 +158,11 @@ impl State {
         let dm = self
             .active_dm()
             .map(|dm| {
-                let avatar = view::absolute_url(&self.api_base, dm.recipient.avatar_url.as_deref());
+                let avatar = view::avatar_url(
+                    &self.api_base,
+                    dm.recipient.avatar_url.as_deref(),
+                    dm.recipient.avatar_display.as_ref(),
+                );
                 let deco = if avatar.is_empty() {
                     String::new()
                 } else {
@@ -246,7 +250,7 @@ impl State {
                         .map(str::trim)
                         .filter(|n| !n.is_empty())
                         .unwrap_or(&f.username);
-                    let avatar = view::absolute_url(&self.api_base, f.avatar_url.as_deref());
+                    let avatar = view::avatar_url(&self.api_base, f.avatar_url.as_deref(), f.avatar_display.as_ref());
                     let deco = if avatar.is_empty() {
                         String::new()
                     } else {
@@ -685,7 +689,12 @@ impl State {
     pub(super) fn show_profile(&mut self, fx: &mut Effects, user_id: Option<String>) {
         self.pending.profile = None;
         self.profile_error = None;
-        self.profile = user_id.filter(|id| !id.is_empty()).map(|id| (id, None));
+        // A profile fetched before (an earlier open, or a hover's prefetch)
+        // shows at once; the refetch below brings it up to date.
+        self.profile = user_id.filter(|id| !id.is_empty()).map(|id| {
+            let known = self.profile_cache.get(&id).cloned();
+            (id, known)
+        });
         let fetch = self
             .profile
             .as_ref()
@@ -708,6 +717,7 @@ impl State {
     ) {
         match result {
             Ok(ApiResponse::Profile(user, mutuals, friends)) => {
+                self.cache_profile(&user);
                 if let Some((_, full)) = self.profile.as_mut().filter(|(id, _)| id == user_id) {
                     *full = Some(*user);
                     self.profile_mutuals = Some((user_id.to_owned(), mutuals, friends));
@@ -730,6 +740,64 @@ impl State {
                 self.emit_profile(fx);
             }
             Ok(_) => {}
+        }
+    }
+
+    /// Profiles kept for the session: a few screens of people, not every
+    /// author ever hovered.
+    fn cache_profile(&mut self, user: &yap_protocol::rest::User) {
+        const KEPT: usize = 200;
+        if self.profile_cache.len() >= KEPT && !self.profile_cache.contains_key(&user.id) {
+            self.profile_cache.clear();
+        }
+        self.profile_cache.insert(user.id.clone(), user.clone());
+    }
+
+    /// The pointer rests on a name or avatar that opens a popout: its
+    /// profile is fetched once, so the card opens with its banner.
+    pub(super) fn prefetch_profile(&mut self, fx: &mut Effects, user_id: String) {
+        let me = self.me().is_some_and(|me| me.id == user_id);
+        let asked = self
+            .pending
+            .profile_prefetch
+            .values()
+            .any(|id| *id == user_id)
+            || self
+                .pending
+                .profile
+                .as_ref()
+                .is_some_and(|(_, id)| *id == user_id);
+        if user_id.is_empty() || me || asked || self.profile_cache.contains_key(&user_id) {
+            return;
+        }
+        let request = ApiRequest::Profile {
+            user_id: user_id.clone(),
+        };
+        if let Some(id) = self.http(fx, request) {
+            self.pending.profile_prefetch.insert(id, user_id);
+        }
+    }
+
+    pub(super) fn on_profile_prefetch(
+        &mut self,
+        fx: &mut Effects,
+        user_id: &str,
+        result: Result<ApiResponse, ApiError>,
+    ) {
+        // A failed prefetch is silent: the popout asks again when it opens.
+        let Ok(ApiResponse::Profile(user, mutuals, friends)) = result else {
+            return;
+        };
+        self.cache_profile(&user);
+        // The popout opened while this was on its way.
+        if let Some((_, full)) = self
+            .profile
+            .as_mut()
+            .filter(|(id, full)| id == user_id && full.is_none())
+        {
+            *full = Some(*user);
+            self.profile_mutuals = Some((user_id.to_owned(), mutuals, friends));
+            self.emit_profile(fx);
         }
     }
 }

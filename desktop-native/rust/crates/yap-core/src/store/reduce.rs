@@ -1432,6 +1432,7 @@ impl State {
                 custom_status,
             } => self.set_presence(fx, &status, custom_status),
             Command::ShowProfile(user_id) => self.show_profile(fx, user_id),
+            Command::PrefetchProfile(user_id) => self.prefetch_profile(fx, user_id),
             Command::HideProfile(user_id) => {
                 if self.profile_user() == Some(user_id.as_str()) {
                     self.show_profile(fx, None);
@@ -1910,6 +1911,7 @@ impl State {
         self.names.clear();
         self.clear_typing(fx);
         self.scroll_positions.clear();
+        self.profile_cache.clear();
         self.jump_anchors.clear();
         self.read_states.clear();
         self.last_message_at.clear();
@@ -2066,6 +2068,9 @@ impl State {
         }
         if let Some((_, user_id)) = pending.profile.take_if(|(slot, _)| *slot == id) {
             return self.on_profile(fx, &user_id, result);
+        }
+        if let Some(user_id) = pending.profile_prefetch.remove(&id) {
+            return self.on_profile_prefetch(fx, &user_id, result);
         }
         if let Some(read) = pending.reads.remove(&id) {
             return self.on_marked(fx, read, result);
@@ -2628,6 +2633,29 @@ impl State {
                 .find(|m| !is_pending(m))
                 .map(|m| m.created_at.clone());
         }
+        if let Some(id) = around {
+            // The saved window replaces this page: the list stays empty
+            // (the skeleton) until it lands, so the newest page never
+            // paints first (the web shows nothing until then). An empty
+            // log that does not reach the end takes no live rows and is
+            // not cached; a failed window loads this page again.
+            let mut held = MessageLog::new(channel_id);
+            held.has_more_after = true;
+            self.messages = Some(held);
+            fx.view(ViewUpdate::PageLoading(true));
+            if placed {
+                self.emit_unread(fx);
+            }
+            if !std::mem::replace(&mut self.first_page_shown, true) {
+                fx.push(Effect::StartupMark("messages shown"));
+            }
+            self.finish_boot(fx);
+            self.emit_history(fx);
+            self.sync_badges(fx);
+            // A position a jump left highlights again (`wasJump`).
+            let anchored = self.jump_anchors.contains(channel_id);
+            return self.load_around(fx, channel_id, &id, !anchored);
+        }
         self.messages = Some(log);
         let rows = self.message_rows();
         if shown {
@@ -2656,11 +2684,6 @@ impl State {
         self.sync_badges(fx);
         self.on_seen(fx, false);
         self.after_page_jump(fx, channel_id);
-        if let Some(id) = around {
-            // A position a jump left highlights again (`wasJump`).
-            let anchored = self.jump_anchors.contains(channel_id);
-            self.load_around(fx, channel_id, &id, !anchored);
-        }
     }
 
     /// Asks for the page before the oldest loaded message.

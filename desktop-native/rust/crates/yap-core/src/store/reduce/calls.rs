@@ -155,7 +155,11 @@ impl State {
             id: peer.id.clone(),
             name: peer.label().to_owned(),
             username: peer.username.clone(),
-            avatar: view::absolute_url(&self.api_base, peer.avatar_url.as_deref()),
+            avatar: view::avatar_url(
+                &self.api_base,
+                peer.avatar_url.as_deref(),
+                peer.avatar_display.as_ref(),
+            ),
         };
         let room = dm_call_slug(&me, &peer.id);
         let ring = self.calls.ring.get_or_insert_with(|| Ring {

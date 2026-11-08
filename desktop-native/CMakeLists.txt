@@ -65,6 +65,7 @@ qt_add_executable(YapNative WIN32
   cpp/videohub.cpp cpp/videohub.h
   cpp/webembed.cpp cpp/webembed.h
   cpp/webmplayer.cpp cpp/webmplayer.h
+  cpp/wheelscroll.cpp cpp/wheelscroll.h
   cpp/windowchrome.cpp cpp/windowchrome.h)
 # Whole-program optimization for our C++ too (/GL, link-time code
 # generation): the static Qt is built with -ltcg, so the link already runs

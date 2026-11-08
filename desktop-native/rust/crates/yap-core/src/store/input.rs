@@ -65,6 +65,9 @@ pub enum Command {
     },
     /// Opens a user's popout; `None` closes it.
     ShowProfile(Option<String>),
+    /// The pointer rests on what opens a user's popout: fetch their profile
+    /// now, so the card opens with its banner and effect at once.
+    PrefetchProfile(String),
     /// Closes the popout if it still shows this user (a closing card must
     /// not empty the one that opened after it).
     HideProfile(String),
