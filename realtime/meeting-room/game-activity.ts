@@ -103,6 +103,17 @@ export interface GameActivityHost {
    * game; the writer is idempotent across sessions reporting the same one.
    */
   onGameEnded?(userId: string, activity: GameActivity, endedAt: number): void;
+  /**
+   * A session's activity changed (set, replaced or cleared; null is none)
+   * while its owner shared activity. The Deadlock fetcher moves its cadence
+   * from this.
+   */
+  onActivityChanged?(
+    userId: string,
+    previous: GameActivity | null,
+    next: GameActivity | null,
+    at: number,
+  ): void;
 }
 
 const AUDIENCE_QUERIES = [
@@ -236,6 +247,7 @@ export class GameActivityRegistry {
     }
     this.bySession.set(sessionId, { userId, activity: next, updatedAt: now });
     this.persist(sessionId);
+    this.reportChanged(userId, previous?.activity ?? null, next, now);
     return true;
   }
 
@@ -244,6 +256,7 @@ export class GameActivityRegistry {
     const entry = this.bySession.get(sessionId);
     if (!entry) return false;
     this.reportEnded(entry, now);
+    this.reportChanged(entry.userId, entry.activity, null, now);
     this.bySession.delete(sessionId);
     this.host.waitUntil(
       this.host.storage
@@ -263,6 +276,21 @@ export class GameActivityRegistry {
       this.host.onGameEnded(entry.userId, entry.activity, endedAt);
     } catch (error) {
       this.host.log.error("Game end report failed", error);
+    }
+  }
+
+  private reportChanged(
+    userId: string,
+    previous: GameActivity | null,
+    next: GameActivity | null,
+    at: number,
+  ) {
+    if (!this.host.onActivityChanged) return;
+    if (this.shareByUser.get(userId) !== true) return;
+    try {
+      this.host.onActivityChanged(userId, previous, next, at);
+    } catch (error) {
+      this.host.log.error("Activity change report failed", error);
     }
   }
 

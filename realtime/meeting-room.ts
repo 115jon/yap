@@ -88,6 +88,10 @@ import {
   recordGameSession,
 } from "../src/services/profile-activity.service";
 import {
+  noteDeadlockActivity,
+  resolveLiveState,
+} from "../src/services/deadlock/live";
+import {
   acceptSocket,
   admitSocket,
   isOpcodeAllowed,
@@ -590,6 +594,16 @@ export class MeetingRoom extends DurableObject<Env> {
             startedAt: activity.started_at,
             endedAt,
           }),
+        );
+      },
+      // Deadlock: fetch career stats faster while the game runs and right
+      // after a match (src/services/deadlock/live.ts).
+      onActivityChanged: (userId, previous, next, at) => {
+        this.ctx.waitUntil(
+          noteDeadlockActivity(this.env, userId, previous, next, at).catch(
+            (error) =>
+              presenceLog.warn("Deadlock cadence update failed", error),
+          ),
         );
       },
     });
@@ -4652,11 +4666,15 @@ export class MeetingRoom extends DurableObject<Env> {
     const userId = session?.user_id;
     if (!session || !userId) return;
 
-    const changed = await this.gameActivity.set(
-      session.id,
+    // A structured live state is checked against the linked Steam account
+    // and its party mapped to Yap users; account ids go no further.
+    const activity = await resolveLiveState(
+      this.env.DB,
       userId,
       d.game_activity,
     );
+    if (this.getSession(ws) !== session) return;
+    const changed = await this.gameActivity.set(session.id, userId, activity);
     // Closed while share_activity was read: the close dropped its activity.
     if (this.getSession(ws) !== session) {
       this.gameActivity.removeSession(session.id);
