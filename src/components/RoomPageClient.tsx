@@ -101,7 +101,12 @@ export default function RoomPageClient() {
         slug={slug}
         guestName={guestState.name}
         onLeaveToHome={() => navigate({ to: "/" })}
-        onSignIn={() => navigate({ to: "/sign-in" })}
+        onSignIn={() =>
+          navigate({
+            to: "/sign-in",
+            search: { redirect_url: `/room/${slug}` },
+          })
+        }
       />
     </Suspense>
   );
