@@ -1,13 +1,14 @@
 import QtQuick
 import QtQuick.Effects
+import QtQuick.Templates as T
 import Yap.Media
 import com.yap.native
 
 // The profile card (ProfileCard.tsx), at two sizes: `popover` has a 96 px
 // banner (the banner picture, else the banner colour, else accent-tint), a
 // 72 px avatar half over it with a 4 px ring of the card colour, the name
-// at 18/600 and a 16 px inset; `modal` (the full profile) has a 120 px
-// banner, an 88 px avatar, the name at 22/600 and a 20 px inset. Then
+// at 18/600 and a 16 px inset; `modal` (the full profile, 640 wide) has a
+// 176 px banner, a 112 px avatar, the name at 28/600 and a 24 px inset. Then
 // "@handle · pronouns" at 13 ink-2, the badges (UserBadges: 24 px, 32 on
 // the full profile, wrapping, never cut off) and the status line (LED,
 // label, custom status). `statusLine` replaces that line (the account
@@ -23,6 +24,12 @@ import com.yap.native
 // front art over it. With a frame the card is inset inside this box by the
 // frame's footprint (side, top and bottom as fractions of the box width),
 // so the overhang stays inside the box and no scroller clips it.
+//
+// `viewable` (the popout): the avatar is a key that opens the full profile
+// (`viewRequested`; Tab reaches it, Enter or Space presses it) and a click
+// on the banner does too. Hovering either, or focusing the avatar from the
+// keyboard, lifts the avatar 4 % and shows a "View profile" chip in the
+// banner's top-right corner, 8 px in.
 Item {
     id: root
 
@@ -64,9 +71,13 @@ Item {
     // popover | modal
     property string size: "popover"
     readonly property bool modalSize: size === "modal"
-    readonly property int bannerHeight: modalSize ? 120 : 96
-    readonly property int avatarSize: modalSize ? 88 : 72
-    readonly property int pad: modalSize ? 20 : 16
+    readonly property int bannerHeight: modalSize ? 176 : 96
+    readonly property int avatarSize: modalSize ? 112 : 72
+    readonly property int pad: modalSize ? 24 : 16
+    // The avatar and banner open the full profile (the popout).
+    property bool viewable: false
+    signal viewRequested()
+    readonly property bool viewHint: viewable && (bannerKey.hovered || viewKey.hovered || viewKey.visualFocus)
 
     // `gif`, `anim` (APNG or WebP) or "" (a still or a video), from the
     // banner's extension or the type the core put in its fragment.
@@ -180,6 +191,51 @@ Item {
                 source: isVideo(root.banner) ? root.banner : ""
                 playing: root.visible
             }
+            // The pointer path; the avatar key is the keyboard and
+            // screen-reader one.
+            T.AbstractButton {
+                id: bannerKey
+                anchors.fill: parent
+                visible: root.viewable
+                focusPolicy: Qt.NoFocus
+                Accessible.ignored: true
+                background: null
+                onClicked: root.viewRequested()
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
+            }
+            // "View profile": the card colour and ink, shadow-float.
+            Rectangle {
+                id: viewChip
+                visible: root.viewable && opacity > 0
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.margins: 8
+                width: chipRow.implicitWidth + 16
+                height: 24
+                radius: Theme.radius
+                color: root.color
+                opacity: root.viewHint ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+                FloatShadow {}
+                Row {
+                    id: chipRow
+                    anchors.centerIn: parent
+                    spacing: 6
+                    Icon {
+                        anchors.verticalCenter: parent.verticalCenter
+                        name: "maximize"
+                        size: 12
+                        color: root.ink
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        textFormat: Text.PlainText
+                        text: qsTr("View profile")
+                        color: root.ink
+                        font: Theme.type.captionStrong
+                    }
+                }
+            }
         }
 
         Column {
@@ -193,11 +249,41 @@ Item {
 
             // The avatar key: tint-2 over the card colour, a 4 px card ring.
             Rectangle {
+                id: avatarRing
                 width: root.avatarSize + 8
                 height: root.avatarSize + 8
                 x: -4
                 radius: Theme.radius
                 color: root.color
+                // A small lift while the full profile is on offer.
+                scale: root.viewHint && !Theme.reducedMotion ? 1.04 : 1
+                Behavior on scale { NumberAnimation { duration: Theme.dur2; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+                // Opens the full profile (the popout).
+                T.AbstractButton {
+                    id: viewKey
+                    anchors.fill: parent
+                    anchors.margins: 4
+                    z: 2
+                    visible: root.viewable
+                    enabled: root.viewable
+                    focusPolicy: Qt.TabFocus
+                    Accessible.role: Accessible.Button
+                    Accessible.name: qsTr("View %1's full profile").arg(root.name)
+                    onClicked: root.viewRequested()
+                    Keys.onReturnPressed: root.viewRequested()
+                    Keys.onEnterPressed: root.viewRequested()
+                    HoverHandler { cursorShape: Qt.PointingHandCursor }
+                    // The 2 px focus ring, 2 px out (styles.css :focus-visible).
+                    background: Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: -2
+                        visible: viewKey.visualFocus
+                        color: "transparent"
+                        radius: Theme.radius
+                        border.width: 2
+                        border.color: Theme.focus
+                    }
+                }
                 Rectangle {
                     anchors.centerIn: parent
                     width: root.avatarSize
@@ -281,9 +367,9 @@ Item {
                         text: root.name
                         nameStyle: root.nameStyle
                         color: root.ink
-                        font: root.modalSize ? Theme.type.pageTitle : Theme.type.profileName
-                        // text-ui-xl's 28 px line (Geist's own is taller).
-                        height: root.modalSize ? 28 : implicitHeight
+                        font: root.modalSize ? Theme.type.profileTitle : Theme.type.profileName
+                        // text-ui-2xl's 32 px line (Geist's own is taller).
+                        height: root.modalSize ? 32 : implicitHeight
                         ground: root.color
                         Accessible.role: Accessible.Heading
                     }

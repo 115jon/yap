@@ -196,9 +196,9 @@ QtObject {
     // `side`: where the card opens next to `anchor`: right, left or top.
     signal profileRequested(string userId, Item anchor, string side)
 
-    // The full profile (UserProfileModal.tsx): every "Profile" menu row.
-    // Your own opens the popout instead (the web never opens the modal for
-    // you).
+    // The full profile (UserProfileModal.tsx): every "Profile" menu row and
+    // the popout's avatar. Your own has Edit profile in place of the
+    // relationship actions.
     signal fullProfileRequested(string userId, Item anchor)
     function showFullProfile(userId, anchor) {
         if (userId.length > 0)

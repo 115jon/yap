@@ -737,6 +737,9 @@ pub struct ProfileView {
     pub game: String,
     pub pronouns: String,
     pub bio: String,
+    /// The bio as rich text (markdown.rs, the message grammar), for the
+    /// full profile's About me; empty without a bio.
+    pub bio_html: String,
     /// The banner picture (absolute), or empty.
     pub banner: String,
     /// The banner colour (`#rrggbb`), or empty for the theme's accent tint.
@@ -2618,6 +2621,10 @@ pub(super) fn profile_view(
             .unwrap_or_default(),
         pronouns: trimmed(&user.pronouns),
         bio: trimmed(&user.bio),
+        bio_html: match trimmed(&user.bio) {
+            bio if bio.is_empty() => String::new(),
+            bio => crate::markdown::to_html_with(&bio, false, api_base),
+        },
         banner: match user.banner_url.as_deref() {
             Some(url) if !url.is_empty() => banner_url(
                 &absolute_url(api_base, Some(url)),

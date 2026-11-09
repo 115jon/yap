@@ -387,6 +387,8 @@ QtObject {
         readonly property font profileName: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 18, weight: Font.DemiBold, hintingPreference: hinting })
         // text-ui-xl semibold: a page header's title (FriendsView.tsx h1).
         readonly property font pageTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 22, weight: Font.DemiBold, letterSpacing: -0.22, hintingPreference: hinting })
+        // text-ui-2xl semibold: the full profile's name (ProfileCard.tsx modal).
+        readonly property font profileTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 28, weight: Font.DemiBold, letterSpacing: -0.42, hintingPreference: hinting })
         // text-ui-md semibold: a popover's title (the bell's Inbox).
         readonly property font menuTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 16, weight: Font.DemiBold, hintingPreference: hinting })
         readonly property font panelTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 14, weight: Font.DemiBold, hintingPreference: hinting })

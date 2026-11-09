@@ -679,13 +679,9 @@ RowLayout {
             profile.load()?.openFor(userId, anchor, side)
         }
         function onFullProfileRequested(userId, anchor) {
-            // Never the modal for yourself (ChatPageClient): your popout.
-            if (userId === Session.meId) {
-                profile.load()?.openFor(userId, anchor, "right")
-                return
-            }
-            // One card at a time: the popout gives way (they share Profile).
-            profile.item?.close()
+            // One card at a time: the popout gives way (they share Profile),
+            // keeping the profile when it showed the same person.
+            profile.item?.handOff(userId)
             fullProfile.load()?.openFor(userId)
         }
         function onListenPanelRequested(anchor) {

@@ -8,7 +8,8 @@ import com.yap.native
 // what opened it, kept 12 px inside the window. Someone else's card has
 // Message (the DM, created when needed) with the friend actions
 // (ProfileFriendActions) and, when known, About me and
-// their roles in the shown server. Your own card has Edit profile instead
+// their roles in the shown server. The avatar (a key: Tab reaches it) and
+// the banner open the full profile (ProfileModal) in its place. Your own card has Edit profile instead
 // (the profile editor). A profile that did not load says why under the
 // actions (RowError, describeApiError's copy). With Manage roles each role
 // chip has a remove key, and the roles row ends in an Add a role key: a
@@ -72,6 +73,14 @@ T.Popup {
     closePolicy: T.Popup.CloseOnEscape | T.Popup.CloseOnPressOutside
     onHeightChanged: if (visible) place()
     onClosed: Profile.close(shownId)
+
+    // The full profile takes over (Shell.qml): close without letting go of
+    // the profile it now shows.
+    function handOff(userId) {
+        if (shownId === userId)
+            shownId = ""
+        close()
+    }
     // The last banner shown (see the card's `banner`).
     property string lastBanner: ""
     Connections {
@@ -109,6 +118,10 @@ T.Popup {
         platforms: Profile.platforms
         badges: Profile.badges
         animate: popup.visible
+        // The avatar and banner open the full profile, which takes over
+        // from this card (Shell.qml).
+        viewable: Profile.userId.length > 0
+        onViewRequested: ShellState.showFullProfile(Profile.userId, popup.anchorItem)
         Accessible.role: Accessible.Dialog
         Accessible.name: qsTr("User profile for %1").arg(Profile.username)
 
@@ -184,47 +197,15 @@ T.Popup {
                 spacing: 6
                 Repeater {
                     model: Profile.roleNames
-                    delegate: Rectangle {
-                        id: chip
+                    // ProfileRoleChips, with `onRemove` under Manage roles.
+                    delegate: ProfileRoleChip {
                         required property string modelData
                         required property int index
-                        readonly property string tone: Profile.roleColors[index] ?? ""
-                        readonly property bool removable: Admin.canManageRoles && !Nav.home
-                        width: Math.min(chipRow.implicitWidth + 8 + (removable ? 2 : 10), parent ? parent.width : 300)
-                        height: 24
-                        radius: Theme.radius
-                        color: Theme.tint1
-                        Row {
-                            id: chipRow
-                            x: 8
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 6
-                            Rectangle {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 10
-                                height: 10
-                                radius: 5
-                                color: chip.tone.length > 0 ? chip.tone : Theme.ink3
-                            }
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                textFormat: Text.PlainText
-                                text: chip.modelData
-                                color: Theme.ink1
-                                font: Theme.type.captionStrong
-                            }
-                            // IconButton close, 20 px, muted (ProfileRoleChips `onRemove`).
-                            IconKey {
-                                visible: chip.removable
-                                anchors.verticalCenter: parent.verticalCenter
-                                size: 20
-                                glyph: Theme.iconSm
-                                iconName: "close"
-                                tone: "muted"
-                                tip: qsTr("Remove the %1 role").arg(chip.modelData)
-                                onClicked: Admin.toggleMemberRole(Profile.userId, Profile.roleIds[chip.index] ?? "")
-                            }
-                        }
+                        name: modelData
+                        tone: Profile.roleColors[index] ?? ""
+                        removable: Admin.canManageRoles && !Nav.home
+                        maxWidth: parent ? parent.width : 300
+                        onRemoveRequested: Admin.toggleMemberRole(Profile.userId, Profile.roleIds[index] ?? "")
                     }
                 }
                 IconKey {
