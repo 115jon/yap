@@ -431,6 +431,7 @@ fn set_profile(mut profile: Pin<&mut Profile>, view: &ProfileView) {
     profile.as_mut().set_game(q(&view.game));
     profile.as_mut().set_pronouns(q(&view.pronouns));
     profile.as_mut().set_bio(q(&view.bio));
+    profile.as_mut().set_bio_html(q(&view.bio_html));
     profile.as_mut().set_banner(q(&view.banner));
     profile.as_mut().set_banner_color(q(&view.banner_color));
     profile

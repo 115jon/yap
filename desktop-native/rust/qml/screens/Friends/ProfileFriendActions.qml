@@ -10,6 +10,8 @@ import com.yap.native
 //   outgoing  Message, then Cancel request
 //   none      Message, then Add friend
 //   blocked   Unblock, and the blocked notice
+// With `callable` (the full profile) a Call key follows the secondaries
+// (ProfileActionRow `extra`), never for someone blocked.
 // The more key also copies the user ID. Block asks in a strip under the
 // keys. While one action runs the others wait; a failure shows its reason
 // under the keys (a failed block, in the strip).
@@ -21,8 +23,11 @@ Column {
     required property string name
     // The ply behind the card (the notched key's notch).
     property color ground: Theme.ply3
+    // Offer Call (the full profile).
+    property bool callable: false
 
     signal messageRequested()
+    signal callRequested()
 
     readonly property var model: JSON.parse(Friends.state)
     readonly property string relation: model.card && model.card.userId === userId ? model.card.relation : "none"
@@ -70,7 +75,9 @@ Column {
 
         Row {
             id: keyRow
-            readonly property int keys: root.relation === "incoming" ? 2 : root.relation === "outgoing" || root.relation === "none" ? 1 : 0
+            readonly property bool call: root.callable && root.relation !== "blocked"
+            readonly property int keys: (root.relation === "incoming" ? 2 : root.relation === "outgoing" || root.relation === "none" ? 1 : 0)
+                + (call ? 1 : 0)
             readonly property real share: keys > 0 ? (width - spacing * (keys - 1)) / keys : 0
             width: parent.width - more.width - 8
             anchors.verticalCenter: parent.verticalCenter
@@ -112,6 +119,15 @@ Column {
                 loading: root.act.busy === "add"
                 enabled: !root.pending
                 onClicked: root.run("add")
+            }
+            KitButton {
+                visible: keyRow.call
+                width: keyRow.share
+                variant: "secondary"
+                iconName: "call"
+                text: qsTr("Call")
+                enabled: !root.pending
+                onClicked: root.callRequested()
             }
             KitButton {
                 visible: root.relation === "blocked"

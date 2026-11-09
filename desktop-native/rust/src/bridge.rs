@@ -644,6 +644,8 @@ pub mod qobject {
         #[qproperty(QString, game)]
         #[qproperty(QString, pronouns)]
         #[qproperty(QString, bio)]
+        /// The bio as rich text (yap-core markdown.rs), or empty.
+        #[qproperty(QString, bio_html, cxx_name = "bioHtml")]
         #[qproperty(QString, banner)]
         /// `#rrggbb`, or empty for the accent tint.
         #[qproperty(QString, banner_color, cxx_name = "bannerColor")]
@@ -950,6 +952,7 @@ pub struct ProfileRust {
     game: QString,
     pronouns: QString,
     bio: QString,
+    bio_html: QString,
     banner: QString,
     banner_color: QString,
     role_names: QStringList,

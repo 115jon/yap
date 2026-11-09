@@ -209,6 +209,7 @@ const QML: &[&str] = &[
     "qml/screens/Shell/ProfileMutuals.qml",
     "qml/screens/Shell/ProfilePopout.qml",
     "qml/screens/Shell/ProfileGame.qml",
+    "qml/screens/Shell/ProfileRoleChip.qml",
     "qml/screens/Shell/QuickSwitcher.qml",
     "qml/screens/Shell/ReactionDetailsDialog.qml",
     "qml/screens/Shell/ServerRail.qml",

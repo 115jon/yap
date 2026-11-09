@@ -803,6 +803,35 @@ fn the_profile_answer_should_add_the_bio_and_banner() {
 }
 
 #[test]
+fn the_profile_bio_should_carry_its_markdown_as_rich_text() {
+    let mut client = Client::online();
+    client.command(Command::ShowProfile(Some(ALICE.into())));
+    let mut full = user(ALICE, "alice", Some("Alice"), "online");
+    full["bio"] = json!("**bold** and *soft*");
+    let fx = client.respond(
+        &ApiRequest::Profile {
+            user_id: ALICE.into(),
+        },
+        json!({ "user": full, "mutualServers": { "count": 0, "items": [] } }),
+    );
+    let view = profile(&fx).expect("profile");
+    assert_eq!(view.bio, "**bold** and *soft*");
+    // The message grammar: the bold cut by family, no markers left.
+    assert_eq!(
+        view.bio_html,
+        yap_core::markdown::to_html("**bold** and *soft*", false)
+    );
+    assert!(!view.bio_html.contains("**"), "{}", view.bio_html);
+}
+
+#[test]
+fn a_profile_without_a_bio_should_have_no_rich_bio() {
+    let mut client = Client::online();
+    let fx = client.command(Command::ShowProfile(Some(ALICE.into())));
+    assert_eq!(profile(&fx).expect("profile").bio_html, "");
+}
+
+#[test]
 fn the_full_profile_should_list_mutual_friends_and_the_account_date() {
     let mut client = Client::online();
     client.command(Command::ShowProfile(Some(ALICE.into())));
