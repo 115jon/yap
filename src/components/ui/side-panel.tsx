@@ -66,6 +66,11 @@ type SidePanelProps = {
   className?: string;
   /** Force one form (fixtures, tests). */
   forceMode?: SidePanelMode;
+  /**
+   * false: the panel does not take the browser back button or push a
+   * history entry for it, because its open state is a route the router owns.
+   */
+  backButton?: boolean;
   children: React.ReactNode;
 };
 
@@ -160,6 +165,7 @@ export function SidePanel({
   dockClassName,
   className,
   forceMode,
+  backButton = true,
   children,
 }: SidePanelProps) {
   const mode = useSidePanelLayout(dock, forceMode);
@@ -174,7 +180,7 @@ export function SidePanel({
       close();
       return true;
     }, [close]),
-    open && mode === "dock",
+    open && mode === "dock" && backButton,
   );
 
   const header = hideHeader ? null : (
@@ -209,7 +215,11 @@ export function SidePanel({
     ) : null;
   } else if (mode === "sheet") {
     surface = (
-      <Sheet open={open} onOpenChange={onOpenChange}>
+      <Sheet
+        open={open}
+        onOpenChange={onOpenChange}
+        backButton={backButton ? undefined : false}
+      >
         <SheetContent
           data-mode="sheet"
           aria-label={label}
@@ -239,7 +249,12 @@ export function SidePanel({
     );
   } else {
     surface = (
-      <Drawer open={open} onOpenChange={onOpenChange} direction="right">
+      <Drawer
+        open={open}
+        onOpenChange={onOpenChange}
+        direction="right"
+        backButton={backButton}
+      >
         <DrawerContent
           data-mode="drawer"
           aria-label={label}

@@ -98,6 +98,8 @@ type DrawerProps = {
   onOpenChange?: (open: boolean) => void;
   /** Overrides what the back button does (default: close). */
   onBackButton?: () => void;
+  /** false: the back button is not this drawer's (a router owns history). */
+  backButton?: boolean;
   /** Edge the sheet is attached to; it swipes away toward that edge. */
   direction?: DrawerDirection;
   /**
@@ -120,6 +122,7 @@ function Drawer({
   defaultOpen,
   onOpenChange,
   onBackButton,
+  backButton = true,
   direction = "bottom",
   repositionInputs = false,
   snapPoints,
@@ -166,7 +169,9 @@ function Drawer({
 
   const handleBack = () => (onBackButton ? onBackButton() : setOpen(false));
 
-  useDialogBackButton(isOpen, handleBack, () => isDialogTopmost(id));
+  useDialogBackButton(isOpen && backButton, handleBack, () =>
+    isDialogTopmost(id),
+  );
 
   const handlePrimitiveOpenChange = (
     nextOpen: boolean,
