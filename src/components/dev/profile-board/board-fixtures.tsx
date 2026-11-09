@@ -52,7 +52,9 @@ import {
   FIXTURE_OWNER,
   FIXTURE_VIEWER,
 } from "@/components/profile-board/fixtures";
+import { FIXTURE_ITEMS } from "@/components/profile-board/deadlock-fixtures";
 import { ProfilePanel } from "@/components/profile-board/ProfilePanel";
+import { DEADLOCK_ICON_PATH } from "@/lib/deadlock";
 import type { User } from "@/lib/types";
 import { useChatStore } from "@/stores/chat-store";
 
@@ -71,6 +73,37 @@ const ICON_URLS = {
   [FIXTURE_ICONS.helldivers]: coverSlowfires,
 } satisfies Record<string, string>;
 
+const DEADLOCK_ART = import.meta.glob<string>("../assets/deadlock/*", {
+  eager: true,
+  import: "default",
+});
+
+/** `/api/game-assets/<id>/<key>.png` → the bundled mockup art. */
+function deadlockArt(path: string): string | null {
+  if (path === DEADLOCK_ICON_PATH) {
+    return DEADLOCK_ART["../assets/deadlock/deadlock-app-icon.png"] ?? null;
+  }
+  const match = /^\/api\/game-assets\/\d+\/([a-z0-9_]+)\.png$/.exec(path);
+  if (!match) return null;
+  const key = match[1]!;
+  const file = key
+    .replace(/^hero_(\w+)_(sm|card)$/, "hero-$1-$2")
+    .replace(/^rank_(\d+)_(\d+)$/, "rank-$1-$2")
+    .replace(
+      /^rank_(\d+)$/,
+      (_, tier: string) => `rank${tier.padStart(2, "0")}`,
+    )
+    .replace(
+      /^item_(\d+)$/,
+      (_, id: string) => `item-${FIXTURE_ITEM_KEYS[id] ?? id}`,
+    );
+  return DEADLOCK_ART[`../assets/deadlock/${file}.webp`] ?? null;
+}
+
+const FIXTURE_ITEM_KEYS: Record<string, string> = Object.fromEntries(
+  Object.entries(FIXTURE_ITEMS).map(([key, id]) => [String(id), key]),
+);
+
 /** Resolves the fixtures' asset names and icon paths to bundled images. */
 export function BoardFixtureMedia({ children }: { children: ReactNode }) {
   const asset = useCallback(
@@ -79,7 +112,8 @@ export function BoardFixtureMedia({ children }: { children: ReactNode }) {
     [],
   );
   const url = useCallback(
-    (path: string) => (ICON_URLS as Record<string, string>)[path] ?? path,
+    (path: string) =>
+      (ICON_URLS as Record<string, string>)[path] ?? deadlockArt(path) ?? path,
     [],
   );
   return (
