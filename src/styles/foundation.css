@@ -344,3 +344,66 @@ html {
     box-shadow: none;
   }
 }
+
+/* ---------- Stage person card (StagePersonCard) ----------
+   A person without media on the focused stage, lit by their own picture.
+   --ambient is the picture's colour (or the accent, or the profile tint).
+   A user image's light, like a media scrim, sits outside the flat-plies
+   rule: the glow is the one shadow on ply-0, painted once (DESIGN.md,
+   Ambient glow). Without a picture the card takes the profile tint at the
+   tiles' 6%, and the glow carries it.
+   The parent is a size container; the card fits it at 16:9, or 4:5 when the
+   stage is portrait (a phone), where a wide card would waste the height. */
+.rm-stage-person {
+  container-type: size;
+  aspect-ratio: 16 / 9;
+  width: min(100cqw, 960px, 100cqh * 16 / 9);
+}
+@container (orientation: portrait) {
+  .rm-stage-person {
+    aspect-ratio: 4 / 5;
+    width: min(100cqw, 480px, 100cqh * 4 / 5);
+  }
+}
+.rm-stage-glow {
+  box-shadow: 0 16px 96px 8px color-mix(in oklab, var(--ambient) 55%, black);
+}
+.rm-stage-scrim {
+  background-color: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--ambient) 20%, black) 64%,
+    transparent
+  );
+}
+[data-ambient="pending"] .rm-stage-scrim {
+  background-color: rgb(0 0 0 / 0.62);
+}
+[data-ambient="tint"] .rm-stage-scrim {
+  background-color: color-mix(in oklab, var(--ambient) 6%, var(--ply-2));
+}
+:is(.light, .miku-light, .spiderman-light) .rm-stage-glow {
+  box-shadow: 0 16px 96px 8px
+    color-mix(in oklab, var(--ambient) 42%, transparent);
+}
+:is(.light, .miku-light, .spiderman-light) .rm-stage-scrim {
+  background-color: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--ambient) 12%, var(--ply-2)) 80%,
+    transparent
+  );
+}
+:is(.light, .miku-light, .spiderman-light)
+  [data-ambient="pending"]
+  .rm-stage-scrim {
+  background-color: color-mix(in oklab, var(--ply-2) 82%, transparent);
+}
+:is(.light, .miku-light, .spiderman-light)
+  [data-ambient="tint"]
+  .rm-stage-scrim {
+  background-color: color-mix(in oklab, var(--ambient) 6%, var(--ply-2));
+}
+@media (forced-colors: active) {
+  .rm-stage-glow {
+    box-shadow: none;
+  }
+}

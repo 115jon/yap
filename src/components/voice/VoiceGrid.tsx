@@ -2,10 +2,7 @@ import { Slider } from "@/components/ContextMenu/ContextMenuItems";
 import { useVoiceSettingsStore } from "@/stores/useVoiceSettingsStore";
 import { cn } from "@/lib/utils";
 import { HIT, PRESS } from "@/components/ui/interaction";
-import { Avatar } from "@/components/ui/avatar";
 import { Icon } from "@/components/ui/icon";
-import { getAuthAssetUrl } from "@/lib/platform";
-import InlineEmojiText from "@/components/chat/InlineEmojiText";
 import React, {
   lazy,
   Suspense,
@@ -17,6 +14,7 @@ import React, {
 } from "react";
 import { flushSync } from "react-dom";
 import { ParticipantCard } from "./ParticipantCard";
+import { StagePersonCard } from "./StagePersonCard";
 import { StickerReactionsOverlay } from "./StickerReactionsOverlay";
 import { StreamLoadingIndicator } from "./StreamLoadingIndicator";
 import { GridItem, VoiceActions } from "./types";
@@ -29,14 +27,9 @@ import {
   type GridFit,
 } from "./grid-columns";
 import { hasLiveAudioTrack, hasLiveVideoTrack } from "./media-stream-tracks";
-import { CameraUnavailableBadge, TileAvatar } from "./TileParts";
+import { CameraUnavailableBadge } from "./TileParts";
 import { useCameraTileVideo } from "./useCameraTileVideo";
-import {
-  FOCUSED_AVATAR_SIZE,
-  streamOwnerName,
-  TILE_SURFACE,
-  useTileTintStyle,
-} from "./tile-utils";
+import { streamOwnerName } from "./tile-utils";
 
 const StreamContextMenu = lazy(() =>
   import("../StreamContextMenu").then((mod) => ({
@@ -288,8 +281,8 @@ function FitGridLayout({
 /**
  * One tile on stage. The header is a bar above (never an overlay on the
  * stream), media sits letterboxed in its own black box inside the stage
- * padding, and a person without media gets an 80px avatar on their tinted
- * 16:9 surface (never their picture stretched across the frame).
+ * padding, and a person without media gets the StagePersonCard: their full
+ * picture lit in its own colour (never stretched across the frame).
  */
 function FocusedStage({
   focusedItem,
@@ -315,7 +308,6 @@ function FocusedStage({
     if (!peer) return 100;
     return isFocusedScreen ? peer.streamVolume : peer.volume;
   });
-  const tintStyle = useTileTintStyle(focusedUserId);
 
   const isPreviewHidden =
     isFocusedScreen && focusedItem.isLocal && !!voiceActions?.isPreviewHidden;
@@ -411,42 +403,31 @@ function FocusedStage({
         ) : (
           <div
             data-focused-visual="true"
-            style={tintStyle}
-            className={cn(
-              "relative flex aspect-video max-h-full w-full max-w-[960px] flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-line",
-              TILE_SURFACE,
-            )}
+            className="flex h-full w-full items-center justify-center [container-type:size] sm:p-4"
           >
-            {isHiddenCameraVideo && (
-              <VideoPlayer
-                stream={focusedItem.stream}
-                label={focusedItem.name}
-                muted
-                className="pointer-events-none absolute inset-0 h-full w-full object-contain opacity-0"
-              />
-            )}
-            {focusedItem.avatar ? (
-              <Avatar
-                name={focusedItem.name}
-                src={getAuthAssetUrl(focusedItem.avatar)}
-                size={80}
-              />
-            ) : (
-              <TileAvatar
-                name={focusedItem.name}
-                sizeClassName={FOCUSED_AVATAR_SIZE}
-              />
-            )}
-            <p className="max-w-[80%] truncate font-display [font-optical-sizing:auto] text-[18px] leading-6 font-bold text-ink-1">
-              <InlineEmojiText text={focusedItem.name} />
-            </p>
-            {isCameraUnavailable && <CameraUnavailableBadge />}
-            {isLoadingStream && (
-              <StreamLoadingIndicator
-                name={streamOwnerName(focusedItem)}
-                className="bg-ply-2/90"
-              />
-            )}
+            <StagePersonCard
+              userId={focusedItem.userId}
+              name={focusedItem.name}
+              avatar={focusedItem.avatar}
+            >
+              {isHiddenCameraVideo && (
+                <VideoPlayer
+                  stream={focusedItem.stream}
+                  label={focusedItem.name}
+                  muted
+                  className="pointer-events-none absolute inset-0 h-full w-full object-contain opacity-0"
+                />
+              )}
+              {isCameraUnavailable && (
+                <CameraUnavailableBadge className="absolute top-3 left-3" />
+              )}
+              {isLoadingStream && (
+                <StreamLoadingIndicator
+                  name={streamOwnerName(focusedItem)}
+                  className="rounded-lg bg-ply-2/90"
+                />
+              )}
+            </StagePersonCard>
           </div>
         )}
 

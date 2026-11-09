@@ -350,7 +350,7 @@ Controls appear once per viewport. The account row at the bottom of the tree pan
 
 ## Elevation & Depth
 
-Hybrid, but flat by default: depth is the ply order plus 1px seams. Nothing on plies 0 to 2 carries a shadow. Ply-3 floats take `shadow-2` with a line; dialogs and drawers take `shadow-3`. Light themes run the same geometry at about a third of the alpha and lean more on the seam. Backdrop blur and filter blur are disabled globally in `styles.css`, so overlays stay crisp.
+Hybrid, but flat by default: depth is the ply order plus 1px seams. Nothing on plies 0 to 2 carries a shadow. Ply-3 floats take `shadow-2` with a line; dialogs and drawers take `shadow-3`. Light themes run the same geometry at about a third of the alpha and lean more on the seam. Backdrop blur and filter blur are disabled globally in `styles.css`, so overlays stay crisp (the stage person card's wash opts out; see Ambient glow).
 
 ### Shadow Vocabulary
 
@@ -360,6 +360,7 @@ Hybrid, but flat by default: depth is the ply order plus 1px seams. Nothing on p
 - **Modal** (`0 24px 64px -12px rgb(shadow / 0.72)`, `shadow-3`, utility `shadow-modal`): dialogs and drawers.
 - **Scrim** (`rgb(0 0 0 / 0.56)` dark, `0.28` light; stacked layer `0.24`).
 - **LED halo** (`0 0 0 2px led/22%, 0 0 8px led/45%`): painted once on the LED's `::after`; only its opacity changes.
+- **Ambient glow** (`0 16px 96px 8px`, the picture's colour mixed 55% with black; 42% alpha on light grounds): the focused stage's person card only (`StagePersonCard`, `.rm-stage-glow`). It is the person's picture lighting the stage, like a media scrim a user-image exception, not elevation; it fades in once when the colour is known. The card's wash (the same picture at 32x18, stretched under a `blur-lg` with `data-rm-preserve-blur`) is the one other filter blur, painted once.
 
 ### Named Rules
 

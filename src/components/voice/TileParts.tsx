@@ -16,7 +16,7 @@ import { TILE_AVATAR_SIZE } from "./tile-utils";
  * draw a person the same way.
  *
  *   surface    ply-2 with a 1px line seam, 2px corners, tinted 6% at most
- *   avatar     64 on grid tiles, 80 for a single focused tile, a square key
+ *   avatar     64 on grid tiles (the focused stage scales its own), a square key
  *              (rounded-avatar); without a picture, a tint-3 square with a
  *              Bricolage 800 initial about 40% of it. A decorated avatar keeps
  *              its round crop (AvatarImage), ring art is drawn for a circle.
