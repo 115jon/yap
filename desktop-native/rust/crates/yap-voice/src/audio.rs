@@ -4,9 +4,17 @@
 
 use std::collections::{HashMap, HashSet};
 
-/// The highest per-user or output volume, in percent (ContextMenuItems
-/// `Slider` max, AudioDeviceMenu output max).
+/// The highest output volume, in percent (AudioDeviceMenu output max).
 pub const MAX_VOLUME: u16 = 200;
+
+/// The highest per-user volume and per-user stream volume, in percent.
+/// Past 100 % a person is boosted, and their track goes through its own
+/// limiter in the mix (`dsp::mix::BoostLimiter`).
+pub const MAX_PEER_VOLUME: u16 = 400;
+
+/// The highest gain for a remote track: the per-user volume at its most
+/// times the output volume at its most (8.0).
+pub const MAX_GAIN: f64 = (MAX_PEER_VOLUME as f64 / 100.0) * (MAX_VOLUME as f64 / 100.0);
 
 /// What we hear of the others (useVoiceSettingsStore `outputVolume` and
 /// `peerSettings[userId].volume` / `.muted`). Gains are linear,
@@ -15,7 +23,7 @@ pub const MAX_VOLUME: u16 = 200;
 pub struct Playback {
     /// The output volume as a gain, 0.0..=2.0.
     pub output: f64,
-    /// Per Yap user id: that person's gain, 0.0..=2.0 (0 while "Mute" is
+    /// Per Yap user id: that person's gain, 0.0..=4.0 (0 while "Mute" is
     /// on for them).
     pub peers: HashMap<String, f64>,
     /// Per Yap user id: their share audio's gain ("Stream volume", 0 while
@@ -46,7 +54,7 @@ impl Playback {
         } else {
             self.peers.get(user_id).copied().unwrap_or(1.0)
         };
-        (self.output * peer).clamp(0.0, 4.0)
+        (self.output * peer).clamp(0.0, MAX_GAIN)
     }
 
     /// The gain for someone's share audio (useVoiceChannel.ts: the stream
@@ -57,7 +65,7 @@ impl Playback {
         } else {
             self.streams.get(user_id).copied().unwrap_or(1.0)
         };
-        (self.output * stream).clamp(0.0, 4.0)
+        (self.output * stream).clamp(0.0, MAX_GAIN)
     }
 
     /// Their share audio plays even off stage.
@@ -66,12 +74,13 @@ impl Playback {
     }
 }
 
-/// A percentage volume (0..=200) and the "Mute" switch as one gain.
+/// A per-user percentage volume (0..=[`MAX_PEER_VOLUME`]) and the "Mute"
+/// switch as one gain.
 pub fn peer_gain(volume: u16, muted: bool) -> f64 {
     if muted {
         0.0
     } else {
-        f64::from(volume.min(MAX_VOLUME)) / 100.0
+        f64::from(volume.min(MAX_PEER_VOLUME)) / 100.0
     }
 }
 
@@ -208,8 +217,31 @@ mod tests {
     }
 
     #[test]
-    fn peer_gain_should_cap_at_two_hundred_percent() {
-        assert_eq!(peer_gain(500, false), 2.0);
+    fn peer_gain_should_cap_at_four_hundred_percent() {
+        assert_eq!(peer_gain(500, false), 4.0);
+        assert_eq!(peer_gain(u16::MAX, false), 4.0);
+        assert_eq!(peer_gain(400, false), 4.0);
+    }
+
+    #[test]
+    fn peer_gain_should_keep_old_values_as_they_were() {
+        assert_eq!(peer_gain(200, false), 2.0);
+        assert_eq!(peer_gain(100, false), 1.0);
+        assert_eq!(peer_gain(35, false), 0.35);
+        assert_eq!(peer_gain(0, false), 0.0);
+    }
+
+    #[test]
+    fn a_boosted_person_at_full_output_should_reach_eight_times() {
+        let playback = Playback {
+            output: 2.0,
+            peers: HashMap::from([("u1".to_owned(), peer_gain(400, false))]),
+            streams: HashMap::from([("u1".to_owned(), peer_gain(400, false))]),
+            always_hear: HashSet::new(),
+        };
+        assert_eq!(playback.gain_for("u1"), MAX_GAIN);
+        assert_eq!(playback.stream_gain_for("u1"), MAX_GAIN);
+        assert_eq!(MAX_GAIN, 8.0);
     }
 
     #[test]

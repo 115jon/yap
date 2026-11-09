@@ -665,6 +665,13 @@ mic test monitor (yap-voice MicTest) ──────────────�
                                                                            └─► YAP_RENDER_TAP file
 ```
 
+- **Boost.** Inside the call's mix, each remote track above unity gain
+  (a person or their stream past 100 %, up to 400 % times the output's
+  200 %) goes through its own look-ahead limiter after its gain and pan
+  (`dsp::mix::BoostLimiter`, LIBRARIES.md §11.1), held under -3 dBFS, so
+  it reaches the mix limiter under its threshold and the bus untouched.
+  Tracks at or under unity skip it, bit for bit. The far end is the
+  limited frame, as played.
 - **Inputs** (`yap_speaker::Input`) add 10 ms of 48 kHz stereo `f32` when
   the render thread asks, and say whether they have anything to play. The
   bus holds them weakly: an owner drops its `Arc` to leave.
@@ -689,6 +696,12 @@ mic test monitor (yap-voice MicTest) ──────────────�
   each input's `mix_into` under that input's own lock. The `yap-audio`
   thread changes voices between frames and forwards the mixer's events
   every 20 ms. The mic and the mic test have their own capture threads.
+- **Tests.** `cargo test -p yap-voice --lib dsp::mix`: the boost limiter
+  (transparent at or under unity, never past its ceiling at 1.01-8x and any
+  pan, a pan kept, no NaN from NaN or infinite input, the 1.5 ms glide into
+  a peak, the release back to idle and to the plain path).
+  `cargo test -p yap-cache voice`: the 400 % cap, old values loading
+  unchanged, garbage clamped without resetting the file.
 - **Tests.** `cargo test -p yap-speaker`: the bus, the soft clip, endpoint
   matching by id and the name migration, the notification decisions, the
   render thread's clock, idle close and holds, and the UI sound voices.
