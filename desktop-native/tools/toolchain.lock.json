@@ -1,0 +1,40 @@
+{
+  "tag": "native-toolchain-qt6.11.3-yap-webrtc-a545de4",
+  "msvc": "14.44.35207",
+  "qt": {
+    "version": "6.11.3",
+    "build": "qt-custom-6.11p8",
+    "script": "desktop-native/patches/qt/build-qt.ps1",
+    "patches": "desktop-native/patches/qt/6.11.3",
+    "files": 6781,
+    "stubs": 176
+  },
+  "libwebrtc": {
+    "build": "webrtc-a545de4",
+    "source": "LiveKit's prebuilt libwebrtc (webrtc-sys 0.3.52: github.com/livekit/rust-sdks/releases/download/webrtc-a545de4/webrtc-win-x64-release.zip), unmodified",
+    "files": 38755
+  },
+  "sevenZip": "26.00",
+  "assets": [
+    {
+      "name": "qt-6.11.3-yap-p8-msvc-x64-static.7z.001",
+      "size": 456363316,
+      "sha256": "b3fd97981bc7e4df0f9adb5ca289e8f021388429e9947e7b2e1a61494426cf8d"
+    },
+    {
+      "name": "qt-6.11.3-yap-p8-msvc-x64-static.7z.contents.sha256",
+      "size": 828375,
+      "sha256": "1a55576e8d76463a7b17e2ac513c9cad77579f98ac4026b167b799877aaaee58"
+    },
+    {
+      "name": "libwebrtc-webrtc-a545de4-win-x64-release.7z.001",
+      "size": 49354845,
+      "sha256": "1eb7dc2293cbb83546f7c08e6f3537fcc08a4d78daf22daa4305d6e970b5b96f"
+    },
+    {
+      "name": "libwebrtc-webrtc-a545de4-win-x64-release.7z.contents.sha256",
+      "size": 5741607,
+      "sha256": "a6b34ef61b54d314d588b9e63a9da18f85a70e9ab3d54b31d07eeafd9a44b8f4"
+    }
+  ]
+}
