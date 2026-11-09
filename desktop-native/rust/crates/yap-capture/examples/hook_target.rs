@@ -109,14 +109,14 @@ fn main() -> windows::core::Result<()> {
         )?;
     }
     let (Some(swap), Some(device), Some(context)) = (swap, device, context) else {
-        return Err(windows::core::Error::from_win32());
+        return Err(windows::core::Error::from_thread());
     };
     // SAFETY: buffer 0 of a live swap chain; the view is made on its device.
     let view: ID3D11RenderTargetView = unsafe {
         let back: ID3D11Texture2D = swap.GetBuffer(0)?;
         let mut view = None;
         device.CreateRenderTargetView(&back.cast::<ID3D11Texture2D>()?, None, Some(&mut view))?;
-        view.ok_or_else(windows::core::Error::from_win32)?
+        view.ok_or_else(windows::core::Error::from_thread)?
     };
     // SAFETY: shows our own window without activating it.
     unsafe {

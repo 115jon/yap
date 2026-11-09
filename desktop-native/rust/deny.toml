@@ -1,0 +1,80 @@
+# cargo-deny for the native client's workspace (docs/LIBRARIES.md §16).
+#
+#   cd desktop-native/rust
+#   pwsh ../patches/vendor.ps1      # the [patch] path crates must exist
+#   cargo deny check
+#
+# Only the target the app ships for is checked: crates that build only for
+# Linux, macOS, Android or wasm (openssl, security-framework, jni, ...) are
+# not in the exe and are left out of every check.
+
+[graph]
+targets = ["x86_64-pc-windows-msvc"]
+all-features = false
+
+[output]
+feature-depth = 1
+
+# RustSec: vulnerabilities, unmaintained and unsound crates, and yanked
+# versions are errors. An exception names the advisory, the crate and why.
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+unmaintained = "all"
+ignore = []
+
+[licenses]
+# The workspace's own crates (GPL-3.0-only, publish = false) are not checked.
+private = { ignore = true }
+confidence-threshold = 0.93
+# What the dependency tree uses today, nothing more. A new licence fails the
+# check until someone has read it and added it here.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "BlueOak-1.0.0",
+    # webpki-roots (Mozilla's root list), through velopack's ureq.
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    # symphonia (yap-audio). File-level copyleft, compatible with GPL-3.0.
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[bans]
+# Two versions of one crate are a warning, listed by `cargo deny check bans`;
+# LIBRARIES.md §16 says which are left and why.
+multiple-versions = "warn"
+wildcards = "deny"
+# Our path crates have no version; that is not a wildcard.
+allow-wildcard-paths = true
+highlight = "all"
+deny = []
+# Duplicates that stay, each for its reason (LIBRARIES.md §16), so a new one
+# stands out. Build-time only (never in the exe): base64 0.22, reqwest 0.12,
+# syn 3 and codespan-reporting 0.11.
+skip = [
+    { crate = "base64@0.22.1", reason = "webrtc-sys-build's reqwest 0.12 (build script only)" },
+    { crate = "reqwest@0.12.28", reason = "webrtc-sys-build downloads libwebrtc with it (build script only)" },
+    { crate = "codespan-reporting@0.11.1", reason = "cxx-qt-build 0.10 (build script only); cxx 1.0.205 is on 0.13" },
+    { crate = "syn@1.0.109", reason = "ebml-iterable-specification-derive 0.4 (yap-webm's demuxer; latest)" },
+    { crate = "syn@3.0.9", reason = "cxx 1.0.205's macros and build crates; everything else is on syn 2" },
+    { crate = "thiserror@1.0.69", reason = "cxx-qt 0.10 and clang-format; a cxx-qt major is out of scope" },
+    { crate = "thiserror-impl@1.0.69", reason = "thiserror 1, above" },
+    { crate = "bitflags@1.3.2", reason = "symphonia-core 0.5.5 (latest)" },
+    { crate = "getrandom@0.2.17", reason = "ring 0.17 (latest), under velopack's ureq; not linked into the exe" },
+    { crate = "miniz_oxide@0.8.9", reason = "png 0.18.1 (latest) pins 0.8; flate2 is on 0.9" },
+    { crate = "windows-sys@0.60.2", reason = "keyring 3.6 (4.x is a new API); the rest is on 0.61" },
+]
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

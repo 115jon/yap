@@ -14,12 +14,12 @@ yap-voice = { path = "../yap-voice", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 # The signed hook files' SHA-256 against the lock.
-sha2 = "0.10"
+sha2 = "0.11"
 
 [target.'cfg(windows)'.dependencies]
 # `windows-core` is named directly because `#[implement]` expands to paths
 # through it.
-windows = { version = "0.61.3", features = [
+windows = { version = "0.62.2", features = [
     "Foundation",
     "Graphics_Capture",
     "Graphics_DirectX",
@@ -55,7 +55,7 @@ windows = { version = "0.61.3", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
-windows-core = "0.61"
+windows-core = "0.62"
 
 [lints]
 workspace = true
