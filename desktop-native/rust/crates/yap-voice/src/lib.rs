@@ -139,7 +139,7 @@ pub use engine::{
     MediaSession, MediaStats, OutboundVideo, VideoOutput,
 };
 #[cfg(feature = "libwebrtc")]
-pub use engine::{LibwebrtcEngine, LibwebrtcSession};
+pub use engine::{LibwebrtcEngine, LibwebrtcSession, MicTest};
 pub use layers::{CameraEncoding, CAMERA_SIMULCAST};
 pub use layers::{Quality, RenderSize};
 pub use machine::{

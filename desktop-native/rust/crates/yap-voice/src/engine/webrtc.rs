@@ -345,8 +345,9 @@ fn apply(f: &PeerConnectionFactory, sel: &mut Selection) -> Option<String> {
         list.default_input.as_ref(),
     );
     if pipeline::enabled() {
-        // The own path opens the endpoints itself; the ADM records and
-        // plays nothing.
+        // The own path opens the mic itself and plays through the app's
+        // speaker (`yap-speaker`, which [`LibwebrtcEngine::choose_devices`]
+        // tells); the ADM records and plays nothing.
         let output = resolve(
             sel.output.as_deref(),
             &list.outputs,
@@ -367,7 +368,7 @@ fn apply(f: &PeerConnectionFactory, sel: &mut Selection) -> Option<String> {
                 .as_deref()
                 .map_or_else(|| "default".to_owned(), |id| name(&list.outputs, id)),
         );
-        pipeline().set_devices(input.clone(), output.clone());
+        pipeline().set_devices(input.clone());
         sel.applied_input = input;
         sel.applied_output = output;
         return Some(line);
@@ -440,6 +441,9 @@ impl LibwebrtcEngine {
     /// calls; in a call it switches at once. A log line if it switched.
     /// Blocks like [`Self::devices`].
     pub fn choose_devices(&self, input: Option<String>, output: Option<String>) -> Option<String> {
+        // Everything the app plays, the call included, goes to this one
+        // output; `None` follows the Windows default.
+        yap_speaker::speaker().set_device(output.clone());
         let mut sel = lock(selection());
         sel.input = input;
         sel.output = output;

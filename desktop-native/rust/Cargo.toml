@@ -8,6 +8,7 @@ members = [
     "crates/yap-realtime",
     "crates/yap-voice",
     "crates/yap-audio",
+    "crates/yap-speaker",
     "crates/yap-anim",
     "crates/yap-webm",
     "crates/yap-segment",
@@ -34,6 +35,7 @@ yap-protocol = { path = "crates/yap-protocol" }
 yap-realtime = { path = "crates/yap-realtime" }
 yap-voice = { path = "crates/yap-voice" }
 yap-audio = { path = "crates/yap-audio" }
+yap-speaker = { path = "crates/yap-speaker" }
 yap-anim = { path = "crates/yap-anim" }
 yap-webm = { path = "crates/yap-webm" }
 yap-segment = { path = "crates/yap-segment" }
@@ -72,6 +74,7 @@ yap-protocol.workspace = true
 yap-realtime.workspace = true
 yap-voice.workspace = true
 yap-audio = { workspace = true, features = ["libopus"] }
+yap-speaker.workspace = true
 yap-anim.workspace = true
 yap-webm = { workspace = true, features = ["libvpx"] }
 yap-segment.workspace = true

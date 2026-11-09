@@ -77,16 +77,57 @@ Loader {
                     color: Theme.ink2
                     font: Theme.type.description
                 }
-                LevelMeter {
+                // MicTestWidget: the chosen mic through the call's processing,
+                // played back on the chosen output, with its level. It stops
+                // when the page goes (this rail is unloaded) or Settings
+                // closes; a call keeps sending its own mic meanwhile.
+                Component.onDestruction: Audio.stopMicTest()
+                Connections {
+                    target: SettingsNav
+                    function onOpenChanged() {
+                        if (!SettingsNav.open)
+                            Audio.stopMicTest()
+                    }
+                }
+                // The test's level, read while it runs (VoicePanel reads the
+                // call's while it shows).
+                Timer {
+                    interval: 33
+                    repeat: true
+                    running: Audio.micTesting
+                    onTriggered: Audio.sample()
+                }
+                // The meter beside the key when it fits at 160 px or more,
+                // else on the next line (the web's flex-wrap, min-w-40).
+                Flow {
+                    id: testRow
+                    readonly property real beside: width - testKey.width - spacing
                     width: parent.width
-                    value: Audio.autoSensitivity ? 69.5 : Audio.sensitivity + 100
-                    level: Audio.level
-                    metering: Audio.levelLive
+                    spacing: 12
+                    KitButton {
+                        id: testKey
+                        size: "lg"
+                        variant: Audio.micTesting ? "destructive" : "secondary"
+                        iconName: Audio.micTesting ? "stop" : "mic"
+                        text: Audio.micTesting ? qsTr("Stop test") : qsTr("Test mic")
+                        Accessible.checkable: true
+                        Accessible.checked: Audio.micTesting
+                        onClicked: Audio.micTesting ? Audio.stopMicTest() : Audio.startMicTest()
+                    }
+                    LevelMeter {
+                        width: testRow.beside >= 160 ? testRow.beside : testRow.width
+                        // As tall as the key beside it, so its cells sit on the key's middle.
+                        height: testRow.beside >= 160 ? testKey.height : implicitHeight
+                        value: Audio.autoSensitivity ? 69.5 : Audio.sensitivity + 100
+                        level: Audio.level
+                        metering: Audio.levelLive
+                    }
                 }
                 Text {
                     width: parent.width
                     textFormat: Text.PlainText
-                    text: !Audio.levelLive ? qsTr("Join a voice channel to see your level.")
+                    text: Audio.micTesting ? qsTr("You're hearing yourself as others will.")
+                        : !Audio.levelLive ? qsTr("Test your mic, or join a voice channel to see your level.")
                         : Voice.muted ? qsTr("Unmute to see your level.")
                         : qsTr("Talk to see your level.")
                     wrapMode: Text.Wrap

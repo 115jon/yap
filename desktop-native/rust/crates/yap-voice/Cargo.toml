@@ -31,6 +31,7 @@ tokio.workspace = true
 uuid = { version = "1.29.0", features = ["v4"] }
 yap-protocol.workspace = true
 yap-realtime.workspace = true
+yap-speaker.workspace = true
 
 # The call's own audio devices (src/engine/wasapi.rs): WASAPI capture and
 # render, as yap-capture's loopback uses them (same version, so one build).

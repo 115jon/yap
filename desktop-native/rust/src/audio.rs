@@ -5,7 +5,8 @@
 //! and handed to the call (`client::voice::set_call_audio`) and to the
 //! device module (`LibwebrtcEngine::choose_devices`). Device lists come
 //! from the ADM on a worker thread. The mic level is written by the call
-//! and read by QML with `sample()` while a meter shows.
+//! (or the mic test, `startMicTest`) and read by QML with `sample()` while
+//! a meter shows.
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -51,8 +52,11 @@ pub mod qobject {
         /// The mic level on the sensitivity scale (0..100), as of the last
         /// `sample()`.
         #[qproperty(f64, level)]
-        /// A call is reading the mic (the level is live).
+        /// A call or the mic test is reading the mic (the level is live).
         #[qproperty(bool, level_live, cxx_name = "levelLive")]
+        /// The mic test runs: the chosen mic, processed as a call does, is
+        /// played back on the chosen output (MicTestWidget).
+        #[qproperty(bool, mic_testing, cxx_name = "micTesting")]
         /// Bumped when any per-user setting changes (bind to it).
         #[qproperty(i32, peers_revision, cxx_name = "peersRevision")]
         /// The chosen camera (`default` or a camera id) and its name as it
@@ -240,9 +244,21 @@ pub mod qobject {
         #[cxx_name = "backgroundEffectInfo"]
         fn background_effect_info(self: &Audio) -> QString;
 
-        /// Copies the call's latest mic level into `level`.
+        /// Copies the latest mic level (the mic test's while it runs, else
+        /// the call's) into `level`.
         #[qinvokable]
         fn sample(self: Pin<&mut Audio>);
+
+        /// Starts the mic test (a no-op while it runs). Device and
+        /// processing changes apply to it as they are made.
+        #[qinvokable]
+        #[cxx_name = "startMicTest"]
+        fn start_mic_test(self: Pin<&mut Audio>);
+
+        /// Stops the mic test (leaving the page, closing Settings, Stop).
+        #[qinvokable]
+        #[cxx_name = "stopMicTest"]
+        fn stop_mic_test(self: Pin<&mut Audio>);
     }
 
     impl cxx_qt::Threading for Audio {}
@@ -343,6 +359,7 @@ pub struct AudioRust {
     sensitivity: f64,
     level: f64,
     level_live: bool,
+    mic_testing: bool,
     peers_revision: i32,
     camera_device: QString,
     camera_label: QString,
@@ -360,6 +377,7 @@ pub struct AudioRust {
     devices: AudioDevices,
     /// A device listing is running; a second request joins it.
     refreshing: bool,
+    mic_test: Option<yap_voice::MicTest>,
 }
 
 fn string_list(items: impl IntoIterator<Item = String>) -> QStringList {
@@ -423,16 +441,11 @@ fn choice(id: &str) -> Option<String> {
     (id != DEFAULT_DEVICE).then(|| id.to_owned())
 }
 
-/// Switches the ADM's devices off the GUI thread (its calls block). The
-/// output's name also goes to the soundboard and Listen Together player.
+/// Switches the devices off the GUI thread (the ADM's calls block). The
+/// output is the app speaker's (`yap-speaker`), so the call, the soundboard,
+/// Listen Together and the UI sounds all follow it.
 fn choose_devices(s: &VoiceSettings) {
     let (input, output) = (choice(&s.input_device_id), choice(&s.output_device_id));
-    crate::apps_audio::set_output_device(
-        output
-            .as_ref()
-            .map(|_| s.output_device_label.clone())
-            .filter(|label| !label.is_empty()),
-    );
     std::thread::spawn(move || {
         if let Some(line) = LibwebrtcEngine.choose_devices(input, output) {
             eprintln!("{line}");
@@ -526,10 +539,57 @@ impl qobject::Audio {
             .set_output_label(QString::from(output_label.as_str()));
     }
 
-    /// Saves (when signed in) and hands the settings to the call.
-    fn commit(self: Pin<&mut Self>) {
+    /// A saved device whose id is not listed but whose name is (an older
+    /// setting: the outside-call player matched outputs by name; or one
+    /// carried over from another client) moves to that endpoint's id, and
+    /// is saved. An unplugged device keeps its id (the default plays until
+    /// it is back).
+    fn migrate_devices(self: Pin<&mut Self>) {
+        let (d, s) = (&self.rust().devices, &self.rust().settings);
+        let moved = |list: &[yap_voice::AudioDevice], id: &str, label: &str| {
+            if id == DEFAULT_DEVICE || list.iter().any(|x| x.id == id) {
+                return None;
+            }
+            let endpoints: Vec<yap_speaker::Endpoint> = list
+                .iter()
+                .map(|x| yap_speaker::Endpoint {
+                    id: x.id.clone(),
+                    name: x.name.clone(),
+                })
+                .collect();
+            yap_speaker::match_endpoint(None, Some(label), &endpoints)
+                .map(|e| (e.id.clone(), e.name.clone()))
+        };
+        let input = moved(&d.inputs, &s.input_device_id, &s.input_device_label);
+        let output = moved(&d.outputs, &s.output_device_id, &s.output_device_label);
+        if input.is_none() && output.is_none() {
+            return;
+        }
+        self.edit(|s| {
+            if let Some((id, name)) = input {
+                eprintln!("[audio] input device {name:?}: saved by name, now by its id");
+                s.input_device_id = id;
+                s.input_device_label = name;
+            }
+            if let Some((id, name)) = output {
+                eprintln!("[audio] output device {name:?}: saved by name, now by its id");
+                s.output_device_id = id;
+                s.output_device_label = name;
+            }
+            choose_devices(s);
+        });
+    }
+
+    /// Saves (when signed in) and hands the settings to the call, and to
+    /// the mic test while it runs.
+    fn commit(mut self: Pin<&mut Self>) {
+        let audio = call_audio(&self.rust().settings, &self.rust().user_id);
+        let input = choice(&self.rust().settings.input_device_id);
+        if let Some(test) = self.as_mut().rust_mut().mic_test.as_mut() {
+            test.update(input, audio.processing);
+        }
         let this = self.rust();
-        set_call_audio(call_audio(&this.settings, &this.user_id));
+        set_call_audio(audio);
         if let (Some(dir), false) = (&this.dir, this.user_id.is_empty()) {
             if let Err(error) = voice::save_voice(dir, &this.user_id, &this.settings) {
                 eprintln!("[audio] could not save voice settings: {error}");
@@ -548,6 +608,7 @@ impl qobject::Audio {
         if user_id == self.rust().user_id && !user_id.is_empty() {
             return;
         }
+        self.as_mut().stop_mic_test();
         let settings = match (&self.rust().dir, user_id.is_empty()) {
             (Some(dir), false) => voice::load_voice(dir, &user_id),
             _ => VoiceSettings::default(),
@@ -577,7 +638,8 @@ impl qobject::Audio {
                 // Unchanged lists keep the menus' rows as they are.
                 if audio.rust().devices != devices {
                     audio.as_mut().rust_mut().devices = devices;
-                    audio.show_devices();
+                    audio.as_mut().show_devices();
+                    audio.migrate_devices();
                 }
             });
         });
@@ -851,8 +913,29 @@ impl qobject::Audio {
         }
     }
 
+    pub fn start_mic_test(mut self: Pin<&mut Self>) {
+        if self.rust().mic_test.is_some() {
+            return;
+        }
+        let s = &self.rust().settings;
+        let processing = call_audio(s, &self.rust().user_id).processing;
+        let test = yap_voice::MicTest::start(choice(&s.input_device_id), processing);
+        self.as_mut().rust_mut().mic_test = Some(test);
+        self.set_mic_testing(true);
+    }
+
+    pub fn stop_mic_test(mut self: Pin<&mut Self>) {
+        if self.as_mut().rust_mut().mic_test.take().is_some() {
+            self.as_mut().set_mic_testing(false);
+            self.sample();
+        }
+    }
+
     pub fn sample(mut self: Pin<&mut Self>) {
-        let level = f64::from_bits(LEVEL.load(Ordering::Relaxed));
+        let level = match &self.rust().mic_test {
+            Some(test) => test.level(),
+            None => f64::from_bits(LEVEL.load(Ordering::Relaxed)),
+        };
         let live = !level.is_nan();
         if live != self.rust().level_live {
             self.as_mut().set_level_live(live);

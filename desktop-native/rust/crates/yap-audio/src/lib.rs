@@ -12,10 +12,15 @@
 //! - [`Engine`] is a cheap `Clone + Send + Sync` handle. Every method only
 //!   sends a command over a channel and returns at once.
 //! - The engine thread (`yap-audio`), spawned on the first play or stream
-//!   load, owns the mixer and the output. It renders 20 ms blocks at 48 kHz
-//!   stereo `f32` and writes them to `waveOut` (four buffers, 80 ms of
-//!   latency). With nothing audible for 2 s it closes the device and sleeps
-//!   on the command channel. It exits when the last `Engine` clone drops.
+//!   load, owns the voices. The mixer is an input of the app's one speaker
+//!   (`yap-speaker`): the speaker's render thread pulls 10 ms of 48 kHz
+//!   stereo `f32` from it each period, sums it with the call's mix and the
+//!   UI sounds, and plays it through WASAPI at the voice settings' output
+//!   device. In a call the call's echo canceller hears that final mix as
+//!   its far end, so the soundboard and the stream are cancelled from the
+//!   mic. The engine thread wakes the speaker when something becomes
+//!   audible; the speaker closes the device after 2 s with nothing to play
+//!   (and no call). The thread exits when the last `Engine` clone drops.
 //! - Each encoded clip is decoded on a short-lived `yap-audio-decode`
 //!   thread, then handed to the engine thread.
 //! - The stream is fetched and decoded on its own `yap-audio-stream` thread,
@@ -28,7 +33,8 @@
 //!
 //! decode (symphonia; Opus through libopus) → stereo → resample to 48 kHz
 //! (rubato FFT) → per-voice gain ramps → the stream's loudness chain → sum →
-//! soft clip → 16-bit PCM → `waveOut`.
+//! soft clip → the speaker's bus (summed with the call and the UI sounds,
+//! a final soft clip under full scale) → 16-bit PCM → WASAPI.
 //!
 //! # Approximations
 //!
@@ -52,8 +58,8 @@
 //!   (the web glides them over 30 ms); the gain envelope smooths the result.
 //! - `max_duration_secs` counts played frames; the web's timer counts wall
 //!   time from the start, paused or not.
-//! - Positions report what the mixer has consumed; the ~80 ms of output
-//!   buffering is not subtracted.
+//! - Positions report what the mixer has consumed; the speaker's 10-20 ms
+//!   of device buffer and its stream latency are not subtracted.
 //! - After a seek in an Opus stream there is no 80 ms pre-roll, so the
 //!   first frames after the seek may be slightly off.
 //! - Channels beyond the first two are dropped; mono is copied to both.
@@ -65,7 +71,6 @@ mod engine;
 mod guard;
 mod mixer;
 mod opus;
-mod output;
 mod resample;
 mod stream;
 mod tone;

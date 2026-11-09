@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Yap local playback: soundboard clips, built-in tones and the Listen Together stream, decoded with symphonia, resampled to 48 kHz, mixed and played through waveOut. No Qt."
+description = "Yap local playback: soundboard clips, built-in tones and the Listen Together stream, decoded with symphonia, resampled to 48 kHz, mixed and played as an input of the app speaker (yap-speaker). No Qt."
 
 [features]
 default = []
@@ -21,9 +21,7 @@ symphonia = { version = "0.5.5", default-features = false, features = ["aac", "f
 tokio = { workspace = true, features = ["net"] }
 url = "2.5.8"
 yap-protocol.workspace = true
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Media", "Win32_Media_Audio", "Win32_System_Threading"] }
+yap-speaker.workspace = true
 
 [lints]
 workspace = true
