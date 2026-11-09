@@ -370,41 +370,10 @@ Rectangle {
         }
     }
 
-    // Joined: one tile per person, fitted to the stage (grid-columns.ts
-    // fitGrid): the column count that gives the largest 16:9 tile under
-    // both the width and the height, 8 px gaps; one tile stops at 640, and
-    // below 200 the grid keeps 200 and scrolls. A stage under 560 wide
-    // with 2-4 people fills its height instead (`usesPhoneFill`): two stack
-    // in one column, three or four sit 2 x 2, in whatever shape it gives.
+    // Joined: one tile per person, fitted to the stage (ShellState.fitGrid,
+    // grid-columns.ts fitGrid).
     function fitGrid(width, height, count) {
-        const gap = 8
-        const n = Math.max(1, count)
-        if (width > 0 && width < 560 && n >= 2 && n <= 4) {
-            const fillCols = n === 2 ? 1 : 2
-            const fillRows = Math.ceil(n / fillCols)
-            return {
-                cols: fillCols,
-                tileW: Math.max(0, Math.floor((width - (fillCols - 1) * gap) / fillCols)),
-                tileH: Math.max(0, Math.floor((height - (fillRows - 1) * gap) / fillRows)),
-                scrolls: false
-            }
-        }
-        let best = { cols: 1, tileW: 0, scrolls: false }
-        for (let cols = 1; cols <= n; cols++) {
-            const rows = Math.ceil(n / cols)
-            const byWidth = (width - (cols - 1) * gap) / cols
-            const byHeight = ((height - (rows - 1) * gap) / rows) * 16 / 9
-            const tileW = Math.floor(Math.min(byWidth, byHeight))
-            if (tileW > best.tileW)
-                best = { cols: cols, tileW: tileW, scrolls: false }
-        }
-        if (n === 1)
-            best.tileW = Math.min(best.tileW, 640)
-        if (best.tileW < 200) {
-            const cols = Math.max(1, Math.min(n, Math.floor((width + gap) / (200 + gap))))
-            return { cols: cols, tileW: Math.max(0, Math.floor((width - (cols - 1) * gap) / cols)), scrolls: true }
-        }
-        return best
+        return ShellState.fitGrid(width, height, count)
     }
 
     // The stagger of tiles made together (a join's first fill): each one
@@ -513,6 +482,7 @@ Rectangle {
                 required property bool video
                 required property string videoKey
                 required property bool hasAudio
+                required property string preview
                 anchors.fill: parent
                 active: tileId === ShellState.focusedTile
                 sourceComponent: FocusedStage { tile: slot }
@@ -561,7 +531,9 @@ Rectangle {
     // square keys in the dock recipe (ui/dock.ts): camera, share, a
     // divider, activities, soundboard, GIF & sticker reactions (and Listen
     // Together, a native key), a divider, then Leave, the one solid danger
-    // fill. Mic and deafen live on the account row, as on desktop web.
+    // fill. Mic and deafen live on the account row, as on desktop web;
+    // fullscreen hides that row, so the bar leads with them there
+    // (VoiceControls.tsx `ownsMicDeafen`).
     Rectangle {
         id: dock
         anchors.bottom: parent.bottom
@@ -573,6 +545,29 @@ Rectangle {
         Row {
             anchors.centerIn: parent
             spacing: 8
+            IconKey {
+                visible: ShellState.stageFullscreen
+                size: 48
+                iconName: "mic"
+                tone: Voice.muted || Audio.noMicrophone ? "off" : "rest"
+                enabled: !Audio.noMicrophone
+                opacity: enabled ? 1 : 0.45
+                tip: Audio.noMicrophone ? qsTr("No microphone detected")
+                    : Voice.muted ? qsTr("Unmute") : qsTr("Mute")
+                Accessible.checkable: true
+                Accessible.checked: Voice.muted
+                onClicked: Voice.requestMute(!Voice.muted)
+            }
+            IconKey {
+                visible: ShellState.stageFullscreen
+                size: 48
+                iconName: "deafen"
+                tone: Voice.deafened ? "off" : "rest"
+                tip: Voice.deafened ? qsTr("Undeafen") : qsTr("Deafen")
+                Accessible.checkable: true
+                Accessible.checked: Voice.deafened
+                onClicked: Voice.requestDeafen(!Voice.deafened)
+            }
             IconKey {
                 size: 48
                 iconName: "camera"

@@ -2,7 +2,7 @@ import QtQuick
 import com.yap.native
 
 // The tree's right-click menus (ChannelSidebar.tsx `useSidebarContextMenus`):
-//   channel   Invite to channel, Copy link; Mute channel and Notification settings (disabled,
+//   channel   Mark as read; Invite to channel, Copy link; Mute channel and Notification settings (disabled,
 //             as on the web); with Manage channels on it, Edit channel and
 //             Duplicate channel; with it server-wide, Create text channel;
 //             Copy channel ID; Delete channel
@@ -40,6 +40,14 @@ MenuPanel {
 
     ClipboardText { id: clipboard }
 
+    MenuRow {
+        visible: menu.onChannel
+        height: visible ? implicitHeight : 0
+        text: qsTr("Mark as read")
+        glyph: "markRead"
+        onTriggered: Chat.markChannelRead(menu.itemId)
+    }
+    MenuRule { visible: menu.onChannel; height: visible ? implicitHeight : 0 }
     MenuRow {
         visible: menu.onChannel
         height: visible ? implicitHeight : 0

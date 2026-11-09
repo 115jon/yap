@@ -342,13 +342,72 @@ Rectangle {
     // `row`: the message's delegate, for the dialog's preview card
     // (avatar, time, attachments, edited).
     function deleteMessage(id, author, text, confirm, row) {
-        if (confirm)
+        if (confirm) {
+            root.deletingRow = row ?? null
             deleteDialog.load()?.ask(id, author, text, row ? {
                 avatar: row.avatar, initials: row.initials, time: row.time,
                 edited: row.edited, attachments: row.mediaItems
             } : null)
-        else
+        } else {
+            root.fadeOutAndDelete(id, row)
+        }
+    }
+
+    // A message we delete fades out over dur-3-exit (motion.css
+    // rm-list-exit, 140 ms) before the store drops its row; the list has
+    // no remove transition (see the tree's note on view transitions). The
+    // row is gone with the delete, so nothing is put back, unless the store
+    // kept it (then the guard shows it again).
+    property Item deletingRow: null
+    function fadeOutAndDelete(id, row) {
+        if (!row || row.messageId !== id || deleteFade.running) {
             Chat.deleteMessage(id)
+            return
+        }
+        deleteFade.messageId = id
+        root.fadingRow = row
+        deleteFade.target = row
+        deleteFade.start()
+    }
+    // The row went while it faded (a rebuild, someone else's delete): the
+    // animation drops it at once, and the delete still goes out.
+    property Item fadingRow: null
+    onFadingRowChanged: {
+        if (fadingRow === null && deleteFade.running) {
+            deleteFade.stop()
+            deleteFade.target = null
+            Chat.deleteMessage(deleteFade.messageId)
+        }
+    }
+    NumberAnimation {
+        id: deleteFade
+        property string messageId
+        property: "opacity"
+        to: 0
+        duration: Theme.dur3Exit
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: Theme.easeOut
+        // The animation's target is not a guarded reference: it lets go of
+        // the row before the delete destroys it, and the guard keeps it in
+        // a typed property, which turns null with the row.
+        onFinished: {
+            root.fadedRow = target
+            root.fadingRow = null
+            target = null
+            Chat.deleteMessage(messageId)
+            deleteGuard.restart()
+        }
+    }
+    property Item fadedRow: null
+    Timer {
+        id: deleteGuard
+        interval: 1000
+        onTriggered: {
+            const row = root.fadedRow
+            root.fadedRow = null
+            if (row && row.messageId === deleteFade.messageId)
+                row.opacity = Qt.binding(() => row.dim ? 0.6 : 1)
+        }
     }
 
     Timer {
@@ -533,11 +592,14 @@ Rectangle {
     }
 
     // A DM's call area (DMCallRegion.tsx), above the messages.
+    // Expanded or with the chat hidden it covers the whole column, the
+    // header too (`absolute inset-0`).
     DmCallRegion {
         id: callRegion
-        anchors.top: strip.bottom
+        anchors.top: fills ? parent.top : strip.bottom
+        z: fills ? 6 : 0
         width: parent.width
-        height: implicitHeight
+        height: fills ? parent.height : implicitHeight
     }
 
     // VirtualMessageList.tsx MessageSkeleton while the first page loads
@@ -1413,7 +1475,11 @@ Rectangle {
     LazyPopup {
         id: deleteDialog
         sourceComponent: DeleteDialog {
-            onConfirmed: id => Chat.deleteMessage(id)
+            onConfirmed: id => {
+                const row = root.deletingRow
+                root.deletingRow = null
+                root.fadeOutAndDelete(id, row)
+            }
             onClosed: composer.focusInput()
         }
     }

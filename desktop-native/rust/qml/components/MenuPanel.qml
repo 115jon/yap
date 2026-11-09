@@ -4,7 +4,9 @@ import com.yap.native
 
 // The menu panel (ui/menu.ts): ply-3 with a 1 px line-strong edge and a
 // 2 px ink-1 top rule, 4 px padding, 200-280 wide. Rows are MenuRow. Opens
-// with scale 0.97 and a fade over 200 ms (exit 140).
+// with scale 0.97 and a fade over 200 ms (exit 140), grown from the corner
+// it opens at (the web's `--transform-origin`): the top left, where a
+// menu opened at the pointer or under its key starts.
 T.Menu {
     id: control
 
@@ -19,6 +21,7 @@ T.Menu {
     topPadding: 6
     margins: 8
     overlap: 0
+    transformOrigin: T.Popup.TopLeft
 
     delegate: MenuRow {}
 

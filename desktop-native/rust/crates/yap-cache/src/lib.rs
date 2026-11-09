@@ -73,6 +73,8 @@ pub struct Snapshot {
     /// The text channel each server opens on, and the last DM under `@me`
     /// (the web's `lastActiveChannels:<userId>`).
     pub last_channels: Vec<(String, String)>,
+    /// The sidebar's collapsed categories (ids), across servers.
+    pub collapsed_categories: Vec<String>,
 }
 
 /// One replacement for part of a user's snapshot. Each replaces what was
@@ -107,6 +109,8 @@ pub enum Write {
         server_id: String,
         channel_id: String,
     },
+    /// The collapsed categories, the whole set.
+    Collapsed(Vec<String>),
 }
 
 /// `%LOCALAPPDATA%\YapNative\cache\snapshot.db` (under the profile's folder

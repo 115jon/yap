@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Templates as T
 import Yap.Chrome
 import com.yap.native
 
@@ -24,6 +25,8 @@ MenuPanel {
 
     signal voiceSettings()
 
+    // Above its caret: it grows up from there.
+    transformOrigin: T.Popup.BottomLeft
     function openAbove(anchor) {
         parent = anchor
         x = 0

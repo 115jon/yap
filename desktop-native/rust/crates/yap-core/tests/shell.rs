@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 use yap_core::shell::{BadgeView, Sound, ToastView};
-use yap_core::store::view::{MemberListRow, MemberRole};
+use yap_core::store::view::{ChannelTreeRow, MemberListRow, MemberRole, TreeKind};
 use yap_core::store::{
     reduce, ApiRequest, Command, Dispatch, Effect, GatewayEvent, Input, RequestId, State, ViewDiff,
     ViewUpdate,
@@ -40,6 +40,8 @@ struct Client {
     state: State,
     asked: Vec<(RequestId, ApiRequest)>,
     members: Vec<MemberListRow>,
+    /// The channel tree as the view holds it.
+    tree: Vec<ChannelTreeRow>,
     /// The badge as last emitted.
     badge: BadgeView,
 }
@@ -54,6 +56,9 @@ impl Client {
                     assert!(diff.clone().apply(&mut self.members), "{diff:?}");
                 }
                 Effect::View(ViewUpdate::Badge(badge)) => self.badge = badge.clone(),
+                Effect::View(ViewUpdate::Channels(diff)) => {
+                    assert!(diff.clone().apply(&mut self.tree), "{diff:?}");
+                }
                 _ => {}
             }
         }
@@ -92,6 +97,7 @@ impl Client {
             state: State::new(BASE),
             asked: Vec::new(),
             members: Vec::new(),
+            tree: Vec::new(),
             badge: BadgeView::default(),
         };
         client.command(Command::UseToken("tok_fixture".into()));
@@ -607,6 +613,112 @@ fn mark_server_read_should_leave_other_servers_alone() {
     let fx = client.command(Command::MarkServerRead(SERVER_TWO.into()));
     assert!(
         !fx.iter().any(|e| matches!(e, Effect::Http { .. })),
+        "{fx:#?}"
+    );
+}
+
+// The sidebar's collapsed categories and the channel menu's Mark as read.
+
+const TEXT_CATEGORY: &str = "cat_fixture_text";
+const VOICE_CATEGORY: &str = "cat_fixture_voice";
+
+fn folded(client: &Client) -> Vec<(TreeKind, String, bool)> {
+    client
+        .tree
+        .iter()
+        .map(|r| (r.kind, r.id.clone(), r.folded))
+        .collect()
+}
+
+fn cache_writes(fx: &[Effect]) -> Vec<&yap_core::store::CacheWrite> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::CacheWrite { write, .. } => Some(write),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn toggling_a_category_should_fold_its_label_and_channels_only() {
+    let mut client = Client::online();
+    client.command(Command::ToggleCategory(VOICE_CATEGORY.into()));
+    assert_eq!(
+        folded(&client),
+        [
+            (TreeKind::Label, TEXT_CATEGORY.to_owned(), false),
+            (TreeKind::Channel, TEXT.to_owned(), false),
+            (TreeKind::Label, VOICE_CATEGORY.to_owned(), true),
+            (TreeKind::Channel, VOICE.to_owned(), true),
+        ]
+    );
+    client.command(Command::ToggleCategory(VOICE_CATEGORY.into()));
+    assert!(folded(&client).iter().all(|(_, _, f)| !f));
+}
+
+#[test]
+fn toggling_a_category_should_store_the_whole_set() {
+    let mut client = Client::online();
+    client.command(Command::ToggleCategory(VOICE_CATEGORY.into()));
+    let fx = client.command(Command::ToggleCategory(TEXT_CATEGORY.into()));
+    assert_eq!(
+        cache_writes(&fx),
+        [&yap_core::store::CacheWrite::Collapsed(vec![
+            TEXT_CATEGORY.to_owned(),
+            VOICE_CATEGORY.to_owned()
+        ])]
+    );
+    let fx = client.command(Command::ToggleCategory(VOICE_CATEGORY.into()));
+    assert_eq!(
+        cache_writes(&fx),
+        [&yap_core::store::CacheWrite::Collapsed(vec![TEXT_CATEGORY.to_owned()])]
+    );
+}
+
+#[test]
+fn a_collapsed_category_should_outlive_a_server_switch() {
+    let mut client = Client::online();
+    client.command(Command::ToggleCategory(VOICE_CATEGORY.into()));
+    client.command(Command::SelectServer(SERVER_TWO.into()));
+    client.command(Command::SelectServer(SERVER.into()));
+    let channels = ApiRequest::Channels {
+        server_id: SERVER.into(),
+    };
+    client.respond(&channels, fixture("channels-response.json"));
+    let voice = client.tree.iter().find(|r| r.id == VOICE).expect("voice row");
+    assert!(voice.folded);
+}
+
+#[test]
+fn signing_out_should_forget_the_collapsed_categories() {
+    let mut client = Client::online();
+    client.command(Command::ToggleCategory(VOICE_CATEGORY.into()));
+    client.command(Command::SignOut);
+    assert!(client.state.collapsed_categories().is_empty());
+}
+
+#[test]
+fn mark_channel_read_should_read_another_channel() {
+    let mut client = Client::online();
+    client.message("m9", VOICE, ALICE, "lunch?");
+    let fx = client.command(Command::MarkChannelRead(VOICE.into()));
+    let read = fx.iter().any(|e| {
+        matches!(e, Effect::Http { request: ApiRequest::MarkRead { channel_id }, .. }
+            if channel_id == VOICE)
+    });
+    assert!(read, "{fx:#?}");
+    let voice = client.tree.iter().find(|r| r.id == VOICE).expect("voice row");
+    assert!(!voice.unread);
+}
+
+#[test]
+fn mark_channel_read_should_skip_a_read_channel() {
+    let mut client = Client::online();
+    client.message("m9", VOICE, ALICE, "lunch?");
+    client.command(Command::MarkChannelRead(VOICE.into()));
+    let fx = client.command(Command::MarkChannelRead(VOICE.into()));
+    assert!(
+        !fx.iter().any(|e| matches!(e, Effect::Http { request: ApiRequest::MarkRead { .. }, .. })),
         "{fx:#?}"
     );
 }

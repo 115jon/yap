@@ -517,6 +517,7 @@ fn snapshot(cached: Vec<Value>) -> Snapshot {
         voice: None,
         scroll_positions: Vec::new(),
         last_channels: vec![(SERVER_TWO.into(), TWO_SECOND.into())],
+        collapsed_categories: Vec::new(),
     }
 }
 
@@ -549,6 +550,33 @@ fn a_page_that_overlaps_the_cached_rows_should_keep_the_older_ones() {
     let shown = ids(&client.state);
     assert_eq!(shown.len(), 58);
     assert_eq!(shown.first().map(String::as_str), Some("m000"));
+}
+
+#[test]
+fn a_snapshot_should_bring_back_the_collapsed_categories() {
+    let mut last = snapshot(history(TEXT, "m", 0, 2));
+    last.collapsed_categories = vec!["cat_fixture_voice".into()];
+    let (client, fx) = launch(last);
+    let rows = views(&fx)
+        .into_iter()
+        .rev()
+        .find_map(|v| match v {
+            ViewUpdate::Channels(ViewDiff::Reset(rows)) if !rows.is_empty() => Some(rows.clone()),
+            _ => None,
+        })
+        .expect("the cached tree");
+    let folded: Vec<(&str, bool)> = rows.iter().map(|r| (r.id.as_str(), r.folded)).collect();
+    assert_eq!(
+        folded,
+        [
+            ("cat_fixture_text", false),
+            ("chan_fixture_text", false),
+            (SECOND, false),
+            ("cat_fixture_voice", true),
+            ("chan_fixture_voice", true),
+        ]
+    );
+    assert!(client.state.collapsed_categories().contains("cat_fixture_voice"));
 }
 
 #[test]

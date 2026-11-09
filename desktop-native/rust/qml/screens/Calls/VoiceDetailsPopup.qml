@@ -12,7 +12,7 @@ import com.yap.native
 // tab. The footer says Encrypted while connected, with Debug and Copy
 // stats. Debug turns the popup into "Voice debug" (VoiceDebugScreen.tsx's
 // Transport, Outbound and Inbound, from the same stats; the web's own is
-// a full-screen overlay). Numbers come from the call's 5 s stats.
+// a full-screen overlay). Numbers come from the call's 2 s stats.
 Popup {
     id: root
 
@@ -889,7 +889,7 @@ Popup {
                 }
 
                 // Voice debug: VoiceDebugScreen.tsx's Transport, Outbound and
-                // Inbound sections, from the same 5 s stats.
+                // Inbound sections, from the same 2 s stats.
                 Column {
                     visible: root.debug
                     x: 16

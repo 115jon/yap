@@ -130,6 +130,12 @@ pub enum Command {
     SetFocused(bool),
     /// Mark the open channel read and drop its "New" divider.
     MarkRead,
+    /// The channel menu's Mark as read (ChannelSidebar.tsx
+    /// `markChannelRead`): that channel, open or not.
+    MarkChannelRead(String),
+    /// A category label's click: collapse it, or expand it again
+    /// (ChannelSidebar.tsx `TOGGLE_CATEGORY`).
+    ToggleCategory(String),
     /// Adds the user's reaction, or removes it when it is there.
     ToggleReaction {
         message_id: String,

@@ -59,6 +59,7 @@ Flow {
             T.Popup {
                 id: popover
                 y: plus.height + 8
+                transformOrigin: T.Popup.TopLeft
                 width: 240
                 padding: 12
                 focus: true

@@ -40,6 +40,10 @@ Loader {
     required property string statusChannel
     required property int occupants
     required property double startedAt
+    // Under a collapsed category (a label: collapsed itself).
+    required property bool folded
+    // Members: their share's still, for the stream card.
+    required property string preview
     // The open channel (text, or a voice channel's view) and the joined call.
     required property string activeId
     required property string callId
@@ -53,13 +57,33 @@ Loader {
 
     sourceComponent: kind === "label" ? labelRow : kind === "member" ? memberRow : channelRow
 
+    // Collapse (ChannelSidebar.tsx `hidden`, motion.css rm-collapse): a row
+    // under a collapsed category folds to no height and fades, except the
+    // open channel and the call (and the call's people). It eases only
+    // while a label's click runs (ShellState.folding), so a pooled row
+    // reused for another one takes its value at once; the value always
+    // ends at the binding, so nothing is left half folded.
+    readonly property string ownerId: kind === "member" ? itemId.slice(0, itemId.indexOf("/")) : itemId
+    readonly property bool hidden: folded && kind !== "label" && ownerId !== activeId && ownerId !== callId
+    property real openness: hidden ? 0 : 1
+    Behavior on openness {
+        enabled: ShellState.folding
+        NumberAnimation { duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+    }
+    Accessible.ignored: hidden
+
     Component {
         id: labelRow
         CategoryLabel {
             width: cell.width
             name: cell.name
             first: cell.index === 0
+            collapsed: cell.folded
             onMenuRequested: (row, at) => cell.menuRequested(row, at)
+            onToggled: {
+                ShellState.foldStarted()
+                Chat.toggleCategory(cell.itemId)
+            }
         }
     }
 
@@ -67,6 +91,10 @@ Loader {
         id: memberRow
         Column {
             width: cell.width
+            height: Math.round(implicitHeight * cell.openness)
+            clip: cell.openness < 1
+            opacity: cell.openness
+            visible: cell.openness > 0
             MemberRow {
                 width: cell.width
                 // Member rows are keyed `<channel>/<user>`.
@@ -84,6 +112,7 @@ Loader {
                 last: cell.last
                 lit: cell.lit
                 reconnecting: cell.reconnecting
+                preview: cell.preview
             }
             ListenLine {}
             StatusLines {}
@@ -94,6 +123,10 @@ Loader {
         id: channelRow
         Column {
             width: cell.width
+            height: Math.round(implicitHeight * cell.openness)
+            clip: cell.openness < 1
+            opacity: cell.openness
+            visible: cell.openness > 0
             ChannelRow {
                 width: cell.width
                 name: cell.name

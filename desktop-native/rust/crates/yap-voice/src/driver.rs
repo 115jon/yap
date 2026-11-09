@@ -136,6 +136,13 @@ const VIDEO_SESSION_DRAIN: Duration = Duration::from_secs(3);
 /// not a frozen share).
 const SHARE_ENCODER_CHECK: Duration = Duration::from_millis(500);
 
+/// The stats tick: the voice details' samples (the web's useVoiceStats.ts
+/// 2 s, so its 24 samples span 48 s).
+pub const STATS_EVERY: Duration = Duration::from_secs(2);
+
+/// The stats line goes to the log at most this often.
+const STATS_LOG_EVERY: Duration = Duration::from_secs(5);
+
 /// Mids of a video session's pulls carry its number: `v<n>:<mid>`.
 fn video_mid(mid: &str) -> Option<(u32, &str)> {
     let rest = mid.strip_prefix('v')?;
@@ -238,6 +245,8 @@ struct Io<'a, E: MediaEngine, T, S: ShareCapturer> {
     meter: EnergyMeter,
     /// The VAD's clock.
     started: Instant,
+    /// When the stats line last went to the log.
+    stats_logged: Option<Instant>,
 }
 
 enum Applied {
@@ -282,6 +291,7 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
             timers: Vec::new(),
             meter: EnergyMeter::default(),
             started: Instant::now(),
+            stats_logged: None,
         }
     }
 
@@ -342,7 +352,7 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
                     Applied::End(reason) => return reason,
                 }
             }
-            let stats = stats.get_or_insert_with(|| tokio::time::interval(Duration::from_secs(5)));
+            let stats = stats.get_or_insert_with(|| tokio::time::interval(STATS_EVERY));
             let next_timer = self.timers.iter().map(|(at, _)| *at).min();
             let input = tokio::select! {
                 event = recv(&mut inbox.room) => match event {
@@ -603,7 +613,10 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
                 if let Some(session) = &self.session {
                     match session.stats().await {
                         Ok(stats) => {
-                            eprintln!("{}", stats.line);
+                            if self.stats_logged.is_none_or(|at| at.elapsed() >= STATS_LOG_EVERY) {
+                                self.stats_logged = Some(Instant::now());
+                                eprintln!("{}", stats.line);
+                            }
                             let at_ms = u64::try_from(self.started.elapsed().as_millis())
                                 .unwrap_or(u64::MAX);
                             return Applied::Input(Input::Stats { stats, at_ms });

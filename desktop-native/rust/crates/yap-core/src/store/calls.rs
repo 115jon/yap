@@ -115,9 +115,9 @@ pub struct CallStats {
     pub window_s: u32,
 }
 
-/// The stats tick, seconds: what one sample counts for before a second
-/// one shows the real gap (the web's 2 s default is its own tick).
-pub const STATS_TICK_S: u32 = 5;
+/// The stats tick, seconds (yap-voice `STATS_EVERY`, the web's 2 s): what
+/// one sample counts for before a second one shows the real gap.
+pub const STATS_TICK_S: u32 = 2;
 
 /// The chart's samples and window from raw ticks, oldest first: each tick
 /// is when it was taken (ms) and `[bitrate, loss, jitter, rtt]`

@@ -234,6 +234,13 @@ rows! {
         /// (ms; 0 when unknown).
         occupants: i64 => Occupants "occupants",
         started_at: i64 => StartedAt "startedAt",
+        /// Labels: the category is collapsed; channels and members: the
+        /// category they are under is (the open channel and the call stay
+        /// shown, which the sidebar decides).
+        folded: bool => Folded "folded",
+        /// Members: their share's still (a `data:image/` URL), or empty
+        /// (the stream hover card's preview).
+        preview: String => Preview "preview",
     }
     key(row) -> (TreeKind, String) { (row.kind, row.id.clone()) }
 
@@ -730,6 +737,8 @@ pub struct ProfileView {
     /// colours (`#rrggbb` or empty) pairwise.
     pub role_names: Vec<String>,
     pub role_colors: Vec<String>,
+    /// Their ids, in the same order (a chip's remove key).
+    pub role_ids: Vec<String>,
     /// The signed-in user's own card.
     pub me: bool,
     /// The avatar decoration (APNG), or empty.
@@ -1683,6 +1692,8 @@ fn plain_row(kind: TreeKind, id: &str, name: &str) -> ChannelTreeRow {
         status_channel: String::new(),
         occupants: 0,
         started_at: 0,
+        folded: false,
+        preview: String::new(),
     }
 }
 
@@ -1713,6 +1724,11 @@ fn member_rows(channel_id: &str, seats: &[Seat]) -> Vec<ChannelTreeRow> {
             deafened: seat.deafened,
             live: seat.live,
             video: seat.video,
+            preview: if seat.live {
+                seat.preview.clone()
+            } else {
+                String::new()
+            },
             first: i == 0,
             last: i + 1 == seats.len(),
             lit: match you {
@@ -2527,6 +2543,7 @@ pub(super) fn profile_view(
             .iter()
             .map(|r| r.color.clone().unwrap_or_default())
             .collect(),
+        role_ids: custom.iter().map(|r| r.id.clone()).collect(),
         me: !me_id.is_empty() && user.id == me_id,
         deco: collectibles::decoration_url(user.avatar_display.as_ref()),
         effect: non_null(collectibles::effect_json(user.avatar_display.as_ref())),

@@ -44,6 +44,9 @@ QtObject {
     property string focusedTile: ""
     property string stageParticipant: ""
     property bool stageFullscreen: false
+    // A DM call's Expand call (DMCallRegion.tsx `isExpanded`): the call
+    // covers the shell under the title bar (no rail, sidebar or panels).
+    property bool callExpanded: false
     // What the stage header says about it ("Linus's Stream", Live).
     property string stageLabel: ""
     // Whose it is: their name (the avatar's initials) and picture.
@@ -64,6 +67,56 @@ QtObject {
     // The card's Queue key: the Listen Together panel opens above `anchor`
     // (Shell hosts it, so it opens off the stage too).
     signal listenPanelRequested(Item anchor)
+
+    // A category label was clicked: the tree's rows ease their fold for
+    // the next 300 ms (dur-3 and a frame or two), and take any other
+    // change at once.
+    property bool folding: false
+    readonly property Timer foldTimer: Timer {
+        interval: 300
+        onTriggered: state.folding = false
+    }
+    function foldStarted() {
+        folding = true
+        foldTimer.restart()
+    }
+
+    // Joined: one tile per person, fitted to the stage (grid-columns.ts
+    // fitGrid): the column count that gives the largest 16:9 tile under
+    // both the width and the height, 8 px gaps; one tile stops at 640, and
+    // below 200 the grid keeps 200 and scrolls. A stage under 560 wide
+    // with 2-4 people fills its height instead (`usesPhoneFill`): two stack
+    // in one column, three or four sit 2 x 2, in whatever shape it gives.
+    function fitGrid(width, height, count) {
+        const gap = 8
+        const n = Math.max(1, count)
+        if (width > 0 && width < 560 && n >= 2 && n <= 4) {
+            const fillCols = n === 2 ? 1 : 2
+            const fillRows = Math.ceil(n / fillCols)
+            return {
+                cols: fillCols,
+                tileW: Math.max(0, Math.floor((width - (fillCols - 1) * gap) / fillCols)),
+                tileH: Math.max(0, Math.floor((height - (fillRows - 1) * gap) / fillRows)),
+                scrolls: false
+            }
+        }
+        let best = { cols: 1, tileW: 0, scrolls: false }
+        for (let cols = 1; cols <= n; cols++) {
+            const rows = Math.ceil(n / cols)
+            const byWidth = (width - (cols - 1) * gap) / cols
+            const byHeight = ((height - (rows - 1) * gap) / rows) * 16 / 9
+            const tileW = Math.floor(Math.min(byWidth, byHeight))
+            if (tileW > best.tileW)
+                best = { cols: cols, tileW: tileW, scrolls: false }
+        }
+        if (n === 1)
+            best.tileW = Math.min(best.tileW, 640)
+        if (best.tileW < 200) {
+            const cols = Math.max(1, Math.min(n, Math.floor((width + gap) / (200 + gap))))
+            return { cols: cols, tileW: Math.max(0, Math.floor((width - (cols - 1) * gap) / cols)), scrolls: true }
+        }
+        return best
+    }
 
     function toggleFocus(tileId) {
         focusedTile = focusedTile === tileId ? "" : tileId

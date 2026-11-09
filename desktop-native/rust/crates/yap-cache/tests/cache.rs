@@ -134,6 +134,7 @@ fn a_snapshot_should_round_trip_through_the_file() {
             voice: None,
             scroll_positions: Vec::new(),
             last_channels: Vec::new(),
+            collapsed_categories: Vec::new(),
         }
     );
 }
@@ -437,14 +438,71 @@ fn a_version_3_cache_should_be_upgraded_in_place() {
     // What version 3 had: no last_channels table.
     {
         let conn = Connection::open(&path).expect("raw");
-        conn.execute_batch("DROP TABLE last_channels; PRAGMA user_version = 3;")
-            .expect("downgrade");
+        conn.execute_batch(
+            "DROP TABLE last_channels; DROP TABLE collapsed_categories; PRAGMA user_version = 3;",
+        )
+        .expect("downgrade");
     }
     let cache = Cache::open(&path).expect("upgrade");
     assert_eq!(cache.schema_version().expect("version"), SCHEMA_VERSION);
     let snapshot = load(&cache, ALICE).expect("kept");
     assert_eq!(snapshot.messages.len(), 3);
     assert!(snapshot.last_channels.is_empty());
+    assert!(snapshot.collapsed_categories.is_empty());
+}
+
+#[test]
+fn a_version_4_cache_should_be_upgraded_in_place() {
+    let (_dir, path) = temp();
+    let mut cache = Cache::open(&path).expect("open");
+    write_snapshot(&mut cache, ALICE, 1_000);
+    drop(cache);
+    // What version 4 had: no collapsed_categories table.
+    {
+        let conn = Connection::open(&path).expect("raw");
+        conn.execute_batch("DROP TABLE collapsed_categories; PRAGMA user_version = 4;")
+            .expect("downgrade");
+    }
+    let mut cache = Cache::open(&path).expect("upgrade");
+    assert_eq!(cache.schema_version().expect("version"), SCHEMA_VERSION);
+    assert_eq!(load(&cache, ALICE).expect("kept").messages.len(), 3);
+    let mut batch = Batch::default();
+    batch.push(ALICE, Write::Collapsed(vec!["cat_a".into()]));
+    cache.apply_at(batch, 2_000).expect("apply");
+    assert_eq!(
+        load(&cache, ALICE).expect("snapshot").collapsed_categories,
+        ["cat_a"]
+    );
+}
+
+#[test]
+fn collapsed_categories_should_replace_the_set_per_user() {
+    let (_dir, path) = temp();
+    let mut cache = Cache::open(&path).expect("open");
+    write_snapshot(&mut cache, ALICE, 1_000);
+    write_snapshot(&mut cache, BOB, 1_000);
+    let mut batch = Batch::default();
+    batch.push(ALICE, Write::Collapsed(vec!["cat_b".into(), "cat_a".into()]));
+    batch.push(BOB, Write::Collapsed(vec!["cat_z".into()]));
+    cache.apply_at(batch, 2_000).expect("apply");
+    let mut batch = Batch::default();
+    batch.push(ALICE, Write::Collapsed(vec!["cat_b".into()]));
+    cache.apply_at(batch, 3_000).expect("apply");
+    let reopened = reopen(&path);
+    assert_eq!(
+        load(&reopened, ALICE).expect("alice").collapsed_categories,
+        ["cat_b"]
+    );
+    assert_eq!(
+        load(&reopened, BOB).expect("bob").collapsed_categories,
+        ["cat_z"]
+    );
+    cache.clear(ALICE).expect("clear");
+    write_snapshot(&mut cache, ALICE, 4_000);
+    assert!(load(&cache, ALICE)
+        .expect("snapshot")
+        .collapsed_categories
+        .is_empty());
 }
 
 #[test]

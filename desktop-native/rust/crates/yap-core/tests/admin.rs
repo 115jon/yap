@@ -891,6 +891,39 @@ fn giving_a_role_should_show_at_once() {
 }
 
 #[test]
+fn taking_a_role_should_drop_it_at_once_and_send_the_rest() {
+    let mut client = Client::owner();
+    with_roles(&mut client);
+    client.command(AdminCommand::ToggleMemberRole {
+        user_id: ALICE.into(),
+        role_id: MOD.into(),
+    });
+    client.answer(
+        |r| matches!(r, ApiRequest::Admin(AdminRequest::SetMemberRoles { .. })),
+        |r| r.decode(json!([everyone(), role(MOD, "Mods", perm::KICK_MEMBERS, 1, false)])),
+    );
+    let fx = client.command(AdminCommand::ToggleMemberRole {
+        user_id: ALICE.into(),
+        role_id: MOD.into(),
+    });
+    let sent = fx.iter().find_map(|e| match e {
+        Effect::Http {
+            request: ApiRequest::Admin(AdminRequest::SetMemberRoles { role_ids, .. }),
+            ..
+        } => Some(role_ids.clone()),
+        _ => None,
+    });
+    assert_eq!(sent, Some(vec![EVERYONE.to_owned()]));
+    let alice = client
+        .view
+        .members
+        .iter()
+        .find(|m| m.id == ALICE)
+        .expect("alice");
+    assert_eq!(alice.role_ids, [EVERYONE]);
+}
+
+#[test]
 fn a_refused_role_change_should_roll_back() {
     let mut client = Client::owner();
     with_roles(&mut client);

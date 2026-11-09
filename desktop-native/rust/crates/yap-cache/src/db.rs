@@ -16,7 +16,7 @@ use crate::{
 /// Bumped whenever the tables or the JSON in them change shape. A version
 /// with a migration below is upgraded in place; any other version on disk
 /// is dropped and recreated.
-pub const SCHEMA_VERSION: i32 = 4;
+pub const SCHEMA_VERSION: i32 = 5;
 
 /// Version 3 to 4: the channel each server opens on.
 const MIGRATE_3_TO_4: &str = "
@@ -25,6 +25,15 @@ CREATE TABLE last_channels (
     server_id  TEXT NOT NULL,
     channel_id TEXT NOT NULL,
     PRIMARY KEY (user_id, server_id)
+) WITHOUT ROWID;
+";
+
+/// Version 4 to 5: the sidebar's collapsed categories.
+const MIGRATE_4_TO_5: &str = "
+CREATE TABLE collapsed_categories (
+    user_id     TEXT NOT NULL,
+    category_id TEXT NOT NULL,
+    PRIMARY KEY (user_id, category_id)
 ) WITHOUT ROWID;
 ";
 
@@ -69,6 +78,11 @@ CREATE TABLE last_channels (
     channel_id TEXT NOT NULL,
     PRIMARY KEY (user_id, server_id)
 ) WITHOUT ROWID;
+CREATE TABLE collapsed_categories (
+    user_id     TEXT NOT NULL,
+    category_id TEXT NOT NULL,
+    PRIMARY KEY (user_id, category_id)
+) WITHOUT ROWID;
 ";
 
 /// Coalesced writes: per user, the newest value per key, plus whether the
@@ -90,6 +104,8 @@ struct UserBatch {
     messages: HashMap<String, Vec<Message>>,
     scroll: HashMap<String, String>,
     last_channels: HashMap<String, String>,
+    /// The whole set of collapsed categories, replacing what is stored.
+    collapsed: Option<Vec<String>>,
 }
 
 impl UserBatch {
@@ -102,6 +118,7 @@ impl UserBatch {
             || !self.messages.is_empty()
             || !self.scroll.is_empty()
             || !self.last_channels.is_empty()
+            || self.collapsed.is_some()
     }
 }
 
@@ -142,6 +159,7 @@ impl Batch {
             } => {
                 user.last_channels.insert(server_id, channel_id);
             }
+            Write::Collapsed(ids) => user.collapsed = Some(ids),
         }
     }
 
@@ -230,7 +248,9 @@ impl Cache {
         let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         let mut cache = Self { conn };
         if version == 3 {
-            cache.migrate(MIGRATE_3_TO_4)?;
+            cache.migrate(&format!("{MIGRATE_3_TO_4}{MIGRATE_4_TO_5}"))?;
+        } else if version == 4 {
+            cache.migrate(MIGRATE_4_TO_5)?;
         } else if version != SCHEMA_VERSION {
             cache.recreate()?;
         }
@@ -374,6 +394,14 @@ impl Cache {
             })?;
             rows.collect::<Result<Vec<_>, _>>()?
         };
+        let collapsed_categories = {
+            let mut query = self.conn.prepare(
+                "SELECT category_id FROM collapsed_categories WHERE user_id = ?1
+                 ORDER BY category_id",
+            )?;
+            let rows = query.query_map([user_id], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
         Ok(Some(Snapshot {
             me,
             servers,
@@ -385,6 +413,7 @@ impl Cache {
             voice: voice.as_deref().and_then(decode),
             scroll_positions,
             last_channels,
+            collapsed_categories,
         }))
     }
 
@@ -441,6 +470,7 @@ fn delete_user(tx: &Transaction<'_>, user_id: &str) -> Result<(), CacheError> {
         "messages",
         "scroll_positions",
         "last_channels",
+        "collapsed_categories",
     ] {
         tx.execute(
             &format!("DELETE FROM {table} WHERE user_id = ?1"),
@@ -500,6 +530,18 @@ fn write_user(
              VALUES (?1, ?2, ?3)",
             params![user_id, server_id, channel_id],
         )?;
+    }
+    if let Some(ids) = &user.collapsed {
+        tx.execute(
+            "DELETE FROM collapsed_categories WHERE user_id = ?1",
+            [user_id],
+        )?;
+        let mut insert = tx.prepare_cached(
+            "INSERT OR IGNORE INTO collapsed_categories (user_id, category_id) VALUES (?1, ?2)",
+        )?;
+        for id in ids {
+            insert.execute(params![user_id, id])?;
+        }
     }
     for (server_id, tree) in &user.channels {
         tx.execute(

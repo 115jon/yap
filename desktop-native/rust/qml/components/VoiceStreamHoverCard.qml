@@ -5,8 +5,9 @@ import com.yap.native
 // VoiceStreamHoverCard.tsx: hovering someone live in the sidebar's voice
 // roster. A 292 px ply-3 card (line edge, float shadow, 12 padding):
 // "Streaming now" with the Live badge, the 16:10 preview (your own share's
-// capture; for others the quiet ply-2 placeholder: the live glyph in a
-// live-tint well, "<name> is live" and "Preview syncing now..."), then
+// capture; for others their still from the roster, object-cover, or until
+// one comes the quiet ply-2 placeholder: the live glyph in a live-tint well,
+// "<name> is live" and "Preview syncing now..."), then
 // Watch stream (Open stream for your own). Placed 12 px right of the row,
 // centred on it, kept 12 px inside the window (ChannelSidebar.tsx
 // `openStreamPreview`); it stays open while the pointer is on it and
@@ -16,6 +17,8 @@ T.Popup {
 
     property string name
     property bool me: false
+    // Their share's still (`stream_preview_url`, a data: URL), or empty.
+    property string preview: ""
     // The row it belongs to.
     property Item anchorItem: null
     readonly property bool held: cardHover.hovered
@@ -118,8 +121,23 @@ T.Popup {
                 active: card.me && card.visible
                 sourceComponent: VideoSurface { videoKey: "local-screen" }
             }
+            Loader {
+                anchors.fill: parent
+                anchors.margins: 1
+                active: !card.me && card.preview.length > 0 && card.visible
+                sourceComponent: Image {
+                    source: card.preview
+                    fillMode: Image.PreserveAspectCrop
+                    clip: true
+                    asynchronous: false
+                    cache: false
+                    retainWhileLoading: true
+                    smooth: true
+                    Accessible.name: qsTr("%1 stream preview").arg(card.name)
+                }
+            }
             Column {
-                visible: !card.me
+                visible: !card.me && card.preview.length === 0
                 anchors.centerIn: parent
                 width: parent.width - 40
                 spacing: 8
