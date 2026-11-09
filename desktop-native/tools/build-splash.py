@@ -6,7 +6,7 @@ The Tauri app's installer window (desktop/installer: MainWindow.xaml,
 Ui/Styles.xaml, Ui/Theme.cs, Ui/Dither.cs) on a 440 x 300 card, in its dark
 palette: the Ply-0 ground with a 1 px line-strong edge, the "YAP SETUP"
 silkscreen label, Yappy in accent ink through the 32-cell Bayer ramp, the
-talk LED with its status word, "Installing Yap Native" and the status line.
+talk LED with its status word, "Installing Yap" and the status line.
 
 Velopack draws no text: it shows this image in a borderless, topmost window,
 scaled by the monitor's DPI (the image counts as 96 DPI, Lanczos, at most
@@ -171,10 +171,10 @@ def render(version):
     word_y = kick_y + 7 - (silk.getbbox("H")[3] - silk.getbbox("H")[1]) / SS / 2 - cap_top(silk)
     text(draw, (led_x + 18, word_y), "INSTALLING", silk, INK3, tracking=0.08)
 
-    # "Installing Yap Native": Bricolage Title ExtraBold (DialogTitle, a size up).
+    # "Installing Yap": Bricolage Title ExtraBold (DialogTitle, a size up).
     title = font("BricolageTitle-ExtraBold.ttf", 30)
     title_top = kick_y + 14 + 12
-    text(draw, (32, title_top - cap_top(title)), "Installing Yap Native", title, INK1)
+    text(draw, (32, title_top - cap_top(title)), "Installing Yap", title, INK1)
 
     # The status line (Message): Geist, a weight up for the upscale.
     body = font("Geist-Medium.ttf", 15)

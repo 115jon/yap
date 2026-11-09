@@ -726,6 +726,10 @@ static void dumpObjectCounts(QQmlApplicationEngine& engine)
 // Velopack's startup handling (rust/src/installer.rs): an install, update or
 // uninstall hook runs and exits here; any other launch returns at once.
 extern "C" void yap_velopack_startup();
+// The released install's default profile only (rust/src/installer.rs):
+// imports the Tauri app's preferences once, then uninstalls it in the
+// background. A no-op for every other build and profile.
+extern "C" void yap_replace_tauri_at_launch();
 
 int main(int argc, char* argv[])
 {
@@ -745,7 +749,10 @@ int main(int argc, char* argv[])
   // Only the first instance owns the log file; a later one only hands over.
   const bool first = DesktopShell::takeInstanceLock();
   if (first) {
+    // Resolves the data folder (moving the old one, once) as it starts.
     logfile::start();
+    // Before anything reads the settings.
+    yap_replace_tauri_at_launch();
     // Minidumps from here on, into the profile's crashes folder.
     CrashNotice::install();
     // Before Qt: Media Foundation's presence, the GPU (adapter, feature
@@ -755,11 +762,13 @@ int main(int argc, char* argv[])
   qInstallMessageHandler(qtMessage);
 
   // No organization: Qt's own caches (QML, pipeline) then go to
-  // %LOCALAPPDATA%\YapNative\cache. With an organization "Yap" they went to
-  // %LOCALAPPDATA%\Yap\..., the installed app's folder. A named profile
-  // suffixes the name ("YapNative-jon"), so its caches are its own too.
+  // %LOCALAPPDATA%\<applicationName>\cache. Not "Yap": that folder is the
+  // Tauri app's install root, which its uninstaller deletes. So the name is
+  // the data folder's (Yap.Data, yap_cache::profile::DATA_DIR); a named
+  // profile suffixes it ("Yap.Data-jon"), so its caches are its own too.
+  // No display name: Qt would append it to every window title.
   QGuiApplication::setApplicationName(
-    QStringLiteral("YapNative") +
+    QStringLiteral("Yap.Data") +
     QString::fromStdWString(profile::suffix(L'-')));
   // Fractional monitor scales as they are (125%, 150%, 175%), the way
   // Chromium renders them; QT_SCALE_FACTOR_ROUNDING_POLICY still overrides.
@@ -974,7 +983,7 @@ int main(int argc, char* argv[])
       std::fprintf(stderr, "[test] in-process pointer on (YAP_TEST_POINTER)\n");
     }
 #endif
-    // Deep links: our own yap-native:// (registered per user where it
+    // Deep links: our own yap:// and yap-native:// (registered per user where it
     // differs), from this command line and from later instances.
     shell->setLinkHandler(
       engine.singletonInstance<QObject*>("com.yap.native", "Invites"));

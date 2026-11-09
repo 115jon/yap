@@ -2,7 +2,7 @@
 //! (CustomSoundsCard.tsx, useCustomSoundsStore.ts). An imported file is
 //! checked ([`yap_core::custom_sounds`]), decoded off the GUI thread to
 //! learn its length, then copied to
-//! `%LOCALAPPDATA%\YapNative\custom-sounds\<stem>.<ext>` and listed in
+//! `%LOCALAPPDATA%\Yap.Data\custom-sounds\<stem>.<ext>` and listed in
 //! `custom-sounds.json`. Nothing is uploaded. [`crate::sound`] plays the
 //! file instead of the built-in sound while "Use custom sounds" is on.
 

@@ -2,7 +2,7 @@
 //! abort, a pure virtual call, an invalid CRT parameter or heap corruption
 //! anywhere in the process (Qt, libwebrtc and Rust alike), and
 //! `minidump-writer` writes the dump with `MiniDumpWriteDump`. Dumps go to
-//! the profile's own `crashes` folder (`%LOCALAPPDATA%\YapNative\crashes`, or
+//! the profile's own `crashes` folder (`%LOCALAPPDATA%\Yap.Data\crashes`, or
 //! `...\profiles\<name>\crashes`); nothing is uploaded. The next launch
 //! offers to open the folder (cpp/crashnotice.*).
 //!
@@ -59,10 +59,10 @@ fn prune(dir: &Path, keep: usize) -> usize {
         .count()
 }
 
-/// `yap-native-<unix seconds>-<pid>.dmp`: unique per run, sorted by time.
+/// `yap-<unix seconds>-<pid>.dmp`: unique per run, sorted by time.
 fn dump_name(now: SystemTime, pid: u32) -> String {
     let secs = now.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    format!("yap-native-{secs}-{pid}.dmp")
+    format!("yap-{secs}-{pid}.dmp")
 }
 
 /// Installs the handler; dumps go to `dir`. `false` when it could not be
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn dump_name_should_carry_the_time_and_pid() {
         let at = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-        assert_eq!(dump_name(at, 42), "yap-native-1700000000-42.dmp");
+        assert_eq!(dump_name(at, 42), "yap-1700000000-42.dmp");
     }
 
     #[test]

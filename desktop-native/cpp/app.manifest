@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<!-- Merged into YapNative.exe by the linker (CMake lists it as a source).
+<!-- Merged into Yap.exe by the linker (CMake lists it as a source).
      Per-monitor v2 DPI awareness from the first instruction, before Qt
      (which would otherwise set it at QGuiApplication), so every window,
      the WebView2 hosts and the crash notice scale per monitor. -->

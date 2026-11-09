@@ -13,7 +13,7 @@
 //                              saved as a PNG (empty when neither); the
 //                              core deletes the PNG once it is uploaded
 //   Files.downloadPath(name)   a free path in the Downloads folder
-//   Files.openPath(name)       a path in YapNative's cache for opening
+//   Files.openPath(name)       a path in the app's cache for opening
 //   Files.reveal(path)         shows the file in Explorer, selected
 //   Files.openMedia(path)      opens a picture or video with its app;
 //                              anything else is only revealed
@@ -24,7 +24,7 @@
 //   Files.testDropUrls()       tests: YAP_TEST_DROP ("a.png;b.png") as file
 //                              URLs, for a drop onto the chat without a
 //                              real drag (empty when unset)
-//   Files.copyPath(name)       a path in YapNative's cache for Copy image
+//   Files.copyPath(name)       a path in the app's cache for Copy image
 //   Files.copyImage(path, dry) puts a downloaded picture on the clipboard as
 //                              an image (a GIF's or WebP's first frame), the
 //                              viewer's Copy image; `dry` (YAP_NO_CLIPBOARD)

@@ -235,7 +235,7 @@ std::wstring relaunchCommandLine(DWORD pid)
   append(std::wstring(exe, n));
   // Only switches go on: not --autostart (the new process shows its window,
   // never starts in the tray: the tray start needs it) and no link or other
-  // plain argument (a yap-native:// link was handled once already).
+  // plain argument (a yap:// link was handled once already).
   // --profile keeps its value.
   for (int i = 1; argv && i < argc; ++i) {
     const std::wstring arg = argv[i];
@@ -373,7 +373,7 @@ void Compat::prepare()
     g_gpu = { true, QStringLiteral("No Direct3D 11 graphics device is available."), true, false };
   } else if (level < D3D_FEATURE_LEVEL_11_0) {
     g_gpu = { true,
-              QStringLiteral("The graphics card supports Direct3D feature level %1; Yap Native "
+              QStringLiteral("The graphics card supports Direct3D feature level %1; Yap "
                              "needs 11_0.")
                 .arg(levelName(level)),
               true, false };

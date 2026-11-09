@@ -32,7 +32,7 @@ pub struct StoredCatalog {
     pub catalog: serde_json::Value,
 }
 
-/// `%LOCALAPPDATA%\YapNative\cache\catalog.json`.
+/// `%LOCALAPPDATA%\Yap.Data\cache\catalog.json`.
 pub fn default_path() -> Option<PathBuf> {
     Some(crate::default_path()?.parent()?.join(FILE))
 }

@@ -1,40 +1,51 @@
 //! Links into the app: invite and channel links in the forms the web makes
-//! and reads, our own `yap-native://` deep links, and that scheme's
-//! per-user registration. Pure: no I/O, no registry access.
+//! and reads, our own `yap://` deep links (and `yap-native://`, the same
+//! links under the name the app had before it replaced the Tauri app), and
+//! those schemes' per-user registration. Pure: no I/O, no registry access.
 //!
 //! The web forms (`<site>` is the configured web origin,
 //! `config::get().api_base`, never a literal here):
 //! - an invite: `<site>/invite/<code>` (`invite.$code.tsx`, `invite_link`),
-//!   or the desktop app's `yap://invite/<code>` (`desktop-deep-link.ts`
-//!   `inviteCodeFromDeepLink`; the desktop app reads nothing else);
+//!   or the Tauri desktop app's `yap://invite/<code>` (`desktop-deep-link.ts`
+//!   `inviteCodeFromDeepLink`, which ignores its query and fragment). It is
+//!   read the same way here when the strict form below does not match, so
+//!   the Tauri app's links keep working;
 //! - `<site>/chat/<server>[/<channel>]` (ChannelSidebar.tsx "Copy link"),
 //!   with `?message=<id>` for a message (MessageItem.tsx `buildMessageLink`);
 //!   `@me` is Home and its DMs. The web reads the path as
 //!   `useChatPageLogic.ts` does: a voice channel is opened, never joined.
 //!
-//! Our own `yap-native://` links, read strictly: one form each, and an
-//! unknown or repeated query parameter, an empty value, a fragment or an
-//! extra segment makes it no link at all.
+//! Our own links, read strictly: one form each, and an unknown or repeated
+//! query parameter, an empty value, a fragment or an extra segment makes it
+//! no link at all. Every form reads the same under `yap-native://`.
 //!
-//! | link                                                  | opens                               |
-//! | ----------------------------------------------------- | ----------------------------------- |
-//! | `yap-native://invite/<code>`                          | the invite landing                  |
-//! | `yap-native://chat/@me`                               | Home (the DM list)                  |
-//! | `yap-native://chat/@me/<dm>[?message=<id>]`           | a DM, at a message                  |
-//! | `yap-native://chat/<server>`                          | a server, on its last channel       |
-//! | `yap-native://chat/<server>/<channel>[?message=<id>]` | a channel (voice: its panel, no join), at a message |
-//! | `yap-native://settings[/<panel>][?row=<row>]`         | Settings, on a panel and row        |
-//! | `yap-native://signin[?code=XXXX-XXXX]`                | the window; polls a waiting sign-in |
+//! | link                                           | opens                               |
+//! | ---------------------------------------------- | ----------------------------------- |
+//! | `yap://invite/<code>`                          | the invite landing                  |
+//! | `yap://chat/@me`                               | Home (the DM list)                  |
+//! | `yap://chat/@me/<dm>[?message=<id>]`           | a DM, at a message                  |
+//! | `yap://chat/<server>`                          | a server, on its last channel       |
+//! | `yap://chat/<server>/<channel>[?message=<id>]` | a channel (voice: its panel, no join), at a message |
+//! | `yap://settings[/<panel>][?row=<row>]`         | Settings, on a panel and row        |
+//! | `yap://signin[?code=XXXX-XXXX]`                | the window; polls a waiting sign-in |
 //!
 //! `signin` never carries a token: the browser page that approved a device
 //! code opens it to bring the app forward, and the app, which polls that
-//! code anyway, polls at once. The app never registers or reads `yap://`
-//! in the registry.
+//! code anyway, polls at once. The web makes it as `yap-native://`, which
+//! only this app reads (the Tauri app may still own `yap://` on a PC).
 
 use crate::settings;
 
-/// Our own scheme (the installed Yap app owns `yap://`).
-pub const SCHEME: &str = "yap-native";
+/// Our scheme, taken over from the Tauri desktop app this app replaces.
+pub const SCHEME: &str = "yap";
+
+/// The scheme the app had before the rename (`Yap Native`), kept as an
+/// alias: the same links, registered beside [`SCHEME`], so links made for
+/// it (the web's sign-in hand-off and invite key) keep opening the app.
+pub const ALIAS_SCHEME: &str = "yap-native";
+
+/// Every scheme the app registers and reads as its own, `yap` first.
+pub const SCHEMES: [&str; 2] = [SCHEME, ALIAS_SCHEME];
 
 /// Where a link leads.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -291,15 +302,26 @@ fn settings_link(panel: Option<&str>, row: Option<&str>) -> Option<Link> {
     })
 }
 
-/// A scheme that reads as ours: `yap-native`, or the run's test scheme.
+/// A scheme that reads as ours: `yap`, `yap-native`, or the run's test
+/// scheme.
 fn is_native_scheme(scheme: &str, test: Option<&str>) -> bool {
-    scheme == SCHEME || test.is_some_and(|t| t == scheme)
+    SCHEMES.contains(&scheme) || test.is_some_and(|t| t == scheme)
+}
+
+/// `yap://invite/<code>` as the Tauri app read it (`inviteCodeFromDeepLink`):
+/// the query and the fragment ignored.
+fn tauri_invite(rest: &str) -> Option<Link> {
+    let path = rest.split(['#', '?']).next().unwrap_or_default();
+    match from_native(path) {
+        Some(Link::Invite(code)) => Some(Link::Invite(code)),
+        _ => None,
+    }
 }
 
 /// The link a URL is, for links clicked in the app (message text, embeds)
-/// and deep links: our site's invite and chat links, `yap-native://`
-/// links, and `yap://invite/<code>`. Anything else is `None` and opens as
-/// it would have (in the browser).
+/// and deep links: our site's invite and chat links and our `yap://` and
+/// `yap-native://` links. Anything else is `None` and opens as it would
+/// have (in the browser).
 pub fn parse_link(url: &str, web_origin: &str) -> Option<Link> {
     parse_link_with(url, web_origin, None)
 }
@@ -308,17 +330,19 @@ fn parse_link_with(url: &str, web_origin: &str, test: Option<&str>) -> Option<Li
     let url = url.trim().trim_matches('"');
     let (scheme, rest) = split_scheme(url)?;
     if is_native_scheme(&scheme, test) {
-        return from_native(rest);
+        return from_native(rest).or_else(|| {
+            // An older link of the Tauri app's, read as it read them.
+            if scheme == SCHEME {
+                tauri_invite(rest)
+            } else {
+                None
+            }
+        });
     }
     let rest = rest.split('#').next().unwrap_or_default();
     let (rest, query) = rest.split_once('?').unwrap_or((rest, ""));
     let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
     match scheme.as_str() {
-        // The desktop app's scheme: invites only, as it reads them.
-        "yap" => match from_site_path(&format!("{authority}/{path}"), "") {
-            Some(Link::Invite(code)) => Some(Link::Invite(code)),
-            _ => None,
-        },
         "http" | "https" => {
             let origin = web_origin.trim_end_matches('/');
             let (site_scheme, site_host) = split_scheme(origin)?;
@@ -348,7 +372,8 @@ pub fn invite_code(text: &str, web_origin: &str) -> Option<String> {
 
 /// A run's test scheme (`YAP_TEST_SCHEME`): `yap-native-<name>`, the name
 /// lowercase `[a-z0-9-]`, so a test can point a scheme of its own at a
-/// build and never touch `yap-native://`. Anything else is `None`.
+/// build and never touch `yap://` or `yap-native://`. Anything else is
+/// `None`.
 pub fn test_scheme(value: &str) -> Option<String> {
     let value = value.trim();
     let name = value.strip_prefix("yap-native-")?;
@@ -361,8 +386,8 @@ pub fn test_scheme(value: &str) -> Option<String> {
 }
 
 /// A command-line argument that is one of our deep links (what Windows
-/// passes as `%1`). Only `yap-native:` arguments count, so a stray path or
-/// flag is never taken for a link.
+/// passes as `%1`). Only `yap:` and `yap-native:` arguments count, so a
+/// stray path or flag is never taken for a link.
 pub fn deep_link_arg(arg: &str) -> Option<Link> {
     deep_link_arg_with(arg, None)
 }
@@ -388,8 +413,17 @@ pub struct RegistryValue {
     pub data: String,
 }
 
-/// The key every value of the registration lives under.
-pub const SCHEME_KEY: &str = r"Software\Classes\yap-native";
+/// The key every value of a scheme's registration lives under:
+/// `Software\Classes\<scheme>`.
+pub fn scheme_key(scheme: &str) -> String {
+    format!(r"Software\Classes\{scheme}")
+}
+
+/// [`SCHEME`]'s key (the Tauri app registered the same one).
+pub const SCHEME_KEY: &str = r"Software\Classes\yap";
+
+/// [`ALIAS_SCHEME`]'s key.
+pub const ALIAS_SCHEME_KEY: &str = r"Software\Classes\yap-native";
 
 /// What `shell\open\command` runs: the quoted executable and the quoted
 /// URL (`"<exe>" "%1"`).
@@ -397,25 +431,35 @@ pub fn open_command(exe: &str) -> String {
     format!("\"{exe}\" \"%1\"")
 }
 
-/// The per-user registration of `yap-native://` (HKCU, no admin): the
+/// The per-user registration of one scheme (HKCU, no admin): the
 /// protocol's name and `URL Protocol` marker, its icon (the executable's
-/// first), and the open command. All under [`SCHEME_KEY`].
-pub fn scheme_registration(exe: &str) -> Vec<RegistryValue> {
+/// first), and the open command. All under [`scheme_key`].
+pub fn scheme_values(scheme: &str, exe: &str) -> Vec<RegistryValue> {
+    let root = scheme_key(scheme);
     let value = |key: &str, name: &str, data: String| RegistryValue {
         key: if key.is_empty() {
-            SCHEME_KEY.to_owned()
+            root.clone()
         } else {
-            format!(r"{SCHEME_KEY}\{key}")
+            format!(r"{root}\{key}")
         },
         name: name.to_owned(),
         data,
     };
     vec![
-        value("", "", "URL:Yap Native".to_owned()),
+        value("", "", "URL:Yap Protocol".to_owned()),
         value("", "URL Protocol", String::new()),
         value("DefaultIcon", "", format!("\"{exe}\",0")),
         value(r"shell\open\command", "", open_command(exe)),
     ]
+}
+
+/// The registration of every scheme in [`SCHEMES`]: `yap://` and its
+/// `yap-native://` alias, both to `exe`.
+pub fn scheme_registration(exe: &str) -> Vec<RegistryValue> {
+    SCHEMES
+        .iter()
+        .flat_map(|scheme| scheme_values(scheme, exe))
+        .collect()
 }
 
 /// The registration as `key\tname\tdata` lines, for the shell to apply.

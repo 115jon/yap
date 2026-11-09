@@ -3,7 +3,7 @@
 // Crash reports, the shell side. main.cpp installs the minidump handler
 // (rust/src/crash.rs) into the profile's `crashes` folder; on the next
 // launch this finds a dump newer than the last one shown and QML offers
-// "Yap Native closed unexpectedly" with Open folder. Nothing is uploaded.
+// "Yap closed unexpectedly" with Open folder. Nothing is uploaded.
 //
 // QML (import Yap.Chrome):
 //   CrashNotice.pending      a new dump since the notice was last dismissed
@@ -22,7 +22,7 @@ class CrashNotice : public QObject
 public:
   explicit CrashNotice(QObject* parent = nullptr);
 
-  // `%LOCALAPPDATA%\YapNative[\profiles\<name>]\crashes`, empty without
+  // `%LOCALAPPDATA%\Yap.Data[\profiles\<name>]\crashes`, empty without
   // LOCALAPPDATA.
   static QString folder();
   // Installs the dump handler (call early in main, after the log starts).

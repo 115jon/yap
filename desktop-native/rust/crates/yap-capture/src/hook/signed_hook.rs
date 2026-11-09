@@ -14,7 +14,7 @@
 //! DLL out of the versioned `app-<ver>` folders (which the updater deletes),
 //! the verified set is copied once to a content-addressed folder shared by all
 //! app versions: `<profile data>\capture-hook\obs-<ver>-<sha8>\` (the
-//! profile's `%LOCALAPPDATA%\YapNative` folder, never the Yap app's).
+//! profile's `%LOCALAPPDATA%\Yap.Data` folder, never the Tauri app's).
 //! `YAP_CAPTURE_HOOK_DIR` overrides the parent folder (development builds).
 //!
 //! Never modify or re-sign these files: a changed byte voids the signature that

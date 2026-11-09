@@ -87,7 +87,13 @@ uuid = { version = "1.29.0", features = ["v4"] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Media_Audio",
+    "Win32_System_Com",
     "Win32_System_Registry",
+    # The Tauri replacement (src/installer.rs): known folders, the DPI of
+    # the monitor its window was on.
+    "Win32_Graphics_Gdi",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
 ] }
 # The installer's startup hooks (src/installer.rs, docs/INSTALLER.md). Pinned:
 # tools/package.ps1 and the release workflow use the vpk of the same version.

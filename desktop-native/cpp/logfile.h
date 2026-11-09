@@ -1,7 +1,7 @@
 #pragma once
 
 // The log file, as the desktop app keeps one (tauri-plugin-log: keep 5,
-// local time): %LOCALAPPDATA%\YapNative\logs\yap-native.log. Everything
+// local time): %LOCALAPPDATA%\Yap.Data\logs\yap-native.log. Everything
 // written to stderr (Rust's eprintln!, Qt's messages, fprintf) goes through
 // a pipe into it, each line stamped with the local time, and is mirrored to
 // the original stderr when that is a file or a pipe (not a console, which

@@ -65,14 +65,14 @@ pub mod qobject {
         fn create_server(self: &Invites, name: &QString, icon_path: &QString);
 
         /// A clicked link: true when it is one of ours (an invite or a
-        /// channel on this site, a `yap-native://` link), which then opens
-        /// here; false leaves it to the browser.
+        /// channel on this site, a `yap://` or `yap-native://` link), which
+        /// then opens here; false leaves it to the browser.
         #[qinvokable]
         #[cxx_name = "openLink"]
         fn open_link(self: &Invites, url: &QString) -> bool;
 
         /// A command-line argument (first launch or a second instance):
-        /// only `yap-native://` links count.
+        /// only `yap://` and `yap-native://` links count.
         #[qinvokable]
         #[cxx_name = "openArg"]
         fn open_arg(self: &Invites, arg: &QString) -> bool;
@@ -96,10 +96,10 @@ pub mod qobject {
         #[cxx_name = "openServer"]
         fn open_server(self: &Invites, server_id: &QString);
 
-        /// The `yap-native://` registration for `exe` as `key\tname\tdata`
+        /// The `yap://` and `yap-native://` registration for `exe` as `key\tname\tdata`
         /// lines under HKCU (the shell writes the ones that differ). Empty
         /// unless `exe` is the released install (`install::PACK_ID`) as the
-        /// default profile: no other build takes the scheme at launch.
+        /// default profile: no other build takes the schemes at launch.
         #[qinvokable]
         #[cxx_name = "schemeRegistration"]
         fn scheme_registration(self: &Invites, exe: &QString) -> QString;
@@ -213,7 +213,7 @@ fn open(link: Option<Link>) -> bool {
 }
 
 /// The run's test scheme (`YAP_TEST_SCHEME=yap-native-<name>`), read once:
-/// deep links in it read as `yap-native://` ones, so an end-to-end test can
+/// deep links in it read as `yap://` ones, so an end-to-end test can
 /// point a scheme of its own at a build. The app never registers it.
 fn test_scheme() -> Option<&'static str> {
     static SCHEME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();

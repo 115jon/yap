@@ -27,13 +27,13 @@
 
 namespace {
 
-// %LOCALAPPDATA%\YapNative\cache\<sub> (under profiles\<name> for a named
+// %LOCALAPPDATA%\Yap.Data\cache\<sub> (under profiles\<name> for a named
 // profile), created on demand.
 QString cacheDir(const QString& sub)
 {
   const QString root = QString::fromStdWString(profile::dataRoot());
   const QString base =
-    root.isEmpty() ? QDir::tempPath() + QStringLiteral("/YapNative") : root;
+    root.isEmpty() ? QDir::tempPath() + QStringLiteral("/Yap.Data") : root;
   const QString dir = base + QStringLiteral("/cache/") + sub;
   QDir().mkpath(dir);
   return dir;
@@ -63,7 +63,7 @@ QString safeName(const QString& name)
   return out;
 }
 
-// Deletes files in %LOCALAPPDATA%\YapNative\cache\<sub> older than a day.
+// Deletes files in %LOCALAPPDATA%\Yap.Data\cache\<sub> older than a day.
 void pruneOld(const QString& sub)
 {
   const QDateTime cutoff = QDateTime::currentDateTime().addDays(-1);

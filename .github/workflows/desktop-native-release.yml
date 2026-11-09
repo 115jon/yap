@@ -130,7 +130,7 @@ jobs:
           dotnet tool install -g vpk --version $v
           "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Build YapNative.exe
+      - name: Build Yap.exe
         run: |
           $env:YAP_NATIVE_BUILD_DIR = "$env:RUNNER_TEMP\yapn-build"
           ./desktop-native/build.ps1 -QtDir $env:YAP_QT_DIR -BuildDir $env:YAP_NATIVE_BUILD_DIR
@@ -149,7 +149,7 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
 
-      # vpk signs every binary it packs (YapNative.exe, the stub, Update.exe,
+      # vpk signs every binary it packs (Yap.exe, the stub, Update.exe,
       # Setup.exe) through the same account and profile, with the Azure CLI
       # session the login step left.
       - name: Pack with vpk
@@ -168,13 +168,13 @@ jobs:
         run: |
           $out = "$env:RUNNER_TEMP\yapn-installer"
           ./desktop/scripts/verify-authenticode.ps1 -ExpectedSigner $env:ARTIFACT_SIGNING_SIGNER -Path @(
-            "$out\YapNative.App-win-Setup.exe"
+            "$out\Yap.App-win-Setup.exe"
           )
 
       - name: Upload installer
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: YapNative-installer-${{ github.run_number }}${{ inputs.sign && '-signed' || '-unsigned' }}
+          name: Yap-installer-${{ github.run_number }}${{ inputs.sign && '-signed' || '-unsigned' }}
           path: |
             ${{ runner.temp }}/yapn-installer/*.exe
             ${{ runner.temp }}/yapn-installer/*.nupkg

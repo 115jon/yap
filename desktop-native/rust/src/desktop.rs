@@ -1,5 +1,5 @@
 //! `Desktop`: the shell settings (close to tray, start minimized, open on
-//! startup, notifications, sounds) from `%LOCALAPPDATA%\YapNative`, the
+//! startup, notifications, sounds) from `%LOCALAPPDATA%\Yap.Data`, the
 //! tray badge and the toasts the core asks for, and the window rect. The OS
 //! side (tray, toasts, Run key, single instance) is `DesktopShell` in
 //! `cpp/desktopshell.*`; QML wires the two.
