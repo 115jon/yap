@@ -8,6 +8,7 @@ import ChatArea from "@/components/chat/ChatArea";
 import DMSidebar from "@/components/chat/DMSidebar";
 import FloatingStreamPreview from "@/components/chat/FloatingStreamPreview";
 import FriendsView from "@/components/chat/FriendsView";
+import ProfileModalHost from "@/components/chat/ProfileModalHost";
 import { MobileNavigationSheet } from "@/components/chat/MobileNavigationSheet";
 import ServerList from "@/components/chat/ServerList";
 import UserPanel from "@/components/chat/UserPanel";
@@ -27,7 +28,6 @@ import {
 } from "@/lib/desktop-native-sync";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 import { isDesktop, isTauri } from "@/lib/platform";
-import { dispatchOpenProfileEditorEvent } from "@/lib/profile-editor-events";
 import {
   resolveStreamPreviewAutomation,
   type StreamPreviewAutomationState,
@@ -81,9 +81,6 @@ const StartCallModal = lazy(() =>
   import("@/components/chat/StartCallModal").then((mod) => ({
     default: mod.StartCallModal,
   })),
-);
-const UserProfileModal = lazy(
-  () => import("@/components/chat/UserProfileModal"),
 );
 const VoiceChannelView = lazy(
   () => import("@/components/chat/VoiceChannelView"),
@@ -166,7 +163,6 @@ export default function ChatPage() {
     voiceChannelStates,
     channelsByServerId,
     dmChannels,
-    profileUser,
     serverMentionCounts,
     channelMentionCounts,
     relationships,
@@ -186,7 +182,6 @@ export default function ChatPage() {
       voiceChannelStates: s.voiceChannelStates,
       channelsByServerId: s.channelsByServerId,
       dmChannels: s.dmChannels,
-      profileUser: s.profileUser,
       serverMentionCounts: s.serverMentionCounts,
       channelMentionCounts: s.channelMentionCounts,
       relationships: s.relationships,
@@ -231,30 +226,6 @@ export default function ChatPage() {
   const [voiceAppsModal, setVoiceAppsModal] = useState<null | "activities">(
     null,
   );
-  const [renderedProfileUser, setRenderedProfileUser] = useState<User | null>(
-    profileUser,
-  );
-  const profileUserRef = useRef(profileUser);
-  const profilePayloadGenerationRef = useRef(0);
-  const previousViewerIdRef = useRef(user?.id);
-  useEffect(() => {
-    profileUserRef.current = profileUser;
-    profilePayloadGenerationRef.current += 1;
-    if (profileUser) {
-      // Keep the last payload mounted while Radix runs the close animation.
-      // eslint-disable-next-line react-hooks-js/set-state-in-effect
-      setRenderedProfileUser(profileUser);
-    }
-  }, [profileUser]);
-  useEffect(() => {
-    if (previousViewerIdRef.current === user?.id) return;
-
-    previousViewerIdRef.current = user?.id;
-    profilePayloadGenerationRef.current += 1;
-    // eslint-disable-next-line react-hooks-js/set-state-in-effect
-    setRenderedProfileUser(null);
-    if (profileUserRef.current) setProfileUser(null);
-  }, [setProfileUser, user?.id]);
   const [channelSidebarWidth, setChannelSidebarWidth] = useState(
     CHANNEL_SIDEBAR_DEFAULT_WIDTH_PX,
   );
@@ -294,8 +265,6 @@ export default function ChatPage() {
     () => servers.find((s) => s.id === activeServerId),
     [servers, activeServerId],
   );
-  const profileModalUser = profileUser ?? renderedProfileUser;
-  const profileModalGeneration = profilePayloadGenerationRef.current;
   const activeChannel = useMemo(
     () => (isDmMode ? null : channels.find((c) => c.id === activeChannelId)),
     [isDmMode, channels, activeChannelId],
@@ -474,12 +443,6 @@ export default function ChatPage() {
   const previewAutomationStateRef =
     useRef<StreamPreviewAutomationState>("idle");
 
-  useEffect(() => {
-    if (!profileUser || profileUser.id !== user?.id) return;
-
-    dispatchOpenProfileEditorEvent();
-    setProfileUser(null);
-  }, [profileUser, setProfileUser, user?.id]);
   const previewToggleInFlightRef = useRef(false);
 
   // ── Voice Switch Confirmation ─────────────────────────────────────────────
@@ -1729,22 +1692,7 @@ export default function ChatPage() {
           </Suspense>
         ) : null}
 
-        {profileModalUser && profileModalUser.id !== user?.id ? (
-          <Suspense fallback={null}>
-            <UserProfileModal
-              open={profileUser != null}
-              user={profileModalUser}
-              onClose={() => {
-                if (
-                  profileUserRef.current?.id === profileModalUser.id &&
-                  profilePayloadGenerationRef.current === profileModalGeneration
-                ) {
-                  setProfileUser(null);
-                }
-              }}
-            />
-          </Suspense>
-        ) : null}
+        <ProfileModalHost />
 
         <Suspense fallback={null}>
           <AudioInteractionModal
