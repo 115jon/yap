@@ -17,6 +17,7 @@
 
 import { SignIn, useAuth } from "@kova/react";
 import {
+  Component,
   lazy,
   Suspense,
   useCallback,
@@ -39,8 +40,11 @@ import {
   takeReturnPath,
 } from "./session";
 
-/** A second try before a 404 counts as "not an admin" (a Kova blip). */
-const REFUSAL_RECHECK_MS = 1_500;
+/**
+ * More looks before a 404 counts as "not an admin": the gate answers a Kova
+ * or D1 blip with the same bare 404, and a refusal signs Kova out.
+ */
+const REFUSAL_RECHECKS_MS = [1_500, 3_000];
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -124,8 +128,9 @@ export function Boot() {
           return;
         }
         let result = await exchangeToken(token);
-        if (result === "refused") {
-          await sleep(REFUSAL_RECHECK_MS);
+        for (const delay of REFUSAL_RECHECKS_MS) {
+          if (result !== "refused") break;
+          await sleep(delay);
           result = await exchangeToken(token);
         }
         if (!mounted.current) return;
@@ -212,9 +217,11 @@ export function Boot() {
   return (
     <>
       <div className="boot-console" inert={prompt}>
-        <Suspense fallback={<Splash />}>
-          <Console {...props} />
-        </Suspense>
+        <ConsoleLoadBoundary>
+          <Suspense fallback={<Splash />}>
+            <Console {...props} />
+          </Suspense>
+        </ConsoleLoadBoundary>
       </div>
       {prompt ? (
         <div className="boot-overlay">
@@ -315,4 +322,40 @@ function Splash({
       <span className="boot-sr">{label}</span>
     </div>
   );
+}
+
+/**
+ * The console bundle failed to load (a deploy swapped its files mid-visit,
+ * the network dropped). A full load fetches the current files.
+ */
+class ConsoleLoadBoundary extends Component<
+  { children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <main className="boot-page">
+        <div className="boot-card" role="alert">
+          <h1>The console didn&apos;t load</h1>
+          <p className="boot-note">
+            It may have just been updated. Loading the page again fetches it.
+          </p>
+          <button
+            type="button"
+            className="boot-button"
+            onClick={() => window.location.reload()}
+          >
+            Load again
+          </button>
+        </div>
+      </main>
+    );
+  }
 }

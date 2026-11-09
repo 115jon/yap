@@ -79,8 +79,10 @@ async function readManifest(
     const response = await env.ASSETS.fetch(
       new Request(`${origin}${MANIFEST}`),
     );
-    return response.ok ? ((await response.json()) as Manifest) : null;
+    if (!response.ok) throw new Error(`manifest: ${response.status}`);
+    return (await response.json()) as Manifest;
   })().catch(() => {
+    // Not cached: the next request reads it again.
     manifestCache = null;
     return null;
   });

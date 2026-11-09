@@ -66,14 +66,20 @@ export function isTransientError(error: unknown): boolean {
 }
 
 /**
- * A write is tried again only when the API never answered it: no response,
- * or a transient status with no API error code (an edge 429/503). A coded
+ * A write is tried again only when the API certainly did not run it: a
+ * transient status with no API error code (an edge 429/503, answered before
+ * the Worker). A lost response (status 0) may have run already, and a coded
  * answer (a cooldown, a refresh that failed upstream and was logged) is the
- * server's decision, and repeating the write would repeat its effects.
+ * server's decision; repeating either would repeat its effects and its
+ * audit row.
  */
 export function isRetryableWrite(error: unknown): boolean {
-  if (!isTransientError(error)) return false;
-  return !(error instanceof AdminApiError && error.code);
+  return (
+    error instanceof AdminApiError &&
+    error.status !== 0 &&
+    !error.code &&
+    isTransientError(error)
+  );
 }
 
 /** 0.5 s, 1 s, 2 s... capped at 8 s, with a little jitter. */

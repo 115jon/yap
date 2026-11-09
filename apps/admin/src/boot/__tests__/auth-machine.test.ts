@@ -87,11 +87,18 @@ describe("the admin page's auth machine", () => {
     expect(authReducer(out, { type: "session-lost" })).toBe(out);
   });
 
-  it("knows the console's paths", () => {
+  it("returns only to same-origin app paths", () => {
     for (const path of ["/people", "/people/u1", "/live", "/audit/"]) {
       expect(isConsolePath(path), path).toBe(true);
     }
-    for (const path of ["/", "/people/u1/x", "/evil", "//evil.test"]) {
+    for (const path of [
+      "/",
+      "/people/u1/x",
+      "//evil.test",
+      "/\\evil.test",
+      "https://evil.test/live",
+      "/live?x=1",
+    ]) {
       expect(isConsolePath(path), path).toBe(false);
     }
   });

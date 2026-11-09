@@ -113,10 +113,13 @@ export function authReducer(state: AuthState, event: AuthEvent): AuthState {
   }
 }
 
-/** The console's own paths (the Worker serves the page there to admins). */
-const CONSOLE_PATH =
-  /^\/(?:people(?:\/[^/?#]+)?|live|insights|switches|audit)\/?$/;
+/**
+ * A same-origin app path to return to after a hosted sign-in: one or two
+ * plain segments. Checked by shape, not by name, so the public bundle does
+ * not list the console's routes; the router answers an unknown one.
+ */
+const RETURN_PATH = /^\/[a-z][a-z-]*(?:\/[A-Za-z0-9_%.-]+)?\/?$/;
 
 export function isConsolePath(path: string): boolean {
-  return CONSOLE_PATH.test(path);
+  return RETURN_PATH.test(path);
 }

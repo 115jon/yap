@@ -43,9 +43,13 @@ vi.mock("@kova/react", async () => {
   };
 });
 
+// The refusal path waits through three looks (about 4.5 s).
+vi.setConfig({ testTimeout: 15_000 });
+
 const consoleProps = vi.hoisted(() => ({
   latest: null as ConsoleAppProps | null,
   mounts: 0,
+  failLoad: false,
 }));
 
 vi.mock("../session", async (importOriginal) => {
@@ -66,7 +70,10 @@ vi.mock("../session", async (importOriginal) => {
   }
   return {
     ...actual,
-    loadConsole: async () => ({ default: FakeConsole }),
+    loadConsole: async () => {
+      if (consoleProps.failLoad) throw new Error("chunk 404");
+      return { default: FakeConsole };
+    },
   };
 });
 
@@ -88,6 +95,7 @@ beforeEach(() => {
   kova.signOut.mockClear();
   consoleProps.latest = null;
   consoleProps.mounts = 0;
+  consoleProps.failLoad = false;
   window.history.replaceState(null, "", "/");
   sessionStorage.clear();
   vi.stubGlobal(
@@ -123,6 +131,18 @@ describe("the admin page", () => {
     expect(calls).toEqual(["GET /api/session"]);
   });
 
+  it("offers a full load when the console bundle fails to load", async () => {
+    serve("GET /api/session", adminSession);
+    consoleProps.failLoad = true;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<Boot />);
+    expect(
+      await screen.findByRole("heading", { name: "The console didn't load" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Load again" })).toBeTruthy();
+    vi.mocked(console.error).mockRestore();
+  });
+
   it("shows only the sign-in form when signed out, never raw text", async () => {
     render(<Boot />);
     expect(await screen.findByLabelText("Kova sign-in")).toBeTruthy();
@@ -148,16 +168,16 @@ describe("the admin page", () => {
     );
   });
 
-  it("refuses a non-admin after a second look, and signs Kova out in place", async () => {
+  it("refuses a non-admin after three looks, and signs Kova out in place", async () => {
     serve("GET /api/session", bare404);
     serve("POST /api/session", bare404);
     kova.isSignedIn = true;
     render(<Boot />);
-    // The second look comes 1.5 s after the first refusal.
+    // Looks at 0, 1.5 s and 4.5 s: a blip of a few seconds is ridden out.
     expect(
-      (await screen.findByRole("alert", {}, { timeout: 4000 })).textContent,
+      (await screen.findByRole("alert", {}, { timeout: 8000 })).textContent,
     ).toBe("That account can't sign in here.");
-    expect(calls.filter((c) => c === "POST /api/session")).toHaveLength(2);
+    expect(calls.filter((c) => c === "POST /api/session")).toHaveLength(3);
     // A fragment URL: Kova's redirect is a same-page navigation.
     expect(kova.signOut).toHaveBeenCalledWith(
       expect.stringMatching(/#signed-out$/),
@@ -210,7 +230,7 @@ describe("the admin page", () => {
     act(() => consoleProps.latest!.onSessionLost());
     // Not a refusal page: the prompt, with the console still underneath.
     expect(
-      await screen.findByLabelText("Kova sign-in", {}, { timeout: 4000 }),
+      await screen.findByLabelText("Kova sign-in", {}, { timeout: 8000 }),
     ).toBeTruthy();
     expect(
       screen.getByRole("heading", { name: "Your session ended" }),

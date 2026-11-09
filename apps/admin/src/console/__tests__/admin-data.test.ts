@@ -157,6 +157,14 @@ describe("the console's transport", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("does not repeat a write whose answer was lost", async () => {
+    const { t, calls } = transport({ "/api/users/u1/disconnect": [] });
+    await expect(
+      t.send("POST", "/api/users/u1/disconnect"),
+    ).rejects.toMatchObject({ status: 0 });
+    expect(calls).toHaveLength(1);
+  });
+
   it("does not retry a write the server refused", async () => {
     const onWrite = vi.fn();
     const { t, calls } = transport(
