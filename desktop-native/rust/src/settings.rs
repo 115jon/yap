@@ -77,6 +77,8 @@ pub mod qobject {
         #[qproperty(QString, tier)]
         /// 1440p and 4K shares (the `hdStreams` perk).
         #[qproperty(bool, hd_streams, cxx_name = "hdStreams")]
+        /// Yap name effects, faces and Wave (the `allNameStyles` perk).
+        #[qproperty(bool, all_name_styles, cxx_name = "allNameStyles")]
         /// The attachment limit in bytes (500 MB with `bigUploads`, else
         /// 25 MB) and as words ("500 MB").
         #[qproperty(f64, attachment_limit, cxx_name = "attachmentLimit")]
@@ -243,6 +245,7 @@ pub struct SettingsRust {
     badges: QString,
     tier: QString,
     hd_streams: bool,
+    all_name_styles: bool,
     attachment_limit: f64,
     attachment_limit_text: QString,
     plan: QString,
@@ -392,6 +395,7 @@ fn apply(mut object: Pin<&mut qobject::Settings>, view: &SettingsView) {
     o.as_mut().set_badges(q(&view.badges));
     o.as_mut().set_tier(q(&view.tier));
     o.as_mut().set_hd_streams(view.hd_streams);
+    o.as_mut().set_all_name_styles(view.all_name_styles);
     // Bytes as a double: QML numbers; 500 MB is exact.
     #[allow(clippy::cast_precision_loss)]
     let limit = if view.attachment_limit > 0 {

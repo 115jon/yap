@@ -40,11 +40,8 @@ T.Popup {
 
     signal applied(string style)
 
-    // INTEGRATION POINT (entitlements, branch native/tiers): whether the
-    // signed-in user's plan has the `allNameStyles` perk. The web passes
-    // hasPerk(entitlement, "allNameStyles"); everyone on production is a
-    // founder today, so this stays true until the native entitlement
-    // parsing binds it where the dialog mounts (ProfileEditor.qml).
+    // Whether the signed-in user's plan has the `allNameStyles` perk
+    // (ProfileEditor binds Settings.allNameStyles).
     property bool canUseYapStyles: true
 
     // DEFAULT_DISPLAY_NAME_STYLE.

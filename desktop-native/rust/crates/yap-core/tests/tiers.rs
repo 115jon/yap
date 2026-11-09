@@ -142,6 +142,7 @@ fn a_founder_sees_lifetime_and_no_purchase_keys() {
     let s = &client.settings;
     assert_eq!(s.tier, "founder");
     assert!(s.hd_streams);
+    assert!(s.all_name_styles);
     assert_eq!(s.attachment_limit, 500 * MB);
     assert_eq!(s.attachment_limit_text, "500 MB");
     let plan = client.plan();
@@ -175,6 +176,7 @@ fn free_sees_upgrade_coming_soon_until_billing_answers_200() {
     let mut client = Client::online_as(me(Value::Null, json!([])));
     assert_eq!(client.settings.tier, "free");
     assert!(!client.settings.hd_streams);
+    assert!(!client.settings.all_name_styles);
     assert_eq!(client.settings.attachment_limit, 25 * MB);
     assert_eq!(client.settings.badges, "");
     let plan = client.plan();

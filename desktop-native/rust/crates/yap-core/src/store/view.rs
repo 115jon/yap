@@ -1147,6 +1147,8 @@ pub struct SettingsView {
     pub tier: String,
     /// 1440p and 4K shares (`hdStreams`).
     pub hd_streams: bool,
+    /// Yap name effects, faces and Wave (`allNameStyles`).
+    pub all_name_styles: bool,
     /// The attachment limit (500 MB with `bigUploads`, else 25 MB), in
     /// bytes and as words.
     pub attachment_limit: u64,

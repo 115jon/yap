@@ -843,6 +843,11 @@ impl State {
                 crate::entitlements::Perk::HdStreams,
                 now,
             );
+            view.all_name_styles = crate::entitlements::has_perk(
+                entitlement,
+                crate::entitlements::Perk::AllNameStyles,
+                now,
+            );
             view.attachment_limit = self.attachment_limit();
             view.attachment_limit_text = crate::limits::format_limit(view.attachment_limit);
             let billing = matches!(self.settings.billing, Load::Ready(true));
