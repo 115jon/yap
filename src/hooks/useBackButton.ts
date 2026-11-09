@@ -15,6 +15,14 @@ let globalInvoke: typeof import("@tauri-apps/api/core").invoke | null = null;
 // the stack avoids one handler's delayed cleanup consuming another handler's
 // entry during rapid dialog transitions.
 let ownsHistoryEntry = false;
+// history.length right after our entry was pushed, and the id in its state.
+// The entry is still ours to pop when its state is unchanged, or (a router
+// replaced its state) when nothing was pushed since: a push always lands at
+// the end, so a longer history means the app navigated on top of it.
+let ownedHistoryLength = 0;
+let ownedHistoryId = 0;
+/** Browsers stop growing history.length here (Chromium and Firefox: 50). */
+const HISTORY_LENGTH_CAP = 50;
 let programmaticPopPending = false;
 let historyCleanupTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -23,8 +31,13 @@ function ensureHistoryEntry() {
     return;
   }
 
-  window.history.pushState({ backHandlerOpen: true }, "");
+  ownedHistoryId += 1;
+  window.history.pushState(
+    { backHandlerOpen: true, backHandlerId: ownedHistoryId },
+    "",
+  );
   ownsHistoryEntry = true;
+  ownedHistoryLength = window.history.length;
 }
 
 function releaseHistoryEntry() {
@@ -39,9 +52,20 @@ function releaseHistoryEntry() {
 
   historyCleanupTimeout = setTimeout(() => {
     historyCleanupTimeout = null;
+    // The page (or a test environment) can be gone by the time this runs.
+    if (typeof window === "undefined") return;
     if (backHandlers.length > 0 || !ownsHistoryEntry) return;
 
     ownsHistoryEntry = false;
+    // Pop only while our entry is still the current one. If the app pushed a
+    // route over it (a section change with a panel open), going back would
+    // undo that navigation; the stale entry (same URL) is left instead.
+    const state = window.history.state as { backHandlerId?: number } | null;
+    const unchanged = state?.backHandlerId === ownedHistoryId;
+    const nothingPushed =
+      window.history.length === ownedHistoryLength &&
+      ownedHistoryLength < HISTORY_LENGTH_CAP;
+    if (!unchanged && !nothingPushed) return;
     programmaticPopPending = true;
     try {
       window.history.go(-1);

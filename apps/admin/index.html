@@ -5,12 +5,153 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
     <meta name="referrer" content="no-referrer" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="kova-key" content="__KOVA_ADMIN_PUBLISHABLE_KEY__" />
     <meta name="kova-url" content="__KOVA_AUTH_URL__" />
     <title>Sign in</title>
+    <!--
+      Inline, so the page is styled before any script runs: the sign-in and
+      loading states never paint as bare text. Neutral on purpose; the
+      console's own stylesheet comes with its bundle, for admins only.
+    -->
+    <style>
+      :root {
+        --boot-bg: #f6f6f4;
+        --boot-card: #ffffff;
+        --boot-ink: #1a1a1a;
+        --boot-ink-2: #5c5c5c;
+        --boot-line: #e2e2de;
+        --boot-scrim: rgb(0 0 0 / 0.45);
+        color-scheme: light dark;
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --boot-bg: #111111;
+          --boot-card: #1b1b1b;
+          --boot-ink: #ededed;
+          --boot-ink-2: #a3a3a3;
+          --boot-line: #2c2c2c;
+          --boot-scrim: rgb(0 0 0 / 0.6);
+        }
+      }
+      html,
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        background: var(--boot-bg);
+        color: var(--boot-ink);
+      }
+      .boot-page {
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        padding: 32px 16px;
+        box-sizing: border-box;
+      }
+      .boot-card {
+        width: min(400px, 100%);
+        box-sizing: border-box;
+      }
+      .boot-overlay .boot-card {
+        background: var(--boot-card);
+        border: 1px solid var(--boot-line);
+        border-radius: 4px;
+        padding: 24px;
+        max-height: calc(100dvh - 32px);
+        overflow-y: auto;
+      }
+      .boot-card h1 {
+        font-size: 20px;
+        line-height: 28px;
+        margin: 0 0 16px;
+      }
+      .boot-note {
+        font-size: 14px;
+        line-height: 20px;
+        color: var(--boot-ink-2);
+        margin: -8px 0 16px;
+      }
+      .boot-button {
+        font: inherit;
+        font-size: 14px;
+        height: 36px;
+        padding: 0 14px;
+        border-radius: 4px;
+        border: 1px solid var(--boot-line);
+        background: var(--boot-card);
+        color: var(--boot-ink);
+        cursor: pointer;
+      }
+      .boot-console {
+        min-height: 100dvh;
+      }
+      .boot-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: grid;
+        place-items: center;
+        padding: 16px;
+        background: var(--boot-scrim);
+      }
+      .boot-splash {
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+      }
+      .boot-splash-inline {
+        min-height: 96px;
+      }
+      .boot-bar {
+        display: block;
+        width: 72px;
+        height: 2px;
+        border-radius: 1px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          var(--boot-ink-2),
+          transparent
+        );
+        background-size: 200% 100%;
+        animation: boot-sweep 1.1s ease-in-out infinite;
+        opacity: 0.7;
+      }
+      @keyframes boot-sweep {
+        from {
+          background-position: 100% 0;
+        }
+        to {
+          background-position: -100% 0;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot-bar {
+          animation: none;
+        }
+      }
+      .boot-sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/signin/main.tsx"></script>
+    <div id="root">
+      <div class="boot-splash" aria-busy="true">
+        <span class="boot-bar" aria-hidden="true"></span>
+      </div>
+    </div>
+    <script type="module" src="/src/boot/main.tsx"></script>
   </body>
 </html>

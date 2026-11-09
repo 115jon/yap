@@ -124,11 +124,16 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-function fail(message: string, status: number, code: string): Response {
-  return Response.json(
-    { error: message, code },
-    { status, headers: { "Cache-Control": "no-store" } },
-  );
+function fail(
+  message: string,
+  status: number,
+  code: string,
+  retryAfterS?: number,
+): Response {
+  const headers: Record<string, string> = { "Cache-Control": "no-store" };
+  // A cooldown says how long: the console counts it down.
+  if (retryAfterS !== undefined) headers["Retry-After"] = String(retryAfterS);
+  return Response.json({ error: message, code }, { status, headers });
 }
 
 async function readJson(
@@ -938,6 +943,7 @@ async function refreshCatalog(
       "A refresh is already running. Try again in a moment.",
       429,
       "CATALOG_REFRESH_COOLDOWN",
+      5,
     );
   }
   if (before.retry_after_ms > 0) {
@@ -946,6 +952,7 @@ async function refreshCatalog(
       `The catalog was tried moments ago. Try again in ${seconds} s.`,
       429,
       "CATALOG_REFRESH_COOLDOWN",
+      seconds,
     );
   }
   const auditId = genId();

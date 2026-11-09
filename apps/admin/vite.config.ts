@@ -1,7 +1,9 @@
 /**
- * The admin console's client build: two pages, the public sign-in
- * (index.html) and the console (console.html), into dist/public, with a
- * manifest the Worker reads to know which files the sign-in page may load.
+ * The admin console's client build: one page (index.html) with the public
+ * boot bundle, and the console bundle as a second entry, into dist/public,
+ * with a manifest the Worker reads to know which files everyone may load
+ * (the boot bundle's) and which entry an admin's session names (the
+ * console's).
  * The Worker itself is bundled by Wrangler (wrangler.toml).
  *
  * The console imports Yap's own components, hooks, tokens and stylesheet
@@ -110,10 +112,15 @@ export default defineConfig(({ mode }) => ({
     manifest: "manifest.json",
     sourcemap: false,
     rollupOptions: {
+      // One page with the public boot bundle, and the console as its own
+      // entry: nothing in the page imports it, so it stays out of the boot
+      // bundle's manifest closure (the files the Worker serves to everyone).
       input: {
-        signin: path.resolve(here, "index.html"),
-        console: path.resolve(here, "console.html"),
+        boot: path.resolve(here, "index.html"),
+        console: path.resolve(here, "src/console/app.tsx"),
       },
+      // The console entry keeps its default export for the boot page.
+      preserveEntrySignatures: "exports-only",
       // Hash-only names: the public sign-in files say nothing about the app.
       output: {
         entryFileNames: "assets/[hash].js",

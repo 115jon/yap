@@ -34,6 +34,11 @@ type DialogRootContextValue = {
 
 type DialogProps = React.ComponentProps<typeof DialogPrimitive.Root> & {
   onBackButton?: () => void;
+  /**
+   * false: the browser back button is not this dialog's (a router owns the
+   * history, e.g. a panel that is a route). Default: modal dialogs take it.
+   */
+  backButton?: boolean;
 };
 
 const DialogRootContext = React.createContext<DialogRootContextValue | null>(
@@ -46,6 +51,7 @@ function Dialog({
   onOpenChange,
   modal = true,
   onBackButton,
+  backButton,
   ...props
 }: DialogProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(
@@ -54,7 +60,7 @@ function Dialog({
   const isControlled = open !== undefined;
   const isOpen = isControlled ? open : uncontrolledOpen;
   const dialogId = React.useId();
-  const handlesBack = modal || onBackButton !== undefined;
+  const handlesBack = backButton ?? (modal || onBackButton !== undefined);
   const openerRef = React.useRef<HTMLElement | null>(null);
   const wasOpenRef = React.useRef(false);
   const [stacked, setStacked] = React.useState(false);

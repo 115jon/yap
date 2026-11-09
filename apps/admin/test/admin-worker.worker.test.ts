@@ -63,25 +63,26 @@ const fakeKova: typeof fetch = async (input, init) => {
 
 const FILES: Record<string, { body: string; type: string }> = {
   "/index.html": {
-    body: '<meta name="kova-key" content="__KOVA_ADMIN_PUBLISHABLE_KEY__"><title>Sign in</title>',
+    body: '<meta name="kova-key" content="__KOVA_ADMIN_PUBLISHABLE_KEY__"><title>Sign in</title><script src="/assets/boot.js"></script>',
     type: "text/html",
   },
-  "/console.html": { body: "<title>console page</title>", type: "text/html" },
   "/manifest.json": {
     body: JSON.stringify({
-      "index.html": { file: "assets/signin.js", imports: ["_shared.js"] },
+      "index.html": { file: "assets/boot.js", imports: ["_shared.js"] },
       "_shared.js": { file: "assets/shared.js" },
-      "console.html": {
+      "src/console/app.tsx": {
         file: "assets/console.js",
-        imports: ["_shared.js"],
-        css: ["assets/console.css"],
+        isEntry: true,
+        imports: ["_shared.js", "_core.js"],
       },
+      "_core.js": { file: "assets/core.js", css: ["assets/console.css"] },
     }),
     type: "application/json",
   },
-  "/assets/signin.js": { body: "signin()", type: "text/javascript" },
+  "/assets/boot.js": { body: "boot()", type: "text/javascript" },
   "/assets/shared.js": { body: "shared()", type: "text/javascript" },
   "/assets/console.js": { body: "console()", type: "text/javascript" },
+  "/assets/core.js": { body: "core()", type: "text/javascript" },
   "/assets/console.css": { body: "body{}", type: "text/css" },
 };
 
@@ -214,9 +215,23 @@ const API: Array<[string, string, unknown?]> = [
   ["GET", "/api/nope"],
 ];
 
+/** The console's client routes (console/router.tsx): admins only. */
+const ROUTES = [
+  "/people",
+  "/people/",
+  `/people/${TARGET}`,
+  "/live",
+  "/insights",
+  "/switches",
+  "/audit",
+];
+
 const PAGES = [
+  ...ROUTES,
   "/console.html",
+  "/index.html",
   "/assets/console.js",
+  "/assets/core.js",
   "/assets/console.css",
   "/manifest.json",
   "/nope",
@@ -272,10 +287,13 @@ describe("the Kova gate", () => {
     const html = await page.text();
     expect(html).toContain(`content="${ADMIN_KEY}"`);
     expect(html).not.toContain("console");
-    expect((await call("GET", "/assets/signin.js")).status).toBe(200);
+    expect((await call("GET", "/assets/boot.js")).status).toBe(200);
     expect((await call("GET", "/assets/shared.js")).status).toBe(200);
-    // The sign-in page itself only at "/".
+    // The page itself only at "/", and none of the console's routes.
     expect((await call("GET", "/index.html")).status).toBe(404);
+    for (const path of ROUTES) {
+      expect((await call("GET", path)).status, path).toBe(404);
+    }
   });
 
   it("trades a token for the session cookie only for a site admin", async () => {
@@ -312,16 +330,39 @@ describe("the Kova gate", () => {
   });
 
   it("lets the admin's session in to the console, its files and the API", async () => {
-    const page = await call("GET", "/", { cookie: "admin-token" });
-    expect(await page.text()).toContain("console page");
+    // The same page at "/" and at every console route (deep links, refresh).
+    for (const path of ["/", ...ROUTES]) {
+      const page = await call("GET", path, { cookie: "admin-token" });
+      expect(page.status, path).toBe(200);
+      const html = await page.text();
+      expect(html, path).toContain(`content="${ADMIN_KEY}"`);
+      expect(page.headers.get("cache-control"), path).toBe("no-store");
+    }
+    for (const file of [
+      "/assets/console.js",
+      "/assets/core.js",
+      "/assets/console.css",
+    ]) {
+      expect(
+        (await call("GET", file, { cookie: "admin-token" })).status,
+        file,
+      ).toBe(200);
+    }
     expect(
-      (await call("GET", "/assets/console.js", { cookie: "admin-token" }))
-        .status,
-    ).toBe(200);
+      (await call("GET", "/manifest.json", { cookie: "admin-token" })).status,
+    ).toBe(404);
+    // The session names the console bundle the boot page loads in place.
     const session = await call("GET", "/api/session", {
       cookie: "admin-token",
     });
-    expect(await session.json()).toMatchObject({ user_id: ADMIN });
+    expect(session.headers.get("cache-control")).toBe("no-store");
+    expect(await session.json()).toMatchObject({
+      user_id: ADMIN,
+      console: {
+        script: "/assets/console.js",
+        styles: ["/assets/console.css"],
+      },
+    });
     for (const [method, path] of API.filter(([method]) => method === "GET")) {
       if (path === "/api/nope") continue;
       expect(
@@ -344,6 +385,57 @@ describe("the Kova gate", () => {
     });
     expect(signOut.status).toBe(204);
     expect(signOut.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
+  it("does not cache a Kova outage as a refusal", async () => {
+    const reference = await fingerprint(await call("GET", "/nope"));
+    let failures = 0;
+    for (const outage of [
+      () => new Response(null, { status: 429 }),
+      () => new Response(null, { status: 503 }),
+      () => {
+        throw new TypeError("fetch failed");
+      },
+    ]) {
+      clearGateCache();
+      const flaky: typeof fetch = async (input, init) => {
+        failures += 1;
+        if (failures % 2 === 1) return outage();
+        return fakeKova(input, init);
+      };
+      const ask = () =>
+        handleAdminRequest(
+          new Request(`${BASE}/api/session`, {
+            headers: { cookie: `${SESSION_COOKIE}=admin-token` },
+          }),
+          adminEnv,
+          { fetch: flaky },
+        );
+      // The outage is still a bare 404, byte for byte...
+      expect(await fingerprint(await ask())).toBe(reference);
+      // ...but the next request asks Kova again and gets in.
+      const next = await ask();
+      expect(next.status).toBe(200);
+      expect(await next.json()).toMatchObject({ user_id: ADMIN });
+    }
+
+    // A definite "no" is cached: Kova is asked once per TTL.
+    clearGateCache();
+    let asked = 0;
+    const counting: typeof fetch = async (input, init) => {
+      asked += 1;
+      return fakeKova(input, init);
+    };
+    for (let i = 0; i < 3; i += 1) {
+      await handleAdminRequest(
+        new Request(`${BASE}/api/users`, {
+          headers: { cookie: `${SESSION_COOKIE}=plain-token` },
+        }),
+        adminEnv,
+        { fetch: counting },
+      );
+    }
+    expect(asked).toBe(1);
   });
 
   it("routes only the known API paths and methods", () => {
@@ -614,6 +706,7 @@ describe("the shop catalog card", () => {
     // Once per cooldown, and a refused try logs nothing.
     const again = await as("POST", "/api/catalog/refresh");
     expect(again.status).toBe(429);
+    expect(Number(again.headers.get("retry-after"))).toBeGreaterThan(0);
     expect(await again.json()).toMatchObject({
       code: "CATALOG_REFRESH_COOLDOWN",
     });

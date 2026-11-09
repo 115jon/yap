@@ -2,9 +2,10 @@
  * Live ops: the site right now. Who is online, the voice rooms as Talk
  * Tree branches with their people and streams, chunked uploads in flight,
  * D1 and R2, the deploy, the shop catalog, the cron sweeps and the
- * background job backlog. Refreshes every 5 s while the page is visible.
+ * background job backlog. Refreshes every 10 s while the page is visible.
  */
 
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Avatar } from "@/components/ui/avatar";
@@ -28,7 +29,12 @@ import { assetUrl } from "./admin-format";
 import { cn } from "@/lib/utils";
 
 import { RefreshButton, SectionToolbar, useAdminShell } from "./AdminConsole";
-import { useAdminResource, useAdminTransport } from "./admin-data";
+import {
+  AdminApiError,
+  adminQueryKey,
+  useAdminResource,
+  useAdminTransport,
+} from "./admin-data";
 import {
   formatAgo,
   formatBytes,
@@ -44,7 +50,7 @@ import {
   useAdminNow,
 } from "./admin-ui";
 
-const LIVE_REFRESH_MS = 5_000;
+const LIVE_REFRESH_MS = 10_000;
 const REPO_COMMIT_URL = "https://github.com/115jon/yap/commit/";
 
 export function LiveSection() {
@@ -64,7 +70,8 @@ export function LiveSection() {
           {live.error ? "Not live" : "Live"}
         </LedLabel>
         <p className="text-ui-sm text-ink-3 max-md:hidden">
-          Refreshes every 5 seconds while this tab is open.
+          Refreshes every {LIVE_REFRESH_MS / 1000} seconds while this tab is
+          open.
         </p>
         <div className="ml-auto flex items-center gap-3">
           <Freshness
@@ -86,11 +93,7 @@ export function LiveSection() {
             onRetry={() => void live.refresh()}
           />
         ) : data ? (
-          <LiveBody
-            data={data}
-            now={now}
-            onChanged={() => void live.refresh()}
-          />
+          <LiveBody data={data} now={now} />
         ) : null}
       </div>
     </section>
@@ -109,15 +112,7 @@ function LiveSkeleton() {
   );
 }
 
-function LiveBody({
-  data,
-  now,
-  onChanged,
-}: {
-  data: AdminLiveSnapshot;
-  now: number;
-  onChanged: () => void;
-}) {
+function LiveBody({ data, now }: { data: AdminLiveSnapshot; now: number }) {
   const { openPerson } = useAdminShell();
   const inVoice =
     data.voice_rooms?.reduce((sum, room) => sum + room.members.length, 0) ??
@@ -463,7 +458,6 @@ function LiveBody({
         catalog={data.catalog}
         generatedAt={data.generated_at}
         now={now}
-        onChanged={onChanged}
       />
 
       <RuleCard legend="Cron sweeps" index={<Num>{data.cron.length}</Num>}>
@@ -541,15 +535,52 @@ function ShopCatalogCard({
   catalog,
   generatedAt,
   now,
-  onChanged,
 }: {
   catalog: AdminCatalogStatus | null;
   generatedAt: string;
   now: number;
-  onChanged: () => void;
 }) {
   const transport = useAdminTransport();
-  const [busy, setBusy] = useState(false);
+  const client = useQueryClient();
+  // A cooldown the server answered with (429 + Retry-After): counted down
+  // here until the next snapshot carries its own retry_after_ms.
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const refresh = useMutation({
+    mutationFn: () =>
+      transport.send<AdminCatalogRefreshResponse>(
+        "POST",
+        "/api/catalog/refresh",
+      ),
+    onSuccess: (result) => {
+      // Show the new status at once; the invalidation below confirms it.
+      client.setQueryData<AdminLiveSnapshot>(
+        adminQueryKey("/api/live"),
+        (current) =>
+          current ? { ...current, catalog: result.catalog } : current,
+      );
+      toast.success(
+        `Catalog refreshed: ${formatCount(result.catalog.items)} items`,
+      );
+    },
+    onError: (error) => {
+      if (
+        error instanceof AdminApiError &&
+        error.code === "CATALOG_REFRESH_COOLDOWN"
+      ) {
+        setCooldownUntil(Date.now() + (error.retryAfterS ?? 30) * 1000);
+        return;
+      }
+      toast.error(describeApiError(error, "refresh the catalog"));
+    },
+    // A failed refresh is recorded too (status row, audit log): refetch both.
+    onSettled: () =>
+      client.invalidateQueries({
+        predicate: (query) =>
+          query.queryKey[0] === "admin" &&
+          (query.queryKey[1] === "/api/live" ||
+            String(query.queryKey[1]).startsWith("/api/audit")),
+      }),
+  });
 
   if (!catalog) {
     return (
@@ -566,25 +597,9 @@ function ShopCatalogCard({
   const waitMs = Math.max(
     0,
     Date.parse(generatedAt) + catalog.retry_after_ms - now,
+    cooldownUntil - now,
   );
-
-  const refresh = async () => {
-    setBusy(true);
-    try {
-      const result = await transport.send<AdminCatalogRefreshResponse>(
-        "POST",
-        "/api/catalog/refresh",
-      );
-      toast.success(
-        `Catalog refreshed: ${formatCount(result.catalog.items)} items`,
-      );
-    } catch (error) {
-      toast.error(describeApiError(error, "refresh the catalog"));
-    } finally {
-      setBusy(false);
-      onChanged();
-    }
-  };
+  const busy = refresh.isPending;
 
   return (
     <RuleCard
@@ -656,13 +671,22 @@ function ShopCatalogCard({
             variant="secondary"
             loading={busy}
             disabled={busy || waitMs > 0}
-            onClick={() => void refresh()}
+            aria-describedby={waitMs > 0 ? "catalog-cooldown" : undefined}
+            onClick={() => refresh.mutate()}
           >
             Refresh now
           </Button>
           {waitMs > 0 ? (
-            <span className="text-ui-xs text-ink-3">
-              Ready in {Math.ceil(waitMs / 1000)} s
+            <span
+              id="catalog-cooldown"
+              role="status"
+              className="flex items-center gap-1.5 text-ui-xs text-ink-3"
+            >
+              <Icon name="clock" size="xs" className="shrink-0" />
+              Tried moments ago, ready in <Num>
+                {Math.ceil(waitMs / 1000)}
+              </Num>{" "}
+              s
             </span>
           ) : null}
         </div>
