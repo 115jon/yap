@@ -172,6 +172,55 @@ fn a_founder_sees_lifetime_and_no_purchase_keys() {
 }
 
 #[test]
+fn avatar_and_banner_limits_follow_the_plan() {
+    use yap_core::limits::{picker_card, Kind};
+    let loud = me(
+        json!({ "tier": "loud", "source": "stripe", "started_at": "2026-08-01T00:00:00Z", "expires_at": "2026-12-01T00:00:00Z" }),
+        json!([]),
+    );
+    for (name, who, limit, text) in [
+        ("founder", founder(), 25 * MB, "25 MB"),
+        ("loud", loud, 25 * MB, "25 MB"),
+        ("free", me(Value::Null, json!([])), 8 * MB, "8 MB"),
+    ] {
+        let s = Client::online_as(who).settings;
+        assert_eq!(s.avatar_limit, limit, "{name} avatar");
+        assert_eq!(s.avatar_limit_text, text, "{name} avatar text");
+        assert_eq!(s.banner_limit, limit, "{name} banner");
+        assert_eq!(s.banner_limit_text, text, "{name} banner text");
+    }
+    // The other limits do not move with the plan.
+    let s = Client::online_as(founder()).settings;
+    assert_eq!(s.attachment_limit, 500 * MB);
+
+    // The picker card says the limit it is given: a founder's 30 MB GIF is
+    // over 25 MB, a 20 MB one is not; a free user's 20 MB one is over 8 MB.
+    let founder_limit = Client::online_as(founder()).settings.avatar_limit;
+    let card = picker_card(Kind::Avatar, 30 * MB, founder_limit, true).expect("30 MB is over");
+    assert_eq!(
+        card["line"],
+        "This GIF is 30.0 MB. Avatars can be up to 25 MB."
+    );
+    assert_eq!(card["limit"], 25 * MB);
+    assert!(picker_card(Kind::Avatar, 20 * MB, founder_limit, true).is_none());
+    let free_limit = Client::online_as(me(Value::Null, json!([])))
+        .settings
+        .avatar_limit;
+    assert_eq!(
+        picker_card(Kind::Banner, 20 * MB, free_limit, false).unwrap()["line"],
+        "Banners can be up to 8 MB; this one is 20.0 MB."
+    );
+    // Kinds no plan raises keep their cards.
+    for (kind, size) in [(Kind::Gif, 30 * MB), (Kind::Sound, 63 * MB)] {
+        let line = picker_card(kind, size, kind.limit(), false).unwrap()["line"].clone();
+        assert!(line.as_str().unwrap().contains(&format!(
+            "up to {}",
+            yap_core::limits::format_limit(kind.limit())
+        )));
+    }
+}
+
+#[test]
 fn free_sees_upgrade_coming_soon_until_billing_answers_200() {
     let mut client = Client::online_as(me(Value::Null, json!([])));
     assert_eq!(client.settings.tier, "free");

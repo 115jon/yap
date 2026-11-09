@@ -99,11 +99,14 @@ impl Kind {
         size <= self.limit()
     }
 
-    /// The limit with the `bigUploads` perk where it raises one
-    /// (`BIG_UPLOAD_LIMITS`): attachments only.
+    /// The limit with the `bigUploads` perk where it raises one: the web's
+    /// `BIG_UPLOAD_LIMITS`, which holds attachments (`MAX_ATTACHMENT_BYTES`,
+    /// 500 MB), avatars and banners (`WORKER_UPLOAD_CAP`, 25 MB). Every
+    /// other kind keeps its limit on every plan.
     pub fn big_limit(self) -> Option<u64> {
         match self {
             Self::Attachment => Some(MAX_ATTACHMENT_BYTES),
+            Self::Avatar | Self::Banner => Some(WORKER_UPLOAD_CAP),
             _ => None,
         }
     }
@@ -275,7 +278,9 @@ pub fn server_refusal_text(message: &str, action: &str, fallback: Option<u64>) -
 }
 
 /// The client's limit for an upload, by the action words its error copy
-/// uses: the 413 sentence's fallback when the server names no limit.
+/// uses: the 413 sentence's fallback when the server names no limit. The
+/// avatar and banner read as the free limit, the one every plan has; the
+/// server's own number (8 or 25 MB) is what a 413 normally carries.
 pub fn limit_for_action(action: &str) -> Option<u64> {
     Some(match action {
         "upload your avatar" => AVATAR,
@@ -346,14 +351,14 @@ fn card(
     })
 }
 
-/// The picker card for one file over `kind`'s limit (avatar, banner,
-/// sound, GIF, vibe, background); `None` when it fits. `is_gif` picks the
-/// avatar's "This GIF" over "This image".
-pub fn picker_card(kind: Kind, size: u64, is_gif: bool) -> Option<Value> {
-    if kind.fits(size) {
+/// The picker card for one file over `limit` (avatar, banner, sound, GIF,
+/// vibe, background); `None` when it fits. `limit` is the user's own for
+/// `kind` ([`client_upload_limit_for`]; `kind.limit()` where no plan
+/// changes it). `is_gif` picks the avatar's "This GIF" over "This image".
+pub fn picker_card(kind: Kind, size: u64, limit: u64, is_gif: bool) -> Option<Value> {
+    if size <= limit {
         return None;
     }
-    let limit = kind.limit();
     let (l, s) = (format_limit(limit), format_size(size));
     let (pose, headline, line) = match kind {
         Kind::Avatar => (
@@ -614,7 +619,8 @@ mod tests {
 
     #[test]
     fn picker_copy_matches_the_spec() {
-        let line = |kind, size, gif| picker_card(kind, size, gif).unwrap()["line"].clone();
+        let line =
+            |kind, size, gif| picker_card(kind, size, kind.limit(), gif).unwrap()["line"].clone();
         let size = 21_390_950; // 20.4 MB
         assert_eq!(
             line(Kind::Avatar, size, true),
@@ -644,7 +650,7 @@ mod tests {
             line(Kind::Background, 30 * MB, false),
             "Backgrounds can be up to 25 MB; this one is 30.0 MB."
         );
-        let card = picker_card(Kind::Avatar, size, true).unwrap();
+        let card = picker_card(Kind::Avatar, size, AVATAR, true).unwrap();
         assert_eq!(card["headline"], "Yappy can't carry that one");
         assert_eq!(card["pose"], SAD);
         assert_eq!(card["actions"], json!(["pick"]));
@@ -653,10 +659,10 @@ mod tests {
             "Yappy can't carry that one. This GIF is 20.4 MB. Avatars can be up to 8 MB."
         );
         assert_eq!(
-            picker_card(Kind::Sound, SOUND + 1, false).unwrap()["pose"],
+            picker_card(Kind::Sound, SOUND + 1, SOUND, false).unwrap()["pose"],
             SQUASHED
         );
-        assert!(picker_card(Kind::Avatar, AVATAR, false).is_none());
+        assert!(picker_card(Kind::Avatar, AVATAR, AVATAR, false).is_none());
     }
 
     #[test]
@@ -771,8 +777,17 @@ mod tests {
             upload_limit_for(Some(&founder), Kind::Sound, false, now),
             50 * MB
         );
+        // Avatars and banners rise to 25 MB with bigUploads, through the
+        // Worker path too (its cap).
+        for kind in [Kind::Avatar, Kind::Banner] {
+            assert_eq!(client_upload_limit_for(None, kind, now), 8 * MB);
+            assert_eq!(client_upload_limit_for(Some(&free), kind, now), 8 * MB);
+            assert_eq!(client_upload_limit_for(Some(&loud), kind, now), 25 * MB);
+            assert_eq!(client_upload_limit_for(Some(&founder), kind, now), 25 * MB);
+            assert_eq!(upload_limit_for(Some(&founder), kind, false, now), 25 * MB);
+        }
         assert_eq!(
-            client_upload_limit_for(Some(&founder), Kind::Avatar, now),
+            client_upload_limit_for(Some(&founder), Kind::ServerIcon, now),
             8 * MB
         );
         assert_eq!(

@@ -22,6 +22,13 @@ pub mod qobject {
         #[qinvokable]
         fn check(self: &Limits, kind: &QString, path: &QString) -> QString;
 
+        /// [`check`](Limits::check) against the user's own limit in bytes
+        /// where a plan raises it: `Settings.avatarLimit` for `avatar`,
+        /// `Settings.bannerLimit` for `banner`.
+        #[qinvokable]
+        #[cxx_name = "checkUpTo"]
+        fn check_up_to(self: &Limits, kind: &QString, path: &QString, limit: f64) -> QString;
+
         /// The drop overlay's card while files are dragged over the chat:
         /// `files` is JSON `[{name, size}]` (sizes from `Files.localFiles`)
         /// against the user's attachment `limit` in bytes
@@ -36,7 +43,8 @@ pub mod qobject {
         #[cxx_name = "traySummary"]
         fn tray_summary(self: &Limits, n: i32, m: i32, limit: f64) -> QString;
 
-        /// `kind`'s limit as words: `25 MB`.
+        /// `kind`'s free limit as words: `25 MB`. A plan's own limit comes
+        /// as words from `Settings` (`avatarLimitText`).
         #[qinvokable]
         #[cxx_name = "limitText"]
         fn limit_text(self: &Limits, kind: &QString) -> QString;
@@ -70,21 +78,38 @@ struct Dragged {
     size: u64,
 }
 
+fn card_for(kind: Kind, limit: u64, path: &QString) -> QString {
+    let path = path.to_string();
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return QString::default();
+    };
+    let is_gif = std::path::Path::new(&path)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("gif"));
+    limits::picker_card(kind, meta.len(), limit, is_gif)
+        .map(|card| QString::from(&card.to_string()))
+        .unwrap_or_default()
+}
+
 impl qobject::Limits {
     pub fn check(&self, kind: &QString, path: &QString) -> QString {
         let Some(kind) = Kind::from_key(&kind.to_string()) else {
             return QString::default();
         };
-        let path = path.to_string();
-        let Ok(meta) = std::fs::metadata(&path) else {
+        card_for(kind, kind.limit(), path)
+    }
+
+    pub fn check_up_to(&self, kind: &QString, path: &QString, limit: f64) -> QString {
+        let Some(kind) = Kind::from_key(&kind.to_string()) else {
             return QString::default();
         };
-        let is_gif = std::path::Path::new(&path)
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("gif"));
-        limits::picker_card(kind, meta.len(), is_gif)
-            .map(|card| QString::from(&card.to_string()))
-            .unwrap_or_default()
+        // Anything unusable is the kind's free limit.
+        let limit = if limit.is_finite() && limit >= 1.0 {
+            bytes(limit)
+        } else {
+            kind.limit()
+        };
+        card_for(kind, limit, path)
     }
 
     pub fn drop_card(&self, files: &QString, limit: f64) -> QString {

@@ -1153,6 +1153,12 @@ pub struct SettingsView {
     /// bytes and as words.
     pub attachment_limit: u64,
     pub attachment_limit_text: String,
+    /// The avatar and banner limits (25 MB with `bigUploads`, else 8 MB),
+    /// likewise.
+    pub avatar_limit: u64,
+    pub avatar_limit_text: String,
+    pub banner_limit: u64,
+    pub banner_limit_text: String,
     /// The Yap Loud page's JSON (`plan_json` in reduce/settings.rs).
     pub plan: String,
 }

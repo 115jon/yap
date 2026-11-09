@@ -1453,14 +1453,15 @@ impl State {
         self.me().and_then(crate::entitlements::of)
     }
 
-    /// The signed-in user's attachment limit (`clientUploadLimitFor`):
-    /// 500 MB with `bigUploads`, 25 MB without.
+    /// The signed-in user's limit for `kind` (`clientUploadLimitFor`).
+    pub fn upload_limit(&self, kind: crate::limits::Kind) -> u64 {
+        crate::limits::client_upload_limit_for(self.my_entitlement(), kind, self.clock_ms())
+    }
+
+    /// The signed-in user's attachment limit: 500 MB with `bigUploads`,
+    /// 25 MB without.
     pub fn attachment_limit(&self) -> u64 {
-        crate::limits::client_upload_limit_for(
-            self.my_entitlement(),
-            crate::limits::Kind::Attachment,
-            self.clock_ms(),
-        )
+        self.upload_limit(crate::limits::Kind::Attachment)
     }
 
     pub fn servers(&self) -> &[Server] {

@@ -146,7 +146,8 @@ T.Popup {
             localError = kind === "avatar" ? qsTr("Choose an image file for your avatar.") : qsTr("Choose an image file for your banner.")
             return
         }
-        const tooBig = Limits.check(kind, path)
+        // The plan sets the limit: 25 MB with bigUploads, else 8 MB.
+        const tooBig = Limits.checkUpTo(kind, path, kind === "avatar" ? Settings.avatarLimit : Settings.bannerLimit)
         if (kind === "avatar") {
             avatarPicker.tooBig = tooBig
             if (tooBig.length > 0)

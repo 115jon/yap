@@ -1319,11 +1319,13 @@ async fn profile_upload(
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "image".into());
+    // The runtime has no plan: an avatar or banner is held to the most any
+    // plan may send (`bigUploads`), and the server's 413 decides between
+    // the free 8 MB and that. The picker has already applied the user's own.
     let cap = match asset {
         ProfileAsset::Nameplate => crate::limits::NAMEPLATE,
-        ProfileAsset::Banner => crate::limits::BANNER,
+        ProfileAsset::Banner | ProfileAsset::Avatar { .. } => crate::limits::WORKER_UPLOAD_CAP,
         ProfileAsset::ServerIcon => crate::limits::SERVER_ICON,
-        ProfileAsset::Avatar { .. } => crate::limits::AVATAR,
     };
     check_size(Path::new(&path), cap).await?;
     let bytes = tokio::fs::read(&path)

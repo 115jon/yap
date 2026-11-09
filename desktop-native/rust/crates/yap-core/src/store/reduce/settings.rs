@@ -850,6 +850,10 @@ impl State {
             );
             view.attachment_limit = self.attachment_limit();
             view.attachment_limit_text = crate::limits::format_limit(view.attachment_limit);
+            view.avatar_limit = self.upload_limit(crate::limits::Kind::Avatar);
+            view.avatar_limit_text = crate::limits::format_limit(view.avatar_limit);
+            view.banner_limit = self.upload_limit(crate::limits::Kind::Banner);
+            view.banner_limit_text = crate::limits::format_limit(view.banner_limit);
             let billing = matches!(self.settings.billing, Load::Ready(true));
             view.plan = plan_json(entitlement, me.badges.as_deref(), billing, now);
         }

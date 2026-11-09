@@ -83,6 +83,12 @@ pub mod qobject {
         /// 25 MB) and as words ("500 MB").
         #[qproperty(f64, attachment_limit, cxx_name = "attachmentLimit")]
         #[qproperty(QString, attachment_limit_text, cxx_name = "attachmentLimitText")]
+        /// The avatar and banner limits likewise (25 MB with `bigUploads`,
+        /// else 8 MB).
+        #[qproperty(f64, avatar_limit, cxx_name = "avatarLimit")]
+        #[qproperty(QString, avatar_limit_text, cxx_name = "avatarLimitText")]
+        #[qproperty(f64, banner_limit, cxx_name = "bannerLimit")]
+        #[qproperty(QString, banner_limit_text, cxx_name = "bannerLimitText")]
         /// Settings > Yap Loud as JSON: `{tier, label, description, badges,
         /// billingEnabled, cards: [{tier, name, price, blurb, kicker,
         /// current, included, showPrice, features, action, label}]}`.
@@ -248,6 +254,10 @@ pub struct SettingsRust {
     all_name_styles: bool,
     attachment_limit: f64,
     attachment_limit_text: QString,
+    avatar_limit: f64,
+    avatar_limit_text: QString,
+    banner_limit: f64,
+    banner_limit_text: QString,
     plan: QString,
     theme: QString,
     version: QString,
@@ -345,6 +355,14 @@ fn set_load(state: &mut QString, value: Option<&mut QString>, load: &Load<String
     }
 }
 
+/// An avatar or banner limit for QML: bytes as a double (25 MB is exact)
+/// and as words; `free` before the plan is known.
+#[allow(clippy::cast_precision_loss)]
+fn image_limit(bytes: u64, free: u64) -> (f64, String) {
+    let bytes = if bytes > 0 { bytes } else { free };
+    (bytes as f64, yap_core::limits::format_limit(bytes))
+}
+
 /// Shows the store's settings view, and applies the account's synced
 /// theme (or seeds it) once per change.
 fn apply(mut object: Pin<&mut qobject::Settings>, view: &SettingsView) {
@@ -410,6 +428,13 @@ fn apply(mut object: Pin<&mut qobject::Settings>, view: &SettingsView) {
         } else {
             &view.attachment_limit_text
         }));
+    // The avatar and banner the same way: the free 8 MB before the plan.
+    let (limit, text) = image_limit(view.avatar_limit, yap_core::limits::AVATAR);
+    o.as_mut().set_avatar_limit(limit);
+    o.as_mut().set_avatar_limit_text(q(&text));
+    let (limit, text) = image_limit(view.banner_limit, yap_core::limits::BANNER);
+    o.as_mut().set_banner_limit(limit);
+    o.as_mut().set_banner_limit_text(q(&text));
     o.as_mut().set_plan(q(&view.plan));
     let (mut state, mut value) = (QString::default(), QString::default());
     set_load(&mut state, Some(&mut value), &view.email);
