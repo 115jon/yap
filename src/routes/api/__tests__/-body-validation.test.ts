@@ -52,7 +52,6 @@ vi.mock("@/services/voice-status-media.service", () => ({
   listRecentVoiceStatusMediaAssets: vi.fn(),
 }));
 
-import { POST as claimAccount } from "../account-claims";
 import { DELETE as deleteAvatar } from "../avatars/$";
 import { DELETE as deleteCameraBackground } from "../camera-backgrounds";
 import { PATCH as patchChannelReadState } from "../channels/$id/read-state";
@@ -113,7 +112,6 @@ describe("route request bodies", () => {
       ["channel reorder", reorderChannels, "PATCH"],
       ["profile update", patchProfile, "PATCH"],
       ["voice status", patchVoiceStatus, "PATCH"],
-      ["account claim", claimAccount, "POST"],
       ["avatar delete", deleteAvatar, "DELETE"],
       ["camera background delete", deleteCameraBackground, "DELETE"],
       ["profile asset delete", deleteProfileAsset, "DELETE"],
@@ -199,16 +197,6 @@ describe("route request bodies", () => {
         expect(response.status).toBe(400);
         expect(await codeOf(response)).toBe("INVALID_BODY");
       }
-    });
-
-    it("account claim: a non-string legacy id no longer reaches .trim()", async () => {
-      const response = await send(
-        claimAccount,
-        "POST",
-        JSON.stringify({ legacyUserId: 42 }),
-      );
-      expect(response.status).toBe(400);
-      expect(await codeOf(response)).toBe("INVALID_BODY");
     });
 
     it("session revoke: a non-string id", async () => {

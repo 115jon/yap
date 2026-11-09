@@ -4,11 +4,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
-import InlineEmojiText from "@/components/chat/InlineEmojiText";
-import { apiGet, apiPatch, apiPost } from "@/lib/api-client";
+import { apiGet, apiPatch } from "@/lib/api-client";
 import { describeApiError } from "@/lib/api-errors";
-import type { AvatarDisplay } from "@/lib/avatar-display";
-import { clog } from "@/lib/console-logger";
 import {
   clearDesktopAuthSession,
   markAuthLogoutIntent,
@@ -315,145 +312,6 @@ function ProfileFieldRow({
   );
 }
 
-type ClaimCandidate = {
-  id: string;
-  username: string;
-  display_name: string | null;
-  avatar_url: string | null;
-  avatar_display?: AvatarDisplay | string | null;
-  match_method: string;
-};
-
-const claimLog = clog("AccountClaims");
-
-/**
- * Legacy Yap accounts that match this login. Renders nothing unless
- * the server offers at least one; claiming merges it and reloads the app.
- */
-function ClaimAccountCard() {
-  const loadCurrentUser = useChatStore((s) => s.actions.loadCurrentUser);
-  const [candidates, setCandidates] = useState<ClaimCandidate[]>([]);
-  const [armedId, setArmedId] = useState<string | null>(null);
-  const [claiming, setClaiming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
-
-  useEffect(() => {
-    let cancelled = false;
-    apiGet<{ claimed: boolean; candidates: ClaimCandidate[] }>(
-      "/api/account-claims",
-    )
-      .then((data) => {
-        if (!cancelled)
-          setCandidates(data?.claimed ? [] : (data?.candidates ?? []));
-      })
-      .catch((err) => {
-        // Optional discovery: a failed check hides the card.
-        claimLog.warn("Unable to check claimable accounts:", err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const cancel = () => {
-    const id = armedId;
-    setArmedId(null);
-    setError(null);
-    if (id) requestAnimationFrame(() => triggerRefs.current.get(id)?.focus());
-  };
-  useSettingsEscape(armedId !== null && !claiming, cancel);
-
-  const claim = async (legacyUserId: string) => {
-    setClaiming(true);
-    setError(null);
-    try {
-      await apiPost("/api/account-claims", { legacyUserId });
-      await loadCurrentUser();
-      window.location.reload();
-    } catch (err) {
-      setError(describeApiError(err, "claim that account"));
-      setClaiming(false);
-    }
-  };
-
-  if (candidates.length === 0) return null;
-
-  return (
-    <SettingsCard
-      title="Claim an existing account"
-      description="We found a Yap account that may be yours. Claim it to bring its servers, messages and profile into this sign-in."
-    >
-      {candidates.map((candidate) => {
-        const name = candidate.display_name || candidate.username;
-        const armed = armedId === candidate.id;
-        return (
-          <SettingsRow
-            key={candidate.id}
-            id={`claim-${candidate.id}`}
-            label={<InlineEmojiText text={name} />}
-            description={`@${candidate.username}`}
-            layout="inline"
-            leading={
-              <span
-                className={cn(
-                  "relative flex size-10 bg-tint-2",
-                  avatarShape(candidate.avatar_url && candidate.avatar_display),
-                )}
-              >
-                {candidate.avatar_url ? (
-                  <AvatarImage
-                    src={candidate.avatar_url}
-                    alt=""
-                    display={candidate.avatar_display}
-                  />
-                ) : (
-                  <span className="flex size-full items-center justify-center text-ui-sm font-semibold text-ink-2">
-                    {getDisplayInitial(candidate)}
-                  </span>
-                )}
-              </span>
-            }
-            footer={
-              armed ? (
-                <ConfirmStrip
-                  consequence={`@${candidate.username} will be merged into this sign-in and the app will reload. You can't undo this.`}
-                  confirmLabel="Claim account"
-                  busy={claiming}
-                  irreversible
-                  error={error}
-                  onCancel={cancel}
-                  onConfirm={() => void claim(candidate.id)}
-                />
-              ) : null
-            }
-          >
-            {() => (
-              <Button
-                ref={(node) => {
-                  if (node) triggerRefs.current.set(candidate.id, node);
-                  else triggerRefs.current.delete(candidate.id);
-                }}
-                type="button"
-                variant="secondary"
-                aria-label={`Claim @${candidate.username}`}
-                aria-expanded={armed}
-                disabled={claiming}
-                onClick={() => {
-                  setError(null);
-                  setArmedId(candidate.id);
-                }}
-              >
-                Claim
-              </Button>
-            )}
-          </SettingsRow>
-        );
-      })}
-    </SettingsCard>
-  );
-}
-
 export default function AccountPanel() {
   const { user, isLoaded } = useUser();
   const { signOut } = useAuth();
@@ -645,8 +503,6 @@ export default function AccountPanel() {
           )}
         </SettingsRow>
       </SettingsCard>
-
-      <ClaimAccountCard />
     </>
   );
 }

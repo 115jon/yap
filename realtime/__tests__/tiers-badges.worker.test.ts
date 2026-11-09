@@ -17,10 +17,7 @@ import {
   sweepAutoBadges,
 } from "../../src/services/badge.service";
 import { getProfileExtras } from "../../src/services/entitlement.service";
-import {
-  mergeLegacyAccountStatements,
-  recordMessageSent,
-} from "../../src/services/stats.service";
+import { recordMessageSent } from "../../src/services/stats.service";
 import { TIME_ZONE_HEADER } from "../../src/lib/request-time-zone";
 import {
   appendRealtimeAdmissionHeaders,
@@ -584,125 +581,5 @@ describe("manual badges: the admin gate", () => {
       changed: false,
     });
     expect(await badges(target)).toEqual([]);
-  });
-});
-
-describe("legacy account claims", () => {
-  async function seedStats(
-    userId: string,
-    row: [number, number, number, string | null, string | null],
-  ) {
-    await db
-      .prepare(
-        `INSERT INTO user_stats (user_id, voice_seconds, stream_seconds, messages_sent, first_seen_at, last_active_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'x')`,
-      )
-      .bind(userId, ...row)
-      .run();
-  }
-
-  it("merges plan, badges and stats into the new id, then drops the legacy rows", async () => {
-    await setup();
-    const legacy = `legacy-${crypto.randomUUID()}`;
-    const fresh = `fresh-${crypto.randomUUID()}`;
-    await addUser(legacy);
-    await addUser(fresh);
-    await seedStats(legacy, [
-      100,
-      10,
-      5,
-      "2026-01-01T00:00:00Z",
-      "2026-03-01T00:00:00Z",
-    ]);
-    await seedStats(fresh, [
-      20,
-      2,
-      1,
-      "2026-02-01T00:00:00Z",
-      "2026-11-01T00:00:00Z",
-    ]);
-    await db.batch([
-      db
-        .prepare(
-          `INSERT INTO user_entitlements (user_id, tier, source, started_at, updated_at) VALUES (?, 'founder', 'grant', '2026-11-09', 'x')`,
-        )
-        .bind(legacy),
-      db
-        .prepare(
-          `INSERT INTO user_badges (user_id, badge_id, awarded_at, source) VALUES (?, 'founder', '2026-11-09T00:00:00Z', 'grant'), (?, 'night-owl', '2026-11-10T00:00:00Z', 'auto')`,
-        )
-        .bind(legacy, legacy),
-      db
-        .prepare(
-          `INSERT INTO user_badges (user_id, badge_id, awarded_at, source) VALUES (?, 'night-owl', '2026-11-12T00:00:00Z', 'auto')`,
-        )
-        .bind(fresh),
-    ]);
-
-    await db.batch(
-      mergeLegacyAccountStatements(
-        db,
-        legacy,
-        fresh,
-        "2026-11-20T00:00:00.000Z",
-      ),
-    );
-
-    expect(await stats(fresh)).toMatchObject({
-      voice_seconds: 120,
-      stream_seconds: 12,
-      messages_sent: 6,
-      first_seen_at: "2026-01-01T00:00:00Z",
-    });
-    const lastActive = await db
-      .prepare(`SELECT last_active_at FROM user_stats WHERE user_id = ?`)
-      .bind(fresh)
-      .first<{ last_active_at: string }>();
-    expect(lastActive?.last_active_at).toBe("2026-11-01T00:00:00Z");
-    expect(await badges(fresh)).toEqual([
-      expect.objectContaining({ badge_id: "founder", source: "grant" }),
-      // The earlier of the two dates.
-      expect.objectContaining({
-        badge_id: "night-owl",
-        awarded_at: "2026-11-10T00:00:00Z",
-      }),
-    ]);
-    expect((await getProfileExtras(db, fresh)).entitlement.tier).toBe(
-      "founder",
-    );
-
-    expect(await stats(legacy)).toBeNull();
-    expect(await badges(legacy)).toEqual([]);
-    expect(
-      await db
-        .prepare(`SELECT 1 FROM user_entitlements WHERE user_id = ?`)
-        .bind(legacy)
-        .first(),
-    ).toBeNull();
-  });
-
-  it("moves stats whole when the new id has none, and keeps a null side", async () => {
-    await setup();
-    const legacy = `legacy-${crypto.randomUUID()}`;
-    const fresh = `fresh-${crypto.randomUUID()}`;
-    await addUser(legacy);
-    await addUser(fresh);
-    await seedStats(legacy, [7, 0, 3, null, "2026-03-01T00:00:00Z"]);
-
-    await db.batch(mergeLegacyAccountStatements(db, legacy, fresh));
-    expect(await stats(fresh)).toMatchObject({
-      voice_seconds: 7,
-      messages_sent: 3,
-      first_seen_at: null,
-    });
-
-    // A later merge adds to it; a known first_seen fills a null one.
-    await seedStats(legacy, [1, 0, 0, "2025-12-01T00:00:00Z", null]);
-    await db.batch(mergeLegacyAccountStatements(db, legacy, fresh));
-    expect(await stats(fresh)).toMatchObject({
-      voice_seconds: 8,
-      messages_sent: 3,
-      first_seen_at: "2025-12-01T00:00:00Z",
-    });
   });
 });
