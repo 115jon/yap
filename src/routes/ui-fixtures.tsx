@@ -29,6 +29,8 @@
  *   sounds (UI sound audition: built-in vs imported custom files)
  *   too-big (the "too big" upload cards, every situation)
  *   badges, tiers (badge art and overflow; the Yap Loud tier cards)
+ *   name-styles, name-style-editor (display name styles on every surface;
+ *   `&name=<effect>&wave=1` dresses every fixture user in a style)
  *   chunked-upload (big-file progress tiles; a live run with cancel)
  */
 

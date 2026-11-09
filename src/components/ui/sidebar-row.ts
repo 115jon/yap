@@ -77,7 +77,10 @@ export const ROW_ACTION_BUTTON =
  * clusters.
  */
 export const ROW_NAME_FADE =
-  "pointer-fine:group-hover:[mask-image:linear-gradient(to_left,transparent_var(--row-actions-w,52px),#000_calc(var(--row-actions-w,52px)+16px))] group-focus-within:[mask-image:linear-gradient(to_left,transparent_var(--row-actions-w,52px),#000_calc(var(--row-actions-w,52px)+16px))]";
+  "pointer-fine:group-hover:[mask-image:linear-gradient(to_left,transparent_var(--row-actions-w,52px),#000_calc(var(--row-actions-w,52px)+16px))] group-focus-within:[mask-image:linear-gradient(to_left,transparent_var(--row-actions-w,52px),#000_calc(var(--row-actions-w,52px)+16px))] " +
+  // The fade runs left to right only: repeated up and down and unclipped,
+  // so a styled name's glow above and below the column still paints.
+  "[mask-repeat:repeat-y] [mask-clip:no-clip]";
 
 /** Trailing meta (mention badge, call clock) that steps aside for ROW_ACTIONS. */
 export const ROW_META_SWAP =

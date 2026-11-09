@@ -14,6 +14,8 @@
  *   command-menu      quick switcher (&q= to prefill)
  */
 
+import { nameStyleFromLocation } from "@/components/dev/name-style-fixtures";
+import { serializeDisplayNameStyle } from "@/lib/profile-customization";
 import CommandMenu from "@/components/CommandMenu";
 import { openMessageSearch } from "@/components/chat/search/open-message-search";
 import {
@@ -102,7 +104,7 @@ function result(
       display_name: author.display_name ?? null,
       avatar_url: AVATARS[author.id] ?? null,
       avatar_display: null,
-      display_name_style: null,
+      display_name_style: serializeDisplayNameStyle(nameStyleFromLocation()),
     },
     content,
     is_pinned: false,

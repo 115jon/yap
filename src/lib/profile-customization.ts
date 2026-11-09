@@ -22,7 +22,8 @@ export const DISPLAY_NAME_COLOR_SWATCHES = [
   "#F97316",
 ] as const;
 
-export type DisplayNameFontId =
+/** The original faces, kept as they shipped ("Classic" in the editor). */
+export type ClassicDisplayNameFontId =
   | "gg-sans"
   | "tempo"
   | "sakura"
@@ -32,18 +33,61 @@ export type DisplayNameFontId =
   | "eight-bit"
   | "vampyre";
 
-export type DisplayNameEffectId =
+/** Faces added with the Yap effects (self-hosted OFL fonts, latin only). */
+export type YapDisplayNameFontId =
+  | "silkscreen"
+  | "unbounded"
+  | "syne"
+  | "instrument-serif"
+  | "vt323"
+  | "rubik-glitch"
+  | "major-mono";
+
+export type DisplayNameFontId = ClassicDisplayNameFontId | YapDisplayNameFontId;
+
+/** The original effects, kept as they shipped ("Classic" in the editor). */
+export type ClassicDisplayNameEffectId =
   | "solid"
   | "gradient"
   | "neon"
   | "toon"
   | "pop";
 
+/**
+ * Yap's own effects. Painted by `src/styles/name-styles.css` from a few
+ * custom properties (`--nm-a`, `--nm-b`, `--nm-n`); see ProfileDisplayName.
+ */
+export type YapDisplayNameEffectId =
+  | "dither"
+  | "holo"
+  | "chrome"
+  | "pixel"
+  | "crt"
+  | "glitch"
+  | "ember"
+  | "sticker"
+  | "candlelit";
+
+export type DisplayNameEffectId =
+  | ClassicDisplayNameEffectId
+  | YapDisplayNameEffectId;
+
 export interface DisplayNameStyle {
   font: DisplayNameFontId;
   effect: DisplayNameEffectId;
   primaryColor: string;
+  /**
+   * The effect's second colour (gradient end, glow, Dither fade's second
+   * ink, Sticker's outline, Pixel shine's shine). Effects that use one
+   * colour or a fixed palette ignore it.
+   */
   secondaryColor: string;
+  /**
+   * The Wave modifier: letters bob in turn. Combines with any effect.
+   * Absent (never `false`) when off, so styles saved before it existed
+   * serialize unchanged.
+   */
+  wave?: boolean;
 }
 
 export interface ProfileCustomizationInput {
@@ -90,7 +134,7 @@ export const DEFAULT_DISPLAY_NAME_STYLE: DisplayNameStyle = {
   secondaryColor: "#FB7185",
 };
 
-const DISPLAY_NAME_FONT_SET = new Set<DisplayNameFontId>([
+export const CLASSIC_DISPLAY_NAME_FONTS: readonly ClassicDisplayNameFontId[] = [
   "gg-sans",
   "tempo",
   "sakura",
@@ -99,15 +143,72 @@ const DISPLAY_NAME_FONT_SET = new Set<DisplayNameFontId>([
   "medieval",
   "eight-bit",
   "vampyre",
+];
+
+export const YAP_DISPLAY_NAME_FONTS: readonly YapDisplayNameFontId[] = [
+  "silkscreen",
+  "unbounded",
+  "syne",
+  "instrument-serif",
+  "vt323",
+  "rubik-glitch",
+  "major-mono",
+];
+
+export const CLASSIC_DISPLAY_NAME_EFFECTS: readonly ClassicDisplayNameEffectId[] =
+  ["solid", "gradient", "neon", "toon", "pop"];
+
+export const YAP_DISPLAY_NAME_EFFECTS: readonly YapDisplayNameEffectId[] = [
+  "dither",
+  "holo",
+  "chrome",
+  "pixel",
+  "crt",
+  "glitch",
+  "ember",
+  "sticker",
+  "candlelit",
+];
+
+const DISPLAY_NAME_FONT_SET = new Set<string>([
+  ...CLASSIC_DISPLAY_NAME_FONTS,
+  ...YAP_DISPLAY_NAME_FONTS,
 ]);
 
-const DISPLAY_NAME_EFFECT_SET = new Set<DisplayNameEffectId>([
-  "solid",
-  "gradient",
-  "neon",
-  "toon",
-  "pop",
+const DISPLAY_NAME_EFFECT_SET = new Set<string>([
+  ...CLASSIC_DISPLAY_NAME_EFFECTS,
+  ...YAP_DISPLAY_NAME_EFFECTS,
 ]);
+
+const YAP_FONT_SET = new Set<string>(YAP_DISPLAY_NAME_FONTS);
+const YAP_EFFECT_SET = new Set<string>(YAP_DISPLAY_NAME_EFFECTS);
+
+export function isYapDisplayNameEffect(
+  effect: DisplayNameEffectId,
+): effect is YapDisplayNameEffectId {
+  return YAP_EFFECT_SET.has(effect);
+}
+
+export function isYapDisplayNameFont(
+  font: DisplayNameFontId,
+): font is YapDisplayNameFontId {
+  return YAP_FONT_SET.has(font);
+}
+
+/**
+ * True when a style uses anything beyond the Classic set (a Yap effect, a
+ * Yap font or Wave): the part a perk will gate.
+ */
+export function usesYapDisplayNameStyle(
+  style: DisplayNameStyle | null | undefined,
+): boolean {
+  if (!style) return false;
+  return (
+    isYapDisplayNameEffect(style.effect) ||
+    isYapDisplayNameFont(style.font) ||
+    style.wave === true
+  );
+}
 
 const HEX_COLOR_RE = /^#?(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 const RGB_COLOR_RE =
@@ -308,6 +409,12 @@ function getContrastRatio(foreground: string, background: string) {
   return (brighter + 0.05) / (darker + 0.05);
 }
 
+/** True for a colour that reads as a light ground (dark ink goes on it). */
+export function isLightDisplayColor(value: string | null | undefined) {
+  const hex = normalizeDisplayColor(value);
+  return hex ? getRelativeLuminance(hex) > 0.47 : false;
+}
+
 function getContrastTextColor(hex: string) {
   return getRelativeLuminance(hex) > 0.47 ? "#12131A" : "#F8FAFC";
 }
@@ -368,12 +475,17 @@ export function resolveReadableDisplayNameStyle(
 
   return {
     ...normalizedStyle,
-    primaryColor: pickReadableDisplayNameColor(
-      normalizedStyle.primaryColor,
-      backgroundColor,
-      fallbackTextColor,
-      minContrastRatio,
-    ),
+    // Sticker's outline (the second colour) carries its contrast, so its
+    // fill keeps the picked colour: white on a light ground is the point.
+    primaryColor:
+      normalizedStyle.effect === "sticker"
+        ? normalizedStyle.primaryColor
+        : pickReadableDisplayNameColor(
+            normalizedStyle.primaryColor,
+            backgroundColor,
+            fallbackTextColor,
+            minContrastRatio,
+          ),
     secondaryColor: pickReadableDisplayNameColor(
       normalizedStyle.secondaryColor,
       backgroundColor,
@@ -408,8 +520,8 @@ export function normalizeDisplayNameStyle(
   if (
     typeof font !== "string" ||
     typeof effect !== "string" ||
-    !DISPLAY_NAME_FONT_SET.has(font as DisplayNameFontId) ||
-    !DISPLAY_NAME_EFFECT_SET.has(effect as DisplayNameEffectId) ||
+    !DISPLAY_NAME_FONT_SET.has(font) ||
+    !DISPLAY_NAME_EFFECT_SET.has(effect) ||
     !primaryColor ||
     !secondaryColor
   ) {
@@ -421,6 +533,8 @@ export function normalizeDisplayNameStyle(
     effect: effect as DisplayNameEffectId,
     primaryColor,
     secondaryColor,
+    // Only `true` survives; anything else is "off" and is left out.
+    ...(raw.wave === true ? { wave: true } : {}),
   };
 }
 
@@ -431,14 +545,18 @@ export function serializeDisplayNameStyle(
   return normalized ? JSON.stringify(normalized) : null;
 }
 
+export type DisplayNameStyleGroup = "classic" | "yap";
+
 export const DISPLAY_NAME_FONT_OPTIONS: Array<{
   id: DisplayNameFontId;
   label: string;
   sample: string;
+  group: DisplayNameStyleGroup;
   style: CSSProperties;
 }> = [
   {
     id: "gg-sans",
+    group: "classic",
     label: "gg sans",
     sample: "Jon",
     style: {
@@ -449,6 +567,7 @@ export const DISPLAY_NAME_FONT_OPTIONS: Array<{
   },
   {
     id: "tempo",
+    group: "classic",
     label: "Tempo",
     sample: "Hype",
     style: {
@@ -460,6 +579,7 @@ export const DISPLAY_NAME_FONT_OPTIONS: Array<{
   },
   {
     id: "sakura",
+    group: "classic",
     label: "Sakura",
     sample: "Bloom",
     style: {
@@ -471,6 +591,7 @@ export const DISPLAY_NAME_FONT_OPTIONS: Array<{
   },
   {
     id: "jellybean",
+    group: "classic",
     label: "Jellybean",
     sample: "Soft",
     style: {
@@ -482,6 +603,7 @@ export const DISPLAY_NAME_FONT_OPTIONS: Array<{
   },
   {
     id: "modern",
+    group: "classic",
     label: "Modern",
     sample: "Muse",
     style: {
@@ -493,6 +615,7 @@ export const DISPLAY_NAME_FONT_OPTIONS: Array<{
   },
   {
     id: "medieval",
+    group: "classic",
     label: "Medieval",
     sample: "Crest",
     style: {
@@ -504,6 +627,7 @@ export const DISPLAY_NAME_FONT_OPTIONS: Array<{
   },
   {
     id: "eight-bit",
+    group: "classic",
     label: "8 Bit",
     sample: "PLAY",
     style: {
@@ -516,6 +640,7 @@ export const DISPLAY_NAME_FONT_OPTIONS: Array<{
   },
   {
     id: "vampyre",
+    group: "classic",
     label: "Vampyre",
     sample: "Noct",
     style: {
@@ -524,18 +649,242 @@ export const DISPLAY_NAME_FONT_OPTIONS: Array<{
       letterSpacing: "0.02em",
     },
   },
+  // Yap faces (src/display-name-fonts.css). Faces with a small x-height
+  // (VT323, Major Mono Display) are scaled with `font-size-adjust` so they
+  // read at the same size as their neighbours in a 14px row.
+  {
+    id: "silkscreen",
+    group: "yap",
+    label: "Pixel",
+    sample: "Ag",
+    style: {
+      fontFamily: '"Silkscreen", "Press Start 2P", "Courier New", monospace',
+      fontWeight: 400,
+      letterSpacing: "0.02em",
+    },
+  },
+  {
+    id: "unbounded",
+    group: "yap",
+    label: "Wide",
+    sample: "Ag",
+    style: {
+      fontFamily: '"Unbounded", var(--font-display), sans-serif',
+      fontWeight: 700,
+      letterSpacing: "-0.01em",
+    },
+  },
+  {
+    id: "syne",
+    group: "yap",
+    label: "Studio",
+    sample: "Ag",
+    style: {
+      fontFamily: '"Syne", var(--font-display), sans-serif',
+      fontWeight: 800,
+      letterSpacing: "-0.01em",
+    },
+  },
+  {
+    id: "instrument-serif",
+    group: "yap",
+    label: "Candle",
+    sample: "Ag",
+    style: {
+      fontFamily: '"Instrument Serif", "Cormorant Garamond", Georgia, serif',
+      fontWeight: 400,
+      fontStyle: "italic",
+      letterSpacing: "0",
+      fontSizeAdjust: "ex-height 0.5",
+    },
+  },
+  {
+    id: "vt323",
+    group: "yap",
+    label: "Terminal",
+    sample: "Ag",
+    style: {
+      fontFamily: '"VT323", "Cascadia Mono", Consolas, monospace',
+      fontWeight: 400,
+      letterSpacing: "0.02em",
+      fontSizeAdjust: "ex-height 0.56",
+    },
+  },
+  {
+    id: "rubik-glitch",
+    group: "yap",
+    label: "Static",
+    sample: "Ag",
+    style: {
+      fontFamily: '"Rubik Glitch", var(--font-display), sans-serif',
+      fontWeight: 400,
+      letterSpacing: "0",
+    },
+  },
+  {
+    id: "major-mono",
+    group: "yap",
+    label: "Monogram",
+    sample: "Ag",
+    style: {
+      fontFamily: '"Major Mono Display", "Cascadia Mono", monospace',
+      fontWeight: 400,
+      letterSpacing: "0",
+      fontSizeAdjust: "ex-height 0.52",
+    },
+  },
 ];
 
-export const DISPLAY_NAME_EFFECT_OPTIONS: Array<{
+export interface DisplayNameEffectOption {
   id: DisplayNameEffectId;
   label: string;
-}> = [
-  { id: "solid", label: "Solid" },
-  { id: "gradient", label: "Gradient" },
-  { id: "neon", label: "Neon" },
-  { id: "toon", label: "Toon" },
-  { id: "pop", label: "Pop" },
+  group: DisplayNameStyleGroup;
+  /**
+   * The face the editor switches to when this effect is picked. Effects and
+   * fonts stay independent: any font works with any effect.
+   */
+  font?: DisplayNameFontId;
+  /**
+   * Which of the style's colours the effect paints with, and what the
+   * editor calls them. An empty list is a fixed palette.
+   */
+  colors: readonly ("primary" | "secondary")[];
+  colorLabels?: { primary?: string; secondary?: string };
+  /** Plays (hover in lists, always in an open profile). */
+  animated: boolean;
+}
+
+export const DISPLAY_NAME_EFFECT_OPTIONS: DisplayNameEffectOption[] = [
+  {
+    id: "solid",
+    label: "Solid",
+    group: "classic",
+    colors: ["primary", "secondary"],
+    animated: false,
+  },
+  {
+    id: "gradient",
+    label: "Gradient",
+    group: "classic",
+    colors: ["primary", "secondary"],
+    animated: true,
+  },
+  {
+    id: "neon",
+    label: "Neon",
+    group: "classic",
+    colors: ["primary", "secondary"],
+    animated: true,
+  },
+  {
+    id: "toon",
+    label: "Toon",
+    group: "classic",
+    colors: ["primary", "secondary"],
+    animated: false,
+  },
+  {
+    id: "pop",
+    label: "Pop",
+    group: "classic",
+    colors: ["primary", "secondary"],
+    animated: true,
+  },
+  {
+    id: "dither",
+    label: "Dither fade",
+    group: "yap",
+    font: "unbounded",
+    colors: ["primary", "secondary"],
+    colorLabels: { primary: "First color", secondary: "Second color" },
+    animated: false,
+  },
+  {
+    id: "holo",
+    label: "Holo",
+    group: "yap",
+    font: "syne",
+    colors: [],
+    animated: true,
+  },
+  {
+    id: "chrome",
+    label: "Chrome",
+    group: "yap",
+    font: "unbounded",
+    colors: ["primary"],
+    colorLabels: { primary: "Tint" },
+    animated: false,
+  },
+  {
+    id: "pixel",
+    label: "Pixel shine",
+    group: "yap",
+    font: "silkscreen",
+    colors: ["primary", "secondary"],
+    colorLabels: { primary: "Base color", secondary: "Shine color" },
+    animated: true,
+  },
+  {
+    id: "crt",
+    label: "CRT",
+    group: "yap",
+    font: "vt323",
+    colors: [],
+    animated: false,
+  },
+  {
+    id: "glitch",
+    label: "Glitch",
+    group: "yap",
+    font: "rubik-glitch",
+    colors: ["primary"],
+    colorLabels: { primary: "Base color" },
+    animated: false,
+  },
+  {
+    id: "ember",
+    label: "Ember",
+    group: "yap",
+    font: "syne",
+    colors: [],
+    animated: true,
+  },
+  {
+    id: "sticker",
+    label: "Sticker",
+    group: "yap",
+    font: "jellybean",
+    colors: ["primary", "secondary"],
+    colorLabels: { primary: "Fill color", secondary: "Outline color" },
+    animated: false,
+  },
+  {
+    id: "candlelit",
+    label: "Candlelit serif",
+    group: "yap",
+    font: "instrument-serif",
+    colors: ["primary"],
+    colorLabels: { primary: "Ink color" },
+    animated: false,
+  },
 ];
+
+export function getDisplayNameEffectOption(
+  effect: DisplayNameEffectId,
+): DisplayNameEffectOption {
+  return (
+    DISPLAY_NAME_EFFECT_OPTIONS.find((option) => option.id === effect) ??
+    DISPLAY_NAME_EFFECT_OPTIONS[0]
+  );
+}
+
+/** Whether the name moves when it plays (an animated effect, or Wave). */
+export function displayNameStyleHasMotion(style: DisplayNameStyle): boolean {
+  return (
+    style.wave === true || getDisplayNameEffectOption(style.effect).animated
+  );
+}
 
 export function getDisplayNameFontStyle(
   font: DisplayNameFontId,
@@ -558,6 +907,9 @@ export function getDisplayNameFontStyle(
  * Only `pop` animates this style (a `translate` bob, composited). Gradient
  * and neon play through a second layer instead (see
  * `getDisplayNameEffectOverlayStyle`), so nothing repaints per frame.
+ *
+ * Yap effects return only their two inks as `--nm-a` / `--nm-b`; their
+ * paint and motion live in `src/styles/name-styles.css`.
  */
 export function getDisplayNameEffectStyle(
   style: DisplayNameStyle,
@@ -591,6 +943,14 @@ export function getDisplayNameEffectStyle(
     secondaryHighlightAnchor,
     0.18,
   );
+
+  if (isYapDisplayNameEffect(style.effect)) {
+    // Yap effects paint in src/styles/name-styles.css from these two inks.
+    return {
+      "--nm-a": primaryColor,
+      "--nm-b": secondaryColor,
+    } as CSSProperties;
+  }
 
   switch (style.effect) {
     case "gradient":
@@ -689,37 +1049,45 @@ export function getDisplayNameEffectOverlayStyle(
   }
 }
 
-export function createRandomDisplayNameStyle() {
+export function createRandomDisplayNameStyle(
+  options: { includeYap?: boolean } = {},
+) {
+  const includeYap = options.includeYap === true;
+  const pick = <T>(items: readonly T[]): T | undefined =>
+    items[Math.floor(Math.random() * items.length)];
+  const effectOption =
+    pick(
+      DISPLAY_NAME_EFFECT_OPTIONS.filter(
+        (option) => includeYap || option.group === "classic",
+      ),
+    ) ?? DISPLAY_NAME_EFFECT_OPTIONS[0];
+  // A Yap effect brings its own face; a Classic one draws any allowed face.
   const font =
-    DISPLAY_NAME_FONT_OPTIONS[
-      Math.floor(Math.random() * DISPLAY_NAME_FONT_OPTIONS.length)
-    ]?.id ?? DEFAULT_DISPLAY_NAME_STYLE.font;
-  const effect =
-    DISPLAY_NAME_EFFECT_OPTIONS[
-      Math.floor(Math.random() * DISPLAY_NAME_EFFECT_OPTIONS.length)
-    ]?.id ?? DEFAULT_DISPLAY_NAME_STYLE.effect;
+    effectOption.font ??
+    pick(
+      DISPLAY_NAME_FONT_OPTIONS.filter(
+        (option) => includeYap || option.group === "classic",
+      ),
+    )?.id ??
+    DEFAULT_DISPLAY_NAME_STYLE.font;
+  const swatches: readonly string[] = DISPLAY_NAME_COLOR_SWATCHES;
   const primaryColor =
-    DISPLAY_NAME_COLOR_SWATCHES[
-      Math.floor(Math.random() * DISPLAY_NAME_COLOR_SWATCHES.length)
-    ] ?? DEFAULT_DISPLAY_NAME_STYLE.primaryColor;
+    pick(swatches) ?? DEFAULT_DISPLAY_NAME_STYLE.primaryColor;
   let secondaryColor =
-    DISPLAY_NAME_COLOR_SWATCHES[
-      Math.floor(Math.random() * DISPLAY_NAME_COLOR_SWATCHES.length)
-    ] ?? DEFAULT_DISPLAY_NAME_STYLE.secondaryColor;
+    pick(swatches) ?? DEFAULT_DISPLAY_NAME_STYLE.secondaryColor;
 
   if (secondaryColor === primaryColor) {
     secondaryColor =
-      DISPLAY_NAME_COLOR_SWATCHES[
-        (DISPLAY_NAME_COLOR_SWATCHES.indexOf(primaryColor) + 3) %
-          DISPLAY_NAME_COLOR_SWATCHES.length
-      ] ?? DEFAULT_DISPLAY_NAME_STYLE.secondaryColor;
+      swatches[(swatches.indexOf(primaryColor) + 3) % swatches.length] ??
+      DEFAULT_DISPLAY_NAME_STYLE.secondaryColor;
   }
 
   return {
     font,
-    effect,
+    effect: effectOption.id,
     primaryColor,
     secondaryColor,
+    ...(includeYap && Math.random() < 0.25 ? { wave: true } : {}),
   } satisfies DisplayNameStyle;
 }
 

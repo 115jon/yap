@@ -1404,7 +1404,9 @@ const MessageItem = memo(
                   type="button"
                   ref={setAuthorNameEl}
                   className={cn(
-                    "min-w-0 cursor-pointer truncate border-0 bg-transparent p-0 text-left font-display-tuned text-[15px] leading-5 font-bold outline-none underline-offset-3 pointer-fine:hover:underline",
+                    // No overflow clip here: the name truncates itself and
+                    // keeps room for its effect's glow (name-styles.css).
+                    "min-w-0 cursor-pointer border-0 bg-transparent p-0 text-left font-display-tuned text-[15px] leading-5 font-bold outline-none underline-offset-3 pointer-fine:hover:underline",
                     !authorInk && "text-ink-1",
                     // Name effects are static in the list and play while the
                     // row is hovered or focused (spec §6).
@@ -1416,7 +1418,7 @@ const MessageItem = memo(
                   <ProfileDisplayName
                     text={authorInfo.displayName}
                     displayNameStyle={authorInfo.displayNameStyle}
-                    className="block max-w-full truncate font-display-tuned text-[15px] leading-5 font-bold"
+                    className="block truncate font-display-tuned text-[15px] leading-5 font-bold"
                   />
                 </button>
                 <MessageHeaderTime iso={message.created_at} full={fullTime}>
