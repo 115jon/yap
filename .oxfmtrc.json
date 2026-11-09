@@ -27,6 +27,7 @@
     "public/desktop/game-catalog.json",
     "packages/*/dist/**",
     "src/routeTree.gen.ts",
+    "src/**/__tests__/fixtures/**/*.html",
     "pnpm-lock.yaml",
     "package-lock.json",
     "Cargo.lock",

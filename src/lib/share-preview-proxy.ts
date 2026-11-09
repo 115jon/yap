@@ -1335,18 +1335,43 @@ export async function fetchTikTokProxyMetadata(
   return (await fetchTikTokProxyLookup(url)).metadata;
 }
 
-export async function lookupInstagramOEmbed(url: string): Promise<{
+type InstagramOEmbedLookup = {
   status: number;
   metadata: InstagramOEmbedMetadata | null;
-}> {
+};
+
+const instagramOEmbedFlights = new Map<
+  string,
+  Promise<InstagramOEmbedLookup>
+>();
+
+/**
+ * One request per post at a time: the link embed and the media resolver ask
+ * for the same post in parallel.
+ */
+export function lookupInstagramOEmbed(
+  url: string,
+): Promise<InstagramOEmbedLookup> {
   const canonicalUrl = canonicalizeInstagramUrl(url);
+  return singleFlight(instagramOEmbedFlights, canonicalUrl, () =>
+    fetchInstagramOEmbedLookup(canonicalUrl),
+  );
+}
+
+async function fetchInstagramOEmbedLookup(
+  canonicalUrl: string,
+): Promise<InstagramOEmbedLookup> {
   const apiUrl = `https://www.instagram.com/api/v1/oembed/?url=${encodeURIComponent(canonicalUrl)}&omitscript=true`;
-  const response = await safeFetch(apiUrl, {
-    headers: {
-      "User-Agent": getBotUserAgent(),
-      Accept: "application/json",
+  const response = await safeFetch(
+    apiUrl,
+    {
+      headers: {
+        "User-Agent": getBotUserAgent(),
+        Accept: "application/json",
+      },
     },
-  });
+    { timeoutMs: 5_000 },
+  );
 
   if (!response.ok || !response.headers.get("Content-Type")?.includes("json")) {
     return { status: response.status, metadata: null };

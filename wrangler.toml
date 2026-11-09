@@ -117,10 +117,13 @@ bucket_name = "ralph-chat-attachments"
 binding = "BACKGROUND_TASKS"
 queue = "ralph-meet-background-tasks"
 
+# A batch is delivered when it is full or after max_batch_timeout. With five
+# per batch a lone message (a link to embed, a mention to notify) sat in the
+# queue for up to 5 s; one per batch delivers it at once.
 [[queues.consumers]]
 queue = "ralph-meet-background-tasks"
-max_batch_size = 5
-max_batch_timeout = 5
+max_batch_size = 1
+max_batch_timeout = 1
 max_retries = 5
 retry_delay = 30
 dead_letter_queue = "ralph-meet-background-tasks-dlq"

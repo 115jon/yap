@@ -30,6 +30,8 @@
  *                   stored tombstones (TikTok, X), age-restricted TikTok,
  *                   a failed TikTok lookup
  *   embed-spotify   recorded Spotify album + track
+ *   embed-instagram Instagram post + reel, before / after the embed-page
+ *                   resolver, and the minimal card
  */
 import type { EmbedInfo, EmbedMedia } from "@/lib/types";
 import { LinkEmbed } from "@/components/chat/LinkEmbed";
@@ -41,6 +43,11 @@ import {
   recordedDirectPng,
   recordedGitHub,
   recordedInstagramReel,
+  instagramMinimalCard,
+  instagramPostAfter,
+  instagramPostBefore,
+  instagramReelAfter,
+  instagramReelBefore,
   recordedReddit,
   recordedSpotifyAlbum,
   recordedTikTokGone,
@@ -538,6 +545,13 @@ const SURFACES: Record<string, Array<[string, EmbedInfo]>> = {
     ["TikTok lookup failed (transient)", tiktokLookupFailed],
     ["X tombstone (recorded)", recordedXGone],
     ["Instagram reel, thumbnail only (recorded)", recordedInstagramReel],
+  ],
+  "embed-instagram": [
+    ["Instagram post, before (oEmbed + page fallback)", instagramPostBefore],
+    ["Instagram post, after (embed page)", instagramPostAfter],
+    ["Instagram reel, before (poster only)", instagramReelBefore],
+    ["Instagram reel, after (embed page, video)", instagramReelAfter],
+    ["Instagram, minimal card", instagramMinimalCard],
   ],
   "embed-spotify": [
     ["Spotify album (recorded)", recordedSpotifyAlbum],

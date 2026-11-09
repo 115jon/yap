@@ -1972,6 +1972,83 @@ describe("MeetingRoom lifecycle", () => {
     callee.close();
   });
 
+  it("sends a prefetched link's embed with MESSAGE_CREATE and stores it", async () => {
+    for (const sql of [
+      "CREATE TABLE IF NOT EXISTS channels (id TEXT PRIMARY KEY, server_id TEXT, channel_type TEXT)",
+      "CREATE TABLE IF NOT EXISTS dm_recipients (channel_id TEXT NOT NULL, user_id TEXT NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT, display_name TEXT, avatar_url TEXT, avatar_display TEXT, status TEXT)",
+      "CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, author_id TEXT NOT NULL, content TEXT NOT NULL, reply_to_id TEXT, created_at TEXT, content_revision INTEGER, type TEXT, metadata TEXT)",
+      "CREATE TABLE IF NOT EXISTS message_postprocessing_jobs (message_id TEXT NOT NULL, revision INTEGER NOT NULL, channel_id TEXT NOT NULL, notify INTEGER NOT NULL DEFAULT 1, attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT, created_at TEXT, PRIMARY KEY (message_id, revision))",
+    ]) {
+      await env.DB.prepare(sql).run();
+    }
+    // Earlier tests in this file create `messages` without the column.
+    await env.DB.prepare("ALTER TABLE messages ADD COLUMN embeds TEXT")
+      .run()
+      .catch(() => undefined);
+
+    const channelId = `embed-dm-${crypto.randomUUID()}`;
+    const authorId = `embed-author-${crypto.randomUUID()}`;
+    const friendId = `embed-friend-${crypto.randomUUID()}`;
+    await env.DB.prepare(
+      "INSERT INTO channels (id, server_id, channel_type) VALUES (?, NULL, 'dm')",
+    )
+      .bind(channelId)
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO dm_recipients (channel_id, user_id) VALUES (?, ?), (?, ?)",
+    )
+      .bind(channelId, authorId, channelId, friendId)
+      .run();
+
+    // What /api/embeds/prefetch leaves behind in KV.
+    const url = "https://www.instagram.com/reel/DfajF1zvsbl/";
+    const embed = {
+      id: "embed_prefetched",
+      url,
+      type: "rich",
+      rawTitle: "Legend says you can still hear it echoing.",
+      provider: { name: "Instagram", url: "https://www.instagram.com" },
+      fields: [],
+    };
+    await env.CACHE.put(
+      `v3:embed:${url}`,
+      JSON.stringify({
+        v: 2,
+        status: "ok",
+        embed,
+        freshUntil: Date.now() + 60_000,
+      }),
+    );
+
+    const author = await openGlobalSocket("global-gateway", authorId);
+    await identifyMeetingSocket(author, { name: "Embed Author" });
+    // A DM's MESSAGE_CREATE reaches the other recipient directly.
+    const friend = await openGlobalSocket("global-gateway", friendId);
+    await identifyMeetingSocket(friend, { name: "Embed Friend" });
+    const created = nextDispatchEvent(friend, "MESSAGE_CREATE");
+    author.send(
+      JSON.stringify({
+        op: 20,
+        d: { channel_id: channelId, content: `look ${url}`, nonce: "n-1" },
+      }),
+    );
+
+    const message = (await created) as {
+      d: { data: { id: string; embeds?: unknown[] } };
+    };
+    expect(message.d.data.embeds).toEqual([embed]);
+    const stored = await env.DB.prepare(
+      "SELECT embeds FROM messages WHERE id = ?",
+    )
+      .bind(message.d.data.id)
+      .first<{ embeds: string }>();
+    expect(JSON.parse(stored?.embeds ?? "[]")).toEqual([embed]);
+
+    author.close();
+    friend.close();
+  });
+
   it("keeps a throttled background tab (one heartbeat a minute) and prunes a dead one", async () => {
     const roomName = crypto.randomUUID();
     const userId = `throttled-${crypto.randomUUID()}`;

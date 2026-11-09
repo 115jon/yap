@@ -16,7 +16,10 @@ import type { D1Database } from "@cloudflare/workers-types";
 import { markSharesDeletedForMessage } from "./message-share.service";
 import type { BroadcastDescriptor } from "./server.service";
 import { clog } from "@/lib/console-logger";
-import { extractAndProcessEmbedsWithStatus } from "./embed-fetcher";
+import {
+  extractAndProcessEmbedsWithStatus,
+  lookupCachedEmbeds,
+} from "./embed-fetcher";
 import type { MessagePush } from "./push.service";
 import { callRecordFields } from "./call.service";
 
@@ -930,6 +933,69 @@ export async function processMessagePostprocessingTask(
     return { retryEmbeds: false };
   }
 
+  const isCurrentRevision = async (): Promise<boolean> => {
+    const current = (await db
+      .prepare(
+        `SELECT content_revision FROM messages
+         WHERE id = ? AND channel_id = ?`,
+      )
+      .bind(task.messageId, task.channelId)
+      .first()) as { content_revision: number } | null;
+    return !!current && Number(current.content_revision) === task.revision;
+  };
+
+  // Notifications do not depend on embeds: they go out while the embeds
+  // resolve instead of waiting on the slowest link preview.
+  let revisionChanged = false;
+  let notificationsSent = 0;
+  const notifyStep =
+    task.notify !== false
+      ? sendPostprocessingNotifications(db, task, message, genId, {
+          broadcast,
+          push,
+          isCurrentRevision,
+        }).then(({ current, sent }) => {
+          if (!current) revisionChanged = true;
+          notificationsSent = sent;
+        })
+      : Promise.resolve();
+  const embedStep = processPostprocessingEmbeds(
+    db,
+    task,
+    message,
+    broadcast,
+    isCurrentRevision,
+  );
+  // Both run to the end before a failure in either is reported.
+  const [embedResult, notifyResult] = await Promise.allSettled([
+    embedStep,
+    notifyStep,
+  ]);
+  // A failed notification step redelivers the whole task (notifications are
+  // idempotent by ID), as before.
+  if (notifyResult.status === "rejected") throw notifyResult.reason;
+  if (embedResult.status === "rejected") {
+    // Nothing else went out: redeliver the task, as before.
+    if (notificationsSent === 0) throw embedResult.reason;
+    // Notifications already went out: retry only the embeds (the deferred
+    // job runs with notify off) instead of redelivering the task, which
+    // would broadcast the same notifications again.
+    console.error("Message embed postprocessing failed", embedResult.reason);
+    return { retryEmbeds: !revisionChanged };
+  }
+
+  return {
+    retryEmbeds: !revisionChanged && embedResult.value.hadFailures,
+  };
+}
+
+async function processPostprocessingEmbeds(
+  db: D1Database,
+  task: MessagePostprocessingTask,
+  message: Record<string, unknown>,
+  broadcast: MessagePostprocessingBroadcast,
+  isCurrentRevision: () => Promise<boolean>,
+): Promise<{ hadFailures: boolean }> {
   const storedEmbeds = parseStoredEmbeds(message.embeds);
   // A URL that fails transiently keeps its stored embed (matched by URL);
   // every URL that resolved is written now rather than waiting for the
@@ -971,16 +1037,6 @@ export async function processMessagePostprocessingTask(
     content_revision: task.revision,
     embeds,
   };
-  const isCurrentRevision = async (): Promise<boolean> => {
-    const current = (await db
-      .prepare(
-        `SELECT content_revision FROM messages
-         WHERE id = ? AND channel_id = ?`,
-      )
-      .bind(task.messageId, task.channelId)
-      .first()) as { content_revision: number } | null;
-    return !!current && Number(current.content_revision) === task.revision;
-  };
   const emitEmbedUpdate = async (
     target: MessagePostprocessingBroadcastTarget,
   ): Promise<void> => {
@@ -1009,50 +1065,70 @@ export async function processMessagePostprocessingTask(
     }
   }
 
-  if (task.notify !== false) {
-    const notifBroadcasts = await generateMessageNotifications(db, genId, {
-      channelId: task.channelId,
-      messageId: task.messageId,
-      authorId: String(message.author_id),
-      authorUsername: String(message.author_username ?? "User"),
-      authorDisplayName:
-        typeof message.author_display_name === "string"
-          ? message.author_display_name
-          : null,
-      authorAvatarUrl:
-        typeof message.author_avatar_url === "string"
-          ? message.author_avatar_url
-          : null,
-      content: String(message.content ?? ""),
-      replyToId:
-        typeof message.reply_to_id === "string"
-          ? message.reply_to_id
-          : undefined,
-      contentRevision: task.revision,
-      notificationId: (type, userId) =>
-        `message:${task.messageId}:${type}:${userId}`,
-    });
+  return { hadFailures: extraction.hadFailures };
+}
 
-    const pushes = notifBroadcasts.flatMap((n) => (n.push ? [n.push] : []));
-    const pushed =
-      push && pushes.length > 0 && (await isCurrentRevision())
-        ? push(pushes)
-        : Promise.resolve();
-    try {
-      for (const notification of notifBroadcasts) {
-        if (!(await isCurrentRevision())) return { retryEmbeds: false };
-        await broadcast(
-          { kind: "user", id: notification.userId },
-          notification.event,
-          notification.data,
-        );
-      }
-    } finally {
-      await pushed;
+/**
+ * Mentions, replies and DM notifications for a new message, plus their
+ * pushes. `current` is false when the message was edited meanwhile (the
+ * rest is left to the newer revision's task); `sent` counts broadcasts.
+ */
+async function sendPostprocessingNotifications(
+  db: D1Database,
+  task: MessagePostprocessingTask,
+  message: Record<string, unknown>,
+  genId: () => string,
+  {
+    broadcast,
+    push,
+    isCurrentRevision,
+  }: {
+    broadcast: MessagePostprocessingBroadcast;
+    push?: MessagePostprocessingOptions["push"];
+    isCurrentRevision: () => Promise<boolean>;
+  },
+): Promise<{ current: boolean; sent: number }> {
+  let sent = 0;
+  const notifBroadcasts = await generateMessageNotifications(db, genId, {
+    channelId: task.channelId,
+    messageId: task.messageId,
+    authorId: String(message.author_id),
+    authorUsername: String(message.author_username ?? "User"),
+    authorDisplayName:
+      typeof message.author_display_name === "string"
+        ? message.author_display_name
+        : null,
+    authorAvatarUrl:
+      typeof message.author_avatar_url === "string"
+        ? message.author_avatar_url
+        : null,
+    content: String(message.content ?? ""),
+    replyToId:
+      typeof message.reply_to_id === "string" ? message.reply_to_id : undefined,
+    contentRevision: task.revision,
+    notificationId: (type, userId) =>
+      `message:${task.messageId}:${type}:${userId}`,
+  });
+
+  const pushes = notifBroadcasts.flatMap((n) => (n.push ? [n.push] : []));
+  const pushed =
+    push && pushes.length > 0 && (await isCurrentRevision())
+      ? push(pushes)
+      : Promise.resolve();
+  try {
+    for (const notification of notifBroadcasts) {
+      if (!(await isCurrentRevision())) return { current: false, sent };
+      await broadcast(
+        { kind: "user", id: notification.userId },
+        notification.event,
+        notification.data,
+      );
+      sent += 1;
     }
+  } finally {
+    await pushed;
   }
-
-  return { retryEmbeds: extraction.hadFailures };
+  return { current: true, sent };
 }
 
 // ─── createMessage ───────────────────────────────────────────────────────────
@@ -1074,13 +1150,16 @@ export async function createMessage(
 ): Promise<FormattedMessage> {
   const now = new Date().toISOString();
   const content = (input.content ?? "").trim();
+  // Links the composer prefetched (or that were posted recently) are cached:
+  // store and broadcast their embeds with the message itself.
+  const cachedEmbeds = await lookupCachedEmbeds(content);
 
   await db.batch([
     db
       .prepare(
         `INSERT INTO messages
-           (id, channel_id, author_id, content, reply_to_id, created_at, content_revision)
-         VALUES (?, ?, ?, ?, ?, ?, 1)`,
+           (id, channel_id, author_id, content, reply_to_id, created_at, content_revision, embeds)
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
       )
       .bind(
         messageId,
@@ -1089,6 +1168,7 @@ export async function createMessage(
         content,
         input.reply_to_id ?? null,
         now,
+        JSON.stringify(cachedEmbeds),
       ),
     db
       .prepare(
@@ -1199,6 +1279,7 @@ export async function createMessage(
     reactions: [],
     reply_count: 0,
     content_revision: 1,
+    embeds: cachedEmbeds,
   };
 }
 

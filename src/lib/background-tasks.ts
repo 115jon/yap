@@ -675,56 +675,62 @@ export async function consumeBackgroundTaskBatch(
   batch: MessageBatch<unknown>,
   env: BackgroundTaskConsumerEnv,
 ): Promise<void> {
-  for (const message of batch.messages) {
-    const parsed = parseBackgroundTask(message.body);
-    if (!parsed.ok) {
-      if (
-        parsed.reason === "unsupported-future-version" ||
-        parsed.reason === "unknown-task" ||
-        parsed.reason === "oversized-task"
-      ) {
-        message.retry();
-      } else {
-        message.ack();
-      }
-      continue;
-    }
+  // Messages in a batch are independent: a slow link preview in one must not
+  // hold up the embeds (and notifications) of the others.
+  await Promise.all(
+    batch.messages.map((message) => consumeBackgroundTask(message, env)),
+  );
+}
 
-    const task = parsed.value.task;
-    try {
-      if (task.type === PRESENCE_CACHE_INVALIDATE_TASK) {
-        await deleteServerMemberCacheKeys(env.CACHE, task.serverIds);
-      } else if (task.type === MESSAGE_POSTPROCESS_TASK) {
-        const outcome = await processMessagePostprocessingTask(
-          env.DB,
-          task,
-          (target, event, data) =>
-            broadcastTaskEvent(env.MEETING_ROOM, target, event, data),
-          { push: messagePushes(env.DB, env.FCM_SERVICE_ACCOUNT) },
-        );
-        await settleMessagePostprocessingJob(
-          env.DB,
-          task,
-          outcome,
-          env.BACKGROUND_TASKS,
-        );
-      } else {
-        await processR2CleanupTask(env.DB, env.BUCKET, task);
-      }
-      message.ack();
-    } catch (error: unknown) {
-      if (task.type === R2_CLEANUP_TASK) {
-        try {
-          await recordR2CleanupFailure(env.DB, task.fileKey, error);
-        } catch (recordError: unknown) {
-          console.error("Failed to persist R2 cleanup retry", recordError);
-        }
-      }
-      console.error(
-        "Background task processing failed; retrying message",
-        error,
-      );
+async function consumeBackgroundTask(
+  message: Message<unknown>,
+  env: BackgroundTaskConsumerEnv,
+): Promise<void> {
+  const parsed = parseBackgroundTask(message.body);
+  if (!parsed.ok) {
+    if (
+      parsed.reason === "unsupported-future-version" ||
+      parsed.reason === "unknown-task" ||
+      parsed.reason === "oversized-task"
+    ) {
       message.retry();
+    } else {
+      message.ack();
     }
+    return;
+  }
+
+  const task = parsed.value.task;
+  try {
+    if (task.type === PRESENCE_CACHE_INVALIDATE_TASK) {
+      await deleteServerMemberCacheKeys(env.CACHE, task.serverIds);
+    } else if (task.type === MESSAGE_POSTPROCESS_TASK) {
+      const outcome = await processMessagePostprocessingTask(
+        env.DB,
+        task,
+        (target, event, data) =>
+          broadcastTaskEvent(env.MEETING_ROOM, target, event, data),
+        { push: messagePushes(env.DB, env.FCM_SERVICE_ACCOUNT) },
+      );
+      await settleMessagePostprocessingJob(
+        env.DB,
+        task,
+        outcome,
+        env.BACKGROUND_TASKS,
+      );
+    } else {
+      await processR2CleanupTask(env.DB, env.BUCKET, task);
+    }
+    message.ack();
+  } catch (error: unknown) {
+    if (task.type === R2_CLEANUP_TASK) {
+      try {
+        await recordR2CleanupFailure(env.DB, task.fileKey, error);
+      } catch (recordError: unknown) {
+        console.error("Failed to persist R2 cleanup retry", recordError);
+      }
+    }
+    console.error("Background task processing failed; retrying message", error);
+    message.retry();
   }
 }

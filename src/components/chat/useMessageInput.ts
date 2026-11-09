@@ -1,6 +1,11 @@
 import { toast } from "@/components/ui/toast";
 import { apiGet, apiPost, apiUpload } from "@/lib/api-client";
 import { describeApiError } from "@/lib/api-errors";
+import {
+  EMBED_PREFETCH_DEBOUNCE_MS,
+  findPrefetchableUrls,
+  prefetchEmbeds,
+} from "@/lib/embed-prefetch";
 import { parseCustomEmojiToken } from "@/lib/emoji";
 import type { GifPickerItem, GifPickerMediaType } from "@/lib/gif-picker";
 import type { Message, User } from "@/lib/types";
@@ -800,10 +805,26 @@ export function useMessageInput({
       if (e.clipboardData.files && e.clipboardData.files.length > 0) {
         e.preventDefault();
         handleFileUpload(e.clipboardData.files);
+        return;
+      }
+      // A pasted link is complete: start resolving its embed now, so it is
+      // ready (and sent with the message) by the time Enter is pressed.
+      const pasted = e.clipboardData.getData("text/plain");
+      if (pasted) {
+        void prefetchEmbeds(findPrefetchableUrls(pasted, { pasted: true }));
       }
     },
     [handleFileUpload],
   );
+
+  // A typed link counts once the user types past it.
+  useEffect(() => {
+    if (!value.includes("http")) return;
+    const timer = setTimeout(() => {
+      void prefetchEmbeds(findPrefetchableUrls(value));
+    }, EMBED_PREFETCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [value]);
 
   const handleGifSelect = useCallback(
     async (gif: GifPickerItem) => {

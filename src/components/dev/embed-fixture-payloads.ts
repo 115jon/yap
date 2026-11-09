@@ -452,3 +452,150 @@ export const recordedInstagramReel: EmbedInfo = {
   footer: { text: "Instagram" },
   fields: [],
 };
+
+// ── Instagram, recorded 2026-11-08 from official accounts ─────────────────
+// "Before": what the old resolver stored once Instagram's logged-in API
+// stopped answering (oEmbed + post-page fallback: one image, no avatar, no
+// counts, a reel without its video). "After": the public embed page
+// (`/p/<code>/embed/captioned/`), same posts.
+
+const NASA_CAPTION =
+  "Rovers, landers, aircraft, and astronauts 🚀\n\nDay 1 of the first-ever MAX POWER aerospace expo and air show was unforgettable! Thanks to the thousands who joined us to celebrate American innovation and technology at @NASAKennedy. \n\nUp next: Day 2. Stay tuned!\n\n#NASA #MAXPOWER";
+const INSTAGRAM_REEL_CAPTION =
+  "Legend says you can still hear it echoing.\u2063\n\u2063\n#InTheMoment \u2063\n\u2063\nVideo by @davidelleonardi";
+
+export const instagramPostBefore: EmbedInfo = {
+  id: "embed_ig_post_before",
+  url: "https://www.instagram.com/p/Dfdiuv0lI2K/",
+  type: "rich",
+  rawTitle: NASA_CAPTION,
+  author: { name: "nasa", url: "https://www.instagram.com/nasa" },
+  provider: { name: "Instagram", url: "https://www.instagram.com" },
+  color: "#E1306C",
+  thumbnail: {
+    url: placeholder("Post 640×427", 640, 427, "#0b3d91", "#fc3d21"),
+    width: 640,
+    height: 427,
+  },
+  media: [
+    {
+      type: "image",
+      url: placeholder("Post 640×427", 640, 427, "#0b3d91", "#fc3d21"),
+    },
+  ],
+  footer: { text: "Instagram" },
+  fields: [],
+};
+
+export const instagramPostAfter: EmbedInfo = {
+  id: "embed_ig_post_after",
+  url: "https://www.instagram.com/p/Dfdiuv0lI2K/",
+  type: "rich",
+  rawTitle: NASA_CAPTION,
+  author: {
+    name: "nasa",
+    url: "https://www.instagram.com/nasa",
+    iconURL: placeholder("N", 150, 150, "#0b3d91", "#1e40af"),
+    isVerified: true,
+  },
+  provider: { name: "Instagram", url: "https://www.instagram.com" },
+  color: "#E1306C",
+  thumbnail: {
+    url: placeholder("Slide 1 of 3", 1080, 720, "#0b3d91", "#fc3d21"),
+    width: 4096,
+    height: 2731,
+  },
+  media: [
+    ["Slide 1 of 3", "#0b3d91", "#fc3d21"],
+    ["Slide 2 of 3", "#1e3a8a", "#38bdf8"],
+    ["Slide 3 of 3", "#312e81", "#f59e0b"],
+  ].map(([label, a, b]) => ({
+    type: "image" as const,
+    url: placeholder(label, 1080, 720, a, b),
+    width: 4096,
+    height: 2731,
+  })),
+  metrics: { comments: 250, likes: 60679 },
+  footer: { text: "Instagram" },
+  fields: [],
+};
+
+export const instagramReelBefore: EmbedInfo = {
+  id: "embed_ig_reel_before",
+  url: "https://www.instagram.com/reel/DfajF1zvsbl/",
+  type: "rich",
+  rawTitle: INSTAGRAM_REEL_CAPTION,
+  author: { name: "instagram", url: "https://www.instagram.com/instagram" },
+  provider: { name: "Instagram", url: "https://www.instagram.com" },
+  color: "#E1306C",
+  thumbnail: {
+    url: placeholder("Reel poster 640×1138", 640, 1138, "#4a044e", "#db2777"),
+    width: 640,
+    height: 1138,
+  },
+  media: [
+    {
+      type: "image",
+      url: placeholder("Reel poster 640×1138", 640, 1138, "#4a044e", "#db2777"),
+    },
+  ],
+  footer: { text: "Instagram" },
+  fields: [],
+};
+
+const instagramReelPoster = placeholder(
+  "Reel 1096×1950",
+  1096,
+  1950,
+  "#4a044e",
+  "#db2777",
+);
+
+export const instagramReelAfter: EmbedInfo = {
+  id: "embed_ig_reel_after",
+  url: "https://www.instagram.com/reel/DfajF1zvsbl/",
+  type: "rich",
+  rawTitle: INSTAGRAM_REEL_CAPTION,
+  author: {
+    name: "instagram",
+    url: "https://www.instagram.com/instagram",
+    iconURL: placeholder("IG", 150, 150, "#833ab4", "#fd1d1d"),
+    isVerified: true,
+  },
+  provider: { name: "Instagram", url: "https://www.instagram.com" },
+  color: "#E1306C",
+  thumbnail: { url: instagramReelPoster, width: 1096, height: 1950 },
+  media: [
+    {
+      type: "video",
+      url: "https://example.invalid/instagram-reel.mp4",
+      width: 1096,
+      height: 1950,
+      thumbnailUrl: instagramReelPoster,
+      contentType: "video/mp4",
+      durationSeconds: 19.966,
+    },
+  ],
+  video: {
+    url: "https://example.invalid/instagram-reel.mp4",
+    width: 1096,
+    height: 1950,
+    kind: "direct",
+    contentType: "video/mp4",
+    durationSeconds: 19.966,
+  },
+  metrics: { comments: 10717, likes: 808428, views: 31034643 },
+  footer: { text: "Instagram" },
+  fields: [],
+};
+
+/** The last layer: Instagram answered but described nothing. */
+export const instagramMinimalCard: EmbedInfo = {
+  id: "embed_ig_minimal",
+  url: "https://www.instagram.com/reel/DfajF1zvsbl/",
+  type: "rich",
+  provider: { name: "Instagram", url: "https://www.instagram.com" },
+  color: "#E1306C",
+  footer: { text: "Instagram" },
+  fields: [],
+};
