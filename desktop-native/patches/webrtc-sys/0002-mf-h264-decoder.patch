@@ -1,0 +1,473 @@
+--- a/build.rs
++++ b/build.rs
+@@ -104,6 +104,13 @@ fn main() {
+     if is_desktop {
+         builder.file("src/desktop_capturer.cpp");
+     }
++    // Yap patch (desktop-native/patches/webrtc-sys): H.264 decode through
++    // Media Foundation on Windows.
++    if target_os == "windows" {
++        builder.file("src/mf_h264_decoder.cpp");
++        println!("cargo:rustc-link-lib=dylib=mfplat");
++        println!("cargo:rustc-link-lib=dylib=mfuuid");
++    }
+ 
+     let webrtc_dir = webrtc_sys_build::webrtc_dir();
+     let webrtc_include = webrtc_dir.join("include");
+--- /dev/null
++++ b/include/livekit/mf_h264_decoder.h
+@@ -0,0 +1,19 @@
++// Yap patch (desktop-native/patches/webrtc-sys): incoming H.264 on Windows
++// through Media Foundation's H.264 decoder MFT, on the GPU (DXVA, with a
++// D3D11 device manager) where it can, in software otherwise. libwebrtc's
++// own FFmpeg decoder is not linked on Windows (1.5 MiB of the exe).
++#pragma once
++
++#include <memory>
++
++#include "api/video_codecs/video_decoder.h"
++
++namespace livekit_ffi {
++
++// False when Media Foundation's H.264 decoder cannot be created (Windows N
++// without the Media Feature Pack).
++bool MfH264DecoderAvailable();
++
++std::unique_ptr<webrtc::VideoDecoder> CreateMfH264Decoder();
++
++}  // namespace livekit_ffi
+--- a/src/video_decoder_factory.cpp
++++ b/src/video_decoder_factory.cpp
+@@ -39,6 +39,11 @@
+ #include "nvidia/nvidia_decoder_factory.h"
+ #endif
+ 
++#if defined(_WIN32)
++// Yap patch (desktop-native/patches/webrtc-sys): H.264 on the GPU.
++#include "livekit/mf_h264_decoder.h"
++#endif
++
+ namespace livekit_ffi {
+ 
+ namespace {
+@@ -48,6 +53,11 @@ namespace {
+ // found"). Probe once so the SDP does not advertise decode support the
+ // internal decoder cannot deliver.
+ bool IsInternalH264DecoderAvailable() {
++#if defined(_WIN32)
++  // Yap patch: Windows decodes H.264 with Media Foundation
++  // (mf_h264_decoder.cpp); FFmpeg's decoder is left out of the link.
++  return false;
++#else
+   if (!webrtc::H264Decoder::IsSupported()) {
+     RTC_LOG(LS_WARNING) << "Internal H264 decoder not compiled in "
+                            "(WEBRTC_USE_H264 off)";
+@@ -66,6 +76,7 @@ bool IsInternalH264DecoderAvailable() {
+     return false;
+   }
+   return true;
++#endif
+ }
+ }  // namespace
+ 
+@@ -105,7 +116,12 @@ std::vector<webrtc::SdpVideoFormat> VideoDecoderFactory::GetSupportedFormats()
+   for (const webrtc::SdpVideoFormat& format :
+        webrtc::SupportedVP9DecoderCodecs())
+     formats.push_back(format);
+-  if (internal_h264_decoder_works_) {
++  bool h264 = internal_h264_decoder_works_;
++#if defined(_WIN32)
++  // Yap patch: Media Foundation decodes H.264 even without FFmpeg's.
++  h264 = h264 || MfH264DecoderAvailable();
++#endif
++  if (h264) {
+     for (const webrtc::SdpVideoFormat& h264_format :
+          webrtc::SupportedH264DecoderCodecs()) {
+       formats.push_back(h264_format);
+@@ -168,9 +184,16 @@ std::unique_ptr<webrtc::VideoDecoder> VideoDecoderFactory::Create(
+     return webrtc::CreateVp8Decoder(env);
+   if (absl::EqualsIgnoreCase(format.name, webrtc::kVp9CodecName))
+     return webrtc::VP9Decoder::Create();
++#if defined(_WIN32)
++  // Yap patch: Media Foundation's decoder (the GPU, or its own software).
++  if (absl::EqualsIgnoreCase(format.name, webrtc::kH264CodecName) &&
++      MfH264DecoderAvailable())
++    return CreateMfH264Decoder();
++#else
+   if (absl::EqualsIgnoreCase(format.name, webrtc::kH264CodecName) &&
+       internal_h264_decoder_works_)
+     return webrtc::H264Decoder::Create();
++#endif
+ 
+ 
+ #if defined(RTC_DAV1D_IN_INTERNAL_DECODER_FACTORY)
+--- /dev/null
++++ b/src/mf_h264_decoder.cpp
+@@ -0,0 +1,367 @@
++// Yap patch (desktop-native/patches/webrtc-sys): see mf_h264_decoder.h.
++//
++// Media Foundation's H.264 decoder MFT (CLSID_MSH264DecoderMFT, in every
++// Windows 10/11 with the media features) decodes on the GPU through DXVA
++// once it is given a D3D11 device manager. Its output samples are D3D11
++// textures; IMF2DBuffer::Lock2D reads one back (the MFT's own staging copy),
++// and libyuv turns the NV12 into the I420 the rest of libwebrtc expects.
++// Low-latency mode makes it hand each frame back as soon as it is decoded
++// (WebRTC's H.264 has no B-frames). Without a usable GPU (no D3D11 video
++// device, or YAP_H264_DECODER=software) the same MFT decodes on the CPU,
++// multithreaded.
++
++#include "livekit/mf_h264_decoder.h"
++
++#include <algorithm>
++#include <cstdlib>
++#include <cstring>
++#include <deque>
++
++#include <windows.h>
++#include <codecapi.h>
++#include <d3d11.h>
++#include <mfapi.h>
++#include <mferror.h>
++#include <mfidl.h>
++#include <mftransform.h>
++#include <wmcodecdsp.h>
++#include <wrl/client.h>
++
++#include "api/video/i420_buffer.h"
++#include "api/video/video_frame.h"
++#include "common_video/include/video_frame_buffer_pool.h"
++#include "libyuv/convert.h"
++#include "modules/video_coding/include/video_error_codes.h"
++#include "rtc_base/logging.h"
++
++using Microsoft::WRL::ComPtr;
++
++namespace livekit_ffi {
++namespace {
++
++// YAP_H264_DECODER=software: the MFT without the GPU (comparisons).
++bool SoftwareRequested() {
++  const char* value = std::getenv("YAP_H264_DECODER");
++  return value != nullptr && std::strcmp(value, "software") == 0;
++}
++
++// A D3D11 device for one decoder (video decode support, multithread
++// protected, as the MFT requires). Each stream gets its own, released with
++// it: the device, the decoder's surfaces and the driver's memory for them go
++// when the stream ends instead of staying for the process's life.
++struct GpuDevice {
++  ComPtr<ID3D11Device> device;
++  ComPtr<IMFDXGIDeviceManager> manager;
++};
++
++bool MakeGpuDevice(GpuDevice& out) {
++  if (SoftwareRequested())
++    return false;
++  D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
++  if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
++                               D3D11_CREATE_DEVICE_VIDEO_SUPPORT, levels, 2,
++                               D3D11_SDK_VERSION, &out.device, nullptr, nullptr)))
++    return false;
++  ComPtr<ID3D10Multithread> multithread;
++  if (SUCCEEDED(out.device.As(&multithread)))
++    multithread->SetMultithreadProtected(TRUE);
++  UINT token = 0;
++  if (FAILED(MFCreateDXGIDeviceManager(&token, &out.manager)) ||
++      FAILED(out.manager->ResetDevice(out.device.Get(), token))) {
++    out = {};
++    return false;
++  }
++  return true;
++}
++
++class MfH264Decoder : public webrtc::VideoDecoder {
++ public:
++  ~MfH264Decoder() override { Release(); }
++
++  bool Configure(const Settings& settings) override {
++    Release();
++    // The decoder thread joins the MTA once (never left: Release may run on
++    // another thread). The MFT is free-threaded.
++    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
++    if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET)))
++      return false;
++    if (FAILED(CoCreateInstance(CLSID_MSH264DecoderMFT, nullptr,
++                                CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&mft_))))
++      return false;
++    ComPtr<IMFAttributes> attributes;
++    if (FAILED(mft_->GetAttributes(&attributes))) {
++      mft_.Reset();
++      return false;
++    }
++    attributes->SetUINT32(MF_LOW_LATENCY, TRUE);
++    gpu_ = false;
++    UINT32 aware = 0;
++    if (SUCCEEDED(attributes->GetUINT32(MF_SA_D3D11_AWARE, &aware)) && aware &&
++        MakeGpuDevice(gpu_device_)) {
++      attributes->SetUINT32(CODECAPI_AVDecVideoAcceleration_H264, TRUE);
++      gpu_ = SUCCEEDED(mft_->ProcessMessage(
++          MFT_MESSAGE_SET_D3D_MANAGER,
++          reinterpret_cast<ULONG_PTR>(gpu_device_.manager.Get())));
++    }
++    if (!gpu_) {
++      gpu_device_ = {};
++      // Software: as many threads as libwebrtc gives the decoder.
++      attributes->SetUINT32(CODECAPI_AVDecNumWorkerThreads,
++                            UINT32(std::max(1, settings.number_of_cores())));
++    }
++    ComPtr<IMFMediaType> input;
++    MFCreateMediaType(&input);
++    input->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
++    input->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
++    input->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
++    if (FAILED(mft_->SetInputType(0, input.Get(), 0)) || !SetOutputType()) {
++      mft_.Reset();
++      return false;
++    }
++    mft_->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
++    mft_->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
++    buffer_pool_size_ = settings.buffer_pool_size();
++    RTC_LOG(LS_INFO) << "[mf-h264] Media Foundation H.264 decoder, "
++                     << (gpu_ ? "on the GPU" : "in software");
++    return true;
++  }
++
++  int32_t Decode(const webrtc::EncodedImage& image,
++                 int64_t /* render_time_ms */) override {
++    if (!mft_ || !callback_)
++      return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
++    if (image.data() == nullptr || image.size() == 0)
++      return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
++    ComPtr<IMFMediaBuffer> buffer;
++    if (FAILED(MFCreateMemoryBuffer(DWORD(image.size()), &buffer)))
++      return WEBRTC_VIDEO_CODEC_ERROR;
++    BYTE* data = nullptr;
++    buffer->Lock(&data, nullptr, nullptr);
++    std::memcpy(data, image.data(), image.size());
++    buffer->Unlock();
++    buffer->SetCurrentLength(DWORD(image.size()));
++    ComPtr<IMFSample> sample;
++    MFCreateSample(&sample);
++    sample->AddBuffer(buffer.Get());
++    // Our own running count as the sample time: the output carries it back,
++    // and it maps to the frame's RTP timestamp and colour space.
++    const LONGLONG time = ++count_;
++    sample->SetSampleTime(time);
++    sample->SetSampleDuration(1);
++    pending_.push_back({time, image.RtpTimestamp(), image.NtpTimeMs(),
++                        image.ColorSpace() ? std::optional<webrtc::ColorSpace>(*image.ColorSpace())
++                                           : std::nullopt});
++    if (pending_.size() > 32)
++      pending_.pop_front();
++
++    HRESULT hr = mft_->ProcessInput(0, sample.Get(), 0);
++    if (hr == MF_E_NOTACCEPTING) {
++      if (!Drain())
++        return WEBRTC_VIDEO_CODEC_ERROR;
++      hr = mft_->ProcessInput(0, sample.Get(), 0);
++    }
++    if (FAILED(hr)) {
++      RTC_LOG(LS_WARNING) << "[mf-h264] ProcessInput failed " << hr;
++      return WEBRTC_VIDEO_CODEC_ERROR;
++    }
++    return Drain() ? WEBRTC_VIDEO_CODEC_OK : WEBRTC_VIDEO_CODEC_ERROR;
++  }
++
++  int32_t RegisterDecodeCompleteCallback(
++      webrtc::DecodedImageCallback* callback) override {
++    callback_ = callback;
++    return WEBRTC_VIDEO_CODEC_OK;
++  }
++
++  int32_t Release() override {
++    if (mft_) {
++      mft_->ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
++      mft_.Reset();
++    }
++    gpu_device_ = {};
++    pending_.clear();
++    pool_.Release();
++    return WEBRTC_VIDEO_CODEC_OK;
++  }
++
++  DecoderInfo GetDecoderInfo() const override {
++    DecoderInfo info;
++    info.implementation_name = "MediaFoundation";
++    info.is_hardware_accelerated = gpu_;
++    return info;
++  }
++
++  const char* ImplementationName() const override { return "MediaFoundation"; }
++
++ private:
++  struct Pending {
++    LONGLONG time;
++    uint32_t rtp;
++    int64_t ntp_ms;
++    std::optional<webrtc::ColorSpace> color;
++  };
++
++  bool SetOutputType() {
++    for (DWORD i = 0;; ++i) {
++      ComPtr<IMFMediaType> type;
++      if (FAILED(mft_->GetOutputAvailableType(0, i, &type)))
++        return false;
++      GUID subtype{};
++      type->GetGUID(MF_MT_SUBTYPE, &subtype);
++      if (subtype != MFVideoFormat_NV12)
++        continue;
++      if (FAILED(mft_->SetOutputType(0, type.Get(), 0)))
++        return false;
++      UINT32 width = 0, height = 0;
++      MFGetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, &width, &height);
++      width_ = int(width);
++      height_ = int(height);
++      // The picture inside the (16-aligned) coded frame.
++      MFVideoArea area{};
++      if (SUCCEEDED(type->GetBlob(MF_MT_MINIMUM_DISPLAY_APERTURE,
++                                  reinterpret_cast<UINT8*>(&area), sizeof area,
++                                  nullptr)) &&
++          area.Area.cx > 0 && area.Area.cy > 0) {
++        width_ = area.Area.cx;
++        height_ = area.Area.cy;
++      }
++      return true;
++    }
++  }
++
++  // Every frame the MFT has ready, to the callback.
++  bool Drain() {
++    MFT_OUTPUT_STREAM_INFO info{};
++    for (;;) {
++      if (FAILED(mft_->GetOutputStreamInfo(0, &info)))
++        return false;
++      MFT_OUTPUT_DATA_BUFFER output{};
++      ComPtr<IMFSample> own;
++      if (!(info.dwFlags & (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES |
++                            MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES))) {
++        ComPtr<IMFMediaBuffer> buffer;
++        MFCreateMemoryBuffer(info.cbSize, &buffer);
++        MFCreateSample(&own);
++        own->AddBuffer(buffer.Get());
++        output.pSample = own.Get();
++      }
++      DWORD status = 0;
++      const HRESULT hr = mft_->ProcessOutput(0, 1, &output, &status);
++      if (output.pEvents)
++        output.pEvents->Release();
++      if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
++        return true;
++      if (hr == MF_E_TRANSFORM_STREAM_CHANGE) {
++        if (output.pSample && !own)
++          output.pSample->Release();
++        if (!SetOutputType())
++          return false;
++        continue;
++      }
++      if (FAILED(hr)) {
++        RTC_LOG(LS_WARNING) << "[mf-h264] ProcessOutput failed " << hr;
++        return false;
++      }
++      ComPtr<IMFSample> sample;
++      if (own)
++        sample = own;
++      else
++        sample.Attach(output.pSample);
++      if (!Deliver(sample.Get()))
++        return false;
++    }
++  }
++
++  bool Deliver(IMFSample* sample) {
++    LONGLONG time = 0;
++    sample->GetSampleTime(&time);
++    Pending meta{time, 0, 0, std::nullopt};
++    while (!pending_.empty() && pending_.front().time <= time) {
++      meta = pending_.front();
++      pending_.pop_front();
++    }
++    ComPtr<IMFMediaBuffer> buffer;
++    if (FAILED(sample->GetBufferByIndex(0, &buffer)))
++      return false;
++    ComPtr<IMF2DBuffer> planar;
++    BYTE* data = nullptr;
++    LONG pitch = 0;
++    bool locked2d = false;
++    if (SUCCEEDED(buffer.As(&planar)) && SUCCEEDED(planar->Lock2D(&data, &pitch))) {
++      locked2d = true;
++    } else {
++      DWORD length = 0;
++      if (FAILED(buffer->Lock(&data, nullptr, &length)))
++        return false;
++      pitch = LONG((width_ + 15) & ~15);
++    }
++    if (pitch <= 0 || width_ <= 0 || height_ <= 0) {
++      locked2d ? planar->Unlock2D() : buffer->Unlock();
++      return false;
++    }
++    // NV12: the chroma plane follows the luma at the coded (aligned) height.
++    UINT32 coded_w = 0, coded_h = 0;
++    ComPtr<IMFMediaType> type;
++    if (SUCCEEDED(mft_->GetOutputCurrentType(0, &type)))
++      MFGetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, &coded_w, &coded_h);
++    if (coded_h < UINT32(height_))
++      coded_h = UINT32(height_);
++    const uint8_t* y = data;
++    const uint8_t* uv = data + size_t(pitch) * coded_h;
++    webrtc::scoped_refptr<webrtc::I420Buffer> i420 =
++        pool_.CreateI420Buffer(width_, height_);
++    if (!i420) {
++      locked2d ? planar->Unlock2D() : buffer->Unlock();
++      return false;
++    }
++    libyuv::NV12ToI420(y, pitch, uv, pitch, i420->MutableDataY(), i420->StrideY(),
++                       i420->MutableDataU(), i420->StrideU(), i420->MutableDataV(),
++                       i420->StrideV(), width_, height_);
++    locked2d ? planar->Unlock2D() : buffer->Unlock();
++
++    webrtc::VideoFrame frame = webrtc::VideoFrame::Builder()
++                                   .set_video_frame_buffer(i420)
++                                   .set_rtp_timestamp(meta.rtp)
++                                   .set_ntp_time_ms(meta.ntp_ms)
++                                   .set_color_space(meta.color)
++                                   .build();
++    callback_->Decoded(frame, std::nullopt, std::nullopt);
++    return true;
++  }
++
++  ComPtr<IMFTransform> mft_;
++  GpuDevice gpu_device_;
++  webrtc::DecodedImageCallback* callback_ = nullptr;
++  webrtc::VideoFrameBufferPool pool_{false, 300};
++  std::optional<int> buffer_pool_size_;
++  std::deque<Pending> pending_;
++  LONGLONG count_ = 0;
++  int width_ = 0;
++  int height_ = 0;
++  bool gpu_ = false;
++};
++
++}  // namespace
++
++bool MfH264DecoderAvailable() {
++  // Once: can the decoder MFT be made at all? (The GPU is only tried when a
++  // stream configures one.)
++  static const bool available = [] {
++    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
++    if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET)))
++      return false;
++    ComPtr<IMFTransform> probe;
++    const bool ok = SUCCEEDED(CoCreateInstance(CLSID_MSH264DecoderMFT, nullptr,
++                                               CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&probe)));
++    if (!ok)
++      RTC_LOG(LS_WARNING) << "[mf-h264] no Media Foundation H.264 decoder: H.264 not offered";
++    return ok;
++  }();
++  return available;
++}
++
++std::unique_ptr<webrtc::VideoDecoder> CreateMfH264Decoder() {
++  return std::make_unique<MfH264Decoder>();
++}
++
++}  // namespace livekit_ffi

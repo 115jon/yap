@@ -1,0 +1,20 @@
+--- a/src/video_frame.rs
++++ b/src/video_frame.rs
+@@ -634,6 +634,17 @@ pub mod native {
+         pub fn get_dmabuf_fd(&self) -> Option<DmaBufFileDescriptor> {
+             self.handle.get_dmabuf_fd()
+         }
++
++        /// Yap patch (desktop-native/patches/libwebrtc): the C++
++        /// `livekit_ffi::VideoFrameBuffer` behind this buffer, valid while
++        /// `self` lives, for C++ that knows the native buffer behind it (the
++        /// Media Foundation decoder's D3D11 textures in the patched
++        /// webrtc-sys).
++        #[cfg(target_os = "windows")]
++        pub fn sys_ptr(&self) -> *const std::ffi::c_void {
++            (self.handle.sys_handle() as *const webrtc_sys::video_frame_buffer::ffi::VideoFrameBuffer)
++                .cast()
++        }
+     }
+ 
+     pub trait VideoFrameBufferExt: VideoBuffer {

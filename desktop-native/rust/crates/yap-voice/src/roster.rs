@@ -1,0 +1,241 @@
+//! Who is in the call, as the room reports it.
+
+use std::collections::{BTreeMap, HashMap};
+
+use crate::wire::Participant;
+
+/// The name a participant shows before any full state named them.
+const FALLBACK_NAME: &str = "Someone";
+
+/// One row of the roster.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Member {
+    /// The participant id.
+    pub id: String,
+    pub name: String,
+    /// The Yap user id, once a full state named it (empty before).
+    pub user_id: String,
+    pub muted: bool,
+    pub deafened: bool,
+    pub speaking: bool,
+    /// This client's own participant.
+    pub me: bool,
+    /// Camera on (`self_video`).
+    pub video: bool,
+    /// Sharing their screen (`self_stream`).
+    pub stream: bool,
+    /// Their camera is pulled and showing (`cam-video-<id>` frames arrive).
+    pub camera_live: bool,
+    /// Their share is pulled and showing (`screen-video-<id>`).
+    pub screen_live: bool,
+    /// Their share offers its audio (`screen-audio-<id>`): the stage's
+    /// stream volume shows only then (VoiceGrid.tsx `hasLiveAudioTrack`).
+    pub screen_audio: bool,
+}
+
+#[derive(Debug, Default)]
+struct Row {
+    name: String,
+    user_id: String,
+    muted: bool,
+    deafened: bool,
+    speaking: bool,
+    me: bool,
+    video: bool,
+    stream: bool,
+    /// Their spatial audio switches, once a state carried them.
+    spatial_enabled: Option<bool>,
+    spatial_high_fidelity: Option<bool>,
+}
+
+/// The roster, ordered by participant id. Names come from full voice
+/// states only; deltas lack them, so names are kept for rows a delta
+/// re-adds.
+#[derive(Debug)]
+pub struct Roster {
+    me: String,
+    rows: BTreeMap<String, Row>,
+    known_names: HashMap<String, String>,
+}
+
+impl Roster {
+    /// A roster with only us.
+    pub fn new(me: &str, my_name: &str) -> Self {
+        let mut rows = BTreeMap::new();
+        rows.insert(
+            me.to_owned(),
+            Row {
+                name: my_name.to_owned(),
+                me: true,
+                ..Row::default()
+            },
+        );
+        Self {
+            me: me.to_owned(),
+            rows,
+            known_names: HashMap::new(),
+        }
+    }
+
+    /// The whole roster, in a stable order.
+    pub fn snapshot(&self) -> Vec<Member> {
+        self.rows
+            .iter()
+            .map(|(id, row)| Member {
+                id: id.clone(),
+                name: row.name.clone(),
+                user_id: row.user_id.clone(),
+                muted: row.muted,
+                deafened: row.deafened,
+                speaking: row.speaking,
+                me: row.me,
+                video: row.video,
+                stream: row.stream,
+                camera_live: false,
+                screen_live: false,
+                screen_audio: false,
+            })
+            .collect()
+    }
+
+    /// Replaces the others with a room Ready/Resumed's `participants` (a
+    /// full state; it excludes us). Speaking bits carry over.
+    pub fn replace_others(&mut self, participants: &[Participant]) {
+        let speaking: HashMap<String, bool> = self
+            .rows
+            .iter()
+            .map(|(id, row)| (id.clone(), row.speaking))
+            .collect();
+        let me = self.me.as_str();
+        self.rows.retain(|id, _| id == me);
+        for p in participants {
+            if p.id.is_empty() || p.id == self.me {
+                continue;
+            }
+            let name = p.name.clone().unwrap_or_else(|| FALLBACK_NAME.to_owned());
+            self.known_names.insert(p.id.clone(), name.clone());
+            self.rows.insert(
+                p.id.clone(),
+                Row {
+                    name,
+                    user_id: p.user_id.clone().unwrap_or_default(),
+                    muted: p.self_mute.unwrap_or(false),
+                    deafened: p.self_deaf.unwrap_or(false),
+                    speaking: speaking.get(&p.id).copied().unwrap_or(false),
+                    me: false,
+                    video: p.self_video.unwrap_or(false),
+                    stream: p.self_stream.unwrap_or(false),
+                    spatial_enabled: p.spatial_enabled,
+                    spatial_high_fidelity: p.spatial_high_fidelity,
+                },
+            );
+        }
+    }
+
+    /// An op 15 join or update for someone else. A full state (it has a
+    /// name) may create the row; a delta merges over the row it has and is
+    /// dropped without one (STATE_MACHINE.md, "Voice-state deltas").
+    pub fn upsert(&mut self, p: &Participant) {
+        if let Some(name) = &p.name {
+            self.known_names.insert(p.id.clone(), name.clone());
+        } else if !self.rows.contains_key(&p.id) {
+            return;
+        }
+        let name = self
+            .known_names
+            .get(&p.id)
+            .cloned()
+            .unwrap_or_else(|| FALLBACK_NAME.to_owned());
+        let row = self.rows.entry(p.id.clone()).or_default();
+        row.name = name;
+        if let Some(user_id) = &p.user_id {
+            row.user_id.clone_from(user_id);
+        }
+        if let Some(muted) = p.self_mute {
+            row.muted = muted;
+        }
+        if let Some(deafened) = p.self_deaf {
+            row.deafened = deafened;
+        }
+        if let Some(video) = p.self_video {
+            row.video = video;
+        }
+        if let Some(stream) = p.self_stream {
+            row.stream = stream;
+        }
+        if p.spatial_enabled.is_some() {
+            row.spatial_enabled = p.spatial_enabled;
+        }
+        if p.spatial_high_fidelity.is_some() {
+            row.spatial_high_fidelity = p.spatial_high_fidelity;
+        }
+    }
+
+    /// A user's spatial audio switches (`enabled`, `high_fidelity`) for the
+    /// spatial panel's notes. Unknown reads as on, as UserPanel.tsx's
+    /// `participantCapabilities` defaults a member without them.
+    pub fn spatial_switches(&self, user_id: &str) -> (bool, bool) {
+        self.rows
+            .values()
+            .find(|row| !row.me && row.user_id == user_id)
+            .map_or((true, true), |row| {
+                (
+                    row.spatial_enabled.unwrap_or(true),
+                    row.spatial_high_fidelity.unwrap_or(true),
+                )
+            })
+    }
+
+    /// A row exists for `id`.
+    pub fn contains(&self, id: &str) -> bool {
+        self.rows.contains_key(id)
+    }
+
+    pub fn remove(&mut self, id: &str) {
+        self.rows.remove(id);
+    }
+
+    /// A participant's Yap user id, once a full state named it.
+    pub fn user_id_of(&self, id: &str) -> Option<&str> {
+        self.rows
+            .get(id)
+            .map(|row| row.user_id.as_str())
+            .filter(|user_id| !user_id.is_empty())
+    }
+
+    /// Sets a row's speaking bit; `false` if there is no such row.
+    pub fn set_speaking(&mut self, id: &str, speaking: bool) -> bool {
+        match self.rows.get_mut(id) {
+            Some(row) => {
+                row.speaking = speaking;
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn set_my_mute(&mut self, muted: bool) {
+        if let Some(row) = self.rows.get_mut(&self.me) {
+            row.muted = muted;
+        }
+    }
+
+    pub fn set_my_deaf(&mut self, deafened: bool) {
+        if let Some(row) = self.rows.get_mut(&self.me) {
+            row.deafened = deafened;
+        }
+    }
+
+    /// Our camera is on (what we send as `self_video`).
+    pub fn set_my_video(&mut self, video: bool) {
+        if let Some(row) = self.rows.get_mut(&self.me) {
+            row.video = video;
+        }
+    }
+
+    pub fn set_my_stream(&mut self, stream: bool) {
+        if let Some(row) = self.rows.get_mut(&self.me) {
+            row.stream = stream;
+        }
+    }
+}

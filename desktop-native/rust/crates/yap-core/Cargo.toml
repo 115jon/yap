@@ -1,0 +1,31 @@
+[package]
+name = "yap-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Yap client core: typed state store (pure reducer), effect runner, REST and auth. No Qt."
+
+[dependencies]
+futures-util = "0.3.34"
+keyring.workspace = true
+# Reads the Tauri app's localStorage (Chromium's LevelDB) once, to import
+# its theme and sound settings (src/tauri.rs). In memory only: no "fs"
+# feature, the files are read into its MemEnv.
+rusty-leveldb = { version = "4.0.2", default-features = false }
+reqwest = { workspace = true, features = ["multipart", "stream"] }
+# Release versions for the updater (src/update.rs), the same crate and
+# order Velopack compares them with.
+semver = "1.0.28"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util"] }
+yap-cache.workspace = true
+yap-protocol.workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints]
+workspace = true

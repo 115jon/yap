@@ -1,0 +1,23 @@
+{
+  "Assets": [
+    {
+      "PackageId": "Yap.App",
+      "Version": "0.2.24-beta.1",
+      "Type": "Full",
+      "FileName": "Yap.App-0.2.24-beta.1-beta-full.nupkg",
+      "SHA1": "0F1E2D3C4B5A69788796A5B4C3D2E1F00F1E2D3C",
+      "SHA256": "",
+      "Size": 37500001,
+      "NotesMarkdown": "Beta build."
+    },
+    {
+      "PackageId": "Yap.App",
+      "Version": "not-a-version",
+      "Type": "Full",
+      "FileName": "broken.nupkg",
+      "SHA1": "",
+      "SHA256": "",
+      "Size": 1
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "op": 106,
+  "d": {
+    "type": "soundboard.catalog-updated",
+    "participant_id": "p_peer",
+    "user_id": "u_peer",
+    "server_key": "srv_1",
+    "sound": {
+      "id": "snd_9",
+      "name": "Airhorn",
+      "file_url": "/api/soundboard/uploads/snd_9",
+      "emoji": "📯",
+      "volume": 0.9
+    },
+    "sent_at": 1762350000500
+  }
+}

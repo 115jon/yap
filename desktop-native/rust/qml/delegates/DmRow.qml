@@ -1,0 +1,153 @@
+import QtQuick
+import com.yap.native
+
+// A conversation in the home list (DMListPanel.tsx, sidebar-row.ts): 32
+// high, 40 with a custom status line; px-2, gap 8, a 24 px avatar with its
+// presence LED cut out of ply-1, the name at 14/500 (unread: 600, ink-1).
+// Selected tint-2, hover tint-1. Unread draws the 2x8 pill at the panel
+// edge; mentions add a count chip. The avatar opens the profile.
+Rectangle {
+    id: row
+
+    required property string channelId
+    required property string userId
+    required property string name
+    required property string avatar
+    required property string initials
+    required property string presence
+    required property string customStatus
+    // What the recipient plays (in the custom status's place), and its icon.
+    required property string game
+    required property string gameIcon
+    // The recipient's avatar decoration (APNG), or empty.
+    required property string deco
+    // The recipient's display-name style (DMListPanel.tsx UserDisplayName).
+    required property string nameStyle
+    required property bool unread
+    required property int mentions
+    required property bool active
+    signal selected()
+    signal profileRequested(Item anchor)
+
+    height: customStatus.length > 0 || game.length > 0 ? 40 : Theme.treeRow
+    radius: Theme.radius
+    color: active ? Theme.tint2 : hover.hovered ? Theme.tint1 : "transparent"
+    Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+
+    Accessible.role: Accessible.Button
+    Accessible.name: qsTr("Open DM with %1").arg(name)
+        + (mentions > 0 ? qsTr(", %n mention(s)", "", mentions) : unread ? qsTr(", unread") : "")
+
+    Rectangle {
+        visible: row.unread && !row.active
+        x: -8
+        anchors.verticalCenter: parent.verticalCenter
+        width: 2
+        height: 8
+        color: Theme.ink1
+    }
+
+    HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+    TapHandler { onTapped: row.selected() }
+    // Right click: the conversation's menu (Start a call asks first).
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: eventPoint => rowMenu.load()?.popup(row, eventPoint.position.x, eventPoint.position.y)
+    }
+    LazyPopup {
+        id: rowMenu
+        // DMSidebar.tsx: Profile (the full profile), Start a call (not
+        // while it rings or runs), Copy ID ("Channel ID copied").
+        sourceComponent: MenuPanel {
+            MenuRow {
+                text: qsTr("Profile")
+                glyph: "account"
+                onTriggered: ShellState.showFullProfile(row.userId, row)
+            }
+            MenuRow {
+                readonly property var call: JSON.parse(Calls.view)
+                visible: !(call.channelId === row.channelId && (call.status === "ringing_outgoing" || call.status === "ringing_incoming" || call.joined === true))
+                height: visible ? implicitHeight : 0
+                text: qsTr("Start a call")
+                glyph: "call"
+                onTriggered: ShellState.startCall(row.channelId, row.name, true)
+            }
+            MenuRow {
+                text: qsTr("Copy ID")
+                glyph: "copy"
+                onTriggered: {
+                    dmClipboard.copyText(row.channelId)
+                    Chat.notice(qsTr("Channel ID copied"))
+                }
+            }
+        }
+    }
+
+    PresenceAvatar {
+        id: face
+        x: 8
+        anchors.verticalCenter: parent.verticalCenter
+        size: 24
+        initials: row.initials
+        source: row.avatar
+        deco: row.deco
+        presence: row.presence
+        ground: Theme.ply1
+        overhang: 4
+        // A MouseArea, so the press stops here instead of opening the DM.
+        MouseArea {
+            anchors.fill: parent
+            anchors.margins: -2
+            cursorShape: Qt.PointingHandCursor
+            onClicked: row.profileRequested(face)
+        }
+        Accessible.role: Accessible.Button
+        Accessible.name: qsTr("View %1's profile").arg(row.name)
+        Accessible.ignored: false
+    }
+
+    Column {
+        anchors.left: face.right
+        anchors.leftMargin: 8
+        anchors.right: badge.visible ? badge.left : parent.right
+        anchors.rightMargin: 8
+        anchors.verticalCenter: parent.verticalCenter
+        DisplayName {
+            width: parent.width
+            text: row.name
+            nameStyle: row.nameStyle
+            color: row.active || hover.hovered || row.unread ? Theme.ink1 : Theme.ink2
+            font: row.unread && !row.active ? Theme.type.rowUnread : Theme.type.row
+            ground: Theme.ply1
+            playing: hover.hovered
+        }
+        // What they play takes the custom status's line (GameActivity.tsx).
+        Loader {
+            width: parent.width
+            active: row.game.length > 0
+            visible: active
+            sourceComponent: GameLine {
+                game: row.game
+                icon: row.gameIcon
+            }
+        }
+        Text {
+            width: parent.width
+            visible: row.game.length === 0 && row.customStatus.length > 0
+            textFormat: Text.PlainText
+            text: row.customStatus
+            elide: Text.ElideRight
+            color: Theme.ink3
+            font: Theme.type.caption
+        }
+    }
+
+    CountBadge {
+        id: badge
+        anchors.right: parent.right
+        anchors.rightMargin: 8
+        anchors.verticalCenter: parent.verticalCenter
+        count: row.active ? 0 : row.mentions
+    }
+    ClipboardText { id: dmClipboard }
+}

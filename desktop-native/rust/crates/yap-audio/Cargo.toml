@@ -1,0 +1,27 @@
+[package]
+name = "yap-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Yap local playback: soundboard clips, built-in tones and the Listen Together stream, decoded with symphonia, resampled to 48 kHz, mixed and played as an input of the app speaker (yap-speaker). No Qt."
+
+[features]
+default = []
+# Opus (Ogg/WebM) through the libopus that LiveKit's `webrtc.lib` already
+# carries. This crate only declares the symbols; the final executable must
+# link `webrtc.lib` (the app does, through yap-voice). Off, Opus fails with
+# a `Failed`/`StreamFailed` event.
+libopus = []
+
+[dependencies]
+reqwest.workspace = true
+rubato = "5.0.1"
+symphonia = { version = "0.5.5", default-features = false, features = ["aac", "flac", "isomp4", "mkv", "mp3", "ogg", "pcm", "vorbis", "wav"] }
+tokio = { workspace = true, features = ["net"] }
+url = "2.5.8"
+yap-protocol.workspace = true
+yap-speaker.workspace = true
+
+[lints]
+workspace = true

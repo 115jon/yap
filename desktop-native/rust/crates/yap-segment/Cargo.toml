@@ -1,0 +1,21 @@
+[package]
+name = "yap-segment"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Person segmentation for camera backgrounds: MediaPipe's selfie segmenter (converted to ONNX) on ONNX Runtime, DirectML on the GPU when it can, the CPU otherwise. Loads the runtime from the app's segmentation folder at run time; nothing links it. No Qt."
+
+[dependencies]
+# Pinned: rc.12 drives ONNX Runtime 1.24, the last release with a DirectML
+# build (Microsoft.ML.OnnxRuntime.DirectML 1.24.4, LIBRARIES.md). Loaded,
+# not linked (`load-dynamic`), so the exe neither grows nor needs the DLLs
+# to start.
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic", "directml", "api-24"] }
+yap-voice = { path = "../yap-voice", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_LibraryLoader"] }
+
+[lints]
+workspace = true

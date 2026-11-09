@@ -1,0 +1,12 @@
+{
+  "op": 106,
+  "d": {
+    "type": "activity.start",
+    "userId": "u_peer",
+    "participant_id": "p_peer",
+    "channelId": "ch_v",
+    "activity": "wordle",
+    "startedAt": 1762350000000,
+    "sent_at": 1762350000001
+  }
+}

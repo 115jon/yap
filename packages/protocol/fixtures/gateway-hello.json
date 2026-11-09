@@ -1,0 +1,1 @@
+{ "op": 8, "d": { "heartbeat_interval": 15000, "gateway_version": 1 } }

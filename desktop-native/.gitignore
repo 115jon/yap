@@ -1,0 +1,5 @@
+build/
+rust/target/
+rust/.qmlls.ini
+tools/.cache/
+rust/vendor/

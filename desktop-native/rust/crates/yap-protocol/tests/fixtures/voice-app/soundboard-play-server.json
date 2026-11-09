@@ -1,0 +1,15 @@
+{
+  "op": 106,
+  "d": {
+    "type": "soundboard.play",
+    "participant_id": "p_peer",
+    "user_id": "u_peer",
+    "server_key": "srv_1",
+    "playback_id": "sb1:6:u_peer:snd_9",
+    "sound_id": "snd_9",
+    "name": "Airhorn",
+    "media_url": "/api/soundboard/uploads/snd_9",
+    "volume": 0.8,
+    "sent_at": 1762350000000
+  }
+}

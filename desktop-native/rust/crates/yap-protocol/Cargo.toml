@@ -1,0 +1,17 @@
+[package]
+name = "yap-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Yap gateway wire protocol: opcodes, close codes, frames and REST DTOs. No I/O."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+# Radio URLs are checked as the room parses them (already in the lock
+# through reqwest).
+url = "2.5.8"
+
+[lints]
+workspace = true

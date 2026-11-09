@@ -1,0 +1,19 @@
+[package]
+name = "yap-anim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Animated picture decoding for the native client: APNG (avatar decorations, profile effects) and animated WebP (X GIFs), which Qt's image plugins cannot animate, and GIFs streamed frame by frame off the GUI thread. Frames come out composited, scaled and premultiplied, ready for a QImage."
+
+[dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png", "webp"] }
+# Streamed GIFs (src/gifstream.rs): the version image's "gif" feature uses.
+gif = { version = "0.14.2", default-features = false, features = ["std"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+png = "0.18"
+
+[lints]
+workspace = true

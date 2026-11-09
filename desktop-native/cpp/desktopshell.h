@@ -1,0 +1,175 @@
+#pragma once
+
+// The desktop shell's OS side, as the desktop app does it (`tray.rs`,
+// `main_window.rs`, `window_state.rs`, `desktop_settings.rs`, `window.rs`):
+// one instance, the tray icon with its unread badge, toasts, the taskbar
+// flash, the autostart entry, and the main window's rect. The settings,
+// the badge and the toasts themselves come from the Rust `Desktop`
+// singleton; QML wires the two.
+//
+// Its identity is the one the Tauri desktop app had, which this app
+// replaces (yap_core::install): the AUMID com.115jon.yap, the Run value
+// "Yap" and the yap:// scheme, with yap-native:// (its name before the
+// rename) kept as an alias. Only the released install's default profile
+// registers the schemes at launch, and a dev build or a copy never writes
+// or removes a Run value another app owns (yap_run_value_may_change). The
+// instance lock and pipe have names of their own (com.115jon.yap.app...),
+// apart from the build before the rename, so neither takes the other's
+// launches. A named profile (profile.h) suffixes every name that
+// identifies the app, so two profiles run side by side.
+//
+// QML (import Yap.Chrome):
+//   DesktopShell.badgeCount / badgeDot / badgeTooltip   (bind from Desktop)
+//   DesktopShell.profile                                "" or the profile name
+//   DesktopShell.showToast(title, summary, body, channelId, serverId,
+//                          messageId)
+//   DesktopShell.toastActivated(channelId, serverId)
+//   DesktopShell.toastReply(channelId, messageId, text)   (Send in the toast)
+//   DesktopShell.toastMarkRead(channelId)                 (Mark as Read)
+//   DesktopShell.setAutostart(on), reveal(), hideToTray(), quit()
+//   DesktopShell.quitting                               (closing must not hide)
+
+#include <QtCore/QObject>
+#include <QtCore/QPointer>
+#include <QtCore/QRect>
+#include <QtCore/QString>
+#include <QtCore/QStringList>
+#include <QtCore/QElapsedTimer>
+#include <QtCore/QTimer>
+
+class QLocalServer;
+class QQuickWindow;
+
+class DesktopShell : public QObject
+{
+  Q_OBJECT
+  Q_PROPERTY(int badgeCount READ badgeCount WRITE setBadgeCount NOTIFY badgeChanged)
+  Q_PROPERTY(bool badgeDot READ badgeDot WRITE setBadgeDot NOTIFY badgeChanged)
+  Q_PROPERTY(QString badgeTooltip READ badgeTooltip WRITE setBadgeTooltip NOTIFY badgeChanged)
+  // The named profile (YAP_PROFILE / --profile), "" for the default one.
+  Q_PROPERTY(QString profile READ profile CONSTANT)
+  // True once quit() (or the session's end) began: the window's close
+  // handler must then let the close through, not hide it to the tray.
+  Q_PROPERTY(bool quitting READ quitting NOTIFY quittingChanged)
+
+public:
+  explicit DesktopShell(QObject* parent = nullptr);
+  ~DesktopShell() override;
+
+  // The process's AppUserModelID (taskbar grouping, toasts). Call first
+  // thing in main, before any window exists.
+  static void setProcessIdentity();
+  // True for the first instance (it holds a named mutex from then on).
+  // Needs no Qt, so it can run before the log file starts.
+  static bool takeInstanceLock();
+  // A later instance: asks the first to show its window and hands it this
+  // command line's arguments (a yap:// link among them). Needs a
+  // QCoreApplication; the caller exits after it.
+  static void showFirstInstance(const QStringList& args);
+
+  // The Rust `Invites` object: arguments from later instances go to its
+  // `openArg`, and `registerUrlScheme` asks it for the registration.
+  void setLinkHandler(QObject* links);
+  // Writes the per-user yap:// and yap-native:// registration (HKCU) where it differs
+  // from what `Invites.schemeRegistration` asks for: only from the released
+  // install, as the default profile. Idempotent.
+  void registerUrlScheme();
+  // Hands one command-line argument to the link handler.
+  void openArg(const QString& arg);
+
+  // The main window and the Rust `Desktop` object: restores the saved rect,
+  // creates the tray icon, listens for later instances, and shows the
+  // window (or keeps it in the tray on an autostart launch with start
+  // minimized).
+  void attach(QQuickWindow* window, QObject* desktop);
+
+  int badgeCount() const { return m_badgeCount; }
+  void setBadgeCount(int count);
+  bool badgeDot() const { return m_badgeDot; }
+  void setBadgeDot(bool dot);
+  QString badgeTooltip() const { return m_badgeTooltip; }
+  QString profile() const;
+  bool quitting() const { return m_quitting; }
+  void setBadgeTooltip(const QString& tooltip);
+
+  // A non-empty `messageId` adds Reply and Mark as Read.
+  Q_INVOKABLE void showToast(const QString& title, const QString& summary,
+                             const QString& body, const QString& channelId,
+                             const QString& serverId,
+                             const QString& messageId = QString());
+  // Writes or removes the HKCU Run value "Yap" ("Yap-<profile>" for a named
+  // profile), unless another app's command is there (then it is left
+  // alone and this returns false). False on failure.
+  Q_INVOKABLE bool setAutostart(bool enabled);
+  // Shows, restores and foregrounds the window.
+  Q_INVOKABLE void reveal();
+  // Close to tray: saves the rect and hides the window.
+  Q_INVOKABLE void hideToTray();
+  // Gives back the scene graph's spare memory a moment from now (debounced):
+  // the renderer's pooled batches and buffers, glyph caches no text uses and
+  // unreferenced pixmaps (QQuickWindow::releaseResources() with the patched
+  // Qt, patches/qt). LazyPopup calls it when a popup is let go; the next
+  // frame remakes what the scene still shows.
+  Q_INVOKABLE void releaseGraphicsSoon();
+  // Saves the rect and quits. Sets quitting first: Qt's quit closes every
+  // window, and a close the window cancels (close to tray) cancels the quit.
+  Q_INVOKABLE void quit();
+
+  // The tray window's messages (called from its window procedure).
+  bool handleTrayMessage(unsigned message, quintptr wParam, qintptr lParam);
+
+signals:
+  void badgeChanged();
+  // A toast was clicked; the window is already revealed.
+  void toastActivated(const QString& channelId, const QString& serverId);
+  // A toast's Send (with the text typed in it) or Mark as Read. The window
+  // stays as it was (hidden in the tray, say).
+  void toastReply(const QString& channelId, const QString& messageId,
+                  const QString& text);
+  void toastMarkRead(const QString& channelId);
+  void quittingChanged();
+
+private:
+  void createTray();
+  void removeTray();
+  void updateTrayIcon();
+  // At the cursor; `test` (YAP_TEST_MENU=tray) opens it at `at` without
+  // taking the foreground and runs no command.
+  void showTrayMenu(bool test = false, int x = 0, int y = 0);
+  // Tests (YAP_TEST_MENU): opens the tray or the caption's system menu in
+  // process and saves our own menu window (YAP_TEST_MENU_DUMP).
+  void runMenuTest();
+  // A tray menu command (kMenuShow, kMenuQuit), chosen or from the test hook.
+  void trayCommand(unsigned chosen);
+  void flashTaskbar(bool on);
+  void restoreGeometry();
+  void scheduleSave();
+  void saveNow();
+  void onInstanceConnected();
+  quintptr windowHandle() const;
+
+  QPointer<QQuickWindow> m_window;
+  QPointer<QObject> m_desktop;
+  QPointer<QObject> m_links;
+  QLocalServer* m_server = nullptr;
+
+  // The hidden window that receives the tray icon's messages.
+  quintptr m_trayHwnd = 0;
+  quintptr m_icon = 0;
+  bool m_trayAdded = false;
+  unsigned m_taskbarCreated = 0;
+  qint64 m_lastActivation = 0;
+
+  int m_badgeCount = 0;
+  bool m_badgeDot = false;
+  QString m_badgeTooltip;
+  bool m_badgeQueued = false;
+  bool m_flashing = false;
+  bool m_quitting = false;
+
+  // The last normal (not maximized, not minimized) rect.
+  QRect m_normal;
+  QTimer m_saveTimer;
+  QTimer m_releaseTimer;
+  QElapsedTimer m_lastRelease;
+};

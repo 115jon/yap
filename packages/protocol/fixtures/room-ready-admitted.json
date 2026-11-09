@@ -1,0 +1,18 @@
+{
+  "op": 2,
+  "d": {
+    "participant_id": "pid_fixture_me",
+    "heartbeat_interval": 15000,
+    "participants": [
+      {
+        "id": "pid_fixture_alice",
+        "user_id": "user_fixture_alice",
+        "name": "Alice",
+        "username": "alice",
+        "self_mute": false,
+        "self_deaf": false
+      }
+    ],
+    "spatial_audio_state": null
+  }
+}

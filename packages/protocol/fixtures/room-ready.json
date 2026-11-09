@@ -1,0 +1,43 @@
+{
+  "op": 2,
+  "d": {
+    "participant_id": "pid_fixture_me",
+    "voice_token": "tok_fixture",
+    "heartbeat_interval": 15000,
+    "ice_servers": [
+      {
+        "urls": [
+          "turn:turn.fixture.invalid:3478?transport=udp",
+          "turn:turn.fixture.invalid:443?transport=tcp"
+        ],
+        "username": "user_fixture",
+        "credential": "cred_fixture"
+      },
+      { "urls": "stun:stun.fixture.invalid:3478" }
+    ],
+    "participants": [
+      {
+        "id": "pid_fixture_alice",
+        "user_id": "user_fixture_alice",
+        "name": "Alice",
+        "username": "alice",
+        "display_name": "Alice",
+        "avatar_url": null,
+        "self_mute": false,
+        "self_deaf": false,
+        "self_stream": false,
+        "self_video": false,
+        "suppress": false,
+        "tracks": []
+      },
+      {
+        "id": "pid_fixture_bob",
+        "user_id": "user_fixture_bob",
+        "name": "Bob",
+        "username": "bob",
+        "self_mute": true
+      }
+    ],
+    "spatial_audio_state": null
+  }
+}

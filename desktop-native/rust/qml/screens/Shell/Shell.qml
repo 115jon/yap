@@ -1,0 +1,699 @@
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Templates as T
+import com.yap.native
+
+// The signed-in shell: server rail, the tree panel (or the DM list at
+// Home), then the open conversation: its messages, a voice channel's view,
+// or Friends at Home. The member panel docks on the right at 1024 px and
+// up (useMediaQuery.ts lg; DESIGN.md's 1280 is stale) and is a right sheet
+// below that. The user popout opens from any row through ShellState.
+RowLayout {
+    id: root
+
+    readonly property bool chatShown: Nav.voicePanelId.length === 0 && Nav.activeChannelId.length > 0 && !noChannel
+    // Nothing to open: no server and not at Home (EmptyChatArea). A channel
+    // or voice panel of a server just left can linger in Nav; it is not shown.
+    readonly property bool noChannel: !Nav.home && Nav.activeServerId.length === 0
+    // A voice channel's text chat beside its view (ChatPageClient.tsx, the
+    // "Voice chat" SidePanel): a 360 column with a seam on its left.
+    readonly property bool voiceChat: Nav.voicePanelId.length > 0 && Nav.voicePanelChat && !noChannel
+        && Nav.activeChannelId === Nav.voicePanelId
+    readonly property bool docked: width >= 1024
+    // Search, a thread or pins take the members' place (ChatArea.tsx). In
+    // the voice chat's column they open as the sheet.
+    readonly property bool panelShown: ShellState.sidePanel.length > 0 && (chatShown || voiceChat) && !ShellState.callExpanded
+    readonly property bool searchShown: ShellState.sidePanel === "search"
+    // Below 1024 the voice chat is a right sheet over the view with a scrim
+    // (side-panel.tsx `sheet`); its title opens the details as a second
+    // sheet stacked over it (ChatArea.tsx's members SidePanel).
+    readonly property bool voiceSheetWanted: voiceChat && !docked
+    property bool voiceSheetShown: false
+    readonly property bool membersShown: ((ShellState.showMembers || ShellState.showDetails) && chatShown
+            || ShellState.showDetails && voiceSheetWanted) && !panelShown && !ShellState.callExpanded
+    readonly property bool sheetWanted: membersShown && !docked
+    readonly property bool panelSheetWanted: panelShown && (!docked || voiceChat)
+
+    // Closing the voice chat's sheet for a layout change (the window
+    // widened) keeps the chat open in its column; a dismissal closes it.
+    property bool closingVoiceForLayout: false
+    onVoiceSheetWantedChanged: {
+        if (voiceSheetWanted) {
+            voiceSheetShown = true
+            voiceSheet.open()
+        } else if (voiceSheet.visible) {
+            closingVoiceForLayout = true
+            voiceSheet.close()
+        }
+    }
+    Component.onCompleted: {
+        Audio.setUser(Session.meId)
+        if (voiceSheetWanted) {
+            voiceSheetShown = true
+            voiceSheet.open()
+        }
+    }
+    onVoiceChatChanged: {
+        if (!voiceChat)
+            ShellState.showDetails = false
+    }
+
+    // Closing the sheet for a layout change (the chat went away, the window
+    // widened) keeps the preference; only a dismissal turns it off.
+    property bool closingForLayout: false
+    onSheetWantedChanged: {
+        if (sheetWanted) {
+            sheet.open()
+        } else if (sheet.visible) {
+            closingForLayout = true
+            sheet.close()
+        }
+    }
+
+    // Like sheetWanted, for the side panels' sheet.
+    property bool closingPanelForLayout: false
+    onPanelSheetWantedChanged: {
+        if (panelSheetWanted) {
+            panelSheet.open()
+        } else if (panelSheet.visible) {
+            closingPanelForLayout = true
+            panelSheet.close()
+        }
+    }
+
+    function closeSidePanel() {
+        if (ShellState.sidePanel === "search")
+            ShellState.searchOpen = false
+        else if (ShellState.sidePanel === "thread")
+            ShellState.threadId = ""
+        else if (ShellState.sidePanel === "pins")
+            ShellState.pinsOpen = false
+    }
+
+    // A thread and the details belong to their channel.
+    Connections {
+        target: Nav
+        function onActiveChannelIdChanged() {
+            ShellState.threadId = ""
+            ShellState.showDetails = false
+        }
+    }
+
+    // Dismissing the members (sheet or close key) closes the details too.
+    function closeMembers() {
+        ShellState.showDetails = false
+        ShellState.showMembers = false
+    }
+
+    Component {
+        id: searchPanel
+        SearchPanel { onCloseRequested: root.closeSidePanel() }
+    }
+    Component {
+        id: threadPanel
+        ThreadPanel { onCloseRequested: root.closeSidePanel() }
+    }
+    Component {
+        id: pinsPanel
+        PinsPanel { onCloseRequested: root.closeSidePanel() }
+    }
+    readonly property Component sidePanelComponent: ShellState.sidePanel === "search" ? searchPanel
+        : ShellState.sidePanel === "thread" ? threadPanel
+        : ShellState.sidePanel === "pins" ? pinsPanel : null
+
+    spacing: 0
+
+    // The voice settings follow the signed-in user (Component.onCompleted
+    // above).
+    Connections {
+        target: Session
+        function onMeIdChanged() { Audio.setUser(Session.meId) }
+    }
+    // A hover's profile prefetch (ShellState.prefetchProfile).
+    Connections {
+        target: ShellState
+        function onProfilePrefetchRequested(userId) { Profile.prefetch(userId) }
+    }
+    // The hovered author's picture, decoded at the popout's size (its 72 px
+    // face at 2x, scaled up by a crop as ProfileCard.qml does), so the
+    // card's picture comes from the pixmap cache when it opens.
+    Image {
+        readonly property var crop: {
+            const s = ShellState.warmAvatar
+            const at = s.indexOf("#crop=")
+            const v = at < 0 ? [] : s.slice(at + 6).split(",").map(Number)
+            return v.length === 4 && v.every(n => isFinite(n) && n > 0) ? v : null
+        }
+        visible: false
+        Layout.preferredWidth: 0
+        Layout.preferredHeight: 0
+        asynchronous: true
+        source: ShellState.warmAvatar
+        sourceSize.width: Math.min(2048, Math.ceil((crop ? 7200 / crop[2] : 72) * 2))
+        sourceSize.height: Math.min(2048, Math.ceil((crop ? 7200 / crop[3] : 72) * 2))
+    }
+
+    // The camera's capture, its saved choice and the Camera dialog.
+    CameraLink {
+        Layout.preferredWidth: 0
+        Layout.preferredHeight: 0
+    }
+    // The screen share picker.
+    ShareLink {
+        Layout.preferredWidth: 0
+        Layout.preferredHeight: 0
+    }
+
+    ServerRail {
+        visible: !ShellState.stageFullscreen && !ShellState.callExpanded
+        Layout.fillHeight: true
+        Layout.preferredWidth: Theme.rail
+    }
+    ChannelSidebar {
+        id: sidebar
+        visible: !ShellState.stageFullscreen && !ShellState.callExpanded
+        Layout.fillHeight: true
+        Layout.preferredWidth: Theme.treePanel
+    }
+    Item {
+        id: chatHost
+        // Over the docked column, so the chat header can span it.
+        z: 1
+        Layout.fillHeight: true
+        Layout.fillWidth: true
+
+        ChatView {
+            id: chatView
+            // Beside the voice view: 360 with its seam (border-l) included.
+            // Below 1024 the same view moves into the voice chat's sheet
+            // (one instance, so its list and composer keep their state).
+            parent: root.voiceSheetShown ? voiceSheetSlot : chatHost
+            x: root.voiceChat && !root.voiceSheetShown ? parent.width - width : 0
+            z: root.voiceChat ? 1 : 0
+            width: root.voiceSheetShown ? parent.width : root.voiceChat ? Math.min(359, parent.width) : parent.width
+            height: parent.height
+            docked: root.voiceChat
+            inSheet: root.voiceSheetShown
+            headerSpan: root.voiceChat ? 0 : root.docked ? (root.membersShown ? (ShellState.showDetails ? 360 : 240) : root.panelShown ? (root.searchShown ? 380 : 360) : 0) : 0
+            visible: !root.noChannel && (root.voiceChat || (Nav.voicePanelId.length === 0 && (!Nav.home || Nav.activeChannelId.length > 0)))
+            Rectangle {
+                visible: root.voiceChat && !root.voiceSheetShown
+                x: -1
+                width: 1
+                height: parent.height
+                color: Theme.line
+            }
+        }
+        // EmptyChatArea.tsx: the column's 48 px header ("No channel"), then
+        // the still mark, "No channel selected" and one line, centred.
+        Item {
+            anchors.fill: parent
+            visible: root.noChannel
+            Rectangle { anchors.fill: parent; color: Theme.ply0 }
+            Item {
+                id: emptyHeader
+                width: parent.width
+                height: Theme.header
+                Text {
+                    x: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: qsTr("No channel")
+                    color: Theme.ink1
+                    font: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 15, weight: Font.DemiBold })
+                }
+                Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.line }
+            }
+            Column {
+                anchors.centerIn: parent
+                anchors.verticalCenterOffset: Theme.header / 2
+                width: Math.min(parent.width - 48, 400)
+                spacing: 16
+                // DitherGlyph "mark", md: 3 px cells, still.
+                YapBark {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    cell: 3
+                }
+                Column {
+                    width: parent.width
+                    spacing: 4
+                    Text {
+                        width: parent.width
+                        horizontalAlignment: Text.AlignHCenter
+                        textFormat: Text.PlainText
+                        text: qsTr("No channel selected")
+                        color: Theme.ink1
+                        font: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 15, weight: Font.DemiBold })
+                    }
+                    Text {
+                        width: parent.width
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                        text: qsTr("Pick a server and a channel to start chatting.")
+                        color: Theme.ink2
+                        font: Theme.type.description
+                    }
+                }
+            }
+        }        // Home with no conversation open: Friends (it loads as it opens),
+        // or the shop from the sidebar's Shop row.
+        Loader {
+            anchors.fill: parent
+            active: Nav.home && Nav.activeChannelId.length === 0 && Nav.voicePanelId.length === 0
+            // By URL, as the cold screens below: their types load on first
+            // use, not at startup (docs/PERFORMANCE.md, pass 6).
+            source: ShellState.shopOpen ? "../Shop/ShopView.qml" : "../Friends/FriendsView.qml"
+        }
+        // Below 1024 the voice chat is a sheet over the view (voiceSheet);
+        // docked, the view gives it the column.
+        Loader {
+            id: voiceLoader
+            width: parent.width - (root.voiceChat && root.docked ? 360 : 0)
+            height: parent.height
+            active: Nav.voicePanelId.length > 0 && !root.noChannel
+            sourceComponent: VoiceView {}
+        }
+        // In the call but looking elsewhere: our share, and each share we
+        // watch, float over the view (ChatPageClient.tsx
+        // `shouldRenderFloatingStreamPreview`, `...WatchedStreamPreviews`),
+        // and the Now Playing card floats over any view of the call
+        // (VoiceDashboard.tsx mounts FloatingListenTogetherPlayer). The
+        // corners keep 8 px clear of the chrome now on screen
+        // (`data-floating-avoid`): the composer over a chat (the voice
+        // chat's column as well), the sidebar's call strip, and the stage
+        // bar over the voice view (the web's card covers that one). The
+        // area is the window's (FloatingSurface.tsx portals to body): its
+        // corners are the window's and it floats over the sidebar and a
+        // docked member panel; the rects are in the shell's coordinates,
+        // which are the window content's.
+        FloatingArea {
+            id: floatingPreviews
+            parent: root.parent
+            anchors.fill: parent
+            visible: root.visible
+            avoids: {
+                const list = []
+                const hostX = chatHost.x
+                const voice = voiceLoader.item
+                if (voice && Nav.voicePanelId.length > 0 && voice.avoidBottom > 0)
+                    list.push({ left: hostX + voiceLoader.x, right: hostX + voiceLoader.x + voiceLoader.width,
+                                top: voiceLoader.height - voice.avoidBottom, bottom: voiceLoader.height })
+                if (chatView.visible && !root.voiceSheetShown)
+                    list.push({ left: hostX + chatView.x, right: hostX + chatView.x + chatView.width,
+                                top: chatView.height - chatView.composerAvoid, bottom: chatView.height })
+                if (sidebar.visible && sidebar.callStripHeight > 0)
+                    list.push({ left: sidebar.x, right: sidebar.x + sidebar.width,
+                                top: sidebar.callStripTop, bottom: sidebar.callStripTop + sidebar.callStripHeight })
+                return list
+            }
+            readonly property bool away: Voice.channelId.length > 0 && Nav.voicePanelId !== Voice.channelId
+                && !ShellState.stageFullscreen
+            Repeater {
+                model: floatingPreviews.away ? VoiceTileModel : null
+                delegate: Loader {
+                    id: previewSlot
+                    required property string kind
+                    required property bool me
+                    required property bool watching
+                    required property string videoKey
+                    required property string name
+                    required property string participantId
+                    required property string memberId
+                    // No size of its own: the card keeps its own and is
+                    // placed in `floatingPreviews` (a sized Loader would
+                    // stretch it).
+                    active: kind === "screen" && (me || watching)
+                    sourceComponent: FloatingStreamPreview {
+                        videoKey: previewSlot.videoKey
+                        displayName: previewSlot.name
+                        participantId: previewSlot.participantId
+                        memberId: previewSlot.memberId
+                        me: previewSlot.me
+                        channelName: Voice.channelName
+                        area: floatingPreviews
+                        // Our share first, a watched one above it while we
+                        // share too (the web's `slotIndex`).
+                        slot: previewSlot.me || !Voice.sharing ? 0 : 1
+                        onGoToChannel: Nav.selectChannel(Voice.channelId)
+                    }
+                }
+            }
+            // What the room is listening to, while we are in the call.
+            Loader {
+                active: Voice.channelId.length > 0
+                sourceComponent: NowPlayingCard { area: floatingPreviews }
+            }
+        }
+    }
+    // Docked: a 240 px ply-0 column with a seam on its left, under the
+    // chat header, which spans it (MemberList draws no header here).
+    Rectangle {
+        visible: root.membersShown && root.docked
+        Layout.fillHeight: true
+        Layout.preferredWidth: ShellState.showDetails ? 360 : 240
+        color: Theme.ply0
+        Rectangle {
+            y: Theme.header
+            width: 1
+            height: parent.height - y
+            color: Theme.line
+        }
+        MemberPanel {
+            anchors.fill: parent
+            anchors.topMargin: Theme.header
+            anchors.leftMargin: 1
+            details: ShellState.showDetails
+        }
+    }
+
+    // Docked side panel: a 360 px ply-1 column with a seam on its left,
+    // under the chat header.
+    Rectangle {
+        visible: root.panelShown && root.docked && !root.voiceChat
+        Layout.fillHeight: true
+        // Search is its own 380 px ply-0 column (SearchPanel.tsx).
+        Layout.preferredWidth: root.searchShown ? 380 : 360
+        color: root.searchShown ? Theme.ply0 : Theme.ply1
+        Rectangle {
+            y: Theme.header
+            width: 1
+            height: parent.height - y
+            color: Theme.line
+        }
+        Loader {
+            anchors.fill: parent
+            anchors.topMargin: Theme.header
+            anchors.leftMargin: 1
+            active: root.panelShown && root.docked && !root.voiceChat
+            sourceComponent: root.sidePanelComponent
+        }
+    }
+
+    // Below 1024: the voice channel's chat as a right sheet over the view
+    // (side-panel.tsx `sheet`: 360 with its border-l, the modal scrim,
+    // ply-3 under the chat). The ChatView moves in while it shows and back
+    // once it has gone.
+    T.Drawer {
+        id: voiceSheet
+        edge: Qt.RightEdge
+        width: Math.min(360, root.width)
+        height: root.height
+        y: 0
+        modal: true
+        onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
+        interactive: false
+        onClosed: {
+            root.voiceSheetShown = false
+            if (!root.closingVoiceForLayout && root.voiceChat)
+                Nav.showVoiceChat(false)
+            root.closingVoiceForLayout = false
+        }
+        enter: Transition {
+            NumberAnimation { property: "position"; to: 1; duration: Theme.durSheet; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
+        }
+        exit: Transition {
+            NumberAnimation { property: "position"; to: 0; duration: Theme.dur4Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
+        }
+        background: Rectangle {
+            objectName: "yapNoPressSink"
+            color: Theme.ply3
+            // sheet.tsx shadow-modal.
+            FloatShadow { modal: true; radius: 0 }
+        }
+        T.Overlay.modal: Scrim { color: Theme.scrim }
+        contentItem: Item {
+            id: voiceSheetSlot
+            // The seam (border-l in line) over the chat's left edge.
+            Rectangle {
+                z: 10
+                width: 1
+                height: parent.height
+                color: Theme.line
+            }
+        }
+    }
+
+    // Below 1024: the side panel as a right sheet (ply-3), like members.
+    T.Drawer {
+        id: panelSheet
+        edge: Qt.RightEdge
+        width: 360
+        height: root.height
+        y: 0
+        modal: true
+        // Ctrl+K stays shut while a modal is up (ExtrasHost).
+        onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
+        interactive: false
+        onClosed: {
+            if (!root.closingPanelForLayout)
+                root.closeSidePanel()
+            root.closingPanelForLayout = false
+        }
+        enter: Transition {
+            NumberAnimation { property: "position"; to: 1; duration: Theme.durSheet; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
+        }
+        exit: Transition {
+            NumberAnimation { property: "position"; to: 0; duration: Theme.dur4Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
+        }
+        background: Rectangle {
+            // A drawer drags from its own item (main.cpp PopupPressSink).
+            objectName: "yapNoPressSink"
+            color: Theme.ply3
+            // sheet.tsx shadow-modal.
+            FloatShadow { modal: true; radius: 0 }
+            Rectangle {
+                width: 1
+                height: parent.height
+                color: Theme.lineStrong
+            }
+        }
+        T.Overlay.modal: Scrim { color: Theme.scrim }
+        contentItem: Loader {
+            active: panelSheet.visible && root.panelShown
+            sourceComponent: root.sidePanelComponent
+        }
+    }
+
+    // Below 1024: the same panel as a right sheet over the chat (ply-3,
+    // its own "Members" header with a close key).
+    T.Drawer {
+        id: sheet
+        edge: Qt.RightEdge
+        width: ShellState.showDetails ? 360 : 320
+        height: root.height
+        y: 0
+        modal: true
+        // Ctrl+K stays shut while a modal is up (ExtrasHost).
+        onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
+        interactive: false
+        onClosed: {
+            if (!root.closingForLayout)
+                root.closeMembers()
+            root.closingForLayout = false
+        }
+        // Templates drawers move only through these (drawer ease, 250 ms).
+        enter: Transition {
+            NumberAnimation { property: "position"; to: 1; duration: Theme.durSheet; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
+        }
+        exit: Transition {
+            NumberAnimation { property: "position"; to: 0; duration: Theme.dur4Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
+        }
+        background: Rectangle {
+            // A drawer drags from its own item (main.cpp PopupPressSink).
+            objectName: "yapNoPressSink"
+            color: Theme.ply3
+            // sheet.tsx shadow-modal.
+            FloatShadow { modal: true; radius: 0 }
+            Rectangle {
+                width: 1
+                height: parent.height
+                color: Theme.lineStrong
+            }
+        }
+        T.Overlay.modal: Scrim { color: Theme.scrim }
+        // Made while the sheet shows.
+        contentItem: Loader {
+            active: sheet.visible
+            sourceComponent: sheetContent
+        }
+    }
+    Component {
+        id: sheetContent
+        Item {
+            // In details the panel draws its own header instead.
+            Item {
+                id: sheetHeader
+                visible: !ShellState.showDetails
+                width: parent.width
+                height: Theme.header
+                Text {
+                    x: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Members")
+                    color: Theme.ink1
+                    font: Theme.type.panelTitle
+                    Accessible.role: Accessible.Heading
+                }
+                IconKey {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    iconName: "close"
+                    size: 32
+                    tone: "muted"
+                    tip: qsTr("Close")
+                    tipSide: "bottom"
+                    onClicked: root.closeMembers()
+                }
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    width: parent.width
+                    height: 1
+                    color: Theme.line
+                }
+            }
+            MemberPanel {
+                ground: Theme.ply3
+                details: ShellState.showDetails
+                anchors.top: ShellState.showDetails ? parent.top : sheetHeader.bottom
+                anchors.topMargin: ShellState.showDetails ? 0 : 8
+                anchors.bottom: parent.bottom
+                width: parent.width
+            }
+        }
+    }
+
+    Binding {
+        target: ShellState
+        property: "mediaFilter"
+        value: Settings.mediaFilter
+    }
+
+    // The quick switcher and the other extras' dialogs.
+    ExtrasHost {}
+
+    // The shell's popups, each made as it opens and let go once closed
+    // (LazyPopup); they position against the shell, as if declared here.
+    Item {
+        Layout.preferredWidth: 0
+        Layout.preferredHeight: 0
+
+        // Kept once made: a reopened card keeps its decoded banner and face.
+        LazyPopup { id: profile; host: root; keep: true; sourceComponent: ProfilePopout {} }
+        LazyPopup { id: fullProfile; host: root; source: "ProfileModal.qml" }
+        LazyPopup { id: peerMenu; host: root; sourceComponent: PeerMenu {} }
+        // A call ringing for us while its DM is not open.
+        LazyPopup {
+            host: root
+            when: JSON.parse(Calls.view).status === "ringing_incoming"
+            sourceComponent: IncomingCallCard {}
+        }
+        LazyPopup { id: memberMenu; host: root; sourceComponent: MemberMenu {} }
+        // Listen Together, from the Now Playing card's Queue key (the
+        // stage bar's own key opens one of its own on the stage).
+        LazyPopup {
+            id: listenPanel
+            host: root
+            sourceComponent: ListenPanel { onClosed: root.listenClosedAt = Date.now() }
+        }
+        // User settings (kept while the theme preview hides it), the profile
+        // editor over it (or alone, from the account card) and the theme
+        // preview sheet.
+        LazyPopup {
+            host: root
+            when: SettingsNav.open
+            // Made per open and let go after: what each instance left behind
+            // was the scene graph's pooled batches and glyph caches, which
+            // the patched Qt now releases (LazyPopup asks;
+            // docs/PERFORMANCE.md, pass 3).
+            source: "../Settings/SettingsDialog.qml"
+        }
+        LazyPopup { id: profileEditor; host: root; source: "../Settings/ProfileEditor.qml" }
+        LazyPopup {
+            host: root
+            when: SettingsNav.open && SettingsNav.previewing
+            // Its parent from the start: it opens as it is made.
+            sourceComponent: ThemePreviewSheet { parent: root }
+        }
+    }
+
+    // Server and channel settings, the create, invite and confirm dialogs.
+    AdminHost {
+        Layout.preferredWidth: 0
+        Layout.preferredHeight: 0
+    }
+
+    // Create a server and the invite landing.
+    JoinHost {
+        Layout.preferredWidth: 0
+        Layout.preferredHeight: 0
+    }
+
+    Connections {
+        target: SettingsNav
+        function onProfileEditorRequested() { profileEditor.load()?.open() }
+    }
+    Connections {
+        target: Session
+        function onPhaseChanged() {
+            if (Session.phase !== Session.Ready) {
+                SettingsNav.close()
+                profileEditor.item?.close()
+            }
+        }
+    }
+
+    // When the Listen Together panel last closed, so the key that opened it
+    // does not reopen it on the click that dismissed it.
+    property double listenClosedAt: 0
+
+    // "Start a call" from a person (MemberList.tsx, FriendsView.tsx): open
+    // their DM, then call there once it is the shown conversation (the web
+    // switches to the DM, then sends request-start-call).
+    property string callUserId: ""
+    property string callUserName: ""
+    function callWhenOpen() {
+        if (root.callUserId.length > 0 && Nav.home && Nav.dmUserId === root.callUserId
+                && Nav.activeChannelId.length > 0) {
+            const name = root.callUserName
+            root.callUserId = ""
+            ShellState.startCall(Nav.activeChannelId, name, true)
+        }
+    }
+    Connections {
+        target: Nav
+        function onActiveChannelIdChanged() { root.callWhenOpen() }
+        function onDmUserIdChanged() { root.callWhenOpen() }
+    }
+
+    Connections {
+        target: ShellState
+        function onStartCallWithRequested(userId, name) {
+            root.callUserId = userId
+            root.callUserName = name
+            Nav.openDm(userId)
+            Qt.callLater(root.callWhenOpen)
+        }
+        function onProfileRequested(userId, anchor, side) {
+            profile.load()?.openFor(userId, anchor, side)
+        }
+        function onFullProfileRequested(userId, anchor) {
+            // One card at a time: the popout gives way (they share Profile),
+            // keeping the profile when it showed the same person.
+            profile.item?.handOff(userId)
+            fullProfile.load()?.openFor(userId)
+        }
+        function onListenPanelRequested(anchor) {
+            if (Date.now() - root.listenClosedAt < 300)
+                return
+            listenPanel.load()?.openAt(anchor)
+        }
+        function onPeerMenuRequested(userId, name, anchor, at, channelId) {
+            peerMenu.load()?.openFor(userId, name, anchor, at.x, at.y, channelId)
+        }
+        function onMemberMenuRequested(userId, name, anchor, at) {
+            memberMenu.load()?.openFor(userId, name, anchor, at.x, at.y)
+        }
+    }
+}

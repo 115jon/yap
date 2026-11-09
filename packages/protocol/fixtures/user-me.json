@@ -1,0 +1,10 @@
+{
+  "id": "user_fixture_me",
+  "username": "me",
+  "display_name": "Fixture Me",
+  "avatar_url": "/api/avatars/user_fixture_me",
+  "avatar_display": null,
+  "status": "online",
+  "custom_status": null,
+  "created_at": "2026-11-01T00:00:00.000Z"
+}
