@@ -106,7 +106,7 @@ the decisions.
   where remote volume and live APM options go through
   `crates/yap-voice/cpp/track_audio.cpp`.
 - One speaker for everything the app plays (`crates/yap-speaker`,
-  docs/LIBRARIES.md §16): the call's mix, the soundboard and its tones,
+  docs/LIBRARIES.md §17): the call's mix, the soundboard and its tones,
   Listen Together and the UI sounds are inputs of one shared-mode WASAPI
   stream, event driven at the engine's 10 ms period, 20 ms ahead. The
   final mix is what the call's echo canceller hears as its far end, so a

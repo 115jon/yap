@@ -653,7 +653,7 @@ headless-Edge peer smoke from FEASIBILITY.md as a manual gate. Blast radius:
 #### Audio output: one speaker (built 2026-11-08)
 
 Everything the app plays goes through one process-wide render stream,
-`crates/yap-speaker` (LIBRARIES.md §16):
+`crates/yap-speaker` (LIBRARIES.md §17):
 
 ```
 call tracks ─► yap-voice Mixer (gain, pan, limiter) ─┐
