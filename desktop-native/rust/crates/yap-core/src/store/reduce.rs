@@ -93,6 +93,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
         Input::User(command) => state.on_command(&mut fx, command),
         Input::UserAt { command, now_ms } => {
             state.now_ms = Some(now_ms);
+            state.clock_ms = state.clock_ms.max(now_ms);
             state.on_command(&mut fx, command);
             state.now_ms = None;
         }
@@ -1631,6 +1632,7 @@ impl State {
             Command::Download { url, dest, open } => self.download(fx, &url, &dest, open),
             Command::LoadAccount => self.load_account(fx),
             Command::LoadSessions => self.load_sessions(fx),
+            Command::LoadBilling => self.load_billing(fx),
             Command::LoadShares => self.load_shares(fx),
             Command::RevokeShare(share_id) => self.revoke_share(fx, share_id),
             Command::SaveDisplayName(name) => self.save_display_name(fx, &name),

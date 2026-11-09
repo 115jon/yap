@@ -450,6 +450,7 @@ fn set_profile(mut profile: Pin<&mut Profile>, view: &ProfileView) {
     profile.as_mut().set_mutual_friends(q(&view.mutual_friends));
     profile.as_mut().set_member_since(q(&view.member_since));
     profile.as_mut().set_load_error(q(&view.load_error));
+    profile.as_mut().set_badges(q(&view.badges));
     profile.set_user_id(q(&view.user_id));
 }
 

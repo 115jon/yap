@@ -233,6 +233,8 @@ pub enum Command {
     LoadAccount,
     /// Settings → Sessions.
     LoadSessions,
+    /// Settings → Yap Loud: whether billing is on (the Upgrade key).
+    LoadBilling,
     /// Settings → Privacy: the shared message links.
     LoadShares,
     /// Revoke a shared message link.

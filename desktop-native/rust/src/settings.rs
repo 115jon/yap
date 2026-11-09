@@ -69,6 +69,22 @@ pub mod qobject {
         #[qproperty(QString, revoking_share, cxx_name = "revokingShare")]
         #[qproperty(QString, share_error_id, cxx_name = "shareErrorId")]
         #[qproperty(QString, share_error, cxx_name = "shareError")]
+        /// The account's badges: JSON `[{id, name, description, earned,
+        /// label}]` in display order, or empty.
+        #[qproperty(QString, badges)]
+        /// The plan in force: `free`, `loud` or `founder` (empty before
+        /// users/me, read as free).
+        #[qproperty(QString, tier)]
+        /// 1440p and 4K shares (the `hdStreams` perk).
+        #[qproperty(bool, hd_streams, cxx_name = "hdStreams")]
+        /// The attachment limit in bytes (500 MB with `bigUploads`, else
+        /// 25 MB) and as words ("500 MB").
+        #[qproperty(f64, attachment_limit, cxx_name = "attachmentLimit")]
+        #[qproperty(QString, attachment_limit_text, cxx_name = "attachmentLimitText")]
+        /// Settings > Yap Loud as JSON: `{tier, label, description, badges,
+        /// billingEnabled, cards: [{tier, name, price, blurb, kicker,
+        /// current, included, showPrice, features, action, label}]}`.
+        #[qproperty(QString, plan)]
         /// The theme picked on this device: a theme id or `system`.
         #[qproperty(QString, theme)]
         #[qproperty(QString, version)]
@@ -118,6 +134,12 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "loadShares"]
         fn load_shares(self: &Settings);
+
+        /// Settings > Yap Loud: asks whether billing is on (the Upgrade key
+        /// stays off with "Coming soon" until it answers 200).
+        #[qinvokable]
+        #[cxx_name = "loadBilling"]
+        fn load_billing(self: &Settings);
 
         #[qinvokable]
         #[cxx_name = "revokeShare"]
@@ -218,6 +240,12 @@ pub struct SettingsRust {
     revoking_share: QString,
     share_error_id: QString,
     share_error: QString,
+    badges: QString,
+    tier: QString,
+    hd_streams: bool,
+    attachment_limit: f64,
+    attachment_limit_text: QString,
+    plan: QString,
     theme: QString,
     version: QString,
 }
@@ -361,6 +389,24 @@ fn apply(mut object: Pin<&mut qobject::Settings>, view: &SettingsView) {
     o.as_mut().set_media_filter(q(&view.media_filter));
     o.as_mut().set_created_at(q(&view.created_at));
     o.as_mut().set_member_since(q(&view.member_since));
+    o.as_mut().set_badges(q(&view.badges));
+    o.as_mut().set_tier(q(&view.tier));
+    o.as_mut().set_hd_streams(view.hd_streams);
+    // Bytes as a double: QML numbers; 500 MB is exact.
+    #[allow(clippy::cast_precision_loss)]
+    let limit = if view.attachment_limit > 0 {
+        view.attachment_limit as f64
+    } else {
+        yap_core::limits::ATTACHMENT as f64
+    };
+    o.as_mut().set_attachment_limit(limit);
+    o.as_mut()
+        .set_attachment_limit_text(q(if view.attachment_limit_text.is_empty() {
+            "25 MB"
+        } else {
+            &view.attachment_limit_text
+        }));
+    o.as_mut().set_plan(q(&view.plan));
     let (mut state, mut value) = (QString::default(), QString::default());
     set_load(&mut state, Some(&mut value), &view.email);
     o.as_mut().set_email(value);
@@ -538,6 +584,10 @@ impl qobject::Settings {
 
     pub fn load_sessions(&self) {
         client::command(Command::LoadSessions);
+    }
+
+    pub fn load_billing(&self) {
+        client::command(Command::LoadBilling);
     }
 
     pub fn load_shares(&self) {

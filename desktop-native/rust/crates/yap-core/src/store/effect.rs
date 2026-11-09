@@ -104,8 +104,11 @@ pub enum Effect {
     },
     /// Log `[startup] <mark> after N ms` (once per mark; the reducer decides).
     StartupMark(&'static str),
-    /// Upload one file as multipart `file`. Reports `Input::UploadProgress`
-    /// while it goes, then `Input::Http` with `ApiResponse::Uploaded`.
+    /// Upload one attachment: under 16 MB as one multipart `file`, from
+    /// 16 MB up in parts (`crate::chunked`, resumable). Reports
+    /// `Input::UploadProgress` while it goes, then `Input::Http` with
+    /// `ApiResponse::Uploaded`. `limit` is the user's attachment limit; a
+    /// file over it is refused before anything is sent.
     Upload {
         id: RequestId,
         token: Token,
@@ -113,8 +116,10 @@ pub enum Effect {
         path: String,
         name: String,
         content_type: String,
+        limit: u64,
     },
-    /// Stop an upload; it never answers.
+    /// Stop an upload (a chunked one is aborted on the server too); it
+    /// never answers.
     CancelUpload(RequestId),
     /// Save `url` to the file `dest`; the session goes along only to the
     /// API's own media. Answered by `Input::Http` (`Done`).
@@ -393,6 +398,9 @@ pub enum ApiRequest {
     /// Changes to the signed-in profile (`PATCH /api/update-profile`); the
     /// body is the patch as the web sends it.
     UpdateProfile(Value),
+    /// Whether billing is on (`GET /api/billing/status`): 200 with
+    /// `enabled: true` once Stripe is set up, 501 until then.
+    BillingStatus,
     /// Drop the banner (`DELETE /api/profile-assets/manage`).
     DeleteBanner,
     /// Drop the uploaded nameplate (the same route, `kind=nameplate`).
@@ -468,6 +476,8 @@ pub enum ApiResponse {
     ),
     /// A file (or a GIF pick) the next message can link.
     Uploaded(UploadedFile),
+    /// `GET /api/billing/status` answered 200: its `enabled`.
+    BillingStatus(bool),
     Gifs(GifPage),
     GifCategories(Vec<GifCategory>),
     GifTerms(Vec<String>),
@@ -560,7 +570,11 @@ impl ApiRequest {
             | Self::GifUpload { .. } => Method::Post,
             Self::UpdateProfile(_) => Method::Patch,
             Self::DeleteBanner | Self::DeleteNameplate | Self::RevokeShare { .. } => Method::Delete,
-            Self::Sessions | Self::Shares | Self::KovaSession | Self::KovaAccounts => Method::Get,
+            Self::Sessions
+            | Self::Shares
+            | Self::KovaSession
+            | Self::KovaAccounts
+            | Self::BillingStatus => Method::Get,
             Self::MarkRead { .. } => Method::Put,
             Self::React { add: true, .. } => Method::Put,
             Self::React { add: false, .. } => Method::Delete,
@@ -625,6 +639,7 @@ impl ApiRequest {
             Self::UpdateProfile(_) => "/api/update-profile".into(),
             Self::DeleteBanner | Self::DeleteNameplate => "/api/profile-assets/manage".into(),
             Self::Sessions => "/api/sessions".into(),
+            Self::BillingStatus => "/api/billing/status".into(),
             Self::Shares => "/api/shares".into(),
             Self::RevokeShare { share_id } => format!("/api/shares/{}", query_value(share_id)),
             Self::KovaSession => "/api/auth/get-session".into(),
@@ -783,7 +798,8 @@ impl ApiRequest {
             | Self::Shares
             | Self::RevokeShare { .. }
             | Self::KovaSession
-            | Self::KovaAccounts => Value::Null,
+            | Self::KovaAccounts
+            | Self::BillingStatus => Value::Null,
             Self::Me
             | Self::Servers
             | Self::Channels { .. }
@@ -882,6 +898,9 @@ impl ApiRequest {
                     .unwrap_or_default(),
             ),
             Self::Sessions => ApiResponse::Sessions(lenient_list(take(&mut body, "sessions"))),
+            Self::BillingStatus => ApiResponse::BillingStatus(
+                body.get("enabled").and_then(Value::as_bool) == Some(true),
+            ),
             Self::Shares => ApiResponse::Shares(lenient_list(take(&mut body, "shares"))),
             // `null` when Kova has no session for the token.
             Self::KovaSession => ApiResponse::KovaEmail(

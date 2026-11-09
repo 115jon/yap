@@ -107,6 +107,7 @@ T.Popup {
         frame: Profile.frame
         nameStyle: Profile.nameStyle
         platforms: Profile.platforms
+        badges: Profile.badges
         animate: popup.visible
         Accessible.role: Accessible.Dialog
         Accessible.name: qsTr("User profile for %1").arg(Profile.username)

@@ -1,5 +1,6 @@
 #include "ditherprovider.h"
 
+#include <QtCore/QMutexLocker>
 #include <QtGui/QColor>
 
 #include <algorithm>
@@ -197,6 +198,87 @@ QImage pose(const QString& name, const PoseInks& ink)
   return image;
 }
 
+// lib/badge-art.ts: one 16 x 16 drawing per badge. "#" body, lit through
+// the Bayer dither (dense top left, thinning toward the bottom right);
+// "@" edge, always lit; "+" detail in the second ink; "." empty.
+struct BadgeArt
+{
+  const char* id;
+  const char* rows[16];
+};
+
+constexpr BadgeArt kBadgeArt[] = {
+  { "founder",
+    { "................", "................", ".......++.......", ".@.....++.....@.",
+      ".@@....@@....@@.", ".@#@..@##@..@#@.", ".@##@@####@@##@.", ".@############@.",
+      ".@############@.", ".@############@.", ".@############@.", ".@@@@@@@@@@@@@@.",
+      ".@@+@@@++@@@+@@.", ".@@@@@@@@@@@@@@.", "................", "................" } },
+  { "loud",
+    { "................", "...........+....", "......@@....+...", ".....@#@.+...+..",
+      "....@##@..+...+.", "@@@@###@..+...+.", "@######@...+...+", "@######@...+...+",
+      "@######@...+...+", "@######@...+...+", "@@@@###@..+...+.", "....@##@..+...+.",
+      ".....@#@.+...+..", "......@@....+...", "...........+....", "................" } },
+  { "yap-team",
+    { "................", ".@..............", ".@@.............", ".@.@............",
+      ".@@#@...........", ".@###@@@@@@.....", ".@#####@###@@@@.", ".@####@.@######@",
+      ".@#####@#######@", ".@#########@@@@@", ".@########@.....", ".@#########@@@..",
+      "..@######@@@@@..", "..@#####@.......", "..@#####@.......", "..@@@@@@@......." } },
+  { "bug-hunter",
+    { "................", "....+......+....", ".....+....+.....", "......@@@@......",
+      ".....@@@@@@.....", "+...@##@@##@...+", ".+.@###@@###@.+.", "..+@###@@###@+..",
+      "...@###@@###@...", "+++@###@@###@+++", "...@###@@###@...", "..+@###@@###@+..",
+      ".+..@##@@##@..+.", "+....@@@@@@....+", "................", "................" } },
+  { "early-yapper",
+    { "................", "................", ".......++.......", "..+....++....+..",
+      "...+........+...", "......@@@@......", "....@@####@@....", "...@########@...",
+      "..@##########@..", "..@##########@..", ".@############@.", "++++++++++++++++",
+      "................", "...++++++++++...", "................", "......++++......" } },
+  { "server-owner",
+    { "................", "................", ".@@..@@..@@..@@.", ".@#@@#@@@@#@@#@.",
+      ".@############@.", ".@############@.", ".@###++##++###@.", ".@###++##++###@.",
+      ".@############@.", ".@#####++#####@.", ".@####++++####@.", ".@####++++####@.",
+      ".@####++++####@.", ".@@@@@@@@@@@@@@.", "................", "................" } },
+  { "voice-regular",
+    { "................", "......@@@@......", ".....@####@.....", ".....@#++#@.....",
+      ".....@####@.....", ".....@#++#@.....", ".....@####@.....", "...+.@####@.+...",
+      "...+.@####@.+...", "...+..@@@@..+...", "....+......+....", ".....++++++.....",
+      ".......@@.......", ".......@@.......", ".....@@@@@@.....", "................" } },
+  { "night-owl",
+    { "................", "...........+....", ".....@@...+++...", "...@@@.....+....",
+      "..@@#@..........", "..@#@.......+...", ".@##@......+++..", ".@###@......+...",
+      ".@###@..........", ".@###@@.........", ".@####@@........", "..@####@@@..@...",
+      "..@@######@@@...", "...@@#####@@....", ".....@@@@@......", "................" } },
+};
+
+// user-badges.tsx badgeMasks: the lit cells (edge, and body where the
+// light's Bayer cell is on) in `lit`, details in `detail`. An unknown id
+// is an empty 16 x 16.
+QImage badge(const QString& id, const QColor& lit, const QColor& detail)
+{
+  constexpr int kCells = 16;
+  QImage image = canvas(kCells, kCells);
+  const BadgeArt* art = nullptr;
+  for (const BadgeArt& a : kBadgeArt)
+    if (id == QLatin1String(a.id))
+      art = &a;
+  if (!art)
+    return image;
+  const auto cell = [&](int x, int y) { return art->rows[y][x]; };
+  // badgeLight: 0.98 at the top left down to 0.64 at the bottom right.
+  const auto light = [](int x, int y) {
+    return 0.98 - (x + y) / (2.0 * (kCells - 1)) * 0.34;
+  };
+  paint(
+    image,
+    [&](int x, int y) {
+      const char c = cell(x, y);
+      return c == '@' || (c == '#' && bayerLit(x, y, light(x, y)));
+    },
+    lit);
+  paint(image, [&](int x, int y) { return cell(x, y) == '+'; }, detail);
+  return image;
+}
+
 // ui/dither-glyph.tsx VOICE: seven two-cell bars with peak-hold cells.
 QImage voice(const QColor& frameInk, const QColor& lightInk)
 {
@@ -302,7 +384,14 @@ QImage DitherProvider::requestImage(const QString& id, QSize* size,
   const QStringList parts = id.split(QLatin1Char('/'));
   const QString kind = parts.value(0);
   QImage image;
-  if (kind == QLatin1String("bark"))
+  if (kind == QLatin1String("badge")) {
+    QMutexLocker locker(&badgesLock_);
+    auto found = badges_.constFind(id);
+    if (found == badges_.constEnd())
+      found = badges_.insert(
+        id, badge(parts.value(1), color(parts.value(2)), color(parts.value(3))));
+    image = *found;
+  } else if (kind == QLatin1String("bark"))
     image = bark(parts.value(1), color(parts.value(2)));
   else if (kind == QLatin1String("pose"))
     image = pose(parts.value(1),

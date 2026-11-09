@@ -67,6 +67,11 @@ impl ApiError {
         }
     }
 
+    /// [`ApiError::network`] for the crate's own request paths.
+    pub(crate) fn from_reqwest(error: &reqwest::Error) -> Self {
+        Self::network(error)
+    }
+
     /// Keeps the whole cause chain, like `anyhow`'s `{:#}` did.
     fn network(error: &reqwest::Error) -> Self {
         let mut text = error.to_string();
@@ -83,11 +88,12 @@ impl ApiError {
 /// How long an upload or a download may take (the client default is 30 s).
 const UPLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
-/// The largest file a download may write (the upload limit).
-pub const MAX_DOWNLOAD_BYTES: u64 = 25 * 1024 * 1024;
+/// The largest file a download may write: the largest attachment any plan
+/// may send (500 MB with `bigUploads`).
+pub const MAX_DOWNLOAD_BYTES: u64 = crate::limits::MAX_ATTACHMENT_BYTES;
 
 fn too_large() -> ApiError {
-    ApiError::Decode("file is too large to download (over 25 MB)".into())
+    ApiError::Decode("file is too large to download (over 500 MB)".into())
 }
 
 /// Writes the response body to `dest` chunk by chunk, refusing more than
@@ -154,6 +160,12 @@ impl Api {
 
     fn request(&self, method: Method, path: &str) -> RequestBuilder {
         self.request_at(method, &config::get().api_base, path)
+    }
+
+    /// A request to the API with the session, for a caller that reads the
+    /// answer itself (the chunked uploads read `code` and `Retry-After`).
+    pub(crate) fn builder(&self, method: Method, path: &str) -> RequestBuilder {
+        self.request(method, path)
     }
 
     /// A request to `base` (the API, or Kova's auth server) with the session.

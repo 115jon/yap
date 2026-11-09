@@ -80,6 +80,7 @@ T.Popup {
         effect: Session.meEffect
         frame: Session.meFrame
         nameStyle: Session.meNameStyle
+        badges: Settings.badges
         surfaceColor: Settings.backgroundColor
         accentColor: Settings.accentColor
         animate: popup.visible

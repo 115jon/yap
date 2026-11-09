@@ -43,6 +43,7 @@ Loader {
                 effect: Session.meEffect
                 frame: Session.meFrame
                 nameStyle: Session.meNameStyle
+                badges: Settings.badges
                 Accessible.role: Accessible.Graphic
                 Accessible.name: qsTr("Profile preview for %1").arg(Settings.name)
                 AboutMe { text: Settings.bio }

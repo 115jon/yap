@@ -763,6 +763,10 @@ pub struct SettingsState {
     pub share_activity_error: String,
     pub revoking_share: Option<String>,
     pub share_error: (String, String),
+    /// `GET /api/billing/status`: ready with `enabled` on a 200; anything
+    /// else (501 until Stripe is set up, offline) fails, and the purchase
+    /// keys stay off.
+    pub billing: Load<bool>,
 }
 
 /// The settings dialog's requests in flight.
@@ -778,6 +782,7 @@ pub(super) struct SettingsPending {
     pub media_filter: Option<RequestId>,
     pub revoke: Option<RequestId>,
     pub share_activity: Option<RequestId>,
+    pub billing: Option<RequestId>,
 }
 
 /// The request id each slot is waiting for. A result for any other id is stale.
@@ -1281,6 +1286,9 @@ pub struct State {
     pub(super) page_asked_ms: i64,
     /// The wall clock of the command being reduced (`Input::UserAt`).
     pub(super) now_ms: Option<i64>,
+    /// The latest wall clock any command brought (0 before the first): what
+    /// plan expiries and badge months are read against between commands.
+    pub(super) clock_ms: i64,
     /// The last text channel opened per server, and the last DM under
     /// `@me` (useChatPageLogic.ts `lastActiveChannels`).
     pub(super) last_channels: HashMap<String, String>,
@@ -1386,6 +1394,7 @@ impl State {
             open_confirmed: (0, 0),
             page_asked_ms: 0,
             now_ms: None,
+            clock_ms: 0,
             last_channels: HashMap::new(),
             collapsed: BTreeSet::new(),
             disk_shown: false,
@@ -1432,6 +1441,26 @@ impl State {
 
     pub fn me(&self) -> Option<&User> {
         self.session.as_ref()?.me.as_ref()
+    }
+
+    /// The latest wall clock a command brought (epoch ms; 0 before any).
+    pub fn clock_ms(&self) -> i64 {
+        self.now_ms.unwrap_or(self.clock_ms)
+    }
+
+    /// The signed-in user's plan (none: free, as before `users/me`).
+    pub fn my_entitlement(&self) -> Option<&yap_protocol::tiers::Entitlement> {
+        self.me().and_then(crate::entitlements::of)
+    }
+
+    /// The signed-in user's attachment limit (`clientUploadLimitFor`):
+    /// 500 MB with `bigUploads`, 25 MB without.
+    pub fn attachment_limit(&self) -> u64 {
+        crate::limits::client_upload_limit_for(
+            self.my_entitlement(),
+            crate::limits::Kind::Attachment,
+            self.clock_ms(),
+        )
     }
 
     pub fn servers(&self) -> &[Server] {

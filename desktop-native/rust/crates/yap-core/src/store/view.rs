@@ -766,6 +766,9 @@ pub struct ProfileView {
     pub member_since: String,
     /// Why the full profile did not load, or empty.
     pub load_error: String,
+    /// Their badges in display order ([`crate::badges::display_json`]), or
+    /// empty.
+    pub badges: String,
 }
 
 /// The open DM's recipient, for the header and the title; empty in a
@@ -1132,6 +1135,19 @@ pub struct SettingsView {
     pub revoking_share: String,
     /// (share id, error copy) of the last failed revoke.
     pub share_error: (String, String),
+    /// The account's badges ([`crate::badges::display_json`]), or empty.
+    pub badges: String,
+    /// The plan in force: `free`, `loud` or `founder` (an expired plan is
+    /// free).
+    pub tier: String,
+    /// 1440p and 4K shares (`hdStreams`).
+    pub hd_streams: bool,
+    /// The attachment limit (500 MB with `bigUploads`, else 25 MB), in
+    /// bytes and as words.
+    pub attachment_limit: u64,
+    pub attachment_limit_text: String,
+    /// The Yap Loud page's JSON (`plan_json` in reduce/settings.rs).
+    pub plan: String,
 }
 
 /// Updates for the Qt side: typed scalars and one diff stream per model.
@@ -2559,6 +2575,7 @@ pub(super) fn profile_view(
         mutual_friends: String::new(),
         member_since: String::new(),
         load_error: String::new(),
+        badges: String::new(),
     }
 }
 

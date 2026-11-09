@@ -1325,7 +1325,7 @@ Rectangle {
     // meter for one file); the files that fit still attach on the drop.
     property string dragCard: ""
     function dragCardFor(urls) {
-        return Limits.dropCard(JSON.stringify(Files.localFiles(urls)))
+        return Limits.dropCard(JSON.stringify(Files.localFiles(urls)), Settings.attachmentLimit)
     }
     function dropUrls(urls) {
         const paths = urls.map(u => decodeURIComponent(String(u).replace(/^file:\/\/\//, "")))
@@ -1468,7 +1468,7 @@ Rectangle {
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        text: qsTr("Files can be up to %1.").arg(Limits.limitText("attachment"))
+                        text: qsTr("Files can be up to %1.").arg(Settings.attachmentLimitText)
                         color: Theme.ink3
                         font: Theme.type.description
                     }

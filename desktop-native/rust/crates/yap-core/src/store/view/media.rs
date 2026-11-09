@@ -14,7 +14,8 @@ use crate::emoji;
 use crate::gif_favorite;
 use crate::store::state::{GifBrowse, Upload, UploadStatus};
 
-/// The largest file the server takes (upload.ts, 25 MiB).
+/// The free attachment limit (upload.ts, 25 MiB); a plan with
+/// `bigUploads` raises it ([`crate::limits::client_upload_limit_for`]).
 pub const MAX_UPLOAD_BYTES: u64 = crate::limits::ATTACHMENT;
 
 /// `formatFileSize` (MessageItem.tsx): 1024-based, one decimal, no GB.
@@ -539,9 +540,14 @@ pub fn file_url(path: &str) -> String {
 
 /// The open channel's tray: finished files first, then the ones going
 /// (AttachmentList.tsx order).
+/// The open channel's tray: finished tiles first. `limit` is the user's
+/// attachment limit, which the too-big cards name. A chunked upload going
+/// shows its bytes sent of the total in the size chip ("54/150 MB",
+/// AttachmentList.tsx `ProgressChip`).
 pub(in crate::store) fn upload_rows(
     uploads: &[Upload],
     channel_id: Option<&str>,
+    limit: u64,
 ) -> Vec<UploadRow> {
     let here = |u: &&Upload| Some(u.channel_id.as_str()) == channel_id;
     let done = uploads
@@ -571,17 +577,23 @@ pub(in crate::store) fn upload_rows(
                 UploadStatus::Refused(_) => ("refused", 0, ""),
             };
             let card = match &u.status {
-                UploadStatus::TooBig => crate::limits::tray_card(&u.name, u.size).to_string(),
+                UploadStatus::TooBig => {
+                    crate::limits::tray_card(&u.name, u.size, limit).to_string()
+                }
                 UploadStatus::Refused(message) => {
-                    crate::limits::server_card(message, crate::limits::ATTACHMENT, "remove")
-                        .to_string()
+                    crate::limits::server_card(message, limit, "remove").to_string()
                 }
                 _ => String::new(),
             };
             UploadRow {
                 id: u.local_id.clone(),
                 name: u.name.clone(),
-                size: format_file_size(u.size),
+                size: match u.status {
+                    UploadStatus::Uploading(sent) if crate::limits::uses_multipart(u.size) => {
+                        crate::limits::format_progress(sent, u.size)
+                    }
+                    _ => format_file_size(u.size),
+                },
                 kind: kind.to_owned(),
                 preview: if kind == "image" {
                     file_url(&u.path)

@@ -667,6 +667,9 @@ pub mod qobject {
         #[qproperty(QString, mutual_friends, cxx_name = "mutualFriends")]
         #[qproperty(QString, member_since, cxx_name = "memberSince")]
         #[qproperty(QString, load_error, cxx_name = "loadError")]
+        /// Their badges: JSON `[{id, name, description, earned, label}]`
+        /// in display order, or empty.
+        #[qproperty(QString, badges)]
         type Profile = super::ProfileRust;
 
         #[qinvokable]
@@ -962,6 +965,7 @@ pub struct ProfileRust {
     mutual_friends: QString,
     member_since: QString,
     load_error: QString,
+    badges: QString,
 }
 
 impl qobject::Profile {

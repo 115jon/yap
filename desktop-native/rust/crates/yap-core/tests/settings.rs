@@ -128,6 +128,7 @@ fn nav_groups_should_list_the_web_panels_in_order() {
         ids,
         [
             "account",
+            "loud",
             "sessions",
             "privacy",
             "voice",

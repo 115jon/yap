@@ -9,7 +9,7 @@ use crate::api::ApiError;
 use crate::gif_favorite;
 use crate::store::favorites::FavoritesCommand;
 use crate::store::state::{GifOp, ReactionChange, State, Upload, UploadStatus};
-use crate::store::view::media::{self, MAX_UPLOAD_BYTES};
+use crate::store::view::media;
 use crate::store::view::{self, ViewUpdate};
 use crate::store::{ApiRequest, ApiResponse, Effect, RequestId, UploadFile};
 
@@ -239,11 +239,13 @@ impl State {
         let Some(channel_id) = self.active_channel.clone() else {
             return;
         };
+        // The plan's limit: 500 MB with bigUploads (chunked), 25 MB free.
+        let limit = self.attachment_limit();
         for file in files {
             if self.uploads.iter().any(|u| u.local_id == file.local_id) {
                 continue;
             }
-            let too_big = file.size > MAX_UPLOAD_BYTES;
+            let too_big = file.size > limit;
             self.uploads.push(Upload {
                 local_id: file.local_id.clone(),
                 channel_id: channel_id.clone(),
@@ -279,6 +281,7 @@ impl State {
         let Some(token) = self.session.as_ref().map(|s| s.token.clone()) else {
             return;
         };
+        let limit = self.attachment_limit();
         let id = RequestId(self.next_id());
         let Some(upload) = self.uploads.iter_mut().find(|u| u.local_id == local_id) else {
             return;
@@ -292,6 +295,7 @@ impl State {
             path: upload.path.clone(),
             name: upload.name.clone(),
             content_type: upload.content_type.clone(),
+            limit,
         });
         self.pending.uploads.insert(id, local_id.to_owned());
     }
@@ -391,7 +395,11 @@ impl State {
 
     /// The tray and its counts for the open channel.
     pub(super) fn sync_uploads(&mut self, fx: &mut Effects) {
-        let rows = media::upload_rows(&self.uploads, self.active_channel.as_deref());
+        let rows = media::upload_rows(
+            &self.uploads,
+            self.active_channel.as_deref(),
+            self.attachment_limit(),
+        );
         for diff in view::moving_diff(&self.view.uploads, &rows) {
             fx.view(ViewUpdate::Uploads(diff));
         }

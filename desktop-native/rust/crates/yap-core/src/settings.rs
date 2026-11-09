@@ -88,7 +88,7 @@ const fn section(
 pub const NAV_GROUPS: &[NavGroup] = &[
     NavGroup {
         title: "You",
-        ids: &["account", "sessions", "privacy"],
+        ids: &["account", "loud", "sessions", "privacy"],
     },
     NavGroup {
         title: "Calls",
@@ -178,6 +178,54 @@ pub const PANELS: &[PanelDef] = &[
                         &["log out", "logout", "leave"],
                     ),
                 ],
+            ),
+        ],
+    },
+    PanelDef {
+        id: "loud",
+        title: "Yap Loud",
+        icon: "sparkle",
+        headline: "Turn it up.",
+        blurb: "Your plan, and what Yap Loud adds.",
+        rail_rows: &[],
+        sections: &[
+            section(
+                "your-plan",
+                "Your plan",
+                "",
+                &[row(
+                    "current-plan",
+                    "Plan",
+                    "What your account has.",
+                    &[
+                        "tier",
+                        "subscription",
+                        "founder",
+                        "loud",
+                        "nitro",
+                        "premium",
+                        "billing",
+                    ],
+                )],
+            ),
+            section(
+                "plans",
+                "Plans",
+                "",
+                &[row(
+                    "tier-cards",
+                    "Yap, Yap Loud and Founder",
+                    "Bigger uploads, 1440p and 4K streams, every name style.",
+                    &[
+                        "upgrade",
+                        "price",
+                        "uploads",
+                        "4k",
+                        "1440p",
+                        "name styles",
+                        "badge",
+                    ],
+                )],
             ),
         ],
     },

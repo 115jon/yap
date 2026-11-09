@@ -87,6 +87,7 @@ T.Popup {
             effect: Profile.effect
             frame: Profile.frame
             nameStyle: Profile.nameStyle
+            badges: Profile.badges
             animate: popup.visible
 
             // ProfileActionRow, or Try again alone after a failed load.

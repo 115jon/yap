@@ -26,7 +26,10 @@ Popup {
     readonly property var shown: sources.filter(s => apps ? s.kind === "window" : s.kind === "monitor")
     readonly property var picked: sources.find(s => s.id === selectedId) ?? null
     readonly property bool onlyOurs: Voice.shareOnlyOurs()
-    readonly property var qualityIds: ["720p30", "720p60", "1080p30", "1080p60", "1440p30", "1440p60", "4k30", "4k60"]
+    // useStreamQualities: 1440p and 4K only with the hdStreams perk; a
+    // saved HD quality without it opens on the first offered (720p30).
+    readonly property var qualityIds: Settings.hdStreams ? ["720p30", "720p60", "1080p30", "1080p60", "1440p30", "1440p60", "4k30", "4k60"]
+        : ["720p30", "720p60", "1080p30", "1080p60"]
 
     function openPicker() {
         // Changing the source of a live share keeps its quality and audio.
@@ -72,6 +75,9 @@ Popup {
         const source = picked
         if (!source)
             return
+        // The plan may have changed since the picker opened.
+        if (!qualityIds.includes(quality))
+            quality = qualityIds[0]
         Audio.changeScreenShareDefaults(quality, withAudio)
         Voice.startShare(source.id, source.name, source.kind === "window", quality, withAudio)
         close()
@@ -314,6 +320,7 @@ Popup {
                     id: qualityControl
                     y: 12
                     value: root.quality
+                    available: root.qualityIds
                     onPicked: id => root.quality = id
                 }
                 T.AbstractButton {

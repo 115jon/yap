@@ -7,7 +7,9 @@ import com.yap.native
 // the chosen preset's one-line hint. `value` and `picked` use preset ids
 // ("1080p60"). Chips sit in a tint-1 well; the chosen one is accent tint
 // with accent ink. A frame rate the resolution lacks is disabled, so the
-// rows keep their shape.
+// rows keep their shape. `available` limits the presets offered
+// (useStreamQualities: 1440p and 4K need the hdStreams perk); a resolution
+// with none offered is left out.
 Column {
     id: root
 
@@ -16,7 +18,10 @@ Column {
 
     signal picked(string id)
 
-    readonly property var presets: [
+    // The preset ids this surface may offer.
+    property var available: ["720p30", "720p60", "1080p30", "1080p60", "1440p30", "1440p60", "4k30", "4k60"]
+
+    readonly property var allPresets: [
         { id: "720p30", label: "720p", fps: 30, desc: qsTr("Light on bandwidth") },
         { id: "720p60", label: "720p", fps: 60, desc: qsTr("Smooth motion") },
         { id: "1080p30", label: "1080p", fps: 30, desc: qsTr("Sharp text and apps") },
@@ -26,8 +31,9 @@ Column {
         { id: "4k30", label: "4K", fps: 30, desc: qsTr("Most detail") },
         { id: "4k60", label: "4K", fps: 60, desc: qsTr("Most detail, smooth") },
     ]
+    readonly property var presets: allPresets.filter(p => available.includes(p.id))
     readonly property var selected: presets.find(p => p.id === value) ?? presets[0]
-    readonly property var resolutions: ["720p", "1080p", "1440p", "4K"]
+    readonly property var resolutions: ["720p", "1080p", "1440p", "4K"].filter(label => presets.some(p => p.label === label))
     readonly property var rates: [30, 60]
 
     function pickResolution(label) {

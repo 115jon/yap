@@ -233,6 +233,7 @@ impl State {
         let mut view = view::profile_view(user, roles, me, &self.presence, &self.api_base);
         // ProfileCard.tsx "Mutual servers": not on your own card.
         view.member_since = member_since_json(user, member);
+        view.badges = crate::badges::display_json(user.badges.as_deref(), self.clock_ms());
         if let Some((_, why)) = self.profile_error.as_ref().filter(|(owner, _)| owner == id) {
             view.load_error = why.clone();
         }

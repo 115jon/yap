@@ -556,6 +556,7 @@ T.Popup {
     function panelComponent(id) {
         switch (id) {
         case "account": return accountPanel
+        case "loud": return loudPanel
         case "sessions": return sessionsPanel
         case "privacy": return privacyPanel
         case "voice": return voicePanel
@@ -568,6 +569,7 @@ T.Popup {
         }
     }
     Component { id: accountPanel; AccountPanel { host: dialog } }
+    Component { id: loudPanel; LoudPanel {} }
     Component { id: sessionsPanel; SessionsPanel {} }
     Component { id: privacyPanel; PrivacyPanel { host: dialog } }
     Component { id: voicePanel; VoicePanel {} }
