@@ -18,7 +18,17 @@ import {
 } from "@/lib/gif-picker";
 import type { Message, User } from "@/lib/types";
 import { useMyEntitlement } from "@/hooks/useEntitlement";
-import { partitionBySize, clientUploadLimitFor } from "@/lib/upload-limits";
+import {
+  localStorageResumeStore,
+  multipartResumeKey,
+  uploadInParts,
+} from "@/lib/multipart-upload";
+import { createApiMultipartTransport } from "@/lib/multipart-upload-transport";
+import {
+  clientUploadLimitFor,
+  partitionBySize,
+  usesMultipartUpload,
+} from "@/lib/upload-limits";
 import { COMPOSER_RESTORE_EVENT } from "@/stores/chat-actions";
 import { useChatStore } from "@/stores/chat-store";
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
@@ -38,6 +48,21 @@ import {
  */
 const COMPOSER_MIN_HEIGHT_PX = 48;
 
+/**
+ * Saved chunked-upload ids, so a Retry or a reload resumes a big file.
+ *
+ * Deliberately no abort on `pagehide`: it fires for a reload and a bfcache
+ * navigation too, which are exactly the cases resume is for, and a tab
+ * close can't be told apart from them. An upload a closed tab leaves behind
+ * costs nothing for long: the server expires open uploads idle for an hour
+ * and, at the per-user cap, aborts the least recently active one to make
+ * room for a new file.
+ */
+const chunkedUploadResumeStore = localStorageResumeStore();
+
+/** How often a chunked upload's progress may re-render the tray. */
+const PROGRESS_RENDER_INTERVAL_MS = 100;
+
 export interface UploadedFile {
   id: string;
   url: string;
@@ -51,8 +76,13 @@ export interface UploadedFile {
 export interface PendingUpload {
   tempId: string;
   file: File;
-  /** 0..1 once a transport reports it. `fetch` can't, so today it stays 0. */
+  /**
+   * 0..1 once a transport reports it. Chunked uploads (files at or over
+   * MULTIPART_THRESHOLD) do; a single-request `fetch` can't, so it stays 0.
+   */
   progress: number;
+  /** Bytes sent so far, for chunked uploads ("12.0 / 150.0 MB"). */
+  loaded?: number;
   previewUrl?: string;
   abortController: AbortController;
   /** Set when the upload failed: the tile stays with a Retry instead of vanishing. */
@@ -710,18 +740,53 @@ export function useMessageInput({
         let failure: string | null = null;
         let serverLimit: number | undefined;
         try {
-          const formData = new FormData();
-          formData.append("file", file);
-
-          const data = await apiUpload<{
+          type UploadResponse = {
             id: string;
             file_url: string;
             file_name: string;
             file_size: number;
             content_type: string;
-          }>(`/api/channels/${channelId}/messages/upload`, formData, {
-            signal: abortController.signal,
-          });
+          };
+          let data: UploadResponse;
+          if (usesMultipartUpload(file.size)) {
+            // Big files go up in parts, with real progress and resume.
+            let lastRender = 0;
+            data = await uploadInParts(file, {
+              transport: createApiMultipartTransport(channelId),
+              resumeKey: multipartResumeKey(channelId, file),
+              store: chunkedUploadResumeStore,
+              signal: abortController.signal,
+              onProgress: ({ loaded, total }) => {
+                const now = Date.now();
+                if (
+                  loaded < total &&
+                  now - lastRender < PROGRESS_RENDER_INTERVAL_MS
+                ) {
+                  return;
+                }
+                lastRender = now;
+                setLocalState((prev: { pendingUploads: PendingUpload[] }) => ({
+                  pendingUploads: prev.pendingUploads.map((p) =>
+                    p.tempId === tempId
+                      ? {
+                          ...p,
+                          loaded,
+                          progress: total > 0 ? loaded / total : 0,
+                        }
+                      : p,
+                  ),
+                }));
+              },
+            });
+          } else {
+            const formData = new FormData();
+            formData.append("file", file);
+            data = await apiUpload<UploadResponse>(
+              `/api/channels/${channelId}/messages/upload`,
+              formData,
+              { signal: abortController.signal },
+            );
+          }
 
           setLocalState((prev: { uploadedFiles: UploadedFile[] }) => ({
             uploadedFiles: [

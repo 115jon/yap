@@ -103,10 +103,13 @@ describe("uploadLimitFor", () => {
     expect(uploadLimitFor(founder, "soundboard")).toBe(50 * MB);
   });
 
-  it("offers the client the Worker limit until chunked uploads are live", () => {
-    expect(CHUNKED_UPLOADS_ENABLED).toBe(false);
-    expect(clientUploadLimitFor(founder, "attachment")).toBe(25 * MB);
+  it("offers the client the chunked limit now that chunked uploads are live", () => {
+    expect(CHUNKED_UPLOADS_ENABLED).toBe(true);
+    expect(clientUploadLimitFor(founder, "attachment")).toBe(500 * MB);
+    expect(clientUploadLimitFor(loud, "attachment")).toBe(500 * MB);
     expect(clientUploadLimitFor(FREE_ENTITLEMENT, "attachment")).toBe(25 * MB);
+    // Kinds without a perk limit offer what they always did.
+    expect(clientUploadLimitFor(founder, "avatar")).toBe(UPLOAD_LIMITS.avatar);
   });
 
   it("gives direct uploads the whole perk limit", () => {

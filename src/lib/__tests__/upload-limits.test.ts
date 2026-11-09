@@ -110,3 +110,48 @@ describe("the server's 413 message", () => {
     expect(parseServerLimitBytes(413)).toBeNull();
   });
 });
+
+describe("formatUploadProgress", () => {
+  it("fits a 96px tile: whole MB from 10 MB, one decimal below", async () => {
+    const { formatUploadProgress, MB } = await import("../upload-limits");
+    expect(formatUploadProgress(60 * MB, 150 * MB)).toBe("60/150 MB");
+    expect(formatUploadProgress(0, 150 * MB)).toBe("0.0/150 MB");
+    expect(formatUploadProgress(0.45 * MB, 16 * MB)).toBe("0.4/16 MB");
+    // Never reads full before it is.
+    expect(formatUploadProgress(149.9 * MB, 150 * MB)).toBe("149/150 MB");
+    expect(formatUploadProgress(150 * MB, 150 * MB)).toBe("150/150 MB");
+    expect(formatUploadProgress(200 * MB, 150 * MB)).toBe("150/150 MB");
+  });
+});
+
+describe("attachmentUploadLimit", () => {
+  it("is the chunked limit for the plan: 500 MB with bigUploads, else 25 MB", async () => {
+    const { attachmentUploadLimit, MAX_ATTACHMENT_BYTES, MB } =
+      await import("../upload-limits");
+    expect(attachmentUploadLimit({ tier: "founder" })).toBe(500 * MB);
+    expect(attachmentUploadLimit({ tier: "loud" })).toBe(500 * MB);
+    expect(attachmentUploadLimit({ tier: "free" })).toBe(25 * MB);
+    expect(attachmentUploadLimit(null)).toBe(25 * MB);
+    // A lapsed plan is free.
+    expect(
+      attachmentUploadLimit({
+        tier: "loud",
+        expires_at: "2000-01-01T00:00:00.000Z",
+      }),
+    ).toBe(25 * MB);
+    expect(attachmentUploadLimit({ tier: "founder" })).toBeLessThanOrEqual(
+      MAX_ATTACHMENT_BYTES,
+    );
+  });
+
+  it("keeps the single-request route at the Worker cap on every plan", async () => {
+    const { uploadLimitFor, usesMultipartUpload, WORKER_UPLOAD_CAP, MB } =
+      await import("../upload-limits");
+    expect(uploadLimitFor({ tier: "founder" }, "attachment")).toBe(
+      WORKER_UPLOAD_CAP,
+    );
+    // Everything from 16 MB up takes the chunked path instead.
+    expect(usesMultipartUpload(16 * MB - 1)).toBe(false);
+    expect(usesMultipartUpload(16 * MB)).toBe(true);
+  });
+});

@@ -53,11 +53,13 @@ export const BIG_UPLOAD_LIMITS: Partial<Record<UploadKind, number>> = {
 export const WORKER_UPLOAD_CAP = 25 * MB;
 
 /**
- * Whether the chunked direct-to-R2 upload path is live. Until it is, the
- * client pre-check, the composer and the plan cards use the Worker limit,
- * so nothing promises more than the server takes.
+ * Whether the chunked direct-to-R2 upload path is live. It is, so the
+ * client pre-check, the composer and the plan cards offer the chunked
+ * limit (500 MB with bigUploads); the single-request route stays at
+ * `WORKER_UPLOAD_CAP` and the client sends anything from
+ * `MULTIPART_THRESHOLD` up in parts.
  */
-export const CHUNKED_UPLOADS_ENABLED = false;
+export const CHUNKED_UPLOADS_ENABLED = true;
 
 /**
  * The limit for one `kind` of upload under `entitlement`, as the server
@@ -106,6 +108,21 @@ export function formatUploadOverage(size: number, limit: number): string {
   return `${(tenths / 10).toFixed(1)} MB`;
 }
 
+/**
+ * A chunked upload's bytes sent of its total, short enough for one line in
+ * a 96px tray tile: "60/150 MB". Whole MB from 10 MB up, one decimal below
+ * ("0.4/16 MB"); the sent side rounds down so it never reads full early.
+ */
+export function formatUploadProgress(loaded: number, total: number): string {
+  const mb = (bytes: number, round: (n: number) => number) => {
+    const value = Math.max(0, bytes) / MB;
+    return value >= 10
+      ? String(round(value))
+      : (round(value * 10) / 10).toFixed(1);
+  };
+  return `${mb(Math.min(loaded, total), Math.floor)}/${mb(total, Math.round)} MB`;
+}
+
 /** A limit: whole MB with no decimal ("25 MB"); a fractional one keeps one. */
 export function formatUploadLimit(bytes: number): string {
   const mb = oneDecimal(bytes);
@@ -149,4 +166,39 @@ export function partitionBySize<T extends { size: number }>(
     (isOverUploadLimit(file.size, limit) ? tooBig : fits).push(file);
   }
   return { fits, tooBig };
+}
+
+// ── Chunked (multipart) attachments ──────────────────────────────────────────
+
+/**
+ * Attachments this size or larger go up in parts (R2 multipart through the
+ * Worker); smaller ones keep the single multipart/form-data request. Each
+ * request stays far under the Worker's ~100 MB body limit either way.
+ */
+export const MULTIPART_THRESHOLD = 16 * MB;
+
+/** The part size the server hands out: 8 MiB, inside R2's 5 MiB floor. */
+export const MULTIPART_PART_SIZE = 8 * MB;
+
+/**
+ * The largest attachment any plan may send (the `bigUploads` perk). The
+ * server never accepts a declared size above it, whatever limit it is given.
+ */
+export const MAX_ATTACHMENT_BYTES = 500 * MB;
+
+/**
+ * The chunked attachment limit under `entitlement`: 500 MB with bigUploads,
+ * 25 MB without. The chunked-upload routes pass the uploader's plan as the
+ * server reads it (and clamp it to `MAX_ATTACHMENT_BYTES`); the client
+ * offers the same number through `clientUploadLimitFor`.
+ */
+export function attachmentUploadLimit(
+  entitlement: Entitlement | null | undefined,
+): number {
+  return uploadLimitFor(entitlement, "attachment", { direct: true });
+}
+
+/** Whether a file of `size` bytes takes the chunked path. */
+export function usesMultipartUpload(size: number): boolean {
+  return size >= MULTIPART_THRESHOLD;
 }

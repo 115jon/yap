@@ -15,6 +15,7 @@ import { FoundationFixture } from "@/components/dev/foundation-fixtures";
 import { SoundFixture } from "@/components/dev/sound-fixtures";
 import { StandaloneUpdaterView } from "@/components/StandaloneUpdater";
 import { DitherMockupsFixture } from "@/components/dev/dither-mockups";
+import { ChunkedUploadFixture } from "@/components/dev/chunked-upload-fixtures";
 import { TooBigFixture } from "@/components/dev/too-big-fixtures";
 import { BadgesFixture, TiersFixture } from "@/components/dev/tiers-fixtures";
 import {
@@ -3198,6 +3199,9 @@ export default function UiFixtures() {
       break;
     case "name-style-editor":
       content = <NameStyleEditorFixture />;
+      break;
+    case "chunked-upload":
+      content = <ChunkedUploadFixture />;
       break;
     case "type-mockups":
       content = <TypeMockupsFixture />;
