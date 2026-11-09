@@ -13,7 +13,7 @@ import {
 } from "@/lib/native-app-link";
 
 describe("native app links", () => {
-  it("never uses the desktop app's yap: scheme", () => {
+  it("never uses yap:, which the Tauri app may still own", () => {
     expect(NATIVE_APP_SCHEME).toBe("yap-native");
     expect(nativeSignInLink("ABCD-EFGH").startsWith("yap://")).toBe(false);
   });
@@ -33,8 +33,13 @@ describe("native app links", () => {
   });
 
   it("tells the native client from the other apps by its label", () => {
+    expect(isNativeAppDevice({ label: "Yap" })).toBe(true);
+    expect(isNativeAppDevice({ label: " Yap " })).toBe(true);
+    // The label before the rename, from a client not updated yet.
     expect(isNativeAppDevice({ label: "Yap Native" })).toBe(true);
     expect(isNativeAppDevice({ label: "  Yap Native " })).toBe(true);
+    expect(isNativeAppDevice({ label: "yap" })).toBe(false);
+    expect(isNativeAppDevice({ label: "" })).toBe(false);
     expect(isNativeAppDevice({ label: "Yap Desktop" })).toBe(false);
     expect(isNativeAppDevice({ label: "Yap Mobile" })).toBe(false);
     expect(isNativeAppDevice({ label: null })).toBe(false);

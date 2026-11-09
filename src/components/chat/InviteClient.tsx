@@ -76,9 +76,9 @@ function serverPath(serverId: string): string {
  * join" with a sign-in link that returns here. Server error text is never
  * shown: each status maps to written copy.
  *
- * In a browser on Windows the invite also offers "Open in Yap Native", the
- * Windows app's `yap-native://invite/<code>` link (native-app-link.ts), as a
- * secondary key under the web join.
+ * In a browser on Windows the invite also offers "Open in Yap for Windows",
+ * the Windows app's `yap-native://invite/<code>` link (native-app-link.ts),
+ * as a secondary key under the web join.
  */
 export default function InviteClient({
   code: codeOverride,
@@ -232,7 +232,7 @@ export default function InviteClient({
             )}
             {nativeLink ? (
               <Button asChild variant="secondary" size="lg">
-                <a href={nativeLink}>Open in Yap Native for Windows</a>
+                <a href={nativeLink}>Open in Yap for Windows</a>
               </Button>
             ) : null}
             <Button
