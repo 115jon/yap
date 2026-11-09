@@ -12,7 +12,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   apiGet: vi.fn(),
   apiPatch: vi.fn(),
-  apiPost: vi.fn(),
   loadCurrentUser: vi.fn(),
   signOut: vi.fn(() => Promise.resolve()),
   endKovaBrowserSession: vi.fn(() => Promise.resolve()),
@@ -42,30 +41,14 @@ vi.mock("@/lib/kova-sign-out", () => ({
 vi.mock("@/lib/api-client", () => ({
   apiGet: mocks.apiGet,
   apiPatch: mocks.apiPatch,
-  apiPost: mocks.apiPost,
 }));
 
-const CLAIMS_URL = "/api/account-claims";
-const claimCandidate = {
-  id: "legacy-1",
-  username: "legacy_jon",
-  display_name: "Legacy Jon",
-  avatar_url: null,
-  match_method: "email",
-};
-
-/** Answers the claim check; everything else goes to `fallback`. */
-function routeApiGet(
-  claims: unknown = { claimed: true, candidates: [] },
-  fallback: (url: string) => unknown = () => undefined,
-) {
-  mocks.apiGet.mockImplementation((url: string) =>
-    url === CLAIMS_URL ? Promise.resolve(claims) : fallback(url),
-  );
+/** Answers every `apiGet` with `fallback`. */
+function routeApiGet(fallback: (url: string) => unknown = () => undefined) {
+  mocks.apiGet.mockImplementation(fallback);
 }
 
-const usernameChecks = () =>
-  mocks.apiGet.mock.calls.filter(([url]) => url !== CLAIMS_URL);
+const usernameChecks = () => mocks.apiGet.mock.calls;
 
 vi.mock("@/stores/chat-store", () => ({
   useChatStore: (selector: (state: unknown) => unknown) =>
@@ -124,7 +107,7 @@ describe("AccountPanel inline profile editing", () => {
 
   it("checks a changed username after a debounce and saves only when available", async () => {
     vi.useFakeTimers();
-    routeApiGet(undefined, () => Promise.resolve({ available: true }));
+    routeApiGet(() => Promise.resolve({ available: true }));
     mocks.apiPatch.mockResolvedValueOnce({});
     mocks.loadCurrentUser.mockResolvedValueOnce(undefined);
     render(<AccountPanel />);
@@ -159,44 +142,6 @@ describe("AccountPanel inline profile editing", () => {
     expect(mocks.apiPatch).toHaveBeenCalledWith("/api/update-profile", {
       username: "new_handle",
     });
-  });
-
-  it("hides the claim card when there is nothing to claim", async () => {
-    routeApiGet();
-    render(<AccountPanel />);
-    await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledWith(CLAIMS_URL));
-    expect(
-      screen.queryByRole("heading", { name: "Claim an existing account" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("claims a legacy account only after confirming, and keeps the strip open on failure", async () => {
-    routeApiGet({ claimed: false, candidates: [claimCandidate] });
-    mocks.apiPost.mockRejectedValueOnce(
-      Object.assign(new Error("D1_ERROR: boom"), { status: 500 }),
-    );
-    render(<AccountPanel />);
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Claim @legacy_jon" }),
-    );
-    expect(mocks.apiPost).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Claim account" }));
-
-    await waitFor(() =>
-      expect(mocks.apiPost).toHaveBeenCalledWith(CLAIMS_URL, {
-        legacyUserId: "legacy-1",
-      }),
-    );
-    expect(
-      await screen.findByText(
-        "Unable to claim that account. Try again in a moment.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/D1_ERROR/)).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Claim account" }),
-    ).toBeInTheDocument();
   });
 });
 
