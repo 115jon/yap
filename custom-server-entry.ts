@@ -45,12 +45,16 @@ import {
   type BackgroundTaskEnvelope,
 } from "./src/lib/background-tasks";
 import { retryR2Cleanup } from "./src/services/r2-cleanup.service";
+import { sweepAutoBadges } from "./src/services/badge.service";
+import { cfTimeZone, TIME_ZONE_HEADER } from "./src/lib/request-time-zone";
+import { cleanupStalePendingUploads } from "./src/services/multipart-upload.service";
 import {
   COLLECTIBLES_SYNC_CRON,
-  CatalogFetchDeferredError,
-  syncCollectiblesCatalog,
+  runCollectiblesCatalogCron,
 } from "./src/lib/collectibles-catalog";
 import {
+  isDailySlot,
+  recordScheduledJobRuns,
   runScheduledJobs,
   selectScheduledJobs,
 } from "./src/lib/scheduled-jobs";
@@ -292,6 +296,10 @@ async function requireAuthenticatedWebSocket(
   );
   headers.delete("Sec-WebSocket-Protocol");
   headers.set("Sec-WebSocket-Protocol", protocol.value.responseProtocol);
+  // Cloudflare's time zone for the client (Night owl), never the client's
+  // own: the strip above removed any x-ralph-realtime-* header it sent.
+  const timeZone = cfTimeZone(request);
+  if (timeZone) headers.set(TIME_ZONE_HEADER, timeZone);
 
   // The Durable Object that accepts the socket spends the ticket's nonce
   // (consumeRealtimeTicketNonce) before it upgrades: one round trip, not a
@@ -494,6 +502,26 @@ export default {
           },
         ],
       },
+      // Automatic badges are checked when a stat changes; the daily sweep
+      // (the 00:00 UTC maintenance run, or any manual trigger) catches what
+      // changes without a stat write: signup rank and server size.
+      badges: {
+        crons: [MAINTENANCE_CRON],
+        jobs: isDailySlot(controller.cron, controller.scheduledTime, [
+          MAINTENANCE_CRON,
+          COLLECTIBLES_SYNC_CRON,
+        ])
+          ? [
+              {
+                name: "Badge sweep",
+                run: async () => {
+                  const awarded = await sweepAutoBadges(env.DB);
+                  console.info("Badge sweep completed", awarded);
+                },
+              },
+            ]
+          : [],
+      },
       // Embed retries back off from one minute, so a six-hourly sweep made
       // them pointless. Delayed queue deliveries do the fast retries; this
       // hourly sweep is the safety net.
@@ -506,6 +534,17 @@ export default {
           },
         ],
       },
+      // Chunked uploads expire after a day; the hourly sweep aborts their R2
+      // multiparts and rows so abandoned parts don't sit in the bucket.
+      staleUploads: {
+        crons: [MAINTENANCE_CRON, COLLECTIBLES_SYNC_CRON],
+        jobs: [
+          {
+            name: "Stale chunked upload cleanup",
+            run: () => cleanupStalePendingUploads(env.DB, env.BUCKET),
+          },
+        ],
+      },
       collectibles: {
         crons: [COLLECTIBLES_SYNC_CRON],
         jobs: [
@@ -514,13 +553,9 @@ export default {
             run: async () => {
               // Upstream blocks Workers egress; an off-Cloudflare fetcher
               // pushes to /api/collectibles/ingest. While it keeps up, a
-              // failed fetch here was already logged as a warning.
-              const catalog = await syncCollectiblesCatalog(env.DB, {
-                trigger: "cron",
-              }).catch((error: unknown) => {
-                if (error instanceof CatalogFetchDeferredError) return null;
-                throw error;
-              });
+              // failed fetch here is only a warning (null); otherwise the
+              // job fails with the reason and the fetcher's last push.
+              const catalog = await runCollectiblesCatalogCron(env.DB);
               if (!catalog) return;
               console.info("Collectibles catalog sync completed", {
                 categories: catalog.categories.length,
@@ -533,7 +568,11 @@ export default {
         ],
       },
     });
-    await runScheduledJobs(jobs, (promise) => ctx.waitUntil(promise));
+    const results = await runScheduledJobs(jobs, (promise) =>
+      ctx.waitUntil(promise),
+    );
+    // The console's "cron sweeps" readout.
+    await recordScheduledJobRuns(env.DB, controller.cron, results);
   },
 
   async queue(

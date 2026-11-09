@@ -1,6 +1,6 @@
 # Yap Privacy Policy
 
-Effective date: July 10, 2026
+Effective date: November 9, 2026
 
 Yap is operated by 115jon. Questions about this policy, privacy requests,
 or data deletion requests can be sent to <115jon@proton.me>.
@@ -14,9 +14,54 @@ the service. When a user joins a voice or video session, the service processes
 the room/channel identifiers, connection credentials, and the media the user
 chooses to send.
 
+Yap keeps per-account usage counters: time spent in voice and screen sharing,
+the number of messages sent, and when the account was last active. They are
+used to award profile badges and are deleted with the account.
+
 The desktop application may store account-session information and application
 settings on the user's device. Browser and CEF runtime data, such as cached web
 resources and local storage, may also be stored locally.
+
+## Game activity
+
+Yap can show others the game a user is playing ("Playing X"): the game's
+name, an icon from Yap's game catalog, and when it started. Yap shares it only
+with people who share a server, a direct message or a friendship with the
+user, keeps it only while the user's connection is open, does not store it with
+the account, and never shows it while the user's status is invisible. "Share my
+activity" is on by default and can be turned off at any time in Privacy &
+safety settings; while it is off, Yap shows no game activity for the user.
+Game icons are served from Yap's own storage, so viewing someone's activity
+does not contact a third party.
+
+Automatic game detection is planned for the Yap desktop application and is not
+part of the current release. When the desktop application supports it, it will
+compare the names of running programs on the user's device against Yap's
+published game catalog; the list of running programs will stay on the device,
+and only a matched game's name, catalog icon and start time will be sent.
+Hiding a single game will be a setting of the desktop application on that
+device. This section will be updated when detection ships.
+
+## Connections
+
+A user can link an account they own on another service to their Yap
+profile. Steam is the first. Linking sends the user to Steam's own sign-in
+page ("Sign in through Steam"); Yap never sees the Steam password. Steam tells
+Yap the account's SteamID, and Yap confirms the answer with Steam. Yap then
+reads the account's public persona name and avatar from its public Steam
+profile.
+
+Yap stores the SteamID (and the account number derived from it, for later
+game-stat features), the persona name, the avatar address, the profile
+address, whether the connection shows on the profile, and when it was
+verified. One Steam account can be linked to only one Yap account.
+
+While "Show on profile" is on, anyone who can open the user's profile sees
+the persona name and a link to the Steam profile, which contains the
+SteamID. People the user has blocked see no connections. The profile also
+carries the avatar address; the Yap apps show the avatar only to the user, in
+settings, through Yap's own media proxy.
+Unlinking deletes the stored connection at once.
 
 ## Where information is sent
 
@@ -28,6 +73,7 @@ Yap uses these services:
 - Cloudflare services for application delivery and infrastructure.
 - GitHub Releases for published desktop releases and desktop update metadata.
 - WebRTC/SFU services used by Yap for voice, video, and screen sharing.
+- `steamcommunity.com` when a user links a Steam account (see Connections).
 
 The web and desktop applications can also connect to locations selected by the
 user or supplied in user content, such as a shared link, embed, attachment, or

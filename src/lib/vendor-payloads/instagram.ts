@@ -168,3 +168,96 @@ export const InstagramGraphqlResponse = looseStruct({
   ),
 });
 export type InstagramGraphqlResponse = typeof InstagramGraphqlResponse.Type;
+
+// ── public embed page ───────────────────────────────────────────────────────
+
+const EmbedDisplayResource = looseStruct({
+  src: lenientString,
+  config_width: lenientNumber,
+  config_height: lenientNumber,
+});
+
+const EmbedDimensions = looseStruct({
+  width: lenientNumber,
+  height: lenientNumber,
+});
+
+const EmbedCount = looseStruct({ count: lenientNumber });
+
+/** The fields a post and each carousel slide share. */
+const EmbedNodeFields = {
+  __typename: lenientString,
+  shortcode: lenientString,
+  is_video: lenientBoolean,
+  display_url: lenientString,
+  display_resources: lenientArray(EmbedDisplayResource),
+  thumbnail_src: lenientString,
+  dimensions: lenient(EmbedDimensions),
+  video_url: lenientString,
+  video_duration: lenientNumber,
+  accessibility_caption: lenientString,
+} as const;
+
+const EmbedNode = looseStruct(EmbedNodeFields);
+export type InstagramEmbedNode = typeof EmbedNode.Type;
+
+export const InstagramEmbedShortcodeMedia = looseStruct({
+  ...EmbedNodeFields,
+  product_type: lenientString,
+  video_view_count: lenientNumber,
+  video_play_count: lenientNumber,
+  taken_at_timestamp: lenientNumber,
+  edge_media_to_caption: lenient(
+    looseStruct({
+      edges: lenientArray(
+        looseStruct({
+          node: lenient(looseStruct({ text: lenientString })),
+        }),
+      ),
+    }),
+  ),
+  edge_media_to_comment: lenient(EmbedCount),
+  edge_media_preview_comment: lenient(EmbedCount),
+  edge_liked_by: lenient(EmbedCount),
+  edge_media_preview_like: lenient(EmbedCount),
+  clips_music_attribution_info: lenient(
+    looseStruct({
+      artist_name: lenientString,
+      song_name: lenientString,
+      uses_original_audio: lenientBoolean,
+    }),
+  ),
+  owner: lenient(
+    looseStruct({
+      username: lenientString,
+      full_name: lenientString,
+      is_verified: lenientBoolean,
+      profile_pic_url: lenientString,
+    }),
+  ),
+  edge_sidecar_to_children: lenient(
+    looseStruct({
+      edges: lenientArray(looseStruct({ node: lenient(EmbedNode) })),
+    }),
+  ),
+});
+export type InstagramEmbedShortcodeMedia =
+  typeof InstagramEmbedShortcodeMedia.Type;
+
+/**
+ * `contextJSON` of `https://www.instagram.com/p/<code>/embed/captioned/`, the
+ * page Instagram serves logged-out to link-preview crawlers.
+ */
+export const InstagramEmbedContext = looseStruct({
+  context: lenient(
+    looseStruct({
+      type: lenientString,
+      shortcode: lenientString,
+      copyright_blocked: lenientBoolean,
+    }),
+  ),
+  gql_data: lenient(
+    looseStruct({ shortcode_media: lenient(InstagramEmbedShortcodeMedia) }),
+  ),
+});
+export type InstagramEmbedContext = typeof InstagramEmbedContext.Type;

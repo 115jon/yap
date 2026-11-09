@@ -1,5 +1,6 @@
 import { useVoiceSoundboardStore } from "@/stores/useVoiceSoundboardStore";
 import { getMediaUrl } from "@/lib/platform";
+import { UPLOAD_LIMITS } from "@/lib/upload-limits";
 
 export interface DefaultSound {
   id: string;
@@ -15,7 +16,7 @@ export const DEFAULT_SOUNDBOARD_SOUNDS: DefaultSound[] = [
   { id: "tada", name: "Ta-da", tone: 740, duration: 0.42 },
 ];
 
-export const MAX_SOUNDBOARD_UPLOAD_BYTES = 50 * 1024 * 1024;
+export const MAX_SOUNDBOARD_UPLOAD_BYTES = UPLOAD_LIMITS.soundboard;
 const PLAYBACK_UI_VISIBLE_AFTER_MS = 500;
 const DATA_URL_PATTERN = /^data:([^;,]+)?(;base64)?,(.*)$/;
 const MAX_SOUNDBOARD_EVENT_PAST_SKEW_MS = 5_000;

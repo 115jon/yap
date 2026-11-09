@@ -18,14 +18,24 @@
  * to the chat shell). Families, by name:
  *   shell*, dm-*, dm-call-*, members, friends, account-row, message-rows
  *   voice*, room*, incoming-call, voice-debug*, connection-states
+ *   voice-person (the stage person card; `&who=linus|ada|grace`)
  *   settings, settings-<panel>, sp-* (settings and profile editors)
- *   search*, command-menu, menus, splash, overlay*, no-channel, drawer*
+ *   search*, command-menu, menus, volume-boost, splash, overlay*, no-channel,
+ *   drawer*
  *   mobile*, action-sheet, shop, catalog-*, updater*
  *   ov-* overlays (each mounted open), fx-* feedback + media, st-* screen
  *   share, fl-* floating players, pk-* pickers, embed-* link embeds,
  *   act-* activities, pub-* public pages
  *   foundation, component-kit, dither-mockups, type-mockups (design specimens)
  *   sounds (UI sound audition: built-in vs imported custom files)
+ *   too-big (the "too big" upload cards, every situation)
+ *   badges, tiers (badge art and overflow; the Yap Loud tier cards)
+ *   name-styles, name-style-editor (display name styles on every surface;
+ *   `&name=<effect>&wave=1` dresses every fixture user in a style)
+ *   chunked-upload (big-file progress tiles; a live run with cancel)
+ *   site-banner (the site announcement strip in each tone)
+ *   settings-connections (`&state=empty|linked|hidden|error`) and
+ *   connections-profile (the profile's Connections block)
  */
 
 import { createFileRoute, notFound } from "@tanstack/react-router";

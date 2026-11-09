@@ -12,6 +12,7 @@ import {
   extractYouTubeVideoId,
   pickPreferredFormat,
   resolvePlayableYouTubeAudio,
+  searchYouTubeCatalog,
   resolveYouTubePlayback,
   YouTubeBotCheckError,
 } from "../ytdlp/youtube";
@@ -62,6 +63,13 @@ function requestUrl(input: string | URL | Request) {
     : input instanceof URL
       ? input.toString()
       : input.url;
+}
+
+const VISITOR_ID_URL = "https://www.youtube.com/youtubei/v1/visitor_id?";
+
+/** The visitor id endpoint VISIONOS needs before its player call. */
+function visitorIdAnswer() {
+  return Response.json({ responseContext: { visitorData: "visitor-123" } });
 }
 
 const BOT_WALL = {
@@ -249,11 +257,13 @@ describe("yt-dlp YouTube helpers", () => {
               ? input.toString()
               : input.url;
 
+        if (url.startsWith(VISITOR_ID_URL)) return visitorIdAnswer();
+
         if (url.startsWith("https://www.youtube.com/youtubei/v1/player?key=")) {
           const headers = new Headers(init?.headers);
-          // IOS goes first: it answers Cloudflare with direct audio URLs.
-          expect(headers.get("X-YouTube-Client-Name")).toBe("5");
-          expect(headers.get("X-Goog-Visitor-Id")).toBeNull();
+          // VISIONOS goes first, with the visitor id it cannot play without.
+          expect(headers.get("X-YouTube-Client-Name")).toBe("101");
+          expect(headers.get("X-Goog-Visitor-Id")).toBe("visitor-123");
           expect(headers.get("Cookie")).toBeNull();
 
           return Response.json({
@@ -303,12 +313,166 @@ describe("yt-dlp YouTube helpers", () => {
 
     expect(resolved.title).toBe("Fallback First Track");
     expect(resolved.selectedFormat?.itag).toBe(140);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // The visitor id, then one player call.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // The visitor id is kept: the next resolve asks the player only.
+    await resolveYouTubePlayback("dQw4w9WgXcQ", { preferredKind: "audio" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("skips VISIONOS when no visitor id can be had", async () => {
+    const clients: string[] = [];
+    const fetchMock = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = requestUrl(input);
+        if (url.startsWith(VISITOR_ID_URL)) {
+          return new Response("unavailable", { status: 500 });
+        }
+        if (url.startsWith("https://www.youtube.com/youtubei/v1/player?key=")) {
+          const client =
+            new Headers(init?.headers).get("X-YouTube-Client-Name") ?? "";
+          clients.push(client);
+          return Response.json({
+            streamingData: {
+              formats: [
+                {
+                  itag: 18,
+                  url: "https://rr1---sn.example.googlevideo.com/videoplayback?itag=18",
+                  mimeType: 'video/mp4; codecs="avc1.42001E, mp4a.40.2"',
+                  bitrate: 503000,
+                  audioQuality: "AUDIO_QUALITY_LOW",
+                },
+              ],
+            },
+          });
+        }
+        throw new Error(`Unexpected fetch in test: ${url}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resolved = await resolveYouTubePlayback("dQw4w9WgXcQ", {
+      preferredKind: "audio",
+    });
+
+    expect(clients).toEqual(["3"]);
+    expect(resolved.selectedFormat?.itag).toBe(18);
+  });
+
+  it("asks the visitor id endpoint once a minute at most when it fails", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = requestUrl(input);
+        urls.push(url);
+        if (url.startsWith(VISITOR_ID_URL)) {
+          return new Response("unavailable", { status: 503 });
+        }
+        return Response.json({
+          streamingData: {
+            formats: [
+              {
+                itag: 18,
+                url: "https://rr1---sn.example.googlevideo.com/videoplayback?itag=18",
+                mimeType: 'video/mp4; codecs="avc1.42001E, mp4a.40.2"',
+                bitrate: 503000,
+                audioQuality: "AUDIO_QUALITY_LOW",
+              },
+            ],
+          },
+        });
+      }),
+    );
+
+    await resolveYouTubePlayback("dQw4w9WgXcQ", { preferredKind: "audio" });
+    await resolveYouTubePlayback("dQw4w9WgXcQ", { preferredKind: "audio" });
+
+    expect(urls.filter((url) => url.startsWith(VISITOR_ID_URL))).toHaveLength(
+      1,
+    );
+  });
+
+  it("drops a refused visitor id without calling it a bot wall", async () => {
+    const visitorIds: Array<string | null> = [];
+    let visitorCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = requestUrl(input);
+        if (url.startsWith(VISITOR_ID_URL)) {
+          visitorCalls += 1;
+          return visitorIdAnswer();
+        }
+        const headers = new Headers(init?.headers);
+        if (headers.get("X-YouTube-Client-Name") === "101") {
+          visitorIds.push(headers.get("X-Goog-Visitor-Id"));
+          return Response.json({
+            ...BOT_WALL,
+            responseContext: { visitorData: "visitor-123" },
+          });
+        }
+        if (headers.get("X-YouTube-Client-Name") === "3") {
+          return Response.json({
+            streamingData: {
+              formats: [
+                {
+                  itag: 18,
+                  url: "https://rr1---sn.example.googlevideo.com/videoplayback?itag=18",
+                  mimeType: 'video/mp4; codecs="avc1.42001E, mp4a.40.2"',
+                  bitrate: 503000,
+                  audioQuality: "AUDIO_QUALITY_LOW",
+                },
+              ],
+            },
+          });
+        }
+        return Response.json({
+          playabilityStatus: { status: "ERROR", reason: "Video unavailable" },
+        });
+      }),
+    );
+
+    const first = await resolveYouTubePlayback("dQw4w9WgXcQ", {
+      preferredKind: "audio",
+    });
+    expect(first.selectedFormat?.itag).toBe(18);
+
+    // The refused id is not kept: the next resolve asks for a fresh one.
+    await resolveYouTubePlayback("dQw4w9WgXcQ", { preferredKind: "audio" });
+    expect(visitorCalls).toBe(2);
+    expect(visitorIds).toEqual(["visitor-123", "visitor-123"]);
+  });
+
+  it("does not call a refused visitor id YouTube's bot wall", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = requestUrl(input);
+        if (url.startsWith(VISITOR_ID_URL)) return visitorIdAnswer();
+        const client = new Headers(init?.headers).get("X-YouTube-Client-Name");
+        if (client === "101") return Response.json(BOT_WALL);
+        if (url.startsWith("https://www.youtube.com/youtubei/v1/player?")) {
+          return Response.json({
+            playabilityStatus: { status: "ERROR", reason: "Video unavailable" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    const error = await resolveYouTubePlayback("dQw4w9WgXcQ", {
+      preferredKind: "audio",
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(YouTubeBotCheckError);
   });
 
   it("stops at YouTube's bot wall without asking the walled web pages too", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = requestUrl(input);
+      if (url.startsWith(VISITOR_ID_URL)) return visitorIdAnswer();
       if (url.startsWith("https://www.youtube.com/youtubei/v1/player?key=")) {
         return Response.json(BOT_WALL);
       }
@@ -319,8 +483,8 @@ describe("yt-dlp YouTube helpers", () => {
     await expect(
       resolveYouTubePlayback("dQw4w9WgXcQ", { preferredKind: "audio" }),
     ).rejects.toBeInstanceOf(YouTubeBotCheckError);
-    // One call per playback client, then nothing.
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    // The visitor id, one call per playback client, then nothing.
+    expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 
   it("skips a client whose formats need the solver when a later one has direct URLs", async () => {
@@ -328,6 +492,7 @@ describe("yt-dlp YouTube helpers", () => {
     const fetchMock = vi.fn(
       async (input: string | URL | Request, init?: RequestInit) => {
         const url = requestUrl(input);
+        if (url.startsWith(VISITOR_ID_URL)) return visitorIdAnswer();
         if (
           !url.startsWith("https://www.youtube.com/youtubei/v1/player?key=")
         ) {
@@ -336,8 +501,8 @@ describe("yt-dlp YouTube helpers", () => {
         const clientName =
           new Headers(init?.headers).get("X-YouTube-Client-Name") ?? "";
         clients.push(clientName);
-        if (clientName === "5") {
-          // IOS: only ciphered formats this time.
+        if (clientName === "101") {
+          // VISIONOS: only ciphered formats this time.
           return Response.json({
             streamingData: {
               adaptiveFormats: [
@@ -352,7 +517,7 @@ describe("yt-dlp YouTube helpers", () => {
             },
           });
         }
-        if (clientName === "28") {
+        if (clientName === "5") {
           return Response.json({
             videoDetails: { title: "Direct Track", lengthSeconds: "200" },
             streamingData: {
@@ -391,7 +556,7 @@ describe("yt-dlp YouTube helpers", () => {
       includeFormats: true,
     });
 
-    expect(clients).toEqual(["5", "3", "28"]);
+    expect(clients).toEqual(["101", "3", "5"]);
     // Audio-only Opus beats the muxed file even though mp4 was asked for.
     expect(resolved.selectedFormat?.itag).toBe(251);
     expect(resolved.selectedFormat?.expiresAt).toBe(1893456000 * 1000);
@@ -423,13 +588,63 @@ describe("yt-dlp YouTube helpers", () => {
   });
 });
 
+describe("searchYouTubeCatalog", () => {
+  it("searches with the static WEB context, never the home page, and keeps the visitor id", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = requestUrl(input);
+        urls.push(url);
+        if (url.startsWith("https://www.youtube.com/youtubei/v1/search?")) {
+          return Response.json({
+            responseContext: { visitorData: "visitor-from-search" },
+            contents: [{ videoRenderer: { videoId: "abcdefghijk" } }],
+          });
+        }
+        if (url.startsWith("https://www.youtube.com/youtubei/v1/player?")) {
+          return Response.json(BOT_WALL);
+        }
+        throw new Error(`Unexpected fetch in test: ${url}`);
+      }),
+    );
+
+    const results = await searchYouTubeCatalog("daft punk", "video");
+
+    expect(results).toHaveLength(1);
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain("prettyPrint=false");
+
+    // A later resolve reuses the search's visitor id instead of asking.
+    await resolveYouTubePlayback("dQw4w9WgXcQ").catch(() => {});
+    expect(urls.some((url) => url.includes("/visitor_id"))).toBe(false);
+  });
+});
+
 describe("resolvePlayableYouTubeAudio", () => {
+  const VISIONOS_AAC =
+    "https://rr3---sn.example.googlevideo.com/videoplayback?c=VISIONOS&itag=140&expire=1893456000";
   const IOS_AAC =
     "https://rr1---sn.example.googlevideo.com/videoplayback?c=IOS&itag=140&expire=1893456000";
   const ANDROID_MUXED =
     "https://rr2---sn.example.googlevideo.com/videoplayback?c=ANDROID&itag=18&expire=1893456000";
 
   function playerAnswer(clientName: string) {
+    if (clientName === "101") {
+      return Response.json({
+        streamingData: {
+          adaptiveFormats: [
+            {
+              itag: 140,
+              url: VISIONOS_AAC,
+              mimeType: 'audio/mp4; codecs="mp4a.40.2"',
+              bitrate: 130000,
+              contentLength: "4123456",
+            },
+          ],
+        },
+      });
+    }
     if (clientName === "5") {
       return Response.json({
         streamingData: {
@@ -474,6 +689,7 @@ describe("resolvePlayableYouTubeAudio", () => {
       vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const url = requestUrl(input);
         const headers = new Headers(init?.headers);
+        if (url.startsWith(VISITOR_ID_URL)) return visitorIdAnswer();
         if (url.startsWith("https://www.youtube.com/youtubei/v1/player?key=")) {
           const client = headers.get("X-YouTube-Client-Name") ?? "";
           players.push(client);
@@ -495,20 +711,22 @@ describe("resolvePlayableYouTubeAudio", () => {
     const format = await resolvePlayableYouTubeAudio("VtcP0PFifpE", "mp4");
 
     expect(format.itag).toBe(140);
-    expect(players).toEqual(["5"]);
-    expect(probes).toEqual([{ url: IOS_AAC, range: "bytes=3860870-3860871" }]);
+    expect(players).toEqual(["101"]);
+    expect(probes).toEqual([
+      { url: VISIONOS_AAC, range: "bytes=4123454-4123455" },
+    ]);
   });
 
   it("moves past a client whose stream is cut off after the first MiB", async () => {
     const { players, probes } = stubYouTube((url) =>
-      url.includes("c=IOS") ? 403 : 206,
+      url.includes("c=VISIONOS") ? 403 : 206,
     );
 
     const format = await resolvePlayableYouTubeAudio("VtcP0PFifpE", "mp4");
 
     expect(format.itag).toBe(18);
-    // IOS once, then the same walk without IOS: ANDROID answers first.
-    expect(players).toEqual(["5", "3"]);
+    // VISIONOS once, then the same walk without it: ANDROID answers first.
+    expect(players).toEqual(["101", "3"]);
     // No content length on the muxed format: probe just past the first MiB.
     expect(probes.at(-1)).toEqual({
       url: ANDROID_MUXED,
@@ -521,7 +739,7 @@ describe("resolvePlayableYouTubeAudio", () => {
 
     await expect(
       resolvePlayableYouTubeAudio("VtcP0PFifpE", "webm"),
-    ).rejects.toThrow(/IOS:140, ANDROID:18/);
+    ).rejects.toThrow(/VISIONOS:140, ANDROID:18, IOS:140/);
     expect(players.length).toBeLessThanOrEqual(8);
   });
 });

@@ -222,6 +222,20 @@ in `desktop/src-tauri/tauri.conf.json`. Its `/api` and `/ws` proxy follows
 `RALPH_DEV_PORT`, so set the same value in both terminals. See
 [desktop/README.md](desktop/README.md).
 
+### Game catalog
+
+The desktop app recognises running games against `public/desktop/game-catalog.json`,
+a trimmed copy of Discord's public detectable-applications list that the site
+serves itself. It is committed. To refresh it, run `pnpm games:catalog`
+(`node scripts/build-game-catalog.mjs`, with `--input <file>` to build from a
+saved copy of the list and `--out <file>` to write elsewhere) and commit the
+result. The file is minified and sorted by app id; each app carries `id`,
+`name`, optional `aliases`, optional `icon_hash`, its win32 `executables`
+(`name`, plus `is_launcher` or `arguments` when set) and optional
+`steam_app_ids`. Apps with no win32 executable are left out. Icons are not
+hot-linked: clients load `/api/game-icons/{id}/{icon_hash}.png`, which fetches
+from Discord's CDN once and keeps the image in our R2 bucket.
+
 ### Deploying the web app
 
 Pushes to `main` deploy through the **Deploy web** workflow: build, a Worker

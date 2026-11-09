@@ -1,9 +1,34 @@
 import { toast } from "@/components/ui/toast";
 import { apiGet, apiPost, apiUpload } from "@/lib/api-client";
-import { describeApiError } from "@/lib/api-errors";
+import {
+  describeApiError,
+  isTooLargeError,
+  serverUploadLimit,
+} from "@/lib/api-errors";
+import {
+  EMBED_PREFETCH_DEBOUNCE_MS,
+  findPrefetchableUrls,
+  prefetchEmbeds,
+} from "@/lib/embed-prefetch";
 import { parseCustomEmojiToken } from "@/lib/emoji";
-import type { GifPickerItem, GifPickerMediaType } from "@/lib/gif-picker";
+import {
+  MAX_GIF_UPLOAD_BYTES,
+  type GifPickerItem,
+  type GifPickerMediaType,
+} from "@/lib/gif-picker";
 import type { Message, User } from "@/lib/types";
+import { useMyEntitlement } from "@/hooks/useEntitlement";
+import {
+  localStorageResumeStore,
+  multipartResumeKey,
+  uploadInParts,
+} from "@/lib/multipart-upload";
+import { createApiMultipartTransport } from "@/lib/multipart-upload-transport";
+import {
+  clientUploadLimitFor,
+  partitionBySize,
+  usesMultipartUpload,
+} from "@/lib/upload-limits";
 import { COMPOSER_RESTORE_EVENT } from "@/stores/chat-actions";
 import { useChatStore } from "@/stores/chat-store";
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
@@ -23,6 +48,21 @@ import {
  */
 const COMPOSER_MIN_HEIGHT_PX = 48;
 
+/**
+ * Saved chunked-upload ids, so a Retry or a reload resumes a big file.
+ *
+ * Deliberately no abort on `pagehide`: it fires for a reload and a bfcache
+ * navigation too, which are exactly the cases resume is for, and a tab
+ * close can't be told apart from them. An upload a closed tab leaves behind
+ * costs nothing for long: the server expires open uploads idle for an hour
+ * and, at the per-user cap, aborts the least recently active one to make
+ * room for a new file.
+ */
+const chunkedUploadResumeStore = localStorageResumeStore();
+
+/** How often a chunked upload's progress may re-render the tray. */
+const PROGRESS_RENDER_INTERVAL_MS = 100;
+
 export interface UploadedFile {
   id: string;
   url: string;
@@ -36,12 +76,38 @@ export interface UploadedFile {
 export interface PendingUpload {
   tempId: string;
   file: File;
-  /** 0..1 once a transport reports it. `fetch` can't, so today it stays 0. */
+  /**
+   * 0..1 once a transport reports it. Chunked uploads (files at or over
+   * MULTIPART_THRESHOLD) do; a single-request `fetch` can't, so it stays 0.
+   */
   progress: number;
+  /** Bytes sent so far, for chunked uploads ("12.0 / 150.0 MB"). */
+  loaded?: number;
   previewUrl?: string;
   abortController: AbortController;
   /** Set when the upload failed: the tile stays with a Retry instead of vanishing. */
   error?: string;
+  /**
+   * Set when the server answered 413 anyway: the limit it named (or the
+   * client's, when it named none). The tile becomes a "turned away" card.
+   */
+  serverLimit?: number;
+}
+
+/** A file over the attachment limit: it stays in the tray as a card. */
+export interface OversizedFile {
+  id: string;
+  name: string;
+  size: number;
+}
+
+/**
+ * The files held back from the tray as too big, and how many files from the
+ * same drops still went up ("The other 2 will still send").
+ */
+export interface OversizedBatch {
+  files: OversizedFile[];
+  fits: number;
 }
 
 export interface UploadedFileInfo {
@@ -61,6 +127,7 @@ export interface MessageInputState {
   gifPickerMediaType: GifPickerMediaType;
   uploadedFiles: UploadedFile[];
   pendingUploads: PendingUpload[];
+  oversized: OversizedBatch | null;
   composerCustomEmojiMap: ComposerCustomEmojiMap;
   mentionQuery: { text: string; startPos: number; endPos: number } | null;
   mentionIndex: number;
@@ -105,6 +172,7 @@ export function useMessageInput({
       gifPickerMediaType,
       uploadedFiles,
       pendingUploads,
+      oversized,
       composerCustomEmojiMap,
       mentionQuery,
       mentionIndex,
@@ -135,6 +203,7 @@ export function useMessageInput({
       gifPickerMediaType: "gifs",
       uploadedFiles: [] as UploadedFile[],
       pendingUploads: [] as PendingUpload[],
+      oversized: null,
       composerCustomEmojiMap: {},
       mentionQuery: null,
       mentionIndex: 0,
@@ -157,6 +226,10 @@ export function useMessageInput({
   pendingUploadsRef.current = pendingUploads;
 
   const members = useChatStore((s) => s.members);
+  const attachmentLimit = clientUploadLimitFor(
+    useMyEntitlement(),
+    "attachment",
+  );
 
   const handleScroll = useCallback(() => {
     if (textareaRef.current && twinRef.current) {
@@ -379,7 +452,7 @@ export function useMessageInput({
       uploadedFiles.forEach((f) => {
         if (f.previewUrl) URL.revokeObjectURL(f.previewUrl);
       });
-      setLocalState({ uploadedFiles: [] });
+      setLocalState({ uploadedFiles: [], oversized: null });
       setLocalState({ composerCustomEmojiMap: {} });
       lastTypingRef.current = 0;
       setLocalState({ mentionQuery: null });
@@ -623,16 +696,29 @@ export function useMessageInput({
 
   const handleFileUpload = useCallback(
     async (files: FileList | File[]) => {
-      const filesArray = Array.from(files);
+      // Files over the limit never upload: they stay in the tray as a card
+      // (the toobig spec). The rest of the same drop still goes up.
+      const { fits, tooBig } = partitionBySize(
+        Array.from(files),
+        attachmentLimit,
+      );
+      if (tooBig.length > 0) {
+        setLocalState((prev: { oversized: OversizedBatch | null }) => ({
+          oversized: {
+            files: [
+              ...(prev.oversized?.files ?? []),
+              ...tooBig.map((file) => ({
+                id: crypto.randomUUID(),
+                name: file.name,
+                size: file.size,
+              })),
+            ],
+            fits: (prev.oversized?.fits ?? 0) + fits.length,
+          },
+        }));
+      }
 
-      for (const file of filesArray) {
-        if (file.size > 25 * 1024 * 1024) {
-          toast.error(`${file.name} is too large to upload`, {
-            description: "Files can be up to 25 MB.",
-          });
-          continue;
-        }
-
+      for (const file of fits) {
         const tempId = crypto.randomUUID();
         const previewUrl =
           file.type.startsWith("image/") || file.type.startsWith("video/")
@@ -652,19 +738,55 @@ export function useMessageInput({
         }));
 
         let failure: string | null = null;
+        let serverLimit: number | undefined;
         try {
-          const formData = new FormData();
-          formData.append("file", file);
-
-          const data = await apiUpload<{
+          type UploadResponse = {
             id: string;
             file_url: string;
             file_name: string;
             file_size: number;
             content_type: string;
-          }>(`/api/channels/${channelId}/messages/upload`, formData, {
-            signal: abortController.signal,
-          });
+          };
+          let data: UploadResponse;
+          if (usesMultipartUpload(file.size)) {
+            // Big files go up in parts, with real progress and resume.
+            let lastRender = 0;
+            data = await uploadInParts(file, {
+              transport: createApiMultipartTransport(channelId),
+              resumeKey: multipartResumeKey(channelId, file),
+              store: chunkedUploadResumeStore,
+              signal: abortController.signal,
+              onProgress: ({ loaded, total }) => {
+                const now = Date.now();
+                if (
+                  loaded < total &&
+                  now - lastRender < PROGRESS_RENDER_INTERVAL_MS
+                ) {
+                  return;
+                }
+                lastRender = now;
+                setLocalState((prev: { pendingUploads: PendingUpload[] }) => ({
+                  pendingUploads: prev.pendingUploads.map((p) =>
+                    p.tempId === tempId
+                      ? {
+                          ...p,
+                          loaded,
+                          progress: total > 0 ? loaded / total : 0,
+                        }
+                      : p,
+                  ),
+                }));
+              },
+            });
+          } else {
+            const formData = new FormData();
+            formData.append("file", file);
+            data = await apiUpload<UploadResponse>(
+              `/api/channels/${channelId}/messages/upload`,
+              formData,
+              { signal: abortController.signal },
+            );
+          }
 
           setLocalState((prev: { uploadedFiles: UploadedFile[] }) => ({
             uploadedFiles: [
@@ -685,21 +807,28 @@ export function useMessageInput({
           } else {
             // Keep the tile (and its preview) so the file can be retried.
             console.error("Upload failed:", err);
-            failure = describeApiError(err, "upload that file");
+            failure = describeApiError(err, "upload that file", {
+              uploadLimitBytes: attachmentLimit,
+            });
+            if (isTooLargeError(err)) {
+              serverLimit = serverUploadLimit(err) ?? attachmentLimit;
+            }
           }
         } finally {
           const failed = failure;
           setLocalState((prev: { pendingUploads: PendingUpload[] }) => ({
             pendingUploads: failed
               ? prev.pendingUploads.map((p) =>
-                  p.tempId === tempId ? { ...p, error: failed } : p,
+                  p.tempId === tempId
+                    ? { ...p, error: failed, serverLimit }
+                    : p,
                 )
               : prev.pendingUploads.filter((p) => p.tempId !== tempId),
           }));
         }
       }
     },
-    [channelId],
+    [attachmentLimit, channelId],
   );
 
   handleFileUploadRef.current = handleFileUpload;
@@ -779,6 +908,33 @@ export function useMessageInput({
     [handleFileUpload],
   );
 
+  /** Drop one too-big card; the last one clears the batch. */
+  const removeOversized = useCallback((id: string) => {
+    setLocalState((prev: { oversized: OversizedBatch | null }) => {
+      const files = prev.oversized?.files.filter((f) => f.id !== id) ?? [];
+      return {
+        oversized:
+          files.length > 0 && prev.oversized
+            ? { ...prev.oversized, files }
+            : null,
+      };
+    });
+  }, []);
+
+  /** "Remove the big ones": every too-big card goes. */
+  const clearOversized = useCallback(() => {
+    setLocalState({ oversized: null });
+  }, []);
+
+  /** "Choose another": drop the card and open the file picker. */
+  const replaceOversized = useCallback(
+    (id: string) => {
+      removeOversized(id);
+      fileInputRef.current?.click();
+    },
+    [removeOversized],
+  );
+
   const removeUploadedFile = useCallback((id: string) => {
     setLocalState((prev: { uploadedFiles: UploadedFile[] }) => {
       const f = prev.uploadedFiles.find((x) => x.id === id);
@@ -800,10 +956,26 @@ export function useMessageInput({
       if (e.clipboardData.files && e.clipboardData.files.length > 0) {
         e.preventDefault();
         handleFileUpload(e.clipboardData.files);
+        return;
+      }
+      // A pasted link is complete: start resolving its embed now, so it is
+      // ready (and sent with the message) by the time Enter is pressed.
+      const pasted = e.clipboardData.getData("text/plain");
+      if (pasted) {
+        void prefetchEmbeds(findPrefetchableUrls(pasted, { pasted: true }));
       }
     },
     [handleFileUpload],
   );
+
+  // A typed link counts once the user types past it.
+  useEffect(() => {
+    if (!value.includes("http")) return;
+    const timer = setTimeout(() => {
+      void prefetchEmbeds(findPrefetchableUrls(value));
+    }, EMBED_PREFETCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [value]);
 
   const handleGifSelect = useCallback(
     async (gif: GifPickerItem) => {
@@ -850,9 +1022,14 @@ export function useMessageInput({
         textareaRef.current?.focus();
       } catch (error) {
         console.error("GIF send failed:", error);
-        toast.error(describeApiError(error, "send that GIF"), {
-          id: "rm-gif-send",
-        });
+        toast.error(
+          describeApiError(error, "send that GIF", {
+            uploadLimitBytes: MAX_GIF_UPLOAD_BYTES,
+          }),
+          {
+            id: "rm-gif-send",
+          },
+        );
       }
     },
     [channelId, onSend, replyTo?.id],
@@ -865,6 +1042,7 @@ export function useMessageInput({
     gifPickerMediaType,
     uploadedFiles,
     pendingUploads,
+    oversized,
     composerCustomEmojiMap,
     mentionQuery,
     mentionIndex,
@@ -888,6 +1066,9 @@ export function useMessageInput({
     cancelUpload,
     retryUpload,
     removeUploadedFile,
+    removeOversized,
+    clearOversized,
+    replaceOversized,
     toggleUploadedFileSensitive,
     handlePaste,
     handleGifSelect,

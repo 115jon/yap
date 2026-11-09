@@ -1,3 +1,6 @@
+import type { UserBadge } from "@/lib/badges";
+import type { PublicConnection } from "@/lib/connections";
+import type { Entitlement } from "@/lib/entitlements";
 import type { MediaContentFilter } from "@/lib/media-content-filter";
 import type { AvatarDisplay } from "@/lib/avatar-display";
 import type { DisplayNameStyle } from "@/lib/profile-customization";
@@ -130,6 +133,8 @@ export interface User {
   theme_preference?: string | null;
   theme_sync_enabled?: boolean;
   media_content_filter?: MediaContentFilter | null;
+  /** Own account only: "Share my activity" (default on). */
+  share_activity?: boolean;
   updated_at?: string;
   created_at?: string | null;
   bio?: string | null;
@@ -137,6 +142,12 @@ export interface User {
   status?: "online" | "idle" | "dnd" | "offline";
   custom_status?: string | null;
   presence_platforms?: PresencePlatform[];
+  /** The plan (users/me and profiles); absent until a profile loads. */
+  entitlement?: Entitlement;
+  /** Earned badges in display order (users/me and profiles). */
+  badges?: UserBadge[];
+  /** Linked accounts shown on the profile (users/me and profiles). */
+  connections?: PublicConnection[];
 }
 
 /** Server object */

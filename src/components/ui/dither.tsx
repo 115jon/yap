@@ -136,7 +136,8 @@ export type DitherInk =
   | "ink"
   | "ink-3"
   | "ground"
-  | "talk";
+  | "talk"
+  | "warning";
 
 const INK_VAR: Record<DitherInk, string> = {
   accent: "var(--accent-ink)",
@@ -146,6 +147,7 @@ const INK_VAR: Record<DitherInk, string> = {
   "ink-3": "var(--ink-3)",
   ground: "var(--ply-0)",
   talk: "var(--talk)",
+  warning: "var(--warning-ink)",
 };
 
 function maskStyle(

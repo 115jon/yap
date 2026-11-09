@@ -1,5 +1,11 @@
+import { isFeatureEnabled } from "@/services/site-flags.service";
 import type { EmbedAuthor, EmbedInfo } from "@/lib/types";
-import { safeFetch, readTextCapped, readJsonCapped } from "@/lib/safe-fetch";
+import {
+  safeFetch,
+  readHtmlHead,
+  readTextCapped,
+  readJsonCapped,
+} from "@/lib/safe-fetch";
 import { safeParseJson } from "@/lib/schema";
 import { Schema } from "effect";
 import {
@@ -17,8 +23,15 @@ import {
   isTwitterUnavailablePayload,
   isUnavailableSocialStatus,
 } from "@/lib/social-embed-availability";
-import { cacheGet, cacheSet } from "@/lib/cache";
-import { getBotUserAgent } from "@/lib/platform";
+import { cacheGet, cacheGetMany, cacheSet } from "@/lib/cache";
+import { getBotUserAgent, getLinkPreviewUserAgent } from "@/lib/platform";
+import { extractEmbedUrls } from "@/lib/embed-urls";
+import {
+  BlockedUrlError,
+  TooManyRedirectsError,
+  guardedFetch,
+  previewUrlBlockReason,
+} from "@/lib/url-guard";
 import { singleFlight } from "@/lib/single-flight";
 import { upstreamGuard } from "@/lib/upstream-guard";
 import {
@@ -34,11 +47,14 @@ import {
 } from "@/lib/media-sniff";
 import { clog } from "@/lib/console-logger";
 
+export { extractEmbedUrls } from "@/lib/embed-urls";
+export { getLinkPreviewUserAgent } from "@/lib/platform";
+
 const log = clog("EmbedFetcher");
 const twitterLog = clog("embed:twitter");
 
-/** Most embeds a single message gets. */
-const MAX_EMBEDS_PER_MESSAGE = 3;
+/** A provider JSON API (oEmbed, X mirrors) that normally answers in < 1 s. */
+const PROVIDER_API_TIMEOUT_MS = 5_000;
 const X_ICON_URL =
   "https://abs.twimg.com/responsive-web/client-web/icon-default.522d363a.png";
 const X_EMBED_HOSTS = new Set([
@@ -85,67 +101,6 @@ function buildUnavailableEmbed(
     color: options?.color,
     fields: [],
   };
-}
-
-// ── URL extraction ──────────────────────────────────────────────────────────
-
-const TRAILING_PUNCTUATION = /[.,;:!?'"*_~]+$/;
-
-function trimUnbalancedClosers(url: string): string {
-  let trimmed = url;
-  const pairs: Array<[string, string]> = [
-    ["(", ")"],
-    ["[", "]"],
-    ["{", "}"],
-  ];
-  for (let guard = 0; guard < 8; guard += 1) {
-    const before = trimmed;
-    trimmed = trimmed.replace(TRAILING_PUNCTUATION, "");
-    for (const [open, close] of pairs) {
-      if (!trimmed.endsWith(close)) continue;
-      const opens = trimmed.split(open).length - 1;
-      const closes = trimmed.split(close).length - 1;
-      if (closes > opens) trimmed = trimmed.slice(0, -1);
-    }
-    if (trimmed === before) break;
-  }
-  return trimmed;
-}
-
-/**
- * URLs in a message that should get embeds, in order. Mirrors how the client
- * linkifies (MarkdownRenderer): trailing punctuation and an unbalanced closing
- * bracket are not part of the URL (`(see https://a.b/c).` -> `https://a.b/c`),
- * and URLs inside inline code or code blocks are not linkified so they get no
- * embed either.
- */
-export function extractEmbedUrls(
-  content: string,
-  limit = MAX_EMBEDS_PER_MESSAGE,
-): string[] {
-  const withoutCode = content
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`[^`\n]*`/g, " ");
-  const urls: string[] = [];
-  const seen = new Set<string>();
-  for (const match of withoutCode.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
-    const candidate = trimUnbalancedClosers(match[0]);
-    let normalized: string;
-    try {
-      const parsed = new URL(candidate);
-      if (!parsed.hostname.includes(".")) continue;
-      normalized = parsed.toString();
-    } catch {
-      continue;
-    }
-    // Keep what the user typed (stored embeds key on it), dedupe on the
-    // parsed form.
-    if (seen.has(normalized)) continue;
-    seen.add(normalized);
-    urls.push(candidate);
-    if (urls.length >= limit) break;
-  }
-  return urls;
 }
 
 // ── Outcomes ────────────────────────────────────────────────────────────────
@@ -211,6 +166,15 @@ export async function extractAndProcessEmbedsWithStatus(
   const urls = extractEmbedUrls(content);
   if (urls.length === 0) {
     return { embeds: [], hadFailures: false, outcomes: [] };
+  }
+  // Link embeds switched off (site flags): fetch nothing, keep what the
+  // message already had, and do not ask for a retry.
+  if (!(await isFeatureEnabled("linkEmbeds"))) {
+    return {
+      embeds: options?.previous ?? [],
+      hadFailures: false,
+      outcomes: [],
+    };
   }
 
   const previousByUrl = new Map(
@@ -298,9 +262,20 @@ function embedFreshSeconds(url: string, embed: EmbedInfo): number {
 
 const embedFlights = new Map<string, Promise<EmbedUrlOutcome>>();
 
+interface ResolveEmbedOptions {
+  bypassCache?: boolean;
+  /**
+   * Cache "no embed" verdicts. Off for composer prefetches: half-typed URLs
+   * would otherwise spend KV writes on links nobody sends.
+   */
+  cacheNegative?: boolean;
+  /** Wait for the KV write (a request that ends right after needs it). */
+  awaitCacheWrite?: boolean;
+}
+
 async function resolveEmbedUrl(
   url: string,
-  options?: { bypassCache?: boolean },
+  options?: ResolveEmbedOptions,
 ): Promise<EmbedUrlOutcome> {
   const key = embedCacheKey(url);
   const run = async (): Promise<EmbedUrlOutcome> => {
@@ -341,17 +316,78 @@ async function resolveEmbedUrl(
             freshUntil: now + freshSeconds * 1000,
           }
         : { v: 2, status: "none", freshUntil: now + freshSeconds * 1000 };
-    void cacheSet(
+    if (outcome.status === "none" && options?.cacheNegative === false) {
+      return outcome;
+    }
+    const write = cacheSet(
       key,
       entry,
       outcome.status === "ok"
         ? freshSeconds + EMBED_CACHE_STALE_GRACE_SECONDS
         : freshSeconds,
     );
+    if (options?.awaitCacheWrite) await write;
     return outcome;
   };
   // A forced refresh must not join a cached flight already in progress.
   return options?.bypassCache ? run() : singleFlight(embedFlights, key, run);
+}
+
+/**
+ * Resolve `urls` ahead of a send (the composer saw them pasted or typed) so
+ * the embed is already cached when the message lands, and can ride along in
+ * MESSAGE_CREATE. Joins an identical resolve already in flight.
+ */
+export async function prefetchEmbedUrls(
+  urls: readonly string[],
+): Promise<EmbedInfo[]> {
+  if (!(await isFeatureEnabled("linkEmbeds"))) return [];
+  const outcomes = await Promise.all(
+    urls.map((url) =>
+      resolveEmbedUrl(url, { cacheNegative: false, awaitCacheWrite: true }),
+    ),
+  );
+  return outcomes.flatMap((outcome) =>
+    outcome.status === "ok" ? [outcome.embed] : [],
+  );
+}
+
+/** How long the send path waits on KV for cached embeds. */
+export const CACHED_EMBED_LOOKUP_BUDGET_MS = 150;
+
+/**
+ * Fresh cached embeds for the URLs in `content`, in message order, from one
+ * bulk KV read bounded by `budgetMs`. The send path puts them on the stored
+ * message and in MESSAGE_CREATE, so a prefetched (or recently posted) link
+ * shows its embed at once instead of after the postprocessing round trip.
+ * URLs that are not cached are left to postprocessing as before.
+ */
+export async function lookupCachedEmbeds(
+  content: string,
+  budgetMs = CACHED_EMBED_LOOKUP_BUDGET_MS,
+): Promise<EmbedInfo[]> {
+  const urls = extractEmbedUrls(content);
+  if (urls.length === 0) return [];
+  if (!(await isFeatureEnabled("linkEmbeds"))) return [];
+  const keys = urls.map(embedCacheKey);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const entries = await Promise.race([
+    cacheGetMany<EmbedCacheEntry>(keys),
+    new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), budgetMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+  if (!entries) return [];
+  const now = Date.now();
+  return urls.flatMap((url, index) => {
+    const entry = entries.get(keys[index]);
+    return entry?.v === 2 &&
+      entry.status === "ok" &&
+      entry.embed &&
+      entry.freshUntil > now
+      ? [{ ...entry.embed, url }]
+      : [];
+  });
 }
 
 async function fetchEmbedOutcome(url: string): Promise<EmbedUrlOutcome> {
@@ -378,6 +414,9 @@ async function fetchEmbedMetadata(url: string): Promise<EmbedInfo | null> {
   } catch {
     return null;
   }
+  // Loopback, private and link-local targets, credentials in the URL, odd
+  // ports: no embed, and nothing is fetched.
+  if (previewUrlBlockReason(parsed)) return null;
   const hostname = parsed.hostname.toLowerCase();
 
   if (isYouTubeHostname(hostname)) {
@@ -484,7 +523,12 @@ async function fetchYouTubeData(url: string): Promise<EmbedInfo | null> {
   const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(
     `https://www.youtube.com/watch?v=${videoId}`,
   )}&format=json`;
-  const res = await safeFetch(oembedUrl);
+  // The player lookup only needs the id: run it alongside oEmbed instead of
+  // after it. It never throws (null on any failure).
+  const dimensionsLookup = fetchYouTubeVideoDimensions(videoId, url);
+  const res = await safeFetch(oembedUrl, undefined, {
+    timeoutMs: PROVIDER_API_TIMEOUT_MS,
+  });
   if (!res.ok) {
     if (isTransientStatus(res.status)) {
       throw new TransientEmbedError("YouTube oEmbed unavailable", res.status);
@@ -505,7 +549,7 @@ async function fetchYouTubeData(url: string): Promise<EmbedInfo | null> {
   const data = await readJsonCapped(res, OEmbedResponse);
   if (!data) return null;
   const isShort = /youtube\.com\/shorts\//i.test(url);
-  const videoDimensions = await fetchYouTubeVideoDimensions(videoId, url);
+  const videoDimensions = await dimensionsLookup;
   const fallbackDimensions = isShort
     ? { width: 720, height: 1280 }
     : { width: 1280, height: 720 };
@@ -712,24 +756,37 @@ async function fetchTwitterData(url: string): Promise<EmbedInfo | null> {
   // APIs that return JSON — documented FxTwitter v2 first, legacy + Vx fallbacks.
   const apis = buildTwitterApiUrls(parsed);
 
-  for (const apiUrl of apis) {
-    try {
-      twitterLog.info(`Trying API: ${apiUrl}`);
-      // One circuit per mirror host: a mirror that rate limits us is skipped
-      // (and counts as transient) until it recovers.
-      const res = await upstreamGuard.fetch(
-        `x-mirror:${new URL(apiUrl).hostname}`,
-        apiUrl,
-        { headers: { "User-Agent": getBotUserAgent() } },
-      );
-      twitterLog.info(
-        `API response status: ${res.status}, content-type: ${res.headers.get("content-type")}`,
-      );
+  // Every mirror is asked anyway (their answers are merged), so ask them all
+  // at once and merge in order. They used to be asked one after another.
+  const answers = await Promise.all(
+    apis.map(async (apiUrl) => {
+      try {
+        twitterLog.info(`Trying API: ${apiUrl}`);
+        // One circuit per mirror host: a mirror that rate limits us is
+        // skipped (and counts as transient) until it recovers.
+        const res = await upstreamGuard.fetch(
+          `x-mirror:${new URL(apiUrl).hostname}`,
+          apiUrl,
+          { headers: { "User-Agent": getBotUserAgent() } },
+          { timeoutMs: PROVIDER_API_TIMEOUT_MS },
+        );
+        const contentType = res.headers.get("content-type") || "";
+        const data = contentType.includes("json")
+          ? await readJsonCapped(res, Schema.Unknown).catch(() => null)
+          : null;
+        return { apiUrl, res, contentType, data, error: null };
+      } catch (error) {
+        return { apiUrl, res: null, contentType: "", data: null, error };
+      }
+    }),
+  );
 
-      const contentType = res.headers.get("content-type") || "";
-      const data = contentType.includes("json")
-        ? await readJsonCapped(res, Schema.Unknown).catch(() => null)
-        : null;
+  for (const { apiUrl, res, contentType, data, error } of answers) {
+    try {
+      if (!res) throw error;
+      twitterLog.info(
+        `API response status: ${res.status}, content-type: ${contentType}`,
+      );
 
       // 404/410 or a body that says so. A bare 403 is a mirror's bot wall,
       // not a deleted tweet (a protected one says "private" in the body).
@@ -1678,19 +1735,43 @@ function readPositiveNumber(...values: Array<unknown>): number | undefined {
   return undefined;
 }
 
+/**
+ * The last layer: a card that names the provider and links out, for a post
+ * Instagram would not describe. The client titles it "Instagram post" or
+ * "Instagram reel" from the URL, and its hydration fills it in later if a
+ * fetch succeeds.
+ */
+function buildMinimalInstagramEmbed(url: string): EmbedInfo {
+  return {
+    id: nextEmbedId(url),
+    url,
+    type: "rich",
+    provider: { name: "Instagram", url: "https://www.instagram.com" },
+    color: "#E1306C",
+    footer: { text: "Instagram" },
+    fields: [],
+  };
+}
+
 async function fetchInstagramData(url: string): Promise<EmbedInfo | null> {
-  const oembedLookup = await lookupInstagramOEmbed(url).catch(() => ({
-    status: 0,
-    metadata: null,
-  }));
-  let videoData: Awaited<ReturnType<typeof resolveInstagramVideoMetadata>> =
-    null;
-  let videoError: Error | null = null;
-  try {
-    videoData = await resolveInstagramVideoMetadata(url);
-  } catch (error) {
-    videoError = error instanceof Error ? error : new Error(String(error));
-  }
+  // oEmbed (author, thumbnail, "is it gone") and the media resolver (embed
+  // page first) are independent: ask both at once. They used to run one
+  // after the other, and the resolver itself made up to seven serial calls.
+  const [oembedLookup, videoOutcome] = await Promise.all([
+    lookupInstagramOEmbed(url).catch(() => ({
+      status: 0,
+      metadata: null,
+    })),
+    resolveInstagramVideoMetadata(url).then(
+      (value) => ({ value, error: null }),
+      (error: unknown) => ({
+        value: null,
+        error: error instanceof Error ? error : new Error(String(error)),
+      }),
+    ),
+  ]);
+  const videoData = videoOutcome.value;
+  const videoError = videoOutcome.error;
   const data = oembedLookup.metadata;
 
   const media = videoData?.media?.length ? videoData.media : undefined;
@@ -1729,10 +1810,7 @@ async function fetchInstagramData(url: string): Promise<EmbedInfo | null> {
   const rawTitle = videoData?.title ?? data?.title;
 
   if (!rawTitle && !thumbnailUrl && !media?.length && !videoData?.videoUrl) {
-    const secretsMissing = videoError?.message.includes(
-      "session secrets are not configured",
-    );
-    if (!secretsMissing && isUnavailableSocialStatus(oembedLookup.status)) {
+    if (isUnavailableSocialStatus(oembedLookup.status)) {
       return buildUnavailableEmbed(
         url,
         {
@@ -1742,14 +1820,21 @@ async function fetchInstagramData(url: string): Promise<EmbedInfo | null> {
         { color: "#E1306C" },
       );
     }
-    // oEmbed threw (status 0) or is rate limited/down: try again later.
-    if (oembedLookup.status === 0 || isTransientStatus(oembedLookup.status)) {
+    // oEmbed threw (status 0) or is rate limited/down, or every page fetch
+    // failed on the network: try again later.
+    if (
+      oembedLookup.status === 0 ||
+      isTransientStatus(oembedLookup.status) ||
+      (videoError && isTransientFetchError(videoError))
+    ) {
       throw new TransientEmbedError(
         "Instagram metadata unavailable",
         oembedLookup.status,
       );
     }
-    return null;
+    // Instagram answered but showed nothing (a login or bot wall): a plain
+    // card ("Instagram post" / "Instagram reel") still beats a bare link.
+    return buildMinimalInstagramEmbed(url);
   }
 
   return {
@@ -2002,20 +2087,13 @@ const DIRECT_VIDEO_TYPES = new Set([
 ]);
 const DIRECT_MEDIA_EXTENSION =
   /\.(?:png|jpe?g|gif|webp|avif|mp4|m4v|webm|mov)$/i;
+/**
+ * One page fetch for a link preview. Pages that take longer are retried by
+ * postprocessing later instead of holding the message's other embeds.
+ */
+const PREVIEW_FETCH_TIMEOUT_MS = 6_000;
 const MAX_TITLE_LENGTH = 256;
 const MAX_DESCRIPTION_LENGTH = 350;
-
-/**
- * Many sites (Reddit, for one) only serve OpenGraph tags to known
- * link-preview crawlers and answer anything else with a bot wall, so the
- * preview fetch identifies as one. The contact URL comes from config.
- */
-export function getLinkPreviewUserAgent(): string {
-  return getBotUserAgent().replace(
-    "YapBot/1.0;",
-    "YapBot/1.0; Discordbot/2.0;",
-  );
-}
 
 function clipText(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
@@ -2033,16 +2111,35 @@ async function fetchOpenGraphData(url: string): Promise<EmbedInfo | null> {
   }
 
   const looksLikeMedia = DIRECT_MEDIA_EXTENSION.test(parsedUrl.pathname);
-  const res = await safeFetch(url, {
-    redirect: "follow",
-    headers: {
-      "User-Agent": getLinkPreviewUserAgent(),
-      Accept: PREVIEW_ACCEPT,
-      "Accept-Language": "en-US,en;q=0.8",
-      // Only the header bytes are needed to size a file.
-      ...(looksLikeMedia ? { Range: `bytes=0-${MEDIA_SNIFF_BYTES - 1}` } : {}),
-    },
-  });
+  let res: Response;
+  let finalUrl: string;
+  try {
+    // Every redirect hop is checked against the SSRF guard, and the hops are
+    // capped. Headers are built here: nothing of the user's is forwarded.
+    ({ response: res, finalUrl } = await guardedFetch(
+      url,
+      {
+        headers: {
+          "User-Agent": getLinkPreviewUserAgent(),
+          Accept: PREVIEW_ACCEPT,
+          "Accept-Language": "en-US,en;q=0.8",
+          // Only the header bytes are needed to size a file.
+          ...(looksLikeMedia
+            ? { Range: `bytes=0-${MEDIA_SNIFF_BYTES - 1}` }
+            : {}),
+        },
+      },
+      { timeoutMs: PREVIEW_FETCH_TIMEOUT_MS },
+    ));
+  } catch (error) {
+    if (
+      error instanceof BlockedUrlError ||
+      error instanceof TooManyRedirectsError
+    ) {
+      return null;
+    }
+    throw error;
+  }
 
   if (!res.ok) {
     await res.body?.cancel().catch(() => {});
@@ -2055,7 +2152,6 @@ async function fetchOpenGraphData(url: string): Promise<EmbedInfo | null> {
     return null;
   }
 
-  const finalUrl = res.url || url;
   const contentType = (res.headers.get("content-type") ?? "")
     .split(";")[0]
     .trim()
@@ -2074,7 +2170,8 @@ async function fetchOpenGraphData(url: string): Promise<EmbedInfo | null> {
     return null;
   }
 
-  return buildOpenGraphEmbed(url, finalUrl, await readTextCapped(res));
+  // The tags are in <head>; stop downloading there.
+  return buildOpenGraphEmbed(url, finalUrl, await readHtmlHead(res));
 }
 
 /**

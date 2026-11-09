@@ -7,6 +7,7 @@ import type {
 import {
   buildListenTogetherStreamUrl,
   getListenTogetherPlaybackPlan,
+  getNextListenTogetherVideoId,
   isExpectedListenTogetherPlayCancellation,
   LISTEN_TOGETHER_MAX_TRANSIENT_RETRIES,
   planListenTogetherPlaybackRecovery,
@@ -244,6 +245,37 @@ describe("listen together stream url", () => {
     expect(parsed.searchParams.get("sessionId")).toBe("session-1");
     expect(parsed.searchParams.get("format")).toBe("mp4");
     expect(parsed.searchParams.get("token")).toBe("desktop-token");
+  });
+});
+
+describe("next track to warm", () => {
+  it("is the music entry queued right after the current one", () => {
+    const base = makeSnapshot();
+    const current = base.queue[0]!;
+    const next = {
+      ...current,
+      entryId: "entry-2",
+      track: { ...current.track, id: "track-2", videoId: "video-2" },
+    };
+    expect(
+      getNextListenTogetherVideoId({ ...base, queue: [current, next] }),
+    ).toBe("video-2");
+  });
+
+  it("is null for the last entry, a radio entry next, or nothing playing", () => {
+    const base = makeSnapshot();
+    const radio = makeRadioSnapshot().queue[0]!;
+    expect(getNextListenTogetherVideoId(base)).toBeNull();
+    expect(
+      getNextListenTogetherVideoId({
+        ...base,
+        queue: [base.queue[0]!, radio],
+      }),
+    ).toBeNull();
+    expect(
+      getNextListenTogetherVideoId({ ...base, currentEntry: null }),
+    ).toBeNull();
+    expect(getNextListenTogetherVideoId(null)).toBeNull();
   });
 });
 

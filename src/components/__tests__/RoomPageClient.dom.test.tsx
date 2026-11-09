@@ -12,15 +12,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Counts how often the joined-room module is evaluated: the lobby must not
 // load it (and the call stack behind it) before a guest shows intent to join.
 const voiceView = vi.hoisted(() => ({ evaluations: 0 }));
+const navigate = vi.hoisted(() => vi.fn());
 
 vi.mock("@/components/RoomVoiceView", () => {
   voiceView.evaluations += 1;
-  return { default: () => <div>joined room</div> };
+  return {
+    default: ({ onSignIn }: { onSignIn: () => void }) => (
+      <div>
+        joined room
+        <button type="button" onClick={onSignIn}>
+          Sign in
+        </button>
+      </div>
+    ),
+  };
 });
 
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({ slug: "standup" }),
-  useNavigate: () => vi.fn(),
+  useNavigate: () => navigate,
 }));
 
 import RoomPageClient from "@/components/RoomPageClient";
@@ -28,6 +38,7 @@ import RoomPageClient from "@/components/RoomPageClient";
 describe("RoomPageClient lobby", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    navigate.mockClear();
   });
 
   afterEach(() => {
@@ -53,5 +64,15 @@ describe("RoomPageClient lobby", () => {
     });
     expect(await screen.findByText("joined room")).toBeInTheDocument();
     expect(sessionStorage.getItem("room-guest-name")).toBe("Ada");
+  });
+
+  it("sends a guest who signs in back to this room", async () => {
+    sessionStorage.setItem("room-guest-name", "Ada");
+    render(<RoomPageClient />);
+    fireEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    expect(navigate).toHaveBeenCalledWith({
+      to: "/sign-in",
+      search: { redirect_url: "/room/standup" },
+    });
   });
 });

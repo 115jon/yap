@@ -18,6 +18,8 @@
 @import "./styles/tokens.css";
 @import "./styles/motion.css";
 @import "./styles/foundation.css";
+/* Display name styles (ProfileDisplayName). */
+@import "./styles/name-styles.css";
 
 @custom-variant dark (&:is(.dark *, .miku-dark *, .spiderman-dark *));
 

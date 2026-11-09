@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { requireActiveVoiceRoomSession, requireAuth } from "@/lib/api-helpers";
 import { clog } from "@/lib/console-logger";
+import { featurePaused } from "@/services/site-flags.service";
 import { looseStruct } from "@/lib/schema";
 import { validateBody } from "@/lib/validate-body";
 import { resolveListenTogetherUrl } from "@/services/listen-together.service";
@@ -26,6 +27,8 @@ function getListenTogetherSourceHost(rawUrl: string) {
 
 const POST = async ({ request }: any) => {
   const startedAt = Date.now();
+  const paused = await featurePaused("listenTogether", request);
+  if (paused) return paused;
   const auth = await requireAuth(request);
   if (auth instanceof Response) return auth;
 

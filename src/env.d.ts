@@ -16,6 +16,9 @@ declare global {
   interface ImportMetaEnv {
     /** `vite dev` only: the Kova key RALPH_AUTH picked (lib/dev-auth-target). */
     readonly RALPH_DEV_KOVA_KEY?: string;
+    /** The commit and time of the build (vite.config.ts), for /admin. */
+    readonly YAP_BUILD_COMMIT?: string;
+    readonly YAP_BUILT_AT?: string;
   }
 
   interface CloudflareEnv {
@@ -41,6 +44,16 @@ declare global {
     EGRESS_PROXY_SECRET?: string;
     /** Egress proxy base URL; defaults to https://egress.115jon.com. */
     EGRESS_PROXY_URL?: string;
+    /** Admin user ids ("id1, id2"): manual badges (POST /api/admin/badges). */
+    COLLECTIBLES_ADMIN_USER_IDS?: string;
+    /**
+     * Billing (not set up yet). While any of the three is unset,
+     * /api/billing/* answers 501 (services/billing.service.ts).
+     */
+    STRIPE_SECRET_KEY?: string;
+    STRIPE_WEBHOOK_SECRET?: string;
+    /** The Stripe price id for Yap Loud. */
+    STRIPE_PRICE_LOUD?: string;
   }
 
   namespace Cloudflare {

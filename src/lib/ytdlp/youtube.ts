@@ -16,7 +16,7 @@ const YOUTUBE_WATCH_PAGE_COOKIE_HEADER = "PREF=hl=en&tz=UTC; SOCS=CAI";
 const DEFAULT_INNERTUBE_CONTEXT = {
   client: {
     clientName: "WEB",
-    clientVersion: "2.20260611.01.00",
+    clientVersion: "2.20260708.00.00",
     hl: "en",
     gl: "US",
     utcOffsetMinutes: 0,
@@ -152,19 +152,53 @@ const FALLBACK_INNERTUBE_ATTEMPTS = [
   IOS_INNERTUBE_ATTEMPT,
 ] as const;
 
-// Order measured from Cloudflare's egress (2026-11):
+// VISIONOS is yt-dlp's JS-less default since 2026.10: direct audio-only URLs
+// (itag 140/251) that serve to the end without a PO token. It answers
+// LOGIN_REQUIRED unless the request carries a visitor id (X-Goog-Visitor-Id),
+// so `fetchPlayerResponseFromInnertube` fills one in (see getVisitorData).
+const VISIONOS_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
+
+const VISIONOS_INNERTUBE_ATTEMPT = {
+  name: "visionos",
+  apiKey: FALLBACK_INNERTUBE_API_KEY,
+  userAgent: VISIONOS_USER_AGENT,
+  context: {
+    client: {
+      clientName: "VISIONOS",
+      clientVersion: "1.02",
+      deviceMake: "Apple",
+      deviceModel: "RealityDevice17,1",
+      userAgent: VISIONOS_USER_AGENT,
+      hl: "en",
+      gl: "US",
+      osName: "visionOS",
+      osVersion: "26.5.23O471",
+      timeZone: "UTC",
+      utcOffsetMinutes: 0,
+    },
+  },
+  clientVersion: "1.02",
+  clientNameHeader: "101",
+  visitorData: null,
+  origin: "https://www.youtube.com",
+} as const;
+
+// Order measured through the egress VPN exit (2026-11-08):
+// - VISIONOS (with a visitor id) answers with audio-only URLs that play to
+//   the end: one player call and one probe for a cold track.
+// - ANDROID only has a direct URL for the muxed 360p file (itag 18), about
+//   three times the bytes of the audio, but it plays to the end every time.
 // - IOS answers with direct audio-only URLs, but without a PO token many of
 //   them refuse any byte past the first MiB (see resolvePlayableYouTubeAudio).
-// - ANDROID only has a direct URL for the muxed 360p file (itag 18), and that
-//   one plays to the end every time.
-// - ANDROID_VR is bot-walled for most videos; its itag 18 always answers 403
-//   and its audio-only URLs stop at the first MiB like IOS's.
+// - ANDROID_VR is left out: yt-dlp reports every format 403'd since
+//   2026-08-17 at the client version that still has direct URLs.
 // - WEB and TV formats carry n/sig challenges, and the solver cannot run on
 //   Workers (no `new Function`), so they go last.
 const PLAYBACK_INNERTUBE_ATTEMPTS = [
-  IOS_INNERTUBE_ATTEMPT,
+  VISIONOS_INNERTUBE_ATTEMPT,
   ANDROID_INNERTUBE_ATTEMPT,
-  ANDROID_VR_INNERTUBE_ATTEMPT,
+  IOS_INNERTUBE_ATTEMPT,
   WEB_SAFARI_INNERTUBE_ATTEMPT,
   TV_INNERTUBE_ATTEMPT,
 ] as const;
@@ -236,8 +270,81 @@ let cachedWebInnertubeConfig: {
   expiresAt: number;
 } | null = null;
 
+/**
+ * A visitor id (`responseContext.visitorData`) for clients that need one
+ * (VISIONOS). Any Innertube answer carries one, so search and player calls
+ * keep it fresh; `getVisitorData` asks YouTube for one only when none is held.
+ * Visitor ids live for months; this one is renewed well before that.
+ */
+const VISITOR_DATA_TTL_MS = 6 * 60 * 60 * 1000;
+const VISITOR_ID_TIMEOUT_MS = 5_000;
+/** After the visitor id endpoint fails, resolves skip it for this long. */
+const VISITOR_ID_FAILURE_BACKOFF_MS = 60_000;
+
+let cachedVisitorData: { value: string; expiresAt: number } | null = null;
+let visitorDataInFlight: Promise<string | null> | null = null;
+let visitorDataFailedUntil = 0;
+
 export function __resetYouTubeInnertubeCacheForTests() {
   cachedWebInnertubeConfig = null;
+  cachedVisitorData = null;
+  visitorDataInFlight = null;
+  visitorDataFailedUntil = 0;
+}
+
+function rememberVisitorData(payload: unknown) {
+  if (!isRecord(payload) || !isRecord(payload.responseContext)) return;
+  const value = toStringValue(payload.responseContext.visitorData);
+  // YouTube echoes the id it was sent: only a new id restarts the clock.
+  if (value && value.length <= 512 && value !== cachedVisitorData?.value) {
+    cachedVisitorData = { value, expiresAt: Date.now() + VISITOR_DATA_TTL_MS };
+  }
+}
+
+/** Drop an id YouTube refused, so the next resolve asks for a fresh one. */
+function forgetVisitorData(value: string) {
+  if (cachedVisitorData?.value === value) cachedVisitorData = null;
+}
+
+async function getVisitorData(): Promise<string | null> {
+  if (cachedVisitorData && cachedVisitorData.expiresAt > Date.now()) {
+    return cachedVisitorData.value;
+  }
+  // Ids live for months: past the TTL a stale one beats none, and a failing
+  // endpoint is not asked again on every resolve.
+  const stale = cachedVisitorData?.value ?? null;
+  if (Date.now() < visitorDataFailedUntil) return stale;
+  visitorDataInFlight ??= (async () => {
+    try {
+      const response = await youtubeFetch(
+        `https://www.youtube.com/youtubei/v1/visitor_id?key=${encodeURIComponent(FALLBACK_INNERTUBE_API_KEY)}&prettyPrint=false`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Origin: "https://www.youtube.com",
+            "User-Agent": YOUTUBE_USER_AGENT,
+            "X-YouTube-Client-Name": "1",
+            "X-YouTube-Client-Version":
+              DEFAULT_INNERTUBE_CONTEXT.client.clientVersion,
+          },
+          body: JSON.stringify({ context: DEFAULT_INNERTUBE_CONTEXT }),
+          signal: AbortSignal.timeout(VISITOR_ID_TIMEOUT_MS),
+        },
+      );
+      if (response.ok) rememberVisitorData(await response.json());
+    } catch {
+      // Handled below as a failure.
+    } finally {
+      visitorDataInFlight = null;
+    }
+    if (cachedVisitorData && cachedVisitorData.value !== stale) {
+      return cachedVisitorData.value;
+    }
+    visitorDataFailedUntil = Date.now() + VISITOR_ID_FAILURE_BACKOFF_MS;
+    return stale;
+  })();
+  return visitorDataInFlight;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -768,24 +875,37 @@ async function postWebInnertubeRequest(
   body: Record<string, unknown>,
   options?: { maxAttempts?: number },
 ): Promise<Record<string, unknown>> {
-  const attempts: InnertubeRequestAttempt[] = [];
-  const liveConfig = await fetchWebInnertubeConfig().catch(() => null);
-
-  if (liveConfig) {
-    attempts.push(liveConfig.attempt);
-  }
-
-  attempts.push({
+  // The static WEB context answers search and browse as well as the home
+  // page's ytcfg does, so a cold isolate no longer downloads the home page
+  // (about 1 MB through the egress VPN) before its first search. The home
+  // page is still fetched when the static context fails.
+  const fresh =
+    cachedWebInnertubeConfig && cachedWebInnertubeConfig.expiresAt > Date.now()
+      ? cachedWebInnertubeConfig.value
+      : null;
+  const staticWeb: InnertubeRequestAttempt = {
     name: "web-fallback",
     apiKey: FALLBACK_INNERTUBE_API_KEY,
     userAgent: YOUTUBE_USER_AGENT,
     context: DEFAULT_INNERTUBE_CONTEXT,
     clientVersion: DEFAULT_INNERTUBE_CONTEXT.client.clientVersion,
     clientNameHeader: "1",
-    visitorData: null,
+    visitorData: cachedVisitorData?.value ?? null,
     origin: "https://www.youtube.com",
-  });
-  attempts.push(...FALLBACK_INNERTUBE_ATTEMPTS);
+  };
+  const attempts: Array<() => Promise<InnertubeRequestAttempt | null>> = [];
+  if (fresh) attempts.push(async () => fresh.attempt);
+  attempts.push(async () => staticWeb);
+  if (!fresh) {
+    attempts.push(async () =>
+      fetchWebInnertubeConfig()
+        .then((config) => config.attempt)
+        .catch(() => null),
+    );
+  }
+  for (const attempt of FALLBACK_INNERTUBE_ATTEMPTS) {
+    attempts.push(async () => attempt);
+  }
 
   let lastError: unknown = null;
 
@@ -794,7 +914,9 @@ async function postWebInnertubeRequest(
       ? attempts.slice(0, options.maxAttempts)
       : attempts;
 
-  for (const attempt of attemptsToUse) {
+  for (const nextAttempt of attemptsToUse) {
+    const attempt = await nextAttempt();
+    if (!attempt) continue;
     try {
       const headers = new Headers({
         "Content-Type": "application/json",
@@ -809,7 +931,7 @@ async function postWebInnertubeRequest(
       }
 
       const response = await youtubeFetch(
-        `https://www.youtube.com/youtubei/v1/${endpoint}?key=${encodeURIComponent(attempt.apiKey)}`,
+        `https://www.youtube.com/youtubei/v1/${endpoint}?key=${encodeURIComponent(attempt.apiKey)}&prettyPrint=false`,
         {
           method: "POST",
           headers,
@@ -827,7 +949,9 @@ async function postWebInnertubeRequest(
         continue;
       }
 
-      return (await response.json()) as Record<string, unknown>;
+      const payload = (await response.json()) as Record<string, unknown>;
+      rememberVisitorData(payload);
+      return payload;
     } catch (error) {
       lastError = error;
     }
@@ -858,7 +982,9 @@ async function fetchPlayerResponseFromInnertube(
   );
   const visitorData = findStringDeep(ytcfg, "VISITOR_DATA");
   const sts = toNumber(findStringDeep(ytcfg, "STS"));
-  const attempts: InnertubeRequestAttempt[] = [];
+  const attempts: Array<
+    InnertubeRequestAttempt & { needsVisitorData?: boolean }
+  > = [];
 
   if (apiKey) {
     attempts.push({
@@ -884,6 +1010,7 @@ async function fetchPlayerResponseFromInnertube(
         ...attempt,
         clientVersion: attempt.context.client.clientVersion,
         visitorData: null,
+        needsVisitorData: attempt === VISIONOS_INNERTUBE_ATTEMPT,
       });
     }
   }
@@ -895,6 +1022,12 @@ async function fetchPlayerResponseFromInnertube(
   const diagnostics: InnertubePlayerAttemptDiagnostic[] = [];
 
   for (const attempt of attempts) {
+    let visitorData = attempt.visitorData;
+    if (attempt.needsVisitorData) {
+      visitorData = await getVisitorData();
+      // Without one this client only ever answers LOGIN_REQUIRED.
+      if (!visitorData) continue;
+    }
     const headers = new Headers({
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "Accept-Language": "en-us,en;q=0.5",
@@ -910,8 +1043,8 @@ async function fetchPlayerResponseFromInnertube(
       headers.set("Cookie", cookieHeader);
     }
 
-    if (attempt.visitorData) {
-      headers.set("X-Goog-Visitor-Id", attempt.visitorData);
+    if (visitorData) {
+      headers.set("X-Goog-Visitor-Id", visitorData);
     }
 
     const body: Record<string, unknown> = {
@@ -935,7 +1068,7 @@ async function fetchPlayerResponseFromInnertube(
 
     try {
       const response = await youtubeFetch(
-        `https://www.youtube.com/youtubei/v1/player?key=${encodeURIComponent(attempt.apiKey)}`,
+        `https://www.youtube.com/youtubei/v1/player?key=${encodeURIComponent(attempt.apiKey)}&prettyPrint=false`,
         {
           method: "POST",
           headers,
@@ -955,8 +1088,21 @@ async function fetchPlayerResponseFromInnertube(
       }
 
       const payload = (await response.json()) as Record<string, unknown>;
-      lastSuccessfulPayload = payload;
       const formatCount = getStreamFormats(payload).length;
+      if (attempt.needsVisitorData && visitorData && formatCount === 0) {
+        // This client's wall is about the visitor id, not the egress IP: drop
+        // the id, and keep its "not a bot" text out of the bot-wall verdict.
+        forgetVisitorData(visitorData);
+        diagnostics.push({
+          client: attempt.name,
+          httpStatus: response.status,
+          playability: "refused the visitor id",
+          formatCount,
+        });
+        continue;
+      }
+      rememberVisitorData(payload);
+      lastSuccessfulPayload = payload;
       diagnostics.push({
         client: attempt.name,
         httpStatus: response.status,
@@ -1256,8 +1402,12 @@ export async function resolveYouTubePlayback(
   const preferredKind = options.preferredKind ?? "audio";
   const preferredContainer = options.preferredContainer;
 
-  const upstream = await import("./upstream");
-  const solverBundle = await upstream.loadActiveSolverBundle();
+  // A KV read: started now and awaited at the end, so it never sits in
+  // front of the player calls.
+  const solverBundlePromise = import("./upstream").then((upstream) =>
+    upstream.loadActiveSolverBundle(),
+  );
+  solverBundlePromise.catch(() => {});
   let webConfig: WebInnertubeSession | null = null;
   let playerUrl = null as string | null;
   let innertubeDiagnostics: InnertubePlayerAttemptDiagnostic[] = [];
@@ -1433,10 +1583,14 @@ export async function resolveYouTubePlayback(
 
   if ((sigChallenges.length > 0 || nChallenges.length > 0) && playerUrl) {
     const playerCode = await fetchPlayerCode(playerUrl);
-    solvedChallenges = solvePlayerChallenges(solverBundle, playerCode, {
-      n: nChallenges,
-      sig: sigChallenges,
-    });
+    solvedChallenges = solvePlayerChallenges(
+      await solverBundlePromise,
+      playerCode,
+      {
+        n: nChallenges,
+        sig: sigChallenges,
+      },
+    );
   }
 
   const resolvedFormats = dedupeFormats(
@@ -1479,6 +1633,7 @@ export async function resolveYouTubePlayback(
     preferredContainer,
   );
   const meta = resolveVideoMeta(playerResponse);
+  const solverBundle = await solverBundlePromise;
 
   return {
     sourceUrl,

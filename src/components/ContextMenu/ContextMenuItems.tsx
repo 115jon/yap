@@ -14,7 +14,13 @@ import {
 } from "@/components/chat/ContextMenu";
 import InlineEmojiText from "@/components/chat/InlineEmojiText";
 import { Icon } from "@/components/ui/icon";
-import React, { memo, useCallback, useMemo } from "react";
+import React, { memo, useCallback, useMemo, useRef } from "react";
+import {
+  BOOST_HOT,
+  BOOST_MAX,
+  boostKeyTarget,
+  snapBoost,
+} from "./volume-boost";
 
 /**
  * Item model for the voice/stream context menus (LocalMenu, RemoteMenu). One
@@ -44,6 +50,8 @@ export type StreamMenuEntry =
       label: string;
       value: number;
       max?: number;
+      /** Per-user volume: 0-400 % with the boost marks (see `Slider`). */
+      boost?: boolean;
       onChange: (value: number) => void;
     }
   | {
@@ -62,44 +70,111 @@ export function divider(key: string): StreamMenuEntry {
 /**
  * Volume-style slider. The thumb is always visible (VC-23) and the input
  * grows to a 44px hit target on coarse pointers.
+ *
+ * `boost` is the per-user volume (0-400 %, the native client's VolumeSlider
+ * `boost: true`): a tick marks 100 %, the range and readout past 200 % light
+ * the warning ink, a drag snaps to 100 % near it, and the keys step 5 %
+ * (PageUp/PageDown 25 %, Home/End the ends). Every move applies live.
  */
 export const Slider = memo(
   ({
     label,
     value,
-    max = 200,
+    max: maxProp,
+    boost = false,
     onChange,
     onMouseEnter,
   }: {
     label: string;
     value: number;
     max?: number;
+    boost?: boolean;
     onChange: (val: number) => void;
     onMouseEnter?: () => void;
   }) => {
+    const max = maxProp ?? (boost ? BOOST_MAX : 200);
+    const dragging = useRef(false);
     const handleChange = useCallback(
       (e: React.ChangeEvent<HTMLInputElement>) => {
-        onChange(parseInt(e.target.value));
+        const next = parseInt(e.target.value);
+        onChange(
+          boost && dragging.current
+            ? snapBoost(next, e.target.getBoundingClientRect().width, max)
+            : next,
+        );
       },
-      [onChange],
+      [boost, max, onChange],
     );
-    const percent = Math.min(100, (value / max) * 100);
+    const handleKeyDown = useCallback(
+      (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (!boost) return;
+        const next = boostKeyTarget(e.key, value, max);
+        if (next === null) return;
+        e.preventDefault();
+        if (next !== value) onChange(next);
+      },
+      [boost, max, onChange, value],
+    );
+    const handlePointerDown = useCallback(() => {
+      dragging.current = true;
+      const release = () => {
+        dragging.current = false;
+        window.removeEventListener("pointerup", release, true);
+        window.removeEventListener("pointercancel", release, true);
+      };
+      window.addEventListener("pointerup", release, true);
+      window.addEventListener("pointercancel", release, true);
+    }, []);
+    const percent = Math.max(0, Math.min(100, (value / max) * 100));
+    const hot = boost && value > BOOST_HOT;
+    const hotStart = (BOOST_HOT / max) * 100;
 
     return (
       <div className="shrink-0 px-2 py-2" onMouseEnter={onMouseEnter}>
         <p className="mb-2 flex items-baseline justify-between gap-2 text-ui-xs font-medium text-ink-2">
           <span className="truncate">{label}</span>
-          <span className="shrink-0 text-num-xs text-ink-3">{value}%</span>
+          <span
+            data-slot="slider-value"
+            className={cn(
+              "shrink-0 text-num-xs",
+              hot ? "text-warning-ink" : "text-ink-3",
+            )}
+          >
+            {value}%
+          </span>
         </p>
-        <div className="relative h-1 rounded-full bg-tint-2">
+        <div className="group/slider relative h-1 rounded-full bg-tint-2">
           {/* The fill scales instead of resizing (no width layout). */}
           <div
             className="absolute inset-y-0 left-0 w-full origin-left rounded-full bg-primary-fill"
             style={{ transform: `scaleX(${percent / 100})` }}
           />
+          {hot ? (
+            // Past 200 %: the rest of the fill lights the warning ink.
+            <div
+              data-slot="slider-boost"
+              className="absolute inset-y-0 right-0 origin-left rounded-full bg-warning-ink"
+              style={{
+                left: `${hotStart}%`,
+                transform: `scaleX(${(percent - hotStart) / (100 - hotStart)})`,
+              }}
+            />
+          ) : null}
+          {boost ? (
+            // 100 %, as sent: a tick across the track.
+            <div
+              data-slot="slider-tick"
+              aria-hidden
+              className="pointer-events-none absolute -top-0.75 -bottom-0.75 w-0.5 -translate-x-1/2 rounded-full bg-ink-3"
+              style={{ left: `${(100 / max) * 100}%` }}
+            />
+          ) : null}
           <div
             data-slot="slider-thumb"
-            className="pointer-events-none absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-line-strong bg-ink-1 pointer-coarse:size-5"
+            className={cn(
+              "pointer-events-none absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-line-strong pointer-coarse:size-5 group-has-focus-visible/slider:outline-2 group-has-focus-visible/slider:outline-offset-2 group-has-focus-visible/slider:outline-focus",
+              hot ? "bg-warning-ink" : "bg-ink-1",
+            )}
             style={{ left: `${percent}%` }}
           />
           <input
@@ -109,7 +184,10 @@ export const Slider = memo(
             step="1"
             value={value}
             aria-label={label}
+            aria-valuetext={`${value}%`}
             onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            onPointerDown={boost ? handlePointerDown : undefined}
             className="absolute inset-x-0 top-1/2 z-10 h-full w-full -translate-y-1/2 cursor-pointer opacity-0 pointer-coarse:min-h-11"
           />
         </div>
@@ -270,6 +348,7 @@ export function StreamMenuEntries({
                   label={block.entry.label}
                   value={block.entry.value}
                   max={block.entry.max}
+                  boost={block.entry.boost}
                   onChange={block.entry.onChange}
                 />
               </div>
@@ -303,6 +382,7 @@ function SheetEntries({ entries }: { entries: StreamMenuEntry[] }) {
                 label={entry.label}
                 value={entry.value}
                 max={entry.max}
+                boost={entry.boost}
                 onChange={entry.onChange}
               />
             );
@@ -368,6 +448,7 @@ export function toActionSheetItems(
             label={entry.label}
             value={entry.value}
             max={entry.max}
+            boost={entry.boost}
             onChange={entry.onChange}
           />
         ),

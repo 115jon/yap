@@ -29,6 +29,35 @@ describe("useVoiceSettingsStore peer volume settings", () => {
     expect(normalizePeerSettings({ volume: 42 } as any).streamVolume).toBe(42);
   });
 
+  it("keeps per-user volumes in 0..400 % and older values as stored", () => {
+    const store = useVoiceSettingsStore.getState();
+    store.setCurrentUser("viewer");
+    store.setPeerVolume("user-2", 950);
+    store.setPeerStreamVolume("user-2", -20);
+    let peer = useVoiceSettingsStore.getState().getSettings("viewer")
+      .peerSettings["user-2"];
+    expect(peer.volume).toBe(400);
+    expect(peer.streamVolume).toBe(0);
+
+    store.setPeerVolume("user-2", 250);
+    store.setPeerStreamVolume("user-2", 400);
+    peer = useVoiceSettingsStore.getState().getSettings("viewer").peerSettings[
+      "user-2"
+    ];
+    expect(peer.volume).toBe(250);
+    expect(peer.streamVolume).toBe(400);
+
+    // Stored by a release that capped at 200 %: unchanged.
+    expect(normalizePeerSettings({ volume: 180, streamVolume: 200 })).toEqual(
+      expect.objectContaining({ volume: 180, streamVolume: 200 }),
+    );
+    expect(normalizePeerSettings({ volume: 1000, streamVolume: -5 })).toEqual(
+      expect.objectContaining({ volume: 400, streamVolume: 0 }),
+    );
+    expect(normalizePeerSettings({ volume: Number.NaN }).volume).toBe(100);
+    expect(normalizePeerSettings({ volume: 900 }).streamVolume).toBe(400);
+  });
+
   it("defaults camera capture and background settings for existing users", () => {
     useVoiceSettingsStore.setState({
       currentUser: "viewer",

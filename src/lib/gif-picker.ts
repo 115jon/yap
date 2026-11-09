@@ -9,10 +9,11 @@ import {
   required,
 } from "@/lib/persisted-guard";
 import { unwrapProxyMediaUrl } from "@/lib/proxy-media-url";
+import { UPLOAD_LIMITS } from "@/lib/upload-limits";
 
 export const GIF_FAVORITES_STORAGE_KEY = "chat:gifs:favorites";
 export const MAX_GIF_FAVORITES = 48;
-export const MAX_GIF_UPLOAD_BYTES = 25 * 1024 * 1024;
+export const MAX_GIF_UPLOAD_BYTES = UPLOAD_LIMITS.gif;
 export const DEFAULT_GIF_PROVIDER = "klipy";
 
 export type GifProvider = "klipy" | "tenor" | "external";

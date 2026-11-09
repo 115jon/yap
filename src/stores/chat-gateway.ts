@@ -25,8 +25,10 @@ import {
   decodeChatGatewayServerFrame,
   GatewayCloseCode,
   GatewayOp,
+  parseGameActivity,
   readReplaySeq,
   type ChatGatewayServerMessage,
+  type GameActivity,
 } from "@/lib/gateway-protocol";
 import {
   CHAT_SOCKET_POLICY,
@@ -102,6 +104,20 @@ export interface ChatGatewayActions {
   sendCallAccept: (callId: string) => void;
   sendCallDecline: (callId: string) => void;
   sendCallEnd: (callId: string) => void;
+  /**
+   * This session's game activity (null clears it). Kept and sent again
+   * after every Ready or Resumed: the server drops it when the socket closes.
+   */
+  setGameActivity: (activity: GameActivity | null) => void;
+}
+
+/**
+ * A presence entry's `game_activity`: undefined when the field is absent
+ * (status-only updates, older servers), null when cleared or not valid.
+ */
+function readGameActivity(value: unknown): GameActivity | null | undefined {
+  if (value === undefined) return undefined;
+  return parseGameActivity(value) ?? null;
 }
 
 export function createChatGateway(
@@ -121,6 +137,10 @@ export function createChatGateway(
   let resumeInFlight = false;
   const subscribedServerIds = new Set<string>();
   let subscribedChannelId: string | null = null;
+  /** This session's game activity, re-sent on every Ready and Resumed. */
+  let gameActivity: GameActivity | null = null;
+  /** An activity was ever set: Ready/Resumed then always restate it (null too). */
+  let gameActivityUsed = false;
 
   /** SET_GATEWAY_FAILURE "auth" is on screen. */
   let authFailureShown = false;
@@ -411,6 +431,7 @@ export function createChatGateway(
           platforms: d.data.platforms
             ? normalizePresencePlatforms(d.data.platforms)
             : undefined,
+          gameActivity: readGameActivity(d.data.game_activity),
         });
         if (d.data.status === "offline") {
           dispatch({ type: "USER_OFFLINE", userId: d.data.user_id });
@@ -442,11 +463,13 @@ export function createChatGateway(
                 status?: "online" | "idle" | "dnd" | "offline";
                 custom_status?: string | null;
                 platforms?: PresencePlatform[];
+                game_activity?: unknown;
               }) => ({
                 userId: user.user_id,
                 status: user.status ?? "online",
                 customStatus: user.custom_status,
                 platforms: normalizePresencePlatforms(user.platforms),
+                gameActivity: readGameActivity(user.game_activity),
               }),
             ),
           });
@@ -568,6 +591,8 @@ export function createChatGateway(
             | null;
           bio?: string | null;
           pronouns?: string | null;
+          /** Own sessions only (the profile route sends it to the user). */
+          share_activity?: boolean;
           updated_at?: string;
         };
         dispatch({
@@ -590,6 +615,10 @@ export function createChatGateway(
           media_content_filter: p.media_content_filter,
           bio: p.bio ?? undefined,
           pronouns: p.pronouns ?? undefined,
+          share_activity:
+            typeof p.share_activity === "boolean"
+              ? p.share_activity
+              : undefined,
           updated_at: p.updated_at,
         });
         break;
@@ -895,8 +924,16 @@ export function createChatGateway(
         break;
       }
       case "CALL_RING_STOP": {
-        const { call_id: _call_id, reason } = d.data;
+        const { call_id, reason } = d.data;
         const callState = useCallStore.getState();
+
+        // A stop for a different call (e.g. the ring we auto-declined while
+        // busy) must not touch the call we are in. A missing id on either
+        // side keeps the legacy behaviour: the server sends a null call_id
+        // for busy/invalid rejections.
+        if (callState.callId && call_id && callState.callId !== call_id) {
+          break;
+        }
 
         playRingStop();
         playOutgoingRingStop();
@@ -964,6 +1001,12 @@ export function createChatGateway(
       sendGateway({
         op: GatewayOp.PresenceUpdate,
         d: { status: currentStatus },
+      });
+    }
+    if (gameActivityUsed) {
+      sendGateway({
+        op: GatewayOp.ActivityUpdate,
+        d: { game_activity: gameActivity },
       });
     }
     socket.markReady();
@@ -1218,5 +1261,17 @@ export function createChatGateway(
       sendWhenReady({ op: GatewayOp.CallDecline, d: { call_id: callId } }),
     sendCallEnd: (callId: string) =>
       sendWhenReady({ op: GatewayOp.CallEnd, d: { call_id: callId } }),
+    setGameActivity: (activity: GameActivity | null) => {
+      if (activity === null && gameActivity === null) return;
+      gameActivity = activity;
+      gameActivityUsed = true;
+      // Ready and Resumed send it when the socket is not ready yet.
+      if (socket.isReady) {
+        sendGateway({
+          op: GatewayOp.ActivityUpdate,
+          d: { game_activity: activity },
+        });
+      }
+    },
   };
 }

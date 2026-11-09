@@ -77,6 +77,12 @@ import {
   voiceRosterSessionOf,
 } from "./voice-roster";
 import { initRealtimeTicketNonces } from "./realtime-admission";
+import { MAX_SESSION_SECONDS, sessionSeconds } from "../src/lib/user-stats";
+import { isTimeZone, TIME_ZONE_HEADER } from "../src/lib/request-time-zone";
+import {
+  recordMessageSent,
+  recordVoiceSession,
+} from "../src/services/stats.service";
 import {
   acceptSocket,
   admitSocket,
@@ -96,6 +102,7 @@ import {
   type SocketRole,
 } from "./socket-core";
 import { resolveMeetingProfile } from "./meeting-room/profile-resolver";
+import { GameActivityRegistry } from "./meeting-room/game-activity";
 import { ProfileRequestCoordinator } from "./meeting-room/profile-request-coordinator";
 import { getCachedTurnCredentials as resolveTurnCredentials } from "./meeting-room/turn-credentials";
 import { mintVoiceMedia, type VoiceMedia } from "./voice-media";
@@ -115,6 +122,7 @@ import {
   type BackgroundTaskEnvelope,
 } from "../src/lib/background-tasks";
 import { recordR2CleanupFailure } from "../src/services/r2-cleanup.service";
+import { lookupCachedEmbeds } from "../src/services/embed-fetcher";
 import {
   callRingTokens,
   insertCallRecord,
@@ -233,6 +241,8 @@ interface WsAttachment {
      * deprecated two-request flow, whose Identify and Resume mint them.
      */
     media?: SocketTicketMedia;
+    /** Cloudflare's IANA time zone for the client, stamped at upgrade. */
+    timeZone?: string;
   };
   id: string;
   name: string;
@@ -272,6 +282,10 @@ interface WsAttachment {
    * per user: the newest join wins, whichever Identify finishes first.
    */
   voice_join_order?: number;
+  /** Room: when the current screen share started (account stats). */
+  stream_started_at?: number;
+  /** Room: milliseconds of screen shares this voice session already ended. */
+  stream_ms?: number;
 }
 
 interface ReplayEntry {
@@ -396,6 +410,8 @@ const WS_RATE_LIMITS: Record<number, number> = {
   [Op.CallDecline]: 12,
   [Op.CallEnd]: 12,
   [Op.VoiceStateUpdate]: 60,
+  [Op.PresenceUpdate]: 30,
+  [Op.ActivityUpdate]: 12,
 };
 
 type PresenceStatus = "online" | "idle" | "dnd" | "offline";
@@ -405,6 +421,10 @@ const PRESENCE_STATUSES: ReadonlySet<string> = new Set<PresenceStatus>([
   "dnd",
   "offline",
 ]);
+
+/** Admin introspection (see MeetingRoom.fetch); internal stub paths only. */
+export const ADMIN_INTROSPECT_PATH = "/admin/introspect";
+export const ADMIN_DISCONNECT_PATH = "/admin/disconnect-user";
 
 function isPresenceStatus(status: string): status is PresenceStatus {
   return PRESENCE_STATUSES.has(status);
@@ -431,6 +451,8 @@ export class MeetingRoom extends DurableObject<Env> {
   /** Global gateway: each user's latest move grant, spent once per use. */
   private readonly voiceMoveGrants: VoiceMoveGrantLedger;
   private readonly rateLimiter: SocketRateLimiter;
+  /** Global gateway: each session's game activity (realtime/meeting-room/game-activity.ts). */
+  private readonly gameActivity: GameActivityRegistry;
   /** Non-standby Identify calls in flight: participantId -> admitted subject. */
   private identifyingVoiceJoins = new Map<string, string>();
   private readonly nextVoiceJoinGrantSeq = createVoiceJoinGrantSequence();
@@ -543,6 +565,18 @@ export class MeetingRoom extends DurableObject<Env> {
       this.ctx.storage.sql,
       WS_RATE_LIMITS,
     );
+    this.gameActivity = new GameActivityRegistry({
+      storage: this.ctx.storage,
+      db: this.env.DB,
+      waitUntil: (promise) => this.ctx.waitUntil(promise),
+      sessions: () => this.sessions.entries(),
+      canDeliver: (ws) =>
+        !this.closedSockets.has(ws) && !this.resumingSockets.has(ws),
+      presenceSnapshot: (userId) => this.buildPresenceSnapshotForUser(userId),
+      send: (ws, msg) => this.sendTo(ws, msg),
+      dispatchOp: Op.Dispatch,
+      log: presenceLog,
+    });
 
     // Cloudflare's auto-response absorbs messages at the edge, preventing the DO
     // from updating the `last_heartbeat` timestamp, which causes the zombie
@@ -611,6 +645,20 @@ export class MeetingRoom extends DurableObject<Env> {
             this.normalizeReplayPersistWrites(restored.persistWrites),
           );
         }
+      }
+
+      // Game activities of sessions that survived hibernation.
+      try {
+        await this.gameActivity.restore(
+          new Map(
+            [...this.sessions.values()].map((session) => [
+              session.id,
+              session.user_id,
+            ]),
+          ),
+        );
+      } catch (error) {
+        log.error("Failed to restore game activities", error);
       }
 
       // Restore voice channel members from per-channel keys (vc:members:*)
@@ -868,6 +916,10 @@ export class MeetingRoom extends DurableObject<Env> {
         }
       }
 
+      // Cloudflare's time zone for the client, stamped by the Worker
+      // (request-time-zone.ts): Night owl on this socket's messages.
+      const stampedTimeZone = request.headers.get(TIME_ZONE_HEADER);
+      const timeZone = isTimeZone(stampedTimeZone) ? stampedTimeZone : null;
       log.info(`New connection, gateway_version=${gatewayVersion}`);
       return acceptSocket(
         this.ctx,
@@ -877,6 +929,7 @@ export class MeetingRoom extends DurableObject<Env> {
             participantId: admission.participantId,
             subject: admission.subject,
             ...(admission.media ? { media: admission.media } : {}),
+            ...(timeZone ? { timeZone } : {}),
           },
         },
         gatewayVersion,
@@ -914,6 +967,17 @@ export class MeetingRoom extends DurableObject<Env> {
           )
         ) {
           await this.applyPartialProfileIdentity(body.data.user_id, body.data);
+        }
+        if (
+          body.event === "USER_PROFILE_UPDATE" &&
+          this.isPlainObject(body.data) &&
+          typeof body.data.user_id === "string" &&
+          typeof body.data.share_activity === "boolean"
+        ) {
+          this.gameActivity.setShare(
+            body.data.user_id,
+            body.data.share_activity,
+          );
         }
         log.info(
           `Internal broadcast: event=${body.event}, type=${body.broadcast_all ? "all" : body.target_user_id ? "user" : "channel"}, recipient=${body.target_user_id || body.channel_id || "all"}`,
@@ -1186,7 +1250,110 @@ export class MeetingRoom extends DurableObject<Env> {
       }
     }
 
+    // Site admin (src/services/admin): a read-only look at who is connected
+    // and who is in voice, and closing one user's sockets. Reached only
+    // through a Durable Object stub from the Worker's /api/admin routes;
+    // no public path forwards here.
+    if (url.pathname === ADMIN_INTROSPECT_PATH && request.method === "POST") {
+      return Response.json(this.adminIntrospect());
+    }
+    if (url.pathname === ADMIN_DISCONNECT_PATH && request.method === "POST") {
+      const body: unknown = await request.json().catch(() => null);
+      const userId =
+        this.isPlainObject(body) && typeof body.user_id === "string"
+          ? body.user_id
+          : "";
+      const reason =
+        this.isPlainObject(body) && typeof body.reason === "string"
+          ? body.reason.slice(0, 100)
+          : "Disconnected by an admin";
+      if (!userId) return Response.json({ error: "invalid" }, { status: 400 });
+      const { closed, participantIds } = await this.adminDisconnectUser(
+        userId,
+        reason,
+      );
+      this.flushDirtyStorage();
+      // The ids let the caller end the same sessions on the VoiceRoom.
+      return Response.json({ closed, participant_ids: participantIds });
+    }
+
     return new Response("Not found", { status: 404 });
+  }
+
+  /** Who is on this object right now, for the admin console. No tokens. */
+  private adminIntrospect() {
+    const sessions = [...this.sessions.values()]
+      .filter((session) => session.admission?.accessMode !== "public-demo")
+      .map((session) => ({
+        user_id: session.user_id ?? null,
+        platform: session.platform ?? null,
+        status: session.status ?? null,
+        voice_channel_id: session.voice_channel_id ?? null,
+        standby: !!session.standby,
+        last_heartbeat: session.last_heartbeat ?? null,
+      }));
+    const voiceChannels = [...this.voiceChannelMembers].map(
+      ([channelId, members]) => ({
+        channel_id: channelId,
+        started_at: this.voiceChannelStartedAt.get(channelId) ?? null,
+        members: [...members.values()].map((member) => ({
+          user_id: member.user_id,
+          name: member.display_name || member.name,
+          avatar_url: member.avatar_url ?? null,
+          connection_state:
+            member.connection_state ??
+            (member.connected === false ? "reconnecting" : "connected"),
+          self_mute: member.self_mute,
+          self_deaf: member.self_deaf,
+          self_video: member.self_video,
+          self_stream: member.self_stream,
+          joined_at: member.joined_at ?? null,
+        })),
+      }),
+    );
+    return {
+      room: this.roomSlug,
+      sockets: this.sessions.size,
+      resumable_sessions: this.resumableSessions.size,
+      pending_calls: this.pendingCalls.size,
+      active_calls: this.activeCalls.size,
+      sessions,
+      voice_channels: voiceChannels,
+    };
+  }
+
+  /**
+   * Closes every socket `userId` holds here with AdmissionRejected (the
+   * client must not reconnect) and ends their sessions without a resume
+   * hold. Returns how many sockets closed and every session id it ended.
+   */
+  private async adminDisconnectUser(
+    userId: string,
+    reason: string,
+  ): Promise<{ closed: number; participantIds: string[] }> {
+    const sockets = [...this.sessions].filter(
+      ([, session]) => session.user_id === userId,
+    );
+    const participantIds = sockets.map(([, session]) => session.id);
+    for (const [ws] of sockets) {
+      try {
+        ws.close(CloseCode.AdmissionRejected, reason);
+      } catch {
+        /* already closed */
+      }
+      await this.handleLeave(ws, true, false);
+    }
+    // Sessions held for a resume go too, so none comes back.
+    const held = [...this.resumableSessions]
+      .filter(([, session]) => session.user_id === userId)
+      .map(([sessionId]) => sessionId);
+    for (const sessionId of held) {
+      await this.disconnectSessionImmediately(userId, sessionId);
+    }
+    return {
+      closed: sockets.length,
+      participantIds: [...participantIds, ...held],
+    };
   }
 
   async webSocketMessage(ws: WebSocket, rawMsg: string | ArrayBuffer) {
@@ -1320,6 +1487,10 @@ export class MeetingRoom extends DurableObject<Env> {
         this.handlePresenceUpdate(ws, msg.d);
         break;
 
+      case Op.ActivityUpdate:
+        await this.handleActivityUpdate(ws, msg.d);
+        break;
+
       case Op.VoiceChannelJoin:
         this.handleVoiceChannelJoin(ws, msg.d);
         break;
@@ -1398,10 +1569,22 @@ export class MeetingRoom extends DurableObject<Env> {
 
       for (const ws of zombies) {
         try {
-          await this.handleLeave(ws, false, true);
+          // Held for resume as any lost socket, but its grace counts from
+          // when it last spoke: it has been gone that long already, so the
+          // roster shows it reconnecting for at most the grace in all,
+          // not the zombie timeout plus the grace.
+          const lastHeard = this.sessions.get(ws)?.last_heartbeat;
+          await this.handleLeave(ws, false, true, false, false, lastHeard);
         } catch (e) {
           log.error(`alarm: handleLeave threw for zombie session:`, e);
         }
+      }
+
+      // Activities of sessions that left some other way than handleLeave.
+      if (this.gameActivity.size > 0) {
+        this.gameActivity.prune(
+          new Set([...this.sessions.values()].map((session) => session.id)),
+        );
       }
 
       // Prune expired resumable sessions
@@ -1744,7 +1927,12 @@ export class MeetingRoom extends DurableObject<Env> {
     };
   }
 
-  private buildPresenceListPayload() {
+  /**
+   * Everyone connected, with each user's game activity as `viewerId` may see
+   * it (null when there is none to show). Load the viewer's audience first
+   * (gameActivity.prefetchAudience); then use sendPresenceList.
+   */
+  private buildPresenceListPayload(viewerId?: string) {
     const userIds = new Set<string>();
 
     for (const [, session] of this.sessions) {
@@ -1753,15 +1941,41 @@ export class MeetingRoom extends DurableObject<Env> {
       }
     }
 
-    const users = Array.from(userIds).map((userId) =>
-      this.buildPresenceSnapshotForUser(userId),
+    const { activities, catchUp } = this.gameActivity.forPresenceList(
+      viewerId,
+      userIds,
     );
+    const users = Array.from(userIds).map((userId) => ({
+      ...this.buildPresenceSnapshotForUser(userId),
+      game_activity: activities.get(userId) ?? null,
+    }));
     return {
-      user_ids: users
-        .filter((user) => user.status !== "offline")
-        .map((user) => user.user_id),
-      users,
+      payload: {
+        user_ids: users
+          .filter((user) => user.status !== "offline")
+          .map((user) => user.user_id),
+        users,
+      },
+      catchUp,
     };
+  }
+
+  /** PRESENCE_LIST to one socket (not replayed: it is a full snapshot). */
+  private sendPresenceList(ws: WebSocket, viewerId?: string) {
+    const { payload, catchUp } = this.buildPresenceListPayload(viewerId);
+    this.sendTo(ws, {
+      op: Op.Dispatch,
+      d: { event: "PRESENCE_LIST", data: payload },
+    });
+    if (catchUp && viewerId) {
+      this.ctx.waitUntil(
+        this.gameActivity
+          .catchUp(ws, viewerId)
+          .catch((error) =>
+            presenceLog.error("Game activity catch-up failed", error),
+          ),
+      );
+    }
   }
 
   /** Persist voice channel members to per-channel storage keys */
@@ -2910,12 +3124,80 @@ export class MeetingRoom extends DurableObject<Env> {
     moved = false,
   ): void {
     if (session.standby) return;
+    // Every way a voice session ends comes through here, once.
+    this.recordVoiceSessionStats(session);
     this.pushVoiceJoinGrant(
       session.id,
       session.admission?.subject,
       false,
       replaced,
       moved,
+    );
+  }
+
+  // ── Account stats ───────────────────────────────────────────────────────
+  // Voice and stream time, added to user_stats once per voice session when
+  // it ends (revokeVoiceJoin), never per tick. Rooms only: the global
+  // gateway's sessions are not in voice.
+
+  private get tracksVoiceStats(): boolean {
+    return (
+      this.roomSlug !== "unknown" && this.roomSlug !== VOICE_ROSTER_GATEWAY
+    );
+  }
+
+  /** Sessions already counted (`id:joinedAt`), so no end is counted twice. */
+  private recordedVoiceSessions = new Set<string>();
+
+  /** Opens or closes a screen share's clock on a self_stream change. */
+  private trackStreamTime(session: WsAttachment, streaming: boolean): void {
+    if (!this.tracksVoiceStats || session.standby) return;
+    const now = Date.now();
+    if (streaming && !session.self_stream) {
+      session.stream_started_at = now;
+    } else if (!streaming && session.self_stream) {
+      session.stream_ms =
+        (session.stream_ms ?? 0) +
+        sessionSeconds(session.stream_started_at, now) * 1000;
+      delete session.stream_started_at;
+    }
+  }
+
+  /**
+   * Adds an ended voice session's time to the user's stats: from its join to
+   * when it ended (a held session ended when its socket was lost), capped at
+   * 24 h, with the share time inside it.
+   */
+  private recordVoiceSessionStats(session: WsAttachment): void {
+    if (!this.tracksVoiceStats || !isVoiceRosterSession(session)) return;
+    const joinedAt = session.voice_joined_at;
+    if (joinedAt === undefined) return;
+    const key = `${session.id}:${joinedAt}`;
+    if (this.recordedVoiceSessions.has(key)) return;
+    this.recordedVoiceSessions.add(key);
+    if (this.recordedVoiceSessions.size > 512) {
+      const oldest = this.recordedVoiceSessions.values().next().value;
+      if (oldest !== undefined) this.recordedVoiceSessions.delete(oldest);
+    }
+
+    const endedAt = this.resumableSessionExpiry.get(session.id) ?? Date.now();
+    const voiceSeconds = sessionSeconds(joinedAt, endedAt);
+    const openShareMs =
+      session.self_stream && session.stream_started_at !== undefined
+        ? sessionSeconds(session.stream_started_at, endedAt) * 1000
+        : 0;
+    const streamSeconds = Math.min(
+      voiceSeconds,
+      MAX_SESSION_SECONDS,
+      Math.floor(((session.stream_ms ?? 0) + openShareMs) / 1000),
+    );
+    if (voiceSeconds <= 0 && streamSeconds <= 0) return;
+    this.ctx.waitUntil(
+      recordVoiceSession(this.env.DB, session.user_id, {
+        voiceSeconds,
+        streamSeconds,
+        endedAt: new Date(endedAt),
+      }),
     );
   }
 
@@ -3461,6 +3743,10 @@ export class MeetingRoom extends DurableObject<Env> {
                 return null;
               })
           : null,
+        // Who may see others' game activity in the PRESENCE_LIST below.
+        this.roomSlug === VOICE_ROSTER_GATEWAY
+          ? this.gameActivity.prefetchAudience(admittedUserId)
+          : null,
       ]);
       if (this.abandonStaleIdentify(ws, voiceJoin)) return;
 
@@ -3570,13 +3856,7 @@ export class MeetingRoom extends DurableObject<Env> {
       // client's DM and friends rows read live presence from this list, not
       // users.status (the status a person last chose, kept after they leave).
       if (attachment.user_id) {
-        this.sendTo(ws, {
-          op: Op.Dispatch,
-          d: {
-            event: "PRESENCE_LIST",
-            data: this.buildPresenceListPayload(),
-          },
-        });
+        this.sendPresenceList(ws, attachment.user_id);
       }
 
       // Op 2: Ready — with the voice credentials when Identify minted them
@@ -3985,6 +4265,15 @@ export class MeetingRoom extends DurableObject<Env> {
         },
       });
 
+      // Game activity updates are not replayed: a resumed chat session gets
+      // the presence (and activity) snapshot instead.
+      if (this.roomSlug === VOICE_ROSTER_GATEWAY && resumedAttachment.user_id) {
+        await this.gameActivity.prefetchAudience(resumedAttachment.user_id);
+        if (!this.isSocketClosed(ws)) {
+          this.sendPresenceList(ws, resumedAttachment.user_id);
+        }
+      }
+
       // Re-announce the resumed participant in full. Its abrupt close sent no
       // leave, but a client that took a roster in the meantime (its own
       // Ready or Resumed) may have dropped it; an update with the full state
@@ -4076,6 +4365,15 @@ export class MeetingRoom extends DurableObject<Env> {
     this.cleanupChannelSubscriptions(oldWs);
     this.cleanupServerSubscriptions(oldWs);
     this.sessions.delete(oldWs);
+    // The resuming client sends its activity again after Resumed. Others
+    // hear the change only after a broadcast interval, so a re-sent, same
+    // activity is no change to them and nothing flickers.
+    if (this.gameActivity.removeSession(session.id) && session.user_id) {
+      this.gameActivity.schedule(
+        session.user_id,
+        this.gameActivity.broadcastIntervalMs,
+      );
+    }
     try {
       oldWs.serializeAttachment(null);
     } catch {
@@ -4192,7 +4490,10 @@ export class MeetingRoom extends DurableObject<Env> {
     if (d.self_mute !== undefined) session.self_mute = d.self_mute;
     if (d.self_deaf !== undefined) session.self_deaf = d.self_deaf;
     if (d.self_video !== undefined) session.self_video = d.self_video;
-    if (d.self_stream !== undefined) session.self_stream = d.self_stream;
+    if (d.self_stream !== undefined) {
+      this.trackStreamTime(session, d.self_stream);
+      session.self_stream = d.self_stream;
+    }
     if (d.self_stream_audio !== undefined)
       session.self_stream_audio = d.self_stream_audio;
     if (d.stream_preview_url !== undefined)
@@ -4286,11 +4587,38 @@ export class MeetingRoom extends DurableObject<Env> {
           data: presenceSnapshot,
         },
       });
+      // Invisible hides the activity; coming back shows it again.
+      if (this.gameActivity.hasActivityFor(session.user_id)) {
+        this.gameActivity.schedule(session.user_id);
+      }
       return;
     }
 
     session.status = status;
     this.persist(ws, session);
+  }
+
+  // ── Op 43: ActivityUpdate (C→S) ──────────────────────────────────────────
+
+  private async handleActivityUpdate(
+    ws: WebSocket,
+    d: MainClientPayload<Op.ActivityUpdate>,
+  ) {
+    const session = this.requireSession(ws);
+    const userId = session?.user_id;
+    if (!session || !userId) return;
+
+    const changed = await this.gameActivity.set(
+      session.id,
+      userId,
+      d.game_activity,
+    );
+    // Closed while share_activity was read: the close dropped its activity.
+    if (this.getSession(ws) !== session) {
+      this.gameActivity.removeSession(session.id);
+      return;
+    }
+    if (changed) this.gameActivity.schedule(userId);
   }
 
   /** Persist presence immediately without blocking the WebSocket response. */
@@ -4358,11 +4686,18 @@ export class MeetingRoom extends DurableObject<Env> {
     replaced: boolean = false,
     /** Ended by a moderator's move (implies replaced). */
     moved: boolean = false,
+    /**
+     * When the client was last heard from, if that was before now (a zombie
+     * socket): the resume grace of a held session counts from then.
+     */
+    lostAt?: number,
   ) {
     const session = this.getSession(ws);
     if (!session) return;
     // The socket is done: no later persist may bring the session back.
     this.closedSockets.add(ws);
+    // Its game activity goes with it (the client re-sends after a resume).
+    const hadGameActivity = this.gameActivity.removeSession(session.id);
 
     // Broadcast updated presence/platform state before cleanup
     if (session.user_id && !session.standby) {
@@ -4416,11 +4751,20 @@ export class MeetingRoom extends DurableObject<Env> {
     const participantId = session.id;
     this.sessions.delete(ws);
     this.profileRefreshCooldowns.delete(participantId);
+    if (
+      session.user_id &&
+      (hadGameActivity || this.gameActivity.hasActivityFor(session.user_id))
+    ) {
+      this.gameActivity.schedule(session.user_id);
+    }
 
     if (shouldKeepResumableSession(intentional)) {
       // Keep resumable session alive for RESUME_GRACE_PERIOD_MS so the client
       // can reconnect and resume without a full re-identify. Mark expiry.
-      this.resumableSessionExpiry.set(participantId, now);
+      this.resumableSessionExpiry.set(
+        participantId,
+        typeof lostAt === "number" && lostAt < now ? lostAt : now,
+      );
       const resumableAttachment = { ...session };
       this.resumableSessions.set(participantId, resumableAttachment);
       this.replayPersistWrites.set(participantId, 0);
@@ -4574,7 +4918,9 @@ export class MeetingRoom extends DurableObject<Env> {
     const writes = (this.replayPersistWrites.get(session.id) ?? 0) + 1;
     if (writes > MAX_REPLAY_PERSIST_WRITES) {
       // A long offline burst is cheaper and safer to reconcile from REST than
-      // to keep rewriting a large snapshot on every event.
+      // to keep rewriting a large snapshot on every event. Its voice time
+      // ends here (nothing else will revoke it).
+      if (!session.standby) this.recordVoiceSessionStats(session);
       this.resumableSessions.delete(session.id);
       this.replayBuffers.delete(session.id);
       this.replayPersistWrites.delete(session.id);
@@ -4892,11 +5238,10 @@ export class MeetingRoom extends DurableObject<Env> {
     const session = this.requireSession(ws);
     if (!session || !d.channel_id || !session.user_id) return;
 
-    const access = await resolveChannelAccess(
-      this.env.DB,
-      session.user_id,
-      d.channel_id,
-    );
+    const [access] = await Promise.all([
+      resolveChannelAccess(this.env.DB, session.user_id, d.channel_id),
+      this.gameActivity.prefetchAudience(session.user_id),
+    ]);
     if (!access || !hasChannelPermission(access, PERMISSIONS.VIEW_CHANNELS)) {
       this.sendTo(ws, {
         op: Op.Error,
@@ -4923,13 +5268,7 @@ export class MeetingRoom extends DurableObject<Env> {
     }
 
     // Send PRESENCE_LIST to the subscribing client with live platform/session metadata.
-    this.sendTo(ws, {
-      op: Op.Dispatch,
-      d: {
-        event: "PRESENCE_LIST",
-        data: this.buildPresenceListPayload(),
-      },
-    });
+    this.sendPresenceList(ws, session.user_id);
 
     // Send current voice channel states to the subscribing client
     this.ctx.waitUntil(this.sendVoiceChannelStates(ws));
@@ -5123,13 +5462,16 @@ export class MeetingRoom extends DurableObject<Env> {
 
     const messageId = crypto.randomUUID();
     const now = new Date().toISOString();
+    // Embeds the composer prefetched (or recently posted links) are cached:
+    // they go out with MESSAGE_CREATE instead of a later MESSAGE_UPDATE.
+    const cachedEmbeds = await lookupCachedEmbeds(d.content.trim());
 
     // Persist to D1
     try {
       await this.env.DB.batch([
         this.env.DB.prepare(
-          `INSERT INTO messages (id, channel_id, author_id, content, reply_to_id, created_at, content_revision)
-             VALUES (?, ?, ?, ?, ?, ?, 1)`,
+          `INSERT INTO messages (id, channel_id, author_id, content, reply_to_id, created_at, content_revision, embeds)
+             VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
         ).bind(
           messageId,
           d.channel_id,
@@ -5137,6 +5479,7 @@ export class MeetingRoom extends DurableObject<Env> {
           d.content.trim(),
           d.reply_to_id ?? null,
           now,
+          JSON.stringify(cachedEmbeds),
         ),
         this.env.DB.prepare(
           `INSERT INTO message_postprocessing_jobs
@@ -5152,6 +5495,15 @@ export class MeetingRoom extends DurableObject<Env> {
       });
       return;
     }
+    // Night owl reads the time zone the Worker stamped at upgrade.
+    this.ctx.waitUntil(
+      recordMessageSent(
+        this.env.DB,
+        session.user_id,
+        new Date(now),
+        session.admission?.timeZone ?? null,
+      ),
+    );
 
     // Build message object for dispatch
     const message = {
@@ -5173,6 +5525,7 @@ export class MeetingRoom extends DurableObject<Env> {
       nonce: d.nonce,
       attachments: [],
       reactions: [],
+      embeds: cachedEmbeds,
     };
 
     const messageDispatch = {

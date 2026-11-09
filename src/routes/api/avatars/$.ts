@@ -62,6 +62,9 @@ const GET = async ({ request, params }: any) => {
     "default-src 'none'; style-src 'unsafe-inline'",
   );
   headers.set("Content-Disposition", "inline");
+  // Public pictures: a client on another origin (the desktop shell) may read
+  // the pixels, e.g. the voice stage's ambient colour (lib/ambient-color).
+  headers.set("Access-Control-Allow-Origin", "*");
 
   return new Response(object.body as ReadableStream, {
     status: 200,

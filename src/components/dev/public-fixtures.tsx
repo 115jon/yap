@@ -4,7 +4,8 @@
  * or a stubbed fetch. Nothing here ships.
  *
  *   pub-activate-{enter,enter-error,auth-loading,loading,review,review-long,
- *     deny-busy,decide-error,approved,expired,rate-limited,mfa,network}
+ *     deny-busy,decide-error,approved,approved-native,expired,rate-limited,
+ *     mfa,network}
  *   pub-sign-in-device    sign-in reached from /activate (device waiting)
  *   pub-desktop-{idle,starting,pending,expiring,open-failed,verifying,
  *     rejected,unreachable,denied,expired,error,mfa}
@@ -34,6 +35,7 @@ import {
   setStoredKovaAuthSessionToken,
 } from "@/lib/desktop-auth";
 import type { DeviceSignInHookState } from "@/lib/device-sign-in";
+import { setNativeAppLauncherForTests } from "@/lib/native-app-link";
 import { useFixtureSetup } from "@/components/dev/sp-fixtures/api-stub";
 import { SignIn } from "@kova/react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -99,6 +101,12 @@ const REQUEST = {
   expiresAt: new Date(Date.now() + 4 * 60_000 + 12_000).toISOString(),
 };
 
+/** The native Windows client's request (its own label, its own link). */
+const NATIVE_REQUEST = {
+  ...REQUEST,
+  device: { ...REQUEST.device, label: "Yap" },
+};
+
 const LONG_REQUEST = {
   ...REQUEST,
   device: {
@@ -136,7 +144,11 @@ function activationDeps(
       isReady: true,
       getDeviceRequest: async () => ({
         ok: true as const,
-        request: long ? LONG_REQUEST : REQUEST,
+        request: long
+          ? LONG_REQUEST
+          : surface.endsWith("-native")
+            ? NATIVE_REQUEST
+            : REQUEST,
       }),
       approveDeviceRequest: async () => ({
         ok: true as const,
@@ -184,11 +196,18 @@ function ActivateFixture({ surface }: { surface: string }) {
               }
             : {};
   const [deps] = useState(() => activationDeps(surface, overrides));
+  // The approval hands yap-native:// to the browser; keep the fixture put.
+  useEffect(() => {
+    setNativeAppLauncherForTests(() => {});
+    return () => setNativeAppLauncherForTests(null);
+  }, []);
   useAutoClick(
     step === "deny-busy"
       ? "Deny"
-      : step === "decide-error" || step === "approved"
-        ? "Approve"
+      : step === "decide-error" ||
+          step === "approved" ||
+          step === "approved-native"
+        ? "Approve sign-in"
         : null,
     600,
   );

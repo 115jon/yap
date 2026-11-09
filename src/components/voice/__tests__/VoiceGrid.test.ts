@@ -126,6 +126,7 @@ describe("VoiceGrid focused stage", () => {
 
     expect(markup).toContain("Stream volume");
     expect(markup).toContain('value="145"');
+    expect(markup).toContain('max="400"');
   });
 
   it("hides the stream volume slider for a focused remote stream without audio", () => {
@@ -224,7 +225,7 @@ describe("VoiceGrid focused stage", () => {
     expect(markup).not.toContain("Bob, Carla");
   });
 
-  it("renders the focused avatar as a square avatar, never stretched, without crop or decoration overlays", () => {
+  it("renders the focused avatar as the stage person card, never stretched, without crop or decoration overlays", () => {
     const markup = render(
       [
         makeFocusedAvatarItem({
@@ -247,14 +248,12 @@ describe("VoiceGrid focused stage", () => {
     );
 
     expect(markup).toContain("avatars/alice.png");
-    // The picture is an 80px square key on the tinted stage, not object-contain
-    // across a 16:9 frame (an upscaled, blurry profile picture).
-    // (The Avatar primitive at 80: a size-20 box with 2px corners, the image
-    // covering it and inheriting them.)
+    expect(markup).toContain("data-stage-person");
+    // The original picture as a square key on its own lit card, not
+    // object-contain across a 16:9 frame (an upscaled, blurry picture).
     expect(markup).toMatch(
-      /data-slot="avatar" class="[^"]*rounded-avatar[^"]* size-20 [^"]*"[^>]*><img[^>]*class="size-full rounded-\[inherit\] object-cover"/,
+      /data-stage-face=""[^>]*>.*?<img[^>]*class="size-full rounded-avatar object-cover"/,
     );
-    expect(markup).not.toMatch(/data-slot="avatar" class="[^"]*rounded-full/);
     expect(markup).not.toMatch(/alice\.png"[^>]*object-contain/);
     expect(markup).not.toContain("avatar-decoration-presets/glow.png");
     expect(markup).not.toContain("left:-50%");

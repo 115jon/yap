@@ -1,3 +1,4 @@
+import { waitUntil } from "cloudflare:workers";
 import { cacheGet, cacheGetMany, cacheSet } from "@/lib/cache";
 import { clog } from "@/lib/console-logger";
 import {
@@ -27,6 +28,22 @@ import {
 } from "@/lib/ytdlp/youtube";
 
 const log = clog("listen-together");
+
+/**
+ * A cache write that outlives the response. A bare promise is cancelled when
+ * the handler returns, so search and resolve answers were never cached (no
+ * search keys reached KV in production).
+ */
+function writeBehind(write: Promise<void>) {
+  const settled = write.catch(() => {});
+  if (typeof waitUntil === "function") {
+    try {
+      waitUntil(settled);
+    } catch {
+      // Outside a request (tests): the promise still runs.
+    }
+  }
+}
 
 let spotifyClientPromise: Promise<SpotifyClient> | null = null;
 
@@ -1017,8 +1034,8 @@ export async function searchListenTogether(
       cursor: null,
     };
 
-    cacheSet(cacheKey, response, LISTEN_TOGETHER_SEARCH_TTL_SECONDS).catch(
-      () => {},
+    writeBehind(
+      cacheSet(cacheKey, response, LISTEN_TOGETHER_SEARCH_TTL_SECONDS),
     );
     return response;
   } catch (error) {
@@ -1072,8 +1089,8 @@ export async function resolveListenTogetherUrl(
     throw new Error("Only YouTube and Spotify URLs are supported");
   }
 
-  cacheSet(cacheKey, response, LISTEN_TOGETHER_RESOLVE_TTL_SECONDS).catch(
-    () => {},
+  writeBehind(
+    cacheSet(cacheKey, response, LISTEN_TOGETHER_RESOLVE_TTL_SECONDS),
   );
   return response;
 }
@@ -1126,7 +1143,7 @@ export async function resolveListenTogetherAudioStream(
       };
       const ttlSeconds = getAudioStreamCacheTtl(format.expiresAt);
       setLocalCachedAudioStream(cacheKey, response, ttlSeconds);
-      cacheSet(cacheKey, response, ttlSeconds).catch(() => {});
+      writeBehind(cacheSet(cacheKey, response, ttlSeconds));
       upstreamGuard.recordSuccess(YOUTUBE_PLAYER_CIRCUIT);
       return response;
     } catch (error) {

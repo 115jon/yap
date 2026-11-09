@@ -7,3 +7,14 @@
 @import "@fontsource/cinzel/700.css";
 @import "@fontsource/press-start-2p/400.css";
 @import "@fontsource/unifrakturmaguntia/400.css";
+
+/* Yap faces (OFL): one weight each, latin subset only. None is preloaded:
+   a face is fetched the first time a name uses it (font-display: swap),
+   and the name style editor's previews warm all of them at once. */
+@import "@fontsource/silkscreen/latin-400.css";
+@import "@fontsource/unbounded/latin-700.css";
+@import "@fontsource/syne/latin-800.css";
+@import "@fontsource/instrument-serif/latin-400-italic.css";
+@import "@fontsource/vt323/latin-400.css";
+@import "@fontsource/rubik-glitch/latin-400.css";
+@import "@fontsource/major-mono-display/latin-400.css";

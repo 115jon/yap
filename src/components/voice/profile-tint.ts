@@ -6,7 +6,8 @@ import { useChatStore } from "@/stores/chat-store";
  * profile accent (or banner) colour, mixed 6% into ply-2 by the tile. People
  * without one get a quiet hue derived from their id, so a five-person call is
  * five different tiles rather than five grey discs. User data, not a theme
- * hue: the tile never uses it at more than 6%.
+ * hue: a tile never uses it at more than 6% (the focused stage's person card
+ * also lets it light the glow behind a person without a picture).
  *
  * Selects a string, so a tile re-renders only when that person's colour
  * changes.

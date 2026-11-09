@@ -20,13 +20,16 @@ CREATE TABLE IF NOT EXISTS users (
     theme_preference TEXT,
     theme_sync_enabled INTEGER NOT NULL DEFAULT 0,
     media_content_filter TEXT NOT NULL DEFAULT 'high',
+    share_activity INTEGER NOT NULL DEFAULT 1, -- 0 hides game activity from others
     sound_settings TEXT,
     bio TEXT,
     pronouns TEXT,
     status TEXT DEFAULT 'online',      -- online | idle | dnd | offline
     custom_status TEXT,                -- e.g. "Today I learned..."
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT
+    updated_at TEXT,
+    suspended_at TEXT,                 -- site admin suspension; NULL = active
+    suspended_reason TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower
@@ -374,6 +377,40 @@ CREATE TABLE IF NOT EXISTS push_tokens (
     last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- ── Tiers, badges and stats (migration 039) ─────────────────────────────
+
+-- A user's plan. No row means free; founder and admin grants never expire.
+CREATE TABLE IF NOT EXISTS user_entitlements (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    tier TEXT NOT NULL CHECK (tier IN ('free', 'loud', 'founder')),
+    source TEXT NOT NULL CHECK (source IN ('grant', 'stripe', 'admin')),
+    started_at TEXT NOT NULL,
+    expires_at TEXT,
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    updated_at TEXT NOT NULL
+);
+
+-- Badge awards; the definitions live in code (src/lib/badges.ts).
+CREATE TABLE IF NOT EXISTS user_badges (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    badge_id TEXT NOT NULL,
+    awarded_at TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('auto', 'admin', 'grant')),
+    PRIMARY KEY (user_id, badge_id)
+);
+
+-- Account-level counters for the badge rules.
+CREATE TABLE IF NOT EXISTS user_stats (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    voice_seconds INTEGER NOT NULL DEFAULT 0,  -- capped at 24 h per session
+    stream_seconds INTEGER NOT NULL DEFAULT 0,
+    messages_sent INTEGER NOT NULL DEFAULT 0,
+    first_seen_at TEXT,
+    last_active_at TEXT,
+    updated_at TEXT NOT NULL
+);
+
 -- ── Indexes ──────────────────────────────────────────────────────────────
 
 CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id);
@@ -416,6 +453,75 @@ CREATE TABLE IF NOT EXISTS r2_cleanup_jobs (
     next_attempt_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Chunked attachment uploads (R2 multipart through the Worker binding).
+-- One row per upload in flight: who started it, for which channel, the R2
+-- key and multipart id the server chose, and what the client declared.
+-- `status` is 'open' while parts arrive and 'completing' while the complete
+-- route owns it. The hourly cron aborts rows past `expires_at`, and open
+-- rows whose `last_activity_at` (create, status or a stored part) is over an
+-- hour old: a closed tab's upload is gone within the hour.
+CREATE TABLE IF NOT EXISTS pending_uploads (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    file_key TEXT NOT NULL,
+    r2_upload_id TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    declared_size INTEGER NOT NULL,
+    part_size INTEGER NOT NULL,
+    part_count INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'completing')),
+    created_at TEXT NOT NULL,
+    last_activity_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_uploads_user ON pending_uploads(user_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_pending_uploads_activity ON pending_uploads(status, last_activity_at);
+CREATE INDEX IF NOT EXISTS idx_pending_uploads_expires ON pending_uploads(expires_at);
+
+-- The parts R2 accepted, with the byte count the part route streamed, so the
+-- complete route can sum the real size instead of trusting the declared one.
+CREATE TABLE IF NOT EXISTS pending_upload_parts (
+    upload_id TEXT NOT NULL REFERENCES pending_uploads(id) ON DELETE CASCADE,
+    part_number INTEGER NOT NULL,
+    etag TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    uploaded_at TEXT NOT NULL,
+    PRIMARY KEY (upload_id, part_number)
+);
+
+-- Connections (migration 042): verified links to accounts on other services.
+-- One external account per Yap account, one account per provider per user.
+CREATE TABLE IF NOT EXISTS user_connections (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    profile_url TEXT,
+    avatar_url TEXT,
+    show_on_profile INTEGER NOT NULL DEFAULT 1 CHECK (show_on_profile IN (0, 1)),
+    metadata TEXT NOT NULL DEFAULT '{}',
+    verified_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, provider),
+    UNIQUE (provider, external_id)
+);
+
+-- A link in flight (start route to provider callback), consumed once.
+CREATE TABLE IF NOT EXISTS connection_link_states (
+    state_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    binding_hash TEXT NOT NULL,
+    return_to TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 -- Read states per user
 CREATE INDEX IF NOT EXISTS idx_read_states_user_id ON read_states(user_id);
 
@@ -431,6 +537,14 @@ CREATE INDEX IF NOT EXISTS idx_notification_delivery_markers_message
 
 -- Push fan-out per recipient
 CREATE INDEX IF NOT EXISTS idx_push_tokens_user_id ON push_tokens(user_id);
+
+-- Billing webhooks find a plan by its Stripe customer
+CREATE INDEX IF NOT EXISTS idx_user_entitlements_stripe_customer
+    ON user_entitlements(stripe_customer_id)
+    WHERE stripe_customer_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_user_badges_badge ON user_badges(badge_id);
+CREATE INDEX IF NOT EXISTS idx_user_stats_voice ON user_stats(voice_seconds);
+CREATE INDEX IF NOT EXISTS idx_connection_link_states_expires ON connection_link_states(expires_at);
 
 -- ── Audit Log ────────────────────────────────────────────────────────────
 
@@ -460,3 +574,56 @@ CREATE TABLE IF NOT EXISTS channel_permission_overrides (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_overrides_unique ON channel_permission_overrides(channel_id, target_id);
+
+-- ── Site admin (migration 041) ─────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+    id TEXT PRIMARY KEY,
+    actor_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id TEXT,
+    before_json TEXT,
+    after_json TEXT,
+    cf_ray TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_audit_log_time ON admin_audit_log(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_admin_audit_log_target ON admin_audit_log(target_type, target_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_users_suspended ON users(suspended_at) WHERE suspended_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS site_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by TEXT
+);
+
+CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+    name TEXT PRIMARY KEY,
+    cron TEXT NOT NULL,
+    ok INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    error TEXT,
+    ran_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS daily_activity (
+    day TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    messages INTEGER NOT NULL DEFAULT 0,
+    voice_seconds INTEGER NOT NULL DEFAULT 0,
+    stream_seconds INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_daily_activity_user ON daily_activity(user_id, day);
+
+CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_created_at ON attachments(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_messages_created_at_global ON messages(created_at);

@@ -9,9 +9,15 @@
  */
 
 import type { IconName } from "@/components/ui/icon";
+import {
+  CONNECTION_PROVIDER_INFO,
+  CONNECTION_PROVIDERS,
+} from "@/lib/connections";
 
 export type SettingsPanelId =
   | "account"
+  | "connections"
+  | "loud"
   | "sessions"
   | "privacy"
   | "voice"
@@ -145,6 +151,95 @@ const SETTINGS_PANELS: SettingsPanelDef[] = [
     ],
   },
   {
+    id: "connections",
+    title: "Connections",
+    icon: "connections",
+    headline: "Your other accounts.",
+    blurb:
+      "Link accounts you own on other services and choose which ones your profile shows.",
+    // One card per provider (lib/connections.ts): its account, then the
+    // profile switch once something is linked.
+    sections: CONNECTION_PROVIDERS.map((provider) => {
+      const info = CONNECTION_PROVIDER_INFO[provider];
+      const keywords = [
+        ...info.keywords,
+        "connection",
+        "connections",
+        "link",
+        "linked account",
+        "connect",
+        "unlink",
+      ];
+      return {
+        id: `connection-${provider}`,
+        title: info.label,
+        desc: info.blurb,
+        rows: [
+          {
+            id: `${provider}-account`,
+            label: `${info.label} account`,
+            keywords,
+          },
+          {
+            id: `${provider}-show-on-profile`,
+            label: "Show on profile",
+            desc: `People who open your profile see your ${info.label} name and a link to it.`,
+            keywords: [...keywords, "profile", "public", "hide", "visible"],
+          },
+        ],
+      };
+    }),
+  },
+  {
+    id: "loud",
+    title: "Yap Loud",
+    icon: "sparkle",
+    headline: "Turn it up.",
+    blurb: "Your plan, and what Yap Loud adds.",
+    sections: [
+      {
+        id: "your-plan",
+        title: "Your plan",
+        rows: [
+          {
+            id: "current-plan",
+            label: "Plan",
+            desc: "What your account has.",
+            keywords: [
+              "tier",
+              "subscription",
+              "founder",
+              "loud",
+              "nitro",
+              "premium",
+              "billing",
+            ],
+          },
+        ],
+      },
+      {
+        id: "plans",
+        title: "Plans",
+        rows: [
+          {
+            id: "tier-cards",
+            label: "Yap, Yap Loud and Founder",
+            desc: "Bigger uploads, 1440p and 4K streams, every name style.",
+            keywords: [
+              "upgrade",
+              "price",
+              "uploads",
+              "4k",
+              "1440p",
+              "name styles",
+              "badge",
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
     id: "sessions",
     title: "Sessions",
     icon: "sessions",
@@ -191,8 +286,30 @@ const SETTINGS_PANELS: SettingsPanelDef[] = [
     title: "Privacy & safety",
     icon: "privacy",
     headline: "What you see and what you share.",
-    blurb: "The media you see, and the messages you've shared publicly.",
+    blurb:
+      "What others see you playing, the media you see, and the messages you've shared publicly.",
     sections: [
+      {
+        id: "activity",
+        title: "Activity",
+        desc: "The game you're playing: its name, icon and how long you've been playing.",
+        rows: [
+          {
+            id: "share-activity",
+            label: "Share my activity",
+            desc: "Show what you're playing to people who share a server, a DM or a friendship with you. Invisible always hides it.",
+            keywords: [
+              "activity",
+              "game",
+              "playing",
+              "now playing",
+              "rich presence",
+              "status",
+              "detection",
+            ],
+          },
+        ],
+      },
       {
         id: "media-filter",
         title: "Media filter",
@@ -735,7 +852,10 @@ export const SETTINGS_NAV_GROUPS: Array<{
   title: string;
   ids: SettingsPanelId[];
 }> = [
-  { title: "You", ids: ["account", "sessions", "privacy"] },
+  {
+    title: "You",
+    ids: ["account", "connections", "loud", "sessions", "privacy"],
+  },
   { title: "Calls", ids: ["voice", "soundboard", "keybinds"] },
   { title: "App", ids: ["appearance", "notifications", "desktop"] },
 ];

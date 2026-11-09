@@ -20,32 +20,18 @@
 import * as React from "react";
 
 import { bayerLit, cellMask } from "@/components/ui/dither";
+import {
+  JAW,
+  YAP_CELLS,
+  YAP_PARTS,
+  yapLight,
+  type Cell,
+} from "@/components/ui/yap-geometry";
 import { cn } from "@/lib/utils";
 
-export const YAP_CELLS = 32;
+export { YAP_CELLS } from "@/components/ui/yap-geometry";
 
-type Cell = (x: number, y: number) => boolean;
-
-const rect =
-  (x0: number, y0: number, w: number, h: number): Cell =>
-  (x, y) =>
-    x >= x0 && x < x0 + w && y >= y0 && y < y0 + h;
-
-// The master's polygons, sampled at cell centres.
-const ear: Cell = (x, y) => x >= 2 && y < 10 && x < y + 2;
-const innerEar: Cell = (x, y) => x >= 4 && y >= 5 && y < 9 && x < y - 1;
-const skull = rect(2, 10, 19, 14);
-const snout = rect(21, 12, 11, 7);
-const neck = rect(4, 24, 14, 8);
-const eye = rect(13, 13, 4, 4);
-const nose = rect(29, 12, 3, 3);
-
-/** The lower jaw per frame: it rises and lengthens as it shuts. */
-const JAW = {
-  closed: rect(17, 19, 13, 4),
-  half: rect(17, 20, 12, 4),
-  open: rect(17, 22, 11, 4),
-} as const;
+const { ear, innerEar, skull, snout, neck, eye, nose } = YAP_PARTS;
 
 /** Two 45-degree ticks off the snout and the jaw tip. */
 const TICK_CELLS = [
@@ -65,16 +51,10 @@ const cutout: Cell = (x, y) => innerEar(x, y) || eye(x, y) || nose(x, y);
 const yapBody: Cell = (x, y) =>
   (ear(x, y) || skull(x, y) || snout(x, y) || neck(x, y)) && !cutout(x, y);
 
-/** Light across the mark: dense at the ear, thinning toward the jaw tip. */
-function light(x: number, y: number): number {
-  const d = (x + y) / (2 * (YAP_CELLS - 1));
-  return 0.98 - d * 0.3;
-}
-
 const lit =
   (region: Cell): Cell =>
   (x, y) =>
-    region(x, y) && !cutout(x, y) && bayerLit(x, y, light(x, y));
+    region(x, y) && !cutout(x, y) && bayerLit(x, y, yapLight(x, y));
 
 const masks = new Map<string, string>();
 function mask(key: string, build: () => Cell): string {
@@ -117,28 +97,42 @@ function YapBark({ barking = false, cell, className }: YapBarkProps) {
       )}
       style={px ? { width: px, height: px } : undefined}
     >
-      {LAYERS.map(([part, cells]) => {
-        const m = mask(part, cells);
-        return (
-          <span
-            key={part}
-            data-part={part}
-            className="absolute inset-0"
-            style={
-              {
-                backgroundColor: "var(--accent-ink)",
-                maskImage: m,
-                WebkitMaskImage: m,
-                maskSize: "100% 100%",
-                WebkitMaskSize: "100% 100%",
-                maskRepeat: "no-repeat",
-                WebkitMaskRepeat: "no-repeat",
-              } as React.CSSProperties
-            }
-          />
-        );
-      })}
+      {LAYERS.map(([part, cells]) => (
+        <CellLayer key={part} part={part} mask={mask(part, cells)} />
+      ))}
     </span>
+  );
+}
+
+/**
+ * One layer of a cell drawing: `mask` (a `cellMask`) over a role colour,
+ * stretched to the box. Shared by YapBark and the Yappy poses.
+ */
+export function CellLayer({
+  part,
+  mask,
+  color = "var(--accent-ink)",
+}: {
+  part: string;
+  mask: string;
+  color?: string;
+}) {
+  return (
+    <span
+      data-part={part}
+      className="absolute inset-0"
+      style={
+        {
+          backgroundColor: color,
+          maskImage: mask,
+          WebkitMaskImage: mask,
+          maskSize: "100% 100%",
+          WebkitMaskSize: "100% 100%",
+          maskRepeat: "no-repeat",
+          WebkitMaskRepeat: "no-repeat",
+        } as React.CSSProperties
+      }
+    />
   );
 }
 

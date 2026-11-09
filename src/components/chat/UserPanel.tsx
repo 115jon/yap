@@ -24,6 +24,8 @@ import {
   type OpenProfileEditorEventDetail,
 } from "@/lib/profile-editor-events";
 import { useUserResolution } from "@/hooks/useUserResolution";
+import { useGameActivity } from "@/hooks/useGameActivity";
+import { gameActivityLabel } from "@/lib/game-activity";
 import { openSettings as openSettingsAt } from "@/components/chat/settings/settings-links";
 import { getAuthAssetUrl } from "@/lib/platform";
 import type {
@@ -36,7 +38,7 @@ import { playCallEnd } from "@/lib/sounds";
 import type { User } from "@/lib/types";
 import { useDeviceAvailability } from "@/lib/useMediaDevices";
 import { cn } from "@/lib/utils";
-import { getAvailableStreamQualities } from "@/lib/voice/utils";
+import { useStreamQualities } from "@/hooks/useEntitlement";
 import { useChatActions, useChatStore } from "@/stores/chat-store";
 import { useCallStore } from "@/stores/useCallStore";
 import { useCallVoiceStore } from "@/stores/useCallVoiceStore";
@@ -63,7 +65,6 @@ import { Led, LedLabel } from "@/components/ui/led";
 const EMPTY_QUALITIES: string[] = [];
 const EMPTY_GRID_ITEMS: GridItem[] = [];
 const EMPTY_WATCHERS_BY_STREAMER: StreamWatchersByStreamer = {};
-const SCREEN_SHARE_QUALITIES = getAvailableStreamQualities();
 const TAILWIND_SPACING_UNIT_PX = 4;
 const USER_PANEL_USERNAME_HIDE_WIDTH_PX = TAILWIND_SPACING_UNIT_PX * 56;
 // Below this the name column can't hold ~4 letters either (the column is the
@@ -194,6 +195,7 @@ function CallDashboardSection({
   onOpenSoundboard?: () => void;
   stageOnScreen?: boolean;
 }) {
+  const streamQualities = useStreamQualities();
   const callStatus = useCallStore((s) => s.status);
   const callChannelId = useCallStore((s) => s.channelId);
   const remoteUser = useCallStore((s) => s.remoteUser);
@@ -263,7 +265,7 @@ function CallDashboardSection({
         isStreamingAudio={isStreamingAudio}
         screenQuality={screenQuality}
         currentScreenSource={currentScreenSource}
-        availableQualities={getAvailableStreamQualities()}
+        availableQualities={streamQualities}
         onStopStreaming={() => toggleScreenShare?.()}
         onToggleStreamAudio={() => onToggleStreamAudio?.()}
         onShareScreen={() => setIsScreenModalOpen(true)}
@@ -300,7 +302,7 @@ function CallDashboardSection({
           });
           setIsScreenModalOpen(false);
         }}
-        availableQualities={getAvailableStreamQualities()}
+        availableQualities={streamQualities}
       />
     </>
   );
@@ -345,6 +347,7 @@ export default function UserPanel({
   stageOnScreen,
   connectionState: connectionStateOverride,
 }: Props) {
+  const streamQualities = useStreamQualities();
   const { updateStatus } = useChatActions();
   const speakingAttr = useSpeakingAttr(user?.id);
   const isMobile = useIsMobile();
@@ -478,6 +481,7 @@ export default function UserPanel({
   // mute button so it stays accurate even when no VC/call is active.
   // When a VC IS active, the prop overrides (it comes from the same store anyway).
   const globalDevices = useDeviceAvailability();
+  const gameActivity = useGameActivity(user?.id);
   const effectiveHasMic = hasMicrophone ?? globalDevices.hasMicrophone;
   const showIdentity =
     !sidebarWidthPx || sidebarWidthPx > USER_PANEL_IDENTITY_HIDE_WIDTH_PX;
@@ -494,11 +498,19 @@ export default function UserPanel({
   const nameplateTheme = hasNameplate ? nameplatePresentation.theme : null;
   const isMicMuted = settings.isMuted || !effectiveHasMic;
   const presenceStatus = normalizeUserStatus(currentStatus);
-  const customStatus = user.custom_status?.trim() ?? "";
+  // What you are playing takes the custom status's line, as others see it;
+  // invisible shows it to no one, so not here either. "Playing Name", as
+  // on every other row; a narrow column truncates the name.
+  const playing = presenceStatus === "offline" ? undefined : gameActivity;
+  const customStatus = playing
+    ? gameActivityLabel(playing)
+    : (user.custom_status?.trim() ?? "");
   const statusWord = STATUS_WORD[presenceStatus];
-  const statusSummary = customStatus
-    ? `${currentStatusLabel}: ${customStatus}`
-    : currentStatusLabel;
+  const statusSummary = playing
+    ? `${currentStatusLabel}: ${gameActivityLabel(playing)}`
+    : customStatus
+      ? `${currentStatusLabel}: ${customStatus}`
+      : currentStatusLabel;
   /* The line under the name (STATUS_WORD): a custom status when one is set
    * and the column has room (Geist, it is a sentence: it ellipsizes), else the
    * state as an LED label that only shows whole words. Its own LED is dropped:
@@ -694,7 +706,7 @@ export default function UserPanel({
               });
               setIsVcScreenModalOpen(false);
             }}
-            availableQualities={availableQualities ?? SCREEN_SHARE_QUALITIES}
+            availableQualities={availableQualities ?? streamQualities}
           />
         </div>
       )}

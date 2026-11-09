@@ -56,9 +56,13 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { HIT, PRESS } from "@/components/ui/interaction";
 import { apiDelete, apiPatch, apiUpload } from "@/lib/api-client";
 import { describeApiError } from "@/lib/api-errors";
+import { useMyEntitlement } from "@/hooks/useEntitlement";
+import { hasPerk } from "@/lib/entitlements";
+import { UPLOAD_LIMITS } from "@/lib/upload-limits";
 import {
   getAvatarCollectibles,
   normalizeAvatarDisplay,
@@ -79,10 +83,15 @@ import {
   DISPLAY_NAME_COLOR_SWATCHES,
   DISPLAY_NAME_EFFECT_OPTIONS,
   DISPLAY_NAME_FONT_OPTIONS,
+  getDisplayNameEffectOption,
   normalizeDisplayNameStyle,
   normalizeHexColor,
   PROFILE_COLOR_SWATCHES,
+  usesYapDisplayNameStyle,
+  type DisplayNameEffectOption,
   type DisplayNameStyle,
+  type DisplayNameStyleGroup,
+  type ProfileCustomizationInput,
 } from "@/lib/profile-customization";
 import { resolveProfileReferenceDate } from "@/lib/profile-dates";
 import type { User } from "@/lib/types";
@@ -100,6 +109,13 @@ import {
   type MutableRefObject,
   type ReactNode,
 } from "react";
+
+/** The upload limit behind a save step, for a 413 that names none. */
+function saveUploadLimit(action: string): number | undefined {
+  if (action === "upload your avatar") return UPLOAD_LIMITS.avatar;
+  if (action === "upload your banner") return UPLOAD_LIMITS.banner;
+  return undefined;
+}
 
 const log = clog("Profile");
 
@@ -146,6 +162,29 @@ function createAssetPreview(file: File): AssetPreview {
     url: URL.createObjectURL(file),
     contentType: file.type || "application/octet-stream",
   };
+}
+
+type EditorTheme = {
+  profile_accent_color: string | null;
+  profile_background_color: string | null;
+  profile_banner_color: string | null;
+};
+
+/**
+ * Profile colours as the editor holds them. The server stores its default
+ * for an Auto (null) colour, and a stored default pair reads back as Auto,
+ * so the preview follows the app theme. Run on the stored colours and on the
+ * draft, it says whether a save would change anything.
+ */
+function toEditorTheme(colors: ProfileCustomizationInput): EditorTheme {
+  const applied = applyProfileThemeDefaults(colors);
+  return hasCustomProfileColors(colors)
+    ? applied
+    : {
+        ...applied,
+        profile_accent_color: null,
+        profile_background_color: null,
+      };
 }
 
 function areDisplayNameStylesEqual(
@@ -566,7 +605,47 @@ const TILE = cn(
   "border-line-strong pointer-fine:hover:bg-tint-1",
 );
 
-function DisplayNameStyleDialog({
+const STYLE_GROUPS: Array<{ id: DisplayNameStyleGroup; label: string }> = [
+  { id: "classic", label: "Classic" },
+  { id: "yap", label: "Yap" },
+];
+
+/** What picking an effect does: a Yap effect brings its recommended face. */
+function withEffect(
+  style: DisplayNameStyle,
+  option: DisplayNameEffectOption,
+): DisplayNameStyle {
+  return {
+    ...style,
+    effect: option.id,
+    ...(option.font ? { font: option.font } : {}),
+  };
+}
+
+function withWave(style: DisplayNameStyle, wave: boolean): DisplayNameStyle {
+  const { wave: _previous, ...rest } = style;
+  return wave ? { ...rest, wave: true } : rest;
+}
+
+/** A silkscreen group label over a grid of tiles ("Classic", "Yap"). */
+function StyleGroupLabel({
+  id,
+  children,
+  locked,
+}: {
+  id: string;
+  children: ReactNode;
+  locked?: boolean;
+}) {
+  return (
+    <p id={id} className="silkscreen flex items-center gap-2 text-ink-3">
+      {children}
+      {locked ? <span>· Locked</span> : null}
+    </p>
+  );
+}
+
+export function DisplayNameStyleDialog({
   open,
   displayName,
   username,
@@ -576,6 +655,7 @@ function DisplayNameStyleDialog({
   themeTextColor,
   avatarSrc,
   avatarDisplay,
+  canUseYapStyles = true,
   onClose,
   onApply,
 }: {
@@ -588,6 +668,12 @@ function DisplayNameStyleDialog({
   themeTextColor: string | null;
   avatarSrc?: string | null;
   avatarDisplay?: AvatarDisplay | string | null;
+  /**
+   * Whether the Yap effects, Yap fonts and Wave can be picked. The caller
+   * decides (see the entitlements note where the dialog mounts); Classic is
+   * always open.
+   */
+  canUseYapStyles?: boolean;
   onClose: () => void;
   onApply: (style: DisplayNameStyle | null) => void;
 }) {
@@ -596,8 +682,19 @@ function DisplayNameStyleDialog({
   );
   const fontLabelId = useId();
   const effectLabelId = useId();
+  const groupLabelId = useId();
+  const waveLabelId = useId();
+  const waveDescId = useId();
   const baseLabelId = useId();
   const glowLabelId = useId();
+  const effectOption = getDisplayNameEffectOption(draft.effect);
+  const primaryLabel = effectOption.colorLabels?.primary ?? "Base color";
+  const secondaryLabel =
+    effectOption.colorLabels?.secondary ?? "Highlight color";
+  const usesPrimary = effectOption.colors.includes("primary");
+  const usesSecondary = effectOption.colors.includes("secondary");
+  // A locked account can still open a saved Yap style, but not apply one.
+  const blocked = !canUseYapStyles && usesYapDisplayNameStyle(draft);
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -617,7 +714,7 @@ function DisplayNameStyleDialog({
               Display name style
             </DialogTitle>
             <DialogDescription className="sr-only">
-              Pick a font, an effect and colors for your display name.
+              Pick an effect, a font and colors for your display name.
             </DialogDescription>
             <IconButton
               icon="close"
@@ -630,123 +727,197 @@ function DisplayNameStyleDialog({
           <div className="@container min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-6 md:py-6">
             <div className="grid gap-6 @min-[640px]:grid-cols-[minmax(0,1fr)_280px] @min-[640px]:items-start">
               <div className="flex min-w-0 flex-col gap-6">
-                <section className="flex flex-col gap-2">
-                  <h3
-                    id={fontLabelId}
-                    className="text-ui-sm font-medium text-ink-1"
-                  >
-                    Font
-                  </h3>
-                  <div
-                    role="group"
-                    aria-labelledby={fontLabelId}
-                    className="grid grid-cols-3 gap-2 @min-[420px]:grid-cols-4"
-                  >
-                    {DISPLAY_NAME_FONT_OPTIONS.map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        className={TILE}
-                        aria-pressed={draft.font === option.id}
-                        onClick={() =>
-                          setDraft((prev) => ({ ...prev, font: option.id }))
-                        }
-                      >
-                        <ProfileDisplayName
-                          text="Ag"
-                          displayNameStyle={{ ...draft, font: option.id }}
-                          className="block text-ui-lg font-semibold leading-none"
-                        />
-                        <span className="text-ui-xs text-ink-2">
-                          {option.label}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-
-                <section className="flex flex-col gap-2">
+                <section className="flex flex-col gap-3">
                   <h3
                     id={effectLabelId}
                     className="text-ui-sm font-medium text-ink-1"
                   >
                     Effect
                   </h3>
-                  <div
-                    role="group"
-                    aria-labelledby={effectLabelId}
-                    className="grid grid-cols-2 gap-2 @min-[420px]:grid-cols-3"
-                  >
-                    {DISPLAY_NAME_EFFECT_OPTIONS.map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        className={TILE}
-                        aria-pressed={draft.effect === option.id}
-                        aria-label={option.label}
-                        onClick={() =>
-                          setDraft((prev) => ({ ...prev, effect: option.id }))
-                        }
+                  {STYLE_GROUPS.map((group) => {
+                    const locked = group.id === "yap" && !canUseYapStyles;
+                    const groupId = `${groupLabelId}-effect-${group.id}`;
+                    return (
+                      <div
+                        key={group.id}
+                        role="group"
+                        aria-labelledby={`${effectLabelId} ${groupId}`}
+                        data-style-group={group.id}
+                        className="flex flex-col gap-2"
                       >
-                        <ProfileDisplayName
-                          text={option.label}
-                          displayNameStyle={{
-                            ...draft,
-                            font: DEFAULT_DISPLAY_NAME_STYLE.font,
-                            effect: option.id,
-                          }}
-                          className="block max-w-full truncate text-ui-sm font-semibold"
-                        />
-                      </button>
-                    ))}
-                  </div>
+                        <StyleGroupLabel id={groupId} locked={locked}>
+                          {group.label}
+                        </StyleGroupLabel>
+                        <div className="grid grid-cols-2 gap-2 @min-[420px]:grid-cols-3">
+                          {DISPLAY_NAME_EFFECT_OPTIONS.filter(
+                            (option) => option.group === group.id,
+                          ).map((option) => (
+                            <button
+                              key={option.id}
+                              type="button"
+                              className={TILE}
+                              aria-pressed={draft.effect === option.id}
+                              aria-label={option.label}
+                              disabled={locked}
+                              data-effect={option.id}
+                              onClick={() =>
+                                setDraft((prev) => withEffect(prev, option))
+                              }
+                            >
+                              {/* The tile previews the pick on your own
+                               * name, font included. */}
+                              <ProfileDisplayName
+                                text={displayName}
+                                displayNameStyle={withEffect(draft, option)}
+                                className="block max-w-full truncate text-ui-md font-semibold"
+                              />
+                              <span className="max-w-full truncate text-ui-xs text-ink-2">
+                                {option.label}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                        {group.id === "yap" ? (
+                          <div className="flex items-center gap-3 rounded-md border border-line-strong px-3 py-2">
+                            <div className="min-w-0 flex-1">
+                              <p
+                                id={waveLabelId}
+                                className="text-ui-row font-medium text-ink-1"
+                              >
+                                Wave
+                              </p>
+                              <p
+                                id={waveDescId}
+                                className="text-pretty text-ui-xs text-ink-2"
+                              >
+                                Letters bob in turn. Works with any effect.
+                              </p>
+                            </div>
+                            <Switch
+                              size="sm"
+                              aria-labelledby={waveLabelId}
+                              aria-describedby={waveDescId}
+                              checked={draft.wave === true}
+                              disabled={locked}
+                              onCheckedChange={(checked) =>
+                                setDraft((prev) => withWave(prev, checked))
+                              }
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </section>
 
-                <section className="flex flex-col gap-2">
+                <section className="flex flex-col gap-3">
                   <h3
-                    id={baseLabelId}
+                    id={fontLabelId}
                     className="text-ui-sm font-medium text-ink-1"
                   >
-                    Base color
+                    Font
                   </h3>
-                  <ColorControl
-                    ids={{ labelId: baseLabelId }}
-                    name="base color"
-                    value={draft.primaryColor}
-                    fallback={DEFAULT_DISPLAY_NAME_STYLE.primaryColor}
-                    presets={DISPLAY_NAME_COLOR_SWATCHES}
-                    onChange={(value) =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        primaryColor:
-                          value ?? DEFAULT_DISPLAY_NAME_STYLE.primaryColor,
-                      }))
-                    }
-                  />
+                  {STYLE_GROUPS.map((group) => {
+                    const locked = group.id === "yap" && !canUseYapStyles;
+                    const groupId = `${groupLabelId}-font-${group.id}`;
+                    return (
+                      <div
+                        key={group.id}
+                        role="group"
+                        aria-labelledby={`${fontLabelId} ${groupId}`}
+                        className="flex flex-col gap-2"
+                      >
+                        <StyleGroupLabel id={groupId} locked={locked}>
+                          {group.label}
+                        </StyleGroupLabel>
+                        <div className="grid grid-cols-3 gap-2 @min-[420px]:grid-cols-4">
+                          {DISPLAY_NAME_FONT_OPTIONS.filter(
+                            (option) => option.group === group.id,
+                          ).map((option) => (
+                            <button
+                              key={option.id}
+                              type="button"
+                              className={TILE}
+                              aria-pressed={draft.font === option.id}
+                              disabled={locked}
+                              onClick={() =>
+                                setDraft((prev) => ({
+                                  ...prev,
+                                  font: option.id,
+                                }))
+                              }
+                            >
+                              <ProfileDisplayName
+                                text="Ag"
+                                displayNameStyle={{ ...draft, font: option.id }}
+                                className="block text-ui-lg font-semibold leading-none"
+                              />
+                              <span className="text-ui-xs text-ink-2">
+                                {option.label}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </section>
 
-                <section className="flex flex-col gap-2">
-                  <h3
-                    id={glowLabelId}
-                    className="text-ui-sm font-medium text-ink-1"
-                  >
-                    Highlight color
-                  </h3>
-                  <ColorControl
-                    ids={{ labelId: glowLabelId }}
-                    name="highlight color"
-                    value={draft.secondaryColor}
-                    fallback={DEFAULT_DISPLAY_NAME_STYLE.secondaryColor}
-                    presets={DISPLAY_NAME_COLOR_SWATCHES}
-                    onChange={(value) =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        secondaryColor:
-                          value ?? DEFAULT_DISPLAY_NAME_STYLE.secondaryColor,
-                      }))
-                    }
-                  />
-                </section>
+                {effectOption.colors.length === 0 ? (
+                  <p className="text-pretty text-ui-sm text-ink-2">
+                    {effectOption.label} uses its own colors.
+                  </p>
+                ) : null}
+
+                {usesPrimary ? (
+                  <section className="flex flex-col gap-2">
+                    <h3
+                      id={baseLabelId}
+                      className="text-ui-sm font-medium text-ink-1"
+                    >
+                      {primaryLabel}
+                    </h3>
+                    <ColorControl
+                      ids={{ labelId: baseLabelId }}
+                      name={primaryLabel.toLowerCase()}
+                      value={draft.primaryColor}
+                      fallback={DEFAULT_DISPLAY_NAME_STYLE.primaryColor}
+                      presets={DISPLAY_NAME_COLOR_SWATCHES}
+                      onChange={(value) =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          primaryColor:
+                            value ?? DEFAULT_DISPLAY_NAME_STYLE.primaryColor,
+                        }))
+                      }
+                    />
+                  </section>
+                ) : null}
+
+                {usesSecondary ? (
+                  <section className="flex flex-col gap-2">
+                    <h3
+                      id={glowLabelId}
+                      className="text-ui-sm font-medium text-ink-1"
+                    >
+                      {secondaryLabel}
+                    </h3>
+                    <ColorControl
+                      ids={{ labelId: glowLabelId }}
+                      name={secondaryLabel.toLowerCase()}
+                      value={draft.secondaryColor}
+                      fallback={DEFAULT_DISPLAY_NAME_STYLE.secondaryColor}
+                      presets={DISPLAY_NAME_COLOR_SWATCHES}
+                      onChange={(value) =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          secondaryColor:
+                            value ?? DEFAULT_DISPLAY_NAME_STYLE.secondaryColor,
+                        }))
+                      }
+                    />
+                  </section>
+                ) : null}
               </div>
 
               <section
@@ -777,13 +948,17 @@ function DisplayNameStyleDialog({
                         />
                       ) : null}
                     </span>
-                    <ProfileDisplayName
-                      text={displayName}
-                      displayNameStyle={draft}
-                      className="mt-1 block truncate text-ui-xl font-semibold"
-                      backgroundColor={themeBackgroundColor}
-                      readableFallbackColor={themeTextColor}
-                    />
+                    {/* A profile card: the effect plays while it shows. */}
+                    <div className="mt-1 min-w-0">
+                      <ProfileDisplayName
+                        text={displayName}
+                        displayNameStyle={draft}
+                        className="block truncate text-ui-xl font-semibold"
+                        backgroundColor={themeBackgroundColor}
+                        readableFallbackColor={themeTextColor}
+                        animate
+                      />
+                    </div>
                     <span className="truncate text-ui-sm text-[color:var(--rm-profile-custom-muted)]">
                       @{username}
                     </span>
@@ -822,7 +997,11 @@ function DisplayNameStyleDialog({
             <Button
               type="button"
               variant="ghost"
-              onClick={() => setDraft(createRandomDisplayNameStyle())}
+              onClick={() =>
+                setDraft(
+                  createRandomDisplayNameStyle({ includeYap: canUseYapStyles }),
+                )
+              }
             >
               <Icon name="sparkle" size="sm" />
               Surprise me
@@ -845,6 +1024,7 @@ function DisplayNameStyleDialog({
               </Button>
               <Button
                 type="button"
+                disabled={blocked}
                 onClick={() => {
                   onApply(draft);
                   onClose();
@@ -952,6 +1132,7 @@ function ProfileEditor({
   closeGuard?: ProfileEditorCloseGuard;
 }) {
   const { user } = useUser();
+  const entitlement = useMyEntitlement();
   const loadCurrentUser = useChatStore((s) => s.actions.loadCurrentUser);
   const updateStatus = useChatStore((s) => s.actions.updateStatus);
   const activeServerId = useChatStore((s) => s.activeServerId);
@@ -967,20 +1148,7 @@ function ProfileEditor({
     profile_background_color: chatUser.profile_background_color,
     profile_banner_color: chatUser.profile_banner_color,
   };
-  const appliedTheme = applyProfileThemeDefaults(storedColors);
-  // The server stores its default pair for people who never picked colours;
-  // those read as "Auto" here, so the preview follows the app theme.
-  const storedTheme: {
-    profile_accent_color: string | null;
-    profile_background_color: string | null;
-    profile_banner_color: string | null;
-  } = hasCustomProfileColors(storedColors)
-    ? appliedTheme
-    : {
-        ...appliedTheme,
-        profile_accent_color: null,
-        profile_background_color: null,
-      };
+  const storedTheme = toEditorTheme(storedColors);
   const savedDisplayNameStyle = normalizeDisplayNameStyle(
     chatUser.display_name_style,
   );
@@ -1072,9 +1240,17 @@ function ProfileEditor({
   }, [saved]);
 
   /* Derived --------------------------------------------------------- */
+  // Compare the draft as a save stores it (text trimmed, an Auto colour
+  // resolved the way the server resolves it). Comparing the raw draft kept
+  // the bar dirty after a successful save.
+  const draftTheme = toEditorTheme({
+    profile_accent_color: accentColor,
+    profile_background_color: backgroundColor,
+    profile_banner_color: bannerColor,
+  });
   const hasChanges =
-    pronouns !== (chatUser.pronouns || "") ||
-    bio !== (chatUser.bio || "") ||
+    pronouns.trim() !== (chatUser.pronouns ?? "").trim() ||
+    bio.trim() !== (chatUser.bio ?? "").trim() ||
     customStatus.trim() !== savedCustomStatus ||
     avatarFile !== null ||
     selectedAvatarUrl !== null ||
@@ -1084,9 +1260,10 @@ function ProfileEditor({
     nameplateFile !== null ||
     removeBanner ||
     removeNameplate ||
-    storedTheme.profile_accent_color !== accentColor ||
-    storedTheme.profile_background_color !== backgroundColor ||
-    storedTheme.profile_banner_color !== bannerColor ||
+    storedTheme.profile_accent_color !== draftTheme.profile_accent_color ||
+    storedTheme.profile_background_color !==
+      draftTheme.profile_background_color ||
+    storedTheme.profile_banner_color !== draftTheme.profile_banner_color ||
     !areDisplayNameStylesEqual(displayNameStyle, savedDisplayNameStyle);
 
   const previewTheme = resolveProfileCardTheme({
@@ -1468,7 +1645,11 @@ function ProfileEditor({
       setSaved(true);
     } catch (err) {
       log.error("Failed to save:", err);
-      setError(describeApiError(err, action));
+      setError(
+        describeApiError(err, action, {
+          uploadLimitBytes: saveUploadLimit(action),
+        }),
+      );
     } finally {
       setSaving(false);
     }
@@ -2044,6 +2225,7 @@ function ProfileEditor({
           onClose={() => setBannerPickerOpen(false)}
           onUpload={handleBannerFile}
           showRecent={false}
+          uploadKind="banner"
           title="Select a banner"
           description="Choose a new banner image or GIF for your profile."
           closeLabel="Close banner picker"
@@ -2069,6 +2251,10 @@ function ProfileEditor({
           themeTextColor={previewTheme.textColor}
           avatarSrc={currentAvatarSrc}
           avatarDisplay={currentAvatarDisplay}
+          // The one place Yap name styles are gated, from the signed-in
+          // user's own plan. Classic stays open to everyone; update-profile
+          // enforces the same perk on the server.
+          canUseYapStyles={hasPerk(entitlement, "allNameStyles")}
           onClose={() => setStyleDialogOpen(false)}
           onApply={setDisplayNameStyle}
         />

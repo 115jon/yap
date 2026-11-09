@@ -6,7 +6,9 @@ import { LONG_PRESS_MS } from "@/features/chat/long-press";
 import {
   PRESENCE_LABEL,
   presenceLedOf,
+  gameActivityLabel,
   useCustomStatus,
+  useGameActivity,
   usePresence,
 } from "@/features/presence/live";
 import { mediaUrl } from "@/lib/api";
@@ -32,8 +34,10 @@ function useSecondLine(relationship: Relationship): string {
   const { user, type } = relationship;
   const presence = usePresence(user.id, user.status);
   const custom = useCustomStatus(user.id, user.custom_status);
+  const game = useGameActivity(user.id);
   if (type === RELATIONSHIP.outgoing) return "Request sent";
   if (type !== RELATIONSHIP.friend) return `@${user.username}`;
+  if (game && presence !== "offline") return gameActivityLabel(game);
   if (custom && presence !== "offline") return custom;
   return PRESENCE_LABEL[presence];
 }

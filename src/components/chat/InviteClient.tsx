@@ -13,6 +13,8 @@ import { HomeLink, PageState } from "@/components/PageState";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useCanOfferNativeApp } from "@/hooks/useCanOfferNativeApp";
+import { nativeInviteLink } from "@/lib/native-app-link";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -73,6 +75,10 @@ function serverPath(serverId: string): string {
  * the server; joining needs a session, so a 401 anywhere becomes "Sign in to
  * join" with a sign-in link that returns here. Server error text is never
  * shown: each status maps to written copy.
+ *
+ * In a browser on Windows the invite also offers "Open in Yap for Windows",
+ * the Windows app's `yap-native://invite/<code>` link (native-app-link.ts),
+ * as a secondary key under the web join.
  */
 export default function InviteClient({
   code: codeOverride,
@@ -89,6 +95,7 @@ export default function InviteClient({
   const [state, setState] = useState<InviteState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const redirectTimer = useRef<number | null>(null);
+  const nativeLink = useCanOfferNativeApp() ? nativeInviteLink(code) : null;
 
   useEffect(
     () => () => {
@@ -223,6 +230,11 @@ export default function InviteClient({
                 Accept invite
               </Button>
             )}
+            {nativeLink ? (
+              <Button asChild variant="secondary" size="lg">
+                <a href={nativeLink}>Open in Yap for Windows</a>
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               size="lg"

@@ -10,7 +10,10 @@ import {
   shouldPlayCurrentChannelMessageSound,
 } from "@/lib/reconnect-sound-guard";
 import { playMessageReceived } from "@/lib/sounds";
+import { dragOverSituation, type TooBigSituation } from "@/lib/too-big-copy";
 import type { Attachment, Message } from "@/lib/types";
+import { useMyEntitlement } from "@/hooks/useEntitlement";
+import { clientUploadLimitFor } from "@/lib/upload-limits";
 import { useChatActions, useChatStore } from "@/stores/chat-store";
 import {
   useCallback,
@@ -37,6 +40,10 @@ export function useChatArea({
   jumpToMessageId?: string | null;
   onJumped?: () => void;
 }) {
+  const attachmentLimit = clientUploadLimitFor(
+    useMyEntitlement(),
+    "attachment",
+  );
   const state = useChatStore(
     useShallow((s) => ({
       messages: s.messages,
@@ -93,6 +100,7 @@ export function useChatArea({
       replyTo: null as Message | null,
       showSearch: false,
       isDragging: false,
+      dragOversize: null as TooBigSituation | null,
       threadMessageId: null as string | null,
       showChannelSettings: false,
       showChannelDetails: false,
@@ -116,6 +124,7 @@ export function useChatArea({
     replyTo,
     showSearch,
     isDragging,
+    dragOversize,
     threadMessageId,
     showChannelSettings,
     showChannelDetails,
@@ -1177,19 +1186,34 @@ export function useChatArea({
     setLocalState({ threadMessageId: messageId, showPins: false });
   }, []);
 
-  const onDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setLocalState({ isDragging: true });
-  }, []);
+  // dragover fires every few ms: only touch state when what shows changes.
+  const dragKeyRef = useRef("");
+  const onDragOver = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      // Sizes are known only where the browser exposes the files mid-drag.
+      const oversize = dragOverSituation(
+        e.dataTransfer?.files ?? [],
+        attachmentLimit,
+      );
+      const key = `on:${oversize ? JSON.stringify(oversize) : ""}`;
+      if (dragKeyRef.current === key) return;
+      dragKeyRef.current = key;
+      setLocalState({ isDragging: true, dragOversize: oversize });
+    },
+    [attachmentLimit],
+  );
 
   const onDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setLocalState({ isDragging: false });
+    dragKeyRef.current = "";
+    setLocalState({ isDragging: false, dragOversize: null });
   }, []);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setLocalState({ isDragging: false });
+    dragKeyRef.current = "";
+    setLocalState({ isDragging: false, dragOversize: null });
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
       const event = new CustomEvent("drop-files", { detail: files });
@@ -1233,6 +1257,7 @@ export function useChatArea({
     replyTo,
     showSearch,
     isDragging,
+    dragOversize,
     threadMessageId,
     showChannelSettings,
     showChannelDetails,

@@ -312,6 +312,86 @@ describe("upload tray", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(apiUpload).toHaveBeenCalledTimes(2);
   });
+
+  const sized = (name: string, bytes: number) => {
+    const file = new File(["x"], name, { type: "video/mp4" });
+    Object.defineProperty(file, "size", { value: bytes });
+    return file;
+  };
+  const MiB = 1024 * 1024;
+  const dropAll = (files: File[]) =>
+    act(() => {
+      window.dispatchEvent(new CustomEvent("drop-files", { detail: files }));
+    });
+
+  it("keeps a file over 25 MB in the tray as a card, uploads nothing for it, and still sends the rest", async () => {
+    apiUpload.mockResolvedValue({
+      id: "f3",
+      file_url: "/files/notes.txt",
+      file_name: "notes.txt",
+      file_size: 10,
+      content_type: "text/plain",
+    });
+    renderComposer();
+    dropAll([
+      sized("raid-clip.mp4", Math.round(31.2 * MiB)),
+      new File(["x"], "notes.txt", { type: "text/plain" }),
+    ]);
+
+    const card = await screen.findByRole("alert", {
+      name: "raid-clip.mp4 is 31.2 MB, 6.2 MB over the 25 MB limit.",
+    });
+    expect(card).toHaveTextContent("raid-clip.mp4");
+    expect(card).toHaveTextContent("31.2 MB · 6.2 MB over the 25 MB limit");
+    await waitFor(() => expect(apiUpload).toHaveBeenCalledTimes(1));
+    expect(
+      (apiUpload.mock.calls[0]![1] as FormData).get("file"),
+    ).toHaveProperty("name", "notes.txt");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("folds several too-big files into one card with Remove the big ones", async () => {
+    apiUpload.mockResolvedValue({
+      id: "f4",
+      file_url: "/files/a.txt",
+      file_name: "a.txt",
+      file_size: 10,
+      content_type: "text/plain",
+    });
+    renderComposer();
+    dropAll([
+      sized("a.mp4", 30 * MiB),
+      sized("b.mp4", 40 * MiB),
+      new File(["x"], "a.txt", { type: "text/plain" }),
+    ]);
+    const card = await screen.findByRole("alert", {
+      name: /A few of these won't fit/,
+    });
+    expect(card).toHaveTextContent(
+      "2 files are over the 25 MB limit. The other 1 will still send.",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove the big ones" }),
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows the server's own limit when it answers 413 anyway", async () => {
+    apiUpload.mockRejectedValueOnce(
+      Object.assign(new Error("File too large (max 20MB)"), { status: 413 }),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComposer();
+    drop(new File(["x"], "clip.txt", { type: "text/plain" }));
+    const card = await screen.findByRole("alert", {
+      name: "The server turned it away. It says the limit is 20 MB.",
+    });
+    expect(card).not.toHaveTextContent("too large");
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });
 
 describe("sending", () => {

@@ -10,6 +10,10 @@ compatibility_flags = [
 # upload check fails anyway: the bundled RNNoise worklet asset ends with a
 # sourceMappingURL to a .map file that is not emitted.
 upload_source_maps = false
+# The built site's static files, readable from the Worker (the game icon
+# route reads public/desktop/game-catalog.json through it). The Cloudflare
+# Vite plugin fills in the directory.
+assets = { binding = "ASSETS" }
 
 # Custom Domains: yap.115jon.com (the public home) and meet.115jon.site
 # (the pre-rename host; every request there 301s to the same path on Yap:
@@ -33,7 +37,8 @@ TURN_TOKEN_ID = "7355d949dedf888e6d89a5298f3ffde7"
 # KOVA_AUTH_URL and VITE_KOVA_AUTH_URL are left unset on purpose: both fall back
 # to DEFAULT_KOVA_AUTH_URL in src/lib/site-defaults.ts, the one place to move Kova.
 VITE_KOVA_AUTH_PUBLISHABLE_KEY = "pk_live_yl2Z9ssEwlWuOYHVRWozk9WThozu4nFP3QAhCWAsPhE"
-# Kova user ids allowed to force a collectibles catalog refresh (comma separated).
+# Kova user ids allowed to award manual badges via POST /api/admin/badges (comma
+# separated). The catalog refresh moved to the admin console (yap-admin).
 COLLECTIBLES_ADMIN_USER_IDS = "DADtHxPYMksiibowh0LmZFu8TWT5DI9b"
 REALTIME_ALLOWED_ORIGINS = "https://yap.115jon.com,http://localhost:5173,http://localhost:1420,http://tauri.localhost,https://tauri.localhost"
 
@@ -113,10 +118,13 @@ bucket_name = "ralph-chat-attachments"
 binding = "BACKGROUND_TASKS"
 queue = "ralph-meet-background-tasks"
 
+# A batch is delivered when it is full or after max_batch_timeout. With five
+# per batch a lone message (a link to embed, a mention to notify) sat in the
+# queue for up to 5 s; one per batch delivers it at once.
 [[queues.consumers]]
 queue = "ralph-meet-background-tasks"
-max_batch_size = 5
-max_batch_timeout = 5
+max_batch_size = 1
+max_batch_timeout = 1
 max_retries = 5
 retry_delay = 30
 dead_letter_queue = "ralph-meet-background-tasks-dlq"

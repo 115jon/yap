@@ -14,6 +14,10 @@ import { lenientNumber } from "@/lib/lenient-schema";
 import { looseStruct, safeParse, safeParseJson } from "@/lib/schema";
 import { Schema } from "effect";
 import { getMe } from "@/services/user.service";
+import {
+  featurePausedResponse,
+  isFeatureEnabled,
+} from "@/services/site-flags.service";
 import { clog } from "@/lib/console-logger";
 import type { AvatarDisplay } from "@/lib/avatar-display";
 import {
@@ -24,6 +28,9 @@ import {
 } from "@/lib/voice/soundboard-trigger";
 
 const log = clog("users/me");
+
+/** A first sign-in refused because sign-ups are switched off. */
+class SignupsPausedError extends Error {}
 
 type UserProfileRow = {
   id: string;
@@ -42,6 +49,7 @@ type UserProfileRow = {
   theme_preference: string | null;
   theme_sync_enabled: number;
   media_content_filter: string;
+  share_activity?: boolean;
   updated_at: string | null;
   created_at: string | null;
   bio: string | null;
@@ -49,25 +57,6 @@ type UserProfileRow = {
   status: string;
   custom_status: string | null;
 };
-
-const USER_ID_REFERENCES = [
-  ["servers", "owner_id"],
-  ["server_members", "user_id"],
-  ["member_roles", "user_id"],
-  ["messages", "author_id"],
-  ["invites", "inviter_id"],
-  ["relationships", "user_id"],
-  ["relationships", "target_user_id"],
-  ["dm_recipients", "user_id"],
-  ["read_states", "user_id"],
-  ["attachments", "user_id"],
-  ["message_reactions", "user_id"],
-  ["server_bans", "user_id"],
-  ["server_bans", "banned_by"],
-  ["notifications", "user_id"],
-  ["notifications", "from_user_id"],
-  ["server_audit_logs", "actor_id"],
-] as const;
 
 export const GET = async ({ request }: any) => {
   const authResult = await requireAuth(request);
@@ -94,6 +83,9 @@ export const GET = async ({ request }: any) => {
         const synced = await syncUserFromRalphAuth(db, userId, request.headers);
         if (synced) return apiSuccess(synced);
       } catch (syncErr) {
+        if (syncErr instanceof SignupsPausedError) {
+          return featurePausedResponse("signups", request);
+        }
         log.error("Auto-sync from Ralph Auth failed:", syncErr);
       }
       return apiError(
@@ -316,12 +308,26 @@ async function syncUserFromRalphAuth(
 
   const email =
     authUser.email ?? authUser.primaryEmailAddress?.emailAddress ?? null;
-  const username = normalizeUsernameForStorage(
+  const preferredUsername = normalizeUsernameForStorage(
     authUser.username ??
       (email ? email.split("@")[0] : null) ??
       `user_${userId.slice(-6)}`,
     `user_${userId.slice(-6)}`,
   );
+  // Usernames are unique, case-insensitively. A name another account already
+  // holds never transfers; this sign-in gets its own, suffixed with its id.
+  const nameTaken = await db
+    .prepare(
+      "SELECT 1 AS taken FROM users WHERE lower(username) = ? AND id != ? LIMIT 1",
+    )
+    .bind(preferredUsername, userId)
+    .first();
+  const username = nameTaken
+    ? normalizeUsernameForStorage(
+        `${preferredUsername.slice(0, 25)}_${userId.slice(-6)}`,
+        `user_${userId.slice(-6)}`,
+      )
+    : preferredUsername;
   const fullName = [authUser.firstName, authUser.lastName]
     .filter(Boolean)
     .join(" ");
@@ -331,19 +337,11 @@ async function syncUserFromRalphAuth(
   const now = new Date().toISOString();
   const defaultProfileTheme = applyProfileThemeDefaults({});
 
-  await ensureIdentityClaimsTable(db);
-
-  const claimedUser = await claimLegacyIdentity(db, {
-    authUserId: userId,
-    email,
-    username,
-    displayName,
-    avatarUrl,
-    bio,
-    now,
-  });
-
-  if (claimedUser) return claimedUser;
+  // Only reached for an id with no profile yet: a brand-new account,
+  // refused while sign-ups are switched off.
+  if (!(await isFeatureEnabled("signups", db))) {
+    throw new SignupsPausedError();
+  }
 
   await db
     .prepare(
@@ -392,6 +390,7 @@ async function syncUserFromRalphAuth(
     theme_preference: null,
     theme_sync_enabled: 0,
     media_content_filter: DEFAULT_MEDIA_CONTENT_FILTER,
+    share_activity: true,
     updated_at: now,
     created_at: now,
     bio,
@@ -399,190 +398,6 @@ async function syncUserFromRalphAuth(
     status: "online",
     custom_status: null,
   };
-}
-
-async function ensureIdentityClaimsTable(db: any) {
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS user_identity_claims (
-        auth_user_id TEXT PRIMARY KEY,
-        legacy_user_id TEXT NOT NULL UNIQUE,
-        email TEXT,
-        match_method TEXT NOT NULL,
-        claimed_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )`,
-    )
-    .run();
-}
-
-async function claimLegacyIdentity(
-  db: any,
-  input: {
-    authUserId: string;
-    email: string | null;
-    username: string;
-    displayName: string;
-    avatarUrl: string | null;
-    bio: string | null;
-    now: string;
-  },
-): Promise<UserProfileRow | null> {
-  const existingClaim = (await db
-    .prepare(
-      "SELECT legacy_user_id FROM user_identity_claims WHERE auth_user_id = ? LIMIT 1",
-    )
-    .bind(input.authUserId)
-    .first()
-    .catch(() => null)) as { legacy_user_id: string } | null;
-
-  if (existingClaim?.legacy_user_id) {
-    const mapped = await getMe(db, input.authUserId).catch(() => null);
-    if (mapped) return mapped;
-  }
-
-  const candidates = buildClaimCandidates(input);
-  if (!candidates.length) return null;
-
-  const placeholders = candidates.map(() => "?").join(", ");
-  const { results = [] } = (await db
-    .prepare(
-      `SELECT id, username, display_name, avatar_url, avatar_display, updated_at, bio, pronouns, status, custom_status
-            , banner_url, banner_content_type, nameplate_url, nameplate_content_type
-            , profile_accent_color, profile_background_color, profile_banner_color, display_name_style
-            , theme_preference, theme_sync_enabled, media_content_filter
-        FROM users
-        WHERE id != ? AND lower(username) IN (${placeholders})`,
-    )
-    .bind(input.authUserId, ...candidates)
-    .all()
-    .catch(() => ({ results: [] }))) as { results?: UserProfileRow[] };
-
-  if (results.length !== 1) return null;
-  const legacy = results[0];
-
-  const existingNewUser = (await db
-    .prepare("SELECT id FROM users WHERE id = ? LIMIT 1")
-    .bind(input.authUserId)
-    .first()
-    .catch(() => null)) as { id: string } | null;
-
-  if (!existingNewUser) {
-    const legacyProfileTheme = applyProfileThemeDefaults(legacy);
-    const claimedUsername = normalizeUsernameForStorage(
-      legacy.username,
-      `user_${input.authUserId.slice(-6)}`,
-    );
-    const legacyHoldingUsername = normalizeUsernameForStorage(
-      `claimed_${legacy.id.slice(-24)}`,
-      `legacy_${legacy.id.slice(-8)}`,
-    );
-    await db.batch([
-      db
-        .prepare("UPDATE users SET username = ? WHERE id = ?")
-        .bind(legacyHoldingUsername, legacy.id),
-      db
-        .prepare(
-          `INSERT INTO users (id, username, display_name, avatar_url, avatar_display, banner_url, banner_content_type, nameplate_url, nameplate_content_type, profile_accent_color, profile_background_color, profile_banner_color, display_name_style, theme_preference, theme_sync_enabled, media_content_filter, bio, pronouns, status, custom_status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          input.authUserId,
-          claimedUsername,
-          legacy.display_name,
-          legacy.avatar_url,
-          legacy.avatar_display ?? null,
-          legacy.banner_url,
-          legacy.banner_content_type,
-          legacy.nameplate_url,
-          legacy.nameplate_content_type,
-          legacyProfileTheme.profile_accent_color,
-          legacyProfileTheme.profile_background_color,
-          legacyProfileTheme.profile_banner_color,
-          legacy.display_name_style,
-          legacy.theme_preference,
-          legacy.theme_sync_enabled,
-          legacy.media_content_filter,
-          legacy.bio,
-          legacy.pronouns,
-          legacy.status,
-          legacy.custom_status,
-          legacy.created_at ?? input.now,
-          input.now,
-        ),
-    ]);
-  }
-
-  const statements = USER_ID_REFERENCES.map(([table, column]) =>
-    db
-      .prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`)
-      .bind(input.authUserId, legacy.id),
-  );
-  statements.push(
-    db
-      .prepare(
-        `UPDATE channel_permission_overrides
-         SET target_id = ?
-         WHERE target_type = 'user' AND target_id = ?`,
-      )
-      .bind(input.authUserId, legacy.id),
-  );
-  statements.push(db.prepare("DELETE FROM users WHERE id = ?").bind(legacy.id));
-  statements.push(
-    db
-      .prepare(
-        `INSERT INTO user_identity_claims (auth_user_id, legacy_user_id, email, match_method, claimed_at)
-         VALUES (?, ?, ?, 'username', ?)
-         ON CONFLICT(auth_user_id) DO UPDATE SET
-           legacy_user_id = excluded.legacy_user_id,
-           email = excluded.email,
-           match_method = excluded.match_method,
-           claimed_at = excluded.claimed_at`,
-      )
-      .bind(input.authUserId, legacy.id, input.email, input.now),
-  );
-
-  await db.batch(statements);
-
-  const merged = await getMe(db, input.authUserId);
-  if (!merged.avatar_url && input.avatarUrl) {
-    await db
-      .prepare(
-        "UPDATE users SET avatar_url = ? WHERE id = ? AND (avatar_url IS NULL OR avatar_url = '')",
-      )
-      .bind(input.avatarUrl, input.authUserId)
-      .run();
-    merged.avatar_url = input.avatarUrl;
-  }
-
-  return merged;
-}
-
-function buildClaimCandidates(input: {
-  email: string | null;
-  username: string;
-  displayName: string;
-}) {
-  const values = new Set<string>();
-  const add = (value: string | null | undefined) => {
-    const normalized = value?.trim().toLowerCase();
-    if (normalized && /^[a-z0-9_.-]{3,32}$/.test(normalized)) {
-      values.add(normalized);
-    }
-  };
-
-  add(input.username);
-  const emailLocalPart = input.email?.split("@")[0] ?? null;
-  add(emailLocalPart);
-  if (emailLocalPart) {
-    for (const suffix of ["dev", "test", "admin"]) {
-      if (emailLocalPart.toLowerCase().endsWith(suffix)) {
-        add(emailLocalPart.slice(0, -suffix.length));
-      }
-    }
-  }
-  add(input.displayName);
-
-  return [...values];
 }
 
 export const Route = createFileRoute("/api/users/me")({

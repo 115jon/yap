@@ -33,6 +33,7 @@ import { dispatchOpenProfileEditorEvent } from "@/lib/profile-editor-events";
 import type { Role, User } from "@/lib/types";
 import InlineEmojiText from "./InlineEmojiText";
 import { useChatActions, useChatStore } from "@/stores/chat-store";
+import { useGameActivity } from "@/hooks/useGameActivity";
 import { Icon } from "@/components/ui/icon";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
@@ -221,7 +222,7 @@ function DesktopUserProfilePopover({
   const cardRef = useRef<HTMLDivElement>(null);
   // Read once, at open: keyboard opens focus the first action.
   const [openedByKeyboard] = useState(() => lastInputWasKeyboard());
-  const { loadRelationships } = useChatActions();
+  const { loadRelationships, setProfileUser } = useChatActions();
   const [error, setError] = useState<string | null>(null);
   const [localState, setLocalState] = useReducer(
     (previous: LocalState, next: LocalAction) => ({
@@ -265,6 +266,7 @@ function DesktopUserProfilePopover({
   const liveProfileUser =
     localState.profileUser?.id === userId ? localState.profileUser : null;
   const resolvedUser = liveProfileUser ?? seededUser;
+  const gameActivity = useGameActivity(userId);
   const resolvedUsername = resolvedUser.username ?? username;
   const resolvedDisplayName =
     resolvedUser.display_name?.trim() || displayName || resolvedUsername;
@@ -401,6 +403,15 @@ function DesktopUserProfilePopover({
     onClose();
   };
 
+  // The avatar (or banner): the popover gives way to the full profile. Focus
+  // goes to what opened the popover first, so it returns there when the
+  // full profile closes.
+  const handleViewProfile = () => {
+    if (anchorEl.isConnected) anchorEl.focus({ preventScroll: true });
+    onClose();
+    setProfileUser(resolvedUser);
+  };
+
   const customRoles = optimisticRoles?.filter((role) => !role.is_default) ?? [];
   const showRoles = customRoles.length > 0 || canManageRoles;
   const currentRoleIds = optimisticRoles?.map((role) => role.id) ?? [];
@@ -450,6 +461,7 @@ function DesktopUserProfilePopover({
           name={resolvedDisplayName}
           status={normalizeUserStatus(isOnline ? resolvedStatus : "offline")}
           replayEffectOnBannerHover
+          onViewProfile={handleViewProfile}
           className="w-full"
           scrollClassName="max-h-[calc(min(640px,var(--available-height,100dvh))-var(--rm-profile-frame-reserve-y,0px))]"
           nameAdornment={
@@ -484,7 +496,9 @@ function DesktopUserProfilePopover({
           <ProfileActionNotices controller={actions} />
           {error ? <RowError className="mt-0">{error}</RowError> : null}
           <ProfileSections
+            gameActivity={gameActivity}
             bio={resolvedUser.bio}
+            connections={resolvedUser.connections}
             roles={
               showRoles ? (
                 <ProfileRoleChips

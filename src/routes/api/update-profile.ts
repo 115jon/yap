@@ -11,12 +11,14 @@ import {
 import { cacheDel, CacheKey } from "@/lib/cache";
 import { clog } from "@/lib/console-logger";
 import { ensureUserProfileSchema } from "@/lib/ensure-user-profile-schema";
+import { FREE_ENTITLEMENT, hasPerk } from "@/lib/entitlements";
 import { parseMediaContentFilter } from "@/lib/media-content-filter";
 import {
   applyProfileThemeDefaults,
   normalizeDisplayNameStyle,
   normalizeHexColor,
   serializeDisplayNameStyle,
+  usesYapDisplayNameStyle,
 } from "@/lib/profile-customization";
 import { looseStruct, safeParse } from "@/lib/schema";
 import { readJsonBody } from "@/lib/validate-body";
@@ -26,6 +28,7 @@ import {
   normalizeAvatarDisplay,
   serializeAvatarDisplay,
 } from "@/lib/avatar-display";
+import { getEntitlement } from "@/services/entitlement.service";
 import { findUserAvatarUploadByUrl } from "@/services/user-avatar.service";
 import { ProfileIdentityPatchSchema } from "@/lib/validations";
 
@@ -39,6 +42,7 @@ const profilePatchSchema = looseStruct({
   themePreference: Schema.optional(Schema.Unknown),
   themeSyncEnabled: Schema.optional(Schema.Unknown),
   mediaContentFilter: Schema.optional(Schema.Unknown),
+  shareActivity: Schema.optional(Schema.Unknown),
   avatarDisplay: Schema.optional(Schema.Unknown),
   avatarUrl: Schema.optional(Schema.Unknown),
   removeAvatar: Schema.optional(Schema.Unknown),
@@ -67,6 +71,7 @@ export const PATCH = async ({ request: req }: any) => {
     themePreference,
     themeSyncEnabled,
     mediaContentFilter,
+    shareActivity,
     avatarDisplay,
     avatarUrl,
     removeAvatar,
@@ -90,6 +95,10 @@ export const PATCH = async ({ request: req }: any) => {
   }
   const normalizedDisplayName = identity.data.displayName;
   const normalizedUsername = identity.data.username;
+
+  if (shareActivity !== undefined && typeof shareActivity !== "boolean") {
+    return apiError("Invalid activity sharing flag", 400);
+  }
 
   if (removeAvatar !== undefined && typeof removeAvatar !== "boolean") {
     return apiError("Invalid avatar removal flag", 400);
@@ -214,6 +223,31 @@ export const PATCH = async ({ request: req }: any) => {
     const db = getDB();
     await ensureUserProfileSchema(db);
 
+    // Yap effects, Yap fonts and Wave need allNameStyles, read here from the
+    // plan, never from the client. Re-sending the style already saved is
+    // fine (the editor sends it on every save), so a lapsed plan can still
+    // edit the rest of the profile; it just cannot pick a new Yap style.
+    if (usesYapDisplayNameStyle(normalizedDisplayNameStyle)) {
+      const entitlement = await getEntitlement(db, userId).catch(
+        () => FREE_ENTITLEMENT,
+      );
+      if (!hasPerk(entitlement, "allNameStyles")) {
+        const stored = await db
+          .prepare("SELECT display_name_style FROM users WHERE id = ?")
+          .bind(userId)
+          .first<{ display_name_style: string | null }>();
+        const storedStyle = normalizeDisplayNameStyle(
+          stored?.display_name_style ?? null,
+        );
+        if (
+          serializeDisplayNameStyle(storedStyle) !==
+          serializeDisplayNameStyle(normalizedDisplayNameStyle ?? null)
+        ) {
+          return apiError("Yap name styles come with Yap Loud", 403);
+        }
+      }
+    }
+
     if (!removeAvatar && avatarUrl !== undefined && avatarUrl !== null) {
       const ownedUpload = await findUserAvatarUploadByUrl(
         db,
@@ -262,6 +296,11 @@ export const PATCH = async ({ request: req }: any) => {
     if (normalizedMediaContentFilter !== undefined) {
       updates.push("media_content_filter = ?");
       binds.push(normalizedMediaContentFilter);
+    }
+
+    if (shareActivity !== undefined) {
+      updates.push("share_activity = ?");
+      binds.push(shareActivity ? 1 : 0);
     }
 
     if (normalizedProfileAccentColor !== undefined) {
@@ -340,7 +379,7 @@ export const PATCH = async ({ request: req }: any) => {
     // Read back the updated profile
     const updatedUser = await db
       .prepare(
-        `SELECT id, username, display_name, avatar_url, avatar_display, banner_url, banner_content_type, nameplate_url, nameplate_content_type, profile_accent_color, profile_background_color, profile_banner_color, display_name_style, theme_preference, theme_sync_enabled, media_content_filter, updated_at, bio, pronouns FROM users WHERE id = ?`,
+        `SELECT id, username, display_name, avatar_url, avatar_display, banner_url, banner_content_type, nameplate_url, nameplate_content_type, profile_accent_color, profile_background_color, profile_banner_color, display_name_style, theme_preference, theme_sync_enabled, media_content_filter, share_activity, updated_at, bio, pronouns FROM users WHERE id = ?`,
       )
       .bind(userId)
       .first<{
@@ -360,6 +399,7 @@ export const PATCH = async ({ request: req }: any) => {
         theme_preference: string | null;
         theme_sync_enabled: number;
         media_content_filter: string;
+        share_activity: number | null;
         updated_at: string | null;
         bio: string | null;
         pronouns: string | null;
@@ -423,6 +463,18 @@ export const PATCH = async ({ request: req }: any) => {
       });
     }
 
+    // Private: only the user's own sessions and the gateway (which stops or
+    // resumes showing their game activity) hear it.
+    if (shareActivity !== undefined) {
+      await broadcastToUser(userId, "USER_PROFILE_UPDATE", {
+        user_id: userId,
+        share_activity: updatedUser
+          ? updatedUser.share_activity !== 0
+          : shareActivity,
+        updated_at: updatedUser?.updated_at ?? null,
+      });
+    }
+
     return apiSuccess({
       user: {
         username: updatedUser?.username,
@@ -440,6 +492,7 @@ export const PATCH = async ({ request: req }: any) => {
         theme_preference: updatedUser?.theme_preference,
         theme_sync_enabled: updatedUser?.theme_sync_enabled === 1,
         media_content_filter: updatedUser?.media_content_filter,
+        share_activity: updatedUser ? updatedUser.share_activity !== 0 : true,
         bio: updatedUser?.bio,
         pronouns: updatedUser?.pronouns,
         updated_at: updatedUser?.updated_at,

@@ -350,7 +350,7 @@ Controls appear once per viewport. The account row at the bottom of the tree pan
 
 ## Elevation & Depth
 
-Hybrid, but flat by default: depth is the ply order plus 1px seams. Nothing on plies 0 to 2 carries a shadow. Ply-3 floats take `shadow-2` with a line; dialogs and drawers take `shadow-3`. Light themes run the same geometry at about a third of the alpha and lean more on the seam. Backdrop blur and filter blur are disabled globally in `styles.css`, so overlays stay crisp.
+Hybrid, but flat by default: depth is the ply order plus 1px seams. Nothing on plies 0 to 2 carries a shadow. Ply-3 floats take `shadow-2` with a line; dialogs and drawers take `shadow-3`. Light themes run the same geometry at about a third of the alpha and lean more on the seam. Backdrop blur and filter blur are disabled globally in `styles.css`, so overlays stay crisp (the stage person card's wash opts out; see Ambient glow).
 
 ### Shadow Vocabulary
 
@@ -360,6 +360,7 @@ Hybrid, but flat by default: depth is the ply order plus 1px seams. Nothing on p
 - **Modal** (`0 24px 64px -12px rgb(shadow / 0.72)`, `shadow-3`, utility `shadow-modal`): dialogs and drawers.
 - **Scrim** (`rgb(0 0 0 / 0.56)` dark, `0.28` light; stacked layer `0.24`).
 - **LED halo** (`0 0 0 2px led/22%, 0 0 8px led/45%`): painted once on the LED's `::after`; only its opacity changes.
+- **Ambient glow** (`0 16px 96px 8px`, the picture's colour mixed 55% with black; 42% alpha on light grounds): the focused stage's person card only (`StagePersonCard`, `.rm-stage-glow`). It is the person's picture lighting the stage, like a media scrim a user-image exception, not elevation; it fades in once when the colour is known. The card's wash (the same picture at 32x18, stretched under a `blur-lg` with `data-rm-preserve-blur`) is the one other filter blur, painted once.
 
 ### Named Rules
 
@@ -448,6 +449,10 @@ Picked from `/ui-fixtures?surface=type-mockups` (now only this direction; the Ar
 - **Access frame** (`auth/PublicFrame`): the sign-in dither in a panel on the leading edge at lg (36 percent, max 600; a 160 to 320px strip beside a shared message), a 64px band across the top below lg; a 440px column on plain ground. `PublicKicker` (silkscreen), `PublicTitle` (Bricolage 800, 44 to 68px for an entry screen, 28/32 after it) over a dithered rule, `PublicBody`, a squared `StatusTile`, `FieldPlate` fields and 48px keys. Every public page, 404 and route errors included, is this frame.
 - **Kova card** (`auth/auth-card-appearance.ts` plus the `.auth-split` block in `styles.css`): the same title, rule, legend-plate fields, rule tabs, notched Continue with its cap, secondary provider keys and a silkscreen footer. The SDK owns the title and subtitle wording.
 - **Voice stats** (`voice/DitherChart`): figures sit under a 2px ink rule (no box), every chart label is silkscreen, and the debug screen leads with a Bricolage "Connection" title, an LED status label and a 4-up Martian readout row with peaks (`DitherReadouts`).
+
+### Display name styles
+
+A person's own decoration, not app chrome, so it sits outside the Colour Is Light, dither and motion rules below; `src/styles/name-styles.css` holds every value. **Classic** (solid, gradient, neon, toon, pop, and the eight original faces) is kept as shipped. **Yap** adds Dither fade (the brand Bayer field between two inks, the one place dither runs under text), Holo, Chrome, Pixel shine, CRT, Glitch, Ember, Sticker and Candlelit serif, seven OFL faces (Silkscreen, Unbounded, Syne, Instrument Serif, VT323, Rubik Glitch, Major Mono Display; latin only, not preloaded) and the Wave modifier. A name never clips: the root pads itself by its effect's reach and takes it back with a negative margin, and it truncates itself, so its parents must not (a parent that has to clip leaves `overflow-clip-margin`). Animated effects (Holo, Pixel shine, Ember, Wave) play only while their row is hovered or focused and continuously in an open profile, never under reduced motion or while the app is inactive; Holo and Pixel shine sweep a background position, the one sanctioned paint animation. Light grounds get deeper palettes and a 0.5px guard shadow.
 
 ### Navigation (tree rows)
 

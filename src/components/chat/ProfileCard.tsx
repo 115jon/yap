@@ -6,12 +6,17 @@
  *
  *   size      banner  avatar  name
  *   popover   96      72      18/600   (account popover, rail, editor preview)
- *   modal     120     88      22/600
+ *   modal     176     112     28/600   (the full profile, 640 wide)
  *   sheet     140     88      22/600
+ *
+ * With `onViewProfile` (the popover) the avatar is a button that opens the
+ * full profile, and a click on the banner opens it too. Hovering either, or
+ * focusing the avatar from the keyboard, lifts the avatar a little and shows
+ * a "View profile" chip on the banner.
  *
  * One section order: banner, avatar (ring in the card colour, overlapping
  * the banner by half), name, `@handle · pronouns`, status line, one row of
- * actions, then About me, Roles, Mutual servers, Mutual friends and Member
+ * actions, then Playing a game, About me, Roles, Mutual servers, Mutual friends and Member
  * since (only when known). Headings are sentence-case 12/16 500 ink-2.
  *
  * The card is ply-3 (a float). A profile with custom colours re-points the
@@ -20,6 +25,7 @@
  */
 
 import { AvatarImage } from "@/components/chat/AvatarImage";
+import { GameActivityCard } from "@/components/chat/GameActivity";
 import { avatarShape, isAvatarDecorated } from "@/components/ui/avatar-shape";
 import {
   DECORATION_PLAY_ATTR,
@@ -29,6 +35,7 @@ import {
   PROFILE_EFFECT_STAGE_HEIGHT,
   PROFILE_EFFECT_STAGE_WIDTH,
 } from "@/components/chat/ProfileCollectiblesLayer";
+import { ProfileConnectionList } from "@/components/chat/ProfileConnections";
 import { ProfileDisplayName } from "@/components/chat/ProfileDisplayName";
 import { ProfileSurfaceShell } from "@/components/chat/ProfileSurfaceShell";
 import {
@@ -37,6 +44,7 @@ import {
   type UserStatus,
 } from "@/components/chat/UserStatusDot";
 import InlineEmojiText from "@/components/chat/InlineEmojiText";
+import { MarkdownRenderer } from "@/components/chat/MarkdownRenderer";
 import { ConfirmStrip, RowError } from "@/components/chat/settings/primitives";
 import {
   ActionSheet,
@@ -53,11 +61,15 @@ import {
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { Num } from "@/components/ui/num";
+import { UserBadges } from "@/components/ui/user-badges";
 import { apiDelete, apiPost, apiPut } from "@/lib/api-client";
 import { describeApiError } from "@/lib/api-errors";
 import { getAvatarDecoration, type AvatarDisplay } from "@/lib/avatar-display";
 import { getDisplayInitial, getDisplayName } from "@/lib/display-name";
+import type { GameActivity } from "@/lib/gateway-protocol";
 import { getAuthAssetUrl } from "@/lib/platform";
+import type { UserBadge } from "@/lib/badges";
+import type { PublicConnection } from "@/lib/connections";
 import {
   resolveProfileTheme,
   type DisplayNameStyle,
@@ -128,26 +140,26 @@ export function resolveProfileCardTheme(
 
 const BANNER: Record<ProfileCardSize, string> = {
   popover: "h-24",
-  modal: "h-30",
+  modal: "h-44",
   sheet: "h-35",
 };
 
 /** Avatar box and the half-overlap onto the banner. */
 const AVATAR: Record<ProfileCardSize, string> = {
   popover: "size-18 -mt-9",
-  modal: "size-22 -mt-11",
+  modal: "size-28 -mt-14",
   sheet: "size-22 -mt-11",
 };
 
 const INSET: Record<ProfileCardSize, string> = {
   popover: "px-4 pb-4",
-  modal: "px-5 pb-5",
+  modal: "px-6 pb-6",
   sheet: "px-4 pb-6",
 };
 
 const NAME: Record<ProfileCardSize, string> = {
   popover: "text-ui-lg",
-  modal: "text-ui-xl",
+  modal: "text-ui-2xl",
   sheet: "text-ui-xl",
 };
 
@@ -165,6 +177,7 @@ type ProfileCardUser = Pick<
   avatar_display?: AvatarDisplay | string | null;
   banner_url?: string | null;
   banner_content_type?: string | null;
+  badges?: readonly UserBadge[] | null;
 };
 
 type ProfileCardProps = {
@@ -200,6 +213,11 @@ type ProfileCardProps = {
   /** Change it to replay the effect once (the editor's Preview button). */
   effectReplayKey?: number;
   renderFrame?: boolean;
+  /**
+   * Opens the full profile (the popover): the avatar becomes a button and a
+   * click on the banner opens it too.
+   */
+  onViewProfile?: () => void;
   className?: string;
   surfaceClassName?: string;
   style?: CSSProperties;
@@ -224,6 +242,7 @@ export const ProfileCard = forwardRef<HTMLDivElement, ProfileCardProps>(
       replayEffectOnBannerHover = false,
       effectReplayKey = 0,
       renderFrame = true,
+      onViewProfile,
       className,
       surfaceClassName,
       style,
@@ -232,6 +251,9 @@ export const ProfileCard = forwardRef<HTMLDivElement, ProfileCardProps>(
     ref,
   ) {
     const [bannerHoverReplays, setBannerHoverReplays] = useState(0);
+    // The banner or the avatar is hovered (or the avatar keyboard-focused):
+    // the "View profile" chip shows.
+    const [viewHint, setViewHint] = useState(false);
     const displayName = name ?? getDisplayName(user);
     const pronouns = user.pronouns?.trim() ?? "";
     const avatar =
@@ -283,13 +305,14 @@ export const ProfileCard = forwardRef<HTMLDivElement, ProfileCardProps>(
             <div
               className={cn("relative shrink-0 overflow-hidden", BANNER[size])}
               style={{ background: "var(--rm-profile-custom-banner-fallback)" }}
-              onPointerEnter={
-                replayEffectOnBannerHover
-                  ? (event) => {
-                      if (event.pointerType === "mouse")
-                        setBannerHoverReplays((count) => count + 1);
-                    }
-                  : undefined
+              onPointerEnter={(event) => {
+                if (event.pointerType !== "mouse") return;
+                if (replayEffectOnBannerHover)
+                  setBannerHoverReplays((count) => count + 1);
+                if (onViewProfile) setViewHint(true);
+              }}
+              onPointerLeave={
+                onViewProfile ? () => setViewHint(false) : undefined
               }
             >
               <ProfileAssetLayer
@@ -303,6 +326,28 @@ export const ProfileCard = forwardRef<HTMLDivElement, ProfileCardProps>(
                   background: "var(--rm-profile-custom-banner-overlay)",
                 }}
               />
+              {onViewProfile ? (
+                <>
+                  {/* The pointer path. The avatar button is the keyboard and
+                      screen-reader one, so this stays out of both. */}
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    data-profile-view-banner=""
+                    className="absolute inset-0 cursor-pointer"
+                    onClick={onViewProfile}
+                  />
+                  <span
+                    aria-hidden="true"
+                    data-visible={viewHint ? "" : undefined}
+                    className="pointer-events-none absolute top-2 right-2 flex h-6 items-center gap-1.5 rounded-[2px] bg-[var(--rm-profile-custom-background)] px-2 text-ui-xs font-medium text-ink-1 opacity-0 shadow-float transition-opacity duration-(--dur-2) ease-out data-visible:opacity-100"
+                  >
+                    <Icon name="maximize" size="xs" />
+                    View profile
+                  </span>
+                </>
+              ) : null}
             </div>
 
             <div className={cn("relative flex flex-col gap-4", INSET[size])}>
@@ -312,6 +357,8 @@ export const ProfileCard = forwardRef<HTMLDivElement, ProfileCardProps>(
                   src={avatar}
                   name={displayName}
                   display={user.avatar_display}
+                  onView={onViewProfile}
+                  onViewHint={setViewHint}
                 />
                 <div className="flex min-w-0 flex-col gap-1">
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -336,6 +383,11 @@ export const ProfileCard = forwardRef<HTMLDivElement, ProfileCardProps>(
                       </>
                     ) : null}
                   </p>
+                  <UserBadges
+                    badges={user.badges}
+                    size={size === "sheet" ? "lg" : "md"}
+                    className="-ms-0.5"
+                  />
                   {line}
                 </div>
               </div>
@@ -356,31 +408,55 @@ function ProfileAvatar({
   src,
   name,
   display,
+  onView,
+  onViewHint,
 }: {
   size: ProfileCardSize;
   src: string | null;
   name: string;
   display?: AvatarDisplay | string | null;
+  /** Makes the avatar the button that opens the full profile. */
+  onView?: () => void;
+  onViewHint?: (shown: boolean) => void;
 }) {
   const decorated = Boolean(getAvatarDecoration(display));
+  // The ring is the card colour; the fallback is laid over the opaque card
+  // colour so the banner never shows through a translucent tint.
+  const className = cn(
+    // A square key; a decoration's ring art is drawn for a circle, so a
+    // decorated avatar keeps the round halo and crop (AvatarImage's rule).
+    decorated ? "rounded-full" : "rounded-avatar",
+    "relative z-10 flex shrink-0 items-center justify-center bg-[var(--rm-profile-custom-background)] bg-[linear-gradient(var(--tint-2),var(--tint-2))] font-display text-ui-2xl font-extrabold text-ink-1 shadow-[0_0_0_4px_var(--rm-profile-custom-background)]",
+    AVATAR[size],
+  );
+  const face = src ? (
+    <AvatarImage src={src} alt="" display={display} />
+  ) : (
+    <span aria-hidden="true">{getDisplayInitial({ name })}</span>
+  );
+  if (!onView) return <div className={className}>{face}</div>;
   return (
-    // The ring is the card colour; the fallback is laid over the opaque card
-    // colour so the banner never shows through a translucent tint.
-    <div
+    <button
+      type="button"
+      aria-label={`View ${name}'s full profile`}
+      data-profile-view=""
+      onClick={onView}
+      onPointerEnter={(event) => {
+        if (event.pointerType === "mouse") onViewHint?.(true);
+      }}
+      onPointerLeave={() => onViewHint?.(false)}
+      onFocus={(event) => {
+        if (event.currentTarget.matches(":focus-visible")) onViewHint?.(true);
+      }}
+      onBlur={() => onViewHint?.(false)}
       className={cn(
-        // A square key; a decoration's ring art is drawn for a circle, so a
-        // decorated avatar keeps the round halo and crop (AvatarImage's rule).
-        decorated ? "rounded-full" : "rounded-avatar",
-        "relative z-10 flex shrink-0 items-center justify-center bg-[var(--rm-profile-custom-background)] bg-[linear-gradient(var(--tint-2),var(--tint-2))] font-display text-ui-2xl font-extrabold text-ink-1 shadow-[0_0_0_4px_var(--rm-profile-custom-background)]",
-        AVATAR[size],
+        className,
+        // A small lift on hover or keyboard focus; none under reduced motion.
+        "cursor-pointer transition-transform duration-(--dur-2) ease-out pointer-fine:hover:scale-[1.04] focus-visible:scale-[1.04] motion-reduce:transform-none",
       )}
     >
-      {src ? (
-        <AvatarImage src={src} alt="" display={display} />
-      ) : (
-        <span aria-hidden="true">{getDisplayInitial({ name })}</span>
-      )}
-    </div>
+      {face}
+    </button>
   );
 }
 
@@ -543,14 +619,23 @@ export function ProfileRoleChips({
  * render, and Member since needs a real date.
  */
 export function ProfileSections({
+  gameActivity,
   bio,
+  bioMarkdown = false,
   roles,
   mutualServers,
   mutualFriends,
   memberSince,
+  connections,
   limit = 8,
 }: {
+  /** What they are playing now (presence); first, as on Discord. */
+  gameActivity?: GameActivity | null;
   bio?: string | null;
+  /** Linked accounts the owner shows (users/me and profiles). */
+  connections?: PublicConnection[] | null;
+  /** Render the bio with the message grammar (the full profile). */
+  bioMarkdown?: boolean;
   roles?: ReactNode;
   mutualServers?: MutualSummary<MutualServer> | null;
   mutualFriends?: MutualSummary<MutualFriend> | null;
@@ -561,11 +646,30 @@ export function ProfileSections({
   const about = bio?.trim() ?? "";
   return (
     <>
+      {gameActivity ? (
+        <ProfileSection title="Playing a game">
+          <GameActivityCard activity={gameActivity} />
+        </ProfileSection>
+      ) : null}
       {about ? (
         <ProfileSection title="About me">
-          <p className="max-w-[62ch] text-ui-sm whitespace-pre-line text-pretty break-words text-ink-1">
-            {about}
-          </p>
+          {bioMarkdown ? (
+            <div
+              data-profile-bio=""
+              className="max-w-[62ch] text-ui-sm whitespace-pre-line text-pretty break-words text-ink-1"
+            >
+              <MarkdownRenderer content={about} />
+            </div>
+          ) : (
+            <p className="max-w-[62ch] text-ui-sm whitespace-pre-line text-pretty break-words text-ink-1">
+              {about}
+            </p>
+          )}
+        </ProfileSection>
+      ) : null}
+      {connections && connections.length > 0 ? (
+        <ProfileSection title="Connections">
+          <ProfileConnectionList connections={connections} />
         </ProfileSection>
       ) : null}
       {roles ? <ProfileSection title="Roles">{roles}</ProfileSection> : null}
@@ -811,6 +915,33 @@ export function useProfileActions({
 }
 
 export type ProfileActionsController = ReturnType<typeof useProfileActions>;
+
+/**
+ * Call someone from their profile: the member menu's "Start a call" path
+ * (open the DM, switch to it, ring), then `onStarted` (close the surface).
+ */
+export function useProfileCall({
+  userId,
+  displayName,
+  onStarted,
+}: {
+  userId: string;
+  displayName: string;
+  onStarted?: () => void;
+}) {
+  const { openDm, dispatch } = useChatActions();
+  return useCallback(async () => {
+    const channelId = await openDm(userId);
+    if (!channelId) return;
+    dispatch({ type: "SWITCH_SERVER", serverId: "@me", channelId });
+    window.dispatchEvent(
+      new CustomEvent("request-start-call", {
+        detail: { userId, displayName, channelId },
+      }),
+    );
+    onStarted?.();
+  }, [dispatch, displayName, onStarted, openDm, userId]);
+}
 
 /**
  * The one row of buttons. The primary follows the relationship (overlays

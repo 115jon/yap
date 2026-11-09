@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { requireActiveVoiceRoomSession, requireAuth } from "@/lib/api-helpers";
 import { clog } from "@/lib/console-logger";
+import { featurePaused } from "@/services/site-flags.service";
 import { UpstreamBlockedError } from "@/lib/upstream-guard";
 import { YouTubeBotCheckError } from "@/lib/ytdlp/youtube";
 import { youtubeFetch } from "@/lib/ytdlp/youtube-fetch";
@@ -284,6 +285,8 @@ export async function streamListenTogetherAudio(args: {
   preferredFormat: "mp4" | "webm";
   range: string | null;
   includeBody: boolean;
+  /** Resolve and cache the track only; googlevideo is not asked (a prefetch). */
+  warmOnly?: boolean;
   logContext?: Record<string, unknown>;
 }): Promise<Response> {
   const { videoId, preferredFormat, range, includeBody } = args;
@@ -311,6 +314,13 @@ export async function streamListenTogetherAudio(args: {
       "HOST_NOT_ALLOWED",
       "Resolved stream host is not allowed",
     );
+  }
+
+  if (args.warmOnly) {
+    return new Response(null, {
+      status: 204,
+      headers: { "Cache-Control": "no-store" },
+    });
   }
 
   const upstreamRange = normalizeListenTogetherUpstreamRange(range, {
@@ -428,6 +438,8 @@ export async function proxyListenTogetherStream(
   request: Request,
   includeBody: boolean,
 ): Promise<Response> {
+  const paused = await featurePaused("listenTogether", request);
+  if (paused) return paused;
   const auth = await requireAuth(request);
   if (auth instanceof Response) return auth;
 
@@ -490,6 +502,8 @@ export async function proxyListenTogetherStream(
       preferredFormat,
       range,
       includeBody,
+      // HEAD only: a warm never moves media bytes.
+      warmOnly: !includeBody && url.searchParams.get("warm") === "1",
       logContext: {
         userId: auth.userId,
         roomSlug,

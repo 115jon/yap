@@ -1,4 +1,5 @@
 import InlineEmojiText from "@/components/chat/InlineEmojiText";
+import { SettingsSwitch } from "@/components/chat/SettingsSwitch";
 import { Button, Spinner } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { LedLabel, type LedState } from "@/components/ui/led";
@@ -22,6 +23,75 @@ import {
   useConfirm,
 } from "./primitives";
 import { isSessionEnded, RecoverButton } from "./session-ended";
+
+/* ------------------------------------------------------------------ */
+/* Activity                                                             */
+/* ------------------------------------------------------------------ */
+
+function ShareActivityRow() {
+  const chatUser = useChatStore((state) => state.user);
+  const dispatch = useChatStore((state) => state.dispatch);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSessionEnded, setSaveSessionEnded] = useState(false);
+  // Older /api/users/me answers have no field: sharing is on by default.
+  const sharing = chatUser?.share_activity !== false;
+
+  const handleToggle = async () => {
+    if (!chatUser?.id || saving) return;
+    const next = !sharing;
+    setSaveError(null);
+    setSaveSessionEnded(false);
+    setSaving(true);
+    dispatch({
+      type: "UPDATE_MEMBER_PROFILE",
+      userId: chatUser.id,
+      share_activity: next,
+    });
+    try {
+      await apiPatch("/api/update-profile", { shareActivity: next });
+    } catch (error) {
+      dispatch({
+        type: "UPDATE_MEMBER_PROFILE",
+        userId: chatUser.id,
+        share_activity: !next,
+      });
+      setSaveError(describeApiError(error, "save your activity setting"));
+      setSaveSessionEnded(isSessionEnded(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SettingsRow
+      id="share-activity"
+      layout="inline"
+      footer={
+        saveError ? (
+          <>
+            <RowError>{saveError}</RowError>
+            {saveSessionEnded ? (
+              <div className="mt-2">
+                <RecoverButton sessionEnded onRetry={() => {}} />
+              </div>
+            ) : null}
+          </>
+        ) : null
+      }
+    >
+      {(ids) => (
+        <SettingsSwitch
+          checked={sharing}
+          onChange={() => void handleToggle()}
+          labelledBy={ids.labelId}
+          describedBy={ids.descId}
+          disabled={!chatUser?.id || saving}
+        />
+      )}
+    </SettingsRow>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /* Media filter                                                         */
@@ -449,6 +519,9 @@ function TabCount({ children }: { children: number }) {
 export default function PrivacyPanel() {
   return (
     <>
+      <SettingsCard id="activity">
+        <ShareActivityRow />
+      </SettingsCard>
       <SettingsCard id="media-filter">
         <MediaFilterRow />
       </SettingsCard>

@@ -15,6 +15,20 @@ import { FoundationFixture } from "@/components/dev/foundation-fixtures";
 import { SoundFixture } from "@/components/dev/sound-fixtures";
 import { StandaloneUpdaterView } from "@/components/StandaloneUpdater";
 import { DitherMockupsFixture } from "@/components/dev/dither-mockups";
+import { ChunkedUploadFixture } from "@/components/dev/chunked-upload-fixtures";
+import { SiteBannerFixture } from "@/components/dev/site-banner-fixture";
+import { TooBigFixture } from "@/components/dev/too-big-fixtures";
+import { BadgesFixture, TiersFixture } from "@/components/dev/tiers-fixtures";
+import {
+  ConnectionsProfileFixture,
+  connectionsFixtureState,
+  installConnectionsStub,
+} from "@/components/dev/connections-fixtures";
+import {
+  applyNameStyleParam,
+  NameStyleEditorFixture,
+  NameStylesFixture,
+} from "@/components/dev/name-style-fixtures";
 import { ComponentKitFixture } from "@/components/dev/component-kit-mockups";
 import { ConnectionStatesFixture } from "@/components/dev/connection-states-mockups";
 import { TypeMockupsFixture } from "@/components/dev/type-mockups";
@@ -69,6 +83,7 @@ import VoiceChannelMediaStatusModal from "@/components/chat/VoiceChannelMediaSta
 import { AudioInteractionModal } from "@/components/voice/AudioInteractionModal";
 import { ExternalLinkConfirmModal } from "@/components/ui/ExternalLinkConfirmModal";
 import { StreamContextMenu } from "@/components/StreamContextMenu";
+import { Slider } from "@/components/ContextMenu/ContextMenuItems";
 import { ImageViewerModal } from "@/components/chat/ImageViewerModal";
 import { useImageViewerStore } from "@/stores/useImageViewerStore";
 import { MobileNavigationSheet } from "@/components/chat/MobileNavigationSheet";
@@ -115,6 +130,8 @@ import coverSlowfires from "@/components/dev/assets/cover-slowfires.webp";
 import coverGlasshouse from "@/components/dev/assets/cover-glasshouse.webp";
 import coverTidelines from "@/components/dev/assets/cover-tidelines.webp";
 import coverSmallhours from "@/components/dev/assets/cover-smallhours.webp";
+import avatarAda from "@/components/dev/assets/avatar-ada.webp";
+import avatarLinus from "@/components/dev/assets/avatar-linus.gif";
 import { SplashScreen } from "@/components/SplashScreen";
 import { VoiceControls } from "@/components/voice/VoiceControls";
 import { MembersTray, VoiceStage } from "@/components/voice/VoiceStage";
@@ -131,14 +148,24 @@ import { VoiceHeader } from "@/components/voice/VoiceHeader";
 import { VoiceLanding } from "@/components/voice/VoiceLanding";
 import { ConnectionBanner } from "@/components/voice/ConnectionBanner";
 import type { GridItem } from "@/components/voice/types";
-import type { ChatMember, VoiceChannelMember } from "@/lib/chat-reducer";
+import type {
+  ChatMember,
+  ChatState,
+  VoiceChannelMember,
+} from "@/lib/chat-reducer";
 import type { Category, Channel, Message, Server, User } from "@/lib/types";
 import { useChatStore } from "@/stores/chat-store";
 import { type MobileTab, useMobileTabStore } from "@/stores/useMobileTabStore";
 import { useSearch } from "@tanstack/react-router";
 import { Icon } from "@/components/ui/icon";
 import { useTheme } from "next-themes";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { cn } from "@/lib/utils";
 import UserProfilePopover from "@/components/chat/UserProfilePopover";
 import UserAccountPopover from "@/components/chat/UserAccountPopover";
@@ -178,6 +205,17 @@ const users: Record<string, User> = {
     display_name: "Jon",
     status: "online",
     custom_status: LANDING_COPY ? "around tonight" : "shipping the UI pass",
+    entitlement: {
+      tier: "founder",
+      source: "grant",
+      started_at: "2026-11-09T00:00:00.000Z",
+      expires_at: null,
+    },
+    badges: [
+      { id: "founder", awarded_at: "2026-11-09T00:00:00.000Z" },
+      { id: "yap-team", awarded_at: "2026-11-09T00:00:00.000Z" },
+      { id: "early-yapper", awarded_at: "2026-11-10T00:00:00.000Z" },
+    ],
   },
   ada: {
     id: "u-ada",
@@ -510,6 +548,45 @@ const voiceMembers: VoiceChannelMember[] = [
   },
 ];
 
+/**
+ * `games=1`: game activity ("Playing X") on the fixture people: an icon
+ * (Jon), no icon with Rich Presence details and state (Ada), and a long name
+ * over a custom status (Grace). Icons are catalog paths; the capture script
+ * answers /api/game-icons itself, so nothing reaches Discord.
+ */
+function fixtureGameActivities(): ChatState["gameActivityByUserId"] {
+  if (fixtureParam("games") !== "1") return {};
+  const started = (minutesAgo: number) => Date.now() - minutesAgo * 60_000;
+  return {
+    "u-me": {
+      kind: "playing",
+      name: "Overwatch",
+      app_id: "356875221078245376",
+      icon_url:
+        "/api/game-icons/356875221078245376/a60bb76ba4d4acafbd4cb9aad6e61739.png",
+      started_at: started(12.5),
+      source: "detected",
+    },
+    "u-ada": {
+      kind: "playing",
+      name: "Celeste",
+      details: "Chapter 7: The Summit",
+      state: "B-side, 1,204 deaths",
+      started_at: started(83),
+      source: "rpc",
+    },
+    "u-grace": {
+      kind: "playing",
+      name: "The Elder Scrolls V: Skyrim Special Edition Anniversary Upgrade",
+      app_id: "356875762940379136",
+      icon_url:
+        "/api/game-icons/356875762940379136/fc92f820c44e72085dc6205e5e746850.png",
+      started_at: started(2),
+      source: "detected",
+    },
+  };
+}
+
 function seedStore(surface: string) {
   const isEmpty = surface === "shell-empty";
   // DM call fixtures render the DM shell: the call's conversation is the
@@ -556,6 +633,7 @@ function seedStore(surface: string) {
     membersByServerId: { "s-1": members },
     membersLoadedByServerId: { "s-1": true },
     onlineUsers: new Set(["u-me", "u-ada", "u-grace", "u-linus"]),
+    gameActivityByUserId: fixtureGameActivities(),
     readStates: { "ch-general": at(0), "ch-welcome": at(0) },
     lastMessageAt: {
       "ch-general": at(3),
@@ -1146,6 +1224,20 @@ const tileStateItems: GridItem[] = [
     isSpeaking: false,
   },
 ];
+
+/**
+ * The stage person card (`voice-person&who=linus|ada|grace`): Linus has an
+ * animated GIF and is talking, Ada a still picture, Grace no picture (her
+ * profile tint lights the card).
+ */
+const personAvatars = new Map([
+  ["g-ada", avatarAda],
+  ["g-linus", avatarLinus],
+]);
+const personItems: GridItem[] = gridItems.map((g) => ({
+  ...g,
+  avatar: personAvatars.get(g.id) ?? null,
+}));
 
 /** Nine people: they fit at 1280x720 without scrolling; a phone scrolls. */
 const manyItems: GridItem[] = [
@@ -1761,6 +1853,52 @@ function useFixtureDevices() {
   return ready;
 }
 
+/**
+ * `volume-boost`: the per-user volume slider (0-400 %) on the menu ply, one
+ * row per `v` (comma list, default 100,250,400). The rows are live, so the
+ * keys and drag snap can be tried.
+ */
+function VolumeBoostFixture() {
+  // Read after hydration (the server renders the default list).
+  const param = useSyncExternalStore(
+    subscribeNever,
+    () => fixtureParam("v") ?? DEFAULT_BOOST_VALUES,
+    () => DEFAULT_BOOST_VALUES,
+  );
+  return <VolumeBoostRows key={param} initial={param} />;
+}
+
+const DEFAULT_BOOST_VALUES = "100,250,400";
+const subscribeNever = () => () => {};
+
+function VolumeBoostRows({ initial }: { initial: string }) {
+  const [values, setValues] = useState(() =>
+    initial.split(",").map(Number).filter(Number.isFinite),
+  );
+  return (
+    <div className="grid h-full w-full place-items-center bg-ply-0 p-6">
+      <div
+        data-fixture="volume-boost"
+        className="w-[300px] rounded-lg border border-line bg-ply-3 py-1 shadow-float"
+      >
+        {values.map((value, index) => (
+          <Slider
+            key={index}
+            label={index % 2 === 0 ? "User volume" : "Stream volume"}
+            value={value}
+            boost
+            onChange={(next) =>
+              setValues((current) =>
+                current.map((entry, at) => (at === index ? next : entry)),
+              )
+            }
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Extra fixture query params the route doesn't validate (row, desktop). */
 function fixtureParam(name: string): string | null {
   if (typeof window === "undefined") return null;
@@ -1769,6 +1907,14 @@ function fixtureParam(name: string): string | null {
 
 function SettingsFixture({ tab }: { tab?: string }) {
   useFixtureDevices();
+  // Connections reads /api/connections on mount: stub it before the first
+  // render (`&state=empty|linked|hidden|error`).
+  const [uninstallConnections] = useState(() =>
+    tab === "connections"
+      ? installConnectionsStub(connectionsFixtureState(fixtureParam("state")))
+      : null,
+  );
+  useEffect(() => () => uninstallConnections?.(), [uninstallConnections]);
   return (
     <div className="relative h-full w-full bg-rm-bg-primary">
       <Shell surface="shell" />
@@ -2900,6 +3046,11 @@ export default function UiFixtures() {
         fixtureParam("frame"),
       );
     }
+    applyNameStyleParam(
+      [...Object.values(users), spMe, spAda, spGrace],
+      fixtureParam("name"),
+      fixtureParam("wave") === "1",
+    );
     seedStore(surface);
     setTheme(theme);
     const id = window.setTimeout(() => setReady(true), 0);
@@ -2941,6 +3092,14 @@ export default function UiFixtures() {
     case "voice-focus":
       content = <VoiceRoom focusId="g-ada" />;
       break;
+    case "voice-person":
+      content = (
+        <VoiceRoom
+          focusId={`g-${fixtureParam("who") ?? "linus"}`}
+          items={personItems}
+        />
+      );
+      break;
     case "voice-tiles":
       content = <VoiceRoom items={tileStateItems} />;
       break;
@@ -2981,6 +3140,9 @@ export default function UiFixtures() {
       break;
     case "menus":
       content = <Menus />;
+      break;
+    case "volume-boost":
+      content = <VolumeBoostFixture />;
       break;
     case "splash":
       content = <SplashScreen />;
@@ -3055,6 +3217,35 @@ export default function UiFixtures() {
       break;
     case "dither-mockups":
       content = <DitherMockupsFixture />;
+      break;
+    case "too-big":
+      content = <TooBigFixture />;
+      break;
+    case "badges":
+      content = <BadgesFixture />;
+      break;
+    case "tiers":
+      content = <TiersFixture />;
+      break;
+    case "connections-profile":
+      content = <ConnectionsProfileFixture />;
+      break;
+    case "site-banner":
+      content = <SiteBannerFixture />;
+      break;
+    case "name-styles":
+      content = (
+        <NameStylesFixture
+          wave={fixtureParam("wave") === "1"}
+          play={fixtureParam("play") === "1"}
+        />
+      );
+      break;
+    case "name-style-editor":
+      content = <NameStyleEditorFixture />;
+      break;
+    case "chunked-upload":
+      content = <ChunkedUploadFixture />;
       break;
     case "type-mockups":
       content = <TypeMockupsFixture />;

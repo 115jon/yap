@@ -163,11 +163,12 @@ export function MobileYouPage({ onNavigate }: { onNavigate: () => void }) {
               <UserStatusDot status={status} className="size-4" />
             </span>
           </div>
-          <h1 id={titleId} className="mt-2 truncate text-ui-xl font-semibold">
+          <h1 id={titleId} className="mt-2 min-w-0 text-ui-xl font-semibold">
+            {/* The name truncates itself, so its effect is never clipped. */}
             <ProfileDisplayName
               text={displayName}
               displayNameStyle={user.display_name_style}
-              className="text-ink-1"
+              className="block truncate text-ink-1"
               backgroundColor={theme.backgroundColor}
               readableFallbackColor={theme.textColor}
             />

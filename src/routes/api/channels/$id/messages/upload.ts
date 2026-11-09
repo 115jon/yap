@@ -14,10 +14,12 @@ import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireChannelAccess } from "@/lib/require-channel-access";
 import { getUserPermissions } from "@/lib/require-permission";
+import { tooLargeMessage, uploadLimitFor } from "@/lib/upload-limits";
+import { FREE_ENTITLEMENT } from "@/lib/entitlements";
+import { getEntitlement } from "@/services/entitlement.service";
 import { getSoundboardUploadUrl } from "@/lib/voice/soundboard-media";
+import { featurePaused } from "@/services/site-flags.service";
 
-const DEFAULT_UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024;
-const SOUNDBOARD_UPLOAD_LIMIT_BYTES = 50 * 1024 * 1024;
 const SOUNDBOARD_AUDIO_TYPES_BY_EXTENSION: Record<string, string> = {
   aac: "audio/aac",
   flac: "audio/flac",
@@ -83,15 +85,28 @@ export const POST = async ({ request, params }: any) => {
     return apiError("No file provided", 400);
   }
 
+  if (isSoundboardUpload) {
+    const paused = await featurePaused("soundboardUploads", request);
+    if (paused) return paused;
+  }
+
   if (isSoundboardUpload && !serverId) {
     return apiError("Soundboard uploads require a server channel", 400);
   }
 
-  const uploadLimit = isSoundboardUpload
-    ? SOUNDBOARD_UPLOAD_LIMIT_BYTES
-    : DEFAULT_UPLOAD_LIMIT_BYTES;
+  // The plan decides the limit (bigUploads), read here, never from the
+  // client, and only for a file over the free limit (most are not). If it
+  // cannot be read, the free limit applies.
+  const uploadKind = isSoundboardUpload ? "soundboard" : "attachment";
+  let uploadLimit = uploadLimitFor(FREE_ENTITLEMENT, uploadKind);
   if (file.size > uploadLimit) {
-    return apiError(`File too large (max ${uploadLimit / 1024 / 1024}MB)`, 413);
+    const entitlement = await getEntitlement(getDB(), userId).catch(
+      () => FREE_ENTITLEMENT,
+    );
+    uploadLimit = uploadLimitFor(entitlement, uploadKind);
+  }
+  if (file.size > uploadLimit) {
+    return apiError(tooLargeMessage("File", uploadLimit), 413);
   }
 
   // Accept any MIME type — security is enforced at the serving layer
@@ -141,7 +156,8 @@ export const POST = async ({ request, params }: any) => {
   const key = `attachments/${channelId}/${attachmentId}/${file.name}`;
 
   // Upload to R2
-  await bucket.put(key, await file.arrayBuffer(), {
+  // The File itself, not a second in-memory copy of it.
+  await bucket.put(key, file, {
     httpMetadata: { contentType },
   });
 

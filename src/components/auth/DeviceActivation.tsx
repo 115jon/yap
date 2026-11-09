@@ -21,6 +21,11 @@
  * can look it up), then signs out straight to that same sign-in URL. If the
  * release fails it still signs out, but lands on a "Code in use" page that
  * asks for a fresh code from the device (`?release=failed`).
+ *
+ * A code from the native Windows client (Yap) ends on an "Open Yap"
+ * key, and the page tries `yap-native://signin?code=…` once on its own, so
+ * the browser offers to open the app (src/lib/native-app-link.ts). The link
+ * carries no token: the app is already polling the code.
  */
 
 import { Avatar } from "@/components/ui/avatar";
@@ -43,6 +48,11 @@ import {
 } from "@/lib/device-code-format";
 import { getKovaAuthUrl } from "@/lib/kova-auth-config";
 import { endKovaBrowserSession } from "@/lib/kova-sign-out";
+import {
+  isNativeAppDevice,
+  launchNativeApp,
+  nativeSignInLink,
+} from "@/lib/native-app-link";
 import {
   useAuth,
   useDeviceApproval,
@@ -85,7 +95,13 @@ type View =
   | { kind: "enter"; code: string; error?: string }
   | { kind: "loading"; code: string }
   | { kind: "review"; code: string; request: DeviceRequest }
-  | { kind: "approved"; code: string; deviceName?: string }
+  | {
+      kind: "approved";
+      code: string;
+      deviceName?: string;
+      /** `yap-native://signin?…` when the native client asked. */
+      appLink?: string;
+    }
   | {
       kind: "outcome";
       code: string;
@@ -435,6 +451,16 @@ export function DeviceActivation({
     lookupNonce,
   ]);
 
+  // The native client's link, tried once as the approval lands; the
+  // "Open Yap" key stays for a browser that asks first or was dismissed.
+  const appLink = view.kind === "approved" ? view.appLink : undefined;
+  const launched = useRef(false);
+  useEffect(() => {
+    if (!appLink || launched.current) return;
+    launched.current = true;
+    launchNativeApp(appLink);
+  }, [appLink]);
+
   // Move focus to the heading whenever the stage changes.
   useEffect(() => {
     headingRef.current?.focus({ preventScroll: true });
@@ -451,9 +477,17 @@ export function DeviceActivation({
     if (result.ok) {
       if (result.status === "approved") {
         const name = deviceName(request);
-        setView({ kind: "approved", code: request.userCode, deviceName: name });
+        const appLink = isNativeAppDevice(request.device)
+          ? nativeSignInLink(request.userCode)
+          : undefined;
+        setView({
+          kind: "approved",
+          code: request.userCode,
+          deviceName: name,
+          appLink,
+        });
         setStatus(
-          `${name ? `You're signed in on ${name}` : "You're signed in"}. You can close this tab and go back to the app.`,
+          `${name ? `You're signed in on ${name}` : "You're signed in"}. ${appLink ? "Opening the app." : "You can close this tab and go back to the app."}`,
         );
       } else {
         setView({ kind: "outcome", code: request.userCode, outcome: "denied" });
@@ -781,12 +815,33 @@ export function DeviceActivation({
             ? `You're signed in on ${view.deviceName}`
             : "You're signed in"}
         </PublicTitle>
-        <PublicBody>You can close this tab and go back to the app.</PublicBody>
-        <PublicActions>
-          <Button asChild variant="secondary" size="lg">
-            <a href="/chat">Open Yap here</a>
-          </Button>
-        </PublicActions>
+        {view.appLink ? (
+          <>
+            <PublicBody>
+              Your browser may ask to open Yap. If it doesn't open, use the
+              button below.
+            </PublicBody>
+            <PublicActions>
+              <Button asChild size="lg">
+                <a href={view.appLink}>Open Yap</a>
+              </Button>
+              <Button asChild variant="secondary" size="lg">
+                <a href="/chat">Open Yap here</a>
+              </Button>
+            </PublicActions>
+          </>
+        ) : (
+          <>
+            <PublicBody>
+              You can close this tab and go back to the app.
+            </PublicBody>
+            <PublicActions>
+              <Button asChild variant="secondary" size="lg">
+                <a href="/chat">Open Yap here</a>
+              </Button>
+            </PublicActions>
+          </>
+        )}
         {live}
       </div>
     );

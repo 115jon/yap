@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getToken: vi.fn(async () => "tok_app"),
   setStoredKovaAuthSessionToken: vi.fn(),
   isSignedIn: true,
+  signInProps: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -20,7 +21,10 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 vi.mock("@kova/react", () => ({
-  SignIn: () => <div data-testid="sign-in-form" />,
+  SignIn: (props: Record<string, unknown>) => {
+    mocks.signInProps = props;
+    return <div data-testid="sign-in-form" />;
+  },
   useAuth: () => ({
     getToken: mocks.getToken,
     isLoaded: true,
@@ -63,8 +67,17 @@ vi.mock("@/components/auth/auth-card-appearance", () => ({
 
 import { Route } from "./sign-in";
 
-const SignInPage = (Route as unknown as { options: { component: React.FC } })
-  .options.component;
+const routeOptions = (
+  Route as unknown as {
+    options: {
+      component: React.FC;
+      validateSearch: (search: Record<string, unknown>) => {
+        redirect_url?: string;
+      };
+    };
+  }
+).options;
+const SignInPage = routeOptions.component;
 
 beforeEach(() => {
   mocks.isSignedIn = true;
@@ -83,6 +96,28 @@ describe("/sign-in after signing in", () => {
       }),
     );
     expect(mocks.setStoredKovaAuthSessionToken).toHaveBeenCalledWith("tok_app");
+  });
+
+  it("returns a guest to the room they signed in from", async () => {
+    mocks.search = { redirect_url: "/room/standup" };
+    render(<SignInPage />);
+    await waitFor(() =>
+      expect(mocks.navigate).toHaveBeenCalledWith({
+        href: "/room/standup",
+        replace: true,
+      }),
+    );
+  });
+
+  it("ignores a redirect_url that leaves the app", async () => {
+    mocks.search = { redirect_url: "//evil.example/room/standup" };
+    render(<SignInPage />);
+    await waitFor(() =>
+      expect(mocks.navigate).toHaveBeenCalledWith({
+        href: "/chat",
+        replace: true,
+      }),
+    );
   });
 
   it("goes to /chat without a redirect_url", async () => {
@@ -114,5 +149,27 @@ describe("/sign-in reached from /activate", () => {
     render(<SignInPage />);
     expect(screen.queryByText("A device is waiting to sign in")).toBeNull();
     expect(screen.getByTestId("sign-in-form")).toBeInTheDocument();
+  });
+});
+
+describe("/sign-in reached from a guest room", () => {
+  it("keeps redirect_url in the search params", () => {
+    expect(
+      routeOptions.validateSearch({ redirect_url: "/room/standup" }),
+    ).toMatchObject({ redirect_url: "/room/standup" });
+  });
+
+  it("carries the room through the OAuth round trip", () => {
+    mocks.isSignedIn = false;
+    mocks.search = { redirect_url: "/room/standup" };
+    render(<SignInPage />);
+    // Kova sends the user back to this URL after Google; /sign-in then reads
+    // redirect_url again and finishes the redirect above.
+    expect(mocks.signInProps?.afterSignInUrl).toBe(
+      "/sign-in?redirect_url=%2Froom%2Fstandup",
+    );
+    expect(mocks.signInProps?.signUpUrl).toBe(
+      "/sign-up?redirect_url=%2Froom%2Fstandup",
+    );
   });
 });

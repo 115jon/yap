@@ -176,6 +176,7 @@ export default function UserAccountPopover({
     ? {
         ...user,
         avatar_display: currentUser.avatar_display ?? user.avatar_display,
+        badges: currentUser.badges ?? user.badges,
       }
     : user;
   const [showStatusMenu, setShowStatusMenu] = useState(

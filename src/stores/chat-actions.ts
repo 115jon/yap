@@ -3,6 +3,9 @@ import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api-client";
 import { getUnreadChannelState } from "@/lib/desktop-notifications";
 import { syncDesktopNotificationState } from "@/lib/desktop-native-sync";
 import { parseMediaContentFilter } from "@/lib/media-content-filter";
+import { parseUserBadges } from "@/lib/badges";
+import { parsePublicConnections } from "@/lib/connections";
+import { parseEntitlement } from "@/lib/entitlements";
 import type { ChatAction, ChatState } from "@/lib/chat-reducer";
 import type {
   Notification as AppNotification,
@@ -819,6 +822,9 @@ export function createChatActions(
             voiceLeaveSoundboard?: unknown;
             soundboardVolume?: unknown;
           };
+          entitlement?: unknown;
+          badges?: unknown;
+          connections?: unknown;
         }>("/api/users/me"),
       );
       if (
@@ -857,11 +863,23 @@ export function createChatActions(
           ),
           updated_at: profile.updated_at ?? current?.updated_at,
           created_at: profile.created_at ?? current?.created_at,
-          bio: profile.bio ?? current?.bio,
-          pronouns: profile.pronouns ?? current?.pronouns,
+          // users/me sends null for a cleared field: clear it, don't keep
+          // the old value (a cleared bio left the profile editor dirty).
+          bio:
+            profile.bio === undefined
+              ? current?.bio
+              : (profile.bio ?? undefined),
+          pronouns:
+            profile.pronouns === undefined
+              ? current?.pronouns
+              : (profile.pronouns ?? undefined),
           presence_platforms: current?.presence_platforms,
           status: (profile.status as any) ?? current?.status ?? "online",
           custom_status: profile.custom_status ?? current?.custom_status,
+          entitlement: parseEntitlement(profile.entitlement),
+          badges: parseUserBadges(profile.badges),
+          // The profile's own Connections block reads these (no fetch for self).
+          connections: parsePublicConnections(profile.connections),
         },
       });
       // Also update member caches and voice states when display-only fields change.

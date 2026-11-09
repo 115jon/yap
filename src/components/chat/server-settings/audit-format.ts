@@ -191,6 +191,44 @@ function serverDetails(changes: Record<string, unknown>): AuditDetail[] {
   return details;
 }
 
+/**
+ * A voice status as words. It is a `{ text, media }` object (older entries
+ * hold the bare text): the text, and the media's title (or its kind, as
+ * "a clip" / "a GIF") after it. Mirrors the native client's audit log.
+ */
+export function voiceStatusShown(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const status = value as Record<string, unknown>;
+  const text = typeof status.text === "string" ? status.text.trim() : "";
+  const media = mediaShown(status.media);
+  if (text && media) return `${text} (${media})`;
+  return text || media;
+}
+
+function mediaShown(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const media = value as Record<string, unknown>;
+  const title = typeof media.title === "string" ? media.title.trim() : "";
+  if (title) return title;
+  const video =
+    typeof media.preview_content_type === "string" &&
+    media.preview_content_type.startsWith("video/");
+  switch (media.media_type) {
+    case "clips":
+      return "a clip";
+    case "stickers":
+      return "a sticker";
+    case undefined:
+    case null:
+      return video ? "a clip" : "a GIF";
+    default:
+      return "a GIF";
+  }
+}
+
 function channelDetails(changes: Record<string, unknown>): AuditDetail[] {
   const details: AuditDetail[] = [];
   for (const [key, raw] of Object.entries(changes)) {
@@ -209,15 +247,18 @@ function channelDetails(changes: Record<string, unknown>): AuditDetail[] {
           ? "Public sharing follows the server"
           : `Public sharing ${onOff(after)}`,
       });
-    else if (key === "voice_status")
+    else if (key === "voice_status") {
+      const now = voiceStatusShown(after);
+      const was = voiceStatusShown(before);
       details.push({
         type: "text",
-        text: isEmpty(after)
+        text: !now
           ? "Cleared the voice status"
-          : isEmpty(before)
-            ? `Voice status: ${after}`
-            : `Voice status: ${before} → ${after}`,
+          : !was
+            ? `Voice status: ${now}`
+            : `Voice status: ${was} → ${now}`,
       });
+    }
   }
   return details;
 }

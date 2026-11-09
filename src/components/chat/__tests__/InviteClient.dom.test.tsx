@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   apiGet: vi.fn(),
   apiPost: vi.fn(),
+  canOffer: vi.fn(() => false),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -23,6 +24,11 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("@/lib/api-client", () => ({
   apiGet: mocks.apiGet,
   apiPost: mocks.apiPost,
+}));
+
+vi.mock("@/lib/native-app-link", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/native-app-link")>()),
+  canOfferNativeApp: mocks.canOffer,
 }));
 
 vi.mock("@/components/chat/InlineEmojiText", () => ({
@@ -45,6 +51,7 @@ beforeEach(() => {
   mocks.navigate.mockReset();
   mocks.apiGet.mockReset();
   mocks.apiPost.mockReset();
+  mocks.canOffer.mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -52,6 +59,29 @@ afterEach(() => {
 });
 
 describe("InviteClient", () => {
+  it("offers the Windows app as a second key in a browser on Windows", async () => {
+    mocks.canOffer.mockReturnValue(true);
+    mocks.apiGet.mockResolvedValue(INVITE);
+    render(<InviteClient />);
+    const native = await screen.findByRole("link", {
+      name: "Open in Yap for Windows",
+    });
+    expect(native).toHaveAttribute("href", "yap-native://invite/abc123");
+    const accept = screen.getByRole("button", { name: "Accept invite" });
+    expect(
+      accept.compareDocumentPosition(native) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("doesn't offer the Windows app where it can't open (Tauri, mobile)", async () => {
+    mocks.apiGet.mockResolvedValue(INVITE);
+    render(<InviteClient />);
+    await screen.findByRole("button", { name: "Accept invite" });
+    expect(
+      screen.queryByRole("link", { name: /Open in Yap for Windows/ }),
+    ).toBeNull();
+  });
+
   it("shows the server and a sign-in link back to the invite on 401", async () => {
     mocks.apiGet.mockImplementation(async (_url: string, opts?: unknown) => {
       if (!opts) throw httpError(401, "Authentication required");

@@ -4,12 +4,150 @@ const audioLog = clog("SFU:Audio");
 // ============================================================================
 // AudioPipeline — Volume control, master gain, limiter, output device
 //
-// Chain: MediaStreamSource → per-participant GainNode → Limiter → MasterGain → destination
+// Chain: MediaStreamSource → per-track GainNode → StereoPanner
+//        [→ boost limiter, only while that track's gain is above 1]
+//        → Limiter → MasterGain → destination
 // ============================================================================
 
 import { resumeSoundContext } from "@/lib/sounds";
 import { prewarmCaptureAudioContext } from "@/lib/voice/capture-audio-context";
+import {
+  BOOST_CEILING_DBFS,
+  BOOST_LIMITER_PROCESSOR,
+} from "@/lib/voice/boost-limiter.worklet.js";
+import { MAX_PEER_GAIN } from "@/lib/voice/peer-volume";
 import { vadWorkletUrl } from "@/lib/voice/vad";
+
+// ── Boost limiter ─────────────────────────────────────────────────────────
+// A person turned up past 100 % (up to 400 %) gets a limiter of their own,
+// after their gain and pan and before the shared mix limiter, so a boosted
+// shout is held at the ceiling instead of driving the mix limiter (which
+// would duck everyone else). The limiter is the "rm-boost-limiter"
+// AudioWorklet (boost-limiter.worklet.js: native parity with desktop-native
+// LIBRARIES.md §11.1, a 1.5 ms look-ahead, 5 ms hold, 60 ms release, ceiling
+// -3 dBFS). Until its module has loaded, or where AudioWorklet is missing, a
+// DynamicsCompressorNode set as a limiter stands in; it is stereo linked too
+// but lets a hard onset overshoot its ceiling by a few dB.
+
+/** The ceiling: the mix limiter's threshold, so one boosted person passes it untouched. */
+const BOOST_CEILING_DB = BOOST_CEILING_DBFS;
+const BOOST_RATIO = 20;
+const BOOST_ATTACK_S = 0.0015;
+const BOOST_RELEASE_S = 0.06;
+/**
+ * The compressor adds automatic make-up gain (Web Audio spec:
+ * `(1 / fullRangeGain) ^ 0.6`, fullRangeGain being its curve's gain for a
+ * 0 dBFS input). The trim after it takes that back out, so under the ceiling
+ * the stand-in is unity and a boost is exactly the gain asked for.
+ */
+const BOOST_FULL_RANGE_GAIN = Math.pow(
+  10,
+  (BOOST_CEILING_DB - BOOST_CEILING_DB / BOOST_RATIO) / 20,
+);
+export const BOOST_TRIM = Math.pow(BOOST_FULL_RANGE_GAIN, 0.6);
+/**
+ * A track that comes back to 100 % or less keeps its limiter this long, so
+ * the gain's 0.1 s glide down and the limiter's release finish before the
+ * track returns to the plain path.
+ */
+export const BOOST_LIMITER_LINGER_MS = 600;
+
+export interface BoostLimiter {
+  kind: "worklet" | "compressor";
+  input: AudioNode;
+  output: AudioNode;
+  dispose(): void;
+}
+
+/**
+ * The AudioWorklet module. Vite emits it as a static asset; the literal
+ * `new URL(..., import.meta.url)` form is what it rewrites.
+ */
+export function boostLimiterWorkletUrl(): string {
+  return new URL("./boost-limiter.worklet.js", import.meta.url).href;
+}
+
+const boostWorkletReady = new WeakSet<BaseAudioContext>();
+const boostWorkletLoads = new WeakMap<BaseAudioContext, Promise<boolean>>();
+
+/** Load the boost limiter's worklet once per context; resolves whether it can be used. */
+export function loadBoostLimiterWorklet(
+  ctx: BaseAudioContext,
+): Promise<boolean> {
+  let load = boostWorkletLoads.get(ctx);
+  if (!load) {
+    load =
+      typeof AudioWorkletNode !== "undefined" &&
+      typeof ctx.audioWorklet?.addModule === "function"
+        ? ctx.audioWorklet.addModule(boostLimiterWorkletUrl()).then(
+            () => {
+              boostWorkletReady.add(ctx);
+              return true;
+            },
+            (err: unknown) => {
+              audioLog.warn(
+                "Boost limiter worklet unavailable; using a compressor",
+                err,
+              );
+              return false;
+            },
+          )
+        : Promise.resolve(false);
+    boostWorkletLoads.set(ctx, load);
+  }
+  return load;
+}
+
+/**
+ * The per-track boost limiter: the worklet once its module is loaded on
+ * `ctx` (`loadBoostLimiterWorklet`), otherwise the compressor stand-in.
+ */
+export function createBoostLimiter(ctx: BaseAudioContext): BoostLimiter {
+  if (boostWorkletReady.has(ctx)) {
+    try {
+      const node = new AudioWorkletNode(ctx, BOOST_LIMITER_PROCESSOR, {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        channelCount: 2,
+        channelCountMode: "explicit",
+        channelInterpretation: "speakers",
+      });
+      return {
+        kind: "worklet",
+        input: node,
+        output: node,
+        dispose: () => {
+          node.port.postMessage({ type: "stop" });
+          node.disconnect();
+        },
+      };
+    } catch (err) {
+      audioLog.warn(
+        "Boost limiter worklet node failed; using a compressor",
+        err,
+      );
+    }
+  }
+  const limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = BOOST_CEILING_DB;
+  limiter.knee.value = 0;
+  limiter.ratio.value = BOOST_RATIO;
+  limiter.attack.value = BOOST_ATTACK_S;
+  limiter.release.value = BOOST_RELEASE_S;
+  const trim = ctx.createGain();
+  trim.gain.value = BOOST_TRIM;
+  limiter.connect(trim);
+  return {
+    kind: "compressor",
+    input: limiter,
+    output: trim,
+    dispose: () => {
+      limiter.disconnect();
+      trim.disconnect();
+    },
+  };
+}
 
 // ── Audio Context Prewarming ──────────────────────────────────────────────
 // Chrome requires AudioContext.resume() to be called during a user gesture.
@@ -117,6 +255,10 @@ export class AudioPipeline {
   private volumeGains: Map<string, Map<string, GainNode>> = new Map();
   private spatialPanners: Map<string, Map<string, StereoPannerNode>> =
     new Map();
+  /** Per-track boost limiters (`participantId::trackName`), only while gain > 1. */
+  private boostLimiters: Map<string, BoostLimiter> = new Map();
+  private boostLingerTimers: Map<string, ReturnType<typeof setTimeout>> =
+    new Map();
   private volumeSources: Map<string, Map<string, MediaStreamAudioSourceNode>> =
     new Map();
   /** Muted <audio> elements that activate Chrome's remote track media pipeline */
@@ -193,15 +335,17 @@ export class AudioPipeline {
   }
 
   /**
-   * Set the volume for a specific remote participant (0.0 = mute, 1.0 = normal, max 2.0).
-   * Clamped to prevent extreme amplification — the limiter catches any remaining peaks.
+   * Set the volume for a specific remote participant (0.0 = mute, 1.0 = normal,
+   * max 4.0 = 400 %). Above 1.0 each of their tracks plays through its own
+   * boost limiter (`createBoostLimiter`).
    */
   setParticipantVolume(participantId: string, level: number): void {
-    const clamped = Math.max(0, Math.min(level, 2.0));
+    const clamped = Math.max(0, Math.min(level, MAX_PEER_GAIN));
     this.volumeLevels.set(participantId, clamped);
     const gains = this.volumeGains.get(participantId);
     if (gains) {
       gains.forEach((gn, trackName) => {
+        this.routeBoost(participantId, trackName);
         gn.gain.setTargetAtTime(
           this.getTrackGain(participantId, trackName),
           this.volumeContext?.currentTime || 0,
@@ -222,18 +366,20 @@ export class AudioPipeline {
   }
 
   /**
-   * Sets volume for a specific track of a participant (clamped to 0.0–2.0).
+   * Sets volume for a specific track of a participant (clamped to 0.0–4.0;
+   * above 1.0 it plays through its own boost limiter).
    */
   setTrackVolume(
     participantId: string,
     trackName: string,
     level: number,
   ): void {
-    const clamped = Math.max(0, Math.min(level, 2.0));
+    const clamped = Math.max(0, Math.min(level, MAX_PEER_GAIN));
     this.trackVolumeLevels.set(`${participantId}::${trackName}`, clamped);
     const gains = this.volumeGains.get(participantId);
     const gn = gains?.get(trackName);
     if (gn) {
+      this.routeBoost(participantId, trackName);
       gn.gain.setTargetAtTime(
         clamped,
         this.volumeContext?.currentTime || 0,
@@ -491,6 +637,8 @@ export class AudioPipeline {
     const ctx = this.volumeContext;
     ctx.resume().catch(() => {});
     void this.setOutputDevice(this.outputDeviceId);
+    // Ready before anyone is turned up past 100 %.
+    void loadBoostLimiterWorklet(ctx);
 
     // Create or reuse the shared limiter (one per AudioContext).
     // This is a DynamicsCompressorNode configured as a brick-wall limiter:
@@ -559,7 +707,14 @@ export class AudioPipeline {
     gainNode.gain.value = this.getTrackGain(participantId, trackName);
     source.connect(gainNode);
     gainNode.connect(pannerNode);
-    pannerNode.connect(this.limiter);
+    // A limiter left from this track's previous graph belonged to its old
+    // panner.
+    this.disposeBoost(participantId, trackName);
+    if (this.getTrackGain(participantId, trackName) > 1) {
+      this.insertBoost(participantId, trackName, pannerNode);
+    } else {
+      pannerNode.connect(this.limiter);
+    }
 
     let participantGains = this.volumeGains.get(participantId);
     if (!participantGains) {
@@ -628,6 +783,95 @@ export class AudioPipeline {
 
     // Return the original stream; the AudioContext handles the audible output.
     return new MediaStream([track]);
+  }
+
+  /**
+   * Put a track behind its boost limiter while its gain is above 1, and take
+   * it back to the plain path (panner straight into the mix limiter)
+   * `BOOST_LIMITER_LINGER_MS` after it comes back to 1 or less. Called before
+   * the gain moves, so a rising gain is limited from its first sample.
+   */
+  private routeBoost(participantId: string, trackName: string): void {
+    const key = `${participantId}::${trackName}`;
+    const panner = this.spatialPanners.get(participantId)?.get(trackName);
+    if (!panner || !this.limiter) return;
+    const boost = this.boostLimiters.get(key);
+    if (this.getTrackGain(participantId, trackName) > 1) {
+      this.cancelBoostLinger(key);
+      if (!boost) this.insertBoost(participantId, trackName, panner);
+      return;
+    }
+    if (!boost || this.boostLingerTimers.has(key)) return;
+    this.boostLingerTimers.set(
+      key,
+      setTimeout(() => {
+        this.boostLingerTimers.delete(key);
+        if (this.boostLimiters.get(key) !== boost) return;
+        if (this.getTrackGain(participantId, trackName) > 1) return;
+        const current = this.spatialPanners.get(participantId)?.get(trackName);
+        if (current && this.limiter) {
+          current.disconnect();
+          current.connect(this.limiter);
+        }
+        this.disposeBoost(participantId, trackName);
+      }, BOOST_LIMITER_LINGER_MS),
+    );
+  }
+
+  private insertBoost(
+    participantId: string,
+    trackName: string,
+    panner: StereoPannerNode,
+  ): void {
+    if (!this.volumeContext || !this.limiter) return;
+    const ctx = this.volumeContext;
+    const boost = createBoostLimiter(ctx);
+    boost.output.connect(this.limiter);
+    panner.disconnect();
+    panner.connect(boost.input);
+    this.boostLimiters.set(`${participantId}::${trackName}`, boost);
+    if (boost.kind === "compressor") {
+      void loadBoostLimiterWorklet(ctx).then((ready) => {
+        if (ready) this.upgradeBoosts(ctx);
+      });
+    }
+  }
+
+  /** Swap compressor stand-ins for the worklet limiter once its module is loaded. */
+  private upgradeBoosts(ctx: BaseAudioContext): void {
+    if (this.volumeContext !== ctx || !this.limiter) return;
+    for (const [key, boost] of this.boostLimiters) {
+      if (boost.kind !== "compressor") continue;
+      const [participantId = "", trackName = ""] = key.split("::");
+      const panner = this.spatialPanners.get(participantId)?.get(trackName);
+      if (!panner) continue;
+      const next = createBoostLimiter(ctx);
+      if (next.kind !== "worklet") {
+        next.dispose();
+        return;
+      }
+      next.output.connect(this.limiter);
+      panner.disconnect();
+      panner.connect(next.input);
+      boost.dispose();
+      this.boostLimiters.set(key, next);
+    }
+  }
+
+  private cancelBoostLinger(key: string): void {
+    const timer = this.boostLingerTimers.get(key);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    this.boostLingerTimers.delete(key);
+  }
+
+  private disposeBoost(participantId: string, trackName: string): void {
+    const key = `${participantId}::${trackName}`;
+    this.cancelBoostLinger(key);
+    const boost = this.boostLimiters.get(key);
+    if (!boost) return;
+    boost.dispose();
+    this.boostLimiters.delete(key);
   }
 
   /**
@@ -723,7 +967,10 @@ export class AudioPipeline {
     }
     const panners = this.spatialPanners.get(participantId);
     if (panners) {
-      panners.forEach((p) => p.disconnect());
+      panners.forEach((p, trackName) => {
+        p.disconnect();
+        this.disposeBoost(participantId, trackName);
+      });
       this.spatialPanners.delete(participantId);
     }
     const activators = this.activatorElements.get(participantId);
@@ -774,6 +1021,7 @@ export class AudioPipeline {
         panner.disconnect();
         panners.delete(trackName);
       }
+      this.disposeBoost(participantId, trackName);
       if (panners.size === 0) this.spatialPanners.delete(participantId);
     }
     const activators = this.activatorElements.get(participantId);
@@ -1012,6 +1260,10 @@ export class AudioPipeline {
       panners.forEach((p) => p.disconnect()),
     );
     this.spatialPanners.clear();
+    this.boostLingerTimers.forEach((timer) => clearTimeout(timer));
+    this.boostLingerTimers.clear();
+    this.boostLimiters.forEach((boost) => boost.dispose());
+    this.boostLimiters.clear();
     this.volumeSources.forEach((sources) =>
       sources.forEach((s) => s.disconnect()),
     );

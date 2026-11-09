@@ -4364,6 +4364,17 @@ const InstagramEmbed = memo(
       return <UnavailableSocialEmbed embed={displayEmbed} />;
     }
 
+    // Instagram described nothing (the server's last-resort card): a plain
+    // "Instagram post / reel" link card instead of an empty media frame. The
+    // wrapper keeps the hydration observer, so a later lookup can fill it in.
+    if (media.length === 0) {
+      return (
+        <div ref={trackRef}>
+          <LinkEmbed_ embed={displayEmbed} />
+        </div>
+      );
+    }
+
     return (
       <BaseEmbed embed={displayEmbed} width="compact" bare>
         <article className="flex flex-col gap-2">

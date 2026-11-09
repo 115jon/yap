@@ -1,4 +1,8 @@
-import type { GifPickerItem, GifPickerMediaType } from "@/lib/gif-picker";
+import {
+  MAX_GIF_UPLOAD_BYTES,
+  type GifPickerItem,
+  type GifPickerMediaType,
+} from "@/lib/gif-picker";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/IconButton";
 import { cn } from "@/lib/utils";
@@ -175,6 +179,7 @@ export function InputControls({
             open
             onClose={() => setLocalState({ showGifPicker: false })}
             onSelect={handleGifSelect}
+            uploadLimitBytes={MAX_GIF_UPLOAD_BYTES}
             defaultMediaType={gifPickerMediaType}
             markerRef={gifPickerMarkerRef}
           />

@@ -12,8 +12,18 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { TooBigCard } from "@/components/ui/too-big-card";
+import { useMyEntitlement } from "@/hooks/useEntitlement";
+import {
+  clientUploadLimitFor,
+  formatUploadProgress,
+} from "@/lib/upload-limits";
 import { COMPOSER_TRAY } from "./ReplyIndicator";
-import type { PendingUpload, UploadedFile } from "./useMessageInput";
+import type {
+  OversizedBatch,
+  PendingUpload,
+  UploadedFile,
+} from "./useMessageInput";
 
 interface AttachmentListProps {
   uploadedFiles: UploadedFile[];
@@ -23,6 +33,66 @@ interface AttachmentListProps {
   onCancel: (tempId: string) => void;
   /** Re-run a failed upload. Without it a failed tile can only be dismissed. */
   onRetry?: (tempId: string) => void;
+  /** Files held back as over the limit; each shows as a card, not a toast. */
+  oversized?: OversizedBatch | null;
+  onRemoveOversized?: (id: string) => void;
+  /** "Remove the big ones". */
+  onClearOversized?: () => void;
+  /** "Choose another": drop the card and open the file picker. */
+  onReplaceOversized?: (id: string) => void;
+}
+
+/**
+ * The too-big cards at the head of the tray: one file gets its own card
+ * (name, size, how far over); several share one ("A few of these won't fit").
+ */
+function OversizedCards({
+  oversized,
+  onRemove,
+  onClear,
+  onReplace,
+}: {
+  oversized: OversizedBatch;
+  onRemove?: (id: string) => void;
+  onClear?: () => void;
+  onReplace?: (id: string) => void;
+}) {
+  const limit = clientUploadLimitFor(useMyEntitlement(), "attachment");
+  const [only] = oversized.files;
+  if (oversized.files.length === 1 && only) {
+    return (
+      <li className="rm-list-enter max-w-full">
+        <TooBigCard
+          variant="tray"
+          situation={{
+            kind: "tray-one",
+            name: only.name,
+            size: only.size,
+            limit,
+          }}
+          onAction={(action) =>
+            action === "choose-another"
+              ? onReplace?.(only.id)
+              : onRemove?.(only.id)
+          }
+        />
+      </li>
+    );
+  }
+  return (
+    <li className="rm-list-enter max-w-full">
+      <TooBigCard
+        variant="tray"
+        situation={{
+          kind: "tray-some",
+          over: oversized.files.length,
+          fits: oversized.fits,
+          limit,
+        }}
+        onAction={() => onClear?.()}
+      />
+    </li>
+  );
 }
 
 /** 96px tile (8px gaps); `rm-list-enter` gives each add its own fade-in. */
@@ -40,6 +110,20 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ProgressChip({ loaded, total }: { loaded: number; total: number }) {
+  return (
+    <Num
+      size="xs"
+      className={cn(
+        MEDIA_CHIP,
+        "right-1 bottom-1 px-1 whitespace-nowrap text-ink-2",
+      )}
+    >
+      {formatUploadProgress(loaded, total)}
+    </Num>
+  );
 }
 
 function SizeChip({ bytes }: { bytes: number }) {
@@ -177,6 +261,22 @@ function PendingTile({
   onRetry?: (tempId: string) => void;
 }) {
   const failed = !!upload.error;
+  if (failed && upload.serverLimit !== undefined) {
+    // The server turned it away (its limit changed): say its number.
+    return (
+      <li className="rm-list-enter max-w-full">
+        <TooBigCard
+          variant="tray"
+          situation={{
+            kind: "server",
+            serverLimit: upload.serverLimit,
+            action: "remove",
+          }}
+          onAction={() => onCancel(upload.tempId)}
+        />
+      </li>
+    );
+  }
   // Only an image can preview as an <img>; a video's blob URL would break.
   const imagePreview =
     upload.previewUrl && upload.file.type.startsWith("image/")
@@ -237,14 +337,23 @@ function PendingTile({
         </div>
       )}
 
-      {!failed ? <SizeChip bytes={upload.file.size} /> : null}
+      {failed ? null : upload.loaded !== undefined ? (
+        <ProgressChip loaded={upload.loaded} total={upload.file.size} />
+      ) : (
+        <SizeChip bytes={upload.file.size} />
+      )}
 
-      {/* Determinate once a transport reports progress (0..1); today's fetch
-          upload doesn't, so the spinner above is the whole indicator. Scale
-          is a transform, so the bar never lays out. */}
+      {/* Determinate once a transport reports progress (0..1): chunked
+          uploads do, a single-request fetch doesn't (the spinner above is
+          then the whole indicator). Scale is a transform, so the bar never
+          lays out. */}
       {!failed && upload.progress > 0 ? (
         <div
-          aria-hidden="true"
+          role="progressbar"
+          aria-label={`Uploading ${upload.file.name}`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(Math.min(1, upload.progress) * 100)}
           className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-accent-ink transition-transform duration-(--dur-2) ease-linear"
           style={{ transform: `scaleX(${Math.min(1, upload.progress)})` }}
         />
@@ -274,8 +383,18 @@ export default function AttachmentList({
   onToggleSensitive,
   onCancel,
   onRetry,
+  oversized = null,
+  onRemoveOversized,
+  onClearOversized,
+  onReplaceOversized,
 }: AttachmentListProps) {
-  if (uploadedFiles.length === 0 && pendingUploads.length === 0) return null;
+  const hasOversized = !!oversized && oversized.files.length > 0;
+  if (
+    uploadedFiles.length === 0 &&
+    pendingUploads.length === 0 &&
+    !hasOversized
+  )
+    return null;
 
   return (
     <ul
@@ -286,6 +405,14 @@ export default function AttachmentList({
         "custom-scrollbar flex max-h-64 flex-wrap gap-2 overflow-y-auto px-3 py-2",
       )}
     >
+      {hasOversized && oversized ? (
+        <OversizedCards
+          oversized={oversized}
+          onRemove={onRemoveOversized}
+          onClear={onClearOversized}
+          onReplace={onReplaceOversized}
+        />
+      ) : null}
       {uploadedFiles.map((file) => (
         <UploadedTile
           key={file.id}
