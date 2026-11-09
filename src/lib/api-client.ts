@@ -66,6 +66,8 @@ function createHttpResponseError(
   (error as any).code =
     json && typeof json === "object" ? json.code : undefined;
   (error as any).status = res.status;
+  // The parsed error body, for answers that carry data (a 409's server copy).
+  (error as any).body = json && typeof json === "object" ? json : undefined;
   const retryAfterMs = parseRetryAfterMs(res.headers.get("Retry-After"));
   if (retryAfterMs !== null) (error as any).retryAfterMs = retryAfterMs;
   return error;
