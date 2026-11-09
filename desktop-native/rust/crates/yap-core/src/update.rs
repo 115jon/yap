@@ -14,11 +14,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::install;
 
-/// Where the released app looks for updates when nothing overrides it: a
-/// static folder with Velopack's feed files (`releases.<channel>.json`, the
-/// `.nupkg` packages). A placeholder: no feed is published there yet. See
+/// Where the released app looks for updates when nothing overrides it: the
+/// GitHub Releases of the repository, read as [`Feed::Github`]. Each native
+/// release (tag [`RELEASE_TAG_PREFIX`]`<version>`) carries Velopack's feed
+/// files (`releases.<channel>.json`) and its `.nupkg` packages. See
 /// INSTALLER.md, "Publishing a release".
-pub const DEFAULT_FEED_URL: &str = "https://updates.115jon.com/yap/win";
+pub const DEFAULT_FEED_URL: &str = "https://github.com/115jon/yap";
+
+/// The tag prefix of the native app's releases. The same repository has the
+/// web app's `v3.x` releases, `mobile-v*` and the build-asset releases;
+/// only tags with this prefix and a semver after it are update sources.
+pub const RELEASE_TAG_PREFIX: &str = "desktop-native-v";
+
+/// Releases asked for per GitHub API page (the API's maximum).
+pub const GITHUB_PAGE_SIZE: usize = 100;
+
+/// Pages of releases read at most while no native release has turned up.
+pub const GITHUB_MAX_PAGES: usize = 3;
 
 /// Test hook: a feed folder (`file:///F:/feed`, `F:\feed`) or URL that
 /// replaces the saved and compiled ones.
@@ -149,6 +161,9 @@ pub enum Feed {
     Http(String),
     /// A folder on disk (a test feed).
     Dir(PathBuf),
+    /// A GitHub repository (`owner/name`): its native releases
+    /// ([`native_releases`]), each one a feed folder.
+    Github(String),
 }
 
 impl std::fmt::Display for Feed {
@@ -156,6 +171,7 @@ impl std::fmt::Display for Feed {
         match self {
             Self::Http(url) => f.write_str(url),
             Self::Dir(dir) => write!(f, "{}", dir.display()),
+            Self::Github(repo) => write!(f, "https://github.com/{repo}"),
         }
     }
 }
@@ -168,14 +184,20 @@ pub enum FeedOrigin {
     Default,
 }
 
-/// A feed location from text: an `http(s)://` folder, a `file://` URL or
-/// an absolute Windows path. `None` for anything else.
+/// A feed location from text: a GitHub repository
+/// (`https://github.com/owner/name`: its releases), an `http(s)://` folder
+/// (a release's download folder,
+/// `https://github.com/owner/name/releases/download/<tag>`, is one), a
+/// `file://` URL or an absolute Windows path. `None` for anything else.
 pub fn parse_feed(text: &str) -> Option<Feed> {
     let text = text.trim();
     let lower = text.to_ascii_lowercase();
     if lower.starts_with("https://") || lower.starts_with("http://") {
         let url = text.trim_end_matches('/');
         let host = url.split_once("://")?.1;
+        if let Some(repo) = github_repo(url) {
+            return Some(Feed::Github(repo));
+        }
         return (!host.is_empty()).then(|| Feed::Http(url.to_owned()));
     }
     if lower.starts_with("file:") {
@@ -188,6 +210,26 @@ pub fn parse_feed(text: &str) -> Option<Feed> {
         return absolute_path(&path).map(Feed::Dir);
     }
     absolute_path(text).map(Feed::Dir)
+}
+
+/// `owner/name` from `https://github.com/owner/name` (nothing after the
+/// name, `.git` allowed); `None` for any other URL.
+fn github_repo(url: &str) -> Option<String> {
+    let rest = url.split_once("://")?.1;
+    let (host, path) = rest.split_once('/')?;
+    if !host.eq_ignore_ascii_case("github.com") && !host.eq_ignore_ascii_case("www.github.com") {
+        return None;
+    }
+    let mut parts = path.split('/');
+    let owner = parts.next()?;
+    let name = parts.next()?;
+    let name = name.strip_suffix(".git").unwrap_or(name);
+    let valid = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    };
+    (parts.next().is_none() && valid(owner) && valid(name)).then(|| format!("{owner}/{name}"))
 }
 
 /// `X:\...`, `X:/...` or `\\server\share`, with backslashes.
@@ -232,7 +274,97 @@ pub fn feed(env: Option<&str>, prefs: Option<&str>) -> (Feed, FeedOrigin) {
     if let Some(feed) = prefs.and_then(parse_feed) {
         return (feed, FeedOrigin::Prefs);
     }
-    (Feed::Http(DEFAULT_FEED_URL.to_owned()), FeedOrigin::Default)
+    let default = parse_feed(DEFAULT_FEED_URL).expect("DEFAULT_FEED_URL parses");
+    (default, FeedOrigin::Default)
+}
+
+// GitHub Releases
+
+/// One release from the GitHub API (`GET /repos/{repo}/releases`): the
+/// fields the updater reads.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct GithubRelease {
+    pub tag_name: String,
+    pub draft: bool,
+    pub prerelease: bool,
+    pub assets: Vec<GithubAsset>,
+}
+
+/// A release's file.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct GithubAsset {
+    pub name: String,
+    /// The public download URL (a redirect to GitHub's CDN; no API call,
+    /// so no API rate limit).
+    pub browser_download_url: String,
+}
+
+impl GithubRelease {
+    /// The URL of the asset called `name` (case-insensitive, as GitHub
+    /// matches names).
+    pub fn asset_url(&self, name: &str) -> Option<&str> {
+        self.assets
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case(name))
+            .map(|a| a.browser_download_url.as_str())
+            .filter(|url| !url.is_empty())
+    }
+}
+
+/// The API URL of one page (from 1) of `repo`'s releases, newest first.
+pub fn github_releases_url(repo: &str, page: usize) -> String {
+    format!("https://api.github.com/repos/{repo}/releases?per_page={GITHUB_PAGE_SIZE}&page={page}")
+}
+
+pub fn parse_github_releases(json: &str) -> Result<Vec<GithubRelease>, serde_json::Error> {
+    serde_json::from_str(json)
+}
+
+/// The version a native release tag names: [`RELEASE_TAG_PREFIX`] and a
+/// semver (`desktop-native-v0.2.24`, `desktop-native-v0.2.25-beta.1`).
+pub fn release_tag_version(tag: &str) -> Option<Version> {
+    Version::parse(tag.strip_prefix(RELEASE_TAG_PREFIX)?).ok()
+}
+
+/// The native releases a channel reads, newest version first: published
+/// (no drafts), a [`RELEASE_TAG_PREFIX`] tag, and for stable neither a
+/// GitHub pre-release nor a pre-release version. Beta reads them all. The
+/// web app's `v3.x`, `mobile-v*` and the toolchain releases never match.
+pub fn native_releases(releases: &[GithubRelease], channel: Channel) -> Vec<&GithubRelease> {
+    let mut out: Vec<(&GithubRelease, Version)> = releases
+        .iter()
+        .filter(|r| !r.draft)
+        .filter_map(|r| release_tag_version(&r.tag_name).map(|v| (r, v)))
+        .filter(|(r, v)| channel == Channel::Beta || (!r.prerelease && v.pre.is_empty()))
+        .collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1));
+    out.into_iter().map(|(r, _)| r).collect()
+}
+
+/// Whether another page of releases is worth reading: page `page` (from 1)
+/// was full and no native release has turned up yet.
+pub fn github_wants_next_page(page: usize, page_len: usize, found_native: bool) -> bool {
+    !found_native && page_len >= GITHUB_PAGE_SIZE && page < GITHUB_MAX_PAGES
+}
+
+/// The URL of `releases.<velopack channel>.json` in the newest of
+/// `releases` that has one. vpk merges the earlier releases into each new
+/// feed file (CI downloads the previous release first), so the newest file
+/// lists them all.
+pub fn github_feed_url<'a>(
+    releases: &[&'a GithubRelease],
+    velopack_channel: &str,
+) -> Option<&'a str> {
+    let name = format!("releases.{velopack_channel}.json");
+    releases.iter().find_map(|r| r.asset_url(&name))
+}
+
+/// The URL of the package `file_name` in the newest of `releases` that has
+/// it (each package is uploaded to the release that built it).
+pub fn github_asset_url<'a>(releases: &[&'a GithubRelease], file_name: &str) -> Option<&'a str> {
+    releases.iter().find_map(|r| r.asset_url(file_name))
 }
 
 // Versions and releases
@@ -757,6 +889,7 @@ pub fn friendly_error(text: &str) -> &'static str {
     } else if has(&["404", "not found", "cannot find", "no feed", "json error"]) {
         "The update feed wasn't found."
     } else if has(&[
+        "rate limit",
         "network",
         "http",
         "dns",

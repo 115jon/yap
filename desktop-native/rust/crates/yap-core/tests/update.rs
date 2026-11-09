@@ -6,11 +6,13 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use yap_core::update::{
-    apply_at_start, eligibility, feed, friendly_error, is_newer, load_prefs, merge_feeds,
-    newest_full, parse_feed, parse_feed_file, parse_version, pin_allows, plain_notes, restart_args,
-    save_prefs, short_error, Channel, Feed, FeedAsset, FeedOrigin, Launch, Off, Phase, Prefs,
-    Timing, Updater, CHECK_EVERY, DEFAULT_FEED_URL, FIRST_CHECK, PREFS_FILE, RETRY_FIRST,
-    RETRY_MAX,
+    apply_at_start, eligibility, feed, friendly_error, github_asset_url, github_feed_url,
+    github_releases_url, github_wants_next_page, is_newer, load_prefs, merge_feeds,
+    native_releases, newest_full, parse_feed, parse_feed_file, parse_github_releases,
+    parse_version, pin_allows, plain_notes, release_tag_version, restart_args, save_prefs,
+    short_error, Channel, Feed, FeedAsset, FeedOrigin, Launch, Off, Phase, Prefs, Timing, Updater,
+    CHECK_EVERY, DEFAULT_FEED_URL, FIRST_CHECK, GITHUB_MAX_PAGES, GITHUB_PAGE_SIZE, PREFS_FILE,
+    RELEASE_TAG_PREFIX, RETRY_FIRST, RETRY_MAX,
 };
 
 const ROOT: &str = r"C:\Users\u\AppData\Local\Yap.App";
@@ -145,10 +147,15 @@ fn the_channels_should_name_velopack_feeds() {
 fn the_feed_should_come_from_env_then_prefs_then_the_default() {
     assert_eq!(
         feed(None, None),
-        (Feed::Http(DEFAULT_FEED_URL.into()), FeedOrigin::Default)
+        (Feed::Github("115jon/yap".into()), FeedOrigin::Default)
     );
     assert!(DEFAULT_FEED_URL.starts_with("https://"));
     assert!(!DEFAULT_FEED_URL.contains(".site"));
+    assert!(!DEFAULT_FEED_URL.contains("updates.115jon.com"));
+    assert_eq!(
+        feed(None, None).0.to_string(),
+        "https://github.com/115jon/yap"
+    );
     assert_eq!(
         feed(
             Some("file:///F:/ct/yapn/run/updater/feed"),
@@ -189,11 +196,203 @@ fn feed_locations_should_parse() {
         parse_feed("file://nas/share/yap"),
         Some(Feed::Dir(PathBuf::from(r"\\nas\share\yap")))
     );
+    // A repository reads its native releases; a release's download folder
+    // is a plain web folder (one fixed release's feed).
+    assert_eq!(
+        parse_feed("https://github.com/115jon/yap"),
+        Some(Feed::Github("115jon/yap".into()))
+    );
+    assert_eq!(
+        parse_feed("https://GitHub.com/someone/fork.git/"),
+        Some(Feed::Github("someone/fork".into()))
+    );
+    assert_eq!(
+        parse_feed("https://github.com/115jon/yap/releases/download/desktop-native-v0.2.24"),
+        Some(Feed::Http(
+            "https://github.com/115jon/yap/releases/download/desktop-native-v0.2.24".into()
+        ))
+    );
+    assert_eq!(
+        parse_feed("https://github.com/115jon"),
+        Some(Feed::Http("https://github.com/115jon".into()))
+    );
+    assert_eq!(
+        parse_feed("https://example.com/115jon/yap"),
+        Some(Feed::Http("https://example.com/115jon/yap".into()))
+    );
     assert_eq!(parse_feed("relative/feed"), None);
     assert_eq!(parse_feed("https://"), None);
     assert_eq!(parse_feed("ftp://x/y"), None);
     assert_eq!(parse_feed("file:F:/x"), None);
     assert_eq!(parse_feed(""), None);
+}
+
+// GitHub Releases
+
+fn github_fixture() -> Vec<yap_core::update::GithubRelease> {
+    parse_github_releases(&fixture("github-releases.json")).expect("releases parse")
+}
+
+fn tags(releases: &[&yap_core::update::GithubRelease]) -> Vec<String> {
+    releases.iter().map(|r| r.tag_name.clone()).collect()
+}
+
+#[test]
+fn native_release_tags_should_carry_a_semver() {
+    assert_eq!(RELEASE_TAG_PREFIX, "desktop-native-v");
+    assert_eq!(
+        release_tag_version("desktop-native-v0.2.24")
+            .unwrap()
+            .to_string(),
+        "0.2.24"
+    );
+    assert_eq!(
+        release_tag_version("desktop-native-v0.2.25-beta.1")
+            .unwrap()
+            .to_string(),
+        "0.2.25-beta.1"
+    );
+    for tag in [
+        "v3.13.0",
+        "v0.2.24",
+        "mobile-v0.5.1",
+        "native-toolchain-qt6.11.3-yap-webrtc-a545de4",
+        "desktop-native-vnext",
+        "desktop-native-0.2.24",
+        "cef-build-assets",
+    ] {
+        assert_eq!(release_tag_version(tag), None, "{tag}");
+    }
+}
+
+#[test]
+fn stable_should_read_only_published_native_stable_releases_newest_first() {
+    let releases = github_fixture();
+    let stable = native_releases(&releases, Channel::Stable);
+    // No draft, no web/mobile/toolchain release, no pre-release; semver
+    // order (0.2.24 before 0.2.3), not the API's.
+    assert_eq!(
+        tags(&stable),
+        ["desktop-native-v0.2.24", "desktop-native-v0.2.3"]
+    );
+}
+
+#[test]
+fn beta_should_read_pre_releases_too() {
+    let releases = github_fixture();
+    let beta = native_releases(&releases, Channel::Beta);
+    assert_eq!(
+        tags(&beta),
+        [
+            "desktop-native-v0.2.25-beta.1",
+            "desktop-native-v0.2.24",
+            "desktop-native-v0.2.3"
+        ]
+    );
+}
+
+#[test]
+fn a_github_pre_release_or_beta_version_should_never_reach_stable() {
+    let mut releases = github_fixture();
+    // A stable-looking tag marked pre-release on GitHub, and a beta version
+    // published as a full release.
+    releases.push(yap_core::update::GithubRelease {
+        tag_name: "desktop-native-v0.2.30".into(),
+        prerelease: true,
+        ..Default::default()
+    });
+    releases.push(yap_core::update::GithubRelease {
+        tag_name: "desktop-native-v0.2.31-beta.2".into(),
+        ..Default::default()
+    });
+    let stable = tags(&native_releases(&releases, Channel::Stable));
+    assert!(!stable
+        .iter()
+        .any(|t| t.ends_with("0.2.30") || t.contains("beta")));
+    let beta = tags(&native_releases(&releases, Channel::Beta));
+    assert_eq!(beta[0], "desktop-native-v0.2.31-beta.2");
+    assert_eq!(beta[1], "desktop-native-v0.2.30");
+}
+
+#[test]
+fn the_feed_file_should_come_from_the_newest_release_that_has_it() {
+    let releases = github_fixture();
+    let stable = native_releases(&releases, Channel::Stable);
+    // Asset names match case-insensitively, as GitHub's do.
+    assert_eq!(
+        github_feed_url(&stable, "win"),
+        Some("https://github.com/115jon/yap/releases/download/desktop-native-v0.2.24/releases.win.json")
+    );
+    assert_eq!(github_feed_url(&stable, "beta"), None);
+    let beta = native_releases(&releases, Channel::Beta);
+    assert_eq!(
+        github_feed_url(&beta, "beta"),
+        Some("https://github.com/115jon/yap/releases/download/desktop-native-v0.2.25-beta.1/releases.beta.json")
+    );
+    // The beta channel's stable feed is still the newest stable release's.
+    assert_eq!(
+        github_feed_url(&beta, "win"),
+        github_feed_url(&stable, "win")
+    );
+    // Nothing published: no feed (the source reports an empty one).
+    assert_eq!(github_feed_url(&[], "win"), None);
+}
+
+#[test]
+fn packages_should_download_from_the_release_that_has_them() {
+    let releases = github_fixture();
+    let stable = native_releases(&releases, Channel::Stable);
+    assert_eq!(
+        github_asset_url(&stable, "Yap.App-0.2.24-delta.nupkg"),
+        Some("https://github.com/115jon/yap/releases/download/desktop-native-v0.2.24/Yap.App-0.2.24-delta.nupkg")
+    );
+    assert_eq!(
+        github_asset_url(&stable, "Yap.App-0.2.3-full.nupkg"),
+        Some("https://github.com/115jon/yap/releases/download/desktop-native-v0.2.3/Yap.App-0.2.3-full.nupkg")
+    );
+    // A stable copy never downloads a beta's package.
+    assert_eq!(
+        github_asset_url(&stable, "Yap.App-0.2.25-beta.1-full.nupkg"),
+        None
+    );
+    assert_eq!(github_asset_url(&stable, "Yap.App-9.9.9-full.nupkg"), None);
+}
+
+#[test]
+fn the_release_listing_should_page_only_while_nothing_native_turned_up() {
+    assert_eq!(GITHUB_PAGE_SIZE, 100);
+    assert_eq!(
+        github_releases_url("115jon/yap", 2),
+        "https://api.github.com/repos/115jon/yap/releases?per_page=100&page=2"
+    );
+    assert!(github_wants_next_page(1, GITHUB_PAGE_SIZE, false));
+    assert!(!github_wants_next_page(1, GITHUB_PAGE_SIZE, true));
+    assert!(!github_wants_next_page(1, 59, false), "the last page");
+    assert!(!github_wants_next_page(
+        GITHUB_MAX_PAGES,
+        GITHUB_PAGE_SIZE,
+        false
+    ));
+}
+
+#[test]
+fn the_api_listing_should_parse_with_unknown_fields() {
+    let releases = parse_github_releases(
+        r#"[{"tag_name":"desktop-native-v0.2.24","draft":false,"prerelease":false,
+            "html_url":"https://github.com/115jon/yap/releases/tag/desktop-native-v0.2.24",
+            "assets":[{"name":"a","browser_download_url":"https://x/a","size":1}]}]"#,
+    )
+    .unwrap();
+    assert_eq!(releases[0].asset_url("A"), Some("https://x/a"));
+    assert!(parse_github_releases(r#"{"message":"API rate limit exceeded"}"#).is_err());
+}
+
+#[test]
+fn a_rate_limited_check_should_read_as_unreachable() {
+    assert_eq!(
+        friendly_error("Http error: http status: 403 API rate limit exceeded"),
+        "Yap couldn't reach the update server."
+    );
 }
 
 // Which copies update

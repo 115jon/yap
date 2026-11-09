@@ -1,7 +1,8 @@
 //! `Updater`: the in-app updater (docs/INSTALLER.md, "Updates"). Velopack's
-//! `UpdateManager` reads the channel's feed files from a static folder (the
-//! compiled `yap_core::update::DEFAULT_FEED_URL`, `updates.json`'s
-//! `feedUrl`, or `YAP_UPDATE_URL`), downloads a newer package in the
+//! `UpdateManager` reads the channel's feed files from the native releases
+//! on GitHub (the compiled `yap_core::update::DEFAULT_FEED_URL`) or a
+//! static folder (`updates.json`'s `feedUrl`, or `YAP_UPDATE_URL`),
+//! downloads a newer package in the
 //! background and leaves it in `<root>\packages`. "Restart now" (never
 //! during a call) or the next quit (install on quit) hands it to
 //! `Update.exe`, which waits for this process to exit, swaps `current\` and
@@ -366,13 +367,14 @@ impl qobject::Updater {
 mod engine {
     use std::path::Path;
     use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use velopack::sources::{FileSource, HttpSource, UpdateSource};
     use velopack::{
         HttpOptions, UpdateCheck, UpdateManager, UpdateOptions, VelopackAsset, VelopackAssetFeed,
     };
-    use yap_core::update::{self, Feed, FeedEntry};
+    use yap_core::update::{self, Channel, Feed, FeedEntry, GithubRelease};
 
     use super::{log, publish, with, Msg};
 
@@ -405,8 +407,8 @@ mod engine {
     struct ChannelSource {
         feeds: &'static [&'static str],
         pin: Option<update::Version>,
-        list: Box<dyn UpdateSource>,
-        fetch: Box<dyn UpdateSource>,
+        list: Arc<dyn UpdateSource>,
+        fetch: Arc<dyn UpdateSource>,
     }
 
     impl UpdateSource for ChannelSource {
@@ -447,15 +449,124 @@ mod engine {
         }
     }
 
-    fn http(url: &str, timeout: Duration) -> Box<dyn UpdateSource> {
-        let options = HttpOptions {
-            Headers: vec![velopack::HttpHeader {
-                Name: "User-Agent".into(),
-                Value: concat!("YapNative/", env!("CARGO_PKG_VERSION")).into(),
-            }],
+    fn http_options(timeout: Duration, extra: &[(&str, &str)]) -> HttpOptions {
+        let mut headers = vec![velopack::HttpHeader {
+            Name: "User-Agent".into(),
+            Value: concat!("YapNative/", env!("CARGO_PKG_VERSION")).into(),
+        }];
+        headers.extend(extra.iter().map(|(name, value)| velopack::HttpHeader {
+            Name: (*name).into(),
+            Value: (*value).into(),
+        }));
+        HttpOptions {
+            Headers: headers,
             TimeoutMilliseconds: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
-        };
-        Box::new(HttpSource::new_with_options(url, options))
+        }
+    }
+
+    fn http(url: &str, timeout: Duration) -> Arc<dyn UpdateSource> {
+        Arc::new(HttpSource::new_with_options(
+            url,
+            http_options(timeout, &[]),
+        ))
+    }
+
+    /// The native releases of a GitHub repository (`yap_core::update`,
+    /// "GitHub Releases"): one unauthenticated API listing per check (60 an
+    /// hour per IP; a check is every 6 h), then the feed file and the
+    /// packages from their public download URLs. Velopack's own
+    /// `GithubSource` reads the newest ten releases whatever their tag, so
+    /// the web app's `v3.x` releases would hide the native ones.
+    struct GithubReleases {
+        repo: String,
+        /// The channel the user chose: stable skips pre-releases.
+        channel: Channel,
+        /// The listing, read once per manager (one check cycle).
+        releases: Mutex<Option<Vec<GithubRelease>>>,
+    }
+
+    impl GithubReleases {
+        fn new(repo: &str, channel: Channel) -> Self {
+            Self {
+                repo: repo.to_owned(),
+                channel,
+                releases: Mutex::new(None),
+            }
+        }
+
+        fn releases(&self) -> Result<Vec<GithubRelease>, velopack::Error> {
+            let mut cached = self.releases.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(releases) = cached.as_ref() {
+                return Ok(releases.clone());
+            }
+            let options = http_options(
+                FEED_TIMEOUT,
+                &[
+                    ("Accept", "application/vnd.github+json"),
+                    ("X-GitHub-Api-Version", "2022-11-28"),
+                ],
+            );
+            let mut all = Vec::new();
+            for page in 1.. {
+                let url = update::github_releases_url(&self.repo, page);
+                let json = velopack::download::download_url_as_string(&url, Some(&options))?;
+                let releases = update::parse_github_releases(&json)?;
+                let len = releases.len();
+                all.extend(releases);
+                let found = !update::native_releases(&all, Channel::Beta).is_empty();
+                if !update::github_wants_next_page(page, len, found) {
+                    break;
+                }
+            }
+            *cached = Some(all.clone());
+            Ok(all)
+        }
+    }
+
+    impl UpdateSource for GithubReleases {
+        fn get_release_feed(
+            &self,
+            channel: &str,
+            _app: &velopack::bundle::Manifest,
+            _staged_user_id: &str,
+        ) -> Result<VelopackAssetFeed, velopack::Error> {
+            let releases = self.releases()?;
+            let native = update::native_releases(&releases, self.channel);
+            let Some(url) = update::github_feed_url(&native, channel) else {
+                // Nothing published on this channel yet: an empty feed
+                // ("up to date"), not an error.
+                log(&format!(
+                    "no releases.{channel}.json in {} native release(s)",
+                    native.len()
+                ));
+                return Ok(VelopackAssetFeed { Assets: Vec::new() });
+            };
+            let options = http_options(FEED_TIMEOUT, &[]);
+            let json = velopack::download::download_url_as_string(url, Some(&options))?;
+            Ok(serde_json::from_str(&json)?)
+        }
+
+        fn download_release_entry(
+            &self,
+            asset: &VelopackAsset,
+            local_file: &Path,
+            progress_sender: Option<mpsc::Sender<i16>>,
+        ) -> Result<(), velopack::Error> {
+            let releases = self.releases()?;
+            let native = update::native_releases(&releases, self.channel);
+            let url = update::github_asset_url(&native, &asset.FileName).ok_or_else(|| {
+                velopack::Error::Other(format!(
+                    "{} not found in the native releases",
+                    asset.FileName
+                ))
+            })?;
+            let options = http_options(DOWNLOAD_TIMEOUT, &[("Accept", "application/octet-stream")]);
+            velopack::download::download_url_to_file(url, local_file, Some(&options), |p| {
+                if let Some(sender) = &progress_sender {
+                    let _ = sender.send(p);
+                }
+            })
+        }
     }
 
     /// A manager for the current preferences.
@@ -463,12 +574,17 @@ mod engine {
         let prefs = with(|s| s.prefs.clone());
         let env = std::env::var(update::ENV_FEED).ok();
         let (feed, origin) = update::feed(env.as_deref(), prefs.feed_url.as_deref());
-        let (list, fetch): (Box<dyn UpdateSource>, Box<dyn UpdateSource>) = match &feed {
+        let (list, fetch): (Arc<dyn UpdateSource>, Arc<dyn UpdateSource>) = match &feed {
             Feed::Http(url) => (http(url, FEED_TIMEOUT), http(url, DOWNLOAD_TIMEOUT)),
-            Feed::Dir(dir) => (
-                Box::new(FileSource::new(dir)),
-                Box::new(FileSource::new(dir)),
-            ),
+            Feed::Dir(dir) => {
+                let source: Arc<dyn UpdateSource> = Arc::new(FileSource::new(dir));
+                (source.clone(), source)
+            }
+            Feed::Github(repo) => {
+                let source: Arc<dyn UpdateSource> =
+                    Arc::new(GithubReleases::new(repo, prefs.channel));
+                (source.clone(), source)
+            }
         };
         log(&format!(
             "feed {feed} ({origin:?}), channel {}, pin {}",
