@@ -3,7 +3,10 @@
  *
  *   resolveLiveState     checks a client's structured live state against
  *                        the user's linked Steam account and maps the party
- *                        to Yap users, so no account id is stored or sent
+ *                        to the Yap users it may name, so no account id is
+ *                        stored or sent
+ *   mutualParty          the party a viewer may see: only members whose own
+ *                        verified live state names this user back
  *   noteDeadlockActivity moves the fetch cadence: every 10 minutes while
  *                        the game runs, checks at +3 and +15 minutes after a
  *                        match or the game ends
@@ -36,7 +39,9 @@ function steamId64(accountId: number): string {
  * The activity as the gateway keeps it. A Deadlock live state survives
  * only when its `account_id` is the user's linked Steam account (a smurf
  * or someone else's PC reports plain "Playing Deadlock"); `party` becomes
- * the Yap users who linked those Steam accounts, the user excluded.
+ * the Yap users who linked those Steam accounts and show them on their
+ * profile, the user excluded. That list is only a claim: it is stored with
+ * the activity but never sent as is (the gateway sends `mutualParty`).
  * `account_id` and `party` never leave this function.
  */
 export async function resolveLiveState(
@@ -69,7 +74,8 @@ export async function resolveLiveState(
       const { results } = await db
         .prepare(
           `SELECT user_id, external_id FROM user_connections
-           WHERE provider = 'steam' AND external_id IN (${partyIds.map(() => "?").join(",")})`,
+           WHERE provider = 'steam' AND show_on_profile = 1
+             AND external_id IN (${partyIds.map(() => "?").join(",")})`,
         )
         .bind(...partyIds.map(steamId64))
         .all<{ user_id: string; external_id: string }>();
@@ -99,10 +105,50 @@ export async function resolveLiveState(
   return { ...rest, game: live };
 }
 
-async function trackedAccounts(db: D1Database, userId: string) {
+/**
+ * The party others may see in `activity`: only the claimed members whose
+ * own current, verified live state (`activityOf`) claims this user back.
+ * A one-sided claim names nobody, so a client cannot make up a party or use
+ * the gateway to learn which Yap user owns a Steam account.
+ */
+export function mutualParty(
+  userId: string,
+  activity: GameActivity | null,
+  activityOf: (userId: string) => GameActivity | null,
+): GameActivity | null {
+  const claimed = activity?.game?.party_user_ids;
+  if (!activity?.game || !claimed) return activity;
+  const mutual = claimed.filter((memberId) => {
+    const theirs = activityOf(memberId)?.game;
+    return (
+      theirs?.kind === "deadlock" &&
+      (theirs.party_user_ids ?? []).includes(userId)
+    );
+  });
+  const { party_user_ids: _claimed, ...game } = activity.game;
+  void _claimed;
+  return {
+    ...activity,
+    game: mutual.length > 0 ? { ...game, party_user_ids: mutual } : game,
+  };
+}
+
+/** Post-game checks for one user's accounts: at most one pair per window. */
+export const POST_GAME_DEDUPE_MS = 10 * 60_000;
+
+/**
+ * Claims the post-game checks for the user's tracked accounts: only rows
+ * that had none queued in the last ten minutes, so a reconnect (the game
+ * "ends" and starts again) or a flapping phase queues nothing more.
+ */
+async function claimPostGame(db: D1Database, userId: string, now: number) {
   const { results } = await db
-    .prepare(`SELECT account_id FROM deadlock_fetch_state WHERE user_id = ?`)
-    .bind(userId)
+    .prepare(
+      `UPDATE deadlock_fetch_state SET post_game_at = ?
+       WHERE user_id = ? AND (post_game_at IS NULL OR post_game_at <= ?)
+       RETURNING account_id`,
+    )
+    .bind(now, userId, now - POST_GAME_DEDUPE_MS)
     .all<{ account_id: number }>();
   return (results ?? []).map((row) => row.account_id);
 }
@@ -149,13 +195,13 @@ export async function noteDeadlockActivity(
     )
       .bind(now, now + c.postGame[0]!, userId)
       .run();
-    await queuePostGame(env, await trackedAccounts(env.DB, userId));
+    await queuePostGame(env, await claimPostGame(env.DB, userId, now));
     return "ended";
   }
   const left = previous?.game?.phase;
   const entered = next?.game?.phase;
   if (entered === "post_match" && left !== "post_match") {
-    await queuePostGame(env, await trackedAccounts(env.DB, userId));
+    await queuePostGame(env, await claimPostGame(env.DB, userId, now));
     return "match_ended";
   }
   return null;

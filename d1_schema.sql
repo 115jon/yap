@@ -726,7 +726,8 @@ CREATE TABLE IF NOT EXISTS deadlock_fetch_state (
     history_at INTEGER,
     live_since INTEGER,
     live_until INTEGER,
-    queued_at INTEGER
+    queued_at INTEGER,
+    post_game_at INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_deadlock_fetch_state_due

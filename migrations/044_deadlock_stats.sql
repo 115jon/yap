@@ -54,7 +54,10 @@ CREATE TABLE IF NOT EXISTS deadlock_fetch_state (
     live_until INTEGER,
     -- Epoch ms an on-demand fetch was queued (a viewed stale plate), so
     -- many viewers queue one fetch.
-    queued_at INTEGER
+    queued_at INTEGER,
+    -- Epoch ms post-game checks were last queued: one pair per ten minutes,
+    -- so a reconnect or a flapping game cannot flood the queue.
+    post_game_at INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_deadlock_fetch_state_due
