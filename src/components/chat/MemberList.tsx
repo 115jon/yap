@@ -1839,7 +1839,9 @@ const MemberItem = memo(function MemberItem({
         ref={buttonRef}
         className={cn(
           sidebarRowClass({ tall: true }),
-          "min-w-0 flex-1 cursor-pointer gap-3 overflow-hidden pl-2.5 transition-[color,background-color,opacity] focus-visible:outline-offset-[-2px]",
+          // Clip (the nameplate layer), but leave a styled name's glow 8px
+          // of room past the row edge (name-styles.css).
+          "min-w-0 flex-1 cursor-pointer gap-3 overflow-clip pl-2.5 transition-[color,background-color,opacity] [overflow-clip-margin:8px] focus-visible:outline-offset-[-2px]",
           // Phone (12.4): a 48px row inside the role's tinted group.
           "max-md:h-auto max-md:min-h-12 max-md:gap-3 max-md:rounded-none max-md:px-4 max-md:py-1.5 max-md:text-ui-base max-md:text-ink-1 max-md:active:bg-tint-2",
           !isOnline && "opacity-50 pointer-fine:hover:opacity-100",

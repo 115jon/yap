@@ -17,6 +17,11 @@ import { StandaloneUpdaterView } from "@/components/StandaloneUpdater";
 import { DitherMockupsFixture } from "@/components/dev/dither-mockups";
 import { TooBigFixture } from "@/components/dev/too-big-fixtures";
 import { BadgesFixture, TiersFixture } from "@/components/dev/tiers-fixtures";
+import {
+  applyNameStyleParam,
+  NameStyleEditorFixture,
+  NameStylesFixture,
+} from "@/components/dev/name-style-fixtures";
 import { ComponentKitFixture } from "@/components/dev/component-kit-mockups";
 import { ConnectionStatesFixture } from "@/components/dev/connection-states-mockups";
 import { TypeMockupsFixture } from "@/components/dev/type-mockups";
@@ -3010,6 +3015,11 @@ export default function UiFixtures() {
         fixtureParam("frame"),
       );
     }
+    applyNameStyleParam(
+      [...Object.values(users), spMe, spAda, spGrace],
+      fixtureParam("name"),
+      fixtureParam("wave") === "1",
+    );
     seedStore(surface);
     setTheme(theme);
     const id = window.setTimeout(() => setReady(true), 0);
@@ -3177,6 +3187,17 @@ export default function UiFixtures() {
       break;
     case "tiers":
       content = <TiersFixture />;
+      break;
+    case "name-styles":
+      content = (
+        <NameStylesFixture
+          wave={fixtureParam("wave") === "1"}
+          play={fixtureParam("play") === "1"}
+        />
+      );
+      break;
+    case "name-style-editor":
+      content = <NameStyleEditorFixture />;
       break;
     case "type-mockups":
       content = <TypeMockupsFixture />;

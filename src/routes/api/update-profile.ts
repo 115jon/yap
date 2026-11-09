@@ -11,12 +11,14 @@ import {
 import { cacheDel, CacheKey } from "@/lib/cache";
 import { clog } from "@/lib/console-logger";
 import { ensureUserProfileSchema } from "@/lib/ensure-user-profile-schema";
+import { FREE_ENTITLEMENT, hasPerk } from "@/lib/entitlements";
 import { parseMediaContentFilter } from "@/lib/media-content-filter";
 import {
   applyProfileThemeDefaults,
   normalizeDisplayNameStyle,
   normalizeHexColor,
   serializeDisplayNameStyle,
+  usesYapDisplayNameStyle,
 } from "@/lib/profile-customization";
 import { looseStruct, safeParse } from "@/lib/schema";
 import { readJsonBody } from "@/lib/validate-body";
@@ -26,6 +28,7 @@ import {
   normalizeAvatarDisplay,
   serializeAvatarDisplay,
 } from "@/lib/avatar-display";
+import { getEntitlement } from "@/services/entitlement.service";
 import { findUserAvatarUploadByUrl } from "@/services/user-avatar.service";
 import { ProfileIdentityPatchSchema } from "@/lib/validations";
 
@@ -219,6 +222,31 @@ export const PATCH = async ({ request: req }: any) => {
   try {
     const db = getDB();
     await ensureUserProfileSchema(db);
+
+    // Yap effects, Yap fonts and Wave need allNameStyles, read here from the
+    // plan, never from the client. Re-sending the style already saved is
+    // fine (the editor sends it on every save), so a lapsed plan can still
+    // edit the rest of the profile; it just cannot pick a new Yap style.
+    if (usesYapDisplayNameStyle(normalizedDisplayNameStyle)) {
+      const entitlement = await getEntitlement(db, userId).catch(
+        () => FREE_ENTITLEMENT,
+      );
+      if (!hasPerk(entitlement, "allNameStyles")) {
+        const stored = await db
+          .prepare("SELECT display_name_style FROM users WHERE id = ?")
+          .bind(userId)
+          .first<{ display_name_style: string | null }>();
+        const storedStyle = normalizeDisplayNameStyle(
+          stored?.display_name_style ?? null,
+        );
+        if (
+          serializeDisplayNameStyle(storedStyle) !==
+          serializeDisplayNameStyle(normalizedDisplayNameStyle ?? null)
+        ) {
+          return apiError("Yap name styles come with Yap Loud", 403);
+        }
+      }
+    }
 
     if (!removeAvatar && avatarUrl !== undefined && avatarUrl !== null) {
       const ownedUpload = await findUserAvatarUploadByUrl(

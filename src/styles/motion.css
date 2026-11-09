@@ -101,6 +101,10 @@
 }
 .rm-collapse[data-open] > .rm-collapse-inner {
   opacity: 1;
+  /* Open and at rest, a styled name's glow (name-styles.css) may paint a
+     little past the edge; the clip comes back the moment it closes. */
+  overflow: clip;
+  overflow-clip-margin: 8px;
 }
 
 /* ---------- 3. list-enter / list-exit ----------

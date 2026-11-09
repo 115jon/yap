@@ -1,0 +1,582 @@
+/* ============================================================
+   Display name styles (ProfileDisplayName).
+
+   Every styled name is a `.rm-name` root. Classic effects (solid, gradient,
+   neon, toon, pop) paint from inline styles in profile-customization.ts;
+   Yap effects (`[data-yap]`) paint here from a few properties the
+   component sets inline:
+
+     --nm-a, --nm-b   the style's two colours, made readable on the ground
+     --nm-n           the name's length in characters
+     --nm-dither      Dither fade's Bayer tile (a url()), --nm-dr its height
+                      in ch
+
+   Split names (`[data-split]`: Wave, Glitch) print one `.rm-name-ch` per
+   character (`--i` set) holding one `.rm-name-gl` glyph. A transformed box
+   drops out of its parent's `background-clip: text`, so the glyph paints
+   its own fill, offset by `--nm-off` (-i ch) so a gradient runs across the
+   name; the letter box keeps the plain ink, because the ellipsis takes the
+   ink of the letter before it.
+
+   Room for paint (never clip a name): the root pads itself by the effect's
+   reach (`--nm-bleed-y/x`) and takes it back with a negative margin, so
+   glows, strokes, offsets and the wave travel stay inside its own
+   overflow box while layout does not move. A one-line name still
+   truncates at its content edge with an ellipsis.
+
+   Motion: nothing plays unless `[data-name-play]` is set (a hovered row,
+   an open profile; useDecorationPlayback), never under reduced motion, and
+   the global `[data-app-inactive]` rule pauses it while the app is hidden.
+   Holo and Pixel shine sweep a background position; Ember moves its
+   gradient and flickers its glow; Wave and the emoji-name bob translate.
+
+   Native spec of every value: name-styles-spec.md (scratchpad), mirrored
+   by desktop-native.
+   ============================================================ */
+
+@property --nm-sweep {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --nm-rise {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 0%;
+}
+
+@property --nm-flicker {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+@layer components {
+  .rm-name {
+    --nm-by: calc(var(--nm-bleed-y, 0.22em) + var(--nm-wave-y, 0em));
+    --nm-bx: var(--nm-bleed-x, 0.16em);
+    padding: var(--nm-by) var(--nm-bx);
+    margin: calc(var(--nm-by) * -1) calc(var(--nm-bx) * -1);
+    /* The bleed is not text room: a name may fill its parent's width. */
+    max-width: calc(100% + 2 * var(--nm-bx));
+  }
+}
+
+/* ── Reach per effect ─────────────────────────────────────── */
+
+.rm-name[data-name-effect="neon"] {
+  --nm-bleed-y: 0.45em;
+  --nm-bleed-x: 0.4em;
+}
+.rm-name[data-name-effect="toon"],
+.rm-name[data-name-effect="pop"] {
+  --nm-bleed-y: 0.32em;
+  --nm-bleed-x: 0.22em;
+}
+.rm-name[data-name-effect="chrome"],
+.rm-name[data-name-effect="pixel"] {
+  --nm-bleed-y: 0.26em;
+}
+.rm-name[data-name-effect="crt"] {
+  --nm-bleed-y: 0.3em;
+  --nm-bleed-x: 0.26em;
+}
+.rm-name[data-name-effect="glitch"] {
+  --nm-bleed-x: 0.22em;
+}
+.rm-name[data-name-effect="sticker"] {
+  --nm-bleed-y: 0.3em;
+  --nm-bleed-x: 0.24em;
+}
+.rm-name[data-name-effect="ember"] {
+  --nm-bleed-y: 0.4em;
+  --nm-bleed-x: 0.34em;
+}
+.rm-name[data-name-effect="candlelit"] {
+  --nm-bleed-y: 0.38em;
+  --nm-bleed-x: 0.34em;
+}
+.rm-name[data-wave] {
+  --nm-wave-y: 0.16em;
+}
+
+/* ── Shared plumbing ──────────────────────────────────────── */
+
+.rm-name {
+  --nm-off: 0px;
+  --nm-span: 100%;
+}
+
+.rm-name[data-split] .rm-name-ch {
+  display: inline-block;
+  --nm-off: calc(var(--i, 0) * -1ch);
+  --nm-span: calc(var(--nm-n, 1) * 1ch);
+}
+
+/* A Classic gradient on a split name (moved to --nm-fill): the resting
+   frame of its 180% sweep, laid across the whole name. */
+.rm-name[data-split]:not([data-yap]) .rm-name-ch {
+  --nm-fill-size: calc(var(--nm-span) * 1.8) 180%;
+  --nm-fill-pos: var(--nm-off) 0;
+  --nm-fill-repeat: no-repeat;
+}
+
+/* The fill: the root, or each glyph of a split name. */
+.rm-name[data-yap]:not([data-split]),
+.rm-name[data-split] .rm-name-gl {
+  background-image: var(--nm-fill, none);
+  background-size: var(--nm-fill-size, auto);
+  background-position: var(--nm-fill-pos, 0 0);
+  background-repeat: var(--nm-fill-repeat, repeat);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.rm-name[data-yap] {
+  color: var(--nm-ink);
+  -webkit-text-fill-color: var(--nm-text-fill, var(--nm-ink));
+  filter: var(--nm-filter,) var(--nm-guard,);
+}
+
+/* A split root and its letter boxes print only the ellipsis, in the ink;
+   the glyphs print the name. */
+.rm-name[data-yap][data-split],
+.rm-name[data-yap][data-split] .rm-name-ch {
+  -webkit-text-fill-color: var(--nm-ink);
+}
+.rm-name[data-yap][data-split] .rm-name-gl {
+  -webkit-text-fill-color: var(--nm-text-fill, var(--nm-ink));
+}
+
+.rm-name[data-name-play] {
+  animation: var(--nm-root-anim, none), var(--nm-bob-anim, none);
+}
+
+/* ── 1. Dither fade ───────────────────────────────────────── */
+
+.rm-name[data-name-effect="dither"] {
+  --nm-ink: var(--nm-b);
+  --nm-text-fill: transparent;
+  image-rendering: pixelated;
+}
+.rm-name[data-name-effect="dither"],
+.rm-name[data-name-effect="dither"] .rm-name-ch {
+  /* Past the tile's end the second ink carries on. */
+  --nm-fill: var(--nm-dither), linear-gradient(var(--nm-b), var(--nm-b));
+  --nm-fill-size: var(--nm-span) calc(var(--nm-dr, 2) * 1ch), 100% 100%;
+  --nm-fill-pos: var(--nm-off) 0, 0 0;
+  --nm-fill-repeat: repeat-y, no-repeat;
+}
+
+/* ── 2. Holo ──────────────────────────────────────────────── */
+
+.rm-name[data-name-effect="holo"] {
+  --nm-h1: #ff9be5;
+  --nm-h2: #b9a6ff;
+  --nm-h3: #8de9ff;
+  --nm-h4: #a9ffd0;
+  --nm-h5: #fff0a3;
+  --nm-h6: #ffb3c7;
+  --nm-ink: var(--nm-h2);
+  --nm-text-fill: transparent;
+  --nm-root-anim: rm-name-holo 4s linear infinite;
+}
+.rm-name[data-name-effect="holo"],
+.rm-name[data-name-effect="holo"] .rm-name-ch {
+  --nm-fill: linear-gradient(
+    100deg,
+    var(--nm-h1) 0%,
+    var(--nm-h2) 16.667%,
+    var(--nm-h3) 33.333%,
+    var(--nm-h4) 50%,
+    var(--nm-h5) 66.667%,
+    var(--nm-h6) 83.333%,
+    var(--nm-h1) 100%
+  );
+  --nm-fill-size: 6em 100%;
+  --nm-fill-pos: calc(var(--nm-sweep) + var(--nm-off)) 0;
+  --nm-fill-repeat: repeat;
+}
+
+@keyframes rm-name-holo {
+  from {
+    --nm-sweep: 0em;
+  }
+  to {
+    --nm-sweep: 6em;
+  }
+}
+
+/* ── 3. Chrome ────────────────────────────────────────────── */
+
+.rm-name[data-name-effect="chrome"] {
+  --nm-c1: color-mix(in oklab, var(--nm-a) 18%, #ffffff);
+  --nm-c2: color-mix(in oklab, var(--nm-a) 35%, #c3ccd6);
+  --nm-c3: color-mix(in oklab, var(--nm-a) 40%, #7c8794);
+  --nm-c4: color-mix(in oklab, var(--nm-a) 30%, #1e232a);
+  --nm-c5: color-mix(in oklab, var(--nm-a) 30%, #3a424c);
+  --nm-c6: color-mix(in oklab, var(--nm-a) 25%, #dce3ea);
+  --nm-stroke: rgb(255 255 255 / 0.4);
+  --nm-ink: var(--nm-c2);
+  --nm-text-fill: transparent;
+  -webkit-text-stroke: max(0.6px, 0.028em) var(--nm-stroke);
+  --nm-filter: drop-shadow(0 0.04em 0 rgb(0 0 0 / 0.55));
+}
+.rm-name[data-name-effect="chrome"],
+.rm-name[data-name-effect="chrome"] .rm-name-ch {
+  /* The horizon: a hard stop at the middle of the line box. */
+  --nm-fill: linear-gradient(
+    180deg,
+    var(--nm-c1) 0%,
+    var(--nm-c2) 30%,
+    var(--nm-c3) 50%,
+    var(--nm-c4) 50%,
+    var(--nm-c5) 66%,
+    var(--nm-c6) 100%
+  );
+  --nm-fill-size: 100% 100%;
+  --nm-fill-pos: 0 0;
+  --nm-fill-repeat: repeat;
+}
+
+/* ── 4. Pixel shine ───────────────────────────────────────── */
+
+.rm-name[data-name-effect="pixel"] {
+  --nm-ink: var(--nm-a);
+  --nm-text-fill: transparent;
+  /* At rest the shine sits over the first letters. */
+  --nm-sweep: 0.4em;
+  --nm-filter: drop-shadow(
+    0 max(1px, 0.08em) 0 color-mix(in oklab, var(--nm-a) 40%, #000000)
+  );
+  --nm-root-anim: rm-name-pixel 2.8s infinite;
+}
+.rm-name[data-name-effect="pixel"],
+.rm-name[data-name-effect="pixel"] .rm-name-ch {
+  /* Two hard bars, thin then wide: an 8-bit glint. */
+  --nm-fill:
+    linear-gradient(
+      90deg,
+      transparent 0 18%,
+      color-mix(in srgb, var(--nm-b) 60%, transparent) 18% 30%,
+      transparent 30% 42%,
+      var(--nm-b) 42% 72%,
+      transparent 72% 100%
+    ),
+    linear-gradient(var(--nm-a), var(--nm-a));
+  --nm-fill-size: 1.6em 100%, 100% 100%;
+  --nm-fill-pos: calc(var(--nm-sweep) + var(--nm-off)) 0, 0 0;
+  --nm-fill-repeat: no-repeat, no-repeat;
+}
+
+/* The glint crosses in 12 hard steps over 60% of the loop, then rests off
+   the name. */
+@keyframes rm-name-pixel {
+  0% {
+    --nm-sweep: -1.6em;
+    animation-timing-function: steps(12, jump-end);
+  }
+  60%,
+  100% {
+    --nm-sweep: calc(var(--nm-n, 8) * 1ch + 0.4em);
+  }
+}
+
+/* ── 5. CRT ───────────────────────────────────────────────── */
+
+.rm-name[data-name-effect="crt"] {
+  --nm-crt-a: #6bffa3;
+  --nm-crt-b: #1fa557;
+  --nm-ink: var(--nm-crt-a);
+  --nm-text-fill: transparent;
+  --nm-filter: drop-shadow(-0.045em 0 0 rgb(255 50 100 / 0.6))
+    drop-shadow(0.045em 0 0 rgb(60 170 255 / 0.6))
+    drop-shadow(0 0 0.16em rgb(70 255 150 / 0.4));
+}
+.rm-name[data-name-effect="crt"],
+.rm-name[data-name-effect="crt"] .rm-name-ch {
+  --nm-sl: max(1px, round(nearest, 0.07em, 1px));
+  --nm-fill: repeating-linear-gradient(
+    180deg,
+    var(--nm-crt-a) 0 var(--nm-sl),
+    var(--nm-crt-b) var(--nm-sl) calc(var(--nm-sl) * 2)
+  );
+  --nm-fill-size: auto;
+  --nm-fill-pos: 0 0;
+  --nm-fill-repeat: repeat;
+}
+
+/* ── 6. Glitch ────────────────────────────────────────────── */
+
+.rm-name[data-name-effect="glitch"] {
+  --nm-rgb-r: rgb(255 0 92 / 0.72);
+  --nm-rgb-c: rgb(0 225 255 / 0.72);
+  --nm-rgb-x: 0.06em;
+  --nm-ink: var(--nm-a);
+  /* The RGB split is a filter on the whole name, so it follows the torn
+     shapes below. */
+  --nm-filter: drop-shadow(calc(var(--nm-rgb-x) * -1) 0 0 var(--nm-rgb-r))
+    drop-shadow(var(--nm-rgb-x) 0 0 var(--nm-rgb-c));
+}
+
+/* Torn letterforms: each letter is cut at a line and its lower part
+   slides sideways, in a 3-letter rhythm. The letter is a one-cell inline
+   grid: its glyph turns transparent (it keeps the width and the
+   selection) and two copies stacked in the same cell print it, ::before
+   above the cut and ::after below it, nudged by a margin. No transform,
+   clip or position inside the letter: Chrome then hides an overflowing
+   letter whole and keeps the ellipsis. */
+.rm-name[data-name-effect="glitch"][data-split] .rm-name-ch {
+  display: inline-grid;
+  --nm-cut: 46%;
+  --nm-tear: 0.08em;
+}
+.rm-name[data-name-effect="glitch"][data-split] .rm-name-ch:nth-child(3n + 2) {
+  --nm-cut: 62%;
+  --nm-tear: -0.06em;
+}
+.rm-name[data-name-effect="glitch"][data-split] .rm-name-ch:nth-child(3n) {
+  --nm-cut: 34%;
+  --nm-tear: 0.03em;
+}
+.rm-name[data-name-effect="glitch"][data-split] .rm-name-gl {
+  grid-area: 1 / 1;
+  --nm-text-fill: transparent;
+}
+.rm-name[data-name-effect="glitch"][data-split] .rm-name-ch::before,
+.rm-name[data-name-effect="glitch"][data-split] .rm-name-ch::after {
+  content: attr(data-ch) / "";
+  grid-area: 1 / 1;
+  pointer-events: none;
+  -webkit-text-fill-color: transparent;
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.rm-name[data-name-effect="glitch"][data-split] .rm-name-ch::before {
+  background-image: linear-gradient(
+    180deg,
+    var(--nm-a) var(--nm-cut),
+    transparent var(--nm-cut)
+  );
+}
+.rm-name[data-name-effect="glitch"][data-split] .rm-name-ch::after {
+  background-image: linear-gradient(
+    180deg,
+    transparent var(--nm-cut),
+    var(--nm-a) var(--nm-cut)
+  );
+  margin-inline: var(--nm-tear) calc(var(--nm-tear) * -1);
+}
+
+/* ── 7. Ember ─────────────────────────────────────────────── */
+
+.rm-name[data-name-effect="ember"] {
+  --nm-e1: #fff6cc;
+  --nm-e2: #ffd45c;
+  --nm-e3: #ffa41f;
+  --nm-e4: #ff6a0d;
+  --nm-e5: #e0340b;
+  --nm-e6: #a3180a;
+  --nm-glow-a: rgb(255 120 20 / calc(0.55 * var(--nm-flicker)));
+  --nm-glow-b: rgb(255 70 0 / calc(0.4 * var(--nm-flicker)));
+  --nm-ink: var(--nm-e3);
+  --nm-text-fill: transparent;
+  --nm-filter: drop-shadow(0 0 0.1em var(--nm-glow-a))
+    drop-shadow(0 -0.05em 0.22em var(--nm-glow-b));
+  --nm-root-anim: rm-name-ember 2.2s linear infinite;
+}
+.rm-name[data-name-effect="ember"],
+.rm-name[data-name-effect="ember"] .rm-name-ch {
+  --nm-fill: linear-gradient(
+    180deg,
+    var(--nm-e1) 0%,
+    var(--nm-e2) 16%,
+    var(--nm-e3) 34%,
+    var(--nm-e4) 52%,
+    var(--nm-e5) 72%,
+    var(--nm-e6) 100%
+  );
+  --nm-fill-size: 100% 150%;
+  --nm-fill-pos: 0 var(--nm-rise);
+  --nm-fill-repeat: repeat;
+}
+
+/* The flame climbs and falls; the glow flickers on its own beat. */
+@keyframes rm-name-ember {
+  0% {
+    --nm-rise: 0%;
+    --nm-flicker: 1;
+  }
+  9% {
+    --nm-flicker: 0.62;
+  }
+  17% {
+    --nm-flicker: 0.95;
+  }
+  30% {
+    --nm-rise: 38%;
+    --nm-flicker: 0.74;
+  }
+  41% {
+    --nm-flicker: 1;
+  }
+  52% {
+    --nm-rise: 12%;
+    --nm-flicker: 0.58;
+  }
+  63% {
+    --nm-flicker: 0.9;
+  }
+  78% {
+    --nm-rise: 46%;
+    --nm-flicker: 0.7;
+  }
+  88% {
+    --nm-flicker: 1;
+  }
+  100% {
+    --nm-rise: 0%;
+    --nm-flicker: 1;
+  }
+}
+
+/* ── 8. Sticker ───────────────────────────────────────────── */
+
+.rm-name[data-name-effect="sticker"] {
+  --nm-ink: var(--nm-a);
+  -webkit-text-stroke: 0.15em var(--nm-b);
+  paint-order: stroke fill;
+  --nm-filter: drop-shadow(
+    0.05em 0.07em 0 color-mix(in oklab, var(--nm-b) 30%, #000000)
+  );
+}
+
+/* ── 9. Candlelit serif ───────────────────────────────────── */
+
+.rm-name[data-name-effect="candlelit"] {
+  --nm-ink: var(--nm-a);
+  text-shadow:
+    0 0 0.06em rgb(255 214 150 / 0.55),
+    0 0 0.28em rgb(255 150 60 / 0.45);
+}
+
+/* ── 10. Wave (a modifier) ────────────────────────────────── */
+
+.rm-name[data-wave][data-split][data-name-play] .rm-name-ch {
+  animation: rm-name-wave 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  animation-delay: calc(var(--i, 0) * 80ms);
+}
+
+/* A name that cannot be split (it holds emoji) bobs as one piece. */
+.rm-name[data-wave]:not([data-split]) {
+  --nm-bob-anim: rm-name-bob 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes rm-name-wave {
+  0%,
+  36%,
+  100% {
+    translate: 0 0;
+  }
+  18% {
+    translate: 0 -0.14em;
+  }
+}
+
+@keyframes rm-name-bob {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -0.12em;
+  }
+}
+
+/* ── Light grounds ────────────────────────────────────────────
+   App light themes, or a light custom profile card
+   (`data-name-ground`). Fixed palettes go deeper and every Yap effect
+   gains a hairline guard so a pale edge never melts into the ground. */
+
+:is(.light, .miku-light, .spiderman-light)
+  .rm-name[data-yap]:not([data-name-ground="dark"]),
+.rm-name[data-yap][data-name-ground="light"] {
+  --nm-guard: drop-shadow(0 0 0.5px rgb(0 0 0 / 0.42));
+
+  --nm-h1: #c0127a;
+  --nm-h2: #6d3fd8;
+  --nm-h3: #0b79a8;
+  --nm-h4: #0e8a57;
+  --nm-h5: #a86a00;
+  --nm-h6: #c2185b;
+
+  --nm-c1: color-mix(in oklab, var(--nm-a) 18%, #aab4bf);
+  --nm-c2: color-mix(in oklab, var(--nm-a) 30%, #6f7a86);
+  --nm-c3: color-mix(in oklab, var(--nm-a) 35%, #3d4651);
+  --nm-c4: color-mix(in oklab, var(--nm-a) 25%, #0f1318);
+  --nm-c5: color-mix(in oklab, var(--nm-a) 25%, #2a3139);
+  --nm-c6: color-mix(in oklab, var(--nm-a) 22%, #7d8894);
+  --nm-stroke: rgb(0 0 0 / 0.5);
+
+  --nm-crt-a: #0a7a3c;
+  --nm-crt-b: #12a150;
+
+  --nm-rgb-r: rgb(224 0 77 / 0.42);
+  --nm-rgb-c: rgb(0 137 179 / 0.42);
+  --nm-rgb-x: 0.045em;
+
+  --nm-e1: #c2410c;
+  --nm-e2: #d9480f;
+  --nm-e3: #c2410c;
+  --nm-e4: #b4300a;
+  --nm-e5: #9a1f08;
+  --nm-e6: #6e1205;
+  --nm-glow-a: rgb(255 120 20 / calc(0.32 * var(--nm-flicker)));
+  --nm-glow-b: transparent;
+}
+
+:is(.light, .miku-light, .spiderman-light)
+  .rm-name[data-name-effect="crt"]:not([data-name-ground="dark"]),
+.rm-name[data-name-effect="crt"][data-name-ground="light"] {
+  --nm-filter: drop-shadow(-0.04em 0 0 rgb(224 0 77 / 0.4))
+    drop-shadow(0.04em 0 0 rgb(0 137 179 / 0.4));
+}
+
+:is(.light, .miku-light, .spiderman-light)
+  .rm-name[data-name-effect="candlelit"]:not([data-name-ground="dark"]),
+.rm-name[data-name-effect="candlelit"][data-name-ground="light"] {
+  text-shadow:
+    0 0 0.04em rgb(255 190 110 / 0.5),
+    0 0.03em 0.2em rgb(190 90 20 / 0.32);
+}
+
+:is(.light, .miku-light, .spiderman-light)
+  .rm-name[data-name-effect="sticker"]:not([data-name-ground="dark"]),
+.rm-name[data-name-effect="sticker"][data-name-ground="light"] {
+  /* The outline already separates it from the ground. */
+  --nm-guard: ;
+}
+
+/* Belt and braces: the hook already stops playback under reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .rm-name,
+  .rm-name * {
+    animation: none !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .rm-name[data-yap],
+  .rm-name[data-yap] .rm-name-gl {
+    background-image: none !important;
+    -webkit-text-fill-color: CanvasText !important;
+    -webkit-text-stroke: 0 !important;
+    filter: none !important;
+    text-shadow: none !important;
+  }
+  .rm-name[data-yap] .rm-name-ch::before,
+  .rm-name[data-yap] .rm-name-ch::after {
+    content: none !important;
+  }
+}
