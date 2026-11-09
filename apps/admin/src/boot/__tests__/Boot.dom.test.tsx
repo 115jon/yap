@@ -143,7 +143,9 @@ describe("the admin page", () => {
       "GET /api/session",
     ]);
     expect(window.location.href).toBe(href);
-    expect(consoleProps.latest).toMatchObject({ active: true, epoch: 1 });
+    await waitFor(() =>
+      expect(consoleProps.latest).toMatchObject({ active: true, epoch: 1 }),
+    );
   });
 
   it("refuses a non-admin after a second look, and signs Kova out in place", async () => {
@@ -189,7 +191,7 @@ describe("the admin page", () => {
     expect(screen.getByTestId("console").getAttribute("data-active")).toBe(
       "true",
     );
-    expect(consoleProps.latest!.epoch).toBe(2);
+    await waitFor(() => expect(consoleProps.latest!.epoch).toBe(2));
     expect(consoleProps.mounts).toBe(1);
     expect(window.location.pathname).toBe("/live");
   });
