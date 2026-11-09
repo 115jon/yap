@@ -3912,6 +3912,7 @@ dependencies = [
 name = "yap-capture"
 version = "0.2.13"
 dependencies = [
+ "png",
  "serde",
  "serde_json",
  "sha2 0.10.9",

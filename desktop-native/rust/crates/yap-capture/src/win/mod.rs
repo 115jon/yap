@@ -6,6 +6,7 @@ mod audio;
 mod enumerate;
 mod fake;
 pub(crate) mod gpu;
+pub(crate) mod hdr;
 mod icon;
 mod item;
 mod session;
@@ -21,8 +22,9 @@ use windows::Win32::UI::WindowsAndMessaging::IsWindow;
 use yap_voice::{CaptureEnded, ShareCaptured, ShareQuality, ShareRequest};
 
 use self::audio::{Audio, AudioSource};
-use self::enumerate::{hwnd, window_is_ours, window_pid};
+use self::enumerate::{hwnd, monitors, window_is_ours, window_pid};
 use self::gpu::Gpu;
+use self::hdr::ColorTarget;
 use self::session::WgcSession;
 use crate::cache::ThumbnailCache;
 use crate::filter::allowed_when_only_ours;
@@ -57,6 +59,15 @@ fn ensure_mta() {
             let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
         }
     });
+}
+
+/// Each monitor's `HMONITOR` value and GDI device name (probes).
+#[cfg(test)]
+pub(crate) fn enumerate_monitors() -> Vec<(isize, String)> {
+    monitors()
+        .into_iter()
+        .map(|monitor| (monitor.handle, monitor.device_name()))
+        .collect()
 }
 
 pub(crate) fn sources() -> Vec<Source> {
@@ -216,7 +227,21 @@ pub(crate) fn start(
     }
     check_allowed(id)?;
     let item = item::capture_item(id)?;
-    let session = WgcSession::start(item, Gpu::new()?, quality, CURSOR, Arc::clone(&ended))?;
+    let target = match id {
+        SourceId::Monitor(index) => {
+            ColorTarget::Monitor(monitors().get(index).map_or(0, |monitor| monitor.handle))
+        }
+        SourceId::Window(value) => ColorTarget::Window(value),
+    };
+    let session = WgcSession::start(
+        item,
+        target,
+        id.to_string(),
+        Gpu::new()?,
+        quality,
+        CURSOR,
+        Arc::clone(&ended),
+    )?;
     let (width, height) = session.size();
     eprintln!(
         "[capture] {id} {width}x{height} via WGC (cursor {})",

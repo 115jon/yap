@@ -134,6 +134,13 @@ impl Staging {
         source: &ID3D11Texture2D,
         read: impl FnOnce(&[u8], u32) -> R,
     ) -> Result<R, String> {
+        self.copy(context, source);
+        self.map(context, read)
+    }
+
+    /// The copy half of [`Staging::read`]: queues the copy of the top-left
+    /// of `source` (at least this large) into this texture.
+    pub(crate) fn copy(&self, context: &ID3D11DeviceContext, source: &ID3D11Texture2D) {
         let region = D3D11_BOX {
             left: 0,
             top: 0,
@@ -148,6 +155,15 @@ impl Staging {
         unsafe {
             context.CopySubresourceRegion(&self.texture, 0, 0, 0, 0, source, 0, Some(&region));
         }
+    }
+
+    /// The map half of [`Staging::read`]: waits for the copy, maps this
+    /// texture and calls `read` with its rows and pitch.
+    pub(crate) fn map<R>(
+        &self,
+        context: &ID3D11DeviceContext,
+        read: impl FnOnce(&[u8], u32) -> R,
+    ) -> Result<R, String> {
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
         // SAFETY: the texture is a staging texture with CPU read access.
         unsafe { context.Map(&self.texture, 0, D3D11_MAP_READ, 0, Some(&mut mapped)) }

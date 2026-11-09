@@ -2,6 +2,8 @@
 //! window titled "Yap Native Share Test" that clears to magenta and presents
 //! through a DXGI swap chain at the display rate. It shows without taking
 //! the focus and quits after `--seconds` (default 60) or when closed.
+//! `--fp16` makes the swap chain R16G16B16A16_FLOAT (scRGB, as an HDR game
+//! renders) and clears to magenta at twice SDR white (2.0, 0, 2.0).
 //!
 //! The only process the hook tests ever inject into.
 
@@ -17,7 +19,8 @@ fn main() -> windows::core::Result<()> {
         ID3D11Texture2D, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION,
     };
     use windows::Win32::Graphics::Dxgi::Common::{
-        DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_MODE_DESC, DXGI_SAMPLE_DESC,
+        DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_MODE_DESC,
+        DXGI_SAMPLE_DESC,
     };
     use windows::Win32::Graphics::Dxgi::{
         IDXGISwapChain, DXGI_PRESENT, DXGI_SWAP_CHAIN_DESC, DXGI_SWAP_EFFECT_FLIP_DISCARD,
@@ -44,6 +47,12 @@ fn main() -> windows::core::Result<()> {
         .nth(1)
         .and_then(|s| s.parse().ok())
         .unwrap_or(60);
+    let fp16 = std::env::args().any(|a| a == "--fp16");
+    let (format, clear) = if fp16 {
+        (DXGI_FORMAT_R16G16B16A16_FLOAT, [2.0, 0.0, 2.0, 1.0])
+    } else {
+        (DXGI_FORMAT_B8G8R8A8_UNORM, [1.0, 0.0, 1.0, 1.0])
+    };
 
     // SAFETY: plain Win32 window creation on this thread, with a class whose
     // procedure is above.
@@ -75,7 +84,7 @@ fn main() -> windows::core::Result<()> {
         BufferDesc: DXGI_MODE_DESC {
             Width: 0,
             Height: 0,
-            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            Format: format,
             ..Default::default()
         },
         SampleDesc: DXGI_SAMPLE_DESC {
@@ -137,7 +146,7 @@ fn main() -> windows::core::Result<()> {
                 DispatchMessageW(&msg);
             }
             // Magenta, opaque: easy to tell from anything WGC would see.
-            context.ClearRenderTargetView(&view, &[1.0, 0.0, 1.0, 1.0]);
+            context.ClearRenderTargetView(&view, &clear);
             let _ = swap.Present(1, DXGI_PRESENT(0));
         }
         std::thread::sleep(Duration::from_millis(1));

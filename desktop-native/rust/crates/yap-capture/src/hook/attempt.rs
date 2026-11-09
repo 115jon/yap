@@ -479,7 +479,8 @@ fn prepare(hwnd: isize, fps: u32, stop: &Stop) -> Result<Prepared, Refusal> {
             .file_name()
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
     );
-    let reader = HookReader::new(channel).map_err(|e| refuse(FallbackReason::InteropFailed, e))?;
+    let reader =
+        HookReader::new(channel, hwnd).map_err(|e| refuse(FallbackReason::InteropFailed, e))?;
     Ok(Prepared {
         reader,
         helper,

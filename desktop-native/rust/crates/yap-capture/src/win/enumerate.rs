@@ -43,6 +43,13 @@ pub(super) struct Monitor {
     primary: bool,
 }
 
+impl Monitor {
+    #[cfg(test)]
+    pub(super) fn device_name(&self) -> String {
+        self.device.clone()
+    }
+}
+
 pub(super) fn monitors() -> Vec<Monitor> {
     unsafe extern "system" fn collect(
         handle: HMONITOR,
