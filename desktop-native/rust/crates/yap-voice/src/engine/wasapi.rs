@@ -1,7 +1,7 @@
-//! The call's audio devices through WASAPI, shared mode and event driven:
-//! the mic as 48 kHz mono and the speaker as 48 kHz stereo, both 16-bit
-//! (`AUTOCONVERTPCM`: the audio engine converts from and to the devices'
-//! own mix formats, as yap-capture's loopback does). A device is opened by
+//! The call's mic through WASAPI, shared mode and event driven, as 48 kHz
+//! mono 16-bit (`AUTOCONVERTPCM`: the audio engine converts from the
+//! device's own mix format, as yap-capture's loopback does), and the device
+//! lists. The speaker is the app's (`yap-speaker`). A device is opened by
 //! the endpoint id the ADM lists (`IMMDevice::GetId`), or as the default
 //! communications endpoint, which is the one libwebrtc opens by default.
 //!
@@ -16,7 +16,7 @@ use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Media::Audio::{
     eCapture, eCommunications, eRender, EDataFlow, IAudioCaptureClient, IAudioClient,
-    IAudioRenderClient, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
+    IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
     AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
     DEVICE_STATE_ACTIVE, WAVEFORMATEX, WAVE_FORMAT_PCM,
@@ -291,97 +291,6 @@ impl Capture {
 }
 
 impl Drop for Capture {
-    fn drop(&mut self) {
-        // SAFETY: a plain call on the live client.
-        let _ = unsafe { self.client.Stop() };
-    }
-}
-
-/// The speaker: 48 kHz stereo.
-pub(super) struct Render {
-    client: IAudioClient,
-    render: IAudioRenderClient,
-    event: Event,
-    /// The device buffer, in sample frames.
-    buffer_frames: u32,
-}
-
-impl Render {
-    pub(super) fn open(id: Option<&str>) -> Result<Self, OpenError> {
-        let (client, event) = open(eRender, id, 2, Duration::from_millis(40))?;
-        // SAFETY: COM calls on the initialised client.
-        unsafe {
-            let buffer_frames = client
-                .GetBufferSize()
-                .map_err(refused("no speaker buffer size"))?;
-            let render: IAudioRenderClient =
-                client.GetService().map_err(refused("no render client"))?;
-            let mut this = Self {
-                client,
-                render,
-                event,
-                buffer_frames,
-            };
-            // One frame of silence so the stream starts with data.
-            this.write(&[0; crate::dsp::mix::SAMPLES])
-                .map_err(OpenError::refused)?;
-            this.client
-                .Start()
-                .map_err(refused("could not start the speaker"))?;
-            Ok(this)
-        }
-    }
-
-    /// Waits up to `timeout` for the device to want more (a timeout is not
-    /// an error; the caller sees no progress).
-    pub(super) fn wait(&self, timeout: Duration) -> Result<(), String> {
-        wait(&self.event, timeout).map(|_| ())
-    }
-
-    /// How long a sample takes from the device's buffer to the ear, ms.
-    pub(super) fn latency_ms(&self) -> u32 {
-        latency_ms(&self.client)
-    }
-
-    /// Sample frames queued on the device, not played yet.
-    pub(super) fn queued(&self) -> Result<u32, String> {
-        // SAFETY: a plain call on the live client.
-        unsafe { self.client.GetCurrentPadding() }.map_err(|e| format!("speaker failed: {e}"))
-    }
-
-    pub(super) fn capacity(&self) -> u32 {
-        self.buffer_frames
-    }
-
-    /// Queues interleaved stereo samples (as many frames as fit).
-    pub(super) fn write(&mut self, samples: &[i16]) -> Result<(), String> {
-        let room = self.buffer_frames.saturating_sub(self.queued()?);
-        let frames = u32::try_from(samples.len() / 2)
-            .unwrap_or(u32::MAX)
-            .min(room);
-        if frames == 0 {
-            return Ok(());
-        }
-        // SAFETY: `GetBuffer` hands out room for `frames` stereo 16-bit
-        // frames, written bytewise (no alignment promise) before the
-        // matching `ReleaseBuffer`.
-        unsafe {
-            let data = self
-                .render
-                .GetBuffer(frames)
-                .map_err(|e| format!("speaker write failed: {e}"))?;
-            let bytes = std::slice::from_raw_parts_mut(data, frames as usize * 4);
-            for (pair, s) in bytes.chunks_exact_mut(2).zip(samples) {
-                pair.copy_from_slice(&s.to_le_bytes());
-            }
-            self.render
-                .ReleaseBuffer(frames, 0)
-                .map_err(|e| format!("speaker write failed: {e}"))
-        }
-    }
-}
-
-impl Drop for Render {
     fn drop(&mut self) {
         // SAFETY: a plain call on the live client.
         let _ = unsafe { self.client.Stop() };

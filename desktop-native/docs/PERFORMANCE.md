@@ -3029,3 +3029,143 @@ clocks at one frame per 16 ms.
   monitor were not seen live; the code paths are the same as the forced
   ones except for the detection.
 - 1440p live (no 1440p display).
+
+# One speaker (2026-11-08)
+
+Everything the app plays now goes through one WASAPI render stream
+(`crates/yap-speaker`, LIBRARIES.md §17), and the call's echo canceller
+hears its final mix. Before, the soundboard, its tones and Listen Together
+played through `waveOut`, and the UI sounds through one `waveOut` handle
+each. Only the call's own stream reached the canceller's far end.
+
+## Conditions
+
+- Native Spike Lab / General, the test owner (`spike`) and Spike Peer
+  (`spikepeer`), both native, about 2 minutes per call.
+- Fake devices only: `YAP_NULL_SPEAKER=1` on both. Our mic is a silent
+  file (`YAP_FAKE_MIC`), and `YAP_FAKE_MIC_ECHO=0.5` adds the speaker's
+  final mix to it 60 ms late at half level, as a room would. The peer has
+  a silent mic.
+- `spike` voice settings for the runs: the Standard profile (echo
+  cancellation, WebRTC noise suppression and gain control on). The profile
+  was on high fidelity (echo cancellation off) and was put back afterwards.
+- The source is a 3 s clip at -14 dBFS RMS (a 196 Hz harmonic tone with
+  vibrato plus low-passed noise, 3 Hz tremolo). `YAP_TEST_SOUNDBOARD` plays
+  it as a soundboard clip every 8 s, through the soundboard's own engine and
+  volume, without the UI.
+- "Before" is the tree at `9cabefd9` plus two test-only switches. One
+  sends `yap-audio`'s output to a clock-paced null sink under
+  `YAP_NULL_SPEAKER`. The other adds that sink's output to the fake room
+  but not to the far end, as speakers in a room would. Without them, the
+  old build would have played the clip on the real speakers.
+- Measured from `YAP_MIC_RAW_TAP` and `YAP_MIC_TAP`. The raw tap is the
+  mic before the APM; the mic is silent, so it holds only the room's echo.
+  The other tap is what is sent, after the APM. 100 ms windows where the
+  raw echo is above -50 dBFS count as sound; windows below -70 dBFS count
+  as silence.
+
+## Echo of the soundboard in what we send
+
+| run                               | echo in the room | sent during the clip | sent in silence | removed | per clip (median, range) |
+| --------------------------------- | ---------------- | -------------------- | --------------- | ------- | ------------------------ |
+| before (12 clips, from 15 s)      | -20.2 dBFS       | -20.5 dBFS           | -70.0 dBFS      | 0.3 dB  | 0.3 dB (-4.7 to 0.3)     |
+| after (13 clips, from 15 s)       | -20.2 dBFS       | -89.1 dBFS           | -95.9 dBFS      | 69.0 dB | 69.2 dB (67.3 to 69.7)   |
+| after, the first clip of the call | -20.2 dBFS       | -20.3 dBFS           |                 | 0.1 dB  |                          |
+
+- Before, the clip goes out at the level it reaches the mic. Sent-to-raw
+  correlation is 0.145 before and -0.001 after.
+- The first clip of a call is the canceller's first far end, with nothing
+  to have converged on yet, so that clip goes out. Every later clip is
+  removed by 67 dB or more. In a call with people talking, the canceller
+  converges before any clip.
+- Listen Together (the live SWR3 stream) in the second call: -18.2 dBFS of
+  echo, -38.6 dBFS sent (20.4 dB removed). That covers the station's first
+  seconds, overlapping a soundboard clip, under the older harness below.
+- Offline, `engine::pipeline::tests`: a clip on the speaker's bus is
+  removed by 52.9 dB; the same clip outside the far end (the old topology)
+  by 3.1 dB.
+- A harness fix, found on the way. The fake room took its echo frame only
+  when 70 ms were queued. Whenever the speaker's clock fell a moment behind
+  the mic's, the simulated delay jumped by 10 ms, and each jump made the
+  canceller re-align. In the first two after-runs, 2-3 of 11-14 clips
+  leaked mid-call (medians still 65.3 and 67.7 dB). The room now takes one
+  frame per frame once primed, so its delay stays put, as a room's does.
+  The before run used the old harness; with no far end it leaks either
+  way.
+
+## Output latency
+
+| step                                        | before (`waveOut`)                                  | after (`yap-speaker`)                      |
+| ------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
+| play to first mixed frame (19 and 17 clips) | 21.5-27.5 ms (20 ms blocks)                         | 1.6-11.3 ms (10 ms frames)                 |
+| mixed to the device's end                   | up to 80 ms of `waveOut` buffers, then the engine's | 10-20 ms queued + 10 ms latency and period |
+| total, play to ear                          | about 100 ms and up                                 | 22-41 ms                                   |
+
+- `yap-audio` logs "play to first mixed frame"
+  (`[audio] <key>: first frame mixed N ms after the play`), stamped on the
+  render thread when the frame is mixed (after the clip is decoded). The
+  before number is the same line in the old engine.
+- The device side comes from `cargo run -p yap-speaker --example probe`. It
+  initialises a client on the default output and closes it unstarted, so
+  nothing plays. On VB-Audio Matrix (period 10 ms), a 20 ms request gives a
+  22 ms buffer, and the stream latency plus a period is 10 ms. The speaker
+  keeps 20 ms ahead (`YAP_SPEAKER_AHEAD_MS`), so 10-20 ms are queued. The
+  call's old stream asked for 40 ms and kept 30 ms ahead.
+- `waveOut`'s own latency under the audio engine has no API. Measuring it
+  means playing sound and recording a loopback, which the test rules do
+  not allow.
+- The live runs used the null speaker, so there are no real-device
+  underrun counts. The stats line now carries them
+  (`speaker[<device> frames underruns reopens delay inputs]`): 0 underruns
+  and 0 reopens on the null device.
+
+## Outside a call
+
+- UI sounds (Settings > Notifications, the "Call connected" and "Call
+  ended" previews): the speaker opened on demand, both sounds were in
+  `YAP_RENDER_TAP` at -37 dBFS, and it closed 2 s after the last.
+- The mic test outside a call, on the fake mic clip: the monitor was in the
+  speaker's mix at -15 dBFS for 30 s, and the meter was live. Studio and
+  Voice isolation were switched during it, in place. Closing Settings
+  stopped it (`[voice] mic test: off`, then `[speaker] idle: stopped`).
+
+## Build, tests, clippy
+
+- `build.ps1 -BuildDir F:/ct/yapn/rel-audio`: exit 0 (`build-audio-7.log`).
+  The live runs used build 6. Build 7 adds one fix: the player's thread
+  stays awake until its last events and the meter's final 0 are sent.
+- `cargo test --workspace --exclude yap_native --exclude yap-audio`:
+  2131 passed, 0 failed. `cargo test -p yap-audio`: 100 passed, 0 failed
+  (`CARGO_TARGET_DIR=F:/ct/yapn/check-audio`, `LK_CUSTOM_WEBRTC` set).
+- `cargo clippy --workspace --all-targets -- -D warnings` (`QMAKE` set):
+  exit 0.
+
+## Not verified
+
+- On real hardware, with sound: a real change of the default device, an
+  unplug mid-call (`AUDCLNT_E_DEVICE_INVALIDATED`), and underruns at 20 ms
+  ahead on a loaded machine. The notification decisions and the reopen are
+  unit-tested, and the client's sizes and latency come from the probe.
+- The mic test beside a call, with both captures reading the same looped
+  fixture. The test's monitor (in the far end) is then a delayed copy of
+  what the call's mic captures, and the call's canceller removed it (the
+  sent level fell from 0.9 to 0.01). With one real mic, the monitor always
+  lags the live voice, so only its echo can be cancelled. Not checked live.
+
+## Files
+
+- New crate `crates/yap-speaker`: `bus.rs` (inputs, the final soft clip),
+  `engine.rs` (the render thread, holds, taps, health, null mode, the
+  render tap), `wasapi.rs` (the client, `IMMNotificationClient`, the
+  probe), `endpoint.rs` (endpoint id matching, the name migration),
+  `voices.rs` (the UI sounds), `wav.rs`, `examples/probe.rs`.
+- `yap-voice` `engine/pipeline.rs`: the call's mix as an input, `CallTap`
+  as its far end, `MicTest`, and a fake room that keeps its delay;
+  `engine/wasapi.rs` (the old speaker removed); `engine/webrtc.rs` (the
+  output choice goes to the speaker).
+- `yap-audio` `engine.rs` (the mixer as `LocalInput`; `output.rs`, the
+  `waveOut` device, removed), `mixer.rs`, `dsp.rs`, `lib.rs`.
+- App: `src/sound.rs` (UI sounds on the speaker), `src/apps_audio.rs`
+  (`YAP_TEST_SOUNDBOARD`; no device of its own), `src/audio.rs` (the
+  name-to-id migration; `startMicTest`, `stopMicTest`, `micTesting`),
+  `qml/screens/Settings/SettingsRail.qml` (Test mic).

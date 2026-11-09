@@ -45,7 +45,6 @@ struct Glue {
     engine: Option<Engine>,
     /// The soundboard volume setting, 0..=1.
     master: Option<f64>,
-    output: Option<String>,
     /// Each clip's own volume (before the setting).
     raw: HashMap<String, f64>,
     /// Bumped per play; a fetch that finishes for an older one is dropped.
@@ -143,17 +142,6 @@ fn gain(value: f64) -> f32 {
     value.clamp(0.0, 1.0) as f32
 }
 
-/// The voice settings' output device (its name), or the default.
-pub fn set_output_device(name: Option<String>) {
-    let mut glue = glue();
-    if glue.output != name {
-        glue.output.clone_from(&name);
-        if let Some(engine) = &glue.engine {
-            engine.set_output_device(name);
-        }
-    }
-}
-
 /// The soundboard volume setting (0..=100), for clips now and later.
 pub fn set_soundboard_volume(volume: u8) {
     let mut glue = glue();
@@ -211,11 +199,10 @@ pub fn spawn(http: reqwest::Client, events: AudioEvents) -> AudioHandle {
         };
         sink.send(event);
     }));
-    {
-        let mut glue = glue();
-        engine.set_output_device(glue.output.clone());
-        glue.engine = Some(engine.clone());
-    }
+    // The engine plays on the app's speaker (`yap-speaker`), which the
+    // voice settings' output device picks for everything.
+    glue().engine = Some(engine.clone());
+    test_soundboard(&engine);
     let (tx, mut rx) = mpsc::unbounded_channel::<(Option<Token>, AudioCommand)>();
     tokio::spawn(async move {
         while let Some((token, command)) = rx.recv().await {
@@ -223,6 +210,57 @@ pub fn spawn(http: reqwest::Client, events: AudioEvents) -> AudioHandle {
         }
     });
     AudioHandle { commands: Some(tx) }
+}
+
+/// `YAP_TEST_SOUNDBOARD=<file>` (tests, only with `YAP_NULL_SPEAKER=1`):
+/// the file plays as a soundboard clip every `YAP_TEST_SOUNDBOARD_EVERY`
+/// seconds (default 10), the first after one period, at the soundboard
+/// volume setting, through the same engine a clip from the picker uses.
+fn test_soundboard(engine: &Engine) {
+    let Some(path) = std::env::var_os("YAP_TEST_SOUNDBOARD").filter(|p| !p.is_empty()) else {
+        return;
+    };
+    if !std::env::var("YAP_NULL_SPEAKER").is_ok_and(|v| v == "1") {
+        eprintln!("[audio] YAP_TEST_SOUNDBOARD needs YAP_NULL_SPEAKER=1; ignored");
+        return;
+    }
+    let every = std::env::var("YAP_TEST_SOUNDBOARD_EVERY")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .unwrap_or(10);
+    let bytes: Arc<[u8]> = match std::fs::read(&path) {
+        Ok(bytes) => bytes.into(),
+        Err(error) => {
+            eprintln!("[audio] YAP_TEST_SOUNDBOARD: {error}");
+            return;
+        }
+    };
+    let hint = std::path::Path::new(&path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_owned);
+    let engine = engine.clone();
+    let _ = std::thread::Builder::new()
+        .name("yap-test-soundboard".into())
+        .spawn(move || {
+            for n in 1u64.. {
+                std::thread::sleep(std::time::Duration::from_secs(every));
+                let volume = gain(master(&glue()));
+                eprintln!("[audio] test soundboard {n} queued (volume {volume:.2})");
+                engine.play(
+                    &format!("test-soundboard-{n}"),
+                    Clip::Encoded {
+                        bytes: Arc::clone(&bytes),
+                        hint: hint.clone(),
+                    },
+                    ClipOptions {
+                        volume,
+                        ..ClipOptions::default()
+                    },
+                );
+            }
+        });
 }
 
 fn run(

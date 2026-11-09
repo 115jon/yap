@@ -84,11 +84,6 @@ pub(crate) fn soft_clip(x: f32) -> f32 {
     shaped.copysign(x)
 }
 
-/// `f32` in -1..=1 to 16-bit PCM.
-pub(crate) fn to_i16(x: f32) -> i16 {
-    (x.clamp(-1.0, 1.0) * f32::from(i16::MAX)).round() as i16
-}
-
 /// Appends `channels`-interleaved `input` to `out` as stereo: mono is copied
 /// to both sides, channels past the first two are dropped.
 pub(crate) fn push_stereo(input: &[f32], channels: usize, out: &mut Vec<f32>) {
@@ -168,12 +163,5 @@ mod tests {
         out.clear();
         push_stereo(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 3, &mut out);
         assert_eq!(out, [1.0, 2.0, 4.0, 5.0]);
-    }
-
-    #[test]
-    fn pcm_conversion_clamps() {
-        assert_eq!(to_i16(2.0), i16::MAX);
-        assert_eq!(to_i16(-2.0), -i16::MAX);
-        assert_eq!(to_i16(0.0), 0);
     }
 }

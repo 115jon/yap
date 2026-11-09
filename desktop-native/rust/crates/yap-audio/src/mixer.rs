@@ -346,6 +346,11 @@ impl Mixer {
         self.events.push(event);
     }
 
+    /// Events not taken yet.
+    pub(crate) fn events(&self) -> &[Event] {
+        &self.events
+    }
+
     pub(crate) fn take_events(&mut self) -> Vec<Event> {
         std::mem::take(&mut self.events)
     }

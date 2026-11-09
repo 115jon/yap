@@ -650,6 +650,52 @@ then `MediaEngine` around the existing calls, then the state machine.
 headless-Edge peer smoke from FEASIBILITY.md as a manual gate. Blast radius:
 `voice.rs`, `sfu.rs`, `socket.rs`.
 
+#### Audio output: one speaker (built 2026-11-08)
+
+Everything the app plays goes through one process-wide render stream,
+`crates/yap-speaker` (LIBRARIES.md §16):
+
+```
+call tracks ─► yap-voice Mixer (gain, pan, limiter) ─┐
+soundboard, tones, Listen Together ─► yap-audio Mixer ┼─► Bus (sum, soft clip) ─► Taps ─► WASAPI
+UI sounds (src/sound.rs) ─► Voices ───────────────────┘                    │
+mic test monitor (yap-voice MicTest) ─────────────────┘                    ├─► call APM far end (CallTap)
+                                                                           ├─► mic test APM far end
+                                                                           ├─► YAP_FAKE_MIC_ECHO room
+                                                                           └─► YAP_RENDER_TAP file
+```
+
+- **Inputs** (`yap_speaker::Input`) add 10 ms of 48 kHz stereo `f32` when
+  the render thread asks, and say whether they have anything to play. The
+  bus holds them weakly: an owner drops its `Arc` to leave.
+- **Taps** (`yap_speaker::Tap`) see the final 16-bit frame and its delay to
+  the ear just before it is written. The call's `CallTap` gives it to the
+  APM's `ProcessReverseStream`. That is why a soundboard clip or a track on
+  laptop speakers is now cancelled from the mic: before, they played
+  through `waveOut`, outside the far end, and the mic sent them on
+  (PERFORMANCE.md "One speaker": 0.3 dB removed before, 69 dB after
+  the echo canceller's first far end).
+- **Lifetime.** The render thread starts on a wake (an input became
+  audible) or a `Hold` (a call, the mic test) and closes the device after
+  2 s with neither. A call never opens its own output.
+- **Device.** `Speaker::set_device(endpoint id | None)`. `None` follows
+  the default communications endpoint through `IMMNotificationClient`.
+  A lost device (`AUDCLNT_E_DEVICE_INVALIDATED`, or no audio taken for
+  1 s) reopens at once, and the mix keeps the clock (taps still fed) until
+  a device opens. The choice is set by `LibwebrtcEngine::choose_devices`,
+  which the voice settings call, so the call, the player and the UI sounds
+  cannot disagree about the device.
+- **Threads.** The render thread (`yap-speaker`, MMCSS "Pro Audio") calls
+  each input's `mix_into` under that input's own lock. The `yap-audio`
+  thread changes voices between frames and forwards the mixer's events
+  every 20 ms. The mic and the mic test have their own capture threads.
+- **Tests.** `cargo test -p yap-speaker`: the bus, the soft clip, endpoint
+  matching by id and the name migration, the notification decisions, the
+  render thread's clock, idle close and holds, and the UI sound voices.
+  `cargo test -p yap-voice --lib engine::pipeline`: a soundboard input on
+  the bus is cancelled by 52.9 dB, while the same clip outside the far end
+  (the old topology) loses only 3.1 dB; the mic test's monitor and meter.
+
 ---
 
 ## Recommended target layout

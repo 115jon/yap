@@ -1,31 +1,33 @@
-//! The public handle and the engine thread that owns the mixer and output.
+//! The public handle, the engine thread that owns the voices, and the
+//! mixer's place on the app's speaker (`yap-speaker`): the speaker's render
+//! thread pulls 10 ms at a time from [`LocalInput`] and mixes it with the
+//! call and the UI sounds, so the call's echo canceller hears it too.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use crate::decode::{decode_clip, DecodedClip};
-use crate::dsp::to_i16;
 use crate::mixer::{Mixer, StreamVoice};
-use crate::output::{Device, BLOCK_FRAMES};
 use crate::stream::queue::StreamQueue;
 use crate::stream::source::{Cancel, HttpFetcher, Net};
 use crate::stream::{self, describe_url, StreamHandle, StreamJob};
 use crate::{tone, Clip, ClipOptions, Event, EventSink, Loudness, StreamRequest};
 
-/// Close the device after this long with nothing audible.
-const IDLE_CLOSE: Duration = Duration::from_secs(2);
 const POSITION_EVERY: Duration = Duration::from_millis(250);
 const LEVEL_EVERY: Duration = Duration::from_millis(100);
-const BLOCK: Duration = Duration::from_millis(20);
+/// How often the engine thread hands on the mixer's events while it plays.
+const EVENTS_EVERY: Duration = Duration::from_millis(20);
+/// One speaker frame (10 ms), in samples (48 kHz stereo).
+const SAMPLES: usize = yap_speaker::SAMPLES;
+const FRAME_TIME: Duration = Duration::from_millis(10);
 /// Clips decoding at once; a play past this fails instead of piling up
 /// threads and decoded PCM.
 const MAX_DECODES: usize = 3;
 
 enum Command {
-    SetDevice(Option<String>),
     Play {
         key: String,
         clip: Clip,
@@ -49,24 +51,81 @@ enum Command {
     Shutdown,
 }
 
-/// Where blocks go.
+/// Where the mix goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OutputKind {
-    /// `waveOut` (falls back to pacing when no device opens).
-    Device,
-    /// Real-time pacing, no device (tests).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "only tests run without a device")
-    )]
+    /// The app's speaker (`yap-speaker`) pulls it.
+    Speaker,
+    /// The engine thread renders it on the clock, to nothing (tests).
     Null,
+}
+
+/// The mixer as an input of the app's speaker. The engine thread changes
+/// the voices under the same lock, between frames.
+pub(crate) struct LocalInput {
+    mixer: Mutex<Mixer>,
+    /// The loudest sample since the level was last read, `f32` bits.
+    peak: AtomicU32,
+    /// When each voice's first frame was mixed (for the latency line).
+    mixed: Mutex<Vec<(String, Instant)>>,
+}
+
+impl LocalInput {
+    fn new() -> Self {
+        Self {
+            mixer: Mutex::new(Mixer::default()),
+            peak: AtomicU32::new(0),
+            mixed: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn mixer(&self) -> MutexGuard<'_, Mixer> {
+        self.mixer.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The peak since the last call.
+    fn take_peak(&self) -> f32 {
+        f32::from_bits(self.peak.swap(0, Ordering::Relaxed))
+    }
+
+    fn render(&self, out: &mut [f32; SAMPLES]) -> bool {
+        let mut block = [0f32; SAMPLES];
+        let (active, peak) = {
+            let mut mixer = self.mixer();
+            let active = mixer.is_active();
+            let before = mixer.events().len();
+            let peak = mixer.render(&mut block);
+            let now = Instant::now();
+            for event in &mixer.events()[before..] {
+                if let Event::Started { key } = event {
+                    let mut mixed = self.mixed.lock().unwrap_or_else(PoisonError::into_inner);
+                    mixed.truncate(63);
+                    mixed.push((key.clone(), now));
+                }
+            }
+            (active, peak)
+        };
+        for (o, s) in out.iter_mut().zip(block) {
+            *o += s;
+        }
+        if peak > 0.0 {
+            // Peaks are non-negative, so their bits order as they do.
+            self.peak.fetch_max(peak.to_bits(), Ordering::Relaxed);
+        }
+        active
+    }
+}
+
+impl yap_speaker::Input for LocalInput {
+    fn mix_into(&self, out: &mut [f32; SAMPLES]) -> bool {
+        self.render(out)
+    }
 }
 
 struct Shared {
     events: EventSink,
     output: OutputKind,
     tx: Mutex<Option<Sender<Command>>>,
-    device: Mutex<Option<String>>,
 }
 
 impl Shared {
@@ -99,7 +158,7 @@ impl std::fmt::Debug for Engine {
 impl Engine {
     /// Spawns the mixer/output thread lazily on first play. `events` is called from engine threads.
     pub fn new(events: Arc<dyn Fn(Event) + Send + Sync>) -> Self {
-        Self::with_output(events, OutputKind::Device)
+        Self::with_output(events, OutputKind::Speaker)
     }
 
     fn with_output(events: EventSink, output: OutputKind) -> Self {
@@ -108,7 +167,6 @@ impl Engine {
                 events,
                 output,
                 tx: Mutex::new(None),
-                device: Mutex::new(None),
             }),
         }
     }
@@ -132,19 +190,12 @@ impl Engine {
             return false;
         }
         let (sender, receiver) = mpsc::channel();
-        let device = self
-            .shared
-            .device
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
         let events = Arc::clone(&self.shared.events);
         let worker_sender = sender.clone();
         let output = self.shared.output;
-        // The worker owns the (thread-bound) device, so it is built on its thread.
         let spawned = std::thread::Builder::new()
             .name("yap-audio".into())
-            .spawn(move || Worker::new(events, worker_sender, device, output).run(&receiver));
+            .spawn(move || Worker::new(events, worker_sender, output).run(&receiver));
         if let Err(error) = spawned {
             eprintln!("[audio] no engine thread: {error}");
             return false;
@@ -152,19 +203,6 @@ impl Engine {
         let sent = sender.send(command).is_ok();
         *tx = Some(sender);
         sent
-    }
-
-    /// Output device by name (as the voice settings store it, i.e. the full Windows endpoint
-    /// name); None or no match = system default (WAVE_MAPPER). waveOut names are truncated to
-    /// 31 chars (WAVEOUTCAPSW.szPname), so match by prefix / case-insensitively. Switching
-    /// mid-play reopens the device without dropping voices.
-    pub fn set_output_device(&self, name: Option<String>) {
-        *self
-            .shared
-            .device
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = name.clone();
-        self.send(Command::SetDevice(name), false);
     }
 
     /// Start (or restart: same key replaces the old voice) a clip.
@@ -259,62 +297,55 @@ struct PendingClip {
     opts: ClipOptions,
 }
 
-enum Sink {
-    Device(Device),
-    /// No device: sleep through each block so voices still end on time.
-    Paced(Instant),
-}
-
 struct Worker {
     events: EventSink,
     /// For decode threads to hand back clips.
     commands: Sender<Command>,
     output: OutputKind,
-    device_name: Option<String>,
-    mixer: Mixer,
-    sink: Option<Sink>,
+    /// The voices, shared with the speaker's render thread.
+    input: Arc<LocalInput>,
+    /// The same, as the speaker holds it (registered while the engine runs).
+    speaker_input: Option<Arc<dyn yap_speaker::Input>>,
     pending: HashMap<String, PendingClip>,
+    /// When each play arrived, for the latency line at its first frame.
+    queued_at: HashMap<String, Instant>,
     next_generation: u64,
     /// Decode threads still running (stopped clips' threads count until
     /// they finish).
     decoding: Arc<AtomicUsize>,
     stream: Option<StreamHandle>,
     net: Option<(tokio::runtime::Runtime, Net)>,
-    quiet_since: Option<Instant>,
     last_position: Instant,
     last_level: Instant,
-    level: f32,
     level_live: bool,
-    block: Vec<f32>,
-    pcm: Vec<i16>,
+    /// `OutputKind::Null`: when the next frame is due.
+    next_frame: Instant,
 }
 
 impl Worker {
-    fn new(
-        events: EventSink,
-        commands: Sender<Command>,
-        device_name: Option<String>,
-        output: OutputKind,
-    ) -> Self {
+    fn new(events: EventSink, commands: Sender<Command>, output: OutputKind) -> Self {
+        let input = Arc::new(LocalInput::new());
+        let speaker_input = (output == OutputKind::Speaker).then(|| {
+            let as_input: Arc<dyn yap_speaker::Input> = input.clone();
+            yap_speaker::speaker().add(&as_input);
+            as_input
+        });
         Self {
             events,
             commands,
             output,
-            device_name,
-            mixer: Mixer::default(),
-            sink: None,
+            input,
+            speaker_input,
             pending: HashMap::new(),
+            queued_at: HashMap::new(),
             next_generation: 0,
             decoding: Arc::new(AtomicUsize::new(0)),
             stream: None,
             net: None,
-            quiet_since: None,
             last_position: Instant::now(),
             last_level: Instant::now(),
-            level: 0.0,
             level_live: false,
-            block: vec![0.0; BLOCK_FRAMES * 2],
-            pcm: vec![0; BLOCK_FRAMES * 2],
+            next_frame: Instant::now(),
         }
     }
 
@@ -324,111 +355,119 @@ impl Worker {
 
     fn run(mut self, commands: &Receiver<Command>) {
         loop {
-            if self.mixer.is_active() && self.sink.is_none() {
-                self.open_sink();
-            }
-            if self.sink.is_some() {
-                loop {
-                    match commands.try_recv() {
-                        Ok(Command::Shutdown) | Err(TryRecvError::Disconnected) => return,
-                        Ok(command) => self.handle(command),
-                        Err(TryRecvError::Empty) => break,
-                    }
-                }
-                self.render();
-            } else {
-                let received = if self.mixer.stream().is_some() || !self.pending.is_empty() {
-                    commands.recv_timeout(POSITION_EVERY)
+            // Read under one lock: a frame that ends the last voice pushes
+            // its `Ended` in the same render that makes the mixer idle, so
+            // an idle mixer with no events left has nothing more to say.
+            let (active, unsent, streaming) = {
+                let mixer = self.input.mixer();
+                (
+                    mixer.is_active(),
+                    !mixer.events().is_empty(),
+                    mixer.stream().is_some(),
+                )
+            };
+            let timeout = if active {
+                if self.output == OutputKind::Null {
+                    self.next_frame.saturating_duration_since(Instant::now())
                 } else {
-                    commands.recv().map_err(|_| RecvTimeoutError::Disconnected)
-                };
-                match received {
-                    Ok(Command::Shutdown) | Err(RecvTimeoutError::Disconnected) => return,
-                    Ok(command) => self.handle(command),
-                    Err(RecvTimeoutError::Timeout) => {}
+                    EVENTS_EVERY
                 }
+            } else if unsent || self.level_live {
+                // The last events and the meter's final 0.
+                EVENTS_EVERY
+            } else if streaming || !self.pending.is_empty() {
+                POSITION_EVERY
+            } else {
+                Duration::MAX
+            };
+            let received = if timeout == Duration::MAX {
+                commands.recv().map_err(|_| RecvTimeoutError::Disconnected)
+            } else {
+                commands.recv_timeout(timeout)
+            };
+            match received {
+                Ok(Command::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
+                Ok(command) => {
+                    self.handle(command);
+                    // Anything else queued, before the next frame.
+                    loop {
+                        match commands.try_recv() {
+                            Ok(Command::Shutdown) | Err(TryRecvError::Disconnected) => {
+                                self.leave();
+                                return;
+                            }
+                            Ok(command) => self.handle(command),
+                            Err(TryRecvError::Empty) => break,
+                        }
+                    }
+                    self.wake();
+                }
+                Err(RecvTimeoutError::Timeout) => {}
             }
+            if self.output == OutputKind::Null {
+                self.render_due();
+            }
+            self.report_level();
             self.report_position();
             self.flush_events();
         }
+        self.leave();
     }
 
-    fn open_sink(&mut self) {
-        let sink = match self.output {
-            OutputKind::Device => match Device::open(self.device_name.as_deref()) {
-                Ok(device) => {
-                    eprintln!(
-                        "[audio] output open ({})",
-                        self.device_name.as_deref().unwrap_or("default")
-                    );
-                    Sink::Device(device)
-                }
-                Err(error) => {
-                    eprintln!("[audio] no output device: {error}");
-                    Sink::Paced(Instant::now())
-                }
-            },
-            OutputKind::Null => Sink::Paced(Instant::now()),
-        };
-        self.sink = Some(sink);
-        self.quiet_since = None;
-    }
-
-    fn close_sink(&mut self) {
-        if let Some(Sink::Device(_)) = self.sink.take() {
-            eprintln!("[audio] output closed (idle)");
+    /// Takes the voices off the speaker (the engine is gone).
+    fn leave(&mut self) {
+        if let Some(input) = self.speaker_input.take() {
+            yap_speaker::speaker().remove(&input);
         }
-        self.sink = None;
-        if self.level_live {
+    }
+
+    /// Something may have become audible: the speaker starts if it slept.
+    fn wake(&mut self) {
+        let active = self.input.mixer().is_active();
+        if !active {
+            return;
+        }
+        match self.output {
+            OutputKind::Speaker => yap_speaker::speaker().wake(),
+            OutputKind::Null => {
+                if self.next_frame < Instant::now() - FRAME_TIME * 5 {
+                    self.next_frame = Instant::now();
+                }
+            }
+        }
+    }
+
+    /// `OutputKind::Null`: the frames the clock has made due, to nothing.
+    fn render_due(&mut self) {
+        let now = Instant::now();
+        if self.next_frame + FRAME_TIME * 5 < now {
+            self.next_frame = now;
+        }
+        while self.next_frame <= now {
+            let mut out = [0f32; SAMPLES];
+            if !self.input.render(&mut out) {
+                self.next_frame = now + FRAME_TIME;
+                return;
+            }
+            self.next_frame += FRAME_TIME;
+        }
+    }
+
+    /// The output meter: the peak every [`LEVEL_EVERY`] while something
+    /// plays, then one 0.
+    fn report_level(&mut self) {
+        if self.last_level.elapsed() < LEVEL_EVERY {
+            return;
+        }
+        self.last_level = Instant::now();
+        let active = self.input.mixer().is_active();
+        let peak = self.input.take_peak();
+        if active || peak > 0.0 {
+            self.level_live = true;
+            self.emit(Event::Level(peak));
+        } else if self.level_live {
             self.level_live = false;
             self.emit(Event::Level(0.0));
-        }
-    }
-
-    /// Renders and outputs one block, and closes the device once idle.
-    fn render(&mut self) {
-        let active = self.mixer.is_active();
-        let peak = self.mixer.render(&mut self.block);
-        for (out, sample) in self.pcm.iter_mut().zip(&self.block) {
-            *out = to_i16(*sample);
-        }
-        let failed = match &mut self.sink {
-            Some(Sink::Device(device)) => device.write(&self.pcm).err(),
-            Some(Sink::Paced(next)) => {
-                *next += BLOCK;
-                let now = Instant::now();
-                if *next > now {
-                    std::thread::sleep(*next - now);
-                } else if now - *next > BLOCK * 5 {
-                    *next = now;
-                }
-                None
-            }
-            None => None,
-        };
-        if let Some(error) = failed {
-            eprintln!("[audio] output error: {error}; pacing without a device");
-            self.sink = Some(Sink::Paced(Instant::now()));
-        }
-        if active {
-            self.quiet_since = None;
-            self.level = self.level.max(peak);
-            if self.last_level.elapsed() >= LEVEL_EVERY {
-                let level = std::mem::take(&mut self.level);
-                self.level_live = true;
-                self.last_level = Instant::now();
-                self.emit(Event::Level(level));
-            }
-        } else {
-            let since = *self.quiet_since.get_or_insert_with(Instant::now);
-            if self.level_live {
-                self.level_live = false;
-                self.level = 0.0;
-                self.emit(Event::Level(0.0));
-            }
-            if since.elapsed() >= IDLE_CLOSE {
-                self.close_sink();
-            }
         }
     }
 
@@ -437,22 +476,26 @@ impl Worker {
             return;
         }
         self.last_position = Instant::now();
-        if self
-            .mixer
-            .stream()
-            .is_some_and(|stream| stream.queue().failed())
-        {
-            // Failed while paused: the stream thread already reported it.
-            self.mixer.set_stream(None);
-            self.stream = None;
-            return;
-        }
-        if let Some(stream) = self.mixer.stream() {
-            let event = Event::StreamPosition {
+        let position = {
+            let mut mixer = self.input.mixer();
+            if mixer
+                .stream()
+                .is_some_and(|stream| stream.queue().failed())
+            {
+                // Failed while paused: the stream thread already reported it.
+                mixer.set_stream(None);
+                drop(mixer);
+                self.stream = None;
+                return;
+            }
+            mixer.stream().map(|stream| Event::StreamPosition {
                 key: stream.key().to_string(),
                 position_ms: stream.queue().position_ms(),
                 paused: stream.paused(),
-            };
+            })
+        };
+        // Sent outside the lock: the speaker's render thread takes it.
+        if let Some(event) = position {
             self.emit(event);
         } else if self.stream.is_some() {
             // The mixer dropped the stream (failed): stop its thread.
@@ -461,7 +504,31 @@ impl Worker {
     }
 
     fn flush_events(&mut self) {
-        for event in self.mixer.take_events() {
+        let events = self.input.mixer().take_events();
+        for event in events {
+            if let Event::Started { key } = &event {
+                if let Some(at) = self.queued_at.remove(key) {
+                    let mixed = {
+                        let mut mixed = self
+                            .input
+                            .mixed
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner);
+                        let found = mixed.iter().rposition(|(k, _)| k == key);
+                        found.map(|i| mixed.swap_remove(i).1)
+                    };
+                    let mixed_ms = mixed.map_or(f64::NAN, |m| {
+                        m.saturating_duration_since(at).as_secs_f64() * 1000.0
+                    });
+                    let device_ms = match self.output {
+                        OutputKind::Speaker => yap_speaker::speaker().delay_ms(),
+                        OutputKind::Null => 0,
+                    };
+                    eprintln!(
+                        "[audio] {key}: first frame mixed {mixed_ms:.1} ms after the play, heard {device_ms} ms after that"
+                    );
+                }
+            }
             if let Event::Ended { key } = &event {
                 eprintln!("[audio] ended {key}");
             }
@@ -476,16 +543,6 @@ impl Worker {
 
     fn handle(&mut self, command: Command) {
         match command {
-            Command::SetDevice(name) => {
-                if name != self.device_name {
-                    self.device_name = name;
-                    if matches!(self.sink, Some(Sink::Device(_))) {
-                        // Reopen on the next block; voices keep their place.
-                        self.sink = None;
-                        self.open_sink();
-                    }
-                }
-            }
             Command::Play { key, clip, opts } => self.play(key, clip, opts),
             Command::Decoded {
                 key,
@@ -495,57 +552,62 @@ impl Worker {
             Command::Stop(key) => {
                 eprintln!("[audio] stop {key}");
                 if self.pending.remove(&key).is_some() {
-                    self.mixer.push_event(Event::Ended { key });
+                    self.input.mixer().push_event(Event::Ended { key });
                 } else {
-                    self.mixer.stop(&key);
+                    self.input.mixer().stop(&key);
                 }
             }
             Command::SetPaused(key, paused) => match self.pending.get_mut(&key) {
                 Some(pending) => pending.opts.paused = paused,
-                None => self.mixer.set_paused(&key, paused),
+                None => self.input.mixer().set_paused(&key, paused),
             },
             Command::SetVolume(key, volume) => match self.pending.get_mut(&key) {
                 Some(pending) => pending.opts.volume = volume,
                 // Tones scale by the ratio to the volume baked into them.
-                None => self.mixer.set_volume(&key, volume),
+                None => self.input.mixer().set_volume(&key, volume),
             },
             Command::StopAll => {
                 eprintln!("[audio] stop all");
                 for (key, _) in self.pending.drain() {
-                    self.mixer.push_event(Event::Ended { key });
+                    self.input.mixer().push_event(Event::Ended { key });
                 }
-                self.mixer.stop_all();
+                self.input.mixer().stop_all();
             }
             Command::StreamLoad(request) => self.stream_load(request),
             Command::StreamSeek(position_ms) => {
-                if let (Some(stream), Some(handle)) = (self.mixer.stream(), &self.stream) {
+                let mixer = self.input.mixer();
+                if let (Some(stream), Some(handle)) = (mixer.stream(), &self.stream) {
                     eprintln!("[audio] stream {}: seek {position_ms} ms", stream.key());
                     let generation = stream.queue().clear(position_ms);
                     handle.seek(position_ms, generation);
                 }
             }
-            Command::StreamPaused(paused) => self.mixer.set_stream_paused(paused),
-            Command::StreamVolume(volume) => self.mixer.set_stream_volume(volume),
-            Command::StreamLoudness(loudness) => self.mixer.set_stream_loudness(loudness),
+            Command::StreamPaused(paused) => self.input.mixer().set_stream_paused(paused),
+            Command::StreamVolume(volume) => self.input.mixer().set_stream_volume(volume),
+            Command::StreamLoudness(loudness) => self.input.mixer().set_stream_loudness(loudness),
             Command::StreamStop => {
-                if let Some(stream) = self.mixer.stream() {
+                if let Some(stream) = self.input.mixer().stream() {
                     eprintln!("[audio] stream {}: stop", stream.key());
                 }
                 self.stream = None;
-                self.mixer.set_stream(None);
+                self.input.mixer().set_stream(None);
             }
             Command::Shutdown => {}
         }
     }
 
     fn play(&mut self, key: String, clip: Clip, opts: ClipOptions) {
-        self.mixer.remove_clip(&key);
+        if self.queued_at.len() > 64 {
+            self.queued_at.clear();
+        }
+        self.queued_at.insert(key.clone(), Instant::now());
+        self.input.mixer().remove_clip(&key);
         self.pending.remove(&key);
         match clip {
             Clip::Tone(id) => {
                 let Some(spec) = tone::find(&id) else {
                     eprintln!("[audio] failed {key}: unknown tone {id:?}");
-                    self.mixer.push_event(Event::Failed {
+                    self.input.mixer().push_event(Event::Failed {
                         key,
                         error: format!("unknown tone {id:?}"),
                     });
@@ -561,12 +623,12 @@ impl Worker {
                 };
                 let baked = if volume > 0.0 { volume } else { 1.0 };
                 let pcm: Arc<[f32]> = tone::render(spec, baked).into();
-                self.mixer.add_clip(key, pcm, &opts, 1.0 / baked);
+                self.input.mixer().add_clip(key, pcm, &opts, 1.0 / baked);
             }
             Clip::Encoded { bytes, hint } => {
                 if self.decoding.load(Ordering::Acquire) >= MAX_DECODES {
                     eprintln!("[audio] failed {key}: too many clips decoding");
-                    self.mixer.push_event(Event::Failed {
+                    self.input.mixer().push_event(Event::Failed {
                         key,
                         error: "too many clips decoding at once".into(),
                     });
@@ -592,7 +654,7 @@ impl Worker {
                     });
                 if let Err(error) = spawned {
                     self.pending.remove(&key);
-                    self.mixer.push_event(Event::Failed {
+                    self.input.mixer().push_event(Event::Failed {
                         key,
                         error: format!("no decode thread: {error}"),
                     });
@@ -619,12 +681,12 @@ impl Worker {
                     clip.codec,
                     clip.samples.len() as f64 / 2.0 / f64::from(crate::SAMPLE_RATE)
                 );
-                self.mixer
+                self.input.mixer()
                     .add_clip(key, clip.samples.into(), &pending.opts, 1.0);
             }
             Err(error) => {
                 eprintln!("[audio] failed {key}: {error}");
-                self.mixer.push_event(Event::Failed { key, error });
+                self.input.mixer().push_event(Event::Failed { key, error });
             }
         }
     }
@@ -670,7 +732,7 @@ impl Worker {
     fn stream_load(&mut self, request: StreamRequest) {
         // Replace: stop the old thread first, without a StreamEnded.
         self.stream = None;
-        self.mixer.set_stream(None);
+        self.input.mixer().set_stream(None);
         eprintln!(
             "[audio] stream {}: load {} at {} ms{}",
             request.key,
@@ -711,7 +773,7 @@ impl Worker {
         match stream::spawn(job, Cancel::default()) {
             Ok(handle) => {
                 self.stream = Some(handle);
-                self.mixer.set_stream(Some(StreamVoice::new(
+                self.input.mixer().set_stream(Some(StreamVoice::new(
                     request.key,
                     queue,
                     request.paused,
@@ -751,6 +813,31 @@ mod tests {
                 Err(_) => return None,
             }
         }
+    }
+
+    #[test]
+    fn the_local_input_should_add_its_mix_and_report_its_peak() {
+        let input = LocalInput::new();
+        input.mixer().add_clip(
+            "a".into(),
+            vec![0.25f32; 9600].into(),
+            &ClipOptions::default(),
+            1.0,
+        );
+        // What the other inputs put there stays: the speaker sums.
+        let mut out = [0.5f32; SAMPLES];
+        assert!(input.render(&mut out));
+        assert!((out[0] - 0.75).abs() < 1e-6 && (out[SAMPLES - 1] - 0.75).abs() < 1e-6);
+        assert!((input.take_peak() - 0.25).abs() < 1e-6);
+        assert_eq!(input.take_peak(), 0.0, "read once");
+    }
+
+    #[test]
+    fn an_idle_local_input_should_add_silence_and_let_the_speaker_close() {
+        let input = LocalInput::new();
+        let mut out = [0.1f32; SAMPLES];
+        assert!(!input.render(&mut out));
+        assert!(out.iter().all(|s| (*s - 0.1).abs() < 1e-9));
     }
 
     #[test]
@@ -847,7 +934,6 @@ mod tests {
         let (engine, rx) = engine();
         engine.stop("x");
         engine.stream_seek(10);
-        engine.set_output_device(Some("Speakers".into()));
         assert!(engine.shared.sender().is_none());
         assert_eq!(rx.recv_timeout(Duration::from_millis(50)).ok(), None);
     }
