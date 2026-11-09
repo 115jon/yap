@@ -536,7 +536,7 @@ A duplicate version is a warning. The ones that remain are listed in
 `skip` with their reasons. A new duplicate shows up as a warning, and a new
 licence fails the check. The release workflow
 (`.github/workflows/desktop-native-release.yml`) runs `cargo deny check`
-before the build. docs/LIBRARIES.md §16 has the audit.
+before the build. docs/LIBRARIES.md §18 has the audit.
 
 ## Installer
 

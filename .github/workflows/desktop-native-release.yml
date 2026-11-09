@@ -75,7 +75,7 @@ jobs:
           cache-bin: false
 
       # The dependency audit (desktop-native/rust/deny.toml; LIBRARIES.md
-      # §16): RustSec advisories, licences, bans and sources. It runs before
+      # §18): RustSec advisories, licences, bans and sources. It runs before
       # the long build so a new advisory stops the package early. The
       # [patch] path crates must exist for cargo metadata (vendor.ps1;
       # build.ps1 then finds them up to date).

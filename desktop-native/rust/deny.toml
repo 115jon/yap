@@ -1,4 +1,4 @@
-# cargo-deny for the native client's workspace (docs/LIBRARIES.md §16).
+# cargo-deny for the native client's workspace (docs/LIBRARIES.md §18).
 #
 #   cd desktop-native/rust
 #   pwsh ../patches/vendor.ps1      # the [patch] path crates must exist
@@ -48,14 +48,14 @@ allow = [
 
 [bans]
 # Two versions of one crate are a warning, listed by `cargo deny check bans`;
-# LIBRARIES.md §16 says which are left and why.
+# LIBRARIES.md §18 says which are left and why.
 multiple-versions = "warn"
 wildcards = "deny"
 # Our path crates have no version; that is not a wildcard.
 allow-wildcard-paths = true
 highlight = "all"
 deny = []
-# Duplicates that stay, each for its reason (LIBRARIES.md §16), so a new one
+# Duplicates that stay, each for its reason (LIBRARIES.md §18), so a new one
 # stands out. Build-time only (never in the exe): base64 0.22, reqwest 0.12,
 # syn 3 and codespan-reporting 0.11.
 skip = [
