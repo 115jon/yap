@@ -33,11 +33,6 @@ const DIRTY_DRAFT = {
 
 const routes: StubRoute[] = [
   {
-    path: /^\/api\/account-claims$/,
-    method: "GET",
-    reply: () => ok({ claimed: true, candidates: [] }),
-  },
-  {
     path: /^\/api\/avatars\/history$/,
     method: "GET",
     reply: () => ok({ items: [] }),

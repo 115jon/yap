@@ -38,7 +38,6 @@ import { Route as ApiDmsRouteImport } from './routes/api/dms'
 import { Route as ApiCheckUsernameRouteImport } from './routes/api/check-username'
 import { Route as ApiCameraBackgroundsRouteImport } from './routes/api/camera-backgrounds'
 import { Route as ApiAvatarUploadRouteImport } from './routes/api/avatar-upload'
-import { Route as ApiAccountClaimsRouteImport } from './routes/api/account-claims'
 import { Route as ApiSharesIndexRouteImport } from './routes/api/shares/index'
 import { Route as ApiWordleTodayRouteImport } from './routes/api/wordle/today'
 import { Route as ApiVoiceSocketTicketRouteImport } from './routes/api/voice/socket-ticket'
@@ -263,11 +262,6 @@ const ApiCameraBackgroundsRoute = ApiCameraBackgroundsRouteImport.update({
 const ApiAvatarUploadRoute = ApiAvatarUploadRouteImport.update({
   id: '/api/avatar-upload',
   path: '/api/avatar-upload',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAccountClaimsRoute = ApiAccountClaimsRouteImport.update({
-  id: '/api/account-claims',
-  path: '/api/account-claims',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSharesIndexRoute = ApiSharesIndexRouteImport.update({
@@ -697,7 +691,6 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/ui-fixtures': typeof UiFixturesRoute
-  '/api/account-claims': typeof ApiAccountClaimsRoute
   '/api/avatar-upload': typeof ApiAvatarUploadRoute
   '/api/camera-backgrounds': typeof ApiCameraBackgroundsRouteWithChildren
   '/api/check-username': typeof ApiCheckUsernameRoute
@@ -809,7 +802,6 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/ui-fixtures': typeof UiFixturesRoute
-  '/api/account-claims': typeof ApiAccountClaimsRoute
   '/api/avatar-upload': typeof ApiAvatarUploadRoute
   '/api/camera-backgrounds': typeof ApiCameraBackgroundsRouteWithChildren
   '/api/check-username': typeof ApiCheckUsernameRoute
@@ -922,7 +914,6 @@ export interface FileRoutesById {
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/ui-fixtures': typeof UiFixturesRoute
-  '/api/account-claims': typeof ApiAccountClaimsRoute
   '/api/avatar-upload': typeof ApiAvatarUploadRoute
   '/api/camera-backgrounds': typeof ApiCameraBackgroundsRouteWithChildren
   '/api/check-username': typeof ApiCheckUsernameRoute
@@ -1036,7 +1027,6 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/sign-up'
     | '/ui-fixtures'
-    | '/api/account-claims'
     | '/api/avatar-upload'
     | '/api/camera-backgrounds'
     | '/api/check-username'
@@ -1148,7 +1138,6 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/sign-up'
     | '/ui-fixtures'
-    | '/api/account-claims'
     | '/api/avatar-upload'
     | '/api/camera-backgrounds'
     | '/api/check-username'
@@ -1260,7 +1249,6 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/sign-up'
     | '/ui-fixtures'
-    | '/api/account-claims'
     | '/api/avatar-upload'
     | '/api/camera-backgrounds'
     | '/api/check-username'
@@ -1373,7 +1361,6 @@ export interface RootRouteChildren {
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
   UiFixturesRoute: typeof UiFixturesRoute
-  ApiAccountClaimsRoute: typeof ApiAccountClaimsRoute
   ApiAvatarUploadRoute: typeof ApiAvatarUploadRoute
   ApiCameraBackgroundsRoute: typeof ApiCameraBackgroundsRouteWithChildren
   ApiCheckUsernameRoute: typeof ApiCheckUsernameRoute
@@ -1639,13 +1626,6 @@ declare module '@tanstack/react-router' {
       path: '/api/avatar-upload'
       fullPath: '/api/avatar-upload'
       preLoaderRoute: typeof ApiAvatarUploadRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/account-claims': {
-      id: '/api/account-claims'
-      path: '/api/account-claims'
-      fullPath: '/api/account-claims'
-      preLoaderRoute: typeof ApiAccountClaimsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/shares/': {
@@ -2484,7 +2464,6 @@ const rootRouteChildren: RootRouteChildren = {
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
   UiFixturesRoute: UiFixturesRoute,
-  ApiAccountClaimsRoute: ApiAccountClaimsRoute,
   ApiAvatarUploadRoute: ApiAvatarUploadRoute,
   ApiCameraBackgroundsRoute: ApiCameraBackgroundsRouteWithChildren,
   ApiCheckUsernameRoute: ApiCheckUsernameRoute,
