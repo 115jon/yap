@@ -4,6 +4,9 @@ const consumeBackgroundTaskBatch = vi.hoisted(() =>
   vi.fn(async () => undefined),
 );
 const retryR2Cleanup = vi.hoisted(() => vi.fn(async () => undefined));
+const cleanupStalePendingUploads = vi.hoisted(() =>
+  vi.fn(async () => ({ aborted: 0 })),
+);
 const retryMessagePostprocessing = vi.hoisted(() =>
   vi.fn(async () => undefined),
 );
@@ -63,6 +66,10 @@ vi.mock("../../../src/lib/background-tasks", () => ({
 
 vi.mock("../../../src/services/r2-cleanup.service", () => ({
   retryR2Cleanup,
+}));
+
+vi.mock("../../../src/services/multipart-upload.service", () => ({
+  cleanupStalePendingUploads,
 }));
 
 vi.mock("../../../src/lib/collectibles-catalog", () => ({
@@ -155,6 +162,7 @@ describe("custom server soundboard media rate limiting", () => {
     syncCollectiblesCatalog.mockClear();
     retryR2Cleanup.mockClear();
     retryMessagePostprocessing.mockClear();
+    cleanupStalePendingUploads.mockClear();
     const waitUntil = vi.fn();
     const env = { DB: {} } as Parameters<typeof server.scheduled>[1];
 
@@ -167,12 +175,14 @@ describe("custom server soundboard media rate limiting", () => {
     expect(syncCollectiblesCatalog).not.toHaveBeenCalled();
     expect(retryR2Cleanup).toHaveBeenCalledWith(env.DB, undefined);
     expect(retryMessagePostprocessing).toHaveBeenCalledWith(env);
-    expect(waitUntil).toHaveBeenCalledTimes(3);
+    expect(cleanupStalePendingUploads).toHaveBeenCalledWith(env.DB, undefined);
+    expect(waitUntil).toHaveBeenCalledTimes(4);
   });
 
   it("syncs the catalog on its hourly cron and isolates its failure", async () => {
     syncCollectiblesCatalog.mockClear();
     retryMessagePostprocessing.mockClear();
+    cleanupStalePendingUploads.mockClear();
     syncCollectiblesCatalog.mockRejectedValueOnce(new Error("upstream 403"));
     vi.spyOn(console, "error").mockImplementation(() => {});
     const waitUntil = vi.fn();
@@ -189,7 +199,9 @@ describe("custom server soundboard media rate limiting", () => {
     });
     // The hourly cron also sweeps message postprocessing (embed retries).
     expect(retryMessagePostprocessing).toHaveBeenCalledWith(env);
-    expect(waitUntil).toHaveBeenCalledTimes(2);
+    // And stale chunked uploads, hourly.
+    expect(cleanupStalePendingUploads).toHaveBeenCalledWith(env.DB, undefined);
+    expect(waitUntil).toHaveBeenCalledTimes(3);
     const results = await Promise.all(
       waitUntil.mock.calls.map((call) => call[0]),
     );

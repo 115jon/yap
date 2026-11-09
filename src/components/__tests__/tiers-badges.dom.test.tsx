@@ -118,12 +118,12 @@ describe("TierCards", () => {
     expect(within(founder).queryByRole("button")).toBeNull();
   });
 
-  it("never promises a bigger upload than the server takes", () => {
+  it("prints each plan's upload size as the chunked routes enforce it", () => {
     render(<TierCards entitlement={{ tier: "free" }} billingEnabled={false} />);
-    // Chunked uploads are off: every plan is held to the Worker's 25 MB.
+    // Chunked uploads are live: Loud and Founder get 500 MB, free 25 MB.
     const loud = screen.getByRole("article", { name: "Yap Loud" });
-    expect(within(loud).getByText("25 MB uploads")).toBeInTheDocument();
-    expect(screen.queryByText(/500 MB/)).toBeNull();
+    expect(within(loud).getByText("500 MB uploads")).toBeInTheDocument();
+    expect(within(loud).queryByText("25 MB uploads")).toBeNull();
     expect(screen.queryByText("{uploads}")).toBeNull();
   });
 

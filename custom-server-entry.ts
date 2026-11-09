@@ -47,6 +47,7 @@ import {
 import { retryR2Cleanup } from "./src/services/r2-cleanup.service";
 import { sweepAutoBadges } from "./src/services/badge.service";
 import { cfTimeZone, TIME_ZONE_HEADER } from "./src/lib/request-time-zone";
+import { cleanupStalePendingUploads } from "./src/services/multipart-upload.service";
 import {
   COLLECTIBLES_SYNC_CRON,
   CatalogFetchDeferredError,
@@ -530,6 +531,17 @@ export default {
           {
             name: "Message postprocessing retry",
             run: () => retryMessagePostprocessing(env),
+          },
+        ],
+      },
+      // Chunked uploads expire after a day; the hourly sweep aborts their R2
+      // multiparts and rows so abandoned parts don't sit in the bucket.
+      staleUploads: {
+        crons: [MAINTENANCE_CRON, COLLECTIBLES_SYNC_CRON],
+        jobs: [
+          {
+            name: "Stale chunked upload cleanup",
+            run: () => cleanupStalePendingUploads(env.DB, env.BUCKET),
           },
         ],
       },

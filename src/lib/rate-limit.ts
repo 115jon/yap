@@ -34,6 +34,13 @@ export const RATE_LIMITS = {
   MESSAGE_SEND: { limit: 30, windowMs: 60_000 },
   /** File uploads: 10/min */
   FILE_UPLOAD: { limit: 10, windowMs: 60_000 },
+  /**
+   * Chunked-upload parts: 300/min (40 MB/s of 8 MiB parts). A 500 MB file
+   * is 63 parts, so this covers several big files a minute plus retries.
+   */
+  UPLOAD_PART: { limit: 300, windowMs: 60_000 },
+  /** Chunked-upload status, complete and abort: 60/min. */
+  UPLOAD_CONTROL: { limit: 60, windowMs: 60_000 },
   /** Reactions: 20/min */
   REACTION: { limit: 20, windowMs: 60_000 },
   /** Creating servers: 5/hr */
