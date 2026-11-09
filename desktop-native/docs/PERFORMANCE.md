@@ -3169,3 +3169,290 @@ each. Only the call's own stream reached the canceller's far end.
   (`YAP_TEST_SOUNDBOARD`; no device of its own), `src/audio.rs` (the
   name-to-id migration; `startMicTest`, `stopMicTest`, `micTesting`),
   `qml/screens/Settings/SettingsRail.qml` (Test mic).
+
+# Performance pass 8: GIF decode off the GUI thread (2026-11-08)
+
+Pass 7's WPR trace put Qt's GIF decoder (`QGIFFormat::decode` under
+`AnimatedPicture::advance`) at 14.6-18 % of the GUI thread in the animated
+idle. Streamed GIFs (chat GIFs, the GIF picker, pins) decoded one frame at a
+time on the GUI thread, each time a frame was due.
+
+## What changed
+
+- **`yap-anim::gifstream`** (new, on `gif` 0.14.2, which was already in the
+  lock):
+  - `scan` reads the canvas, frame count, each delay and the loop count from
+    the blocks, without decoding a pixel;
+  - `GifStream` composites frame after frame onto one canvas as browsers
+    do:
+    - the canvas starts transparent;
+    - the transparent index keeps the pixel under it;
+    - a local palette applies to its own frame only;
+    - interlaced rows are put in order;
+    - disposal 2 clears to transparent; browsers ignore the background
+      colour, and Qt does not;
+    - disposal 3 restores the rectangle;
+    - frames are clipped to the screen, and a 0x0 screen takes the first
+      frame's extent;
+  - seeking back rewinds and decodes from the start. A frame that cannot be
+    read ends the animation there, and the first one is an error.
+  - Output is premultiplied RGBA (`Format_RGBA8888_Premultiplied`, which
+    the texture upload takes as is), scaled only when the GIF is more than
+    twice its tile.
+- **FFI** (`src/anim.rs`): `yap_gif_open`, `yap_gif_delay`,
+  `yap_gif_stream_new`, `yap_gif_stream_frame` and the matching frees.
+- **`AnimatedPicture`** (`cpp/animatedpicture.*`):
+  - the loader thread scans the file (`scanGif`). The cache holds the file
+    once, in Rust, under the same 4 MB budget for streamed files;
+  - each item has a `GifPlayer` (its stream). One worker thread, `yap-gif`,
+    decodes the frame due **one frame ahead**. When the slot on the shared
+    30 Hz grid comes, the GUI thread only swaps the decoded `QImage` into the
+    one `QSGPlainTexture` (pass 7's path);
+  - the worker wakes the item only when the item waits for a frame (the
+    first frame, a skip, a late decode). A frame decoded ahead waits to be
+    taken at its slot;
+  - frame buffers the window has let go of are decoded into again, so no
+    allocation is made per frame;
+  - the timeline (delays, loops, skipping to the frame due after a stall)
+    stays on the GUI thread, from the scanned delays;
+  - paused (off screen, the app not in front, finished): the timer stops as
+    before, and the frame decoded ahead and the spare buffers are dropped
+    (`restGif`). What stays is the file, the frame on screen and the Rust
+    canvas;
+  - `still` shows the first frame only, and `duration` now comes from the
+    scan for a streamed GIF too;
+  - `YAP_GIF_DECODER=qt` keeps the old path, Qt's reader on the GUI thread,
+    for comparisons. A GIF yap-anim refuses (a canvas over 4096 a side or
+    16 Mpx) falls back to that path;
+  - `YAP_DEBUG_GIF=1` logs frame pacing every 300 frames shown: on time
+    (decoded ahead), late (by how much) and first frames (the wait).
+- **Delays**: the stream clamps 0-10 ms to 100 ms, as browsers do. The Qt
+  path clamped to 16 ms.
+- **Fixture**: `YAP_FIXTURE_GIF` takes a comma-separated list, and
+  `YAP_FIXTURE_GIF_COUNT=n` puts one GIF in each of the last n messages
+  (`yap-core/src/fixture.rs`).
+
+A first version used a 2-thread `QThreadPool` and woke the item for every
+frame. It cut the GUI thread by about 0.2 points, but the process went _up_
+by about 1 point: the large set measured 6.05 % with Qt and 7.09 % with the
+pool (3 rounds). The fix had three parts:
+
+- a single worker that drains every player due in a slot in one wake-up,
+  one frame per player at a time, so a GIF slower to decode than to play
+  goes to the back of the queue and cannot hold up the others;
+- no wake-up for frames decoded ahead;
+- reused frame buffers.
+
+## Correctness
+
+A Python script (`craft.py`, scratch, not in the repo) writes 19 GIFs byte
+by byte with its own LZW encoder. Pillow decodes its output back to the
+source indices.
+
+| case                                   | what it checks                                    |
+| -------------------------------------- | ------------------------------------------------- |
+| `disposal2_trans`, `disposal2_notrans` | disposal 2, with and without a transparent index  |
+| `disposal3`, `disposal3_first`         | disposal 3, and disposal 3 on the first frame     |
+| `transparency`                         | transparent indices                               |
+| `interlaced`                           | interlace at 33x37 (odd), and a 20x29 subframe    |
+| `local_palettes`, `no_global_palette`  | local palettes of 2, 16 and 256 colours           |
+| `zero_delays`                          | delays of 0, 1, 2, 5 and 10 cs                    |
+| `loops_none`, `loops_3`                | loop counts                                       |
+| `offscreen_frame`, `zero_screen`       | a frame past the screen, a 0x0 screen             |
+| `palette_overflow`                     | an index past the palette                         |
+| `gif87a`                               | GIF87a                                            |
+| `huge_4000`, `too_wide_5000`           | 4000x4000 (16 Mpx), 5000x40                       |
+| `truncated`                            | a truncated file                                  |
+| `chat_320`                             | 320x240, 60 frames, subframes with every disposal |
+
+Real files: the repo's `docs/readme/yappy-bark.gif`, the pass 3 scene's
+`chat.gif` and `icon.gif`, and three 50 % re-encodes made with Pillow.
+
+Each file was decoded three ways and compared frame by frame, pixel by
+pixel, premultiplied:
+
+- `yap-anim`'s `examples/gifdump.rs`: the stream, at canvas size;
+- **Qt's reader**, PySide6 6.12, whose GIF code is the same as 6.11's;
+- **headless Edge**: WebCodecs `ImageDecoder`, the decoder `<img>` uses,
+  from local bytes on a routed throwaway origin. Nothing was fetched.
+
+Results:
+
+- **Edge: identical on every frame of every file** (`huge_4000` was not run
+  in Edge). This includes the truncated file, where both stop after 2
+  frames, and the out-of-palette index, where both stop after 1.
+- **Qt: identical on every frame of 15 of the 24 files.** Edge sides with
+  the stream on every difference:
+  - Qt paints the background colour where browsers leave transparency: on
+    disposal 2 (`disposal2_notrans`, `disposal3` frame 4, `huge_4000`
+    frame 2, `chat_320` from frame 3 on, `offscreen_frame`), and around the
+    first frame on a 0x0 screen (`zero_screen`);
+  - on disposal 3 of the first frame, Qt keeps the frame where browsers
+    clear it;
+  - Qt shows one more frame after a truncated LZW stream, and after an
+    out-of-palette index, where Edge and the stream stop.
+- **Loops**: no NETSCAPE block plays once, 0 plays forever, n plays n+1
+  times. This matches Edge's `repetitionCount` and QMovie's count.
+- **Delays**: the same as Qt's `nextImageDelay`, clamped.
+- `too_wide_5000` is refused by the stream, so the app plays it through Qt's
+  reader.
+
+**A `gif` 0.14.2 bug**: its row-by-row deinterlacing stops with "image
+truncated" on some interlaced frames, 33x37 among them. Qt, Pillow and Edge
+read those whole. `gifstream` reads each frame in one piece and puts the
+rows in order itself (LIBRARIES.md §18.4).
+
+**Decode cost**, best of 3, per frame, in `gifdump`. Qt's reader is
+PySide6's `read()`, which does not include its conversion to premultiplied:
+
+| file               | stream   | Qt       |
+| ------------------ | -------- | -------- |
+| chat.gif 360x240   | 0.137 ms | 0.165 ms |
+| icon.gif 128x128   | 0.041 ms | 0.050 ms |
+| chat_320 320x240   | 0.112 ms | 0.093 ms |
+| yappy-bark 320x320 | 0.101 ms | 0.094 ms |
+
+A frame whose descriptor is over 16 Mpx is refused before anything is
+allocated for it, whatever the screen size says. The crate itself checks no
+limit on that path. The scan refuses such a file, and Qt's reader takes it.
+
+Tests: 16 new `gifstream` unit tests cover the scan, loops, delays, each
+disposal, the first frame's disposal 3, local palettes, interlace (seven
+sizes), clipping, the 0x0 screen, the huge canvas and huge frame
+refusals, seeking back,
+truncation and scaling into a stride.
+
+## Method
+
+- Offline and on our own profile (`gif8`): the chat-10k fixture with local
+  GIF files, the window at 1200x1040 on DISPLAY15 (1080p, 100 %).
+  `WM_ACTIVATE` was posted to mark it active, with no real focus.
+  `YAP_NO_TOASTS`, `YAP_NO_CLIPBOARD` and `YAP_TEST_POINTER` were set.
+- CPU is `TotalProcessorTime` over 40 s after 28 s of settling: the
+  process, the GUI thread (the process's first thread), and the other
+  threads by name (`GetThreadDescription`). Each run is one launch.
+- The decoder is A/B'd in one exe (`YAP_GIF_DECODER=qt` against the
+  default), interleaved over 3 rounds.
+- **The machine was shared.** Other agents' builds were running, along with
+  a qemu VM (2 cores). Compare only within a round.
+
+Scenes:
+
+- **large**: `YAP_FIXTURE_GIF_COUNT=6` with chat.gif (360x240), chat_320
+  and yappy-bark. 3 GIFs are on screen.
+- **small**: 10 messages with the three 50 % re-encodes. 4 GIFs are on
+  screen.
+- **pass 3**: pass 3's scene, two chat.gif messages and the GIF server icon
+  (the icon decodes whole and is not streamed). This is the "animated idle"
+  target.
+
+## Results
+
+CPU, % of one core, as qt / stream for each round:
+
+| scene  | process                         | GUI thread                      | `yap-gif` |
+| ------ | ------------------------------- | ------------------------------- | --------- |
+| large  | 5.27/4.69, 6.52/5.55, 6.02/4.72 | 2.66/2.07, 3.55/2.54, 3.12/1.84 | 0.47-0.66 |
+| small  | 5.51/4.96, 5.47/4.84, 4.88/5.00 | 3.12/1.91, 2.89/2.30, 2.77/1.80 | 0.39-0.55 |
+| pass 3 | 4.84/5.58, 5.27/5.16, 5.74/4.49 | 2.34/2.11, 2.50/2.03, 2.77/1.60 | 0.51-0.74 |
+
+Means:
+
+| scene  | process, Qt | process, stream    | GUI, Qt | GUI, stream        |
+| ------ | ----------- | ------------------ | ------- | ------------------ |
+| large  | 5.94 %      | **4.99 %** (−16 %) | 3.11 %  | **2.15 %** (−31 %) |
+| small  | 5.29 %      | **4.93 %** (−7 %)  | 2.93 %  | **2.00 %** (−32 %) |
+| pass 3 | 5.28 %      | **5.08 %** (−4 %)  | 2.54 %  | **1.91 %** (−25 %) |
+
+- **The GUI thread is 25-32 % lower in every round of every scene.** That is
+  more than the 15-18 % the trace gave Qt's decoder. The GUI thread no
+  longer converts ARGB32 to premultiplied RGBA either, and no longer
+  allocates a frame each time.
+- **The process total is lower in 7 of 9 rounds**, by 4-16 % on the means.
+  About 0.5 points moved to `yap-gif`. The rounds vary by up to 1.3 points
+  with the machine's load, so the totals are the weaker result.
+- **Paused, the stream costs nothing.** With the app not in front (no
+  activation), 30 s measured 0.21 % with Qt and 0.05 % with the stream.
+  Scrolled so the GIFs are off screen, 0.16 % and 0.21 %. In both cases the
+  GUI thread measured 0.00 %, and the rest is `YapGames`, the game
+  detector.
+- **Private memory**: +1 to +3 MB with the stream in the large scene
+  (198.3 against 195.3 MB) and the same in the others. That is the frame
+  decoded ahead and up to two reused buffers per playing GIF. The final
+  build drops them while paused.
+
+**Frame pacing** (`YAP_DEBUG_GIF`, every run with the stream):
+
+- 0 late frames out of ~2,090 per large run, ~2,690 per small run and
+  ~1,500 per pass 3 run. The only exceptions were 1 frame late by 1 ms in
+  one run, and in the first build (the pool) 1-17 late frames, at most 4 ms.
+- The first frame of a stream is on screen 0.4-5.4 ms (mean per run) after
+  it is opened.
+
+Renders (`QSG_RENDER_TIMING`, large scene, the last two thirds of 40 s):
+
+| decoder | renders/s | gap p50 | gap p95 | gap p99 | gap max | process | GUI    |
+| ------- | --------- | ------- | ------- | ------- | ------- | ------- | ------ |
+| Qt      | 27.8      | 33 ms   | 66 ms   | 67 ms   | 68 ms   | 8.44 %  | 4.10 % |
+| stream  | 27.1      | 33 ms   | 66 ms   | 67 ms   | 68 ms   | 7.46 %  | 2.93 % |
+
+The renders keep the same pacing on the 30 Hz grid. A 66 ms gap is a slot in
+which no GIF changed (60 ms and 40 ms GIFs on a 33 ms grid). It is not a
+late frame.
+
+## Targets
+
+- **GIF decode off the GUI thread: done.** The GUI thread is 25-32 % lower,
+  and frames meet their slots.
+- **Animated idle under 3 %: not reached on this machine today.** Pass 3's
+  scene measured 4.49-5.58 % with the stream and 4.84-5.74 % with Qt, under
+  other agents' load. Pass 7 had 2.77-4.49 % on a quieter machine. What is
+  left is pass 7's other cost: rendering (83 draws a frame), the render
+  thread and the driver's threads.
+- **A real chat GIF**: the test server "Native Spike Lab" #general had none.
+  Spike Peer posted `chat.gif` through the REST upload, the post was
+  deleted afterwards, and the final build ran as the test owner (profile
+  `spike`). The GIF loaded through the attachment URL and played, with 298
+  frames on time, 0 late and the first frame 0.5 ms after the stream
+  opened. With that one GIF on screen the process used 3.05 % of a core
+  over 20 s.
+- Not measured: a WPR trace of the new build (no elevation this pass), and
+  the GIF picker, whose GIFs come from KLIPY and were not loaded.
+
+## Build, tests, clippy
+
+The checks used `QMAKE` at `F:/ct/qt-custom-6.11p8`, `LK_CUSTOM_WEBRTC` and
+`--target-dir F:/ct/yapn/check-gifdeps`. Logs are in `F:/ct/yapn/`.
+
+- **Tests**: the workspace without `yap_native` and `yap-audio` passed
+  2,116 with 0 failed (`test-gifdeps-2.log`). `yap-audio` on its own
+  passed 102 with 0 failed. `yap-anim` passed 31 with 0 failed after the
+  review fixes (`test-gifdeps-anim-3.log`). `yap-webm` prints three
+  warnings when built without its `libvpx` feature; they were there before
+  this change.
+- **Clippy**: `cargo clippy --workspace --all-targets -- -D warnings`
+  exited 0 with no warnings (`clippy-gifdeps-3.log`).
+- **Builds**: `build.ps1 -BuildDir F:/ct/yapn/rel-gifdeps` exited 0 five
+  times (`build-gifdeps-1..5.log`). Build 2 added `/MAP` for LIBRARIES.md
+  §18.3. The exe is 58.6 MB.
+- **The final build** (round-robin worker, the frame-size guard, rest when
+  finished) was checked once more, on one run each:
+
+  | scene, decoder     | process | GUI    | `yap-gif` |
+  | ------------------ | ------- | ------ | --------- |
+  | large, Qt          | 4.84 %  | 2.24 % | -         |
+  | large, stream      | 4.37 %  | 1.72 % | 0.47 %    |
+  | small, stream      | 5.10 %  | 2.14 % | 0.31 %    |
+  | off screen, stream | 0.23 %  | 0.00 % | -         |
+
+  The streams were still identical to Edge on all 23 files.
+
+## Files
+
+- `rust/crates/yap-anim/src/gifstream.rs` (new), `src/lib.rs`
+  (`AnimError::Gif`), `Cargo.toml` (`gif`), `examples/gifdump.rs` (new);
+- `rust/src/anim.rs`: the `yap_gif_*` FFI;
+- `cpp/animatedpicture.h`, `cpp/animatedpicture.cpp`: `GifPlayer`,
+  `GifWorker`, the streamed path, `YAP_GIF_DECODER`, `YAP_DEBUG_GIF`;
+- `rust/crates/yap-core/src/fixture.rs`: `YAP_FIXTURE_GIF_COUNT` and the
+  URL list.

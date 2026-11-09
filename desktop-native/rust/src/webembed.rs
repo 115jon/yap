@@ -222,7 +222,7 @@ fn register_class() -> windows::core::Result<()> {
             ..Default::default()
         };
         if RegisterClassW(&class) == 0 {
-            return Err(windows::core::Error::from_win32());
+            return Err(windows::core::Error::from_thread());
         }
     }
     CLASS.set(true);

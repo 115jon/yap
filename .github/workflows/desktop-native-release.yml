@@ -74,6 +74,22 @@ jobs:
           cache-targets: false
           cache-bin: false
 
+      # The dependency audit (desktop-native/rust/deny.toml; LIBRARIES.md
+      # §16): RustSec advisories, licences, bans and sources. It runs before
+      # the long build so a new advisory stops the package early. The
+      # [patch] path crates must exist for cargo metadata (vendor.ps1;
+      # build.ps1 then finds them up to date).
+      - name: Dependency audit (cargo deny)
+        run: |
+          cargo install cargo-deny --locked --version 0.20.2
+          ./desktop-native/patches/vendor.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Push-Location desktop-native/rust
+          cargo deny check
+          $code = $LASTEXITCODE
+          Pop-Location
+          exit $code
+
       # A static Qt is not something an action can install. The hosted path
       # takes a prepared archive; the self-hosted runner brings its own.
       - name: Static Qt 6.6.3

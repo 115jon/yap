@@ -515,6 +515,29 @@ You need:
 `build.ps1` enters the VS developer shell, configures with CMake, and builds
 with Ninja. A dynamic Qt also works; you then need `windeployqt` to run it.
 
+### Dependency audit (cargo-deny)
+
+`rust/deny.toml` checks the Rust workspace for RustSec advisories
+(vulnerable, unmaintained, unsound and yanked crates), licences outside the
+allowed list, duplicate versions and sources other than crates.io. It checks
+the Windows target only. The `[patch]` crates must be vendored first,
+because cargo metadata reads them:
+
+```powershell
+cargo install cargo-deny --locked --version 0.20.2   # once
+pwsh patches/vendor.ps1                              # no-op when up to date
+cd rust
+cargo deny check                  # all four checks
+cargo deny check advisories       # one of them
+cargo deny list -l license        # which crate uses which licence
+```
+
+A duplicate version is a warning. The ones that remain are listed in
+`skip` with their reasons. A new duplicate shows up as a warning, and a new
+licence fails the check. The release workflow
+(`.github/workflows/desktop-native-release.yml`) runs `cargo deny check`
+before the build. docs/LIBRARIES.md §16 has the audit.
+
 ## Installer
 
 `tools/package.ps1` builds the release exe and packs it with Velopack

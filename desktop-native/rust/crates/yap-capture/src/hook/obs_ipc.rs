@@ -468,7 +468,7 @@ impl IpcError {
     fn last_os(context: &'static str) -> Self {
         IpcError::Os {
             context,
-            code: windows::core::Error::from_win32().code().0,
+            code: windows::core::Error::from_thread().code().0,
         }
     }
 }
@@ -1827,7 +1827,7 @@ impl ObsIpcChannel {
                 unsafe {
                     let _ = CloseHandle(map);
                 }
-                last_err_code = windows::core::Error::from_win32().code().0;
+                last_err_code = windows::core::Error::from_thread().code().0;
                 continue;
             }
             opened = Some((mapping_name, map, view));
