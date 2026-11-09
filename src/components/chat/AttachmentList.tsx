@@ -14,7 +14,10 @@ import {
 } from "@/components/ui/tooltip";
 import { TooBigCard } from "@/components/ui/too-big-card";
 import { useMyEntitlement } from "@/hooks/useEntitlement";
-import { clientUploadLimitFor } from "@/lib/upload-limits";
+import {
+  clientUploadLimitFor,
+  formatUploadProgress,
+} from "@/lib/upload-limits";
 import { COMPOSER_TRAY } from "./ReplyIndicator";
 import type {
   OversizedBatch,
@@ -107,6 +110,20 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ProgressChip({ loaded, total }: { loaded: number; total: number }) {
+  return (
+    <Num
+      size="xs"
+      className={cn(
+        MEDIA_CHIP,
+        "right-1 bottom-1 px-1 whitespace-nowrap text-ink-2",
+      )}
+    >
+      {formatUploadProgress(loaded, total)}
+    </Num>
+  );
 }
 
 function SizeChip({ bytes }: { bytes: number }) {
@@ -320,14 +337,23 @@ function PendingTile({
         </div>
       )}
 
-      {!failed ? <SizeChip bytes={upload.file.size} /> : null}
+      {failed ? null : upload.loaded !== undefined ? (
+        <ProgressChip loaded={upload.loaded} total={upload.file.size} />
+      ) : (
+        <SizeChip bytes={upload.file.size} />
+      )}
 
-      {/* Determinate once a transport reports progress (0..1); today's fetch
-          upload doesn't, so the spinner above is the whole indicator. Scale
-          is a transform, so the bar never lays out. */}
+      {/* Determinate once a transport reports progress (0..1): chunked
+          uploads do, a single-request fetch doesn't (the spinner above is
+          then the whole indicator). Scale is a transform, so the bar never
+          lays out. */}
       {!failed && upload.progress > 0 ? (
         <div
-          aria-hidden="true"
+          role="progressbar"
+          aria-label={`Uploading ${upload.file.name}`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(Math.min(1, upload.progress) * 100)}
           className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-accent-ink transition-transform duration-(--dur-2) ease-linear"
           style={{ transform: `scaleX(${Math.min(1, upload.progress)})` }}
         />

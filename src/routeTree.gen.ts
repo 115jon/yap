@@ -93,6 +93,7 @@ import { Route as ApiEmojisAssetsIdRouteImport } from './routes/api/emojis/asset
 import { Route as ApiChannelsIdVoiceStatusMediaRouteImport } from './routes/api/channels/$id/voice-status-media'
 import { Route as ApiChannelsIdVoiceStatusRouteImport } from './routes/api/channels/$id/voice-status'
 import { Route as ApiChannelsIdVoiceDisconnectRouteImport } from './routes/api/channels/$id/voice-disconnect'
+import { Route as ApiChannelsIdUploadsRouteImport } from './routes/api/channels/$id/uploads'
 import { Route as ApiChannelsIdTypingRouteImport } from './routes/api/channels/$id/typing'
 import { Route as ApiChannelsIdThreadsRouteImport } from './routes/api/channels/$id/threads'
 import { Route as ApiChannelsIdThreadRouteImport } from './routes/api/channels/$id/thread'
@@ -111,10 +112,13 @@ import { Route as ApiServersIdMembersUserIdRouteImport } from './routes/api/serv
 import { Route as ApiServersIdInvitesCodeRouteImport } from './routes/api/servers/$id/invites/$code'
 import { Route as ApiServersIdChannelsReorderRouteImport } from './routes/api/servers/$id/channels/reorder'
 import { Route as ApiServersIdCategoriesCategoryIdRouteImport } from './routes/api/servers/$id/categories/$categoryId'
+import { Route as ApiChannelsIdUploadsUploadIdRouteImport } from './routes/api/channels/$id/uploads/$uploadId'
 import { Route as ApiChannelsIdPermissionsTargetIdRouteImport } from './routes/api/channels/$id/permissions/$targetId'
 import { Route as ApiChannelsIdMessagesUploadRouteImport } from './routes/api/channels/$id/messages/upload'
 import { Route as ApiChannelsIdMessagesGifRouteImport } from './routes/api/channels/$id/messages/gif'
 import { Route as ApiServersIdMembersUserIdRolesRouteImport } from './routes/api/servers/$id/members/$userId/roles'
+import { Route as ApiChannelsIdUploadsUploadIdCompleteRouteImport } from './routes/api/channels/$id/uploads/$uploadId/complete'
+import { Route as ApiChannelsIdUploadsUploadIdPartsPartNumberRouteImport } from './routes/api/channels/$id/uploads/$uploadId/parts/$partNumber'
 
 const UiFixturesRoute = UiFixturesRouteImport.update({
   id: '/ui-fixtures',
@@ -543,6 +547,11 @@ const ApiChannelsIdVoiceDisconnectRoute =
     path: '/voice-disconnect',
     getParentRoute: () => ApiChannelsIdRoute,
   } as any)
+const ApiChannelsIdUploadsRoute = ApiChannelsIdUploadsRouteImport.update({
+  id: '/uploads',
+  path: '/uploads',
+  getParentRoute: () => ApiChannelsIdRoute,
+} as any)
 const ApiChannelsIdTypingRoute = ApiChannelsIdTypingRouteImport.update({
   id: '/typing',
   path: '/typing',
@@ -638,6 +647,12 @@ const ApiServersIdCategoriesCategoryIdRoute =
     path: '/$categoryId',
     getParentRoute: () => ApiServersIdCategoriesRoute,
   } as any)
+const ApiChannelsIdUploadsUploadIdRoute =
+  ApiChannelsIdUploadsUploadIdRouteImport.update({
+    id: '/$uploadId',
+    path: '/$uploadId',
+    getParentRoute: () => ApiChannelsIdUploadsRoute,
+  } as any)
 const ApiChannelsIdPermissionsTargetIdRoute =
   ApiChannelsIdPermissionsTargetIdRouteImport.update({
     id: '/$targetId',
@@ -661,6 +676,18 @@ const ApiServersIdMembersUserIdRolesRoute =
     id: '/roles',
     path: '/roles',
     getParentRoute: () => ApiServersIdMembersUserIdRoute,
+  } as any)
+const ApiChannelsIdUploadsUploadIdCompleteRoute =
+  ApiChannelsIdUploadsUploadIdCompleteRouteImport.update({
+    id: '/complete',
+    path: '/complete',
+    getParentRoute: () => ApiChannelsIdUploadsUploadIdRoute,
+  } as any)
+const ApiChannelsIdUploadsUploadIdPartsPartNumberRoute =
+  ApiChannelsIdUploadsUploadIdPartsPartNumberRouteImport.update({
+    id: '/parts/$partNumber',
+    path: '/parts/$partNumber',
+    getParentRoute: () => ApiChannelsIdUploadsUploadIdRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -740,6 +767,7 @@ export interface FileRoutesByFullPath {
   '/api/channels/$id/thread': typeof ApiChannelsIdThreadRoute
   '/api/channels/$id/threads': typeof ApiChannelsIdThreadsRoute
   '/api/channels/$id/typing': typeof ApiChannelsIdTypingRoute
+  '/api/channels/$id/uploads': typeof ApiChannelsIdUploadsRouteWithChildren
   '/api/channels/$id/voice-disconnect': typeof ApiChannelsIdVoiceDisconnectRoute
   '/api/channels/$id/voice-status': typeof ApiChannelsIdVoiceStatusRoute
   '/api/channels/$id/voice-status-media': typeof ApiChannelsIdVoiceStatusMediaRoute
@@ -763,13 +791,16 @@ export interface FileRoutesByFullPath {
   '/api/channels/$id/messages/gif': typeof ApiChannelsIdMessagesGifRoute
   '/api/channels/$id/messages/upload': typeof ApiChannelsIdMessagesUploadRoute
   '/api/channels/$id/permissions/$targetId': typeof ApiChannelsIdPermissionsTargetIdRoute
+  '/api/channels/$id/uploads/$uploadId': typeof ApiChannelsIdUploadsUploadIdRouteWithChildren
   '/api/servers/$id/categories/$categoryId': typeof ApiServersIdCategoriesCategoryIdRoute
   '/api/servers/$id/channels/reorder': typeof ApiServersIdChannelsReorderRoute
   '/api/servers/$id/invites/$code': typeof ApiServersIdInvitesCodeRoute
   '/api/servers/$id/members/$userId': typeof ApiServersIdMembersUserIdRouteWithChildren
   '/api/servers/$id/roles/$roleId': typeof ApiServersIdRolesRoleIdRoute
   '/api/shared-messages/$token/media/$': typeof ApiSharedMessagesTokenMediaSplatRoute
+  '/api/channels/$id/uploads/$uploadId/complete': typeof ApiChannelsIdUploadsUploadIdCompleteRoute
   '/api/servers/$id/members/$userId/roles': typeof ApiServersIdMembersUserIdRolesRoute
+  '/api/channels/$id/uploads/$uploadId/parts/$partNumber': typeof ApiChannelsIdUploadsUploadIdPartsPartNumberRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -848,6 +879,7 @@ export interface FileRoutesByTo {
   '/api/channels/$id/thread': typeof ApiChannelsIdThreadRoute
   '/api/channels/$id/threads': typeof ApiChannelsIdThreadsRoute
   '/api/channels/$id/typing': typeof ApiChannelsIdTypingRoute
+  '/api/channels/$id/uploads': typeof ApiChannelsIdUploadsRouteWithChildren
   '/api/channels/$id/voice-disconnect': typeof ApiChannelsIdVoiceDisconnectRoute
   '/api/channels/$id/voice-status': typeof ApiChannelsIdVoiceStatusRoute
   '/api/channels/$id/voice-status-media': typeof ApiChannelsIdVoiceStatusMediaRoute
@@ -871,13 +903,16 @@ export interface FileRoutesByTo {
   '/api/channels/$id/messages/gif': typeof ApiChannelsIdMessagesGifRoute
   '/api/channels/$id/messages/upload': typeof ApiChannelsIdMessagesUploadRoute
   '/api/channels/$id/permissions/$targetId': typeof ApiChannelsIdPermissionsTargetIdRoute
+  '/api/channels/$id/uploads/$uploadId': typeof ApiChannelsIdUploadsUploadIdRouteWithChildren
   '/api/servers/$id/categories/$categoryId': typeof ApiServersIdCategoriesCategoryIdRoute
   '/api/servers/$id/channels/reorder': typeof ApiServersIdChannelsReorderRoute
   '/api/servers/$id/invites/$code': typeof ApiServersIdInvitesCodeRoute
   '/api/servers/$id/members/$userId': typeof ApiServersIdMembersUserIdRouteWithChildren
   '/api/servers/$id/roles/$roleId': typeof ApiServersIdRolesRoleIdRoute
   '/api/shared-messages/$token/media/$': typeof ApiSharedMessagesTokenMediaSplatRoute
+  '/api/channels/$id/uploads/$uploadId/complete': typeof ApiChannelsIdUploadsUploadIdCompleteRoute
   '/api/servers/$id/members/$userId/roles': typeof ApiServersIdMembersUserIdRolesRoute
+  '/api/channels/$id/uploads/$uploadId/parts/$partNumber': typeof ApiChannelsIdUploadsUploadIdPartsPartNumberRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -957,6 +992,7 @@ export interface FileRoutesById {
   '/api/channels/$id/thread': typeof ApiChannelsIdThreadRoute
   '/api/channels/$id/threads': typeof ApiChannelsIdThreadsRoute
   '/api/channels/$id/typing': typeof ApiChannelsIdTypingRoute
+  '/api/channels/$id/uploads': typeof ApiChannelsIdUploadsRouteWithChildren
   '/api/channels/$id/voice-disconnect': typeof ApiChannelsIdVoiceDisconnectRoute
   '/api/channels/$id/voice-status': typeof ApiChannelsIdVoiceStatusRoute
   '/api/channels/$id/voice-status-media': typeof ApiChannelsIdVoiceStatusMediaRoute
@@ -980,13 +1016,16 @@ export interface FileRoutesById {
   '/api/channels/$id/messages/gif': typeof ApiChannelsIdMessagesGifRoute
   '/api/channels/$id/messages/upload': typeof ApiChannelsIdMessagesUploadRoute
   '/api/channels/$id/permissions/$targetId': typeof ApiChannelsIdPermissionsTargetIdRoute
+  '/api/channels/$id/uploads/$uploadId': typeof ApiChannelsIdUploadsUploadIdRouteWithChildren
   '/api/servers/$id/categories/$categoryId': typeof ApiServersIdCategoriesCategoryIdRoute
   '/api/servers/$id/channels/reorder': typeof ApiServersIdChannelsReorderRoute
   '/api/servers/$id/invites/$code': typeof ApiServersIdInvitesCodeRoute
   '/api/servers/$id/members/$userId': typeof ApiServersIdMembersUserIdRouteWithChildren
   '/api/servers/$id/roles/$roleId': typeof ApiServersIdRolesRoleIdRoute
   '/api/shared-messages/$token/media/$': typeof ApiSharedMessagesTokenMediaSplatRoute
+  '/api/channels/$id/uploads/$uploadId/complete': typeof ApiChannelsIdUploadsUploadIdCompleteRoute
   '/api/servers/$id/members/$userId/roles': typeof ApiServersIdMembersUserIdRolesRoute
+  '/api/channels/$id/uploads/$uploadId/parts/$partNumber': typeof ApiChannelsIdUploadsUploadIdPartsPartNumberRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -1067,6 +1106,7 @@ export interface FileRouteTypes {
     | '/api/channels/$id/thread'
     | '/api/channels/$id/threads'
     | '/api/channels/$id/typing'
+    | '/api/channels/$id/uploads'
     | '/api/channels/$id/voice-disconnect'
     | '/api/channels/$id/voice-status'
     | '/api/channels/$id/voice-status-media'
@@ -1090,13 +1130,16 @@ export interface FileRouteTypes {
     | '/api/channels/$id/messages/gif'
     | '/api/channels/$id/messages/upload'
     | '/api/channels/$id/permissions/$targetId'
+    | '/api/channels/$id/uploads/$uploadId'
     | '/api/servers/$id/categories/$categoryId'
     | '/api/servers/$id/channels/reorder'
     | '/api/servers/$id/invites/$code'
     | '/api/servers/$id/members/$userId'
     | '/api/servers/$id/roles/$roleId'
     | '/api/shared-messages/$token/media/$'
+    | '/api/channels/$id/uploads/$uploadId/complete'
     | '/api/servers/$id/members/$userId/roles'
+    | '/api/channels/$id/uploads/$uploadId/parts/$partNumber'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -1175,6 +1218,7 @@ export interface FileRouteTypes {
     | '/api/channels/$id/thread'
     | '/api/channels/$id/threads'
     | '/api/channels/$id/typing'
+    | '/api/channels/$id/uploads'
     | '/api/channels/$id/voice-disconnect'
     | '/api/channels/$id/voice-status'
     | '/api/channels/$id/voice-status-media'
@@ -1198,13 +1242,16 @@ export interface FileRouteTypes {
     | '/api/channels/$id/messages/gif'
     | '/api/channels/$id/messages/upload'
     | '/api/channels/$id/permissions/$targetId'
+    | '/api/channels/$id/uploads/$uploadId'
     | '/api/servers/$id/categories/$categoryId'
     | '/api/servers/$id/channels/reorder'
     | '/api/servers/$id/invites/$code'
     | '/api/servers/$id/members/$userId'
     | '/api/servers/$id/roles/$roleId'
     | '/api/shared-messages/$token/media/$'
+    | '/api/channels/$id/uploads/$uploadId/complete'
     | '/api/servers/$id/members/$userId/roles'
+    | '/api/channels/$id/uploads/$uploadId/parts/$partNumber'
   id:
     | '__root__'
     | '/'
@@ -1283,6 +1330,7 @@ export interface FileRouteTypes {
     | '/api/channels/$id/thread'
     | '/api/channels/$id/threads'
     | '/api/channels/$id/typing'
+    | '/api/channels/$id/uploads'
     | '/api/channels/$id/voice-disconnect'
     | '/api/channels/$id/voice-status'
     | '/api/channels/$id/voice-status-media'
@@ -1306,13 +1354,16 @@ export interface FileRouteTypes {
     | '/api/channels/$id/messages/gif'
     | '/api/channels/$id/messages/upload'
     | '/api/channels/$id/permissions/$targetId'
+    | '/api/channels/$id/uploads/$uploadId'
     | '/api/servers/$id/categories/$categoryId'
     | '/api/servers/$id/channels/reorder'
     | '/api/servers/$id/invites/$code'
     | '/api/servers/$id/members/$userId'
     | '/api/servers/$id/roles/$roleId'
     | '/api/shared-messages/$token/media/$'
+    | '/api/channels/$id/uploads/$uploadId/complete'
     | '/api/servers/$id/members/$userId/roles'
+    | '/api/channels/$id/uploads/$uploadId/parts/$partNumber'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -1975,6 +2026,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiChannelsIdVoiceDisconnectRouteImport
       parentRoute: typeof ApiChannelsIdRoute
     }
+    '/api/channels/$id/uploads': {
+      id: '/api/channels/$id/uploads'
+      path: '/uploads'
+      fullPath: '/api/channels/$id/uploads'
+      preLoaderRoute: typeof ApiChannelsIdUploadsRouteImport
+      parentRoute: typeof ApiChannelsIdRoute
+    }
     '/api/channels/$id/typing': {
       id: '/api/channels/$id/typing'
       path: '/typing'
@@ -2101,6 +2159,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiServersIdCategoriesCategoryIdRouteImport
       parentRoute: typeof ApiServersIdCategoriesRoute
     }
+    '/api/channels/$id/uploads/$uploadId': {
+      id: '/api/channels/$id/uploads/$uploadId'
+      path: '/$uploadId'
+      fullPath: '/api/channels/$id/uploads/$uploadId'
+      preLoaderRoute: typeof ApiChannelsIdUploadsUploadIdRouteImport
+      parentRoute: typeof ApiChannelsIdUploadsRoute
+    }
     '/api/channels/$id/permissions/$targetId': {
       id: '/api/channels/$id/permissions/$targetId'
       path: '/$targetId'
@@ -2128,6 +2193,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/servers/$id/members/$userId/roles'
       preLoaderRoute: typeof ApiServersIdMembersUserIdRolesRouteImport
       parentRoute: typeof ApiServersIdMembersUserIdRoute
+    }
+    '/api/channels/$id/uploads/$uploadId/complete': {
+      id: '/api/channels/$id/uploads/$uploadId/complete'
+      path: '/complete'
+      fullPath: '/api/channels/$id/uploads/$uploadId/complete'
+      preLoaderRoute: typeof ApiChannelsIdUploadsUploadIdCompleteRouteImport
+      parentRoute: typeof ApiChannelsIdUploadsUploadIdRoute
+    }
+    '/api/channels/$id/uploads/$uploadId/parts/$partNumber': {
+      id: '/api/channels/$id/uploads/$uploadId/parts/$partNumber'
+      path: '/parts/$partNumber'
+      fullPath: '/api/channels/$id/uploads/$uploadId/parts/$partNumber'
+      preLoaderRoute: typeof ApiChannelsIdUploadsUploadIdPartsPartNumberRouteImport
+      parentRoute: typeof ApiChannelsIdUploadsUploadIdRoute
     }
   }
 }
@@ -2312,6 +2391,36 @@ const ApiChannelsIdPermissionsRouteWithChildren =
     ApiChannelsIdPermissionsRouteChildren,
   )
 
+interface ApiChannelsIdUploadsUploadIdRouteChildren {
+  ApiChannelsIdUploadsUploadIdCompleteRoute: typeof ApiChannelsIdUploadsUploadIdCompleteRoute
+  ApiChannelsIdUploadsUploadIdPartsPartNumberRoute: typeof ApiChannelsIdUploadsUploadIdPartsPartNumberRoute
+}
+
+const ApiChannelsIdUploadsUploadIdRouteChildren: ApiChannelsIdUploadsUploadIdRouteChildren =
+  {
+    ApiChannelsIdUploadsUploadIdCompleteRoute:
+      ApiChannelsIdUploadsUploadIdCompleteRoute,
+    ApiChannelsIdUploadsUploadIdPartsPartNumberRoute:
+      ApiChannelsIdUploadsUploadIdPartsPartNumberRoute,
+  }
+
+const ApiChannelsIdUploadsUploadIdRouteWithChildren =
+  ApiChannelsIdUploadsUploadIdRoute._addFileChildren(
+    ApiChannelsIdUploadsUploadIdRouteChildren,
+  )
+
+interface ApiChannelsIdUploadsRouteChildren {
+  ApiChannelsIdUploadsUploadIdRoute: typeof ApiChannelsIdUploadsUploadIdRouteWithChildren
+}
+
+const ApiChannelsIdUploadsRouteChildren: ApiChannelsIdUploadsRouteChildren = {
+  ApiChannelsIdUploadsUploadIdRoute:
+    ApiChannelsIdUploadsUploadIdRouteWithChildren,
+}
+
+const ApiChannelsIdUploadsRouteWithChildren =
+  ApiChannelsIdUploadsRoute._addFileChildren(ApiChannelsIdUploadsRouteChildren)
+
 interface ApiChannelsIdRouteChildren {
   ApiChannelsIdMediaRoute: typeof ApiChannelsIdMediaRoute
   ApiChannelsIdMessagesRoute: typeof ApiChannelsIdMessagesRouteWithChildren
@@ -2323,6 +2432,7 @@ interface ApiChannelsIdRouteChildren {
   ApiChannelsIdThreadRoute: typeof ApiChannelsIdThreadRoute
   ApiChannelsIdThreadsRoute: typeof ApiChannelsIdThreadsRoute
   ApiChannelsIdTypingRoute: typeof ApiChannelsIdTypingRoute
+  ApiChannelsIdUploadsRoute: typeof ApiChannelsIdUploadsRouteWithChildren
   ApiChannelsIdVoiceDisconnectRoute: typeof ApiChannelsIdVoiceDisconnectRoute
   ApiChannelsIdVoiceStatusRoute: typeof ApiChannelsIdVoiceStatusRoute
   ApiChannelsIdVoiceStatusMediaRoute: typeof ApiChannelsIdVoiceStatusMediaRoute
@@ -2339,6 +2449,7 @@ const ApiChannelsIdRouteChildren: ApiChannelsIdRouteChildren = {
   ApiChannelsIdThreadRoute: ApiChannelsIdThreadRoute,
   ApiChannelsIdThreadsRoute: ApiChannelsIdThreadsRoute,
   ApiChannelsIdTypingRoute: ApiChannelsIdTypingRoute,
+  ApiChannelsIdUploadsRoute: ApiChannelsIdUploadsRouteWithChildren,
   ApiChannelsIdVoiceDisconnectRoute: ApiChannelsIdVoiceDisconnectRoute,
   ApiChannelsIdVoiceStatusRoute: ApiChannelsIdVoiceStatusRoute,
   ApiChannelsIdVoiceStatusMediaRoute: ApiChannelsIdVoiceStatusMediaRoute,

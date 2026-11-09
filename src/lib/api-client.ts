@@ -66,8 +66,26 @@ function createHttpResponseError(
   (error as any).code =
     json && typeof json === "object" ? json.code : undefined;
   (error as any).status = res.status;
+  const retryAfterMs = parseRetryAfterMs(res.headers.get("Retry-After"));
+  if (retryAfterMs !== null) (error as any).retryAfterMs = retryAfterMs;
   return error;
 }
+
+/** Retry-After in ms: delta-seconds or an HTTP date. Null when absent/bad. */
+function parseRetryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return seconds > 0 ? seconds * 1000 : null;
+  const at = Date.parse(value);
+  return Number.isFinite(at) && at > Date.now() ? at - Date.now() : null;
+}
+
+/**
+ * A part upload with no progress (bytes sent, or the answer arriving) for
+ * this long is treated as a network failure, so the engine's retry engages
+ * instead of waiting on a dead connection forever.
+ */
+export const UPLOAD_STALL_TIMEOUT_MS = 60_000;
 
 async function getInitialBearerToken(): Promise<string | null> {
   if (!isTauri()) {
@@ -462,4 +480,139 @@ export async function apiUpload<T>(
   }
 
   return json as T;
+}
+
+/** One XHR attempt: the status and parsed JSON body (null when none). */
+function sendBlobOnce(
+  url: string,
+  method: string,
+  body: Blob,
+  headers: Record<string, string>,
+  opts: {
+    signal?: AbortSignal;
+    onProgress?: (loaded: number) => void;
+    stallTimeoutMs?: number;
+  },
+): Promise<{ status: number; json: any; retryAfter: string | null }> {
+  return new Promise((resolve, reject) => {
+    if (opts.signal?.aborted) {
+      reject(new DOMException("The upload was cancelled", "AbortError"));
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url);
+    for (const [name, value] of Object.entries(headers)) {
+      xhr.setRequestHeader(name, value);
+    }
+    xhr.responseType = "text";
+    // Inactivity, not total time: a slow link that keeps moving is fine.
+    let stalled = false;
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    const armStallTimer = () => {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        stalled = true;
+        xhr.abort();
+      }, opts.stallTimeoutMs ?? UPLOAD_STALL_TIMEOUT_MS);
+    };
+    const onAbort = () => xhr.abort();
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+    const done = () => {
+      clearTimeout(stallTimer);
+      opts.signal?.removeEventListener("abort", onAbort);
+    };
+    xhr.upload.onprogress = (event) => {
+      armStallTimer();
+      opts.onProgress?.(event.loaded);
+    };
+    // Sent in full: the timer now waits for the answer to start arriving.
+    xhr.upload.onload = armStallTimer;
+    xhr.onprogress = armStallTimer;
+    xhr.onload = () => {
+      done();
+      let json: any = null;
+      try {
+        json = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        json = null;
+      }
+      resolve({
+        status: xhr.status,
+        json,
+        retryAfter: xhr.getResponseHeader("Retry-After"),
+      });
+    };
+    xhr.onerror = () => {
+      done();
+      // No status: the upload engine reads this as a network error and retries.
+      reject(new TypeError("Network request failed"));
+    };
+    xhr.ontimeout = xhr.onerror;
+    xhr.onabort = () => {
+      done();
+      reject(
+        stalled
+          ? // No status: retried as a network failure, not a cancel.
+            new TypeError("Upload stalled")
+          : new DOMException("The upload was cancelled", "AbortError"),
+      );
+    };
+    armStallTimer();
+    xhr.send(body);
+  });
+}
+
+/**
+ * Send a raw Blob (one chunked-upload part) with upload progress, which
+ * `fetch` can't report. Same auth and 401 recovery as the JSON helpers.
+ * Errors carry `status`, `code` and, on a 429/503, `retryAfterMs`.
+ */
+export async function apiSendBlob<T>(
+  url: string,
+  body: Blob,
+  opts: {
+    method?: string;
+    signal?: AbortSignal;
+    onProgress?: (loaded: number) => void;
+    /** Default UPLOAD_STALL_TIMEOUT_MS. */
+    stallTimeoutMs?: number;
+  } = {},
+): Promise<T> {
+  const resolved = url.startsWith("/") ? apiUrl(url) : url;
+  const initialToken = await getInitialBearerToken();
+  if (isTauri() && !initialToken) throw createDesktopAuthRequiredError();
+  if (!isTauri() && !initialToken) throw createAuthRequiredError();
+
+  let sentToken: string | null = null;
+  const attempt = (token?: string | null) => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/octet-stream",
+    };
+    const t = token ?? getClientBearerToken();
+    sentToken = t;
+    if (t) headers["Authorization"] = `Bearer ${t}`;
+    if (isTauri() && KOVA_AUTH_PUBLISHABLE_KEY) {
+      headers["X-Publishable-Key"] = KOVA_AUTH_PUBLISHABLE_KEY;
+    }
+    return sendBlobOnce(resolved, opts.method ?? "PUT", body, headers, opts);
+  };
+
+  let res = await attempt(initialToken);
+  if (res.status === 401) {
+    const freshToken = await recoverFrom401(sentToken);
+    if (freshToken) res = await attempt(freshToken);
+  }
+
+  if (res.status < 200 || res.status >= 300) {
+    const message =
+      (res.json && typeof res.json.error === "string" && res.json.error) ||
+      `Upload failed: HTTP ${res.status}`;
+    const error = new Error(message);
+    (error as any).status = res.status;
+    (error as any).code = res.json?.code;
+    const retryAfterMs = parseRetryAfterMs(res.retryAfter);
+    if (retryAfterMs !== null) (error as any).retryAfterMs = retryAfterMs;
+    throw error;
+  }
+  return res.json as T;
 }
