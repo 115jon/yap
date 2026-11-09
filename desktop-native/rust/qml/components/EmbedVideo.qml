@@ -71,6 +71,25 @@ Item {
 
     property bool started: animated || autoStart
     property bool errored: false
+    // Recovery: a player that errors (a network timeout after a seek, a
+    // dropped relay) is made again once and resumes where it was; a second
+    // failure shows "Try again" instead of leaving a dead picture.
+    property int retries: 0
+    property int resumeAt: -1
+    property bool reloading: false
+    function recover(at) {
+        root.retries++
+        root.resumeAt = Math.max(0, at)
+        root.reloading = true
+        Qt.callLater(() => { root.reloading = false })
+    }
+    function retry() {
+        root.retries = 0
+        root.errored = false
+        root.started = true
+        root.recover(root.resumeAt >= 0 ? root.resumeAt : 0)
+        root.retries = 0
+    }
     // The grab of the picture last shown (an image URL), and its result,
     // which must stay alive for the URL to load.
     property string endFrame: ""
@@ -111,6 +130,8 @@ Item {
     onSourceChanged: {
         started = animated || autoStart
         errored = false
+        retries = 0
+        resumeAt = -1
         endFrame = ""
         endGrab = null
         peekFrame = ""
@@ -310,7 +331,7 @@ Item {
             // Hidden (a pooled row, another view): the player goes, so a
             // paused session costs nothing in the background.
             active: (root.started || root.warm || (root.preview && root.peekFrame.length === 0)) && !root.errored
-                && root.visible && !root.pooled && !root.unplayable
+                && root.visible && !root.pooled && !root.unplayable && !root.reloading
             sourceComponent: root.webm ? webmEngine : mediaEngine
         }
 
@@ -361,11 +382,23 @@ Item {
                     }
                     onErrorOccurred: (error, message) => {
                         console.warn("[video]", error, message)
+                        if (root.started && root.retries < 1) {
+                            root.recover(position > 0 ? position : root.resumeAt)
+                            return
+                        }
+                        root.resumeAt = position > 0 ? position : root.resumeAt
                         root.errored = true
                         root.failed()
                     }
                     Component.onCompleted: {
                         holder.relink()
+                        if (root.resumeAt >= 0) {
+                            // Made again after an error: back where it was,
+                            // playing.
+                            position = root.resumeAt
+                            play()
+                            return
+                        }
                         if (root.startAt > 0)
                             position = root.startAt
                         // A preview plays muted just until its first frame
@@ -459,18 +492,67 @@ Item {
             }
         }
         // Loading: the stage stays black until the first frame.
-        BusyIndicator {
+        Spinner {
+            id: loading
             anchors.centerIn: parent
-            width: 32
-            height: 32
-            running: root.started && root.player !== null && (root.player.mediaStatus === MediaPlayer.LoadingMedia
-                || root.player.mediaStatus === MediaPlayer.StalledMedia) && !root.errored
-            visible: running
+            onMedia: true
+            running: (root.reloading || (root.started && root.player !== null && (root.player.mediaStatus === MediaPlayer.LoadingMedia
+                || root.player.mediaStatus === MediaPlayer.StalledMedia))) && !root.errored && !root.bare
+        }
+        // Loading or stalled for 15 s: the stream is stuck (a seek whose
+        // range never answers); treated as an error, so it is retried.
+        Timer {
+            interval: 15000
+            running: loading.running && !root.reloading && root.player !== null
+            onTriggered: {
+                const at = root.player ? root.player.position : 0
+                console.warn("[video] stalled for 15 s; reloading")
+                if (root.retries < 1) {
+                    root.recover(at > 0 ? at : root.resumeAt)
+                } else {
+                    root.resumeAt = at > 0 ? at : root.resumeAt
+                    root.errored = true
+                }
+            }
+        }
+        // Failed twice: say so, with a way back (not a dead picture).
+        Column {
+            anchors.centerIn: parent
+            spacing: 10
+            visible: root.errored && root.started && !root.bare && !root.unplayable
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                textFormat: Text.PlainText
+                text: qsTr("Couldn't play this video")
+                style: Text.Outline
+                styleColor: "#000000"
+                color: "#ffffff"
+                font: Theme.type.captionStrong
+            }
+            Rectangle {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: retryLabel.implicitWidth + 24
+                height: 30
+                radius: Theme.radius
+                color: retryHover.hovered ? Qt.rgba(1, 1, 1, 0.24) : Qt.rgba(1, 1, 1, 0.16)
+                Accessible.role: Accessible.Button
+                Accessible.name: retryLabel.text
+                Text {
+                    id: retryLabel
+                    anchors.centerIn: parent
+                    textFormat: Text.PlainText
+                    text: qsTr("Try again")
+                    color: "#ffffff"
+                    font: Theme.type.labelStrong
+                }
+                HoverHandler { id: retryHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: root.retry() }
+            }
         }
         Text {
             anchors.centerIn: parent
             width: Math.min(implicitWidth, parent.width - 24)
-            visible: !root.bare && ((root.errored && root.poster.length === 0)
+            visible: !root.bare && ((root.errored && !root.started && root.poster.length === 0)
                 || (root.unplayable && root.started && (!root.animated || root.poster.length === 0)))
             textFormat: Text.PlainText
             horizontalAlignment: Text.AlignHCenter
