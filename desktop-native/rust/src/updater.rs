@@ -513,7 +513,7 @@ mod engine {
                 let releases = update::parse_github_releases(&json)?;
                 let len = releases.len();
                 all.extend(releases);
-                let found = !update::native_releases(&all, Channel::Beta).is_empty();
+                let found = !update::native_releases(&all, self.channel).is_empty();
                 if !update::github_wants_next_page(page, len, found) {
                     break;
                 }
