@@ -14,6 +14,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireChannelAccess } from "@/lib/require-channel-access";
 import { requireChannelPermission } from "@/lib/require-permission";
+import { tooLargeMessage } from "@/lib/upload-limits";
 import {
   buildExternalVoiceStatusMediaFileKey,
   MAX_VOICE_STATUS_MEDIA_RECENTS,
@@ -153,7 +154,10 @@ export const POST = async ({ request, params }: any) => {
 
     if (file.size > MAX_VOICE_STATUS_MEDIA_UPLOAD_BYTES) {
       return apiError(
-        "Voice status media must be 25 MB or smaller.",
+        tooLargeMessage(
+          "Voice status media",
+          MAX_VOICE_STATUS_MEDIA_UPLOAD_BYTES,
+        ),
         413,
         undefined,
         request,

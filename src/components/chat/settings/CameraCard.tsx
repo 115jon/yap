@@ -4,8 +4,14 @@ import { Button, Spinner } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { REVEAL } from "@/components/ui/interaction";
-import { describeApiError } from "@/lib/api-errors";
+import { TooBigCard } from "@/components/ui/too-big-card";
+import {
+  describeApiError,
+  isTooLargeError,
+  serverUploadLimit,
+} from "@/lib/api-errors";
 import { createCameraBackgroundEffect } from "@/lib/camera-background-effects";
+import { CAMERA_BACKGROUND_UPLOAD_LIMIT_BYTES } from "@/lib/camera-background-validation";
 import {
   CAMERA_BACKGROUND_ACCEPT,
   deleteCameraBackground,
@@ -18,6 +24,7 @@ import {
   buildCameraVideoConstraints,
 } from "@/lib/camera-quality";
 import { getAuthAssetUrl, isDesktop } from "@/lib/platform";
+import type { TooBigSituation } from "@/lib/too-big-copy";
 import { useMediaDevices } from "@/lib/useMediaDevices";
 import { cn } from "@/lib/utils";
 import type {
@@ -223,6 +230,7 @@ export default function CameraCard({
   const previewEffectRef = useRef<any>(null);
   const previewRequestIdRef = useRef(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [tooBig, setTooBig] = useState<TooBigSituation | null>(null);
   const [isLoadingBackgrounds, setIsLoadingBackgrounds] = useState(false);
   const [isUploadingBackground, setIsUploadingBackground] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -441,6 +449,14 @@ export default function CameraCard({
     event.currentTarget.value = "";
     if (!file) return;
 
+    setTooBig(null);
+    const limit = CAMERA_BACKGROUND_UPLOAD_LIMIT_BYTES;
+    if (file.size > limit) {
+      // Too big: the card says by how much; nothing is uploaded.
+      setUploadError(null);
+      setTooBig({ kind: "camera-background", size: file.size, limit });
+      return;
+    }
     const validationError = getCameraBackgroundValidationError(file);
     if (validationError) {
       setUploadError(validationError);
@@ -465,6 +481,15 @@ export default function CameraCard({
       );
       setUploadError(null);
     } catch (error) {
+      if (isTooLargeError(error)) {
+        setTooBig({
+          kind: "server",
+          serverLimit:
+            serverUploadLimit(error) ?? CAMERA_BACKGROUND_UPLOAD_LIMIT_BYTES,
+          action: "pick-another",
+        });
+        return;
+      }
       setUploadError(
         (error as { status?: number })?.status === 401
           ? "Sign in to upload backgrounds."
@@ -670,6 +695,17 @@ export default function CameraCard({
               <p role="status" className="mt-3 text-ui-xs text-ink-2">
                 Loading saved backgrounds…
               </p>
+            ) : null}
+            {tooBig ? (
+              <TooBigCard
+                variant="inline"
+                className="mt-3"
+                situation={tooBig}
+                onAction={() => {
+                  setTooBig(null);
+                  fileInputRef.current?.click();
+                }}
+              />
             ) : null}
             {uploadError ? <RowError>{uploadError}</RowError> : null}
           </>

@@ -26,6 +26,7 @@ import {
   validateProfileNameplateBuffer,
 } from "@/lib/profile-asset-validation";
 import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
+import { tooLargeMessage } from "@/lib/upload-limits";
 import { clearProfileAsset, updateProfileAsset } from "@/services/user.service";
 
 async function listExistingAssetKeys(
@@ -102,8 +103,8 @@ const POST = async ({ request }: any) => {
   if (file.size > maxSize) {
     return apiError(
       kindValue === "banner"
-        ? "Banner too large (max 8MB)"
-        : "Nameplate too large (max 25MB)",
+        ? tooLargeMessage("Banner", maxSize)
+        : tooLargeMessage("Nameplate", maxSize),
       413,
     );
   }

@@ -158,8 +158,9 @@ function ToastFixture({ copiedOnly = false }: { copiedOnly?: boolean }) {
       toast.success("Message link copied", { duration: Infinity });
       if (!copiedOnly) {
         // Newest on top: the persistent error leads the stack.
-        toast.error("grace.png is too large to upload", {
-          description: "Files can be up to 25 MB.",
+        // (Too-big uploads are cards now, not toasts: see ?surface=too-big.)
+        toast.error("Unable to upload grace.png", {
+          description: "Try again in a moment.",
         });
       }
     }, 300);

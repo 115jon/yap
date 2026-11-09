@@ -6,7 +6,14 @@ import {
   ResponsiveDialogTitle,
 } from "@/components/ui/responsive-dialog";
 import { Spinner } from "@/components/ui/button";
-import { describeApiError } from "@/lib/api-errors";
+import {
+  describeApiError,
+  isTooLargeError,
+  serverUploadLimit,
+} from "@/lib/api-errors";
+import { TooBigCard } from "@/components/ui/too-big-card";
+import type { TooBigSituation } from "@/lib/too-big-copy";
+import { MAX_VOICE_STATUS_MEDIA_UPLOAD_BYTES } from "@/lib/voice-status-media";
 import { RowError } from "@/components/chat/settings/primitives";
 import { apiGet, apiPatch, apiPost, apiUpload } from "@/lib/api-client";
 import { getAuthAssetUrl, getMediaUrl } from "@/lib/platform";
@@ -207,6 +214,7 @@ export default function VoiceChannelMediaStatusModal({
   const [showGifPicker, setShowGifPicker] = useState(false);
   const shouldRenderGifPicker = showGifPicker;
   const [error, setError] = useState<string | null>(null);
+  const [tooBig, setTooBig] = useState<TooBigSituation | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const voiceSessionHeaders = useMemo(
     () =>
@@ -276,8 +284,15 @@ export default function VoiceChannelMediaStatusModal({
   };
 
   const handleUpload = async (file: File) => {
-    setUploading(true);
     setError(null);
+    setTooBig(null);
+    const limit = MAX_VOICE_STATUS_MEDIA_UPLOAD_BYTES;
+    if (file.size > limit) {
+      setTooBig({ kind: "vibe", size: file.size, limit });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+    setUploading(true);
 
     try {
       const dimensions = await readMediaDimensions(file);
@@ -295,7 +310,16 @@ export default function VoiceChannelMediaStatusModal({
       setRecentItems((current) => dedupeAssets([response.item, ...current]));
       await applyMedia(response.item.media);
     } catch (err) {
-      setError(describeApiError(err, "upload that media"));
+      if (isTooLargeError(err)) {
+        setTooBig({
+          kind: "server",
+          serverLimit:
+            serverUploadLimit(err) ?? MAX_VOICE_STATUS_MEDIA_UPLOAD_BYTES,
+          action: "pick-another",
+        });
+      } else {
+        setError(describeApiError(err, "upload that media"));
+      }
     } finally {
       setUploading(false);
       if (fileInputRef.current) {
@@ -402,6 +426,17 @@ export default function VoiceChannelMediaStatusModal({
             </span>
           </button>
         </div>
+
+        {tooBig ? (
+          <TooBigCard
+            variant="inline"
+            situation={tooBig}
+            onAction={() => {
+              setTooBig(null);
+              fileInputRef.current?.click();
+            }}
+          />
+        ) : null}
 
         <input
           ref={fileInputRef}

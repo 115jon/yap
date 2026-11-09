@@ -27,6 +27,7 @@
  *   act-* activities, pub-* public pages
  *   foundation, component-kit, dither-mockups, type-mockups (design specimens)
  *   sounds (UI sound audition: built-in vs imported custom files)
+ *   too-big (the "too big" upload cards, every situation)
  */
 
 import { createFileRoute, notFound } from "@tanstack/react-router";

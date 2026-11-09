@@ -163,6 +163,7 @@ export default function MessageInput({
     gifPickerMediaType,
     uploadedFiles,
     pendingUploads,
+    oversized,
     composerCustomEmojiMap,
     mentionQuery,
     mentionIndex,
@@ -184,6 +185,9 @@ export default function MessageInput({
     cancelUpload,
     retryUpload,
     removeUploadedFile,
+    removeOversized,
+    clearOversized,
+    replaceOversized,
     toggleUploadedFileSensitive,
     handlePaste,
     handleGifSelect,
@@ -249,6 +253,10 @@ export default function MessageInput({
           onToggleSensitive={toggleUploadedFileSensitive}
           onCancel={cancelUpload}
           onRetry={retryUpload}
+          oversized={oversized}
+          onRemoveOversized={removeOversized}
+          onClearOversized={clearOversized}
+          onReplaceOversized={replaceOversized}
         />
 
         <div className={COMPOSER_ROW}>

@@ -62,6 +62,7 @@ import { Spinner } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Num } from "@/components/ui/num";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TooBigCard } from "@/components/ui/too-big-card";
 import { HIT, PRESS, REVEAL } from "@/components/ui/interaction";
 import {
   MENU_HINT,
@@ -162,6 +163,12 @@ interface GifPickerModalProps {
    *  Clicking an item sends via SFU and keeps the picker open. */
   voiceMode?: { sfu: SFUClient };
   markerRef?: React.RefObject<HTMLElement | null>;
+  /**
+   * The upload limit for a picked GIF (the chat composer's GIF upload). A
+   * GIF known to be bigger is not sent: the picker stays open with the
+   * too-big card.
+   */
+  uploadLimitBytes?: number;
 }
 
 export default function GifPickerModal({
@@ -178,6 +185,7 @@ export default function GifPickerModal({
   stacked = false,
   voiceMode,
   markerRef,
+  uploadLimitBytes,
 }: GifPickerModalProps) {
   const { user } = useUser();
   const providerOptions = providers?.length
@@ -220,6 +228,7 @@ export default function GifPickerModal({
     number | null
   >(null);
   const [error, setError] = useState<string | null>(null);
+  const [tooBigSize, setTooBigSize] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(initialExpanded);
   const [dynamicStyle, setDynamicStyle] = useState<React.CSSProperties>({
     opacity: 0,
@@ -1005,13 +1014,30 @@ export default function GifPickerModal({
         return;
       }
       // Normal chat mode
+      if (
+        uploadLimitBytes !== undefined &&
+        gif.send.sizeBytes > uploadLimitBytes
+      ) {
+        // Too big to send: keep the picker open and say so.
+        setTooBigSize(gif.send.sizeBytes);
+        return;
+      }
+      setTooBigSize(null);
       if (query.trim()) {
         saveQueryToHistory(query.trim());
       }
       onClose();
       void onSelect(gif);
     },
-    [voiceMode, voiceDisplayMode, onClose, onSelect, query, saveQueryToHistory],
+    [
+      voiceMode,
+      voiceDisplayMode,
+      onClose,
+      onSelect,
+      query,
+      saveQueryToHistory,
+      uploadLimitBytes,
+    ],
   );
 
   const suggestionsVisible =
@@ -1582,6 +1608,22 @@ export default function GifPickerModal({
             )}
           </div>
         )}
+
+        {tooBigSize !== null && uploadLimitBytes !== undefined ? (
+          <TooBigCard
+            variant="inline"
+            className="mx-1 mb-1"
+            situation={{
+              kind: "gif",
+              size: tooBigSize,
+              limit: uploadLimitBytes,
+            }}
+            onAction={() => {
+              setTooBigSize(null);
+              focusResultsPane();
+            }}
+          />
+        ) : null}
 
         <div
           ref={scrollRef}

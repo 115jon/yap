@@ -2,10 +2,11 @@ import type {
   VoiceChannelStatusMedia,
   VoiceChannelStatusMediaAsset,
 } from "@/lib/types";
+import { UPLOAD_LIMITS } from "@/lib/upload-limits";
 
 const VOICE_STATUS_MEDIA_PREFIX = "voice-status-media";
 const EXTERNAL_VOICE_STATUS_MEDIA_FILE_KEY_PREFIX = "external-url:";
-export const MAX_VOICE_STATUS_MEDIA_UPLOAD_BYTES = 25 * 1024 * 1024;
+export const MAX_VOICE_STATUS_MEDIA_UPLOAD_BYTES = UPLOAD_LIMITS.vibe;
 export const MAX_VOICE_STATUS_MEDIA_RECENTS = 12;
 
 const ALLOWED_VOICE_STATUS_MEDIA_CONTENT_TYPES = new Set<

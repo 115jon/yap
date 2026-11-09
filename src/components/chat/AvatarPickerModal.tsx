@@ -10,11 +10,18 @@ import {
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from "@/components/ui/responsive-dialog";
+import { TooBigCard } from "@/components/ui/too-big-card";
 import { apiDelete, apiGet } from "@/lib/api-client";
-import { describeApiError } from "@/lib/api-errors";
+import {
+  describeApiError,
+  isTooLargeError,
+  serverUploadLimit,
+} from "@/lib/api-errors";
 import type { GifPickerItem } from "@/lib/gif-picker";
 import { getApiBaseUrl, getAuthAssetUrl } from "@/lib/platform";
 import { buildProxyMediaUrl } from "@/lib/proxy-media-url";
+import type { TooBigSituation } from "@/lib/too-big-copy";
+import { UPLOAD_LIMITS } from "@/lib/upload-limits";
 import { cn } from "@/lib/utils";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
@@ -39,7 +46,12 @@ interface AvatarPickerModalProps {
   description?: string;
   /** @deprecated The dialog's own close button names itself; kept for callers. */
   closeLabel?: string;
+  /** Whose upload limit applies (and whose words the too-big card uses). */
+  uploadKind?: "avatar" | "banner";
 }
+
+/** Where the too-big file came from, so "Pick another" reopens the same place. */
+type PickSource = "file" | "gif";
 
 function extensionForContentType(contentType: string): string {
   if (contentType === "image/jpeg") return "jpg";
@@ -110,7 +122,13 @@ export function AvatarPickerModal({
   showRecent = true,
   title = "Choose an image",
   description = "Upload a new avatar or reuse one of your recent uploads.",
+  uploadKind = "avatar",
 }: AvatarPickerModalProps) {
+  const limit = UPLOAD_LIMITS[uploadKind];
+  const [tooBig, setTooBig] = useState<{
+    situation: TooBigSituation;
+    source: PickSource;
+  } | null>(null);
   const [items, setItems] = useState<AvatarUploadItem[]>([]);
   const [loading, setLoading] = useState(showRecent);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -144,21 +162,56 @@ export function AvatarPickerModal({
     };
   }, [showRecent]);
 
-  const handleUpload = async (file: File) => {
+  const handleUpload = async (file: File, source: PickSource = "file") => {
     setError(null);
+    setTooBig(null);
+    // Over the limit: say so here, with the numbers, and upload nothing.
+    if (file.size > limit) {
+      setTooBig({
+        source,
+        situation:
+          uploadKind === "banner"
+            ? { kind: "banner", size: file.size, limit }
+            : {
+                kind: "avatar",
+                size: file.size,
+                limit,
+                isGif: file.type === "image/gif",
+              },
+      });
+      return;
+    }
     try {
       await onUpload(file);
       onClose();
     } catch (cause) {
+      if (isTooLargeError(cause)) {
+        setTooBig({
+          source,
+          situation: {
+            kind: "server",
+            serverLimit: serverUploadLimit(cause) ?? limit,
+            action: "pick-another",
+          },
+        });
+        return;
+      }
       setError(describeApiError(cause, "upload that image"));
     }
+  };
+
+  const pickAnother = () => {
+    const source = tooBig?.source;
+    setTooBig(null);
+    if (source === "gif") setShowGifPicker(true);
+    else fileInputRef.current?.click();
   };
 
   const handleGifSelect = async (item: GifPickerItem) => {
     setBusyId(item.id);
     setError(null);
     try {
-      await handleUpload(await gifToFile(item));
+      await handleUpload(await gifToFile(item), "gif");
     } catch {
       setError("Unable to use that GIF. Choose another one and try again.");
     } finally {
@@ -231,6 +284,13 @@ export function AvatarPickerModal({
           </button>
         </div>
 
+        {tooBig ? (
+          <TooBigCard
+            variant="inline"
+            situation={tooBig.situation}
+            onAction={pickAnother}
+          />
+        ) : null}
         <input
           ref={fileInputRef}
           type="file"

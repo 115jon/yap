@@ -14,10 +14,9 @@ import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireChannelAccess } from "@/lib/require-channel-access";
 import { getUserPermissions } from "@/lib/require-permission";
+import { tooLargeMessage, UPLOAD_LIMITS } from "@/lib/upload-limits";
 import { getSoundboardUploadUrl } from "@/lib/voice/soundboard-media";
 
-const DEFAULT_UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024;
-const SOUNDBOARD_UPLOAD_LIMIT_BYTES = 50 * 1024 * 1024;
 const SOUNDBOARD_AUDIO_TYPES_BY_EXTENSION: Record<string, string> = {
   aac: "audio/aac",
   flac: "audio/flac",
@@ -88,10 +87,10 @@ export const POST = async ({ request, params }: any) => {
   }
 
   const uploadLimit = isSoundboardUpload
-    ? SOUNDBOARD_UPLOAD_LIMIT_BYTES
-    : DEFAULT_UPLOAD_LIMIT_BYTES;
+    ? UPLOAD_LIMITS.soundboard
+    : UPLOAD_LIMITS.attachment;
   if (file.size > uploadLimit) {
-    return apiError(`File too large (max ${uploadLimit / 1024 / 1024}MB)`, 413);
+    return apiError(tooLargeMessage("File", uploadLimit), 413);
   }
 
   // Accept any MIME type — security is enforced at the serving layer

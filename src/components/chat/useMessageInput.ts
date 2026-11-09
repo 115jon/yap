@@ -1,14 +1,23 @@
 import { toast } from "@/components/ui/toast";
 import { apiGet, apiPost, apiUpload } from "@/lib/api-client";
-import { describeApiError } from "@/lib/api-errors";
+import {
+  describeApiError,
+  isTooLargeError,
+  serverUploadLimit,
+} from "@/lib/api-errors";
 import {
   EMBED_PREFETCH_DEBOUNCE_MS,
   findPrefetchableUrls,
   prefetchEmbeds,
 } from "@/lib/embed-prefetch";
 import { parseCustomEmojiToken } from "@/lib/emoji";
-import type { GifPickerItem, GifPickerMediaType } from "@/lib/gif-picker";
+import {
+  MAX_GIF_UPLOAD_BYTES,
+  type GifPickerItem,
+  type GifPickerMediaType,
+} from "@/lib/gif-picker";
 import type { Message, User } from "@/lib/types";
+import { partitionBySize, UPLOAD_LIMITS } from "@/lib/upload-limits";
 import { COMPOSER_RESTORE_EVENT } from "@/stores/chat-actions";
 import { useChatStore } from "@/stores/chat-store";
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
@@ -47,6 +56,27 @@ export interface PendingUpload {
   abortController: AbortController;
   /** Set when the upload failed: the tile stays with a Retry instead of vanishing. */
   error?: string;
+  /**
+   * Set when the server answered 413 anyway: the limit it named (or the
+   * client's, when it named none). The tile becomes a "turned away" card.
+   */
+  serverLimit?: number;
+}
+
+/** A file over the attachment limit: it stays in the tray as a card. */
+export interface OversizedFile {
+  id: string;
+  name: string;
+  size: number;
+}
+
+/**
+ * The files held back from the tray as too big, and how many files from the
+ * same drops still went up ("The other 2 will still send").
+ */
+export interface OversizedBatch {
+  files: OversizedFile[];
+  fits: number;
 }
 
 export interface UploadedFileInfo {
@@ -66,6 +96,7 @@ export interface MessageInputState {
   gifPickerMediaType: GifPickerMediaType;
   uploadedFiles: UploadedFile[];
   pendingUploads: PendingUpload[];
+  oversized: OversizedBatch | null;
   composerCustomEmojiMap: ComposerCustomEmojiMap;
   mentionQuery: { text: string; startPos: number; endPos: number } | null;
   mentionIndex: number;
@@ -110,6 +141,7 @@ export function useMessageInput({
       gifPickerMediaType,
       uploadedFiles,
       pendingUploads,
+      oversized,
       composerCustomEmojiMap,
       mentionQuery,
       mentionIndex,
@@ -140,6 +172,7 @@ export function useMessageInput({
       gifPickerMediaType: "gifs",
       uploadedFiles: [] as UploadedFile[],
       pendingUploads: [] as PendingUpload[],
+      oversized: null,
       composerCustomEmojiMap: {},
       mentionQuery: null,
       mentionIndex: 0,
@@ -384,7 +417,7 @@ export function useMessageInput({
       uploadedFiles.forEach((f) => {
         if (f.previewUrl) URL.revokeObjectURL(f.previewUrl);
       });
-      setLocalState({ uploadedFiles: [] });
+      setLocalState({ uploadedFiles: [], oversized: null });
       setLocalState({ composerCustomEmojiMap: {} });
       lastTypingRef.current = 0;
       setLocalState({ mentionQuery: null });
@@ -628,16 +661,29 @@ export function useMessageInput({
 
   const handleFileUpload = useCallback(
     async (files: FileList | File[]) => {
-      const filesArray = Array.from(files);
+      // Files over the limit never upload: they stay in the tray as a card
+      // (the toobig spec). The rest of the same drop still goes up.
+      const { fits, tooBig } = partitionBySize(
+        Array.from(files),
+        UPLOAD_LIMITS.attachment,
+      );
+      if (tooBig.length > 0) {
+        setLocalState((prev: { oversized: OversizedBatch | null }) => ({
+          oversized: {
+            files: [
+              ...(prev.oversized?.files ?? []),
+              ...tooBig.map((file) => ({
+                id: crypto.randomUUID(),
+                name: file.name,
+                size: file.size,
+              })),
+            ],
+            fits: (prev.oversized?.fits ?? 0) + fits.length,
+          },
+        }));
+      }
 
-      for (const file of filesArray) {
-        if (file.size > 25 * 1024 * 1024) {
-          toast.error(`${file.name} is too large to upload`, {
-            description: "Files can be up to 25 MB.",
-          });
-          continue;
-        }
-
+      for (const file of fits) {
         const tempId = crypto.randomUUID();
         const previewUrl =
           file.type.startsWith("image/") || file.type.startsWith("video/")
@@ -657,6 +703,7 @@ export function useMessageInput({
         }));
 
         let failure: string | null = null;
+        let serverLimit: number | undefined;
         try {
           const formData = new FormData();
           formData.append("file", file);
@@ -690,14 +737,21 @@ export function useMessageInput({
           } else {
             // Keep the tile (and its preview) so the file can be retried.
             console.error("Upload failed:", err);
-            failure = describeApiError(err, "upload that file");
+            failure = describeApiError(err, "upload that file", {
+              uploadLimitBytes: UPLOAD_LIMITS.attachment,
+            });
+            if (isTooLargeError(err)) {
+              serverLimit = serverUploadLimit(err) ?? UPLOAD_LIMITS.attachment;
+            }
           }
         } finally {
           const failed = failure;
           setLocalState((prev: { pendingUploads: PendingUpload[] }) => ({
             pendingUploads: failed
               ? prev.pendingUploads.map((p) =>
-                  p.tempId === tempId ? { ...p, error: failed } : p,
+                  p.tempId === tempId
+                    ? { ...p, error: failed, serverLimit }
+                    : p,
                 )
               : prev.pendingUploads.filter((p) => p.tempId !== tempId),
           }));
@@ -782,6 +836,33 @@ export function useMessageInput({
       void handleFileUpload([failed.file]);
     },
     [handleFileUpload],
+  );
+
+  /** Drop one too-big card; the last one clears the batch. */
+  const removeOversized = useCallback((id: string) => {
+    setLocalState((prev: { oversized: OversizedBatch | null }) => {
+      const files = prev.oversized?.files.filter((f) => f.id !== id) ?? [];
+      return {
+        oversized:
+          files.length > 0 && prev.oversized
+            ? { ...prev.oversized, files }
+            : null,
+      };
+    });
+  }, []);
+
+  /** "Remove the big ones": every too-big card goes. */
+  const clearOversized = useCallback(() => {
+    setLocalState({ oversized: null });
+  }, []);
+
+  /** "Choose another": drop the card and open the file picker. */
+  const replaceOversized = useCallback(
+    (id: string) => {
+      removeOversized(id);
+      fileInputRef.current?.click();
+    },
+    [removeOversized],
   );
 
   const removeUploadedFile = useCallback((id: string) => {
@@ -871,9 +952,14 @@ export function useMessageInput({
         textareaRef.current?.focus();
       } catch (error) {
         console.error("GIF send failed:", error);
-        toast.error(describeApiError(error, "send that GIF"), {
-          id: "rm-gif-send",
-        });
+        toast.error(
+          describeApiError(error, "send that GIF", {
+            uploadLimitBytes: MAX_GIF_UPLOAD_BYTES,
+          }),
+          {
+            id: "rm-gif-send",
+          },
+        );
       }
     },
     [channelId, onSend, replyTo?.id],
@@ -886,6 +972,7 @@ export function useMessageInput({
     gifPickerMediaType,
     uploadedFiles,
     pendingUploads,
+    oversized,
     composerCustomEmojiMap,
     mentionQuery,
     mentionIndex,
@@ -909,6 +996,9 @@ export function useMessageInput({
     cancelUpload,
     retryUpload,
     removeUploadedFile,
+    removeOversized,
+    clearOversized,
+    replaceOversized,
     toggleUploadedFileSensitive,
     handlePaste,
     handleGifSelect,

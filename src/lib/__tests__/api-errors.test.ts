@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { describeApiError } from "../api-errors";
+import {
+  describeApiError,
+  isTooLargeError,
+  serverUploadLimit,
+} from "../api-errors";
 
 function httpError(status: number, message = "D1_ERROR: no such table") {
   return Object.assign(new Error(message), { status });
@@ -51,8 +55,48 @@ describe("describeApiError", () => {
     expect(describeApiError(httpError(404), "revoke the invite")).toBe(
       "Unable to revoke the invite. It may have been deleted.",
     );
+  });
+});
+
+describe("413: the server's own limit survives", () => {
+  it("says the limit the server named", () => {
+    expect(
+      describeApiError(
+        httpError(413, "Avatar too large (max 8MB)"),
+        "upload your avatar",
+      ),
+    ).toBe("Unable to upload your avatar. The server says the limit is 8 MB.");
+    expect(
+      describeApiError(httpError(413, "File too large (max 50MB)"), "send"),
+    ).toBe("Unable to send. The server says the limit is 50 MB.");
+  });
+
+  it("falls back to the client's limit when the body names none", () => {
+    expect(
+      describeApiError(httpError(413, "Payload Too Large"), "upload the icon", {
+        uploadLimitBytes: 8 * 1024 * 1024,
+      }),
+    ).toBe("Unable to upload the icon. The server says the limit is 8 MB.");
+  });
+
+  it("never says 'The file is too large'", () => {
+    for (const message of ["Avatar too large (max 8MB)", "", "D1_ERROR"]) {
+      const copy = describeApiError(httpError(413, message), "upload it");
+      expect(copy).not.toContain("The file is too large");
+    }
     expect(describeApiError(httpError(413), "upload the icon")).toBe(
-      "Unable to upload the icon. The file is too large.",
+      "Unable to upload the icon. It's over the server's size limit.",
     );
+  });
+
+  it("reads the limit only from a 413", () => {
+    expect(
+      serverUploadLimit(httpError(413, "Banner too large (max 8MB)")),
+    ).toBe(8 * 1024 * 1024);
+    expect(serverUploadLimit(httpError(400, "max 8MB"))).toBeNull();
+    expect(serverUploadLimit(httpError(413, "too large"))).toBeNull();
+    expect(serverUploadLimit(null)).toBeNull();
+    expect(isTooLargeError(httpError(413))).toBe(true);
+    expect(isTooLargeError(httpError(400))).toBe(false);
   });
 });
