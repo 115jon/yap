@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Templates as T
 import QtMultimedia
 import Yap.Chrome
 import Yap.Media
@@ -504,7 +505,7 @@ Item {
         // Controls over a scrim, while hovered or paused.
         Item {
             id: controls
-            readonly property bool shown: root.started && !root.errored && (hover.hovered || !root.playing || volumePop.hovered)
+            readonly property bool shown: root.started && !root.errored && (hover.hovered || !root.playing || volume.open)
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
@@ -529,7 +530,11 @@ Item {
                 y: 4
                 width: parent.width - 20
                 height: 12
-                readonly property real progress: root.player && root.player.duration > 0 ? root.player.position / root.player.duration : 0
+                // While dragging, the bar and thumb follow the pointer, not
+                // the player (it lands on keyframes, so following it jumps).
+                property real dragProgress: 0
+                readonly property real playerProgress: root.player && root.player.duration > 0 ? root.player.position / root.player.duration : 0
+                readonly property real progress: scrubArea.pressed ? dragProgress : playerProgress
                 readonly property real buffered: root.player ? root.player.bufferProgress : 0
                 Rectangle {
                     id: rail
@@ -566,12 +571,32 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    function seek(x) {
+                    preventStealing: true
+                    function seek() {
                         if (root.player && root.player.duration > 0 && root.player.seekable)
-                            root.player.position = Math.round(Math.max(0, Math.min(1, x / width)) * root.player.duration)
+                            root.player.position = Math.round(scrub.dragProgress * root.player.duration)
                     }
-                    onPressed: mouse => seek(mouse.x)
-                    onPositionChanged: mouse => { if (pressed) seek(mouse.x) }
+                    function follow(x) {
+                        scrub.dragProgress = Math.max(0, Math.min(1, x / width))
+                    }
+                    // Seeks at most every 120 ms while dragging (each one
+                    // makes the decoder find a keyframe), then exactly on
+                    // release.
+                    Timer {
+                        id: seekPace
+                        interval: 120
+                        onTriggered: scrubArea.seek()
+                    }
+                    onPressed: mouse => { follow(mouse.x); seek() }
+                    onPositionChanged: mouse => {
+                        if (!pressed)
+                            return
+                        follow(mouse.x)
+                        if (!seekPace.running)
+                            seekPace.start()
+                    }
+                    onReleased: { seekPace.stop(); seek() }
+                    onCanceled: seekPace.stop()
                 }
                 Accessible.role: Accessible.Slider
                 Accessible.name: qsTr("Video progress")
@@ -592,6 +617,97 @@ Item {
                     tip: root.ended ? qsTr("Replay") : root.playing ? qsTr("Pause") : qsTr("Play")
                     onClicked: root.toggle()
                 }
+                // Volume, as YouTube's: the slider slides out beside the
+                // speaker on the same bar, one hover area for both (no gap
+                // to fall through), and stays a moment after the pointer
+                // leaves. The wheel over either changes it too.
+                Item {
+                    id: volume
+                    readonly property bool open: volumeHover.hovered || volumeSlider.pressed || volumeLinger.running
+                    width: 28 + volumeTrack.width
+                    height: 28
+                    HoverHandler {
+                        id: volumeHover
+                        onHoveredChanged: if (!hovered) volumeLinger.restart()
+                    }
+                    Timer { id: volumeLinger; interval: 600 }
+                    WheelHandler {
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                        onWheel: event => {
+                            const v = Math.max(0, Math.min(1, (ShellState.videoMuted ? 0 : ShellState.videoVolume) + (event.angleDelta.y > 0 ? 0.05 : -0.05)))
+                            ShellState.videoVolume = v
+                            ShellState.videoMuted = v === 0
+                        }
+                    }
+                    IconKey {
+                        id: speakerKey
+                        size: 28
+                        tone: "onMedia"
+                        iconName: ShellState.videoMuted || ShellState.videoVolume === 0 ? "speakerOff"
+                            : ShellState.videoVolume < 0.5 ? "speakerLow" : "speakerHigh"
+                        tip: ""
+                        onClicked: {
+                            // Unmuting at 0 brings the sound back at half.
+                            if (ShellState.videoMuted && ShellState.videoVolume === 0)
+                                ShellState.videoVolume = 0.5
+                            ShellState.videoMuted = !ShellState.videoMuted
+                        }
+                        Accessible.name: ShellState.videoMuted ? qsTr("Unmute") : qsTr("Mute")
+                    }
+                    Item {
+                        id: volumeTrack
+                        anchors.left: speakerKey.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: volume.open ? 68 : 0
+                        height: 28
+                        clip: true
+                        Behavior on width { NumberAnimation { duration: Theme.dur2; easing.type: Easing.OutCubic } }
+                        T.Slider {
+                            id: volumeSlider
+                            x: 4
+                            width: 60
+                            height: parent.height
+                            from: 0
+                            to: 1
+                            // Continuous: no 5 % steps.
+                            stepSize: 0
+                            live: true
+                            focusPolicy: Qt.StrongFocus
+                            value: ShellState.videoMuted ? 0 : ShellState.videoVolume
+                            onMoved: {
+                                ShellState.videoVolume = value
+                                ShellState.videoMuted = value === 0
+                            }
+                            Accessible.role: Accessible.Slider
+                            Accessible.name: qsTr("Volume")
+                            background: Item {
+                                x: volumeSlider.leftPadding
+                                y: (volumeSlider.height - height) / 2
+                                width: volumeSlider.availableWidth
+                                height: 4
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 2
+                                    color: Qt.rgba(1, 1, 1, 0.25)
+                                }
+                                Rectangle {
+                                    width: volumeSlider.visualPosition * parent.width
+                                    height: parent.height
+                                    radius: 2
+                                    color: "#ffffff"
+                                }
+                            }
+                            handle: Rectangle {
+                                x: volumeSlider.leftPadding + volumeSlider.visualPosition * (volumeSlider.availableWidth - width)
+                                y: (volumeSlider.height - height) / 2
+                                width: 12
+                                height: 12
+                                radius: 6
+                                color: "#ffffff"
+                            }
+                        }
+                    }
+                }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     leftPadding: 4
@@ -607,56 +723,6 @@ Item {
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 6
                 spacing: 2
-                Item {
-                    visible: !root.animated
-                    width: 28
-                    height: 28
-                    IconKey {
-                        id: speakerKey
-                        size: 28
-                        tone: "onMedia"
-                        iconName: ShellState.videoMuted || ShellState.videoVolume === 0 ? "speakerOff"
-                            : ShellState.videoVolume < 0.5 ? "speakerLow" : "speakerHigh"
-                        tip: ""
-                        onClicked: ShellState.videoMuted = !ShellState.videoMuted
-                        Accessible.name: ShellState.videoMuted ? qsTr("Unmute") : qsTr("Mute")
-                    }
-                    HoverHandler { id: speakerHover }
-                    // The vertical volume popover (stays a beat after leave).
-                    Rectangle {
-                        id: volumePop
-                        readonly property bool hovered: popHover.hovered
-                        readonly property bool open: speakerHover.hovered || popHover.hovered || volumeSlider.pressed
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        anchors.bottom: parent.top
-                        anchors.bottomMargin: 4
-                        width: 32
-                        height: 104
-                        radius: Theme.radiusSheet * 2
-                        color: Theme.ply3
-                        border.width: 1
-                        border.color: Theme.line
-                        opacity: open ? 1 : 0
-                        visible: opacity > 0
-                        Behavior on opacity { NumberAnimation { duration: Theme.dur2 } }
-                        HoverHandler { id: popHover }
-                        Slider {
-                            id: volumeSlider
-                            anchors.centerIn: parent
-                            height: 80
-                            orientation: Qt.Vertical
-                            from: 0
-                            to: 1
-                            stepSize: 0.05
-                            value: ShellState.videoMuted ? 0 : ShellState.videoVolume
-                            onMoved: {
-                                ShellState.videoVolume = value
-                                ShellState.videoMuted = value === 0
-                            }
-                            Accessible.name: qsTr("Volume")
-                        }
-                    }
-                }
                 IconKey {
                     size: 28
                     tone: "onMedia"
