@@ -90,6 +90,19 @@ const SETTINGS_PANELS: SettingsPanelDef[] = [
             ],
           },
           {
+            id: "profile-board",
+            label: "Profile board",
+            desc: "Widgets, Activity and a wishlist beside your profile.",
+            keywords: [
+              "widgets",
+              "board",
+              "studio",
+              "activity",
+              "wishlist",
+              "guestbook",
+            ],
+          },
+          {
             id: "display-name",
             label: "Display name",
             desc: "Shown in chat and voice. It doesn't need to be unique.",

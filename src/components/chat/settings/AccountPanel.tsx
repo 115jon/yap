@@ -29,6 +29,7 @@ import {
   useSettingsEscape,
   ValueText,
 } from "./primitives";
+import { dispatchOpenProfileStudioEvent } from "@/lib/profile-studio-events";
 
 const USERNAME_CHECK_DELAY_MS = 400;
 
@@ -442,6 +443,18 @@ export default function AccountPanel() {
             >
               <Icon name="edit" size="sm" />
               Edit profile
+            </Button>
+          )}
+        </SettingsRow>
+        <SettingsRow id="profile-board" layout="inline">
+          {() => (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => dispatchOpenProfileStudioEvent()}
+            >
+              <Icon name="edit" size="sm" />
+              Open Studio
             </Button>
           )}
         </SettingsRow>
