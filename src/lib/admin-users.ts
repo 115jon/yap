@@ -1,6 +1,7 @@
 /**
  * The admin gate: user ids in COLLECTIBLES_ADMIN_USER_IDS ("id1, id2") may
- * use the admin routes (catalog sync, manual badges). Unset means nobody.
+ * use POST /api/admin/badges (manual badges). Unset means nobody. Forcing a
+ * catalog refresh is the admin console's (yap-admin), not this gate's.
  */
 
 import { parseCollectiblesAdminIds } from "@/lib/collectibles-catalog";
