@@ -1,6 +1,20 @@
 import { env } from "cloudflare:workers";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
+import fixture from "@/lib/__fixtures__/yapper-catalog.sample.json";
+import {
+  encodeCatalogPayload,
+  normalizeYapperCatalog,
+  resetCollectiblesCatalogMemory,
+} from "@/lib/collectibles-catalog";
 import schema from "../../../d1_schema.sql?raw";
 import { clearGateCache, SESSION_COOKIE } from "../src/server/gate";
 import {
@@ -195,6 +209,7 @@ const API: Array<[string, string, unknown?]> = [
   ["GET", "/api/insights?days=7"],
   ["GET", "/api/settings"],
   ["PUT", "/api/settings", { flags: { signups: false } }],
+  ["POST", "/api/catalog/refresh"],
   ["GET", "/api/audit"],
   ["GET", "/api/nope"],
 ];
@@ -340,6 +355,10 @@ describe("the Kova gate", () => {
     });
     expect(routeApi("GET", "/api/users/u1/plan")).toBeNull();
     expect(routeApi("DELETE", "/api/settings")).toBeNull();
+    expect(routeApi("POST", "/api/catalog/refresh")).toEqual({
+      action: "refreshCatalog",
+    });
+    expect(routeApi("GET", "/api/catalog/refresh")).toBeNull();
   });
 });
 
@@ -491,5 +510,175 @@ describe("admin mutations write the audit log", () => {
     expect(response.status).toBe(200);
     const [row] = await auditRows("user.disconnect");
     expect(JSON.parse(row!.after_json!)).toEqual({ closed_sockets: 0 });
+  });
+});
+
+// ── The shop catalog ────────────────────────────────────────────────────────
+
+describe("the shop catalog card", () => {
+  const ETAG = 'W/"catalog-1"';
+  const as = (method: string, path: string) =>
+    call(method, path, { cookie: "admin-token" });
+  const blockPage = () =>
+    new Response(
+      "<!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title></head></html>",
+      { status: 403, statusText: "Forbidden" },
+    );
+
+  async function storedCatalog() {
+    return db
+      .prepare(
+        `SELECT etag, item_count, synced_at FROM collectible_catalog_cache WHERE source = 'discord-collectibles'`,
+      )
+      .first<{ etag: string; item_count: number; synced_at: string }>();
+  }
+
+  beforeEach(async () => {
+    resetCollectiblesCatalogMemory();
+    await as("GET", "/api/live"); // creates the catalog tables
+    await run(`DELETE FROM admin_audit_log`);
+    await run(`DELETE FROM collectible_catalog_sync_status`);
+    const catalog = normalizeYapperCatalog(fixture);
+    await run(
+      `INSERT OR REPLACE INTO collectible_catalog_cache (source, payload, etag, category_count, item_count, synced_at)
+       VALUES ('discord-collectibles', ?, ?, ?, ?, ?)`,
+      await encodeCatalogPayload(catalog),
+      ETAG,
+      catalog.categories.length,
+      catalog.items.length,
+      "2026-10-24T00:41:16.641Z",
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("shows on Live ops: last synced, items, last error, the fetcher", async () => {
+    const live = (await (await as("GET", "/api/live")).json()) as {
+      catalog: Record<string, unknown> & { fetcher: unknown };
+    };
+    expect(live.catalog).toMatchObject({
+      synced_at: "2026-10-24T00:41:16.641Z",
+      items: normalizeYapperCatalog(fixture).items.length,
+      stale: true,
+      last_outcome: null,
+      last_error: null,
+      retry_after_ms: 0,
+      fetcher: { last_success_at: null },
+    });
+  });
+
+  it("Refresh now runs the sync here and logs who asked", async () => {
+    const upstream = vi.fn<typeof fetch>(async (_input, init) =>
+      new Headers(init?.headers).get("if-none-match") === ETAG
+        ? new Response(null, { status: 304, headers: { etag: ETAG } })
+        : new Response("unexpected", { status: 500 }),
+    );
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await as("POST", "/api/catalog/refresh");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      catalog: Record<string, unknown>;
+    };
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(String(upstream.mock.calls[0]![0])).toBe(
+      "https://api.yapper.dev/v4/categories/catalog",
+    );
+    expect(body.catalog).toMatchObject({
+      stale: false,
+      last_outcome: "not_modified",
+      last_trigger: "manual",
+      consecutive_failures: 0,
+    });
+    expect((await storedCatalog())?.synced_at).not.toBe(
+      "2026-10-24T00:41:16.641Z",
+    );
+
+    const [row] = await auditRows("catalog.refresh");
+    expect(row).toMatchObject({
+      actor_id: ADMIN,
+      target_type: "site",
+      target_id: null,
+      cf_ray: "test-ray-1",
+    });
+    expect(JSON.parse(row!.before_json!)).toEqual({
+      synced_at: "2026-10-24T00:41:16.641Z",
+      items: normalizeYapperCatalog(fixture).items.length,
+    });
+    expect(JSON.parse(row!.after_json!)).toMatchObject({
+      outcome: "not_modified",
+    });
+
+    // Once per cooldown, and a refused try logs nothing.
+    const again = await as("POST", "/api/catalog/refresh");
+    expect(again.status).toBe(429);
+    expect(await again.json()).toMatchObject({
+      code: "CATALOG_REFRESH_COOLDOWN",
+    });
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(await auditRows("catalog.refresh")).toHaveLength(1);
+  });
+
+  it("a fetcher push does not start the cooldown", async () => {
+    await run(
+      `INSERT INTO collectible_catalog_sync_status (source, last_attempt_at, last_success_at, last_outcome, consecutive_failures, last_trigger)
+       VALUES ('discord-collectibles', ?, ?, 'not_modified', 0, 'ingest')`,
+      new Date().toISOString(),
+      new Date().toISOString(),
+    );
+    const live = (await (await as("GET", "/api/live")).json()) as {
+      catalog: { retry_after_ms: number; last_trigger: string };
+    };
+    expect(live.catalog).toMatchObject({
+      retry_after_ms: 0,
+      last_trigger: "ingest",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(
+        async () =>
+          new Response(null, { status: 304, headers: { etag: ETAG } }),
+      ),
+    );
+    expect((await as("POST", "/api/catalog/refresh")).status).toBe(200);
+  });
+
+  it("a failed refresh keeps the catalog and records the reason", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => blockPage()),
+    );
+    const before = await storedCatalog();
+
+    const response = await as("POST", "/api/catalog/refresh");
+    expect(response.status).toBe(502);
+    const reason =
+      'Yapper catalog fetch failed with 403 Forbidden: an HTML page titled "Attention Required! | Cloudflare"';
+    expect(await response.json()).toEqual({
+      code: "CATALOG_REFRESH_FAILED",
+      error: `The refresh failed; the last good catalog stays. ${reason}`,
+    });
+    expect(await storedCatalog()).toEqual(before);
+
+    const [row] = await auditRows("catalog.refresh");
+    expect(JSON.parse(row!.after_json!)).toEqual({
+      outcome: "failed",
+      synced_at: before!.synced_at,
+      items: before!.item_count,
+      error: reason,
+    });
+    const live = (await (await as("GET", "/api/live")).json()) as {
+      catalog: Record<string, unknown>;
+    };
+    expect(live.catalog).toMatchObject({
+      last_outcome: "failed",
+      last_trigger: "manual",
+      last_error: reason,
+      last_failure_at: expect.any(String),
+      consecutive_failures: 1,
+      stale: true,
+    });
   });
 });

@@ -1,24 +1,34 @@
 /**
  * Live ops: the site right now. Who is online, the voice rooms as Talk
  * Tree branches with their people and streams, chunked uploads in flight,
- * D1 and R2, the deploy, the cron sweeps and the background job backlog.
- * Refreshes every 5 s while the page is visible.
+ * D1 and R2, the deploy, the shop catalog, the cron sweeps and the
+ * background job backlog. Refreshes every 5 s while the page is visible.
  */
 
+import { useState } from "react";
+
 import { Avatar } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import { Led, LedLabel } from "@/components/ui/led";
 import { Num, NumClock } from "@/components/ui/num";
 import { RuleCard } from "@/components/ui/plate";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "@/components/ui/toast";
 import { TreeBranch, TreeLeaf } from "@/components/ui/tree";
-import type { AdminLiveSnapshot, AdminVoiceRoom } from "../shared/admin-api";
+import { describeApiError } from "@/lib/api-errors";
+import type {
+  AdminCatalogRefreshResponse,
+  AdminCatalogStatus,
+  AdminLiveSnapshot,
+  AdminVoiceRoom,
+} from "../shared/admin-api";
 import { assetUrl } from "./admin-format";
 import { cn } from "@/lib/utils";
 
 import { RefreshButton, SectionToolbar, useAdminShell } from "./AdminConsole";
-import { useAdminResource } from "./admin-data";
+import { useAdminResource, useAdminTransport } from "./admin-data";
 import {
   formatAgo,
   formatBytes,
@@ -76,7 +86,11 @@ export function LiveSection() {
             onRetry={() => void live.refresh()}
           />
         ) : data ? (
-          <LiveBody data={data} now={now} />
+          <LiveBody
+            data={data}
+            now={now}
+            onChanged={() => void live.refresh()}
+          />
         ) : null}
       </div>
     </section>
@@ -95,7 +109,15 @@ function LiveSkeleton() {
   );
 }
 
-function LiveBody({ data, now }: { data: AdminLiveSnapshot; now: number }) {
+function LiveBody({
+  data,
+  now,
+  onChanged,
+}: {
+  data: AdminLiveSnapshot;
+  now: number;
+  onChanged: () => void;
+}) {
   const { openPerson } = useAdminShell();
   const inVoice =
     data.voice_rooms?.reduce((sum, room) => sum + room.members.length, 0) ??
@@ -437,6 +459,13 @@ function LiveBody({ data, now }: { data: AdminLiveSnapshot; now: number }) {
         </div>
       </div>
 
+      <ShopCatalogCard
+        catalog={data.catalog}
+        generatedAt={data.generated_at}
+        now={now}
+        onChanged={onChanged}
+      />
+
       <RuleCard legend="Cron sweeps" index={<Num>{data.cron.length}</Num>}>
         {data.cron.length === 0 ? (
           <p className="text-ui-sm text-ink-3">
@@ -491,6 +520,177 @@ function LiveBody({ data, now }: { data: AdminLiveSnapshot; now: number }) {
         gateway are counted by their voice members, not one by one.
       </p>
     </div>
+  );
+}
+
+const OUTCOME_WORD: Record<
+  NonNullable<AdminCatalogStatus["last_outcome"]>,
+  string
+> = {
+  updated: "Updated",
+  not_modified: "Unchanged",
+  rejected: "Rejected",
+  failed: "Failed",
+};
+
+/**
+ * The collectibles shop catalog: how fresh it is, the last refresh and its
+ * error, the off-Cloudflare fetcher's last push, and "Refresh now".
+ */
+function ShopCatalogCard({
+  catalog,
+  generatedAt,
+  now,
+  onChanged,
+}: {
+  catalog: AdminCatalogStatus | null;
+  generatedAt: string;
+  now: number;
+  onChanged: () => void;
+}) {
+  const transport = useAdminTransport();
+  const [busy, setBusy] = useState(false);
+
+  if (!catalog) {
+    return (
+      <RuleCard legend="Shop catalog">
+        <p className="text-ui-sm text-ink-3">
+          The catalog&apos;s status couldn&apos;t be read.
+        </p>
+      </RuleCard>
+    );
+  }
+
+  const failing =
+    catalog.last_outcome === "failed" || catalog.last_outcome === "rejected";
+  const waitMs = Math.max(
+    0,
+    Date.parse(generatedAt) + catalog.retry_after_ms - now,
+  );
+
+  const refresh = async () => {
+    setBusy(true);
+    try {
+      const result = await transport.send<AdminCatalogRefreshResponse>(
+        "POST",
+        "/api/catalog/refresh",
+      );
+      toast.success(
+        `Catalog refreshed: ${formatCount(result.catalog.items)} items`,
+      );
+    } catch (error) {
+      toast.error(describeApiError(error, "refresh the catalog"));
+    } finally {
+      setBusy(false);
+      onChanged();
+    }
+  };
+
+  return (
+    <RuleCard
+      legend="Shop catalog"
+      index={
+        catalog.stale ? (
+          <LedLabel state="muted">Stale</LedLabel>
+        ) : (
+          <LedLabel state="talk">Current</LedLabel>
+        )
+      }
+    >
+      <div className="flex flex-wrap items-start gap-x-10 gap-y-4">
+        <dl className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-ui-sm">
+          <dt className="silkscreen text-ink-3">Synced</dt>
+          <dd>
+            <Num
+              className={catalog.stale ? "text-danger-ink" : "text-ink-1"}
+              title={
+                catalog.synced_at
+                  ? formatDateTime(catalog.synced_at)
+                  : undefined
+              }
+            >
+              {catalog.synced_at ? formatAgo(catalog.synced_at, now) : "Never"}
+            </Num>
+          </dd>
+          <dt className="silkscreen text-ink-3">Items</dt>
+          <dd>
+            <Num className="text-ink-1">{formatCount(catalog.items)}</Num>{" "}
+            <span className="text-ink-3">
+              in {formatCount(catalog.categories)} collections
+            </span>
+          </dd>
+          <dt className="silkscreen text-ink-3">Last try</dt>
+          <dd className="flex min-w-0 items-center gap-2">
+            {catalog.last_outcome ? (
+              <>
+                <LedLabel state={failing ? "muted" : "talk"}>
+                  {OUTCOME_WORD[catalog.last_outcome]}
+                </LedLabel>
+                <span className="truncate text-ink-3">
+                  {catalog.last_trigger ?? "unknown"}
+                  {catalog.last_attempt_at
+                    ? `, ${formatAgo(catalog.last_attempt_at, now)}`
+                    : ""}
+                  {catalog.consecutive_failures > 1
+                    ? `, ${formatCount(catalog.consecutive_failures)} in a row`
+                    : ""}
+                </span>
+              </>
+            ) : (
+              <span className="text-ink-3">Never</span>
+            )}
+          </dd>
+          <dt className="silkscreen text-ink-3">Fetcher</dt>
+          <dd className="text-ink-2">
+            {catalog.fetcher.last_success_at ? (
+              <span title={formatDateTime(catalog.fetcher.last_success_at)}>
+                Pushed {formatAgo(catalog.fetcher.last_success_at, now)}
+              </span>
+            ) : (
+              "Never pushed"
+            )}
+          </dd>
+        </dl>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <Button
+            variant="secondary"
+            loading={busy}
+            disabled={busy || waitMs > 0}
+            onClick={() => void refresh()}
+          >
+            Refresh now
+          </Button>
+          {waitMs > 0 ? (
+            <span className="text-ui-xs text-ink-3">
+              Ready in {Math.ceil(waitMs / 1000)} s
+            </span>
+          ) : null}
+        </div>
+      </div>
+      {failing && catalog.last_error ? (
+        <p
+          className="mt-3 line-clamp-2 font-mono text-[12px] text-danger-ink"
+          title={catalog.last_error}
+        >
+          {catalog.last_error}
+        </p>
+      ) : null}
+      {catalog.fetcher.last_error ? (
+        <p
+          className="mt-2 truncate font-mono text-[12px] text-danger-ink"
+          title={catalog.fetcher.last_error}
+        >
+          Fetcher: {catalog.fetcher.last_error}
+        </p>
+      ) : null}
+      {failing && catalog.last_error?.includes(" 403 ") ? (
+        <p className="mt-3 text-ui-xs text-pretty text-ink-3">
+          Upstream is refusing Cloudflare, so the hourly cron and Refresh now
+          fail. The off-Cloudflare fetcher keeps the shop current; when it stops
+          pushing, the catalog goes stale here.
+        </p>
+      ) : null}
+    </RuleCard>
   );
 }
 

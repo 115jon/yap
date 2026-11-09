@@ -2,19 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   apiGet: vi.fn(),
-  apiPost: vi.fn(),
 }));
 
 vi.mock("@/lib/api-client", () => ({
   apiGet: mocks.apiGet,
-  apiPost: mocks.apiPost,
 }));
 
+import * as client from "@/lib/collectibles-catalog-client";
 import {
-  CollectiblesSyncError,
   loadCollectiblesCatalog,
   resetCollectiblesCatalogClient,
-  syncCollectiblesCatalogClient,
 } from "@/lib/collectibles-catalog-client";
 
 function catalog(stale: boolean) {
@@ -27,10 +24,6 @@ function catalog(stale: boolean) {
     items: [],
     counts: {},
   };
-}
-
-function httpError(status: number, message: string) {
-  return Object.assign(new Error(message), { status, code: "X" });
 }
 
 beforeEach(() => {
@@ -67,23 +60,14 @@ describe("loadCollectiblesCatalog", () => {
   });
 });
 
-describe("syncCollectiblesCatalogClient", () => {
-  it("explains a 403 for non-admins", async () => {
-    mocks.apiPost.mockRejectedValue(httpError(403, "Forbidden"));
-    const error = await syncCollectiblesCatalogClient().catch((e) => e);
-    expect(error).toBeInstanceOf(CollectiblesSyncError);
-    expect(error.status).toBe(403);
-    expect(error.message).toMatch(/Only catalog admins/);
-  });
-
-  it("passes the server's cooldown message through on 429", async () => {
-    mocks.apiPost.mockRejectedValue(
-      httpError(429, "The catalog synced moments ago. Try again in 240s."),
-    );
-    const error = await syncCollectiblesCatalogClient().catch((e) => e);
-    expect(error.status).toBe(429);
-    expect(error.message).toBe(
-      "The catalog synced moments ago. Try again in 240s.",
-    );
+describe("refreshing", () => {
+  it("is not something the app can ask for", async () => {
+    // The admin console refreshes the catalog; the app only reads it.
+    expect(Object.keys(client)).not.toContain("syncCollectiblesCatalogClient");
+    mocks.apiGet.mockResolvedValue({ catalog: catalog(true) });
+    await (loadCollectiblesCatalog as (options?: unknown) => Promise<unknown>)({
+      forceRefresh: true,
+    });
+    expect(mocks.apiGet).toHaveBeenCalledWith("/api/collectibles/catalog");
   });
 });
