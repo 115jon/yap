@@ -434,58 +434,40 @@ function Pool({
   const pool = digest.ranges[range].pool.slice(0, rows);
   const max = Math.max(1, ...pool.map((entry) => entry.matches));
   return (
-    <table className="w-full table-fixed border-separate border-spacing-y-1">
-      <caption className="sr-only">
-        Hero pool, {RANGE_LONG[range]}: matches and win rate
-      </caption>
-      <thead className="sr-only">
-        <tr>
-          <th scope="col">Hero</th>
-          <th scope="col">Matches</th>
-          <th scope="col">Won</th>
-        </tr>
-      </thead>
-      <tbody>
-        {pool.map((entry) => {
-          const hero = heroOf(digest, entry.hero);
-          const rate = winRate(entry.wins, entry.matches);
-          return (
-            <tr
-              key={entry.hero}
-              title={`${hero.name} · ${entry.matches} matches · ${rate}% won`}
-              className="h-5 pointer-fine:hover:bg-tint-1"
-            >
-              <th scope="row" className="w-[96px] p-0 text-left font-normal">
-                <span className="flex min-w-0 items-center gap-2">
-                  <HeroIcon hero={hero} className="size-5" />
-                  <span className="truncate text-[12px] leading-4 text-ink-1">
-                    {hero.name}
-                  </span>
-                </span>
-              </th>
-              <td className="px-2 py-0" aria-hidden="true">
-                <span className="relative block h-1.5">
-                  <i
-                    className="absolute inset-y-0 left-0 rounded-r-[2px] bg-accent-ink"
-                    style={{ width: `${(entry.matches / max) * 100}%` }}
-                  />
-                </span>
-              </td>
-              <td className="w-6 p-0 text-right">
-                <Num size="sm" className="text-ink-2">
-                  {entry.matches}
-                </Num>
-              </td>
-              <td className="w-[38px] p-0 text-right">
-                <Num size="sm" className="text-ink-3">
-                  {rate}%
-                </Num>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <ol
+      aria-label={`Hero pool, ${RANGE_LONG[range]}`}
+      className="flex flex-col gap-1"
+    >
+      {pool.map((entry) => {
+        const hero = heroOf(digest, entry.hero);
+        const rate = winRate(entry.wins, entry.matches);
+        return (
+          <li
+            key={entry.hero}
+            title={`${hero.name} · ${entry.matches} matches · ${rate}% won`}
+            className="grid h-5 grid-cols-[20px_68px_minmax(0,1fr)_24px_34px] items-center gap-2 rounded-[1px] pointer-fine:hover:bg-tint-1"
+          >
+            <HeroIcon hero={hero} className="size-5" />
+            <span className="truncate text-[12px] leading-4 text-ink-1">
+              {hero.name}
+            </span>
+            <span aria-hidden="true" className="relative block h-1.5">
+              <i
+                className="absolute inset-y-0 left-0 rounded-r-[2px] bg-accent-ink"
+                style={{ width: `${(entry.matches / max) * 100}%` }}
+              />
+            </span>
+            <Num size="sm" className="text-right text-ink-2">
+              {entry.matches}
+              <span className="sr-only"> matches,</span>
+            </Num>
+            <Num size="sm" className="text-right text-ink-3">
+              {rate}%<span className="sr-only"> won</span>
+            </Num>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -1190,8 +1172,11 @@ function CareerPlate({
         ctx={ctx}
         readout={
           stale ??
-          (endedAt ? (
-            <Readout>Played {formatAge(endedAt, ctx.at)} ago</Readout>
+          (digest.last_played_at ? (
+            <Readout>
+              Played{" "}
+              {Math.floor((ctx.at / 1000 - digest.last_played_at) / DAY_S)}d ago
+            </Readout>
           ) : null)
         }
       >
@@ -1571,7 +1556,8 @@ function CareerLarge({
 }) {
   const stats = digest.ranges[range];
   const badge = digest.rank?.badge ?? 0;
-  const delta = stats.rank_delta;
+  // Points moved this week, as on the M plate.
+  const delta = digest.ranges["7d"].rank_delta;
   return (
     <div className="flex min-h-0 flex-1 items-stretch gap-[18px]">
       <div className="flex w-[232px] shrink-0 flex-col gap-2 @max-[560px]/cell:hidden">
@@ -1771,7 +1757,29 @@ function LivePlate({
             </div>
           </div>
         </div>
-        <div className="mt-auto flex min-w-0 items-center gap-2">{footer}</div>
+        {widget.size === "M" ? (
+          <>
+            {digest.ranges["30d"].pool.length > 0 ? (
+              <div className="flex min-w-0 flex-col gap-1">
+                <ZoneHead label="Hero pool" aside="games · won" />
+                <Pool digest={digest} range="30d" />
+              </div>
+            ) : null}
+            {digest.last10.length > 0 ? (
+              <div className="mt-auto flex min-w-0 flex-col gap-2">
+                <ZoneHead
+                  label={`Last ${digest.last10.length}`}
+                  aside={record(digest.last10)}
+                />
+                <Letters digest={digest} now={ctx.at} />
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="mt-auto flex min-w-0 items-center gap-2">
+            {footer}
+          </div>
+        )}
       </DeadlockPlate>
     );
   }
@@ -1815,12 +1823,14 @@ function LivePlate({
               <div className="flex items-center justify-between gap-2">
                 <Caption>Today</Caption>
                 <span className="flex items-center gap-1.5">
-                  {today
-                    .slice(0, 4)
-                    .reverse()
-                    .map((match) => (
-                      <Result key={match.id} win={match.win} />
-                    ))}
+                  <span className="flex items-center gap-1.5 @max-[260px]/cell:hidden">
+                    {today
+                      .slice(0, 4)
+                      .reverse()
+                      .map((match) => (
+                        <Result key={match.id} win={match.win} />
+                      ))}
+                  </span>
                   <Num size="sm" className="ml-1 text-ink-2">
                     {record(today)}
                   </Num>
@@ -1829,8 +1839,10 @@ function LivePlate({
             ) : null}
             {heroStats ? (
               <div className="flex items-center justify-between gap-2">
-                <Caption>{hero!.name}, 30 days</Caption>
-                <Num size="sm" className="text-ink-2">
+                <Caption className="@max-[260px]/cell:hidden">
+                  {hero!.name}, 30 days
+                </Caption>
+                <Num size="sm" className="truncate text-ink-2">
                   {heroStats.matches} matches ·{" "}
                   {winRate(heroStats.wins, heroStats.matches)}% won
                 </Num>
