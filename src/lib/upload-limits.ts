@@ -42,6 +42,8 @@ export type UploadKind = keyof typeof UPLOAD_LIMITS;
  */
 export const BIG_UPLOAD_LIMITS: Partial<Record<UploadKind, number>> = {
   attachment: 500 * MB,
+  avatar: 25 * MB,
+  banner: 25 * MB,
 };
 
 /**

@@ -10,7 +10,8 @@ import {
 } from "@/lib/api-helpers";
 import { cacheDel, CacheKey } from "@/lib/cache";
 import { validateImageBuffer } from "@/lib/image-validation";
-import { tooLargeMessage, UPLOAD_LIMITS } from "@/lib/upload-limits";
+import { tooLargeMessage } from "@/lib/upload-limits";
+import { uploadLimitForUser } from "@/services/entitlement.service";
 import { logger } from "@/lib/logger";
 import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
 import { updateAvatarUrl } from "@/services/user.service";
@@ -55,8 +56,14 @@ const POST = async ({ request, params: _params }: any) => {
     return apiError("Invalid avatar display metadata", 400);
   }
 
-  if (file.size > UPLOAD_LIMITS.avatar) {
-    return apiError(tooLargeMessage("Avatar", UPLOAD_LIMITS.avatar), 413);
+  const avatarLimit = await uploadLimitForUser(
+    getDB(),
+    userId,
+    "avatar",
+    file.size,
+  );
+  if (file.size > avatarLimit) {
+    return apiError(tooLargeMessage("Avatar", avatarLimit), 413);
   }
 
   // ── Magic byte validation ───────────────────────────────────────
