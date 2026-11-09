@@ -36,6 +36,7 @@ const ACTION_LABEL: Record<string, string> = {
   "user.disconnect": "Disconnected",
   "flags.update": "Switch",
   "announcement.update": "Banner",
+  "catalog.refresh": "Catalog",
 };
 
 function obj(value: unknown): Record<string, unknown> {
@@ -86,6 +87,16 @@ export function describeChange(entry: AdminAuditEntry): string {
       return entry.after && typeof after.text === "string"
         ? `“${after.text}”`
         : "Cleared";
+    case "catalog.refresh": {
+      if (typeof after.error === "string")
+        return `Refresh failed: ${after.error}`;
+      if (after.requested === true) return "Refresh requested";
+      const items =
+        typeof after.items === "number" ? `, ${after.items} items` : "";
+      return after.outcome === "not_modified"
+        ? `Refreshed, unchanged${items}`
+        : `Refreshed${items}`;
+    }
     default:
       return entry.action;
   }

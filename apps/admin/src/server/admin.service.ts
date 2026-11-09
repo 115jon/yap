@@ -20,6 +20,13 @@ import {
   type BadgeAwardSource,
   type UserBadge,
 } from "@/lib/badges";
+import {
+  describeError,
+  getCollectiblesCatalogHealth,
+  isCollectiblesSyncInFlight,
+  manualSyncRetryAfterMs,
+  syncCollectiblesCatalog,
+} from "@/lib/collectibles-catalog";
 import { isTier, parseEntitlement, type Entitlement } from "@/lib/entitlements";
 import { genId } from "@/lib/id";
 import {
@@ -34,6 +41,8 @@ import type {
   AdminAuditEntry,
   AdminAuditResponse,
   AdminBadge,
+  AdminCatalogRefreshResponse,
+  AdminCatalogStatus,
   AdminCronRun,
   AdminDailyPoint,
   AdminDevice,
@@ -868,6 +877,125 @@ async function disconnectUser(
   return json({ closed_sockets: closed });
 }
 
+// ── Shop catalog ────────────────────────────────────────────────────────────
+
+/** The collectibles catalog's freshness and its refreshes, for the console. */
+export async function catalogStatus(
+  db: D1Database,
+  now: number,
+): Promise<AdminCatalogStatus> {
+  const health = await getCollectiblesCatalogHealth(db, now);
+  const { sync, ingest } = health;
+  return {
+    synced_at: health.catalog?.syncedAt ?? null,
+    items: health.catalog?.items ?? 0,
+    categories: health.catalog?.categories ?? 0,
+    stale: health.catalog?.stale ?? true,
+    last_attempt_at: sync.lastAttemptAt ?? null,
+    last_success_at: sync.lastSuccessAt ?? null,
+    last_failure_at: sync.lastFailureAt ?? null,
+    last_error: sync.lastError ?? null,
+    last_outcome: sync.lastOutcome ?? null,
+    last_trigger: sync.lastTrigger ?? null,
+    consecutive_failures: sync.consecutiveFailures,
+    fetcher: {
+      last_success_at: ingest.lastSuccessAt ?? null,
+      last_failure_at: ingest.lastFailureAt ?? null,
+      last_error: ingest.lastError ?? null,
+    },
+    // The cooldown spares upstream. A fetcher push never calls upstream
+    // from here, so it does not start one.
+    retry_after_ms:
+      sync.lastTrigger === "ingest" ? 0 : manualSyncRetryAfterMs(sync, now),
+  };
+}
+
+/** A `catalog.refresh` audit row's outcome (after_json). */
+interface CatalogRefreshAudit {
+  outcome: AdminCatalogStatus["last_outcome"];
+  synced_at: string | null;
+  items: number;
+  error?: string;
+}
+
+/**
+ * "Refresh now": the same fetch, validate and store path as the cron, run
+ * here with trigger "manual" (the main Worker has no refresh of its own).
+ * Like a disconnect, the audit row is written first ("requested") and then
+ * holds the outcome. A failed fetch keeps the last good catalog and answers
+ * 502 with the reason, which the status row also records.
+ */
+async function refreshCatalog(
+  deps: AdminDeps,
+  actorId: string,
+  request: Request,
+  now: number,
+): Promise<Response> {
+  const { db } = deps;
+  const before = await catalogStatus(db, now);
+  if (isCollectiblesSyncInFlight()) {
+    return fail(
+      "A refresh is already running. Try again in a moment.",
+      429,
+      "CATALOG_REFRESH_COOLDOWN",
+    );
+  }
+  if (before.retry_after_ms > 0) {
+    const seconds = Math.ceil(before.retry_after_ms / 1000);
+    return fail(
+      `The catalog was tried moments ago. Try again in ${seconds} s.`,
+      429,
+      "CATALOG_REFRESH_COOLDOWN",
+    );
+  }
+  const auditId = genId();
+  await auditStatement(db, {
+    id: auditId,
+    actorId,
+    action: "catalog.refresh",
+    targetType: "site",
+    targetId: null,
+    before: { synced_at: before.synced_at, items: before.items },
+    after: { requested: true },
+    request,
+    at: new Date(now).toISOString(),
+  }).run();
+  let error: string | null = null;
+  try {
+    await syncCollectiblesCatalog(db, { trigger: "manual" });
+  } catch (cause) {
+    error = describeError(cause);
+  }
+  const after = await catalogStatus(db, deps.now?.() ?? Date.now());
+  const outcome: CatalogRefreshAudit = {
+    outcome: after.last_outcome,
+    synced_at: after.synced_at,
+    items: after.items,
+  };
+  if (error) outcome.error = error;
+  await db
+    .prepare(`UPDATE admin_audit_log SET after_json = ? WHERE id = ?`)
+    .bind(JSON.stringify(outcome), auditId)
+    .run()
+    .catch((cause: unknown) =>
+      console.error({
+        level: "ERROR",
+        message: "admin.audit_update_failed",
+        audit_id: auditId,
+        error: describeError(cause),
+      }),
+    );
+  if (error) {
+    return fail(
+      `The refresh failed; the last good catalog stays. ${error}`,
+      502,
+      "CATALOG_REFRESH_FAILED",
+    );
+  }
+  const response: AdminCatalogRefreshResponse = { catalog: after };
+  return json(response);
+}
+
 // ── Settings (switches and the announcement) ────────────────────────────────
 
 async function settingsResponse(
@@ -1308,8 +1436,8 @@ async function liveSnapshot(
   now: number,
 ): Promise<AdminLiveSnapshot> {
   const { db } = deps;
-  const [gateway, uploads, d1, storage, cron, jobs, deploy] = await Promise.all(
-    [
+  const [gateway, uploads, d1, storage, cron, jobs, deploy, catalog] =
+    await Promise.all([
       deps.gateway.introspect().catch(() => null),
       pendingUploads(db),
       d1Overview(db).catch(() => ({ tables: [], size_bytes: null })),
@@ -1321,8 +1449,8 @@ async function liveSnapshot(
       ),
       jobBacklog(db),
       deps.deploy?.().catch(() => null) ?? Promise.resolve(null),
-    ],
-  );
+      catalogStatus(db, now).catch(() => null),
+    ]);
   let online: AdminOnlineUser[] | null = null;
   let voiceRooms: AdminVoiceRoom[] | null = null;
   if (gateway) {
@@ -1361,6 +1489,7 @@ async function liveSnapshot(
       duration_ms: num(run.duration_ms),
     })),
     jobs,
+    catalog,
   };
 }
 
@@ -1644,6 +1773,10 @@ export function createAdminHandlers(deps: AdminDeps) {
     }),
 
     settings: admin(async () => json(await settingsResponse(deps.db))),
+
+    refreshCatalog: admin(async (actorId, request) =>
+      refreshCatalog(deps, actorId, request, now()),
+    ),
 
     putSettings: admin(async (actorId, request) =>
       putSettings(deps, actorId, await readJson(request), request, now()),

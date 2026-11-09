@@ -820,9 +820,10 @@ function live(): AdminLiveSnapshot {
       {
         name: "Collectibles catalog sync",
         cron: "17 * * * *",
-        ok: true,
-        duration_ms: 1_830,
-        error: null,
+        ok: false,
+        duration_ms: 355,
+        error:
+          'Yapper catalog fetch failed with 403 Forbidden: an HTML page titled "Attention Required! | Cloudflare"; the fetcher last pushed 2026-10-24T00:41:25.807Z',
         ran_at: iso(NOW - 43 * 60_000),
       },
       {
@@ -863,6 +864,26 @@ function live(): AdminLiveSnapshot {
       postprocessing_oldest: iso(NOW - 40 * 60_000),
       r2_cleanup_pending: 2,
       r2_cleanup_last_error: "R2 delete failed: 503 Service Unavailable",
+    },
+    catalog: {
+      synced_at: iso(NOW - 16 * DAY),
+      items: 1_540,
+      categories: 114,
+      stale: true,
+      last_attempt_at: iso(NOW - 43 * 60_000),
+      last_success_at: iso(NOW - 16 * DAY),
+      last_failure_at: iso(NOW - 43 * 60_000),
+      last_error:
+        'Yapper catalog fetch failed with 403 Forbidden: an HTML page titled "Attention Required! | Cloudflare"',
+      last_outcome: "failed",
+      last_trigger: "cron",
+      consecutive_failures: 442,
+      fetcher: {
+        last_success_at: iso(NOW - 16 * DAY),
+        last_failure_at: null,
+        last_error: null,
+      },
+      retry_after_ms: 0,
     },
   };
 }

@@ -10,7 +10,7 @@ const cleanupStalePendingUploads = vi.hoisted(() =>
 const retryMessagePostprocessing = vi.hoisted(() =>
   vi.fn(async () => undefined),
 );
-const syncCollectiblesCatalog = vi.hoisted(() =>
+const runCollectiblesCatalogCron = vi.hoisted(() =>
   vi.fn(async () => ({
     source: "yapper" as const,
     categories: [],
@@ -74,8 +74,7 @@ vi.mock("../../../src/services/multipart-upload.service", () => ({
 
 vi.mock("../../../src/lib/collectibles-catalog", () => ({
   COLLECTIBLES_SYNC_CRON: "17 * * * *",
-  CatalogFetchDeferredError: class CatalogFetchDeferredError extends Error {},
-  syncCollectiblesCatalog,
+  runCollectiblesCatalogCron,
 }));
 
 import server from "../../../custom-server-entry";
@@ -159,7 +158,7 @@ describe("custom server soundboard media rate limiting", () => {
   });
 
   it("runs maintenance jobs, not the catalog, on the 6-hour cron", async () => {
-    syncCollectiblesCatalog.mockClear();
+    runCollectiblesCatalogCron.mockClear();
     retryR2Cleanup.mockClear();
     retryMessagePostprocessing.mockClear();
     cleanupStalePendingUploads.mockClear();
@@ -172,7 +171,7 @@ describe("custom server soundboard media rate limiting", () => {
       { waitUntil } as unknown as ExecutionContext,
     );
 
-    expect(syncCollectiblesCatalog).not.toHaveBeenCalled();
+    expect(runCollectiblesCatalogCron).not.toHaveBeenCalled();
     expect(retryR2Cleanup).toHaveBeenCalledWith(env.DB, undefined);
     expect(retryMessagePostprocessing).toHaveBeenCalledWith(env);
     expect(cleanupStalePendingUploads).toHaveBeenCalledWith(env.DB, undefined);
@@ -180,10 +179,10 @@ describe("custom server soundboard media rate limiting", () => {
   });
 
   it("syncs the catalog on its hourly cron and isolates its failure", async () => {
-    syncCollectiblesCatalog.mockClear();
+    runCollectiblesCatalogCron.mockClear();
     retryMessagePostprocessing.mockClear();
     cleanupStalePendingUploads.mockClear();
-    syncCollectiblesCatalog.mockRejectedValueOnce(new Error("upstream 403"));
+    runCollectiblesCatalogCron.mockRejectedValueOnce(new Error("upstream 403"));
     vi.spyOn(console, "error").mockImplementation(() => {});
     const waitUntil = vi.fn();
     const env = { DB: {} } as Parameters<typeof server.scheduled>[1];
@@ -194,9 +193,7 @@ describe("custom server soundboard media rate limiting", () => {
       } as unknown as ExecutionContext),
     ).resolves.toBeUndefined();
 
-    expect(syncCollectiblesCatalog).toHaveBeenCalledWith(env.DB, {
-      trigger: "cron",
-    });
+    expect(runCollectiblesCatalogCron).toHaveBeenCalledWith(env.DB);
     // The hourly cron also sweeps message postprocessing (embed retries).
     expect(retryMessagePostprocessing).toHaveBeenCalledWith(env);
     // And stale chunked uploads, hourly.

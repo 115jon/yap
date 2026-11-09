@@ -23,6 +23,9 @@
  * Durable Objects through cross-script bindings for live state and
  * disconnects (./admin-gateway.service.ts). The switches, the banner and
  * suspensions this Worker writes are read and enforced by the main Worker.
+ * "Refresh now" on the shop catalog runs Yap's own catalog sync here
+ * (@/lib/collectibles-catalog against the shared D1); the main Worker
+ * offers no way to force one.
  */
 
 import { CacheKey } from "@/lib/cache";
@@ -226,6 +229,7 @@ export function routeApi(method: string, pathname: string): Route | null {
     "/api/live": { GET: "live" },
     "/api/insights": { GET: "insights" },
     "/api/settings": { GET: "settings", PUT: "putSettings" },
+    "/api/catalog/refresh": { POST: "refreshCatalog" },
     "/api/audit": { GET: "audit" },
   };
   const action = table[pathname]?.[method];

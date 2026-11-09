@@ -222,7 +222,7 @@ function DesktopUserProfilePopover({
   const cardRef = useRef<HTMLDivElement>(null);
   // Read once, at open: keyboard opens focus the first action.
   const [openedByKeyboard] = useState(() => lastInputWasKeyboard());
-  const { loadRelationships } = useChatActions();
+  const { loadRelationships, setProfileUser } = useChatActions();
   const [error, setError] = useState<string | null>(null);
   const [localState, setLocalState] = useReducer(
     (previous: LocalState, next: LocalAction) => ({
@@ -403,6 +403,15 @@ function DesktopUserProfilePopover({
     onClose();
   };
 
+  // The avatar (or banner): the popover gives way to the full profile. Focus
+  // goes to what opened the popover first, so it returns there when the
+  // full profile closes.
+  const handleViewProfile = () => {
+    if (anchorEl.isConnected) anchorEl.focus({ preventScroll: true });
+    onClose();
+    setProfileUser(resolvedUser);
+  };
+
   const customRoles = optimisticRoles?.filter((role) => !role.is_default) ?? [];
   const showRoles = customRoles.length > 0 || canManageRoles;
   const currentRoleIds = optimisticRoles?.map((role) => role.id) ?? [];
@@ -452,6 +461,7 @@ function DesktopUserProfilePopover({
           name={resolvedDisplayName}
           status={normalizeUserStatus(isOnline ? resolvedStatus : "offline")}
           replayEffectOnBannerHover
+          onViewProfile={handleViewProfile}
           className="w-full"
           scrollClassName="max-h-[calc(min(640px,var(--available-height,100dvh))-var(--rm-profile-frame-reserve-y,0px))]"
           nameAdornment={

@@ -4,6 +4,8 @@
  *   sp-profile-modal[-friend|-pending|-blocked|-error|-block-confirm]
  *                                                         UserProfileModal
  *   sp-profile-popover[-banner|-self]                     UserProfilePopover
+ *   sp-profile-view[-self]          the full profile: banner, badges,
+ *                                   markdown bio, roles (UserProfileModal)
  *   sp-account-popover[-status]                           UserAccountPopover
  *   sp-avatar-picker                                      AvatarPickerModal
  *   sp-avatar-frame                                       AvatarFrameEditor
@@ -34,6 +36,8 @@ const PROFILE_SURFACES = [
   "sp-profile-popover",
   "sp-profile-popover-banner",
   "sp-profile-popover-self",
+  "sp-profile-view",
+  "sp-profile-view-self",
   "sp-account-popover",
   "sp-account-popover-status",
   "sp-avatar-picker",
@@ -67,6 +71,21 @@ export const me: User = {
   banner_url: coverGlasshouse,
 } as User;
 
+/** Ada with everything the full profile shows. */
+export const adaFull: User = {
+  ...ada,
+  pronouns: "she/her",
+  custom_status: "compiling the analytical engine",
+  bio: "First programmer. **Notes** on the *Analytical Engine*.\nAsk me about `Note G` or ||the Bernoulli numbers||.",
+  created_at: at(60 * 24 * 400),
+  badges: [
+    { id: "founder", awarded_at: at(60 * 24 * 300) },
+    { id: "early-yapper", awarded_at: at(60 * 24 * 280) },
+    { id: "voice-regular", awarded_at: at(60 * 24 * 90) },
+    { id: "night-owl", awarded_at: at(60 * 24 * 30) },
+  ],
+} as User;
+
 function relationshipFor(surface: string, user: User): Relationship[] {
   const type = surface.endsWith("-friend")
     ? 0
@@ -88,7 +107,14 @@ export function profileRoutes(surface: string): StubRoute[] {
           return fail(500, "D1_ERROR: no such table: user_profiles");
         }
         const id = url.pathname.split("/")[3];
-        const user = id === "u-ada" ? ada : id === "u-me" ? me : grace;
+        const user =
+          id === "u-ada"
+            ? surface.startsWith("sp-profile-view")
+              ? adaFull
+              : ada
+            : id === "u-me"
+              ? me
+              : grace;
         return ok({
           user,
           mutualFriends: {
@@ -184,6 +210,11 @@ function ProfilesFixture({ surface }: { surface: string }) {
         initialBlockConfirm={surface === "sp-profile-modal-block-confirm"}
       />
     );
+  }
+  if (surface.startsWith("sp-profile-view")) {
+    // Over the shell, so Ada's server roles come from its member list.
+    const user = surface === "sp-profile-view-self" ? me : adaFull;
+    return <UserProfileModal open user={user} onClose={noop} />;
   }
   if (surface.startsWith("sp-profile-popover")) {
     const user =

@@ -8,6 +8,7 @@ import {
   ProfileSections,
   resolveProfileCardTheme,
   useProfileActions,
+  useProfileCall,
   type MutualFriend,
   type MutualServer,
 } from "@/components/chat/ProfileCard";
@@ -23,7 +24,7 @@ import { resolveProfileReferenceDate } from "@/lib/profile-dates";
 import type { Role, User } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { normalizeUserStatus, type UserStatus } from "./UserStatusDot";
-import { useChatActions, useChatStore } from "@/stores/chat-store";
+import { useChatStore } from "@/stores/chat-store";
 import { useGameActivity } from "@/hooks/useGameActivity";
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/IconButton";
@@ -87,7 +88,6 @@ export default function MobileProfileSheet({
       onlineUsers: s.onlineUsers,
     })),
   );
-  const { openDm, dispatch } = useChatActions();
   const [snap, setSnap] = useState<number | string | null>(SNAP_POINTS[0]!);
   const [profileData, setProfileData] = useState<ProfileFetchState | null>(
     null,
@@ -156,21 +156,11 @@ export default function MobileProfileSheet({
   }, [user.id, isMe]);
 
   // Same path as the member context menu's "Start a call".
-  const handleCall = async () => {
-    const channelId = await openDm(user.id);
-    if (!channelId) return;
-    dispatch({ type: "SWITCH_SERVER", serverId: "@me", channelId });
-    window.dispatchEvent(
-      new CustomEvent("request-start-call", {
-        detail: {
-          userId: user.id,
-          displayName: resolvedUser.display_name ?? resolvedUser.username,
-          channelId,
-        },
-      }),
-    );
-    onClose();
-  };
+  const handleCall = useProfileCall({
+    userId: user.id,
+    displayName: resolvedUser.display_name ?? resolvedUser.username,
+    onStarted: onClose,
+  });
 
   const modActions =
     (canKick && onKick) || (canBan && onBan) ? (
@@ -285,6 +275,7 @@ export default function MobileProfileSheet({
           <ProfileSections
             gameActivity={gameActivity}
             bio={resolvedUser.bio}
+            bioMarkdown
             roles={
               memberRoles && memberRoles.length > 0 ? (
                 <ProfileRoleChips roles={memberRoles} />

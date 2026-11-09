@@ -44,7 +44,7 @@ declare global {
     EGRESS_PROXY_SECRET?: string;
     /** Egress proxy base URL; defaults to https://egress.115jon.com. */
     EGRESS_PROXY_URL?: string;
-    /** Admin user ids ("id1, id2"): catalog sync and manual badges. */
+    /** Admin user ids ("id1, id2"): manual badges (POST /api/admin/badges). */
     COLLECTIBLES_ADMIN_USER_IDS?: string;
     /**
      * Billing (not set up yet). While any of the three is unset,

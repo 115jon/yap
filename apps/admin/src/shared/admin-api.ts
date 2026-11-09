@@ -110,6 +110,7 @@ export const ADMIN_ACTIONS = [
   "user.disconnect",
   "flags.update",
   "announcement.update",
+  "catalog.refresh",
 ] as const;
 export type AdminAction = (typeof ADMIN_ACTIONS)[number];
 
@@ -213,6 +214,41 @@ export interface AdminJobBacklog {
   r2_cleanup_last_error: string | null;
 }
 
+/**
+ * The collectibles shop catalog. The main Worker's hourly cron tries the
+ * upstream itself; an off-Cloudflare fetcher pushes it in (ingest) because
+ * upstream blocks Cloudflare.
+ */
+export interface AdminCatalogStatus {
+  /** When the stored catalog was last refreshed; null if nothing is stored. */
+  synced_at: string | null;
+  items: number;
+  categories: number;
+  /** Older than four hours, so several refreshes in a row were missed. */
+  stale: boolean;
+  /** The last refresh of any kind: cron, manual, request or ingest. */
+  last_attempt_at: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_error: string | null;
+  last_outcome: "updated" | "not_modified" | "rejected" | "failed" | null;
+  last_trigger: string | null;
+  consecutive_failures: number;
+  /** Pushes from the off-Cloudflare fetcher only. */
+  fetcher: {
+    last_success_at: string | null;
+    last_failure_at: string | null;
+    last_error: string | null;
+  };
+  /** Until "Refresh now" may run again (0 = now), from generated_at. */
+  retry_after_ms: number;
+}
+
+/** POST /api/catalog/refresh, when the refresh ran and stored a catalog. */
+export interface AdminCatalogRefreshResponse {
+  catalog: AdminCatalogStatus;
+}
+
 export interface AdminLiveSnapshot {
   generated_at: string;
   /** Null when the gateway could not be asked. */
@@ -230,6 +266,8 @@ export interface AdminLiveSnapshot {
   deploy: { version: string; commit: string; built_at: string | null };
   cron: AdminCronRun[];
   jobs: AdminJobBacklog;
+  /** Null when it could not be read. */
+  catalog: AdminCatalogStatus | null;
 }
 
 // ── Insights ────────────────────────────────────────────────────────────────
