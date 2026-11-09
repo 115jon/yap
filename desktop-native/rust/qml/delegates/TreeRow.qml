@@ -44,6 +44,8 @@ Loader {
     required property bool folded
     // Members: their share's still, for the stream card.
     required property string preview
+    // Members: their display-name style, or empty.
+    required property string nameStyle
     // The open channel (text, or a voice channel's view) and the joined call.
     required property string activeId
     required property string callId
@@ -113,6 +115,7 @@ Loader {
                 lit: cell.lit
                 reconnecting: cell.reconnecting
                 preview: cell.preview
+                nameStyle: cell.nameStyle
             }
             ListenLine {}
             StatusLines {}

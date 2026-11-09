@@ -241,6 +241,9 @@ rows! {
         /// Members: their share's still (a `data:image/` URL), or empty
         /// (the stream hover card's preview).
         preview: String => Preview "preview",
+        /// Members: their display-name style ([`name_style`]), or empty
+        /// (ChannelSidebar.tsx: from the members, friends and DMs).
+        name_style: String => NameStyle "nameStyle",
     }
     key(row) -> (TreeKind, String) { (row.kind, row.id.clone()) }
 
@@ -394,6 +397,8 @@ rows! {
         rail_count: i64 => RailCount "railCount",
         /// The recipient's avatar decoration (APNG), or empty.
         deco: String => Deco "deco",
+        /// The recipient's display-name style ([`name_style`]), or empty.
+        name_style: String => NameStyle "nameStyle",
     }
     key(row) -> String { row.id.clone() }
 
@@ -1699,6 +1704,7 @@ fn plain_row(kind: TreeKind, id: &str, name: &str) -> ChannelTreeRow {
         started_at: 0,
         folded: false,
         preview: String::new(),
+        name_style: String::new(),
     }
 }
 
@@ -2262,6 +2268,7 @@ pub(super) fn dm_rows(
                 rail: rank,
                 rail_count: badge.notifications.max(1),
                 deco: collectibles::decoration_url(user.avatar_display.as_ref()),
+                name_style: name_style(user.display_name_style.as_ref()),
             }
         })
         .collect();
@@ -2409,23 +2416,58 @@ fn member_row(m: &Member, online: bool, ctx: &MemberContext<'_>) -> MemberListRo
     }
 }
 
+/// The display-name faces (profile-customization.ts
+/// `CLASSIC_DISPLAY_NAME_FONTS`, then `YAP_DISPLAY_NAME_FONTS`).
+pub const NAME_FONTS: [&str; 15] = [
+    "gg-sans",
+    "tempo",
+    "sakura",
+    "jellybean",
+    "modern",
+    "medieval",
+    "eight-bit",
+    "vampyre",
+    "silkscreen",
+    "unbounded",
+    "syne",
+    "instrument-serif",
+    "vt323",
+    "rubik-glitch",
+    "major-mono",
+];
+
+/// The display-name effects (`CLASSIC_DISPLAY_NAME_EFFECTS`, then
+/// `YAP_DISPLAY_NAME_EFFECTS`).
+pub const NAME_EFFECTS: [&str; 14] = [
+    "solid",
+    "gradient",
+    "neon",
+    "toon",
+    "pop",
+    "dither",
+    "holo",
+    "chrome",
+    "pixel",
+    "crt",
+    "glitch",
+    "ember",
+    "sticker",
+    "candlelit",
+];
+
+/// Where the Yap entries of [`NAME_FONTS`] and [`NAME_EFFECTS`] start: the
+/// ones before are Classic.
+const YAP_FONTS_FROM: usize = 8;
+const YAP_EFFECTS_FROM: usize = 5;
+
 /// A display-name style as the card and rows draw it
 /// (profile-customization.ts `normalizeDisplayNameStyle`): compact JSON
-/// `{"font","effect","primary","secondary"}` with `#RRGGBB` colours, or
-/// empty when absent or invalid. The value may be the object or a string
+/// `{"effect","font","primary","secondary"}` with `#RRGGBB` colours, plus
+/// `"wave":true` when the Wave modifier is on (only a JSON `true` counts),
+/// or empty when absent or invalid: an unknown font or effect id draws the
+/// plain name, as on the web. The value may be the object or a string
 /// holding it.
 pub fn name_style(value: Option<&serde_json::Value>) -> String {
-    const FONTS: [&str; 8] = [
-        "gg-sans",
-        "tempo",
-        "sakura",
-        "jellybean",
-        "modern",
-        "medieval",
-        "eight-bit",
-        "vampyre",
-    ];
-    const EFFECTS: [&str; 5] = ["solid", "gradient", "neon", "toon", "pop"];
     let parsed;
     let object = match value {
         Some(serde_json::Value::String(text)) => {
@@ -2458,18 +2500,39 @@ pub fn name_style(value: Option<&serde_json::Value>) -> String {
         hex("secondaryColor"),
     ) {
         (Some(font), Some(effect), Some(primary), Some(secondary))
-            if FONTS.contains(&font) && EFFECTS.contains(&effect) =>
+            if NAME_FONTS.contains(&font) && NAME_EFFECTS.contains(&effect) =>
         {
-            serde_json::json!({
+            let mut style = serde_json::json!({
                 "font": font,
                 "effect": effect,
                 "primary": primary,
                 "secondary": secondary,
-            })
-            .to_string()
+            });
+            if object.get("wave") == Some(&serde_json::Value::Bool(true)) {
+                style["wave"] = serde_json::Value::Bool(true);
+            }
+            style.to_string()
         }
         _ => String::new(),
     }
+}
+
+/// Whether a style as [`name_style`] gives it uses anything beyond the
+/// Classic set: a Yap effect, a Yap face or Wave
+/// (`usesYapDisplayNameStyle`), the part the `allNameStyles` perk gates.
+pub fn uses_yap_name_style(view_json: &str) -> bool {
+    let Ok(style) = serde_json::from_str::<serde_json::Value>(view_json) else {
+        return false;
+    };
+    let yap = |key: &str, list: &[&str], from: usize| {
+        style
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|id| list[from..].contains(&id))
+    };
+    yap("effect", &NAME_EFFECTS, YAP_EFFECTS_FROM)
+        || yap("font", &NAME_FONTS, YAP_FONTS_FROM)
+        || style.get("wave") == Some(&serde_json::Value::Bool(true))
 }
 
 /// A banner whose type says video (or an animatable picture: GIF, APNG,
@@ -2848,6 +2911,115 @@ mod banner_tests {
         let bad = serde_json::json!({"font": "comic", "effect": "solid", "primaryColor": "#fff", "secondaryColor": "#000"});
         assert_eq!(name_style(Some(&bad)), "");
         assert_eq!(name_style(None), "");
+    }
+
+    #[test]
+    fn a_yap_name_style_should_keep_its_effect_font_and_wave() {
+        use super::name_style;
+        let raw = serde_json::json!({
+            "font": "rubik-glitch",
+            "effect": "glitch",
+            "primaryColor": "#fde68a",
+            "secondaryColor": "#0ff",
+            "wave": true,
+        });
+        assert_eq!(
+            name_style(Some(&raw)),
+            r##"{"effect":"glitch","font":"rubik-glitch","primary":"#FDE68A","secondary":"#00FFFF","wave":true}"##
+        );
+        for (font, effect) in [
+            ("silkscreen", "pixel"),
+            ("unbounded", "dither"),
+            ("syne", "holo"),
+            ("instrument-serif", "candlelit"),
+            ("vt323", "crt"),
+            ("major-mono", "chrome"),
+            ("jellybean", "sticker"),
+            ("syne", "ember"),
+        ] {
+            let raw = serde_json::json!({
+                "font": font, "effect": effect,
+                "primaryColor": "#FFFFFF", "secondaryColor": "#000000",
+            });
+            let style: serde_json::Value =
+                serde_json::from_str(&name_style(Some(&raw))).expect("a valid style");
+            assert_eq!(
+                (style["font"].as_str(), style["effect"].as_str()),
+                (Some(font), Some(effect))
+            );
+            assert_eq!(style.get("wave"), None);
+        }
+    }
+
+    #[test]
+    fn wave_should_count_only_when_it_is_true() {
+        use super::name_style;
+        for wave in [
+            serde_json::json!(false),
+            serde_json::json!("true"),
+            serde_json::json!(1),
+            serde_json::Value::Null,
+        ] {
+            let raw = serde_json::json!({
+                "font": "syne", "effect": "holo",
+                "primaryColor": "#FFFFFF", "secondaryColor": "#000000",
+                "wave": wave,
+            });
+            let style = name_style(Some(&raw));
+            assert!(!style.is_empty());
+            assert!(!style.contains("wave"), "{style}");
+        }
+        // A string holding the object (how some rows carry it).
+        let text = serde_json::json!(
+            r##"{"font":"gg-sans","effect":"solid","primaryColor":"#fff","secondaryColor":"#000","wave":true}"##
+        );
+        assert!(name_style(Some(&text)).ends_with(r#","wave":true}"#));
+    }
+
+    #[test]
+    fn an_unknown_effect_or_font_should_fall_back_to_the_plain_name() {
+        use super::name_style;
+        for (font, effect) in [
+            ("syne", "sparkle"),
+            ("comic-sans", "holo"),
+            ("Syne", "holo"),
+            ("syne", "HOLO"),
+        ] {
+            let raw = serde_json::json!({
+                "font": font, "effect": effect,
+                "primaryColor": "#FFFFFF", "secondaryColor": "#000000",
+            });
+            assert_eq!(name_style(Some(&raw)), "", "{font} {effect}");
+        }
+        let missing_secondary = serde_json::json!({
+            "font": "syne", "effect": "holo", "primaryColor": "#FFFFFF",
+        });
+        assert_eq!(name_style(Some(&missing_secondary)), "");
+        let bad_colour = serde_json::json!({
+            "font": "syne", "effect": "holo",
+            "primaryColor": "#GGGGGG", "secondaryColor": "#000000",
+        });
+        assert_eq!(name_style(Some(&bad_colour)), "");
+        assert_eq!(name_style(Some(&serde_json::json!("not json"))), "");
+        assert_eq!(name_style(Some(&serde_json::json!(["syne"]))), "");
+    }
+
+    #[test]
+    fn yap_styles_should_be_told_from_classic_ones() {
+        use super::uses_yap_name_style;
+        assert!(!uses_yap_name_style(
+            r##"{"effect":"neon","font":"tempo","primary":"#FFFFFF","secondary":"#000000"}"##
+        ));
+        assert!(uses_yap_name_style(
+            r##"{"effect":"holo","font":"tempo","primary":"#FFFFFF","secondary":"#000000"}"##
+        ));
+        assert!(uses_yap_name_style(
+            r##"{"effect":"solid","font":"vt323","primary":"#FFFFFF","secondary":"#000000"}"##
+        ));
+        assert!(uses_yap_name_style(
+            r##"{"effect":"solid","font":"gg-sans","primary":"#FFFFFF","secondary":"#000000","wave":true}"##
+        ));
+        assert!(!uses_yap_name_style(""));
     }
 
     #[test]

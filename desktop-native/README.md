@@ -180,7 +180,15 @@ the decisions.
   account), username, email and sign-in methods from Kova. The profile
   editor (account card or Account): avatar and banner uploads, banner,
   background and accent colours, custom status, pronouns and bio, with the
-  live card and the unsaved bar. Custom colours (profile, name style and
+  live card and the unsaved bar. Display name styles as on the web: the
+  Classic effects and faces, the Yap ones (Dither fade, Holo, Chrome, Pixel
+  shine, CRT, Glitch, Ember, Sticker, Candlelit serif, seven faces) and
+  Wave, in every surface that shows a name (`components/DisplayName.qml`;
+  the Yap effects paint the name's layer with one small shader per effect,
+  `shaders/namefx.frag`, baked to DXBC at build time; animated ones play
+  only on hover, in an open profile and in the editor's preview). The
+  editor gates the Yap set on `canUseYapStyles` (the `allNameStyles` perk,
+  true until entitlements land). Custom colours (profile, name style and
   role colours) open the app's own colour picker
   (`components/ColorPopover.qml`, what Chromium's `<input type="color">`
   popup gives the web): a saturation/brightness square, a hue slider, the
@@ -513,7 +521,7 @@ stickers, the avatar picker's GIF tile and the voice status picture's
 upload (GIFs and recent pictures only), toast avatars, toast actions
 from Action Center once the app has quit (no COM activator), the game
 capture hook's Vulkan layer, and auto-update. In
-settings: avatar crop, display name styles,
+settings: avatar crop,
 bundles (none in the catalog), sign-out from the page,
 server profiles, call keybinds,
 the spatial audio panel (the room map: placement, room size, distance, arc,
@@ -603,6 +611,8 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_PICK_FILES`                | unset                     | `a.png;b.png`: returned by the file picker instead of showing it (tests)                                                                                                                                                       |
 | `YAP_PICK_COLOR`                | unset                     | `#RRGGBB`: a colour key applies it at once instead of opening the colour picker; `-` applies nothing (tests)                                                                                                                   |
 | `YAP_TEST_EYEDROPPER`           | unset                     | `#RRGGBB`: the eyedropper picks it 150 ms after it starts, `-` cancels; no overlay, the screen is never read (tests)                                                                                                           |
+| `YAP_TEST_NAME_STYLE`           | unset                     | `{"font","effect","primary","secondary","wave"}` (the views' shape): every display name wears this style locally, nothing is saved (tests)                                                                                     |
+| `YAP_TEST_HOVER_PLAY`           | unset                     | `1`: what plays only while pointed at (name effects, resting clips) plays as if hovered, also in a window that is not active (tests)                                                                                           |
 | `YAP_EMBED_MUTED`               | unset                     | `1`: every chat player starts muted (tests)                                                                                                                                                                                    |
 | `YAP_FAKE_NO_WEBVIEW2`          | unset                     | `1`: WebView2 creation fails for this process, as on a PC without the runtime (tests)                                                                                                                                          |
 | `YAP_LOG_EXTERNAL_OPEN`         | unset                     | `1`: links the players would open in the browser are logged as `[external] open <host><path>` instead (tests)                                                                                                                  |
@@ -708,6 +718,9 @@ Node. It is embedded as `:/fonts`, `:/icons` and `:/svg`.
 # Static cuts of Bricolage, Geist, Geist Mono and Martian Mono from a pinned
 # google/fonts commit (SHA-256 checked, versions matched to the web's
 # Fontsource files), renamed to one "Yap *" family per cut, plus OFL texts.
+# The seven Yap display-name faces (Silkscreen, Unbounded, Syne, Instrument
+# Serif, VT323, Rubik Glitch, Major Mono Display) are the web's Fontsource
+# 5.3.0 latin WOFF2s, pinned by SHA-256 and converted to TTF.
 uvx --from fonttools --with brotli python -I tools/build-fonts.py
 # Phosphor SVGs for every concept in src/components/ui/icon/mapping.ts,
 # manifest.json (fill, slash, rotate, off pairs), and the brand marks.

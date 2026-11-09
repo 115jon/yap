@@ -74,14 +74,15 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         opacity: row.overlay ? 0.35 : 1
         Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
-        Text {
+        // FriendsView.tsx UserDisplayName: their style, if they have one.
+        DisplayName {
             width: parent.width
-            textFormat: Text.PlainText
             text: row.person.name
-            elide: Text.ElideRight
+            nameStyle: row.person.nameStyle ?? ""
             color: hover.hovered ? Theme.ink1 : Theme.ink2
-            EaseColor on color {}
             font: Theme.type.row
+            ground: Theme.ply0
+            playing: hover.hovered
         }
         // What they play takes the custom status's line (GameActivity.tsx).
         Loader {

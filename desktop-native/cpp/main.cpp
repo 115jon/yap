@@ -930,6 +930,10 @@ int main(int argc, char* argv[])
     // (name effects, resting clips) plays as if hovered, since posted mouse
     // moves give a window behind others no hover.
     state->setProperty("testHoverPlay", qEnvironmentVariableIntValue("YAP_TEST_HOVER_PLAY") != 0);
+    // YAP_TEST_NAME_STYLE=<json> (tests): every display name wears this
+    // style locally (`{"font","effect","primary","secondary","wave"}`, the
+    // shape the views carry); nothing is saved.
+    state->setProperty("testNameStyle", qEnvironmentVariable("YAP_TEST_NAME_STYLE"));
   }
 
   engine.loadFromModule("com.yap.native", "Main");

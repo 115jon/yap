@@ -381,6 +381,7 @@ fn channels_result_should_open_the_first_text_channel_and_request_its_page() {
         started_at: 0,
         folded: false,
         preview: String::new(),
+        name_style: String::new(),
     };
     // Members have not answered: no Manage channels yet. An empty voice
     // channel draws its own status rows.

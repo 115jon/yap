@@ -443,7 +443,28 @@ impl State {
         );
         self.add_voice_status(&mut rows);
         self.fold_rows(&mut rows);
+        self.style_member_rows(&mut rows);
         rows
+    }
+
+    /// The people under voice channels wear their display-name style
+    /// (ChannelSidebar.tsx `resolvedDisplayNameStyle`): from whoever we know
+    /// them as (us, a server's members, a DM), else a relationship.
+    fn style_member_rows(&self, rows: &mut [ChannelTreeRow]) {
+        for row in rows.iter_mut().filter(|r| r.kind == TreeKind::Member) {
+            let Some((_, user_id)) = row.id.split_once('/') else {
+                continue;
+            };
+            let style = self
+                .known_user(user_id)
+                .and_then(|u| u.display_name_style.as_ref())
+                .or_else(|| {
+                    self.friends
+                        .get(user_id)
+                        .and_then(|r| r.user.display_name_style.as_ref())
+                });
+            row.name_style = view::name_style(style);
+        }
     }
 
     /// Marks each row under a collapsed category, and the label itself.

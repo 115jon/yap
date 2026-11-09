@@ -34,6 +34,8 @@ Item {
     required property bool last
     // 0 off, 1 the trunk passes here on its way to you, 2 you.
     required property int lit
+    // The display-name style (ChannelSidebar.tsx UserDisplayName), or empty.
+    property string nameStyle
 
     // Rows are 26 + the list's 2 px spacing, so leaves sit on a 28 px pitch.
     readonly property int guideX: 18
@@ -117,17 +119,18 @@ Item {
             border.color: Theme.talk
         }
     }
-    Text {
+    DisplayName {
         anchors.left: face.right
         anchors.leftMargin: 8
         anchors.right: glyphs.left
         anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter
-        textFormat: Text.PlainText
         text: root.name
-        elide: Text.ElideRight
+        nameStyle: root.nameStyle
         color: root.speaking || root.me || hover.hovered ? Theme.ink1 : Theme.ink2
         font: Theme.type.occupant
+        ground: Theme.ply1
+        playing: hover.hovered
     }
     Row {
         id: glyphs

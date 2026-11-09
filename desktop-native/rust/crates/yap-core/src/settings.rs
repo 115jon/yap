@@ -1092,9 +1092,10 @@ pub fn avatar_display(
 }
 
 /// A display-name style as the views carry it (`{font, effect, primary,
-/// secondary}`, `view::name_style`) in the shape the server takes
-/// (`DisplayNameStyle`: `primaryColor`, `secondaryColor`); null for empty
-/// or anything `normalizeDisplayNameStyle` would refuse.
+/// secondary, wave?}`, `view::name_style`) in the shape the server takes
+/// (`DisplayNameStyle`: `primaryColor`, `secondaryColor`, and `wave: true`
+/// only when on, never `false`); null for empty or anything
+/// `normalizeDisplayNameStyle` would refuse.
 pub fn name_style_patch(view_json: &str) -> serde_json::Value {
     let Ok(style) = serde_json::from_str::<serde_json::Value>(view_json) else {
         return serde_json::Value::Null;
@@ -1104,15 +1105,22 @@ pub fn name_style_patch(view_json: &str) -> serde_json::Value {
         "effect": style.get("effect"),
         "primaryColor": style.get("primary"),
         "secondaryColor": style.get("secondary"),
+        "wave": style.get("wave"),
     });
     let normal = crate::store::view::name_style(Some(&shaped));
     match serde_json::from_str::<serde_json::Value>(&normal) {
-        Ok(normal) => serde_json::json!({
-            "font": normal["font"],
-            "effect": normal["effect"],
-            "primaryColor": normal["primary"],
-            "secondaryColor": normal["secondary"],
-        }),
+        Ok(normal) => {
+            let mut out = serde_json::json!({
+                "font": normal["font"],
+                "effect": normal["effect"],
+                "primaryColor": normal["primary"],
+                "secondaryColor": normal["secondary"],
+            });
+            if normal.get("wave") == Some(&serde_json::Value::Bool(true)) {
+                out["wave"] = serde_json::Value::Bool(true);
+            }
+            out
+        }
         Err(_) => serde_json::Value::Null,
     }
 }
