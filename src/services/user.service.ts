@@ -17,6 +17,9 @@ import {
   type DisplayNameStyle,
 } from "@/lib/profile-customization";
 import type { D1Database } from "@cloudflare/workers-types";
+import type { UserBadge } from "@/lib/badges";
+import type { Entitlement } from "@/lib/entitlements";
+import { getProfileExtras } from "@/services/entitlement.service";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -45,11 +48,15 @@ export interface UserProfile {
   pronouns: string | null;
   status: string;
   custom_status: string | null;
+  /** The plan (no billing ids); free when there is no entitlement row. */
+  entitlement: Entitlement;
+  /** Earned badges in display order, Loud included while subscribed. */
+  badges: UserBadge[];
 }
 
 type UserProfileRow = Omit<
   UserProfile,
-  "display_name_style" | "share_activity"
+  "display_name_style" | "share_activity" | "entitlement" | "badges"
 > & {
   display_name_style: string | null;
   share_activity: number | null;
@@ -83,12 +90,15 @@ export async function getMe(
 ): Promise<UserProfile> {
   await ensureUserProfileSchema(db);
 
-  const user = await db
-    .prepare(
-      `SELECT id, username, display_name, avatar_url, avatar_display, banner_url, banner_content_type, nameplate_url, nameplate_content_type, profile_accent_color, profile_background_color, profile_banner_color, display_name_style, theme_preference, theme_sync_enabled, media_content_filter, share_activity, updated_at, created_at, bio, pronouns, status, custom_status FROM users WHERE id = ?`,
-    )
-    .bind(userId)
-    .first<UserProfileRow>();
+  const [user, extras] = await Promise.all([
+    db
+      .prepare(
+        `SELECT id, username, display_name, avatar_url, avatar_display, banner_url, banner_content_type, nameplate_url, nameplate_content_type, profile_accent_color, profile_background_color, profile_banner_color, display_name_style, theme_preference, theme_sync_enabled, media_content_filter, share_activity, updated_at, created_at, bio, pronouns, status, custom_status FROM users WHERE id = ?`,
+      )
+      .bind(userId)
+      .first<UserProfileRow>(),
+    getProfileExtras(db, userId),
+  ]);
 
   if (!user) {
     throw ServiceError.notFound("User not found");
@@ -104,6 +114,8 @@ export async function getMe(
     avatar_display: normalizeAvatarDisplay(user.avatar_display),
     display_name_style: normalizeDisplayNameStyle(user.display_name_style),
     share_activity: user.share_activity !== 0,
+    entitlement: extras.entitlement,
+    badges: extras.badges,
   };
 }
 

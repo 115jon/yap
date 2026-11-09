@@ -1,6 +1,6 @@
 # Yap Privacy Policy
 
-Effective date: November 8, 2026
+Effective date: November 9, 2026
 
 Yap is operated by 115jon. Questions about this policy, privacy requests,
 or data deletion requests can be sent to <115jon@proton.me>.
@@ -13,6 +13,10 @@ read-state data, notification preferences, and audit records needed to operate
 the service. When a user joins a voice or video session, the service processes
 the room/channel identifiers, connection credentials, and the media the user
 chooses to send.
+
+Yap keeps per-account usage counters: time spent in voice and screen sharing,
+the number of messages sent, and when the account was last active. They are
+used to award profile badges and are deleted with the account.
 
 The desktop application may store account-session information and application
 settings on the user's device. Browser and CEF runtime data, such as cached web

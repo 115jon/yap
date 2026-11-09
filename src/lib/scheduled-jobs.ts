@@ -63,3 +63,18 @@ export function selectScheduledJobs<K extends string>(
   const matched = all.filter((group) => group.crons.includes(cron));
   return (matched.length ? matched : all).flatMap((group) => group.jobs);
 }
+
+/**
+ * Whether a cron run is the day's slot for daily work: the run scheduled at
+ * 00:00 UTC, or a run whose expression is not one of `knownCrons` (a manual
+ * "Trigger" from the dashboard, which runs everything).
+ */
+export function isDailySlot(
+  cron: string,
+  scheduledTime: number,
+  knownCrons: readonly string[],
+): boolean {
+  if (!knownCrons.includes(cron)) return true;
+  const at = new Date(scheduledTime);
+  return at.getUTCHours() === 0 && at.getUTCMinutes() === 0;
+}

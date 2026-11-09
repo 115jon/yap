@@ -14,6 +14,7 @@ import { lenientNumber } from "@/lib/lenient-schema";
 import { looseStruct, safeParse, safeParseJson } from "@/lib/schema";
 import { Schema } from "effect";
 import { getMe } from "@/services/user.service";
+import { mergeLegacyAccountStatements } from "@/services/stats.service";
 import { clog } from "@/lib/console-logger";
 import type { AvatarDisplay } from "@/lib/avatar-display";
 import {
@@ -518,6 +519,10 @@ async function claimLegacyIdentity(
     db
       .prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`)
       .bind(input.authUserId, legacy.id),
+  );
+  // The legacy account's plan, badges and stats, merged into the new id.
+  statements.push(
+    ...mergeLegacyAccountStatements(db, legacy.id, input.authUserId, input.now),
   );
   statements.push(
     db

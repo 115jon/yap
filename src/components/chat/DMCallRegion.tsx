@@ -14,7 +14,7 @@ import {
   disposePrewarmedAudioContext,
   prewarmAudioContext,
 } from "@/lib/voice/audio-pipeline";
-import { getAvailableStreamQualities } from "@/lib/voice/utils";
+import { useStreamQualities } from "@/hooks/useEntitlement";
 import { useChatStore } from "@/stores/chat-store";
 import { useCallStore } from "@/stores/useCallStore";
 import { useCallVoiceStore } from "@/stores/useCallVoiceStore";
@@ -139,6 +139,7 @@ const EMPTY_MEMBERS: any[] = [];
  * camera/screen streams, controls, and join buttons.
  */
 export function DMCallRegion({ channelId }: { channelId: string }) {
+  const streamQualities = useStreamQualities();
   const {
     status,
     callId,
@@ -546,7 +547,7 @@ export function DMCallRegion({ channelId }: { channelId: string }) {
               onToggleWatch: callVoice.onToggleWatch || (() => {}),
               watchedStreams: callVoice.watchedStreams,
               watchersByStreamer,
-              availableQualities: getAvailableStreamQualities(),
+              availableQualities: streamQualities,
               onLeave: handleLeave,
               isMuted: !callVoice.isMicOn,
               onToggleMute: callVoice.toggleMic || (() => {}),
@@ -717,7 +718,7 @@ export function DMCallRegion({ channelId }: { channelId: string }) {
             });
             setIsScreenModalOpen(false);
           }}
-          availableQualities={getAvailableStreamQualities()}
+          availableQualities={streamQualities}
         />
       </Suspense>
     </section>

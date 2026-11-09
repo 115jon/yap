@@ -1,3 +1,5 @@
+import type { UserBadge } from "@/lib/badges";
+import type { Entitlement } from "@/lib/entitlements";
 import type { MediaContentFilter } from "@/lib/media-content-filter";
 import type { AvatarDisplay } from "@/lib/avatar-display";
 import type { DisplayNameStyle } from "@/lib/profile-customization";
@@ -139,6 +141,10 @@ export interface User {
   status?: "online" | "idle" | "dnd" | "offline";
   custom_status?: string | null;
   presence_platforms?: PresencePlatform[];
+  /** The plan (users/me and profiles); absent until a profile loads. */
+  entitlement?: Entitlement;
+  /** Earned badges in display order (users/me and profiles). */
+  badges?: UserBadge[];
 }
 
 /** Server object */

@@ -38,7 +38,7 @@ import { playCallEnd } from "@/lib/sounds";
 import type { User } from "@/lib/types";
 import { useDeviceAvailability } from "@/lib/useMediaDevices";
 import { cn } from "@/lib/utils";
-import { getAvailableStreamQualities } from "@/lib/voice/utils";
+import { useStreamQualities } from "@/hooks/useEntitlement";
 import { useChatActions, useChatStore } from "@/stores/chat-store";
 import { useCallStore } from "@/stores/useCallStore";
 import { useCallVoiceStore } from "@/stores/useCallVoiceStore";
@@ -65,7 +65,6 @@ import { Led, LedLabel } from "@/components/ui/led";
 const EMPTY_QUALITIES: string[] = [];
 const EMPTY_GRID_ITEMS: GridItem[] = [];
 const EMPTY_WATCHERS_BY_STREAMER: StreamWatchersByStreamer = {};
-const SCREEN_SHARE_QUALITIES = getAvailableStreamQualities();
 const TAILWIND_SPACING_UNIT_PX = 4;
 const USER_PANEL_USERNAME_HIDE_WIDTH_PX = TAILWIND_SPACING_UNIT_PX * 56;
 // Below this the name column can't hold ~4 letters either (the column is the
@@ -196,6 +195,7 @@ function CallDashboardSection({
   onOpenSoundboard?: () => void;
   stageOnScreen?: boolean;
 }) {
+  const streamQualities = useStreamQualities();
   const callStatus = useCallStore((s) => s.status);
   const callChannelId = useCallStore((s) => s.channelId);
   const remoteUser = useCallStore((s) => s.remoteUser);
@@ -265,7 +265,7 @@ function CallDashboardSection({
         isStreamingAudio={isStreamingAudio}
         screenQuality={screenQuality}
         currentScreenSource={currentScreenSource}
-        availableQualities={getAvailableStreamQualities()}
+        availableQualities={streamQualities}
         onStopStreaming={() => toggleScreenShare?.()}
         onToggleStreamAudio={() => onToggleStreamAudio?.()}
         onShareScreen={() => setIsScreenModalOpen(true)}
@@ -302,7 +302,7 @@ function CallDashboardSection({
           });
           setIsScreenModalOpen(false);
         }}
-        availableQualities={getAvailableStreamQualities()}
+        availableQualities={streamQualities}
       />
     </>
   );
@@ -347,6 +347,7 @@ export default function UserPanel({
   stageOnScreen,
   connectionState: connectionStateOverride,
 }: Props) {
+  const streamQualities = useStreamQualities();
   const { updateStatus } = useChatActions();
   const speakingAttr = useSpeakingAttr(user?.id);
   const isMobile = useIsMobile();
@@ -705,7 +706,7 @@ export default function UserPanel({
               });
               setIsVcScreenModalOpen(false);
             }}
-            availableQualities={availableQualities ?? SCREEN_SHARE_QUALITIES}
+            availableQualities={availableQualities ?? streamQualities}
           />
         </div>
       )}

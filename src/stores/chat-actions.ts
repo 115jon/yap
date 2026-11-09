@@ -3,6 +3,8 @@ import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api-client";
 import { getUnreadChannelState } from "@/lib/desktop-notifications";
 import { syncDesktopNotificationState } from "@/lib/desktop-native-sync";
 import { parseMediaContentFilter } from "@/lib/media-content-filter";
+import { parseUserBadges } from "@/lib/badges";
+import { parseEntitlement } from "@/lib/entitlements";
 import type { ChatAction, ChatState } from "@/lib/chat-reducer";
 import type {
   Notification as AppNotification,
@@ -819,6 +821,8 @@ export function createChatActions(
             voiceLeaveSoundboard?: unknown;
             soundboardVolume?: unknown;
           };
+          entitlement?: unknown;
+          badges?: unknown;
         }>("/api/users/me"),
       );
       if (
@@ -862,6 +866,8 @@ export function createChatActions(
           presence_platforms: current?.presence_platforms,
           status: (profile.status as any) ?? current?.status ?? "online",
           custom_status: profile.custom_status ?? current?.custom_status,
+          entitlement: parseEntitlement(profile.entitlement),
+          badges: parseUserBadges(profile.badges),
         },
       });
       // Also update member caches and voice states when display-only fields change.

@@ -2,7 +2,8 @@ import { Icon } from "@/components/ui/icon";
 import { Num } from "@/components/ui/num";
 import { TooBigCard } from "@/components/ui/too-big-card";
 import type { TooBigSituation } from "@/lib/too-big-copy";
-import { formatUploadLimit, UPLOAD_LIMITS } from "@/lib/upload-limits";
+import { useMyEntitlement } from "@/hooks/useEntitlement";
+import { formatUploadLimit, clientUploadLimitFor } from "@/lib/upload-limits";
 
 /**
  * Shown over the chat column while files are dragged in. Presence is opacity
@@ -20,6 +21,7 @@ export function DragDropOverlay({
   isDragging: boolean;
   oversize?: TooBigSituation | null;
 }) {
+  const limit = clientUploadLimitFor(useMyEntitlement(), "attachment");
   if (!isDragging) return null;
   if (oversize) {
     return (
@@ -40,8 +42,7 @@ export function DragDropOverlay({
         <Icon name="upload" size="2xl" className="text-ink-2" />
         <p className="text-ui-md font-semibold text-ink-1">Drop to upload</p>
         <p className="text-ui-sm text-ink-3">
-          Files can be up to{" "}
-          <Num size="sm">{formatUploadLimit(UPLOAD_LIMITS.attachment)}</Num>.
+          Files can be up to <Num size="sm">{formatUploadLimit(limit)}</Num>.
         </p>
       </div>
     </div>

@@ -64,10 +64,15 @@ import { Route as ApiCollectiblesCatalogRouteImport } from './routes/api/collect
 import { Route as ApiCollectiblesApplyRouteImport } from './routes/api/collectibles/apply'
 import { Route as ApiChannelsIdRouteImport } from './routes/api/channels/$id'
 import { Route as ApiCameraBackgroundsSplatRouteImport } from './routes/api/camera-backgrounds/$'
+import { Route as ApiBillingWebhookRouteImport } from './routes/api/billing/webhook'
+import { Route as ApiBillingStatusRouteImport } from './routes/api/billing/status'
+import { Route as ApiBillingPortalRouteImport } from './routes/api/billing/portal'
+import { Route as ApiBillingCheckoutRouteImport } from './routes/api/billing/checkout'
 import { Route as ApiAvatarsSplatRouteImport } from './routes/api/avatars/$'
 import { Route as ApiAuthSyncRouteImport } from './routes/api/auth/sync'
 import { Route as ApiAuthDesktopRouteImport } from './routes/api/auth/desktop'
 import { Route as ApiAttachmentsSplatRouteImport } from './routes/api/attachments/$'
+import { Route as ApiAdminBadgesRouteImport } from './routes/api/admin/badges'
 import { Route as ApiInvitesCodeIndexRouteImport } from './routes/api/invites/$code/index'
 import { Route as ApiUsersIdProfileRouteImport } from './routes/api/users/$id/profile'
 import { Route as ApiSoundboardUploadsIdRouteImport } from './routes/api/soundboard/uploads/$id'
@@ -389,6 +394,26 @@ const ApiCameraBackgroundsSplatRoute =
     path: '/$',
     getParentRoute: () => ApiCameraBackgroundsRoute,
   } as any)
+const ApiBillingWebhookRoute = ApiBillingWebhookRouteImport.update({
+  id: '/api/billing/webhook',
+  path: '/api/billing/webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBillingStatusRoute = ApiBillingStatusRouteImport.update({
+  id: '/api/billing/status',
+  path: '/api/billing/status',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBillingPortalRoute = ApiBillingPortalRouteImport.update({
+  id: '/api/billing/portal',
+  path: '/api/billing/portal',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBillingCheckoutRoute = ApiBillingCheckoutRouteImport.update({
+  id: '/api/billing/checkout',
+  path: '/api/billing/checkout',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAvatarsSplatRoute = ApiAvatarsSplatRouteImport.update({
   id: '/api/avatars/$',
   path: '/api/avatars/$',
@@ -407,6 +432,11 @@ const ApiAuthDesktopRoute = ApiAuthDesktopRouteImport.update({
 const ApiAttachmentsSplatRoute = ApiAttachmentsSplatRouteImport.update({
   id: '/api/attachments/$',
   path: '/api/attachments/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminBadgesRoute = ApiAdminBadgesRouteImport.update({
+  id: '/api/admin/badges',
+  path: '/api/admin/badges',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiInvitesCodeIndexRoute = ApiInvitesCodeIndexRouteImport.update({
@@ -664,10 +694,15 @@ export interface FileRoutesByFullPath {
   '/invite/$code': typeof InviteCodeRoute
   '/room/$slug': typeof RoomSlugRoute
   '/share/$token': typeof ShareTokenRoute
+  '/api/admin/badges': typeof ApiAdminBadgesRoute
   '/api/attachments/$': typeof ApiAttachmentsSplatRoute
   '/api/auth/desktop': typeof ApiAuthDesktopRoute
   '/api/auth/sync': typeof ApiAuthSyncRoute
   '/api/avatars/$': typeof ApiAvatarsSplatRoute
+  '/api/billing/checkout': typeof ApiBillingCheckoutRoute
+  '/api/billing/portal': typeof ApiBillingPortalRoute
+  '/api/billing/status': typeof ApiBillingStatusRoute
+  '/api/billing/webhook': typeof ApiBillingWebhookRoute
   '/api/camera-backgrounds/$': typeof ApiCameraBackgroundsSplatRoute
   '/api/channels/$id': typeof ApiChannelsIdRouteWithChildren
   '/api/collectibles/apply': typeof ApiCollectiblesApplyRoute
@@ -767,10 +802,15 @@ export interface FileRoutesByTo {
   '/invite/$code': typeof InviteCodeRoute
   '/room/$slug': typeof RoomSlugRoute
   '/share/$token': typeof ShareTokenRoute
+  '/api/admin/badges': typeof ApiAdminBadgesRoute
   '/api/attachments/$': typeof ApiAttachmentsSplatRoute
   '/api/auth/desktop': typeof ApiAuthDesktopRoute
   '/api/auth/sync': typeof ApiAuthSyncRoute
   '/api/avatars/$': typeof ApiAvatarsSplatRoute
+  '/api/billing/checkout': typeof ApiBillingCheckoutRoute
+  '/api/billing/portal': typeof ApiBillingPortalRoute
+  '/api/billing/status': typeof ApiBillingStatusRoute
+  '/api/billing/webhook': typeof ApiBillingWebhookRoute
   '/api/camera-backgrounds/$': typeof ApiCameraBackgroundsSplatRoute
   '/api/channels/$id': typeof ApiChannelsIdRouteWithChildren
   '/api/collectibles/apply': typeof ApiCollectiblesApplyRoute
@@ -871,10 +911,15 @@ export interface FileRoutesById {
   '/invite/$code': typeof InviteCodeRoute
   '/room/$slug': typeof RoomSlugRoute
   '/share/$token': typeof ShareTokenRoute
+  '/api/admin/badges': typeof ApiAdminBadgesRoute
   '/api/attachments/$': typeof ApiAttachmentsSplatRoute
   '/api/auth/desktop': typeof ApiAuthDesktopRoute
   '/api/auth/sync': typeof ApiAuthSyncRoute
   '/api/avatars/$': typeof ApiAvatarsSplatRoute
+  '/api/billing/checkout': typeof ApiBillingCheckoutRoute
+  '/api/billing/portal': typeof ApiBillingPortalRoute
+  '/api/billing/status': typeof ApiBillingStatusRoute
+  '/api/billing/webhook': typeof ApiBillingWebhookRoute
   '/api/camera-backgrounds/$': typeof ApiCameraBackgroundsSplatRoute
   '/api/channels/$id': typeof ApiChannelsIdRouteWithChildren
   '/api/collectibles/apply': typeof ApiCollectiblesApplyRoute
@@ -976,10 +1021,15 @@ export interface FileRouteTypes {
     | '/invite/$code'
     | '/room/$slug'
     | '/share/$token'
+    | '/api/admin/badges'
     | '/api/attachments/$'
     | '/api/auth/desktop'
     | '/api/auth/sync'
     | '/api/avatars/$'
+    | '/api/billing/checkout'
+    | '/api/billing/portal'
+    | '/api/billing/status'
+    | '/api/billing/webhook'
     | '/api/camera-backgrounds/$'
     | '/api/channels/$id'
     | '/api/collectibles/apply'
@@ -1079,10 +1129,15 @@ export interface FileRouteTypes {
     | '/invite/$code'
     | '/room/$slug'
     | '/share/$token'
+    | '/api/admin/badges'
     | '/api/attachments/$'
     | '/api/auth/desktop'
     | '/api/auth/sync'
     | '/api/avatars/$'
+    | '/api/billing/checkout'
+    | '/api/billing/portal'
+    | '/api/billing/status'
+    | '/api/billing/webhook'
     | '/api/camera-backgrounds/$'
     | '/api/channels/$id'
     | '/api/collectibles/apply'
@@ -1182,10 +1237,15 @@ export interface FileRouteTypes {
     | '/invite/$code'
     | '/room/$slug'
     | '/share/$token'
+    | '/api/admin/badges'
     | '/api/attachments/$'
     | '/api/auth/desktop'
     | '/api/auth/sync'
     | '/api/avatars/$'
+    | '/api/billing/checkout'
+    | '/api/billing/portal'
+    | '/api/billing/status'
+    | '/api/billing/webhook'
     | '/api/camera-backgrounds/$'
     | '/api/channels/$id'
     | '/api/collectibles/apply'
@@ -1285,10 +1345,15 @@ export interface RootRouteChildren {
   InviteCodeRoute: typeof InviteCodeRoute
   RoomSlugRoute: typeof RoomSlugRoute
   ShareTokenRoute: typeof ShareTokenRoute
+  ApiAdminBadgesRoute: typeof ApiAdminBadgesRoute
   ApiAttachmentsSplatRoute: typeof ApiAttachmentsSplatRoute
   ApiAuthDesktopRoute: typeof ApiAuthDesktopRoute
   ApiAuthSyncRoute: typeof ApiAuthSyncRoute
   ApiAvatarsSplatRoute: typeof ApiAvatarsSplatRoute
+  ApiBillingCheckoutRoute: typeof ApiBillingCheckoutRoute
+  ApiBillingPortalRoute: typeof ApiBillingPortalRoute
+  ApiBillingStatusRoute: typeof ApiBillingStatusRoute
+  ApiBillingWebhookRoute: typeof ApiBillingWebhookRoute
   ApiChannelsIdRoute: typeof ApiChannelsIdRouteWithChildren
   ApiCollectiblesApplyRoute: typeof ApiCollectiblesApplyRoute
   ApiCollectiblesCatalogRoute: typeof ApiCollectiblesCatalogRoute
@@ -1707,6 +1772,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCameraBackgroundsSplatRouteImport
       parentRoute: typeof ApiCameraBackgroundsRoute
     }
+    '/api/billing/webhook': {
+      id: '/api/billing/webhook'
+      path: '/api/billing/webhook'
+      fullPath: '/api/billing/webhook'
+      preLoaderRoute: typeof ApiBillingWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/billing/status': {
+      id: '/api/billing/status'
+      path: '/api/billing/status'
+      fullPath: '/api/billing/status'
+      preLoaderRoute: typeof ApiBillingStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/billing/portal': {
+      id: '/api/billing/portal'
+      path: '/api/billing/portal'
+      fullPath: '/api/billing/portal'
+      preLoaderRoute: typeof ApiBillingPortalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/billing/checkout': {
+      id: '/api/billing/checkout'
+      path: '/api/billing/checkout'
+      fullPath: '/api/billing/checkout'
+      preLoaderRoute: typeof ApiBillingCheckoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/avatars/$': {
       id: '/api/avatars/$'
       path: '/api/avatars/$'
@@ -1733,6 +1826,13 @@ declare module '@tanstack/react-router' {
       path: '/api/attachments/$'
       fullPath: '/api/attachments/$'
       preLoaderRoute: typeof ApiAttachmentsSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/badges': {
+      id: '/api/admin/badges'
+      path: '/api/admin/badges'
+      fullPath: '/api/admin/badges'
+      preLoaderRoute: typeof ApiAdminBadgesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/invites/$code/': {
@@ -2296,10 +2396,15 @@ const rootRouteChildren: RootRouteChildren = {
   InviteCodeRoute: InviteCodeRoute,
   RoomSlugRoute: RoomSlugRoute,
   ShareTokenRoute: ShareTokenRoute,
+  ApiAdminBadgesRoute: ApiAdminBadgesRoute,
   ApiAttachmentsSplatRoute: ApiAttachmentsSplatRoute,
   ApiAuthDesktopRoute: ApiAuthDesktopRoute,
   ApiAuthSyncRoute: ApiAuthSyncRoute,
   ApiAvatarsSplatRoute: ApiAvatarsSplatRoute,
+  ApiBillingCheckoutRoute: ApiBillingCheckoutRoute,
+  ApiBillingPortalRoute: ApiBillingPortalRoute,
+  ApiBillingStatusRoute: ApiBillingStatusRoute,
+  ApiBillingWebhookRoute: ApiBillingWebhookRoute,
   ApiChannelsIdRoute: ApiChannelsIdRouteWithChildren,
   ApiCollectiblesApplyRoute: ApiCollectiblesApplyRoute,
   ApiCollectiblesCatalogRoute: ApiCollectiblesCatalogRoute,

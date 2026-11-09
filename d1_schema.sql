@@ -375,6 +375,40 @@ CREATE TABLE IF NOT EXISTS push_tokens (
     last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- ── Tiers, badges and stats (migration 039) ─────────────────────────────
+
+-- A user's plan. No row means free; founder and admin grants never expire.
+CREATE TABLE IF NOT EXISTS user_entitlements (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    tier TEXT NOT NULL CHECK (tier IN ('free', 'loud', 'founder')),
+    source TEXT NOT NULL CHECK (source IN ('grant', 'stripe', 'admin')),
+    started_at TEXT NOT NULL,
+    expires_at TEXT,
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    updated_at TEXT NOT NULL
+);
+
+-- Badge awards; the definitions live in code (src/lib/badges.ts).
+CREATE TABLE IF NOT EXISTS user_badges (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    badge_id TEXT NOT NULL,
+    awarded_at TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('auto', 'admin', 'grant')),
+    PRIMARY KEY (user_id, badge_id)
+);
+
+-- Account-level counters for the badge rules.
+CREATE TABLE IF NOT EXISTS user_stats (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    voice_seconds INTEGER NOT NULL DEFAULT 0,  -- capped at 24 h per session
+    stream_seconds INTEGER NOT NULL DEFAULT 0,
+    messages_sent INTEGER NOT NULL DEFAULT 0,
+    first_seen_at TEXT,
+    last_active_at TEXT,
+    updated_at TEXT NOT NULL
+);
+
 -- ── Indexes ──────────────────────────────────────────────────────────────
 
 CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id);
@@ -432,6 +466,13 @@ CREATE INDEX IF NOT EXISTS idx_notification_delivery_markers_message
 
 -- Push fan-out per recipient
 CREATE INDEX IF NOT EXISTS idx_push_tokens_user_id ON push_tokens(user_id);
+
+-- Billing webhooks find a plan by its Stripe customer
+CREATE INDEX IF NOT EXISTS idx_user_entitlements_stripe_customer
+    ON user_entitlements(stripe_customer_id)
+    WHERE stripe_customer_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_user_badges_badge ON user_badges(badge_id);
+CREATE INDEX IF NOT EXISTS idx_user_stats_voice ON user_stats(voice_seconds);
 
 -- ── Audit Log ────────────────────────────────────────────────────────────
 

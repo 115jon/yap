@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { apiError, apiSuccess, getDB, requireAuth } from "@/lib/api-helpers";
+import { effectiveTier } from "@/lib/entitlements";
 import { ServiceError } from "@/lib/service-error";
 import { getMe, getUserProfileMutuals } from "@/services/user.service";
 
@@ -17,7 +18,16 @@ const GET = async ({ request, params }: any) => {
       getMe(db, targetUserId),
       getUserProfileMutuals(db, targetUserId, currentUserId),
     ]);
-    return apiSuccess({ user, ...profile });
+    // Someone else's profile carries only their tier; the plan's dates and
+    // source are for the user themselves.
+    const shown =
+      targetUserId === currentUserId
+        ? user
+        : {
+            ...user,
+            entitlement: { tier: effectiveTier(user.entitlement) },
+          };
+    return apiSuccess({ user: shown, ...profile });
   } catch (e) {
     if (e instanceof ServiceError) {
       return apiError(e.message, e.status, e.code);

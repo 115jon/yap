@@ -45,12 +45,15 @@ import {
   type BackgroundTaskEnvelope,
 } from "./src/lib/background-tasks";
 import { retryR2Cleanup } from "./src/services/r2-cleanup.service";
+import { sweepAutoBadges } from "./src/services/badge.service";
+import { cfTimeZone, TIME_ZONE_HEADER } from "./src/lib/request-time-zone";
 import {
   COLLECTIBLES_SYNC_CRON,
   CatalogFetchDeferredError,
   syncCollectiblesCatalog,
 } from "./src/lib/collectibles-catalog";
 import {
+  isDailySlot,
   runScheduledJobs,
   selectScheduledJobs,
 } from "./src/lib/scheduled-jobs";
@@ -292,6 +295,10 @@ async function requireAuthenticatedWebSocket(
   );
   headers.delete("Sec-WebSocket-Protocol");
   headers.set("Sec-WebSocket-Protocol", protocol.value.responseProtocol);
+  // Cloudflare's time zone for the client (Night owl), never the client's
+  // own: the strip above removed any x-ralph-realtime-* header it sent.
+  const timeZone = cfTimeZone(request);
+  if (timeZone) headers.set(TIME_ZONE_HEADER, timeZone);
 
   // The Durable Object that accepts the socket spends the ticket's nonce
   // (consumeRealtimeTicketNonce) before it upgrades: one round trip, not a
@@ -493,6 +500,26 @@ export default {
             run: () => retryR2Cleanup(env.DB, env.BUCKET),
           },
         ],
+      },
+      // Automatic badges are checked when a stat changes; the daily sweep
+      // (the 00:00 UTC maintenance run, or any manual trigger) catches what
+      // changes without a stat write: signup rank and server size.
+      badges: {
+        crons: [MAINTENANCE_CRON],
+        jobs: isDailySlot(controller.cron, controller.scheduledTime, [
+          MAINTENANCE_CRON,
+          COLLECTIBLES_SYNC_CRON,
+        ])
+          ? [
+              {
+                name: "Badge sweep",
+                run: async () => {
+                  const awarded = await sweepAutoBadges(env.DB);
+                  console.info("Badge sweep completed", awarded);
+                },
+              },
+            ]
+          : [],
       },
       // Embed retries back off from one minute, so a six-hourly sweep made
       // them pointless. Delayed queue deliveries do the fast retries; this

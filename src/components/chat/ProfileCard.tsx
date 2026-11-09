@@ -54,12 +54,14 @@ import {
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { Num } from "@/components/ui/num";
+import { UserBadges } from "@/components/ui/user-badges";
 import { apiDelete, apiPost, apiPut } from "@/lib/api-client";
 import { describeApiError } from "@/lib/api-errors";
 import { getAvatarDecoration, type AvatarDisplay } from "@/lib/avatar-display";
 import { getDisplayInitial, getDisplayName } from "@/lib/display-name";
 import type { GameActivity } from "@/lib/gateway-protocol";
 import { getAuthAssetUrl } from "@/lib/platform";
+import type { UserBadge } from "@/lib/badges";
 import {
   resolveProfileTheme,
   type DisplayNameStyle,
@@ -167,6 +169,7 @@ type ProfileCardUser = Pick<
   avatar_display?: AvatarDisplay | string | null;
   banner_url?: string | null;
   banner_content_type?: string | null;
+  badges?: readonly UserBadge[] | null;
 };
 
 type ProfileCardProps = {
@@ -338,6 +341,11 @@ export const ProfileCard = forwardRef<HTMLDivElement, ProfileCardProps>(
                       </>
                     ) : null}
                   </p>
+                  <UserBadges
+                    badges={user.badges}
+                    size={size === "sheet" ? "lg" : "md"}
+                    className="-ms-0.5"
+                  />
                   {line}
                 </div>
               </div>
