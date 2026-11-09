@@ -509,6 +509,8 @@ Rectangle {
                 required property string participantId
                 required property string name
                 required property string avatar
+                required property string deco
+                required property bool speaking
                 required property bool me
                 required property bool video
                 required property string videoKey

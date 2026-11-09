@@ -1,5 +1,6 @@
 import QtQuick
 import QtMultimedia
+import QtQuick.Effects
 import Yap.Chrome
 import com.yap.native
 
@@ -98,24 +99,92 @@ Item {
         }
     }
 
-    Rectangle {
+    // A person without media: their picture at full size on a 16:9 card,
+    // lit by itself (YouTube's ambient mode). Behind the card, a soft glow
+    // in the picture's colourful average (DominantColor, measured once at
+    // 24 px; RectangularShadow draws it in one shader pass, no blur
+    // texture). On the card, the same picture decoded at 24 px and scaled
+    // up (that is the blur), dimmed so the picture and name stand out.
+    // Talking rings the picture in talk green, as the tiles do.
+    Item {
+        id: person
         visible: !root.showsVideo
         anchors.centerIn: parent
-        width: Math.min(parent.width, 960, parent.height * 16 / 9)
+        width: Math.min(parent.width - 64, 960, (parent.height - 64) * 16 / 9)
         height: width * 9 / 16
-        radius: Theme.radius
-        color: Theme.ply2
-        border.width: 1
-        border.color: Theme.line
+        readonly property bool hasPicture: root.tile.avatar.length > 0
+        readonly property int face: Math.round(Math.max(96, Math.min(height * 0.56, 320)))
+
+        DominantColor {
+            id: ambient
+            source: person.hasPicture && person.visible ? root.tile.avatar : ""
+        }
+        RectangularShadow {
+            anchors.fill: parent
+            visible: ambient.known
+            offset.y: 16
+            blur: 96
+            spread: 8
+            radius: 12
+            color: Qt.hsla(ambient.color.hslHue, ambient.color.hslSaturation, ambient.color.hslLightness * 0.55, 1)
+            opacity: ambient.known ? 1 : 0
+            EaseNumber on opacity {}
+        }
+        Rectangle {
+            anchors.fill: parent
+            radius: Theme.radiusSheet
+            color: Theme.ply2
+            border.width: 1
+            border.color: Theme.line
+            clip: true
+            // The card's own wash, dimmed so the picture and name stand out.
+            Image {
+                visible: person.hasPicture && status === Image.Ready
+                anchors.fill: parent
+                source: person.hasPicture ? root.tile.avatar : ""
+                sourceSize: Qt.size(24, 24)
+                fillMode: Image.PreserveAspectCrop
+                smooth: true
+                asynchronous: true
+                opacity: 0.45
+            }
+            Rectangle {
+                anchors.fill: parent
+                visible: person.hasPicture
+                // A deep shade of the ambient colour rather than black, so a
+                // picture on white does not leave the card grey.
+                color: ambient.known
+                    ? Qt.hsla(ambient.color.hslHue, ambient.color.hslSaturation * 0.8, 0.07, 0.78)
+                    : Qt.rgba(0, 0, 0, 0.62)
+                EaseColor on color {}
+            }
+        }
+
         Column {
             anchors.centerIn: parent
             width: parent.width * 0.8
-            spacing: 12
-            Avatar {
+            spacing: 16
+            Item {
                 anchors.horizontalCenter: parent.horizontalCenter
-                size: 80
-                initials: root.tile.name
-                source: root.tile.avatar
+                width: person.face + 12
+                height: width
+                Rectangle {
+                    anchors.fill: parent
+                    radius: bigFace.roundFace ? width / 2 : bigFace.radius + 6
+                    color: "transparent"
+                    border.width: 3
+                    border.color: Theme.talk
+                    opacity: root.tile.speaking ? 1 : 0
+                    EaseNumber on opacity {}
+                }
+                Avatar {
+                    id: bigFace
+                    anchors.centerIn: parent
+                    size: person.face
+                    initials: root.tile.name
+                    source: root.tile.avatar
+                    deco: root.tile.deco
+                }
             }
             Text {
                 width: parent.width
@@ -125,7 +194,7 @@ Item {
                 text: root.tile.name
                 color: Theme.ink1
                 font.family: "Yap Bricolage Key Bold"
-                font.pixelSize: 18
+                font.pixelSize: person.face >= 200 ? 24 : 18
                 font.weight: Font.Bold
             }
         }
