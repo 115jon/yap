@@ -192,6 +192,8 @@ describe("StreamContextMenu", () => {
     // A slider is custom inline content between the item rows, not a row.
     const slider = await screen.findByRole("slider", { name: "Stream volume" });
     expect(menu).toContainElement(slider);
+    // Per-user stream volume goes to 400 % (native parity).
+    expect(slider).toHaveAttribute("max", "400");
     fireEvent.change(slider, { target: { value: "60" } });
     await waitFor(() =>
       expect(
@@ -238,6 +240,7 @@ describe("StreamContextMenu", () => {
     expect(screen.queryByRole("slider")).not.toBeInTheDocument();
     fireEvent.click(volumeRow);
     const slider = screen.getByRole("slider", { name: "User volume" });
+    expect(slider).toHaveAttribute("max", "400");
     fireEvent.change(slider, { target: { value: "150" } });
     await waitFor(() =>
       expect(

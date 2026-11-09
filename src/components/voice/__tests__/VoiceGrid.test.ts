@@ -126,6 +126,7 @@ describe("VoiceGrid focused stage", () => {
 
     expect(markup).toContain("Stream volume");
     expect(markup).toContain('value="145"');
+    expect(markup).toContain('max="400"');
   });
 
   it("hides the stream volume slider for a focused remote stream without audio", () => {

@@ -69,6 +69,7 @@ import VoiceChannelMediaStatusModal from "@/components/chat/VoiceChannelMediaSta
 import { AudioInteractionModal } from "@/components/voice/AudioInteractionModal";
 import { ExternalLinkConfirmModal } from "@/components/ui/ExternalLinkConfirmModal";
 import { StreamContextMenu } from "@/components/StreamContextMenu";
+import { Slider } from "@/components/ContextMenu/ContextMenuItems";
 import { ImageViewerModal } from "@/components/chat/ImageViewerModal";
 import { useImageViewerStore } from "@/stores/useImageViewerStore";
 import { MobileNavigationSheet } from "@/components/chat/MobileNavigationSheet";
@@ -142,7 +143,13 @@ import { type MobileTab, useMobileTabStore } from "@/stores/useMobileTabStore";
 import { useSearch } from "@tanstack/react-router";
 import { Icon } from "@/components/ui/icon";
 import { useTheme } from "next-themes";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { cn } from "@/lib/utils";
 import UserProfilePopover from "@/components/chat/UserProfilePopover";
 import UserAccountPopover from "@/components/chat/UserAccountPopover";
@@ -1805,6 +1812,52 @@ function useFixtureDevices() {
   return ready;
 }
 
+/**
+ * `volume-boost`: the per-user volume slider (0-400 %) on the menu ply, one
+ * row per `v` (comma list, default 100,250,400). The rows are live, so the
+ * keys and drag snap can be tried.
+ */
+function VolumeBoostFixture() {
+  // Read after hydration (the server renders the default list).
+  const param = useSyncExternalStore(
+    subscribeNever,
+    () => fixtureParam("v") ?? DEFAULT_BOOST_VALUES,
+    () => DEFAULT_BOOST_VALUES,
+  );
+  return <VolumeBoostRows key={param} initial={param} />;
+}
+
+const DEFAULT_BOOST_VALUES = "100,250,400";
+const subscribeNever = () => () => {};
+
+function VolumeBoostRows({ initial }: { initial: string }) {
+  const [values, setValues] = useState(() =>
+    initial.split(",").map(Number).filter(Number.isFinite),
+  );
+  return (
+    <div className="grid h-full w-full place-items-center bg-ply-0 p-6">
+      <div
+        data-fixture="volume-boost"
+        className="w-[300px] rounded-lg border border-line bg-ply-3 py-1 shadow-float"
+      >
+        {values.map((value, index) => (
+          <Slider
+            key={index}
+            label={index % 2 === 0 ? "User volume" : "Stream volume"}
+            value={value}
+            boost
+            onChange={(next) =>
+              setValues((current) =>
+                current.map((entry, at) => (at === index ? next : entry)),
+              )
+            }
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Extra fixture query params the route doesn't validate (row, desktop). */
 function fixtureParam(name: string): string | null {
   if (typeof window === "undefined") return null;
@@ -3025,6 +3078,9 @@ export default function UiFixtures() {
       break;
     case "menus":
       content = <Menus />;
+      break;
+    case "volume-boost":
+      content = <VolumeBoostFixture />;
       break;
     case "splash":
       content = <SplashScreen />;

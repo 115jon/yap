@@ -24,6 +24,7 @@ import {
   VOICE_INPUT_PROFILE_SETTINGS,
   type VoiceInputProfile,
 } from "@/lib/voice/input-profiles";
+import { clampPeerVolume } from "@/lib/voice/peer-volume";
 
 export type CameraBackgroundSetting =
   | { type: "none" }
@@ -224,14 +225,19 @@ const defaultPeerSettings: PeerSettings = {
 export function normalizePeerSettings(
   peer?: Partial<PeerSettings>,
 ): PeerSettings {
-  const volume =
-    typeof peer?.volume === "number" ? peer.volume : defaultPeerSettings.volume;
+  // Volumes are kept in 0..400 % (older releases stored 0..200 %, which
+  // passes through unchanged).
+  const volume = clampPeerVolume(
+    typeof peer?.volume === "number" ? peer.volume : defaultPeerSettings.volume,
+  );
   return {
     ...defaultPeerSettings,
     ...peer,
     volume,
     streamVolume:
-      typeof peer?.streamVolume === "number" ? peer.streamVolume : volume,
+      typeof peer?.streamVolume === "number"
+        ? clampPeerVolume(peer.streamVolume)
+        : volume,
   };
 }
 
@@ -509,7 +515,7 @@ export const useVoiceSettingsStore = create<VoiceSettingsState>()(
               ...current,
               peerSettings: {
                 ...current.peerSettings,
-                [peerId]: { ...peer, volume },
+                [peerId]: { ...peer, volume: clampPeerVolume(volume) },
               },
             },
           },
@@ -528,7 +534,10 @@ export const useVoiceSettingsStore = create<VoiceSettingsState>()(
               ...current,
               peerSettings: {
                 ...current.peerSettings,
-                [peerId]: { ...peer, streamVolume },
+                [peerId]: {
+                  ...peer,
+                  streamVolume: clampPeerVolume(streamVolume),
+                },
               },
             },
           },

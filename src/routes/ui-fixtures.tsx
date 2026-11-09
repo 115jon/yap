@@ -19,7 +19,8 @@
  *   shell*, dm-*, dm-call-*, members, friends, account-row, message-rows
  *   voice*, room*, incoming-call, voice-debug*, connection-states
  *   settings, settings-<panel>, sp-* (settings and profile editors)
- *   search*, command-menu, menus, splash, overlay*, no-channel, drawer*
+ *   search*, command-menu, menus, volume-boost, splash, overlay*, no-channel,
+ *   drawer*
  *   mobile*, action-sheet, shop, catalog-*, updater*
  *   ov-* overlays (each mounted open), fx-* feedback + media, st-* screen
  *   share, fl-* floating players, pk-* pickers, embed-* link embeds,
