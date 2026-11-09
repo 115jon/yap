@@ -2,7 +2,7 @@
  * Live ops: the site right now. Who is online, the voice rooms as Talk
  * Tree branches with their people and streams, chunked uploads in flight,
  * D1 and R2, the deploy, the cron sweeps and the background job backlog.
- * Refreshes every 5 s while the page is visible.
+ * Refreshes every 10 s while the page is visible.
  */
 
 import { Avatar } from "@/components/ui/avatar";
@@ -34,7 +34,7 @@ import {
   useAdminNow,
 } from "./admin-ui";
 
-const LIVE_REFRESH_MS = 5_000;
+const LIVE_REFRESH_MS = 10_000;
 const REPO_COMMIT_URL = "https://github.com/115jon/yap/commit/";
 
 export function LiveSection() {

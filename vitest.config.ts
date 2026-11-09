@@ -11,6 +11,10 @@ export default defineConfig({
       "src/**/*.test.tsx",
       "realtime/**/*.test.ts",
       "packages/*/src/**/*.test.ts",
+      // The admin console's client (its Worker tests run under
+      // vitest.realtime.config.ts, from apps/admin/test).
+      "apps/admin/src/**/*.test.ts",
+      "apps/admin/src/**/*.test.tsx",
     ],
     exclude: ["node_modules", "realtime/__tests__/**/*.worker.test.ts"],
     coverage: {

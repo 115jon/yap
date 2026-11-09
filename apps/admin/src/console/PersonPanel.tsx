@@ -101,6 +101,9 @@ export function PersonPanel({
       title="Account"
       description="Plan, badges, sign-in and history for one account"
       dockClassName="w-[420px] max-xl:w-[380px]"
+      // The panel is a route (/people/$userId): back and forward are the
+      // router's, so the panel must not push its own history entry.
+      backButton={false}
     >
       <div
         data-admin-panel=""
