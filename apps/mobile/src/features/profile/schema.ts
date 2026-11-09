@@ -1,10 +1,46 @@
-import { Schema } from "effect";
+import { Effect, Schema, SchemaTransformation } from "effect";
+
+import {
+  parseEntitlement,
+  parseUserBadges,
+  type Entitlement,
+  type UserBadge,
+} from "./badges";
 
 // GET /api/users/:id/profile (src/routes/api/users/$id/profile.ts):
 // services/user.service.ts getMe plus getUserProfileMutuals, the parts the
 // profile sheet shows.
 
 const OptionalText = Schema.optional(Schema.NullOr(Schema.String));
+
+/**
+ * Lenient on purpose: whatever the server sends is read with the badge
+ * module's parsers, so a malformed or unknown value cannot fail the whole
+ * profile. Absent or unreadable is free / no badges.
+ */
+const EntitlementField = Schema.Unknown.pipe(
+  Schema.decodeTo(
+    Schema.declare<Entitlement>(
+      (u): u is Entitlement => typeof u === "object" && u !== null,
+    ),
+    SchemaTransformation.transform<Entitlement, unknown>({
+      decode: parseEntitlement,
+      encode: (value) => value,
+    }),
+  ),
+  Schema.withDecodingDefaultKey(Effect.succeed(undefined)),
+);
+
+const BadgesField = Schema.Unknown.pipe(
+  Schema.decodeTo(
+    Schema.declare<readonly UserBadge[]>(Array.isArray),
+    SchemaTransformation.transform<readonly UserBadge[], unknown>({
+      decode: parseUserBadges,
+      encode: (value) => value,
+    }),
+  ),
+  Schema.withDecodingDefaultKey(Effect.succeed(undefined)),
+);
 
 export const ProfileUserSchema = Schema.Struct({
   id: Schema.String,
@@ -24,6 +60,9 @@ export const ProfileUserSchema = Schema.Struct({
   pronouns: OptionalText,
   status: OptionalText,
   custom_status: OptionalText,
+  /** Plan (free when absent) and badges in rank order, unknown ids dropped. */
+  entitlement: EntitlementField,
+  badges: BadgesField,
 });
 export type ProfileUser = typeof ProfileUserSchema.Type;
 

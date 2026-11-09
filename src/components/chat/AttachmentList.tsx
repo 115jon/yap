@@ -13,7 +13,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { TooBigCard } from "@/components/ui/too-big-card";
-import { UPLOAD_LIMITS } from "@/lib/upload-limits";
+import { useMyEntitlement } from "@/hooks/useEntitlement";
+import { clientUploadLimitFor } from "@/lib/upload-limits";
 import { COMPOSER_TRAY } from "./ReplyIndicator";
 import type {
   OversizedBatch,
@@ -53,7 +54,7 @@ function OversizedCards({
   onClear?: () => void;
   onReplace?: (id: string) => void;
 }) {
-  const limit = UPLOAD_LIMITS.attachment;
+  const limit = clientUploadLimitFor(useMyEntitlement(), "attachment");
   const [only] = oversized.files;
   if (oversized.files.length === 1 && only) {
     return (

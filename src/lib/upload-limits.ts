@@ -9,7 +9,11 @@
  * The routes print their limit as "max 25MB" (`serverLimitLabel`);
  * `parseServerLimitBytes` reads it back when a 413 arrives anyway (the limit
  * changed under a stale client).
+ *
+ * `UPLOAD_LIMITS` are the free limits; `uploadLimitFor` applies the perks.
  */
+
+import { hasPerk, type Entitlement } from "@/lib/entitlements";
 
 export const MB = 1024 * 1024;
 
@@ -31,6 +35,58 @@ export const UPLOAD_LIMITS = {
 } as const;
 
 export type UploadKind = keyof typeof UPLOAD_LIMITS;
+
+/**
+ * Limits with the `bigUploads` perk (Yap Loud, Founder), where it raises
+ * one. Kinds not listed keep their `UPLOAD_LIMITS` value on every tier.
+ */
+export const BIG_UPLOAD_LIMITS: Partial<Record<UploadKind, number>> = {
+  attachment: 500 * MB,
+};
+
+/**
+ * What one attachment through the single-request Worker path may weigh, on
+ * every tier. The isolate holds the multipart body while it parses it
+ * (128 MB of memory in all), so this path stays at the free limit; bigger
+ * files go through the chunked direct-to-R2 path (`{ direct: true }`).
+ */
+export const WORKER_UPLOAD_CAP = 25 * MB;
+
+/**
+ * Whether the chunked direct-to-R2 upload path is live. Until it is, the
+ * client pre-check, the composer and the plan cards use the Worker limit,
+ * so nothing promises more than the server takes.
+ */
+export const CHUNKED_UPLOADS_ENABLED = false;
+
+/**
+ * The limit for one `kind` of upload under `entitlement`, as the server
+ * enforces it. Through the Worker (the default) no kind goes above
+ * `max(its free limit, WORKER_UPLOAD_CAP)`; `{ direct: true }` is the
+ * chunked path's limit (500 MB attachments with bigUploads).
+ */
+export function uploadLimitFor(
+  entitlement: Entitlement | null | undefined,
+  kind: UploadKind,
+  { direct = false }: { direct?: boolean } = {},
+): number {
+  const base = UPLOAD_LIMITS[kind];
+  const big = BIG_UPLOAD_LIMITS[kind];
+  const limit =
+    big !== undefined && hasPerk(entitlement, "bigUploads") ? big : base;
+  return direct ? limit : Math.min(limit, Math.max(base, WORKER_UPLOAD_CAP));
+}
+
+/**
+ * The limit the client offers for `kind`: the chunked path's once it is
+ * live (`CHUNKED_UPLOADS_ENABLED`), the Worker path's until then.
+ */
+export function clientUploadLimitFor(
+  entitlement: Entitlement | null | undefined,
+  kind: UploadKind,
+): number {
+  return uploadLimitFor(entitlement, kind, { direct: CHUNKED_UPLOADS_ENABLED });
+}
 
 function oneDecimal(bytes: number): number {
   return Math.round((bytes / MB) * 10) / 10;

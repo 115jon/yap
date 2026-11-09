@@ -17,7 +17,8 @@ import {
   type GifPickerMediaType,
 } from "@/lib/gif-picker";
 import type { Message, User } from "@/lib/types";
-import { partitionBySize, UPLOAD_LIMITS } from "@/lib/upload-limits";
+import { useMyEntitlement } from "@/hooks/useEntitlement";
+import { partitionBySize, clientUploadLimitFor } from "@/lib/upload-limits";
 import { COMPOSER_RESTORE_EVENT } from "@/stores/chat-actions";
 import { useChatStore } from "@/stores/chat-store";
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
@@ -195,6 +196,10 @@ export function useMessageInput({
   pendingUploadsRef.current = pendingUploads;
 
   const members = useChatStore((s) => s.members);
+  const attachmentLimit = clientUploadLimitFor(
+    useMyEntitlement(),
+    "attachment",
+  );
 
   const handleScroll = useCallback(() => {
     if (textareaRef.current && twinRef.current) {
@@ -665,7 +670,7 @@ export function useMessageInput({
       // (the toobig spec). The rest of the same drop still goes up.
       const { fits, tooBig } = partitionBySize(
         Array.from(files),
-        UPLOAD_LIMITS.attachment,
+        attachmentLimit,
       );
       if (tooBig.length > 0) {
         setLocalState((prev: { oversized: OversizedBatch | null }) => ({
@@ -738,10 +743,10 @@ export function useMessageInput({
             // Keep the tile (and its preview) so the file can be retried.
             console.error("Upload failed:", err);
             failure = describeApiError(err, "upload that file", {
-              uploadLimitBytes: UPLOAD_LIMITS.attachment,
+              uploadLimitBytes: attachmentLimit,
             });
             if (isTooLargeError(err)) {
-              serverLimit = serverUploadLimit(err) ?? UPLOAD_LIMITS.attachment;
+              serverLimit = serverUploadLimit(err) ?? attachmentLimit;
             }
           }
         } finally {
@@ -758,7 +763,7 @@ export function useMessageInput({
         }
       }
     },
-    [channelId],
+    [attachmentLimit, channelId],
   );
 
   handleFileUploadRef.current = handleFileUpload;

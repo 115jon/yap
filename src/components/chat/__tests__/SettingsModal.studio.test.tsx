@@ -321,7 +321,7 @@ describe("SettingsModal (Studio)", () => {
       account.focus();
       await user.keyboard("{ArrowDown}");
       expect(
-        within(nav()).getByRole("button", { name: "Sessions" }),
+        within(nav()).getByRole("button", { name: "Yap Loud" }),
       ).toHaveFocus();
 
       await user.keyboard("{End}");

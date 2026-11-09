@@ -7,6 +7,7 @@ import { Schema } from "effect";
 import { applyProfileThemeDefaults } from "@/lib/profile-customization";
 import { normalizeUsernameForStorage } from "@/lib/validations";
 import { getMe } from "@/services/user.service";
+import { mergeLegacyAccountStatements } from "@/services/stats.service";
 
 type ClaimCandidate = {
   id: string;
@@ -199,6 +200,9 @@ export const POST = async ({ request }: any) => {
             .bind(userId, legacyUserId),
         ]
       : []),
+    // Plan, badges and stats (the new id's own rows went with its users row
+    // above, so the legacy account's move over whole).
+    ...mergeLegacyAccountStatements(db, legacyUserId, userId, now),
     db.prepare("DELETE FROM users WHERE id = ?").bind(legacyUserId),
     db
       .prepare(

@@ -49,6 +49,7 @@ import {
   type ConfirmRequest,
 } from "@/ui";
 
+import { BadgeRow } from "./BadgeRow";
 import { AvatarDecoration, ProfileEffect } from "./Collectibles";
 import { PersonMenu, type MenuPerson } from "./PersonMenu";
 import type { Profile } from "./schema";
@@ -476,6 +477,7 @@ function ProfileBody({
         >
           {handle}
         </Text>
+        {user ? <BadgeRow badges={user.badges} colors={colors} /> : null}
         <StatusLine
           userId={person.id}
           fallbackStatus={user?.status}

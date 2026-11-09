@@ -12,6 +12,7 @@ import type { IconName } from "@/components/ui/icon";
 
 export type SettingsPanelId =
   | "account"
+  | "loud"
   | "sessions"
   | "privacy"
   | "voice"
@@ -139,6 +140,55 @@ const SETTINGS_PANELS: SettingsPanelDef[] = [
             label: "Sign out",
             desc: "Sign out of Yap on this device.",
             keywords: ["log out", "logout", "leave"],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "loud",
+    title: "Yap Loud",
+    icon: "sparkle",
+    headline: "Turn it up.",
+    blurb: "Your plan, and what Yap Loud adds.",
+    sections: [
+      {
+        id: "your-plan",
+        title: "Your plan",
+        rows: [
+          {
+            id: "current-plan",
+            label: "Plan",
+            desc: "What your account has.",
+            keywords: [
+              "tier",
+              "subscription",
+              "founder",
+              "loud",
+              "nitro",
+              "premium",
+              "billing",
+            ],
+          },
+        ],
+      },
+      {
+        id: "plans",
+        title: "Plans",
+        rows: [
+          {
+            id: "tier-cards",
+            label: "Yap, Yap Loud and Founder",
+            desc: "Bigger uploads, 1440p and 4K streams, every name style.",
+            keywords: [
+              "upgrade",
+              "price",
+              "uploads",
+              "4k",
+              "1440p",
+              "name styles",
+              "badge",
+            ],
           },
         ],
       },
@@ -757,7 +807,7 @@ export const SETTINGS_NAV_GROUPS: Array<{
   title: string;
   ids: SettingsPanelId[];
 }> = [
-  { title: "You", ids: ["account", "sessions", "privacy"] },
+  { title: "You", ids: ["account", "loud", "sessions", "privacy"] },
   { title: "Calls", ids: ["voice", "soundboard", "keybinds"] },
   { title: "App", ids: ["appearance", "notifications", "desktop"] },
 ];

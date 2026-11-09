@@ -77,6 +77,12 @@ import {
   voiceRosterSessionOf,
 } from "./voice-roster";
 import { initRealtimeTicketNonces } from "./realtime-admission";
+import { MAX_SESSION_SECONDS, sessionSeconds } from "../src/lib/user-stats";
+import { isTimeZone, TIME_ZONE_HEADER } from "../src/lib/request-time-zone";
+import {
+  recordMessageSent,
+  recordVoiceSession,
+} from "../src/services/stats.service";
 import {
   acceptSocket,
   admitSocket,
@@ -235,6 +241,8 @@ interface WsAttachment {
      * deprecated two-request flow, whose Identify and Resume mint them.
      */
     media?: SocketTicketMedia;
+    /** Cloudflare's IANA time zone for the client, stamped at upgrade. */
+    timeZone?: string;
   };
   id: string;
   name: string;
@@ -274,6 +282,10 @@ interface WsAttachment {
    * per user: the newest join wins, whichever Identify finishes first.
    */
   voice_join_order?: number;
+  /** Room: when the current screen share started (account stats). */
+  stream_started_at?: number;
+  /** Room: milliseconds of screen shares this voice session already ended. */
+  stream_ms?: number;
 }
 
 interface ReplayEntry {
@@ -900,6 +912,10 @@ export class MeetingRoom extends DurableObject<Env> {
         }
       }
 
+      // Cloudflare's time zone for the client, stamped by the Worker
+      // (request-time-zone.ts): Night owl on this socket's messages.
+      const stampedTimeZone = request.headers.get(TIME_ZONE_HEADER);
+      const timeZone = isTimeZone(stampedTimeZone) ? stampedTimeZone : null;
       log.info(`New connection, gateway_version=${gatewayVersion}`);
       return acceptSocket(
         this.ctx,
@@ -909,6 +925,7 @@ export class MeetingRoom extends DurableObject<Env> {
             participantId: admission.participantId,
             subject: admission.subject,
             ...(admission.media ? { media: admission.media } : {}),
+            ...(timeZone ? { timeZone } : {}),
           },
         },
         gatewayVersion,
@@ -3000,12 +3017,80 @@ export class MeetingRoom extends DurableObject<Env> {
     moved = false,
   ): void {
     if (session.standby) return;
+    // Every way a voice session ends comes through here, once.
+    this.recordVoiceSessionStats(session);
     this.pushVoiceJoinGrant(
       session.id,
       session.admission?.subject,
       false,
       replaced,
       moved,
+    );
+  }
+
+  // ── Account stats ───────────────────────────────────────────────────────
+  // Voice and stream time, added to user_stats once per voice session when
+  // it ends (revokeVoiceJoin), never per tick. Rooms only: the global
+  // gateway's sessions are not in voice.
+
+  private get tracksVoiceStats(): boolean {
+    return (
+      this.roomSlug !== "unknown" && this.roomSlug !== VOICE_ROSTER_GATEWAY
+    );
+  }
+
+  /** Sessions already counted (`id:joinedAt`), so no end is counted twice. */
+  private recordedVoiceSessions = new Set<string>();
+
+  /** Opens or closes a screen share's clock on a self_stream change. */
+  private trackStreamTime(session: WsAttachment, streaming: boolean): void {
+    if (!this.tracksVoiceStats || session.standby) return;
+    const now = Date.now();
+    if (streaming && !session.self_stream) {
+      session.stream_started_at = now;
+    } else if (!streaming && session.self_stream) {
+      session.stream_ms =
+        (session.stream_ms ?? 0) +
+        sessionSeconds(session.stream_started_at, now) * 1000;
+      delete session.stream_started_at;
+    }
+  }
+
+  /**
+   * Adds an ended voice session's time to the user's stats: from its join to
+   * when it ended (a held session ended when its socket was lost), capped at
+   * 24 h, with the share time inside it.
+   */
+  private recordVoiceSessionStats(session: WsAttachment): void {
+    if (!this.tracksVoiceStats || !isVoiceRosterSession(session)) return;
+    const joinedAt = session.voice_joined_at;
+    if (joinedAt === undefined) return;
+    const key = `${session.id}:${joinedAt}`;
+    if (this.recordedVoiceSessions.has(key)) return;
+    this.recordedVoiceSessions.add(key);
+    if (this.recordedVoiceSessions.size > 512) {
+      const oldest = this.recordedVoiceSessions.values().next().value;
+      if (oldest !== undefined) this.recordedVoiceSessions.delete(oldest);
+    }
+
+    const endedAt = this.resumableSessionExpiry.get(session.id) ?? Date.now();
+    const voiceSeconds = sessionSeconds(joinedAt, endedAt);
+    const openShareMs =
+      session.self_stream && session.stream_started_at !== undefined
+        ? sessionSeconds(session.stream_started_at, endedAt) * 1000
+        : 0;
+    const streamSeconds = Math.min(
+      voiceSeconds,
+      MAX_SESSION_SECONDS,
+      Math.floor(((session.stream_ms ?? 0) + openShareMs) / 1000),
+    );
+    if (voiceSeconds <= 0 && streamSeconds <= 0) return;
+    this.ctx.waitUntil(
+      recordVoiceSession(this.env.DB, session.user_id, {
+        voiceSeconds,
+        streamSeconds,
+        endedAt: new Date(endedAt),
+      }),
     );
   }
 
@@ -4298,7 +4383,10 @@ export class MeetingRoom extends DurableObject<Env> {
     if (d.self_mute !== undefined) session.self_mute = d.self_mute;
     if (d.self_deaf !== undefined) session.self_deaf = d.self_deaf;
     if (d.self_video !== undefined) session.self_video = d.self_video;
-    if (d.self_stream !== undefined) session.self_stream = d.self_stream;
+    if (d.self_stream !== undefined) {
+      this.trackStreamTime(session, d.self_stream);
+      session.self_stream = d.self_stream;
+    }
     if (d.self_stream_audio !== undefined)
       session.self_stream_audio = d.self_stream_audio;
     if (d.stream_preview_url !== undefined)
@@ -4723,7 +4811,9 @@ export class MeetingRoom extends DurableObject<Env> {
     const writes = (this.replayPersistWrites.get(session.id) ?? 0) + 1;
     if (writes > MAX_REPLAY_PERSIST_WRITES) {
       // A long offline burst is cheaper and safer to reconcile from REST than
-      // to keep rewriting a large snapshot on every event.
+      // to keep rewriting a large snapshot on every event. Its voice time
+      // ends here (nothing else will revoke it).
+      if (!session.standby) this.recordVoiceSessionStats(session);
       this.resumableSessions.delete(session.id);
       this.replayBuffers.delete(session.id);
       this.replayPersistWrites.delete(session.id);
@@ -5298,6 +5388,15 @@ export class MeetingRoom extends DurableObject<Env> {
       });
       return;
     }
+    // Night owl reads the time zone the Worker stamped at upgrade.
+    this.ctx.waitUntil(
+      recordMessageSent(
+        this.env.DB,
+        session.user_id,
+        new Date(now),
+        session.admission?.timeZone ?? null,
+      ),
+    );
 
     // Build message object for dispatch
     const message = {

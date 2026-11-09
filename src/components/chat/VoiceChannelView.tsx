@@ -4,7 +4,7 @@ import type {
   ScreenShareSourceState,
 } from "@/lib/screen-share-types";
 import type { StreamWatchersByStreamer } from "@/lib/stream-watchers";
-import { getAvailableStreamQualities } from "@/lib/voice/utils";
+import { useStreamQualities } from "@/hooks/useEntitlement";
 import { isActivityType, useActivityStore } from "@/stores/useActivityStore";
 
 import {
@@ -203,7 +203,7 @@ export default function VoiceChannelView({
     onToggleAlwaysShowStreamPreview: VoiceSessionStreamState["onToggleAlwaysShowStreamPreview"];
   }>(null);
 
-  const availableQualities = useMemo(() => getAvailableStreamQualities(), []);
+  const availableQualities = useStreamQualities();
 
   // Retry after a failed connection: leave the dead session, then join again
   // on the next task (handleJoin skips while a session object still exists).

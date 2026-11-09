@@ -21,7 +21,7 @@ import {
   type StreamWatcherIdentity,
 } from "@/lib/stream-watchers";
 import { cn } from "@/lib/utils";
-import { getAvailableStreamQualities } from "@/lib/voice/utils";
+import { useStreamQualities } from "@/hooks/useEntitlement";
 import { Icon } from "@/components/ui/icon";
 import {
   lazy,
@@ -180,7 +180,7 @@ export default function RoomVoiceView({
   const [isFileDragging, setIsFileDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const availableQualities = useMemo(() => getAvailableStreamQualities(), []);
+  const availableQualities = useStreamQualities();
   const localScreenWatchers = useMemo(
     () => getLocalScreenStreamWatchers(gridItems, watchersByStreamer),
     [gridItems, watchersByStreamer],

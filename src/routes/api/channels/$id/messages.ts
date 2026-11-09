@@ -36,6 +36,8 @@ import {
   scheduleR2Cleanup,
 } from "@/lib/background-tasks";
 import { recordR2CleanupFailure } from "@/services/r2-cleanup.service";
+import { scheduleMessageSent } from "@/services/stats.service";
+import { cfTimeZone } from "@/lib/request-time-zone";
 
 // GET /api/channels/:id/messages — get message history (paginated)
 export const GET = async ({ request, params }: any) => {
@@ -142,6 +144,15 @@ export const POST = async ({ request, params }: any) => {
   const messageId = genId();
 
   const message = await createMessage(db, channelId, userId, messageId, body);
+  const sentAt = new Date(String(message.created_at));
+  scheduleMessageSent(
+    waitUntil,
+    db,
+    userId,
+    Number.isNaN(sentAt.getTime()) ? new Date() : sentAt,
+    // Night owl reads Cloudflare's time zone for the request, not the client.
+    cfTimeZone(request),
+  );
   const revision = Number(message.content_revision ?? 1);
   const postprocessingTask = {
     messageId,

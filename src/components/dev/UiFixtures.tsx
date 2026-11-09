@@ -16,6 +16,7 @@ import { SoundFixture } from "@/components/dev/sound-fixtures";
 import { StandaloneUpdaterView } from "@/components/StandaloneUpdater";
 import { DitherMockupsFixture } from "@/components/dev/dither-mockups";
 import { TooBigFixture } from "@/components/dev/too-big-fixtures";
+import { BadgesFixture, TiersFixture } from "@/components/dev/tiers-fixtures";
 import { ComponentKitFixture } from "@/components/dev/component-kit-mockups";
 import { ConnectionStatesFixture } from "@/components/dev/connection-states-mockups";
 import { TypeMockupsFixture } from "@/components/dev/type-mockups";
@@ -190,6 +191,17 @@ const users: Record<string, User> = {
     display_name: "Jon",
     status: "online",
     custom_status: LANDING_COPY ? "around tonight" : "shipping the UI pass",
+    entitlement: {
+      tier: "founder",
+      source: "grant",
+      started_at: "2026-11-09T00:00:00.000Z",
+      expires_at: null,
+    },
+    badges: [
+      { id: "founder", awarded_at: "2026-11-09T00:00:00.000Z" },
+      { id: "yap-team", awarded_at: "2026-11-09T00:00:00.000Z" },
+      { id: "early-yapper", awarded_at: "2026-11-10T00:00:00.000Z" },
+    ],
   },
   ada: {
     id: "u-ada",
@@ -3159,6 +3171,12 @@ export default function UiFixtures() {
       break;
     case "too-big":
       content = <TooBigFixture />;
+      break;
+    case "badges":
+      content = <BadgesFixture />;
+      break;
+    case "tiers":
+      content = <TiersFixture />;
       break;
     case "type-mockups":
       content = <TypeMockupsFixture />;

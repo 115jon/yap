@@ -24,6 +24,11 @@ const mocks = vi.hoisted(() => ({
   recordMessagePostprocessingJob: vi.fn(),
   scheduleMessagePostprocessing: vi.fn(),
   scheduleR2Cleanup: vi.fn(),
+  scheduleMessageSent: vi.fn(),
+}));
+
+vi.mock("@/services/stats.service", () => ({
+  scheduleMessageSent: mocks.scheduleMessageSent,
 }));
 
 vi.mock("@/lib/api-helpers", () => ({
@@ -171,6 +176,15 @@ describe("message history GET limit", () => {
     ]);
     expect(vi.mocked(createMessage)).toHaveBeenCalledOnce();
     expect(order).toEqual(["broadcast", "schedule"]);
+    // The sender's message count, off the critical path; no offset sent,
+    // so Night owl reads UTC.
+    expect(mocks.scheduleMessageSent).toHaveBeenCalledWith(
+      undefined,
+      {},
+      "user-1",
+      new Date("2026-07-22T00:00:00.000Z"),
+      null,
+    );
   });
 
   it("enqueues the next content revision after a REST edit", async () => {

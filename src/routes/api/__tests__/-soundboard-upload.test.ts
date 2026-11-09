@@ -687,6 +687,52 @@ describe("soundboard upload GET", () => {
 
     expect(response.status).toBe(201);
     expect(bucket.put).toHaveBeenCalled();
+    // The File goes to R2 as it is: no second in-memory copy of the body.
+    const stored = bucket.put.mock.calls[0]?.[1];
+    expect(stored).toBeInstanceOf(File);
+    expect(stored).not.toBeInstanceOf(ArrayBuffer);
+  });
+
+  it("holds a founder to 25 MB on the single-request path", async () => {
+    // The plan is read only for a file over the free limit; a founder has
+    // bigUploads, but this path stays at 25 MB for every tier.
+    const first = vi.fn().mockResolvedValue({
+      tier: "founder",
+      source: "grant",
+      started_at: "2026-11-09T00:00:00Z",
+      expires_at: null,
+    });
+    mocks.getDB.mockReturnValue({
+      prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first })) })),
+    });
+    const bucket = { put: vi.fn() };
+    mocks.getBucket.mockReturnValue(bucket);
+    mocks.getUserPermissions.mockResolvedValue(1);
+    mocks.hasPermission.mockImplementation(
+      (_permissions: number, permission: number) => permission === 1,
+    );
+    const formData = new FormData();
+    formData.append(
+      "file",
+      new File([new Uint8Array(25 * 1024 * 1024 + 1)], "big.bin", {
+        type: "application/octet-stream",
+      }),
+    );
+
+    const response = await POST({
+      request: new Request(
+        "https://meet.test/api/channels/channel-1/messages/upload",
+        { method: "POST", body: formData },
+      ),
+      params: { id: "channel-1" },
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "File too large (max 25MB)",
+    });
+    expect(first).toHaveBeenCalledOnce();
+    expect(bucket.put).not.toHaveBeenCalled();
   });
 
   it("rejects a same-channel foreign message without MANAGE_MESSAGES before R2", async () => {

@@ -1,3 +1,4 @@
+import { hasPerk, type Entitlement } from "@/lib/entitlements";
 export const formatQuality = (
   q: string | null | undefined,
   track?: MediaStreamTrack | null,
@@ -79,6 +80,27 @@ const STREAMING_PROFILES: StreamQualityProfile[] = [
  * - Screen-capture can target a different monitor or upscale.
  * - Discord follows the same approach (quality is gated by subscription
  *   tier, not local hardware).
+ *
+ * 1440p and 4K need the `hdStreams` perk: without an entitlement (or on the
+ * free tier) they are left out. This gating is client-side only for now.
+ * TODO(hdStreams): enforce it on the server, at the SFU (the Cloudflare
+ * Calls track publish in partytracks-proxy / the VoiceRoom), by capping the
+ * published resolution for entitlements without the perk.
  */
-export const getAvailableStreamQualities = (): string[] =>
-  STREAMING_PROFILES.map((p) => p.id);
+export const getAvailableStreamQualities = (
+  entitlement?: Entitlement | null,
+): string[] =>
+  STREAMING_PROFILES.filter(
+    (p) => !isHdStreamProfile(p) || hasPerk(entitlement, "hdStreams"),
+  ).map((p) => p.id);
+
+/** 1440p and 4K: the `hdStreams` perk (Yap Loud, Founder). */
+function isHdStreamProfile(profile: StreamQualityProfile): boolean {
+  return profile.height > 1080;
+}
+
+/** Whether a quality id is one of the HD (`hdStreams`) profiles. */
+export function isHdStreamQuality(id: string): boolean {
+  const profile = STREAMING_PROFILES.find((p) => p.id === id);
+  return profile ? isHdStreamProfile(profile) : false;
+}

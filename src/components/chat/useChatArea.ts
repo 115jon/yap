@@ -12,7 +12,8 @@ import {
 import { playMessageReceived } from "@/lib/sounds";
 import { dragOverSituation, type TooBigSituation } from "@/lib/too-big-copy";
 import type { Attachment, Message } from "@/lib/types";
-import { UPLOAD_LIMITS } from "@/lib/upload-limits";
+import { useMyEntitlement } from "@/hooks/useEntitlement";
+import { clientUploadLimitFor } from "@/lib/upload-limits";
 import { useChatActions, useChatStore } from "@/stores/chat-store";
 import {
   useCallback,
@@ -39,6 +40,10 @@ export function useChatArea({
   jumpToMessageId?: string | null;
   onJumped?: () => void;
 }) {
+  const attachmentLimit = clientUploadLimitFor(
+    useMyEntitlement(),
+    "attachment",
+  );
   const state = useChatStore(
     useShallow((s) => ({
       messages: s.messages,
@@ -1183,18 +1188,21 @@ export function useChatArea({
 
   // dragover fires every few ms: only touch state when what shows changes.
   const dragKeyRef = useRef("");
-  const onDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    // Sizes are known only where the browser exposes the files mid-drag.
-    const oversize = dragOverSituation(
-      e.dataTransfer?.files ?? [],
-      UPLOAD_LIMITS.attachment,
-    );
-    const key = `on:${oversize ? JSON.stringify(oversize) : ""}`;
-    if (dragKeyRef.current === key) return;
-    dragKeyRef.current = key;
-    setLocalState({ isDragging: true, dragOversize: oversize });
-  }, []);
+  const onDragOver = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      // Sizes are known only where the browser exposes the files mid-drag.
+      const oversize = dragOverSituation(
+        e.dataTransfer?.files ?? [],
+        attachmentLimit,
+      );
+      const key = `on:${oversize ? JSON.stringify(oversize) : ""}`;
+      if (dragKeyRef.current === key) return;
+      dragKeyRef.current = key;
+      setLocalState({ isDragging: true, dragOversize: oversize });
+    },
+    [attachmentLimit],
+  );
 
   const onDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
