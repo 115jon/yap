@@ -1,11 +1,17 @@
-import { getBotUserAgent } from "@/lib/platform";
+import { getLinkPreviewUserAgent } from "@/lib/platform";
 import { env } from "cloudflare:workers";
 
 import { cacheGet, cacheSet } from "@/lib/cache";
 import { fetchInstagramOEmbedMetadata } from "@/lib/share-preview-proxy";
 import { singleFlight } from "@/lib/single-flight";
 import type { EmbedAudio, EmbedMedia } from "@/lib/types";
-import { safeFetch, readTextCapped, readJsonCapped } from "@/lib/safe-fetch";
+import {
+  safeFetch,
+  readHtmlHead,
+  readTextCapped,
+  readJsonCapped,
+} from "@/lib/safe-fetch";
+import { fetchInstagramEmbedPage } from "@/lib/instagram-embed-page";
 import { safeParse } from "@/lib/schema";
 import {
   InstagramGraphqlResponse,
@@ -18,6 +24,8 @@ import {
 const INSTAGRAM_VIDEO_TTL = 50 * 60;
 const INSTAGRAM_VIDEO_CACHE_SAFETY_WINDOW = 5 * 60;
 const INSTAGRAM_WEAK_FALLBACK_TTL = 5 * 60;
+/** Post page and private API requests; each answers in well under a second. */
+const INSTAGRAM_PAGE_TIMEOUT_MS = 6_000;
 
 export interface InstagramVideoResult {
   videoUrl: string | null;
@@ -182,8 +190,10 @@ function extractInstagramMetricsFromDescription(
   }
 
   const decoded = decodeInstagramXmlEntities(description).trim();
+  // `1,234 likes, 56 comments - user on June 1, 2026: "…"`, or, as served
+  // to link-preview crawlers, `808K likes, 11K comments: "…"`.
   const metricMatch = decoded.match(
-    /^([\d.,kmb]+)\s+likes?,\s+([\d.,kmb]+)\s+comments?\s+-\s+.+?\s+on\s+([^:]+):/i,
+    /^([\d.,kmb]+)\s+likes?,\s+([\d.,kmb]+)\s+comments?(?:\s+-\s+.+?\s+on\s+([^:]+))?:/i,
   );
 
   return {
@@ -672,10 +682,14 @@ async function fetchInstagramMediaInfoPayload(
 
   for (const candidateUrl of candidateUrls) {
     try {
-      const response = await safeFetch(candidateUrl, {
-        headers: buildInstagramIPhoneHeaders(canonicalUrl, secrets),
-        redirect: "manual",
-      });
+      const response = await safeFetch(
+        candidateUrl,
+        {
+          headers: buildInstagramIPhoneHeaders(canonicalUrl, secrets),
+          redirect: "manual",
+        },
+        { timeoutMs: INSTAGRAM_PAGE_TIMEOUT_MS },
+      );
 
       if (!response.ok) {
         const text = await readTextCapped(response).catch(() => "");
@@ -753,15 +767,20 @@ function buildInstagramResultFromMediaItem(
 async function fetchInstagramPublicPageSharedEntityId(
   canonicalUrl: string,
 ): Promise<string | null> {
-  const response = await safeFetch(canonicalUrl, {
-    headers: {
-      Accept: "text/html,application/xhtml+xml",
-      "Accept-Language": "en-US,en;q=0.8",
-      "User-Agent": getBotUserAgent(),
+  const response = await safeFetch(
+    canonicalUrl,
+    {
+      headers: {
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.8",
+        "User-Agent": getLinkPreviewUserAgent(),
+      },
     },
-  });
+    { timeoutMs: INSTAGRAM_PAGE_TIMEOUT_MS },
+  );
 
   if (!response.ok || !response.headers.get("content-type")?.includes("html")) {
+    await response.body?.cancel().catch(() => {});
     return null;
   }
 
@@ -805,20 +824,32 @@ async function fetchInstagramPublicPageMetadata(
     title?: string | null;
   },
 ): Promise<InstagramVideoResult | null> {
-  const response = await safeFetch(canonicalUrl, {
-    headers: {
-      Accept: "text/html,application/xhtml+xml",
-      "Accept-Language": "en-US,en;q=0.8",
-      "User-Agent": getBotUserAgent(),
+  const response = await safeFetch(
+    canonicalUrl,
+    {
+      headers: {
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.8",
+        // Instagram serves OpenGraph tags to link-preview crawlers.
+        "User-Agent": getLinkPreviewUserAgent(),
+      },
+      // A login wall is a redirect to /accounts/login: nothing to read there.
+      redirect: "manual",
     },
-  });
+    { timeoutMs: INSTAGRAM_PAGE_TIMEOUT_MS },
+  );
 
   if (!response.ok || !response.headers.get("content-type")?.includes("html")) {
+    await response.body?.cancel().catch(() => {});
     return null;
   }
 
-  const html = await readTextCapped(response);
+  // The tags are in a ~130 KB head; the 400 KB after it are scripts.
+  const html = await readHtmlHead(response);
   const ogTitle = readInstagramMetaContent(html, "og:title");
+  const ogUrlAuthor = readInstagramMetaContent(html, "og:url")?.match(
+    /^https:\/\/www\.instagram\.com\/([A-Za-z0-9._]+)\/(?:p|reel|tv)\//,
+  )?.[1];
   const ogDescription = firstNonEmptyString(
     readInstagramMetaContent(html, "og:description"),
     readInstagramMetaContent(html, "description"),
@@ -833,9 +864,15 @@ async function fetchInstagramPublicPageMetadata(
     readInstagramMetaContent(html, "og:video:url"),
     readInstagramMetaContent(html, "og:video"),
   );
+  // `Name on Instagram: "caption"` carries the caption; a bare
+  // `Name on Instagram` does not.
   const title = firstNonEmptyString(
-    extractInstagramCaptionFromMetaText(ogTitle),
-    extractInstagramCaptionFromMetaText(ogDescription),
+    ogTitle?.includes(":")
+      ? extractInstagramCaptionFromMetaText(ogTitle)
+      : null,
+    extractInstagramCaptionFromMetaText(
+      ogDescription?.replace(/\s+-\s+@?[A-Za-z0-9._]+ on [^:]+$/, ""),
+    ),
     fallback?.title ?? null,
   );
   const { likeCount, commentCount, timestamp } =
@@ -875,6 +912,8 @@ async function fetchInstagramPublicPageMetadata(
     title,
     durationSeconds: null,
     media: media.length > 0 ? media : undefined,
+    authorName: ogUrlAuthor ?? null,
+    authorUrl: ogUrlAuthor ? `https://www.instagram.com/${ogUrlAuthor}` : null,
     authorAvatarUrl: null,
     authorVerified: null,
     likeCount,
@@ -885,14 +924,93 @@ async function fetchInstagramPublicPageMetadata(
   };
 }
 
+/**
+ * Fill the gaps of `primary` (the embed page) from `secondary` (the logged-in
+ * API or the post page), keeping `primary`'s values where it has them.
+ */
+function mergeInstagramResults(
+  primary: InstagramVideoResult,
+  secondary: InstagramVideoResult | null,
+): InstagramVideoResult {
+  if (!secondary) return primary;
+  const pick = <K extends keyof InstagramVideoResult>(key: K) =>
+    primary[key] ?? secondary[key] ?? null;
+  const media =
+    secondary.media?.some((item) => item.type === "video") &&
+    !primary.media?.some((item) => item.type === "video")
+      ? secondary.media
+      : (primary.media ?? secondary.media);
+  return {
+    videoUrl: pick("videoUrl"),
+    thumbnailUrl: pick("thumbnailUrl"),
+    title: pick("title"),
+    durationSeconds: pick("durationSeconds"),
+    media,
+    authorName: pick("authorName"),
+    authorUrl: pick("authorUrl"),
+    authorAvatarUrl: pick("authorAvatarUrl"),
+    authorVerified: pick("authorVerified"),
+    likeCount: pick("likeCount"),
+    commentCount: pick("commentCount"),
+    viewCount: pick("viewCount"),
+    timestamp: pick("timestamp"),
+    audio: pick("audio"),
+  };
+}
+
+/**
+ * Layered, cheapest and most reliable first:
+ *
+ *   1. the public embed page (logged out, crawler user agent);
+ *   2. only when that left a gap (no MP4 for a video, or no data at all) and
+ *      session secrets are set: the logged-in private API, as before;
+ *   3. the post page's OpenGraph tags.
+ *
+ * Throws when every layer came back empty, so the caller can tell a miss
+ * from a post that is gone (it asks oEmbed for that).
+ */
 async function fetchInstagramMedia(
   canonicalUrl: string,
 ): Promise<InstagramVideoResult> {
-  const secrets = getInstagramSessionSecrets();
-  if (!secrets) {
-    throw new Error("Instagram session secrets are not configured");
+  const shortcode = extractInstagramShortcode(canonicalUrl);
+  let embedPage: InstagramVideoResult | null = null;
+  let embedPageError: Error | null = null;
+  if (shortcode) {
+    try {
+      const outcome = await fetchInstagramEmbedPage(shortcode);
+      if (outcome.status === "ok") {
+        if (outcome.complete) return outcome.result;
+        embedPage = outcome.result;
+      }
+    } catch (error) {
+      embedPageError =
+        error instanceof Error ? error : new Error(String(error));
+    }
   }
 
+  const secrets = getInstagramSessionSecrets();
+  if (secrets) {
+    try {
+      const session = await fetchInstagramSessionMedia(canonicalUrl, secrets);
+      if (hasResolvedInstagramMetadata(session)) {
+        return embedPage ? mergeInstagramResults(embedPage, session) : session;
+      }
+    } catch {
+      // An expired or blocked session: fall through to the public page.
+    }
+  }
+  if (embedPage) return embedPage;
+
+  const publicPage = await fetchInstagramPublicPageMetadata(canonicalUrl);
+  if (publicPage) return publicPage;
+  throw embedPageError ?? new Error("Instagram metadata could not be resolved");
+}
+
+/** The logged-in private API path (needs `INSTAGRAM_SESSIONID` and friends). */
+async function fetchInstagramSessionMedia(
+  canonicalUrl: string,
+  secrets: InstagramSessionSecrets,
+): Promise<InstagramVideoResult> {
   const oembed = await fetchInstagramOEmbedMetadata(canonicalUrl);
   const mediaPk = normalizeInstagramMediaPk(oembed?.mediaId);
   const shortcode = extractInstagramShortcode(canonicalUrl);

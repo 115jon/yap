@@ -8,7 +8,28 @@ import {
   readJsonCapped,
   ResponseTooLargeError,
   DEFAULT_FETCH_TIMEOUT_MS,
+  readHtmlHead,
+  readTextUntil,
 } from "../safe-fetch";
+
+/** A body that yields `chunks` and then an endless tail; records cancel. */
+function streamingResponse(chunks: string[]) {
+  const encoder = new TextEncoder();
+  const state = { pulls: 0, cancelled: false };
+  let index = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      state.pulls += 1;
+      controller.enqueue(
+        encoder.encode(index < chunks.length ? chunks[index++] : "<p>more</p>"),
+      );
+    },
+    cancel() {
+      state.cancelled = true;
+    },
+  });
+  return { response: new Response(body), state };
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -146,5 +167,54 @@ describe("readJsonCapped", () => {
     await expect(
       readJsonCapped(res, looseStruct({ title: lenientString })),
     ).rejects.toBeInstanceOf(SyntaxError);
+  });
+});
+
+describe("readHtmlHead", () => {
+  it("stops at </head> and cancels the rest of the download", async () => {
+    const { response, state } = streamingResponse([
+      '<html><head><meta property="og:title" content="A"',
+      "><title>x</title></he",
+      "ad><body>",
+    ]);
+
+    const html = await readHtmlHead(response);
+
+    expect(html).toContain('<meta property="og:title" content="A">');
+    expect(html).toContain("</he" + "ad>");
+    expect(state.cancelled).toBe(true);
+    expect(state.pulls).toBeLessThanOrEqual(4);
+  });
+
+  it("stops at the byte cap instead of throwing", async () => {
+    const { response, state } = streamingResponse(["<html><head>"]);
+    const html = await readHtmlHead(response, 64);
+    expect(html.length).toBeGreaterThanOrEqual(64);
+    expect(html.length).toBeLessThan(200);
+    expect(state.cancelled).toBe(true);
+  });
+
+  it("returns the whole body when it ends before the head does", async () => {
+    const html = await readHtmlHead(new Response("<title>t</title>"));
+    expect(html).toBe("<title>t</title>");
+  });
+});
+
+describe("readTextUntil", () => {
+  it("decodes multi-byte characters split across chunks", async () => {
+    const bytes = new TextEncoder().encode("café done");
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.slice(0, 4));
+        controller.enqueue(bytes.slice(4));
+        controller.close();
+      },
+    });
+    const text = await readTextUntil(
+      new Response(body),
+      (t) => t.includes("done"),
+      1024,
+    );
+    expect(text).toBe("café done");
   });
 });

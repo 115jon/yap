@@ -116,6 +116,7 @@ import {
   type BackgroundTaskEnvelope,
 } from "../src/lib/background-tasks";
 import { recordR2CleanupFailure } from "../src/services/r2-cleanup.service";
+import { lookupCachedEmbeds } from "../src/services/embed-fetcher";
 import {
   callRingTokens,
   insertCallRecord,
@@ -5264,13 +5265,16 @@ export class MeetingRoom extends DurableObject<Env> {
 
     const messageId = crypto.randomUUID();
     const now = new Date().toISOString();
+    // Embeds the composer prefetched (or recently posted links) are cached:
+    // they go out with MESSAGE_CREATE instead of a later MESSAGE_UPDATE.
+    const cachedEmbeds = await lookupCachedEmbeds(d.content.trim());
 
     // Persist to D1
     try {
       await this.env.DB.batch([
         this.env.DB.prepare(
-          `INSERT INTO messages (id, channel_id, author_id, content, reply_to_id, created_at, content_revision)
-             VALUES (?, ?, ?, ?, ?, ?, 1)`,
+          `INSERT INTO messages (id, channel_id, author_id, content, reply_to_id, created_at, content_revision, embeds)
+             VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
         ).bind(
           messageId,
           d.channel_id,
@@ -5278,6 +5282,7 @@ export class MeetingRoom extends DurableObject<Env> {
           d.content.trim(),
           d.reply_to_id ?? null,
           now,
+          JSON.stringify(cachedEmbeds),
         ),
         this.env.DB.prepare(
           `INSERT INTO message_postprocessing_jobs
@@ -5314,6 +5319,7 @@ export class MeetingRoom extends DurableObject<Env> {
       nonce: d.nonce,
       attachments: [],
       reactions: [],
+      embeds: cachedEmbeds,
     };
 
     const messageDispatch = {

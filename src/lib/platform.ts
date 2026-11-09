@@ -149,6 +149,19 @@ export function getBotUserAgent(): string {
   return `Mozilla/5.0 (compatible; YapBot/1.0; +${getPublicWebUrl()})`;
 }
 
+/**
+ * Many sites (Reddit, Instagram's embed pages) only serve OpenGraph tags or a
+ * server-rendered page to known link-preview crawlers and answer anything
+ * else with a bot wall or an empty script shell, so preview fetches identify
+ * as one. The contact URL comes from config.
+ */
+export function getLinkPreviewUserAgent(): string {
+  return getBotUserAgent().replace(
+    "YapBot/1.0;",
+    "YapBot/1.0; Discordbot/2.0;",
+  );
+}
+
 /** Contact address shown for reporting abuse of shared content. */
 export function getAbuseEmail(): string {
   const envEmail =

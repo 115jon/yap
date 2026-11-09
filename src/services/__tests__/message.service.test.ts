@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { env } from "cloudflare:workers";
 import { anyTimestamp, createMockD1 } from "../../lib/__tests__/mock-d1";
+import { embedCacheKey } from "../embed-fetcher";
 import {
   addReaction,
   batchFetchAttachments,
@@ -152,8 +154,8 @@ describe("createMessage attachment linking", () => {
 
     const insert = db.getCalls("INSERT INTO messages")[0];
     expect(insert?.sql).toContain("content_revision");
-    expect(insert?.sql).toContain("VALUES (?, ?, ?, ?, ?, ?, 1)");
-    // id, channel, author, content, reply target, created_at.
+    expect(insert?.sql).toContain("VALUES (?, ?, ?, ?, ?, ?, 1, ?)");
+    // id, channel, author, content, reply target, created_at, cached embeds.
     expect(insert?.bindings).toEqual([
       "msg_revision",
       CHANNEL_ID,
@@ -161,11 +163,57 @@ describe("createMessage attachment linking", () => {
       "hello",
       null,
       anyTimestamp(),
+      "[]",
     ]);
     db.assertCalledWith("INSERT INTO message_postprocessing_jobs", [
       "msg_revision",
       CHANNEL_ID,
     ]);
+  });
+
+  it("stores and returns embeds that are already cached (prefetched links)", async () => {
+    const url = "https://www.instagram.com/reel/DfajF1zvsbl/";
+    const embed = { id: "embed_x", url, type: "rich", fields: [] };
+    const workerEnv = env as unknown as Record<string, unknown>;
+    workerEnv.CACHE = {
+      get: async (keys: string[]) =>
+        new Map(
+          keys.map((key) => [
+            key,
+            key === embedCacheKey(url)
+              ? {
+                  v: 2,
+                  status: "ok",
+                  embed,
+                  freshUntil: Date.now() + 60_000,
+                }
+              : null,
+          ]),
+        ),
+    };
+    try {
+      const db = createMockD1();
+      db.mockQuery("FROM users WHERE id", {
+        username: "alice",
+        display_name: null,
+        avatar_url: null,
+        avatar_display: null,
+      });
+
+      const message = await createMessage(
+        db as never,
+        CHANNEL_ID,
+        USER_ID,
+        "msg_cached",
+        { content: `watch ${url}` },
+      );
+
+      expect(message.embeds).toEqual([embed]);
+      const insert = db.getCalls("INSERT INTO messages")[0];
+      expect(insert?.bindings.at(-1)).toBe(JSON.stringify([embed]));
+    } finally {
+      delete workerEnv.CACHE;
+    }
   });
 
   it("does not reassociate a soundboard attachment with a message", async () => {

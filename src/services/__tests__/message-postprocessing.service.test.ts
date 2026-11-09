@@ -441,6 +441,133 @@ describe("message postprocessing", () => {
     });
   });
 
+  it("delivers notifications while a slow link preview is still resolving", async () => {
+    const db = createMockD1();
+    let finishEmbeds: (embeds: unknown[]) => void = () => {};
+    embedMock.mockReturnValue(
+      new Promise((resolve) => {
+        finishEmbeds = resolve;
+      }),
+    );
+    db.mockQuery("SELECT m.id", {
+      id: "message-1",
+      channel_id: "channel-1",
+      content: "hello @mentioned https://slow.example/page",
+      content_revision: 1,
+      embeds: "[]",
+      author_id: "author-1",
+      author_username: "author",
+      author_display_name: null,
+      author_avatar_url: null,
+      reply_to_id: null,
+      server_id: "server-1",
+    });
+    db.mockQuery("SELECT c.name", {
+      channel_name: "general",
+      server_id: "server-1",
+      channel_type: "text",
+      server_name: "server",
+    });
+    db.mockQuery("SELECT id, username", {
+      results: [{ id: "mentioned-1", username: "mentioned" }],
+    });
+    db.mockQuery("SELECT content_revision FROM messages", {
+      content_revision: 1,
+    });
+    db.mockQuery("INSERT OR IGNORE INTO notification_delivery_markers", {
+      meta: { changes: 1 },
+    });
+    db.mockQuery("INSERT OR IGNORE INTO notifications", {
+      meta: { changes: 1 },
+    });
+    db.mockQuery("UPDATE messages SET embeds", { meta: { changes: 1 } });
+    const broadcast = vi.fn(async () => undefined);
+    const push = vi.fn(async () => undefined);
+
+    const task = processMessagePostprocessingTask(
+      db as never,
+      { messageId: "message-1", channelId: "channel-1", revision: 1 },
+      broadcast,
+      { push },
+    );
+
+    await vi.waitFor(() => expect(push).toHaveBeenCalledOnce());
+    expect(broadcast).toHaveBeenCalledWith(
+      { kind: "user", id: "mentioned-1" },
+      expect.any(String),
+      expect.objectContaining({ id: "message:message-1:mention:mentioned-1" }),
+    );
+    expect(broadcast).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "MESSAGE_UPDATE",
+      expect.anything(),
+    );
+
+    finishEmbeds([{ url: "https://slow.example/page" }]);
+    await expect(task).resolves.toEqual({ retryEmbeds: false });
+    expect(broadcast).toHaveBeenCalledWith(
+      { kind: "server", id: "server-1" },
+      "MESSAGE_UPDATE",
+      expect.objectContaining({
+        embeds: [{ url: "https://slow.example/page" }],
+      }),
+    );
+  });
+
+  it("retries only the embeds when they fail after notifications went out", async () => {
+    const db = createMockD1();
+    embedMock.mockRejectedValue(new Error("D1 write failed"));
+    db.mockQuery("SELECT m.id", {
+      id: "message-1",
+      channel_id: "channel-1",
+      content: "hello @mentioned https://example.test",
+      content_revision: 1,
+      embeds: "[]",
+      author_id: "author-1",
+      author_username: "author",
+      author_display_name: null,
+      author_avatar_url: null,
+      reply_to_id: null,
+      server_id: "server-1",
+    });
+    db.mockQuery("SELECT c.name", {
+      channel_name: "general",
+      server_id: "server-1",
+      channel_type: "text",
+      server_name: "server",
+    });
+    db.mockQuery("SELECT id, username", {
+      results: [{ id: "mentioned-1", username: "mentioned" }],
+    });
+    db.mockQuery("SELECT content_revision FROM messages", {
+      content_revision: 1,
+    });
+    db.mockQuery("INSERT OR IGNORE INTO notification_delivery_markers", {
+      meta: { changes: 1 },
+    });
+    db.mockQuery("INSERT OR IGNORE INTO notifications", {
+      meta: { changes: 1 },
+    });
+    const broadcast = vi.fn(async () => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    // Not rethrown: a redelivered task would broadcast the notification
+    // again. The deferred retry runs with notify off.
+    await expect(
+      processMessagePostprocessingTask(
+        db as never,
+        { messageId: "message-1", channelId: "channel-1", revision: 1 },
+        broadcast,
+      ),
+    ).resolves.toEqual({ retryEmbeds: true });
+    expect(broadcast).toHaveBeenCalledOnce();
+    expect(broadcast).toHaveBeenCalledWith(
+      { kind: "user", id: "mentioned-1" },
+      expect.any(String),
+      expect.objectContaining({ id: "message:message-1:mention:mentioned-1" }),
+    );
+  });
+
   it("does not generate notifications for edit postprocessing tasks", async () => {
     const db = createMockD1();
     db.mockQuery("SELECT m.id", {

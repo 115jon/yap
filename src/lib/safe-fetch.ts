@@ -130,6 +130,71 @@ export async function readTextCapped(
   return new TextDecoder().decode(merged);
 }
 
+/** Most bytes {@link readHtmlHead} reads looking for the end of `<head>`. */
+export const HTML_HEAD_MAX_BYTES = 640 * 1024;
+
+/**
+ * Read a response body as text until `isDone(textSoFar)` says enough, then
+ * cancel the rest of the download. Never throws for size: past `maxBytes` it
+ * stops and returns what it has (the caller parses a prefix either way).
+ * `isDone` sees the whole text so far; keep it cheap (an indexOf).
+ */
+export async function readTextUntil(
+  response: Response,
+  isDone: (text: string) => boolean,
+  maxBytes: number,
+): Promise<string> {
+  const body = response.body;
+  if (!body) return "";
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let total = 0;
+  let finished = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        finished = true;
+        break;
+      }
+      if (!value) continue;
+      total += value.byteLength;
+      text += decoder.decode(value, { stream: true });
+      if (total >= maxBytes || isDone(text)) break;
+    }
+  } finally {
+    if (!finished) await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+  return text + decoder.decode();
+}
+
+/**
+ * Read an HTML page only up to the end of its `<head>` (where OpenGraph and
+ * Twitter card tags live, and where `parseHtmlMeta` stops scanning) and drop
+ * the connection. A page without `</head>` is read up to the byte cap. Pages like Instagram's put
+ * 500 KB of body after a 130 KB head; most articles are similar.
+ */
+export function readHtmlHead(
+  response: Response,
+  maxBytes: number = HTML_HEAD_MAX_BYTES,
+): Promise<string> {
+  let scanned = 0;
+  return readTextUntil(
+    response,
+    (text) => {
+      // Only look at the new tail (plus room for a split tag).
+      const from = Math.max(0, scanned - 8);
+      scanned = text.length;
+      const tail = text.slice(from).toLowerCase();
+      return tail.includes("</head");
+    },
+    maxBytes,
+  );
+}
+
 /**
  * Read a response body as JSON, aborting once `maxBytes` is exceeded, and decode
  * it with `schema`. Use this for API/metadata reads instead of `response.json()`:
