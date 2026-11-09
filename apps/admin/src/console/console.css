@@ -1,0 +1,4 @@
+/* The console wears Yap's own stylesheet (tokens, themes, fonts, kit) and
+   adds its own sources to Tailwind's scan; nothing is copied. */
+@import "../../../../src/styles.css";
+@source "./";

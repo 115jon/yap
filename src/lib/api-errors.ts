@@ -23,6 +23,9 @@ export function describeApiError(
   options: { uploadLimitBytes?: number } = {},
 ): string {
   const status = errorStatus(error);
+  // A site switch is off: the server's sentence says what is paused.
+  const paused = pausedMessage(error);
+  if (paused) return paused;
   if (status === 401) {
     return `Your session has ended. Sign in again to ${action}.`;
   }
@@ -68,4 +71,16 @@ function errorStatus(error: unknown): number | null {
   if (!error || typeof error !== "object") return null;
   const status = (error as { status?: unknown }).status;
   return typeof status === "number" && Number.isFinite(status) ? status : null;
+}
+
+/**
+ * The server's own sentence for a feature a site admin switched off (503
+ * FEATURE_PAUSED, services/site-flags.service.ts), or a suspended account
+ * (403 ACCOUNT_SUSPENDED). Both are written for people, not logs.
+ */
+function pausedMessage(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  if (code !== "FEATURE_PAUSED" && code !== "ACCOUNT_SUSPENDED") return null;
+  return typeof message === "string" && message.trim() ? message : null;
 }

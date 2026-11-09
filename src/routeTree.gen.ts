@@ -21,6 +21,7 @@ import { Route as InviteCodeRouteImport } from './routes/invite.$code'
 import { Route as ChatSplatRouteImport } from './routes/chat.$'
 import { Route as ApiUpdateProfileRouteImport } from './routes/api/update-profile'
 import { Route as ApiTiktokVideoRouteImport } from './routes/api/tiktok-video'
+import { Route as ApiSiteConfigRouteImport } from './routes/api/site-config'
 import { Route as ApiSessionsRouteImport } from './routes/api/sessions'
 import { Route as ApiServersRouteImport } from './routes/api/servers'
 import { Route as ApiReadStatesRouteImport } from './routes/api/read-states'
@@ -177,6 +178,11 @@ const ApiUpdateProfileRoute = ApiUpdateProfileRouteImport.update({
 const ApiTiktokVideoRoute = ApiTiktokVideoRouteImport.update({
   id: '/api/tiktok-video',
   path: '/api/tiktok-video',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSiteConfigRoute = ApiSiteConfigRouteImport.update({
+  id: '/api/site-config',
+  path: '/api/site-config',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSessionsRoute = ApiSessionsRouteImport.update({
@@ -708,6 +714,7 @@ export interface FileRoutesByFullPath {
   '/api/read-states': typeof ApiReadStatesRoute
   '/api/servers': typeof ApiServersRouteWithChildren
   '/api/sessions': typeof ApiSessionsRoute
+  '/api/site-config': typeof ApiSiteConfigRoute
   '/api/tiktok-video': typeof ApiTiktokVideoRoute
   '/api/update-profile': typeof ApiUpdateProfileRoute
   '/chat/$': typeof ChatSplatRoute
@@ -819,6 +826,7 @@ export interface FileRoutesByTo {
   '/api/read-states': typeof ApiReadStatesRoute
   '/api/servers': typeof ApiServersRouteWithChildren
   '/api/sessions': typeof ApiSessionsRoute
+  '/api/site-config': typeof ApiSiteConfigRoute
   '/api/tiktok-video': typeof ApiTiktokVideoRoute
   '/api/update-profile': typeof ApiUpdateProfileRoute
   '/chat/$': typeof ChatSplatRoute
@@ -931,6 +939,7 @@ export interface FileRoutesById {
   '/api/read-states': typeof ApiReadStatesRoute
   '/api/servers': typeof ApiServersRouteWithChildren
   '/api/sessions': typeof ApiSessionsRoute
+  '/api/site-config': typeof ApiSiteConfigRoute
   '/api/tiktok-video': typeof ApiTiktokVideoRoute
   '/api/update-profile': typeof ApiUpdateProfileRoute
   '/chat/$': typeof ChatSplatRoute
@@ -1044,6 +1053,7 @@ export interface FileRouteTypes {
     | '/api/read-states'
     | '/api/servers'
     | '/api/sessions'
+    | '/api/site-config'
     | '/api/tiktok-video'
     | '/api/update-profile'
     | '/chat/$'
@@ -1155,6 +1165,7 @@ export interface FileRouteTypes {
     | '/api/read-states'
     | '/api/servers'
     | '/api/sessions'
+    | '/api/site-config'
     | '/api/tiktok-video'
     | '/api/update-profile'
     | '/chat/$'
@@ -1266,6 +1277,7 @@ export interface FileRouteTypes {
     | '/api/read-states'
     | '/api/servers'
     | '/api/sessions'
+    | '/api/site-config'
     | '/api/tiktok-video'
     | '/api/update-profile'
     | '/chat/$'
@@ -1378,6 +1390,7 @@ export interface RootRouteChildren {
   ApiReadStatesRoute: typeof ApiReadStatesRoute
   ApiServersRoute: typeof ApiServersRouteWithChildren
   ApiSessionsRoute: typeof ApiSessionsRoute
+  ApiSiteConfigRoute: typeof ApiSiteConfigRoute
   ApiTiktokVideoRoute: typeof ApiTiktokVideoRoute
   ApiUpdateProfileRoute: typeof ApiUpdateProfileRoute
   InviteCodeRoute: typeof InviteCodeRoute
@@ -1507,6 +1520,13 @@ declare module '@tanstack/react-router' {
       path: '/api/tiktok-video'
       fullPath: '/api/tiktok-video'
       preLoaderRoute: typeof ApiTiktokVideoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/site-config': {
+      id: '/api/site-config'
+      path: '/api/site-config'
+      fullPath: '/api/site-config'
+      preLoaderRoute: typeof ApiSiteConfigRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/sessions': {
@@ -2481,6 +2501,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiReadStatesRoute: ApiReadStatesRoute,
   ApiServersRoute: ApiServersRouteWithChildren,
   ApiSessionsRoute: ApiSessionsRoute,
+  ApiSiteConfigRoute: ApiSiteConfigRoute,
   ApiTiktokVideoRoute: ApiTiktokVideoRoute,
   ApiUpdateProfileRoute: ApiUpdateProfileRoute,
   InviteCodeRoute: InviteCodeRoute,

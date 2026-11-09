@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { requireActiveVoiceRoomSession, requireAuth } from "@/lib/api-helpers";
 import { clog } from "@/lib/console-logger";
+import { featurePaused } from "@/services/site-flags.service";
 import { UpstreamBlockedError } from "@/lib/upstream-guard";
 import { YouTubeBotCheckError } from "@/lib/ytdlp/youtube";
 import { youtubeFetch } from "@/lib/ytdlp/youtube-fetch";
@@ -437,6 +438,8 @@ export async function proxyListenTogetherStream(
   request: Request,
   includeBody: boolean,
 ): Promise<Response> {
+  const paused = await featurePaused("listenTogether", request);
+  if (paused) return paused;
   const auth = await requireAuth(request);
   if (auth instanceof Response) return auth;
 

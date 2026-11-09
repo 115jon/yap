@@ -18,6 +18,7 @@ import { tooLargeMessage, uploadLimitFor } from "@/lib/upload-limits";
 import { FREE_ENTITLEMENT } from "@/lib/entitlements";
 import { getEntitlement } from "@/services/entitlement.service";
 import { getSoundboardUploadUrl } from "@/lib/voice/soundboard-media";
+import { featurePaused } from "@/services/site-flags.service";
 
 const SOUNDBOARD_AUDIO_TYPES_BY_EXTENSION: Record<string, string> = {
   aac: "audio/aac",
@@ -82,6 +83,11 @@ export const POST = async ({ request, params }: any) => {
 
   if (!file) {
     return apiError("No file provided", 400);
+  }
+
+  if (isSoundboardUpload) {
+    const paused = await featurePaused("soundboardUploads", request);
+    if (paused) return paused;
   }
 
   if (isSoundboardUpload && !serverId) {

@@ -200,3 +200,17 @@ signed proxy on a US server instead.
   Direct and proxy requests have separate circuits (`<provider>@egress`).
 - To rotate the key, change it on the proxy and run
   `pnpm exec wrangler secret put EGRESS_PROXY_SECRET` together.
+
+## Site admin
+
+The site-admin console is its own Worker, `yap-admin`, in `apps/admin`, behind
+a Kova-only gate. Its setup, secrets and deploy are in
+[apps/admin/README.md](../apps/admin/README.md). The main Worker has no admin
+page or admin API. It enforces what the console writes: the kill switches
+and the site banner (`site_settings`, `GET /api/site-config`) and account
+suspensions (`users.suspended_at`).
+
+Migration `041_site_admin.sql` adds the audit log, the suspension columns,
+site settings, cron run records and the daily activity rollup. Apply it with
+the main deploy before deploying `yap-admin`. The main build stamps the
+commit from `GITHUB_SHA` (or `git rev-parse HEAD` locally).

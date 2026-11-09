@@ -12,6 +12,7 @@ import { logger } from "@/lib/logger";
 import { applyProfileThemeDefaults } from "@/lib/profile-customization";
 import { normalizeUsernameForStorage } from "@/lib/validations";
 import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
+import { isFeatureEnabled } from "@/services/site-flags.service";
 import type { D1Database } from "@cloudflare/workers-types";
 
 type RalphAuthWebhook = {
@@ -159,6 +160,18 @@ const POST = async ({ request }: any) => {
     case "user.created":
     case "user.signUp":
     case "user.signed_up": {
+      // New sign-ups switched off (site flags): no profile for an id Yap
+      // has not seen. A 200, so Kova does not retry the delivery.
+      if (
+        !(await isFeatureEnabled("signups", db)) &&
+        !(await db
+          .prepare(`SELECT 1 FROM users WHERE id = ?`)
+          .bind(userId)
+          .first())
+      ) {
+        logger.info("Sign-up refused while sign-ups are paused", { userId });
+        return apiSuccess({ received: true, skipped: "signups_paused" });
+      }
       await db
         .prepare(
           `INSERT INTO users (id, username, display_name, avatar_url, bio, status, profile_accent_color, profile_background_color, created_at)

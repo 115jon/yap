@@ -1,12 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { requireActiveVoiceRoomSession, requireAuth } from "@/lib/api-helpers";
 import { clog } from "@/lib/console-logger";
+import { featurePaused } from "@/services/site-flags.service";
 import { searchListenTogether } from "@/services/listen-together.service";
 
 const searchLog = clog("listen-together:search");
 
 const GET = async ({ request }: any) => {
   const startedAt = Date.now();
+  const paused = await featurePaused("listenTogether", request);
+  if (paused) return paused;
   const auth = await requireAuth(request);
   if (auth instanceof Response) return auth;
 

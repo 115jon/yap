@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS users (
     status TEXT DEFAULT 'online',      -- online | idle | dnd | offline
     custom_status TEXT,                -- e.g. "Today I learned..."
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT
+    updated_at TEXT,
+    suspended_at TEXT,                 -- site admin suspension; NULL = active
+    suspended_reason TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower
@@ -542,3 +544,56 @@ CREATE TABLE IF NOT EXISTS channel_permission_overrides (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_overrides_unique ON channel_permission_overrides(channel_id, target_id);
+
+-- ── Site admin (migration 041) ─────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+    id TEXT PRIMARY KEY,
+    actor_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id TEXT,
+    before_json TEXT,
+    after_json TEXT,
+    cf_ray TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_audit_log_time ON admin_audit_log(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_admin_audit_log_target ON admin_audit_log(target_type, target_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_users_suspended ON users(suspended_at) WHERE suspended_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS site_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by TEXT
+);
+
+CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+    name TEXT PRIMARY KEY,
+    cron TEXT NOT NULL,
+    ok INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    error TEXT,
+    ran_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS daily_activity (
+    day TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    messages INTEGER NOT NULL DEFAULT 0,
+    voice_seconds INTEGER NOT NULL DEFAULT 0,
+    stream_seconds INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_daily_activity_user ON daily_activity(user_id, day);
+
+CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_created_at ON attachments(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_messages_created_at_global ON messages(created_at);

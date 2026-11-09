@@ -78,3 +78,44 @@ export function isDailySlot(
   const at = new Date(scheduledTime);
   return at.getUTCHours() === 0 && at.getUTCMinutes() === 0;
 }
+
+/**
+ * Keeps each job's last run in D1 `scheduled_job_runs` (migration 041), for
+ * the admin console. Best effort: a failed write is logged, never thrown.
+ */
+export async function recordScheduledJobRuns(
+  db: Pick<D1Database, "prepare" | "batch">,
+  cron: string,
+  results: readonly ScheduledJobResult[],
+  now: Date = new Date(),
+): Promise<void> {
+  if (results.length === 0) return;
+  const ranAt = now.toISOString();
+  try {
+    await db.batch(
+      results.map((result) =>
+        db
+          .prepare(
+            `INSERT INTO scheduled_job_runs (name, cron, ok, duration_ms, error, ran_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(name) DO UPDATE SET
+               cron = excluded.cron,
+               ok = excluded.ok,
+               duration_ms = excluded.duration_ms,
+               error = excluded.error,
+               ran_at = excluded.ran_at`,
+          )
+          .bind(
+            result.name,
+            cron,
+            result.ok ? 1 : 0,
+            Math.max(0, Math.round(result.durationMs)),
+            result.error ? result.error.slice(0, 500) : null,
+            ranAt,
+          ),
+      ),
+    );
+  } catch (error) {
+    console.warn(`scheduled_job_runs write failed: ${describe(error)}`);
+  }
+}
