@@ -275,6 +275,12 @@ export default function MobileProfileSheet({
           <ProfileSections
             gameActivity={gameActivity}
             bio={resolvedUser.bio}
+            // Your own sheet isn't fetched: users/me carries your connections.
+            connections={
+              isMe
+                ? (chatUser?.connections ?? resolvedUser.connections)
+                : resolvedUser.connections
+            }
             bioMarkdown
             roles={
               memberRoles && memberRoles.length > 0 ? (
