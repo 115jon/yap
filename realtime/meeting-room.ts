@@ -84,6 +84,10 @@ import {
   recordVoiceSession,
 } from "../src/services/stats.service";
 import {
+  recordCallSession,
+  recordGameSession,
+} from "../src/services/profile-activity.service";
+import {
   acceptSocket,
   admitSocket,
   isOpcodeAllowed,
@@ -576,6 +580,18 @@ export class MeetingRoom extends DurableObject<Env> {
       send: (ws, msg) => this.sendTo(ws, msg),
       dispatchOp: Op.Dispatch,
       log: presenceLog,
+      // Finished games go to the profile Activity timeline and Top games.
+      onGameEnded: (userId, activity, endedAt) => {
+        this.ctx.waitUntil(
+          recordGameSession(this.env.DB, {
+            userId,
+            name: activity.name,
+            iconUrl: activity.icon_url ?? null,
+            startedAt: activity.started_at,
+            endedAt,
+          }),
+        );
+      },
     });
 
     // Cloudflare's auto-response absorbs messages at the edge, preventing the DO
@@ -3159,8 +3175,24 @@ export class MeetingRoom extends DurableObject<Env> {
       session.stream_ms =
         (session.stream_ms ?? 0) +
         sessionSeconds(session.stream_started_at, now) * 1000;
+      this.recordStreamActivity(session, now);
       delete session.stream_started_at;
     }
+  }
+
+  /** A screen share that ended: one profile Activity event (5 min or more). */
+  private recordStreamActivity(session: WsAttachment, endedAt: number): void {
+    const startedAt = session.stream_started_at;
+    if (startedAt === undefined || !session.user_id) return;
+    this.ctx.waitUntil(
+      recordCallSession(this.env.DB, "stream", {
+        userId: session.user_id,
+        sessionKey: `${session.id}:${startedAt}`,
+        channelId: this.voiceRosterChannelId,
+        startedAt,
+        endedAt,
+      }),
+    );
   }
 
   /**
@@ -3199,6 +3231,18 @@ export class MeetingRoom extends DurableObject<Env> {
         endedAt: new Date(endedAt),
       }),
     );
+    // The profile Activity timeline: the call (15 min or more), and a share
+    // still open when it ended.
+    this.ctx.waitUntil(
+      recordCallSession(this.env.DB, "voice", {
+        userId: session.user_id,
+        sessionKey: key,
+        channelId: this.voiceRosterChannelId,
+        startedAt: joinedAt,
+        endedAt,
+      }),
+    );
+    if (session.self_stream) this.recordStreamActivity(session, endedAt);
   }
 
   // ── One voice session per user ─────────────────────────────────────────
