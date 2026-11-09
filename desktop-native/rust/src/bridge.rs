@@ -218,6 +218,8 @@ pub mod qobject {
         // and ones still going.
         #[qproperty(i32, uploads_ready, cxx_name = "uploadsReady")]
         #[qproperty(i32, uploads_busy, cxx_name = "uploadsBusy")]
+        // Files over the limit, never started (the too-big cards).
+        #[qproperty(i32, uploads_too_big, cxx_name = "uploadsTooBig")]
         // The GIF picker: a page is loading, more exist, the error line,
         // and each column's height (thousandths of the width) and tiles.
         #[qproperty(bool, gif_loading, cxx_name = "gifLoading")]
@@ -253,6 +255,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "removeUpload"]
         fn remove_upload(self: &Chat, id: &QString);
+
+        /// "Remove the big ones": every too-big card in the tray.
+        #[qinvokable]
+        #[cxx_name = "removeOversizedUploads"]
+        fn remove_oversized_uploads(self: &Chat);
 
         #[qinvokable]
         #[cxx_name = "retryUpload"]
@@ -782,6 +789,7 @@ pub struct ChatRust {
     page_loading: bool,
     uploads_ready: i32,
     uploads_busy: i32,
+    uploads_too_big: i32,
     gif_loading: bool,
     gif_more: bool,
     gif_error: QString,
@@ -1024,6 +1032,10 @@ impl qobject::Chat {
 
     pub fn remove_upload(&self, id: &QString) {
         client::command(Command::RemoveUpload(id.to_string()));
+    }
+
+    pub fn remove_oversized_uploads(&self) {
+        client::command(Command::RemoveOversizedUploads);
     }
 
     pub fn retry_upload(&self, id: &QString) {

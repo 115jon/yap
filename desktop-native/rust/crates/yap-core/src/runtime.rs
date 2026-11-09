@@ -986,12 +986,10 @@ const UPLOAD_CHUNK: usize = 64 * 1024;
 /// Progress reports are at least this far apart (bytes, as thousandths).
 const PROGRESS_STEP: u64 = 10;
 
-/// The largest profile picture, banner or server icon the server takes
-/// (`MAX_IMAGE_SIZE`, src/lib/image-validation.ts).
-const MAX_IMAGE_UPLOAD_BYTES: u64 = 8 * 1024 * 1024;
-
-/// Refuses a file over `cap` before reading it, as the server's 413 would
-/// (`describe_error` words it "The file is too large.").
+/// Refuses a file over `cap` before reading it, as the server's 413 would,
+/// with its limit in the server's words ("max 25MB", which
+/// `limits::server_limit` reads back). The pickers check first, so this is
+/// a backstop: nothing over its limit is ever sent.
 async fn check_size(path: &Path, cap: u64) -> Result<(), crate::api::ApiError> {
     let meta = tokio::fs::metadata(path)
         .await
@@ -999,7 +997,7 @@ async fn check_size(path: &Path, cap: u64) -> Result<(), crate::api::ApiError> {
     if meta.len() > cap {
         return Err(crate::api::ApiError::Http {
             status: 413,
-            message: "file is too large".into(),
+            message: format!("File too large (max {}MB)", cap / crate::limits::MB),
         });
     }
     Ok(())
@@ -1162,10 +1160,11 @@ async fn profile_upload(
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "image".into());
-    let cap = if asset == ProfileAsset::Nameplate {
-        crate::settings::NAMEPLATE_MAX_BYTES
-    } else {
-        MAX_IMAGE_UPLOAD_BYTES
+    let cap = match asset {
+        ProfileAsset::Nameplate => crate::limits::NAMEPLATE,
+        ProfileAsset::Banner => crate::limits::BANNER,
+        ProfileAsset::ServerIcon => crate::limits::SERVER_ICON,
+        ProfileAsset::Avatar { .. } => crate::limits::AVATAR,
     };
     check_size(Path::new(&path), cap).await?;
     let bytes = tokio::fs::read(&path)

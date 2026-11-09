@@ -452,7 +452,7 @@ pub const TOPIC_MAX: usize = 1024;
 /// A ban reason: at most 512 characters.
 pub const BAN_REASON_MAX: usize = 512;
 /// A server icon: at most 8 MB (OverviewPage.tsx `MAX_ICON_BYTES`).
-pub const MAX_ICON_BYTES: u64 = 8 * 1024 * 1024;
+pub const MAX_ICON_BYTES: u64 = crate::limits::SERVER_ICON;
 
 // The audit log (audit-format.ts)
 

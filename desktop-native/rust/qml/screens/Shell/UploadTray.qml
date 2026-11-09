@@ -7,10 +7,21 @@ import com.yap.native
 // type glyph and name), the size chip, the sensitive toggle and, on hover,
 // Remove. One still going is dimmed with its progress and a cancel key;
 // a failed one says so and offers Retry.
+//
+// A file over the limit is never uploaded: it stays as a too-big card
+// (toobig-spec.md: pose A, its name, "31.2 MB · 6.2 MB over the 25 MB
+// limit", Remove and Choose another), and several of them fold into one
+// card ("A few of these won't fit", Remove the big ones). A 413 that came
+// back anyway is a card with the server's own number (pose B).
 Item {
     id: root
 
     readonly property bool shown: tiles.count > 0
+    // Several too big: one summary card in their place.
+    readonly property bool folded: Chat.uploadsTooBig >= 2
+
+    // Choose another: the card went; the composer opens its picker.
+    signal chooseAnother()
 
     implicitHeight: shown ? Math.min(256, flow.implicitHeight + 16) : 0
     clip: true
@@ -38,6 +49,18 @@ Item {
             property bool painted: false
             Component.onCompleted: Qt.callLater(() => flow.painted = true)
 
+            TooBigCard {
+                visible: root.folded
+                width: Math.min(flow.width, 420)
+                compact: true
+                edge: Theme.mix(Theme.warningInk, 0.36)
+                info: root.folded ? JSON.parse(Limits.traySummary(Chat.uploadsTooBig, tiles.count - Chat.uploadsTooBig)) : ({})
+                onAction: id => {
+                    if (id === "removeBig")
+                        Chat.removeOversizedUploads()
+                }
+            }
+
             Repeater {
                 id: tiles
                 model: UploadListModel
@@ -53,8 +76,11 @@ Item {
                     required property int progress
                     required property string error
                     required property bool nsfw
+                    required property string card
                     readonly property bool done: uploadState === "done"
                     readonly property bool failed: uploadState === "failed"
+                    // Too big (never started) or refused by the server.
+                    readonly property bool isCard: card.length > 0
                     transform: Translate { id: lift }
                     ListEnter {
                         id: entrance
@@ -66,20 +92,35 @@ Item {
                         }
                     }
                     Component.onCompleted: if (flow.painted) entrance.start()
-                    width: 96
-                    height: 96
+                    visible: !(root.folded && tile.uploadState === "toobig")
+                    width: tile.isCard ? Math.min(380, flow.width) : 96
+                    height: tile.isCard ? tooBig.implicitHeight : 96
                     radius: Theme.radius
-                    color: Theme.tint2
-                    border.width: 1
+                    color: tile.isCard ? "transparent" : Theme.tint2
+                    border.width: tile.isCard ? 0 : 1
                     border.color: tile.nsfw ? Theme.warningInk : Theme.line
                     clip: true
                     Accessible.role: Accessible.ListItem
                     Accessible.name: tile.name
 
+                    TooBigCard {
+                        id: tooBig
+                        visible: tile.isCard
+                        width: parent.width
+                        compact: true
+                        edge: Theme.mix(Theme.warningInk, 0.36)
+                        info: tile.isCard ? JSON.parse(tile.card) : ({})
+                        onAction: id => {
+                            Chat.removeUpload(tile.uploadId)
+                            if (id === "choose")
+                                root.chooseAnother()
+                        }
+                    }
+
                     Image {
                         anchors.fill: parent
                         anchors.margins: 1
-                        visible: tile.kind === "image"
+                        visible: tile.kind === "image" && !tile.isCard
                         opacity: tile.done ? 1 : tile.failed ? 0.2 : 0.4
                         asynchronous: true
                         fillMode: Image.PreserveAspectCrop
@@ -233,7 +274,7 @@ Item {
 
                     // Remove (finished, failed) or cancel (going), top right.
                     IconKey {
-                        visible: tileHover.hovered || !tile.done
+                        visible: !tile.isCard && (tileHover.hovered || !tile.done)
                         anchors.right: parent.right
                         anchors.top: parent.top
                         anchors.margins: 2

@@ -23,8 +23,10 @@ PlateDialog {
     property bool media: false
     property string initialText: ""
     property int savedAt: 0
-    // A file the upload refused before it went (type or size).
+    // A file the upload refused before it went (its type).
     property string localError: ""
+    // A file over the vibe limit: its too-big card, never uploaded.
+    property string tooBig: ""
 
     readonly property var status: JSON.parse(Extras.voiceStatus)
     readonly property string normalized: field.text.replace(/\s+/g, " ").trim()
@@ -38,6 +40,7 @@ PlateDialog {
         dialog.media = media
         dialog.initialText = text
         dialog.localError = ""
+        dialog.tooBig = ""
         field.text = text
         dialog.savedAt = status.saved
         if (media)
@@ -47,8 +50,11 @@ PlateDialog {
 
     function chooseFile() {
         const paths = Files.pickFiles(qsTr("Upload media status"))
-        if (paths.length > 0)
-            dialog.localError = Extras.uploadVoiceMedia(dialog.channelId, paths[0])
+        if (paths.length === 0)
+            return
+        dialog.tooBig = Limits.check("vibe", paths[0])
+        dialog.localError = dialog.tooBig.length > 0 ? ""
+            : Extras.uploadVoiceMedia(dialog.channelId, paths[0])
     }
 
     // CSS columns: items in order, top to bottom, column by column, at the
@@ -189,6 +195,13 @@ PlateDialog {
                 gifs.openCentred()
             }
         }
+    }
+
+    TooBigCard {
+        visible: dialog.media && dialog.tooBig.length > 0
+        width: parent.width
+        info: dialog.tooBig.length > 0 ? JSON.parse(dialog.tooBig) : ({})
+        onAction: dialog.chooseFile()
     }
 
     // Recents, while they load or once there are some.

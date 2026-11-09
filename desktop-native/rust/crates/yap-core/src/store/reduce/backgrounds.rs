@@ -194,6 +194,16 @@ impl State {
                         self.backgrounds.items.retain(|a| a.id != asset.id);
                         self.backgrounds.items.insert(0, asset);
                     }
+                    Err(ApiError::Http {
+                        status: 413,
+                        message,
+                    }) => {
+                        self.backgrounds.error = crate::limits::server_refusal_text(
+                            &message,
+                            "upload that image",
+                            Some(crate::limits::BACKGROUND),
+                        );
+                    }
                     Err(error) => {
                         self.backgrounds.error = format!("Couldn't upload that image ({error}).");
                     }

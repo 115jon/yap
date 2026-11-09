@@ -533,6 +533,7 @@ Item {
 
         UploadTray {
             id: tray
+            onChooseAnother: root.pickFiles()
             y: replyBar.height
             width: parent.width
             height: implicitHeight

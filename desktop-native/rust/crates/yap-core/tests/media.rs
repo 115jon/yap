@@ -311,20 +311,99 @@ fn our_chip_should_be_mine_by_users_not_the_me_flag() {
 // Uploads
 
 #[test]
-fn a_file_over_25_mb_should_be_refused_with_the_web_copy() {
+fn a_file_over_25_mb_should_stay_as_a_card_and_never_upload() {
     let mut client = Client::online();
-    let fx = client.upload("big", 26 * 1024 * 1024);
-    let notice = views(&fx).find_map(|v| match v {
-        ViewUpdate::Notice(text) => Some(text.clone()),
-        _ => None,
-    });
-    assert_eq!(
-        notice.as_deref(),
-        Some(
-            "big.png is too large to upload
-Files can be up to 25 MB."
-        )
+    let fx = client.upload("big", 30 * 1024 * 1024);
+    assert!(
+        !fx.iter().any(|e| matches!(e, Effect::Upload { .. })),
+        "{fx:#?}"
     );
+    assert!(!views(&fx).any(|v| matches!(v, ViewUpdate::Notice(_))));
+    let row = views(&fx)
+        .find_map(|v| match v {
+            ViewUpdate::Uploads(ViewDiff::Insert { rows, .. }) => rows.first().cloned(),
+            _ => None,
+        })
+        .expect("a tray row");
+    assert_eq!(row.state, "toobig");
+    let card: Value = serde_json::from_str(&row.card).expect("card");
+    assert_eq!(card["headline"], "big.png");
+    assert_eq!(card["line"], "30.0 MB · 5.0 MB over the 25 MB limit");
+    assert_eq!(card["actions"], json!(["remove", "choose"]));
+    assert!(views(&fx).any(|v| matches!(
+        v,
+        ViewUpdate::UploadCounts {
+            ready: 0,
+            busy: 0,
+            too_big: 1
+        }
+    )));
+}
+
+#[test]
+fn files_under_the_limit_in_the_same_drop_should_still_upload() {
+    let mut client = Client::online();
+    let file = |id: &str, size: u64| UploadFile {
+        local_id: id.into(),
+        path: format!(r"C:\tmp\{id}.bin"),
+        name: format!("{id}.bin"),
+        size,
+        content_type: "application/octet-stream".into(),
+    };
+    let fx = client.command(Command::AddUploads(vec![
+        file("a", 26 * 1024 * 1024),
+        file("b", 1000),
+        file("c", 40 * 1024 * 1024),
+    ]));
+    let started = fx
+        .iter()
+        .filter(|e| matches!(e, Effect::Upload { .. }))
+        .count();
+    assert_eq!(started, 1, "{fx:#?}");
+    assert!(views(&fx).any(|v| matches!(
+        v,
+        ViewUpdate::UploadCounts {
+            busy: 1,
+            too_big: 2,
+            ..
+        }
+    )));
+    // Remove the big ones: only the small one is left.
+    let fx = client.command(Command::RemoveOversizedUploads);
+    assert!(views(&fx).any(|v| matches!(
+        v,
+        ViewUpdate::UploadCounts {
+            busy: 1,
+            too_big: 0,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn a_413_should_show_the_servers_own_limit() {
+    let mut client = Client::online();
+    let fx = client.upload("a", 1000);
+    let id = upload_id(&fx);
+    let fx = client.answer(
+        id,
+        Err(ApiError::Http {
+            status: 413,
+            message: "File too large (max 10MB)".into(),
+        }),
+    );
+    let row = views(&fx)
+        .find_map(|v| match v {
+            ViewUpdate::Uploads(ViewDiff::Update { row, .. }) => Some(row.clone()),
+            _ => None,
+        })
+        .expect("the row");
+    assert_eq!(row.state, "refused");
+    let card: Value = serde_json::from_str(&row.card).expect("card");
+    assert_eq!(card["headline"], "The server turned it away");
+    assert_eq!(card["line"], "It says the limit is 10 MB.");
+    assert_eq!(card["pose"], "sad");
+    assert_eq!(card["actions"], json!(["remove"]));
 }
 
 #[test]

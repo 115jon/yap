@@ -530,13 +530,19 @@ fn a_failed_banner_upload_should_stop_and_name_the_step() {
             _ => None,
         })
         .expect("upload");
-    let fx = client.answer(upload, Err(http_error(413)));
+    let fx = client.answer(
+        upload,
+        Err(yap_core::ApiError::Http {
+            status: 413,
+            message: "Banner too large (max 8MB)".into(),
+        }),
+    );
     let view = settings(&fx).expect("view");
     assert_eq!(
         (view.profile_saving, view.profile_error.as_str()),
         (
             false,
-            "Unable to upload your banner. The file is too large."
+            "Unable to upload your banner. The server says the limit is 8 MB."
         )
     );
 }

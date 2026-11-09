@@ -13,6 +13,9 @@ PlateDialog {
     id: dialog
 
     property string name
+    // A picked file over the avatar limit: its too-big card, shown here
+    // (inline, not a toast) until another pick or the dialog closes.
+    property string tooBig
     readonly property var avatars: JSON.parse(Extras.avatars)
     readonly property bool busy: avatars.busyId.length > 0
 
@@ -22,6 +25,15 @@ PlateDialog {
     title: qsTr("Choose an image")
     description: qsTr("Upload a new avatar or reuse one of your recent uploads.")
     onAboutToShow: Extras.loadAvatars()
+    onClosed: tooBig = ""
+
+    TooBigCard {
+        visible: dialog.tooBig.length > 0
+        width: parent.width
+        info: dialog.tooBig.length > 0 ? JSON.parse(dialog.tooBig) : ({})
+        // Pick another: the system dialog again, over this one.
+        onAction: dialog.uploadRequested()
+    }
 
     AbstractButton {
         id: upload
@@ -32,10 +44,9 @@ PlateDialog {
         enabled: !dialog.busy
         Accessible.role: Accessible.Button
         Accessible.name: qsTr("Upload image")
-        onClicked: {
-            dialog.close()
-            dialog.uploadRequested()
-        }
+        // The editor closes this once the file fits; one over the limit
+        // shows its card here instead.
+        onClicked: dialog.uploadRequested()
         contentItem: Column {
             spacing: 4
             Item { width: 1; height: 20 }

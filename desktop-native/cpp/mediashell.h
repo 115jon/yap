@@ -17,6 +17,9 @@
 //   Files.openMedia(path)      opens a picture or video with its app;
 //                              anything else is only revealed
 //   Files.clearImageCache()    empties the downloaded-images cache (sign-out)
+//   Files.localFiles(urls)     each local file among dragged or dropped URLs
+//                              as {name, size} (QFileInfo, no read): the
+//                              drop overlay's too-big state before the drop
 //   Files.testDropUrls()       tests: YAP_TEST_DROP ("a.png;b.png") as file
 //                              URLs, for a drop onto the chat without a
 //                              real drag (empty when unset)
@@ -35,6 +38,7 @@
 #include <QtCore/QObject>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
+#include <QtCore/QVariantList>
 
 class MediaShell : public QObject
 {
@@ -55,6 +59,7 @@ public:
   Q_INVOKABLE void openExternal(const QString& url) const;
   Q_INVOKABLE bool copyImage(const QString& path, bool dry) const;
   Q_INVOKABLE QStringList testDropUrls() const;
+  Q_INVOKABLE QVariantList localFiles(const QVariantList& urls) const;
 
 signals:
   void imageCacheCleared();

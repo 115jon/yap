@@ -678,8 +678,8 @@ pub(super) struct Projection {
     pub badge: BadgeView,
     /// The composer tray of the open channel.
     pub uploads: Vec<UploadRow>,
-    /// (ready, busy) uploads of the open channel, as last emitted.
-    pub upload_counts: (i64, i64),
+    /// Ready, going and too big (never started) in the open channel's tray.
+    pub upload_counts: (i64, i64, i64),
     pub gifs: Vec<GifRow>,
     pub settings: SettingsView,
     pub admin: AdminView,
@@ -871,6 +871,12 @@ pub enum UploadStatus {
     Done(UploadedFile),
     /// The error copy (api-errors.ts `describeApiError`).
     Failed(String),
+    /// Over the attachment limit when it was added: never started, shown
+    /// as the too-big card until removed.
+    TooBig,
+    /// The server answered 413 anyway (its limit changed): its message,
+    /// which names the limit it holds to.
+    Refused(String),
 }
 
 /// One file in the composer tray (useMessageInput.ts `pendingUploads` and

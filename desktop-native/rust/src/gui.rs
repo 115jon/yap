@@ -65,7 +65,7 @@ struct Scalars {
     dm_unread: i64,
     profile: ProfileView,
     /// (ready, busy) uploads of the open channel.
-    uploads: (i64, i64),
+    uploads: (i64, i64, i64),
     gifs: GifStatusView,
     settings: SettingsView,
     admin: AdminView,
@@ -453,9 +453,10 @@ fn set_profile(mut profile: Pin<&mut Profile>, view: &ProfileView) {
     profile.set_user_id(q(&view.user_id));
 }
 
-fn set_uploads(mut chat: Pin<&mut Chat>, (ready, busy): (i64, i64)) {
+fn set_uploads(mut chat: Pin<&mut Chat>, (ready, busy, too_big): (i64, i64, i64)) {
     chat.as_mut().set_uploads_ready(int(ready));
-    chat.set_uploads_busy(int(busy));
+    chat.as_mut().set_uploads_busy(int(busy));
+    chat.set_uploads_too_big(int(too_big));
 }
 
 fn set_gifs(mut chat: Pin<&mut Chat>, view: &GifStatusView) {
@@ -662,9 +663,13 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::Calls(view) => crate::calls::on_view(*view),
         ViewUpdate::Badge(badge) => crate::desktop::on_badge(badge),
         ViewUpdate::Uploads(diff) => models::apply::<m::UploadListModel>(diff),
-        ViewUpdate::UploadCounts { ready, busy } => {
-            with::<Chat>(|chat| set_uploads(chat, (ready, busy)));
-            scalars(|s| s.uploads = (ready, busy));
+        ViewUpdate::UploadCounts {
+            ready,
+            busy,
+            too_big,
+        } => {
+            with::<Chat>(|chat| set_uploads(chat, (ready, busy, too_big)));
+            scalars(|s| s.uploads = (ready, busy, too_big));
         }
         ViewUpdate::Gifs(diff) => models::apply::<m::GifListModel>(diff),
         ViewUpdate::GifStatus(view) => {

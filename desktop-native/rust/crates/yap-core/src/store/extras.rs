@@ -1095,7 +1095,7 @@ pub fn voice_media_upload_type(name: &str) -> Option<&'static str> {
 }
 
 /// The server's limit for one status picture.
-pub const MAX_VOICE_MEDIA_UPLOAD_BYTES: u64 = 25 * 1024 * 1024;
+pub const MAX_VOICE_MEDIA_UPLOAD_BYTES: u64 = crate::limits::VIBE;
 
 /// `normalizeUsername` then `UsernameSchema`: lower case, 2-32 of
 /// letters, digits, `_`, `.` and `-`, starting with a letter or digit.

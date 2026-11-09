@@ -621,11 +621,14 @@ fn failed_icon_upload_should_say_so_and_not_create() {
     });
     client.input(yap_core::store::Input::Http {
         id: upload_id(&fx),
-        result: Err(http_error(413)),
+        result: Err(yap_core::ApiError::Http {
+            status: 413,
+            message: "Icon too large (max 8MB)".into(),
+        }),
     });
     assert_eq!(
         client.view.create.error,
-        "Unable to upload that icon. The file is too large."
+        "Unable to upload that icon. The server says the limit is 8 MB."
     );
 }
 

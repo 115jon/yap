@@ -42,6 +42,8 @@ T.Popup {
     property string nameplatePath
     property bool removeNameplate: false
     property string localError
+    // A banner over its limit (the too-big card under the banner row).
+    property string bannerTooBig
     property bool saved: false
 
     readonly property bool dirty: pronouns !== Settings.pronouns
@@ -98,6 +100,7 @@ T.Popup {
         nameplatePath = ""
         removeNameplate = false
         localError = ""
+        bannerTooBig = ""
         saved = false
     }
     function save() {
@@ -128,14 +131,31 @@ T.Popup {
         else
             close()
     }
+    // The avatar's file comes from Choose an image, which stays open under
+    // the system dialog: a file over the limit shows its too-big card there
+    // (Pick another asks again); one that fits closes it for the crop. A
+    // banner over the limit shows its card under the banner row. Nothing
+    // over its limit joins the draft, so nothing over it is uploaded.
     function pick(kind) {
         const paths = Files.pickFiles(kind === "avatar" ? qsTr("Choose an avatar") : qsTr("Choose a banner"))
         const path = paths.length > 0 ? paths[0] : ""
         if (path.length === 0)
             return
         if (Settings.imageType(path).length === 0) {
+            avatarPicker.close()
             localError = kind === "avatar" ? qsTr("Choose an image file for your avatar.") : qsTr("Choose an image file for your banner.")
             return
+        }
+        const tooBig = Limits.check(kind, path)
+        if (kind === "avatar") {
+            avatarPicker.tooBig = tooBig
+            if (tooBig.length > 0)
+                return
+            avatarPicker.close()
+        } else {
+            bannerTooBig = tooBig
+            if (tooBig.length > 0)
+                return
         }
         localError = ""
         if (kind === "avatar") {
@@ -545,6 +565,18 @@ T.Popup {
                                             editor.removeBanner = true
                                     }
                                 }
+                            }
+                        }
+                        Item {
+                            visible: editor.bannerTooBig.length > 0
+                            width: parent.width
+                            height: visible ? bannerCard.height + 16 : 0
+                            TooBigCard {
+                                id: bannerCard
+                                y: 4
+                                width: parent.width
+                                info: editor.bannerTooBig.length > 0 ? JSON.parse(editor.bannerTooBig) : ({})
+                                onAction: editor.pick("banner")
                             }
                         }
                         SettingsRow {
