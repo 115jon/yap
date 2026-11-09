@@ -541,6 +541,10 @@ Item {
             id: authorText
             playing: hover.hovered
             height: Theme.type.authorLine
+            // One line, elided at the end, leaving the time and the pin
+            // their room (MessageItem.tsx: the name truncates).
+            width: Math.min(implicitWidth, Math.max(24, root.width - meta.x - 24 - headerTime.implicitWidth
+                - meta.spacing - (root.pinned ? Theme.iconXs + meta.spacing : 0)))
             text: root.author
             nameStyle: root.nameStyle
             color: root.authorInk
@@ -556,6 +560,7 @@ Item {
             }
         }
         Text {
+            id: headerTime
             anchors.baseline: authorText.baseline
             textFormat: Text.PlainText
             text: root.time

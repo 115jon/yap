@@ -281,6 +281,11 @@ QtObject {
     // YAP_TEST_HOVER_PLAY=1 (set by main.cpp, tests only): hover-only motion
     // (name effects, resting clips) plays as if pointed at.
     property bool testHoverPlay: false
+    // YAP_TEST_NAME_STYLE (set by main.cpp, tests only): a display-name
+    // style as the views carry it (`{"font","effect","primary","secondary",
+    // "wave"}`) that every DisplayName wears instead of its owner's, so
+    // each effect can be seen in every surface without saving a profile.
+    property string testNameStyle: ""
     // Copy image (ImageViewerToolbar.tsx handleCopyImage: the file itself,
     // fetched, onto the clipboard). ChatView downloads it with the session
     // into the copy cache and its `saved` handler puts it on the clipboard

@@ -952,6 +952,11 @@ T.Popup {
         surfaceColor: editor.backgroundColor
         accentColor: editor.accentColor
         bannerColor: editor.bannerColor
+        // INTEGRATION POINT (native/tiers): bind the signed-in user's
+        // `allNameStyles` perk here, as the web does
+        // (hasPerk(entitlement, "allNameStyles")). Everyone on production
+        // is a founder, and update-profile refuses a Yap style without it.
+        canUseYapStyles: true
         onApplied: style => editor.nameStyle = style
     }
 

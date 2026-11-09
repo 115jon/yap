@@ -21,6 +21,8 @@ Rectangle {
     required property string gameIcon
     // The recipient's avatar decoration (APNG), or empty.
     required property string deco
+    // The recipient's display-name style (DMListPanel.tsx UserDisplayName).
+    required property string nameStyle
     required property bool unread
     required property int mentions
     required property bool active
@@ -110,13 +112,14 @@ Rectangle {
         anchors.right: badge.visible ? badge.left : parent.right
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
-        Text {
+        DisplayName {
             width: parent.width
-            textFormat: Text.PlainText
             text: row.name
-            elide: Text.ElideRight
+            nameStyle: row.nameStyle
             color: row.active || hover.hovered || row.unread ? Theme.ink1 : Theme.ink2
             font: row.unread && !row.active ? Theme.type.rowUnread : Theme.type.row
+            ground: Theme.ply1
+            playing: hover.hovered
         }
         // What they play takes the custom status's line (GameActivity.tsx).
         Loader {

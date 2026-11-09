@@ -24,6 +24,8 @@ find_package(Qt6 REQUIRED COMPONENTS
 # drawn from its D3D11 texture (cpp/videohub.cpp); QSGPlainTexture, so a
 # streamed GIF uploads each frame into one texture (cpp/animatedpicture.cpp).
 find_package(Qt6 REQUIRED COMPONENTS GuiPrivate MultimediaPrivate QuickPrivate)
+# qsb at build time: our ShaderEffect fragment shaders (shaders/).
+find_package(Qt6 REQUIRED COMPONENTS ShaderTools)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -106,6 +108,28 @@ qt_add_resources(YapNative yap_assets
   BASE assets
   FILES ${YAP_FONT_PATHS} ${YAP_SVG_PATHS} ${YAP_ICON_PATHS} ${YAP_THUMBBAR_PATHS}
     assets/app/yap-256.png)
+# ShaderEffect shaders, baked by qsb into :/shaders/<name>.qsb. GLSL 300 es
+# and 330 rather than Qt's default 100 es (no textureLod or textureSize).
+# The app draws with Direct3D 11 (WARP in safe mode too), so the HLSL is
+# compiled to DXBC here (PRECOMPILE: fxc from the VS developer shell) and
+# never at run time. The display-name effects are one source baked once per
+# effect (MODE, shaders/namefx.frag).
+set(YAP_NAME_EFFECTS dither holo chrome pixel crt glitch ember sticker candlelit)
+list(LENGTH YAP_NAME_EFFECTS YAP_NAME_EFFECT_COUNT)
+math(EXPR YAP_NAME_EFFECT_LAST "${YAP_NAME_EFFECT_COUNT} - 1")
+foreach(mode RANGE ${YAP_NAME_EFFECT_LAST})
+  list(GET YAP_NAME_EFFECTS ${mode} effect)
+  qt_add_shaders(YapNative yap_name_${effect}
+    PREFIX /shaders
+    BASE shaders
+    GLSL "300es,330"
+    HLSL 50
+    MSL 12
+    PRECOMPILE
+    DEFINES MODE=${mode}
+    FILES shaders/namefx.frag
+    OUTPUTS name-${effect}.frag.qsb)
+endforeach()
 # Avatars and server icons come as PNG, JPEG, WebP or GIF over HTTPS. Call
 # video renders through Qt Multimedia's VideoOutput, whose QVideoSink needs
 # a media backend (Windows Media Foundation; nothing is decoded by it).

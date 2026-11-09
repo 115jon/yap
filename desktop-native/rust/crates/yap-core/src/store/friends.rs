@@ -268,6 +268,8 @@ pub struct FriendRow {
     pub game_icon: String,
     /// `friend`, `blocked`, `incoming` or `sent`.
     pub kind: &'static str,
+    /// Their display-name style (`view::name_style`), or empty.
+    pub name_style: String,
 }
 
 /// The open profile card's relationship (ProfileCard.tsx `relationFor`).
@@ -359,6 +361,7 @@ fn row(rel: &Relationship, presence: &Presence, api_base: &str) -> FriendRow {
         game,
         game_icon,
         kind,
+        name_style: super::view::name_style(user.display_name_style.as_ref()),
     }
 }
 

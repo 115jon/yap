@@ -704,6 +704,26 @@ fn a_name_style_should_go_out_in_the_servers_shape() {
 }
 
 #[test]
+fn a_yap_name_style_should_go_out_with_wave_only_when_on() {
+    let style = r##"{"font":"syne","effect":"ember","primary":"#fde68a","secondary":"#F97316","wave":true}"##;
+    assert_eq!(
+        name_style_patch(style),
+        json!({
+            "font": "syne",
+            "effect": "ember",
+            "primaryColor": "#FDE68A",
+            "secondaryColor": "#F97316",
+            "wave": true,
+        })
+    );
+    let off = r##"{"font":"vt323","effect":"crt","primary":"#FFFFFF","secondary":"#000000","wave":false}"##;
+    assert_eq!(name_style_patch(off).get("wave"), None);
+    assert_eq!(name_style_patch(off)["effect"], "crt");
+    let unknown = r##"{"font":"vt323","effect":"plasma","primary":"#FFFFFF","secondary":"#000000"}"##;
+    assert_eq!(name_style_patch(unknown), Value::Null);
+}
+
+#[test]
 fn nameplates_should_take_pictures_and_the_three_video_types() {
     assert_eq!(
         nameplate_content_type(r"C:\a\plate.WEBM"),

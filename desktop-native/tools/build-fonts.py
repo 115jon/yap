@@ -12,6 +12,13 @@ Downloads (curl) are pinned to one google/fonts commit and checked by
 SHA-256; the cache lives in desktop-native/tools/.cache/. When node_modules
 has the Fontsource packages, each source's version string (name ID 5) must
 match the WOFF2 the web loads.
+
+The Yap display-name faces (NAME_FACES: Silkscreen, Unbounded, Syne,
+Instrument Serif, VT323, Rubik Glitch, Major Mono Display) are the web's
+own Fontsource files, one weight each and latin only as the web loads them
+(src/display-name-fonts.css), pinned to their package version and SHA-256
+and converted from WOFF2 to TTF with one "Yap Name *" family each. (The
+eight Classic faces, `Display*.ttf`, were converted the same way by hand.)
 """
 
 import hashlib
@@ -72,6 +79,36 @@ INSTANCES = [
 ]
 
 
+# The Yap display-name faces: (file, family, package, WOFF2 in the
+# package's files/, sha256, italic). Families are what DisplayName.qml asks
+# for; the weight stays the source's (Unbounded 700, Syne 800).
+FONTSOURCE_VERSION = "5.3.0"
+FONTSOURCE = "https://cdn.jsdelivr.net/npm/@fontsource/{package}@" + FONTSOURCE_VERSION + "/{path}"
+NAME_FACES = [
+    ("DisplaySilkscreen-Regular.ttf", "Yap Name Silkscreen", "silkscreen",
+     "silkscreen-latin-400-normal.woff2",
+     "e6c72ea4702249202bcdd79d3343057e4e25ef1f04e3fcffd8602ab53b40b4cc", False),
+    ("DisplayUnbounded-Bold.ttf", "Yap Name Unbounded", "unbounded",
+     "unbounded-latin-700-normal.woff2",
+     "477fa23002517a32f232316d859e7b672a044f20073babec8ed3dbcfdb8e041a", False),
+    ("DisplaySyne-ExtraBold.ttf", "Yap Name Syne", "syne",
+     "syne-latin-800-normal.woff2",
+     "1a340e84b78c7e1e7ed24306d682fdcd6dc8cc6cb52b158fbaf22c03f7f001c3", False),
+    ("DisplayInstrumentSerif-Italic.ttf", "Yap Name Instrument Serif", "instrument-serif",
+     "instrument-serif-latin-400-italic.woff2",
+     "5a51946dfffa82972bc98745359c46761515641fda557c25116459a9f83da4a7", True),
+    ("DisplayVT323-Regular.ttf", "Yap Name VT323", "vt323",
+     "vt323-latin-400-normal.woff2",
+     "8ddbebcc1048154132e1d78eb9b1f7850bca1b7d857035ccf1cb4318ebc615b6", False),
+    ("DisplayRubikGlitch-Regular.ttf", "Yap Name Rubik Glitch", "rubik-glitch",
+     "rubik-glitch-latin-400-normal.woff2",
+     "ce7442b4b24dec89c46dee8926494d916d16c42ad038b9a14dceb96293773a5c", False),
+    ("DisplayMajorMono-Regular.ttf", "Yap Name Major Mono", "major-mono-display",
+     "major-mono-display-latin-400-normal.woff2",
+     "3fcb93251028559c08304b621be8d132d1360b0efae44c0f282181fb1e9800f3", False),
+]
+
+
 def fetch(url, dest, sha256=None):
     if not dest.exists():
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -98,6 +135,31 @@ def rename(font, family, italic):
     name.setName("https://openfontlicense.org", 14, 3, 1, 0x409)
 
 
+def style_bits(font, italic):
+    """REGULAR (bit 6) or ITALIC (bit 0); never BOLD, so GDI does not
+    treat a 600-800 cut as the bold of another family."""
+    os2 = font["OS/2"]
+    os2.fsSelection = (os2.fsSelection & ~0b1100001) | (0b1 if italic else 0b1000000)
+    font["head"].macStyle = 0b10 if italic else 0
+
+
+def name_faces():
+    modules = ROOT / "node_modules" / "@fontsource"
+    for file_name, family, package, woff2, sha, italic in NAME_FACES:
+        source = fetch(FONTSOURCE.format(package=package, path=f"files/{woff2}"),
+                       CACHE / "fontsource" / woff2, sha)
+        web = modules / package / "files" / woff2
+        if web.exists() and hashlib.sha256(web.read_bytes()).hexdigest() != sha:
+            sys.exit(f"{woff2}: node_modules has another file than the pinned one")
+        fetch(FONTSOURCE.format(package=package, path="LICENSE"), OUT / f"OFL-{package}.txt")
+        font = TTFont(source)
+        font.flavor = None
+        rename(font, family, italic)
+        style_bits(font, italic)
+        font.save(OUT / file_name)
+        print(f"{file_name}: {family} {font['OS/2'].usWeightClass}, {(OUT / file_name).stat().st_size} bytes")
+
+
 def main():
     modules = ROOT / "node_modules" / "@fontsource-variable"
     paths = {}
@@ -119,16 +181,14 @@ def main():
     for file_name, family, source, axes, italic in INSTANCES:
         font = instantiateVariableFont(TTFont(paths[source]), axes)
         rename(font, family, italic)
-        os2 = font["OS/2"]
-        os2.usWeightClass = axes["wght"]
-        # REGULAR (bit 6) or ITALIC (bit 0); never BOLD, so GDI does not
-        # treat a 600-800 cut as the bold of another family.
-        os2.fsSelection = (os2.fsSelection & ~0b1100001) | (0b1 if italic else 0b1000000)
-        font["head"].macStyle = 0b10 if italic else 0
+        font["OS/2"].usWeightClass = axes["wght"]
+        style_bits(font, italic)
         if "STAT" in font:
             del font["STAT"]
         font.save(OUT / file_name)
         print(f"{file_name}: {family}, {(OUT / file_name).stat().st_size} bytes")
+
+    name_faces()
 
 
 if __name__ == "__main__":

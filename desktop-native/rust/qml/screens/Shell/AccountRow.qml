@@ -111,7 +111,6 @@ Rectangle {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             height: 36
-            clip: true
 
             DisplayName {
                 id: nameText
