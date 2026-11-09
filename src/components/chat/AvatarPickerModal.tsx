@@ -21,7 +21,8 @@ import type { GifPickerItem } from "@/lib/gif-picker";
 import { getApiBaseUrl, getAuthAssetUrl } from "@/lib/platform";
 import { buildProxyMediaUrl } from "@/lib/proxy-media-url";
 import type { TooBigSituation } from "@/lib/too-big-copy";
-import { UPLOAD_LIMITS } from "@/lib/upload-limits";
+import { useMyEntitlement } from "@/hooks/useEntitlement";
+import { clientUploadLimitFor } from "@/lib/upload-limits";
 import { cn } from "@/lib/utils";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
@@ -124,7 +125,7 @@ export function AvatarPickerModal({
   description = "Upload a new avatar or reuse one of your recent uploads.",
   uploadKind = "avatar",
 }: AvatarPickerModalProps) {
-  const limit = UPLOAD_LIMITS[uploadKind];
+  const limit = clientUploadLimitFor(useMyEntitlement(), uploadKind);
   const [tooBig, setTooBig] = useState<{
     situation: TooBigSituation;
     source: PickSource;

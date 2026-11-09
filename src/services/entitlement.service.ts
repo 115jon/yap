@@ -14,6 +14,7 @@ import {
   type EntitlementSource,
   type Tier,
 } from "@/lib/entitlements";
+import { uploadLimitFor, type UploadKind } from "@/lib/upload-limits";
 
 type EntitlementRow = {
   tier: string;
@@ -34,6 +35,25 @@ export async function getEntitlement(
     .bind(userId)
     .first<EntitlementRow>();
   return row ? parseEntitlement(row) : FREE_ENTITLEMENT;
+}
+
+/**
+ * The single-request limit for `kind` under the caller's plan, read here and
+ * never from the client. The plan is only looked up for a file over the free
+ * limit (most are not); if it cannot be read, the free limit applies.
+ */
+export async function uploadLimitForUser(
+  db: D1Database,
+  userId: string,
+  kind: UploadKind,
+  size: number,
+): Promise<number> {
+  const free = uploadLimitFor(FREE_ENTITLEMENT, kind);
+  if (size <= free) return free;
+  const entitlement = await getEntitlement(db, userId).catch(
+    () => FREE_ENTITLEMENT,
+  );
+  return uploadLimitFor(entitlement, kind);
 }
 
 /**

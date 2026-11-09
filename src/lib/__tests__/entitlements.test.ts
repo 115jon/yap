@@ -108,8 +108,14 @@ describe("uploadLimitFor", () => {
     expect(clientUploadLimitFor(founder, "attachment")).toBe(500 * MB);
     expect(clientUploadLimitFor(loud, "attachment")).toBe(500 * MB);
     expect(clientUploadLimitFor(FREE_ENTITLEMENT, "attachment")).toBe(25 * MB);
+    // Avatars and banners: 25 MB with the perk, 8 MB without.
+    expect(clientUploadLimitFor(founder, "avatar")).toBe(25 * MB);
+    expect(clientUploadLimitFor(loud, "banner")).toBe(25 * MB);
+    expect(clientUploadLimitFor(FREE_ENTITLEMENT, "avatar")).toBe(
+      UPLOAD_LIMITS.avatar,
+    );
     // Kinds without a perk limit offer what they always did.
-    expect(clientUploadLimitFor(founder, "avatar")).toBe(UPLOAD_LIMITS.avatar);
+    expect(clientUploadLimitFor(founder, "gif")).toBe(UPLOAD_LIMITS.gif);
   });
 
   it("gives direct uploads the whole perk limit", () => {
@@ -125,9 +131,16 @@ describe("uploadLimitFor", () => {
     for (const kind of Object.keys(UPLOAD_LIMITS) as Array<
       keyof typeof UPLOAD_LIMITS
     >) {
-      if (kind === "attachment") continue;
+      if (kind in BIG_UPLOAD_LIMITS) continue;
       expect(uploadLimitFor(founder, kind)).toBe(UPLOAD_LIMITS[kind]);
     }
+  });
+
+  it("gives avatars and banners 25 MB with the perk, through the Worker", () => {
+    expect(uploadLimitFor(founder, "avatar")).toBe(25 * MB);
+    expect(uploadLimitFor(loud, "banner")).toBe(25 * MB);
+    expect(uploadLimitFor(FREE_ENTITLEMENT, "avatar")).toBe(8 * MB);
+    expect(uploadLimitFor(FREE_ENTITLEMENT, "banner")).toBe(8 * MB);
   });
 });
 
