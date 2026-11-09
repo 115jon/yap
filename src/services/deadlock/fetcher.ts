@@ -609,7 +609,8 @@ export async function reconcileDeadlockTracking(
     .run();
   const keep = `SELECT ${STEAM_ACCOUNT_SQL} FROM user_connections uc
        JOIN profile_boards pb ON pb.user_id = uc.user_id
-       WHERE uc.provider = 'steam' AND ${HAS_WIDGET_SQL}`;
+       WHERE uc.provider = 'steam' AND ${HAS_WIDGET_SQL}
+         AND ${STEAM_ACCOUNT_SQL} IS NOT NULL`;
   const [dropped] = await db.batch([
     db.prepare(
       `DELETE FROM deadlock_fetch_state WHERE account_id NOT IN (${keep})`,
