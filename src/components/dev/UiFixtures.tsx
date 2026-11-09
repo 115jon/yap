@@ -124,6 +124,8 @@ import coverSlowfires from "@/components/dev/assets/cover-slowfires.webp";
 import coverGlasshouse from "@/components/dev/assets/cover-glasshouse.webp";
 import coverTidelines from "@/components/dev/assets/cover-tidelines.webp";
 import coverSmallhours from "@/components/dev/assets/cover-smallhours.webp";
+import avatarAda from "@/components/dev/assets/avatar-ada.webp";
+import avatarLinus from "@/components/dev/assets/avatar-linus.gif";
 import { SplashScreen } from "@/components/SplashScreen";
 import { VoiceControls } from "@/components/voice/VoiceControls";
 import { MembersTray, VoiceStage } from "@/components/voice/VoiceStage";
@@ -1216,6 +1218,20 @@ const tileStateItems: GridItem[] = [
     isSpeaking: false,
   },
 ];
+
+/**
+ * The stage person card (`voice-person&who=linus|ada|grace`): Linus has an
+ * animated GIF and is talking, Ada a still picture, Grace no picture (her
+ * profile tint lights the card).
+ */
+const personAvatars = new Map([
+  ["g-ada", avatarAda],
+  ["g-linus", avatarLinus],
+]);
+const personItems: GridItem[] = gridItems.map((g) => ({
+  ...g,
+  avatar: personAvatars.get(g.id) ?? null,
+}));
 
 /** Nine people: they fit at 1280x720 without scrolling; a phone scrolls. */
 const manyItems: GridItem[] = [
@@ -3061,6 +3077,14 @@ export default function UiFixtures() {
       break;
     case "voice-focus":
       content = <VoiceRoom focusId="g-ada" />;
+      break;
+    case "voice-person":
+      content = (
+        <VoiceRoom
+          focusId={`g-${fixtureParam("who") ?? "linus"}`}
+          items={personItems}
+        />
+      );
       break;
     case "voice-tiles":
       content = <VoiceRoom items={tileStateItems} />;

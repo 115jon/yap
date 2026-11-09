@@ -18,6 +18,7 @@
  * to the chat shell). Families, by name:
  *   shell*, dm-*, dm-call-*, members, friends, account-row, message-rows
  *   voice*, room*, incoming-call, voice-debug*, connection-states
+ *   voice-person (the stage person card; `&who=linus|ada|grace`)
  *   settings, settings-<panel>, sp-* (settings and profile editors)
  *   search*, command-menu, menus, volume-boost, splash, overlay*, no-channel,
  *   drawer*
