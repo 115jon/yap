@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   requireAuth: vi.fn(),
   getMe: vi.fn(),
   getUserProfileMutuals: vi.fn(),
+  hasBlocked: vi.fn(),
 }));
 
 vi.mock("@/lib/api-helpers", () => ({
@@ -17,6 +18,10 @@ vi.mock("@/lib/api-helpers", () => ({
 vi.mock("@/services/user.service", () => ({
   getMe: mocks.getMe,
   getUserProfileMutuals: mocks.getUserProfileMutuals,
+}));
+
+vi.mock("@/services/connection.service", () => ({
+  hasBlocked: mocks.hasBlocked,
 }));
 
 import { Route } from "../users/$id/profile";
@@ -34,6 +39,14 @@ const entitlement = {
   expires_at: "2099-01-01T00:00:00.000Z",
 };
 const badges = [{ id: "loud", awarded_at: "2026-10-01T00:00:00.000Z" }];
+const connections = [
+  {
+    provider: "steam",
+    display_name: "Gordon",
+    profile_url: "https://steamcommunity.com/profiles/76561197960287930",
+    avatar_url: null,
+  },
+];
 
 async function profile(viewer: string, target: string) {
   mocks.requireAuth.mockResolvedValue({ userId: viewer });
@@ -42,7 +55,7 @@ async function profile(viewer: string, target: string) {
     params: { id: target },
   });
   return (await response.json()) as {
-    user: { entitlement: unknown; badges: unknown };
+    user: { entitlement: unknown; badges: unknown; connections?: unknown };
   };
 }
 
@@ -53,8 +66,10 @@ beforeEach(() => {
     username: id,
     entitlement,
     badges,
+    connections,
   }));
   mocks.getUserProfileMutuals.mockResolvedValue({});
+  mocks.hasBlocked.mockResolvedValue(false);
 });
 
 describe("GET /api/users/:id/profile", () => {
@@ -77,5 +92,14 @@ describe("GET /api/users/:id/profile", () => {
   it("keeps the whole plan for the user themselves", async () => {
     const { user } = await profile("target", "target");
     expect(user.entitlement).toEqual(entitlement);
+  });
+
+  it("shows the shown connections, and none to someone the user blocked", async () => {
+    expect((await profile("viewer", "target")).user.connections).toEqual(
+      connections,
+    );
+    expect(mocks.hasBlocked).toHaveBeenCalledWith({}, "target", "viewer");
+    mocks.hasBlocked.mockResolvedValue(true);
+    expect((await profile("viewer", "target")).user.connections).toEqual([]);
   });
 });

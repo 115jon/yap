@@ -18,6 +18,11 @@ const ALLOWED_HOSTS = new Set([
   // vxtwitter.com is not listed: only its /tvid/ video paths are (below).
   "tenor.com",
   "lh3.googleusercontent.com",
+  // Steam avatars on profile connections (services/connections/steam.ts).
+  "avatars.steamstatic.com",
+  "avatars.akamai.steamstatic.com",
+  "avatars.fastly.steamstatic.com",
+  "avatars.cloudflare.steamstatic.com",
 ]);
 
 const KLIPY_STATIC_HOST_PATTERN = /^static\d*\.klipy\.com$/;
