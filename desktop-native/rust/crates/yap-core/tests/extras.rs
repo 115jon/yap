@@ -1,6 +1,6 @@
 //! The extras through the reducer: the inbox, who reacted, Mark unread,
-//! share links, the username, sessions, the channel invite, the catalog
-//! sync, recent avatars, AI emoji and the voice channel status.
+//! share links, the username, sessions, the channel invite, recent
+//! avatars, AI emoji and the voice channel status.
 
 use std::path::PathBuf;
 
@@ -451,34 +451,6 @@ fn a_channel_invite_should_link_to_its_code() {
         view(&fx).expect("view").invite.url,
         format!("{BASE}/invite/abc123")
     );
-}
-
-// The catalog sync
-
-#[test]
-fn a_non_admin_sync_should_get_the_web_sentence() {
-    let mut client = Client::online();
-    let fx = client.command(ExtrasCommand::SyncCatalog);
-    let (id, _) = extras_request(&fx);
-    let fx = client.answer(id, Err(http_error(403, "forbidden")));
-    assert_eq!(
-        view(&fx).expect("view").sync.message,
-        "Only catalog admins can refresh the catalog. It refreshes on its own every hour."
-    );
-}
-
-#[test]
-fn the_sync_note_should_clear_after_its_timeout() {
-    let mut client = Client::online();
-    let fx = client.command(ExtrasCommand::SyncCatalog);
-    let (id, _) = extras_request(&fx);
-    let fx = client.answer(id, Err(http_error(403, "forbidden")));
-    let later = fx.iter().find_map(|e| match e {
-        Effect::Later { input, .. } => Some((**input).clone()),
-        _ => None,
-    });
-    let fx = client.input(later.expect("a timeout"));
-    assert_eq!(view(&fx).expect("view").sync.message, "");
 }
 
 // Recent avatars

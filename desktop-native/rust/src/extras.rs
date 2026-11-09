@@ -1,6 +1,6 @@
 //! `Extras`: the inbox, who reacted, the channel details' Media, Links and
-//! Files tabs, voice channel status, recent avatars, AI emoji, the catalog
-//! sync, share links, the account's username, claims and sessions, and the
+//! Files tabs, voice channel status, recent avatars, AI emoji, share
+//! links, the account's username, claims and sessions, and the
 //! channel's quick invite ([`yap_core::store::extras`]). Each surface is
 //! one JSON property, set only when it changed.
 
@@ -37,8 +37,6 @@ pub mod qobject {
         /// `{loading, error, pending, generating, generateError,
         /// generateSuccess, rows: [{id, shortcode, url, status, token}]}`.
         #[qproperty(QString, emojis)]
-        /// `{busy, ok, message}`.
-        #[qproperty(QString, sync)]
         /// `{messageId, busy, url, error}`.
         #[qproperty(QString, share)]
         /// `{usernameDraft, usernameCheck, usernameMessage, usernameSaving,
@@ -150,10 +148,6 @@ pub mod qobject {
         fn clear_emoji_notes(self: &Extras);
 
         #[qinvokable]
-        #[cxx_name = "syncCatalog"]
-        fn sync_catalog(self: &Extras);
-
-        #[qinvokable]
         #[cxx_name = "markUnread"]
         fn mark_unread(self: &Extras, message_id: &QString);
 
@@ -221,7 +215,6 @@ pub struct ExtrasRust {
     voice_status: QString,
     avatars: QString,
     emojis: QString,
-    sync: QString,
     share: QString,
     account: QString,
     invite: QString,
@@ -264,7 +257,6 @@ fn apply(mut object: Pin<&mut qobject::Extras>, view: &ExtrasView) {
     set!(voice_status, set_voice_status, view.voice_status);
     set!(avatars, set_avatars, view.avatars);
     set!(emojis, set_emojis, view.emojis);
-    set!(sync, set_sync, view.sync);
     set!(share, set_share, view.share);
     set!(account, set_account, view.account);
     set!(invite, set_invite, view.invite);
@@ -448,10 +440,6 @@ impl qobject::Extras {
 
     pub fn clear_emoji_notes(&self) {
         send(ExtrasCommand::ClearEmojiNotes);
-    }
-
-    pub fn sync_catalog(&self) {
-        send(ExtrasCommand::SyncCatalog);
     }
 
     pub fn mark_unread(&self, message_id: &QString) {

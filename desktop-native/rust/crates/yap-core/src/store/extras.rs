@@ -4,7 +4,7 @@
 //! tabs (MemberList.tsx), a voice channel's status
 //! (VoiceChannelTextStatusModal.tsx, VoiceChannelMediaStatusModal.tsx), the
 //! recent avatars (AvatarPickerModal.tsx), AI emoji (EmojiPicker.tsx), the
-//! catalog admins' sync, Mark unread, shared message links
+//! Mark unread, shared message links
 //! (MessageShareModal.tsx), the account's username, claims and sessions
 //! (AccountPanel.tsx, SessionsPanel.tsx) and the channel's quick invite
 //! (ChannelInviteModal.tsx).
@@ -135,10 +135,6 @@ pub enum ExtrasCommand {
         shortcode: String,
     },
     ClearEmojiNotes,
-    /// A catalog admin forces an upstream sync.
-    SyncCatalog,
-    /// The sync's note has shown long enough (fed back after 6 s).
-    ClearSyncNote(u32),
     /// Mark unread from this message on (the message menu).
     MarkUnread(String),
     /// A public link to a message of the open list.
@@ -208,7 +204,6 @@ pub enum ExtrasRequest {
         prompt: String,
         shortcode: String,
     },
-    SyncCatalog,
     MarkUnread {
         channel_id: String,
         message_id: String,
@@ -256,7 +251,6 @@ impl ExtrasRequest {
             | Self::RevokeSession { .. } => Method::Delete,
             Self::AddVoiceMedia { .. }
             | Self::GenerateEmoji { .. }
-            | Self::SyncCatalog
             | Self::Share { .. }
             | Self::Claim { .. }
             | Self::ChannelInvite { .. } => Method::Post,
@@ -283,7 +277,6 @@ impl ExtrasRequest {
             }
             Self::AvatarHistory | Self::DeleteAvatar { .. } => "/api/avatars/history".into(),
             Self::Emojis | Self::GenerateEmoji { .. } => "/api/emojis".into(),
-            Self::SyncCatalog => "/api/collectibles/sync".into(),
             Self::MarkUnread { channel_id, .. } => format!("/api/channels/{channel_id}/read-state"),
             Self::Share { message_id, .. } => format!("/api/messages/{message_id}/share"),
             Self::CheckUsername { username } => {
@@ -319,7 +312,6 @@ impl ExtrasRequest {
             Self::GenerateEmoji { prompt, shortcode } => {
                 json!({ "prompt": prompt, "shortcode": shortcode })
             }
-            Self::SyncCatalog => json!({}),
             Self::MarkUnread { message_id, .. } => json!({ "message_id": message_id }),
             Self::Share { expires, .. } => json!({ "expires": expires }),
             Self::SaveUsername { username } => json!({ "username": username }),
@@ -372,7 +364,6 @@ impl ExtrasRequest {
             Self::GenerateEmoji { .. } => ExtrasResponse::Emoji(
                 serde_json::from_value(take(&mut body, "item")).map_err(|e| decode("emoji", e))?,
             ),
-            Self::SyncCatalog => ExtrasResponse::Catalog(take(&mut body, "catalog")),
             Self::MarkUnread { .. } => ExtrasResponse::ReadState(
                 serde_json::from_value(body).map_err(|e| decode("read", e))?,
             ),
@@ -445,8 +436,6 @@ pub enum ExtrasResponse {
     Avatars(Vec<AvatarUpload>),
     Emojis(Vec<GeneratedEmoji>),
     Emoji(GeneratedEmoji),
-    /// The catalog as served after a sync.
-    Catalog(Value),
     ReadState(ReadState),
     /// The public link.
     Shared(String),
@@ -560,7 +549,6 @@ pub enum ExtrasOp {
     DeleteAvatar(String),
     Emojis,
     Generate,
-    Sync,
     /// The read mark before, to put back on a refusal.
     MarkUnread {
         channel_id: String,
@@ -644,11 +632,6 @@ pub struct ExtrasState {
     pub(super) generating: Option<RequestId>,
     pub(super) generate_error: String,
     pub(super) generate_success: String,
-    pub(super) sync: Option<RequestId>,
-    /// The sync's outcome: (ok, sentence).
-    pub(super) sync_note: Option<(bool, String)>,
-    /// Counts the notes, so only the newest one's timeout clears it.
-    pub(super) sync_serial: u32,
     /// A channel whose automatic read mark waits for the user (Mark unread).
     pub(super) unread_hold: Option<String>,
     pub(super) share_message: String,
@@ -848,14 +831,6 @@ pub struct EmojisView {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SyncView {
-    pub busy: bool,
-    pub ok: bool,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ShareView {
     pub message_id: String,
     pub busy: bool,
@@ -911,7 +886,6 @@ pub struct ExtrasView {
     pub voice_status: VoiceStatusView,
     pub avatars: AvatarsView,
     pub emojis: EmojisView,
-    pub sync: SyncView,
     pub share: ShareView,
     pub account: AccountView,
     pub invite: InviteView,

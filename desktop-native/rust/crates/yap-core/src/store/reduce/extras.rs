@@ -1,6 +1,6 @@
 //! The extras ([`crate::store::extras`]): the inbox, who reacted, the
 //! details tabs, voice channel status, recent avatars, AI emoji, the
-//! catalog sync, Mark unread, share links, the account's username, claims
+//! Mark unread, share links, the account's username, claims
 //! and sessions, and the channel's quick invite.
 
 use serde_json::Value;
@@ -17,10 +17,6 @@ use crate::store::state::State;
 use crate::store::time::{format_rfc3339, parse_rfc3339};
 use crate::store::view::{self, ViewUpdate};
 use crate::store::{ApiRequest, ApiResponse, Effect, RequestId};
-
-/// The 403 a non-admin gets (collectibles-catalog-client.ts).
-const SYNC_FORBIDDEN: &str =
-    "Only catalog admins can refresh the catalog. It refreshes on its own every hour.";
 
 fn error_of(result: &Result<ApiResponse, ApiError>) -> Option<&ApiError> {
     result.as_ref().err()
@@ -195,18 +191,6 @@ impl State {
             ExtrasCommand::ClearEmojiNotes => {
                 self.extras.generate_error.clear();
                 self.extras.generate_success.clear();
-            }
-            ExtrasCommand::SyncCatalog => {
-                if self.extras.sync.is_none() {
-                    self.extras.sync_note = None;
-                    self.extras.sync =
-                        self.extras_http(fx, ExtrasRequest::SyncCatalog, ExtrasOp::Sync);
-                }
-            }
-            ExtrasCommand::ClearSyncNote(serial) => {
-                if serial == self.extras.sync_serial {
-                    self.extras.sync_note = None;
-                }
             }
             ExtrasCommand::MarkUnread(message_id) => self.mark_unread(fx, &message_id),
             ExtrasCommand::ShareMessage {
@@ -918,34 +902,6 @@ impl State {
                     }
                 }
             }
-            (ExtrasOp::Sync, result) => {
-                self.extras.sync = None;
-                self.extras.sync_note = Some(match result {
-                    Ok(ExtrasResponse::Catalog(catalog)) => {
-                        self.apply_synced_catalog(fx, catalog);
-                        (true, "Collectibles catalog refreshed.".into())
-                    }
-                    Ok(_) => (true, "Collectibles catalog refreshed.".into()),
-                    Err(ApiError::Http { status: 403, .. }) => (false, SYNC_FORBIDDEN.into()),
-                    Err(ApiError::Http {
-                        status: 429,
-                        message,
-                    }) if message != "request failed" => (false, message),
-                    Err(ApiError::Http { status: 429, .. }) => (
-                        false,
-                        "The catalog synced moments ago. Try again in a few minutes.".into(),
-                    ),
-                    Err(error) => (false, server_or(&error, "refresh collectibles")),
-                });
-                // The note shows for 6 s (the store has no clock).
-                self.extras.sync_serial = self.extras.sync_serial.wrapping_add(1);
-                fx.push(Effect::Later {
-                    delay: std::time::Duration::from_secs(6),
-                    input: Box::new(crate::store::Input::User(crate::store::Command::Extras(
-                        ExtrasCommand::ClearSyncNote(self.extras.sync_serial),
-                    ))),
-                });
-            }
             (
                 ExtrasOp::MarkUnread {
                     channel_id,
@@ -1077,17 +1033,6 @@ impl State {
         }
     }
 
-    fn apply_synced_catalog(&mut self, fx: &mut Effects, catalog: Value) {
-        let Ok(parsed) =
-            serde_json::from_value::<yap_protocol::collectibles::Catalog>(catalog.clone())
-        else {
-            return;
-        };
-        fx.push(Effect::SaveCatalog { catalog });
-        self.set_shop_catalog(parsed);
-        self.sync_shop(fx);
-    }
-
     // The view
 
     fn extras_view(&self) -> ExtrasView {
@@ -1210,15 +1155,6 @@ impl State {
                         }
                     })
                     .collect(),
-            },
-            sync: x::SyncView {
-                busy: e.sync.is_some(),
-                ok: e.sync_note.as_ref().is_some_and(|(ok, _)| *ok),
-                message: e
-                    .sync_note
-                    .as_ref()
-                    .map(|(_, m)| m.clone())
-                    .unwrap_or_default(),
             },
             share: x::ShareView {
                 message_id: e.share_message.clone(),
