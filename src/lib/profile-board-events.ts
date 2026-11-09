@@ -7,6 +7,11 @@
 export interface ProfileBoardUpdate {
   user_id: string;
   version: number;
+  /**
+   * Only the widgets' data changed (the Deadlock stats landed): refetch
+   * whatever the version.
+   */
+  data?: boolean;
 }
 
 type Listener = (update: ProfileBoardUpdate) => void;
@@ -19,7 +24,11 @@ export function emitProfileBoardUpdate(value: unknown): void {
   if (typeof raw.user_id !== "string" || typeof raw.version !== "number") {
     return;
   }
-  const update = { user_id: raw.user_id, version: raw.version };
+  const update: ProfileBoardUpdate = {
+    user_id: raw.user_id,
+    version: raw.version,
+  };
+  if (raw.data === true) update.data = true;
   for (const listener of listeners) listener(update);
 }
 

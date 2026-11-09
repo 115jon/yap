@@ -109,8 +109,9 @@ export function useProfileBoard(
     if (fixture) return;
     return onProfileBoardUpdate((update) => {
       if (update.user_id !== userId) return;
-      // Our own save already replaced the board at this version.
-      if (versionRef.current >= update.version) return;
+      // Our own save already replaced the board at this version (a
+      // data-only update refetches anyway).
+      if (!update.data && versionRef.current >= update.version) return;
       setNonce((value) => value + 1);
     });
   }, [userId, fixture]);

@@ -171,6 +171,7 @@ export const ICONS = {
   gauge: { glyph: "gauge" },
   server: { glyph: "hard-drives" },
   offline: { glyph: "wifi-slash" },
+  cloudOff: { glyph: "cloud-slash" },
 
   /* Settings */
   sessions: { glyph: "devices", fill: true },

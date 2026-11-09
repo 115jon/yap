@@ -40,6 +40,11 @@ function handlers(): ProfileBoardHandlers {
         broadcastToUser(userId, PROFILE_BOARD_UPDATE, data),
       ]);
     },
+    deadlockRefresh: async (accountId) => {
+      const { scheduleDeadlockRefresh } =
+        await import("@/services/deadlock/runtime");
+      await scheduleDeadlockRefresh([accountId], { reason: "view" });
+    },
     waitUntil,
   });
 }

@@ -15,6 +15,7 @@ import type { BoardCtx } from "../board-format";
 import { BadgesWidget } from "./Badges";
 import { CountdownWidget } from "./Countdown";
 import { CustomWidget } from "./Custom";
+import { DeadlockWidget } from "./Deadlock";
 import { GuestbookWidget } from "./Guestbook";
 import { LinksWidget } from "./Links";
 import { ListeningWidget } from "./Listening";
@@ -30,6 +31,7 @@ import { VoiceHoursWidget } from "./VoiceHours";
 const WIDGET_COMPONENTS = {
   now_playing: NowPlayingWidget,
   top_games: TopGamesWidget,
+  deadlock: DeadlockWidget,
   voice_hours: VoiceHoursWidget,
   listening: ListeningWidget,
   badges: BadgesWidget,

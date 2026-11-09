@@ -16,6 +16,7 @@
  * read (`boardForViewer`), and the owner sees it as a draft.
  */
 
+import type { DeadlockBoardData, DeadlockRange } from "@/lib/deadlock";
 import { hasPerk, type Entitlement, type Perk } from "@/lib/entitlements";
 
 // ── Widgets ────────────────────────────────────────────────────────────────
@@ -23,6 +24,7 @@ import { hasPerk, type Entitlement, type Perk } from "@/lib/entitlements";
 export const WIDGET_TYPES = [
   "now_playing",
   "top_games",
+  "deadlock",
   "voice_hours",
   "listening",
   "badges",
@@ -87,6 +89,16 @@ export const WIDGET_SPECS: Record<WidgetType, WidgetSpec> = {
     type: "top_games",
     name: "Top games",
     blurb: "Your most played over 7 days, 30 days or all time.",
+    category: "games",
+    sizes: ["S", "M", "L"],
+    defaultSize: "M",
+    max: 1,
+  },
+  deadlock: {
+    type: "deadlock",
+    name: "Deadlock",
+    blurb:
+      "Your rank, heroes and recent matches, and what you're playing right now.",
     category: "games",
     sizes: ["S", "M", "L"],
     defaultSize: "M",
@@ -231,6 +243,11 @@ export const TOP_GAMES_RANGES = ["7d", "30d", "all"] as const;
 export type TopGamesRange = (typeof TOP_GAMES_RANGES)[number];
 
 export const VOICE_HOURS_PERIODS = ["month", "30d"] as const;
+
+/** Deadlock: what the plate shows when the owner is not in the game. */
+export const DEADLOCK_AT_REST = ["career", "last_match"] as const;
+export type DeadlockAtRest = (typeof DEADLOCK_AT_REST)[number];
+export const DEADLOCK_WIDGET_RANGES = ["7d", "30d", "season"] as const;
 export type VoiceHoursPeriod = (typeof VOICE_HOURS_PERIODS)[number];
 
 export interface PhotoItem {
@@ -258,6 +275,15 @@ export interface QuoteSnapshot {
 export interface WidgetConfigMap {
   now_playing: { when_idle: "last_played" | "hide" };
   top_games: { range: TopGamesRange };
+  /**
+   * Every game mode counts. `show_party`: name Yap friends in the party
+   * (only people who linked Steam too) on the live plate.
+   */
+  deadlock: {
+    at_rest: DeadlockAtRest;
+    range: DeadlockRange;
+    show_party: boolean;
+  };
   voice_hours: { period: VoiceHoursPeriod };
   listening: Record<string, never>;
   /** Empty means every badge the owner has, newest first. */
@@ -323,6 +349,7 @@ export function defaultWidgetConfig<T extends WidgetType>(
   const configs: { [K in WidgetType]: () => WidgetConfigMap[K] } = {
     now_playing: () => ({ when_idle: "last_played" }),
     top_games: () => ({ range: "30d" }),
+    deadlock: () => ({ at_rest: "career", range: "30d", show_party: true }),
     voice_hours: () => ({ period: "month" }),
     listening: () => ({}),
     badges: () => ({ badge_ids: [] }),
@@ -552,6 +579,11 @@ export function parseWidgetConfig<T extends WidgetType>(
       when_idle: oneOf(raw.when_idle, ["last_played", "hide"], "last_played"),
     }),
     top_games: () => ({ range: oneOf(raw.range, TOP_GAMES_RANGES, "30d") }),
+    deadlock: () => ({
+      at_rest: oneOf(raw.at_rest, DEADLOCK_AT_REST, "career"),
+      range: oneOf(raw.range, DEADLOCK_WIDGET_RANGES, "30d"),
+      show_party: raw.show_party !== false,
+    }),
     voice_hours: () => ({
       period: oneOf(raw.period, VOICE_HOURS_PERIODS, "month"),
     }),
@@ -876,6 +908,11 @@ export interface BoardData {
     total_seconds: number;
     game_count: number;
   };
+  /**
+   * deadlock: the owner's career digest and its state. Others receive it
+   * only when there is something to show (see boardForViewerData).
+   */
+  deadlock?: DeadlockBoardData;
   /** voice_hours: one entry per day of the period, oldest first. */
   voice_hours?: {
     period: VoiceHoursPeriod;

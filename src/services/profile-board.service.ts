@@ -13,11 +13,16 @@
  * anyone, so a free user can draft it and a lapsed plan loses nothing, and
  * `boardForViewer` keeps it from every other viewer while the owner's plan
  * does not cover it.
+ *
+ * The Deadlock widget is free, but others only get it when there is
+ * something to show: not linked, no matches and deleted-at-source are
+ * the owner's alone (`getBoardView` drops the plate for everyone else).
  */
 
 import type { D1Database } from "@cloudflare/workers-types";
 
 import { BADGE_IDS } from "@/lib/badges";
+import { isOwnerOnlyDeadlockState } from "@/lib/deadlock";
 import type { Entitlement } from "@/lib/entitlements";
 import {
   boardAssets,
@@ -40,6 +45,7 @@ import {
   type WidgetType,
 } from "@/lib/profile-board";
 import { ServiceError } from "@/lib/service-error";
+import { deadlockBoardData } from "@/services/deadlock/board";
 import { getProfileExtras } from "@/services/entitlement.service";
 import { retentionCutoff } from "@/services/profile-activity.service";
 import {
@@ -473,6 +479,8 @@ export async function boardData(
     board: ProfileBoard;
     badges: Array<{ id: string; awarded_at: string }>;
     now: number;
+    /** A Deadlock account whose plate is old enough to fetch again. */
+    onDeadlockRefresh?(accountId: number): void;
   },
 ): Promise<BoardData> {
   const { ownerId, viewerId, board, now } = input;
@@ -574,6 +582,29 @@ export async function boardData(
     );
   }
 
+  // The owner always gets the Deadlock state (cheap: D1 only), so a plate
+  // just added in the editor knows whether Steam is linked.
+  const deadlockWidget = board.widgets.find(
+    (widget) => widget.type === "deadlock",
+  );
+  if (deadlockWidget || isOwner) {
+    jobs.push(
+      deadlockBoardData(db, {
+        ownerId,
+        isOwner,
+        range:
+          deadlockWidget?.type === "deadlock"
+            ? deadlockWidget.cfg.range
+            : "30d",
+        track: !!deadlockWidget,
+        now,
+      }).then((view) => {
+        data.deadlock = view.data;
+        if (view.refresh !== null) input.onDeadlockRefresh?.(view.refresh);
+      }),
+    );
+  }
+
   if (types.has("listening")) {
     jobs.push(
       (async () => {
@@ -640,7 +671,12 @@ export async function boardData(
  */
 export async function getBoardView(
   db: D1Database,
-  input: { ownerId: string; viewerId: string; now?: number },
+  input: {
+    ownerId: string;
+    viewerId: string;
+    now?: number;
+    onDeadlockRefresh?(accountId: number): void;
+  },
 ): Promise<BoardResponse> {
   const now = input.now ?? Date.now();
   const isOwner = input.ownerId === input.viewerId;
@@ -656,18 +692,34 @@ export async function getBoardView(
     getStoredBoard(db, input.ownerId),
     getProfileExtras(db, input.ownerId),
   ]);
-  const { board, drafts } = boardForViewer(stored.board, {
+  const viewed = boardForViewer(stored.board, {
     isOwner,
     ownerEntitlement: extras.entitlement,
     now,
   });
+  const { drafts } = viewed;
+  let { board } = viewed;
   const data = await boardData(db, {
     ownerId: input.ownerId,
     viewerId: input.viewerId,
     board,
     badges: extras.badges,
     now,
+    onDeadlockRefresh: input.onDeadlockRefresh,
   });
+  // Nothing to show (not linked, no matches, deleted at source): the
+  // plate is the owner's alone.
+  if (
+    !isOwner &&
+    data.deadlock &&
+    isOwnerOnlyDeadlockState(data.deadlock.state)
+  ) {
+    board = {
+      v: 1,
+      widgets: board.widgets.filter((widget) => widget.type !== "deadlock"),
+    };
+    delete data.deadlock;
+  }
   return {
     user_id: input.ownerId,
     board,
