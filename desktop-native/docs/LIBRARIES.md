@@ -744,7 +744,7 @@ Versions from the crates already in the lock or the registry cache on
 | Chat video             | Qt Multimedia `MediaPlayer` + `VideoOutput` on Windows Media Foundation (the only backend in the static Qt 6.6.3)                                                | Plays mp4 (H.264/AAC) from a URL with seeking, including `/api/proxy-media`'s synthetic 206 ranges (live: TikTok, X, a direct mp4). No seekable `QIODevice` was needed: Media Foundation's own HTTP source does the ranges.                                                                                                                                                                                                     |
 | WebM                   | `webm-iterable` 0.7.1 (2026-08-28, MIT, pure Rust) in the new `yap-webm` crate; libvpx's VP8/VP9 decoders and libyuv from LiveKit's `webrtc.lib`                 | Qt's backend opens sources through `IMFSourceResolver`, which has no webm byte-stream handler (the player waits in `LoadingMedia` forever). See §10.1.                                                                                                                                                                                                                                                                          |
 | APNG and animated WebP | `image` 0.25.10 (`png`, `webp` features, no defaults) in the new `yap-anim` crate, behind `src/anim.rs` and the `AnimatedPicture` item (`cpp/animatedpicture.*`) | Qt's PNG reader shows only APNG's default image; decorations and effects are APNG. One decoder for both formats: frames composited, scaled to the drawn size (never up), premultiplied, delays clamped as browsers do. Decoded on the thread pool; a shared 96 MB cache keyed by URL and size; frames tick only while playing, on screen and with the app active. Qt's `qwebp` could animate WebP too, but one path is simpler. |
-| Web players            | `webview2-com` =0.38.2 (Tauri's version, `windows` 0.61, already in the lock)                                                                                    | The web's iframes need a browser. Each player is a WebView2 controller in a child window of ours, placed every rendered frame over its QML item and clipped to the chat list; hidden under popups. The loader is linked statically from `WebView2LoaderStatic.lib` (no DLL; `webview2-com-sys`'s own binding would import `WebView2Loader.dll`).                                                                                |
+| Web players            | `webview2-com` =0.39.1 (`windows` 0.62, as velopack; was Tauri's =0.38.2 on `windows` 0.61 until the audit in §16)                                               | The web's iframes need a browser. Each player is a WebView2 controller in a child window of ours, placed every rendered frame over its QML item and clipped to the chat list; hidden under popups. The loader is linked statically from `WebView2LoaderStatic.lib` (no DLL; `webview2-com-sys`'s own binding would import `WebView2Loader.dll`).                                                                                |
 
 ### 10.1 WebM: demuxer and decoder
 
@@ -1368,3 +1368,93 @@ No new third-party crate came in for it.
 The probe (`cargo run --release -p yap-games --example probe [s]`) prints
 the catalog's load time and heap and the detector's CPU over the real
 process list, counts only.
+
+## 16. Dependency audit (cargo-deny, 2026-11-08)
+
+`rust/deny.toml` runs four checks on the Windows target only. Crates that
+build only for Linux, macOS, Android or wasm (openssl, security-framework,
+jni, r-efi) are not in the exe and are left out. README "Dependency audit"
+says how to run it. The release workflow runs it before the build.
+
+| check      | setting                                                                                                          | result                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| advisories | RustSec database; vulnerabilities, `unmaintained = "all"`, unsound and yanked versions are errors; no ignores    | **none** (0 vulnerable, 0 unmaintained) |
+| licenses   | our crates (GPL-3.0-only, `publish = false`) skipped; an allow list of exactly what the tree uses                | ok                                      |
+| bans       | `multiple-versions = "warn"`, wildcards denied; the duplicates that stay are in `skip`, each with its reason     | ok, no unexplained duplicate            |
+| sources    | crates.io only; no git or other registries (the patched crates are `[patch]` paths made by `patches/vendor.ps1`) | ok                                      |
+
+**Licences in use** (`cargo deny list -l license`): MIT, Apache-2.0,
+BSD-3-Clause, ISC, Zlib, 0BSD, BSL-1.0, Unlicense, Unicode-3.0,
+BlueOak-1.0.0, CDLA-Permissive-2.0 (webpki-roots, through velopack's ureq)
+and MPL-2.0 (symphonia; file-level copyleft, fine under our GPL-3.0).
+Apache-2.0 WITH LLVM-exception, BSD-2-Clause and LGPL-2.1-or-later appear
+only on crates that do not build for Windows, so they are not on the list.
+
+### 16.1 Fixed
+
+| duplicate                                                                                            | was                                                              | now                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `windows` 0.61 and 0.62, and 10 `windows-*` crates with them                                         | ours and `webview2-com` 0.38.2 on 0.61, velopack on 0.62         | everything on **0.62.2**: `webview2-com` =0.39.1 (its release on 0.62); `windows` and `windows-core` 0.62 in the root, `yap-capture` and `yap-voice` |
+| `sha2` 0.10 and 0.11, with `digest`, `block-buffer`, `crypto-common`, `cpufeatures`, `generic-array` | `yap-capture` (the signed hook's hash) on 0.10, velopack on 0.11 | `yap-capture` on 0.11 (the same `Sha256::digest` call)                                                                                               |
+| `windows-sys` 0.59                                                                                   | `tempfile`, `winapi-util`                                        | gone after the lock update. 0.60 (keyring) and 0.61 are left                                                                                         |
+
+26 duplicate warnings became 10, and §16.2 gives the reason for each.
+
+In this code `windows` 0.62 changes one call: `Error::from_win32()` is now
+`Error::from_thread()`. It had four call sites: two in `obs_ipc.rs`, one in
+`webembed.rs` and one in the `hook_target` example. The Tauri desktop app
+still pins `webview2-com` 0.38.2. The two apps do not share a lock, so they
+do not need to match.
+
+### 16.2 Left, and why
+
+| crate                                                    | pulled by                                                   | why it stays                                         |
+| -------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------- |
+| `thiserror` 1 (and `-impl`)                              | `cxx-qt` 0.10, `clang-format`                               | a cxx-qt major (0.11) is out of scope                |
+| `bitflags` 1                                             | `symphonia-core` 0.5.5                                      | symphonia 0.6 has a new API (§9)                     |
+| `windows-sys` 0.60                                       | `keyring` 3.6.3                                             | keyring 4 has a new API (separate credential stores) |
+| `miniz_oxide` 0.8                                        | `png` 0.18.1 (latest)                                       | `flate2` is on 0.9 and png has not moved             |
+| `getrandom` 0.2                                          | `ring` 0.17 (latest), under velopack's `ureq`               | not linked into the exe (§16.3)                      |
+| `syn` 1                                                  | `ebml-iterable-specification-derive` 0.4 (yap-webm, latest) | a proc macro, build time only                        |
+| `syn` 3                                                  | `cxx` 1.0.205's macros and build crates                     | build time only                                      |
+| `reqwest` 0.12, `base64` 0.22, `codespan-reporting` 0.11 | `webrtc-sys-build` (downloads libwebrtc), `cxx-qt-build`    | build scripts only, never in the exe                 |
+
+Not done: a blanket `cargo update`. It offers patch releases of cc, flate2,
+mime, smallvec, uuid and zip. Those would add three crates and a second
+`unicode-width`, and none of the current versions has an advisory.
+
+### 16.3 Does velopack put ureq, rustls and ring in the exe?
+
+velopack 1.3.39 uses `ureq` 3 with its default features (rustls, ring and
+webpki-roots) for `UpdateManager`'s downloads. velopack has no feature that
+turns this off, and a crate cannot turn off its dependency's default
+features. So the four crates stay in the build graph and in this audit.
+
+**They are not in the exe.** The app calls only
+`VelopackApp::build()...run()` (`src/installer.rs`), and the linker drops
+the rest. In the link map of the `native/gifdeps` build (`/MAP`):
+
+- none of `ring`'s C or assembly objects is there: no `ring_core_0_17_*`
+  symbol;
+- there is no rustls handshake, ureq agent or webpki code, and no
+  webpki-roots certificate data: the string "ISRG Root" is not in the exe;
+- 19 symbols (1.1 KiB) carry those crates' names. They are generic std
+  code that identical-code folding named after the first crate that used it:
+  drop glue, `Read::read_exact`, `Vec::into_boxed_slice`;
+- velopack itself is 132 KiB: zip reading, `VelopackApp::run` and the
+  apply path.
+
+The exe does contain DigiCert certificates and the strings ChaCha20 and
+X25519. They come from BoringSSL and WebRTC (`third_party/boringssl`,
+`rtc_base/ssl_roots.h`), not from Rust.
+
+### 16.4 `gif` in yap-anim
+
+Streamed GIFs (PERFORMANCE.md, pass 8) use `gif` 0.14.2 directly. It was
+already in the lock through `image`'s `gif` feature, so no crate was added.
+The crate's own row-by-row deinterlacing (`read_next_frame`) can stop early
+with "image truncated" on an interlaced frame that Qt, Pillow and Edge
+decode in full (for example a 33x37 frame). `gifstream.rs` therefore reads
+each frame with a single `fill_buffer` call and puts the rows in order
+itself. A test covers interlaced frames of seven sizes. The bug has not
+been reported upstream yet.
