@@ -28,7 +28,7 @@ run_worker_first = true
 [vars]
 # The "Yap Admin" Kova application's publishable key (origin and redirect
 # URI https://yap-admin.115jon.com only). Empty = nobody can sign in.
-KOVA_ADMIN_PUBLISHABLE_KEY = ""
+KOVA_ADMIN_PUBLISHABLE_KEY = "pk_live_Pkjkl4XsYjsj1cqfyt9AEaqK7IdmnkiCo2nghph13ck"
 # KOVA_AUTH_URL is left unset: DEFAULT_KOVA_AUTH_URL (src/lib/site-defaults.ts).
 
 # ── Yap's data (the same resources as the main Worker, wrangler.toml) ────────
