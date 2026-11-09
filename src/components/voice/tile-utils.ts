@@ -20,7 +20,7 @@ export function useTileTintStyle(
 
 /**
  * 64 on every grid tile, whatever its width: the tile is a person, the
- * nameplate and ring carry state. Only a single focused tile uses 80.
+ * nameplate and ring carry state. The focused stage has its own (StagePersonCard).
  */
 export const TILE_AVATAR_SIZE = "size-16";
 
@@ -33,9 +33,6 @@ export const TILE_AVATAR_SIZE = "size-16";
 export const ROW_TILE_AVATAR_SIZE = "size-16 @max-[210px]:size-10";
 export const ROW_TILE_AVATAR_BOX =
   "items-center p-4 @max-[210px]:items-start @max-[210px]:p-3";
-
-/** The focused stage's one person without media. */
-export const FOCUSED_AVATAR_SIZE = "size-20";
 
 /** The owner's name on a stream tile ("Linus", never "Linus's Stream"). */
 export function streamOwnerName(item: Pick<GridItem, "name" | "isLocal">) {

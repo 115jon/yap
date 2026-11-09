@@ -1,9 +1,8 @@
 # yap-admin: the site-admin console, its own Worker (README.md).
 #
-# Served only at yap-admin.115jon.com, a Custom Domain attached in the
-# Cloudflare dashboard (not declared here: a `routes` entry would make every
-# deploy re-sync it). workers.dev and Preview URLs are off, so the custom
-# domain is the only way in.
+# Served only at a private hostname that is never written into this public
+# repository; its Worker route is added through the Cloudflare API, not here.
+# workers.dev and Preview URLs are off, so that route is the only way in.
 name = "yap-admin"
 main = "src/server/worker.ts"
 compatibility_date = "2026-02-28"
@@ -24,11 +23,11 @@ run_worker_first = true
 # ── Secrets ───────────────────────────────────────────────────────────────
 #   wrangler secret put SITE_ADMIN_USER_IDS --config apps/admin/wrangler.toml
 #     comma-separated Yap user ids allowed in; unset = nobody
+#   wrangler secret put KOVA_ADMIN_PUBLISHABLE_KEY --config apps/admin/wrangler.toml
+#     the "Yap Admin" Kova application's key; unset = nobody can sign in. It
+#     is kept out of the repository because Kova ties it to the hostname.
 
 [vars]
-# The "Yap Admin" Kova application's publishable key (origin and redirect
-# URI https://yap-admin.115jon.com only). Empty = nobody can sign in.
-KOVA_ADMIN_PUBLISHABLE_KEY = "pk_live_Pkjkl4XsYjsj1cqfyt9AEaqK7IdmnkiCo2nghph13ck"
 # KOVA_AUTH_URL is left unset: DEFAULT_KOVA_AUTH_URL (src/lib/site-defaults.ts).
 
 # ── Yap's data (the same resources as the main Worker, wrangler.toml) ────────

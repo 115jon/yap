@@ -1,7 +1,8 @@
 # yap-admin
 
-The site-admin console for Yap, a separate Cloudflare Worker served only at
-`https://yap-admin.115jon.com`. The main Worker (`ralph-meet`) has no admin
+The site-admin console for Yap, a separate Cloudflare Worker served only at a
+private hostname. The hostname and the Kova key are never written into this
+public repository, its issues or its pull requests. The main Worker (`ralph-meet`) has no admin
 page or admin API.
 
 It has five sections:
@@ -55,17 +56,17 @@ Kova's hosted sign-ins return to `/?kova_auth_code=…`, which is the sign-in pa
 This setup needs the owner's approval, and none of it is in the repository.
 
 1. **Kova application "Yap Admin"** (in Kova's dashboard):
-   - Allowed origin: `https://yap-admin.115jon.com`, and nothing else.
-   - Redirect / callback URI: `https://yap-admin.115jon.com/`, and nothing else.
-   - Sign-ups: disabled, if Kova offers the setting. Admins sign in with their existing Kova accounts.
+   - Allowed origin: `https://<admin host>`, and nothing else.
+   - Redirect / callback URI: `https://<admin host>/`, and nothing else.
+   - Sign-ups: Kova has no per-app switch; the gate refuses anyone not in `SITE_ADMIN_USER_IDS`.
    - Social providers: only the ones the admins use.
    - Display name: shown on Kova's sign-in card. Use a neutral name to keep the page anonymous.
    - Copy its publishable key (`pk_live_…`).
-2. **Publishable key:** set `KOVA_ADMIN_PUBLISHABLE_KEY` in `apps/admin/wrangler.toml` `[vars]` to that key. It is public by design; the Worker writes it into the sign-in page.
+2. **Publishable key:** `cd apps/admin && pnpm exec wrangler secret put KOVA_ADMIN_PUBLISHABLE_KEY`. The Worker writes it into the sign-in page, but it stays out of the repository because Kova ties it to the hostname.
 3. **Secret:** run `cd apps/admin && pnpm exec wrangler secret put SITE_ADMIN_USER_IDS`. The value is a comma-separated list of Yap user ids.
 4. **Migration:** `migrations/041_site_admin.sql` must be applied to `ralph-chat-db`. The main deploy applies it (`pnpm run migrate:main`); deploy the main Worker first.
 5. **First deploy:** `pnpm admin:deploy` from the repository root runs the Vite build, then `wrangler deploy` in `apps/admin`. The main Worker (`ralph-meet`) must already be deployed with `RootMeetingRoom` and `RootVoiceRoom`, which it is.
-6. **Custom domain:** in the dashboard, go to Workers & Pages, then yap-admin, then Settings, then Domains & Routes, and add `yap-admin.115jon.com`. `workers_dev` and `preview_urls` are off in `wrangler.toml`, so the custom domain is the only way in.
+6. **Hostname:** create a proxied DNS record for `<admin host>` (`AAAA 100::`) and a Worker route `<admin host>/*` → `yap-admin` through the Cloudflare API. Use a one-level name under the zone so the existing wildcard edge certificate covers it; a Workers Custom Domain may issue its own certificate, and every new certificate is published in Certificate Transparency logs. `workers_dev` and `preview_urls` are off, so the route is the only way in.
 
 ## Develop
 
