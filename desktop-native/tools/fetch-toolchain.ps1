@@ -66,7 +66,7 @@ if ((Test-Path $stamp) -and ((Get-Content -Raw $stamp).Trim() -eq $lockHash) -an
     }
     if (-not (Test-Path "$Dest/qt/bin/qmake.exe")) { throw "The Qt archive has no qt/bin/qmake.exe" }
     if (-not (Test-Path "$Dest/libwebrtc/lib")) { throw "The libwebrtc archive has no libwebrtc/lib" }
-    Set-Content -NoNewline $stamp $lockHash
+    Set-Content -LiteralPath $stamp -Value $lockHash -NoNewline
 }
 
 $qt = "$Dest/qt" -replace '\\', '/'
