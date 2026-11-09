@@ -42,6 +42,27 @@ and only a matched game's name, catalog icon and start time will be sent.
 Hiding a single game will be a setting of the desktop application on that
 device. This section will be updated when detection ships.
 
+## Connections
+
+A user can link an account they own on another service to their Yap
+profile. Steam is the first. Linking sends the user to Steam's own sign-in
+page ("Sign in through Steam"); Yap never sees the Steam password. Steam tells
+Yap the account's SteamID, and Yap confirms the answer with Steam. Yap then
+reads the account's public persona name and avatar from its public Steam
+profile.
+
+Yap stores the SteamID (and the account number derived from it, for later
+game-stat features), the persona name, the avatar address, the profile
+address, whether the connection shows on the profile, and when it was
+verified. One Steam account can be linked to only one Yap account.
+
+While "Show on profile" is on, anyone who can open the user's profile sees
+the persona name and a link to the Steam profile, which contains the
+SteamID. People the user has blocked see no connections. The profile also
+carries the avatar address; the Yap apps show the avatar only to the user, in
+settings, through Yap's own media proxy.
+Unlinking deletes the stored connection at once.
+
 ## Where information is sent
 
 Yap uses these services:
@@ -52,6 +73,7 @@ Yap uses these services:
 - Cloudflare services for application delivery and infrastructure.
 - GitHub Releases for published desktop releases and desktop update metadata.
 - WebRTC/SFU services used by Yap for voice, video, and screen sharing.
+- `steamcommunity.com` when a user links a Steam account (see Connections).
 
 The web and desktop applications can also connect to locations selected by the
 user or supplied in user content, such as a shared link, embed, attachment, or
