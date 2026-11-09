@@ -24,6 +24,7 @@ describe("UPLOAD_LIMITS", () => {
     expect(UPLOAD_LIMITS).toEqual({
       avatar: 8 * MB,
       banner: 8 * MB,
+      profileWidget: 8 * MB,
       attachment: 25 * MB,
       gif: 25 * MB,
       vibe: 25 * MB,

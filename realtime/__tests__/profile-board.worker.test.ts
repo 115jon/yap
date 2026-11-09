@@ -9,7 +9,7 @@ import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import schemaSql from "../../d1_schema.sql?raw";
-import migrationSql from "../../migrations/042_profile_boards.sql?raw";
+import migrationSql from "../../migrations/043_profile_boards.sql?raw";
 import type {
   ActivityPage,
   BoardConflictBody,

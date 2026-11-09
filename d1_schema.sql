@@ -598,7 +598,7 @@ CREATE INDEX IF NOT EXISTS idx_attachments_created_at ON attachments(created_at)
 
 CREATE INDEX IF NOT EXISTS idx_messages_created_at_global ON messages(created_at);
 
--- Profile boards, Activity, guestbook and wishlist (migration 042).
+-- Profile boards, Activity, guestbook and wishlist (migration 043).
 CREATE TABLE IF NOT EXISTS profile_boards (
     user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     board TEXT NOT NULL,
