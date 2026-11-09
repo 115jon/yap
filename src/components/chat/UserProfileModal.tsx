@@ -1,11 +1,14 @@
+import MobileProfileSheet from "@/components/chat/MobileProfileSheet";
 import {
   ProfileActionNotices,
   ProfileActionRow,
   ProfileBlockConfirm,
   ProfileCard,
+  ProfileRoleChips,
   ProfileSections,
   resolveProfileCardTheme,
   useProfileActions,
+  useProfileCall,
   type MutualFriend,
   type MutualServer,
 } from "@/components/chat/ProfileCard";
@@ -14,6 +17,8 @@ import {
   type UserStatus,
 } from "@/components/chat/UserStatusDot";
 import { RowError } from "@/components/chat/settings/primitives";
+import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import {
   ResponsiveDialog,
   ResponsiveDialogContent,
@@ -25,7 +30,8 @@ import { apiGet } from "@/lib/api-client";
 import { describeApiError } from "@/lib/api-errors";
 import { getDisplayName } from "@/lib/display-name";
 import { resolveProfileReferenceDate } from "@/lib/profile-dates";
-import type { User } from "@/lib/types";
+import { dispatchOpenProfileEditorEvent } from "@/lib/profile-editor-events";
+import type { Role, User } from "@/lib/types";
 import { useChatActions, useChatStore } from "@/stores/chat-store";
 import { useGameActivity } from "@/hooks/useGameActivity";
 import { useCallback, useEffect, useState } from "react";
@@ -40,6 +46,7 @@ interface Props {
 
 type JoinedMemberRecord = {
   user: User;
+  roles?: Role[];
   joined_at?: string | number | null;
 };
 
@@ -50,18 +57,44 @@ type ProfileResponse = {
 };
 
 /**
- * The full profile card (Friends menu → Profile): the shared ProfileCard at
- * modal size. A top-anchored content dialog on desktop (it grows downward,
- * so loading or the block confirm never recentre it), a bottom drawer on
- * phones; one scroller either way.
+ * The full profile: what the popover's avatar and every "Profile" menu row
+ * open. A large top-anchored dialog on desktop (the shared ProfileCard at
+ * modal size, 640 wide), the phone profile sheet (MobileProfileSheet) on
+ * phones. Your own profile has Edit profile in place of the relationship
+ * actions.
  */
-export default function UserProfileModal({
+export default function UserProfileModal(props: Props) {
+  const isMobile = useIsMobile();
+  if (isMobile) {
+    return (
+      <MobileProfileSheet
+        open={props.open}
+        user={props.user}
+        onClose={props.onClose}
+        onOpenProfileEditor={() => {
+          props.onClose();
+          dispatchOpenProfileEditorEvent();
+        }}
+      />
+    );
+  }
+  return <DesktopUserProfileModal {...props} />;
+}
+
+/**
+ * A top-anchored content dialog: it grows downward, so loading or the block
+ * confirm never recentre it; one scroller.
+ */
+function DesktopUserProfileModal({
   open,
   user,
   onClose,
   initialBlockConfirm = false,
 }: Props) {
   const currentUser = useChatStore((state) => state.user);
+  const inServer = useChatStore(
+    (state) => Boolean(state.activeServerId) && state.activeServerId !== "@me",
+  );
   const memberRecord = useChatStore(
     (state) =>
       (state.members as JoinedMemberRecord[]).find(
@@ -69,22 +102,24 @@ export default function UserProfileModal({
       ) ?? null,
   );
   const { loadRelationships } = useChatActions();
-  const isMobile = useIsMobile();
 
   const [profileData, setProfileData] = useState<ProfileResponse | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
-  const seededUser =
-    memberRecord?.user ?? (currentUser?.id === user.id ? currentUser : user);
-  const resolvedUser = profileData?.user ?? seededUser;
+  const isMe = currentUser?.id === user.id;
+  const seededUser = (isMe ? currentUser : null) ?? memberRecord?.user ?? user;
+  const resolvedUser =
+    (profileData?.user.id === user.id ? profileData.user : null) ?? seededUser;
   const gameActivity = useGameActivity(user.id);
-  const isMe = currentUser?.id === resolvedUser.id;
   const displayName = getDisplayName(resolvedUser);
   const fallbackName = getDisplayName(user);
   const theme = resolveProfileCardTheme(resolvedUser);
   const status = (resolvedUser.status ?? "offline") as UserStatus;
   const statusLabel = USER_STATUS_LABELS[status] ?? USER_STATUS_LABELS.offline;
+  const roles = inServer
+    ? (memberRecord?.roles?.filter((role) => !role.is_default) ?? [])
+    : [];
   const hasReferenceDate = Boolean(
     memberRecord?.joined_at || resolvedUser.created_at,
   );
@@ -102,10 +137,15 @@ export default function UserProfileModal({
     initialBlockConfirm,
   });
   const { confirmBlock, cancelBlock } = actions;
+  const call = useProfileCall({
+    userId: resolvedUser.id,
+    displayName,
+    onStarted: onClose,
+  });
 
   useEffect(() => {
-    void loadRelationships();
-  }, [loadRelationships]);
+    if (!isMe) void loadRelationships();
+  }, [isMe, loadRelationships]);
 
   useEffect(() => {
     if (isMe) return undefined;
@@ -153,12 +193,11 @@ export default function UserProfileModal({
           event.preventDefault();
           cancelBlock();
         }}
-        className="gap-0"
-        drawerClassName="px-0 pt-0"
         // The profile card is the panel (radius, line, ply-3, shadow); its
         // frame art sits in the dialog box around it. The primitive's close
         // (28/16 at 16/16) sits on the banner.
-        dialogClassName="flex flex-col overflow-visible border-0 bg-transparent p-0 shadow-none"
+        className="gap-0"
+        dialogClassName="flex flex-col overflow-visible border-0 bg-transparent p-0 shadow-none md:max-w-[640px]"
       >
         <ResponsiveDialogTitle className="sr-only">
           {`${displayName}'s profile`}
@@ -168,22 +207,37 @@ export default function UserProfileModal({
         </ResponsiveDialogDescription>
 
         <ProfileCard
-          size={isMobile ? "sheet" : "modal"}
+          size="modal"
           user={resolvedUser}
           theme={theme}
           name={displayName}
           status={status}
-          renderFrame={!isMobile}
-          replayEffectOnBannerHover
-          className={isMobile ? "rounded-t-2xl" : undefined}
-          surfaceClassName={isMobile ? undefined : "shadow-modal"}
+          replayEffectOnBannerHover={!isMe}
+          surfaceClassName="shadow-modal"
           scrollClassName="md:max-h-[calc(100dvh-max(48px,12vh)-24px-var(--rm-profile-frame-reserve-y,0px))]"
           actions={
             <ProfileActionRow
               controller={actions}
-              size={isMobile ? "sheet" : "modal"}
+              size="modal"
               loadError={Boolean(profileError)}
               onRetry={retry}
+              selfAction={
+                <Button
+                  onClick={() => {
+                    onClose();
+                    dispatchOpenProfileEditorEvent();
+                  }}
+                >
+                  <Icon name="edit" size="sm" />
+                  Edit profile
+                </Button>
+              }
+              extra={
+                <Button variant="secondary" onClick={() => void call()}>
+                  <Icon name="call" size="sm" />
+                  Call
+                </Button>
+              }
             />
           }
         >
@@ -194,6 +248,8 @@ export default function UserProfileModal({
           <ProfileSections
             gameActivity={gameActivity}
             bio={resolvedUser.bio}
+            bioMarkdown
+            roles={roles.length > 0 ? <ProfileRoleChips roles={roles} /> : null}
             mutualServers={isMe ? null : profileData?.mutualServers}
             mutualFriends={isMe ? null : profileData?.mutualFriends}
             memberSince={hasReferenceDate ? referenceDate : null}
