@@ -58,6 +58,7 @@ import { Route as ApiListenTogetherStreamRouteImport } from './routes/api/listen
 import { Route as ApiListenTogetherSearchRouteImport } from './routes/api/listen-together/search'
 import { Route as ApiListenTogetherResolveRouteImport } from './routes/api/listen-together/resolve'
 import { Route as ApiGameIconsSplatRouteImport } from './routes/api/game-icons/$'
+import { Route as ApiGameAssetsSplatRouteImport } from './routes/api/game-assets/$'
 import { Route as ApiEmbedsPrefetchRouteImport } from './routes/api/embeds/prefetch'
 import { Route as ApiConnectionsProviderRouteImport } from './routes/api/connections/$provider'
 import { Route as ApiCollectiblesIngestRouteImport } from './routes/api/collectibles/ingest'
@@ -378,6 +379,11 @@ const ApiListenTogetherResolveRoute =
 const ApiGameIconsSplatRoute = ApiGameIconsSplatRouteImport.update({
   id: '/api/game-icons/$',
   path: '/api/game-icons/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGameAssetsSplatRoute = ApiGameAssetsSplatRouteImport.update({
+  id: '/api/game-assets/$',
+  path: '/api/game-assets/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiEmbedsPrefetchRoute = ApiEmbedsPrefetchRouteImport.update({
@@ -822,6 +828,7 @@ export interface FileRoutesByFullPath {
   '/api/collectibles/ingest': typeof ApiCollectiblesIngestRoute
   '/api/connections/$provider': typeof ApiConnectionsProviderRouteWithChildren
   '/api/embeds/prefetch': typeof ApiEmbedsPrefetchRoute
+  '/api/game-assets/$': typeof ApiGameAssetsSplatRoute
   '/api/game-icons/$': typeof ApiGameIconsSplatRoute
   '/api/listen-together/resolve': typeof ApiListenTogetherResolveRoute
   '/api/listen-together/search': typeof ApiListenTogetherSearchRoute
@@ -947,6 +954,7 @@ export interface FileRoutesByTo {
   '/api/collectibles/ingest': typeof ApiCollectiblesIngestRoute
   '/api/connections/$provider': typeof ApiConnectionsProviderRouteWithChildren
   '/api/embeds/prefetch': typeof ApiEmbedsPrefetchRoute
+  '/api/game-assets/$': typeof ApiGameAssetsSplatRoute
   '/api/game-icons/$': typeof ApiGameIconsSplatRoute
   '/api/listen-together/resolve': typeof ApiListenTogetherResolveRoute
   '/api/listen-together/search': typeof ApiListenTogetherSearchRoute
@@ -1073,6 +1081,7 @@ export interface FileRoutesById {
   '/api/collectibles/ingest': typeof ApiCollectiblesIngestRoute
   '/api/connections/$provider': typeof ApiConnectionsProviderRouteWithChildren
   '/api/embeds/prefetch': typeof ApiEmbedsPrefetchRoute
+  '/api/game-assets/$': typeof ApiGameAssetsSplatRoute
   '/api/game-icons/$': typeof ApiGameIconsSplatRoute
   '/api/listen-together/resolve': typeof ApiListenTogetherResolveRoute
   '/api/listen-together/search': typeof ApiListenTogetherSearchRoute
@@ -1200,6 +1209,7 @@ export interface FileRouteTypes {
     | '/api/collectibles/ingest'
     | '/api/connections/$provider'
     | '/api/embeds/prefetch'
+    | '/api/game-assets/$'
     | '/api/game-icons/$'
     | '/api/listen-together/resolve'
     | '/api/listen-together/search'
@@ -1325,6 +1335,7 @@ export interface FileRouteTypes {
     | '/api/collectibles/ingest'
     | '/api/connections/$provider'
     | '/api/embeds/prefetch'
+    | '/api/game-assets/$'
     | '/api/game-icons/$'
     | '/api/listen-together/resolve'
     | '/api/listen-together/search'
@@ -1450,6 +1461,7 @@ export interface FileRouteTypes {
     | '/api/collectibles/ingest'
     | '/api/connections/$provider'
     | '/api/embeds/prefetch'
+    | '/api/game-assets/$'
     | '/api/game-icons/$'
     | '/api/listen-together/resolve'
     | '/api/listen-together/search'
@@ -1573,6 +1585,7 @@ export interface RootRouteChildren {
   ApiCollectiblesCatalogRoute: typeof ApiCollectiblesCatalogRoute
   ApiCollectiblesIngestRoute: typeof ApiCollectiblesIngestRoute
   ApiEmbedsPrefetchRoute: typeof ApiEmbedsPrefetchRoute
+  ApiGameAssetsSplatRoute: typeof ApiGameAssetsSplatRoute
   ApiGameIconsSplatRoute: typeof ApiGameIconsSplatRoute
   ApiListenTogetherResolveRoute: typeof ApiListenTogetherResolveRoute
   ApiListenTogetherSearchRoute: typeof ApiListenTogetherSearchRoute
@@ -1946,6 +1959,13 @@ declare module '@tanstack/react-router' {
       path: '/api/game-icons/$'
       fullPath: '/api/game-icons/$'
       preLoaderRoute: typeof ApiGameIconsSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/game-assets/$': {
+      id: '/api/game-assets/$'
+      path: '/api/game-assets/$'
+      fullPath: '/api/game-assets/$'
+      preLoaderRoute: typeof ApiGameAssetsSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/embeds/prefetch': {
@@ -2858,6 +2878,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiCollectiblesCatalogRoute: ApiCollectiblesCatalogRoute,
   ApiCollectiblesIngestRoute: ApiCollectiblesIngestRoute,
   ApiEmbedsPrefetchRoute: ApiEmbedsPrefetchRoute,
+  ApiGameAssetsSplatRoute: ApiGameAssetsSplatRoute,
   ApiGameIconsSplatRoute: ApiGameIconsSplatRoute,
   ApiListenTogetherResolveRoute: ApiListenTogetherResolveRoute,
   ApiListenTogetherSearchRoute: ApiListenTogetherSearchRoute,

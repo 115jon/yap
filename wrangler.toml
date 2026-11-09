@@ -226,8 +226,11 @@ port = 8888
 
 [triggers]
 # "0 */6 * * *": yt-dlp sync, R2 cleanup, message postprocessing retries.
-# "17 * * * *": collectibles catalog (conditional GET; a 304 costs ~nothing).
-crons = ["0 */6 * * *", "17 * * * *"]
+# "17 * * * *": collectibles catalog (conditional GET; a 304 costs ~nothing)
+#   and the Deadlock art mirror.
+# "*/10 * * * *": Deadlock widget stats, for accounts that are due (one D1
+#   read when none is).
+crons = ["0 */6 * * *", "17 * * * *", "*/10 * * * *"]
 
 # ── Observability ────────────────────────────────────────────────────────
 
