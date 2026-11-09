@@ -1,4 +1,5 @@
-import { MAX_IMAGE_SIZE, validateImageBuffer } from "@/lib/image-validation";
+import { validateImageBuffer } from "@/lib/image-validation";
+import { UPLOAD_LIMITS } from "@/lib/upload-limits";
 
 const ALLOWED_NAMEPLATE_VIDEO_TYPES: ReadonlyMap<string, string> = new Map([
   ["video/mp4", "mp4"],
@@ -6,7 +7,7 @@ const ALLOWED_NAMEPLATE_VIDEO_TYPES: ReadonlyMap<string, string> = new Map([
   ["video/ogg", "ogv"],
 ]);
 
-export const MAX_PROFILE_BANNER_SIZE = MAX_IMAGE_SIZE;
+export const MAX_PROFILE_BANNER_SIZE = UPLOAD_LIMITS.banner;
 export const MAX_PROFILE_NAMEPLATE_SIZE = 25 * 1024 * 1024;
 
 function detectNameplateVideoType(bytes: Uint8Array): string | null {

@@ -15,6 +15,7 @@ import { FoundationFixture } from "@/components/dev/foundation-fixtures";
 import { SoundFixture } from "@/components/dev/sound-fixtures";
 import { StandaloneUpdaterView } from "@/components/StandaloneUpdater";
 import { DitherMockupsFixture } from "@/components/dev/dither-mockups";
+import { TooBigFixture } from "@/components/dev/too-big-fixtures";
 import { ComponentKitFixture } from "@/components/dev/component-kit-mockups";
 import { ConnectionStatesFixture } from "@/components/dev/connection-states-mockups";
 import { TypeMockupsFixture } from "@/components/dev/type-mockups";
@@ -3155,6 +3156,9 @@ export default function UiFixtures() {
       break;
     case "dither-mockups":
       content = <DitherMockupsFixture />;
+      break;
+    case "too-big":
+      content = <TooBigFixture />;
       break;
     case "type-mockups":
       content = <TypeMockupsFixture />;

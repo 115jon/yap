@@ -17,6 +17,7 @@ import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireChannelAccess } from "@/lib/require-channel-access";
 import { getUserPermissions } from "@/lib/require-permission";
 import { isTikTokMediaHostname } from "@/lib/tiktok-hosts";
+import { tooLargeMessage } from "@/lib/upload-limits";
 import { validateBody } from "@/lib/validate-body";
 import { Schema } from "effect";
 import { looseStruct, withDefault } from "@/lib/schema";
@@ -170,7 +171,7 @@ const POST = async ({ params, request }: any) => {
 
   const reportedSize = Number(body.size_bytes ?? 0);
   if (Number.isFinite(reportedSize) && reportedSize > MAX_GIF_UPLOAD_BYTES) {
-    return apiError("GIF too large to upload", 413);
+    return apiError(tooLargeMessage("GIF", MAX_GIF_UPLOAD_BYTES), 413);
   }
 
   const db = getDB();

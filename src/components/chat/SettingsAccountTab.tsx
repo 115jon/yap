@@ -59,6 +59,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { HIT, PRESS } from "@/components/ui/interaction";
 import { apiDelete, apiPatch, apiUpload } from "@/lib/api-client";
 import { describeApiError } from "@/lib/api-errors";
+import { UPLOAD_LIMITS } from "@/lib/upload-limits";
 import {
   getAvatarCollectibles,
   normalizeAvatarDisplay,
@@ -100,6 +101,13 @@ import {
   type MutableRefObject,
   type ReactNode,
 } from "react";
+
+/** The upload limit behind a save step, for a 413 that names none. */
+function saveUploadLimit(action: string): number | undefined {
+  if (action === "upload your avatar") return UPLOAD_LIMITS.avatar;
+  if (action === "upload your banner") return UPLOAD_LIMITS.banner;
+  return undefined;
+}
 
 const log = clog("Profile");
 
@@ -1468,7 +1476,11 @@ function ProfileEditor({
       setSaved(true);
     } catch (err) {
       log.error("Failed to save:", err);
-      setError(describeApiError(err, action));
+      setError(
+        describeApiError(err, action, {
+          uploadLimitBytes: saveUploadLimit(action),
+        }),
+      );
     } finally {
       setSaving(false);
     }
@@ -2044,6 +2056,7 @@ function ProfileEditor({
           onClose={() => setBannerPickerOpen(false)}
           onUpload={handleBannerFile}
           showRecent={false}
+          uploadKind="banner"
           title="Select a banner"
           description="Choose a new banner image or GIF for your profile."
           closeLabel="Close banner picker"

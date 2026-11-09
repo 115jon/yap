@@ -11,6 +11,9 @@ import {
 import { FIELD as INPUT_FIELD, Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Num } from "@/components/ui/num";
+import { TooBigCard } from "@/components/ui/too-big-card";
+import { isTooLargeError, serverUploadLimit } from "@/lib/api-errors";
+import type { TooBigSituation } from "@/lib/too-big-copy";
 import { cn } from "@/lib/utils";
 
 import EmojiToken from "./EmojiToken";
@@ -37,6 +40,11 @@ interface UploadSoundModalProps {
     emoji?: string;
     volume?: number;
   };
+  /**
+   * The server soundboard's limit. A file over it is not taken: the dialog
+   * shows the too-big card instead. Unset for local sounds.
+   */
+  maxBytes?: number;
 }
 
 export function UploadSoundModal({
@@ -45,8 +53,10 @@ export function UploadSoundModal({
   onUpload,
   isUploading,
   editSound,
+  maxBytes,
 }: UploadSoundModalProps) {
   const [file, setFile] = useState<File | null>(null);
+  const [tooBig, setTooBig] = useState<TooBigSituation | null>(null);
   const [soundName, setSoundName] = useState(editSound?.name ?? "");
   const [relatedEmoji, setRelatedEmoji] = useState<string | null>(
     editSound?.emoji ?? null,
@@ -62,6 +72,13 @@ export function UploadSoundModal({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
+    e.target.value = "";
+    if (selected && maxBytes !== undefined && selected.size > maxBytes) {
+      setFile(null);
+      setTooBig({ kind: "soundboard", size: selected.size, limit: maxBytes });
+      return;
+    }
+    setTooBig(null);
     if (selected) {
       setFile(selected);
       if (!soundName) {
@@ -72,13 +89,29 @@ export function UploadSoundModal({
 
   const handleSubmit = async () => {
     if ((!file && !editSound) || !soundName) return;
-    await onUpload({
-      file,
-      soundId: editSound?.id,
-      soundName,
-      relatedEmoji,
-      soundVolume,
-    });
+    try {
+      await onUpload({
+        file,
+        soundId: editSound?.id,
+        soundName,
+        relatedEmoji,
+        soundVolume,
+      });
+    } catch (error) {
+      // The server turned it away anyway: show its number.
+      if (!isTooLargeError(error) || maxBytes === undefined) throw error;
+      setFile(null);
+      setTooBig({
+        kind: "server",
+        serverLimit: serverUploadLimit(error) ?? maxBytes,
+        action: "pick-another",
+      });
+    }
+  };
+
+  const pickAnother = () => {
+    setTooBig(null);
+    fileInputRef.current?.click();
   };
 
   const isEditMode = !!editSound;
@@ -136,6 +169,13 @@ export function UploadSoundModal({
               Browse
             </span>
           </label>
+          {tooBig ? (
+            <TooBigCard
+              variant="inline"
+              situation={tooBig}
+              onAction={pickAnother}
+            />
+          ) : null}
         </div>
       )}
 

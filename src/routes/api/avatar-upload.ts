@@ -9,7 +9,8 @@ import {
   requireAuth,
 } from "@/lib/api-helpers";
 import { cacheDel, CacheKey } from "@/lib/cache";
-import { MAX_IMAGE_SIZE, validateImageBuffer } from "@/lib/image-validation";
+import { validateImageBuffer } from "@/lib/image-validation";
+import { tooLargeMessage, UPLOAD_LIMITS } from "@/lib/upload-limits";
 import { logger } from "@/lib/logger";
 import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
 import { updateAvatarUrl } from "@/services/user.service";
@@ -54,8 +55,8 @@ const POST = async ({ request, params: _params }: any) => {
     return apiError("Invalid avatar display metadata", 400);
   }
 
-  if (file.size > MAX_IMAGE_SIZE) {
-    return apiError("Avatar too large (max 8MB)", 413);
+  if (file.size > UPLOAD_LIMITS.avatar) {
+    return apiError(tooLargeMessage("Avatar", UPLOAD_LIMITS.avatar), 413);
   }
 
   // ── Magic byte validation ───────────────────────────────────────

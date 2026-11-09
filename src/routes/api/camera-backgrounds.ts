@@ -11,6 +11,7 @@ import { CAMERA_BACKGROUND_UPLOAD_LIMIT_BYTES } from "@/lib/camera-background-va
 import { validateImageBuffer } from "@/lib/image-validation";
 import { logger } from "@/lib/logger";
 import { safeParse } from "@/lib/schema";
+import { tooLargeMessage } from "@/lib/upload-limits";
 import { readJsonBody } from "@/lib/validate-body";
 import { Schema } from "effect";
 import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
@@ -126,7 +127,7 @@ export const POST = async ({ request }: any) => {
 
   if (file.size > CAMERA_BACKGROUND_UPLOAD_LIMIT_BYTES) {
     return apiError(
-      "Background image too large (max 25MB)",
+      tooLargeMessage("Background image", CAMERA_BACKGROUND_UPLOAD_LIMIT_BYTES),
       413,
       undefined,
       request,

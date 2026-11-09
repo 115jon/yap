@@ -83,6 +83,7 @@ export default function ChatArea({
     replyTo,
     showSearch,
     isDragging,
+    dragOversize,
     threadMessageId,
     showChannelSettings,
     showChannelDetails,
@@ -268,7 +269,7 @@ export default function ChatArea({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      <DragDropOverlay isDragging={isDragging} />
+      <DragDropOverlay isDragging={isDragging} oversize={dragOversize} />
 
       <ChatHeader
         isDM={isDM}

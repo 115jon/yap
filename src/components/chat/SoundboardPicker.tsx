@@ -8,7 +8,7 @@ import {
   required,
 } from "@/lib/persisted-guard";
 import { useMounted } from "@/hooks/useMounted";
-import { describeApiError } from "@/lib/api-errors";
+import { describeApiError, isTooLargeError } from "@/lib/api-errors";
 import { readAppChromeTop } from "@/lib/app-chrome";
 import {
   Tooltip,
@@ -1441,9 +1441,8 @@ export default function SoundboardPicker({
           "Join a voice channel before uploading soundboard audio.",
         );
       }
-      if (file.size > MAX_SOUNDBOARD_UPLOAD_BYTES) {
-        throw new Error("Soundboard uploads must be 50 MB or smaller.");
-      }
+      // UploadSoundModal shows the too-big card before this is reached.
+      if (file.size > MAX_SOUNDBOARD_UPLOAD_BYTES) return;
       const formData = new FormData();
       formData.append("file", file);
       formData.append("purpose", "soundboard");
@@ -1483,6 +1482,8 @@ export default function SoundboardPicker({
         },
       });
     } catch (error) {
+      // A 413 goes back to the open dialog, which shows the server's limit.
+      if (isTooLargeError(error)) throw error;
       setUploadError(describeApiError(error, "add that sound"));
     } finally {
       setIsUploading(false);
@@ -2350,6 +2351,7 @@ export default function SoundboardPicker({
         }}
         onUpload={handleUpload}
         isUploading={isUploading}
+        maxBytes={isServerSoundboard ? MAX_SOUNDBOARD_UPLOAD_BYTES : undefined}
         editSound={
           renderedEditingSound
             ? {
