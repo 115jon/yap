@@ -1395,7 +1395,13 @@ fn one_bad_custom_sound_should_not_wipe_the_file() {
 
 /// A Listen Together state for the fixture call: one entry (`track`), its
 /// anchor and play state.
-fn lt_snapshot(track: &Value, paused: bool, anchor_ms: f64, anchor_at: i64, requester: &Value) -> AppEvent {
+fn lt_snapshot(
+    track: &Value,
+    paused: bool,
+    anchor_ms: f64,
+    anchor_at: i64,
+    requester: &Value,
+) -> AppEvent {
     let entry = json!({
         "entryId": "e_1", "requestedAt": NOW, "track": track, "requester": requester,
     });
@@ -1439,12 +1445,18 @@ fn a_paused_radio_should_read_zero_however_long_it_played() {
     // `anchorPositionMs` 5000; the web clamps to `durationMs ?? 0` and reads
     // 0:00, the card read 0:05.
     let mut client = Client::in_call();
-    client.event(lt_snapshot(&lt_radio(), true, 5_000.0, NOW, &peer()), NOW + 1_000);
+    client.event(
+        lt_snapshot(&lt_radio(), true, 5_000.0, NOW, &peer()),
+        NOW + 1_000,
+    );
     let clock = LtClock::of(&client.view.listen);
     assert_eq!(clock.live_ms(NOW + 60_000), 0.0);
     assert!(!clock.running());
     // Playing, it still reads 0:00 and does not tick.
-    client.event(lt_snapshot(&lt_radio(), false, 5_000.0, NOW, &peer()), NOW + 1_000);
+    client.event(
+        lt_snapshot(&lt_radio(), false, 5_000.0, NOW, &peer()),
+        NOW + 1_000,
+    );
     let clock = LtClock::of(&client.view.listen);
     assert_eq!(clock.live_ms(NOW + 60_000), 0.0);
     assert!(!clock.running());
@@ -1454,7 +1466,10 @@ fn a_paused_radio_should_read_zero_however_long_it_played() {
 fn a_playing_track_should_run_on_from_its_anchor() {
     let mut client = Client::in_call();
     // Anchored at 10 s two seconds before it reached us.
-    client.event(lt_snapshot(&lt_music(), false, 10_000.0, NOW, &peer()), NOW + 2_000);
+    client.event(
+        lt_snapshot(&lt_music(), false, 10_000.0, NOW, &peer()),
+        NOW + 2_000,
+    );
     let clock = LtClock::of(&client.view.listen);
     assert!(clock.running());
     assert_eq!(clock.live_ms(NOW + 2_000), 12_000.0);
@@ -1466,12 +1481,18 @@ fn a_playing_track_should_run_on_from_its_anchor() {
 #[test]
 fn a_paused_track_should_hold_its_anchor() {
     let mut client = Client::in_call();
-    client.event(lt_snapshot(&lt_music(), true, 0.0, NOW - 30_000, &peer()), NOW);
+    client.event(
+        lt_snapshot(&lt_music(), true, 0.0, NOW - 30_000, &peer()),
+        NOW,
+    );
     let clock = LtClock::of(&client.view.listen);
     assert!(!clock.running());
     assert_eq!(clock.live_ms(NOW + 60_000), 0.0);
     client.event(lt_snapshot(&lt_music(), true, 42_000.0, NOW, &peer()), NOW);
-    assert_eq!(LtClock::of(&client.view.listen).live_ms(NOW + 60_000), 42_000.0);
+    assert_eq!(
+        LtClock::of(&client.view.listen).live_ms(NOW + 60_000),
+        42_000.0
+    );
 }
 
 #[test]
@@ -1500,9 +1521,21 @@ fn the_requester_should_carry_their_picture() {
     client.event(lt_snapshot(&lt_music(), true, 0.0, NOW, &requester), NOW);
     let now = client.view.listen.now.as_ref().expect("a current entry");
     assert_eq!(now.requester, "Spike Peer");
-    assert_eq!(now.requester_avatar, format!("{BASE}/api/avatars/alice.png"));
+    assert_eq!(
+        now.requester_avatar,
+        format!("{BASE}/api/avatars/alice.png")
+    );
     client.event(lt_snapshot(&lt_music(), true, 0.0, NOW, &peer()), NOW);
-    assert_eq!(client.view.listen.now.as_ref().expect("entry").requester_avatar, "");
+    assert_eq!(
+        client
+            .view
+            .listen
+            .now
+            .as_ref()
+            .expect("entry")
+            .requester_avatar,
+        ""
+    );
 }
 
 /// Out of the fixture server's call into a DM call with the peer (rung,

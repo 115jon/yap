@@ -3758,7 +3758,10 @@ fn a_share_tile_should_say_whether_it_carries_audio() {
         .collect();
     assert_eq!(
         audio,
-        [("screen", "user_p_ana", true), ("screen", "user_p_bo", false)]
+        [
+            ("screen", "user_p_ana", true),
+            ("screen", "user_p_bo", false)
+        ]
     );
 }
 
@@ -4019,23 +4022,27 @@ fn showing_a_voice_channels_chat_should_open_its_messages_beside_the_view() {
             before: None,
         },
     );
-    assert!(fx.contains(&Effect::View(ViewUpdate::VoicePanel(VoicePanelView {
-        id: VOICE.into(),
-        name: "lounge".into(),
-        count: 0,
-        chat: true,
-    }))));
+    assert!(
+        fx.contains(&Effect::View(ViewUpdate::VoicePanel(VoicePanelView {
+            id: VOICE.into(),
+            name: "lounge".into(),
+            count: 0,
+            chat: true,
+        })))
+    );
     assert_eq!(client.state.voice_view(), Some(VOICE));
     assert_eq!(client.state.active_channel(), Some(VOICE));
     // Selecting the channel again closes the chat (`SET_VOICE_TEXT` false).
     client.command(Command::SelectChannel(VOICE.into()));
     let fx = client.command(Command::SelectChannel(VOICE.into()));
-    assert!(fx.contains(&Effect::View(ViewUpdate::VoicePanel(VoicePanelView {
-        id: VOICE.into(),
-        name: "lounge".into(),
-        count: 0,
-        chat: false,
-    }))));
+    assert!(
+        fx.contains(&Effect::View(ViewUpdate::VoicePanel(VoicePanelView {
+            id: VOICE.into(),
+            name: "lounge".into(),
+            count: 0,
+            chat: false,
+        })))
+    );
 }
 
 #[test]
@@ -4080,7 +4087,10 @@ fn a_dm_call_record_should_read_as_the_viewer_sees_it() {
             "created_at": A3,
         })
     };
-    let fx = client.dispatch("MESSAGE_CREATE", call("missed", "user_fixture_alice", "call1"));
+    let fx = client.dispatch(
+        "MESSAGE_CREATE",
+        call("missed", "user_fixture_alice", "call1"),
+    );
     let rows: Vec<&MessageRow> = message_diffs(&fx)
         .into_iter()
         .filter_map(|d| match d {
@@ -4093,7 +4103,10 @@ fn a_dm_call_record_should_read_as_the_viewer_sees_it() {
         row.call,
         r#"{"duration":null,"text":"Missed call from Alice","tone":"missed"}"#
     );
-    let fx = client.dispatch("MESSAGE_CREATE", call("ended", "user_fixture_alice", "call2"));
+    let fx = client.dispatch(
+        "MESSAGE_CREATE",
+        call("ended", "user_fixture_alice", "call2"),
+    );
     let ended = message_diffs(&fx)
         .into_iter()
         .find_map(|d| match d {
@@ -4101,7 +4114,10 @@ fn a_dm_call_record_should_read_as_the_viewer_sees_it() {
             _ => None,
         })
         .expect("a row");
-    assert!(ended.contains(r#""duration":"4:12""#) && ended.contains("Alice called"), "{ended}");
+    assert!(
+        ended.contains(r#""duration":"4:12""#) && ended.contains("Alice called"),
+        "{ended}"
+    );
 }
 
 // Share stills (stream_preview_url)
@@ -4120,7 +4136,9 @@ fn screen_tiles(fx: &[Effect]) -> Vec<yap_core::store::view::VoiceTileRow> {
         .filter_map(|e| match e {
             Effect::View(ViewUpdate::Tiles(ViewDiff::Insert { rows, .. }))
             | Effect::View(ViewUpdate::Tiles(ViewDiff::Reset(rows))) => Some(rows.clone()),
-            Effect::View(ViewUpdate::Tiles(ViewDiff::Update { row, .. })) => Some(vec![row.clone()]),
+            Effect::View(ViewUpdate::Tiles(ViewDiff::Update { row, .. })) => {
+                Some(vec![row.clone()])
+            }
             _ => None,
         })
         .flatten()
@@ -4150,7 +4168,11 @@ fn an_unwatched_share_tile_should_carry_its_owners_still_from_the_roster() {
     let (_, _, fx) = call_with_ada_sharing(json!(STILL));
     let tile = screen_tiles(&fx).pop().expect("Ada's share tile");
     assert_eq!(
-        (tile.member_id.as_str(), tile.watching, tile.preview.as_str()),
+        (
+            tile.member_id.as_str(),
+            tile.watching,
+            tile.preview.as_str()
+        ),
         ("user_ada", false, STILL)
     );
 }
@@ -4316,5 +4338,8 @@ fn a_still_should_wait_for_a_live_share_and_fit_the_gateway() {
         call,
         update: VoiceUpdate::SharePreview(huge),
     });
-    assert!(preview_frames(&fx).is_empty(), "the gateway would refuse it");
+    assert!(
+        preview_frames(&fx).is_empty(),
+        "the gateway would refuse it"
+    );
 }

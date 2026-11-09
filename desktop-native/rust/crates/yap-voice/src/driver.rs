@@ -613,7 +613,10 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
                 if let Some(session) = &self.session {
                     match session.stats().await {
                         Ok(stats) => {
-                            if self.stats_logged.is_none_or(|at| at.elapsed() >= STATS_LOG_EVERY) {
+                            if self
+                                .stats_logged
+                                .is_none_or(|at| at.elapsed() >= STATS_LOG_EVERY)
+                            {
                                 self.stats_logged = Some(Instant::now());
                                 eprintln!("{}", stats.line);
                             }

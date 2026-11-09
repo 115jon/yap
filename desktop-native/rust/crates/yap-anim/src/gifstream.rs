@@ -123,7 +123,10 @@ pub fn scan(bytes: &[u8]) -> Result<GifInfo, AnimError> {
                 // own allocation limit.
                 let (w, h) = (usize::from(frame.width), usize::from(frame.height));
                 if !frame_fits(w, h) {
-                    return Err(AnimError::TooLarge(u32::from(frame.width), u32::from(frame.height)));
+                    return Err(AnimError::TooLarge(
+                        u32::from(frame.width),
+                        u32::from(frame.height),
+                    ));
                 }
                 if first.is_none() {
                     first = Some((frame.left, frame.top, frame.width, frame.height));
@@ -271,7 +274,10 @@ impl GifStream {
         let decoder = options(false)
             .read_info(Cursor::new(Arc::clone(&self.bytes)))
             .map_err(decode_err)?;
-        self.global = decoder.global_palette().map(<[u8]>::to_vec).unwrap_or_default();
+        self.global = decoder
+            .global_palette()
+            .map(<[u8]>::to_vec)
+            .unwrap_or_default();
         self.decoder = Some(decoder);
         Ok(())
     }
@@ -348,7 +354,10 @@ impl GifStream {
         // limit (16 Mpx, a canvas's) ends the animation before anything is
         // allocated for it.
         if !frame_fits(frame.width, frame.height) {
-            return self.broken(next, AnimError::TooLarge(frame.width as u32, frame.height as u32));
+            return self.broken(
+                next,
+                AnimError::TooLarge(frame.width as u32, frame.height as u32),
+            );
         }
         let mut indices = std::mem::take(&mut self.indices);
         indices.clear();
@@ -698,7 +707,9 @@ mod tests {
         frames[0].interlaced = true;
         frames[0].transparent = None;
         // Row r has index r % 3.
-        let bytes = encode_pixels((1, 10), &frames, None, |_| (0..10u8).map(|r| r % 3).collect());
+        let bytes = encode_pixels((1, 10), &frames, None, |_| {
+            (0..10u8).map(|r| r % 3).collect()
+        });
         let (_, mut stream) = open(bytes);
         assert!(stream.seek(0).expect("seek"));
         for row in 0..10 {
@@ -711,7 +722,15 @@ mod tests {
     fn interlaced_frames_of_any_size_should_decode_whole() {
         // gif 0.14.2's own row-by-row deinterlace stops short on some sizes
         // (33x37 among them); every size here must come out whole.
-        for (w, h) in [(33u16, 37u16), (1, 1), (1, 9), (7, 3), (64, 65), (79, 41), (255, 2)] {
+        for (w, h) in [
+            (33u16, 37u16),
+            (1, 1),
+            (1, 9),
+            (7, 3),
+            (64, 65),
+            (79, 41),
+            (255, 2),
+        ] {
             let mut frames = [spec((0, 0, w, h), 0, DisposalMethod::Keep)];
             frames[0].interlaced = true;
             frames[0].transparent = None;

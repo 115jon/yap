@@ -218,10 +218,11 @@ fn share_stills(events: VoiceEvents) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         tokio::time::sleep(STILL_FIRST_AFTER).await;
         loop {
-            let url = tokio::task::spawn_blocking(|| fit_still_url(yap_voice::share_still, still_jpeg))
-                .await
-                .ok()
-                .flatten();
+            let url =
+                tokio::task::spawn_blocking(|| fit_still_url(yap_voice::share_still, still_jpeg))
+                    .await
+                    .ok()
+                    .flatten();
             if let Some(url) = url {
                 events.send(VoiceUpdate::SharePreview(url));
             }

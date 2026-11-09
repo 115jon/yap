@@ -89,7 +89,6 @@ impl Input for Voices {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,7 +106,10 @@ mod tests {
         let (out, active) = mix(&voices);
         assert!(active && out[0] == 0.5 && out[1] == 0.5);
         let (out, _) = mix(&voices);
-        assert!(out[2 * 9] == 0.5 && out[2 * 10] == 0.0, "the last 10 frames");
+        assert!(
+            out[2 * 9] == 0.5 && out[2 * 10] == 0.0,
+            "the last 10 frames"
+        );
         assert!(!mix(&voices).1, "over");
     }
 

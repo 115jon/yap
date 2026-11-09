@@ -671,7 +671,9 @@ fn toggling_a_category_should_store_the_whole_set() {
     let fx = client.command(Command::ToggleCategory(VOICE_CATEGORY.into()));
     assert_eq!(
         cache_writes(&fx),
-        [&yap_core::store::CacheWrite::Collapsed(vec![TEXT_CATEGORY.to_owned()])]
+        [&yap_core::store::CacheWrite::Collapsed(vec![
+            TEXT_CATEGORY.to_owned()
+        ])]
     );
 }
 
@@ -685,7 +687,11 @@ fn a_collapsed_category_should_outlive_a_server_switch() {
         server_id: SERVER.into(),
     };
     client.respond(&channels, fixture("channels-response.json"));
-    let voice = client.tree.iter().find(|r| r.id == VOICE).expect("voice row");
+    let voice = client
+        .tree
+        .iter()
+        .find(|r| r.id == VOICE)
+        .expect("voice row");
     assert!(voice.folded);
 }
 
@@ -707,7 +713,11 @@ fn mark_channel_read_should_read_another_channel() {
             if channel_id == VOICE)
     });
     assert!(read, "{fx:#?}");
-    let voice = client.tree.iter().find(|r| r.id == VOICE).expect("voice row");
+    let voice = client
+        .tree
+        .iter()
+        .find(|r| r.id == VOICE)
+        .expect("voice row");
     assert!(!voice.unread);
 }
 
@@ -718,7 +728,13 @@ fn mark_channel_read_should_skip_a_read_channel() {
     client.command(Command::MarkChannelRead(VOICE.into()));
     let fx = client.command(Command::MarkChannelRead(VOICE.into()));
     assert!(
-        !fx.iter().any(|e| matches!(e, Effect::Http { request: ApiRequest::MarkRead { .. }, .. })),
+        !fx.iter().any(|e| matches!(
+            e,
+            Effect::Http {
+                request: ApiRequest::MarkRead { .. },
+                ..
+            }
+        )),
         "{fx:#?}"
     );
 }

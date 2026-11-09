@@ -58,7 +58,10 @@ fn tsc_ghz() -> f64 {
 }
 
 fn main() {
-    let seconds: u64 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(120);
+    let seconds: u64 = std::env::args()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(120);
 
     let before = NOW.load(Ordering::Relaxed);
     PEAK.store(before, Ordering::Relaxed);

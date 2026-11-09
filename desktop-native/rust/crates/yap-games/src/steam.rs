@@ -35,8 +35,13 @@ impl SteamWatch {
         let mut key: HKEY = std::ptr::null_mut();
         // SAFETY: the key is closed on drop; the event by `Owned`.
         unsafe {
-            if RegOpenKeyExW(HKEY_CURRENT_USER, path.as_ptr(), 0, KEY_QUERY_VALUE | KEY_NOTIFY, &mut key)
-                != ERROR_SUCCESS
+            if RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                path.as_ptr(),
+                0,
+                KEY_QUERY_VALUE | KEY_NOTIFY,
+                &mut key,
+            ) != ERROR_SUCCESS
             {
                 return None;
             }
@@ -99,11 +104,13 @@ impl SteamWatch {
     pub(crate) fn manifest_name(&self, app: u32) -> Option<String> {
         let steam = self.steam_path()?;
         let mut libraries = vec![steam.join("steamapps")];
-        if let Ok(vdf) = std::fs::read_to_string(steam.join("steamapps").join("libraryfolders.vdf")) {
+        if let Ok(vdf) = std::fs::read_to_string(steam.join("steamapps").join("libraryfolders.vdf"))
+        {
             libraries.extend(vdf_values(&vdf, "path").map(|p| Path::new(&p).join("steamapps")));
         }
         libraries.iter().find_map(|library| {
-            let text = std::fs::read_to_string(library.join(format!("appmanifest_{app}.acf"))).ok()?;
+            let text =
+                std::fs::read_to_string(library.join(format!("appmanifest_{app}.acf"))).ok()?;
             let name = vdf_values(&text, "name").next();
             name
         })
@@ -160,7 +167,11 @@ mod tests {
     fn manifest_names_and_library_paths_are_read() {
         let acf = "\"AppState\"\n{\n\t\"appid\"\t\t\"570\"\n\t\"name\"\t\t\"Dota 2\"\n}\n";
         assert_eq!(vdf_values(acf, "name").collect::<Vec<_>>(), ["Dota 2"]);
-        let vdf = "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"D:\\\\SteamLibrary\"\n\t}\n}";
-        assert_eq!(vdf_values(vdf, "path").collect::<Vec<_>>(), [r"D:\SteamLibrary"]);
+        let vdf =
+            "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"D:\\\\SteamLibrary\"\n\t}\n}";
+        assert_eq!(
+            vdf_values(vdf, "path").collect::<Vec<_>>(),
+            [r"D:\SteamLibrary"]
+        );
     }
 }

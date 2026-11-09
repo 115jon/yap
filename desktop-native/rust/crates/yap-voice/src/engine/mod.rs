@@ -27,11 +27,11 @@ pub use fake::{FakeEngine, FakeOp, FakeSession};
 #[cfg(all(feature = "libwebrtc", windows))]
 pub(crate) use mf_h264::{HwConfig, HwEncoder};
 #[cfg(feature = "libwebrtc")]
+pub use pipeline::MicTest;
+#[cfg(feature = "libwebrtc")]
 pub(crate) use webrtc::installed_video_output as video_output;
 #[cfg(feature = "libwebrtc")]
 pub use webrtc::{LibwebrtcEngine, LibwebrtcSession};
-#[cfg(feature = "libwebrtc")]
-pub use pipeline::MicTest;
 
 /// A media operation failed; the text is for the log and the call's error.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

@@ -58,7 +58,9 @@ pub fn file_variants(name: &str) -> Vec<String> {
 /// Whether a process with this file name could match anything: only then
 /// is it worth opening.
 pub fn may_match(catalog: &Catalog, name: &str) -> bool {
-    file_variants(name).iter().any(|file| catalog.has_file(file))
+    file_variants(name)
+        .iter()
+        .any(|file| catalog.has_file(file))
 }
 
 /// The app a full image path matches, if any.
@@ -126,7 +128,11 @@ mod tests {
         let compared = compared_strings(r"C:\Games\Blizzard\Overwatch.exe");
         assert_eq!(
             &compared[..3],
-            ["overwatch.exe", "blizzard/overwatch.exe", "games/blizzard/overwatch.exe"]
+            [
+                "overwatch.exe",
+                "blizzard/overwatch.exe",
+                "games/blizzard/overwatch.exe"
+            ]
         );
         assert!(!compared.iter().any(|c| c.starts_with("c:")));
     }

@@ -478,10 +478,7 @@ impl Worker {
         self.last_position = Instant::now();
         let position = {
             let mut mixer = self.input.mixer();
-            if mixer
-                .stream()
-                .is_some_and(|stream| stream.queue().failed())
-            {
+            if mixer.stream().is_some_and(|stream| stream.queue().failed()) {
                 // Failed while paused: the stream thread already reported it.
                 mixer.set_stream(None);
                 drop(mixer);
@@ -681,7 +678,8 @@ impl Worker {
                     clip.codec,
                     clip.samples.len() as f64 / 2.0 / f64::from(crate::SAMPLE_RATE)
                 );
-                self.input.mixer()
+                self.input
+                    .mixer()
                     .add_clip(key, clip.samples.into(), &pending.opts, 1.0);
             }
             Err(error) => {

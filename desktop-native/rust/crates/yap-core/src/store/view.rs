@@ -1579,8 +1579,8 @@ pub(crate) const STREAM_PREVIEW_MAX_BYTES: usize = 4096;
 pub(crate) fn is_still_url(url: &str) -> bool {
     url.len() <= STREAM_PREVIEW_MAX_BYTES
         && ["jpeg", "png", "webp"]
-        .iter()
-        .any(|kind| url.starts_with(&format!("data:image/{kind};base64,")))
+            .iter()
+            .any(|kind| url.starts_with(&format!("data:image/{kind};base64,")))
 }
 
 /// A badge: unread, and the mention count.

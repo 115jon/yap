@@ -188,7 +188,11 @@ mod tests {
         )
     }
 
-    fn frame<'a>(width: u32, height: u32, planes: &'a (Vec<u8>, Vec<u8>, Vec<u8>)) -> I420Frame<'a> {
+    fn frame<'a>(
+        width: u32,
+        height: u32,
+        planes: &'a (Vec<u8>, Vec<u8>, Vec<u8>),
+    ) -> I420Frame<'a> {
         I420Frame {
             width,
             height,
@@ -289,13 +293,28 @@ mod tests {
         // Fits only at 160 wide, quality 20 (base64 of 3000 bytes is 4000).
         let url = fit_still_url(still_at, |s, q| {
             tried.push((s.width, q));
-            Some(vec![0; if s.width <= 160 && q <= 20 { 3000 } else { 3100 }])
+            Some(vec![
+                0;
+                if s.width <= 160 && q <= 20 {
+                    3000
+                } else {
+                    3100
+                }
+            ])
         })
         .expect("fits");
         assert!(url.len() <= STILL_MAX_URL_BYTES);
         assert_eq!(
             tried,
-            [(224, 40), (224, 30), (224, 20), (224, 10), (160, 40), (160, 30), (160, 20)]
+            [
+                (224, 40),
+                (224, 30),
+                (224, 20),
+                (224, 10),
+                (160, 40),
+                (160, 30),
+                (160, 20)
+            ]
         );
     }
 

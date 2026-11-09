@@ -183,7 +183,10 @@ impl Drop for Capture {
         // Nothing may report the end of a share the driver has let go of.
         self.ended.disarm();
         self.hook = None;
-        for (stop, thread) in [self.watchdog.take(), self.fake.take()].into_iter().flatten() {
+        for (stop, thread) in [self.watchdog.take(), self.fake.take()]
+            .into_iter()
+            .flatten()
+        {
             stop.stop();
             let _ = thread.join();
         }
@@ -212,7 +215,9 @@ pub(crate) fn start(
     let quality = ShareQuality::of(&request.quality);
     // Before the only-ours check: nothing of the picked source is read.
     if let Some((width, height)) = fake::size() {
-        eprintln!("[capture] {id} replaced by a {width}x{height} test picture (YAP_FAKE_SHARE_SOURCE)");
+        eprintln!(
+            "[capture] {id} replaced by a {width}x{height} test picture (YAP_FAKE_SHARE_SOURCE)"
+        );
         let mut capture = Capture {
             hook: None,
             session: None,

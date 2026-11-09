@@ -360,10 +360,14 @@ impl Worker {
 
     fn wait(&mut self, wake: HANDLE) -> Woke {
         let mut handles: Vec<HANDLE> = vec![wake];
-        let steam_at = self.steam.as_ref().filter(|_| self.rules.enabled).map(|steam| {
-            handles.push(steam.event());
-            handles.len() - 1
-        });
+        let steam_at = self
+            .steam
+            .as_ref()
+            .filter(|_| self.rules.enabled)
+            .map(|steam| {
+                handles.push(steam.event());
+                handles.len() - 1
+            });
         if self.rules.enabled {
             handles.extend(
                 self.tracked
@@ -446,7 +450,10 @@ impl Worker {
     fn open(&self, pid: u32) -> win::Opened {
         match &self.config.fake {
             Some(fake) => win::Opened {
-                path: fake.iter().find(|p| p.pid == pid).and_then(|p| p.path.clone()),
+                path: fake
+                    .iter()
+                    .find(|p| p.pid == pid)
+                    .and_then(|p| p.path.clone()),
                 wait: None,
             },
             None => win::open(pid),
@@ -587,7 +594,9 @@ impl Worker {
             .iter()
             .filter_map(|(pid, t)| t.hit.as_ref().map(|hit| (*pid, t, hit)))
             .filter(|(_, _, hit)| !hidden(&hit.key))
-            .max_by_key(|(pid, t, _)| (foreground_seq(*pid), t.first_seen, std::cmp::Reverse(*pid)));
+            .max_by_key(|(pid, t, _)| {
+                (foreground_seq(*pid), t.first_seen, std::cmp::Reverse(*pid))
+            });
         let steam_running = self.steam.as_ref().map_or(0, SteamWatch::running_app);
         if steam_running != self.steam_app.0 {
             self.steam_app = (steam_running, now);
@@ -684,7 +693,10 @@ fn thread_cycles() -> u64 {
     let mut cycles = 0u64;
     // SAFETY: the pseudo handle needs no closing; `cycles` outlives the call.
     unsafe {
-        windows_sys::Win32::System::WindowsProgramming::QueryThreadCycleTime(GetCurrentThread(), &mut cycles)
+        windows_sys::Win32::System::WindowsProgramming::QueryThreadCycleTime(
+            GetCurrentThread(),
+            &mut cycles,
+        )
     };
     cycles
 }

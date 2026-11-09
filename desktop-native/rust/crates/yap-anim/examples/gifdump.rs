@@ -64,7 +64,11 @@ fn main() {
         std::process::exit(2);
     };
     for file in args.map(PathBuf::from) {
-        let stem = file.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+        let stem = file
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
         let dir = out.join(&stem);
         if let Err(error) = fs::create_dir_all(&dir) {
             eprintln!("{}: {error}", dir.display());

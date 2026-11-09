@@ -482,7 +482,10 @@ fn collapsed_categories_should_replace_the_set_per_user() {
     write_snapshot(&mut cache, ALICE, 1_000);
     write_snapshot(&mut cache, BOB, 1_000);
     let mut batch = Batch::default();
-    batch.push(ALICE, Write::Collapsed(vec!["cat_b".into(), "cat_a".into()]));
+    batch.push(
+        ALICE,
+        Write::Collapsed(vec!["cat_b".into(), "cat_a".into()]),
+    );
     batch.push(BOB, Write::Collapsed(vec!["cat_z".into()]));
     cache.apply_at(batch, 2_000).expect("apply");
     let mut batch = Batch::default();

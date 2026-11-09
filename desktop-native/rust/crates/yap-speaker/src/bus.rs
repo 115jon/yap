@@ -46,9 +46,7 @@ pub struct Bus {
 
 impl std::fmt::Debug for Bus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Bus")
-            .field("inputs", &self.len())
-            .finish()
+        f.debug_struct("Bus").field("inputs", &self.len()).finish()
     }
 }
 
@@ -73,7 +71,8 @@ impl Bus {
     /// Takes `input` out of the mix now (rather than when it is dropped).
     pub fn remove(&self, input: &Arc<dyn Input>) {
         let weak = Arc::downgrade(input);
-        self.inputs().retain(|w| !w.ptr_eq(&weak) && w.strong_count() > 0);
+        self.inputs()
+            .retain(|w| !w.ptr_eq(&weak) && w.strong_count() > 0);
     }
 
     /// Inputs still alive.

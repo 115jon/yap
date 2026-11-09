@@ -191,7 +191,11 @@ mod tests {
         assert!(dir.path().join(crate::CACHE_FILE).exists());
         assert_eq!(load_meta(dir.path()).http_etag, "\"abc\"");
         // A 304 keeps the cache and the ETag, and marks the check.
-        let fresh = check(dir.path(), &fetcher(Ok(Fetched::NotModified), seen.clone()), 9);
+        let fresh = check(
+            dir.path(),
+            &fetcher(Ok(Fetched::NotModified), seen.clone()),
+            9,
+        );
         assert!(fresh.is_none());
         assert_eq!(seen.lock().unwrap().as_slice(), ["", "\"abc\""]);
         let meta = load_meta(dir.path());

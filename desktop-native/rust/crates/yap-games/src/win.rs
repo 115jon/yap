@@ -4,15 +4,12 @@
 
 use std::ffi::c_void;
 
-use windows_sys::Win32::Foundation::{
-    CloseHandle, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM,
-};
+use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-    TH32CS_SNAPPROCESS,
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::SystemInformation::GetWindowsDirectoryW;
-use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcessId, OpenProcess, QueryFullProcessImageNameW, WaitForSingleObject,
     PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
@@ -85,7 +82,11 @@ pub(crate) struct Opened {
 pub(crate) fn open(pid: u32) -> Opened {
     // SAFETY: handles are owned by `Owned`; the buffer length is passed.
     unsafe {
-        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE, 0, pid);
+        let handle = OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+            0,
+            pid,
+        );
         if handle.is_null() {
             let wait = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
             return Opened {
@@ -96,8 +97,12 @@ pub(crate) fn open(pid: u32) -> Opened {
         let handle = Owned(handle);
         let mut buffer = vec![0u16; 1024];
         let mut len = buffer.len() as u32;
-        let path = (QueryFullProcessImageNameW(handle.0, PROCESS_NAME_WIN32, buffer.as_mut_ptr(), &mut len)
-            != 0)
+        let path = (QueryFullProcessImageNameW(
+            handle.0,
+            PROCESS_NAME_WIN32,
+            buffer.as_mut_ptr(),
+            &mut len,
+        ) != 0)
             .then(|| String::from_utf16_lossy(&buffer[..len as usize]));
         Opened {
             path,
@@ -157,7 +162,10 @@ pub(crate) fn app_windows() -> Vec<(u32, String)> {
     let mut list: Vec<(u32, String)> = Vec::new();
     // SAFETY: the callback only touches `list`, which outlives the call.
     unsafe {
-        EnumWindows(Some(collect), std::ptr::from_mut(&mut list) as *mut c_void as LPARAM);
+        EnumWindows(
+            Some(collect),
+            std::ptr::from_mut(&mut list) as *mut c_void as LPARAM,
+        );
     }
     list
 }

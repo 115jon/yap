@@ -1202,7 +1202,13 @@ mod tests {
                 // The far end: 300 ms bursts every 400 ms, mono.
                 let talking = (n % 40) < 30;
                 let far: Vec<i16> = (0..FRAME)
-                    .map(|_| if talking { (noise.next() * 6000.0) as i16 } else { 0 })
+                    .map(|_| {
+                        if talking {
+                            (noise.next() * 6000.0) as i16
+                        } else {
+                            0
+                        }
+                    })
                     .collect();
                 stream.push(&far, 1);
             }
@@ -1378,7 +1384,10 @@ mod tests {
 
     fn monitor_out(monitor: &Monitor) -> [f32; SAMPLES] {
         let mut out = [0f32; SAMPLES];
-        assert!(monitor.mix_into(&mut out), "the test keeps the speaker open");
+        assert!(
+            monitor.mix_into(&mut out),
+            "the test keeps the speaker open"
+        );
         out
     }
 

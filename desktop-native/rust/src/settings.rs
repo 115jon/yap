@@ -387,7 +387,8 @@ fn apply(mut object: Pin<&mut qobject::Settings>, view: &SettingsView) {
     o.as_mut()
         .set_media_filter_error(q(&view.media_filter_error));
     o.as_mut().set_share_activity(view.share_activity);
-    o.as_mut().set_share_activity_saving(view.share_activity_saving);
+    o.as_mut()
+        .set_share_activity_saving(view.share_activity_saving);
     o.as_mut()
         .set_share_activity_error(q(&view.share_activity_error));
     o.as_mut().set_revoking_share(q(&view.revoking_share));

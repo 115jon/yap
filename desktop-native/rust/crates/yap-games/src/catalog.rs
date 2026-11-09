@@ -261,7 +261,11 @@ impl Catalog {
         let app = u32::try_from(self.apps.len()).unwrap_or(u32::MAX);
         let name = self.push_text(name);
         let steam_start = u32::try_from(self.steam_ids.len()).unwrap_or(u32::MAX);
-        for steam in raw.steam_app_ids.iter().filter_map(|s| s.parse::<u32>().ok()) {
+        for steam in raw
+            .steam_app_ids
+            .iter()
+            .filter_map(|s| s.parse::<u32>().ok())
+        {
             self.steam_ids.push(steam);
             self.steam.push((steam, app));
         }
@@ -308,9 +312,7 @@ impl Catalog {
                 let file = file_part(self.text(self.exes[exe as usize].path)).to_owned();
                 let mut apps: Vec<u32> = group
                     .iter()
-                    .filter(|&&other| {
-                        file_part(self.text(self.exes[other as usize].path)) == file
-                    })
+                    .filter(|&&other| file_part(self.text(self.exes[other as usize].path)) == file)
                     .map(|&other| self.exes[other as usize].app)
                     .collect();
                 apps.sort_unstable();
@@ -349,14 +351,14 @@ impl Catalog {
     /// The app at `index`.
     pub fn app(&self, index: u32) -> Option<CatalogApp> {
         let app = self.apps.get(index as usize)?;
-        let steam = &self.steam_ids
-            [app.steam.start as usize..(app.steam.start + app.steam.len) as usize];
+        let steam =
+            &self.steam_ids[app.steam.start as usize..(app.steam.start + app.steam.len) as usize];
         Some(CatalogApp {
             id: app.id.to_string(),
             name: self.text(app.name).to_owned(),
-            icon_hash: app.icon.map(|bytes| {
-                bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
-            }),
+            icon_hash: app
+                .icon
+                .map(|bytes| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()),
             steam_app_ids: steam.iter().map(u32::to_string).collect(),
         })
     }
@@ -372,7 +374,10 @@ impl Catalog {
 
     /// Entries a full path may match: (exe, the compared string's length
     /// in segments), for [`crate::matcher`].
-    pub(crate) fn entries_for<'a>(&'a self, compared: &'a str) -> impl Iterator<Item = Entry<'a>> + 'a {
+    pub(crate) fn entries_for<'a>(
+        &'a self,
+        compared: &'a str,
+    ) -> impl Iterator<Item = Entry<'a>> + 'a {
         self.under(file_part(compared)).map(move |exe| Entry {
             app: exe.app,
             path: self.text(exe.path),
@@ -526,7 +531,10 @@ pub(crate) mod tests {
         let dota = catalog.app(index).expect("app");
         assert_eq!(dota.id, "356875988589740042");
         assert_eq!(dota.name, "Dota 2");
-        assert_eq!(dota.icon_hash.as_deref(), Some("6b4b3fa4c83555d3008de69d33a60588"));
+        assert_eq!(
+            dota.icon_hash.as_deref(),
+            Some("6b4b3fa4c83555d3008de69d33a60588")
+        );
         assert_eq!(dota.steam_app_ids, vec!["570".to_owned()]);
         assert!(catalog.app_for_steam(1).is_none());
     }
@@ -541,7 +549,10 @@ pub(crate) mod tests {
             "<!doctype html><html></html>",
             "",
         ] {
-            assert!(Catalog::from_slice(raw.as_bytes()).is_err(), "accepted {raw:?}");
+            assert!(
+                Catalog::from_slice(raw.as_bytes()).is_err(),
+                "accepted {raw:?}"
+            );
         }
     }
 
@@ -549,7 +560,11 @@ pub(crate) mod tests {
     fn the_bundled_snapshot_loads_under_budget() {
         let catalog = Catalog::from_gzip(crate::BUNDLED_CATALOG).expect("bundled");
         assert!(catalog.len() > 10_000, "{}", catalog.len());
-        assert!(catalog.heap_bytes() < 3 * 1024 * 1024, "{}", catalog.heap_bytes());
+        assert!(
+            catalog.heap_bytes() < 3 * 1024 * 1024,
+            "{}",
+            catalog.heap_bytes()
+        );
         assert_eq!(catalog.etag(), crate::bundled_meta().etag);
     }
 }

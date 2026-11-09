@@ -230,7 +230,11 @@ pub unsafe extern "C" fn yap_gif_stream_new(file: *const c_void) -> *mut c_void 
     }
     // SAFETY: a live `GifFile` from `yap_gif_open`.
     let file = unsafe { &*file.cast::<GifFile>() };
-    Box::into_raw(Box::new(GifStream::new(Arc::clone(&file.bytes), &file.info))).cast()
+    Box::into_raw(Box::new(GifStream::new(
+        Arc::clone(&file.bytes),
+        &file.info,
+    )))
+    .cast()
 }
 
 /// Composites frame `index` (decoding on from the frame shown, or from the

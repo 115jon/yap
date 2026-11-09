@@ -189,7 +189,9 @@ impl Client {
 fn sent(fx: &[Effect]) -> Vec<Value> {
     fx.iter()
         .filter_map(|e| match e {
-            Effect::GatewaySend(frame) if frame.op == i64::from(GatewayOp::ActivityUpdate.code()) => {
+            Effect::GatewaySend(frame)
+                if frame.op == i64::from(GatewayOp::ActivityUpdate.code()) =>
+            {
                 Some(frame.d["game_activity"].clone())
             }
             _ => None,
@@ -221,7 +223,10 @@ fn a_status_only_update_should_keep_the_game_and_null_should_clear_it() {
         "PRESENCE_UPDATE",
         json!({ "user_id": ALICE, "status": "online", "game_activity": wire_game("Celeste") }),
     );
-    client.dispatch("PRESENCE_UPDATE", json!({ "user_id": ALICE, "status": "idle" }));
+    client.dispatch(
+        "PRESENCE_UPDATE",
+        json!({ "user_id": ALICE, "status": "idle" }),
+    );
     assert_eq!(client.member(ALICE).game, "Celeste");
     client.dispatch(
         "PRESENCE_UPDATE",
@@ -237,10 +242,16 @@ fn going_offline_should_clear_the_game() {
         "PRESENCE_UPDATE",
         json!({ "user_id": ALICE, "status": "online", "game_activity": wire_game("Celeste") }),
     );
-    client.dispatch("PRESENCE_UPDATE", json!({ "user_id": ALICE, "status": "offline" }));
+    client.dispatch(
+        "PRESENCE_UPDATE",
+        json!({ "user_id": ALICE, "status": "offline" }),
+    );
     assert_eq!(client.member(ALICE).game, "");
     // Back online with a status-only update: nothing to show until told.
-    client.dispatch("PRESENCE_UPDATE", json!({ "user_id": ALICE, "status": "online" }));
+    client.dispatch(
+        "PRESENCE_UPDATE",
+        json!({ "user_id": ALICE, "status": "online" }),
+    );
     assert_eq!(client.member(ALICE).game, "");
 }
 
@@ -291,7 +302,10 @@ fn our_game_should_be_sent_once_per_change() {
     // The same activity again (another scan): nothing sent.
     assert!(sent(&client.play(Some(game("Celeste", 5)))).is_empty());
     // Unrelated inputs send nothing either.
-    let fx = client.dispatch("PRESENCE_UPDATE", json!({ "user_id": ALICE, "status": "idle" }));
+    let fx = client.dispatch(
+        "PRESENCE_UPDATE",
+        json!({ "user_id": ALICE, "status": "idle" }),
+    );
     assert!(sent(&fx).is_empty());
     // Quitting the game clears it, once.
     assert_eq!(sent(&client.play(None)), vec![Value::Null]);
@@ -333,7 +347,10 @@ fn ready_and_resumed_should_restate_our_activity() {
     client.gateway(GatewayEvent::Closed);
     assert!(sent(&client.play(None)).is_empty());
     client.presence_list(true);
-    assert_eq!(sent(&client.gateway(GatewayEvent::Ready)), vec![Value::Null]);
+    assert_eq!(
+        sent(&client.gateway(GatewayEvent::Ready)),
+        vec![Value::Null]
+    );
 }
 
 #[test]
@@ -354,7 +371,10 @@ fn sharing_off_should_send_null_once_and_then_nothing() {
     assert!(sent(&client.play(Some(game("Hades", 9)))).is_empty());
     client.gateway(GatewayEvent::Closed);
     // Restated as null after a resume, still nothing shown.
-    assert_eq!(sent(&client.gateway(GatewayEvent::Resumed)), vec![Value::Null]);
+    assert_eq!(
+        sent(&client.gateway(GatewayEvent::Resumed)),
+        vec![Value::Null]
+    );
     // Turned back on: the game running now goes out.
     let request = ApiRequest::UpdateProfile(json!({ "shareActivity": false }));
     client.respond(&request, json!({ "user": {} }));

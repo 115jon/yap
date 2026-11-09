@@ -89,7 +89,10 @@ pub struct Detected {
 impl Detected {
     /// Our `/api/game-icons/{app id}/{hash}.png` path, when it has an icon.
     pub fn icon_path(&self) -> Option<String> {
-        yap_protocol::game_activity::game_icon_path(self.app_id.as_deref()?, self.icon_hash.as_deref()?)
+        yap_protocol::game_activity::game_icon_path(
+            self.app_id.as_deref()?,
+            self.icon_hash.as_deref()?,
+        )
     }
 
     /// The activity as op 43 carries it (`detected` for catalog games,
@@ -228,12 +231,20 @@ mod tests {
 
     #[test]
     fn the_test_switch_parses_names_paths_and_closed_processes() {
-        let list = parse_test_processes(" celeste.exe|C:/Games/Celeste/Celeste.exe ; Locked.exe ;;|D:/x/Only.exe");
+        let list = parse_test_processes(
+            " celeste.exe|C:/Games/Celeste/Celeste.exe ; Locked.exe ;;|D:/x/Only.exe",
+        );
         assert_eq!(list.len(), 3);
         assert_eq!(list[0].name, "celeste.exe");
-        assert_eq!(list[0].path.as_deref(), Some("C:/Games/Celeste/Celeste.exe"));
+        assert_eq!(
+            list[0].path.as_deref(),
+            Some("C:/Games/Celeste/Celeste.exe")
+        );
         assert_eq!(list[0].pid, FAKE_PID_BASE);
-        assert_eq!((list[1].name.as_str(), list[1].path.as_deref()), ("Locked.exe", None));
+        assert_eq!(
+            (list[1].name.as_str(), list[1].path.as_deref()),
+            ("Locked.exe", None)
+        );
         assert_eq!(list[2].name, "only.exe");
     }
 

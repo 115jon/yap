@@ -900,7 +900,12 @@ fn taking_a_role_should_drop_it_at_once_and_send_the_rest() {
     });
     client.answer(
         |r| matches!(r, ApiRequest::Admin(AdminRequest::SetMemberRoles { .. })),
-        |r| r.decode(json!([everyone(), role(MOD, "Mods", perm::KICK_MEMBERS, 1, false)])),
+        |r| {
+            r.decode(json!([
+                everyone(),
+                role(MOD, "Mods", perm::KICK_MEMBERS, 1, false)
+            ]))
+        },
     );
     let fx = client.command(AdminCommand::ToggleMemberRole {
         user_id: ALICE.into(),

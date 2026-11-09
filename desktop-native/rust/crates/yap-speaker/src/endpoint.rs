@@ -96,7 +96,11 @@ mod tests {
     #[test]
     fn an_unlisted_id_should_migrate_by_its_exact_name() {
         let list = list();
-        let found = match_endpoint(Some("browser-hash-1234"), Some(" speakers (usb audio) "), &list);
+        let found = match_endpoint(
+            Some("browser-hash-1234"),
+            Some(" speakers (usb audio) "),
+            &list,
+        );
         assert_eq!(id_of(found), Some("{0.0.0.00000000}.{faa8}"));
     }
 
@@ -130,6 +134,9 @@ mod tests {
         let list = list();
         assert_eq!(match_endpoint(None, None, &list), None);
         assert_eq!(match_endpoint(Some(""), Some("  "), &list), None);
-        assert_eq!(match_endpoint(Some("gone"), Some("Monitor (HDMI)"), &list), None);
+        assert_eq!(
+            match_endpoint(Some("gone"), Some("Monitor (HDMI)"), &list),
+            None
+        );
     }
 }

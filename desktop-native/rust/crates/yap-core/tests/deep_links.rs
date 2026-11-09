@@ -604,7 +604,10 @@ fn links_into_the_chat_should_ask_to_uncover_it() {
         panel: "voice".into(),
         row: String::new(),
     });
-    assert_eq!(client.view.nav_seq, 0, "settings is not a link into the chat");
+    assert_eq!(
+        client.view.nav_seq, 0,
+        "settings is not a link into the chat"
+    );
     client.link(Link::Home);
     assert_eq!(client.view.nav_seq, 1);
     client.link(Link::Server("srv_fixture".into()));

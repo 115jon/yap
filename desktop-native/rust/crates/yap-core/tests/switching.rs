@@ -576,7 +576,10 @@ fn a_snapshot_should_bring_back_the_collapsed_categories() {
             ("chan_fixture_voice", true),
         ]
     );
-    assert!(client.state.collapsed_categories().contains("cat_fixture_voice"));
+    assert!(client
+        .state
+        .collapsed_categories()
+        .contains("cat_fixture_voice"));
 }
 
 #[test]

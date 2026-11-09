@@ -170,11 +170,8 @@ pub fn start() {
                 fake: s.fake.clone(),
                 trace: std::env::var("YAP_TRACE_GAMES").is_ok_and(|v| v == "1"),
             };
-            s.detector = yap_games::detector::Detector::spawn(
-                config,
-                rules(&s.prefs),
-                Box::new(on_change),
-            );
+            s.detector =
+                yap_games::detector::Detector::spawn(config, rules(&s.prefs), Box::new(on_change));
             if s.detector.is_none() {
                 eprintln!("[games] could not start detection");
             }
@@ -352,7 +349,9 @@ impl qobject::Games {
             return;
         }
         let name = if name.is_empty() {
-            exe.rsplit_once('.').map_or(exe.as_str(), |(stem, _)| stem).to_owned()
+            exe.rsplit_once('.')
+                .map_or(exe.as_str(), |(stem, _)| stem)
+                .to_owned()
         } else {
             name
         };

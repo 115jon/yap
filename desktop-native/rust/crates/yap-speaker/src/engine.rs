@@ -444,7 +444,11 @@ impl Speaker {
                     eprintln!(
                         "[speaker] open {} ({}, {} frame buffer, {} ms ahead, {} ms latency)",
                         render.name,
-                        if render.on_default { "default" } else { "chosen" },
+                        if render.on_default {
+                            "default"
+                        } else {
+                            "chosen"
+                        },
                         render.capacity(),
                         self.ahead_ms,
                         render.latency_ms()
@@ -608,7 +612,11 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         let after = tap.frames.load(Ordering::Relaxed);
         std::thread::sleep(Duration::from_millis(100));
-        assert_eq!(tap.frames.load(Ordering::Relaxed), after, "removed: hears no more");
+        assert_eq!(
+            tap.frames.load(Ordering::Relaxed),
+            after,
+            "removed: hears no more"
+        );
         drop(hold);
     }
 
@@ -650,7 +658,11 @@ mod tests {
         assert!(h.failures.load(Ordering::Relaxed) >= NOTICE_AFTER);
         assert!(h.refusals.load(Ordering::Relaxed) >= NOTICE_AFTER);
         h.failed(false);
-        assert_eq!(h.refusals.load(Ordering::Relaxed), 0, "a missing device breaks the run");
+        assert_eq!(
+            h.refusals.load(Ordering::Relaxed),
+            0,
+            "a missing device breaks the run"
+        );
         h.working();
         assert_eq!(h.failures.load(Ordering::Relaxed), 0);
     }
@@ -664,7 +676,10 @@ mod tests {
         assert!(s.watch.reopen.swap(false, Ordering::Relaxed));
         s.set_device(Some("{id}".into()));
         #[cfg(windows)]
-        assert!(!s.watch.reopen.load(Ordering::Relaxed), "unchanged: no reopen");
+        assert!(
+            !s.watch.reopen.load(Ordering::Relaxed),
+            "unchanged: no reopen"
+        );
         s.set_device(Some(String::new()));
         assert_eq!(s.device_choice(), None, "empty means the default");
     }
