@@ -962,8 +962,9 @@ Rectangle {
     // ui/toast.tsx ToastCard: a 356 px ply-3 card (line-strong edge,
     // shadow-2) at the window's bottom right, 16 above the composer: an
     // 8 px LED (talk for a success, muted for a failure), the message at
-    // Bricolage 15/700 and the 4 s dithered time bar along its foot. An
-    // error stays until dismissed (14.3): no time bar, a close key.
+    // Bricolage 15/700 and the dithered time bar along its foot. It goes
+    // by itself: 4 s, or 8 s for an error (which also has a close key);
+    // the pointer over it holds the time, and leaving gives a moment more.
     Rectangle {
         id: toast
         property bool failure: false
@@ -980,13 +981,11 @@ Rectangle {
                 toast.visible = true
                 toastIn.restart()
             }
-            if (toast.failure) {
-                toastTimer.stop()
-                toastRun.stop()
-            } else {
-                toastTimer.restart()
-                toastRun.restart()
-            }
+            toastTimer.interval = toast.failure ? 8000 : 4000
+            toastRun.from = toast.width - 2
+            toastRun.duration = toastTimer.interval
+            toastTimer.restart()
+            toastRun.restart()
         }
         // Sonner's card, as rm-toaster sets it (styles/foundation.css):
         // it rises its own height and fades in over 200 ms, ease-out, and
@@ -1066,10 +1065,30 @@ Rectangle {
             tip: qsTr("Dismiss")
             onClicked: toast.hide()
         }
+        // Reading it: the time holds while the pointer is over the card and
+        // starts again, from 2 s, when it leaves.
+        HoverHandler {
+            id: toastHover
+            onHoveredChanged: {
+                if (!toast.visible || toastOut.running)
+                    return
+                if (hovered) {
+                    toastTimer.stop()
+                    toastRun.pause()
+                } else {
+                    toastTimer.interval = 2000
+                    toastTimer.restart()
+                    toastRun.stop()
+                    toastRun.from = toastBar.width
+                    toastRun.duration = 2000
+                    toastRun.start()
+                }
+            }
+        }
         // The time left: accent dither, 2 px cells, emptying left to right.
         Item {
             id: toastBar
-            visible: !toast.failure
+            visible: true
             x: 1
             y: parent.height - 1 - 4
             width: parent.width - 2
