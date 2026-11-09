@@ -30,6 +30,7 @@ Claims marked UNVERIFIED were not checked against this build.
 | Share encode  | Media Foundation hardware H.264 MFT into libwebrtc's pre-encoded pass-through (§12); VP8 without one                                                   | vendor SDKs, OpenH264                                                               |
 | Backgrounds   | MediaPipe selfie segmenter as ONNX on ONNX Runtime 1.24.4 DirectML (`ort` rc.12, loaded at run time), own compositor (§12)                             | tract, MediaPipe C API                                                              |
 | Game catalog  | `yap-games`: the web's catalog JSON parsed into a flat index, gzipped in the exe with `flate2` (linked already), Win32 through `windows-sys` (§15)     | `sysinfo` for processes                                                             |
+| HDR capture   | FP16 (scRGB) WGC frames tone-mapped to BGRA8 by a pixel shader on the capture device; HDR, SDR white and peak from DXGI and the display config (§16)   | the D3D11 video processor; BGRA8 from WGC (no tone map)                             |
 | Qt            | Keep 6.6.3 for the parity sprint. Build a static **Qt 6.12 LTS** (6.12.1 is due 2026-11-12) in parallel, then switch                                   | Stay on 6.6.3 (EOL, no fixes)                                                       |
 
 ## 1. Fonts
@@ -1368,3 +1369,87 @@ No new third-party crate came in for it.
 The probe (`cargo run --release -p yap-games --example probe [s]`) prints
 the catalog's load time and heap and the detector's CPU over the real
 process list, counts only.
+
+## 16. Screen capture: HDR displays (`yap-capture`, 2026-11-08)
+
+A share of an HDR display used to ask Windows Graphics Capture for
+`B8G8R8A8`. Windows then converts the scRGB desktop to SDR itself, with no
+tone map: HDR games and video come out washed out or clipped. The capture
+now follows OBS: on an HDR display it takes `R16G16B16A16Float` (scRGB,
+linear, 1.0 = 80 nits) and tone-maps it to SDR on the GPU. SDR displays
+are unchanged (BGRA8, as before). No new crate came in: the detection, the
+shader and its compiler are all in `windows` 0.61 (one more feature,
+`Win32_Graphics_Direct3D_Fxc`); `png` is a dev-dependency for the
+gradient check only.
+
+| need            | pick                                                                                                                                                                                         | not picked                                                                                                                                                          |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| HDR on?         | `IDXGIOutput6::GetDesc1` (a new `IDXGIFactory1` each time) `ColorSpace == RGB_FULL_G2084_NONE_P2020` and the display config's advanced color on without `wideColorEnforced`; both must agree | `ColorSpace` alone: `RGB_FULL_G10_NONE_P709` is the composition space, not what an output reports, and only the display config tells auto color management from HDR |
+| SDR white       | `DisplayConfigGetDeviceInfo(DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL)`: thousandths of 80 nits, by the monitor's GDI name (`MONITORINFOEXW`) to the path's source name                  | a fixed 80 or 203 nits                                                                                                                                              |
+| peak            | `DXGI_OUTPUT_DESC1::MaxLuminance`; under SDR white counts as no headroom                                                                                                                     | `MaxFullFrameLuminance` (too low for highlights)                                                                                                                    |
+| which display   | a monitor share: its `HMONITOR`; a window: `MonitorFromWindow(MONITOR_DEFAULTTONEAREST)`, the monitor with the largest part of the window                                                    | -                                                                                                                                                                   |
+| following it    | `yap-share-color`, a thread per capture that looks again every second; a change recreates the frame pool in the other format (`Direct3D11CaptureFramePool::Recreate`)                        | display change notifications (`WM_DISPLAYCHANGE` needs a window; a window moving between monitors sends none to us)                                                 |
+| the conversion  | a pixel shader (`win/hdr.hlsl`): one full-target triangle, `Load` of its own texel, into a BGRA8 render target that the existing staging copy reads; on the capture's own D3D11 device       | a compute shader: a typed UAV store to `B8G8R8A8_UNORM` is optional hardware support; the D3D11 video processor: no control over the curve                          |
+| shader compiler | `D3DCompile` (`d3dcompiler_47.dll`, in every Windows 10 and 11) once per process, `vs_4_0`/`ps_4_0`                                                                                          | prebuilt bytecode in the repo (another build step for a 40-line shader)                                                                                             |
+
+### 16.1 The tone map
+
+`src/tonemap.rs` is the CPU reference; `win/hdr.hlsl` must match it to one
+8-bit code (a test checks it on the GPU).
+
+1. Scale by `80 / sdrWhiteNits`: SDR white lands on 1.0, so SDR content
+   (the desktop, browser pages, the UI of an HDR game) keeps its
+   brightness.
+2. Clip negatives (colours outside BT.709) to 0.
+3. On the brightest channel (maxRGB) `m`: the identity up to a knee `k`,
+   then an extended Reinhard shoulder that meets it with slope 1 and
+   reaches 1.0 at the peak `W = maxNits / sdrWhiteNits`:
+   `f(m) = k + (1 - k) * t * (1 + t / w²) / (1 + t)`, with
+   `t = (m - k) / (1 - k)` and `w = (W - k) / (1 - k)`; 1.0 above `W`.
+   All three channels are scaled by `f(m) / m`, so a bright colour keeps
+   its hue and saturation instead of going white channel by channel.
+4. The sRGB OETF, into `B8G8R8A8_UNORM`.
+
+The knee trades SDR brightness for highlight room. SDR output has no room
+above white, so a curve cannot be both the identity on `[0, 1]` and keep
+highlights apart. The knee moves with the headroom:
+`k = clamp(1 - 0.05 (W - 1), 0.8, 1)`. No headroom (`W <= 1`) gives
+`k = 1`, the identity: an SDR display captured in FP16 looks as the BGRA8
+path does. At `W = 5` (200-nit white on a 1000-nit display) `k = 0.8`:
+everything up to 80 % of SDR white is untouched, SDR white itself lands
+at 0.90 linear (243 of 255 after the OETF), and highlights up to the peak
+use the rest. BT.2390's EETF was the other candidate. Mapped to an SDR
+target (target peak = SDR white) its knee falls near half of SDR white,
+which dims the SDR content of the share far more.
+
+### 16.2 The game capture hook
+
+A hooked game with an `R16G16B16A16_FLOAT` back buffer (scRGB, as HDR
+games render on Windows) used to stop the hook (`unsupported back buffer
+format 10`) and fall back to WGC. The reader now runs the same shader on
+the hook's shared texture before its readback, with the tone map of the
+display the game's window is mostly on (looked at again every 2 s), or
+the identity when that display is SDR. `hook_probe --fp16` checks it
+against `hook_target --fp16`.
+
+Left for later: 10-bit back buffers (`R10G10B10A2`, format 24) stay
+refused. They are either HDR10 (PQ, BT.2020) or plain 10-bit SDR, and the
+OBS hook's `hook_info` does not carry the swap chain's color space, so the
+reader cannot tell which; WGC (now tone-mapped) carries those games. The
+picker's thumbnails stay BGRA8.
+
+### 16.3 Test switches
+
+- `YAP_TEST_HDR_CAPTURE=<sdrWhiteNits>,<maxNits>`: the FP16 capture and
+  that tone map on any display. On an SDR display WGC's FP16 frames are
+  at most 1.0, so `80,80` must look as the BGRA8 path does; other values
+  show the scale and the curve.
+- `YAP_CAPTURE_TIMING=1`: per-frame GPU time of the conversion and of the
+  copy to staging (timestamp queries), CPU time of the read and of the
+  push, logged every 300 frames (PERFORMANCE.md, "HDR screen capture").
+- `cargo test -p yap-capture -- hdr --include-ignored --nocapture`: the
+  shader against the CPU reference on this GPU, the displays this PC
+  reports (`display_probe`), the shader's cost at 1080p and 1440p
+  (`shader_cost`), and with `YAP_HDR_GRADIENT_PNG=<path>` a strip of
+  eight hue ramps from 0.01 to 10.0 (0.8 to 800 nits) through three tone
+  maps, each above a naive scale-and-clip of the same ramps.

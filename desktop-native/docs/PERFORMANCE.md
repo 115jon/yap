@@ -2930,3 +2930,102 @@ here. The tour added +2.9 MB, inside the +6 MB budget.
   `Composer`, `ExtrasHost`, `QuickSwitcher`, `ServerRail`.
 - Tests: `tests/switching.rs` (new), `yap-cache` `tests/cache.rs`, and
   `tests/{threads,social}.rs` where a revisit now opens warm.
+
+# HDR screen capture (2026-11-08)
+
+What the HDR capture path (LIBRARIES.md §16) costs, and that the SDR path
+did not get slower. This PC's three displays (Parsec and virtual display
+adapters on an RTX 3080, all 1920x1080) are SDR, and the display settings
+were left alone, so the FP16 path was forced with
+`YAP_TEST_HDR_CAPTURE`. No 1440p display exists here: 1440p numbers come
+from the offline measurement only.
+
+## Method
+
+- **Offline** (`cargo test --release -p yap-capture -- shader_cost
+--ignored --nocapture`): a 1080p and a 1440p texture, one frame every
+  16 ms for 330 frames (the first 30 dropped), through the same
+  `HdrConverter` and `Staging` the capture uses; GPU time from timestamp
+  queries, CPU time around the map.
+- **Live**: the owner (Spike, fake devices) sharing the
+  `share-test-window.ps1` window (1920x1093 captured, encoded 1896x1080)
+  at 1080p60 into a call in Native Spike Lab, NVENC. Process CPU over
+  25 s after 25 s of settling (`share-run.ps1` in `tmp/hdr`), and
+  `YAP_CAPTURE_TIMING=1` for per-frame GPU and CPU time. "Before" is the
+  spike build at 9cabefd9 (`F:/ct/yapn/rel`), whose capture and voice code
+  is this branch's base.
+- The machine was shared with other agents' builds and VMs (total CPU at
+  96 % during one run), so the push time (the I420 conversion and hand-off
+  to the encoder) moved between 3 and 40 ms from run to run, on both
+  paths. The GPU numbers and the read time held steady.
+
+## Offline: per frame
+
+| size      | path                   | GPU convert  | GPU copy to staging | CPU map (waits for the GPU) |
+| --------- | ---------------------- | ------------ | ------------------- | --------------------------- |
+| 1920x1080 | BGRA8 (SDR, as before) | -            | 0.79-1.03 ms        | 1.3-1.5 ms                  |
+| 1920x1080 | FP16 + tone map (HDR)  | 0.11-0.21 ms | 1.25-2.1 ms         | 2.5-3.5 ms                  |
+| 2560x1440 | BGRA8 (SDR, as before) | -            | 1.7-2.7 ms          | 2.9-3.8 ms                  |
+| 2560x1440 | FP16 + tone map (HDR)  | 0.17-0.21 ms | 2.3-2.6 ms          | 3.8-5.7 ms                  |
+
+Two runs each. The copy is BGRA8 on both paths (the shader writes BGRA8),
+so the readback is the same size; the run-to-run spread is the GPU's
+clocks at one frame per 16 ms.
+
+## Live: 1080p60 window share
+
+| run                                   | process CPU (one core) | WGC callback thread / 25 s | sent           |
+| ------------------------------------- | ---------------------- | -------------------------- | -------------- |
+| before (9cabefd9), SDR                | 43.4 %                 | 4.88 s                     | H.264 @ 54 fps |
+| this branch, SDR (BGRA8)              | 44.2 %                 | 5.11 s                     | H.264 @ 55 fps |
+| this branch, FP16 forced (`200,1000`) | 46.9 %                 | 5.36 s                     | H.264 @ 56 fps |
+
+`YAP_CAPTURE_TIMING`, averages of 300 frames:
+
+| path                     | GPU convert    | GPU copy     | CPU read    | push       |
+| ------------------------ | -------------- | ------------ | ----------- | ---------- |
+| SDR (BGRA8)              | -              | 0.47-1.30 ms | 0.93-3.6 ms | 4.7-29 ms  |
+| FP16, identity (`80,80`) | 0.043-0.085 ms | 0.63-1.27 ms | 1.1-1.9 ms  | 3.0-3.4 ms |
+| FP16, `200,1000`         | 0.037-0.096 ms | 0.53-1.38 ms | 3.0-3.8 ms  | 26-41 ms   |
+
+- **SDR does not regress.** Its per-frame work is the old one; what it
+  adds is one uncontended lock to read the wanted format and the
+  `yap-share-color` thread, which looks at the display once a second for
+  0.5-0.8 ms (DXGI factory, outputs, display config): under 0.1 % of a
+  core. The 0.8-point difference in process CPU is inside the run-to-run
+  noise of this machine.
+- **HDR costs** about 0.1-0.2 ms of GPU per frame for the shader, a
+  slightly longer map (the copy waits behind the draw), and 2-3 points of
+  one core in this share (the larger FP16 pool surfaces WGC and the driver
+  handle). The FP16 frame never reaches the CPU.
+- The FP16 runs with the high push times (and 2-36 fps sent) and the SDR
+  timing run at 13-29 ms push both happened while the machine was at
+  ~96 % CPU; the same paths measured 3-5 ms push when it was not.
+
+## Correctness checks
+
+- `the_shader_should_match_the_cpu_reference`: the GPU output of an FP16
+  strip (eight hues, 0.01 to 10.0 on a log scale) through three tone maps
+  is within one 8-bit code of `tonemap.rs` everywhere, for a texture with
+  and without shader binding.
+- `wgc_fp16_identity_should_match_bgra8_on_sdr` (ignored, needs the test
+  window): the test window captured as BGRA8 and as FP16 + identity tone
+  map at the same time: 99.70 % of pixels identical, the rest in the
+  moving bars and clock between the two frames.
+- The gradient strip (`YAP_HDR_GRADIENT_PNG`) and a viewer's screenshot
+  of a forced `200,1000` share were looked at: the tone-mapped ramps keep
+  their hue up to the peak where a scale-and-clip turns orange and skin
+  tones yellow and white.
+- `hook_probe --fp16`: an FP16 scRGB back buffer (magenta at 2x white)
+  hooked and read as (255, 0, 255) with the identity map, and as
+  (231, 0, 231) with `YAP_TEST_HDR_CAPTURE=200,1000` (0.8 linear,
+  under the knee), the values the reference gives.
+
+## Not verified here
+
+- A real HDR display: detection (`G2084` color space with advanced color
+  on), the SDR white level other than 80 nits, the peak and the switch
+  between formats when HDR is toggled or a window moves to another
+  monitor were not seen live; the code paths are the same as the forced
+  ones except for the detection.
+- 1440p live (no 1440p display).
