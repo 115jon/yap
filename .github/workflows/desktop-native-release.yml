@@ -401,9 +401,9 @@ jobs:
             "---", "",
             "Native Windows app ($kind channel, ``$env:CHANNEL``), built from ${{ github.sha }} by [run ${{ github.run_id }}](${{ github.server_url }}/$repo/actions/runs/${{ github.run_id }}).",
             "Install with ``$env:PACK_ID-$env:CHANNEL-Setup.exe``; installed copies update from this release's ``releases.$env:CHANNEL.json``.",
-            $(if ($env:DRY_RUN -eq "true") { "", "**Dry run: unsigned, never to be published.**" }),
             "", '```text', $sums, '```'
           ) -join "`n"
+          if ($env:DRY_RUN -eq "true") { $body += "`n`n**Dry run: unsigned, never to be published.**" }
           Set-Content -Encoding utf8NoBOM "$env:RUNNER_TEMP\body.md" $body
 
           $latest = {
