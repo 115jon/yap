@@ -150,6 +150,7 @@ impl Fixture {
             ApiRequest::Dms => ApiResponse::Dms(Vec::new()),
             ApiRequest::DeleteMessage { .. }
             | ApiRequest::Typing { .. }
+            | ApiRequest::PrefetchEmbeds { .. }
             | ApiRequest::MarkRead { .. }
             | ApiRequest::MarkNotificationsRead { .. }
             | ApiRequest::SetPresence { .. }
@@ -274,7 +275,12 @@ fn channels(fixture: Fixture) -> ChannelsResponse {
             .text_channels()
             .iter()
             .map(|&(id, name)| channel(id, name, ChannelType::Text, "cat_fixture_text"))
-            .chain([channel(VOICE, "lounge", ChannelType::Voice, "cat_fixture_voice")])
+            .chain([channel(
+                VOICE,
+                "lounge",
+                ChannelType::Voice,
+                "cat_fixture_voice",
+            )])
             .collect(),
         categories: vec![
             category("cat_fixture_text", "Text", 0),
@@ -399,15 +405,13 @@ pub fn messages(count: usize) -> Vec<Message> {
 
 /// [`messages`] for one channel; each channel has its own history.
 pub fn messages_in(count: usize, channel_id: &str) -> Vec<Message> {
-    let seed = channel_id
-        .bytes()
-        .fold(0x9E37_79B9_7F4A_7C15_u64, |h, b| {
-            if channel_id == TEXT {
-                h
-            } else {
-                (h ^ u64::from(b)).wrapping_mul(0x100_0000_01B3)
-            }
-        });
+    let seed = channel_id.bytes().fold(0x9E37_79B9_7F4A_7C15_u64, |h, b| {
+        if channel_id == TEXT {
+            h
+        } else {
+            (h ^ u64::from(b)).wrapping_mul(0x100_0000_01B3)
+        }
+    });
     let mut rng = Rng(seed);
     let mut at = parse_rfc3339(START).unwrap_or_default();
     let mut author = 0;

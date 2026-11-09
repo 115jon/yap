@@ -20,6 +20,7 @@ pub mod favorites;
 mod friends;
 mod input;
 pub mod invites;
+pub mod prefetch;
 mod reduce;
 mod search;
 pub mod shop;

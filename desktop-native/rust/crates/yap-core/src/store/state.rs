@@ -1255,6 +1255,8 @@ pub struct State {
     pub(super) extras: super::extras::ExtrasState,
     /// TikTok and Instagram lookups, by link.
     pub(super) hydrations: super::embeds::Hydrations,
+    /// Links the composer asked the server to resolve early.
+    pub(super) prefetched: super::prefetch::Prefetched,
     pub(super) view: Projection,
     pub(super) pending: Pending,
     pub(super) boot: Option<Boot>,
@@ -1366,6 +1368,7 @@ impl State {
             backgrounds: Default::default(),
             extras: Default::default(),
             hydrations: Default::default(),
+            prefetched: Default::default(),
             view: Projection::default(),
             pending: Pending::default(),
             boot: None,

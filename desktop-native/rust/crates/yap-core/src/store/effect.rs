@@ -356,6 +356,11 @@ pub enum ApiRequest {
     Typing {
         channel_id: String,
     },
+    /// Resolve these links now (POST /api/embeds/prefetch), so the embed
+    /// rides in the message's MESSAGE_CREATE.
+    PrefetchEmbeds {
+        urls: Vec<String>,
+    },
     ReadStates,
     /// The server sets `last_read_at` to now and broadcasts `READ_STATE_UPDATE`.
     MarkRead {
@@ -549,6 +554,7 @@ impl ApiRequest {
             Self::VoiceMove(_) => Method::Post,
             Self::SendMessage { .. }
             | Self::Typing { .. }
+            | Self::PrefetchEmbeds { .. }
             | Self::OpenDm { .. }
             | Self::SetPresence { .. }
             | Self::GifUpload { .. } => Method::Post,
@@ -607,6 +613,7 @@ impl ApiRequest {
                 format!("/api/channels/{channel_id}/messages")
             }
             Self::Typing { channel_id } => format!("/api/channels/{channel_id}/typing"),
+            Self::PrefetchEmbeds { .. } => "/api/embeds/prefetch".into(),
             Self::ReadStates => "/api/read-states".into(),
             Self::MarkRead { channel_id } => format!("/api/channels/{channel_id}/read-state"),
             Self::Notifications => "/api/notifications?limit=100&unread=true".into(),
@@ -768,6 +775,7 @@ impl ApiRequest {
                 custom_status,
             } => json!({ "status": status, "custom_status": custom_status }),
             Self::Typing { .. } | Self::MarkRead { .. } => json!({}),
+            Self::PrefetchEmbeds { urls } => json!({ "urls": urls }),
             Self::UpdateProfile(patch) => patch.clone(),
             Self::DeleteBanner => json!({ "kind": "banner" }),
             Self::DeleteNameplate => json!({ "kind": "nameplate" }),
@@ -897,6 +905,7 @@ impl ApiRequest {
             | Self::GifShare { .. }
             | Self::SetPresence { .. }
             | Self::Typing { .. }
+            | Self::PrefetchEmbeds { .. }
             | Self::MarkRead { .. }
             | Self::MarkNotificationsRead { .. } => ApiResponse::Done,
         })

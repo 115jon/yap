@@ -1559,6 +1559,15 @@ impl State {
                     let _ = self.http(fx, ApiRequest::Typing { channel_id });
                 }
             }
+            Command::PrefetchEmbeds { text, pasted } => {
+                if self.signed_in().is_some() {
+                    let urls = super::prefetch::prefetchable(&text, pasted);
+                    let urls = self.prefetched.take_fresh(urls);
+                    if !urls.is_empty() {
+                        let _ = self.http(fx, ApiRequest::PrefetchEmbeds { urls });
+                    }
+                }
+            }
             Command::LoadOlder => self.load_older(fx),
             Command::SetAtBottom(at_bottom) => {
                 self.at_bottom = at_bottom;

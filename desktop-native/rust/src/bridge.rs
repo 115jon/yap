@@ -373,6 +373,12 @@ pub mod qobject {
         #[cxx_name = "sendTyping"]
         fn send_typing(self: &Chat);
 
+        /// The composer's text after a 350 ms pause, or right after a paste:
+        /// its finished links are resolved early (embed-prefetch.ts).
+        #[qinvokable]
+        #[cxx_name = "prefetchEmbeds"]
+        fn prefetch_embeds(self: &Chat, text: &QString, pasted: bool);
+
         #[qinvokable]
         #[cxx_name = "loadOlder"]
         fn load_older(self: &Chat);
@@ -1149,6 +1155,14 @@ impl qobject::Chat {
 
     pub fn send_typing(&self) {
         client::command(Command::Typing);
+    }
+
+    pub fn prefetch_embeds(&self, text: &QString, pasted: bool) {
+        // Nothing to ask without a link (the common case: no command at all).
+        let text = text.to_string();
+        if text.contains("http") {
+            client::command(Command::PrefetchEmbeds { text, pasted });
+        }
     }
 
     pub fn load_older(&self) {

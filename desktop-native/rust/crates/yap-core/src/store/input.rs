@@ -113,6 +113,12 @@ pub enum Command {
     DeleteMessage(String),
     /// The composer has text (the UI throttles this to every 3 s).
     Typing,
+    /// The composer's text after a pause (or a paste): links in it that are
+    /// complete are resolved early (prefetch.rs).
+    PrefetchEmbeds {
+        text: String,
+        pasted: bool,
+    },
     /// The message list is scrolled near its top: load the page before.
     LoadOlder,
     /// Whether the message list is at its newest end.

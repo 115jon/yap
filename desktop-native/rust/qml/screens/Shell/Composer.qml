@@ -47,6 +47,14 @@ Item {
     readonly property bool mentionOpen: mentionStart >= 0 && !mentionDismissed && suggestions.count > 0
     // When the last typing ping went out (TYPING_THROTTLE in useMessageInput.ts).
     property double typingSentAt: 0
+    // Links resolve early (embed-prefetch.ts): a pasted text at once, typed
+    // text after a 350 ms pause (only links typed past count then).
+    property bool pastePending: false
+    Timer {
+        id: prefetchPause
+        interval: 350
+        onTriggered: Chat.prefetchEmbeds(input.text, false)
+    }
 
     function focusInput() {
         input.forceActiveFocus()
@@ -742,6 +750,15 @@ Item {
                         root.typingSentAt = now
                         Chat.sendTyping()
                     }
+                    if (root.puttingDraft) {
+                        root.pastePending = false
+                    } else if (root.pastePending) {
+                        root.pastePending = false
+                        prefetchPause.stop()
+                        Chat.prefetchEmbeds(text, true)
+                    } else {
+                        prefetchPause.restart()
+                    }
                 }
                 onCursorPositionChanged: {
                     root.enforceAtomic()
@@ -772,6 +789,8 @@ Item {
                             event.accepted = true
                             return
                         }
+                        // The text paste lands in the next text change.
+                        root.pastePending = true
                     }
                     // A member's mention moves and deletes as one unit
                     // (useMessageInput.ts handleKeyDown).
