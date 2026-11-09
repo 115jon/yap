@@ -13,7 +13,7 @@ use windows::core::{implement, w, PCWSTR};
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, PROPERTYKEY, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Media::Audio::{
-    eCommunications, eRender, EDataFlow, ERole, IAudioClient, IAudioRenderClient,
+    eCommunications, eConsole, eRender, EDataFlow, ERole, IAudioClient, IAudioRenderClient,
     IAudioSessionControl, IAudioSessionControl2, IMMDevice, IMMDeviceEnumerator,
     IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
     AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
@@ -183,7 +183,7 @@ fn pick(
         }
     }
     // SAFETY: a plain COM call on a live enumerator.
-    unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eCommunications) }
+    unsafe { enumerator.GetDefaultAudioEndpoint(eRender, default_role()) }
         .map(|device| (device, true))
         .map_err(|e| OpenError::missing(format!("no default output device: {e}")))
 }
@@ -238,14 +238,24 @@ fn client(device: &IMMDevice, buffer: Duration) -> Result<(IAudioClient, Event),
     }
 }
 
-/// Keeps Windows from turning other apps down while `client`'s stream is
-/// open ("Lower other apps during calls" off, [`crate::duck_others`]): the
-/// session opts out of the communications ducking. Call after `Initialize`,
-/// before `Start`. Best effort: a failure only logs.
-pub fn opt_out_of_ducking(client: &IAudioClient, what: &str) {
+/// Which default "Default" means: the console default, or with "Lower
+/// other apps during calls" the communications default (opening a stream
+/// there is what makes Windows duck other apps).
+pub fn default_role() -> ERole {
     if crate::duck_others() {
-        return;
+        eCommunications
+    } else {
+        eConsole
     }
+}
+
+/// Keeps another call app's communications stream from turning *our*
+/// render session down (`SetDuckingPreference` opts a session out of being
+/// ducked; it does not stop us ducking others, `default_role` does). Render
+/// sessions only: Windows refuses it on a capture stream
+/// (AUDCLNT_E_WRONG_ENDPOINT_TYPE). Call after `Initialize`, before
+/// `Start`. Best effort: a failure only logs.
+pub fn opt_out_of_ducking(client: &IAudioClient, what: &str) {
     // SAFETY: COM calls on an initialised client.
     let result = unsafe {
         client
@@ -422,7 +432,7 @@ impl Watch {
     /// The decisions, apart from COM so they can be tested.
     pub(crate) fn default_changed(&self, flow: EDataFlow, role: ERole, id: &str) {
         let (open, on_default) = self.open();
-        if flow == eRender && role == eCommunications && on_default && id != open {
+        if flow == eRender && role == default_role() && on_default && id != open {
             self.reopen("the default output changed");
         }
     }
@@ -553,7 +563,7 @@ pub fn probe_default(buffer: Duration) -> Result<Probe, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use windows::Win32::Media::Audio::{eCapture, eConsole};
+    use windows::Win32::Media::Audio::eCapture;
 
     fn watch(open: &str, on_default: bool, choice: Option<&str>) -> Watch {
         let w = Watch::default();
@@ -565,15 +575,17 @@ mod tests {
     #[test]
     fn a_new_default_should_reopen_only_when_following_it() {
         let w = watch("a", true, None);
-        w.default_changed(eRender, eConsole, "b");
-        w.default_changed(eCapture, eCommunications, "b");
-        assert!(!w.reopen.load(Ordering::Relaxed), "other role or flow");
-        w.default_changed(eRender, eCommunications, "a");
-        assert!(!w.reopen.load(Ordering::Relaxed), "already on it");
+        // With ducking off "Default" is the console default: the
+        // communications default changing is someone else's role.
         w.default_changed(eRender, eCommunications, "b");
+        w.default_changed(eCapture, default_role(), "b");
+        assert!(!w.reopen.load(Ordering::Relaxed), "other role or flow");
+        w.default_changed(eRender, default_role(), "a");
+        assert!(!w.reopen.load(Ordering::Relaxed), "already on it");
+        w.default_changed(eRender, default_role(), "b");
         assert!(w.reopen.load(Ordering::Relaxed));
         let chosen = watch("c", false, Some("c"));
-        chosen.default_changed(eRender, eCommunications, "b");
+        chosen.default_changed(eRender, default_role(), "b");
         assert!(
             !chosen.reopen.load(Ordering::Relaxed),
             "a chosen device stays"

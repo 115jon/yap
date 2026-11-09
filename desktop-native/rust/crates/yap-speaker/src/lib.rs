@@ -52,12 +52,14 @@ pub use endpoint::{match_endpoint, Endpoint};
 pub use engine::{speaker, Hold, Speaker, Tap, NOTICE_AFTER};
 pub use voices::Voices;
 #[cfg(windows)]
-pub use wasapi::{opt_out_of_ducking, probe_default, Probe};
+pub use wasapi::{default_role, opt_out_of_ducking, probe_default, Probe};
 
 /// "Lower other apps during calls" (off by default). Windows turns other
-/// apps down while a communications stream is open, by the amount in Sound
-/// settings > Communications (80 % out of the box). Every stream we open
-/// opts out of that unless this is on; a change applies from the next
+/// apps down, by the amount in Sound settings > Communications (80 % out of
+/// the box), while a stream is open on a device opened in the
+/// communications role. Off, "Default" opens the console default as
+/// Chromium's "Default" does (the Tauri app never ducked); on, the
+/// communications default, so Windows ducks. A change applies from the next
 /// stream opened (the next call).
 static DUCK_OTHERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 

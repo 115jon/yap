@@ -393,7 +393,7 @@ pub const PANELS: &[PanelDef] = &[
                     row(
                         "duck-other-apps",
                         "Lower other apps during calls",
-                        "Turns other apps down while you're in a call, as set in Windows' Communications settings.",
+                        "Lets Windows turn other apps down while you're in a call, as set in its Communications settings. Default devices then follow Windows' communications defaults.",
                         &["ducking", "attenuation", "other apps quieter", "discord quieter", "communications"],
                     ),
                 ],

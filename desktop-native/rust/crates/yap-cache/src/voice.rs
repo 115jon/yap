@@ -186,9 +186,10 @@ pub struct VoiceSettings {
     pub auto_sensitivity: bool,
     /// 0..=200 percent.
     pub output_volume: u16,
-    /// "Lower other apps during calls": let Windows turn other apps down
-    /// while we're in a call (its Communications setting). Off: Yap opts
-    /// out, as Discord does. Native only.
+    /// "Lower other apps during calls": "Default" devices open in the
+    /// communications role, so Windows turns other apps down during a call
+    /// (its Communications setting). Off: the console defaults, as
+    /// Chromium's "Default", and nothing is ducked. Native only.
     pub duck_other_apps: bool,
     /// By Yap user id; people at the defaults are left out.
     pub peer_settings: BTreeMap<String, PeerSettings>,
