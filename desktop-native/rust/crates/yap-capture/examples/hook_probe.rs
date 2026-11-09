@@ -7,8 +7,13 @@
 //!
 //! ```text
 //! YAP_OBS_SIGNED_DIR=<folder with the six OBS-signed files> \
-//!   cargo run -p yap-capture --example hook_probe -- <path to hook_target.exe> <data dir>
+//!   cargo run -p yap-capture --example hook_probe -- <path to hook_target.exe> <data dir> \
+//!   [--fp16] [--expect <b>,<g>,<r>]
 //! ```
+//!
+//! `--fp16` has the target render scRGB (FP16) magenta at twice SDR white;
+//! the hook's frames go through the HDR tone map. `--expect` is the centre
+//! pixel to pass with (default magenta, 255,0,255).
 
 #[cfg(windows)]
 fn main() {
@@ -24,10 +29,25 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let target = args.next().expect("the hook_target executable");
     let data = args.next().expect("a data folder for the probe");
+    let rest: Vec<String> = args.collect();
+    let fp16 = rest.iter().any(|a| a == "--fp16");
+    let expect: [u8; 4] = rest
+        .iter()
+        .skip_while(|a| *a != "--expect")
+        .nth(1)
+        .map(|v| {
+            let c: Vec<u8> = v
+                .split(',')
+                .map(|c| c.trim().parse().expect("a byte"))
+                .collect();
+            [c[0], c[1], c[2], 255]
+        })
+        .unwrap_or([255, 0, 255, 255]);
     yap_capture::set_data_dir(data.into());
 
     let mut child = Command::new(&target)
         .args(["--seconds", "40"])
+        .args(fp16.then_some("--fp16"))
         .stdout(Stdio::piped())
         .spawn()
         .expect("start the target");
@@ -78,13 +98,13 @@ fn main() {
     drop(hook);
     let _ = child.kill();
     let _ = child.wait();
-    let ok = stats.frames > 0 && stats.center == [255, 0, 255, 255];
+    let ok = stats.frames > 0 && stats.center == expect;
     println!(
         "{}",
         if ok {
-            "PASS: hooked magenta frames"
+            format!("PASS: hooked frames of {expect:?}")
         } else {
-            "FAIL"
+            format!("FAIL: expected {expect:?}")
         }
     );
     std::process::exit(if ok { 0 } else { 1 });

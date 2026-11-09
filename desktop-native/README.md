@@ -152,7 +152,15 @@ the decisions.
   hook is not delivering. DX11 and DX12 games; Vulkan only when an
   OBS-signed hook is already resident (no Vulkan layer is registered).
   `cargo run -p yap-capture --example hook_probe` checks it live against
-  `hook_target`, a D3D11 window the probe starts itself.
+  `hook_target`, a D3D11 window the probe starts itself (`--fp16`: an
+  scRGB back buffer, as HDR games render).
+- HDR displays (`crates/yap-capture/src/win/hdr.rs`): a share of a
+  monitor or window on a display in HDR mode captures FP16 (scRGB) and
+  tone-maps it to SDR on the GPU before the usual readback, with the
+  display's SDR white level and peak (docs/LIBRARIES.md §16). A window
+  that moves to another monitor, or HDR switched on or off, is followed
+  within a second. SDR displays capture BGRA8 as before. The hook does
+  the same for FP16 back buffers.
 - User settings, the web's Studio workbench (`qml/screens/Settings`): the
   numbered nav (01 You, 02 Calls, 03 App), search that lands on rows
   (the map, search and rules are `yap-core` `settings.rs`), the poster
@@ -531,6 +539,8 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_FAKE_CAMERA`               | unset                     | `1`: a test pattern stands in for every camera                                                                                                                                                                                 |
 | `YAP_SHARE_ONLY_OURS`           | unset                     | `1`: share stills and captures only of our own windows (or one titled "Yap Native Share Test"); other windows listed without titles                                                                                            |
 | `YAP_FAKE_SHARE_AUDIO`          | unset                     | `1`: share audio is a 440 Hz tone, never a loopback                                                                                                                                                                            |
+| `YAP_TEST_HDR_CAPTURE`          | unset                     | `<sdrWhiteNits>,<maxNits>`: shares capture FP16 and tone-map with these values on any display (`80,80`: the identity; tests)                                                                                                   |
+| `YAP_CAPTURE_TIMING`            | unset                     | `1`: the WGC capture logs its per-frame GPU (tone map, copy) and CPU (read, push) time every 300 frames (`[capture] timing`)                                                                                                   |
 | `YAP_PICK_FILES`                | unset                     | `a.png;b.png`: returned by the file picker instead of showing it (tests)                                                                                                                                                       |
 | `YAP_EMBED_MUTED`               | unset                     | `1`: every chat player starts muted (tests)                                                                                                                                                                                    |
 | `YAP_FAKE_NO_WEBVIEW2`          | unset                     | `1`: WebView2 creation fails for this process, as on a PC without the runtime (tests)                                                                                                                                          |

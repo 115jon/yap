@@ -22,6 +22,14 @@
 //!   [`TEST_WINDOW_TITLE`]. Monitors are always refused. Listing stays on.
 //! - `YAP_FAKE_SHARE_AUDIO=1`: share audio is a synthetic 440 Hz sine
 //!   instead of any loopback.
+//!
+//! HDR displays are captured in FP16 and tone-mapped to SDR on the GPU
+//! (`win/hdr.rs`, the curve in `tonemap.rs`). Two switches test it:
+//!
+//! - `YAP_TEST_HDR_CAPTURE=<sdrWhiteNits>,<maxNits>`: that path and tone
+//!   map on any display (`80,80` is the identity);
+//! - `YAP_CAPTURE_TIMING=1`: per-frame GPU and CPU time of the capture,
+//!   logged every 300 frames.
 
 #![cfg_attr(not(windows), allow(dead_code))]
 
@@ -34,6 +42,7 @@ mod pace;
 mod pcm;
 mod pixels;
 mod stop;
+mod tonemap;
 
 #[cfg(windows)]
 mod win;
