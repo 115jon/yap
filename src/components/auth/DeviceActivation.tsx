@@ -22,7 +22,7 @@
  * release fails it still signs out, but lands on a "Code in use" page that
  * asks for a fresh code from the device (`?release=failed`).
  *
- * A code from the native Windows client ("Yap Native") ends on an "Open Yap"
+ * A code from the native Windows client (Yap) ends on an "Open Yap"
  * key, and the page tries `yap-native://signin?code=…` once on its own, so
  * the browser offers to open the app (src/lib/native-app-link.ts). The link
  * carries no token: the app is already polling the code.
@@ -818,8 +818,8 @@ export function DeviceActivation({
         {view.appLink ? (
           <>
             <PublicBody>
-              Your browser may ask to open Yap Native. If it doesn't open, use
-              the button below.
+              Your browser may ask to open Yap. If it doesn't open, use the
+              button below.
             </PublicBody>
             <PublicActions>
               <Button asChild size="lg">

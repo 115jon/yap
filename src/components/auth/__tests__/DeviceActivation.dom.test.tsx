@@ -271,7 +271,7 @@ describe("DeviceActivation", () => {
       ok: true,
       request: {
         ...REQUEST,
-        device: { label: "Yap Native", platform: "windows", hostname: "pc" },
+        device: { label: "Yap", platform: "windows", hostname: "pc" },
       },
     });
     mocks.approveDeviceRequest.mockResolvedValue({
@@ -283,7 +283,7 @@ describe("DeviceActivation", () => {
       await screen.findByRole("button", { name: "Approve sign-in" }),
     );
     await screen.findByRole("heading", {
-      name: "You're signed in on Yap Native",
+      name: "You're signed in on Yap",
     });
     const link = "yap-native://signin?code=ABCD-EFGH";
     expect(mocks.launchNativeApp).toHaveBeenCalledTimes(1);
@@ -305,7 +305,7 @@ describe("DeviceActivation", () => {
   it("does not open the native app when it is denied", async () => {
     mocks.getDeviceRequest.mockResolvedValue({
       ok: true,
-      request: { ...REQUEST, device: { label: "Yap Native" } },
+      request: { ...REQUEST, device: { label: "Yap" } },
     });
     mocks.denyDeviceRequest.mockResolvedValue({ ok: true, status: "denied" });
     render(<DeviceActivation initialCode="ABCD-EFGH" />);
