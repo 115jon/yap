@@ -297,7 +297,7 @@ jobs:
             Where-Object { $_.assets.name -contains $feed } |
             Sort-Object { [System.Management.Automation.SemanticVersion]$_.tag_name.Substring($env:TAG_PREFIX.Length) } -Descending |
             Select-Object -First 1
-          if (-not $previous) { Write-Host "==> no earlier $feed: the first release of this channel, no delta"; exit 0 }
+          if (-not $previous) { Write-Host "==> no earlier ${feed}: the first release of this channel, no delta"; exit 0 }
           gh release download $previous.tag_name --repo ${{ github.repository }} --pattern $feed --dir $env:OUT
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $assets = (Get-Content -Raw "$env:OUT\$feed" | ConvertFrom-Json).Assets
