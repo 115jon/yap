@@ -95,9 +95,12 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_HiDpi",
     "Win32_UI_Shell",
 ] }
-# The installer's startup hooks (src/installer.rs, docs/INSTALLER.md). Pinned:
-# tools/package.ps1 and the release workflow use the vpk of the same version.
-velopack = "=1.3.39-g8d2844f"
+# The installer's startup hooks (src/installer.rs) and the in-app updater
+# (src/updater.rs), docs/INSTALLER.md. Pinned: tools/package.ps1 and the
+# release workflow use the vpk of the same version. `public-utils` makes
+# `bundle::Manifest` nameable, which a custom `UpdateSource` (the updater's
+# merged, pinned channel feed) has to implement.
+velopack = { version = "=1.3.39-g8d2844f", features = ["public-utils"] }
 # WebView2 for iframe embeds (YouTube, Spotify, TikTok's player). It links
 # WebView2LoaderStatic.lib, so no loader DLL ships. 0.39 is the release on
 # `windows` 0.62, the version velopack uses, so one `windows` is built

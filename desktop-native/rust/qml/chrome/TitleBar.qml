@@ -3,8 +3,9 @@ import Yap.Chrome
 import com.yap.native
 
 // The 32 px window chrome (desktop/desktop-entry.tsx, desktop/styles.css):
-// back and forward on the left, the centred location title, and minimise,
-// maximise and close. Everything else is the caption, dragged by Windows.
+// back and forward on the left, the centred location title, "Restart to
+// update" when an update is ready (UpdatePill), and minimise, maximise and
+// close. Everything else is the caption, dragged by Windows.
 // The three window keys are Windows' own caption keys (WindowChrome), so
 // they still work while a dialog's scrim takes every other click.
 Rectangle {
@@ -23,7 +24,7 @@ Rectangle {
         WindowChrome.minimizeButton = minimizeKey
         WindowChrome.maximizeButton = maximizeKey
         WindowChrome.closeButton = closeKey
-        for (const key of [backKey, forwardKey])
+        for (const key of [backKey, forwardKey, updatePill])
             WindowChrome.setHitTestVisible(key, true)
     }
     Connections {
@@ -40,7 +41,7 @@ Rectangle {
     // like the rest of the caption.
     readonly property bool modalUp: ShellState.modalCount > 0
     onModalUpChanged: {
-        for (const key of [backKey, forwardKey])
+        for (const key of [backKey, forwardKey, updatePill])
             WindowChrome.setHitTestVisible(key, !modalUp)
     }
 
@@ -132,7 +133,7 @@ Rectangle {
     Text {
         anchors.left: parent.left
         anchors.leftMargin: 68
-        anchors.right: controls.left
+        anchors.right: updatePill.visible ? updatePill.left : controls.left
         anchors.verticalCenter: parent.verticalCenter
         horizontalAlignment: Text.AlignHCenter
         elide: Text.ElideRight
@@ -141,6 +142,17 @@ Rectangle {
         color: Theme.ink3
         font: Theme.type.captionStrong
         Accessible.ignored: true
+    }
+
+    // An update is downloaded (src/updater.rs): a quiet key before the
+    // window keys, hidden during a call (the restart waits for it). It
+    // restarts into the new version; Settings > Desktop app has the rest.
+    UpdatePill {
+        id: updatePill
+        anchors.right: controls.left
+        anchors.rightMargin: 8
+        anchors.verticalCenter: parent.verticalCenter
+        enabled: !bar.modalUp
     }
 
     Row {

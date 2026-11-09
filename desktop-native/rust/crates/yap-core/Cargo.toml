@@ -14,6 +14,9 @@ keyring.workspace = true
 # feature, the files are read into its MemEnv.
 rusty-leveldb = { version = "4.0.2", default-features = false }
 reqwest = { workspace = true, features = ["multipart", "stream"] }
+# Release versions for the updater (src/update.rs), the same crate and
+# order Velopack compares them with.
+semver = "1.0.28"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

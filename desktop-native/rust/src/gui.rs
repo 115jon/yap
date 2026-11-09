@@ -591,6 +591,8 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             with::<Chat>(|chat| chat.set_hovered_mention(q(&json)));
         }
         ViewUpdate::Voice(view) => {
+            // The updater's restart waits while a call is up.
+            crate::updater::set_in_call(!view.channel_id.is_empty());
             with::<Voice>(|voice| set_voice(voice, &view));
             scalars(|s| s.voice = view);
         }

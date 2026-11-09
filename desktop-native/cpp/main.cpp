@@ -730,6 +730,9 @@ extern "C" void yap_velopack_startup();
 // imports the Tauri app's preferences once, then uninstalls it in the
 // background. A no-op for every other build and profile.
 extern "C" void yap_replace_tauri_at_launch();
+// The in-app updater (rust/src/updater.rs): with install on quit, hands a
+// downloaded update to Velopack's updater. Not while Windows shuts down.
+extern "C" void yap_updater_quit(bool session_ending);
 
 int main(int argc, char* argv[])
 {
@@ -1088,6 +1091,9 @@ int main(int argc, char* argv[])
   // The crash guard's marker goes with a clean quit (cpp/compat.*).
   Compat::quitting();
 #ifdef Q_OS_WIN
+  // Install on quit (rust/src/updater.rs): a downloaded update goes to
+  // Velopack's Update.exe, which waits for this process to exit.
+  yap_updater_quit(GetSystemMetrics(SM_SHUTTINGDOWN) != 0);
   logfile::finish(500);
   TerminateProcess(GetCurrentProcess(), UINT(code));
 #endif

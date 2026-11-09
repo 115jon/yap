@@ -3856,6 +3856,7 @@ dependencies = [
  "keyring",
  "reqwest 0.13.5",
  "rusty-leveldb",
+ "semver",
  "serde",
  "serde_json",
  "tempfile",

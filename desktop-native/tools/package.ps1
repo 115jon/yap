@@ -1,10 +1,15 @@
 # Builds Yap.exe (release) and packs it into a per-user Velopack
-# installer: <OutDir>/<PackId>-win-Setup.exe, the full .nupkg and the
+# installer: <OutDir>/<PackId>-<channel>-Setup.exe, the full .nupkg and the
 # release feed files. See docs/INSTALLER.md.
 #
 #   ./tools/package.ps1                          # build, pack, unsigned
 #   ./tools/package.ps1 -Sign                    # Authenticode via Artifact Signing (az login)
 #   ./tools/package.ps1 -SkipBuild -PackId Yap.InstallTest -Version 0.0.1 -Title "Yap InstallTest"
+#   ./tools/package.ps1 -Channel beta -Version 0.2.24-beta.1 -ReleaseNotes notes.md
+#
+# For a delta package, -OutDir must hold the previous release of the same
+# channel (its full .nupkg and releases.<channel>.json, `vpk download`):
+# docs/INSTALLER.md, "Publishing a release".
 #
 # The version defaults to [workspace.package] in rust/Cargo.toml, the one
 # CMakeLists.txt reads. vpk is a .NET global tool needed only here; the
@@ -16,6 +21,14 @@ param(
     # "Yap.Data" (the app's data root). yap_core::install::PACK_ID.
     [string]$PackId = "Yap.App",
     [string]$Version,
+    # The update channel (docs/INSTALLER.md, "Updates"): "win" is stable
+    # (vpk's default; feed releases.win.json), "beta" the beta channel
+    # (releases.beta.json, which beta users read with the stable one).
+    [ValidateSet("win", "beta")]
+    [string]$Channel = "win",
+    # Markdown release notes, shown in Settings > Desktop app (the feed's
+    # NotesMarkdown).
+    [string]$ReleaseNotes,
     # Shortcuts, Apps & features and Velopack's root stub (<Title>.exe).
     [string]$Title = "Yap",
     [string]$Authors = "115jon",
@@ -60,7 +73,7 @@ if (-not $Version) {
     $Version = $m.Groups[1].Value
 }
 # vpk must match the velopack crate the exe links (rust/Cargo.toml).
-$m = [regex]::Match($cargoToml, '(?m)^velopack = "=([^"]+)"')
+$m = [regex]::Match($cargoToml, '(?m)^velopack = (?:\{ version = )?"=([^"]+)"')
 if (-not $m.Success) { throw "No pinned velopack version in rust/Cargo.toml" }
 $vpkVersion = $m.Groups[1].Value
 
@@ -88,7 +101,7 @@ if (-not $vpk -or $vpk.Version -ne $vpkVersion) {
     $vpk = Find-Vpk
     if (-not $vpk) { throw "vpk was installed but cannot be run." }
 }
-Write-Host "==> vpk $($vpk.Version), $PackId $Version"
+Write-Host "==> vpk $($vpk.Version), $PackId $Version ($Channel)"
 
 if (-not $SkipBuild) {
     $buildArgs = @{ Config = "Release"; BuildDir = $BuildDir }
@@ -184,8 +197,13 @@ $packArgs = @(
     # the running window group together.
     "--aumid", "com.115jon.yap",
     "--shortcuts", "Desktop,StartMenuRoot",
+    "--channel", $Channel,
     "--outputDir", $OutDir
 )
+if ($ReleaseNotes) {
+    if (-not (Test-Path $ReleaseNotes)) { throw "No release notes at $ReleaseNotes" }
+    $packArgs += @("--releaseNotes", (Resolve-Path $ReleaseNotes).Path)
+}
 
 $metadata = $null
 if ($Sign) {
@@ -208,7 +226,7 @@ Remove-Item -Recurse -Force $stage
 if ($splash -like "$OutDir*") { Remove-Item -Force -ErrorAction SilentlyContinue $splash }
 if ($code) { throw "vpk pack failed ($code)" }
 
-$setup = Join-Path $OutDir "$PackId-win-Setup.exe"
+$setup = Join-Path $OutDir "$PackId-$Channel-Setup.exe"
 if (-not (Test-Path $setup)) { throw "vpk did not produce $setup" }
 if ($Sign) {
     $sig = Get-AuthenticodeSignature $setup

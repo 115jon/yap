@@ -818,12 +818,28 @@ pub const PANELS: &[PanelDef] = &[
                 "updates",
                 "Updates",
                 "",
-                &[row(
-                    "app-version",
-                    "Version",
-                    "",
-                    &["update", "upgrade", "release", "check for updates", "about"],
-                )],
+                &[
+                    row(
+                        "app-version",
+                        "Version",
+                        "",
+                        &["update", "upgrade", "release", "check for updates", "about"],
+                    ),
+                    // The native app's own (the Tauri app updated with no
+                    // choices): src/updater.rs, yap_core::update.
+                    row(
+                        "install-on-quit",
+                        "Install updates on quit",
+                        "A downloaded update installs when you quit Yap. Turn it off to install only with Restart now.",
+                        &["update", "restart", "quit", "automatic"],
+                    ),
+                    row(
+                        "beta-updates",
+                        "Beta updates",
+                        "Get new versions before everyone else. Betas can have rough edges.",
+                        &["update", "beta", "channel", "preview", "early"],
+                    ),
+                ],
             ),
         ],
     },
