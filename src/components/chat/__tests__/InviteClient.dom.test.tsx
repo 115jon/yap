@@ -59,12 +59,12 @@ afterEach(() => {
 });
 
 describe("InviteClient", () => {
-  it("offers Yap Native as a second key in a browser on Windows", async () => {
+  it("offers the Windows app as a second key in a browser on Windows", async () => {
     mocks.canOffer.mockReturnValue(true);
     mocks.apiGet.mockResolvedValue(INVITE);
     render(<InviteClient />);
     const native = await screen.findByRole("link", {
-      name: "Open in Yap Native for Windows",
+      name: "Open in Yap for Windows",
     });
     expect(native).toHaveAttribute("href", "yap-native://invite/abc123");
     const accept = screen.getByRole("button", { name: "Accept invite" });
@@ -73,11 +73,13 @@ describe("InviteClient", () => {
     ).toBeTruthy();
   });
 
-  it("doesn't offer Yap Native where it can't open (Tauri, mobile)", async () => {
+  it("doesn't offer the Windows app where it can't open (Tauri, mobile)", async () => {
     mocks.apiGet.mockResolvedValue(INVITE);
     render(<InviteClient />);
     await screen.findByRole("button", { name: "Accept invite" });
-    expect(screen.queryByRole("link", { name: /Yap Native/ })).toBeNull();
+    expect(
+      screen.queryByRole("link", { name: /Open in Yap for Windows/ }),
+    ).toBeNull();
   });
 
   it("shows the server and a sign-in link back to the invite on 401", async () => {
