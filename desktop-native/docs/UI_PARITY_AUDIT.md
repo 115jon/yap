@@ -1600,3 +1600,89 @@ Notes:
     "QQmlVMEMetaObject: Internal error - attempted to evaluate a function
     in an invalid context" warnings (server settings, Roles). Not looked
     into; it may predate this pass.
+
+## Colour picker pass (2026-11-09, branch native/colorpicker)
+
+Custom colours used Windows' `ChooseColorW` dialog (`Files.pickColor`), a
+modal system window unlike the rest of the app. The web gets Chromium's
+`<input type="color">` popup. Native now has its own picker, and the
+`ChooseColorW` path is gone.
+
+- `components/ColorPopover.qml` is a 248 px popover on the menu plate
+  (ply-3, line-strong edge, 2 px ink-1 rule, FloatShadow, PresenceIn at
+  dur-popover from 0.96). It holds:
+  - a saturation/brightness square: two stacked Rectangle gradients, a
+    ring handle that follows the pointer, arrows step 1 % (Shift 10 %);
+  - a hue slider: a rainbow track and a ring, arrows step 1° (Shift 10°);
+  - the eyedropper key;
+  - the hex field: hex digits only, a paste with `#` or spaces is
+    cleaned, 6 digits apply as typed, 3 apply on Enter or blur;
+  - old | new: the old half puts the opening colour back, and a slash
+    marks Auto;
+  - Recent: the last 8 colours.
+- It opens under its key, or over it when the window has no room below.
+  The colour applies as it changes. Esc puts back the opening value and
+  closes, and the draft is clean again. A click outside keeps the colour
+  and adds it to the recents.
+- Accessible names on the square and hue (Slider, with the value in the
+  description), the field, the halves and the recents. Focus rings show
+  for the keyboard only.
+- The maths and the recents live in Rust: `yap-core` `color.rs` (HSV, RGB
+  and hex both ways, `remember`, 8 tests, among them a round trip of over 16,000
+  byte triples) and the `Colors` QML singleton (`src/color.rs`). The
+  recents are kept in `color-recents.json` (yap-cache `ColorPrefs`, 1
+  test).
+- `cpp/eyedropper.*` covers every screen with a transparent topmost
+  window. The window is excluded from capture with
+  `WDA_EXCLUDEFROMCAPTURE`, and draws an 11×11 loupe with the hex. Each
+  move reads a 15 px square at the pointer (`QScreen::grabWindow(0, …)`).
+  A click picks; Esc, a right click or leaving the app cancels. It reads
+  the screen only during a pick the user started. `YAP_TEST_EYEDROPPER`
+  returns a colour (or `-`, a cancel) without a window or any read.
+- `YAP_PICK_COLOR` still stands in for the whole picker
+  (`Files.testPickColor`): a colour key applies the colour at once.
+- Callers: `ColorControl.qml` (profile banner, background and accent;
+  the name style's base and highlight) and `RoleEditor.qml` (the role
+  colour key).
+
+Evidence (`F:/ct/yapn/tmp/colorpicker/`, profile `spike`; nothing was
+saved, and every draft was reset):
+
+- the background picker open, flipped above its key with recents
+  (`c01-background-open.png`);
+- a recent applied (`c02-recent-applied.png`) and a drag in progress,
+  with the card live (`c03-dragging.png`);
+- keyboard steps on the square and the hue (`c04-keys-square.png`,
+  `c05-keys-hue.png`), and Esc back to Auto (`c06-esc-reverted.png`);
+- the role colour picker open, dragged, a hex typed and kept on a click
+  outside (`r05`–`r07`), and Reset (`r08`);
+- `YAP_PICK_COLOR=#123456` on the role key with no popover
+  (`f01-pickcolor-role.png`);
+- `YAP_TEST_EYEDROPPER=-` keeping the colour (`f03`);
+- Esc leaving the role draft clean (`f04`);
+- from the first build: a typed `#33ccff`, the test eyedropper's
+  `#3E9B4F` and Esc back to Auto (`b1-*.png`; the popover had no plate
+  then, which was fixed).
+
+Not verified:
+
+- The real eyedropper overlay was never shown. It would cover the
+  owner's screens and read them. Only the test switch was run, and the
+  overlay code is checked by the build alone.
+- Screen readers were not run against the new names.
+- The name style dialog's colours use the same ColorControl but were not
+  opened.
+
+Found and fixed while testing:
+
+- The template popup had no height, so its plate did not draw.
+- Esc in the role editor gave back the colour lower-cased, which left
+  the draft dirty.
+
+Checks:
+
+- `cargo test -p yap-core -p yap-protocol -p yap-cache -p yap-voice`
+  (target `F:/ct/yapn/check-color`): 1887 passed, 0 failed.
+- `cargo clippy --workspace --all-targets -- -D warnings` is clean.
+- `build.ps1` into `F:/ct/yapn/rel-color` was green
+  (`F:/ct/yapn/build-color-1.log` to `-4.log`).

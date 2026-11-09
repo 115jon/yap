@@ -23,8 +23,6 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
-#include <commdlg.h>
-#pragma comment(lib, "comdlg32.lib")
 #endif
 
 namespace {
@@ -150,35 +148,12 @@ void MediaShell::clearImageCache()
   emit imageCacheCleared();
 }
 
-QString MediaShell::pickColor(const QString& initial)
+QString MediaShell::testPickColor() const
 {
-  // Tests: YAP_PICK_COLOR ("#RRGGBB", or "-" for a cancel) stands in.
-  const QString forced = qEnvironmentVariable("YAP_PICK_COLOR");
-  if (!forced.isEmpty())
-    return forced == QLatin1String("-") ? QString() : forced.toUpper();
-#ifdef Q_OS_WIN
-  // The dialog's 16 custom colours, kept for the run as Chromium keeps them.
-  static COLORREF custom[16] = {};
-  const QString hex = initial.startsWith(QLatin1Char('#')) ? initial.mid(1) : initial;
-  bool ok = false;
-  const uint rgb = hex.size() == 6 ? hex.toUInt(&ok, 16) : 0;
-  CHOOSECOLORW choose = {};
-  choose.lStructSize = sizeof(choose);
-  choose.hwndOwner = ownerWindow();
-  choose.rgbResult = ok ? RGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF) : RGB(0, 0, 0);
-  choose.lpCustColors = custom;
-  choose.Flags = CC_RGBINIT | CC_FULLOPEN;
-  if (!ChooseColorW(&choose))
-    return QString();
-  return QStringLiteral("#%1%2%3")
-    .arg(int(GetRValue(choose.rgbResult)), 2, 16, QLatin1Char('0'))
-    .arg(int(GetGValue(choose.rgbResult)), 2, 16, QLatin1Char('0'))
-    .arg(int(GetBValue(choose.rgbResult)), 2, 16, QLatin1Char('0'))
-    .toUpper();
-#else
-  Q_UNUSED(initial);
-  return QString();
-#endif
+  // Tests: YAP_PICK_COLOR ("#RRGGBB", or "-" for a cancel) stands in for
+  // the colour picker; empty when unset.
+  const QString forced = qEnvironmentVariable("YAP_PICK_COLOR").trimmed();
+  return forced == QLatin1String("-") ? forced : forced.toUpper();
 }
 
 QStringList MediaShell::pickFiles(const QString& title)

@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
-import Yap.Chrome
 import com.yap.native
 
 // The role editor (RoleManagement.tsx RoleEditor): the role's dot and name
@@ -198,9 +197,10 @@ Column {
             label: qsTr("Colour")
             description: qsTr("Names with this role show in this colour. Leave empty for none.")
             // The colour input (RoleManagement.tsx `<input type="color">`,
-            // which Chromium opens as Windows' colour dialog): a 32 px
+            // Chromium's colour popup there, ColorPopover here): a 32 px
             // swatch with a line-field edge and 2 px inset, on the colour
-            // in use, or #99aab5 (PICKER_START) while there is none.
+            // in use, or #99aab5 (PICKER_START) while there is none. The
+            // colour applies as it changes; Esc puts the old one back.
             T.AbstractButton {
                 id: picker
                 readonly property bool valid: /^#[0-9a-f]{6}$/i.test(root.color)
@@ -225,12 +225,18 @@ Column {
                         color: picker.valid ? root.color : "#99aab5"
                     }
                 }
-                onClicked: {
-                    const picked = Files.pickColor(picker.valid ? root.color : "#99aab5")
-                    if (picked.length === 0)
-                        return
-                    root.color = picked.toLowerCase()
-                    Admin.clear("role.color")
+                onClicked: popover.request(root.color)
+
+                ColorPopover {
+                    id: popover
+                    name: qsTr("role colour")
+                    start: "#99aab5"
+                    onPicked: value => {
+                        // Esc gives back the colour as it was, case and all,
+                        // so the draft is clean again.
+                        root.color = value === popover.initial ? value : value.toLowerCase()
+                        Admin.clear("role.color")
+                    }
                 }
             }
             KitField {

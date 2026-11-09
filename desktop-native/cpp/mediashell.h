@@ -5,9 +5,10 @@
 // "open"):
 //
 //   Files.pickFiles()          the system's multi-select open dialog
-//   Files.pickColor(hex)       the system's colour dialog (ChooseColor, what
-//                              Chromium opens for <input type=color>) from
-//                              `#RRGGBB`; the pick as `#RRGGBB`, or empty
+//   Files.testPickColor()      tests: YAP_PICK_COLOR, which the colour
+//                              picker (ColorPopover.qml) applies instead of
+//                              opening: `#RRGGBB`, "-" (a cancel), or empty
+//                              when unset
 //   Files.clipboardFiles()     files copied in Explorer, or a copied picture
 //                              saved as a PNG (empty when neither); the
 //                              core deletes the PNG once it is uploaded
@@ -48,7 +49,7 @@ public:
   explicit MediaShell(QObject* parent = nullptr);
 
   Q_INVOKABLE QStringList pickFiles(const QString& title);
-  Q_INVOKABLE QString pickColor(const QString& initial);
+  Q_INVOKABLE QString testPickColor() const;
   Q_INVOKABLE QStringList clipboardFiles();
   Q_INVOKABLE QString downloadPath(const QString& name) const;
   Q_INVOKABLE QString openPath(const QString& name) const;
