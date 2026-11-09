@@ -638,7 +638,7 @@ Inputs: `version` (empty: Cargo.toml's), `channel` (`win` or `beta`),
 | job       | runner        | token                                | does                                                                                                                                                                                                                                                                                                                                          |
 | --------- | ------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `plan`    | ubuntu-latest | `contents: read`                     | checks the version against Cargo.toml and the channel (beta takes `x.y.z-pre`), refuses a tag or release (drafts too) that exists, and a signed run off `main`                                                                                                                                                                                |
-| `build`   | windows-2025  | `contents: read`                     | the toolchain (below), `cargo deny`, `cargo test` (the workspace without `yap_native` and `yap-audio`), ONNX Runtime from nuget.org (hash-checked), `build.ps1`; uploads `Yap.exe` and the runtime                                                                                                                                            |
+| `build`   | windows-2022  | `contents: read`                     | the toolchain (below), `cargo deny`, `cargo test` (the workspace without `yap_native` and `yap-audio`), ONNX Runtime from nuget.org (hash-checked), `build.ps1`; uploads `Yap.exe` and the runtime                                                                                                                                            |
 | `release` | windows-2025  | `contents: write`, `id-token: write` | the previous release of the channel (feed and full package, for the delta), `azure/login` (OIDC) and `azure/artifact-signing-action` on `Yap.exe`, `package.ps1 -Sign` (vpk signs Update.exe, the stub and Setup.exe), `verify-authenticode.ps1`, then the release: a draft, packages, then the feed file, published with `make_latest=false` |
 
 The build job runs third-party build scripts, so it gets neither the write
@@ -672,8 +672,12 @@ again on a hit. The Qt archive adds `bin/qt.conf` (`Prefix = ..`): a static
 Qt is not relocatable, and cxx-qt asks qmake for its paths.
 
 Qt's libraries are link-time code, which links only with the MSVC that
-compiled them: the build job warns when the runner's MSVC differs from the
-lock's `msvc`. A new Qt build means a new toolchain release (a new tag),
+compiled them: the build job runs on `windows-2022` (Visual Studio 2022,
+MSVC 14.44; `windows-2025` is now the Visual Studio 2026 image) and warns
+when the runner's MSVC differs from the lock's `msvc`. When `windows-2022`
+is retired, either install the 14.44 toolset on the newer image and pass
+`-vcvars_ver=14.44` to `Enter-VsDevShell`, or rebuild Qt with the newer
+MSVC and make a new toolchain release. A new Qt build means a new toolchain release (a new tag),
 `package-toolchain.ps1 -Upload`, and the new lock file committed.
 
 ## Local test
