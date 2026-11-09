@@ -31,8 +31,25 @@ pub const SHARE_QUALITIES: [&str; 8] = [
 /// The default share preset (`screenShareQuality`).
 pub const DEFAULT_SHARE_QUALITY: &str = "720p30";
 
-/// The highest per-user and output volume, in percent.
+/// The highest output and input volume, in percent.
 pub const MAX_VOLUME: u16 = 200;
+
+/// The highest per-user volume and per-user stream volume, in percent
+/// (past 100 % a boost; yap-voice `MAX_PEER_VOLUME`). Values saved under
+/// the old 200 % cap are in range as they are.
+pub const MAX_PEER_VOLUME: u16 = 400;
+
+/// A per-user percent as saved, read leniently: any JSON number is rounded
+/// and clamped to 0..=[`MAX_PEER_VOLUME`]; anything else (a string, null,
+/// an object) reads as 100. So one hand-edited or foreign value cannot fail
+/// the whole file, which would reset every user's settings.
+fn percent<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(match value.as_f64() {
+        Some(v) if v.is_finite() => v.round().clamp(0.0, f64::from(MAX_PEER_VOLUME)) as u16,
+        _ => 100,
+    })
+}
 
 /// The noise reduction providers (`NoiseReductionProviderId`). Only RNNoise
 /// runs here; Krisp's is the browser SDK, which the web does not offer
@@ -67,12 +84,14 @@ pub enum InputProfile {
 #[serde(default)]
 #[serde(rename_all = "camelCase")]
 pub struct PeerSettings {
-    /// 0..=200 percent.
+    /// 0..=400 percent (past 100 a boost).
+    #[serde(deserialize_with = "percent")]
     pub volume: u16,
     pub muted: bool,
     /// Their soundboard is silent for us (`soundboardMuted`).
     pub soundboard_muted: bool,
-    /// Their share's audio, 0..=200 percent ("Stream volume").
+    /// Their share's audio, 0..=400 percent ("Stream volume").
+    #[serde(deserialize_with = "percent")]
     pub stream_volume: u16,
     /// Their share's audio plays even while it is not on stage.
     pub always_hear: bool,
@@ -279,7 +298,9 @@ impl VoiceSettings {
             }
         }
         self.peer_settings.retain(|_, peer| {
-            peer.volume = peer.volume.min(MAX_VOLUME);
+            peer.volume = peer.volume.min(MAX_PEER_VOLUME);
+            peer.stream_volume = peer.stream_volume.min(MAX_PEER_VOLUME);
+            peer.attenuation_strength = peer.attenuation_strength.min(100);
             *peer != PeerSettings::default()
         });
         self
@@ -293,8 +314,8 @@ impl VoiceSettings {
     /// Sets someone's settings; the defaults drop the entry.
     pub fn set_peer(&mut self, user_id: &str, peer: PeerSettings) {
         let peer = PeerSettings {
-            volume: peer.volume.min(MAX_VOLUME),
-            stream_volume: peer.stream_volume.min(MAX_VOLUME),
+            volume: peer.volume.min(MAX_PEER_VOLUME),
+            stream_volume: peer.stream_volume.min(MAX_PEER_VOLUME),
             attenuation_strength: peer.attenuation_strength.min(100),
             ..peer
         };
@@ -583,18 +604,118 @@ mod tests {
     }
 
     #[test]
-    fn volumes_should_be_capped_at_two_hundred_percent() {
+    fn peer_volumes_should_be_capped_at_four_hundred_percent() {
         let mut s = VoiceSettings::default();
         s.set_peer(
             "u-ana",
             PeerSettings {
                 volume: 900,
-                muted: false,
-                soundboard_muted: false,
+                stream_volume: u16::MAX,
                 ..PeerSettings::default()
             },
         );
-        assert_eq!(s.peer("u-ana").volume, 200);
+        assert_eq!(
+            (s.peer("u-ana").volume, s.peer("u-ana").stream_volume),
+            (400, 400)
+        );
+        s.set_peer(
+            "u-ana",
+            PeerSettings {
+                volume: 400,
+                stream_volume: 250,
+                ..PeerSettings::default()
+            },
+        );
+        assert_eq!(
+            (s.peer("u-ana").volume, s.peer("u-ana").stream_volume),
+            (400, 250)
+        );
+    }
+
+    #[test]
+    fn the_output_and_input_volumes_should_stay_capped_at_two_hundred() {
+        let s = VoiceSettings {
+            output_volume: 400,
+            input_volume: 300,
+            ..VoiceSettings::default()
+        }
+        .normalized();
+        assert_eq!((s.output_volume, s.input_volume), (200, 200));
+    }
+
+    #[test]
+    fn values_saved_under_the_old_cap_should_load_unchanged() {
+        let dir = tempfile::tempdir().expect("dir");
+        std::fs::write(
+            dir.path().join(VOICE_FILE),
+            r#"{"userSettings":{"u-jon":{"outputVolume":150,"peerSettings":{
+                "u-a":{"volume":200,"streamVolume":200},
+                "u-b":{"volume":35,"streamVolume":120,"muted":true},
+                "u-c":{"volume":0}
+            }}}}"#,
+        )
+        .expect("write");
+        let s = load_voice(dir.path(), "u-jon");
+        assert_eq!(s.output_volume, 150);
+        assert_eq!(
+            (s.peer("u-a").volume, s.peer("u-a").stream_volume),
+            (200, 200)
+        );
+        assert_eq!(
+            (
+                s.peer("u-b").volume,
+                s.peer("u-b").stream_volume,
+                s.peer("u-b").muted
+            ),
+            (35, 120, true)
+        );
+        assert_eq!(s.peer("u-c").volume, 0);
+    }
+
+    #[test]
+    fn a_boost_should_survive_a_save_and_load() {
+        let dir = tempfile::tempdir().expect("dir");
+        let mut s = VoiceSettings::default();
+        s.set_peer(
+            "u-a",
+            PeerSettings {
+                volume: 400,
+                stream_volume: 333,
+                ..PeerSettings::default()
+            },
+        );
+        save_voice(dir.path(), "u-jon", &s).expect("save");
+        let back = load_voice(dir.path(), "u-jon");
+        assert_eq!(
+            (back.peer("u-a").volume, back.peer("u-a").stream_volume),
+            (400, 333)
+        );
+    }
+
+    #[test]
+    fn garbage_volumes_should_clamp_not_reset_the_file() {
+        let dir = tempfile::tempdir().expect("dir");
+        std::fs::write(
+            dir.path().join(VOICE_FILE),
+            r#"{"userSettings":{"u-jon":{"outputVolume":120,"peerSettings":{
+                "u-big":{"volume":90000,"streamVolume":1e300},
+                "u-neg":{"volume":-40,"streamVolume":-1},
+                "u-frac":{"volume":149.6,"streamVolume":0.4},
+                "u-text":{"volume":"loud","streamVolume":null,"muted":true},
+                "u-obj":{"volume":{"a":1},"streamVolume":[3]}
+            }}}}"#,
+        )
+        .expect("write");
+        let s = load_voice(dir.path(), "u-jon");
+        // The rest of the file still loads.
+        assert_eq!(s.output_volume, 120);
+        let v = |id: &str| (s.peer(id).volume, s.peer(id).stream_volume);
+        assert_eq!(v("u-big"), (400, 400));
+        assert_eq!(v("u-neg"), (0, 0));
+        assert_eq!(v("u-frac"), (150, 0));
+        assert_eq!(v("u-text"), (100, 100));
+        assert!(s.peer("u-text").muted);
+        assert_eq!(v("u-obj"), (100, 100));
     }
 
     #[test]

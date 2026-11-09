@@ -131,7 +131,10 @@ mod tracks;
 mod vad;
 pub mod wire;
 
-pub use audio::{peer_gain, resolve, AudioDevice, AudioDevices, Playback, Processing, MAX_VOLUME};
+pub use audio::{
+    peer_gain, resolve, AudioDevice, AudioDevices, Playback, Processing, MAX_GAIN, MAX_PEER_VOLUME,
+    MAX_VOLUME,
+};
 pub use camera::{push_camera_frame, CameraFrame, PixelFormat, LOCAL_CAMERA_KEY};
 pub use driver::{run_call, AdmissionApi, ApiFailure, CallEnv, Commands};
 pub use engine::{

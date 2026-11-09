@@ -563,7 +563,7 @@ impl Pipeline {
         format!(
             "audio[5s frames in={capture_frames} out={render_frames} apm={apm}us rnnoise={rnnoise}us{} \
              reverse={reverse}us mix={mix}us streams={} queued={}f underruns={} trimmed={}f \
-             skewed={}f delay={}+{}ms aec={} ns={} agc={}{}{}] {}",
+             skewed={}f boosted={}f/{} delay={}+{}ms aec={} ns={} agc={}{}{}] {}",
             if self.shared.noise_reduction.load(Ordering::Relaxed) {
                 ""
             } else {
@@ -574,6 +574,8 @@ impl Pipeline {
             m.underruns,
             m.trimmed_frames,
             m.skewed_frames,
+            m.boosted_frames,
+            m.boost_clamped,
             self.shared.render_delay_ms.load(Ordering::Relaxed),
             self.shared.capture_delay_ms.load(Ordering::Relaxed),
             apm_config.0,
@@ -1180,8 +1182,32 @@ mod tests {
     /// back into the "mic" 40 ms later at half level. Returns the mic's RMS
     /// before and after processing over the last two seconds.
     fn echo_run(processing: Processing, seconds: usize, board: Board) -> (f64, f64) {
+        let run = talker_run(processing, seconds, board, 6000.0, 1.0);
+        (run.before, run.after)
+    }
+
+    /// What [`talker_run`] measured.
+    struct TalkerRun {
+        before: f64,
+        after: f64,
+        /// The loudest sample the speaker played, and how many sat at the
+        /// rails (|s| >= 32767).
+        peak: i32,
+        pinned: usize,
+    }
+
+    /// [`echo_run`] with the far-end talker's noise at `level` (of 32768)
+    /// and its stream at `gain`.
+    fn talker_run(
+        processing: Processing,
+        seconds: usize,
+        board: Board,
+        level: f64,
+        gain: f64,
+    ) -> TalkerRun {
         let shared = Arc::new(shared(processing));
         let stream = shared.mixer.add();
+        stream.set_gain(gain);
         let bus = yap_speaker::Bus::new();
         let call: Arc<dyn Input> = Arc::new(CallMix(Arc::clone(&shared)));
         bus.add(&call);
@@ -1196,6 +1222,7 @@ mod tests {
         let delay = 4;
         let mut heard: VecDeque<Vec<i16>> = VecDeque::new();
         let (mut before, mut after) = (Vec::new(), Vec::new());
+        let (mut peak, mut pinned) = (0i32, 0usize);
         let frames = seconds * 100;
         for n in 0..frames {
             if board == Board::None {
@@ -1204,7 +1231,7 @@ mod tests {
                 let far: Vec<i16> = (0..FRAME)
                     .map(|_| {
                         if talking {
-                            (noise.next() * 6000.0) as i16
+                            (noise.next() * level).clamp(-32768.0, 32767.0) as i16
                         } else {
                             0
                         }
@@ -1215,6 +1242,11 @@ mod tests {
             let mut out = [0i16; SAMPLES];
             bus.render(&mut out);
             tap.played(&out, 10);
+            for s in out {
+                let a = i32::from(s).abs();
+                peak = peak.max(a);
+                pinned += usize::from(a >= 32767);
+            }
             let room = if board == Board::Outside {
                 // Played by another output: in the room, not in the tap.
                 let mut extra = [0f32; SAMPLES];
@@ -1242,7 +1274,12 @@ mod tests {
                 after.extend(mic);
             }
         }
-        (rms(&before), rms(&after))
+        TalkerRun {
+            before: rms(&before),
+            after: rms(&after),
+            peak,
+            pinned,
+        }
     }
 
     fn removed_db((before, after): (f64, f64)) -> f64 {
@@ -1266,6 +1303,25 @@ mod tests {
         let erle = removed_db((before, after));
         eprintln!("echo: {before:.4} -> {after:.4} RMS ({erle:.1} dB)");
         assert!(erle >= 50.0, "only {erle:.1} dB of echo removed");
+    }
+
+    /// A loud talker at 400 %: limited before the bus, so the speaker
+    /// never plays a sample at the rails; the tap hands the echo canceller
+    /// the frame as played (limited), so it still cancels it.
+    #[test]
+    fn a_boosted_loud_talker_should_play_clean_and_still_be_cancelled() {
+        let run = talker_run(aec_only(true), 6, Board::None, 30000.0, 4.0);
+        let erle = removed_db((run.before, run.after));
+        let ceiling = (crate::dsp::mix::BOOST_CEILING * 32768.0).ceil() as i32;
+        eprintln!(
+            "boosted x4: peak {} ({:.2} dBFS), {} at the rails, {erle:.1} dB of echo removed",
+            run.peak,
+            20.0 * (f64::from(run.peak) / 32768.0).log10(),
+            run.pinned
+        );
+        assert_eq!(run.pinned, 0);
+        assert!(run.peak <= ceiling, "peak {}", run.peak);
+        assert!(erle >= 40.0, "only {erle:.1} dB of the boosted echo removed");
     }
 
     #[test]

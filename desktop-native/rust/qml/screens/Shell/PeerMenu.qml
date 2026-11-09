@@ -200,9 +200,11 @@ MenuPanel {
     VolumeSlider {
         visible: root.plain
         height: visible ? implicitHeight : 0
+        boost: true
         label: qsTr("User volume")
         value: Audio.peersRevision >= 0 ? Audio.peerVolume(root.userId) : 100
-        onMoved: Audio.setPeerVolume(root.userId, Math.round(value))
+        onPercentMoved: (percent) => Audio.previewPeerVolume(root.userId, percent)
+        onCommitted: (percent) => Audio.setPeerVolume(root.userId, percent)
     }
     MenuRule { visible: root.plain; height: visible ? implicitHeight : 0 }
     MenuRow {
@@ -224,9 +226,11 @@ MenuPanel {
     VolumeSlider {
         visible: root.watching
         height: visible ? implicitHeight : 0
+        boost: true
         label: qsTr("Stream volume")
         value: Audio.peersRevision >= 0 ? Audio.peerStreamVolume(root.userId) : 100
-        onMoved: Audio.setPeerStreamVolume(root.userId, Math.round(value))
+        onPercentMoved: (percent) => Audio.previewPeerStreamVolume(root.userId, percent)
+        onCommitted: (percent) => Audio.setPeerStreamVolume(root.userId, percent)
     }
     MenuRow {
         visible: root.sharing

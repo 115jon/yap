@@ -141,15 +141,22 @@ pub mod qobject {
         #[cxx_name = "peerMuted"]
         fn peer_muted(self: &Audio, user_id: &QString) -> bool;
 
+        /// Their volume, 0..=400 (past 100 a boost), applied and saved.
         #[qinvokable]
         #[cxx_name = "setPeerVolume"]
         fn set_peer_volume(self: Pin<&mut Audio>, user_id: &QString, volume: i32);
+
+        /// Their volume applied to the call at once but not saved (a slider
+        /// mid-drag); `setPeerVolume` saves it.
+        #[qinvokable]
+        #[cxx_name = "previewPeerVolume"]
+        fn preview_peer_volume(self: Pin<&mut Audio>, user_id: &QString, volume: i32);
 
         #[qinvokable]
         #[cxx_name = "setPeerMuted"]
         fn set_peer_muted(self: Pin<&mut Audio>, user_id: &QString, muted: bool);
 
-        /// Their share's audio ("Stream volume", 0..=200).
+        /// Their share's audio ("Stream volume", 0..=400).
         #[qinvokable]
         #[cxx_name = "peerStreamVolume"]
         fn peer_stream_volume(self: &Audio, user_id: &QString) -> i32;
@@ -157,6 +164,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "setPeerStreamVolume"]
         fn set_peer_stream_volume(self: Pin<&mut Audio>, user_id: &QString, volume: i32);
+
+        /// As `previewPeerVolume`, for their share's audio.
+        #[qinvokable]
+        #[cxx_name = "previewPeerStreamVolume"]
+        fn preview_peer_stream_volume(self: Pin<&mut Audio>, user_id: &QString, volume: i32);
 
         /// Their share's audio plays off stage ("Always hear stream audio").
         #[qinvokable]
@@ -460,8 +472,17 @@ fn choose_devices(s: &VoiceSettings) {
     });
 }
 
+/// The output or input volume from the UI, 0..=200.
 fn volume(v: i32) -> u16 {
     u16::try_from(v.clamp(0, i32::from(voice::MAX_VOLUME))).unwrap_or(100)
+}
+
+// The saved cap and the call's agree.
+const _: () = assert!(voice::MAX_PEER_VOLUME == yap_voice::MAX_PEER_VOLUME);
+
+/// A per-user volume from the UI, 0..=400.
+fn peer_volume(v: i32) -> u16 {
+    u16::try_from(v.clamp(0, i32::from(voice::MAX_PEER_VOLUME))).unwrap_or(100)
 }
 
 impl qobject::Audio {
@@ -767,7 +788,35 @@ impl qobject::Audio {
     }
 
     pub fn set_peer_volume(self: Pin<&mut Self>, user_id: &QString, v: i32) {
-        self.edit_peer(user_id, |p| p.volume = volume(v));
+        self.edit_peer(user_id, |p| p.volume = peer_volume(v));
+    }
+
+    /// Applies a change to someone's settings to the call only: no save, no
+    /// `peersRevision` (a slider mid-drag; its commit does both).
+    fn preview_peer(
+        mut self: Pin<&mut Self>,
+        user_id: &QString,
+        f: impl FnOnce(&mut PeerSettings),
+    ) {
+        let user_id = user_id.to_string();
+        if user_id.is_empty() {
+            return;
+        }
+        {
+            let settings = &mut self.as_mut().rust_mut().settings;
+            let mut peer = settings.peer(&user_id);
+            f(&mut peer);
+            settings.set_peer(&user_id, peer);
+        }
+        set_call_audio(call_audio(&self.rust().settings, &self.rust().user_id));
+    }
+
+    pub fn preview_peer_volume(self: Pin<&mut Self>, user_id: &QString, v: i32) {
+        self.preview_peer(user_id, |p| p.volume = peer_volume(v));
+    }
+
+    pub fn preview_peer_stream_volume(self: Pin<&mut Self>, user_id: &QString, v: i32) {
+        self.preview_peer(user_id, |p| p.stream_volume = peer_volume(v));
     }
 
     pub fn set_peer_muted(self: Pin<&mut Self>, user_id: &QString, muted: bool) {
@@ -784,7 +833,7 @@ impl qobject::Audio {
     }
 
     pub fn set_peer_stream_volume(self: Pin<&mut Self>, user_id: &QString, v: i32) {
-        self.edit_peer(user_id, |p| p.stream_volume = volume(v));
+        self.edit_peer(user_id, |p| p.stream_volume = peer_volume(v));
     }
 
     pub fn peer_always_hear(&self, user_id: &QString) -> bool {
