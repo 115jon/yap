@@ -331,6 +331,57 @@ describe("the Kova gate", () => {
     expect(signOut.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 
+  it("does not cache a Kova outage as a refusal", async () => {
+    const reference = await fingerprint(await call("GET", "/nope"));
+    let failures = 0;
+    for (const outage of [
+      () => new Response(null, { status: 429 }),
+      () => new Response(null, { status: 503 }),
+      () => {
+        throw new TypeError("fetch failed");
+      },
+    ]) {
+      clearGateCache();
+      const flaky: typeof fetch = async (input, init) => {
+        failures += 1;
+        if (failures % 2 === 1) return outage();
+        return fakeKova(input, init);
+      };
+      const ask = () =>
+        handleAdminRequest(
+          new Request(`${BASE}/api/session`, {
+            headers: { cookie: `${SESSION_COOKIE}=admin-token` },
+          }),
+          adminEnv,
+          { fetch: flaky },
+        );
+      // The outage is still a bare 404, byte for byte...
+      expect(await fingerprint(await ask())).toBe(reference);
+      // ...but the next request asks Kova again and gets in.
+      const next = await ask();
+      expect(next.status).toBe(200);
+      expect(await next.json()).toMatchObject({ user_id: ADMIN });
+    }
+
+    // A definite "no" is cached: Kova is asked once per TTL.
+    clearGateCache();
+    let asked = 0;
+    const counting: typeof fetch = async (input, init) => {
+      asked += 1;
+      return fakeKova(input, init);
+    };
+    for (let i = 0; i < 3; i += 1) {
+      await handleAdminRequest(
+        new Request(`${BASE}/api/users`, {
+          headers: { cookie: `${SESSION_COOKIE}=plain-token` },
+        }),
+        adminEnv,
+        { fetch: counting },
+      );
+    }
+    expect(asked).toBe(1);
+  });
+
   it("routes only the known API paths and methods", () => {
     expect(routeApi("GET", "/api/users")).toEqual({ action: "people" });
     expect(routeApi("POST", "/api/users")).toBeNull();

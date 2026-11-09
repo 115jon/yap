@@ -102,35 +102,67 @@ async function cacheKey(token: string): Promise<string> {
 }
 
 /**
+ * What the gate decided about one token: an admin's Yap user id, a definite
+ * "no" (Kova found no session, or one that is not a site admin), or
+ * "unknown" when Kova or D1 could not answer (a timeout, a 429, a 5xx).
+ */
+export type AdminVerdict =
+  | { kind: "admin"; userId: string }
+  | { kind: "refused" }
+  | { kind: "unknown" };
+
+/**
  * The Yap user id behind `token` when it is a live "Yap Admin" Kova session
  * of a site admin with a Yap account that is not suspended; null for
- * anything else, a Kova outage included (no session is assumed).
+ * anything else, a Kova outage included (the caller still answers a bare
+ * 404). Only definite answers are cached: an outage is asked again on the
+ * next request, so one slow Kova call cannot lock an admin out for the TTL.
  */
 export async function verifyAdminToken(
   token: string | null,
   env: GateEnv,
   deps: GateDeps = {},
 ): Promise<string | null> {
-  if (!token) return null;
+  const verdict = await adminVerdict(token, env, deps);
+  return verdict.kind === "admin" ? verdict.userId : null;
+}
+
+export async function adminVerdict(
+  token: string | null,
+  env: GateEnv,
+  deps: GateDeps = {},
+): Promise<AdminVerdict> {
+  if (!token) return { kind: "refused" };
   const admins = siteAdminIds(env.SITE_ADMIN_USER_IDS);
   const publishableKey = env.KOVA_ADMIN_PUBLISHABLE_KEY?.trim();
-  if (admins.size === 0 || !publishableKey) return null;
+  if (admins.size === 0 || !publishableKey) return { kind: "refused" };
 
   const now = (deps.now ?? Date.now)();
   const key = await cacheKey(token);
   const hit = verified.get(key);
-  if (hit && now - hit.at < VERIFY_TTL_MS) return hit.userId;
+  if (hit && now - hit.at < VERIFY_TTL_MS) {
+    return hit.userId
+      ? { kind: "admin", userId: hit.userId }
+      : { kind: "refused" };
+  }
 
-  const kovaUserId = await Effect.runPromise(
+  // Kova's two failures stay apart (kova-auth.ts): Unauthenticated is its
+  // answer, AuthUnavailable means it could not give one.
+  const lookup = await Effect.runPromise(
     Effect.gen(function* () {
       const kova = yield* KovaAuth;
       const identity = yield* kova.lookup({
         authorization: `Bearer ${token}`,
         cookie: null,
       });
-      return identity.user.id;
+      return { kind: "found" as const, userId: identity.user.id };
     }).pipe(
-      Effect.catch(() => Effect.succeed(null)),
+      Effect.catchTag("Unauthenticated", () =>
+        Effect.succeed({ kind: "none" as const }),
+      ),
+      Effect.catchTag("AuthUnavailable", () =>
+        Effect.succeed({ kind: "unavailable" as const }),
+      ),
       Effect.provide(
         KovaAuth.layerWith({
           url: (env.KOVA_AUTH_URL || DEFAULT_KOVA_AUTH_URL).replace(/\/$/, ""),
@@ -141,24 +173,30 @@ export async function verifyAdminToken(
       ),
     ),
   );
+  if (lookup.kind === "unavailable") return { kind: "unknown" };
 
   let userId: string | null = null;
-  if (kovaUserId && admins.has(kovaUserId)) {
+  if (lookup.kind === "found" && admins.has(lookup.userId)) {
     const row = await env.DB.prepare(
       `SELECT id FROM users WHERE id = ? AND suspended_at IS NULL`,
     )
-      .bind(kovaUserId)
+      .bind(lookup.userId)
       .first<{ id: string }>()
-      .catch(() => null);
-    userId = row?.id ?? null;
+      .then(
+        (found) => ({ ok: true as const, found }),
+        () => ({ ok: false as const }),
+      );
+    // A D1 error is no answer either.
+    if (!row.ok) return { kind: "unknown" };
+    userId = row.found?.id ?? null;
   }
-  // Only a definite answer is cached; a refusal is cached too, so a probe
-  // with a stolen-but-not-admin token costs one Kova call per TTL.
+  // A refusal is cached too, so a probe with a stolen-but-not-admin token
+  // costs one Kova call per TTL.
   verified.set(key, { at: now, userId });
   if (verified.size > 500) {
     for (const [entry, value] of verified) {
       if (now - value.at >= VERIFY_TTL_MS) verified.delete(entry);
     }
   }
-  return userId;
+  return userId ? { kind: "admin", userId } : { kind: "refused" };
 }
