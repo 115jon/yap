@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Effects
 import QtQuick.Templates as T
 import com.yap.native
 
@@ -8,7 +7,8 @@ import com.yap.native
 // square on a tint-1 plate, dragged to place it and zoomed 1x to 4x; the
 // square's 2 px accent ring is the avatar's edge (a circle while a
 // decoration is worn, as the ring art is drawn for one). Under it the zoom
-// fader between a small and a large image glyph, and a 40 px preview.
+// fader between a small and a large image glyph, and a 40 px preview. The
+// wheel zooms too; a GIF plays while it is framed.
 // Reset, Cancel and Apply. Apply gives the crop as `{x, y, width,
 // height}` in percent of the picture, rounded to hundredths; the picture
 // itself is never changed (the server keeps the crop beside it).
@@ -28,7 +28,7 @@ PlateDialog {
     readonly property real minZoom: 1
     readonly property real maxZoom: 4
     readonly property int viewport: 320
-    readonly property bool ready: picture.status === Image.Ready && picture.sourceSize.width > 0
+    readonly property bool ready: picture.status === AnimatedImage.Ready && picture.sourceSize.width > 0
     readonly property real naturalW: picture.sourceSize.width
     readonly property real naturalH: picture.sourceSize.height
     readonly property real baseScale: ready ? Math.max(viewport / naturalW, viewport / naturalH) : 1
@@ -121,18 +121,17 @@ PlateDialog {
             Accessible.role: Accessible.Graphic
             Accessible.name: qsTr("%1's avatar crop").arg(dialog.name)
 
-            // What the frame holds: tint-2 under the placed picture.
+            // What the frame holds: tint-2 under the placed picture. A GIF
+            // plays, as the web's <img> does (only while the dialog is up).
             Item {
                 id: stage
                 anchors.fill: parent
                 clip: true
-                visible: !dialog.round
-                layer.enabled: dialog.round
                 Rectangle {
                     anchors.fill: parent
                     color: Theme.tint2
                 }
-                Image {
+                AnimatedImage {
                     id: picture
                     x: (dialog.viewport - dialog.shownW) / 2 + dialog.offsetX
                     y: (dialog.viewport - dialog.shownH) / 2 + dialog.offsetY
@@ -140,6 +139,7 @@ PlateDialog {
                     height: dialog.shownH
                     visible: dialog.ready
                     source: dialog.visible ? dialog.source : ""
+                    playing: dialog.visible && !Theme.reducedMotion
                     fillMode: Image.Stretch
                     asynchronous: true
                     smooth: true
@@ -149,25 +149,25 @@ PlateDialog {
                     anchors.centerIn: parent
                     visible: !dialog.ready
                     textFormat: Text.PlainText
-                    text: picture.status === Image.Error ? qsTr("The image could not be loaded.") : qsTr("Loading image…")
+                    text: picture.status === AnimatedImage.Error ? qsTr("The image could not be loaded.") : qsTr("Loading image…")
                     color: Theme.ink3
                     font: Theme.type.description
                 }
-            }
-            // A worn decoration: the frame cut to a circle.
-            Rectangle {
-                id: roundMask
-                anchors.fill: parent
-                radius: width / 2
-                visible: false
-                layer.enabled: true
-            }
-            MultiEffect {
-                anchors.fill: parent
-                visible: dialog.round
-                source: stage
-                maskEnabled: true
-                maskSource: roundMask
+                // A worn decoration makes the avatar a circle: what falls
+                // outside it stays visible but dimmed, so you can see what
+                // the circle cuts off (a ring of a thick border, no layer
+                // or mask, so the picture always shows).
+                Rectangle {
+                    visible: dialog.round && dialog.ready
+                    readonly property real reach: dialog.viewport * 0.3
+                    anchors.centerIn: parent
+                    width: dialog.viewport + 2 * reach
+                    height: width
+                    radius: width / 2
+                    color: "transparent"
+                    border.width: reach
+                    border.color: Qt.rgba(0, 0, 0, 0.6)
+                }
             }
             // ring-2 ring-accent-ink ring-inset.
             Rectangle {
@@ -178,6 +178,12 @@ PlateDialog {
                 border.color: Theme.accentInk
             }
 
+            // The wheel zooms, around the frame's centre.
+            WheelHandler {
+                enabled: dialog.ready
+                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                onWheel: event => dialog.setZoom(dialog.zoom * Math.pow(1.0015, event.angleDelta.y))
+            }
             MouseArea {
                 id: drag
                 property real startX
