@@ -91,6 +91,7 @@ import {
   type DisplayNameEffectOption,
   type DisplayNameStyle,
   type DisplayNameStyleGroup,
+  type ProfileCustomizationInput,
 } from "@/lib/profile-customization";
 import { resolveProfileReferenceDate } from "@/lib/profile-dates";
 import type { User } from "@/lib/types";
@@ -161,6 +162,29 @@ function createAssetPreview(file: File): AssetPreview {
     url: URL.createObjectURL(file),
     contentType: file.type || "application/octet-stream",
   };
+}
+
+type EditorTheme = {
+  profile_accent_color: string | null;
+  profile_background_color: string | null;
+  profile_banner_color: string | null;
+};
+
+/**
+ * Profile colours as the editor holds them. The server stores its default
+ * for an Auto (null) colour, and a stored default pair reads back as Auto,
+ * so the preview follows the app theme. Run on the stored colours and on the
+ * draft, it says whether a save would change anything.
+ */
+function toEditorTheme(colors: ProfileCustomizationInput): EditorTheme {
+  const applied = applyProfileThemeDefaults(colors);
+  return hasCustomProfileColors(colors)
+    ? applied
+    : {
+        ...applied,
+        profile_accent_color: null,
+        profile_background_color: null,
+      };
 }
 
 function areDisplayNameStylesEqual(
@@ -1124,20 +1148,7 @@ function ProfileEditor({
     profile_background_color: chatUser.profile_background_color,
     profile_banner_color: chatUser.profile_banner_color,
   };
-  const appliedTheme = applyProfileThemeDefaults(storedColors);
-  // The server stores its default pair for people who never picked colours;
-  // those read as "Auto" here, so the preview follows the app theme.
-  const storedTheme: {
-    profile_accent_color: string | null;
-    profile_background_color: string | null;
-    profile_banner_color: string | null;
-  } = hasCustomProfileColors(storedColors)
-    ? appliedTheme
-    : {
-        ...appliedTheme,
-        profile_accent_color: null,
-        profile_background_color: null,
-      };
+  const storedTheme = toEditorTheme(storedColors);
   const savedDisplayNameStyle = normalizeDisplayNameStyle(
     chatUser.display_name_style,
   );
@@ -1229,9 +1240,17 @@ function ProfileEditor({
   }, [saved]);
 
   /* Derived --------------------------------------------------------- */
+  // Compare the draft as a save stores it (text trimmed, an Auto colour
+  // resolved the way the server resolves it). Comparing the raw draft kept
+  // the bar dirty after a successful save.
+  const draftTheme = toEditorTheme({
+    profile_accent_color: accentColor,
+    profile_background_color: backgroundColor,
+    profile_banner_color: bannerColor,
+  });
   const hasChanges =
-    pronouns !== (chatUser.pronouns || "") ||
-    bio !== (chatUser.bio || "") ||
+    pronouns.trim() !== (chatUser.pronouns ?? "").trim() ||
+    bio.trim() !== (chatUser.bio ?? "").trim() ||
     customStatus.trim() !== savedCustomStatus ||
     avatarFile !== null ||
     selectedAvatarUrl !== null ||
@@ -1241,9 +1260,10 @@ function ProfileEditor({
     nameplateFile !== null ||
     removeBanner ||
     removeNameplate ||
-    storedTheme.profile_accent_color !== accentColor ||
-    storedTheme.profile_background_color !== backgroundColor ||
-    storedTheme.profile_banner_color !== bannerColor ||
+    storedTheme.profile_accent_color !== draftTheme.profile_accent_color ||
+    storedTheme.profile_background_color !==
+      draftTheme.profile_background_color ||
+    storedTheme.profile_banner_color !== draftTheme.profile_banner_color ||
     !areDisplayNameStylesEqual(displayNameStyle, savedDisplayNameStyle);
 
   const previewTheme = resolveProfileCardTheme({
