@@ -3456,3 +3456,56 @@ The checks used `QMAKE` at `F:/ct/qt-custom-6.11p8`, `LK_CUSTOM_WEBRTC` and
   `GifWorker`, the streamed path, `YAP_GIF_DECODER`, `YAP_DEBUG_GIF`;
 - `rust/crates/yap-core/src/fixture.rs`: `YAP_FIXTURE_GIF_COUNT` and the
   URL list.
+
+# Boost to 400 % (2026-11-08)
+
+The per-user volume and stream volume go to 400 %. A track above unity
+gain goes through its own look-ahead limiter in the call's mix
+(LIBRARIES.md §11.1); at or under unity nothing changes.
+
+## Cost
+
+- Offline, release build (`cargo test --release -p yap-voice --lib
+dsp::mix::tests::boost_limiter_cost -- --nocapture`): one stream's mix
+  takes 1.6 µs per 10 ms frame at gain 1.0 and 6.0 µs at 4.0 with the
+  limiter on, so the limiter costs about 4.5 µs per boosted stream per
+  frame (0.045 % of one core). Ten boosted people: about 45 µs a frame.
+- In the call (the `[voice] stats` line, `mix=`, one remote stream): 7-8 µs
+  per frame at 100 %, 14-15 µs at 400 %.
+- Memory: 73 floats of ring and a few words per stream; the per-frame
+  scratch (about 7 KB) is on the render thread's stack, nothing is
+  allocated.
+
+## Live measurement
+
+- Native Spike Lab / General, Spike Peer (`spikepeer`) talking through
+  `YAP_FAKE_MIC`, the test owner (`spike`) listening; `YAP_NULL_SPEAKER=1`
+  on both, `spike`'s own mic a silent file. `spike` recorded its final mix
+  with `YAP_RENDER_TAP` (120 s).
+- The source is a 30 s loop: 20 s of synthetic voiced syllables (harmonic
+  tone with pitch glides, 80-300 ms envelopes, gaps; one syllable in six
+  near -4 dBFS), then a 10 s log sine sweep, 100 Hz to 4 kHz at -3 dBFS.
+- `spike`'s output volume was 10 % in its saved settings, which made the
+  400 % run a total gain of 0.4 (the limiter never engaged). It was set to
+  100 % for the run and put back afterwards.
+- 100 % for 36 s, then 400 % (End on the call menu's "User volume" slider) for 60 s. Windows
+  of whole loops, compared at the same place in the loop:
+
+| window                 | 100 %: peak | 100 %: RMS | 400 %: peak | 400 %: RMS | samples at full scale (100 / 400 %) | gain    |
+| ---------------------- | ----------- | ---------- | ----------- | ---------- | ----------------------------------- | ------- |
+| a whole loop (30 s)    | -4.89 dBFS  | -18.53     | -3.00 dBFS  | -13.20     | 0 / 0                               | +5.3 dB |
+| the syllables (17.5 s) | -4.91 dBFS  | -27.38     | -3.00 dBFS  | -19.66     | 0 / 0                               | +7.7 dB |
+| the sweep (8.5 s)      | -7.71 dBFS  | -14.15     | -3.00 dBFS  | -9.11      | 0 / 0                               | +5.0 dB |
+
+- The peak at 400 % is the limiter's ceiling, 23198 of 32768 (-3.00
+  dBFS), in every second of the boosted run; nothing at or within 0.01 dB
+  of full scale, and no flat-topped runs of samples at the peak.
+- The gain is under the nominal +12 dB because the material is loud: the
+  sweep arrives at -7.7 dBFS (after the sender's processing and Opus), so
+  4x would put it at +4.3 dBFS and the limiter takes 7.3 dB off; the
+  syllables peak near -5 dBFS and lose about 4 dB on their loud parts.
+  Quiet talkers get more of the 12 dB (offline: a -18 dBFS talker gains
+  12.0 dB between its shouts).
+- The stats line counted 5,832 boosted frames and 3 samples cut by the
+  last clamp (the look-ahead guessing wrong, a skewed frame or the gain
+  step), out of 5.6 million.

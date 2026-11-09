@@ -85,7 +85,8 @@ the decisions.
 - Voice controls as on the web: device menus on the mic and headphone
   carets (system default first; switching applies at once in a call, an
   unplugged choice falls back to the default), the output volume, the
-  per-user "User volume" (0-200 %) and "Mute" on a right click of a call
+  per-user "User volume" (0-400 %, past 100 % a boost through its own
+  limiter, docs/LIBRARIES.md §11.1) and "Mute" on a right click of a call
   tile or Talk Tree leaf, our own speaking LED and rings with op 5 from
   the web's VAD hysteresis and sensitivity (auto or a manual marker), and
   Voice settings: microphone, input volume (kept, not applied, as on the

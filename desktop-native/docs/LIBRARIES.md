@@ -869,6 +869,47 @@ Versions and dates from crates.io on 2026-11-06.
 | Remote audio   | `NativeAudioStream::with_options` per remote audio track (48 kHz stereo, at most 20 queued frames) into our own mixer (`src/dsp/mix.rs`): per-track gain and the `StereoPannerNode` pan law (mono law for a track whose channels are equal, two-channel law for stereo), ramped over a frame; the queue primed at 40 ms and held at 30-60 ms against clock drift by resampling a frame from 477 or 483 samples (linear, 0.625 %), cut only past 120 ms; a look-ahead-free soft limiter on the sum (-3 dBFS, ratio 20, 1 ms / 100 ms, soft clip under -0.2 dBFS) | Per-track gain inside libwebrtc (`SetVolume`, what the ADM path does): scalar only, no pan. A custom audio decoder factory or mixer source: fixed inside webrtc-sys's factory, so it means forking webrtc-sys                                                               |
 | Speaker out    | The app's one speaker (`yap-speaker`, §17): the call's mix is one input beside the soundboard, Listen Together and the UI sounds; WASAPI shared mode, event driven, 48 kHz stereo 16-bit, 20 ms ahead, MMCSS "Pro Audio"; the final frame goes to the APM's far end (a `Tap`), its delay hint the queued audio plus `GetStreamLatency` and a period, plus the mic's                                                                                                                                                                                             | The ADM's playout with our mix injected: its APM takes the far end from its own mixer before our frame exists, so the echo canceller would hear the unpanned mix                                                                                                            |
 
+### 11.1 Boost past 100 % (2026-11-08)
+
+The per-user volume and the per-user stream volume go to 400 %
+(`MAX_PEER_VOLUME`, yap-voice and yap-cache), the output volume stays at
+200 %, so a track's gain reaches 8x (`MAX_GAIN`). The web caps both at
+200 % and plays them through a `GainNode` into its master
+`DynamicsCompressorNode`. A plain 4x gain on a loud talker would sit on
+the mix limiter all the time, and that limiter has no look-ahead: what its
+1 ms attack lets past is bent by its soft clip, which is audible as
+crackle on a boosted shout.
+
+So a stream above unity gain gets its own limiter, `dsp::mix::BoostLimiter`,
+after its gain and pan and before the sum:
+
+| choice        | pick                                                                                                                                                                                                             | not picked                                                                                                                                                                   |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| where         | per stream, after gain and pan, stereo linked (one gain for both channels, so a pan survives it and a spatial seat keeps its place)                                                                              | on the sum: one boosted person would duck everyone else. Before the pan: the stereo law can add the two channels, so the panned result could still pass the ceiling          |
+| detector      | sample peak of the louder channel; the need is the gain that brings it to the ceiling                                                                                                                            | RMS: lets peaks through. True peak (oversampled): the mix is 16-bit PCM straight to WASAPI at 48 kHz, with no resampler after it to create inter-sample overs worth the cost |
+| look-ahead    | 1.5 ms (72 samples), read from the stream's own jitter queue (30-60 ms already waiting), so it adds no latency                                                                                                   | a delay line: 1.5 ms more latency, and a jump in delay whenever the gain crosses 100 %                                                                                       |
+| attack        | the smallest need over the next 1.5 ms (a sliding minimum, van Herk / Gil-Werman), then the mean of the last 73 of those: the gain glides down over 1.5 ms and is exactly at the need when the peak plays        | a one-pole attack: overshoots on a hard onset (what the mix limiter's soft clip then bends)                                                                                  |
+| hold, release | 5 ms hold (half a period at 100 Hz, so it does not ride a low voice's waveform), then a 60 ms one-pole release, run on the reduction's depth so it reaches unity exactly in `f32`                                | a release on the gain itself: in `f32` it stalls about 1e-4 under unity and never goes idle                                                                                  |
+| ceiling       | -3 dBFS, the mix limiter's threshold: one boosted person reaches that limiter under its threshold and passes it untouched, so only the look-ahead limiter acts                                                   | -1 dBFS: the mix limiter (threshold -3 dBFS, ratio 20) would take it to -2.9 dBFS anyway, through its look-ahead-free attack and soft clip                                   |
+| safety        | a clamp at the ceiling after the gain, which only acts when the look-ahead guessed wrong (the gain or pan moved between frames, a skewed frame); counted, `boosted=<frames>/<clamped samples>` in the stats line | -                                                                                                                                                                            |
+
+- At or under unity, a stream never enters the limiter: its samples are
+  the same bits as before the boost existed (a test compares them). A
+  stream coming back down from a boost only lets go of what the limiter
+  holds (hold, release, no new reduction) and returns to the plain path
+  within about a second, however loud it is.
+- Echo cancellation: the limiter runs inside the call's mix, before the
+  speaker's bus, so the frame the render thread writes, and hands the
+  APM's far end, is the limited one. The canceller models what was
+  played, not the linear 4x (`engine::pipeline` test: a -0.8 dBFS noise
+  talker at 4x plays with a -3.00 dBFS peak, nothing at the rails, and is
+  cancelled by 52 dB).
+- Several boosted people still sum past -3 dBFS; the mix limiter and the
+  speaker's soft clip (§17) are unchanged above them.
+- The ADM fallback (`YAP_ADM_AUDIO=1`) passes the gain to libwebrtc's
+  `SetVolume` (0..10) and has no per-track limiter.
+- Cost: PERFORMANCE.md "Boost to 400 %".
+
 Why the far end matters: AEC removes what it is told was played. Here the
 render thread hands the APM exactly the frame it writes to the speaker, so a
 panned or re-gained mix is cancelled as played, and so is a soundboard clip
@@ -1479,7 +1520,7 @@ or a track like a voice.
 | device choice  | the endpoint id (`IMMDevice::GetId`), stable across reboots and hot-plug; `None` = the default communications endpoint (what the call always opened and the menus list as "Default")                                                                                 | names: `waveOut` cut them to 31 characters, so two headsets of one model matched the same entry                                                                                                             |
 | default follow | `IMMNotificationClient` on the render thread's enumerator: `OnDefaultDeviceChanged(eRender, eCommunications)` reopens when following the default; `OnDeviceStateChanged`/`Removed` for the open endpoint reopen; the chosen one coming back reopens on it            | polling `GetDefaultAudioEndpoint`                                                                                                                                                                           |
 | device loss    | any error from `GetCurrentPadding`, `GetBuffer` or `ReleaseBuffer` (`AUDCLNT_E_DEVICE_INVALIDATED` on unplug or a format change), or no audio taken for 1 s: reopen at once; while no device opens, the mix runs on the clock (taps still fed), retried every second | stopping the call's far end until a device is back (the echo canceller would lose its reference)                                                                                                            |
-| summing        | add the inputs in `f32`, then a soft clip from 0.977 (the call limiter's ceiling) towards 0.999, so one input passes untouched and a clip over a loud call bends instead of clipping                                                                                 | a limiter on the sum: the call already has one, and a second would pump the call when a clip plays                                                                                                          |
+| summing        | add the inputs in `f32`, then a soft clip from 0.977 (the call limiter's ceiling) towards 0.999, so one input passes untouched and a clip over a loud call bends instead of clipping; a boosted person is limited inside the call's mix first (§11.1)                | a limiter on the sum: the call already has one, and a second would pump the call when a clip plays                                                                                                          |
 | lifetime       | the thread starts on a wake (an input became audible) or a `Hold` (the call); it closes the device after 2 s with neither                                                                                                                                            | a device open for the whole process                                                                                                                                                                         |
 
 Name migration: a saved output (or input) whose id is not listed, but
