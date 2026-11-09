@@ -291,7 +291,9 @@ describe("every effect on every surface, unclipped", () => {
       }
       unmount();
     }
-  });
+    // Two full matrices (every effect × 8 surfaces × 3 names, with and without
+    // Wave) take ~5 s on a loaded CI runner, past the 5 s default.
+  }, 30_000);
 
   it("the real mention list", async () => {
     const MessageInput = (await import("../MessageInput")).default;
