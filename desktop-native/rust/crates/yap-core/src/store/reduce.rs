@@ -1726,6 +1726,14 @@ impl State {
                 prefs.muted = muted;
                 self.set_voice_prefs(fx, prefs);
             }
+            Command::ToggleVoiceMuted => {
+                let muted = !self.voice_prefs.muted;
+                self.on_command(fx, Command::SetVoiceMuted(muted));
+            }
+            Command::ToggleVoiceDeafened => {
+                let deafened = !self.voice_prefs.deafened;
+                self.on_command(fx, Command::SetVoiceDeafened(deafened));
+            }
             // Deafening mutes too and remembers the mic; undeafening puts
             // it back.
             Command::SetVoiceDeafened(deafened) => {

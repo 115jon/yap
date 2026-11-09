@@ -3879,6 +3879,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "yap-hotkeys"
+version = "0.2.22"
+dependencies = [
+ "serde",
+ "serde_json",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "yap-protocol"
 version = "0.2.22"
 dependencies = [
@@ -3976,6 +3985,7 @@ dependencies = [
  "yap-capture",
  "yap-core",
  "yap-games",
+ "yap-hotkeys",
  "yap-protocol",
  "yap-realtime",
  "yap-segment",

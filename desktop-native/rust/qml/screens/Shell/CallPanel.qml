@@ -122,6 +122,17 @@ Rectangle {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             spacing: 6
+            // Push to talk (Hotkeys): lit while the key holds the mic open.
+            LedLabel {
+                id: pttState
+                readonly property bool on: Hotkeys.talking && !Voice.muted
+                visible: root.inCall && Hotkeys.inputMode === "ptt"
+                anchors.verticalCenter: parent.verticalCenter
+                rightPadding: 4
+                ledState: on ? "talk" : "off"
+                text: on ? qsTr("Talking") : qsTr("PTT")
+                Accessible.name: on ? qsTr("Push to talk: talking") : qsTr("Push to talk: not talking")
+            }
             Text {
                 visible: root.callLive && root.lastSample !== null
                 anchors.verticalCenter: parent.verticalCenter

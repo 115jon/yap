@@ -361,6 +361,12 @@ pub const PANELS: &[PanelDef] = &[
                         &["mic volume", "gain", "loudness"],
                     ),
                     row(
+                        "input-mode",
+                        "Input mode",
+                        "Voice activity sends when you talk. Push to talk sends while you hold your key.",
+                        &["push to talk", "ptt", "voice activity", "vad", "open mic"],
+                    ),
+                    row(
                         "input-profile",
                         "Input profile",
                         "Pick a preset, or Custom to set each option yourself.",
@@ -535,34 +541,82 @@ pub const PANELS: &[PanelDef] = &[
         id: "keybinds",
         title: "Keybinds",
         icon: "keyboard",
-        headline: "Keys you can use today.",
-        blurb: "Keyboard shortcuts you can use today, and call keys on the way.",
+        headline: "Keys that work in any app.",
+        blurb: "Call keys work while a game has the focus. Built-in shortcuts work inside Yap.",
         rail_rows: &[],
         sections: &[
             section(
                 "call-keys",
                 "Call keys",
-                "You can't set call keys yet. Until then, mute and deafen are on the account row.",
+                "These work in any app, games included, and never block the key there. Add a key, then press it.",
                 &[
                     row(
                         "push-to-talk",
                         "Push to talk",
-                        "Hold a key to send your voice.",
-                        &["ptt", "hotkey", "keybind", "shortcut"],
+                        "Hold to send your voice, when the input mode is Push to talk.",
+                        &["ptt", "hotkey", "keybind", "shortcut", "global"],
+                    ),
+                    row(
+                        "push-to-mute",
+                        "Push to mute",
+                        "Hold to stop sending your voice.",
+                        &["ptm", "hotkey", "keybind", "shortcut", "global"],
                     ),
                     row(
                         "toggle-mute",
                         "Toggle mute",
                         "",
-                        &["mute", "hotkey", "keybind", "shortcut"],
+                        &["mute", "hotkey", "keybind", "shortcut", "global"],
                     ),
                     row(
                         "toggle-deafen",
                         "Toggle deafen",
                         "",
-                        &["deafen", "hotkey", "keybind", "shortcut"],
+                        &["deafen", "hotkey", "keybind", "shortcut", "global"],
+                    ),
+                    row(
+                        "toggle-input-mode",
+                        "Switch input mode",
+                        "Between voice activity and push to talk.",
+                        &["ptt", "voice activity", "hotkey", "keybind"],
+                    ),
+                    row(
+                        "disconnect-key",
+                        "Disconnect",
+                        "Leave the call.",
+                        &["leave", "hang up", "hotkey", "keybind"],
                     ),
                 ],
+            ),
+            section(
+                "push-to-talk-options",
+                "Push to talk",
+                "",
+                &[
+                    row(
+                        "ptt-release-delay",
+                        "Release delay",
+                        "How long your mic stays on after you let go, so your last word isn't cut.",
+                        &["ptt", "delay", "cut off"],
+                    ),
+                    row(
+                        "ptt-sounds",
+                        "Push to talk sounds",
+                        "A click when your mic opens and closes.",
+                        &["ptt", "click", "beep", "tone"],
+                    ),
+                ],
+            ),
+            section(
+                "soundboard-keys",
+                "Soundboard keys",
+                "Sounds from the soundboard you're in. They play in a call.",
+                &[row(
+                    "soundboard-key",
+                    "Play a sound",
+                    "Pick a sound, then press its key.",
+                    &["soundboard", "hotkey", "keybind", "sfx"],
+                )],
             ),
             section(
                 "built-in-shortcuts",

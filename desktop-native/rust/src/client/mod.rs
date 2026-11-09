@@ -88,6 +88,8 @@ pub fn start(sink: Sink) -> bool {
     crate::games::start();
     // The update check waits a little, then runs on its own thread.
     crate::updater::start();
+    // Keybinds fire store commands on the channel above.
+    crate::hotkeys::start();
     started
 }
 
@@ -151,6 +153,7 @@ pub fn shutdown() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         eprintln!("[quit] core shutdown");
+        crate::hotkeys::shutdown();
         voice::send_disconnect_beacon(std::time::Duration::from_millis(800));
         command(Command::Quit);
         yap_core::shutdown();

@@ -75,6 +75,28 @@ Column {
                 onMoved: value => Audio.changeInputVolume(value)
             }
         }
+        // Push to talk gates the mic in the call (Hotkeys); its keys are
+        // on the Keybinds page.
+        SettingsRow {
+            id: modeRow
+            rowId: "input-mode"
+            layout: "block"
+            readonly property var pttKeys: JSON.parse(Hotkeys.bindings || "[]")
+                .filter(b => b.action === "push-to-talk").map(b => b.caps.join("+"))
+            SegmentedField {
+                width: parent.width
+                accessibleName: SettingsNav.label("input-mode")
+                value: Hotkeys.inputMode
+                options: [
+                    { value: "voice", label: qsTr("Voice activity"), desc: qsTr("Your mic sends whenever you talk.") },
+                    { value: "ptt", label: qsTr("Push to talk"),
+                      desc: modeRow.pttKeys.length > 0
+                        ? qsTr("Your mic sends while you hold %1, in any app.").arg(modeRow.pttKeys.join(qsTr(" or ")))
+                        : qsTr("No push to talk key yet: your mic stays off until you set one in Keybinds.") },
+                ]
+                onPicked: value => Hotkeys.chooseInputMode(value)
+            }
+        }
         SettingsRow {
             rowId: "input-profile"
             layout: "block"

@@ -268,7 +268,7 @@ impl CallMachine {
             fx.push(Effect::Notify(Notice::InboundAudioStalled(inbound_banner)));
         }
         // Outbound: an unmuted, published mic that sends nothing.
-        let mic_live = self.published.is_some() && !self.muted && !self.standby && self.media_up;
+        let mic_live = self.published.is_some() && self.mic_open() && !self.standby && self.media_up;
         let outbound = if mic_live {
             self.health.outbound.feed(sent, elapsed, true)
         } else {

@@ -209,6 +209,11 @@ pub enum Command {
     SetVoiceMuted(bool),
     /// Deafen (or not). Like mute, it is kept between calls.
     SetVoiceDeafened(bool),
+    /// Flips mute from what is kept now (a hotkey, which cannot see the
+    /// view): [`Command::SetVoiceMuted`] with the other value.
+    ToggleVoiceMuted,
+    /// Flips deafen the same way.
+    ToggleVoiceDeafened,
     /// Watch (or stop watching) a participant's share in the call.
     WatchStream {
         participant_id: String,

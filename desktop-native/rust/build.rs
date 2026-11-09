@@ -324,6 +324,7 @@ fn main() {
             "src/extras.rs",
             "src/friends.rs",
             "src/games.rs",
+            "src/hotkeys.rs",
             "src/invites.rs",
             "src/limits.rs",
             "src/models.rs",
