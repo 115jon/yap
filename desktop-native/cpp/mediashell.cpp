@@ -128,6 +128,23 @@ QStringList MediaShell::testDropUrls() const
   return urls;
 }
 
+QVariantList MediaShell::localFiles(const QVariantList& urls) const
+{
+  QVariantList files;
+  for (const QVariant& value : urls) {
+    const QUrl url = value.typeId() == QMetaType::QUrl ? value.toUrl()
+                                                       : QUrl(value.toString());
+    if (!url.isLocalFile())
+      continue;
+    const QFileInfo info(url.toLocalFile());
+    if (!info.isFile())
+      continue;
+    files << QVariantMap{ { QStringLiteral("name"), info.fileName() },
+                          { QStringLiteral("size"), double(info.size()) } };
+  }
+  return files;
+}
+
 void MediaShell::clearImageCache()
 {
   emit imageCacheCleared();

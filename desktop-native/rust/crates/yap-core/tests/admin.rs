@@ -575,7 +575,10 @@ fn a_failed_icon_upload_should_say_so_on_the_icon_row() {
         .expect("an upload");
     client.input(Input::Http {
         id,
-        result: Err(http_error(413)),
+        result: Err(ApiError::Http {
+            status: 413,
+            message: "Icon too large (max 8MB)".into(),
+        }),
     });
     assert_eq!(
         (
@@ -584,7 +587,7 @@ fn a_failed_icon_upload_should_say_so_on_the_icon_row() {
         ),
         (
             false,
-            "Unable to upload the server icon. The file is too large."
+            "Unable to upload the server icon. The server says the limit is 8 MB."
         )
     );
 }

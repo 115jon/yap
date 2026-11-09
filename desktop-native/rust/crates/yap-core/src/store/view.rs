@@ -444,12 +444,15 @@ rows! {
         kind: String => Kind "kind",
         /// A `file:` URL of the picture for images, else empty.
         preview: String => Preview "preview",
-        /// `uploading`, `done` or `failed`.
+        /// `uploading`, `done`, `failed`, `toobig` (over the limit, never
+        /// started) or `refused` (the server's 413).
         state: String => State "uploadState",
         /// Sent so far, in thousandths.
         progress: i64 => Progress "progress",
         error: String => Error "error",
         nsfw: bool => Nsfw "nsfw",
+        /// `toobig` and `refused`: the card's JSON (`limits.rs`), else empty.
+        card: String => Card "card",
     }
     key(row) -> String { row.id.clone() }
 
@@ -1252,6 +1255,8 @@ pub enum ViewUpdate {
     UploadCounts {
         ready: i64,
         busy: i64,
+        /// Over the limit, never started (the too-big cards).
+        too_big: i64,
     },
     Gifs(ViewDiff<GifRow>),
     GifStatus(GifStatusView),

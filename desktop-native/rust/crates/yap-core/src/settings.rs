@@ -1118,7 +1118,7 @@ pub fn name_style_patch(view_json: &str) -> serde_json::Value {
 }
 
 /// The largest nameplate the server takes (`MAX_PROFILE_NAMEPLATE_SIZE`).
-pub const NAMEPLATE_MAX_BYTES: u64 = 25 * 1024 * 1024;
+pub const NAMEPLATE_MAX_BYTES: u64 = crate::limits::NAMEPLATE;
 
 /// A file the nameplate upload takes, by extension (the web's picker:
 /// `image/*,video/mp4,video/webm,video/ogg`; the server checks the bytes
@@ -1150,6 +1150,18 @@ pub fn is_managed_nameplate(url: &str) -> bool {
 /// The web's failure copy for a REST call (`describeApiError`); `action`
 /// completes "Unable to …" ("save your profile").
 pub fn describe_api_error(error: &ApiError, action: &str) -> String {
+    // The too-big spec: the server's own number, never "too large" alone.
+    if let ApiError::Http {
+        status: 413,
+        message,
+    } = error
+    {
+        return crate::limits::server_refusal_text(
+            message,
+            action,
+            crate::limits::limit_for_action(action),
+        );
+    }
     let status = match error {
         ApiError::Unauthorized => Some(401),
         ApiError::Http { status, .. } => Some(*status),
@@ -1159,7 +1171,6 @@ pub fn describe_api_error(error: &ApiError, action: &str) -> String {
         Some(401) => format!("Your session has ended. Sign in again to {action}."),
         Some(403) => format!("You don't have permission to {action}."),
         Some(404 | 410) => format!("Unable to {action}. It may have been deleted."),
-        Some(413) => format!("Unable to {action}. The file is too large."),
         Some(429) => format!("Unable to {action} right now. Wait a moment and try again."),
         Some(400..=499) => format!("Unable to {action}. Check the details and try again."),
         Some(500..) => format!("Unable to {action}. Try again in a moment."),

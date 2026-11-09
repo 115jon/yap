@@ -19,6 +19,7 @@ pub mod faults;
 pub mod fixture;
 pub mod gif_favorite;
 pub mod install;
+pub mod limits;
 pub mod links;
 pub mod markdown;
 pub mod picker;

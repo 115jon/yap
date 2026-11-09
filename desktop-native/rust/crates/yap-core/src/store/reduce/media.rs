@@ -71,9 +71,16 @@ pub(super) fn describe_error(error: &ApiError, action: &str) -> String {
         ApiError::Http {
             status: 404 | 410, ..
         } => format!("Unable to {action}. It may have been deleted."),
-        ApiError::Http { status: 413, .. } => {
-            format!("Unable to {action}. The file is too large.")
-        }
+        // The too-big spec: the server's own number, never "too large"
+        // without one.
+        ApiError::Http {
+            status: 413,
+            message,
+        } => crate::limits::server_refusal_text(
+            message,
+            action,
+            crate::limits::limit_for_action(action),
+        ),
         ApiError::Http { status: 429, .. } => {
             format!("Unable to {action} right now. Wait a moment and try again.")
         }
@@ -225,26 +232,18 @@ impl State {
 
     // Uploads
 
-    /// Adds files to the open channel's tray and starts each one. Files over
-    /// the limit are refused with the web's toast.
+    /// Adds files to the open channel's tray and starts each one. A file
+    /// over the limit stays in the tray as the too-big card and is never
+    /// started; the others in the same drop still upload.
     pub(super) fn add_uploads(&mut self, fx: &mut Effects, files: Vec<UploadFile>) {
         let Some(channel_id) = self.active_channel.clone() else {
             return;
         };
         for file in files {
-            if file.size > MAX_UPLOAD_BYTES {
-                // useMessageInput.ts: the error toast's title, then its
-                // description on the next line.
-                fx.view(ViewUpdate::Notice(format!(
-                    "{} is too large to upload
-Files can be up to 25 MB.",
-                    file.name
-                )));
-                continue;
-            }
             if self.uploads.iter().any(|u| u.local_id == file.local_id) {
                 continue;
             }
+            let too_big = file.size > MAX_UPLOAD_BYTES;
             self.uploads.push(Upload {
                 local_id: file.local_id.clone(),
                 channel_id: channel_id.clone(),
@@ -254,10 +253,25 @@ Files can be up to 25 MB.",
                 content_type: file.content_type,
                 nsfw: false,
                 request: None,
-                status: UploadStatus::Uploading(0),
+                status: if too_big {
+                    UploadStatus::TooBig
+                } else {
+                    UploadStatus::Uploading(0)
+                },
             });
-            self.start_upload(fx, &file.local_id);
+            if !too_big {
+                self.start_upload(fx, &file.local_id);
+            }
         }
+        self.sync_uploads(fx);
+    }
+
+    /// "Remove the big ones": every too-big card in the open channel's tray.
+    pub(super) fn remove_oversized(&mut self, fx: &mut Effects) {
+        let here = self.active_channel.clone();
+        self.uploads.retain(|u| {
+            !(Some(&u.channel_id) == here.as_ref() && matches!(u.status, UploadStatus::TooBig))
+        });
         self.sync_uploads(fx);
     }
 
@@ -308,6 +322,11 @@ Files can be up to 25 MB.",
                 &ApiError::Decode(String::new()),
                 "upload that file",
             )),
+            // Its limit changed under us: the card with the server's number.
+            Err(ApiError::Http {
+                status: 413,
+                message,
+            }) => UploadStatus::Refused(message),
             Err(error) => UploadStatus::Failed(describe_error(&error, "upload that file")),
         };
         self.sync_uploads(fx);
@@ -376,18 +395,17 @@ Files can be up to 25 MB.",
         for diff in view::moving_diff(&self.view.uploads, &rows) {
             fx.view(ViewUpdate::Uploads(diff));
         }
-        let ready = rows.iter().filter(|r| r.state == "done").count();
-        let busy = rows.iter().filter(|r| r.state == "uploading").count();
-        let counts = (
-            i64::try_from(ready).unwrap_or(0),
-            i64::try_from(busy).unwrap_or(0),
-        );
+        let count = |state: &str| {
+            i64::try_from(rows.iter().filter(|r| r.state == state).count()).unwrap_or(0)
+        };
+        let counts = (count("done"), count("uploading"), count("toobig"));
         self.view.uploads = rows;
         if counts != self.view.upload_counts {
             self.view.upload_counts = counts;
             fx.view(ViewUpdate::UploadCounts {
                 ready: counts.0,
                 busy: counts.1,
+                too_big: counts.2,
             });
         }
     }
@@ -947,11 +965,11 @@ mod tests {
     fn upload_errors_should_use_the_web_copy() {
         let error = ApiError::Http {
             status: 413,
-            message: String::new(),
+            message: "File too large (max 25MB)".into(),
         };
         assert_eq!(
             describe_error(&error, "upload that file"),
-            "Unable to upload that file. The file is too large."
+            "Unable to upload that file. The server says the limit is 25 MB."
         );
     }
 

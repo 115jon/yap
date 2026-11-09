@@ -15,7 +15,7 @@ use crate::gif_favorite;
 use crate::store::state::{GifBrowse, Upload, UploadStatus};
 
 /// The largest file the server takes (upload.ts, 25 MiB).
-pub const MAX_UPLOAD_BYTES: u64 = 25 * 1024 * 1024;
+pub const MAX_UPLOAD_BYTES: u64 = crate::limits::ATTACHMENT;
 
 /// `formatFileSize` (MessageItem.tsx): 1024-based, one decimal, no GB.
 pub fn format_file_size(bytes: u64) -> String {
@@ -567,6 +567,16 @@ pub(in crate::store) fn upload_rows(
                 }
                 UploadStatus::Done(_) => ("done", 1000, ""),
                 UploadStatus::Failed(error) => ("failed", 0, error.as_str()),
+                UploadStatus::TooBig => ("toobig", 0, ""),
+                UploadStatus::Refused(_) => ("refused", 0, ""),
+            };
+            let card = match &u.status {
+                UploadStatus::TooBig => crate::limits::tray_card(&u.name, u.size).to_string(),
+                UploadStatus::Refused(message) => {
+                    crate::limits::server_card(message, crate::limits::ATTACHMENT, "remove")
+                        .to_string()
+                }
+                _ => String::new(),
             };
             UploadRow {
                 id: u.local_id.clone(),
@@ -582,6 +592,7 @@ pub(in crate::store) fn upload_rows(
                 progress,
                 error: error.to_owned(),
                 nsfw: u.nsfw,
+                card,
             }
         })
         .collect()

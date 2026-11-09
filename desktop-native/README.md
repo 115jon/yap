@@ -219,8 +219,25 @@ the decisions.
   `src/media.rs`), never as a URL token.
 - Uploads: the + key (system file dialog), Ctrl+V with copied files or a
   picture, drag and drop onto the chat; the tray with real progress,
-  cancel, retry, the sensitive toggle and the web's 25 MB limit and error
-  copy; captions, and attachments-only sends.
+  cancel, retry, the sensitive toggle and the web's error copy; captions,
+  and attachments-only sends.
+- Too-big files, as the shared too-big spec has them (`yap-core`
+  `limits.rs`: one limit per kind, read from the server's routes; avatar
+  and banner 8 MB, attachments, GIFs, vibes and camera backgrounds 25 MB,
+  soundboard 50 MB; MB of 1024 x 1024 with one decimal). Nothing over its
+  limit is uploaded. The drop overlay reads the dragged files' sizes
+  (`Files.localFiles`, QFileInfo) and shows the too-big card before the
+  drop; an oversized file dropped, pasted or picked stays in the tray as a
+  card with Remove and Choose another (several fold into one with Remove
+  the big ones) while the rest of the drop still uploads. The avatar
+  (in Choose an image), banner, soundboard, vibe and camera background
+  pickers show their card inline, with Pick another. A 413 that comes
+  back anyway shows the server's own number from its "max NMB" (the tray's
+  card: "It says the limit is 8 MB."; elsewhere "Unable to upload your
+  avatar. The server says the limit is 8 MB."), the client's limit when it
+  names none.
+  Yappy's three poses are cell art from the dither provider
+  (`image://dither/pose/...`, `YappyPose.qml`), one still image each.
 - Reactions (chips, mine by `users`, tooltips, toggle, `REACTION_ADD` /
   `_REMOVE` live, rollback on failure), the hover bar's quick reactions
   (recents, then thumbs up, heart, joy) and the emoji picker (sections,

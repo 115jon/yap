@@ -30,6 +30,7 @@ mod gui;
 #[cfg(windows)]
 mod installer;
 mod invites;
+mod limits;
 mod loopback;
 mod media;
 mod models;

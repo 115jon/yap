@@ -12,8 +12,16 @@ Column {
     property bool busy: false
     property bool local: false
     property string path: ""
+    // A server sound over its limit: the too-big card in place of the form.
+    readonly property string tooBig: path.length > 0 && !local ? Limits.check("sound", path) : ""
     // The form closed (saved, uploading or cancelled).
     signal done()
+
+    function choose() {
+        const paths = Files.pickFiles(qsTr("Choose an audio file"))
+        if (paths.length > 0)
+            root.start(paths[0])
+    }
 
     // The picker's Add sound cell chose `file`: the name starts from it.
     function start(file) {
@@ -32,21 +40,20 @@ Column {
         size: "sm"
         iconName: "upload"
         text: root.local ? qsTr("Add custom sound") : qsTr("Add sound")
-        onClicked: {
-            const paths = Files.pickFiles(qsTr("Choose an audio file"))
-            if (paths.length > 0) {
-                root.path = paths[0]
-                const base = root.path.split(/[\\/]/).pop()
-                name.text = base.replace(/\.[^.]+$/, "")
-                name.forceActiveFocus()
-            }
-        }
+        onClicked: root.choose()
     }
     Column {
         visible: root.path.length > 0
         width: parent.width
         spacing: 8
+        TooBigCard {
+            visible: root.tooBig.length > 0
+            width: parent.width
+            info: root.tooBig.length > 0 ? JSON.parse(root.tooBig) : ({})
+            onAction: root.choose()
+        }
         Text {
+            visible: root.tooBig.length === 0
             width: parent.width
             textFormat: Text.PlainText
             elide: Text.ElideMiddle
@@ -55,6 +62,7 @@ Column {
             font: Theme.type.caption
         }
         Row {
+            visible: root.tooBig.length === 0
             width: parent.width
             spacing: 8
             KitField {
@@ -76,6 +84,7 @@ Column {
         }
         VolumeSlider {
             id: volume
+            visible: root.tooBig.length === 0
             width: parent.width
             to: 100
             value: 100
@@ -84,11 +93,12 @@ Column {
         Row {
             spacing: 8
             KitButton {
+                visible: root.tooBig.length === 0
                 variant: "primary"
                 size: "sm"
                 text: root.local ? qsTr("Save") : root.busy ? qsTr("Uploading…") : qsTr("Upload")
                 loading: root.busy
-                enabled: !root.busy && name.text.trim().length > 0
+                enabled: !root.busy && name.text.trim().length > 0 && root.tooBig.length === 0
                 onClicked: {
                     if (root.local)
                         Apps.addLocalSound(root.path, name.text, emoji.text, volume.value / 100)

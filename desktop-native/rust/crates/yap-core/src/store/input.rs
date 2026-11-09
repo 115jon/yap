@@ -151,6 +151,8 @@ pub enum Command {
     AddUploads(Vec<UploadFile>),
     /// Cancels an upload, or removes its tile.
     RemoveUpload(String),
+    /// "Remove the big ones": every too-big card in the open channel's tray.
+    RemoveOversizedUploads,
     RetryUpload(String),
     /// Marks a finished upload as sensitive (or not).
     SetUploadSensitive {

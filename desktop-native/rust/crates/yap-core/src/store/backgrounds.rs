@@ -22,7 +22,7 @@ use super::{Method, RequestId};
 use crate::api::ApiError;
 
 /// The upload limit (`CAMERA_BACKGROUND_UPLOAD_LIMIT_BYTES`).
-pub const MAX_BACKGROUND_BYTES: u64 = 25 * 1024 * 1024;
+pub const MAX_BACKGROUND_BYTES: u64 = crate::limits::BACKGROUND;
 
 /// The picture types an upload may be (`SUPPORTED_BACKGROUND_MIME_TYPES`,
 /// less AVIF: this client has no AVIF decoder, so it would upload a

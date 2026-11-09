@@ -32,7 +32,7 @@ pub const DRIFT_TOLERANCE_MS: f64 = 750.0;
 pub const DEFAULT_SEND_VOLUME: f64 = 0.8;
 
 /// The soundboard upload limit (`MAX_SOUNDBOARD_UPLOAD_BYTES`).
-pub const MAX_UPLOAD_BYTES: u64 = 50 * 1024 * 1024;
+pub const MAX_UPLOAD_BYTES: u64 = crate::limits::SOUND;
 
 /// The scope a join or leave sound applies to when no server overrides it
 /// (`ALL_SERVERS_SOUND_SCOPE`).

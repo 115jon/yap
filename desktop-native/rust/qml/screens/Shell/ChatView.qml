@@ -1319,7 +1319,14 @@ Rectangle {
     // Files dragged over the chat (DragDropOverlay.tsx): the scrim with a
     // dashed line-strong frame 16 px in (radius 12), and over it a ply-3
     // float with the upload glyph, "Drop to upload" and the size limit. It
-    // fades in; nothing moves or loops.
+    // fades in; nothing moves or loops. When a dragged file is over the
+    // limit (its size from QFileInfo, before the drop) the float is the
+    // too-big card instead (toobig-spec.md: Yappy stuffed, the counts, the
+    // meter for one file); the files that fit still attach on the drop.
+    property string dragCard: ""
+    function dragCardFor(urls) {
+        return Limits.dropCard(JSON.stringify(Files.localFiles(urls)))
+    }
     function dropUrls(urls) {
         const paths = urls.map(u => decodeURIComponent(String(u).replace(/^file:\/\/\//, "")))
             .filter(p => p.length > 0 && !/^[a-z]+:\/\//i.test(p))
@@ -1341,6 +1348,7 @@ Rectangle {
         onTriggered: {
             root.testDropped = true
             root.testDragging = true
+            root.dragCard = root.dragCardFor(root.testDrop)
             testDropEnd.start()
         }
     }
@@ -1349,6 +1357,7 @@ Rectangle {
         interval: 4000
         onTriggered: {
             root.testDragging = false
+            root.dragCard = ""
             root.dropUrls(root.testDrop)
         }
     }
@@ -1358,7 +1367,10 @@ Rectangle {
         anchors.fill: parent
         enabled: Nav.activeChannelId.length > 0
         keys: ["text/uri-list"]
+        onEntered: drag => root.dragCard = root.dragCardFor(drag.urls)
+        onExited: root.dragCard = ""
         onDropped: event => {
+            root.dragCard = ""
             root.dropUrls(event.urls)
             event.acceptProposedAction()
         }
@@ -1419,7 +1431,18 @@ Rectangle {
                     }
                 }
             }
+            TooBigCard {
+                id: dropTooBig
+                visible: root.dragCard.length > 0
+                anchors.centerIn: parent
+                width: Math.min(parent.width - 64, 560)
+                cell: 4
+                ground: Theme.ply3
+                headlineFont: Theme.type.sectionTitle
+                info: root.dragCard.length > 0 ? JSON.parse(root.dragCard) : ({})
+            }
             Rectangle {
+                visible: root.dragCard.length === 0
                 anchors.centerIn: parent
                 width: dropCard.implicitWidth + 64
                 height: dropCard.implicitHeight + 48
@@ -1445,7 +1468,7 @@ Rectangle {
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        text: qsTr("Files can be up to 25 MB.")
+                        text: qsTr("Files can be up to %1.").arg(Limits.limitText("attachment"))
                         color: Theme.ink3
                         font: Theme.type.description
                     }

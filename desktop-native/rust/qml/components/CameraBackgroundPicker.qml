@@ -29,6 +29,8 @@ Column {
     readonly property var items: view.items ?? []
     readonly property bool disabledTiles: !Camera.hasCamera
     property string uploadError: ""
+    // A picked image over the background limit: its too-big card.
+    property string tooBig: ""
     property var effect: ({})
 
     spacing: 0
@@ -45,6 +47,7 @@ Column {
 
     function clearErrors() {
         uploadError = ""
+        tooBig = ""
         Audio.clearCameraBackgroundError()
     }
 
@@ -205,8 +208,10 @@ Column {
             DashedEdge { color: Theme.lineField }
             function choose() {
                 const paths = Files.pickFiles(qsTr("Choose a background image"))
-                if (paths.length > 0)
-                    root.uploadError = Audio.uploadCameraBackground(paths[0])
+                if (paths.length === 0)
+                    return
+                root.tooBig = Limits.check("background", paths[0])
+                root.uploadError = root.tooBig.length > 0 ? "" : Audio.uploadCameraBackground(paths[0])
             }
             Column {
                 anchors.centerIn: parent
@@ -245,6 +250,18 @@ Column {
         color: Theme.ink2
         font: Theme.type.caption
         Accessible.role: Accessible.StaticText
+    }
+    Item {
+        visible: root.tooBig.length > 0
+        width: parent.width
+        height: visible ? backgroundCard.height + 12 : 0
+        TooBigCard {
+            id: backgroundCard
+            y: 12
+            width: parent.width
+            info: root.tooBig.length > 0 ? JSON.parse(root.tooBig) : ({})
+            onAction: upload.choose()
+        }
     }
     RowError {
         text: root.uploadError.length > 0 ? root.uploadError

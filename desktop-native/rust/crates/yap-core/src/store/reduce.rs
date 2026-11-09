@@ -1603,6 +1603,7 @@ impl State {
             }
             Command::AddUploads(files) => self.add_uploads(fx, files),
             Command::RemoveUpload(id) => self.remove_upload(fx, &id),
+            Command::RemoveOversizedUploads => self.remove_oversized(fx),
             Command::RetryUpload(id) => self.retry_upload(fx, &id),
             Command::SetUploadSensitive { local_id, nsfw } => {
                 self.set_upload_sensitive(fx, &local_id, nsfw);
