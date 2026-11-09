@@ -41,6 +41,20 @@ describe("the main Worker's routes", () => {
     expect(admin).toEqual(["api/admin/badges.ts"]);
   });
 
+  it("cannot force a collectibles catalog refresh", () => {
+    // The admin console's Shop catalog card does that now (POST
+    // /api/catalog/refresh on yap-admin). The catalog route is read-only.
+    expect(tree).not.toContain("/api/collectibles/sync");
+    const collectibles = routeFiles(path.join(routesDir, "api/collectibles"));
+    expect(collectibles).toContain("api/collectibles/catalog.ts");
+    expect(collectibles).not.toContain("api/collectibles/sync.ts");
+    const catalog = readFileSync(
+      path.join(routesDir, "api/collectibles/catalog.ts"),
+      "utf8",
+    );
+    expect(catalog).not.toMatch(/searchParams|refresh=|forceRefresh|ADMIN/);
+  });
+
   it("tell no one whether they are a site admin", () => {
     const me = readFileSync(path.join(routesDir, "api/users/me.ts"), "utf8");
     expect(me).not.toMatch(/site_admin|SITE_ADMIN/);

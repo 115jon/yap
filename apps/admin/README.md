@@ -7,7 +7,7 @@ page or admin API.
 It has five sections:
 
 - **People:** every account with its plan, badges, stats and storage. Plans and manual badges are changed here, and sign-in can be suspended or live connections closed.
-- **Live ops:** who is online, voice rooms, uploads in flight, D1 and R2 totals, the deploy and cron runs.
+- **Live ops:** who is online, voice rooms, uploads in flight, D1 and R2 totals, the deploy, the shop catalog (last synced, items, last error, the fetcher's last push, and Refresh now) and cron runs.
 - **Insights:** daily charts.
 - **Switches:** kill switches and the site banner.
 - **Audit log:** every admin change.

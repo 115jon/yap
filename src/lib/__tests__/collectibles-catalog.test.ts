@@ -13,7 +13,9 @@ import {
   MANUAL_SYNC_COOLDOWN_MS,
   decodeCatalogPayload,
   encodeCatalogPayload,
+  describeUpstreamBody,
   getCollectiblesCatalog,
+  getCollectiblesCatalogHealth,
   getCollectiblesIngestState,
   ingestCollectiblesCatalog,
   ingestRetryAfterMs,
@@ -21,6 +23,7 @@ import {
   normalizeYapperCatalog,
   parseCollectiblesAdminIds,
   resetCollectiblesCatalogMemory,
+  runCollectiblesCatalogCron,
   syncCollectiblesCatalog,
   validateNormalizedCatalog,
   type CollectiblesCatalog,
@@ -384,7 +387,7 @@ describe("syncCollectiblesCatalog", () => {
     await syncCollectiblesCatalog(db, SMALL);
     const goodPayload = getRow()!.payload;
     await expect(syncCollectiblesCatalog(db, SMALL)).rejects.toThrow(
-      "Yapper catalog fetch failed with 403 Forbidden: <html>blocked</html>",
+      "Yapper catalog fetch failed with 403 Forbidden: an HTML page",
     );
 
     expect(getRow()?.payload).toBe(goodPayload);
@@ -797,6 +800,172 @@ describe("cron fallback while ingest keeps up", () => {
       syncCollectiblesCatalog(db, { ...SMALL, trigger: "manual" }),
     ).rejects.toThrow("403");
     expect(getStatus()?.last_outcome).toBe("failed");
+  });
+});
+
+describe("the hourly cron job", () => {
+  // What Cloudflare answers a Worker today: an HTML block page, 403.
+  const blockPage = () =>
+    new Response(
+      `<!DOCTYPE html>\n<html><head><title>Attention Required! | Cloudflare</title></head><body>${"x".repeat(400)}</body></html>`,
+      { status: 403, statusText: "Forbidden" },
+    );
+
+  it("records a success with its trigger", async () => {
+    const { db, getStatus } = createDatabase();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(okResponse(fixture)),
+    );
+
+    const catalog = await runCollectiblesCatalogCron(db, SMALL);
+
+    expect(catalog?.items.length).toBeGreaterThan(0);
+    expect(getStatus()).toMatchObject({
+      last_outcome: "updated",
+      last_trigger: "cron",
+      last_error: null,
+      consecutive_failures: 0,
+      last_success_at: expect.any(String),
+    });
+  });
+
+  it("records a failure with a readable reason and keeps the last success", async () => {
+    const { db, getStatus, getRow } = createDatabase();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(okResponse(fixture))
+        .mockImplementation(async () => blockPage()),
+    );
+    await runCollectiblesCatalogCron(db, SMALL);
+    const lastSuccess = getStatus()?.last_success_at;
+    const payload = getRow()?.payload;
+
+    // No fetcher has ever pushed, and the job's own error says so.
+    await expect(runCollectiblesCatalogCron(db, SMALL)).rejects.toThrow(
+      'Yapper catalog fetch failed with 403 Forbidden: an HTML page titled "Attention Required! | Cloudflare"; the fetcher last pushed never',
+    );
+    await expect(runCollectiblesCatalogCron(db, SMALL)).rejects.toThrow();
+
+    expect(getRow()?.payload).toBe(payload);
+    expect(getStatus()).toMatchObject({
+      last_outcome: "failed",
+      last_trigger: "cron",
+      consecutive_failures: 2,
+      last_success_at: lastSuccess,
+      last_failure_at: expect.any(String),
+      last_error:
+        'Yapper catalog fetch failed with 403 Forbidden: an HTML page titled "Attention Required! | Cloudflare"',
+    });
+  });
+
+  it("names the fetcher's last push once ingest has fallen behind", async () => {
+    const { db, getIngestStatus } = createDatabase();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(async () => blockPage()),
+    );
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      await ingestCollectiblesCatalog(
+        db,
+        { body: JSON.stringify(fixture), etag: "e1" },
+        SMALL,
+      );
+      const pushedAt = getIngestStatus()?.last_success_at as string;
+      vi.setSystemTime(Date.now() + INGEST_FALLBACK_WINDOW_MS + 60_000);
+
+      await expect(runCollectiblesCatalogCron(db, SMALL)).rejects.toThrow(
+        `; the fetcher last pushed ${pushedAt}`,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("is quiet while a recent ingest keeps the catalog current", async () => {
+    const { db } = createDatabase();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(async () => blockPage()),
+    );
+    await ingestCollectiblesCatalog(
+      db,
+      { body: JSON.stringify(fixture), etag: "e1" },
+      SMALL,
+    );
+
+    await expect(runCollectiblesCatalogCron(db, SMALL)).resolves.toBeNull();
+  });
+});
+
+describe("describeUpstreamBody", () => {
+  it("keeps a JSON error's message, an HTML page's title, or plain text", () => {
+    expect(
+      describeUpstreamBody(
+        '{"status":403,"error":"Forbidden","message":"Your request has been automatically flagged as suspicious."}',
+      ),
+    ).toBe("Your request has been automatically flagged as suspicious.");
+    expect(
+      describeUpstreamBody(
+        '<!DOCTYPE html> <!--[if lt IE 7]> <html class="no-js"> <![endif]--><head><title>Access denied</title>',
+      ),
+    ).toBe('an HTML page titled "Access denied"');
+    expect(describeUpstreamBody("<html><body>nope</body></html>")).toBe(
+      "an HTML page",
+    );
+    expect(describeUpstreamBody("  bad\n gateway ")).toBe("bad gateway");
+    expect(describeUpstreamBody("")).toBe("");
+  });
+});
+
+describe("getCollectiblesCatalogHealth", () => {
+  it("is empty before anything was stored", async () => {
+    const { db } = createDatabase();
+    await expect(getCollectiblesCatalogHealth(db)).resolves.toEqual({
+      catalog: null,
+      sync: { consecutiveFailures: 0, lastTrigger: undefined },
+      ingest: { consecutiveFailures: 0 },
+    });
+  });
+
+  it("reports the stored catalog, the last refresh and the fetcher apart", async () => {
+    const { db, getRow } = createDatabase();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(okResponse(fixture))
+        .mockResolvedValue(
+          new Response("{}", { status: 503, statusText: "Unavailable" }),
+        ),
+    );
+    await runCollectiblesCatalogCron(db, SMALL);
+    await runCollectiblesCatalogCron(db, SMALL).catch(() => undefined);
+
+    const health = await getCollectiblesCatalogHealth(db);
+    expect(health.catalog).toEqual({
+      syncedAt: getRow()?.synced_at,
+      items: getRow()?.item_count,
+      categories: getRow()?.category_count,
+      stale: false,
+    });
+    expect(health.sync).toMatchObject({
+      lastOutcome: "failed",
+      lastTrigger: "cron",
+      consecutiveFailures: 1,
+      lastError: "Yapper catalog fetch failed with 503 Unavailable: {}",
+      lastSuccessAt: expect.any(String),
+    });
+    expect(health.ingest).toEqual({ consecutiveFailures: 0 });
+
+    const later = Date.parse(getRow()!.synced_at) + 5 * 60 * 60 * 1000;
+    expect((await getCollectiblesCatalogHealth(db, later)).catalog?.stale).toBe(
+      true,
+    );
   });
 });
 
