@@ -12,6 +12,7 @@ import {
   type MultipartRateLimitAction,
   type MultipartRouteParams,
 } from "@/services/multipart-upload.service";
+import { featurePaused } from "@/services/site-flags.service";
 
 const RATE_LIMIT_BY_ACTION = {
   // Shares the single-request route's bucket: one file is one upload.
@@ -38,6 +39,7 @@ function handlers() {
     // The uploader's plan as stored, read on create and again on complete;
     // never anything the client sends.
     attachmentLimit: (userId) => attachmentLimitForUser(db, userId),
+    paused: () => featurePaused("chunkedUploads", undefined, db),
   });
 }
 

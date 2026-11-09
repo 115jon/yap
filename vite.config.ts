@@ -14,6 +14,24 @@ import {
   selectDevAuthKey,
 } from "./src/lib/dev-auth-target";
 import { describeBusyDevPort, resolveWebDevPort } from "./src/lib/dev-port";
+import { execSync } from "node:child_process";
+
+/**
+ * The commit this build is from, for the admin console's "deployed" readout:
+ * CI's GITHUB_SHA, else the local checkout's HEAD, else unknown.
+ */
+function buildCommit(): string {
+  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA;
+  try {
+    return execSync("git rev-parse HEAD", {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+  } catch {
+    return "unknown";
+  }
+}
 
 const shimDir = path.resolve(import.meta.dirname, "src/shims");
 const usePolling = process.env.VITE_USE_POLLING === "true";
@@ -139,6 +157,8 @@ export default defineConfig(({ command, isPreview }) => {
       // drops desktop/mobile branches and the desktop host adapter.
       __IS_DESKTOP__: false,
       __IS_MOBILE__: false,
+      "import.meta.env.YAP_BUILD_COMMIT": JSON.stringify(buildCommit()),
+      "import.meta.env.YAP_BUILT_AT": JSON.stringify(new Date().toISOString()),
       ...(kovaKey
         ? { "import.meta.env.RALPH_DEV_KOVA_KEY": JSON.stringify(kovaKey) }
         : {}),

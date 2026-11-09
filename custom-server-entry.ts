@@ -55,6 +55,7 @@ import {
 } from "./src/lib/collectibles-catalog";
 import {
   isDailySlot,
+  recordScheduledJobRuns,
   runScheduledJobs,
   selectScheduledJobs,
 } from "./src/lib/scheduled-jobs";
@@ -572,7 +573,11 @@ export default {
         ],
       },
     });
-    await runScheduledJobs(jobs, (promise) => ctx.waitUntil(promise));
+    const results = await runScheduledJobs(jobs, (promise) =>
+      ctx.waitUntil(promise),
+    );
+    // The console's "cron sweeps" readout.
+    await recordScheduledJobRuns(env.DB, controller.cron, results);
   },
 
   async queue(

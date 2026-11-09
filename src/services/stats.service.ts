@@ -76,6 +76,40 @@ export function voiceSessionStatements(
   ];
 }
 
+/** The UTC day of `at` ("2026-11-09"), the rollup's key. */
+export function utcDay(at: Date): string {
+  return at.toISOString().slice(0, 10);
+}
+
+/**
+ * The daily rollup (`daily_activity`, migration 041) for one event: what the
+ * admin console's charts read. A separate write from `user_stats`, so a
+ * rollup that fails never costs the counters the badges read.
+ */
+export function dailyActivityStatement(
+  db: D1Database,
+  userId: string,
+  at: Date,
+  delta: { messages?: number; voiceSeconds?: number; streamSeconds?: number },
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO daily_activity (day, user_id, messages, voice_seconds, stream_seconds)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(day, user_id) DO UPDATE SET
+         messages = daily_activity.messages + excluded.messages,
+         voice_seconds = daily_activity.voice_seconds + excluded.voice_seconds,
+         stream_seconds = daily_activity.stream_seconds + excluded.stream_seconds`,
+    )
+    .bind(
+      utcDay(at),
+      userId,
+      Math.max(0, Math.round(delta.messages ?? 0)),
+      Math.max(0, Math.round(delta.voiceSeconds ?? 0)),
+      Math.max(0, Math.round(delta.streamSeconds ?? 0)),
+    );
+}
+
 /**
  * Writes `statements` off the request's critical path: a stat that fails to
  * land is logged and dropped, never an error for the message or the call
@@ -101,11 +135,18 @@ export function recordMessageSent(
   now: Date,
   timeZone?: string | null,
 ): Promise<void> {
-  return runStatWrite(
-    db,
-    () => messageSentStatements(db, userId, now, timeZone),
-    "message",
-  );
+  return Promise.all([
+    runStatWrite(
+      db,
+      () => messageSentStatements(db, userId, now, timeZone),
+      "message",
+    ),
+    runStatWrite(
+      db,
+      () => [dailyActivityStatement(db, userId, now, { messages: 1 })],
+      "daily message",
+    ),
+  ]).then(() => undefined);
 }
 
 export function recordVoiceSession(
@@ -116,11 +157,23 @@ export function recordVoiceSession(
   if (session.voiceSeconds <= 0 && session.streamSeconds <= 0) {
     return Promise.resolve();
   }
-  return runStatWrite(
-    db,
-    () => voiceSessionStatements(db, userId, session),
-    "voice session",
-  );
+  return Promise.all([
+    runStatWrite(
+      db,
+      () => voiceSessionStatements(db, userId, session),
+      "voice session",
+    ),
+    runStatWrite(
+      db,
+      () => [
+        dailyActivityStatement(db, userId, session.endedAt, {
+          voiceSeconds: session.voiceSeconds,
+          streamSeconds: session.streamSeconds,
+        }),
+      ],
+      "daily voice",
+    ),
+  ]).then(() => undefined);
 }
 
 /** `recordMessageSent`, handed to the request's `waitUntil`. */

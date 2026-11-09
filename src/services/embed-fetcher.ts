@@ -1,3 +1,4 @@
+import { isFeatureEnabled } from "@/services/site-flags.service";
 import type { EmbedAuthor, EmbedInfo } from "@/lib/types";
 import {
   safeFetch,
@@ -166,6 +167,15 @@ export async function extractAndProcessEmbedsWithStatus(
   if (urls.length === 0) {
     return { embeds: [], hadFailures: false, outcomes: [] };
   }
+  // Link embeds switched off (site flags): fetch nothing, keep what the
+  // message already had, and do not ask for a retry.
+  if (!(await isFeatureEnabled("linkEmbeds"))) {
+    return {
+      embeds: options?.previous ?? [],
+      hadFailures: false,
+      outcomes: [],
+    };
+  }
 
   const previousByUrl = new Map(
     (options?.previous ?? []).map((embed) => [embed.url, embed]),
@@ -331,6 +341,7 @@ async function resolveEmbedUrl(
 export async function prefetchEmbedUrls(
   urls: readonly string[],
 ): Promise<EmbedInfo[]> {
+  if (!(await isFeatureEnabled("linkEmbeds"))) return [];
   const outcomes = await Promise.all(
     urls.map((url) =>
       resolveEmbedUrl(url, { cacheNegative: false, awaitCacheWrite: true }),
@@ -357,6 +368,7 @@ export async function lookupCachedEmbeds(
 ): Promise<EmbedInfo[]> {
   const urls = extractEmbedUrls(content);
   if (urls.length === 0) return [];
+  if (!(await isFeatureEnabled("linkEmbeds"))) return [];
   const keys = urls.map(embedCacheKey);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const entries = await Promise.race([

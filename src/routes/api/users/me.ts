@@ -14,6 +14,10 @@ import { lenientNumber } from "@/lib/lenient-schema";
 import { looseStruct, safeParse, safeParseJson } from "@/lib/schema";
 import { Schema } from "effect";
 import { getMe } from "@/services/user.service";
+import {
+  featurePausedResponse,
+  isFeatureEnabled,
+} from "@/services/site-flags.service";
 import { clog } from "@/lib/console-logger";
 import type { AvatarDisplay } from "@/lib/avatar-display";
 import {
@@ -24,6 +28,9 @@ import {
 } from "@/lib/voice/soundboard-trigger";
 
 const log = clog("users/me");
+
+/** A first sign-in refused because sign-ups are switched off. */
+class SignupsPausedError extends Error {}
 
 type UserProfileRow = {
   id: string;
@@ -76,6 +83,9 @@ export const GET = async ({ request }: any) => {
         const synced = await syncUserFromRalphAuth(db, userId, request.headers);
         if (synced) return apiSuccess(synced);
       } catch (syncErr) {
+        if (syncErr instanceof SignupsPausedError) {
+          return featurePausedResponse("signups", request);
+        }
         log.error("Auto-sync from Ralph Auth failed:", syncErr);
       }
       return apiError(
@@ -326,6 +336,12 @@ async function syncUserFromRalphAuth(
   const bio = authUser.bio ?? null;
   const now = new Date().toISOString();
   const defaultProfileTheme = applyProfileThemeDefaults({});
+
+  // Only reached for an id with no profile yet: a brand-new account,
+  // refused while sign-ups are switched off.
+  if (!(await isFeatureEnabled("signups", db))) {
+    throw new SignupsPausedError();
+  }
 
   await db
     .prepare(

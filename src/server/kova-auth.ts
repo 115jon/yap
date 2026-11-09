@@ -12,7 +12,16 @@ import {
   DEFAULT_KOVA_AUTH_PUBLISHABLE_KEY,
   DEFAULT_KOVA_AUTH_URL,
 } from "@/lib/site-defaults";
-import { AuthUnavailable, Unauthenticated } from "@/server/errors";
+import {
+  ACCOUNT_SUSPENDED,
+  isSuspended,
+  SUSPENDED_MESSAGE,
+} from "@/lib/suspension";
+import {
+  AuthUnavailable,
+  ServiceFailure,
+  Unauthenticated,
+} from "@/server/errors";
 
 export interface KovaAuthUser {
   id: string;
@@ -232,12 +241,31 @@ export const authenticate = Effect.fn("kova.authenticate")(function* (
     );
 });
 
-/** The signed-in caller's user id: what `requireAuth` gave routes, as a typed lookup. */
+/**
+ * The signed-in caller's user id: what `requireAuth` gave routes, as a typed
+ * lookup. A suspended account (lib/suspension) fails with a 403
+ * ACCOUNT_SUSPENDED, as `requireAuth` answers it.
+ */
 export function signedInUserId(
   request: Request,
-): Effect.Effect<string, Unauthenticated | AuthUnavailable, KovaAuth> {
-  return Effect.map(
-    authenticate(credentialsOf(request)),
-    (identity) => identity.user.id,
+): Effect.Effect<
+  string,
+  Unauthenticated | AuthUnavailable | ServiceFailure,
+  KovaAuth
+> {
+  return Effect.flatMap(authenticate(credentialsOf(request)), (identity) =>
+    Effect.flatMap(
+      Effect.promise(() => isSuspended(identity.user.id)),
+      (suspended) =>
+        suspended
+          ? Effect.fail(
+              new ServiceFailure({
+                message: SUSPENDED_MESSAGE,
+                status: 403,
+                code: ACCOUNT_SUSPENDED,
+              }),
+            )
+          : Effect.succeed(identity.user.id),
+    ),
   );
 }

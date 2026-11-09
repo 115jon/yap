@@ -23,7 +23,11 @@ import {
   WorkerEnv,
   type WorkerBindings,
 } from "@/server/bindings";
-import type { AuthUnavailable, Unauthenticated } from "@/server/errors";
+import type {
+  AuthUnavailable,
+  ServiceFailure,
+  Unauthenticated,
+} from "@/server/errors";
 import { signedInUserId, type KovaAuth } from "@/server/kova-auth";
 import {
   VOICE_MOVE_GRANT_USE_PATH,
@@ -64,7 +68,7 @@ export type CallSocketTarget = {
 
 type AdmissionResult = Effect.Effect<
   SocketAdmission | Response,
-  Unauthenticated | AuthUnavailable,
+  Unauthenticated | AuthUnavailable | ServiceFailure,
   KovaAuth | Database | RateLimiter | WorkerEnv
 >;
 
@@ -89,7 +93,11 @@ export function admitCallSocket(
 /** The chat socket (/api/gateway): any signed-in user. */
 export function admitGlobalSocket(
   request: Request,
-): Effect.Effect<SocketAdmission, Unauthenticated | AuthUnavailable, KovaAuth> {
+): Effect.Effect<
+  SocketAdmission,
+  Unauthenticated | AuthUnavailable | ServiceFailure,
+  KovaAuth
+> {
   return Effect.map(signedInUserId(request), (userId) => ({
     accessMode: "authenticated" as const,
     roomSlug: "global-gateway",
@@ -104,7 +112,7 @@ function authorizeChannel(
   moveGrantUse: VoiceMoveGrantUseRequest["use"],
 ): Effect.Effect<
   SocketAdmission | Response,
-  Unauthenticated | AuthUnavailable,
+  Unauthenticated | AuthUnavailable | ServiceFailure,
   KovaAuth | Database | WorkerEnv
 > {
   return Effect.gen(function* () {

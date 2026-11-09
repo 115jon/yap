@@ -2,6 +2,7 @@ import ChannelSidebar from "@/components/chat/ChannelSidebar";
 import { SidePanel } from "@/components/ui/side-panel";
 import { isMobileViewport } from "@/hooks/useMediaQuery";
 import { WebAppTitleBar } from "@/components/chat/AppTitleBar";
+import { SiteAnnouncementBanner } from "@/components/chat/SiteAnnouncementBanner";
 import { AppConnectionBanner } from "@/components/chat/ConnectionBanner";
 import { EmptyState } from "@/components/ui/empty-state";
 import ChatArea from "@/components/chat/ChatArea";
@@ -1173,6 +1174,7 @@ export default function ChatPage() {
       data-app-layout="true"
     >
       {!isTauri() && <WebAppTitleBar />}
+      <SiteAnnouncementBanner />
       <div
         className="flex flex-1 overflow-hidden relative"
         style={channelSidebarStyle}
