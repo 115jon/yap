@@ -55,6 +55,7 @@ qt_add_executable(YapNative WIN32
   cpp/crashnotice.cpp cpp/crashnotice.h
   cpp/desktopshell.cpp cpp/desktopshell.h
   cpp/ditherprovider.cpp cpp/ditherprovider.h
+  cpp/eyedropper.cpp cpp/eyedropper.h
   cpp/heaptrace.cpp cpp/heaptrace.h
   cpp/iconprovider.cpp cpp/iconprovider.h
   cpp/logfile.cpp cpp/logfile.h

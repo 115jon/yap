@@ -15,6 +15,7 @@ mod bridge;
 mod calls;
 mod camera;
 mod client;
+mod color;
 mod command_menu;
 #[cfg(windows)]
 mod crash;

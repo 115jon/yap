@@ -49,6 +49,7 @@
 #include "crashnotice.h"
 #include "desktopshell.h"
 #include "ditherprovider.h"
+#include "eyedropper.h"
 #include "heaptrace.h"
 #include "iconprovider.h"
 #include "logfile.h"
@@ -863,6 +864,10 @@ int main(int argc, char* argv[])
   static CachedNetworkFactory networkFactory;
   networkFactory.shell = files;
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "Files", files);
+  // The colour picker's eyedropper (YAP_TEST_EYEDROPPER: a set colour, no
+  // window, no screen read).
+  auto* eyedropper = new Eyedropper(&app);
+  qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "Eyedropper", eyedropper);
   // Never deleted: media threads may still deliver a frame while the
   // window closes.
   auto* video = new VideoHub;

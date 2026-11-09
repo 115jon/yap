@@ -180,7 +180,14 @@ the decisions.
   account), username, email and sign-in methods from Kova. The profile
   editor (account card or Account): avatar and banner uploads, banner,
   background and accent colours, custom status, pronouns and bio, with the
-  live card and the unsaved bar. Sessions (list), Privacy (media filter,
+  live card and the unsaved bar. Custom colours (profile, name style and
+  role colours) open the app's own colour picker
+  (`components/ColorPopover.qml`, what Chromium's `<input type="color">`
+  popup gives the web): a saturation/brightness square, a hue slider, the
+  hex field, old beside new, an eyedropper for any pixel on screen
+  (`cpp/eyedropper.*`, only while the user picks) and the last 8 colours
+  (`color-recents.json`, `yap-core` `color.rs`). The colour applies as it
+  changes; Esc puts the old one back, a click outside keeps it. Sessions (list), Privacy (media filter,
   which the GIF search follows; shared links with copy, open and revoke),
   Voice & video (the old voice popup, plus camera, preview and quality),
   Soundboard volume, Keybinds, Appearance (the seven themes in
@@ -577,6 +584,8 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_TEST_HDR_CAPTURE`          | unset                     | `<sdrWhiteNits>,<maxNits>`: shares capture FP16 and tone-map with these values on any display (`80,80`: the identity; tests)                                                                                                   |
 | `YAP_CAPTURE_TIMING`            | unset                     | `1`: the WGC capture logs its per-frame GPU (tone map, copy) and CPU (read, push) time every 300 frames (`[capture] timing`)                                                                                                   |
 | `YAP_PICK_FILES`                | unset                     | `a.png;b.png`: returned by the file picker instead of showing it (tests)                                                                                                                                                       |
+| `YAP_PICK_COLOR`                | unset                     | `#RRGGBB`: a colour key applies it at once instead of opening the colour picker; `-` applies nothing (tests)                                                                                                                   |
+| `YAP_TEST_EYEDROPPER`           | unset                     | `#RRGGBB`: the eyedropper picks it 150 ms after it starts, `-` cancels; no overlay, the screen is never read (tests)                                                                                                           |
 | `YAP_EMBED_MUTED`               | unset                     | `1`: every chat player starts muted (tests)                                                                                                                                                                                    |
 | `YAP_FAKE_NO_WEBVIEW2`          | unset                     | `1`: WebView2 creation fails for this process, as on a PC without the runtime (tests)                                                                                                                                          |
 | `YAP_LOG_EXTERNAL_OPEN`         | unset                     | `1`: links the players would open in the browser are logged as `[external] open <host><path>` instead (tests)                                                                                                                  |
@@ -729,6 +738,7 @@ cpp/thumbbar.*        taskbar thumbnail toolbar (ITaskbarList3) in calls
 cpp/crashnotice.*     minidump handler install and the next launch's crash notice
 cpp/logfile.*         stderr tee into %LOCALAPPDATA%\YapNative\logs, rotated
 cpp/videohub.*        remote call video into QVideoSinks (VideoHub singleton)
+cpp/eyedropper.*      the colour picker's eyedropper: overlay, loupe, one pixel read
 cpp/webmplayer.*      WebmPlayer: yap-webm frames into a VideoOutput's sink
 cpp/authmedia.*       AuthMedia: private attachments through the loopback relay
 cpp/camera.*          our camera: devices, QCamera or the test pattern, frames out

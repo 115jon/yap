@@ -11,6 +11,7 @@ pub mod admin;
 pub mod api;
 pub mod auth;
 pub mod collectibles;
+pub mod color;
 pub mod command_menu;
 pub mod config;
 pub mod custom_sounds;

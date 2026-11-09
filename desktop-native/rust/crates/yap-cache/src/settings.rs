@@ -19,6 +19,14 @@ pub const APPEARANCE_FILE: &str = "appearance.json";
 pub const SEARCH_FILE: &str = "search-recent.json";
 pub const TRUSTED_LINKS_FILE: &str = "trusted-links.json";
 pub const GAMES_FILE: &str = "games.json";
+pub const COLOR_FILE: &str = "color-recents.json";
+
+/// The colour picker's recent colours (`#RRGGBB`), most recent first.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ColorPrefs {
+    pub recents: Vec<String>,
+}
 
 /// The theme picked on this device (next-themes' `theme` key on the web):
 /// a theme id or `system`. App-wide, like the web's origin storage.
@@ -320,6 +328,15 @@ pub fn save_emoji(dir: &Path, prefs: &EmojiPrefs) -> Result<(), CacheError> {
     write(&dir.join(EMOJI_FILE), prefs)
 }
 
+/// The colour picker's recents in `dir`; empty when missing or unreadable.
+pub fn load_colors(dir: &Path) -> ColorPrefs {
+    read(&dir.join(COLOR_FILE)).unwrap_or_default()
+}
+
+pub fn save_colors(dir: &Path, prefs: &ColorPrefs) -> Result<(), CacheError> {
+    write(&dir.join(COLOR_FILE), prefs)
+}
+
 /// The hosts whose links open without the "Leaving Yap" confirmation
 /// (localStorage `ralph-meet:trusted-external-link-domains` on the web):
 /// lower case, sorted. Empty when missing or unreadable.
@@ -529,6 +546,17 @@ mod tests {
         };
         save_emoji(dir.path(), &prefs).expect("save");
         assert_eq!(load_emoji(dir.path()), prefs);
+    }
+
+    #[test]
+    fn color_prefs_round_trip() {
+        let dir = tempfile::tempdir().expect("dir");
+        assert_eq!(load_colors(dir.path()), ColorPrefs::default());
+        let prefs = ColorPrefs {
+            recents: vec!["#33CCFF".into(), "#000000".into()],
+        };
+        save_colors(dir.path(), &prefs).expect("save");
+        assert_eq!(load_colors(dir.path()), prefs);
     }
 
     #[test]
