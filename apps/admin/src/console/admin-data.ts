@@ -49,7 +49,10 @@ export class AdminApiError extends Error {
   }
 }
 
-/** Worth trying again: no answer, a timeout, a rate limit or a 5xx. */
+/**
+ * Worth trying again: no answer, a timeout, a rate limit or a 5xx. Reads
+ * only; writes use isRetryableWrite.
+ */
 export function isTransientError(error: unknown): boolean {
   if (error instanceof AdminApiError) {
     return (
@@ -60,6 +63,17 @@ export function isTransientError(error: unknown): boolean {
     );
   }
   return error instanceof TypeError;
+}
+
+/**
+ * A write is tried again only when the API never answered it: no response,
+ * or a transient status with no API error code (an edge 429/503). A coded
+ * answer (a cooldown, a refresh that failed upstream and was logged) is the
+ * server's decision, and repeating the write would repeat its effects.
+ */
+export function isRetryableWrite(error: unknown): boolean {
+  if (!isTransientError(error)) return false;
+  return !(error instanceof AdminApiError && error.code);
 }
 
 /** 0.5 s, 1 s, 2 s... capped at 8 s, with a little jitter. */
@@ -190,7 +204,7 @@ export function createHttpTransport(
           options.onWrite?.(path);
           return result;
         } catch (error) {
-          if (attempt >= writeRetries || !isTransientError(error)) throw error;
+          if (attempt >= writeRetries || !isRetryableWrite(error)) throw error;
           const asked =
             error instanceof AdminApiError && error.retryAfterS
               ? error.retryAfterS * 1000

@@ -706,6 +706,7 @@ describe("the shop catalog card", () => {
     // Once per cooldown, and a refused try logs nothing.
     const again = await as("POST", "/api/catalog/refresh");
     expect(again.status).toBe(429);
+    expect(Number(again.headers.get("retry-after"))).toBeGreaterThan(0);
     expect(await again.json()).toMatchObject({
       code: "CATALOG_REFRESH_COOLDOWN",
     });

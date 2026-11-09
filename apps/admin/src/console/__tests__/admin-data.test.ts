@@ -139,6 +139,24 @@ describe("the console's transport", () => {
     expect(onWrite).toHaveBeenCalledWith("/api/settings");
   });
 
+  it("does not repeat a write the API answered with a code, even a 502", async () => {
+    // A catalog refresh that failed upstream was already run and logged.
+    const { t, calls } = transport({
+      "/api/catalog/refresh": [
+        () =>
+          Response.json(
+            { error: "Upstream said 403", code: "CATALOG_REFRESH_FAILED" },
+            { status: 502 },
+          ),
+      ],
+    });
+    await expect(t.send("POST", "/api/catalog/refresh")).rejects.toMatchObject({
+      status: 502,
+      code: "CATALOG_REFRESH_FAILED",
+    });
+    expect(calls).toHaveLength(1);
+  });
+
   it("does not retry a write the server refused", async () => {
     const onWrite = vi.fn();
     const { t, calls } = transport(
