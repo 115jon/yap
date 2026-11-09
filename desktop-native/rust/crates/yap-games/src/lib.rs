@@ -1,4 +1,4 @@
-//! Game detection for Yap Native: which game is running, from the process
+//! Game detection for Yap: which game is running, from the process
 //! list and Steam, matched against the game catalog (`catalog`, `matcher`),
 //! watched on one background thread (`detector`, Windows only).
 //!

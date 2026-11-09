@@ -321,7 +321,7 @@ impl cxx_qt::Initialize for qobject::Apps {
     }
 }
 
-/// The custom sounds kept in `%LOCALAPPDATA%\YapNative`.
+/// The custom sounds kept in `%LOCALAPPDATA%\Yap.Data`.
 fn send_local_sounds() {
     let sounds = yap_cache::settings::app_dir()
         .and_then(|dir| yap_cache::settings::load_app_file(&dir, SOUNDS_FILE))

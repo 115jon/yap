@@ -17,7 +17,8 @@
 //! navigation stays on the host page; any other navigation and every new
 //! window go to the system browser. Dev tools, host objects, web messages, script dialogs
 //! and the context menu are off. The profile lives in
-//! `%LOCALAPPDATA%\YapNative\WebView2`, apart from the installed app's.
+//! `%LOCALAPPDATA%\Yap.Data\WebView2` (the profile's data folder), apart from
+//! any other app's.
 
 #![cfg(windows)]
 

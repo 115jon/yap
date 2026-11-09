@@ -33,6 +33,7 @@ pub mod settings;
 pub mod shell;
 pub mod store;
 pub mod synth;
+pub mod tauri;
 pub mod wordle;
 
 pub use api::{Api, ApiError, Token};

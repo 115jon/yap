@@ -45,7 +45,7 @@ Rectangle {
             width: parent.width
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
-            text: card.gpu ? qsTr("Yap Native is drawing without the graphics card")
+            text: card.gpu ? qsTr("Yap is drawing without the graphics card")
                            : qsTr("Video playback needs the Media Feature Pack")
             color: Theme.ink1
             font: Theme.type.author
@@ -56,7 +56,7 @@ Rectangle {
             wrapMode: Text.Wrap
             text: card.gpu
                 ? Compat.gpuReason + " " + qsTr("Animations and video may be slower. Hardware acceleration in Settings > Desktop app turns the graphics card back on.")
-                : qsTr("This edition of Windows has no Media Foundation, so videos, clips and audio previews in chats don't play here. Calls still work. Install the Media Feature Pack from Settings > System > Optional features, then restart Yap Native.")
+                : qsTr("This edition of Windows has no Media Foundation, so videos, clips and audio previews in chats don't play here. Calls still work. Install the Media Feature Pack from Settings > System > Optional features, then restart Yap.")
             color: Theme.ink2
             font: Theme.type.description
         }

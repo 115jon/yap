@@ -9,9 +9,9 @@ use std::time::{Duration, Instant};
 
 use yap_protocol::rest::{Message, Notification, User};
 
-/// The name the tray and toasts use. Not "Yap": the installed desktop app
-/// runs beside this one, and the two must be told apart.
-pub const APP_NAME: &str = "Yap Native";
+/// The name the tray and toasts use (`install::TITLE`): this app replaces
+/// the Tauri desktop app under its name.
+pub const APP_NAME: &str = crate::install::TITLE;
 
 /// The badge count stops here (desktop-notifications.ts `MAX_BADGE_COUNT`).
 pub const MAX_BADGE_COUNT: usize = 99;
@@ -536,27 +536,27 @@ mod tests {
     fn badge_counts_unread_notifications() {
         let b = badge(3, true);
         assert_eq!((b.count, b.dot), (3, false));
-        assert_eq!(b.tooltip, "Yap Native - 3 unread notifications");
+        assert_eq!(b.tooltip, "Yap - 3 unread notifications");
     }
 
     #[test]
     fn badge_shows_a_dot_for_unread_channels_only() {
         let b = badge(0, true);
         assert_eq!((b.count, b.dot), (0, true));
-        assert_eq!(b.tooltip, "Yap Native - unread activity");
+        assert_eq!(b.tooltip, "Yap - unread activity");
     }
 
     #[test]
     fn badge_caps_the_count_but_not_the_tooltip() {
         let b = badge(150, false);
         assert_eq!(b.count, 99);
-        assert_eq!(b.tooltip, "Yap Native - 150 unread notifications");
+        assert_eq!(b.tooltip, "Yap - 150 unread notifications");
     }
 
     #[test]
     fn badge_is_plain_with_nothing_unread() {
         assert_eq!(badge(0, false), BadgeView::default());
-        assert_eq!(BadgeView::default().tooltip, "Yap Native");
+        assert_eq!(BadgeView::default().tooltip, "Yap");
     }
 
     #[test]
@@ -692,8 +692,8 @@ mod tests {
 
     #[test]
     fn detects_the_autostart_flag_after_argv0() {
-        assert!(launched_by_autostart(["YapNative.exe", "--autostart"]));
-        assert!(!launched_by_autostart(["YapNative.exe"]));
+        assert!(launched_by_autostart(["Yap.exe", "--autostart"]));
+        assert!(!launched_by_autostart(["Yap.exe"]));
         assert!(!launched_by_autostart(["--autostart"]));
     }
 }

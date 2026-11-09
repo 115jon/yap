@@ -1,4 +1,4 @@
-# Builds YapNative.exe: CMake + Ninja, MSVC from the newest Visual Studio,
+# Builds Yap.exe: CMake + Ninja, MSVC from the newest Visual Studio,
 # Qt from -QtDir (a static Qt gives one self-contained .exe).
 param(
     # The size-optimized, patched static Qt 6.11.3 (patches/qt/build-qt.ps1);

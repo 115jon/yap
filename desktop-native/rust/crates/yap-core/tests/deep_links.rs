@@ -1,5 +1,6 @@
-//! `yap-native://` deep links: the strict parser (every form in the
-//! `links` table, and what it refuses), the run's test scheme, and what the
+//! `yap://` and `yap-native://` deep links: the strict parser (every form in
+//! the `links` table under both schemes, and what it refuses), the Tauri
+//! app's older `yap://invite` links, the run's test scheme, and what the
 //! store does with the links the invite tests do not cover (Home, a
 //! server, settings, the sign-in nudge).
 
@@ -249,7 +250,11 @@ fn signin_and_settings_should_never_come_from_a_site_link() {
         None
     );
     assert_eq!(parse_link("https://yap.fixture.invalid/signin", SITE), None);
-    assert_eq!(parse_link("yap://signin", SITE), None);
+    // Our own scheme is another matter: `yap://` is ours now.
+    assert_eq!(
+        parse_link("yap://signin", SITE),
+        Some(Link::SignIn { user_code: None })
+    );
 }
 
 #[test]
@@ -275,13 +280,97 @@ fn site_chat_links_should_read_as_the_web_reads_them() {
 #[test]
 fn another_scheme_should_never_be_a_deep_link() {
     for url in [
-        "yap://invite/a1b2c3d4",
         "yap-native-test://invite/a1b2c3d4",
+        "yapp://invite/a1b2c3d4",
+        "yap-nativex://invite/a1b2c3d4",
+        "ralphmeet://invite/a1b2c3d4",
         "https://yap.fixture.invalid/invite/a1b2c3d4",
         "yap-native:invite/a1b2c3d4",
+        "yap:invite/a1b2c3d4",
     ] {
         assert_eq!(arg(url), None, "{url}");
     }
+}
+
+// yap:// and its yap-native:// alias
+
+/// Every strict form, after the scheme.
+const FORMS: [&str; 14] = [
+    "invite/a1b2c3d4",
+    "invite/a1b2c3d4/",
+    "Invite/a1b2c3d4",
+    "chat/@me",
+    "chat/%40me",
+    "chat/@me/dm_1",
+    "chat/%40me/dm_1?message=m_1",
+    "chat/srv",
+    "chat/srv/chan?message=msg_1",
+    "settings",
+    "settings/voice",
+    "settings/voice?row=sign-out",
+    "signin",
+    "signin?code=abcd-efgh",
+];
+
+#[test]
+fn every_form_should_read_the_same_under_yap_and_yap_native() {
+    for form in FORMS {
+        let primary = arg(&format!("yap://{form}"));
+        assert!(primary.is_some(), "yap://{form}");
+        assert_eq!(primary, arg(&format!("yap-native://{form}")), "{form}");
+        assert_eq!(
+            parse_link(&format!("yap://{form}"), SITE),
+            primary,
+            "parse_link yap://{form}"
+        );
+        assert_eq!(arg(&format!("YAP://{form}")), primary, "YAP://{form}");
+    }
+}
+
+#[test]
+fn what_yap_native_refuses_yap_should_refuse_too() {
+    for rest in [
+        "",
+        "/",
+        "open",
+        "room/abc",
+        "activate?code=ABCD-EFGH",
+        "invite/a/b",
+        "invite//a",
+        "chat/srv/chan/extra",
+        "chat/srv?message=m",
+        "chat/srv/chan?message=a&message=b",
+        "settings/nope",
+        "signin?token=abc",
+        "signin?code=ABCD-EFGH&session=abc",
+        "chat/srv/ch%20an",
+    ] {
+        assert_eq!(arg(&format!("yap://{rest}")), None, "yap://{rest}");
+        assert_eq!(
+            arg(&format!("yap-native://{rest}")),
+            None,
+            "yap-native://{rest}"
+        );
+    }
+}
+
+#[test]
+fn the_tauri_apps_invite_links_should_still_open_the_landing() {
+    let invite = Some(Link::Invite("a1b2c3d4".into()));
+    // desktop-deep-link.ts read the code and ignored the query and fragment.
+    for url in [
+        "yap://invite/a1b2c3d4",
+        "yap://invite/a1b2c3d4?utm_source=x",
+        "yap://invite/a1b2c3d4#join",
+        "\"yap://invite/a1b2c3d4\"",
+    ] {
+        assert_eq!(arg(url), invite, "{url}");
+        assert_eq!(parse_link(url, SITE), invite, "{url}");
+    }
+    // Only for invites, and only under yap://: the alias stays strict.
+    assert_eq!(arg("yap-native://invite/a1b2c3d4?utm_source=x"), None);
+    assert_eq!(arg("yap://chat/srv?utm_source=x"), None);
+    assert_eq!(arg("yap://invite/bad%20code?x=1"), None);
 }
 
 // The test scheme

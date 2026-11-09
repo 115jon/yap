@@ -1,20 +1,23 @@
-# Builds YapNative.exe (release) and packs it into a per-user Velopack
+# Builds Yap.exe (release) and packs it into a per-user Velopack
 # installer: <OutDir>/<PackId>-win-Setup.exe, the full .nupkg and the
 # release feed files. See docs/INSTALLER.md.
 #
 #   ./tools/package.ps1                          # build, pack, unsigned
 #   ./tools/package.ps1 -Sign                    # Authenticode via Artifact Signing (az login)
-#   ./tools/package.ps1 -SkipBuild -PackId YapNative.InstallTest -Version 0.0.1 -Title "Yap Native InstallTest"
+#   ./tools/package.ps1 -SkipBuild -PackId Yap.InstallTest -Version 0.0.1 -Title "Yap InstallTest"
 #
 # The version defaults to [workspace.package] in rust/Cargo.toml, the one
 # CMakeLists.txt reads. vpk is a .NET global tool needed only here; the
 # Setup.exe it makes is native, so nothing needs .NET at install time.
 param(
     # Velopack's app id. Also the install folder (%LOCALAPPDATA%\<PackId>),
-    # which uninstall deletes: never "YapNative", the app's data root.
-    [string]$PackId = "YapNative.App",
+    # which uninstall deletes, and the uninstall entry's key. Never "Yap"
+    # (the Tauri app's install folder and uninstall key) and never
+    # "Yap.Data" (the app's data root). yap_core::install::PACK_ID.
+    [string]$PackId = "Yap.App",
     [string]$Version,
-    [string]$Title = "Yap Native",
+    # Shortcuts, Apps & features and Velopack's root stub (<Title>.exe).
+    [string]$Title = "Yap",
     [string]$Authors = "115jon",
     [string]$BuildDir = $(if ($env:YAP_NATIVE_BUILD_DIR) { $env:YAP_NATIVE_BUILD_DIR } else { "$PSScriptRoot/../build/Release" }),
     [string]$OutDir = "$PSScriptRoot/../build/installer",
@@ -93,7 +96,7 @@ if (-not $SkipBuild) {
     & "$root/build.ps1" @buildArgs
     if ($LASTEXITCODE) { throw "build.ps1 failed ($LASTEXITCODE)" }
 }
-$exe = Join-Path $BuildDir "YapNative.exe"
+$exe = Join-Path $BuildDir "Yap.exe"
 if (-not (Test-Path $exe)) { throw "No $exe; build first or drop -SkipBuild." }
 
 # The package is exactly what is staged: the one static exe, the game
@@ -169,16 +172,17 @@ $packArgs = @(
     "--packTitle", $Title,
     "--packAuthors", $Authors,
     "--packDir", $stage,
-    "--mainExe", "YapNative.exe",
+    "--mainExe", "Yap.exe",
     # vpk assumes x86 otherwise (Setup refuses nothing, but the feed and
     # the update stub would say so).
     "--runtime", "win-x64",
     "--icon", "$root/assets/app/yap.ico",
     "--splashImage", $splash,
     "--splashProgressColor", "#ff8ad8",
-    # The default profile's AUMID (cpp/desktopshell.cpp), so a pinned
-    # shortcut and the running window group together.
-    "--aumid", "com.115jon.yap.native",
+    # The default profile's AUMID (cpp/desktopshell.cpp,
+    # yap_core::install::AUMID), the Tauri app's, so a pinned shortcut and
+    # the running window group together.
+    "--aumid", "com.115jon.yap",
     "--shortcuts", "Desktop,StartMenuRoot",
     "--outputDir", $OutDir
 )

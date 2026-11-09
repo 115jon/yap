@@ -29,26 +29,36 @@
 #include <shellapi.h>
 #include <shobjidl.h>
 
+// rust/src/installer.rs: whether this profile's Run value may be written
+// (`enabled`) or deleted, given its command now (null: none).
+extern "C" bool yap_run_value_may_change(const wchar_t* current,
+                                         const wchar_t* exe, bool enabled);
+
 namespace {
 
-// This app's identity. Never the installed app's (com.115jon.yap, "Yap").
-// A named profile (profile.h) suffixes every name below with the profile, so
-// two profiles never share an instance, a toast identity or a Run value; the
-// functions after this block build them.
-constexpr wchar_t kAumidBase[] = L"com.115jon.yap.native";
+// This app's identity (yap_core::install): the Tauri desktop app's, which
+// this app replaces. A named profile (profile.h) suffixes every name below
+// with the profile, so two profiles never share an instance, a toast
+// identity or a Run value; the functions after this block build them.
+constexpr wchar_t kAumidBase[] = L"com.115jon.yap";
 constexpr wchar_t kAumidKeyBase[] =
-  L"Software\\Classes\\AppUserModelId\\com.115jon.yap.native";
-constexpr wchar_t kMutexBase[] = L"Local\\com.115jon.yap.native.instance";
-constexpr char kPipe[] = "com.115jon.yap.native";
+  L"Software\\Classes\\AppUserModelId\\com.115jon.yap";
+// The lock and the pipe are new with the rename (before it:
+// com.115jon.yap.native...): an older build that is still installed and
+// starts at sign-in must not take this app's launches, nor this app its.
+// The Tauri app's single-instance names are its plugin's, never these.
+constexpr wchar_t kMutexBase[] = L"Local\\com.115jon.yap.app.instance";
+constexpr char kPipe[] = "com.115jon.yap.app";
 constexpr wchar_t kRunKey[] =
   L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-constexpr wchar_t kRunValueBase[] = L"YapNative";
-constexpr wchar_t kTrayClassBase[] = L"YapNativeTrayWindow";
+constexpr wchar_t kRunValueBase[] = L"Yap";
+constexpr wchar_t kTrayClassBase[] = L"YapTrayWindow";
 // The app's name in the tray and the tray menu; a profile adds its own.
-constexpr wchar_t kAppName[] = L"Yap Native";
-// Our deep-link scheme's key (yap_core::links::SCHEME_KEY). Never
-// Software\Classes\yap, the installed app's.
-constexpr wchar_t kSchemeKey[] = L"Software\\Classes\\yap-native";
+constexpr wchar_t kAppName[] = L"Yap";
+// Our deep-link schemes' keys (yap_core::links::SCHEME_KEY and
+// ALIAS_SCHEME_KEY): yap://, and yap-native:// as an alias.
+constexpr const wchar_t* kSchemeKeys[] = { L"Software\\Classes\\yap",
+                                           L"Software\\Classes\\yap-native" };
 // A forwarded argument longer than this is not a link we made: dropped at
 // both ends of the pipe hand-off, and by openArg for our own command line.
 constexpr int kMaxArgBytes = 4096;
@@ -83,7 +93,7 @@ std::wstring mutexName()
   return kMutexBase + profile::suffix(L'.');
 }
 
-// "YapNative", or "YapNative-<name>".
+// "Yap", or "Yap-<name>".
 std::wstring runValue()
 {
   return kRunValueBase + profile::suffix(L'-');
@@ -112,7 +122,7 @@ std::wstring wide(const QString& text)
   return text.toStdWString();
 }
 
-// The tray tooltip with the profile in it: "Yap Native (jon) - 3 unread
+// The tray tooltip with the profile in it: "Yap (jon) - 3 unread
 // notifications". The default profile's tooltip is unchanged.
 QString trayTooltip(const QString& tooltip)
 {
@@ -146,7 +156,7 @@ QString toastIconPath()
   return QDir::toNativeSeparators(path);
 }
 
-// HKCU\Software\Classes\AppUserModelId\com.115jon.yap.native[.<profile>]:
+// HKCU\Software\Classes\AppUserModelId\com.115jon.yap[.<profile>]:
 // the name and icon toasts show, so an unpackaged app can raise them without
 // a Start menu shortcut. Only this key is written.
 void registerAumid()
@@ -565,20 +575,27 @@ void DesktopShell::registerUrlScheme()
   QMetaObject::invokeMethod(m_links, "schemeRegistration", Qt::DirectConnection,
                             Q_RETURN_ARG(QString, lines), Q_ARG(QString, exe));
   if (lines.isEmpty()) {
-    std::fprintf(stderr, "[scheme] yap-native: not the installed app, "
+    std::fprintf(stderr, "[scheme] yap: not the installed app, "
                          "left to it\n");
     return;
   }
-  // Only ever our own key, whatever the list says.
-  const QString root = QString::fromWCharArray(kSchemeKey);
+  // Only ever our own keys, whatever the list says.
+  auto ours = [](const QString& key) {
+    for (const wchar_t* scheme : kSchemeKeys) {
+      const QString root = QString::fromWCharArray(scheme);
+      if (key.compare(root, Qt::CaseInsensitive) == 0 ||
+          key.startsWith(root + QLatin1Char('\\'), Qt::CaseInsensitive))
+        return true;
+    }
+    return false;
+  };
   int written = 0;
   for (const QString& line : lines.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
     const QStringList parts = line.split(QLatin1Char('\t'));
     if (parts.size() != 3)
       continue;
     const QString& key = parts[0];
-    if (key.compare(root, Qt::CaseInsensitive) != 0 &&
-        !key.startsWith(root + QLatin1Char('\\'), Qt::CaseInsensitive))
+    if (!ours(key))
       continue;
     const std::wstring wkey = wide(key);
     const std::wstring wname = wide(parts[1]);
@@ -598,7 +615,8 @@ void DesktopShell::registerUrlScheme()
       ++written;
     RegCloseKey(handle);
   }
-  std::fprintf(stderr, "[scheme] yap-native: %d value(s) written\n", written);
+  std::fprintf(stderr, "[scheme] yap, yap-native: %d value(s) written\n",
+               written);
 }
 
 quintptr DesktopShell::windowHandle() const
@@ -674,6 +692,21 @@ void DesktopShell::quit()
 
 bool DesktopShell::setAutostart(bool enabled)
 {
+  // "Yap" was the Tauri app's value too: never take or remove one that
+  // starts another app (yap_core::install::may_write_run_value and
+  // may_delete_run_value), unless this is the released install taking it
+  // over.
+  const std::wstring exePath =
+    wide(QDir::toNativeSeparators(QCoreApplication::applicationFilePath()));
+  const QString current = readRegString(kRunKey, runValue());
+  const std::wstring currentText = wide(current);
+  if (!yap_run_value_may_change(current.isNull() ? nullptr : currentText.c_str(),
+                                exePath.c_str(), enabled)) {
+    std::fprintf(stderr, "[autostart] %s: the Run value is another app's; "
+                         "left alone\n",
+                 enabled ? "on" : "off");
+    return false;
+  }
   HKEY key = nullptr;
   if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_SET_VALUE, &key) !=
       ERROR_SUCCESS)
@@ -683,9 +716,7 @@ bool DesktopShell::setAutostart(bool enabled)
     // desktop `build_windows_startup_command`: the quoted path, --autostart.
     // A named profile restarts as itself.
     const std::wstring command =
-      L"\"" +
-      wide(QDir::toNativeSeparators(QCoreApplication::applicationFilePath())) +
-      L"\" --autostart" +
+      L"\"" + exePath + L"\" --autostart" +
       (profile::name().empty() ? std::wstring()
                                : L" --profile " + profile::name());
     result = RegSetValueExW(

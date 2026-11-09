@@ -7,13 +7,16 @@
 // the badge and the toasts themselves come from the Rust `Desktop`
 // singleton; QML wires the two.
 //
-// Its identity is its own everywhere. The installed Yap app owns
-// com.115jon.yap, the Run value "Yap", the yap:// scheme and its folders;
-// none of them is read or written here. Deep links use our own
-// yap-native:// (HKCU\Software\Classes\yap-native only, and only the
-// released install's default profile registers it at launch). A named
-// profile (profile.h) suffixes every name that identifies the app, so two
-// profiles run side by side.
+// Its identity is the one the Tauri desktop app had, which this app
+// replaces (yap_core::install): the AUMID com.115jon.yap, the Run value
+// "Yap" and the yap:// scheme, with yap-native:// (its name before the
+// rename) kept as an alias. Only the released install's default profile
+// registers the schemes at launch, and a dev build or a copy never writes
+// or removes a Run value another app owns (yap_run_value_may_change). The
+// instance lock and pipe have names of their own (com.115jon.yap.app...),
+// apart from the build before the rename, so neither takes the other's
+// launches. A named profile (profile.h) suffixes every name that
+// identifies the app, so two profiles run side by side.
 //
 // QML (import Yap.Chrome):
 //   DesktopShell.badgeCount / badgeDot / badgeTooltip   (bind from Desktop)
@@ -60,14 +63,14 @@ public:
   // Needs no Qt, so it can run before the log file starts.
   static bool takeInstanceLock();
   // A later instance: asks the first to show its window and hands it this
-  // command line's arguments (a yap-native:// link among them). Needs a
+  // command line's arguments (a yap:// link among them). Needs a
   // QCoreApplication; the caller exits after it.
   static void showFirstInstance(const QStringList& args);
 
   // The Rust `Invites` object: arguments from later instances go to its
   // `openArg`, and `registerUrlScheme` asks it for the registration.
   void setLinkHandler(QObject* links);
-  // Writes the per-user yap-native:// registration (HKCU) where it differs
+  // Writes the per-user yap:// and yap-native:// registration (HKCU) where it differs
   // from what `Invites.schemeRegistration` asks for: only from the released
   // install, as the default profile. Idempotent.
   void registerUrlScheme();
@@ -94,8 +97,9 @@ public:
                              const QString& body, const QString& channelId,
                              const QString& serverId,
                              const QString& messageId = QString());
-  // Writes or removes the HKCU Run value "YapNative" ("YapNative-<profile>"
-  // for a named profile). False on failure.
+  // Writes or removes the HKCU Run value "Yap" ("Yap-<profile>" for a named
+  // profile), unless another app's command is there (then it is left
+  // alone and this returns false). False on failure.
   Q_INVOKABLE bool setAutostart(bool enabled);
   // Shows, restores and foregrounds the window.
   Q_INVOKABLE void reveal();

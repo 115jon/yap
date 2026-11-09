@@ -1,8 +1,10 @@
-# Yap native (spike)
+# Yap (native Windows client)
 
-A native Yap desktop client prototype: a Rust core behind a QML UI via
+The native Yap desktop client: a Rust core behind a QML UI via
 [cxx-qt](https://github.com/KDAB/cxx-qt), linked against a static Qt into one
-`YapNative.exe`.
+`Yap.exe`. It replaces the Tauri desktop app (`desktop/`) under its name;
+until 0.2.21 it was "Yap Native" (`YapNative.exe`) and ran beside it
+(docs/INSTALLER.md, "Rename from Yap Native").
 
 [FEASIBILITY.md](FEASIBILITY.md) covers the assessment, the measurements and
 the decisions.
@@ -95,7 +97,7 @@ the decisions.
   level meter, speaker and output volume, with the web's coupling (high
   fidelity and spatial audio turn echo cancellation and WebRTC noise
   suppression off, RNNoise turns WebRTC noise suppression off). Kept per
-  user in `%LOCALAPPDATA%\YapNative\voice-settings.json`.
+  user in `%LOCALAPPDATA%\Yap.Data\voice-settings.json`.
 - The call's own audio path (`crates/yap-voice/src/engine/pipeline.rs`,
   docs/LIBRARIES.md §11): WASAPI mic, WebRTC's APM, then RNNoise when it
   is on, into a `NativeAudioSource`; every remote audio track into our
@@ -139,8 +141,8 @@ the decisions.
   otherwise. The icons show the state, the tooltips the next action.
 - Crash reports: minidumps through `crash-handler` and `minidump-writer`
   (`rust/src/crash.rs`) into the profile's `crashes` folder
-  (`%LOCALAPPDATA%\YapNative[\profiles\<name>]\crashes`, the newest 10
-  kept, nothing uploaded). The next launch shows "Yap Native closed
+  (`%LOCALAPPDATA%\Yap.Data[\profiles\<name>]\crashes`, the newest 10
+  kept, nothing uploaded). The next launch shows "Yap closed
   unexpectedly" with Open folder (`cpp/crashnotice.*`) until dismissed.
   `YAP_TEST_CRASH=1` crashes on purpose 4 s after start.
 - Compatibility guards (`cpp/compat.*`, `cpp/mediafoundation.*`,
@@ -467,7 +469,7 @@ the decisions.
   - Invite to channel (ChannelInviteModal.tsx): a fresh 7-day link to the
     channel, from the row's key or its menu;
   - custom UI sounds (CustomSoundsCard.tsx): import one or several files,
-    preview, reset, under `%LOCALAPPDATA%\YapNative\custom-sounds`;
+    preview, reset, under `%LOCALAPPDATA%\Yap.Data\custom-sounds`;
   - Listen Together results' action menu, the voice switch confirm (with
     Don't ask again) and the stream watcher list on share tiles.
 - The voice core and 1:1 calls of batch N4 (`yap-voice` `machine.rs`,
@@ -508,7 +510,8 @@ the decisions.
     and dock as the web has them;
   - the server menu opens at the pointer, 205 wide, as on the web (the
     keyboard opens it under the header).
-- Deep links on our own scheme, `yap-native://` (the table and the strict
+- Deep links on our scheme, `yap://`, and on `yap-native://`, its alias
+  from before the rename (the same links; the table and the strict
   rules are in `crates/yap-core/src/links.rs`): `invite/<code>`,
   `chat/@me`, `chat/@me/<dm>`, `chat/<server>`,
   `chat/<server>/<channel>[?message=<id>]` (a voice channel opens its
@@ -517,19 +520,24 @@ the decisions.
   device sign-in at once; it never carries a token). Anything else is
   refused. A link on the command line, or one a second launch hands over
   through the instance pipe, opens in the running app and brings it to the
-  front. The scheme lives under `HKCU\Software\Classes\yap-native` and
-  belongs to the released install (`YapNative.App`): its install and update
-  hooks write it, its uninstall hook removes it, and it rewrites what
-  differs at every default-profile start. No other build or profile writes
-  it (docs/INSTALLER.md). The web's /activate page opens
-  `yap-native://signin?code=…` after approving a "Yap Native" device code.
+  front. The Tauri app's older `yap://invite/<code>?...` links still open
+  the invite (its query and fragment ignored). The schemes live under
+  `HKCU\Software\Classes\yap` and `...\yap-native` and belong to the
+  released install (`Yap.App`): its install and update hooks write them, its
+  uninstall hook removes them, and it rewrites what differs at every
+  default-profile start. No other build or profile writes them
+  (docs/INSTALLER.md). The web's /activate page opens
+  `yap-native://signin?code=…` after approving a "Yap" (or older "Yap
+  Native") device code.
 
-The shell has its own identity, apart from the installed Yap app: AUMID
-and single-instance name `com.115jon.yap.native` (registered under
-`HKCU\Software\Classes\AppUserModelId` only), Run value `YapNative` (off
-unless "Open on startup" is on), data and logs under
-`%LOCALAPPDATA%\YapNative`, and its own `yap-native://` scheme (never
-`yap://`).
+The shell's identity is the Tauri app's, which it replaces: AUMID
+`com.115jon.yap` (registered under `HKCU\Software\Classes\AppUserModelId`),
+Run value `Yap` (off unless "Open on startup" is on; never written over, or
+removed from, another app's command by a dev build), data and logs under
+`%LOCALAPPDATA%\Yap.Data`, and the `yap://` scheme. The single-instance
+lock and pipe are `com.115jon.yap.app...`, apart from the old build's. On its first
+starts the released install imports the Tauri app's preferences and
+uninstalls it (docs/INSTALLER.md, "Replacing the Tauri app").
 
 ## Not yet
 
@@ -597,9 +605,10 @@ before the build. docs/LIBRARIES.md §18 has the audit.
 ## Installer
 
 `tools/package.ps1` builds the release exe and packs it with Velopack
-(`vpk`) into a per-user `YapNative.App-win-Setup.exe`: no admin, no .NET at
-install time, installed to `%LOCALAPPDATA%\YapNative.App` (never the data
-root `%LOCALAPPDATA%\YapNative`, which uninstall keeps). The version is
+(`vpk`) into a per-user `Yap.App-win-Setup.exe`: no admin, no .NET at
+install time, installed to `%LOCALAPPDATA%\Yap.App` (never the data root
+`%LOCALAPPDATA%\Yap.Data`, which uninstall keeps, and never the Tauri app's
+`%LOCALAPPDATA%\Yap`). The version is
 `[workspace.package]` in `rust/Cargo.toml`, which CMake reads too.
 
 ```powershell
@@ -615,7 +624,7 @@ Design, hooks, parity with the Tauri app's installer, signing and CI
 
 ```powershell
 $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
-./build/Release/YapNative.exe
+./build/Release/Yap.exe
 ```
 
 | env var                         | default                   | meaning                                                                                                                                                                                                                        |
@@ -627,7 +636,7 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_TOKEN`                     | none                      | use this session instead of the credential store                                                                                                                                                                               |
 | `YAP_PROFILE`                   | unset                     | a profile name (`[a-z0-9-]{1,32}`; also `--profile <name>`): a second, separate copy of the app, see "Profiles"                                                                                                                |
 | `YAP_FAKE_CAMERA`               | unset                     | `1`: a test pattern stands in for every camera                                                                                                                                                                                 |
-| `YAP_SHARE_ONLY_OURS`           | unset                     | `1`: share stills and captures only of our own windows (or one titled "Yap Native Share Test"); other windows listed without titles                                                                                            |
+| `YAP_SHARE_ONLY_OURS`           | unset                     | `1`: share stills and captures only of our own windows (or one titled "Yap Native Share Test", a test window's fixed title); other windows listed without titles                                                               |
 | `YAP_FAKE_SHARE_AUDIO`          | unset                     | `1`: share audio is a 440 Hz tone, never a loopback                                                                                                                                                                            |
 | `YAP_TEST_HDR_CAPTURE`          | unset                     | `<sdrWhiteNits>,<maxNits>`: shares capture FP16 and tone-map with these values on any display (`80,80`: the identity; tests)                                                                                                   |
 | `YAP_CAPTURE_TIMING`            | unset                     | `1`: the WGC capture logs its per-frame GPU (tone map, copy) and CPU (read, push) time every 300 frames (`[capture] timing`)                                                                                                   |
@@ -646,7 +655,7 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_DEBUG_SDP`                 | unset                     | `<dir>`: each SDP the call sets is written there (holds ICE credentials: a private dir), and the transceivers are logged (tests)                                                                                               |
 | `YAP_TEST_DROP`                 | unset                     | `a.png;b.png`: dropped once onto the first open chat (the overlay shows 4 s first), instead of a real drag (tests)                                                                                                             |
 | `YAP_TEST_CRASH`                | unset                     | `1`: crash on purpose 4 s after start (an access violation), to check the minidump and the next launch's notice                                                                                                                |
-| `YAP_OBS_SIGNED_DIR`            | next to the exe           | the six OBS-signed hook files (default `obs-capture\obs-signed` beside `YapNative.exe`)                                                                                                                                        |
+| `YAP_OBS_SIGNED_DIR`            | next to the exe           | the six OBS-signed hook files (default `obs-capture\obs-signed` beside `Yap.exe`)                                                                                                                                              |
 | `YAP_CAPTURE_HOOK_DIR`          | profile `capture-hook`    | where the verified hook files are staged                                                                                                                                                                                       |
 | `YAP_TEST_TOAST_ACTION`         | unset                     | `reply:<text>` or `mark-read`: 3 s after a message toast shows, its button runs through the same handler a click would (tests)                                                                                                 |
 | `YAP_TEST_TRAY_QUIT_AFTER_SECS` | unset                     | `<n>`: `n` s after launch, the tray menu's Quit runs through the same dispatch as a click (tests)                                                                                                                              |
@@ -690,20 +699,26 @@ the variable. A name is `[a-z0-9-]{1,32}`; anything else (including a bad
 nothing changes.
 
 ```powershell
-./YapNative.exe --profile jon          # or: $env:YAP_PROFILE = "jon"
+./Yap.exe --profile jon          # or: $env:YAP_PROFILE = "jon"
 ```
 
-| what                                                  | default profile                                           | profile `<name>`                                          |
-| ----------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------- |
-| data folder (cache, settings, sounds, logs, WebView2) | `%LOCALAPPDATA%\YapNative`                                | `%LOCALAPPDATA%\YapNative\profiles\<name>`                |
-| credential                                            | Credential Manager, service `com.115jon.yap.native-spike` | the same service with `:<name>` appended                  |
-| instance lock and pipe                                | `...native.instance`, `...native.<session>`               | `...native.instance.<name>`, `...native.<name>.<session>` |
-| AUMID (toasts)                                        | `com.115jon.yap.native`, "Yap Native"                     | `com.115jon.yap.native.<name>`, "Yap Native (`<name>`)"   |
-| tray window class                                     | `YapNativeTrayWindow`                                     | `YapNativeTrayWindow-<name>`                              |
-| tray tooltip, title                                   | "Yap Native", the location                                | "Yap Native (`<name>`)", the location with `(<name>)`     |
-| Run (autostart) value                                 | `YapNative`                                               | `YapNative-<name>`, launching with `--profile <name>`     |
-| `yap-native://` scheme                                | registered by the released install only                   | never registered                                          |
-| Qt `applicationName`                                  | `YapNative`                                               | `YapNative-<name>` (Qt's own cache folders)               |
+| what                                                  | default profile                                           | profile `<name>`                                    |
+| ----------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------- |
+| data folder (cache, settings, sounds, logs, WebView2) | `%LOCALAPPDATA%\Yap.Data`                                 | `%LOCALAPPDATA%\Yap.Data\profiles\<name>`           |
+| credential                                            | Credential Manager, service `com.115jon.yap.native-spike` | the same service with `:<name>` appended            |
+| instance lock and pipe                                | `com.115jon.yap.app.instance`, `...yap.app.<session>`     | `...app.instance.<name>`, `...app.<name>.<session>` |
+| AUMID (toasts)                                        | `com.115jon.yap`, "Yap"                                   | `com.115jon.yap.<name>`, "Yap (`<name>`)"           |
+| tray window class                                     | `YapTrayWindow`                                           | `YapTrayWindow-<name>`                              |
+| tray tooltip, title                                   | "Yap", the location                                       | "Yap (`<name>`)", the location with `(<name>)`      |
+| Run (autostart) value                                 | `Yap`                                                     | `Yap-<name>`, launching with `--profile <name>`     |
+| `yap://`, `yap-native://` schemes                     | registered by the released install only                   | never registered                                    |
+| Qt `applicationName`                                  | `Yap.Data`                                                | `Yap.Data-<name>` (Qt's own cache folders)          |
+| Tauri app replacement                                 | the released install only                                 | never                                               |
+
+The data folder moved from `%LOCALAPPDATA%\YapNative` (profiles included)
+on the first start of 0.2.22 or later; while an older build holds files in
+it, a run reads it in place and the next one moves it (docs/INSTALLER.md,
+"Rename from Yap Native").
 
 Two profiles can run at once; a second launch of the same profile shows the
 first one's window. `YAP_TOKEN`, when set, overrides the credential for any
@@ -718,19 +733,23 @@ Agents run the test account as profile `spike`, with the session from
 
 ```powershell
 $env:YAP_TOKEN = (Get-Content -Raw F:/ct/yapn/secrets/owner.json | ConvertFrom-Json).tok
-./YapNative.exe --profile spike
+./Yap.exe --profile spike
 ```
 
-The default profile, and with it the `yap-native://` scheme and the
-`YapNative` Run value, belongs to the user's installed copy: agents never
-launch it without `--profile`. To test deep links, point a scheme of your
+The default profile, and with it the `yap://` and `yap-native://`
+schemes, the `Yap` Run value and the AUMID `com.115jon.yap` (which the Tauri
+app uses too), belongs to the user's installed copy: agents never launch it
+without `--profile`. A run also moves `%LOCALAPPDATA%\YapNative` to
+`Yap.Data` once, so a test build on the user's PC runs with `LOCALAPPDATA`
+(and `APPDATA`) pointed at a scratch folder. To test deep links, point a scheme of your
 own at the build (`HKCU\Software\Classes\yap-native-test`, open command
 `"<exe>" --profile <name> "%1"`), run with `YAP_TEST_SCHEME=yap-native-test`
 (read as `yap-native://`) and `YAP_DEBUG_NO_ACTIVATE=1` (links reveal the
 window without taking the focus), and delete the key afterwards. Never print the token files. An installer
-test uses its own pack id and title (`-PackId YapNative.InstallTest -Title
-"Yap Native InstallTest"`), launches with `--profile spike`, and is
-uninstalled afterwards (docs/INSTALLER.md, "Local test").
+test uses its own pack id and title (`-PackId Yap.InstallTest -Title
+"Yap InstallTest"`), launches with `--profile spike`, and is uninstalled
+afterwards (docs/INSTALLER.md, "Local test"). Never run a `Yap.App` Setup
+on a PC whose Tauri app matters: its first start uninstalls it.
 
 ## Assets and theme
 
@@ -789,7 +808,7 @@ cpp/desktopshell.*    one instance, tray and badge, toasts, Run key, window rect
 cpp/toast_win.*       WinRT toasts with Reply and Mark as read (WRL, no Qt headers)
 cpp/thumbbar.*        taskbar thumbnail toolbar (ITaskbarList3) in calls
 cpp/crashnotice.*     minidump handler install and the next launch's crash notice
-cpp/logfile.*         stderr tee into %LOCALAPPDATA%\YapNative\logs, rotated
+cpp/logfile.*         stderr tee into %LOCALAPPDATA%\Yap.Data\logs, rotated
 cpp/videohub.*        remote call video into QVideoSinks (VideoHub singleton)
 cpp/eyedropper.*      the colour picker's eyedropper: overlay, loupe, one pixel read
 cpp/webmplayer.*      WebmPlayer: yap-webm frames into a VideoOutput's sink

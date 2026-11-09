@@ -1003,11 +1003,16 @@ impl Runner {
 }
 
 /// A picture pasted from the clipboard, which the shell saved under
-/// `YapNative/cache/paste/` (`YapNative/profiles/<name>/cache/paste/` for a
-/// named profile; cpp/mediashell.cpp). Nothing else is deleted.
+/// `Yap.Data/cache/paste/` (`Yap.Data/profiles/<name>/cache/paste/` for a
+/// named profile; cpp/mediashell.cpp), or the same under `YapNative` while a
+/// run reads the data folder from before the rename. Nothing else is
+/// deleted.
 fn is_pasted_copy(path: &Path) -> bool {
     let parts: Vec<_> = path.components().rev().skip(1).take(5).collect();
-    let is_app = |c: &std::path::Component| c.as_os_str() == "YapNative";
+    let is_app = |c: &std::path::Component| {
+        c.as_os_str() == yap_cache::profile::DATA_DIR
+            || c.as_os_str() == yap_cache::profile::LEGACY_DATA_DIR
+    };
     match parts.as_slice() {
         [paste, cache, rest @ ..]
             if paste.as_os_str() == "paste" && cache.as_os_str() == "cache" =>
@@ -1474,17 +1479,33 @@ mod tests {
 
     #[test]
     fn only_the_shells_paste_folder_counts_as_a_pasted_copy() {
-        let pasted = r"C:\Users\a\AppData\Local\YapNative\cache\paste\image-1.png";
+        let pasted = r"C:\Users\a\AppData\Local\Yap.Data\cache\paste\image-1.png";
+        let legacy = r"C:\Users\a\AppData\Local\YapNative\cache\paste\image-1.png";
         let picked = r"C:\Users\a\Pictures\image-1.png";
         let lookalike = r"C:\Users\a\cache\paste\image-1.png";
-        let profiled = r"C:\Users\a\AppData\Local\YapNative\profiles\jon\cache\paste\image-1.png";
-        let bad_profile =
-            r"C:\Users\a\AppData\Local\YapNative\profiles\Jon\cache\paste\image-1.png";
+        let profiled = r"C:\Users\a\AppData\Local\Yap.Data\profiles\jon\cache\paste\image-1.png";
+        let bad_profile = r"C:\Users\a\AppData\Local\Yap.Data\profiles\Jon\cache\paste\image-1.png";
         let stranger = r"C:\Users\a\AppData\Local\Other\profiles\jon\cache\paste\image-1.png";
         assert_eq!(
-            [pasted, picked, lookalike, profiled, bad_profile, stranger]
-                .map(|p| is_pasted_copy(Path::new(p))),
-            [cfg!(windows), false, false, cfg!(windows), false, false]
+            [
+                pasted,
+                legacy,
+                picked,
+                lookalike,
+                profiled,
+                bad_profile,
+                stranger
+            ]
+            .map(|p| is_pasted_copy(Path::new(p))),
+            [
+                cfg!(windows),
+                cfg!(windows),
+                false,
+                false,
+                cfg!(windows),
+                false,
+                false
+            ]
         );
     }
 }

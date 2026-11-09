@@ -1,9 +1,15 @@
 #include "profile.h"
 
+#include <cstdint>
 #include <iterator>
 
 #include <windows.h>
 #include <shellapi.h>
+
+// rust/src/installer.rs: this process's data folder (Rust's
+// yap_cache::profile::data_root, which moves %LOCALAPPDATA%\YapNative to
+// %LOCALAPPDATA%\Yap.Data once), as UTF-16; its length, 0 for none.
+extern "C" size_t yap_profile_data_root(uint16_t* out, size_t capacity);
 
 namespace profile {
 
@@ -87,20 +93,21 @@ std::wstring suffix(wchar_t separator)
 
 std::wstring dataRoot()
 {
-  wchar_t base[MAX_PATH];
-  const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH);
-  if (n == 0 || n >= MAX_PATH)
-    return {};
-  std::wstring root = std::wstring(base, n) + L"\\YapNative";
-  if (!name().empty())
-    root += L"\\profiles\\" + name();
-  return root;
+  // Asked once: the Rust side resolves it (and moves the old folder) once
+  // per process, and the answer never changes.
+  static const std::wstring value = [] {
+    std::wstring buffer(32768, L'\0');
+    const size_t n = yap_profile_data_root(
+      reinterpret_cast<uint16_t*>(buffer.data()), buffer.size());
+    buffer.resize(n);
+    return buffer;
+  }();
+  return value;
 }
 
 std::wstring displayName()
 {
-  return name().empty() ? std::wstring(L"Yap Native")
-                        : L"Yap Native (" + name() + L")";
+  return name().empty() ? std::wstring(L"Yap") : L"Yap (" + name() + L")";
 }
 
 } // namespace profile

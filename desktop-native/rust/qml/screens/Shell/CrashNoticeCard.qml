@@ -39,7 +39,7 @@ Rectangle {
             width: parent.width
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
-            text: qsTr("Yap Native closed unexpectedly")
+            text: qsTr("Yap closed unexpectedly")
             color: Theme.ink1
             font: Theme.type.author
         }

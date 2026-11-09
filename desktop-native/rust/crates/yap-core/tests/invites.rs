@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 use yap_core::links::{
-    deep_link_arg, invite_code, open_command, parse_link, scheme_registration,
-    scheme_registration_lines, Link, SCHEME_KEY,
+    deep_link_arg, invite_code, open_command, parse_link, scheme_key, scheme_registration,
+    scheme_registration_lines, Link, ALIAS_SCHEME_KEY, SCHEMES, SCHEME_KEY,
 };
 use yap_core::store::invites::{create_icon_problem, member_count, InviteView};
 use yap_core::store::view::ServerRow;
@@ -276,8 +276,15 @@ fn desktop_app_invite_link_should_be_an_invite() {
 }
 
 #[test]
-fn desktop_app_channel_link_should_not_be_read() {
-    assert_eq!(parse_link("yap://chat/srv/chan", SITE), None);
+fn a_yap_channel_link_should_be_read_now_that_yap_is_ours() {
+    assert_eq!(
+        parse_link("yap://chat/srv/chan", SITE),
+        Some(Link::Channel {
+            server_id: "srv".into(),
+            channel_id: "chan".into(),
+            message_id: None,
+        })
+    );
 }
 
 #[test]
@@ -373,15 +380,18 @@ fn deep_link_arg_should_take_our_scheme() {
 }
 
 #[test]
-fn deep_link_arg_should_ignore_the_desktop_apps_scheme() {
-    assert_eq!(deep_link_arg("yap://invite/a1b2c3d4"), None);
+fn deep_link_arg_should_take_the_yap_scheme_too() {
+    assert_eq!(
+        deep_link_arg("yap://invite/a1b2c3d4"),
+        Some(Link::Invite("a1b2c3d4".into()))
+    );
 }
 
 #[test]
 fn deep_link_arg_should_ignore_flags_and_paths() {
     let args = [
         "--autostart",
-        r"C:\Yap\YapNative.exe",
+        r"C:\Yap\Yap.exe",
         "https://yap.115jon.com/invite/x",
     ];
     assert!(args.iter().all(|arg| deep_link_arg(arg).is_none()));
@@ -389,42 +399,52 @@ fn deep_link_arg_should_ignore_flags_and_paths() {
 
 // The scheme's registration
 
-const EXE: &str = r"C:\Apps\Yap Native\YapNative.exe";
+const EXE: &str = r"C:\Apps\Yap App\Yap.exe";
 
 #[test]
 fn open_command_should_quote_the_executable_and_the_url() {
-    assert_eq!(
-        open_command(EXE),
-        r#""C:\Apps\Yap Native\YapNative.exe" "%1""#
-    );
+    assert_eq!(open_command(EXE), r#""C:\Apps\Yap App\Yap.exe" "%1""#);
+}
+
+fn under(key: &str, root: &str) -> bool {
+    key == root || key.starts_with(&format!("{root}\\"))
 }
 
 #[test]
-fn registration_should_stay_under_our_own_key() {
+fn registration_should_stay_under_our_two_keys() {
     assert!(scheme_registration(EXE)
         .iter()
-        .all(|v| v.key == SCHEME_KEY || v.key.starts_with(&format!("{SCHEME_KEY}\\"))));
+        .all(|v| under(&v.key, SCHEME_KEY) || under(&v.key, ALIAS_SCHEME_KEY)));
+    assert_eq!(SCHEMES, ["yap", "yap-native"]);
+    assert_eq!(scheme_key("yap"), SCHEME_KEY);
+    assert_eq!(scheme_key("yap-native"), ALIAS_SCHEME_KEY);
 }
 
 #[test]
-fn registration_should_never_touch_the_yap_scheme() {
+fn registration_should_register_yap_and_the_yap_native_alias_alike() {
+    let values = scheme_registration(EXE);
+    assert_eq!(values.len(), 8);
+    for root in [SCHEME_KEY, ALIAS_SCHEME_KEY] {
+        assert!(
+            values
+                .iter()
+                .any(|v| v.key == root && v.name == "URL Protocol" && v.data.is_empty()),
+            "{root}"
+        );
+        assert!(
+            values.iter().any(|v| {
+                v.key == format!(r"{root}\shell\open\command") && v.data == open_command(EXE)
+            }),
+            "{root}"
+        );
+    }
+}
+
+#[test]
+fn registration_should_never_name_another_scheme() {
     assert!(scheme_registration(EXE).iter().all(|v| {
         let key = v.key.to_ascii_lowercase();
-        key != r"software\classes\yap" && !key.starts_with(r"software\classes\yap\")
-    }));
-}
-
-#[test]
-fn registration_should_mark_a_url_protocol() {
-    assert!(scheme_registration(EXE)
-        .iter()
-        .any(|v| v.key == SCHEME_KEY && v.name == "URL Protocol" && v.data.is_empty()));
-}
-
-#[test]
-fn registration_should_open_with_the_command() {
-    assert!(scheme_registration(EXE).iter().any(|v| {
-        v.key == format!(r"{SCHEME_KEY}\shell\open\command") && v.data == open_command(EXE)
+        under(&key, r"software\classes\yap") || under(&key, r"software\classes\yap-native")
     }));
 }
 
@@ -433,8 +453,11 @@ fn registration_lines_should_be_tab_separated() {
     let lines = scheme_registration_lines(EXE);
     assert_eq!(
         lines.lines().next(),
-        Some("Software\\Classes\\yap-native\t\tURL:Yap Native")
+        Some("Software\\Classes\\yap\t\tURL:Yap Protocol")
     );
+    assert!(lines
+        .lines()
+        .any(|l| l == "Software\\Classes\\yap-native\t\tURL:Yap Protocol"));
 }
 
 // Copy rules

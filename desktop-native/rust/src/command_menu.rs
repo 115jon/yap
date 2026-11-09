@@ -2,7 +2,7 @@
 //! come from what the shell already shows (the server rail, the open
 //! server's tree and the DM list), ranked by cmdk's rules
 //! ([`yap_core::command_menu`]). Recent places live in
-//! `%LOCALAPPDATA%\YapNative\quick-switcher.json` (the web's localStorage
+//! `%LOCALAPPDATA%\Yap.Data\quick-switcher.json` (the web's localStorage
 //! `rm:quick-switcher:recent`).
 
 #[cxx_qt::bridge]

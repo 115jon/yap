@@ -79,6 +79,14 @@ qt_add_executable(YapNative WIN32
 # into the Rust static library: rustc's archive has no symbol index for
 # /GL objects, so the link cannot find them.) Same MSVC as Qt: build.ps1.
 set_property(TARGET YapNative PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+# The file is Yap.exe (yap_core::install::EXE_NAME); the target keeps its
+# name. The version resource (cpp/app.rc) takes the version from here.
+set_target_properties(YapNative PROPERTIES OUTPUT_NAME Yap)
+target_compile_definitions(YapNative PRIVATE
+  YAP_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+  YAP_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+  YAP_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+  YAP_VERSION_STRING="${YAP_VERSION}")
 # Qt::GuiPrivate: the test keyboard (YAP_TEST_POINTER) delivers through
 # QWindowSystemInterface, as a real key does, so shortcuts see it.
 target_link_libraries(YapNative PRIVATE
@@ -166,7 +174,7 @@ endif()
 qt_import_qml_plugins(YapNative)
 
 # A profiling build only (docs/PERFORMANCE.md): the QML profiler services,
-# for `qmlprofiler -- YapNative.exe` or `-qmljsdebugger=port:N,block`.
+# for `qmlprofiler -- Yap.exe` or `-qmljsdebugger=port:N,block`.
 # Never shipped: it opens a debug port on request.
 option(YAP_QML_PROFILER "Link the QML profiler services (QT_QML_DEBUG)" OFF)
 if(YAP_QML_PROFILER)

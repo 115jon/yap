@@ -1,7 +1,7 @@
 //! Custom UI sounds (custom-sounds.ts, sound-catalog.ts,
 //! CustomSoundsCard.tsx): any UI sound can be replaced by an audio file of
 //! the user's, kept on this device only. These are the rules; the app keeps
-//! the files under `%LOCALAPPDATA%\YapNative\custom-sounds` and decodes
+//! the files under `%LOCALAPPDATA%\Yap.Data\custom-sounds` and decodes
 //! them for playback.
 
 use std::collections::BTreeMap;

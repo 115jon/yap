@@ -24,11 +24,14 @@ const std::wstring& name();
 // "" for the default profile, else `separator` + the name.
 std::wstring suffix(wchar_t separator);
 
-// %LOCALAPPDATA%\YapNative, or ...\YapNative\profiles\<name> for a named
-// profile. Empty without LOCALAPPDATA. Native (backslash) separators.
+// %LOCALAPPDATA%\Yap.Data, or ...\Yap.Data\profiles\<name> for a named
+// profile; the old %LOCALAPPDATA%\YapNative[...] while a running older build
+// keeps the one-time move from happening. Resolved by the Rust side
+// (yap_cache::profile::data_root), so both halves agree. Empty without
+// LOCALAPPDATA. Native (backslash) separators.
 std::wstring dataRoot();
 
-// The name to show people: "Yap Native", or "Yap Native (<name>)".
+// The name to show people: "Yap", or "Yap (<name>)".
 std::wstring displayName();
 
 } // namespace profile

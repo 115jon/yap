@@ -60,12 +60,17 @@ async fn device_post(
     Ok((status, body))
 }
 
+/// What this app calls itself when it starts a device sign-in. The web
+/// (`src/lib/native-app-link.ts`) reads it to offer the `yap-native://signin`
+/// hand-off, and takes "Yap Native", the label before the rename, too.
+pub const DEVICE_LABEL: &str = "Yap";
+
 pub async fn start(http: &Client) -> Result<DeviceStart, AuthError> {
     let hostname = std::env::var("COMPUTERNAME").ok();
     let (status, body) = device_post(
         http,
         "start",
-        json!({ "platform": "windows", "label": "Yap Native", "hostname": hostname }),
+        json!({ "platform": "windows", "label": DEVICE_LABEL, "hostname": hostname }),
     )
     .await?;
     if !status.is_success() {

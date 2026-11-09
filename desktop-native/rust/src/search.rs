@@ -1,7 +1,7 @@
 //! `Search`: the message search panel's side of the core. Everything the
 //! panel draws comes as one JSON `state` ([`yap_core::store::SearchView`]);
 //! the field reports its text, caret and keys through the invokables.
-//! Recent searches are kept in `%LOCALAPPDATA%\YapNative\search-recent.json`
+//! Recent searches are kept in `%LOCALAPPDATA%\Yap.Data\search-recent.json`
 //! by scope (the web's localStorage `rm:search-recent:<scope>`), like the
 //! emoji picker's prefs: read once, written when the store's list changes.
 

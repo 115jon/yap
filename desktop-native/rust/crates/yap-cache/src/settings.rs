@@ -102,7 +102,7 @@ pub struct EmojiPrefs {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct DesktopSettings {
-    /// The `HKCU\…\Run` entry (`YapNative`).
+    /// The `HKCU\…\Run` entry (`Yap`).
     pub open_on_startup: bool,
     /// An autostart launch stays in the tray.
     pub start_minimized: bool,
@@ -230,9 +230,9 @@ pub struct WindowState {
     pub maximized: bool,
 }
 
-/// `%LOCALAPPDATA%\YapNative` (`YapNative\profiles\<name>` for a named
-/// profile), apart from the installed Yap app's folders. `None` without
-/// `LOCALAPPDATA`.
+/// `%LOCALAPPDATA%\Yap.Data` (`Yap.Data\profiles\<name>` for a named
+/// profile; `crate::profile::data_root`), apart from the Tauri app's and the
+/// install's folders. `None` without `LOCALAPPDATA`.
 pub fn app_dir() -> Option<PathBuf> {
     crate::profile::data_root()
 }

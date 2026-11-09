@@ -113,7 +113,7 @@ pub enum Write {
     Collapsed(Vec<String>),
 }
 
-/// `%LOCALAPPDATA%\YapNative\cache\snapshot.db` (under the profile's folder
+/// `%LOCALAPPDATA%\Yap.Data\cache\snapshot.db` (under the profile's folder
 /// for a named profile, see [`profile`]), apart from the installed Yap app's
 /// folders. `None` without `LOCALAPPDATA`.
 pub fn default_path() -> Option<PathBuf> {

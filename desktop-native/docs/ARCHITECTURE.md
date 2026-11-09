@@ -463,7 +463,7 @@ because the client has no memory of the last session.
 **Target design**
 
 - **`yap-core::cache`**, SQLite (`rusqlite` with `bundled`, so it links
-  statically) at `%LOCALAPPDATA%\Yap Native\cache\<user_id>.db`.
+  statically) at `%LOCALAPPDATA%\Yap.Data\cache\<user_id>.db`.
   - Tables: `me`, `servers`, `channels`, `messages` (the last ~200 per
     recently opened channel), `members`, `read_states`, and `kv` (last server
     and channel per server, window geometry, `schema_version`).

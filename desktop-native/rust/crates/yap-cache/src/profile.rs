@@ -81,20 +81,231 @@ pub fn current() -> Option<&'static str> {
         .as_deref()
 }
 
-/// The app folder under `base` (`%LOCALAPPDATA%`): `YapNative`, or
-/// `YapNative\profiles\<name>` for a named profile.
+/// The app's data folder under `%LOCALAPPDATA%`: settings, caches, logs,
+/// WebView2 and every profile. Not `Yap` (the Tauri app's install root,
+/// which its uninstaller deletes) and not `Yap.App` (this app's Velopack
+/// install root, which ours deletes): docs/INSTALLER.md.
+pub const DATA_DIR: &str = "Yap.Data";
+
+/// The data folder before the rename to Yap (`Yap Native`). [`resolve_root`]
+/// moves it to [`DATA_DIR`] once, and reads it in place while it cannot
+/// (a running older build holds files in it). The fallback is for one
+/// version: drop it once every copy has moved.
+pub const LEGACY_DATA_DIR: &str = "YapNative";
+
+/// Where a move that found [`DATA_DIR`] already there parks the old folder
+/// while its entries move in one by one; a later start finishes the job.
+pub const STAGING_DIR: &str = "YapNative.migrating";
+
+/// Written into [`DATA_DIR`] once the old folder has moved (or there was
+/// none): from then on an old folder that an older build makes again
+/// belongs to that build and is never moved or read.
+pub const MIGRATED_MARKER: &str = ".migrated-from-yapnative";
+
+/// The app folder under `base` (`%LOCALAPPDATA%`): `Yap.Data`, or
+/// `Yap.Data\profiles\<name>` for a named profile.
 pub fn data_root_in(base: &Path, profile: Option<&str>) -> PathBuf {
-    let root = base.join("YapNative");
+    with_profile(base.join(DATA_DIR), profile)
+}
+
+/// The same folder in the old layout: `YapNative[\profiles\<name>]`.
+pub fn legacy_root_in(base: &Path, profile: Option<&str>) -> PathBuf {
+    with_profile(base.join(LEGACY_DATA_DIR), profile)
+}
+
+fn with_profile(root: PathBuf, profile: Option<&str>) -> PathBuf {
     match profile {
         Some(name) => root.join("profiles").join(name),
         None => root,
     }
 }
 
-/// This process's app folder. `None` without `LOCALAPPDATA`.
+/// What [`migrate`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Migration {
+    /// The marker was there: nothing to do.
+    AlreadyDone,
+    /// No old folder: a fresh start (the marker is written).
+    NothingToMove,
+    /// The old folder was renamed to the new one, every profile with it.
+    Renamed,
+    /// The new folder existed (an installer log, say): the old one's entries
+    /// moved in one by one. `conflicts` are files both had: the old copy
+    /// sits beside the new one as `<stem>.legacy.<ext>`. `left` could not
+    /// move and stay in [`STAGING_DIR`].
+    Merged {
+        conflicts: Vec<PathBuf>,
+        left: Vec<PathBuf>,
+    },
+    /// The old folder could not be moved (files open in it, usually a
+    /// running older build): nothing moved, and this run reads the old
+    /// folder. The next start tries again.
+    Locked(String),
+}
+
+impl Migration {
+    /// Whether this run should use the old folder.
+    pub fn uses_legacy(&self) -> bool {
+        matches!(self, Migration::Locked(_))
+    }
+}
+
+/// Moves `base\YapNative` (every profile in it) to `base\Yap.Data`, once.
+/// Every step is a rename on the same volume, so nothing is copied and
+/// nothing is deleted: a folder that cannot move stays where it was, and an
+/// interrupted move resumes on the next start. Idempotent.
+pub fn migrate(base: &Path) -> Migration {
+    let new = base.join(DATA_DIR);
+    let old = base.join(LEGACY_DATA_DIR);
+    let staging = base.join(STAGING_DIR);
+    if new.join(MIGRATED_MARKER).exists() {
+        return Migration::AlreadyDone;
+    }
+    let outcome = if staging.is_dir() {
+        // A merge that did not finish (the process ended mid-way).
+        merge_staging(&staging, &new)
+    } else if !old.is_dir() {
+        Migration::NothingToMove
+    } else if !new.exists() {
+        match std::fs::rename(&old, &new) {
+            Ok(()) => Migration::Renamed,
+            // Another process (a second profile starting) moved it first.
+            Err(_) if !old.exists() && new.is_dir() => Migration::Renamed,
+            Err(e) => return Migration::Locked(e.to_string()),
+        }
+    } else {
+        // One rename takes the whole old folder or nothing, so a running
+        // older build (which keeps files open in it) stops it here.
+        match std::fs::rename(&old, &staging) {
+            Ok(()) => merge_staging(&staging, &new),
+            Err(_) if !old.exists() => Migration::AlreadyDone,
+            Err(e) => return Migration::Locked(e.to_string()),
+        }
+    };
+    // Not while anything is still in the staging folder: the marker would
+    // stop the next start from finishing the move.
+    let unfinished = matches!(&outcome, Migration::Merged { left, .. } if !left.is_empty());
+    if !unfinished && std::fs::create_dir_all(&new).is_ok() {
+        let _ = std::fs::write(new.join(MIGRATED_MARKER), format!("{outcome:?}\n"));
+    }
+    outcome
+}
+
+fn merge_staging(staging: &Path, new: &Path) -> Migration {
+    let mut conflicts = Vec::new();
+    let mut left = Vec::new();
+    let _ = std::fs::create_dir_all(new);
+    merge_dir(staging, new, &mut conflicts, &mut left);
+    // Empty folders only: a file left behind keeps its folder.
+    remove_empty_dirs(staging);
+    Migration::Merged { conflicts, left }
+}
+
+/// Moves every entry of `from` into `to`: a missing one by a rename,
+/// folders on both sides entry by entry, and a file on both sides as
+/// `<stem>.legacy.<ext>` next to the one already there.
+fn merge_dir(from: &Path, to: &Path, conflicts: &mut Vec<PathBuf>, left: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(from) else {
+        left.push(from.to_path_buf());
+        return;
+    };
+    for entry in entries.flatten() {
+        let source = entry.path();
+        let target = to.join(entry.file_name());
+        if !target.exists() {
+            if std::fs::rename(&source, &target).is_err() {
+                left.push(source);
+            }
+            continue;
+        }
+        if source.is_dir() && target.is_dir() {
+            merge_dir(&source, &target, conflicts, left);
+            continue;
+        }
+        let aside = legacy_name(&target);
+        if !aside.exists() && std::fs::rename(&source, &aside).is_ok() {
+            conflicts.push(aside);
+        } else {
+            left.push(source);
+        }
+    }
+}
+
+/// `installer.log` -> `installer.legacy.log`; `notes` -> `notes.legacy`.
+fn legacy_name(path: &Path) -> PathBuf {
+    let name = match (path.file_stem(), path.extension()) {
+        (Some(stem), Some(ext)) => format!(
+            "{}.legacy.{}",
+            stem.to_string_lossy(),
+            ext.to_string_lossy()
+        ),
+        _ => format!(
+            "{}.legacy",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        ),
+    };
+    path.with_file_name(name)
+}
+
+fn remove_empty_dirs(dir: &Path) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                remove_empty_dirs(&entry.path());
+            }
+        }
+    }
+    // Fails, and keeps the folder, unless it is empty.
+    let _ = std::fs::remove_dir(dir);
+}
+
+/// The data folder of `profile` under `base`, after [`migrate`]: the new
+/// one, or the old one while the move is blocked. A move is logged to
+/// `<root>\logs\migration.log`.
+pub fn resolve_root(base: &Path, profile: Option<&str>) -> (PathBuf, Migration) {
+    let migration = migrate(base);
+    let root = if migration.uses_legacy() {
+        legacy_root_in(base, profile)
+    } else {
+        data_root_in(base, profile)
+    };
+    if migration != Migration::AlreadyDone {
+        log_migration(&root, &migration);
+    }
+    (root, migration)
+}
+
+/// One line in `<root>\logs\migration.log` (kept, never rotated).
+fn log_migration(root: &Path, migration: &Migration) {
+    use std::io::Write;
+    let dir = root.join("logs");
+    let _ = std::fs::create_dir_all(&dir);
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("migration.log"))
+    {
+        let _ = writeln!(
+            file,
+            "{secs} data folder: {migration:?} -> {}",
+            root.display()
+        );
+    }
+}
+
+/// This process's app folder, resolved (and the old folder moved) once,
+/// for the Rust side and the C++ shell alike (`yap_profile_data_root`).
+/// `None` without `LOCALAPPDATA`.
 pub fn data_root() -> Option<PathBuf> {
-    let base = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty())?;
-    Some(data_root_in(Path::new(&base), current()))
+    static ROOT: OnceLock<Option<PathBuf>> = OnceLock::new();
+    ROOT.get_or_init(|| {
+        let base = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty())?;
+        Some(resolve_root(Path::new(&base), current()).0)
+    })
+    .clone()
 }
 
 /// The suffix the credential's service name takes: `:<name>`, or nothing for
@@ -149,9 +360,14 @@ mod tests {
     #[test]
     fn a_named_profile_has_its_own_folder_and_credential() {
         let base = Path::new("base");
-        assert_eq!(data_root_in(base, None), base.join("YapNative"));
+        assert_eq!(data_root_in(base, None), base.join("Yap.Data"));
         assert_eq!(
             data_root_in(base, Some("jon")),
+            base.join("Yap.Data").join("profiles").join("jon")
+        );
+        assert_eq!(legacy_root_in(base, None), base.join("YapNative"));
+        assert_eq!(
+            legacy_root_in(base, Some("jon")),
             base.join("YapNative").join("profiles").join("jon")
         );
         assert_eq!(credential_suffix(None), "");
