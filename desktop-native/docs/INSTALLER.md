@@ -119,9 +119,10 @@ Hook decisions are appended to `%LOCALAPPDATA%\Yap.Data\logs\installer.log`
 
 ## Updates
 
-The app updates itself from a Velopack feed: a static folder that holds
-`releases.<channel>.json`, the matching `.nupkg` packages and, for older
-clients, `RELEASES`. The rules are `yap_core::update` (tested in
+The app updates itself from a Velopack feed: `releases.<channel>.json` and
+the matching `.nupkg` packages. Released builds read them from this
+repository's GitHub Releases (one release per version, tag
+`desktop-native-v<version>`); a test feed is a static folder. The rules are `yap_core::update` (tested in
 `crates/yap-core/tests/update.rs`); `rust/src/updater.rs` runs them with
 Velopack's `UpdateManager` on a thread of its own (`yap-updater`), and QML
 shows them through the `Updater` singleton.
@@ -209,31 +210,55 @@ switches, kept per profile in `Yap.Data\updates.json`:
 
 ### The feed
 
-| setting                  | where                                                                      |
-| ------------------------ | -------------------------------------------------------------------------- |
-| compiled default         | `yap_core::update::DEFAULT_FEED_URL`: `https://updates.115jon.com/yap/win` |
-| `updates.json` `feedUrl` | overrides the default                                                      |
-| `YAP_UPDATE_URL`         | overrides both: `https://...`, `file:///F:/feed` or `F:\feed`              |
+| setting                  | where                                                                                              |
+| ------------------------ | -------------------------------------------------------------------------------------------------- |
+| compiled default         | `yap_core::update::DEFAULT_FEED_URL`: `https://github.com/115jon/yap`, its native releases         |
+| `updates.json` `feedUrl` | overrides the default                                                                              |
+| `YAP_UPDATE_URL`         | overrides both: `https://github.com/<owner>/<repo>`, `https://...`, `file:///F:/feed` or `F:\feed` |
 
-**The default is a placeholder**: no feed is published there yet, so a
-released build reports "Couldn't update" in Settings (and nothing in the
-shell) until one is. See "Hosting the feed".
+A URL that is exactly `https://github.com/<owner>/<repo>` is read as a
+repository's releases (`Feed::Github`, below); any other `https://` URL is
+a static folder (`Feed::Http`), and so is one release's download folder,
+`https://github.com/115jon/yap/releases/download/desktop-native-v0.2.24`,
+which pins a client to that release's feed.
 
-Velopack asks for `<base>/releases.<channel>.json?localVersion=...&id=...&stagingId=...`
-and then `<base>/<FileName>` for each package, so the folder looks like:
+**GitHub Releases** (`src/updater.rs`, `GithubReleases`; the rules are
+`yap_core::update`, "GitHub Releases"). Each check makes one
+unauthenticated API call, `GET /repos/115jon/yap/releases?per_page=100`
+(up to three pages while no native release has turned up), within the API's
+60 requests an hour per IP. From the list it keeps the **native releases**:
+not drafts, tag `desktop-native-v` plus a semver, and on stable neither a
+GitHub pre-release nor a pre-release version; beta keeps them all. The
+web app's `v3.x`, `mobile-v*`, `cef-build-assets` and the
+`native-toolchain-*` release never match. It then reads
+`releases.<channel>.json` from the newest native release that has one, and
+downloads each package from the newest native release that has a file of
+that name, both from the public download URLs (GitHub's CDN, no API call).
+A channel with no native release yet is an empty feed ("up to date"), not
+an error. Velopack's own `GithubSource` is not used: it reads the newest
+ten releases whatever their tag, and the web releases would hide the
+native ones.
+
+Every release's `releases.<channel>.json` lists the earlier versions too
+(CI downloads the previous one before `vpk pack`, which merges it), so the
+newest file is the whole channel. A static folder looks the same, all in
+one place: Velopack asks for
+`<base>/releases.<channel>.json?localVersion=...&id=...&stagingId=...` and
+then `<base>/<FileName>`.
+
+What a native release holds:
 
 ```
-<base>/
-  releases.win.json            # stable: the releases uploaded so far (vpk merges each upload in)
-  releases.beta.json           # beta (only once a beta ships)
-  RELEASES, RELEASES-beta      # Squirrel-era index; Velopack clients don't read it
-  assets.win.json              # vpk's own list of what it produced
-  Yap.App-0.2.22-full.nupkg
-  Yap.App-0.2.23-full.nupkg
-  Yap.App-0.2.23-delta.nupkg   # 0.2.22 -> 0.2.23
-  Yap.App-win-Setup.exe        # the newest installer, for the download page
+desktop-native-v0.2.24/
+  releases.win.json            # the channel's feed (uploaded last)
+  Yap.App-0.2.24-full.nupkg
+  Yap.App-0.2.24-delta.nupkg   # from the previous release's full package
+  Yap.App-win-Setup.exe        # the installer
   Yap.App-win-Portable.zip
 ```
+
+A beta (`desktop-native-v0.2.25-beta.1`, a GitHub pre-release) holds
+`releases.beta.json` and `Yap.App-beta-Setup.exe` instead.
 
 A `releases.win.json` entry, as vpk 1.3.39 writes it:
 
@@ -255,65 +280,59 @@ A `releases.win.json` entry, as vpk 1.3.39 writes it:
 }
 ```
 
-Only `releases.*.json` changes on a release; packages never change once
-uploaded. Serve the JSON with a short cache (`Cache-Control: max-age=60`)
-and the packages as immutable.
-
 ### Hosting the feed
 
-Recommended: **an R2 bucket behind `updates.115jon.com`** (the placeholder
-default), folder `yap/win/`.
+GitHub Releases of `115jon/yap`, chosen over an R2 bucket (2026-11-09):
+nothing new to run or pay for, CI needs only `GITHUB_TOKEN`, and every
+version gets a release page. What that costs, and how it is handled:
 
-|                      | R2 behind a 115jon.com hostname                                                                        | GitHub Releases of 115jon/yap                                                                                                                                                                                             |
-| -------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tauri installs       | untouched                                                                                              | the Tauri updater reads `releases/latest/download/latest.json`: a native release marked latest breaks it until the cutover, so every native release would have to be a prerelease or not-latest                           |
-| how clients read it  | Velopack's `HttpSource`: two plain GETs, no API                                                        | Velopack's `GithubSource` lists releases through the GitHub API, 60 requests an hour per IP unauthenticated; or a fixed tag served as a plain folder, whose `releases.win.json` must be deleted and re-uploaded each time |
-| versions and tags    | separate from the web app's `v3.x` release-please tags                                                 | mixed into the same release list as `v3.x`                                                                                                                                                                                |
-| caching and rollback | our `Cache-Control`; a bad release is pulled by editing one JSON                                       | GitHub's CDN caching; pulling a release means editing assets                                                                                                                                                              |
-| cost, setup          | R2 has no egress fee; needs the bucket, the custom domain and an R2 API token for CI (`vpk upload s3`) | free and already there; needs nothing but `GITHUB_TOKEN`                                                                                                                                                                  |
-| a release page       | none (the notes live in the feed and show in Settings)                                                 | a public release page per version                                                                                                                                                                                         |
+- **The Tauri app's updater** reads `releases/latest/download/latest.json`.
+  Until the cutover ("Replacing the Tauri app") a native release must
+  never be "latest": the workflow creates it as a draft with
+  `--latest=false`, publishes it with `make_latest=false`, then checks that
+  `releases/latest` did not move (and restores it and fails if it did).
+  If the current latest web release is ever deleted, GitHub picks a new
+  latest by date and could pick a native one: mark a web release latest
+  again by hand.
+- **The API rate limit**: 60 unauthenticated requests an hour per IP. One
+  call per check, a check every 6 h, retries backing off to an hour; a
+  rate-limited check reads "Couldn't reach the update server" and retries.
+- **Mixed tags**: handled by the tag prefix (above).
+- **Pulling a bad release**: delete its release, or edit its assets. The
+  previous release's feed file still lists the versions before it, so
+  clients fall back to that one. Clients that already downloaded the bad
+  version still install it; ship a fixed version where that matters.
 
-R2 keeps the native channel apart from the Tauri updater and from the web
-app's tags, has no API rate limit, and lets the feed's JSON be cached
-briefly while the packages are cached forever. GitHub would need nothing
-new, but only works if native releases are never "latest" before the
-cutover. To change the host later, ship one release whose
-`DEFAULT_FEED_URL` points at the new place and publish that release to both.
+To move the feed later, ship one release whose `DEFAULT_FEED_URL` points at
+the new place and publish that release to both.
 
 ### Publishing a release
 
-Stable, by hand (CI can run the same steps after the pack):
+By CI: `.github/workflows/desktop-native-release.yml` ("CI" below) does all
+of it. Stable:
 
-1. Bump `[workspace.package] version` in `rust/Cargo.toml`.
-2. Fetch the previous release, so vpk can make a delta against it:
-   ```powershell
-   vpk download http --url https://updates.115jon.com/yap/win --outputDir F:/ct/yapn/release --channel win
-   ```
-   (or `vpk download s3 ...` with the bucket's credentials). Skip it for the
-   very first release.
-3. Pack into the same folder, with notes:
-   ```powershell
-   ./tools/package.ps1 -Sign -OutDir F:/ct/yapn/release -ReleaseNotes notes.md
-   ```
-   (`-Sign` needs the Certificate Profile Signer role, see "Signing"; CI has
-   it.) vpk adds the new version to `releases.win.json`, beside the old
-   ones, and writes the delta.
-4. Upload. Packages first, then the feed JSON, so a client never sees an
-   entry whose package is missing (vpk's `upload` does this order):
-   ```powershell
-   vpk upload s3 --outputDir F:/ct/yapn/release --channel win `
-     --endpoint https://<account>.r2.cloudflarestorage.com --bucket <bucket> --prefix yap/win `
-     --keyId $env:R2_KEY_ID --secret $env:R2_SECRET --disableChecksumValidation --keepMaxReleases 10
-   ```
-5. Check: `Invoke-RestMethod https://updates.115jon.com/yap/win/releases.win.json`
-   lists the version, and an installed copy finds it ("Check for updates").
+1. Bump `[workspace.package] version` in `rust/Cargo.toml` and merge it to
+   `main`.
+2. Actions > Desktop Native Release > Run workflow, **from `main`**:
+   `version` empty (or the same `0.2.24`), `channel` `win`, `notes` the
+   release notes (Markdown, shown in Settings > Desktop app).
+3. The run tests, builds, signs, packs (with a delta against the previous
+   native release) and publishes `desktop-native-v0.2.24`, never "latest".
+4. Check: the release lists `releases.win.json`, and an installed copy
+   finds the version ("Check for updates").
 
-A beta is the same with `-Channel beta` (and `--channel beta` for vpk) and a
-pre-release version (`0.2.24-beta.1`); beta users also read the stable feed,
-so nothing needs copying between them. To pull a bad release, remove its
-entries from `releases.<channel>.json` (and the packages after); clients
-that already downloaded it still install it, so ship a fixed version
-instead where that matters.
+A beta is the same with `channel` `beta` and a pre-release version
+(`0.2.25-beta.1`, whose `0.2.25` must be Cargo.toml's): a GitHub
+pre-release with `releases.beta.json`. Beta users read the stable feed too,
+so nothing is copied between channels.
+
+By hand (a release CI cannot make): download the previous release's
+`releases.<channel>.json` and full `.nupkg` into one folder, run
+`./tools/package.ps1 -Sign -OutDir <folder> -Version <v> -Channel <c> -ReleaseNotes notes.md`
+there (`-Sign` needs the Signer role, see "Signing"), then
+`gh release create desktop-native-v<v> --draft --latest=false`, upload the
+new packages, Setup.exe and the Portable zip, then the feed file, and
+publish with `gh api -X PATCH repos/115jon/yap/releases/<id> -F draft=false -f make_latest=false`.
 
 ### Test hooks and a local feed
 
@@ -612,25 +631,50 @@ someone with Owner must first assign the Signer role to that user.
 ## CI
 
 `.github/workflows/desktop-native-release.yml`, manual (`workflow_dispatch`)
-only. It builds the exe, packs it with `tools/package.ps1 -Sign` after the
-same `azure/login` OIDC step as `desktop-release.yml`, verifies the
-Setup.exe signature with `desktop/scripts/verify-authenticode.ps1`, and
-uploads the installer and feed files as a workflow artifact. It publishes
-nothing: no feed exists yet ("Publishing a release" has the steps).
+only, one run at a time (concurrency group `desktop-native-release`).
+Inputs: `version` (empty: Cargo.toml's), `channel` (`win` or `beta`),
+`notes`, and `dry_run`.
 
-It needs a static Qt 6.6.3 (MSVC, `-static -static-runtime`), which no
-action provides:
+| job       | runner        | token                                | does                                                                                                                                                                                                                                                                                                                                          |
+| --------- | ------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan`    | ubuntu-latest | `contents: read`                     | checks the version against Cargo.toml and the channel (beta takes `x.y.z-pre`), refuses a tag or release (drafts too) that exists, and a signed run off `main`                                                                                                                                                                                |
+| `build`   | windows-2025  | `contents: read`                     | the toolchain (below), `cargo deny`, `cargo test` (the workspace without `yap_native` and `yap-audio`), ONNX Runtime from nuget.org (hash-checked), `build.ps1`; uploads `Yap.exe` and the runtime                                                                                                                                            |
+| `release` | windows-2025  | `contents: write`, `id-token: write` | the previous release of the channel (feed and full package, for the delta), `azure/login` (OIDC) and `azure/artifact-signing-action` on `Yap.exe`, `package.ps1 -Sign` (vpk signs Update.exe, the stub and Setup.exe), `verify-authenticode.ps1`, then the release: a draft, packages, then the feed file, published with `make_latest=false` |
 
-- `runner: github-hosted` downloads `qt-6.6.3-static-msvc-x64.zip` (with
-  `bin/qmake.exe` at its root) from the `native-build-assets` release. That
-  asset does not exist yet; until it is uploaded this path fails with a
-  clear message.
-- `runner: self-hosted` runs on a `[self-hosted, windows, x64, yap-native]`
-  runner whose `YAP_QT_DIR` points at the static Qt (and optionally
-  `YAP_LIBWEBRTC_DIR` at an extracted libwebrtc).
+The build job runs third-party build scripts, so it gets neither the write
+token nor OIDC; signing and publishing happen in the release job only.
 
-libwebrtc comes from LiveKit's prebuilt release (webrtc-sys downloads it).
-The OIDC credential trusts `main` and `v*` tags only: dispatch from `main`.
+**Dry run** (`dry_run`): no Azure login or signing, so it works from any
+branch, and the release stays a draft (a draft creates no tag). Delete the
+draft afterwards (`gh release delete desktop-native-v<v> --yes`); the plan
+job refuses to run while it exists.
+
+**Signing** needs the run to come from `main`: the federated credentials on
+`AZURE_CLIENT_ID` trust `refs/heads/main` and `v*` tags only (immutable
+subject form, docs/desktop/code-signing.md). The job's OIDC subject is the
+ref the workflow runs from, not the release tag, so a dispatch from `main`
+that creates `desktop-native-v*` needs no new credential. A
+`push: tags: desktop-native-v*` trigger would; it would need a flexible
+credential matching
+`repo:115jon@<owner id>/yap@<repo id>:ref:refs/tags/desktop-native-v*`.
+
+**Toolchain.** No action provides a static, patched Qt, so it comes from
+the `native-toolchain-qt6.11.3-yap-webrtc-a545de4` release (a pre-release,
+never latest): the Qt build (`patches/qt/build-qt.ps1`, MSVC 14.44, LTCG)
+pruned by `tools/toolchain-qt.exclude`, and LiveKit's libwebrtc
+`webrtc-a545de4` as `webrtc-sys` downloads it. `tools/package-toolchain.ps1`
+makes the archives (7-Zip, volumes under 2 GB) and
+`tools/toolchain.lock.json` (every asset's size and SHA-256);
+`tools/fetch-toolchain.ps1` downloads them, checks them against the lock,
+unpacks them and sets `YAP_QT_DIR`, `QMAKE`, `YAP_LIBWEBRTC_DIR` and
+`LK_CUSTOM_WEBRTC`. The archives are cached per lock file, and checked
+again on a hit. The Qt archive adds `bin/qt.conf` (`Prefix = ..`): a static
+Qt is not relocatable, and cxx-qt asks qmake for its paths.
+
+Qt's libraries are link-time code, which links only with the MSVC that
+compiled them: the build job warns when the runner's MSVC differs from the
+lock's `msvc`. A new Qt build means a new toolchain release (a new tag),
+`package-toolchain.ps1 -Upload`, and the new lock file committed.
 
 ## Local test
 

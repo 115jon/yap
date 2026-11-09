@@ -570,7 +570,7 @@ stickers, the avatar picker's GIF tile and the voice status picture's
 upload (GIFs and recent pictures only), toast avatars, toast actions
 from Action Center once the app has quit (no COM activator), the game
 capture hook's Vulkan layer, and a published update feed (the updater is
-in, see "Updates"; its feed URL is a placeholder). In
+in, see "Updates"; no native release is published yet). In
 settings: avatar crop,
 bundles (none in the catalog), sign-out from the page,
 server profiles,
@@ -649,10 +649,11 @@ downloads a newer package in the background, then offers "Restart now"
 is up; with "Install updates on quit" (on by default) a plain quit installs
 it too. The beta channel, a pinned version and a feed override live in
 `Yap.Data\updates.json`. Dev builds, copies, the portable zip, named
-profiles and anything under `F:\ct\yapn` never update. No feed is
-published yet: the compiled URL (`https://updates.115jon.com/yap/win`) is a
-placeholder. The flow, the feed layout, hosting and how to publish a
-release are in [docs/INSTALLER.md](docs/INSTALLER.md), "Updates".
+profiles and anything under `F:\ct\yapn` never update. Updates come from
+this repository's GitHub Releases (tags `desktop-native-v*`, published by
+`.github/workflows/desktop-native-release.yml`, never "latest"). The flow,
+the feed, hosting and how to publish a release are in
+[docs/INSTALLER.md](docs/INSTALLER.md), "Updates".
 
 ```powershell
 # A local test feed (INSTALLER.md, "Test hooks and a local feed")
