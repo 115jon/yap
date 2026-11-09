@@ -1662,6 +1662,20 @@ fn deafen_should_mute_and_undeafen_should_restore_the_mic() {
 }
 
 #[test]
+fn toggles_should_flip_what_is_kept() {
+    let mut client = Client::online();
+    client.command(Command::ToggleVoiceMuted);
+    assert_eq!(prefs(&client), (true, false));
+    client.command(Command::ToggleVoiceMuted);
+    assert_eq!(prefs(&client), (false, false));
+    client.command(Command::ToggleVoiceDeafened);
+    assert_eq!(prefs(&client), (true, true));
+    // Unmuting while deafened undeafens, as the mic key does.
+    client.command(Command::ToggleVoiceMuted);
+    assert_eq!(prefs(&client), (false, false));
+}
+
+#[test]
 fn unmuting_while_deafened_should_undeafen() {
     let mut client = Client::online();
     client.command(Command::SetVoiceDeafened(true));

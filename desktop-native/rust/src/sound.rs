@@ -64,6 +64,22 @@ pub fn play(sound: Sound) {
     start(sound, settings.sound_settings.sound_volume, custom);
 }
 
+/// Push to talk's on (`Unmute`) and off (`Mute`) tones. Its own switch
+/// (Keybinds) stands for the mute category's; the sounds switch and the
+/// volume still apply.
+pub fn play_ptt(on: bool) {
+    let settings = crate::desktop::current();
+    if !settings.sounds {
+        return;
+    }
+    let sound = if on { Sound::Unmute } else { Sound::Mute };
+    start(
+        sound,
+        settings.sound_settings.sound_volume,
+        settings.sound_settings.custom_sounds,
+    );
+}
+
 /// The Test key: plays whatever the switches say (`bypassToggles`).
 pub fn play_test(sound: Sound) {
     let settings = crate::desktop::current();

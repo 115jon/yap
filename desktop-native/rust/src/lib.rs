@@ -28,6 +28,7 @@ mod extras;
 mod friends;
 mod games;
 mod gui;
+mod hotkeys;
 #[cfg(windows)]
 mod installer;
 mod invites;

@@ -48,6 +48,18 @@ pub fn set_call_audio(audio: CallAudio) {
     });
 }
 
+fn transmit() -> &'static watch::Sender<bool> {
+    static TRANSMIT: OnceLock<watch::Sender<bool>> = OnceLock::new();
+    TRANSMIT.get_or_init(|| watch::channel(true).0)
+}
+
+/// Push to talk's gate ([`UserCommand::SetTransmit`]) for this call and
+/// later ones: open in voice activity, held open by the key in push to
+/// talk. Applied at once in a call, without touching the settings.
+pub fn set_transmit(open: bool) {
+    transmit().send_if_modified(|current| std::mem::replace(current, open) != open);
+}
+
 /// Call admission (`realtime/ADMISSION.md`) through the signed-in API.
 #[derive(Clone)]
 struct Admission(Api);
@@ -79,6 +91,7 @@ struct Commands {
     store: UnboundedReceiver<VoiceCommand>,
     audio: watch::Receiver<CallAudio>,
     video: watch::Receiver<VideoIntent>,
+    transmit: watch::Receiver<bool>,
     /// Settings commands not handed out yet.
     pending: VecDeque<UserCommand>,
 }
@@ -89,14 +102,18 @@ impl Commands {
         let first = audio.borrow_and_update().clone();
         let mut video = crate::video::subscribe();
         let shown = video.borrow_and_update().clone();
+        let mut transmit = transmit().subscribe();
+        let open = *transmit.borrow_and_update();
         let mut commands = Self {
             store,
             audio,
             video,
+            transmit,
             pending: VecDeque::new(),
         };
         commands.queue(&first);
         commands.pending.push_back(UserCommand::SetVideo(shown));
+        commands.pending.push_back(UserCommand::SetTransmit(open));
         commands
     }
 
@@ -124,6 +141,9 @@ impl yap_voice::Commands for Commands {
                 }
                 Ok(()) = self.video.changed() => {
                     return Some(UserCommand::SetVideo(self.video.borrow_and_update().clone()));
+                }
+                Ok(()) = self.transmit.changed() => {
+                    return Some(UserCommand::SetTransmit(*self.transmit.borrow_and_update()));
                 }
                 // The sender is a static: this never ends.
                 Ok(()) = self.audio.changed() => {

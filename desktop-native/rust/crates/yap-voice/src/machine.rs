@@ -166,6 +166,11 @@ pub struct VideoIntent {
 #[derive(Debug, Clone, PartialEq)]
 pub enum UserCommand {
     SetMuted(bool),
+    /// Push to talk's gate (or push to mute's): closed, the mic track is
+    /// disabled as a mute disables it, but nothing is announced (no op 15,
+    /// the roster keeps our mute as it is) and speaking stays off. Open by
+    /// default; a call starts with the gate as it is.
+    SetTransmit(bool),
     /// Deafen: silence the others (remote audio off) and say so (op 15).
     SetDeafened(bool),
     /// The speaking threshold.
@@ -637,6 +642,8 @@ pub struct CallMachine {
     media_up: bool,
     status: &'static str,
     muted: bool,
+    /// Push to talk's gate is open (see [`UserCommand::SetTransmit`]).
+    transmit: bool,
     deafened: bool,
     roster: Option<Roster>,
     /// The roster last reported.
@@ -717,6 +724,7 @@ impl CallMachine {
             media_up: false,
             status: "",
             muted: false,
+            transmit: true,
             deafened: false,
             roster: None,
             reported: Vec::new(),
@@ -1099,10 +1107,15 @@ impl CallMachine {
         })
     }
 
+    /// Our mic goes out: not muted and push to talk's gate open.
+    fn mic_open(&self) -> bool {
+        !self.muted && self.transmit
+    }
+
     /// One level reading: the meter, then speaking (held off while muted).
     fn on_mic_level(&mut self, fx: &mut Vec<Effect>, rms: f64, at_ms: u64) {
         fx.push(Effect::Notify(Notice::MicLevel(level_percent(rms))));
-        if self.published.is_none() || self.muted {
+        if self.published.is_none() || !self.mic_open() {
             return;
         }
         if self
@@ -1289,7 +1302,7 @@ impl CallMachine {
         match result {
             Ok(published) => {
                 self.published = Some(published);
-                if self.muted || self.standby {
+                if !self.mic_open() || self.standby {
                     fx.push(Effect::SetMicEnabled(false));
                 }
                 if self.standby {
@@ -1684,7 +1697,7 @@ impl CallMachine {
             UserCommand::SetMuted(muted) => {
                 self.muted = muted;
                 if self.published.is_some() {
-                    fx.push(Effect::SetMicEnabled(!muted));
+                    fx.push(Effect::SetMicEnabled(self.mic_open()));
                 }
                 if let Some(roster) = &mut self.roster {
                     roster.set_my_mute(muted);
@@ -1702,6 +1715,22 @@ impl CallMachine {
                     fx.push(Effect::Send(Socket::Room, self.voice_state()));
                 }
                 self.emit_roster(fx);
+            }
+            UserCommand::SetTransmit(open) => {
+                if self.transmit == open {
+                    return;
+                }
+                self.transmit = open;
+                fx.push(Effect::Log(format!(
+                    "[voice] transmit gate {}",
+                    if open { "open" } else { "closed" }
+                )));
+                if self.published.is_some() && !self.standby {
+                    fx.push(Effect::SetMicEnabled(self.mic_open()));
+                }
+                if !open && self.vad.reset() {
+                    self.send_speaking(fx);
+                }
             }
             UserCommand::SetDeafened(deafened) => {
                 self.deafened = deafened;
@@ -2066,7 +2095,7 @@ impl CallMachine {
         self.send_spatial(fx, true);
         if self.published.is_some() {
             fx.push(Effect::PromoteMedia);
-            fx.push(Effect::SetMicEnabled(!self.muted));
+            fx.push(Effect::SetMicEnabled(self.mic_open()));
             if std::mem::take(&mut self.standby_stale) {
                 fx.push(Effect::Log(
                     "[voice] standby mic idle too long; republishing".into(),

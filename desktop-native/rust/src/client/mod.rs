@@ -86,6 +86,8 @@ pub fn start(sink: Sink) -> bool {
     let started = COMMANDS.set(tx).is_ok();
     // Game detection reports through the command channel above.
     crate::games::start();
+    // Keybinds fire store commands on the channel above.
+    crate::hotkeys::start();
     started
 }
 
@@ -149,6 +151,7 @@ pub fn shutdown() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         eprintln!("[quit] core shutdown");
+        crate::hotkeys::shutdown();
         voice::send_disconnect_beacon(std::time::Duration::from_millis(800));
         command(Command::Quit);
         yap_core::shutdown();

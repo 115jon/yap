@@ -1229,6 +1229,43 @@ fn muting_should_turn_speaking_off_at_once() {
 }
 
 #[test]
+fn a_closed_transmit_gate_should_disable_the_mic_without_announcing_a_mute() {
+    let mut m = joined();
+    m.handle(level(10.0, 0));
+    let fx = m.handle(Input::Command(UserCommand::SetTransmit(false)));
+    assert!(fx.contains(&Effect::SetMicEnabled(false)));
+    // Speaking goes off at once; nothing goes to the room (op 15).
+    assert_eq!(speaking_sends(&fx), vec![0]);
+    assert!(sends(&fx, Socket::Room).is_empty());
+    // Speech behind the closed gate is not sent.
+    assert!(speaking_sends(&m.handle(level(10.0, 100))).is_empty());
+    let fx = m.handle(Input::Command(UserCommand::SetTransmit(true)));
+    assert!(fx.contains(&Effect::SetMicEnabled(true)));
+    assert_eq!(speaking_sends(&m.handle(level(10.0, 200))), vec![1]);
+}
+
+#[test]
+fn opening_the_gate_while_muted_should_keep_the_mic_off() {
+    let mut m = joined();
+    m.handle(Input::Command(UserCommand::SetTransmit(false)));
+    m.handle(Input::Command(UserCommand::SetMuted(true)));
+    let fx = m.handle(Input::Command(UserCommand::SetTransmit(true)));
+    assert!(fx.contains(&Effect::SetMicEnabled(false)));
+    // Unmuting with the gate closed keeps it off too.
+    m.handle(Input::Command(UserCommand::SetTransmit(false)));
+    let fx = m.handle(Input::Command(UserCommand::SetMuted(false)));
+    assert!(fx.contains(&Effect::SetMicEnabled(false)));
+}
+
+#[test]
+fn the_same_gate_twice_should_do_nothing() {
+    let mut m = joined();
+    assert!(m
+        .handle(Input::Command(UserCommand::SetTransmit(true)))
+        .is_empty());
+}
+
+#[test]
 fn speech_while_muted_should_not_be_sent() {
     let mut m = joined();
     m.handle(Input::Command(UserCommand::SetMuted(true)));

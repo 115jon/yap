@@ -265,6 +265,12 @@ pub struct AppsRust {
     level: f64,
 }
 
+/// Plays a soundboard sound in the call, as a click on its cell does (a
+/// keybind; nothing happens outside a call).
+pub fn play_sound(sound_id: &str) {
+    send(AppsCommand::Play(sound_id.to_owned()));
+}
+
 fn send(command: AppsCommand) {
     client::command(Command::Apps(command));
 }
