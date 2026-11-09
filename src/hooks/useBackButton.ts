@@ -52,6 +52,8 @@ function releaseHistoryEntry() {
 
   historyCleanupTimeout = setTimeout(() => {
     historyCleanupTimeout = null;
+    // The page (or a test environment) can be gone by the time this runs.
+    if (typeof window === "undefined") return;
     if (backHandlers.length > 0 || !ownsHistoryEntry) return;
 
     ownsHistoryEntry = false;
