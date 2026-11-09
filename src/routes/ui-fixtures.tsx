@@ -18,6 +18,7 @@
  * to the chat shell). Families, by name:
  *   shell*, dm-*, dm-call-*, members, friends, account-row, message-rows
  *   voice*, room*, incoming-call, voice-debug*, connection-states
+ *   voice-person (the stage person card; `&who=linus|ada|grace`)
  *   settings, settings-<panel>, sp-* (settings and profile editors)
  *   search*, command-menu, menus, volume-boost, splash, overlay*, no-channel,
  *   drawer*
@@ -32,6 +33,7 @@
  *   name-styles, name-style-editor (display name styles on every surface;
  *   `&name=<effect>&wave=1` dresses every fixture user in a style)
  *   chunked-upload (big-file progress tiles; a live run with cancel)
+ *   site-banner (the site announcement strip in each tone)
  */
 
 import { createFileRoute, notFound } from "@tanstack/react-router";

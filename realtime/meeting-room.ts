@@ -422,6 +422,10 @@ const PRESENCE_STATUSES: ReadonlySet<string> = new Set<PresenceStatus>([
   "offline",
 ]);
 
+/** Admin introspection (see MeetingRoom.fetch); internal stub paths only. */
+export const ADMIN_INTROSPECT_PATH = "/admin/introspect";
+export const ADMIN_DISCONNECT_PATH = "/admin/disconnect-user";
+
 function isPresenceStatus(status: string): status is PresenceStatus {
   return PRESENCE_STATUSES.has(status);
 }
@@ -1246,7 +1250,110 @@ export class MeetingRoom extends DurableObject<Env> {
       }
     }
 
+    // Site admin (src/services/admin): a read-only look at who is connected
+    // and who is in voice, and closing one user's sockets. Reached only
+    // through a Durable Object stub from the Worker's /api/admin routes;
+    // no public path forwards here.
+    if (url.pathname === ADMIN_INTROSPECT_PATH && request.method === "POST") {
+      return Response.json(this.adminIntrospect());
+    }
+    if (url.pathname === ADMIN_DISCONNECT_PATH && request.method === "POST") {
+      const body: unknown = await request.json().catch(() => null);
+      const userId =
+        this.isPlainObject(body) && typeof body.user_id === "string"
+          ? body.user_id
+          : "";
+      const reason =
+        this.isPlainObject(body) && typeof body.reason === "string"
+          ? body.reason.slice(0, 100)
+          : "Disconnected by an admin";
+      if (!userId) return Response.json({ error: "invalid" }, { status: 400 });
+      const { closed, participantIds } = await this.adminDisconnectUser(
+        userId,
+        reason,
+      );
+      this.flushDirtyStorage();
+      // The ids let the caller end the same sessions on the VoiceRoom.
+      return Response.json({ closed, participant_ids: participantIds });
+    }
+
     return new Response("Not found", { status: 404 });
+  }
+
+  /** Who is on this object right now, for the admin console. No tokens. */
+  private adminIntrospect() {
+    const sessions = [...this.sessions.values()]
+      .filter((session) => session.admission?.accessMode !== "public-demo")
+      .map((session) => ({
+        user_id: session.user_id ?? null,
+        platform: session.platform ?? null,
+        status: session.status ?? null,
+        voice_channel_id: session.voice_channel_id ?? null,
+        standby: !!session.standby,
+        last_heartbeat: session.last_heartbeat ?? null,
+      }));
+    const voiceChannels = [...this.voiceChannelMembers].map(
+      ([channelId, members]) => ({
+        channel_id: channelId,
+        started_at: this.voiceChannelStartedAt.get(channelId) ?? null,
+        members: [...members.values()].map((member) => ({
+          user_id: member.user_id,
+          name: member.display_name || member.name,
+          avatar_url: member.avatar_url ?? null,
+          connection_state:
+            member.connection_state ??
+            (member.connected === false ? "reconnecting" : "connected"),
+          self_mute: member.self_mute,
+          self_deaf: member.self_deaf,
+          self_video: member.self_video,
+          self_stream: member.self_stream,
+          joined_at: member.joined_at ?? null,
+        })),
+      }),
+    );
+    return {
+      room: this.roomSlug,
+      sockets: this.sessions.size,
+      resumable_sessions: this.resumableSessions.size,
+      pending_calls: this.pendingCalls.size,
+      active_calls: this.activeCalls.size,
+      sessions,
+      voice_channels: voiceChannels,
+    };
+  }
+
+  /**
+   * Closes every socket `userId` holds here with AdmissionRejected (the
+   * client must not reconnect) and ends their sessions without a resume
+   * hold. Returns how many sockets closed and every session id it ended.
+   */
+  private async adminDisconnectUser(
+    userId: string,
+    reason: string,
+  ): Promise<{ closed: number; participantIds: string[] }> {
+    const sockets = [...this.sessions].filter(
+      ([, session]) => session.user_id === userId,
+    );
+    const participantIds = sockets.map(([, session]) => session.id);
+    for (const [ws] of sockets) {
+      try {
+        ws.close(CloseCode.AdmissionRejected, reason);
+      } catch {
+        /* already closed */
+      }
+      await this.handleLeave(ws, true, false);
+    }
+    // Sessions held for a resume go too, so none comes back.
+    const held = [...this.resumableSessions]
+      .filter(([, session]) => session.user_id === userId)
+      .map(([sessionId]) => sessionId);
+    for (const sessionId of held) {
+      await this.disconnectSessionImmediately(userId, sessionId);
+    }
+    return {
+      closed: sockets.length,
+      participantIds: [...participantIds, ...held],
+    };
   }
 
   async webSocketMessage(ws: WebSocket, rawMsg: string | ArrayBuffer) {
