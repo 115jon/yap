@@ -13,8 +13,9 @@ use windows::core::{implement, w, PCWSTR};
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, PROPERTYKEY, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Media::Audio::{
-    eCommunications, eRender, EDataFlow, ERole, IAudioClient, IAudioRenderClient, IMMDevice,
-    IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
+    eCommunications, eRender, EDataFlow, ERole, IAudioClient, IAudioRenderClient,
+    IAudioSessionControl, IAudioSessionControl2, IMMDevice, IMMDeviceEnumerator,
+    IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
     AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
     AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, DEVICE_STATE,
     DEVICE_STATE_ACTIVE, WAVEFORMATEX, WAVE_FORMAT_PCM,
@@ -232,7 +233,28 @@ fn client(device: &IMMDevice, buffer: Duration) -> Result<(IAudioClient, Event),
         client
             .SetEventHandle(event.0)
             .map_err(refused("could not set the audio event"))?;
+        opt_out_of_ducking(&client, "speaker");
         Ok((client, event))
+    }
+}
+
+/// Keeps Windows from turning other apps down while `client`'s stream is
+/// open ("Lower other apps during calls" off, [`crate::duck_others`]): the
+/// session opts out of the communications ducking. Call after `Initialize`,
+/// before `Start`. Best effort: a failure only logs.
+pub fn opt_out_of_ducking(client: &IAudioClient, what: &str) {
+    if crate::duck_others() {
+        return;
+    }
+    // SAFETY: COM calls on an initialised client.
+    let result = unsafe {
+        client
+            .GetService::<IAudioSessionControl>()
+            .and_then(|session| windows::core::Interface::cast::<IAudioSessionControl2>(&session))
+            .and_then(|session| session.SetDuckingPreference(true))
+    };
+    if let Err(error) = result {
+        eprintln!("[audio] {what}: could not opt out of ducking: {error}");
     }
 }
 
@@ -429,7 +451,8 @@ fn text(id: &PCWSTR) -> String {
 // Called on a system thread: only flags are set here.
 impl IMMNotificationClient_Impl for Notifier_Impl {
     fn OnDeviceStateChanged(&self, id: &PCWSTR, state: DEVICE_STATE) -> windows::core::Result<()> {
-        self.0.state_changed(&text(id), state == DEVICE_STATE_ACTIVE);
+        self.0
+            .state_changed(&text(id), state == DEVICE_STATE_ACTIVE);
         Ok(())
     }
 
@@ -453,7 +476,11 @@ impl IMMNotificationClient_Impl for Notifier_Impl {
         Ok(())
     }
 
-    fn OnPropertyValueChanged(&self, _id: &PCWSTR, _key: &PROPERTYKEY) -> windows::core::Result<()> {
+    fn OnPropertyValueChanged(
+        &self,
+        _id: &PCWSTR,
+        _key: &PROPERTYKEY,
+    ) -> windows::core::Result<()> {
         Ok(())
     }
 }
@@ -547,7 +574,10 @@ mod tests {
         assert!(w.reopen.load(Ordering::Relaxed));
         let chosen = watch("c", false, Some("c"));
         chosen.default_changed(eRender, eCommunications, "b");
-        assert!(!chosen.reopen.load(Ordering::Relaxed), "a chosen device stays");
+        assert!(
+            !chosen.reopen.load(Ordering::Relaxed),
+            "a chosen device stays"
+        );
     }
 
     #[test]

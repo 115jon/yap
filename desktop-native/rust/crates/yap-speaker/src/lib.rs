@@ -43,16 +43,31 @@ pub mod bus;
 pub mod endpoint;
 mod engine;
 mod voices;
-mod wav;
 #[cfg(windows)]
 mod wasapi;
+mod wav;
 
 pub use bus::{Bus, Input};
 pub use endpoint::{match_endpoint, Endpoint};
 pub use engine::{speaker, Hold, Speaker, Tap, NOTICE_AFTER};
 pub use voices::Voices;
 #[cfg(windows)]
-pub use wasapi::{probe_default, Probe};
+pub use wasapi::{opt_out_of_ducking, probe_default, Probe};
+
+/// "Lower other apps during calls" (off by default). Windows turns other
+/// apps down while a communications stream is open, by the amount in Sound
+/// settings > Communications (80 % out of the box). Every stream we open
+/// opts out of that unless this is on; a change applies from the next
+/// stream opened (the next call).
+static DUCK_OTHERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_duck_others(on: bool) {
+    DUCK_OTHERS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn duck_others() -> bool {
+    DUCK_OTHERS.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// The mix rate, frames per second.
 pub const RATE: u32 = 48_000;

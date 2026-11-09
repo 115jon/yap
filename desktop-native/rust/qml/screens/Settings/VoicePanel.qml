@@ -190,6 +190,11 @@ Column {
                 onMoved: value => Audio.changeOutputVolume(value)
             }
         }
+        SwitchSetting {
+            rowId: "duck-other-apps"
+            checked: Audio.duckOtherApps
+            onToggled: Audio.setSwitch("duckOtherApps", !Audio.duckOtherApps)
+        }
     }
 
     SettingsCard {

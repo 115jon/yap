@@ -186,6 +186,10 @@ pub struct VoiceSettings {
     pub auto_sensitivity: bool,
     /// 0..=200 percent.
     pub output_volume: u16,
+    /// "Lower other apps during calls": let Windows turn other apps down
+    /// while we're in a call (its Communications setting). Off: Yap opts
+    /// out, as Discord does. Native only.
+    pub duck_other_apps: bool,
     /// By Yap user id; people at the defaults are left out.
     pub peer_settings: BTreeMap<String, PeerSettings>,
 }
@@ -221,6 +225,7 @@ impl Default for VoiceSettings {
             sensitivity: -50.0,
             auto_sensitivity: true,
             output_volume: 100,
+            duck_other_apps: false,
             peer_settings: BTreeMap::new(),
         }
     }
@@ -338,6 +343,11 @@ impl VoiceSettings {
             "streamHighFidelity" => self.stream_high_fidelity = on,
             "spatialAudioEnabled" => self.spatial_audio_enabled = on,
             "autoSensitivity" => self.auto_sensitivity = on,
+            // Turns nothing else off.
+            "duckOtherApps" => {
+                self.duck_other_apps = on;
+                return true;
+            }
             _ => return false,
         }
         if !on {

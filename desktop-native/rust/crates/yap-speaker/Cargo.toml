@@ -7,7 +7,7 @@ publish.workspace = true
 description = "Yap's one speaker: every sound the app plays (the call's mix, the soundboard, Listen Together, UI sounds) is an input of one shared-mode WASAPI render stream, with a tap after the final mix for the echo canceller. Follows the Windows default device. No Qt."
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61.3", features = [
+windows = { version = "0.62.2", features = [
     "Win32_Devices_FunctionDiscovery",
     "Win32_Foundation",
     "Win32_Media_Audio",
@@ -18,7 +18,7 @@ windows = { version = "0.61.3", features = [
     "Win32_System_Variant",
     "Win32_UI_Shell_PropertiesSystem",
 ] }
-windows-core = "0.61"
+windows-core = "0.62"
 
 [lints]
 workspace = true

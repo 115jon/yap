@@ -388,6 +388,14 @@ pub const PANELS: &[PanelDef] = &[
                         "",
                         &["speaker volume", "loudness"],
                     ),
+                    // Windows' communications ducking (Sound settings >
+                    // Communications); Yap opts out unless this is on.
+                    row(
+                        "duck-other-apps",
+                        "Lower other apps during calls",
+                        "Turns other apps down while you're in a call, as set in Windows' Communications settings.",
+                        &["ducking", "attenuation", "other apps quieter", "discord quieter", "communications"],
+                    ),
                 ],
             ),
             section(

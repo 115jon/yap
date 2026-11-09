@@ -47,6 +47,8 @@ pub mod qobject {
         #[qproperty(bool, echo_cancellation, cxx_name = "echoCancellation")]
         #[qproperty(bool, high_fidelity, cxx_name = "highFidelity")]
         #[qproperty(bool, spatial_audio, cxx_name = "spatialAudio")]
+        /// "Lower other apps during calls" (Windows' communications ducking).
+        #[qproperty(bool, duck_other_apps, cxx_name = "duckOtherApps")]
         /// "Input volume", 0..=200 (kept; the web does not apply it either).
         #[qproperty(i32, input_volume, cxx_name = "inputVolume")]
         #[qproperty(bool, auto_sensitivity, cxx_name = "autoSensitivity")]
@@ -358,6 +360,7 @@ pub struct AudioRust {
     echo_cancellation: bool,
     high_fidelity: bool,
     spatial_audio: bool,
+    duck_other_apps: bool,
     input_volume: i32,
     auto_sensitivity: bool,
     sensitivity: f64,
@@ -482,6 +485,8 @@ impl qobject::Audio {
         self.as_mut().set_echo_cancellation(s.echo_cancellation);
         self.as_mut().set_high_fidelity(s.stream_high_fidelity);
         self.as_mut().set_spatial_audio(s.spatial_audio_enabled);
+        self.as_mut().set_duck_other_apps(s.duck_other_apps);
+        yap_speaker::set_duck_others(s.duck_other_apps);
         self.as_mut().set_input_volume(i32::from(s.input_volume));
         self.as_mut().set_auto_sensitivity(s.auto_sensitivity);
         self.as_mut().set_sensitivity(s.sensitivity);
