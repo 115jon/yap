@@ -228,10 +228,33 @@ the decisions.
   picture, drag and drop onto the chat; the tray with real progress,
   cancel, retry, the sensitive toggle and the web's error copy; captions,
   and attachments-only sends.
+- Big uploads (`yap-core` `chunked.rs`, the web's multipart-upload.ts):
+  attachments of 16 MB and up go up in 8 MiB parts through
+  `/api/channels/:id/uploads`, three at a time, streamed from disk, with
+  retries (exponential backoff, the server's Retry-After up to 60 s), a
+  60 s stall timeout, and resume: the upload id is kept per channel, file
+  path, size and modified time in the profile's `chunked-uploads.json`
+  for the server's 24 h, so Retry, a dropped connection or a restart
+  sends only the parts not stored. Cancel aborts it on the server. The
+  tile's chip reads "54/150 MB" (formatUploadProgress). Smaller files keep
+  the single request.
+- Plans and badges (`entitlements.rs`, `badges.rs`): users/me's
+  `entitlement` and `badges`, and a profile's `{tier}` and badges
+  (`yap-protocol` `tiers.rs`, read leniently: unreadable is free); the
+  perks as `hasPerk` has them (an expired plan is free). Founder and Loud
+  attach up to 500 MB, free 25 MB; 1440p and 4K shares need `hdStreams`.
+  The eight badges are the web's 16-cell art from the dither provider
+  (`image://dither/badge/<id>/<lit>/<detail>`, `UserBadges.qml`), on the
+  profile card (popout, full profile, account card, the settings
+  previews) in their order, wrapping, with tips (name, description,
+  "Earned Nov 9, 2026"; Loud counts months). Settings > Yap Loud: the plan
+  ("Founder · lifetime") and the three tier cards; Upgrade stays off with
+  "Coming soon" until `GET /api/billing/status` answers 200.
 - Too-big files, as the shared too-big spec has them (`yap-core`
   `limits.rs`: one limit per kind, read from the server's routes; avatar
-  and banner 8 MB, attachments, GIFs, vibes and camera backgrounds 25 MB,
-  soundboard 50 MB; MB of 1024 x 1024 with one decimal). Nothing over its
+  and banner 8 MB, attachments 25 MB (500 MB with Yap Loud or Founder),
+  GIFs, vibes and camera backgrounds 25 MB, soundboard 50 MB; MB of
+  1024 x 1024 with one decimal). Nothing over its
   limit is uploaded. The drop overlay reads the dragged files' sizes
   (`Files.localFiles`, QFileInfo) and shows the too-big card before the
   drop; an oversized file dropped, pasted or picked stays in the tray as a

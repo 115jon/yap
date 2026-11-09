@@ -32,6 +32,24 @@ pub const NAMEPLATE: u64 = 25 * MB;
 /// `purpose=soundboard`).
 pub const SOUND: u64 = 50 * MB;
 
+/// What one attachment through the single-request Worker path may weigh,
+/// on every tier (`WORKER_UPLOAD_CAP`): bigger files go up in parts.
+pub const WORKER_UPLOAD_CAP: u64 = 25 * MB;
+
+/// The chunked direct-to-R2 path is live (`CHUNKED_UPLOADS_ENABLED`), so
+/// the client offers its limit (500 MB attachments with `bigUploads`).
+pub const CHUNKED_UPLOADS_ENABLED: bool = true;
+
+/// Attachments this size or larger go up in parts
+/// (`MULTIPART_THRESHOLD`); smaller ones keep the single request.
+pub const MULTIPART_THRESHOLD: u64 = 16 * MB;
+
+/// The part size the server hands out (`MULTIPART_PART_SIZE`, 8 MiB).
+pub const MULTIPART_PART_SIZE: u64 = 8 * MB;
+
+/// The largest attachment any plan may send (`MAX_ATTACHMENT_BYTES`).
+pub const MAX_ATTACHMENT_BYTES: u64 = 500 * MB;
+
 /// What is being uploaded; each kind has its limit and its card.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -80,6 +98,79 @@ impl Kind {
     pub fn fits(self, size: u64) -> bool {
         size <= self.limit()
     }
+
+    /// The limit with the `bigUploads` perk where it raises one
+    /// (`BIG_UPLOAD_LIMITS`): attachments only.
+    pub fn big_limit(self) -> Option<u64> {
+        match self {
+            Self::Attachment => Some(MAX_ATTACHMENT_BYTES),
+            _ => None,
+        }
+    }
+}
+
+/// `uploadLimitFor`: `kind`'s limit under `entitlement` at `now_ms`, as the
+/// server enforces it. Through the Worker (`direct: false`) no kind goes
+/// above `max(its free limit, WORKER_UPLOAD_CAP)`; `direct` is the chunked
+/// path's limit (500 MB attachments with `bigUploads`).
+pub fn upload_limit_for(
+    entitlement: Option<&yap_protocol::tiers::Entitlement>,
+    kind: Kind,
+    direct: bool,
+    now_ms: i64,
+) -> u64 {
+    use crate::entitlements::{has_perk, Perk};
+    let base = kind.limit();
+    let limit = match kind.big_limit() {
+        Some(big) if has_perk(entitlement, Perk::BigUploads, now_ms) => big,
+        _ => base,
+    };
+    if direct {
+        limit
+    } else {
+        limit.min(base.max(WORKER_UPLOAD_CAP))
+    }
+}
+
+/// `clientUploadLimitFor`: the limit the client offers, the chunked
+/// path's while it is live.
+pub fn client_upload_limit_for(
+    entitlement: Option<&yap_protocol::tiers::Entitlement>,
+    kind: Kind,
+    now_ms: i64,
+) -> u64 {
+    upload_limit_for(entitlement, kind, CHUNKED_UPLOADS_ENABLED, now_ms)
+}
+
+/// `usesMultipartUpload`: a file this size takes the chunked path.
+pub fn uses_multipart(size: u64) -> bool {
+    size >= MULTIPART_THRESHOLD
+}
+
+/// `formatUploadProgress`: a chunked upload's bytes sent of its total, one
+/// line in a 96 px tile: "60/150 MB". Whole MB from 10 MB up, one decimal
+/// below ("0.4/16 MB"); the sent side rounds down so it never reads full
+/// early, the total rounds to nearest.
+pub fn format_progress(loaded: u64, total: u64) -> String {
+    // Display only: f64 holds every size here closely enough.
+    let mb = |bytes: u64, round: fn(f64) -> f64| {
+        let value = bytes as f64 / MB as f64;
+        if value >= 10.0 {
+            format!("{}", round(value))
+        } else {
+            format!("{:.1}", round(value * 10.0) / 10.0)
+        }
+    };
+    format!(
+        "{}/{} MB",
+        mb(loaded.min(total), f64::floor),
+        mb(total, js_round)
+    )
+}
+
+/// `Math.round` for the non-negative sizes here: halves go up.
+fn js_round(value: f64) -> f64 {
+    (value + 0.5).floor()
 }
 
 /// MB rounded to one decimal (upload-limits.ts `oneDecimal`).
@@ -325,7 +416,16 @@ pub fn server_card(message: &str, fallback: u64, action: &str) -> Value {
     let limit = server_limit(message).unwrap_or(fallback);
     let headline = "The server turned it away";
     let line = format!("It says the limit is {}.", format_limit(limit));
-    card(SAD, headline, &line, &escape(&line), "", &[action], 0, limit)
+    card(
+        SAD,
+        headline,
+        &line,
+        &escape(&line),
+        "",
+        &[action],
+        0,
+        limit,
+    )
 }
 
 /// "The other 2 will still send." (empty when nothing else sends).
@@ -338,11 +438,11 @@ fn others(m: usize) -> String {
 }
 
 /// The composer's drop overlay while files are dragged over it, from each
-/// file's name and size (`attachment` limit); `None` when every one fits.
+/// file's name and size against the user's attachment `limit`
+/// ([`client_upload_limit_for`]); `None` when every one fits.
 /// One over: "Too big to chew", its name, size and the limit, the hint and
 /// the meter. Several over: "A few of these won't fit" with the counts.
-pub fn drop_card(files: &[(String, u64)]) -> Option<Value> {
-    let limit = ATTACHMENT;
+pub fn drop_card(files: &[(String, u64)], limit: u64) -> Option<Value> {
     let over: Vec<&(String, u64)> = files.iter().filter(|(_, s)| *s > limit).collect();
     let l = format_limit(limit);
     match over.as_slice() {
@@ -382,8 +482,7 @@ pub fn drop_card(files: &[(String, u64)]) -> Option<Value> {
 
 /// One oversized file in the composer's tray: the name as its title,
 /// "31.2 MB · 6.2 MB over the 25 MB limit", Remove and Choose another.
-pub fn tray_card(name: &str, size: u64) -> Value {
-    let limit = ATTACHMENT;
+pub fn tray_card(name: &str, size: u64, limit: u64) -> Value {
     let size_text = format_size(size);
     let over = format!(
         "{} over the {} limit",
@@ -408,10 +507,10 @@ pub fn tray_card(name: &str, size: u64) -> Value {
 
 /// Several oversized files in the tray, `n` of them, with `m` others that
 /// still send: one card with "Remove the big ones".
-pub fn tray_summary(n: usize, m: usize) -> Value {
+pub fn tray_summary(n: usize, m: usize, limit: u64) -> Value {
     let line = format!(
         "{n} files are over the {} limit.{}",
-        format_limit(ATTACHMENT),
+        format_limit(limit),
         others(m)
     );
     card(
@@ -422,7 +521,7 @@ pub fn tray_summary(n: usize, m: usize) -> Value {
         "",
         &["removeBig"],
         0,
-        ATTACHMENT,
+        limit,
     )
 }
 
@@ -476,14 +575,21 @@ mod tests {
         assert_eq!(server_limit("max. 8MB"), Some(8 * MB));
         assert_eq!(server_limit("max 7.5MB"), Some(7 * MB + MB / 2));
         // Only a "max N MB" counts, as the web's parser reads it.
-        assert_eq!(server_limit("Voice status media must be 25 MB or smaller."), None);
+        assert_eq!(
+            server_limit("Voice status media must be 25 MB or smaller."),
+            None
+        );
         assert_eq!(server_limit("GIF too large to upload"), None);
         assert_eq!(server_limit("climax 9MB"), None);
         assert_eq!(server_limit("max 8MBps"), None);
         assert_eq!(server_limit("request failed"), None);
         assert_eq!(server_limit(""), None);
         assert_eq!(
-            server_refusal_text("Avatar too large (max 10MB)", "upload your avatar", Some(AVATAR)),
+            server_refusal_text(
+                "Avatar too large (max 10MB)",
+                "upload your avatar",
+                Some(AVATAR)
+            ),
             "Unable to upload your avatar. The server says the limit is 10 MB."
         );
         assert_eq!(
@@ -555,14 +661,20 @@ mod tests {
 
     #[test]
     fn composer_copy_matches_the_spec() {
-        let one = drop_card(&[("raid-clip.mp4".into(), 32_715_571)]).unwrap();
+        let one = drop_card(&[("raid-clip.mp4".into(), 32_715_571)], ATTACHMENT).unwrap();
         assert_eq!(one["headline"], "Too big to chew");
-        assert_eq!(one["line"], "raid-clip.mp4 is 31.2 MB. Files can be up to 25 MB.");
+        assert_eq!(
+            one["line"],
+            "raid-clip.mp4 is 31.2 MB. Files can be up to 25 MB."
+        );
         assert_eq!(
             one["lineRich"],
             "<b>raid-clip.mp4</b> is 31.2 MB. Files can be up to 25 MB."
         );
-        assert_eq!(one["hint"], "Drop a smaller file, or post a link to it instead.");
+        assert_eq!(
+            one["hint"],
+            "Drop a smaller file, or post a link to it instead."
+        );
         assert_eq!(one["sizeText"], "31.2 MB");
         assert_eq!(one["limitText"], "25 MB");
         let files = [
@@ -572,24 +684,24 @@ mod tests {
             ("d.png".to_owned(), MB),
             ("e.png".to_owned(), 2 * MB),
         ];
-        let many = drop_card(&files).unwrap();
+        let many = drop_card(&files, ATTACHMENT).unwrap();
         assert_eq!(many["headline"], "A few of these won't fit");
         assert_eq!(
             many["line"],
             "3 files are over the 25 MB limit. The other 2 will still send."
         );
         assert_eq!(
-            drop_card(&files[..2]).unwrap()["line"],
+            drop_card(&files[..2], ATTACHMENT).unwrap()["line"],
             "2 files are over the 25 MB limit."
         );
-        assert!(drop_card(&files[3..]).is_none());
-        let rich = drop_card(&[("<i>x</i>.bin".into(), 30 * MB)]).unwrap();
+        assert!(drop_card(&files[3..], ATTACHMENT).is_none());
+        let rich = drop_card(&[("<i>x</i>.bin".into(), 30 * MB)], ATTACHMENT).unwrap();
         assert_eq!(
             rich["lineRich"],
             "<b>&lt;i&gt;x&lt;/i&gt;.bin</b> is 30.0 MB. Files can be up to 25 MB."
         );
 
-        let tile = tray_card("raid-clip.mp4", 32_715_571);
+        let tile = tray_card("raid-clip.mp4", 32_715_571, ATTACHMENT);
         assert_eq!(tile["headline"], "raid-clip.mp4");
         assert_eq!(tile["line"], "31.2 MB · 6.2 MB over the 25 MB limit");
         assert_eq!(tile["actions"], json!(["remove", "choose"]));
@@ -605,12 +717,106 @@ mod tests {
             )
         );
         // One over among files that fit: still the one-file copy.
-        let mixed = drop_card(&[("a.mp4".into(), 30 * MB), ("b.png".into(), MB)]).unwrap();
+        let mixed = drop_card(
+            &[("a.mp4".into(), 30 * MB), ("b.png".into(), MB)],
+            ATTACHMENT,
+        )
+        .unwrap();
         assert_eq!(mixed["headline"], "Too big to chew");
         assert_eq!(
-            tray_summary(3, 2)["line"],
+            tray_summary(3, 2, ATTACHMENT)["line"],
             "3 files are over the 25 MB limit. The other 2 will still send."
         );
-        assert_eq!(tray_summary(3, 2)["actions"], json!(["removeBig"]));
+        assert_eq!(
+            tray_summary(3, 2, ATTACHMENT)["actions"],
+            json!(["removeBig"])
+        );
+    }
+    fn plan(tier: yap_protocol::tiers::Tier) -> yap_protocol::tiers::Entitlement {
+        yap_protocol::tiers::Entitlement {
+            tier,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn upload_limits_follow_the_plan() {
+        use yap_protocol::tiers::Tier;
+        let (free, loud, founder) = (plan(Tier::Free), plan(Tier::Loud), plan(Tier::Founder));
+        let now = 1_793_000_000_000;
+        // The chunked path: 500 MB attachments with bigUploads.
+        assert_eq!(
+            client_upload_limit_for(None, Kind::Attachment, now),
+            25 * MB
+        );
+        assert_eq!(
+            client_upload_limit_for(Some(&free), Kind::Attachment, now),
+            25 * MB
+        );
+        assert_eq!(
+            client_upload_limit_for(Some(&loud), Kind::Attachment, now),
+            500 * MB
+        );
+        assert_eq!(
+            client_upload_limit_for(Some(&founder), Kind::Attachment, now),
+            500 * MB
+        );
+        // The Worker path stays at its cap on every tier.
+        assert_eq!(
+            upload_limit_for(Some(&founder), Kind::Attachment, false, now),
+            25 * MB
+        );
+        // Other kinds keep their limits, the 50 MB soundboard included.
+        assert_eq!(
+            upload_limit_for(Some(&founder), Kind::Sound, false, now),
+            50 * MB
+        );
+        assert_eq!(
+            client_upload_limit_for(Some(&founder), Kind::Avatar, now),
+            8 * MB
+        );
+        assert_eq!(
+            client_upload_limit_for(Some(&founder), Kind::Gif, now),
+            25 * MB
+        );
+        // An expired Loud is free.
+        let lapsed = yap_protocol::tiers::Entitlement {
+            tier: Tier::Loud,
+            expires_at: Some("2020-01-01T00:00:00Z".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            client_upload_limit_for(Some(&lapsed), Kind::Attachment, now),
+            25 * MB
+        );
+        // The cards use the limit they are given.
+        assert_eq!(
+            tray_card("big.mkv", 600 * MB, 500 * MB)["line"],
+            "600.0 MB · 100.0 MB over the 500 MB limit"
+        );
+        assert!(drop_card(&[("ok.mkv".into(), 60 * MB)], 500 * MB).is_none());
+        assert_eq!(
+            tray_summary(2, 0, 500 * MB)["line"],
+            "2 files are over the 500 MB limit."
+        );
+    }
+
+    #[test]
+    fn chunked_threshold_and_progress_match_the_web() {
+        assert!(!uses_multipart(16 * MB - 1));
+        assert!(uses_multipart(16 * MB));
+        assert_eq!(MULTIPART_PART_SIZE, 8_388_608);
+        assert_eq!(format_progress(54 * MB, 150 * MB), "54/150 MB");
+        assert_eq!(format_progress(60 * MB + MB / 2, 150 * MB), "60/150 MB");
+        assert_eq!(format_progress(MB * 4 / 10, 16 * MB), "0.3/16 MB");
+        assert_eq!(format_progress(MB / 2, 16 * MB), "0.5/16 MB");
+        assert_eq!(format_progress(0, 150 * MB), "0.0/150 MB");
+        // The sent side rounds down: never full early.
+        assert_eq!(format_progress(150 * MB - 1, 150 * MB), "149/150 MB");
+        assert_eq!(format_progress(MB * 99 / 100, 2 * MB), "0.9/2.0 MB");
+        // Over the total reads as the total.
+        assert_eq!(format_progress(200 * MB, 150 * MB), "150/150 MB");
+        // The total rounds to nearest.
+        assert_eq!(format_progress(0, 60 * MB + MB / 2), "0.0/61 MB");
     }
 }

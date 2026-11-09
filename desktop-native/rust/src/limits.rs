@@ -23,16 +23,18 @@ pub mod qobject {
         fn check(self: &Limits, kind: &QString, path: &QString) -> QString;
 
         /// The drop overlay's card while files are dragged over the chat:
-        /// `files` is JSON `[{name, size}]` (sizes from `Files.localFiles`).
-        /// Empty when every file fits.
+        /// `files` is JSON `[{name, size}]` (sizes from `Files.localFiles`)
+        /// against the user's attachment `limit` in bytes
+        /// (`Settings.attachmentLimit`). Empty when every file fits.
         #[qinvokable]
         #[cxx_name = "dropCard"]
-        fn drop_card(self: &Limits, files: &QString) -> QString;
+        fn drop_card(self: &Limits, files: &QString, limit: f64) -> QString;
 
-        /// The tray's one card for `n` too-big files with `m` others.
+        /// The tray's one card for `n` too-big files with `m` others, over
+        /// the attachment `limit` in bytes.
         #[qinvokable]
         #[cxx_name = "traySummary"]
-        fn tray_summary(self: &Limits, n: i32, m: i32) -> QString;
+        fn tray_summary(self: &Limits, n: i32, m: i32, limit: f64) -> QString;
 
         /// `kind`'s limit as words: `25 MB`.
         #[qinvokable]
@@ -46,6 +48,19 @@ use yap_core::limits::{self, Kind};
 
 #[derive(Default)]
 pub struct LimitsRust;
+
+/// A limit QML passes as a number of bytes; anything unusable is the free
+/// attachment limit.
+fn bytes(limit: f64) -> u64 {
+    if limit.is_finite() && limit >= 1.0 {
+        // Whole bytes, at most 500 MB: the cast is exact.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let whole = limit.round() as u64;
+        whole
+    } else {
+        limits::ATTACHMENT
+    }
+}
 
 #[derive(serde::Deserialize)]
 struct Dragged {
@@ -72,17 +87,17 @@ impl qobject::Limits {
             .unwrap_or_default()
     }
 
-    pub fn drop_card(&self, files: &QString) -> QString {
+    pub fn drop_card(&self, files: &QString, limit: f64) -> QString {
         let files: Vec<Dragged> = serde_json::from_str(&files.to_string()).unwrap_or_default();
         let files: Vec<(String, u64)> = files.into_iter().map(|f| (f.name, f.size)).collect();
-        limits::drop_card(&files)
+        limits::drop_card(&files, bytes(limit))
             .map(|card| QString::from(&card.to_string()))
             .unwrap_or_default()
     }
 
-    pub fn tray_summary(&self, n: i32, m: i32) -> QString {
+    pub fn tray_summary(&self, n: i32, m: i32, limit: f64) -> QString {
         let count = |v: i32| usize::try_from(v).unwrap_or(0);
-        QString::from(&limits::tray_summary(count(n), count(m)).to_string())
+        QString::from(&limits::tray_summary(count(n), count(m), bytes(limit)).to_string())
     }
 
     pub fn limit_text(&self, kind: &QString) -> QString {

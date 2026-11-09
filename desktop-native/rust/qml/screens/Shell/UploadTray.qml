@@ -5,8 +5,9 @@ import com.yap.native
 // The composer's attachments (AttachmentList.tsx): 96 px tiles 8 px apart,
 // wrapping, at most 256 high. A finished tile shows its picture (or the
 // type glyph and name), the size chip, the sensitive toggle and, on hover,
-// Remove. One still going is dimmed with its progress and a cancel key;
-// a failed one says so and offers Retry.
+// Remove. One still going is dimmed with its progress and a cancel key
+// (a chunked one, 16 MB and up, reads its bytes in the size chip: "54/150
+// MB", formatUploadProgress); a failed one says so and offers Retry.
 //
 // A file over the limit is never uploaded: it stays as a too-big card
 // (toobig-spec.md: pose A, its name, "31.2 MB · 6.2 MB over the 25 MB
@@ -54,7 +55,7 @@ Item {
                 width: Math.min(flow.width, 420)
                 compact: true
                 edge: Theme.mix(Theme.warningInk, 0.36)
-                info: root.folded ? JSON.parse(Limits.traySummary(Chat.uploadsTooBig, tiles.count - Chat.uploadsTooBig)) : ({})
+                info: root.folded ? JSON.parse(Limits.traySummary(Chat.uploadsTooBig, tiles.count - Chat.uploadsTooBig, Settings.attachmentLimit)) : ({})
                 onAction: id => {
                     if (id === "removeBig")
                         Chat.removeOversizedUploads()

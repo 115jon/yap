@@ -151,6 +151,64 @@ fn share_row(share: &ShareItem, api_base: &str) -> ShareRow {
     }
 }
 
+/// The Yap Loud page (LoudPanel.tsx, TierCards.tsx) as JSON: the plan in
+/// force (`tier`, `label`, `description`, its founder or loud `badges`),
+/// whether billing is on, and the three `cards` with what each says and
+/// offers.
+fn plan_json(
+    entitlement: Option<&yap_protocol::tiers::Entitlement>,
+    badges: Option<&[yap_protocol::tiers::UserBadge]>,
+    billing: bool,
+    now_ms: i64,
+) -> String {
+    use crate::entitlements::{self as e, TIER_PLANS};
+    use yap_protocol::tiers::Tier;
+    let tier = e::effective_tier(entitlement, now_ms);
+    // formatProfileReferenceDate of the expiry: `Dec 1, 2026` in UTC.
+    let renews = entitlement
+        .and_then(|plan| plan.expires_at.as_deref())
+        .and_then(crate::store::time::parse_rfc3339)
+        .map(|ms| crate::store::time::local_date(ms, crate::store::time::LocalOffset::UTC, false));
+    let cards: Vec<serde_json::Value> = TIER_PLANS
+        .iter()
+        .map(|plan| {
+            let current = plan.tier == tier;
+            let included = tier == Tier::Founder && plan.tier != Tier::Founder;
+            serde_json::json!({
+                "tier": plan.tier.key(),
+                "name": plan.name,
+                "price": plan.price,
+                "blurb": plan.blurb,
+                "kicker": e::card_kicker(plan, tier, renews.as_deref()),
+                "current": current,
+                "included": included,
+                // The price under the name, where the kicker is not it.
+                "showPrice": current || included || plan.tier == Tier::Founder,
+                "features": plan
+                    .features
+                    .iter()
+                    .map(|f| e::feature_text(*f, plan.tier))
+                    .collect::<Vec<_>>(),
+                "action": e::plan_action(plan.tier, tier).key(),
+                "label": if current {
+                    format!("{}, your plan", plan.name)
+                } else {
+                    plan.name.to_owned()
+                },
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "tier": tier.key(),
+        "label": e::plan_label(tier),
+        "description": e::plan_description(tier),
+        "badges": crate::badges::plan_badges_json(badges, now_ms),
+        "billingEnabled": billing,
+        "cards": cards,
+    })
+    .to_string()
+}
+
 fn map_load<T, U>(load: &Load<T>, f: impl FnOnce(&T) -> U) -> Load<U> {
     match load {
         Load::Idle => Load::Idle,
@@ -165,6 +223,14 @@ impl State {
         if !self.settings.sessions.is_loading() {
             self.pending.settings.sessions = self.http(fx, ApiRequest::Sessions);
             self.settings.sessions = Load::Loading;
+        }
+    }
+
+    /// Settings → Yap Loud asks once per open whether billing is on.
+    pub(super) fn load_billing(&mut self, fx: &mut Effects) {
+        if !self.settings.billing.is_loading() {
+            self.pending.settings.billing = self.http(fx, ApiRequest::BillingStatus);
+            self.settings.billing = Load::Loading;
         }
     }
 
@@ -509,6 +575,7 @@ impl State {
             &mut pending.media_filter,
             &mut pending.revoke,
             &mut pending.share_activity,
+            &mut pending.billing,
         ]
         .into_iter()
         .position(|slot| {
@@ -570,7 +637,14 @@ impl State {
             }
             7 => self.on_media_filter_saved(fx, result),
             8 => self.on_share_revoked(result),
-            _ => self.on_share_activity_saved(fx, result),
+            9 => self.on_share_activity_saved(fx, result),
+            _ => {
+                self.settings.billing = match result {
+                    Ok(ApiResponse::BillingStatus(enabled)) => Load::Ready(enabled),
+                    Ok(_) => Load::Ready(false),
+                    Err(error) => Load::Failed(describe_api_error(&error, "load billing")),
+                }
+            }
         }
         true
     }
@@ -757,6 +831,22 @@ impl State {
                 .and_then(|server| self.members.get(server))
                 .and_then(|list| list.iter().find(|m| m.user.id == me.id));
             view.member_since = super::social::member_since_json(me, member);
+            // The plan (signed out, the view stays empty: QML reads that
+            // as free).
+            let now = self.clock_ms();
+            let entitlement = crate::entitlements::of(me);
+            let tier = crate::entitlements::effective_tier(entitlement, now);
+            view.badges = crate::badges::display_json(me.badges.as_deref(), now);
+            view.tier = tier.key().to_owned();
+            view.hd_streams = crate::entitlements::has_perk(
+                entitlement,
+                crate::entitlements::Perk::HdStreams,
+                now,
+            );
+            view.attachment_limit = self.attachment_limit();
+            view.attachment_limit_text = crate::limits::format_limit(view.attachment_limit);
+            let billing = matches!(self.settings.billing, Load::Ready(true));
+            view.plan = plan_json(entitlement, me.badges.as_deref(), billing, now);
         }
         view
     }

@@ -8,8 +8,9 @@ import com.yap.native
 // 72 px avatar half over it with a 4 px ring of the card colour, the name
 // at 18/600 and a 16 px inset; `modal` (the full profile) has a 120 px
 // banner, an 88 px avatar, the name at 22/600 and a 20 px inset. Then
-// "@handle · pronouns" at 13 ink-2 and the status line (LED, label,
-// custom status). `statusLine` replaces that line (the account
+// "@handle · pronouns" at 13 ink-2, the badges (UserBadges: 24 px, 32 on
+// the full profile, wrapping, never cut off) and the status line (LED,
+// label, custom status). `statusLine` replaces that line (the account
 // card's custom-status field). Children go in the 16 px inset column
 // under it (actions, sections). A profile theme (`surfaceColor`,
 // `accentColor`, `#RRGGBB`) paints the card and the banner fallback, with
@@ -56,6 +57,8 @@ Item {
     property string nameStyle: ""
     // Where they are signed in, beside the name (UserPlatformIndicators).
     property string platforms: ""
+    // Their badges (the core's JSON), or empty.
+    property string badges: ""
     property string effectPlayback: "once"
     property bool animate: true
     // popover | modal
@@ -304,6 +307,14 @@ Item {
                     wrapMode: Text.WrapAnywhere
                     color: root.subInk
                     font: Theme.type.description
+                }
+                // -ms-0.5: the drawings line up with the text, not their
+                // keys' 2 px padding.
+                UserBadges {
+                    x: -2
+                    width: parent.width + 2
+                    badges: root.badges
+                    size: root.modalSize ? "lg" : "md"
                 }
                 Loader {
                     width: parent.width

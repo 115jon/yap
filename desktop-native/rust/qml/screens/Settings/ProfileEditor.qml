@@ -335,6 +335,7 @@ T.Popup {
                     effect: Session.meEffect
                     frame: Session.meFrame
                     nameStyle: editor.nameStyle
+                    badges: Settings.badges
                     animate: editor.visible
                     name: Settings.name
                     username: Settings.username

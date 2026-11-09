@@ -12,6 +12,7 @@ pub mod game_activity;
 pub mod opcode;
 pub mod payload;
 pub mod rest;
+pub mod tiers;
 pub mod voice_app;
 
 pub use frame::Frame;

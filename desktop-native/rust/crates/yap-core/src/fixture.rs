@@ -162,6 +162,8 @@ impl Fixture {
             | ApiRequest::DeleteBanner
             | ApiRequest::DeleteNameplate
             | ApiRequest::RevokeShare { .. } => ApiResponse::Done,
+            // Billing is off, as on a server without Stripe.
+            ApiRequest::BillingStatus => ApiResponse::BillingStatus(false),
             // No pins, no windows; a thread is empty.
             ApiRequest::Threads(request) => ApiResponse::Threads(
                 request

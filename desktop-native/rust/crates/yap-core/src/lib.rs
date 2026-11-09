@@ -10,11 +10,14 @@
 pub mod admin;
 pub mod api;
 pub mod auth;
+pub mod badges;
+pub mod chunked;
 pub mod collectibles;
 pub mod color;
 pub mod command_menu;
 pub mod config;
 pub mod custom_sounds;
+pub mod entitlements;
 pub mod emoji;
 pub mod faults;
 pub mod fixture;

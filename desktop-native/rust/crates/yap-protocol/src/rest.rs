@@ -257,6 +257,23 @@ pub struct User {
     /// last said.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presence_platforms: Option<Vec<String>>,
+    /// The plan: in full from `GET /api/users/me`, `{tier}` from a profile;
+    /// `None` (free) when absent or unreadable ([`crate::tiers`]). Boxed:
+    /// most users in a list carry none.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::tiers::lenient_entitlement"
+    )]
+    pub entitlement: Option<Box<crate::tiers::Entitlement>>,
+    /// The awards (users/me and profiles), as sent; the core keeps the
+    /// known ids in their order.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::tiers::lenient_badges"
+    )]
+    pub badges: Option<Vec<crate::tiers::UserBadge>>,
 }
 
 /// The signed-in user.

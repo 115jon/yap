@@ -268,8 +268,12 @@ pub struct Runner {
     calls: HashMap<CallId, UnboundedSender<VoiceCommand>>,
     /// The running device sign-in, and what wakes its poll early.
     sign_in: Option<(JoinHandle<()>, Arc<Notify>)>,
-    /// Uploads in flight, so a cancel can stop them.
-    uploads: HashMap<RequestId, JoinHandle<()>>,
+    /// Uploads in flight, so a cancel can stop them (and abort a chunked
+    /// one on the server).
+    uploads: HashMap<RequestId, UploadTask>,
+    /// Where chunked uploads keep their ids for a resume (opened on first
+    /// use: the profile's `chunked-uploads.json`).
+    resume: Option<Arc<dyn crate::chunked::ResumeStore>>,
     startup_marks: Vec<&'static str>,
     /// View updates since the last flush.
     batch: Vec<ViewUpdate>,
@@ -294,6 +298,17 @@ pub struct Runner {
 }
 
 impl Runner {
+    /// The chunked uploads' saved ids: the profile's file, else (no data
+    /// folder) memory, so uploads still work without resume.
+    fn resume_store(&mut self) -> Arc<dyn crate::chunked::ResumeStore> {
+        Arc::clone(self.resume.get_or_insert_with(|| {
+            match crate::chunked::FileResumeStore::for_profile() {
+                Some(store) => Arc::new(store),
+                None => Arc::new(crate::chunked::MemoryResumeStore::default()),
+            }
+        }))
+    }
+
     /// Must be called inside a Tokio runtime (it spawns the keyring worker).
     pub fn new(
         http: reqwest::Client,
@@ -315,6 +330,7 @@ impl Runner {
             calls: HashMap::new(),
             sign_in: None,
             uploads: HashMap::new(),
+            resume: None,
             startup_marks: Vec::new(),
             batch: Vec::new(),
             fixture: None,
@@ -674,15 +690,27 @@ impl Runner {
                 path,
                 name,
                 content_type,
+                limit,
             } => {
-                self.uploads.retain(|_, task| !task.is_finished());
+                self.uploads.retain(|_, task| !task.handle.is_finished());
                 let api = Api::new(self.http.clone(), token);
                 let inbox = self.inbox.clone();
+                let chunk = Arc::new(ChunkState::default());
+                let resume = self.resume_store();
+                let job = UploadJob {
+                    api,
+                    channel_id,
+                    path: PathBuf::from(path),
+                    name,
+                    content_type,
+                    limit,
+                    id,
+                };
+                let state = Arc::clone(&chunk);
                 let task = tokio::spawn(async move {
-                    let path = std::path::PathBuf::from(path);
-                    let target = format!("/api/channels/{channel_id}/messages/upload");
+                    let path = job.path.clone();
                     let pasted = is_pasted_copy(&path).then(|| path.clone());
-                    let result = upload(&api, &target, path, name, content_type, id, &inbox).await;
+                    let result = upload_attachment(job, resume, state, &inbox).await;
                     // A pasted picture is a temp copy; a failed upload keeps
                     // it for the retry (startup prunes what is left).
                     if let (Some(copy), true) = (pasted, result.is_ok()) {
@@ -695,11 +723,32 @@ impl Runner {
                     });
                     let _ = inbox.send(Input::Http { id, result });
                 });
-                self.uploads.insert(id, task);
+                self.uploads.insert(
+                    id,
+                    UploadTask {
+                        handle: task,
+                        chunk,
+                    },
+                );
             }
             Effect::CancelUpload(id) => {
                 if let Some(task) = self.uploads.remove(&id) {
-                    task.abort();
+                    task.handle.abort();
+                    // A chunked upload under way: forget its saved id and
+                    // abort it on the server (multipart-upload.ts on abort).
+                    let known = lock(&task.chunk.session).take();
+                    if let Some((transport, key, upload_id)) = known {
+                        let store = self.resume_store();
+                        tokio::spawn(async move {
+                            crate::chunked::cancel(
+                                transport.as_ref(),
+                                store.as_ref(),
+                                &key,
+                                &upload_id,
+                            )
+                            .await;
+                        });
+                    }
                 }
             }
             Effect::Download {
@@ -983,6 +1032,114 @@ fn is_pasted_copy(path: &Path) -> bool {
 /// Chunks an upload is streamed in; progress is reported per chunk.
 const UPLOAD_CHUNK: usize = 64 * 1024;
 
+/// One attachment upload in flight.
+struct UploadTask {
+    handle: JoinHandle<()>,
+    chunk: Arc<ChunkState>,
+}
+
+/// What a cancel needs to abort a chunked upload on the server: its
+/// transport, resume key and id, once the engine has one.
+type ChunkSession = (Arc<dyn crate::chunked::Transport>, String, String);
+
+#[derive(Default)]
+struct ChunkState {
+    session: std::sync::Mutex<Option<ChunkSession>>,
+}
+
+fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+struct UploadJob {
+    api: Api,
+    channel_id: String,
+    path: PathBuf,
+    name: String,
+    content_type: String,
+    limit: u64,
+    id: RequestId,
+}
+
+/// Progress reports for a chunked upload are at least this far apart (the
+/// last one always goes).
+const CHUNKED_PROGRESS_EVERY: Duration = Duration::from_millis(100);
+
+/// An attachment: files of 16 MB and up in parts (resumable, three at a
+/// time), smaller ones as one multipart request. Over `limit` it is
+/// refused before anything is sent, with the server's own wording.
+async fn upload_attachment(
+    job: UploadJob,
+    resume: Arc<dyn crate::chunked::ResumeStore>,
+    state: Arc<ChunkState>,
+    inbox: &UnboundedSender<Input>,
+) -> Result<Value, crate::api::ApiError> {
+    use crate::chunked::{self, ApiTransport, FileInfo, Options};
+    let meta = tokio::fs::metadata(&job.path)
+        .await
+        .map_err(|error| crate::api::ApiError::Network(error.to_string()))?;
+    let size = meta.len();
+    if !crate::limits::uses_multipart(size) {
+        let cap = job.limit.min(crate::limits::WORKER_UPLOAD_CAP);
+        let target = format!("/api/channels/{}/messages/upload", job.channel_id);
+        return upload(
+            &job.api,
+            &target,
+            job.path,
+            job.name,
+            job.content_type,
+            job.id,
+            cap,
+            inbox,
+        )
+        .await;
+    }
+    check_size(&job.path, job.limit).await?;
+    let modified_ms = meta
+        .modified()
+        .ok()
+        .and_then(|at| at.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(0));
+    let key = chunked::resume_key(
+        &job.channel_id,
+        &job.path.to_string_lossy(),
+        size,
+        modified_ms,
+    );
+    let transport: Arc<dyn chunked::Transport> = Arc::new(ApiTransport::new(
+        job.api.clone(),
+        &job.channel_id,
+        &job.path,
+    ));
+    let file = FileInfo {
+        path: job.path.clone(),
+        name: job.name,
+        size,
+        content_type: job.content_type,
+    };
+    let mut options = Options::new(Arc::clone(&transport), resume, key.clone());
+    let id = job.id;
+    let progress = inbox.clone();
+    let last = Arc::new(std::sync::Mutex::new(None::<Instant>));
+    options.on_progress = Arc::new(move |loaded, total| {
+        let now = Instant::now();
+        let mut last = lock(&last);
+        let due = last.is_none_or(|at| now.duration_since(at) >= CHUNKED_PROGRESS_EVERY);
+        if due || loaded >= total {
+            *last = Some(now);
+            let _ = progress.send(Input::UploadProgress { id, sent: loaded });
+        }
+    });
+    options.on_session = Arc::new(move |upload_id| {
+        *lock(&state.session) = Some((Arc::clone(&transport), key.clone(), upload_id.to_owned()));
+    });
+    chunked::upload_in_parts(&file, &options)
+        .await
+        .map_err(chunked::UploadError::into_api_error)
+}
+
 /// Progress reports are at least this far apart (bytes, as thousandths).
 const PROGRESS_STEP: u64 = 10;
 
@@ -1005,6 +1162,7 @@ async fn check_size(path: &Path, cap: u64) -> Result<(), crate::api::ApiError> {
 
 /// Reads the file and posts it as multipart `file`, reporting the bytes
 /// handed to the connection as they go.
+#[allow(clippy::too_many_arguments)]
 async fn upload(
     api: &Api,
     target: &str,
@@ -1012,10 +1170,11 @@ async fn upload(
     name: String,
     content_type: String,
     id: RequestId,
+    cap: u64,
     inbox: &UnboundedSender<Input>,
 ) -> Result<Value, crate::api::ApiError> {
     use futures_util::StreamExt;
-    check_size(&path, crate::store::view::media::MAX_UPLOAD_BYTES).await?;
+    check_size(&path, cap).await?;
     let read = tokio::task::spawn_blocking(move || std::fs::read(path)).await;
     let bytes = match read {
         Ok(Ok(bytes)) => bytes,
@@ -1186,7 +1345,8 @@ async fn profile_upload(
     api.upload(asset.path(), form.part("file", part)).await
 }
 
-/// Fetches `url` into `dest`, creating its folder (at most 25 MB).
+/// Fetches `url` into `dest`, creating its folder (at most 500 MB, the
+/// largest attachment).
 async fn download(api: &Api, url: &str, dest: String) -> Result<(), crate::api::ApiError> {
     api.download(url, Path::new(&dest), crate::api::MAX_DOWNLOAD_BYTES)
         .await
