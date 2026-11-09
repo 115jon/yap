@@ -257,6 +257,7 @@ function DesktopUserProfileModal({
             <ProfileSections
               gameActivity={gameActivity}
               bio={resolvedUser.bio}
+              connections={resolvedUser.connections}
               bioMarkdown
               roles={
                 roles.length > 0 ? <ProfileRoleChips roles={roles} /> : null

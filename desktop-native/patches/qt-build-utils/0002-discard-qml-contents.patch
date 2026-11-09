@@ -1,0 +1,51 @@
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -437,7 +437,47 @@ impl QtBuild {
+                 .map(|qml_file| qml_file.get_path().to_path_buf())
+                 .collect();
+ 
+-            let rcc = self.rcc().compile(&qrc_path);
++            // Yap patch (desktop-native/patches/qt-build-utils): with
++            // QT_BUILD_UTILS_DISCARD_QML_CONTENTS=1, what qt_add_qml_module's
++            // DISCARD_QML_CONTENTS (Qt 6.8) does: every .qml file stays in the
++            // resources, at its path, but empty. qmlcachegen compiled each one
++            // (to C++ or to bytecode) and the engine loads that, never the
++            // text. qmlcachegen above still read the real qrc.
++            let rcc_qrc_path = if std::env::var("QT_BUILD_UTILS_DISCARD_QML_CONTENTS")
++                .is_ok_and(|value| value == "1")
++                && !qmlcachegen_file_paths.is_empty()
++            {
++                let empty = qml_module_dir.join("discarded.qml");
++                std::fs::write(&empty, "").expect("Could not write the empty QML file");
++                let empty = std::fs::canonicalize(&empty)
++                    .expect("Could not canonicalize the empty QML file")
++                    .display()
++                    .to_string();
++                let text = std::fs::read_to_string(&qrc_path).expect("Could not read the qrc file");
++                let discarded = text
++                    .lines()
++                    .map(|line| match (line.find("alias=\""), line.find("\">"), line.rfind("</file>")) {
++                        (Some(_), Some(open), Some(close))
++                            if line[..close].ends_with(".qml") =>
++                        {
++                            format!("{}\">{empty}</file>", &line[..open])
++                        }
++                        _ => line.to_owned(),
++                    })
++                    .collect::<Vec<_>>()
++                    .join("
++");
++                // Same file name, another folder: rcc names the resource's
++                // init function after it.
++                let dir = qml_module_dir.join("discarded");
++                std::fs::create_dir_all(&dir).expect("Could not create the qrc folder");
++                let path = dir.join(qrc_path.file_name().expect("qrc file name"));
++                std::fs::write(&path, discarded).expect("Could not write the qrc file");
++                path
++            } else {
++                qrc_path.clone()
++            };
++            let rcc = self.rcc().compile(&rcc_qrc_path);
+             QmlModuleRegistrationFiles {
+                 // The rcc file is automatically initialized when importing the plugin.
+                 // so we don't need to treat it like an initializer here.

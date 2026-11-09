@@ -1,0 +1,36 @@
+--- a/src/tool/qmlcachegen.rs
++++ b/src/tool/qmlcachegen.rs
+@@ -73,7 +73,7 @@
+ 
+         let qml_resource_path = format!("/qt/qml/{qml_uri_dirs}/{}", file.as_ref().display());
+ 
+-        let specific_args = vec![
++        let mut specific_args = vec![
+             "--resource-path".to_owned(),
+             qml_resource_path.clone(),
+             "-o".to_owned(),
+@@ -83,6 +83,24 @@
+                 .to_string_lossy()
+                 .into_owned(),
+         ];
++        // Yap patch (desktop-native/patches/qt-build-utils): bytecode only,
++        // no C++, for the files named in QT_BUILD_UTILS_QMLCACHEGEN_BYTECODE_ONLY
++        // (';'-separated: a file path suffix, a folder ending in '/', or "*").
++        if let Ok(list) = std::env::var("QT_BUILD_UTILS_QMLCACHEGEN_BYTECODE_ONLY") {
++            let path = file.as_ref().to_string_lossy().replace('\\', "/");
++            if list
++                .split(';')
++                .map(str::trim)
++                .filter(|entry| !entry.is_empty())
++                .any(|entry| {
++                    entry == "*"
++                        || (entry.ends_with('/') && path.contains(entry))
++                        || path.ends_with(entry)
++                })
++            {
++                specific_args.insert(0, "--only-bytecode".to_owned());
++            }
++        }
+ 
+         let cmd = Command::new(&self.executable)
+             .args(common_args.iter().chain(&specific_args))

@@ -1,0 +1,18 @@
+{
+  "op": 15,
+  "d": {
+    "action": "join",
+    "participant": {
+      "id": "pid_fixture_carol",
+      "user_id": "user_fixture_carol",
+      "name": "Carol",
+      "username": "carol",
+      "display_name": null,
+      "avatar_url": null,
+      "self_mute": true,
+      "self_deaf": false,
+      "self_video": false,
+      "self_stream": false
+    }
+  }
+}

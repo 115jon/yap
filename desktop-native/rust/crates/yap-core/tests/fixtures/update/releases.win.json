@@ -1,0 +1,37 @@
+{
+  "Assets": [
+    {
+      "PackageId": "Yap.App",
+      "Version": "0.2.22",
+      "Type": "Full",
+      "FileName": "Yap.App-0.2.22-full.nupkg",
+      "SHA1": "FEE32754FA6390D2193B4F40D2ECD4522C65C4AF",
+      "SHA256": "A769D75DEFFC2E02744DCE266EADA571D4E2B45C955C3376B6E9DDCF3436B179",
+      "Size": 37373156,
+      "NotesMarkdown": "",
+      "NotesHtml": ""
+    },
+    {
+      "PackageId": "Yap.App",
+      "Version": "0.2.23",
+      "Type": "Full",
+      "FileName": "Yap.App-0.2.23-full.nupkg",
+      "SHA1": "2A1C0F3E52E1A2B4F44C1E0D8B1C6F2E4A9D7B10",
+      "SHA256": "5D41402ABC4B2A76B9719D911017C592E3B0C44298FC1C149AFBF4C8996FB924",
+      "Size": 37401870,
+      "NotesMarkdown": "## What's new\n\n- Updates install from inside the app.",
+      "NotesHtml": "<h2>What's new</h2>\n<ul>\n<li>Updates install from inside the app.</li>\n</ul>"
+    },
+    {
+      "PackageId": "Yap.App",
+      "Version": "0.2.23",
+      "Type": "Delta",
+      "FileName": "Yap.App-0.2.23-delta.nupkg",
+      "SHA1": "9B71D224BD62F3785D96D46AD3EA3D73319BFBC2",
+      "SHA256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "Size": 4128833,
+      "NotesMarkdown": "## What's new\n\n- Updates install from inside the app.",
+      "NotesHtml": ""
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+[package]
+name = "yap-webm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "WebM playback for the native client: VP8/VP9 (with the WebM alpha side stream nameplates use) demuxed with webm-iterable, decoded by the libvpx inside LiveKit's webrtc.lib, scaled and converted with its libyuv, paced on a thread of its own. No Qt; frames go to a sink."
+
+[features]
+default = []
+# Decoding through the libvpx and libyuv that LiveKit's `webrtc.lib` already
+# carries. This crate only declares the symbols; the final executable links
+# `webrtc.lib` (the app does, through yap-voice). Off, a player fails with
+# "WebM decoding is not built in". The build script links `webrtc.lib` into
+# this crate's own tests when it can find it (LK_CUSTOM_WEBRTC or
+# YAP_LIBWEBRTC_DIR).
+libvpx = []
+
+[dependencies]
+thiserror.workspace = true
+webm-iterable = { version = "0.7.1", default-features = false }
+
+[lints]
+workspace = true

@@ -1,0 +1,510 @@
+#include "windowchrome.h"
+
+#include <QtCore/QElapsedTimer>
+#include <QtCore/QEventLoop>
+#include <QtGui/qpa/qwindowsysteminterface.h>
+#include <QtQuick/QQuickWindow>
+
+#include <cstdio>
+
+#ifdef Q_OS_WIN
+#include <dwmapi.h>
+#include <windows.h>
+#include <windowsx.h>
+#include <commctrl.h>
+#endif
+
+WindowChrome::WindowChrome(QObject* parent)
+  : QObject(parent)
+{
+}
+
+#ifdef Q_OS_WIN
+// Ahead of Qt's window procedure (WM_PAINT from a move/size loop never
+// reaches an application event filter): the WM_PAINT a resize queues
+// after its WM_WINDOWPOSCHANGED, when renderResize() already presented
+// that size, only validates. Qt would render and present the same frame
+// again, and that second Present waits for the first to reach the screen
+// (a vblank per resize step).
+static LRESULT CALLBACK chromeSubclass(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam,
+                                       UINT_PTR, DWORD_PTR data)
+{
+  auto* chrome = reinterpret_cast<WindowChrome*>(data);
+  if (message == WM_PAINT && chrome->takePresentedResize(GetTickCount64())) {
+    PAINTSTRUCT ps;
+    BeginPaint(hwnd, &ps);
+    EndPaint(hwnd, &ps);
+    return 0;
+  }
+  if (message == WM_NCDESTROY)
+    RemoveWindowSubclass(hwnd, chromeSubclass, 1);
+  return DefSubclassProc(hwnd, message, wParam, lParam);
+}
+#endif
+
+void WindowChrome::attach(QQuickWindow* window)
+{
+#ifdef Q_OS_WIN
+  const HWND hwnd = reinterpret_cast<HWND>(window->winId());
+  m_window = window;
+  m_hwnd = reinterpret_cast<quintptr>(hwnd);
+  m_dpi = GetDpiForWindow(hwnd);
+  m_syncResize = qEnvironmentVariable("YAP_RESIZE_SYNC") != QLatin1String("0");
+  m_eraseBackground = qEnvironmentVariable("YAP_RESIZE_ERASE") != QLatin1String("0");
+  m_debugResize = qEnvironmentVariableIntValue("YAP_DEBUG_RESIZE") != 0;
+  // Counts finished frames, so a resize knows whether Qt already drew the
+  // new size (a shrink: Qt's own expose) or it still has to.
+  connect(window, &QQuickWindow::afterFrameEnd, this, [this] { ++m_framesEnded; },
+          Qt::DirectConnection);
+  SetWindowSubclass(hwnd, chromeSubclass, 1, reinterpret_cast<DWORD_PTR>(this));
+  applyFrameColors();
+  // Re-run WM_NCCALCSIZE now that the filter is in place.
+  SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+               SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                 SWP_NOACTIVATE);
+#else
+  m_window = window;
+#endif
+}
+
+void WindowChrome::setTitleBar(QQuickItem* item)
+{
+  if (m_titleBar == item)
+    return;
+  m_titleBar = item;
+  emit titleBarChanged();
+}
+
+void WindowChrome::setMinimizeButton(QQuickItem* item)
+{
+  if (m_minimizeButton == item)
+    return;
+  m_minimizeButton = item;
+  emit buttonsChanged();
+}
+
+void WindowChrome::setMaximizeButton(QQuickItem* item)
+{
+  if (m_maximizeButton == item)
+    return;
+  m_maximizeButton = item;
+  emit buttonsChanged();
+}
+
+void WindowChrome::setCloseButton(QQuickItem* item)
+{
+  if (m_closeButton == item)
+    return;
+  m_closeButton = item;
+  emit buttonsChanged();
+}
+
+void WindowChrome::setHitTestVisible(QQuickItem* item, bool visible)
+{
+  m_hitTestVisible.removeIf(
+    [item](const QPointer<QQuickItem>& p) { return !p || p == item; });
+  if (visible && item)
+    m_hitTestVisible.append(item);
+}
+
+void WindowChrome::setDark(bool dark)
+{
+  if (m_dark == dark)
+    return;
+  m_dark = dark;
+  applyFrameColors();
+  emit darkChanged();
+}
+
+void WindowChrome::setBorderColor(const QColor& color)
+{
+  if (m_borderColor == color)
+    return;
+  m_borderColor = color;
+  applyFrameColors();
+  emit borderColorChanged();
+}
+
+void WindowChrome::setHoveredButton(int button)
+{
+  if (m_hoveredButton == button)
+    return;
+  m_hoveredButton = button;
+  emit hoveredButtonChanged();
+}
+
+void WindowChrome::setPressedButton(int button)
+{
+  if (m_pressedButton == button)
+    return;
+  m_pressedButton = button;
+  emit pressedButtonChanged();
+}
+
+int WindowChrome::buttonAt(const QPointF& scenePos) const
+{
+#ifdef Q_OS_WIN
+  if (contains(m_minimizeButton, scenePos))
+    return HTMINBUTTON;
+  if (contains(m_maximizeButton, scenePos))
+    return HTMAXBUTTON;
+  if (contains(m_closeButton, scenePos))
+    return HTCLOSE;
+#else
+  Q_UNUSED(scenePos);
+#endif
+  return 0;
+}
+
+void WindowChrome::toggleMaximized()
+{
+  if (!m_window)
+    return;
+#ifdef Q_OS_WIN
+  const HWND hwnd = reinterpret_cast<HWND>(m_hwnd);
+  ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+#else
+  if (m_window->visibility() == QWindow::Maximized)
+    m_window->showNormal();
+  else
+    m_window->showMaximized();
+#endif
+}
+
+void WindowChrome::applyFrameColors()
+{
+#ifdef Q_OS_WIN
+  if (!m_hwnd)
+    return;
+  const HWND hwnd = reinterpret_cast<HWND>(m_hwnd);
+  const BOOL dark = m_dark;
+  DwmSetWindowAttribute(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark,
+                        sizeof dark);
+  const COLORREF border = RGB(m_borderColor.red(), m_borderColor.green(),
+                              m_borderColor.blue());
+  DwmSetWindowAttribute(hwnd, 34 /* DWMWA_BORDER_COLOR */, &border,
+                        sizeof border);
+#endif
+}
+
+QSize WindowChrome::scaledWindowSize(unsigned newDpi) const
+{
+#ifdef Q_OS_WIN
+  const HWND hwnd = reinterpret_cast<HWND>(m_hwnd);
+  RECT client{};
+  GetClientRect(hwnd, &client);
+  const UINT oldDpi = m_dpi ? m_dpi : GetDpiForWindow(hwnd);
+  const int frameX = GetSystemMetricsForDpi(SM_CXFRAME, newDpi) +
+                     GetSystemMetricsForDpi(SM_CXPADDEDBORDER, newDpi);
+  const int frameY = GetSystemMetricsForDpi(SM_CYFRAME, newDpi) +
+                     GetSystemMetricsForDpi(SM_CXPADDEDBORDER, newDpi);
+  return QSize(MulDiv(client.right, int(newDpi), int(oldDpi)) + 2 * frameX,
+               MulDiv(client.bottom, int(newDpi), int(oldDpi)) + frameY);
+#else
+  Q_UNUSED(newDpi);
+  return {};
+#endif
+}
+
+void WindowChrome::renderResize()
+{
+#ifdef Q_OS_WIN
+  // WM_SIZE has queued the new geometry. Deliver it now (the QML layout
+  // follows), then draw and present a frame at that size before
+  // SetWindowPos returns, so DWM gets the window's new bounds and its new
+  // content together. Qt alone draws a grown window only at the WM_PAINT
+  // that comes once the move loop is idle again, and a shrunk one at the
+  // next pass of the event loop: until then DWM shows the old frame
+  // pinned to the top left, next to a strip nothing has drawn.
+  const quint64 before = m_framesEnded;
+  QWindowSystemInterface::flushWindowSystemEvents(QEventLoop::ExcludeUserInputEvents);
+  if (!m_window || !m_window->isExposed())
+    return;
+  if (m_framesEnded == before) {
+    QWindowSystemInterface::handleExposeEvent<QWindowSystemInterface::SynchronousDelivery>(
+      m_window, QRect(QPoint(), m_window->size()));
+  }
+  // Drawn: the WM_PAINT this resize queues would only draw it again.
+  if (m_framesEnded != before) {
+    ValidateRect(reinterpret_cast<HWND>(m_hwnd), nullptr);
+    m_presentedResize = GetTickCount64();
+  }
+#endif
+}
+
+void WindowChrome::eraseBackground(void* hdc)
+{
+#ifdef Q_OS_WIN
+  const QRgb rgb = m_window ? m_window->color().rgb() : qRgb(0, 0, 0);
+  if (!m_groundBrush || rgb != m_groundRgb) {
+    if (m_groundBrush)
+      DeleteObject(static_cast<HBRUSH>(m_groundBrush));
+    m_groundBrush = CreateSolidBrush(RGB(qRed(rgb), qGreen(rgb), qBlue(rgb)));
+    m_groundRgb = rgb;
+  }
+  RECT client{};
+  GetClientRect(reinterpret_cast<HWND>(m_hwnd), &client);
+  FillRect(static_cast<HDC>(hdc), &client, static_cast<HBRUSH>(m_groundBrush));
+#else
+  Q_UNUSED(hdc);
+#endif
+}
+
+bool WindowChrome::contains(QQuickItem* item, const QPointF& scenePos) const
+{
+  if (!item || !item->isVisible())
+    return false;
+  return item->contains(item->mapFromScene(scenePos));
+}
+
+#ifdef Q_OS_WIN
+static bool isCaptionKey(WPARAM hit)
+{
+  return hit == HTMINBUTTON || hit == HTMAXBUTTON || hit == HTCLOSE;
+}
+#endif
+
+bool WindowChrome::nativeEventFilter(const QByteArray& eventType,
+                                     void* message, qintptr* result)
+{
+#ifdef Q_OS_WIN
+  if (!m_hwnd || !m_window || eventType != "windows_generic_MSG")
+    return false;
+  MSG* msg = static_cast<MSG*>(message);
+  const HWND hwnd = reinterpret_cast<HWND>(m_hwnd);
+  if (msg->hwnd != hwnd)
+    return false;
+  // A posted message (the WM_NCLBUTTON* a caption key gets) reaches the
+  // filter first from the event dispatcher's message loop, which passes no
+  // result; consuming it there skips the dispatch. Only messages sent to
+  // the window procedure come with one.
+  qintptr unused = 0;
+  if (!result)
+    result = &unused;
+
+  const UINT dpi = GetDpiForWindow(hwnd);
+  // The resize border Windows uses: frame plus padded border, per DPI.
+  const int frameY = GetSystemMetricsForDpi(SM_CYFRAME, dpi) +
+                     GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+
+  switch (msg->message) {
+    // A monitor with another scale: keep the client's logical size exact.
+    // Qt scales the whole frame by the DPI ratio, but Windows rounds the
+    // resize border per DPI (8 px at 96, 9 at 120, 11 at 168), so each move
+    // between monitors grew or shrank the client by a pixel or two. The
+    // size comes from the client and the new DPI's own border; our frame
+    // has no top edge (WM_NCCALCSIZE below).
+    case WM_GETDPISCALEDSIZE: {
+      if (IsZoomed(hwnd) || IsIconic(hwnd) ||
+          m_window->visibility() == QWindow::FullScreen)
+        return false;
+      const QSize size = scaledWindowSize(unsigned(msg->wParam));
+      *reinterpret_cast<SIZE*>(msg->lParam) = SIZE{ size.width(), size.height() };
+      *result = TRUE;
+      return true;
+    }
+    case WM_DPICHANGED: {
+      // Qt applies the suggested rectangle; make its size the exact one
+      // too (a programmatic move gets a linearly scaled one).
+      const UINT oldDpi = m_dpi ? m_dpi : dpi;
+      const UINT newDpi = HIWORD(msg->wParam);
+      if (!IsZoomed(hwnd) && !IsIconic(hwnd) &&
+          m_window->visibility() != QWindow::FullScreen) {
+        auto* rect = reinterpret_cast<RECT*>(msg->lParam);
+        const QSize size = scaledWindowSize(newDpi);
+        rect->right = rect->left + size.width();
+        rect->bottom = rect->top + size.height();
+        // A DPI change from Qt's own setGeometry (the saved rect restored
+        // onto another monitor) keeps Qt's rect, which it framed with the
+        // old DPI's border: the client comes out a few pixels short. Once
+        // Qt is done, put the border it assumed back to the new one.
+        const RECT suggested = *rect;
+        QMetaObject::invokeMethod(
+          this,
+          [hwnd, suggested, oldDpi, newDpi] {
+            RECT now{};
+            GetWindowRect(hwnd, &now);
+            if (IsZoomed(hwnd) || IsIconic(hwnd) || EqualRect(&now, &suggested) ||
+                GetDpiForWindow(hwnd) != newDpi)
+              return;
+            const auto border = [](UINT d, int metric) {
+              return GetSystemMetricsForDpi(metric, d) +
+                     GetSystemMetricsForDpi(SM_CXPADDEDBORDER, d);
+            };
+            const int oldX = border(oldDpi, SM_CXFRAME);
+            const int newX = border(newDpi, SM_CXFRAME);
+            const int oldY = border(oldDpi, SM_CYFRAME);
+            const int newY = border(newDpi, SM_CYFRAME);
+            if (oldX == newX && oldY == newY)
+              return;
+            SetWindowPos(hwnd, nullptr, now.left + oldX - newX, now.top,
+                         now.right - now.left - 2 * oldX + 2 * newX,
+                         now.bottom - now.top - oldY + newY,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+          },
+          Qt::QueuedConnection);
+      }
+      m_dpi = newDpi;
+      return false;
+    }
+
+    case WM_NCCALCSIZE: {
+      if (!msg->wParam)
+        return false;
+      // Let Windows size the frame, then give the caption to the client.
+      auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(msg->lParam);
+      const LONG top = params->rgrc[0].top;
+      const LRESULT r =
+        DefWindowProcW(hwnd, msg->message, msg->wParam, msg->lParam);
+      if (r != 0) {
+        *result = r;
+        return true;
+      }
+      params->rgrc[0].top = top;
+      // Maximised, the frame hangs off the monitor: inset it like the sides.
+      if (IsZoomed(hwnd))
+        params->rgrc[0].top += frameY;
+      *result = 0;
+      return true;
+    }
+
+    // Where no frame has reached yet (a grown window before its first
+    // frame at the new size), DWM shows the redirection surface. Qt leaves
+    // it unpainted, so those strips showed through (white, or what was
+    // behind); paint it the window colour.
+    case WM_ERASEBKGND:
+      if (!m_eraseBackground)
+        return false;
+      eraseBackground(reinterpret_cast<void*>(msg->wParam));
+      *result = 1;
+      return true;
+
+    case WM_WINDOWPOSCHANGED: {
+      const auto* pos = reinterpret_cast<const WINDOWPOS*>(msg->lParam);
+      m_presentedResize = 0;
+      if (!m_syncResize || m_inResize || (pos->flags & SWP_NOSIZE) || IsIconic(hwnd))
+        return false;
+      // Inside Qt's own WM_DPICHANGED handling (its SetWindowPos to the new
+      // rect) the window's scale is not Qt's yet: leave that resize to Qt.
+      if (qRound(m_window->devicePixelRatio() * USER_DEFAULT_SCREEN_DPI) != int(GetDpiForWindow(hwnd)))
+        return false;
+      // DefWindowProc turns this into WM_SIZE and WM_MOVE (Qt's), then the
+      // new size is drawn here.
+      m_inResize = true;
+      QElapsedTimer timer;
+      timer.start();
+      *result = DefWindowProcW(hwnd, msg->message, msg->wParam, msg->lParam);
+      const qint64 tDef = timer.nsecsElapsed();
+      // The surface first: the WM_PAINT that would erase it is validated
+      // away once the frame is drawn.
+      if (m_eraseBackground) {
+        if (HDC dc = GetDC(hwnd)) {
+          eraseBackground(dc);
+          ReleaseDC(hwnd, dc);
+        }
+      }
+      const qint64 tErase = timer.nsecsElapsed();
+      const quint64 framesBefore = m_framesEnded;
+      renderResize();
+      if (m_debugResize)
+        std::fprintf(stderr, "[resize] %dx%d def %.2f erase %.2f render %.2f ms (%d frames)\n",
+                     pos->cx, pos->cy, tDef / 1e6, (tErase - tDef) / 1e6,
+                     (timer.nsecsElapsed() - tErase) / 1e6, int(m_framesEnded - framesBefore));
+      m_inResize = false;
+      return true;
+    }
+
+    case WM_NCHITTEST: {
+      const LRESULT def =
+        DefWindowProcW(hwnd, msg->message, msg->wParam, msg->lParam);
+      if (def != HTCLIENT) {
+        *result = def;
+        return true;
+      }
+      POINT pt{ GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam) };
+      ScreenToClient(hwnd, &pt);
+      RECT client{};
+      GetClientRect(hwnd, &client);
+      // The top resize band lives inside the client now.
+      if (!IsZoomed(hwnd) && pt.y < frameY) {
+        const int frameX = GetSystemMetricsForDpi(SM_CXFRAME, dpi) +
+                           GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+        *result = pt.x < frameX                   ? HTTOPLEFT
+                  : pt.x >= client.right - frameX ? HTTOPRIGHT
+                                                  : HTTOP;
+        return true;
+      }
+      const qreal ratio = m_window->devicePixelRatio();
+      const QPointF scenePos(pt.x / ratio, pt.y / ratio);
+      if (const int button = buttonAt(scenePos)) {
+        *result = button;
+        return true;
+      }
+      for (const auto& item : std::as_const(m_hitTestVisible)) {
+        if (contains(item, scenePos)) {
+          *result = HTCLIENT;
+          return true;
+        }
+      }
+      *result = contains(m_titleBar, scenePos) ? HTCAPTION : HTCLIENT;
+      return true;
+    }
+
+    // Over a caption key Windows sends non-client mouse messages; mirror
+    // them into QML and click the key ourselves (the default would draw and
+    // track a classic caption button).
+    case WM_NCMOUSEMOVE: {
+      const int over = isCaptionKey(msg->wParam) ? int(msg->wParam) : 0;
+      if (over && m_hoveredButton != over) {
+        TRACKMOUSEEVENT track{ sizeof(TRACKMOUSEEVENT),
+                               TME_LEAVE | TME_NONCLIENT, hwnd, 0 };
+        TrackMouseEvent(&track);
+      }
+      setHoveredButton(over);
+      if (over != m_pressedButton)
+        setPressedButton(0);
+      return false;
+    }
+    case WM_LBUTTONDOWN: {
+      const qreal ratio = m_window->devicePixelRatio();
+      m_lastPress = QPointF(GET_X_LPARAM(msg->lParam) / ratio,
+                            GET_Y_LPARAM(msg->lParam) / ratio);
+      setHoveredButton(0);
+      setPressedButton(0);
+      return false;
+    }
+    case WM_NCMOUSELEAVE:
+    case WM_MOUSEMOVE:
+      setHoveredButton(0);
+      setPressedButton(0);
+      return false;
+    case WM_NCLBUTTONDOWN:
+    case WM_NCLBUTTONDBLCLK:
+      if (!isCaptionKey(msg->wParam))
+        return false;
+      setPressedButton(int(msg->wParam));
+      *result = 0;
+      return true;
+    case WM_NCLBUTTONUP: {
+      if (!isCaptionKey(msg->wParam))
+        return false;
+      const int button = int(msg->wParam);
+      if (m_pressedButton == button) {
+        setPressedButton(0);
+        if (button == HTMAXBUTTON)
+          toggleMaximized();
+        emit buttonClicked(button);
+      }
+      *result = 0;
+      return true;
+    }
+    default:
+      return false;
+  }
+#else
+  Q_UNUSED(eventType);
+  Q_UNUSED(message);
+  Q_UNUSED(result);
+  return false;
+#endif
+}

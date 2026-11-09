@@ -35,6 +35,7 @@ import {
   PROFILE_EFFECT_STAGE_HEIGHT,
   PROFILE_EFFECT_STAGE_WIDTH,
 } from "@/components/chat/ProfileCollectiblesLayer";
+import { ProfileConnectionList } from "@/components/chat/ProfileConnections";
 import { ProfileDisplayName } from "@/components/chat/ProfileDisplayName";
 import { ProfileSurfaceShell } from "@/components/chat/ProfileSurfaceShell";
 import {
@@ -68,6 +69,7 @@ import { getDisplayInitial, getDisplayName } from "@/lib/display-name";
 import type { GameActivity } from "@/lib/gateway-protocol";
 import { getAuthAssetUrl } from "@/lib/platform";
 import type { UserBadge } from "@/lib/badges";
+import type { PublicConnection } from "@/lib/connections";
 import {
   resolveProfileTheme,
   type DisplayNameStyle,
@@ -624,11 +626,14 @@ export function ProfileSections({
   mutualServers,
   mutualFriends,
   memberSince,
+  connections,
   limit = 8,
 }: {
   /** What they are playing now (presence); first, as on Discord. */
   gameActivity?: GameActivity | null;
   bio?: string | null;
+  /** Linked accounts the owner shows (users/me and profiles). */
+  connections?: PublicConnection[] | null;
   /** Render the bio with the message grammar (the full profile). */
   bioMarkdown?: boolean;
   roles?: ReactNode;
@@ -660,6 +665,11 @@ export function ProfileSections({
               {about}
             </p>
           )}
+        </ProfileSection>
+      ) : null}
+      {connections && connections.length > 0 ? (
+        <ProfileSection title="Connections">
+          <ProfileConnectionList connections={connections} />
         </ProfileSection>
       ) : null}
       {roles ? <ProfileSection title="Roles">{roles}</ProfileSection> : null}

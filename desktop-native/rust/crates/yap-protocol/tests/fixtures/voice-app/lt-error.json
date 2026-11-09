@@ -1,0 +1,9 @@
+{
+  "op": 106,
+  "d": {
+    "type": "listen_together.error",
+    "room_slug": "voice-srv_1-ch_v",
+    "code": "EMPTY_QUEUE",
+    "message": "Nothing valid to queue"
+  }
+}

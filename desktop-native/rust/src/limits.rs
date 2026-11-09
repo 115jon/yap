@@ -1,0 +1,133 @@
+//! `Limits`: the upload limits and the too-big cards for QML
+//! ([`yap_core::limits`]). Pure: nothing goes through the core, and a file
+//! is only stat'ed, never read. A card is JSON (`limits.rs` `card`), or
+//! empty when the file fits.
+
+#[cxx_qt::bridge]
+pub mod qobject {
+    unsafe extern "C++" {
+        include!("cxx-qt-lib/qstring.h");
+        type QString = cxx_qt_lib::QString;
+    }
+
+    extern "RustQt" {
+        #[qobject]
+        #[qml_element]
+        #[qml_singleton]
+        type Limits = super::LimitsRust;
+
+        /// The card for `path` against `kind`'s limit (`avatar`, `banner`,
+        /// `sound`, `gif`, `vibe`, `background`), or empty when it fits or
+        /// cannot be read (the upload then says why).
+        #[qinvokable]
+        fn check(self: &Limits, kind: &QString, path: &QString) -> QString;
+
+        /// [`check`](Limits::check) against the user's own limit in bytes
+        /// where a plan raises it: `Settings.avatarLimit` for `avatar`,
+        /// `Settings.bannerLimit` for `banner`.
+        #[qinvokable]
+        #[cxx_name = "checkUpTo"]
+        fn check_up_to(self: &Limits, kind: &QString, path: &QString, limit: f64) -> QString;
+
+        /// The drop overlay's card while files are dragged over the chat:
+        /// `files` is JSON `[{name, size}]` (sizes from `Files.localFiles`)
+        /// against the user's attachment `limit` in bytes
+        /// (`Settings.attachmentLimit`). Empty when every file fits.
+        #[qinvokable]
+        #[cxx_name = "dropCard"]
+        fn drop_card(self: &Limits, files: &QString, limit: f64) -> QString;
+
+        /// The tray's one card for `n` too-big files with `m` others, over
+        /// the attachment `limit` in bytes.
+        #[qinvokable]
+        #[cxx_name = "traySummary"]
+        fn tray_summary(self: &Limits, n: i32, m: i32, limit: f64) -> QString;
+
+        /// `kind`'s free limit as words: `25 MB`. A plan's own limit comes
+        /// as words from `Settings` (`avatarLimitText`).
+        #[qinvokable]
+        #[cxx_name = "limitText"]
+        fn limit_text(self: &Limits, kind: &QString) -> QString;
+    }
+}
+
+use cxx_qt_lib::QString;
+use yap_core::limits::{self, Kind};
+
+#[derive(Default)]
+pub struct LimitsRust;
+
+/// A limit QML passes as a number of bytes; anything unusable is the free
+/// attachment limit.
+fn bytes(limit: f64) -> u64 {
+    if limit.is_finite() && limit >= 1.0 {
+        // Whole bytes, at most 500 MB: the cast is exact.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let whole = limit.round() as u64;
+        whole
+    } else {
+        limits::ATTACHMENT
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct Dragged {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    size: u64,
+}
+
+fn card_for(kind: Kind, limit: u64, path: &QString) -> QString {
+    let path = path.to_string();
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return QString::default();
+    };
+    let is_gif = std::path::Path::new(&path)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("gif"));
+    limits::picker_card(kind, meta.len(), limit, is_gif)
+        .map(|card| QString::from(&card.to_string()))
+        .unwrap_or_default()
+}
+
+impl qobject::Limits {
+    pub fn check(&self, kind: &QString, path: &QString) -> QString {
+        let Some(kind) = Kind::from_key(&kind.to_string()) else {
+            return QString::default();
+        };
+        card_for(kind, kind.limit(), path)
+    }
+
+    pub fn check_up_to(&self, kind: &QString, path: &QString, limit: f64) -> QString {
+        let Some(kind) = Kind::from_key(&kind.to_string()) else {
+            return QString::default();
+        };
+        // Anything unusable is the kind's free limit.
+        let limit = if limit.is_finite() && limit >= 1.0 {
+            bytes(limit)
+        } else {
+            kind.limit()
+        };
+        card_for(kind, limit, path)
+    }
+
+    pub fn drop_card(&self, files: &QString, limit: f64) -> QString {
+        let files: Vec<Dragged> = serde_json::from_str(&files.to_string()).unwrap_or_default();
+        let files: Vec<(String, u64)> = files.into_iter().map(|f| (f.name, f.size)).collect();
+        limits::drop_card(&files, bytes(limit))
+            .map(|card| QString::from(&card.to_string()))
+            .unwrap_or_default()
+    }
+
+    pub fn tray_summary(&self, n: i32, m: i32, limit: f64) -> QString {
+        let count = |v: i32| usize::try_from(v).unwrap_or(0);
+        QString::from(&limits::tray_summary(count(n), count(m), bytes(limit)).to_string())
+    }
+
+    pub fn limit_text(&self, kind: &QString) -> QString {
+        Kind::from_key(&kind.to_string())
+            .map(|kind| QString::from(&limits::format_limit(kind.limit())))
+            .unwrap_or_default()
+    }
+}

@@ -1,0 +1,11 @@
+{
+  "op": 19,
+  "d": {
+    "event": "TYPING_START",
+    "seq": 44,
+    "data": {
+      "channel_id": "chan_fixture_text",
+      "user_id": "user_fixture_alice"
+    }
+  }
+}

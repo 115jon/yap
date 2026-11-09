@@ -1,0 +1,19 @@
+{
+  "op": 106,
+  "d": {
+    "type": "wordle.progress",
+    "channel_id": "ch_v",
+    "puzzle_date": "2026-11-05",
+    "progress": {
+      "userId": "u_peer",
+      "participant_id": "p_peer",
+      "name": null,
+      "avatar": null,
+      "guesses": ["crane", "sloth"],
+      "streak": 3,
+      "finished": false,
+      "missed": false
+    },
+    "sent_at": 1762350000001
+  }
+}

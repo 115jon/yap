@@ -1,0 +1,312 @@
+{
+  "catalog": {
+    "version": 1,
+    "source": "yapper",
+    "syncedAt": "2026-10-24T00:41:16.641Z",
+    "stale": true,
+    "categories": [
+      {
+        "id": "1558225633413173430",
+        "name": "The Nightmare Before Christmas",
+        "summary": "",
+        "bannerUrl": "https://cdn.discordapp.com/media/v1/collectibles-shop/83b6691118c7c1741c8db09acbcd9480c9249292b0bab38f327754c8325568bd",
+        "logoUrl": "https://cdn.discordapp.com/media/v1/collectibles-shop/13b620ee70b9d36b01187382cbb8e1a8e9e6623e4a106314a41e17bf373274a9",
+        "heroBannerUrl": "https://cdn.discordapp.com/media/v1/collectibles-shop/4f45fe175d63f6dbd0db7a34b656dee064a63dabd13e2aafa862019cce7d10d1",
+        "heroLogoUrl": "https://cdn.discordapp.com/media/v1/collectibles-shop/13b620ee70b9d36b01187382cbb8e1a8e9e6623e4a106314a41e17bf373274a9",
+        "mobileBannerUrl": "https://cdn.discordapp.com/media/v1/collectibles-shop/51d21d916c6c3f9802f70fbc77bd7bedaa02e9513e7246b1fb0e8dde3a6f6842",
+        "featuredBlockUrl": "https://cdn.discordapp.com/media/v1/collectibles-shop/61efafbd9618f4e504a79dbc40e6687987158cd2b991eb654faa30dc99e00baf",
+        "background": "linear-gradient(180deg, #2B2957 0%, #6C6773 100%)",
+        "marketingTitle": "The Pumpkin King has arrived!",
+        "marketingBody": "Tim Burton's The Nightmare Before Christmas is here. Get ready for tricks and treats! ©Disney",
+        "updatedAt": "2026-10-22T16:52:16.881668+00:00",
+        "itemIds": [
+          "avatar_decoration:1385050947834613820",
+          "nameplate:1436367668990050304",
+          "profile_effect:1420057111622193222",
+          "profile_frame:1545193867710562406",
+          "avatar_decoration:1466891815113195868",
+          "avatar_decoration:1466892957331489040"
+        ]
+      }
+    ],
+    "items": [
+      {
+        "id": "avatar_decoration:1385050947834613820",
+        "skuId": "1385050947834613820",
+        "productId": "1463960817350344868",
+        "name": "a duck",
+        "summary": "Give your avatar a new look.",
+        "label": "An adorable duck cheerfully dips its head underwater with carefree joy around the avatar, occasionally letting out a happy little quack!",
+        "kind": "avatar_decoration",
+        "source": "yapper",
+        "categoryId": "1385050947985735701",
+        "categoryName": "Summer Bliss",
+        "productType": 0,
+        "itemType": 0,
+        "premiumType": 0,
+        "updatedAt": "2026-04-03T17:05:43.304355+00:00",
+        "price": {
+          "amount": 599,
+          "exponent": 2,
+          "currency": "usd"
+        },
+        "nitroPrice": {
+          "amount": 499,
+          "exponent": 2,
+          "currency": "usd"
+        },
+        "previewUrl": "https://cdn.discordapp.com/avatar-decoration-presets/a_1ffd338bf104b616ea5774244e46dbf6.png?size=240&passthrough=true",
+        "previewAssets": {},
+        "asset": "a_1ffd338bf104b616ea5774244e46dbf6",
+        "staticUrl": "https://cdn.discordapp.com/avatar-decoration-presets/a_1ffd338bf104b616ea5774244e46dbf6.png?size=240&passthrough=true",
+        "animatedUrl": "https://cdn.discordapp.com/avatar-decoration-presets/a_1ffd338bf104b616ea5774244e46dbf6.png?size=4096&passthrough=true",
+        "productIds": ["1463960813244121088", "1463960817350344868"]
+      },
+      {
+        "id": "nameplate:1436367668990050304",
+        "skuId": "1436367668990050304",
+        "productId": "1463960993259458561",
+        "name": "2035",
+        "summary": "Make your name stand out in servers and chats.",
+        "label": "Blue and orange data stream nameplate with digital interference pattern.",
+        "kind": "nameplate",
+        "source": "yapper",
+        "categoryId": "1436367669111554119",
+        "categoryName": "Call of Duty: Black Ops 7",
+        "productType": 2,
+        "itemType": 2,
+        "premiumType": 0,
+        "updatedAt": "2026-04-03T17:06:30.150475+00:00",
+        "price": {
+          "amount": 799,
+          "exponent": 2,
+          "currency": "usd"
+        },
+        "nitroPrice": {
+          "amount": 599,
+          "exponent": 2,
+          "currency": "usd"
+        },
+        "previewUrl": "https://cdn.discordapp.com/assets/collectibles/nameplates/straw/2035/static.png",
+        "previewAssets": {},
+        "asset": "nameplates/straw/2035/",
+        "palette": "cobalt",
+        "staticUrl": "https://cdn.discordapp.com/assets/collectibles/nameplates/straw/2035/static.png",
+        "animatedUrl": "https://cdn.discordapp.com/assets/collectibles/nameplates/straw/2035/asset.webm",
+        "productIds": ["1463960985143607326", "1463960993259458561"]
+      },
+      {
+        "id": "profile_effect:1420057111622193222",
+        "skuId": "1420057111622193222",
+        "productId": "1463960960623444229",
+        "name": "A Bit Batty (Treat)",
+        "summary": "Show this effect when others view your profile.",
+        "label": "Purple bats flutter around the profile with a rainbow spiderweb in the corner and flying bats in the clouds.",
+        "kind": "profile_effect",
+        "source": "yapper",
+        "categoryId": "1418326116485038320",
+        "categoryName": "Trick or Treat",
+        "productType": 1,
+        "itemType": 1,
+        "premiumType": 0,
+        "updatedAt": "2026-04-06T18:01:40.432098+00:00",
+        "price": {
+          "amount": 599,
+          "exponent": 2,
+          "currency": "usd"
+        },
+        "nitroPrice": {
+          "amount": 499,
+          "exponent": 2,
+          "currency": "usd"
+        },
+        "previewUrl": "https://cdn.discordapp.com/assets/content/8199b2ac143ca1394627bbc775574bc15a3d30507c57169798d4e6984b75b5a8",
+        "previewAssets": {},
+        "profileEffect": {
+          "animationType": 1,
+          "thumbnailPreviewSrc": "https://cdn.discordapp.com/assets/content/8199b2ac143ca1394627bbc775574bc15a3d30507c57169798d4e6984b75b5a8",
+          "reducedMotionSrc": "https://cdn.discordapp.com/assets/content/1fb2de6917f81d4119c4f874f99872ee72e7332ea25e7139d511278b1dffeb1d",
+          "staticFrameSrc": "https://cdn.discordapp.com/assets/content/1fb2de6917f81d4119c4f874f99872ee72e7332ea25e7139d511278b1dffeb1d",
+          "effects": [
+            {
+              "src": "https://cdn.discordapp.com/assets/content/8c944215d7c32595c85f7ae37398a8c9576032dcd259bf097a23b04b2df916d2",
+              "loop": false,
+              "duration": 3000,
+              "start": 0,
+              "loopDelay": 0,
+              "zIndex": 100,
+              "width": 450,
+              "height": 880,
+              "position": {
+                "x": 0,
+                "y": 0
+              }
+            },
+            {
+              "src": "https://cdn.discordapp.com/assets/content/364ffd382d46714146f13a7e6e71972b27bc9822bd704dd02b75607617877eaa",
+              "loop": true,
+              "duration": 3000,
+              "start": 3000,
+              "loopDelay": 0,
+              "zIndex": 101,
+              "width": 450,
+              "height": 880,
+              "position": {
+                "x": 0,
+                "y": 0
+              }
+            }
+          ]
+        },
+        "staticUrl": "https://cdn.discordapp.com/assets/content/1fb2de6917f81d4119c4f874f99872ee72e7332ea25e7139d511278b1dffeb1d",
+        "animatedUrl": "https://cdn.discordapp.com/assets/content/8c944215d7c32595c85f7ae37398a8c9576032dcd259bf097a23b04b2df916d2",
+        "productIds": ["1463960947902255282", "1463960960623444229"]
+      },
+      {
+        "id": "profile_frame:1545193867710562406",
+        "skuId": "1545193867710562406",
+        "productId": "1545193959360307251",
+        "name": "Alt Raccoon",
+        "summary": "Elevate and wrap your profile with a frame.",
+        "label": "A raccoon peeks over the top of the profile, with a striped tail along the bottom.",
+        "kind": "profile_frame",
+        "source": "yapper",
+        "categoryId": "1545190959015530626",
+        "categoryName": "All Ears",
+        "productType": 3,
+        "itemType": 3,
+        "premiumType": 0,
+        "updatedAt": "2026-09-16T19:00:34.780166+00:00",
+        "price": {
+          "amount": 599,
+          "exponent": 2,
+          "currency": "usd"
+        },
+        "nitroPrice": {
+          "amount": 499,
+          "exponent": 2,
+          "currency": "usd"
+        },
+        "previewUrl": "https://cdn.discordapp.com/media/v1/collectibles-shop/1545193867710562406/1545565659092623491/static",
+        "previewAssets": {},
+        "frame": {
+          "innerWidth": 1200,
+          "overflowTop": 304,
+          "overflowBottom": 212,
+          "overflowHorizontal": 56,
+          "layers": [
+            {
+              "id": "1545565659092623491",
+              "src": "https://cdn.discordapp.com/media/v1/collectibles-shop/1545193867710562406/1545565659092623491/static",
+              "type": "staple",
+              "order": "front",
+              "anchor": "top",
+              "responsive": false
+            },
+            {
+              "id": "1545565664134037606",
+              "src": "https://cdn.discordapp.com/media/v1/collectibles-shop/1545193867710562406/1545565664134037606/static",
+              "type": "staple",
+              "order": "front",
+              "anchor": "bottom",
+              "responsive": false
+            },
+            {
+              "id": "1547000420180693142",
+              "src": "https://cdn.discordapp.com/media/v1/collectibles-shop/1545193867710562406/1547000420180693142/static",
+              "type": "staple",
+              "order": "back",
+              "anchor": "top",
+              "responsive": false
+            },
+            {
+              "id": "1547000553375137823",
+              "src": "https://cdn.discordapp.com/media/v1/collectibles-shop/1545193867710562406/1547000553375137823/static",
+              "type": "staple",
+              "order": "back",
+              "anchor": "bottom",
+              "responsive": false
+            }
+          ]
+        },
+        "productIds": ["1545194482310578246", "1545193959360307251"]
+      },
+      {
+        "id": "avatar_decoration:1466891815113195868",
+        "skuId": "1466891815113195868",
+        "productId": "1466891815113195867",
+        "name": "Ambient Ripples",
+        "summary": "Give your avatar a new look.",
+        "label": "Light blue ambient waves dance around in a ring.",
+        "kind": "avatar_decoration",
+        "source": "yapper",
+        "categoryId": "1514654595299672245",
+        "categoryName": "Flux Vol. 2",
+        "productType": 0,
+        "itemType": 0,
+        "premiumType": 0,
+        "updatedAt": "2026-06-30T17:44:40.502400+00:00",
+        "price": {
+          "amount": 599,
+          "exponent": 2,
+          "currency": "usd"
+        },
+        "nitroPrice": {
+          "amount": 499,
+          "exponent": 2,
+          "currency": "usd"
+        },
+        "previewUrl": "https://cdn.discordapp.com/avatar-decoration-presets/a_5b1f96fa1993f981a1ac06e2629e1eb9.png?size=240&passthrough=true",
+        "previewAssets": {},
+        "asset": "a_5b1f96fa1993f981a1ac06e2629e1eb9",
+        "staticUrl": "https://cdn.discordapp.com/avatar-decoration-presets/a_5b1f96fa1993f981a1ac06e2629e1eb9.png?size=240&passthrough=true",
+        "animatedUrl": "https://cdn.discordapp.com/avatar-decoration-presets/a_5b1f96fa1993f981a1ac06e2629e1eb9.png?size=4096&passthrough=true",
+        "productIds": ["1468088935384092937", "1466891815113195867"],
+        "variantOf": "1466891815113195868",
+        "variantLabel": "Arctic",
+        "variantColor": "#aec7db"
+      },
+      {
+        "id": "avatar_decoration:1466892957331489040",
+        "skuId": "1466892957331489040",
+        "productId": "1466891815113195867",
+        "name": "Ambient Ripples (Bubblegum)",
+        "summary": "Give your avatar a new look.",
+        "label": "Pink ambient waves dance around in a ring.",
+        "kind": "avatar_decoration",
+        "source": "yapper",
+        "categoryId": "1514654595299672245",
+        "categoryName": "Flux Vol. 2",
+        "productType": 0,
+        "itemType": 0,
+        "premiumType": 0,
+        "updatedAt": "2026-06-30T17:44:40.502400+00:00",
+        "price": {
+          "amount": 599,
+          "exponent": 2,
+          "currency": "usd"
+        },
+        "nitroPrice": {
+          "amount": 499,
+          "exponent": 2,
+          "currency": "usd"
+        },
+        "previewUrl": "https://cdn.discordapp.com/avatar-decoration-presets/a_b504c72d75cb5efd208d5ee6349e13ec.png?size=240&passthrough=true",
+        "previewAssets": {},
+        "variantOf": "1466891815113195868",
+        "variantLabel": "Bubblegum",
+        "variantColor": "#d782cc",
+        "asset": "a_b504c72d75cb5efd208d5ee6349e13ec",
+        "staticUrl": "https://cdn.discordapp.com/avatar-decoration-presets/a_b504c72d75cb5efd208d5ee6349e13ec.png?size=240&passthrough=true",
+        "animatedUrl": "https://cdn.discordapp.com/avatar-decoration-presets/a_b504c72d75cb5efd208d5ee6349e13ec.png?size=4096&passthrough=true",
+        "productIds": ["1466891815113195867"]
+      }
+    ],
+    "counts": {
+      "avatar_decoration": 770,
+      "profile_effect": 394,
+      "nameplate": 306,
+      "profile_frame": 70
+    }
+  }
+}

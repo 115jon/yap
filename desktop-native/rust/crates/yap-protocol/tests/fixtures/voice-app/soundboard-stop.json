@@ -1,0 +1,11 @@
+{
+  "op": 106,
+  "d": {
+    "type": "soundboard.stop",
+    "participant_id": "p_peer",
+    "user_id": "u_peer",
+    "server_key": "srv_1",
+    "playback_id": "sb1:6:u_peer:snd_9",
+    "sent_at": 1762350000500
+  }
+}

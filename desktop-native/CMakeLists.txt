@@ -1,0 +1,189 @@
+cmake_minimum_required(VERSION 3.24)
+# One version for the app and its installer: [workspace.package] in
+# rust/Cargo.toml (tools/package.ps1 reads the same line).
+file(STRINGS rust/Cargo.toml YAP_VERSION_LINE REGEX "^version = \"[0-9]+\\.[0-9]+\\.[0-9]+\"" LIMIT_COUNT 1)
+string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" YAP_VERSION "${YAP_VERSION_LINE}")
+if(NOT YAP_VERSION)
+  message(FATAL_ERROR "No workspace version in rust/Cargo.toml")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS rust/Cargo.toml)
+project(YapNative VERSION ${YAP_VERSION} LANGUAGES CXX)
+
+# The static Qt build uses the static MSVC runtime (/MT); the Rust side
+# matches it through rust/.cargo/config.toml (+crt-static).
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+# Sources and generated code are UTF-8; MSVC otherwise assumes the ANSI code page.
+add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+
+find_package(Qt6 REQUIRED COMPONENTS
+  Core Gui Multimedia Network Qml Quick QuickControls2 Svg QmlImportScanner)
+# Private: QHwVideoBuffer and QRhi's native handles, for decoded video
+# drawn from its D3D11 texture (cpp/videohub.cpp); QSGPlainTexture, so a
+# streamed GIF uploads each frame into one texture (cpp/animatedpicture.cpp).
+find_package(Qt6 REQUIRED COMPONENTS GuiPrivate MultimediaPrivate QuickPrivate)
+# qsb at build time: our ShaderEffect fragment shaders (shaders/).
+find_package(Qt6 REQUIRED COMPONENTS ShaderTools)
+
+include(FetchContent)
+FetchContent_Declare(
+  CxxQt
+  GIT_REPOSITORY https://github.com/kdab/cxx-qt-cmake.git
+  # main as of 2026-11-04 (no tag for cxx-qt 0.10 yet)
+  GIT_TAG 64e63f560737b3b7f85ef8267c5918e4b8176d5a)
+FetchContent_MakeAvailable(CxxQt)
+
+cxx_qt_import_crate(
+  MANIFEST_PATH rust/Cargo.toml
+  CRATES yap_native
+  LOCKED
+  QT_MODULES Qt::Core Qt::Gui Qt::Qml Qt::Quick Qt::QuickControls2)
+
+cxx_qt_import_qml_module(yap_native_qml
+  URI "com.yap.native"
+  SOURCE_CRATE yap_native)
+
+qt_add_executable(YapNative WIN32
+  cpp/main.cpp
+  cpp/app.rc
+  cpp/app.manifest
+  cpp/animatedpicture.cpp cpp/animatedpicture.h
+  cpp/authmedia.cpp cpp/authmedia.h
+  cpp/camera.cpp cpp/camera.h
+  cpp/compat.cpp cpp/compat.h
+  cpp/composerhighlighter.cpp cpp/composerhighlighter.h
+  cpp/crashnotice.cpp cpp/crashnotice.h
+  cpp/desktopshell.cpp cpp/desktopshell.h
+  cpp/ditherprovider.cpp cpp/ditherprovider.h
+  cpp/eyedropper.cpp cpp/eyedropper.h
+  cpp/heaptrace.cpp cpp/heaptrace.h
+  cpp/iconprovider.cpp cpp/iconprovider.h
+  cpp/logfile.cpp cpp/logfile.h
+  cpp/mediafoundation.cpp cpp/mediafoundation.h
+  cpp/mediashell.cpp cpp/mediashell.h
+  cpp/profile.cpp cpp/profile.h
+  cpp/sampler.cpp cpp/sampler.h
+  cpp/shareprovider.cpp cpp/shareprovider.h
+  cpp/thumbbar.cpp cpp/thumbbar.h
+  cpp/toast_win.cpp cpp/toast_win.h
+  cpp/videohub.cpp cpp/videohub.h
+  cpp/webembed.cpp cpp/webembed.h
+  cpp/webmplayer.cpp cpp/webmplayer.h
+  cpp/wheelscroll.cpp cpp/wheelscroll.h
+  cpp/windowchrome.cpp cpp/windowchrome.h)
+# Whole-program optimization for our C++ too (/GL, link-time code
+# generation): the static Qt is built with -ltcg, so the link already runs
+# LTCG over Qt, and now over cpp/ with it. (Not the C++ that `cc` builds
+# into the Rust static library: rustc's archive has no symbol index for
+# /GL objects, so the link cannot find them.) Same MSVC as Qt: build.ps1.
+set_property(TARGET YapNative PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+# The file is Yap.exe (yap_core::install::EXE_NAME); the target keeps its
+# name. The version resource (cpp/app.rc) takes the version from here.
+set_target_properties(YapNative PROPERTIES OUTPUT_NAME Yap)
+target_compile_definitions(YapNative PRIVATE
+  YAP_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+  YAP_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+  YAP_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+  YAP_VERSION_STRING="${YAP_VERSION}")
+# Qt::GuiPrivate: the test keyboard (YAP_TEST_POINTER) delivers through
+# QWindowSystemInterface, as a real key does, so shortcuts see it.
+target_link_libraries(YapNative PRIVATE
+  yap_native_qml
+  Qt::Gui Qt::Multimedia Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg
+  Qt::GuiPrivate Qt::MultimediaPrivate Qt::QuickPrivate)
+
+# Brand fonts, Phosphor icons and brand SVGs (assets/, built by tools/),
+# embedded as :/fonts, :/icons and :/svg.
+file(GLOB YAP_FONT_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/assets
+  CONFIGURE_DEPENDS assets/fonts/*.ttf)
+file(GLOB YAP_SVG_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/assets
+  CONFIGURE_DEPENDS assets/svg/*.svg)
+# The taskbar thumbnail toolbar's icons (the desktop app's
+# resources/thumbnail-toolbar), embedded as :/thumbbar.
+file(GLOB YAP_THUMBBAR_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/assets
+  CONFIGURE_DEPENDS assets/thumbbar/*.png)
+file(STRINGS assets/icons/files.txt YAP_ICON_NAMES)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS assets/icons/files.txt)
+list(TRANSFORM YAP_ICON_NAMES PREPEND icons/ OUTPUT_VARIABLE YAP_ICON_FILES)
+list(TRANSFORM YAP_FONT_FILES PREPEND assets/ OUTPUT_VARIABLE YAP_FONT_PATHS)
+list(TRANSFORM YAP_SVG_FILES PREPEND assets/ OUTPUT_VARIABLE YAP_SVG_PATHS)
+list(TRANSFORM YAP_ICON_FILES PREPEND assets/ OUTPUT_VARIABLE YAP_ICON_PATHS)
+list(TRANSFORM YAP_THUMBBAR_FILES PREPEND assets/ OUTPUT_VARIABLE YAP_THUMBBAR_PATHS)
+qt_add_resources(YapNative yap_assets
+  PREFIX /
+  BASE assets
+  FILES ${YAP_FONT_PATHS} ${YAP_SVG_PATHS} ${YAP_ICON_PATHS} ${YAP_THUMBBAR_PATHS}
+    assets/app/yap-256.png)
+# ShaderEffect shaders, baked by qsb into :/shaders/<name>.qsb. GLSL 300 es
+# and 330 rather than Qt's default 100 es (no textureLod or textureSize).
+# The app draws with Direct3D 11 (WARP in safe mode too), so the HLSL is
+# compiled to DXBC here (PRECOMPILE: fxc from the VS developer shell) and
+# never at run time. The display-name effects are one source baked once per
+# effect (MODE, shaders/namefx.frag).
+set(YAP_NAME_EFFECTS dither holo chrome pixel crt glitch ember sticker candlelit)
+list(LENGTH YAP_NAME_EFFECTS YAP_NAME_EFFECT_COUNT)
+math(EXPR YAP_NAME_EFFECT_LAST "${YAP_NAME_EFFECT_COUNT} - 1")
+foreach(mode RANGE ${YAP_NAME_EFFECT_LAST})
+  list(GET YAP_NAME_EFFECTS ${mode} effect)
+  qt_add_shaders(YapNative yap_name_${effect}
+    PREFIX /shaders
+    BASE shaders
+    GLSL "300es,330"
+    HLSL 50
+    MSL 12
+    PRECOMPILE
+    DEFINES MODE=${mode}
+    FILES shaders/namefx.frag
+    OUTPUTS name-${effect}.frag.qsb)
+endforeach()
+# Avatars and server icons come as PNG, JPEG, WebP or GIF over HTTPS. Call
+# video renders through Qt Multimedia's VideoOutput, whose QVideoSink needs
+# a media backend (Windows Media Foundation; nothing is decoded by it).
+# Only those: a static Qt otherwise links every default plugin of a type
+# (ICO, ICNS, TGA, TIFF and WBMP decoders, the OpenSSL TLS backend, the SVG
+# icon engine, network information), none of which the app uses.
+qt_import_plugins(YapNative
+  INCLUDE_BY_TYPE imageformats Qt::QSvgPlugin Qt::QGifPlugin Qt::QJpegPlugin Qt::QWebpPlugin)
+qt_import_plugins(YapNative INCLUDE_BY_TYPE tls Qt::QSchannelBackendPlugin)
+qt_import_plugins(YapNative INCLUDE Qt::QWindowsMediaPlugin
+  EXCLUDE_BY_TYPE iconengines networkinformation)
+if(WIN32)
+  # dwmapi and comctl32 (the window subclass) for the title bar; shell32, advapi32 and runtimeobject for the
+  # tray, the Run key and WinRT toasts; dwrite for the monitor's ClearType
+  # settings (main.cpp); the rest is what libwebrtc (static)
+  # needs (mfplat and mfuuid: its H.264 decoder, patches/webrtc-sys).
+  target_link_libraries(YapNative PRIVATE
+    dwmapi comctl32 shell32 user32 advapi32 runtimeobject msdmo wmcodecdspuuid dmoguids crypt32 iphlpapi ole32 secur32
+    winmm ws2_32 strmiids d3d11 gdi32 dxgi shcore userenv dbghelp mfplat mfuuid dwrite)
+  # Media Foundation is delay-loaded, so the exe starts on Windows N/KN
+  # without the Media Feature Pack, where these DLLs are missing (and
+  # dxva2/msdmo, which only Media Foundation code calls). Qt Multimedia's
+  # windows backend (static), the H.264 decoder and encoder and libwebrtc
+  # import them; cpp/mediafoundation.cpp decides at startup whether any of
+  # it may run, and its delay-load hooks answer any call that still comes
+  # with an E_NOTIMPL stub instead of the helper's 0xC06D007E exception.
+  target_link_libraries(YapNative PRIVATE delayimp)
+  target_link_options(YapNative PRIVATE
+    /DELAYLOAD:mfplat.dll /DELAYLOAD:mf.dll /DELAYLOAD:mfreadwrite.dll
+    /DELAYLOAD:evr.dll /DELAYLOAD:dxva2.dll /DELAYLOAD:msdmo.dll)
+endif()
+
+# Static Qt: pull in the QML plugins the UI imports.
+qt_import_qml_plugins(YapNative)
+
+# A profiling build only (docs/PERFORMANCE.md): the QML profiler services,
+# for `qmlprofiler -- Yap.exe` or `-qmljsdebugger=port:N,block`.
+# Never shipped: it opens a debug port on request.
+option(YAP_QML_PROFILER "Link the QML profiler services (QT_QML_DEBUG)" OFF)
+if(YAP_QML_PROFILER)
+  target_compile_definitions(YapNative PRIVATE QT_QML_DEBUG)
+  qt_import_plugins(YapNative INCLUDE_BY_TYPE qmltooling
+    Qt::QQmlDebugServerFactoryPlugin Qt::QQmlProfilerServiceFactoryPlugin
+    Qt::QQuickProfilerAdapterFactoryPlugin Qt::QTcpServerConnectionFactoryPlugin
+    Qt::QLocalClientConnectionFactoryPlugin)
+else()
+  # A static Qt links the QML debug and profiler services by default.
+  qt_import_plugins(YapNative EXCLUDE_BY_TYPE qmltooling)
+endif()

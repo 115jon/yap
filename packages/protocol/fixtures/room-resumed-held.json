@@ -1,0 +1,14 @@
+{
+  "op": 9,
+  "d": {
+    "participants": [
+      {
+        "id": "pid_fixture_alice",
+        "user_id": "user_fixture_alice",
+        "name": "Alice",
+        "username": "alice",
+        "self_mute": true
+      }
+    ]
+  }
+}

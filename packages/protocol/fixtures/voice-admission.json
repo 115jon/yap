@@ -1,0 +1,22 @@
+{
+  "access_mode": "authenticated",
+  "room_slug": "voice-srv_fixture-chan_fixture_voice",
+  "expires_at": 1793793600000,
+  "participant_id": "pid_fixture_me",
+  "room_ticket": "tok_fixture_room_ticket",
+  "voice_ticket": "tok_fixture_voice_ticket",
+  "media": {
+    "participant_id": "pid_fixture_me",
+    "voice_token": "tok_fixture",
+    "ice_servers": [
+      {
+        "urls": [
+          "turn:turn.fixture.invalid:3478?transport=udp",
+          "turn:turn.fixture.invalid:443?transport=tcp"
+        ],
+        "username": "user_fixture",
+        "credential": "cred_fixture"
+      }
+    ]
+  }
+}

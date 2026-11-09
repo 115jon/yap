@@ -1,0 +1,19 @@
+{
+  "op": 19,
+  "d": {
+    "event": "MESSAGE_UPDATE",
+    "seq": 42,
+    "data": {
+      "id": "msg_fixture_0002",
+      "channel_id": "chan_fixture_text",
+      "embeds": [
+        {
+          "type": "link",
+          "url": "https://example.com/fixture",
+          "title": "Fixture page",
+          "fields": []
+        }
+      ]
+    }
+  }
+}

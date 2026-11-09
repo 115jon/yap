@@ -1,0 +1,101 @@
+[
+  {
+    "tag_name": "desktop-native-v0.2.26",
+    "draft": true,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "releases.win.json",
+        "browser_download_url": "https://github.com/115jon/yap/releases/download/untagged-1/releases.win.json"
+      }
+    ]
+  },
+  {
+    "tag_name": "v3.14.0",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "latest.json",
+        "browser_download_url": "https://github.com/115jon/yap/releases/download/v3.14.0/latest.json"
+      },
+      {
+        "name": "releases.win.json",
+        "browser_download_url": "https://github.com/115jon/yap/releases/download/v3.14.0/releases.win.json"
+      }
+    ]
+  },
+  {
+    "tag_name": "desktop-native-v0.2.25-beta.1",
+    "draft": false,
+    "prerelease": true,
+    "assets": [
+      {
+        "name": "releases.beta.json",
+        "browser_download_url": "https://github.com/115jon/yap/releases/download/desktop-native-v0.2.25-beta.1/releases.beta.json"
+      },
+      {
+        "name": "Yap.App-0.2.25-beta.1-full.nupkg",
+        "browser_download_url": "https://github.com/115jon/yap/releases/download/desktop-native-v0.2.25-beta.1/Yap.App-0.2.25-beta.1-full.nupkg"
+      }
+    ]
+  },
+  {
+    "tag_name": "native-toolchain-qt6.11.3-yap-webrtc-a545de4",
+    "draft": false,
+    "prerelease": true,
+    "assets": [
+      {
+        "name": "toolchain.sha256",
+        "browser_download_url": "https://github.com/115jon/yap/releases/download/native-toolchain-qt6.11.3-yap-webrtc-a545de4/toolchain.sha256"
+      }
+    ]
+  },
+  {
+    "tag_name": "desktop-native-v0.2.24",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "Releases.Win.json",
+        "browser_download_url": "https://github.com/115jon/yap/releases/download/desktop-native-v0.2.24/releases.win.json"
+      },
+      {
+        "name": "Yap.App-0.2.24-full.nupkg",
+        "browser_download_url": "https://github.com/115jon/yap/releases/download/desktop-native-v0.2.24/Yap.App-0.2.24-full.nupkg"
+      },
+      {
+        "name": "Yap.App-0.2.24-delta.nupkg",
+        "browser_download_url": "https://github.com/115jon/yap/releases/download/desktop-native-v0.2.24/Yap.App-0.2.24-delta.nupkg"
+      }
+    ]
+  },
+  {
+    "tag_name": "mobile-v0.5.1",
+    "draft": false,
+    "prerelease": false,
+    "assets": []
+  },
+  {
+    "tag_name": "desktop-native-v0.2.3",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "releases.win.json",
+        "browser_download_url": "https://github.com/115jon/yap/releases/download/desktop-native-v0.2.3/releases.win.json"
+      },
+      {
+        "name": "Yap.App-0.2.3-full.nupkg",
+        "browser_download_url": "https://github.com/115jon/yap/releases/download/desktop-native-v0.2.3/Yap.App-0.2.3-full.nupkg",
+        "uploader": { "login": "github-actions[bot]" }
+      }
+    ]
+  },
+  {
+    "tag_name": "desktop-native-vnext",
+    "draft": false,
+    "prerelease": false,
+    "assets": []
+  }
+]

@@ -36,6 +36,8 @@
  *   site-banner (the site announcement strip in each tone)
  *   pb-* profile boards: pb-board*, pb-activity*, pb-wishlist*, pb-edit*,
  *   pb-studio* (dev/profile-board-fixtures.tsx)
+ *   settings-connections (`&state=empty|linked|hidden|error`) and
+ *   connections-profile (the profile's Connections block)
  */
 
 import { createFileRoute, notFound } from "@tanstack/react-router";

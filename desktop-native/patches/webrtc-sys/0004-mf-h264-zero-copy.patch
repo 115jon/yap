@@ -1,0 +1,299 @@
+--- a/src/mf_h264_decoder.cpp
++++ b/src/mf_h264_decoder.cpp
+@@ -9,13 +9,26 @@
+ // (WebRTC's H.264 has no B-frames). Without a usable GPU (no D3D11 video
+ // device, or YAP_H264_DECODER=software) the same MFT decodes on the CPU,
+ // multithreaded.
++//
++// Zero copy (performance pass 6): when the app has registered the D3D11
++// device its UI renders with (yap_mf_set_shared_device), the MFT decodes on
++// that device, and each picture is copied on the GPU out of the decoder's
++// texture array into a texture of our own (a small pool per stream). The
++// frame carries that texture as a native buffer (D3D11Nv12Buffer), which the
++// UI samples as it is (cpp/videohub.cpp). Nothing is read back unless a
++// consumer asks for I420 (ToI420).
+ 
+ #include "livekit/mf_h264_decoder.h"
++#include "livekit/video_frame_buffer.h"
+ 
+ #include <algorithm>
+ #include <cstdlib>
+ #include <cstring>
+ #include <deque>
++#include <memory>
++#include <mutex>
++#include <string>
++#include <vector>
+ 
+ #include <windows.h>
+ #include <codecapi.h>
+@@ -27,6 +40,7 @@
+ #include <wmcodecdsp.h>
+ #include <wrl/client.h>
+ 
++#include "api/make_ref_counted.h"
+ #include "api/video/i420_buffer.h"
+ #include "api/video/video_frame.h"
+ #include "common_video/include/video_frame_buffer_pool.h"
+@@ -45,20 +59,137 @@ bool SoftwareRequested() {
+   return value != nullptr && std::strcmp(value, "software") == 0;
+ }
+ 
++// The device the app's UI renders with, if it registered one: made with
++// video support and multithread protection (the MFT needs both).
++std::mutex g_shared_mutex;
++ComPtr<ID3D11Device> g_shared_device;
++
++ComPtr<ID3D11Device> SharedDevice() {
++  std::lock_guard<std::mutex> lock(g_shared_mutex);
++  return g_shared_device;
++}
++
++// What D3D11Nv12Buffer::storage_representation says, so the UI can tell
++// our frames from any other native buffer.
++constexpr char kD3D11Nv12[] = "yap-d3d11-nv12";
++
++// Textures of one size for one stream's decoded pictures. A texture goes
++// back when the last frame holding it is released; the pool outlives its
++// decoder while frames are still shown.
++class TexturePool {
++ public:
++  TexturePool(ComPtr<ID3D11Device> device, int width, int height)
++      : device_(std::move(device)), width_(width), height_(height) {}
++
++  int width() const { return width_; }
++  int height() const { return height_; }
++  ID3D11Device* device() const { return device_.Get(); }
++
++  ComPtr<ID3D11Texture2D> Take() {
++    {
++      std::lock_guard<std::mutex> lock(mutex_);
++      if (!free_.empty()) {
++        ComPtr<ID3D11Texture2D> texture = std::move(free_.back());
++        free_.pop_back();
++        return texture;
++      }
++    }
++    D3D11_TEXTURE2D_DESC desc{};
++    desc.Width = UINT(width_);
++    desc.Height = UINT(height_);
++    desc.MipLevels = 1;
++    desc.ArraySize = 1;
++    desc.Format = DXGI_FORMAT_NV12;
++    desc.SampleDesc.Count = 1;
++    desc.Usage = D3D11_USAGE_DEFAULT;
++    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
++    ComPtr<ID3D11Texture2D> texture;
++    if (FAILED(device_->CreateTexture2D(&desc, nullptr, &texture)))
++      return nullptr;
++    return texture;
++  }
++
++  void Give(ComPtr<ID3D11Texture2D> texture) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    // A few spare; more were only needed for a burst.
++    if (texture && free_.size() < 4)
++      free_.push_back(std::move(texture));
++  }
++
++ private:
++  ComPtr<ID3D11Device> device_;
++  const int width_;
++  const int height_;
++  std::mutex mutex_;
++  std::vector<ComPtr<ID3D11Texture2D>> free_;
++};
++
++// One decoded picture as an NV12 texture on the shared device.
++class D3D11Nv12Buffer : public webrtc::VideoFrameBuffer {
++ public:
++  D3D11Nv12Buffer(ComPtr<ID3D11Texture2D> texture, std::shared_ptr<TexturePool> pool)
++      : texture_(std::move(texture)), pool_(std::move(pool)) {}
++  ~D3D11Nv12Buffer() override { pool_->Give(std::move(texture_)); }
++
++  Type type() const override { return Type::kNative; }
++  int width() const override { return pool_->width(); }
++  int height() const override { return pool_->height(); }
++  std::string storage_representation() const override { return kD3D11Nv12; }
++  ID3D11Texture2D* texture() const { return texture_.Get(); }
++
++  // For a consumer that needs the pixels: a staging copy, read back.
++  webrtc::scoped_refptr<webrtc::I420BufferInterface> ToI420() override {
++    D3D11_TEXTURE2D_DESC desc{};
++    texture_->GetDesc(&desc);
++    desc.Usage = D3D11_USAGE_STAGING;
++    desc.BindFlags = 0;
++    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
++    desc.MiscFlags = 0;
++    ComPtr<ID3D11Texture2D> staging;
++    if (FAILED(pool_->device()->CreateTexture2D(&desc, nullptr, &staging)))
++      return nullptr;
++    ComPtr<ID3D11DeviceContext> context;
++    pool_->device()->GetImmediateContext(&context);
++    context->CopyResource(staging.Get(), texture_.Get());
++    D3D11_MAPPED_SUBRESOURCE mapped{};
++    if (FAILED(context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped)))
++      return nullptr;
++    webrtc::scoped_refptr<webrtc::I420Buffer> i420 =
++        webrtc::I420Buffer::Create(width(), height());
++    const uint8_t* y = static_cast<const uint8_t*>(mapped.pData);
++    libyuv::NV12ToI420(y, int(mapped.RowPitch), y + size_t(mapped.RowPitch) * desc.Height,
++                       int(mapped.RowPitch), i420->MutableDataY(), i420->StrideY(),
++                       i420->MutableDataU(), i420->StrideU(), i420->MutableDataV(),
++                       i420->StrideV(), width(), height());
++    context->Unmap(staging.Get(), 0);
++    return i420;
++  }
++
++ private:
++  ComPtr<ID3D11Texture2D> texture_;
++  std::shared_ptr<TexturePool> pool_;
++};
++
+ // A D3D11 device for one decoder (video decode support, multithread
+ // protected, as the MFT requires). Each stream gets its own, released with
+ // it: the device, the decoder's surfaces and the driver's memory for them go
+ // when the stream ends instead of staying for the process's life.
++// With the UI's device (zero copy), the device is shared and only the
++// manager and the decoder's surfaces are the stream's own.
+ struct GpuDevice {
+   ComPtr<ID3D11Device> device;
+   ComPtr<IMFDXGIDeviceManager> manager;
++  bool shared = false;
+ };
+ 
+ bool MakeGpuDevice(GpuDevice& out) {
+   if (SoftwareRequested())
+     return false;
++  out.device = SharedDevice();
++  out.shared = out.device != nullptr;
+   D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
+-  if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
++  if (!out.shared &&
++      FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+                                D3D11_CREATE_DEVICE_VIDEO_SUPPORT, levels, 2,
+                                D3D11_SDK_VERSION, &out.device, nullptr, nullptr)))
+     return false;
+@@ -122,7 +253,8 @@ class MfH264Decoder : public webrtc::VideoDecoder {
+     mft_->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
+     buffer_pool_size_ = settings.buffer_pool_size();
+     RTC_LOG(LS_INFO) << "[mf-h264] Media Foundation H.264 decoder, "
+-                     << (gpu_ ? "on the GPU" : "in software");
++                     << (gpu_ ? (gpu_device_.shared ? "on the GPU, zero copy" : "on the GPU")
++                              : "in software");
+     return true;
+   }
+ 
+@@ -178,7 +310,9 @@ class MfH264Decoder : public webrtc::VideoDecoder {
+       mft_->ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
+       mft_.Reset();
+     }
++    context_.Reset();
+     gpu_device_ = {};
++    textures_.reset();
+     pending_.clear();
+     pool_.Release();
+     return WEBRTC_VIDEO_CODEC_OK;
+@@ -283,6 +417,19 @@ class MfH264Decoder : public webrtc::VideoDecoder {
+     ComPtr<IMFMediaBuffer> buffer;
+     if (FAILED(sample->GetBufferByIndex(0, &buffer)))
+       return false;
++    if (gpu_ && gpu_device_.shared) {
++      if (webrtc::scoped_refptr<webrtc::VideoFrameBuffer> texture = CopyToTexture(buffer.Get())) {
++        webrtc::VideoFrame frame = webrtc::VideoFrame::Builder()
++                                       .set_video_frame_buffer(texture)
++                                       .set_rtp_timestamp(meta.rtp)
++                                       .set_ntp_time_ms(meta.ntp_ms)
++                                       .set_color_space(meta.color)
++                                       .build();
++        callback_->Decoded(frame, std::nullopt, std::nullopt);
++        return true;
++      }
++      // Not a texture we can copy: read it back below.
++    }
+     ComPtr<IMF2DBuffer> planar;
+     BYTE* data = nullptr;
+     LONG pitch = 0;
+@@ -329,8 +476,41 @@ class MfH264Decoder : public webrtc::VideoDecoder {
+     return true;
+   }
+ 
++  // The decoded picture (a slice of the decoder's texture array) copied on
++  // the GPU into a texture of our own, so the decoder gets its surface back
++  // at once and the UI can sample the copy.
++  webrtc::scoped_refptr<webrtc::VideoFrameBuffer> CopyToTexture(IMFMediaBuffer* buffer) {
++    ComPtr<IMFDXGIBuffer> dxgi;
++    if (FAILED(buffer->QueryInterface(IID_PPV_ARGS(&dxgi))))
++      return nullptr;
++    ComPtr<ID3D11Texture2D> source;
++    UINT index = 0;
++    if (FAILED(dxgi->GetResource(IID_PPV_ARGS(&source))) ||
++        FAILED(dxgi->GetSubresourceIndex(&index)))
++      return nullptr;
++    // NV12 needs even sizes.
++    const int width = (width_ + 1) & ~1;
++    const int height = (height_ + 1) & ~1;
++    D3D11_TEXTURE2D_DESC desc{};
++    source->GetDesc(&desc);
++    if (desc.Format != DXGI_FORMAT_NV12 || UINT(width) > desc.Width || UINT(height) > desc.Height)
++      return nullptr;
++    if (!textures_ || textures_->width() != width || textures_->height() != height)
++      textures_ = std::make_shared<TexturePool>(gpu_device_.device, width, height);
++    ComPtr<ID3D11Texture2D> texture = textures_->Take();
++    if (!texture)
++      return nullptr;
++    if (!context_)
++      gpu_device_.device->GetImmediateContext(&context_);
++    const D3D11_BOX box{0, 0, 0, UINT(width), UINT(height), 1};
++    context_->CopySubresourceRegion(texture.Get(), 0, 0, 0, 0, source.Get(), index, &box);
++    return webrtc::make_ref_counted<D3D11Nv12Buffer>(std::move(texture), textures_);
++  }
++
+   ComPtr<IMFTransform> mft_;
+   GpuDevice gpu_device_;
++  ComPtr<ID3D11DeviceContext> context_;
++  std::shared_ptr<TexturePool> textures_;
+   webrtc::DecodedImageCallback* callback_ = nullptr;
+   webrtc::VideoFrameBufferPool pool_{false, 300};
+   std::optional<int> buffer_pool_size_;
+@@ -365,3 +545,40 @@ std::unique_ptr<webrtc::VideoDecoder> CreateMfH264Decoder() {
+ }
+ 
+ }  // namespace livekit_ffi
++
++// The app's UI device, for decoders configured from now on (nullptr: each
++// stream makes its own device again and reads its pictures back). It must
++// have video support and multithread protection.
++extern "C" void yap_mf_set_shared_device(void* device) {
++  std::lock_guard<std::mutex> lock(livekit_ffi::g_shared_mutex);
++  livekit_ffi::g_shared_device = static_cast<ID3D11Device*>(device);
++}
++
++// A frame's texture, if `frame` (a livekit_ffi::VideoFrameBuffer, as Rust's
++// NativeBuffer holds it) is one of ours. `hold` keeps the frame, and with it
++// the texture, until `release(hold)`. The layout is repeated in
++// cpp/videohub.cpp.
++struct YapD3D11Frame {
++  void* texture;  // ID3D11Texture2D*: NV12, on the shared device
++  int width;
++  int height;
++  void* hold;
++  void (*release)(void* hold);
++};
++
++extern "C" bool yap_d3d11_frame(const void* frame, YapD3D11Frame* out) {
++  if (!frame || !out)
++    return false;
++  webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer =
++      static_cast<const livekit_ffi::VideoFrameBuffer*>(frame)->get();
++  if (!buffer || buffer->type() != webrtc::VideoFrameBuffer::Type::kNative ||
++      buffer->storage_representation() != livekit_ffi::kD3D11Nv12)
++    return false;
++  auto* nv12 = static_cast<livekit_ffi::D3D11Nv12Buffer*>(buffer.get());
++  out->texture = nv12->texture();
++  out->width = nv12->width();
++  out->height = nv12->height();
++  out->hold = buffer.release();
++  out->release = [](void* hold) { static_cast<webrtc::VideoFrameBuffer*>(hold)->Release(); };
++  return true;
++}

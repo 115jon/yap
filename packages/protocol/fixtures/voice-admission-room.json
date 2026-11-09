@@ -1,0 +1,6 @@
+{
+  "access_mode": "authenticated",
+  "room_slug": "voice-srv_fixture-chan_fixture_voice",
+  "expires_at": 1793793600000,
+  "room_ticket": "tok_fixture_room_ticket"
+}

@@ -1,0 +1,7 @@
+{
+  "channelId": "chan_fixture_voice",
+  "serverId": "srv_fixture",
+  "roomSlug": "voice-srv_fixture-chan_fixture_voice",
+  "sockets": ["room"],
+  "media": false
+}

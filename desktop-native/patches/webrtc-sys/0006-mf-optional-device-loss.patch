@@ -1,0 +1,123 @@
+--- a/src/mf_h264_decoder.cpp
++++ b/src/mf_h264_decoder.cpp
+@@ -28,6 +28,7 @@
+ #include "livekit/video_frame_buffer.h"
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <cstdlib>
+ #include <cstring>
+ #include <deque>
+@@ -115,10 +116,24 @@
+   return hr;
+ }
+ 
++// Media Foundation can be used (yap_mf_set_available). Off on Windows N/KN
++// without the Media Feature Pack, whose mfplat.dll the app delay-loads:
++// nothing here calls into it then, H.264 is not offered and VP8/VP9 stay
++// on libvpx.
++std::atomic<bool> g_mf_available{true};
++
++bool MfAvailable() {
++  return g_mf_available.load(std::memory_order_relaxed);
++}
++
+ // The device the app's UI renders with, if it registered one: made with
+ // video support and multithread protection (the MFT needs both).
+ std::mutex g_shared_mutex;
+ ComPtr<ID3D11Device> g_shared_device;
++// Bumped by each yap_mf_set_shared_device: a decoder made on an earlier
++// shared device (one the UI replaced after a device loss) starts again on
++// the new one.
++std::atomic<unsigned> g_shared_generation{0};
+ 
+ ComPtr<ID3D11Device> SharedDevice() {
+   std::lock_guard<std::mutex> lock(g_shared_mutex);
+@@ -269,6 +284,10 @@
+ 
+   bool Configure(const Settings& settings) override {
+     Release();
++    if (!MfAvailable())
++      return false;
++    settings_ = settings;
++    generation_ = g_shared_generation.load();
+     // The decoder thread joins the MTA once (never left: Release may run on
+     // another thread). The MFT is free-threaded.
+     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+@@ -338,6 +357,17 @@
+       return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
+     if (image.data() == nullptr || image.size() == 0)
+       return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
++    if (gpu_ && DeviceGone()) {
++      // The device was lost (or the UI replaced its own): the decoder, its
++      // surfaces and its texture pool start again on a working one. This
++      // frame is dropped; the error asks the sender for a key frame.
++      RTC_LOG(LS_WARNING) << CodecTag(codec_)
++                          << " the GPU device was lost or replaced; the decoder starts again";
++      const Settings settings = *settings_;
++      if (!Configure(settings))
++        return Failed();
++      return WEBRTC_VIDEO_CODEC_ERROR;
++    }
+     ComPtr<IMFMediaBuffer> buffer;
+     if (FAILED(MFCreateMemoryBuffer(DWORD(image.size()), &buffer)))
+       return WEBRTC_VIDEO_CODEC_ERROR;
+@@ -409,6 +439,14 @@
+     std::optional<webrtc::ColorSpace> color;
+   };
+ 
++  // The device this decoder is on was removed, or it was the UI's shared
++  // device and the UI has registered another since.
++  bool DeviceGone() const {
++    if (gpu_device_.shared && generation_ != g_shared_generation.load())
++      return true;
++    return gpu_device_.device && gpu_device_.device->GetDeviceRemovedReason() != S_OK;
++  }
++
+   // H.264 has no other decoder here; VP8/VP9 go to libvpx (the fallback
+   // wrapper, from the next key frame).
+   int32_t Failed() const {
+@@ -601,6 +639,8 @@
+   int width_ = 0;
+   int height_ = 0;
+   bool gpu_ = false;
++  std::optional<Settings> settings_;
++  unsigned generation_ = 0;
+ };
+ 
+ }  // namespace
+@@ -609,6 +649,10 @@
+   // Once: can the decoder MFT be made at all? (The GPU is only tried when a
+   // stream configures one.)
+   static const bool available = [] {
++    if (!MfAvailable()) {
++      RTC_LOG(LS_WARNING) << "[mf-h264] Media Foundation unavailable: H.264 not offered";
++      return false;
++    }
+     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+     if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET)))
+       return false;
+@@ -631,7 +675,7 @@
+   // D3D11 device manager (DXVA for it on this GPU)? It is asked when the
+   // first stream of the codec arrives, after the UI registered its device.
+   auto probe = [codec] {
+-    if (VpxSoftwareRequested() || SoftwareRequested())
++    if (VpxSoftwareRequested() || SoftwareRequested() || !MfAvailable())
+       return false;
+     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+     if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET)))
+@@ -684,6 +728,14 @@
+ extern "C" void yap_mf_set_shared_device(void* device) {
+   std::lock_guard<std::mutex> lock(livekit_ffi::g_shared_mutex);
+   livekit_ffi::g_shared_device = static_cast<ID3D11Device*>(device);
++  livekit_ffi::g_shared_generation.fetch_add(1);
++}
++
++// Whether Media Foundation may be used. The app calls it before anything
++// makes a peer connection: false on Windows N/KN without the Media Feature
++// Pack (or YAP_TEST_NO_MF=1), when mfplat.dll and the rest are missing.
++extern "C" void yap_mf_set_available(bool available) {
++  livekit_ffi::g_mf_available.store(available);
+ }
+ 
+ // A frame's texture, if `frame` (a livekit_ffi::VideoFrameBuffer, as Rust's

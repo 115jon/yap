@@ -1,0 +1,261 @@
+//! The client's state store: typed [`State`], the [`Input`]s that change it,
+//! the [`Effect`]s it asks for, and [`reduce`], which is pure and synchronous
+//! (no I/O, no clock, no `await`). The runtime executes the effects and feeds
+//! their results back as inputs.
+//!
+//! Staleness is one rule: every request carries a [`RequestId`], the state
+//! keeps the id it is waiting for per slot (servers, a server's channels, the
+//! open channel's page, each send), and a result for any other id is dropped.
+//! Gateway, voice and sign-in inputs carry the session, call or attempt they
+//! belong to, with the same rule.
+
+mod admin;
+pub mod apps;
+pub mod backgrounds;
+pub mod calls;
+mod effect;
+pub mod embeds;
+pub mod extras;
+pub mod favorites;
+mod friends;
+mod input;
+pub mod invites;
+pub mod prefetch;
+mod reduce;
+mod search;
+pub mod shop;
+mod state;
+mod threads;
+pub mod time;
+pub mod view;
+
+pub use threads::{
+    message_link, uri_component, PanelsView, PinsCommand, ThreadCommand, ThreadListRow,
+    ThreadRequest, ThreadResponse,
+};
+
+pub use admin::{
+    Act, AdminCommand, AdminList, AdminRequest, AdminResponse, AdminState, OverrideDraft,
+    ServerDraft,
+};
+pub use effect::{
+    ApiRequest, ApiResponse, CacheWrite, Effect, HttpReason, Method, Page, ProfileAsset,
+    SwitchSource,
+};
+pub use friends::{
+    add_friend_error, friends_view, relation_name, AddStatus, CardRelation, FriendAction,
+    FriendRow, FriendsCommand, FriendsContext, FriendsRequest, FriendsResponse, FriendsState,
+    FriendsView, PersonAct,
+};
+pub use input::{Command, Dispatch, GatewayEvent, Input, ProfileDraft, SignInEvent, UploadFile};
+pub use invites::{InviteCommand, InviteRequest, InviteResponse, InviteState};
+pub use reduce::reduce;
+pub use search::{SearchCommand, SearchRequest, SearchScope, SearchState, SearchView};
+pub use state::{
+    live_status, pending_id, Divider, GatewayStatus, GifBrowse, MessageLog, Outgoing, Phase,
+    Presence, ProfileStep, ReactionChange, ServerChannels, Session, SettingsState, State, Typer,
+    Upload, UploadStatus, VoiceCall, VoicePrefs, WarmCache, WarmEntry, WARM_BYTES, WARM_ENTRIES,
+    WARM_FRESH_MS, WARM_WINDOW,
+};
+pub use time::LocalOffset;
+pub use view::{
+    DmRow, DmView, EmojiRow, GifRow, GifStatusView, Load, MemberListRow, MentionRow, ProfileView,
+    Row, SessionRow, SettingsView, ShareRow, UnreadView, UploadRow, ViewDiff, ViewUpdate,
+};
+pub use yap_cache::Snapshot;
+
+/// Which HTTP request a result answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RequestId(pub u64);
+
+/// One signed-in session (a token from `UseToken`, the store or sign-in).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SessionId(pub u64);
+
+/// One voice call. A new join is a new id; updates from older calls are dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CallId(pub u64);
+
+/// One device sign-in attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SignInId(pub u64);
+
+/// What a voice session needs to join.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VoiceTarget {
+    /// Empty for a DM call.
+    pub server_id: String,
+    /// The signed-in user (soundboard playback ids, activities).
+    pub me_id: String,
+    /// The voice channel, or a DM call's DM channel.
+    pub channel_id: String,
+    pub me_name: String,
+    pub me_username: String,
+    /// A DM call's room (`dm-call-<a>-<b>`).
+    pub room_slug: Option<String>,
+    /// A moderator's move grant for this join.
+    pub move_grant: Option<String>,
+    /// Warm up hidden until [`VoiceCommand::Promote`].
+    pub standby: bool,
+}
+
+/// Commands to a running voice session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VoiceCommand {
+    SetMuted(bool),
+    SetDeafened(bool),
+    /// The participants whose shares the user watches.
+    SetWatched(Vec<String>),
+    /// Our camera on or off.
+    SetCamera(bool),
+    /// Share a source (always a new capture; the latest request wins).
+    StartShare(VoiceShare),
+    StopShare,
+    /// The share's audio on or off.
+    SetShareAudio(bool),
+    /// The share's quality preset id.
+    SetShareQuality(String),
+    /// A voice app event (op 106) frame to send.
+    SendApp(String),
+    /// Our own soundboard clip is audible (op 5 SOUNDSHARE).
+    SetSoundboardSpeaking(bool),
+    /// The spatial panel's new room state (`SharedSpatialAudioState` JSON).
+    SetSpatialRoom(String),
+    /// A standby becomes the join.
+    Promote,
+    Leave,
+}
+
+/// Where a moderator moved us (op 42).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VoiceMoved {
+    pub server_id: String,
+    pub channel_id: String,
+    pub channel_name: String,
+    pub mover_name: String,
+    /// Stands in for CONNECT on the join there.
+    pub grant: Option<String>,
+}
+
+/// A screen share as asked for, or as it is live.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VoiceShare {
+    /// `monitor-<index>` or `window-<hwnd>`.
+    pub source_id: String,
+    pub source_name: String,
+    /// The source is a window (else a monitor).
+    pub window: bool,
+    /// A preset id (`1080p30`).
+    pub quality: String,
+    /// Asked: send the source's audio. Live: the share carries it
+    /// (`self_stream_audio`).
+    pub audio: bool,
+}
+
+/// One participant in a call, as the voice session reports it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VoiceMember {
+    /// The participant id.
+    pub id: String,
+    /// The Yap user id when the room named it (empty otherwise).
+    pub user_id: String,
+    pub name: String,
+    pub muted: bool,
+    pub deafened: bool,
+    pub speaking: bool,
+    /// This client's own participant.
+    pub me: bool,
+    /// Camera on (`self_video`).
+    pub video: bool,
+    /// Sharing their screen (`self_stream`).
+    pub stream: bool,
+    /// Their camera's frames arrive.
+    pub camera_live: bool,
+    /// Their share's frames arrive.
+    pub screen_live: bool,
+    /// Their share offers its audio (`screen-audio-<id>`).
+    pub screen_audio: bool,
+}
+
+/// Someone in a server voice channel, as the gateway reports it for the
+/// sidebar (`VOICE_CHANNEL_STATES`); profile fields carry over from the
+/// last full state of the same user.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Occupant {
+    pub user_id: String,
+    pub name: String,
+    /// As sent (possibly relative); empty when there is none.
+    pub avatar_url: String,
+    pub muted: bool,
+    pub deafened: bool,
+    pub video: bool,
+    pub stream: bool,
+    /// Their share's still (`stream_preview_url`), a `data:image/` URL;
+    /// empty when there is none (or it is anything else).
+    pub stream_preview: String,
+    /// Their voice session is coming back (`isVoiceMemberReconnecting`).
+    pub reconnecting: bool,
+}
+
+/// What a voice session reports back.
+#[derive(Debug, Clone, PartialEq)]
+pub enum VoiceUpdate {
+    Status(String),
+    /// The room said Ready for the first time.
+    Connected,
+    /// The room identified us afresh mid-call: presence goes out again.
+    Rejoined,
+    /// The whole roster, in a stable order.
+    Roster(Vec<VoiceMember>),
+    /// Our camera is on or off now; `error` says why turning it on failed.
+    Camera {
+        on: bool,
+        error: Option<String>,
+    },
+    /// Our share went live (the start sound plays).
+    ShareStarted(VoiceShare),
+    /// Our live share moved to a new capture, or its audio or quality
+    /// changed.
+    ShareUpdated(VoiceShare),
+    /// A fresh still of our live share (a `data:image/jpeg` URL, at most
+    /// 4096 bytes), taken every 8 s while it is live (`yap_voice::still`).
+    /// It goes to the global gateway as op 15 `stream_preview_url`, the
+    /// still other people see behind Watch stream.
+    SharePreview(String),
+    /// Our share is over. `stop_sound`: a live share the user stopped;
+    /// `error` when it failed.
+    ShareEnded {
+        stop_sound: bool,
+        error: Option<String>,
+    },
+    /// The voice socket is ready (first time or after a re-identify);
+    /// `participant_id` is ours.
+    VoiceReady {
+        participant_id: String,
+    },
+    /// A voice app event (op 106), stamped with the wall clock it arrived
+    /// at (Listen Together and soundboard timing).
+    App {
+        event: Box<yap_protocol::voice_app::AppEvent>,
+        now_ms: i64,
+    },
+    /// A moderator moved us; the call ends and the target is joined.
+    Moved(VoiceMoved),
+    /// The voice details' numbers (every 5 s).
+    Stats(Box<calls::CallStats>),
+    /// Nothing arrives while someone speaks.
+    InboundStalled(bool),
+    /// Our unmuted mic sends nothing.
+    MicStalled(bool),
+    /// The spatial panel's room map, as JSON (`yap_voice::SpatialMap`).
+    Spatial(String),
+    /// The call is over; the error text if it failed.
+    Ended(Option<String>),
+    /// The call is over because the room lost our session and made a new
+    /// participant (a reset room object): a joined channel call is joined
+    /// again at once; anything else ends as `Ended` with [`CALL_RESET`].
+    Reset,
+}
+
+/// What a reset call that is not joined again says.
+pub const CALL_RESET: &str = "The call connection was reset. Join again.";

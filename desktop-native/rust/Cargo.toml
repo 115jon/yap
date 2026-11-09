@@ -1,0 +1,204 @@
+[workspace]
+members = [
+    "crates/yap-cache",
+    "crates/yap-capture",
+    "crates/yap-core",
+    "crates/yap-games",
+    "crates/yap-hotkeys",
+    "crates/yap-protocol",
+    "crates/yap-realtime",
+    "crates/yap-voice",
+    "crates/yap-audio",
+    "crates/yap-speaker",
+    "crates/yap-anim",
+    "crates/yap-webm",
+    "crates/yap-segment",
+]
+
+[workspace.package]
+version = "0.2.23"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+
+[workspace.dependencies]
+serde = { version = "1.0.229", features = ["derive", "rc"] }
+serde_json = "1.0.154"
+keyring = { version = "3", features = ["windows-native"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "native-tls"] }
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+yap-cache = { path = "crates/yap-cache" }
+yap-capture = { path = "crates/yap-capture" }
+yap-core = { path = "crates/yap-core" }
+yap-games = { path = "crates/yap-games" }
+yap-hotkeys = { path = "crates/yap-hotkeys" }
+yap-protocol = { path = "crates/yap-protocol" }
+yap-realtime = { path = "crates/yap-realtime" }
+yap-voice = { path = "crates/yap-voice" }
+yap-audio = { path = "crates/yap-audio" }
+yap-speaker = { path = "crates/yap-speaker" }
+yap-anim = { path = "crates/yap-anim" }
+yap-webm = { path = "crates/yap-webm" }
+yap-segment = { path = "crates/yap-segment" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[package]
+name = "yap_native"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+cxx = "1"
+cxx-qt = "0.10"
+cxx-qt-lib = "0.10"
+futures-util = "0.3.34"
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["net", "io-util"] }
+tokio-tungstenite = { version = "0.30.0", features = ["native-tls"] }
+yap-cache.workspace = true
+yap-capture.workspace = true
+yap-core.workspace = true
+yap-games.workspace = true
+yap-hotkeys.workspace = true
+yap-protocol.workspace = true
+yap-realtime.workspace = true
+yap-voice.workspace = true
+yap-audio = { workspace = true, features = ["libopus"] }
+yap-speaker.workspace = true
+yap-anim.workspace = true
+yap-webm = { workspace = true, features = ["libvpx"] }
+yap-segment.workspace = true
+# Camera background pictures (the formats the web uploads, less AVIF).
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+# The loopback relay's path tokens (already in the lock through yap-voice).
+uuid = { version = "1.29.0", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Registry",
+    # The Tauri replacement (src/installer.rs): known folders, the DPI of
+    # the monitor its window was on.
+    "Win32_Graphics_Gdi",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
+] }
+# The installer's startup hooks (src/installer.rs) and the in-app updater
+# (src/updater.rs), docs/INSTALLER.md. Pinned: tools/package.ps1 and the
+# release workflow use the vpk of the same version. `public-utils` makes
+# `bundle::Manifest` nameable, which a custom `UpdateSource` (the updater's
+# merged, pinned channel feed) has to implement.
+velopack = { version = "=1.3.39-g8d2844f", features = ["public-utils"] }
+# WebView2 for iframe embeds (YouTube, Spotify, TikTok's player). It links
+# WebView2LoaderStatic.lib, so no loader DLL ships. 0.39 is the release on
+# `windows` 0.62, the version velopack uses, so one `windows` is built
+# (docs/LIBRARIES.md §16; the Tauri app is still on 0.38).
+webview2-com = "=0.39.1"
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.62"
+# Minidumps on a crash (src/crash.rs): Embark's in-process handler for
+# exceptions, aborts and pure calls, and rust-minidump's writer.
+crash-handler = "0.6"
+minidump-writer = "0.10"
+
+[build-dependencies]
+cxx-qt-build = "0.10"
+
+[lints]
+workspace = true
+
+[profile.release]
+# Fat, not thin: one module for the whole Rust side, 0.4 MiB smaller
+# (docs/PERFORMANCE.md, pass 5).
+lto = "fat"
+codegen-units = 1
+# Size first (docs/PERFORMANCE.md, pass 3): most of the code is the core,
+# the bridge, the HTTP stack and the QML compiled to C++ (whose `cc` build
+# takes /O1 from this). The per-frame paths keep opt-level 3 below.
+opt-level = "s"
+strip = "symbols"
+
+# Audio (RNNoise, resampling, the mix), camera backgrounds, picture
+# decoding and capture: per-frame work, kept at full speed.
+[profile.release.package.nnnoiseless]
+opt-level = 3
+[profile.release.package.rustfft]
+opt-level = 3
+[profile.release.package.realfft]
+opt-level = 3
+[profile.release.package.rubato]
+opt-level = 3
+[profile.release.package.yap-audio]
+opt-level = 3
+[profile.release.package.yap-voice]
+opt-level = 3
+[profile.release.package.yap-segment]
+opt-level = 3
+[profile.release.package.ndarray]
+opt-level = 3
+[profile.release.package.yap-anim]
+opt-level = 3
+[profile.release.package.yap-capture]
+opt-level = 3
+[profile.release.package.yap-webm]
+opt-level = 3
+[profile.release.package.image]
+opt-level = 3
+[profile.release.package.png]
+opt-level = 3
+[profile.release.package.image-webp]
+opt-level = 3
+[profile.release.package.zune-jpeg]
+opt-level = 3
+[profile.release.package.zune-core]
+opt-level = 3
+[profile.release.package.fdeflate]
+opt-level = 3
+[profile.release.package.miniz_oxide]
+opt-level = 3
+[profile.release.package.zlib-rs]
+opt-level = 3
+[profile.release.package.crc32fast]
+opt-level = 3
+[profile.release.package.gif]
+opt-level = 3
+[profile.release.package.weezl]
+opt-level = 3
+
+# Patched dependencies (desktop-native/patches, docs/LIBRARIES.md): the
+# copies are made by patches/vendor.ps1 (build.ps1 runs it).
+#   qt-build-utils: qmlcachegen's bytecode-only mode for the QML files
+#   rust/build.rs names, and empty .qml files in the resources.
+#   webrtc-sys: no AV1 encoder or decoder, and H.264 decoded by Media
+#   Foundation (on the GPU where it can) instead of FFmpeg, into D3D11
+#   textures the UI draws without a copy.
+#   libwebrtc: the C++ buffer behind a native frame (those textures), and
+#   offers that keep pulled tracks receiving (offer_to_receive_* unset).
+[patch.crates-io]
+qt-build-utils = { path = "vendor/qt-build-utils" }
+webrtc-sys = { path = "vendor/webrtc-sys" }
+libwebrtc = { path = "vendor/libwebrtc" }
+
+[features]
+link_qt_object_files = ["cxx-qt-build/link_qt_object_files"]

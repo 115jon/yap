@@ -498,6 +498,7 @@ function DesktopUserProfilePopover({
           <ProfileSections
             gameActivity={gameActivity}
             bio={resolvedUser.bio}
+            connections={resolvedUser.connections}
             roles={
               showRoles ? (
                 <ProfileRoleChips

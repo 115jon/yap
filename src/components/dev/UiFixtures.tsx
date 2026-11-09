@@ -24,6 +24,11 @@ import {
   ProfileBoardFixture,
 } from "@/components/dev/profile-board-fixtures";
 import {
+  ConnectionsProfileFixture,
+  connectionsFixtureState,
+  installConnectionsStub,
+} from "@/components/dev/connections-fixtures";
+import {
   applyNameStyleParam,
   NameStyleEditorFixture,
   NameStylesFixture,
@@ -1906,6 +1911,14 @@ function fixtureParam(name: string): string | null {
 
 function SettingsFixture({ tab }: { tab?: string }) {
   useFixtureDevices();
+  // Connections reads /api/connections on mount: stub it before the first
+  // render (`&state=empty|linked|hidden|error`).
+  const [uninstallConnections] = useState(() =>
+    tab === "connections"
+      ? installConnectionsStub(connectionsFixtureState(fixtureParam("state")))
+      : null,
+  );
+  useEffect(() => () => uninstallConnections?.(), [uninstallConnections]);
   return (
     <div className="relative h-full w-full bg-rm-bg-primary">
       <Shell surface="shell" />
@@ -3217,6 +3230,9 @@ export default function UiFixtures() {
       break;
     case "tiers":
       content = <TiersFixture />;
+      break;
+    case "connections-profile":
+      content = <ConnectionsProfileFixture />;
       break;
     case "site-banner":
       content = <SiteBannerFixture />;

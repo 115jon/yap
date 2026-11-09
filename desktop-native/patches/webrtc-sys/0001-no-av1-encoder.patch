@@ -1,0 +1,17 @@
+--- a/src/video_encoder_factory.cpp
++++ b/src/video_encoder_factory.cpp
+@@ -295,9 +295,11 @@
+ #if defined(WEBRTC_USE_H264)
+     webrtc::OpenH264EncoderTemplateAdapter,
+ #endif
+-#if defined(RTC_USE_LIBAOM_AV1_ENCODER)
+-    webrtc::LibaomAv1EncoderTemplateAdapter,
+-#endif
++// Yap patch (desktop-native/patches/webrtc-sys): no AV1 encoder (the
++// LibaomAv1EncoderTemplateAdapter was here). The client never sends AV1:
++// VP8 for the camera and software shares (yap-voice puts VP8 first), H.264
++// for hardware ones. libaom's encoder was ~3.4 MiB of the exe; AV1 still
++// decodes (dav1d).
+     webrtc::LibvpxVp9EncoderTemplateAdapter>;
+ 
+ rust::Vec<VideoEncoderBackend> video_encoder_backend_list() {

@@ -1,0 +1,16 @@
+{
+  "op": 13,
+  "d": {
+    "participant_id": "pid_fixture_alice",
+    "track_names": ["cam-audio-pid_fixture_alice"],
+    "tracks": [
+      {
+        "participant_id": "pid_fixture_alice",
+        "track_name": "cam-audio-pid_fixture_alice",
+        "sfu_track_name": "sfu_track_fixture_alice",
+        "session_id": "cap_fixture_alice",
+        "kind": "audio"
+      }
+    ]
+  }
+}

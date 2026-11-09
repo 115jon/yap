@@ -1,0 +1,4 @@
+{
+  "op": 2,
+  "d": { "participant_id": "sess_fixture_01", "heartbeat_interval": 15000 }
+}

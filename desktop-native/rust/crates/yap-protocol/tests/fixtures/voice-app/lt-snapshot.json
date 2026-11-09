@@ -1,0 +1,66 @@
+{
+  "op": 106,
+  "d": {
+    "type": "listen_together.snapshot",
+    "room_slug": "voice-srv_1-ch_v",
+    "snapshot": {
+      "roomSlug": "voice-srv_1-ch_v",
+      "revision": 7,
+      "paused": false,
+      "currentEntryId": "e_1",
+      "anchorPositionMs": 12000,
+      "anchorUpdatedAt": 1762350000000,
+      "lastUpdatedAt": 1762350000000,
+      "recentlyPlayed": [],
+      "queue": [
+        {
+          "entryId": "e_1",
+          "requestedAt": 1762349990000,
+          "track": {
+            "kind": "music",
+            "id": "youtube:dQw4w9WgXcQ",
+            "provider": "youtube",
+            "videoId": "dQw4w9WgXcQ",
+            "title": "Never Gonna Give You Up",
+            "artist": "Rick Astley",
+            "album": null,
+            "durationMs": 213000,
+            "artworkUrl": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+            "canonicalUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "sourceUrl": null,
+            "sourceLabel": "YouTube"
+          },
+          "requester": {
+            "userId": "u_peer",
+            "displayName": "Spike Peer",
+            "avatarUrl": null,
+            "avatarDisplay": null
+          },
+          "importBatchId": null,
+          "importBatchLabel": null
+        }
+      ],
+      "currentEntry": {
+        "entryId": "e_1",
+        "requestedAt": 1762349990000,
+        "track": {
+          "kind": "music",
+          "id": "youtube:dQw4w9WgXcQ",
+          "provider": "youtube",
+          "videoId": "dQw4w9WgXcQ",
+          "title": "Never Gonna Give You Up",
+          "artist": "Rick Astley",
+          "album": null,
+          "durationMs": 213000,
+          "artworkUrl": null,
+          "canonicalUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+          "sourceUrl": null,
+          "sourceLabel": "YouTube"
+        },
+        "requester": { "userId": "u_peer", "displayName": "Spike Peer" }
+      },
+      "positionMs": 12000,
+      "durationMs": 213000
+    }
+  }
+}

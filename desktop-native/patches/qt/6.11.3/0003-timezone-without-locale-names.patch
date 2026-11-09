@@ -1,0 +1,25 @@
+--- a/qtbase/src/corelib/time/qtimezoneprivate_win.cpp
++++ b/qtbase/src/corelib/time/qtimezoneprivate_win.cpp
+@@ -16,7 +16,8 @@
+ 
+ #include <private/qwinregistry_p.h>
+ 
+-QT_REQUIRE_CONFIG(timezone_locale);
++// Yap patch (desktop-native/patches/qt): builds without timezone_locale
++// too, with Windows' own zone names (as before Qt 6.8).
+ 
+ QT_BEGIN_NAMESPACE
+ 
+@@ -892,8 +893,12 @@ QTimeZonePrivate::Data QWinTimeZonePrivate::ruleToData(const QWinTransitionRule
+         tran.daylightTimeOffset = 0;
+     }
+     tran.offsetFromUtc = tran.standardTimeOffset + tran.daylightTimeOffset;
++#if QT_CONFIG(timezone_locale)
+     tran.abbreviation = localeName(atMSecsSinceEpoch, tran.offsetFromUtc,
+                                    type, QTimeZone::ShortName, QLocale::system());
++#else
++    tran.abbreviation = type == QTimeZone::DaylightTime ? m_daylightName : m_standardName;
++#endif
+     return tran;
+ }
+ 

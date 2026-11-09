@@ -1,0 +1,8 @@
+{
+  "op": 19,
+  "d": {
+    "event": "MESSAGE_DELETE",
+    "seq": 43,
+    "data": { "id": "msg_fixture_0002", "channel_id": "chan_fixture_text" }
+  }
+}
