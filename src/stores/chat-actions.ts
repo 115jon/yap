@@ -861,8 +861,16 @@ export function createChatActions(
           ),
           updated_at: profile.updated_at ?? current?.updated_at,
           created_at: profile.created_at ?? current?.created_at,
-          bio: profile.bio ?? current?.bio,
-          pronouns: profile.pronouns ?? current?.pronouns,
+          // users/me sends null for a cleared field: clear it, don't keep
+          // the old value (a cleared bio left the profile editor dirty).
+          bio:
+            profile.bio === undefined
+              ? current?.bio
+              : (profile.bio ?? undefined),
+          pronouns:
+            profile.pronouns === undefined
+              ? current?.pronouns
+              : (profile.pronouns ?? undefined),
           presence_platforms: current?.presence_platforms,
           status: (profile.status as any) ?? current?.status ?? "online",
           custom_status: profile.custom_status ?? current?.custom_status,
