@@ -98,14 +98,24 @@ the decisions.
 - The call's own audio path (`crates/yap-voice/src/engine/pipeline.rs`,
   docs/LIBRARIES.md §11): WASAPI mic, WebRTC's APM, then RNNoise when it
   is on, into a `NativeAudioSource`; every remote audio track into our
-  stereo mix with its gain and pan, played through WASAPI and handed to
-  the same APM as the echo canceller's far end. Spatial audio as the web
+  stereo mix with its gain and pan. Spatial audio as the web
   places people (`src/spatial.rs`: the room's shared state from op 2, 9
   and 15, ours sent in op 15; pan and distance gain on voice tracks only,
   while the room, our switch and high fidelity are on and we are not
   deafened). `YAP_ADM_AUDIO=1` falls back to libwebrtc's device module,
   where remote volume and live APM options go through
   `crates/yap-voice/cpp/track_audio.cpp`.
+- One speaker for everything the app plays (`crates/yap-speaker`,
+  docs/LIBRARIES.md §16): the call's mix, the soundboard and its tones,
+  Listen Together and the UI sounds are inputs of one shared-mode WASAPI
+  stream, event driven at the engine's 10 ms period, 20 ms ahead. The
+  final mix is what the call's echo canceller hears as its far end, so a
+  soundboard clip or a track on laptop speakers is cancelled from the mic
+  like a voice. The output device is the voice settings' (by endpoint id;
+  an older name-only choice moves to its id); "Default" follows the
+  Windows default communications device as it changes, an unplugged
+  choice falls back to the default and returns, and a lost device is
+  reopened at once without stopping the call's far end.
 - The Talk Tree: everyone in every voice channel of the server
   (`VOICE_CHANNEL_STATES` / `_UPDATE`), with guides, the lit path to you,
   speaking LEDs and mute/deafen glyphs.
@@ -119,7 +129,7 @@ the decisions.
   Read, which work with the window hidden in the tray: `ToastReply` posts
   as a reply to the toasted message, open channel or not), the taskbar
   flash, the saved window rect, start minimized and open on startup, the
-  web's UI sounds (`synth.rs`, played through `waveOut`), and a rotating
+  web's UI sounds (`synth.rs`, played on the app's one speaker), and a rotating
   log file.
 - The taskbar thumbnail toolbar (`cpp/thumbbar.*`, the desktop app's
   `thumbnail_toolbar.rs` and icons): camera, mic, deafen and disconnect
@@ -343,7 +353,8 @@ the decisions.
     or keyboard focus.
   - The local player is `crates/yap-audio`: symphonia decoding (mp3, AAC/m4a,
     Vorbis, FLAC, WAV, WebM/MKV; Opus through the libopus inside libwebrtc),
-    a 48 kHz mixer and `waveOut` on the voice output device.
+    a 48 kHz mixer, played as an input of the app's one speaker
+    (`crates/yap-speaker`) on the voice output device.
   - Listen Together: search or a YouTube/Spotify link, queue (append, play
     next, play now), play, pause, seek, skip, remove, clear; the now-playing
     card; Tracks and Collections search, a pasted playlist's preview (Play
@@ -556,11 +567,13 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_TEST_VOICE_FAIL`           | unset                     | `admission` (the join's admission answers 500) or `ice` (the media connection never comes up): a call join fails there (tests)                                                                                                 |
 | `YAP_ADM_AUDIO`                 | unset                     | `1`: libwebrtc's device module records and plays (mixed playout; no RNNoise, no panning) instead of the own audio path                                                                                                         |
 | `YAP_FAKE_MIC`                  | unset                     | `<file.wav>` (48 kHz 16-bit): the mic, looped and paced by the clock (tests)                                                                                                                                                   |
-| `YAP_FAKE_MIC_ECHO`             | unset                     | `<gain>`: with `YAP_FAKE_MIC`, our own speaker mix is added to the mic 60-90 ms late at this gain, as a room's echo (tests)                                                                                                    |
-| `YAP_NULL_SPEAKER`              | unset                     | `1`: the mix plays to no device (paced by the clock; the echo canceller is still fed) (tests)                                                                                                                                  |
+| `YAP_FAKE_MIC_ECHO`             | unset                     | `<gain>`: with `YAP_FAKE_MIC`, the speaker's final mix (soundboard and stream included) is added to the mic 60-90 ms late at this gain, as a room's echo (tests)                                                               |
+| `YAP_NULL_SPEAKER`              | unset                     | `1`: the app's speaker plays to no device: the call, the soundboard, Listen Together and the UI sounds (paced by the clock; the echo canceller and the fake room are still fed) (tests)                                        |
 | `YAP_MIC_RAW_TAP`               | unset                     | `<file.wav>`: records the mic as it comes in (before the APM), up to 120 s (tests)                                                                                                                                             |
 | `YAP_MIC_TAP`                   | unset                     | `<file.wav>`: records the mic as it is sent (after the APM and RNNoise), up to 120 s (tests)                                                                                                                                   |
-| `YAP_RENDER_TAP`                | unset                     | `<file.wav>`: records the stereo speaker mix as it is played, up to 120 s (tests)                                                                                                                                              |
+| `YAP_RENDER_TAP`                | unset                     | `<file.wav>`: records the speaker's final stereo mix (call, soundboard, stream, UI sounds) as it is played, up to 120 s per render thread (`-2.wav`... after); its start time is logged (tests)                                |
+| `YAP_SPEAKER_AHEAD_MS`          | `20`                      | `<10..60>`: how far ahead of the device the speaker's mix runs                                                                                                                                                                 |
+| `YAP_TEST_SOUNDBOARD`           | unset                     | `<file>`: with `YAP_NULL_SPEAKER=1` only, played as a soundboard clip every `YAP_TEST_SOUNDBOARD_EVERY` s (default 10) through the soundboard's engine (tests)                                                                 |
 | `YAP_TEST_NO_MF`                | unset                     | `1`: Media Foundation counts as missing, as on Windows N without the Media Feature Pack: no mp4 playback, no H.264, no cameras, the notice (tests)                                                                             |
 | `YAP_GPU_SAFE_MODE`             | unset                     | `1` (or `--gpu-safe-mode`): this run draws with WARP and keeps every GPU user of ours off (`--no-gpu-safe-mode` clears a saved safe mode)                                                                                      |
 | `YAP_TEST_GPU_FAIL`             | unset                     | `1`: 2 s after the first frame the scene graph error handler runs: safe mode is saved and the app restarts itself in it (tests)                                                                                                |
@@ -697,6 +710,7 @@ assets/games/         the bundled game catalog (tools/pack-game-catalog.mjs)
 rust/src/installer.rs Velopack startup and install/uninstall hooks (docs/INSTALLER.md)
 tools/package.ps1     release build + vpk pack into Setup.exe (optionally signed)
 rust/src/video.rs     video frames to the hub; render demand to the call
-rust/src/sound.rs     UI sounds through waveOut
+rust/src/sound.rs     UI sounds, as voices on the app's speaker
+rust/crates/yap-speaker/  the one WASAPI speaker: bus, tap, device follow
 rust/qml/             UI: Main, SignInView, ServerRail, ChannelSidebar, ChatView, ...
 ```

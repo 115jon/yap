@@ -598,12 +598,12 @@ behind two `DynamicsCompressorNode`s. All of it is local to each client, not
 published into the call. `crates/yap-audio` does the same natively. Versions
 and dates come from the crates.io API on 2026-11-05.
 
-| area       | pick                                                                                                                                                              | runner-up / rejected                                                                                                                                                   |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Decoding   | `symphonia` 0.5.5 (2025-10-11; MPL-2.0; pure Rust), features `mp3`, `aac`, `isomp4`, `ogg`, `vorbis`, `wav`, `pcm`, `flac`, `mkv`                                 | 0.6.1 (2026-08-13) has a new API; move when the crate is ready for it. FFmpeg bindings: a large C dependency to build `/MT`                                            |
-| Opus       | `extern "C"` to `opus_decoder_create` / `opus_decode_float` / `opus_decoder_destroy`, resolved from the libopus inside LiveKit's `webrtc.lib` (feature `libopus`) | `audiopus` / `opus` crates build or link a second libopus (duplicate symbols next to `webrtc.lib`)                                                                     |
-| Resampling | `rubato` 5.0.1 (2026-10-01; MIT/Apache), the synchronous FFT resampler (`Fft`, `FixedSync::Input`, 1024-frame chunks)                                             | linear or cubic interpolation: audible aliasing and treble loss on 44.1 → 48 kHz music                                                                                 |
-| Output     | `waveOut` through `windows-sys` 0.61 (as `src/sound.rs`), one thread, four 20 ms buffers (80 ms), 48 kHz stereo 16-bit                                            | `cpal` (WASAPI): more code and threads for the same shared-mode result. WASAPI directly: only needed for exclusive mode or lower latency, which playback does not need |
+| area       | pick                                                                                                                                                              | runner-up / rejected                                                                                                                                                                                                 |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Decoding   | `symphonia` 0.5.5 (2025-10-11; MPL-2.0; pure Rust), features `mp3`, `aac`, `isomp4`, `ogg`, `vorbis`, `wav`, `pcm`, `flac`, `mkv`                                 | 0.6.1 (2026-08-13) has a new API; move when the crate is ready for it. FFmpeg bindings: a large C dependency to build `/MT`                                                                                          |
+| Opus       | `extern "C"` to `opus_decoder_create` / `opus_decode_float` / `opus_decoder_destroy`, resolved from the libopus inside LiveKit's `webrtc.lib` (feature `libopus`) | `audiopus` / `opus` crates build or link a second libopus (duplicate symbols next to `webrtc.lib`)                                                                                                                   |
+| Resampling | `rubato` 5.0.1 (2026-10-01; MIT/Apache), the synchronous FFT resampler (`Fft`, `FixedSync::Input`, 1024-frame chunks)                                             | linear or cubic interpolation: audible aliasing and treble loss on 44.1 → 48 kHz music                                                                                                                               |
+| Output     | An input of the app's one speaker (`yap-speaker`, §16): WASAPI shared mode, event driven at the 10 ms engine period, 20 ms ahead, 48 kHz stereo 16-bit            | `waveOut` (until 2026-11-08): an output beside the call's, so the echo canceller never heard it (§16), 31-character names, no default-device follow, 80 ms of buffers. `cpal`: no endpoint ids, no tap after the mix |
 
 ### 9.1 Decoder: symphonia
 
@@ -646,19 +646,19 @@ and dates come from the crates.io API on 2026-11-05.
 
 ### 9.4 Output path
 
-- One `yap-audio` thread mixes 20 ms blocks and writes them to `waveOut`
-  with an event callback. Four buffers keep the latency at 80 ms.
-- The device closes after 2 s with nothing audible and reopens on the next
-  play.
-- `set_output_device` matches the endpoint name against `waveOut`'s
-  31-character names: exact first, then by prefix, case-insensitively. No
-  match falls back to `WAVE_MAPPER`.
-- The final mix is soft clipped: identity up to 0.8, then a tanh shoulder
-  towards 0.98. Overlapping clips never wrap or hard clip.
-- Known limit: the output stays on the device it opened. A change of the
-  system default device mid-stream is not followed until the device closes
-  (2 s idle) and reopens on the next play. Choosing a device in the voice
-  settings reopens it at once.
+- The mixer is an input of the app's one speaker (§16). The speaker's
+  render thread pulls 10 ms from it each period (under the mixer's lock;
+  the `yap-audio` thread changes voices between frames), sums it with the
+  call's mix and the UI sounds, and plays it. In a call, that final mix is
+  the echo canceller's far end.
+- The `yap-audio` thread wakes the speaker when something becomes audible,
+  and forwards the mixer's events every 20 ms while it plays. The speaker
+  closes the device after 2 s with nothing to play and no call.
+- The device is the voice settings' output, by endpoint id (§16). The
+  player no longer has a device of its own.
+- The player's mix is soft clipped as before: identity up to 0.8, then a
+  tanh shoulder towards 0.98. The speaker's clip on the sum starts above
+  that (0.977, towards 0.999), so a single input passes unchanged.
 
 ### 9.5 Loudness and tones (approximations)
 
@@ -866,11 +866,12 @@ Versions and dates from crates.io on 2026-11-06.
 | Mic in         | WASAPI shared mode, event driven, 48 kHz mono 16-bit with `AUTOCONVERTPCM` (`windows` 0.61, as yap-capture's loopback), by the ADM's endpoint id or the default communications endpoint                                                                                                                                                                                                                                                                                                                                                                         | `cpal`: an extra layer with no endpoint-id API matching the ADM's ids; the ADM's own recording: no hook after its APM                                                                                                                                                       |
 | Mic to encoder | `NativeAudioSource` (unbuffered, `capture_frame(..).now_or_never()`, as the share audio)                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | -                                                                                                                                                                                                                                                                           |
 | Remote audio   | `NativeAudioStream::with_options` per remote audio track (48 kHz stereo, at most 20 queued frames) into our own mixer (`src/dsp/mix.rs`): per-track gain and the `StereoPannerNode` pan law (mono law for a track whose channels are equal, two-channel law for stereo), ramped over a frame; the queue primed at 40 ms and held at 30-60 ms against clock drift by resampling a frame from 477 or 483 samples (linear, 0.625 %), cut only past 120 ms; a look-ahead-free soft limiter on the sum (-3 dBFS, ratio 20, 1 ms / 100 ms, soft clip under -0.2 dBFS) | Per-track gain inside libwebrtc (`SetVolume`, what the ADM path does): scalar only, no pan. A custom audio decoder factory or mixer source: fixed inside webrtc-sys's factory, so it means forking webrtc-sys                                                               |
-| Speaker out    | WASAPI shared mode, event driven, 48 kHz stereo 16-bit, kept 30 ms ahead, threads at MMCSS "Pro Audio" (`AvSetMmThreadCharacteristicsW`); the same frame goes to the APM's far end, its delay hint the queued audio plus `GetStreamLatency` and the device period of both clients                                                                                                                                                                                                                                                                               | The ADM's playout with our mix injected: its APM takes the far end from its own mixer before our frame exists, so the echo canceller would hear the unpanned mix                                                                                                            |
+| Speaker out    | The app's one speaker (`yap-speaker`, §16): the call's mix is one input beside the soundboard, Listen Together and the UI sounds; WASAPI shared mode, event driven, 48 kHz stereo 16-bit, 20 ms ahead, MMCSS "Pro Audio"; the final frame goes to the APM's far end (a `Tap`), its delay hint the queued audio plus `GetStreamLatency` and a period, plus the mic's                                                                                                                                                                                             | The ADM's playout with our mix injected: its APM takes the far end from its own mixer before our frame exists, so the echo canceller would hear the unpanned mix                                                                                                            |
 
 Why the far end matters: AEC removes what it is told was played. Here the
 render thread hands the APM exactly the frame it writes to the speaker, so a
-panned or re-gained mix is cancelled as played. The libwebrtc-feature test
+panned or re-gained mix is cancelled as played, and so is a soundboard clip
+or a Listen Together track that shares the speaker (§16). The libwebrtc-feature test
 `engine::pipeline::tests::the_echo_canceller_should_remove_what_the_speaker_played`
 runs a far-end talker through the mixer and back into the mic 40 ms late at
 half level: about 50 dB of it is removed; with echo cancellation off it
@@ -1368,3 +1369,59 @@ No new third-party crate came in for it.
 The probe (`cargo run --release -p yap-games --example probe [s]`) prints
 the catalog's load time and heap and the detector's CPU over the real
 process list, counts only.
+
+## 16. One speaker for everything (`yap-speaker`, 2026-11-08)
+
+Until this change the app had three outputs. The call played through its
+own WASAPI stream (§11). The soundboard, its tones and Listen Together
+played through `waveOut` (§9.4). The UI sounds played through one
+`waveOut` handle per sound (`src/sound.rs`). Only the call's stream fed the
+echo canceller's far end. During a call on laptop speakers, the mic
+therefore picked up the soundboard and the stream, and sent them to
+everyone (PERFORMANCE.md "One speaker": 0.3 dB of a soundboard clip
+removed). `waveOut` also matched devices by names cut to 31 characters,
+never followed a change of the Windows default device, and kept 80 ms of
+buffers.
+
+Now everything the app plays is an `Input` of one render stream. The
+call's echo canceller hears the final mix, so it cancels a soundboard clip
+or a track like a voice.
+
+| need           | pick                                                                                                                                                                                                                                                                 | not picked                                                                                                                                                                                                  |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| topology       | one process-wide render thread; every source is an `Input` (`mix_into` adds 10 ms of 48 kHz stereo `f32`); one `Tap` list after the final mix                                                                                                                        | yap-audio feeding the call's render path only while a call runs: two output paths to keep in step (the device, its follow, its loss), and a soundboard clip that started before the call would jump devices |
+| device API     | WASAPI directly through `windows` 0.61 (in the tree): shared mode, `EVENTCALLBACK`, `AUTOCONVERTPCM`, 48 kHz stereo 16-bit, a 20 ms buffer request, 20 ms ahead, MMCSS "Pro Audio"                                                                                   | `cpal` 0.16: no endpoint ids, no `IMMNotificationClient`, and its own thread and callback between us and the tap. `IAudioClient3` low-latency periods: the engine's 10 ms period is already the target      |
+| device choice  | the endpoint id (`IMMDevice::GetId`), stable across reboots and hot-plug; `None` = the default communications endpoint (what the call always opened and the menus list as "Default")                                                                                 | names: `waveOut` cut them to 31 characters, so two headsets of one model matched the same entry                                                                                                             |
+| default follow | `IMMNotificationClient` on the render thread's enumerator: `OnDefaultDeviceChanged(eRender, eCommunications)` reopens when following the default; `OnDeviceStateChanged`/`Removed` for the open endpoint reopen; the chosen one coming back reopens on it            | polling `GetDefaultAudioEndpoint`                                                                                                                                                                           |
+| device loss    | any error from `GetCurrentPadding`, `GetBuffer` or `ReleaseBuffer` (`AUDCLNT_E_DEVICE_INVALIDATED` on unplug or a format change), or no audio taken for 1 s: reopen at once; while no device opens, the mix runs on the clock (taps still fed), retried every second | stopping the call's far end until a device is back (the echo canceller would lose its reference)                                                                                                            |
+| summing        | add the inputs in `f32`, then a soft clip from 0.977 (the call limiter's ceiling) towards 0.999, so one input passes untouched and a clip over a loud call bends instead of clipping                                                                                 | a limiter on the sum: the call already has one, and a second would pump the call when a clip plays                                                                                                          |
+| lifetime       | the thread starts on a wake (an input became audible) or a `Hold` (the call); it closes the device after 2 s with neither                                                                                                                                            | a device open for the whole process                                                                                                                                                                         |
+
+Name migration: a saved output (or input) whose id is not listed, but
+whose saved name is, moves to that endpoint's id when the device list
+arrives (`match_endpoint`: exact name, case-insensitive; a 31-character
+name only when exactly one listed name starts with it). An unplugged
+device keeps its id, and the default plays until it is back.
+
+Measured with `cargo run -p yap-speaker --example probe`, which initialises
+and closes the client without starting it, so nothing plays. On this
+machine's default communications output (VB-Audio Matrix, 10 ms engine
+period), a 10 or 20 ms request gives a 22 ms buffer, and the stream
+latency plus a period is 10 ms. So a frame is heard 20-30 ms after it is
+mixed (10-20 ms queued, 10 ms past the buffer). The call's old stream
+asked for 40 ms and kept 30 ms ahead (40-50 ms). `waveOut` kept up to
+80 ms of buffers before the audio engine's own latency. PERFORMANCE.md
+"One speaker" has the end-to-end numbers.
+
+Not verified on hardware (all live runs used `YAP_NULL_SPEAKER`): a real
+default-device change, an unplug mid-call, and underruns at 20 ms ahead
+on a loaded machine. The notification decisions and the reopen request
+are unit-tested (`wasapi::tests`, `engine::tests`). `YAP_SPEAKER_AHEAD_MS`
+raises the lead if a machine underruns.
+
+Sources:
+
+- https://learn.microsoft.com/windows/win32/coreaudio/stream-latency-during-playback
+- https://learn.microsoft.com/windows/win32/api/mmdeviceapi/nn-mmdeviceapi-immnotificationclient
+- https://learn.microsoft.com/windows/win32/coreaudio/audclnt-streamflags-xxx-constants
+- https://learn.microsoft.com/windows/win32/coreaudio/recovering-from-an-invalid-device-error
