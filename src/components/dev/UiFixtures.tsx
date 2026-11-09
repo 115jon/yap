@@ -16,6 +16,7 @@ import { SoundFixture } from "@/components/dev/sound-fixtures";
 import { StandaloneUpdaterView } from "@/components/StandaloneUpdater";
 import { DitherMockupsFixture } from "@/components/dev/dither-mockups";
 import { ChunkedUploadFixture } from "@/components/dev/chunked-upload-fixtures";
+import { SiteBannerFixture } from "@/components/dev/site-banner-fixture";
 import { TooBigFixture } from "@/components/dev/too-big-fixtures";
 import { BadgesFixture, TiersFixture } from "@/components/dev/tiers-fixtures";
 import {
@@ -3212,6 +3213,9 @@ export default function UiFixtures() {
       break;
     case "tiers":
       content = <TiersFixture />;
+      break;
+    case "site-banner":
+      content = <SiteBannerFixture />;
       break;
     case "name-styles":
       content = (

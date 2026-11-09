@@ -144,10 +144,12 @@ export function isAbortError(error: unknown): boolean {
 /**
  * Worth another try: a network failure (no status) or a status that says
  * "later" (timeouts, 429, 5xx). A 4xx that names the request as wrong never
- * is, nor is an abort.
+ * is, nor is an abort or a paused feature (503 FEATURE_PAUSED).
  */
 export function isRetryableUploadError(error: unknown): boolean {
   if (isAbortError(error)) return false;
+  // Switched off by a site admin: a retry gets the same answer.
+  if (codeOf(error) === "FEATURE_PAUSED") return false;
   const status = statusOf(error);
   if (status === undefined || status === 0) return true;
   return RETRYABLE_STATUSES.has(status);

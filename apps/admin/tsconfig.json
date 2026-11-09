@@ -1,0 +1,20 @@
+{
+  // The admin app: its client (React, DOM) and its Worker (workers-types),
+  // with Yap's modules through the same `@/` alias as the app.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "types": ["@cloudflare/workers-types", "vite/client"],
+    "paths": {
+      "@/*": ["../../src/*"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "test/**/*.ts",
+    "vite.config.ts",
+    "../../src/env.d.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

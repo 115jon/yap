@@ -76,6 +76,12 @@ export interface MultipartUploadDeps {
    * to MAX_ATTACHMENT_BYTES.
    */
   attachmentLimit: (userId: string) => Promise<number> | number;
+  /**
+   * The chunked-uploads kill switch: a response to refuse new uploads with
+   * (503 FEATURE_PAUSED), or null to go on. Asked by create only, before
+   * auth; uploads already in flight may finish. Default: never paused.
+   */
+  paused?: () => Promise<Response | null>;
   /** Bytes per part (every part but the last). Default MULTIPART_PART_SIZE. */
   partSize?: number;
   /** How long an upload may stay open. Default 24 hours. */
@@ -377,6 +383,8 @@ export function createMultipartUploadHandlers(deps: MultipartUploadDeps) {
     request: Request,
     { channelId }: MultipartRouteParams,
   ): Promise<Response> {
+    const paused = await deps.paused?.();
+    if (paused) return paused;
     const gated = await gate(request, channelId, "create");
     if (gated instanceof Response) return gated;
     const { userId, serverId } = gated;

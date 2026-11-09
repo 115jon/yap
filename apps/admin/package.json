@@ -1,0 +1,13 @@
+{
+  "name": "@ralph/admin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --dir ../.. run admin:dev",
+    "fixtures": "pnpm --dir ../.. run admin:fixtures",
+    "build": "pnpm --dir ../.. run admin:build",
+    "typecheck": "pnpm --dir ../.. exec tsc -p apps/admin/tsconfig.json --noEmit",
+    "deploy": "pnpm --dir ../.. run admin:deploy"
+  }
+}

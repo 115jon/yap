@@ -104,7 +104,7 @@ const REQUEST = {
 /** The native Windows client's request (its own label, its own link). */
 const NATIVE_REQUEST = {
   ...REQUEST,
-  device: { ...REQUEST.device, label: "Yap Native" },
+  device: { ...REQUEST.device, label: "Yap" },
 };
 
 const LONG_REQUEST = {

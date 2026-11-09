@@ -6,6 +6,7 @@ import { extractEmbedUrls, MAX_EMBEDS_PER_MESSAGE } from "@/lib/embed-urls";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isFetchablePreviewUrl } from "@/lib/url-guard";
 import { validateBody } from "@/lib/validate-body";
+import { featurePaused } from "@/services/site-flags.service";
 import { prefetchEmbedUrls } from "@/services/embed-fetcher";
 
 /**
@@ -27,6 +28,8 @@ const prefetchSchema = Schema.Struct({
 });
 
 export const POST = async ({ request }: { request: Request }) => {
+  const paused = await featurePaused("linkEmbeds", request);
+  if (paused) return paused;
   const authResult = await requireAuth();
   if (authResult instanceof Response) return authResult;
   const { userId } = authResult;

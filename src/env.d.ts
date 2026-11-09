@@ -16,6 +16,9 @@ declare global {
   interface ImportMetaEnv {
     /** `vite dev` only: the Kova key RALPH_AUTH picked (lib/dev-auth-target). */
     readonly RALPH_DEV_KOVA_KEY?: string;
+    /** The commit and time of the build (vite.config.ts), for /admin. */
+    readonly YAP_BUILD_COMMIT?: string;
+    readonly YAP_BUILT_AT?: string;
   }
 
   interface CloudflareEnv {

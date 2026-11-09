@@ -33,6 +33,7 @@
  *   name-styles, name-style-editor (display name styles on every surface;
  *   `&name=<effect>&wave=1` dresses every fixture user in a style)
  *   chunked-upload (big-file progress tiles; a live run with cancel)
+ *   site-banner (the site announcement strip in each tone)
  */
 
 import { createFileRoute, notFound } from "@tanstack/react-router";

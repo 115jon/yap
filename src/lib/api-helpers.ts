@@ -4,6 +4,11 @@
 
 import { env } from "cloudflare:workers";
 import { clog } from "@/lib/console-logger";
+import {
+  ACCOUNT_SUSPENDED,
+  isSuspended,
+  SUSPENDED_MESSAGE,
+} from "@/lib/suspension";
 export { genId } from "@/lib/id";
 
 const authLog = clog("requireAuth");
@@ -356,6 +361,11 @@ export async function requireAuth(
     const check = await checkCredentials(credentials);
 
     if (check.status === "signed-in") {
+      // A suspended account is signed in to Kova but refused here.
+      if (await isSuspended(check.user.id)) {
+        authLog.warn("Suspended account refused", requestContext);
+        return suspendedResponse(req);
+      }
       return { userId: check.user.id };
     }
 
@@ -387,6 +397,11 @@ export async function requireAuth(
     });
     return authUnavailableResponse(req);
   }
+}
+
+/** The 403 a suspended account gets instead of its answer (lib/suspension). */
+export function suspendedResponse(req?: Request): Response {
+  return apiError(SUSPENDED_MESSAGE, 403, ACCOUNT_SUSPENDED, req);
 }
 
 /** Seconds a client should wait before retrying a 503 AUTH_UNAVAILABLE. */
