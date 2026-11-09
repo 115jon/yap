@@ -20,13 +20,13 @@ import { logger } from "@/lib/logger";
 import { validateBody } from "@/lib/validate-body";
 import { Schema } from "effect";
 import {
-  MAX_PROFILE_BANNER_SIZE,
   MAX_PROFILE_NAMEPLATE_SIZE,
   validateProfileBannerBuffer,
   validateProfileNameplateBuffer,
 } from "@/lib/profile-asset-validation";
 import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
 import { tooLargeMessage } from "@/lib/upload-limits";
+import { uploadLimitForUser } from "@/services/entitlement.service";
 import { clearProfileAsset, updateProfileAsset } from "@/services/user.service";
 
 async function listExistingAssetKeys(
@@ -98,7 +98,7 @@ const POST = async ({ request }: any) => {
 
   const maxSize =
     kindValue === "banner"
-      ? MAX_PROFILE_BANNER_SIZE
+      ? await uploadLimitForUser(getDB(), userId, "banner", file.size)
       : MAX_PROFILE_NAMEPLATE_SIZE;
   if (file.size > maxSize) {
     return apiError(
