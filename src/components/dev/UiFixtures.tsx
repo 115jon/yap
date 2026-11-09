@@ -20,6 +20,10 @@ import { SiteBannerFixture } from "@/components/dev/site-banner-fixture";
 import { TooBigFixture } from "@/components/dev/too-big-fixtures";
 import { BadgesFixture, TiersFixture } from "@/components/dev/tiers-fixtures";
 import {
+  isProfileBoardFixture,
+  ProfileBoardFixture,
+} from "@/components/dev/profile-board-fixtures";
+import {
   applyNameStyleParam,
   NameStyleEditorFixture,
   NameStylesFixture,
@@ -3287,6 +3291,8 @@ export default function UiFixtures() {
         />
       ) : surfaceName.startsWith("act-") ? (
         <ActivityFixture surface={surfaceName} />
+      ) : isProfileBoardFixture(surfaceName) ? (
+        <ProfileBoardFixture surface={surfaceName} />
       ) : isSettingsProfileFixture(surfaceName) ? (
         <SettingsProfileFixture
           surface={surfaceName}
