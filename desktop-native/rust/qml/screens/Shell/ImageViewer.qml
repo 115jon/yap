@@ -513,12 +513,10 @@ Popup {
                         hidden: root.hidden
                     }
                 }
-                BusyIndicator {
+                Spinner {
                     anchors.centerIn: parent
-                    width: 24
-                    height: 24
+                    onMedia: true
                     running: !root.isVideo && !root.hidden && root.current !== null && root.shown.status === Image.Loading
-                    visible: running
                 }
                 Text {
                     anchors.centerIn: parent

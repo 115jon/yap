@@ -115,12 +115,10 @@ Item {
             font: Theme.type.captionStrong
         }
     }
-    BusyIndicator {
+    Spinner {
         anchors.centerIn: parent
-        width: 32
-        height: 32
+        onMedia: true
         running: web.state === WebEmbed.Loading
-        visible: running
     }
 
     MouseArea {
