@@ -6,6 +6,11 @@
 //! down to fit the box the caller draws (never up), premultiplied RGBA (the
 //! layout of `QImage::Format_RGBA8888_Premultiplied`), with its delay. A
 //! still PNG or WebP comes back as one frame, so callers need no second path.
+//!
+//! GIFs stream instead ([`gifstream`]): one canvas, decoded frame by frame
+//! on a worker thread as they play.
+
+pub mod gifstream;
 
 use std::io::Cursor;
 
@@ -38,6 +43,8 @@ pub enum AnimError {
     Empty,
     #[error("the picture declares {0}x{1}, which is too large")]
     TooLarge(u32, u32),
+    #[error("gif: {0}")]
+    Gif(String),
 }
 
 /// One frame: `width * height * 4` premultiplied RGBA bytes.
@@ -235,7 +242,7 @@ fn still(image: DynamicImage, mut out: Collector) -> Result<Animation, AnimError
 }
 
 /// Refuses a declared canvas that is too big, from the header alone.
-fn check_size(width: u32, height: u32) -> Result<(), AnimError> {
+pub(crate) fn check_size(width: u32, height: u32) -> Result<(), AnimError> {
     if width > MAX_SIDE || height > MAX_SIDE || u64::from(width) * u64::from(height) > MAX_PIXELS {
         return Err(AnimError::TooLarge(width, height));
     }

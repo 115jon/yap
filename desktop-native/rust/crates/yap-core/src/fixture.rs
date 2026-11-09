@@ -199,6 +199,24 @@ impl Fixture {
     }
 }
 
+/// The GIF message `n` of `count` carries, if any (YAP_FIXTURE_GIF and
+/// YAP_FIXTURE_GIF_COUNT; see `messages`).
+fn fixture_gif(n: usize, count: usize) -> Option<String> {
+    let urls = std::env::var("YAP_FIXTURE_GIF").ok()?;
+    let urls: Vec<&str> = urls.split(',').filter(|u| !u.is_empty()).collect();
+    let many = std::env::var("YAP_FIXTURE_GIF_COUNT")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok());
+    let from_end = count.checked_sub(n + 1)?;
+    let slot = match many {
+        Some(many) if from_end < many => from_end,
+        Some(_) => return None,
+        None if from_end == 0 || from_end == 5 => from_end / 5,
+        None => return None,
+    };
+    urls.get(slot % urls.len().max(1)).map(|u| (*u).to_string())
+}
+
 /// `YAP_FIXTURE_MEDIA`: the local media server's base URL, if one is set.
 pub(crate) fn media_base() -> Option<String> {
     std::env::var("YAP_FIXTURE_MEDIA")
@@ -404,7 +422,10 @@ pub fn messages_in(count: usize, channel_id: &str) -> Vec<Message> {
         let (id, username, display) = AUTHORS[author];
         // YAP_FIXTURE_GIF=<url>: the last message and the fifth from last
         // carry that GIF (animated idle with chat GIFs, docs/PERFORMANCE.md).
-        let gif = std::env::var("YAP_FIXTURE_GIF").ok().filter(|_| n + 1 == count || n + 6 == count);
+        // With YAP_FIXTURE_GIF_COUNT=<n>, the last n messages each carry one,
+        // taking the URLs of a comma-separated list in turn (n GIFs on screen,
+        // performance pass 8).
+        let gif = fixture_gif(n, count);
         let attachments = if let Some(url) = gif {
             vec![Attachment {
                 id: Some(format!("att_fixture_{n}")),

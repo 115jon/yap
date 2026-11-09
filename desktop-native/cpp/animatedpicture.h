@@ -27,6 +27,12 @@
 // same slot advances in the same pass and they share one window render
 // (each render redraws the whole window). A picture keeps its speed: a slot
 // that comes after several of its frames skips to the one due by then.
+//
+// A streamed GIF (`stream`) is decoded by yap-anim (src/anim.rs) on a worker
+// thread, one frame at a time and one frame ahead: when its slot comes the
+// next frame is usually decoded already, so the GUI thread only swaps it in.
+// YAP_GIF_DECODER=qt streams with Qt's reader on the GUI thread instead (the
+// comparison), as does a GIF yap-anim refuses.
 
 #include <QtCore/QHash>
 #include <QtCore/QPointer>
@@ -41,6 +47,7 @@
 class QBuffer;
 class QImageReader;
 class QNetworkAccessManager;
+class GifPlayer;
 
 struct AnimationData
 {
@@ -49,15 +56,20 @@ struct AnimationData
   // How many times it plays; 0 is forever.
   int loops = 0;
   qsizetype bytes = 0;
-  // A streamed GIF (`AnimatedPicture.stream`): the file itself, its size
-  // and frame count; `frames` stays empty and each item decodes its own
-  // frame as it plays.
+  // A streamed GIF (`AnimatedPicture.stream`): its size and frame count;
+  // `frames` stays empty and each item decodes its own frame as it plays.
+  // `gif` is the file scanned by yap-anim (a `yap_gif_open` handle, shared
+  // by every item's stream; `delays` holds each frame's), else `raw` is the
+  // file for Qt's reader.
   QByteArray raw;
+  std::shared_ptr<void> gif;
   QSize rawSize;
   int rawFrames = 0;
   // One pass, in ms (0: not known). A still (`AnimatedPicture.still`)
   // knows it from the file's header without decoding the frames.
   int duration = 0;
+
+  bool streamed() const { return !raw.isEmpty() || gif; }
 };
 using AnimationPtr = std::shared_ptr<const AnimationData>;
 
@@ -192,6 +204,9 @@ public:
   Q_INVOKABLE void restart();
   // Diagnostics (YAP_DEBUG_ANIMATIONS): the frame timer is running.
   bool ticking() const { return m_timer.isActive(); }
+  // From a GifPlayer's worker, on the GUI thread: frame `frame` of `player`
+  // is decoded (`ok`), or the file holds no such frame.
+  void gifFrameDone(const GifPlayer* player, int frame, bool ok);
 
 signals:
   void sourceChanged();
@@ -229,6 +244,16 @@ private:
   bool openStream();
   // What shows is `m_source` (at another size, or its first frame).
   bool sameSourceShown() const;
+  // A GIF yap-anim streams (`m_gif`): the frame due goes on screen when it
+  // is decoded (at once when it was decoded ahead), and the one after it is
+  // asked for.
+  bool gifStreamed() const;
+  void openGif();
+  void showGifFrame(int frame);
+  void askGif(int frame);
+  // Paused: the frame decoded ahead and the spare buffers go.
+  void restGif();
+  int nextFrame(int frame) const;
 
   QUrl m_source;
   // The source `m_anim` was loaded for.
@@ -258,5 +283,14 @@ private:
   std::unique_ptr<QImageReader> m_reader;
   QImage m_current;
   int m_currentDelay = 100;
+  // A GIF yap-anim streams: this item's decoder, the frame it waits for to
+  // go on screen (-1: none), and the frames the file turned out to hold.
+  std::shared_ptr<GifPlayer> m_gif;
+  int m_gifWaiting = -1;
+  int m_gifFrames = 0;
+  // YAP_DEBUG_GIF: when the frame waited for was asked for, and whether it
+  // is the stream's first.
+  qint64 m_gifWaitedFrom = 0;
+  bool m_gifFirst = false;
   QMetaObject::Connection m_frameWatch;
 };

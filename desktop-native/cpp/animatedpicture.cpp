@@ -3,7 +3,10 @@
 #include <QtCore/QBuffer>
 #include <QtCore/QDateTime>
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QMutex>
+#include <QtCore/QThread>
 #include <QtCore/QThreadPool>
+#include <QtCore/QWaitCondition>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImageReader>
 #include <QtNetwork/QNetworkAccessManager>
@@ -19,6 +22,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <limits>
 #include <vector>
 
@@ -37,6 +41,79 @@ extern "C" const uint8_t* yap_anim_frame(const void* anim, uint32_t index,
                                          uint32_t* delay_ms);
 extern "C" void yap_anim_release_frame(void* anim, uint32_t index);
 extern "C" void yap_anim_free(void* anim);
+struct YapGifInfo
+{
+  uint32_t width;
+  uint32_t height;
+  uint32_t frames;
+  uint32_t loops;
+  uint32_t duration_ms;
+};
+extern "C" void* yap_gif_open(const uint8_t* data, size_t len, YapGifInfo* out);
+extern "C" uint32_t yap_gif_delay(const void* file, uint32_t index);
+extern "C" void yap_gif_file_free(void* file);
+extern "C" void* yap_gif_stream_new(const void* file);
+extern "C" bool yap_gif_stream_frame(void* stream, uint32_t index, uint8_t* out, uint32_t out_w,
+                                     uint32_t out_h, size_t stride);
+extern "C" void yap_gif_stream_free(void* stream);
+
+// One item's stream over a GIF yap-anim scanned: the item asks for a frame
+// (`want`), the GIF worker decodes it into `ready`, and tells the item
+// only when the item is waiting for it (`waiting`); a frame decoded ahead
+// is just left for the item to take at its slot. A player is queued once
+// at a time (`running`), so the Rust stream is never used by two threads.
+// The item holds the frame on screen and at most one frame decoded ahead,
+// and frame buffers are reused once the window has let go of them
+// (`spare`). The Rust side holds the file (shared) and one canvas.
+class GifPlayer
+{
+public:
+  GifPlayer(AnimationPtr anim, QSize out)
+    : anim(std::move(anim))
+    , out(out)
+    , stream(yap_gif_stream_new(this->anim->gif.get()))
+  {
+  }
+  ~GifPlayer() { yap_gif_stream_free(stream); }
+  GifPlayer(const GifPlayer&) = delete;
+  GifPlayer& operator=(const GifPlayer&) = delete;
+
+  // Keeps the file alive while a job uses the stream.
+  const AnimationPtr anim;
+  // The size frames come out at.
+  const QSize out;
+  // Used by the running job only.
+  void* const stream;
+
+  QMutex lock;
+  // Guarded by `lock`: the frame the item wants next (-1: none, the item
+  // let go), the frame it waits for on screen (-1: none), the frame decoded
+  // and not yet taken, whether a job runs, and frames the item has shown,
+  // to decode into again once nothing else holds them.
+  int want = -1;
+  int waiting = -1;
+  int readyFrame = -1;
+  QImage ready;
+  bool running = false;
+  QList<QImage> spare;
+};
+
+// The item lets go of its player: a job still running stops after the frame
+// it is on (and its frame is dropped with the player).
+static void dropGif(std::shared_ptr<GifPlayer>& player)
+{
+  if (!player)
+    return;
+  {
+    QMutexLocker locked(&player->lock);
+    player->want = -1;
+    player->waiting = -1;
+    player->ready = QImage();
+    player->readyFrame = -1;
+    player->spare.clear();
+  }
+  player.reset();
+}
 
 namespace {
 
@@ -154,10 +231,38 @@ QSize coverBox(const QByteArray& bytes, QSize box)
                qMax(1, int(std::ceil(full.height() * scale))));
 }
 
-// A GIF kept as its file for streamed items: only its size, frame count
-// and loops are read here (QGifHandler scans the blocks, no pixels).
+// YAP_GIF_DECODER=qt: streamed GIFs decode with Qt's reader on the GUI
+// thread, as before yap-anim streamed them (comparisons).
+bool qtGifStreams()
+{
+  static const bool qt = qgetenv("YAP_GIF_DECODER") == "qt";
+  return qt;
+}
+
+// A GIF kept as its file for streamed items: only its size, frame count,
+// loops and delays are read here (yap-anim walks the blocks, no pixels).
+// A GIF yap-anim refuses (or YAP_GIF_DECODER=qt) is kept for Qt's reader.
 AnimationPtr scanGif(const QByteArray& bytes)
 {
+  if (!qtGifStreams()) {
+    YapGifInfo info{};
+    if (void* file = yap_gif_open(reinterpret_cast<const uint8_t*>(bytes.constData()),
+                                  size_t(bytes.size()), &info)) {
+      auto data = std::make_shared<AnimationData>();
+      data->gif = std::shared_ptr<void>(file, yap_gif_file_free);
+      data->rawSize = QSize(int(info.width), int(info.height));
+      data->rawFrames = int(qMin<uint32_t>(info.frames, uint32_t(std::numeric_limits<int>::max())));
+      data->loops = int(info.loops);
+      data->delays.reserve(data->rawFrames);
+      for (int i = 0; i < data->rawFrames; ++i)
+        data->delays.append(int(yap_gif_delay(file, uint32_t(i))));
+      data->duration =
+        int(qMin<uint32_t>(info.duration_ms, uint32_t(std::numeric_limits<int>::max())));
+      // The file, held once (by yap-anim).
+      data->bytes = bytes.size();
+      return data;
+    }
+  }
   QBuffer buffer;
   buffer.setData(bytes);
   buffer.open(QIODevice::ReadOnly);
@@ -427,7 +532,7 @@ void AnimationCache::insert(const QString& key, AnimationPtr data)
   // The whole animation replaces its first-frame preview.
   if (auto old = m_entries.find(key); old != m_entries.end()) {
     m_bytes -= old.value()->bytes;
-    if (!old.value()->raw.isEmpty())
+    if (old.value()->streamed())
       m_rawBytes -= old.value()->bytes;
     m_entries.erase(old);
     m_order.removeOne(key);
@@ -440,7 +545,7 @@ void AnimationCache::insert(const QString& key, AnimationPtr data)
                double(data->bytes) / (1024 * 1024),
                double(m_bytes + data->bytes) / (1024 * 1024));
   m_bytes += data->bytes;
-  if (!data->raw.isEmpty())
+  if (data->streamed())
     m_rawBytes += data->bytes;
   m_entries.insert(key, std::move(data));
   m_order.append(key);
@@ -455,7 +560,7 @@ void AnimationCache::trim()
     const QString key = m_order.takeAt(index);
     if (auto it = m_entries.find(key); it != m_entries.end()) {
       m_bytes -= it.value()->bytes;
-      if (!it.value()->raw.isEmpty())
+      if (it.value()->streamed())
         m_rawBytes -= it.value()->bytes;
       m_entries.erase(it);
     }
@@ -463,7 +568,7 @@ void AnimationCache::trim()
   // Streamed files first, oldest first, within their own budget.
   for (qsizetype i = 0; m_rawBytes > kRawBudget && i < m_order.size() - 1;) {
     auto it = m_entries.constFind(m_order.at(i));
-    if (it != m_entries.constEnd() && !it.value()->raw.isEmpty())
+    if (it != m_entries.constEnd() && it.value()->streamed())
       forget(i);
     else
       ++i;
@@ -492,6 +597,163 @@ qint64 slotAfter(qint64 at)
   return (at + kSlotMs - 1) / kSlotMs * kSlotMs;
 }
 
+void runGif(const std::shared_ptr<GifPlayer>& player, const QPointer<AnimatedPicture>& item);
+
+// Streamed GIFs' frame decodes: one thread ("yap-gif") working through the
+// players that want a frame. GIFs advance together on the shared grid, so
+// the frames due in one slot are asked for together and decoded in one
+// wake-up (a pool woke a thread per frame). A chat GIF's frame takes about
+// 0.1 ms, and each is decoded a whole frame ahead of its slot.
+class GifWorker
+{
+public:
+  static GifWorker* instance()
+  {
+    // Never destroyed: the thread waits for work until the process ends.
+    static GifWorker* worker = new GifWorker;
+    return worker;
+  }
+
+  void post(std::shared_ptr<GifPlayer> player, QPointer<AnimatedPicture> item)
+  {
+    QMutexLocker locked(&m_lock);
+    m_queue.push_back({std::move(player), std::move(item)});
+    m_ready.wakeOne();
+  }
+
+private:
+  GifWorker()
+  {
+    m_thread = QThread::create([this] { run(); });
+    m_thread->setObjectName(QStringLiteral("yap-gif"));
+    m_thread->start();
+  }
+
+  void run()
+  {
+    for (;;) {
+      Job job;
+      {
+        QMutexLocker locked(&m_lock);
+        while (m_queue.empty())
+          m_ready.wait(&m_lock);
+        job = std::move(m_queue.front());
+        m_queue.pop_front();
+      }
+      runGif(job.player, job.item);
+    }
+  }
+
+  struct Job
+  {
+    std::shared_ptr<GifPlayer> player;
+    QPointer<AnimatedPicture> item;
+  };
+  QMutex m_lock;
+  QWaitCondition m_ready;
+  std::deque<Job> m_queue;
+  QThread* m_thread = nullptr;
+};
+
+// YAP_DEBUG_GIF=1: how streamed GIF frames met their slots, every 300
+// frames shown (stderr): on time (decoded ahead), late (decoded after the
+// slot; how late), and first frames (the wait from opening the stream).
+struct GifPacing
+{
+  int onTime = 0;
+  int late = 0;
+  qint64 lateMs = 0;
+  qint64 lateMax = 0;
+  int first = 0;
+  qint64 firstMs = 0;
+
+  static GifPacing* get()
+  {
+    static GifPacing* pacing = qEnvironmentVariableIntValue("YAP_DEBUG_GIF") ? new GifPacing : nullptr;
+    return pacing;
+  }
+  void shown(bool onSlot, qint64 waited, bool firstFrame)
+  {
+    if (firstFrame) {
+      ++first;
+      firstMs += waited;
+    } else if (onSlot) {
+      ++onTime;
+    } else {
+      ++late;
+      lateMs += waited;
+      lateMax = qMax(lateMax, waited);
+    }
+    if ((onTime + late + first) % 300 == 0)
+      std::fprintf(stderr,
+                   "[gif] frames shown: %d on time, %d late (mean %.1f ms, max %lld ms), %d first "
+                   "(mean %.1f ms)\n",
+                   onTime, late, late ? double(lateMs) / late : 0.0,
+                   static_cast<long long>(lateMax), first, first ? double(firstMs) / first : 0.0);
+  }
+};
+
+// Decodes one frame `player` wants and tells `item` if it waits for it.
+// When the player wants another (it skipped ahead), it goes to the back of
+// the queue, so one GIF slower to decode than it plays cannot hold the
+// worker from the others.
+void runGif(const std::shared_ptr<GifPlayer>& player, const QPointer<AnimatedPicture>& item)
+{
+  int frame = -1;
+  QImage image;
+  {
+    QMutexLocker locked(&player->lock);
+    if (player->want < 0 || player->want == player->readyFrame) {
+      player->running = false;
+      return;
+    }
+    frame = player->want;
+    // A shown frame the window no longer holds (its texture has the next
+    // one) is decoded into again: no allocation per frame.
+    for (qsizetype i = 0; i < player->spare.size(); ++i) {
+      if (player->spare.at(i).isDetached()) {
+        image = player->spare.takeAt(i);
+        break;
+      }
+    }
+  }
+  if (image.isNull())
+    image = QImage(player->out, QImage::Format_RGBA8888_Premultiplied);
+  const bool ok = !image.isNull() &&
+                  yap_gif_stream_frame(player->stream, uint32_t(frame), image.bits(),
+                                       uint32_t(image.width()), uint32_t(image.height()),
+                                       size_t(image.bytesPerLine()));
+  bool tell = !ok;
+  bool more = false;
+  {
+    QMutexLocker locked(&player->lock);
+    if (ok && player->want >= 0) {
+      player->ready = std::move(image);
+      player->readyFrame = frame;
+      tell = player->waiting == frame;
+    }
+    // A frame the file does not hold is not asked for again.
+    if (!ok && player->want == frame)
+      player->want = -1;
+    more = player->want >= 0 && player->want != player->readyFrame;
+    if (!more)
+      player->running = false;
+  }
+  if (more)
+    GifWorker::instance()->post(player, item);
+  // Decoded ahead: the item takes it at its slot, no wake-up needed.
+  if (!tell)
+    return;
+  // The cache lives for good, so it carries the call; the item may not.
+  QMetaObject::invokeMethod(
+    AnimationCache::instance(),
+    [player, item, frame, ok] {
+      if (item)
+        item->gifFrameDone(player.get(), frame, ok);
+    },
+    Qt::QueuedConnection);
+}
+
 } // namespace
 
 AnimatedPicture::AnimatedPicture(QQuickItem* parent)
@@ -510,6 +772,7 @@ AnimatedPicture::AnimatedPicture(QQuickItem* parent)
 AnimatedPicture::~AnimatedPicture()
 {
   disconnect(m_frameWatch);
+  dropGif(m_gif);
 }
 
 void AnimatedPicture::setStream(bool stream)
@@ -536,6 +799,8 @@ int AnimatedPicture::frameCount() const
 {
   if (!m_anim)
     return 0;
+  if (gifStreamed())
+    return m_gifFrames;
   return m_anim->frames.isEmpty() ? m_anim->rawFrames : int(m_anim->frames.size());
 }
 
@@ -543,9 +808,145 @@ int AnimatedPicture::delayOf(int frame) const
 {
   if (!m_anim)
     return 100;
-  if (m_anim->frames.isEmpty())
+  if (m_anim->frames.isEmpty() && !m_anim->gif)
     return m_currentDelay;
   return m_anim->delays.value(frame, 100);
+}
+
+bool AnimatedPicture::gifStreamed() const
+{
+  return m_anim && m_anim->gif && m_gif;
+}
+
+void AnimatedPicture::openGif()
+{
+  // The GPU scales a frame as it draws; only a GIF far larger than its tile
+  // (twice over) comes out scaled down, so the texture stays small.
+  const QSize canvas = m_anim->rawSize;
+  QSize out = canvas;
+  const qreal dpr = window() ? window()->effectiveDevicePixelRatio() : 1.0;
+  const QSize box(int(std::ceil(width() * dpr)), int(std::ceil(height() * dpr)));
+  if (box.width() > 0 && box.height() > 0 && canvas.width() > 2 * box.width() &&
+      canvas.height() > 2 * box.height())
+    out = canvas.scaled(box, Qt::KeepAspectRatioByExpanding);
+  dropGif(m_gif);
+  m_gif = std::make_shared<GifPlayer>(m_anim, out);
+  m_gifFrames = m_anim->rawFrames;
+  m_gifWaiting = -1;
+  m_gifFirst = true;
+  showGifFrame(0);
+}
+
+int AnimatedPicture::nextFrame(int frame) const
+{
+  return frame + 1 < frameCount() ? frame + 1 : 0;
+}
+
+void AnimatedPicture::askGif(int frame)
+{
+  if (!m_gif)
+    return;
+  bool start = false;
+  {
+    QMutexLocker locked(&m_gif->lock);
+    m_gif->want = frame;
+    if (!m_gif->running && m_gif->readyFrame != frame) {
+      m_gif->running = true;
+      start = true;
+    }
+  }
+  if (start) {
+    GifWorker::instance()->post(m_gif, QPointer<AnimatedPicture>(this));
+  }
+}
+
+void AnimatedPicture::showGifFrame(int frame)
+{
+  if (!m_gif)
+    return;
+  QImage decoded;
+  {
+    QMutexLocker locked(&m_gif->lock);
+    if (m_gif->readyFrame == frame) {
+      decoded = std::move(m_gif->ready);
+      m_gif->ready = QImage();
+      m_gif->readyFrame = -1;
+      m_gif->waiting = -1;
+      // The frame going off screen: the window's texture still holds it
+      // until its next sync, after which the worker may decode into it.
+      if (!m_current.isNull() && m_current.size() == m_gif->out && m_gif->spare.size() < 2)
+        m_gif->spare.append(std::move(m_current));
+    } else {
+      m_gif->waiting = frame;
+    }
+  }
+  if (decoded.isNull()) {
+    // Not decoded ahead (the first frame, a skip, a slow decode): it goes
+    // on screen when it is.
+    if (m_gifWaiting != frame)
+      m_gifWaitedFrom = animationNow();
+    m_gifWaiting = frame;
+    askGif(frame);
+    return;
+  }
+  if (GifPacing* pacing = GifPacing::get())
+    pacing->shown(m_gifWaiting < 0, animationNow() - m_gifWaitedFrom, m_gifFirst);
+  m_gifFirst = false;
+  m_gifWaiting = -1;
+  m_current = std::move(decoded);
+  m_frameDirty = true;
+  update();
+  // A resting picture (`still`) never needs another frame.
+  if (!m_still && frameCount() > 1)
+    askGif(nextFrame(frame));
+}
+
+void AnimatedPicture::restGif()
+{
+  // Paused (off screen, the app behind, finished): only the frame on screen
+  // stays. A frame still awaited (the first one) is left to come.
+  if (!m_gif || m_gifWaiting >= 0)
+    return;
+  QMutexLocker locked(&m_gif->lock);
+  m_gif->want = -1;
+  m_gif->ready = QImage();
+  m_gif->readyFrame = -1;
+  m_gif->spare.clear();
+}
+
+void AnimatedPicture::gifFrameDone(const GifPlayer* player, int frame, bool ok)
+{
+  if (!m_gif || player != m_gif.get())
+    return;
+  if (!ok) {
+    if (frame == 0) {
+      // Not even the first frame: nothing to show.
+      dropGif(m_gif);
+      m_gifWaiting = -1;
+      m_anim.reset();
+      m_current = QImage();
+      m_timer.stop();
+      setStatus(Error);
+      update();
+      return;
+    }
+    // The file ends (or breaks) before `frame`: it plays the frames it
+    // has, from the first again.
+    m_gifFrames = qMax(1, qMin(m_gifFrames, frame));
+    if (m_gifWaiting == frame || m_frame >= m_gifFrames) {
+      m_frame = 0;
+      showGifFrame(0);
+    }
+    emit statusChanged();
+    return;
+  }
+  if (m_gifWaiting != frame)
+    return;
+  showGifFrame(frame);
+  if (m_status != Ready) {
+    setStatus(Ready);
+    schedule();
+  }
 }
 
 bool AnimatedPicture::openStream()
@@ -629,7 +1030,9 @@ void AnimatedPicture::restart()
 {
   m_frame = 0;
   m_played = 0;
-  if (m_anim && m_anim->frames.isEmpty())
+  if (gifStreamed())
+    showGifFrame(0);
+  else if (m_anim && m_anim->frames.isEmpty())
     openStream();
   if (m_finished) {
     m_finished = false;
@@ -665,6 +1068,7 @@ void AnimatedPicture::load()
   if (m_source.isEmpty()) {
     m_key.clear();
     m_anim.reset();
+    dropGif(m_gif);
     m_timer.stop();
     setStatus(Null);
     update();
@@ -725,6 +1129,7 @@ void AnimatedPicture::onLoaded(const QString& key)
     return;
   }
   const bool fresh = data != m_anim;
+  const bool shown = sameSourceShown();
   // The whole animation after its start (the same picture, at the same
   // size, with more frames): it carries on from the frame showing.
   const bool extends = fresh && m_anim && m_animSource == m_source && !m_finished &&
@@ -746,12 +1151,23 @@ void AnimatedPicture::onLoaded(const QString& key)
       m_finished = false;
       emit finishedChanged();
     }
-    if (m_anim->frames.isEmpty() && !openStream()) {
-      m_anim.reset();
+    if (m_anim->gif) {
+      // Decoded on a worker: Ready once the first frame is (the same
+      // picture's frame at its old size shows meanwhile).
       m_reader.reset();
       m_buffer.reset();
-      setStatus(Error);
-      return;
+      if (!shown)
+        m_current = QImage();
+      openGif();
+    } else {
+      dropGif(m_gif);
+      if (m_anim->frames.isEmpty() && !openStream()) {
+        m_anim.reset();
+        m_reader.reset();
+        m_buffer.reset();
+        setStatus(Error);
+        return;
+      }
     }
   }
   if (m_anim->frames.isEmpty()) {
@@ -763,7 +1179,8 @@ void AnimatedPicture::onLoaded(const QString& key)
     setImplicitSize(m_anim->frames.first().width() / dpr,
                     m_anim->frames.first().height() / dpr);
   }
-  setStatus(Ready);
+  if (!gifStreamed() || !m_current.isNull())
+    setStatus(Ready);
   emit statusChanged();
   m_frameDirty = true;
   update();
@@ -827,6 +1244,9 @@ bool AnimatedPicture::shouldRun() const
 {
   if (!m_playing || !m_anim || frameCount() < 2 || m_finished)
     return false;
+  // A resting streamed GIF shows its first frame only.
+  if (m_still && gifStreamed())
+    return false;
   if (!isVisible() || opacity() <= 0)
     return false;
   QQuickWindow* win = window();
@@ -841,11 +1261,13 @@ void AnimatedPicture::schedule()
   if (!shouldRun()) {
     m_timer.stop();
     m_due = 0;
+    restGif();
     return;
   }
   if (!onScreen()) {
     m_timer.stop();
     m_due = 0;
+    restGif();
     // Scrolling back renders frames: look again after each one.
     if (m_window)
       m_frameWatch = connect(m_window, &QQuickWindow::afterAnimating, this, [this] {
@@ -877,7 +1299,9 @@ void AnimatedPicture::advance()
   }
   const qint64 now = animationNow();
   const int count = frameCount();
-  const bool streamed = m_anim->frames.isEmpty();
+  const bool gif = gifStreamed();
+  // Qt's reader: each frame due is decoded here, in turn.
+  const bool streamed = m_anim->frames.isEmpty() && !gif;
   bool moved = false;
   // Every frame due by now: the slot may come after several.
   for (int skipped = 0; m_due <= now && skipped < count; ++skipped) {
@@ -904,12 +1328,16 @@ void AnimatedPicture::advance()
     moved = true;
     m_due += delayOf(m_frame);
   }
-  if (moved) {
+  if (moved && gif) {
+    showGifFrame(m_frame);
+  } else if (moved) {
     m_frameDirty = true;
     update();
   }
-  if (m_finished)
+  if (m_finished) {
+    restGif();
     return;
+  }
   // Far behind (a long stall): carry on from now.
   if (m_due <= now)
     m_due = now + delayOf(m_frame);
@@ -959,6 +1387,8 @@ void AnimatedPicture::release()
   m_timer.stop();
   m_reader.reset();
   m_buffer.reset();
+  dropGif(m_gif);
+  m_gifWaiting = -1;
   m_current = QImage();
   if (m_anim) {
     m_anim.reset();
