@@ -5,6 +5,7 @@ use cxx_qt_build::{CxxQtBuilder, QmlFile, QmlModule};
 const QML: &[&str] = &[
     "qml/Main.qml",
     "qml/chrome/TitleBar.qml",
+    "qml/chrome/UpdatePill.qml",
     "qml/chrome/WindowKey.qml",
     "qml/components/Avatar.qml",
     "qml/components/CallKey.qml",
@@ -331,6 +332,7 @@ fn main() {
             "src/search.rs",
             "src/settings.rs",
             "src/shop.rs",
+            "src/updater.rs",
         ])
         .build();
 }

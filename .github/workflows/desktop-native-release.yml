@@ -125,7 +125,7 @@ jobs:
       # The vpk that matches the velopack crate the exe links.
       - name: Install vpk
         run: |
-          $v = [regex]::Match((Get-Content -Raw desktop-native/rust/Cargo.toml), '(?m)^velopack = "=([^"]+)"').Groups[1].Value
+          $v = [regex]::Match((Get-Content -Raw desktop-native/rust/Cargo.toml), '(?m)^velopack = (?:\{ version = )?"=([^"]+)"').Groups[1].Value
           if (-not $v) { throw "No pinned velopack version in desktop-native/rust/Cargo.toml" }
           dotnet tool install -g vpk --version $v
           "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append

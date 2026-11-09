@@ -28,7 +28,7 @@ files. It replaces the .NET/WPF `YapSetup.exe` that the Tauri app uses
 | schemes        | `yap://`, and `yap-native://` as an alias (the same links)                                            |
 | Run value      | `Yap` (the Tauri app's name), `Yap-<profile>` for a named profile                                     |
 | version        | `[workspace.package]` in `rust/Cargo.toml`, read by `CMakeLists.txt` and `tools/package.ps1`          |
-| Velopack       | crate `velopack = "=1.3.39-g8d2844f"`; `vpk` of the same version (the script checks)                  |
+| Velopack       | crate `velopack` `=1.3.39-g8d2844f` (`public-utils`); `vpk` of the same version (the script checks)   |
 
 **Why `Yap.App` as the packId.** Velopack installs to `%LOCALAPPDATA%\<packId>`,
 writes its uninstall entry under `Uninstall\<packId>` and deletes that whole
@@ -109,12 +109,242 @@ Hook decisions are appended to `%LOCALAPPDATA%\Yap.Data\logs\installer.log`
   from the root (`Killing process: ...\current\Yap.exe`), replaces
   `current\`, updates the shortcuts and the uninstall entry, and runs the
   install hook again (idempotent).
-- **Update** (`Update.exe apply --package <full.nupkg>`, what an in-app
-  updater will call): the same kill, a backup and swap of `current\`, the
-  after-update hook, then a restart with the arguments after `--`.
+- **Update** (`Update.exe apply --package <full.nupkg>`, what the in-app
+  updater calls, see "Updates"): the same kill, a backup and swap of
+  `current\`, the after-update hook, then a restart with the arguments
+  after `--`.
 - **Uninstall** (`Update.exe --uninstall [--silent]`): the before-uninstall
   hook, then Velopack removes the shortcuts, the uninstall entry,
   `%TEMP%\velopack_<packId>` and, about 3 s after it exits, the root.
+
+## Updates
+
+The app updates itself from a Velopack feed: a static folder that holds
+`releases.<channel>.json`, the matching `.nupkg` packages and, for older
+clients, `RELEASES`. The rules are `yap_core::update` (tested in
+`crates/yap-core/tests/update.rs`); `rust/src/updater.rs` runs them with
+Velopack's `UpdateManager` on a thread of its own (`yap-updater`), and QML
+shows them through the `Updater` singleton.
+
+### The flow
+
+1. **Check.** 20 s after the core starts, then every 6 h while the app
+   runs, and on "Check for updates". The feed request gives up after 30 s.
+   Nothing on the start path waits for it.
+2. **Download.** A newer release downloads in the background into
+   `<root>\packages`: a delta when the feed has one from the installed
+   version (Velopack rebuilds the full package with `Update.exe patch`),
+   else the full package. Velopack checks its size and SHA-256 against the
+   feed. Settings shows `Downloading version 0.2.23… 42%`.
+3. **Ready.** Settings > Desktop app says the version is ready, with
+   "Restart now"; the title bar shows "Restart to update"
+   (`qml/chrome/UpdatePill.qml`) before the window keys.
+4. **Apply.** "Restart now" starts
+   `Update.exe apply --package <full.nupkg> --waitPid <pid>` and quits the
+   app the usual way (`DesktopShell.quit()`: the call is left, the cache
+   committed). Update.exe waits for the process to end, swaps `current\`
+   (the after-update hook runs, see "App integration") and starts the new
+   version. With **install on quit** (on by default), a plain quit does the
+   same without the restart (`--silent --norestart`, from `main.cpp` after
+   the event loop), except while Windows is shutting down. If a quit could
+   not install it, Velopack installs a downloaded package on the next start
+   (`set_auto_apply_on_startup`, only with install on quit on and no pin).
+   With install on quit off, only "Restart now" installs; the next start
+   shows it as ready again without downloading.
+
+**During a call** the restart waits: the title bar key stays hidden,
+"Restart now" is disabled, and Settings says the update installs once you
+leave the call (`Updater::can_restart`, the voice view's channel). A quit
+during a call still installs, since quitting ends the call.
+
+**Errors** (no network, a missing feed, a bad checksum) are logged as
+`[updater] failed: <Velopack's error>` in `logs\yap-native.log` and shown
+under the version in Settings as one sentence ("Couldn't update. Yap
+couldn't reach the update server. Yap tries again on its own.",
+`update::friendly_error`) with "Try again". Retries back off on their own: 1, 2,
+4 ... minutes, at most an hour (never longer than the check interval); a
+success resets them. An update that is already downloaded stays ready when
+a later check fails. A failed check never shows anything in the shell.
+
+### What updates
+
+Only an installed copy, on the default profile. These do nothing but say
+why in Settings (`update::eligibility`, the same layout rule as the hooks):
+
+| copy                                                                               | why                                                        |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| a dev build, a copy of the exe (no `<root>\current\Yap.exe` + `<root>\Update.exe`) | nothing to update                                          |
+| the portable zip (`<root>\.portable`)                                              | not an install                                             |
+| a named profile (`--profile`, `YAP_PROFILE`)                                       | profiles share one install; the default profile updates it |
+| anything under `F:\ct\yapn` (agents' builds and runs)                              | would replace a build under test                           |
+
+`YAP_UPDATE_TEST=1` lifts the last two for an end-to-end run in a scratch
+root; it never makes a dev build or a portable copy update.
+
+### Settings
+
+`Settings > Desktop app > Updates`: the installed version (Velopack's
+`sq.version`), the status, "Check for updates" (or "Try again", or
+"Restart now"), "Release notes" (the ready update's notes, else this
+version's, from `vpk pack --releaseNotes`), the download bar, and two
+switches, kept per profile in `Yap.Data\updates.json`:
+
+```json
+{
+  "channel": "stable",
+  "installOnQuit": true,
+  "pinnedVersion": null,
+  "feedUrl": null
+}
+```
+
+- **Beta updates** (`channel: "beta"`): reads `releases.beta.json` and
+  `releases.win.json` and takes the newest of both, so a beta user moves on
+  to a newer stable release. Switching back to stable never downgrades: a
+  beta user stays on their version until stable passes it.
+- **Pinned version** (`pinnedVersion`, set by hand, no switch): releases
+  past it are ignored, deltas included, and a downloaded package past it is
+  not offered. Settings says "Updates stop at version 0.2.22."
+- **Feed** (`feedUrl`): replaces the compiled feed, for testing.
+
+### The feed
+
+| setting                  | where                                                                      |
+| ------------------------ | -------------------------------------------------------------------------- |
+| compiled default         | `yap_core::update::DEFAULT_FEED_URL`: `https://updates.115jon.com/yap/win` |
+| `updates.json` `feedUrl` | overrides the default                                                      |
+| `YAP_UPDATE_URL`         | overrides both: `https://...`, `file:///F:/feed` or `F:\feed`              |
+
+**The default is a placeholder**: no feed is published there yet, so a
+released build reports "Couldn't update" in Settings (and nothing in the
+shell) until one is. See "Hosting the feed".
+
+Velopack asks for `<base>/releases.<channel>.json?localVersion=...&id=...&stagingId=...`
+and then `<base>/<FileName>` for each package, so the folder looks like:
+
+```
+<base>/
+  releases.win.json            # stable: the releases uploaded so far (vpk merges each upload in)
+  releases.beta.json           # beta (only once a beta ships)
+  RELEASES, RELEASES-beta      # Squirrel-era index; Velopack clients don't read it
+  assets.win.json              # vpk's own list of what it produced
+  Yap.App-0.2.22-full.nupkg
+  Yap.App-0.2.23-full.nupkg
+  Yap.App-0.2.23-delta.nupkg   # 0.2.22 -> 0.2.23
+  Yap.App-win-Setup.exe        # the newest installer, for the download page
+  Yap.App-win-Portable.zip
+```
+
+A `releases.win.json` entry, as vpk 1.3.39 writes it:
+
+```json
+{
+  "Assets": [
+    {
+      "PackageId": "Yap.App",
+      "Version": "0.2.23",
+      "Type": "Full",
+      "FileName": "Yap.App-0.2.23-full.nupkg",
+      "SHA1": "...",
+      "SHA256": "...",
+      "Size": 37401870,
+      "NotesMarkdown": "...",
+      "NotesHtml": "..."
+    }
+  ]
+}
+```
+
+Only `releases.*.json` changes on a release; packages never change once
+uploaded. Serve the JSON with a short cache (`Cache-Control: max-age=60`)
+and the packages as immutable.
+
+### Hosting the feed
+
+Recommended: **an R2 bucket behind `updates.115jon.com`** (the placeholder
+default), folder `yap/win/`.
+
+|                      | R2 behind a 115jon.com hostname                                                                        | GitHub Releases of 115jon/yap                                                                                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tauri installs       | untouched                                                                                              | the Tauri updater reads `releases/latest/download/latest.json`: a native release marked latest breaks it until the cutover, so every native release would have to be a prerelease or not-latest                           |
+| how clients read it  | Velopack's `HttpSource`: two plain GETs, no API                                                        | Velopack's `GithubSource` lists releases through the GitHub API, 60 requests an hour per IP unauthenticated; or a fixed tag served as a plain folder, whose `releases.win.json` must be deleted and re-uploaded each time |
+| versions and tags    | separate from the web app's `v3.x` release-please tags                                                 | mixed into the same release list as `v3.x`                                                                                                                                                                                |
+| caching and rollback | our `Cache-Control`; a bad release is pulled by editing one JSON                                       | GitHub's CDN caching; pulling a release means editing assets                                                                                                                                                              |
+| cost, setup          | R2 has no egress fee; needs the bucket, the custom domain and an R2 API token for CI (`vpk upload s3`) | free and already there; needs nothing but `GITHUB_TOKEN`                                                                                                                                                                  |
+| a release page       | none (the notes live in the feed and show in Settings)                                                 | a public release page per version                                                                                                                                                                                         |
+
+R2 keeps the native channel apart from the Tauri updater and from the web
+app's tags, has no API rate limit, and lets the feed's JSON be cached
+briefly while the packages are cached forever. GitHub would need nothing
+new, but only works if native releases are never "latest" before the
+cutover. To change the host later, ship one release whose
+`DEFAULT_FEED_URL` points at the new place and publish that release to both.
+
+### Publishing a release
+
+Stable, by hand (CI can run the same steps after the pack):
+
+1. Bump `[workspace.package] version` in `rust/Cargo.toml`.
+2. Fetch the previous release, so vpk can make a delta against it:
+   ```powershell
+   vpk download http --url https://updates.115jon.com/yap/win --outputDir F:/ct/yapn/release --channel win
+   ```
+   (or `vpk download s3 ...` with the bucket's credentials). Skip it for the
+   very first release.
+3. Pack into the same folder, with notes:
+   ```powershell
+   ./tools/package.ps1 -Sign -OutDir F:/ct/yapn/release -ReleaseNotes notes.md
+   ```
+   (`-Sign` needs the Certificate Profile Signer role, see "Signing"; CI has
+   it.) vpk adds the new version to `releases.win.json`, beside the old
+   ones, and writes the delta.
+4. Upload. Packages first, then the feed JSON, so a client never sees an
+   entry whose package is missing (vpk's `upload` does this order):
+   ```powershell
+   vpk upload s3 --outputDir F:/ct/yapn/release --channel win `
+     --endpoint https://<account>.r2.cloudflarestorage.com --bucket <bucket> --prefix yap/win `
+     --keyId $env:R2_KEY_ID --secret $env:R2_SECRET --disableChecksumValidation --keepMaxReleases 10
+   ```
+5. Check: `Invoke-RestMethod https://updates.115jon.com/yap/win/releases.win.json`
+   lists the version, and an installed copy finds it ("Check for updates").
+
+A beta is the same with `-Channel beta` (and `--channel beta` for vpk) and a
+pre-release version (`0.2.24-beta.1`); beta users also read the stable feed,
+so nothing needs copying between them. To pull a bad release, remove its
+entries from `releases.<channel>.json` (and the packages after); clients
+that already downloaded it still install it, so ship a fixed version
+instead where that matters.
+
+### Test hooks and a local feed
+
+| variable              | does                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------- |
+| `YAP_UPDATE_URL`      | the feed: a URL, `file:///F:/ct/yapn/run/updater/feed` or a folder path                |
+| `YAP_UPDATE_INTERVAL` | seconds between checks (instead of 6 h); retries and the first check never wait longer |
+| `YAP_UPDATE_DELAY`    | seconds before the first check (instead of 20 s)                                       |
+| `YAP_UPDATE_TEST`     | `1`: a Velopack layout under `F:\ct\yapn` or on a named profile updates (never a copy) |
+
+A local feed with two versions, without installing anything:
+
+```powershell
+$feed = "F:/ct/yapn/run/updater/feed"; $out = "F:/ct/yapn/run/updater/pack"
+./tools/package.ps1 -SkipBuild -BuildDir F:/ct/yapn/rel-updater -OutDir $out `
+  -PackId Yap.UpdateTest -Title "Yap UpdateTest" -Version 0.2.22
+./tools/package.ps1 -SkipBuild -BuildDir F:/ct/yapn/rel-updater -OutDir $out `
+  -PackId Yap.UpdateTest -Title "Yap UpdateTest" -Version 0.2.23 -ReleaseNotes notes.md
+vpk upload local --outputDir $out --path $feed --channel win
+```
+
+An installed layout without Setup: the portable zip is the install layout
+plus a `.portable` marker. Extract the old version's
+`Yap.UpdateTest-win-Portable.zip` into a scratch root, delete `.portable`,
+copy its full package into `<root>\packages\` (Setup keeps one there, the
+delta base), and start `<root>\current\Yap.exe --profile spike` with
+`YAP_UPDATE_TEST=1`, `YAP_UPDATE_URL=<feed>` and `LOCALAPPDATA` / `APPDATA`
+pointed at scratch folders. "Restart now" or a quit with install on quit
+would run `Update.exe apply` on that root; its after-update hook and
+Velopack's apply write per-user registry values (the uninstall entry,
+shortcuts), so only do that step on a test machine.
 
 ## Replacing the Tauri app
 
@@ -230,21 +460,21 @@ older build makes again is that build's. Each move is logged to
 
 ## Parity with the Tauri installer
 
-| old installer (`desktop/installer`)                                             | native installer                                                                                                                                                                                                                   |
-| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| per-user, no elevation, under `%LOCALAPPDATA%`                                  | same: Velopack per-user install to `%LOCALAPPDATA%\Yap.App`                                                                                                                                                                        |
-| Desktop and Start menu shortcuts with the AUMID                                 | same names and AUMID: `--shortcuts Desktop,StartMenuRoot --aumid com.115jon.yap` (`Yap.lnk`)                                                                                                                                       |
-| HKCU uninstall entry: DisplayName, icon, version, publisher, NoModify, NoRepair | Velopack's `HKCU\...\Uninstall\Yap.App`: DisplayName "Yap", DisplayIcon (`current\Yap.exe`), DisplayVersion, Publisher "115jon", InstallLocation, UninstallString, QuietUninstallString, EstimatedSize, NoModify = 1, NoRepair = 1 |
-| owns `yap://`, removed on uninstall only if it points at the install            | same rule for `yap://` and `yap-native://` (before-uninstall hook)                                                                                                                                                                 |
-| Run value removed on uninstall if ours                                          | same, for `Yap`, `Yap-<profile>` and the old `YapNative[-<profile>]` that point into the root                                                                                                                                      |
-| closes running instances on upgrade                                             | Velopack stops every process running from the install root before it swaps `current\` (forced, like the old `Process.Kill`)                                                                                                        |
-| user data kept on uninstall                                                     | same: the data root is a different folder; only the default toast icon goes                                                                                                                                                        |
-| `/S`                                                                            | `Setup.exe --silent` (never starts the app)                                                                                                                                                                                        |
-| `--uninstall /S`                                                                | `Update.exe --uninstall --silent` (the entry's QuietUninstallString)                                                                                                                                                               |
-| `/NoLaunch`                                                                     | `Setup.exe -- --no-launch` for an interactive install; silent installs never launch                                                                                                                                                |
-| install log                                                                     | Velopack's log plus `installer.log` for the hooks                                                                                                                                                                                  |
-| Authenticode via Artifact Signing                                               | same account and profile, through `vpk --azureTrustedSignFile` (signs the exe, the stub, `Update.exe` and `Setup.exe`)                                                                                                             |
-| no telemetry                                                                    | none: Setup and Update make no network calls (there is no update feed yet); `vpk --skip-updates` keeps vpk from checking for itself                                                                                                |
+| old installer (`desktop/installer`)                                             | native installer                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| per-user, no elevation, under `%LOCALAPPDATA%`                                  | same: Velopack per-user install to `%LOCALAPPDATA%\Yap.App`                                                                                                                                                                                      |
+| Desktop and Start menu shortcuts with the AUMID                                 | same names and AUMID: `--shortcuts Desktop,StartMenuRoot --aumid com.115jon.yap` (`Yap.lnk`)                                                                                                                                                     |
+| HKCU uninstall entry: DisplayName, icon, version, publisher, NoModify, NoRepair | Velopack's `HKCU\...\Uninstall\Yap.App`: DisplayName "Yap", DisplayIcon (`current\Yap.exe`), DisplayVersion, Publisher "115jon", InstallLocation, UninstallString, QuietUninstallString, EstimatedSize, NoModify = 1, NoRepair = 1               |
+| owns `yap://`, removed on uninstall only if it points at the install            | same rule for `yap://` and `yap-native://` (before-uninstall hook)                                                                                                                                                                               |
+| Run value removed on uninstall if ours                                          | same, for `Yap`, `Yap-<profile>` and the old `YapNative[-<profile>]` that point into the root                                                                                                                                                    |
+| closes running instances on upgrade                                             | Velopack stops every process running from the install root before it swaps `current\` (forced, like the old `Process.Kill`)                                                                                                                      |
+| user data kept on uninstall                                                     | same: the data root is a different folder; only the default toast icon goes                                                                                                                                                                      |
+| `/S`                                                                            | `Setup.exe --silent` (never starts the app)                                                                                                                                                                                                      |
+| `--uninstall /S`                                                                | `Update.exe --uninstall --silent` (the entry's QuietUninstallString)                                                                                                                                                                             |
+| `/NoLaunch`                                                                     | `Setup.exe -- --no-launch` for an interactive install; silent installs never launch                                                                                                                                                              |
+| install log                                                                     | Velopack's log plus `installer.log` for the hooks                                                                                                                                                                                                |
+| Authenticode via Artifact Signing                                               | same account and profile, through `vpk --azureTrustedSignFile` (signs the exe, the stub, `Update.exe` and `Setup.exe`)                                                                                                                           |
+| no telemetry                                                                    | none: Setup makes no network calls; the app reads the update feed (two static files and the package), sending only Velopack's query string (`localVersion`, `id`, a random `stagingId`); `vpk --skip-updates` keeps vpk from checking for itself |
 
 Dropped on purpose:
 
@@ -260,8 +490,9 @@ Dropped on purpose:
 - **Vulkan layer cleanup**: the native client's game capture hook registers
   no Vulkan layer (see "Game capture hook payload"), so there is nothing to
   remove.
-- **Tauri updater (`latest.json`, minisign)**: no auto-update yet. Velopack's
-  feed files are produced and kept as artifacts for when it lands.
+- **Tauri updater (`latest.json`, minisign)**: replaced by Velopack's feed
+  and the in-app updater ("Updates"). Packages are checked by SHA-256 from
+  the feed; there is no separate signature over the feed.
 
 ## Building
 
@@ -278,9 +509,11 @@ dotnet tool install -g vpk --version 1.3.39-g8d2844f   # the script does this if
 `-PackId`, `-Version`, `-Title` and `-OutDir` override the defaults. The
 script stages only `Yap.exe`, the game capture hook's files and the
 segmentation runtime, so nothing else from the build dir ships.
-Output: `<packId>-win-Setup.exe`, `<packId>-win-Portable.zip`,
-`<packId>-<version>-full.nupkg`, `releases.win.json`, `assets.win.json`,
-`RELEASES`.
+`-Channel beta` packs into the beta channel, `-ReleaseNotes <file.md>`
+adds notes (see "Updates"). Output: `<packId>-<channel>-Setup.exe`,
+`<packId>-<channel>-Portable.zip`, `<packId>-<version>-full.nupkg` (and a
+`-delta.nupkg` when the folder holds the previous release),
+`releases.<channel>.json`, `assets.<channel>.json`, `RELEASES`.
 
 ## Splash
 
@@ -383,7 +616,7 @@ only. It builds the exe, packs it with `tools/package.ps1 -Sign` after the
 same `azure/login` OIDC step as `desktop-release.yml`, verifies the
 Setup.exe signature with `desktop/scripts/verify-authenticode.ps1`, and
 uploads the installer and feed files as a workflow artifact. It publishes
-nothing.
+nothing: no feed exists yet ("Publishing a release" has the steps).
 
 It needs a static Qt 6.6.3 (MSVC, `-static -static-runtime`), which no
 action provides:

@@ -63,6 +63,11 @@ pub extern "C" fn yap_velopack_startup() {
                     std::process::exit(0);
                 }
             })
+            // A downloaded update installs here only for a copy that
+            // updates, with install on quit on and no pin
+            // (`yap_core::update::apply_at_start`); otherwise it waits for
+            // "Restart now" (src/updater.rs).
+            .set_auto_apply_on_startup(crate::updater::apply_at_start())
             .run();
     };
     if std::panic::catch_unwind(run).is_err() {

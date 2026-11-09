@@ -4,7 +4,8 @@
 //! share in [`gui`]. The voice settings are [`audio`]; remote video between
 //! the call and the UI is [`video`], our camera's frames into it
 //! [`camera`], the share picker's sources and pictures [`share`], and the
-//! settings dialog's side of the core [`settings`].
+//! settings dialog's side of the core [`settings`]; the in-app updater is
+//! [`updater`].
 
 mod admin;
 mod anim;
@@ -42,6 +43,7 @@ mod settings;
 mod share;
 mod shop;
 mod sound;
+mod updater;
 mod video;
 #[cfg(windows)]
 mod webembed;

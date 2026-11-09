@@ -86,6 +86,8 @@ pub fn start(sink: Sink) -> bool {
     let started = COMMANDS.set(tx).is_ok();
     // Game detection reports through the command channel above.
     crate::games::start();
+    // The update check waits a little, then runs on its own thread.
+    crate::updater::start();
     started
 }
 
