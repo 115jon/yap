@@ -15,6 +15,9 @@ let globalInvoke: typeof import("@tauri-apps/api/core").invoke | null = null;
 // the stack avoids one handler's delayed cleanup consuming another handler's
 // entry during rapid dialog transitions.
 let ownsHistoryEntry = false;
+// history.length right after our entry was pushed. A push always lands at the
+// end, so a longer history means the app navigated on top of our entry.
+let ownedHistoryLength = 0;
 let programmaticPopPending = false;
 let historyCleanupTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -25,6 +28,7 @@ function ensureHistoryEntry() {
 
   window.history.pushState({ backHandlerOpen: true }, "");
   ownsHistoryEntry = true;
+  ownedHistoryLength = window.history.length;
 }
 
 function releaseHistoryEntry() {
@@ -42,6 +46,10 @@ function releaseHistoryEntry() {
     if (backHandlers.length > 0 || !ownsHistoryEntry) return;
 
     ownsHistoryEntry = false;
+    // Pop only while our entry is still the current one. If the app pushed a
+    // route over it (a section change with a panel open), going back would
+    // undo that navigation; the stale entry (same URL) is left instead.
+    if (window.history.length !== ownedHistoryLength) return;
     programmaticPopPending = true;
     try {
       window.history.go(-1);
