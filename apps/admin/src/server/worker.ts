@@ -2,12 +2,17 @@
  * The admin Worker (yap-admin). It serves the console and its API, and
  * nothing else, behind one gate (./gate.ts):
  *
- *   signed out, or not an admin    GET /  the neutral sign-in page and the
- *                                  files only it needs (from the build's
- *                                  manifest); POST /api/session trades a
- *                                  Kova app token for the session cookie.
- *                                  Anything else: a bare 404.
- *   a site admin's session         the console page, its files and /api/*
+ *   signed out, or not an admin    GET /  the page (index.html) and the files
+ *                                  only its public boot bundle needs (from
+ *                                  the build's manifest); POST /api/session
+ *                                  trades a Kova app token for the session
+ *                                  cookie. Anything else: a bare 404, the
+ *                                  console's routes and bundle included.
+ *   a site admin's session         the same page at / and at every console
+ *                                  route (CONSOLE_ROUTES), the console
+ *                                  bundle and /api/*. GET /api/session names
+ *                                  the bundle's entry and stylesheets, which
+ *                                  the boot bundle then loads in place.
  *
  * Every refusal is the same bare 404 (`notFound()`): a missing session, a
  * bad or expired token, a Kova outage, a signed-in non-admin and an unknown
@@ -18,6 +23,9 @@
  * Durable Objects through cross-script bindings for live state and
  * disconnects (./admin-gateway.service.ts). The switches, the banner and
  * suspensions this Worker writes are read and enforced by the main Worker.
+ * "Refresh now" on the shop catalog runs Yap's own catalog sync here
+ * (@/lib/collectibles-catalog against the shared D1); the main Worker
+ * offers no way to force one.
  */
 
 import { CacheKey } from "@/lib/cache";
@@ -45,9 +53,14 @@ export interface AdminEnv extends GateEnv {
   YAP?: Fetcher;
 }
 
-const SIGN_IN_PAGE = "/index.html";
-const CONSOLE_PAGE = "/console.html";
+/** The one page: the boot bundle signs in, then loads the console. */
+const PAGE = "/index.html";
 const MANIFEST = "/manifest.json";
+/** The console bundle's entry in the build manifest. */
+const CONSOLE_ENTRY = "src/console/app.tsx";
+/** The console's client routes (console/router.tsx), served to admins. */
+const CONSOLE_ROUTES =
+  /^\/(?:people(?:\/[^/]+)?|live|insights|switches|audit)\/?$/;
 const KEY_PLACEHOLDER = "__KOVA_ADMIN_PUBLISHABLE_KEY__";
 const URL_PLACEHOLDER = "__KOVA_AUTH_URL__";
 
@@ -56,41 +69,75 @@ type Manifest = Record<
   { file: string; css?: string[]; assets?: string[]; imports?: string[] }
 >;
 
-let publicFiles: Promise<Set<string>> | null = null;
+let manifestCache: Promise<Manifest | null> | null = null;
 
-/** The sign-in entry's files and everything they import, from the manifest. */
+async function readManifest(
+  env: AdminEnv,
+  origin: string,
+): Promise<Manifest | null> {
+  manifestCache ??= (async () => {
+    const response = await env.ASSETS.fetch(
+      new Request(`${origin}${MANIFEST}`),
+    );
+    if (!response.ok) throw new Error(`manifest: ${response.status}`);
+    return (await response.json()) as Manifest;
+  })().catch(() => {
+    // Not cached: the next request reads it again.
+    manifestCache = null;
+    return null;
+  });
+  return manifestCache;
+}
+
+/** A manifest entry's files and everything it imports statically. */
+function closure(manifest: Manifest, entry: string) {
+  const scripts: string[] = [];
+  const styles: string[] = [];
+  const other: string[] = [];
+  const seen = new Set<string>();
+  const visit = (key: string) => {
+    const chunk = manifest[key];
+    if (!chunk || seen.has(key)) return;
+    seen.add(key);
+    scripts.push(`/${chunk.file}`);
+    for (const file of chunk.css ?? []) styles.push(`/${file}`);
+    for (const file of chunk.assets ?? []) other.push(`/${file}`);
+    for (const next of chunk.imports ?? []) visit(next);
+  };
+  visit(entry);
+  return { scripts, styles, other };
+}
+
+/** The boot bundle's files and everything they import, from the manifest. */
 async function signInFiles(
   env: AdminEnv,
   origin: string,
 ): Promise<Set<string>> {
-  publicFiles ??= (async () => {
-    const response = await env.ASSETS.fetch(
-      new Request(`${origin}${MANIFEST}`),
-    );
-    const files = new Set<string>([SIGN_IN_PAGE, "/favicon.ico"]);
-    if (!response.ok) return files;
-    const manifest = (await response.json()) as Manifest;
-    const visit = (key: string) => {
-      const chunk = manifest[key];
-      if (!chunk || files.has(`/${chunk.file}`)) return;
-      files.add(`/${chunk.file}`);
-      for (const file of [...(chunk.css ?? []), ...(chunk.assets ?? [])]) {
-        files.add(`/${file}`);
-      }
-      for (const next of chunk.imports ?? []) visit(next);
-    };
-    visit("index.html");
-    return files;
-  })().catch(() => {
-    publicFiles = null;
-    return new Set([SIGN_IN_PAGE]);
-  });
-  return publicFiles;
+  const files = new Set<string>([PAGE, "/favicon.ico"]);
+  const manifest = await readManifest(env, origin);
+  if (!manifest) return files;
+  const { scripts, styles, other } = closure(manifest, "index.html");
+  for (const file of [...scripts, ...styles, ...other]) files.add(file);
+  return files;
+}
+
+/** The console bundle's entry and stylesheets, for an admin's session. */
+async function consoleFiles(
+  env: AdminEnv,
+  origin: string,
+): Promise<{ script: string; styles: string[] } | null> {
+  const manifest = await readManifest(env, origin);
+  const entry = manifest?.[CONSOLE_ENTRY];
+  if (!manifest || !entry) return null;
+  return {
+    script: `/${entry.file}`,
+    styles: [...new Set(closure(manifest, CONSOLE_ENTRY).styles)],
+  };
 }
 
 /** Forget the manifest (tests). */
 export function resetAdminWorkerCache(): void {
-  publicFiles = null;
+  manifestCache = null;
 }
 
 /** An HTML page with the Kova settings filled in, never cached. */
@@ -184,6 +231,7 @@ export function routeApi(method: string, pathname: string): Route | null {
     "/api/live": { GET: "live" },
     "/api/insights": { GET: "insights" },
     "/api/settings": { GET: "settings", PUT: "putSettings" },
+    "/api/catalog/refresh": { POST: "refreshCatalog" },
     "/api/audit": { GET: "audit" },
   };
   const action = table[pathname]?.[method];
@@ -220,9 +268,9 @@ export async function handleAdminRequest(
   if (!adminId) {
     if (!read) return notFound();
     // The Kova redirect comes back to "/" with its code in the query.
-    if (pathname === "/") return page(env, request, SIGN_IN_PAGE);
+    if (pathname === "/") return page(env, request, PAGE);
     const files = await signInFiles(env, url.origin);
-    if (files.has(pathname) && pathname !== SIGN_IN_PAGE) {
+    if (files.has(pathname) && pathname !== PAGE) {
       return asset(env, request);
     }
     return notFound();
@@ -256,15 +304,24 @@ export async function handleAdminRequest(
       },
       deploy: () => mainWorkerBuild(env),
     });
-    return handlers[route.action](request, adminId, { userId: route.userId });
+    const response = await handlers[route.action](request, adminId, {
+      userId: route.userId,
+    });
+    if (route.action !== "session" || !response.ok) return response;
+    // The admin's session names the console bundle for the boot page.
+    const body = (await response.json()) as Record<string, unknown>;
+    return Response.json(
+      { ...body, console: await consoleFiles(env, url.origin) },
+      { headers: response.headers },
+    );
   }
 
   if (!read) return notFound();
-  // The console is one page; its sections live in the query string.
-  if (pathname === "/" || pathname === CONSOLE_PAGE) {
-    return page(env, request, CONSOLE_PAGE);
+  // One page: at "/" and at each console route (deep links, refresh).
+  if (pathname === "/" || CONSOLE_ROUTES.test(pathname)) {
+    return page(env, request, PAGE);
   }
-  if (pathname === MANIFEST) return notFound();
+  if (pathname === MANIFEST || pathname === PAGE) return notFound();
   return asset(env, request);
 }
 

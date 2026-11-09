@@ -7,6 +7,9 @@
  *            silkscreen groups, a 48px column header, one scroller
  *   phone    a 48px header, rule tabs that scroll sideways, the section
  *
+ * Each section is a route (./router.tsx); this frame is the root route's
+ * layout and the section renders in `children`.
+ *
  * Keyboard first: ⌘K / Ctrl+K opens the palette, "/" focuses the section's
  * search, g then p/l/i/s/a (or 1-5) switches section, j/k move through
  * table rows, Enter opens one and Escape closes it. Nothing here animates on
@@ -15,8 +18,6 @@
 
 import {
   createContext,
-  lazy,
-  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -44,12 +45,6 @@ import { cn } from "@/lib/utils";
 
 import { AdminPalette } from "./AdminPalette";
 import { useAdminResource } from "./admin-data";
-import { AuditSection } from "./AuditSection";
-import { LiveSection } from "./LiveSection";
-import { PeopleSection } from "./PeopleSection";
-import { SwitchesSection } from "./SwitchesSection";
-
-const InsightsSection = lazy(() => import("./InsightsSection"));
 
 export const ADMIN_SECTIONS = [
   "people",
@@ -122,6 +117,8 @@ function inDialog(target: EventTarget | null): boolean {
 
 export interface AdminConsoleProps {
   adminId: string;
+  /** The section's route (the router's outlet). */
+  children: ReactNode;
   section: AdminSection;
   selectedUserId: string | null;
   onNavigate: (section: AdminSection, userId: string | null) => void;
@@ -133,6 +130,7 @@ export interface AdminConsoleProps {
 
 export function AdminConsole({
   adminId,
+  children,
   section,
   selectedUserId,
   onNavigate,
@@ -224,17 +222,6 @@ export function AdminConsole({
   );
 
   const info = SECTION_INFO[section];
-  const content: Record<AdminSection, ReactNode> = {
-    people: <PeopleSection />,
-    live: <LiveSection />,
-    insights: (
-      <Suspense fallback={null}>
-        <InsightsSection />
-      </Suspense>
-    ),
-    switches: <SwitchesSection />,
-    audit: <AuditSection />,
-  };
 
   return (
     <AdminShellContext.Provider value={shell}>
@@ -302,7 +289,7 @@ export function AdminConsole({
               />
             </div>
           ) : null}
-          <div className="flex min-h-0 flex-1">{content[section]}</div>
+          <div className="flex min-h-0 flex-1">{children}</div>
         </main>
       </div>
       <AdminPalette

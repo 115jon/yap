@@ -51,8 +51,7 @@ import { cfTimeZone, TIME_ZONE_HEADER } from "./src/lib/request-time-zone";
 import { cleanupStalePendingUploads } from "./src/services/multipart-upload.service";
 import {
   COLLECTIBLES_SYNC_CRON,
-  CatalogFetchDeferredError,
-  syncCollectiblesCatalog,
+  runCollectiblesCatalogCron,
 } from "./src/lib/collectibles-catalog";
 import {
   isDailySlot,
@@ -564,13 +563,9 @@ export default {
             run: async () => {
               // Upstream blocks Workers egress; an off-Cloudflare fetcher
               // pushes to /api/collectibles/ingest. While it keeps up, a
-              // failed fetch here was already logged as a warning.
-              const catalog = await syncCollectiblesCatalog(env.DB, {
-                trigger: "cron",
-              }).catch((error: unknown) => {
-                if (error instanceof CatalogFetchDeferredError) return null;
-                throw error;
-              });
+              // failed fetch here is only a warning (null); otherwise the
+              // job fails with the reason and the fetcher's last push.
+              const catalog = await runCollectiblesCatalogCron(env.DB);
               if (!catalog) return;
               console.info("Collectibles catalog sync completed", {
                 categories: catalog.categories.length,

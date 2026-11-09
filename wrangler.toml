@@ -37,7 +37,8 @@ TURN_TOKEN_ID = "7355d949dedf888e6d89a5298f3ffde7"
 # KOVA_AUTH_URL and VITE_KOVA_AUTH_URL are left unset on purpose: both fall back
 # to DEFAULT_KOVA_AUTH_URL in src/lib/site-defaults.ts, the one place to move Kova.
 VITE_KOVA_AUTH_PUBLISHABLE_KEY = "pk_live_yl2Z9ssEwlWuOYHVRWozk9WThozu4nFP3QAhCWAsPhE"
-# Kova user ids allowed to force a collectibles catalog refresh (comma separated).
+# Kova user ids allowed to award manual badges via POST /api/admin/badges (comma
+# separated). The catalog refresh moved to the admin console (yap-admin).
 COLLECTIBLES_ADMIN_USER_IDS = "DADtHxPYMksiibowh0LmZFu8TWT5DI9b"
 REALTIME_ALLOWED_ORIGINS = "https://yap.115jon.com,http://localhost:5173,http://localhost:1420,http://tauri.localhost,https://tauri.localhost"
 

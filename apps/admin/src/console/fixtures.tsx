@@ -1,7 +1,7 @@
 /**
  * Dev-only fixtures for the admin console (`vite --mode fixtures`, see the
- * apps/admin README; `/console.html?surface=…&theme=…`). The
- * real console, fed by an in-memory transport with a friend group's worth
+ * apps/admin README; `/?surface=…&theme=…`). The
+ * real console and its router (on memory history), fed by an in-memory transport with a friend group's worth
  * of accounts, rooms and history, on a pinned clock so captures never
  * drift.
  *
@@ -18,11 +18,14 @@
  * the skeletons and error states can be captured too.
  */
 
+import { QueryClient } from "@tanstack/react-query";
+import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "next-themes";
 
-import { AdminConsole, type AdminSection } from "./AdminConsole";
-import { AdminTransportContext, type AdminTransport } from "./admin-data";
+import type { AdminTransport } from "./admin-data";
+import { ConsoleProviders } from "./app";
+import { createConsoleRouter } from "./router";
 import { AdminNowContext } from "./admin-format";
 import { SiteAnnouncementBar } from "@/components/chat/SiteAnnouncementBar";
 import type {
@@ -43,6 +46,9 @@ const NOW = Date.parse("2026-11-09T12:00:00Z");
 const DAY = 86_400_000;
 const iso = (ms: number) => new Date(ms).toISOString();
 const ADMIN_ID = "k3RcTGruSN9UCswqRpO12bDHqoPXUe3Q";
+/** The pinned clock and the signed-in admin, for tests. */
+export const FIXTURE_NOW = NOW;
+export const FIXTURE_ADMIN_ID = ADMIN_ID;
 
 /** A small deterministic generator, so every capture draws the same data. */
 function rng(seed: number) {
@@ -814,9 +820,10 @@ function live(): AdminLiveSnapshot {
       {
         name: "Collectibles catalog sync",
         cron: "17 * * * *",
-        ok: true,
-        duration_ms: 1_830,
-        error: null,
+        ok: false,
+        duration_ms: 355,
+        error:
+          'Yapper catalog fetch failed with 403 Forbidden: an HTML page titled "Attention Required! | Cloudflare"; the fetcher last pushed 2026-10-24T00:41:25.807Z',
         ran_at: iso(NOW - 43 * 60_000),
       },
       {
@@ -858,6 +865,26 @@ function live(): AdminLiveSnapshot {
       r2_cleanup_pending: 2,
       r2_cleanup_last_error: "R2 delete failed: 503 Service Unavailable",
     },
+    catalog: {
+      synced_at: iso(NOW - 16 * DAY),
+      items: 1_540,
+      categories: 114,
+      stale: true,
+      last_attempt_at: iso(NOW - 43 * 60_000),
+      last_success_at: iso(NOW - 16 * DAY),
+      last_failure_at: iso(NOW - 43 * 60_000),
+      last_error:
+        'Yapper catalog fetch failed with 403 Forbidden: an HTML page titled "Attention Required! | Cloudflare"',
+      last_outcome: "failed",
+      last_trigger: "cron",
+      consecutive_failures: 442,
+      fetcher: {
+        last_success_at: iso(NOW - 16 * DAY),
+        last_failure_at: null,
+        last_error: null,
+      },
+      retry_after_ms: 0,
+    },
   };
 }
 
@@ -880,7 +907,8 @@ function settings(): AdminSettingsResponse {
   };
 }
 
-function fixtureTransport(state: string | null): AdminTransport {
+/** The fixtures' in-memory API (tests use it too). */
+export function fixtureTransport(state: string | null): AdminTransport {
   const delay = <T,>(value: T) =>
     state === "loading"
       ? new Promise<T>(() => {})
@@ -901,7 +929,7 @@ function fixtureTransport(state: string | null): AdminTransport {
         } as T);
       }
       if (p.startsWith("/api/users/")) {
-        return delay(detailFor(decodeURIComponent(p.split("/")[4] ?? "")) as T);
+        return delay(detailFor(decodeURIComponent(p.split("/")[3] ?? "")) as T);
       }
       if (p === "/api/live") return delay(live() as T);
       if (p === "/api/insights") {
@@ -921,18 +949,19 @@ function fixtureTransport(state: string | null): AdminTransport {
   };
 }
 
-const SURFACE_SECTION: Record<string, AdminSection> = {
-  "admin-people": "people",
-  "admin-person": "people",
-  "admin-palette": "people",
-  "admin-live": "live",
-  "admin-insights": "insights",
-  "admin-switches": "switches",
-  "admin-audit": "audit",
+/** Each surface's route. */
+const SURFACE_PATH: Record<string, string> = {
+  "admin-people": "/people",
+  "admin-person": "/people/u-ada",
+  "admin-palette": "/people",
+  "admin-live": "/live",
+  "admin-insights": "/insights",
+  "admin-switches": "/switches",
+  "admin-audit": "/audit",
 };
 
 export function isAdminFixture(surface: string): boolean {
-  return surface === "admin-banner" || surface in SURFACE_SECTION;
+  return surface === "admin-banner" || surface in SURFACE_PATH;
 }
 
 export function AdminFixture({
@@ -943,11 +972,20 @@ export function AdminFixture({
   state: string | null;
 }) {
   const transport = useMemo(() => fixtureTransport(state), [state]);
-  const [section, setSection] = useState<AdminSection>(
-    SURFACE_SECTION[surface] ?? "people",
+  const [client] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: { retry: false, refetchOnWindowFocus: false },
+        },
+      }),
   );
-  const [userId, setUserId] = useState<string | null>(
-    surface === "admin-person" ? "u-ada" : null,
+  const [router] = useState(() =>
+    createConsoleRouter(
+      createMemoryHistory({
+        initialEntries: [SURFACE_PATH[surface] ?? "/people"],
+      }),
+    ),
   );
 
   if (surface === "admin-banner") {
@@ -985,18 +1023,16 @@ export function AdminFixture({
 
   return (
     <AdminNowContext.Provider value={NOW}>
-      <AdminTransportContext.Provider value={transport}>
-        <AdminConsole
-          adminId={ADMIN_ID}
-          section={section}
-          selectedUserId={userId}
-          initialPaletteOpen={surface === "admin-palette"}
-          onNavigate={(next, nextUser) => {
-            setSection(next);
-            setUserId(nextUser);
-          }}
-        />
-      </AdminTransportContext.Provider>
+      <ConsoleProviders
+        client={client}
+        transport={transport}
+        session={{
+          adminId: ADMIN_ID,
+          initialPaletteOpen: surface === "admin-palette",
+        }}
+      >
+        <RouterProvider router={router} />
+      </ConsoleProviders>
     </AdminNowContext.Provider>
   );
 }

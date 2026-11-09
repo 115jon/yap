@@ -1,6 +1,20 @@
 import { env } from "cloudflare:workers";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
+import fixture from "@/lib/__fixtures__/yapper-catalog.sample.json";
+import {
+  encodeCatalogPayload,
+  normalizeYapperCatalog,
+  resetCollectiblesCatalogMemory,
+} from "@/lib/collectibles-catalog";
 import schema from "../../../d1_schema.sql?raw";
 import { clearGateCache, SESSION_COOKIE } from "../src/server/gate";
 import {
@@ -49,25 +63,26 @@ const fakeKova: typeof fetch = async (input, init) => {
 
 const FILES: Record<string, { body: string; type: string }> = {
   "/index.html": {
-    body: '<meta name="kova-key" content="__KOVA_ADMIN_PUBLISHABLE_KEY__"><title>Sign in</title>',
+    body: '<meta name="kova-key" content="__KOVA_ADMIN_PUBLISHABLE_KEY__"><title>Sign in</title><script src="/assets/boot.js"></script>',
     type: "text/html",
   },
-  "/console.html": { body: "<title>console page</title>", type: "text/html" },
   "/manifest.json": {
     body: JSON.stringify({
-      "index.html": { file: "assets/signin.js", imports: ["_shared.js"] },
+      "index.html": { file: "assets/boot.js", imports: ["_shared.js"] },
       "_shared.js": { file: "assets/shared.js" },
-      "console.html": {
+      "src/console/app.tsx": {
         file: "assets/console.js",
-        imports: ["_shared.js"],
-        css: ["assets/console.css"],
+        isEntry: true,
+        imports: ["_shared.js", "_core.js"],
       },
+      "_core.js": { file: "assets/core.js", css: ["assets/console.css"] },
     }),
     type: "application/json",
   },
-  "/assets/signin.js": { body: "signin()", type: "text/javascript" },
+  "/assets/boot.js": { body: "boot()", type: "text/javascript" },
   "/assets/shared.js": { body: "shared()", type: "text/javascript" },
   "/assets/console.js": { body: "console()", type: "text/javascript" },
+  "/assets/core.js": { body: "core()", type: "text/javascript" },
   "/assets/console.css": { body: "body{}", type: "text/css" },
 };
 
@@ -195,13 +210,28 @@ const API: Array<[string, string, unknown?]> = [
   ["GET", "/api/insights?days=7"],
   ["GET", "/api/settings"],
   ["PUT", "/api/settings", { flags: { signups: false } }],
+  ["POST", "/api/catalog/refresh"],
   ["GET", "/api/audit"],
   ["GET", "/api/nope"],
 ];
 
+/** The console's client routes (console/router.tsx): admins only. */
+const ROUTES = [
+  "/people",
+  "/people/",
+  `/people/${TARGET}`,
+  "/live",
+  "/insights",
+  "/switches",
+  "/audit",
+];
+
 const PAGES = [
+  ...ROUTES,
   "/console.html",
+  "/index.html",
   "/assets/console.js",
+  "/assets/core.js",
   "/assets/console.css",
   "/manifest.json",
   "/nope",
@@ -257,10 +287,13 @@ describe("the Kova gate", () => {
     const html = await page.text();
     expect(html).toContain(`content="${ADMIN_KEY}"`);
     expect(html).not.toContain("console");
-    expect((await call("GET", "/assets/signin.js")).status).toBe(200);
+    expect((await call("GET", "/assets/boot.js")).status).toBe(200);
     expect((await call("GET", "/assets/shared.js")).status).toBe(200);
-    // The sign-in page itself only at "/".
+    // The page itself only at "/", and none of the console's routes.
     expect((await call("GET", "/index.html")).status).toBe(404);
+    for (const path of ROUTES) {
+      expect((await call("GET", path)).status, path).toBe(404);
+    }
   });
 
   it("trades a token for the session cookie only for a site admin", async () => {
@@ -297,16 +330,39 @@ describe("the Kova gate", () => {
   });
 
   it("lets the admin's session in to the console, its files and the API", async () => {
-    const page = await call("GET", "/", { cookie: "admin-token" });
-    expect(await page.text()).toContain("console page");
+    // The same page at "/" and at every console route (deep links, refresh).
+    for (const path of ["/", ...ROUTES]) {
+      const page = await call("GET", path, { cookie: "admin-token" });
+      expect(page.status, path).toBe(200);
+      const html = await page.text();
+      expect(html, path).toContain(`content="${ADMIN_KEY}"`);
+      expect(page.headers.get("cache-control"), path).toBe("no-store");
+    }
+    for (const file of [
+      "/assets/console.js",
+      "/assets/core.js",
+      "/assets/console.css",
+    ]) {
+      expect(
+        (await call("GET", file, { cookie: "admin-token" })).status,
+        file,
+      ).toBe(200);
+    }
     expect(
-      (await call("GET", "/assets/console.js", { cookie: "admin-token" }))
-        .status,
-    ).toBe(200);
+      (await call("GET", "/manifest.json", { cookie: "admin-token" })).status,
+    ).toBe(404);
+    // The session names the console bundle the boot page loads in place.
     const session = await call("GET", "/api/session", {
       cookie: "admin-token",
     });
-    expect(await session.json()).toMatchObject({ user_id: ADMIN });
+    expect(session.headers.get("cache-control")).toBe("no-store");
+    expect(await session.json()).toMatchObject({
+      user_id: ADMIN,
+      console: {
+        script: "/assets/console.js",
+        styles: ["/assets/console.css"],
+      },
+    });
     for (const [method, path] of API.filter(([method]) => method === "GET")) {
       if (path === "/api/nope") continue;
       expect(
@@ -331,6 +387,57 @@ describe("the Kova gate", () => {
     expect(signOut.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 
+  it("does not cache a Kova outage as a refusal", async () => {
+    const reference = await fingerprint(await call("GET", "/nope"));
+    let failures = 0;
+    for (const outage of [
+      () => new Response(null, { status: 429 }),
+      () => new Response(null, { status: 503 }),
+      () => {
+        throw new TypeError("fetch failed");
+      },
+    ]) {
+      clearGateCache();
+      const flaky: typeof fetch = async (input, init) => {
+        failures += 1;
+        if (failures % 2 === 1) return outage();
+        return fakeKova(input, init);
+      };
+      const ask = () =>
+        handleAdminRequest(
+          new Request(`${BASE}/api/session`, {
+            headers: { cookie: `${SESSION_COOKIE}=admin-token` },
+          }),
+          adminEnv,
+          { fetch: flaky },
+        );
+      // The outage is still a bare 404, byte for byte...
+      expect(await fingerprint(await ask())).toBe(reference);
+      // ...but the next request asks Kova again and gets in.
+      const next = await ask();
+      expect(next.status).toBe(200);
+      expect(await next.json()).toMatchObject({ user_id: ADMIN });
+    }
+
+    // A definite "no" is cached: Kova is asked once per TTL.
+    clearGateCache();
+    let asked = 0;
+    const counting: typeof fetch = async (input, init) => {
+      asked += 1;
+      return fakeKova(input, init);
+    };
+    for (let i = 0; i < 3; i += 1) {
+      await handleAdminRequest(
+        new Request(`${BASE}/api/users`, {
+          headers: { cookie: `${SESSION_COOKIE}=plain-token` },
+        }),
+        adminEnv,
+        { fetch: counting },
+      );
+    }
+    expect(asked).toBe(1);
+  });
+
   it("routes only the known API paths and methods", () => {
     expect(routeApi("GET", "/api/users")).toEqual({ action: "people" });
     expect(routeApi("POST", "/api/users")).toBeNull();
@@ -340,6 +447,10 @@ describe("the Kova gate", () => {
     });
     expect(routeApi("GET", "/api/users/u1/plan")).toBeNull();
     expect(routeApi("DELETE", "/api/settings")).toBeNull();
+    expect(routeApi("POST", "/api/catalog/refresh")).toEqual({
+      action: "refreshCatalog",
+    });
+    expect(routeApi("GET", "/api/catalog/refresh")).toBeNull();
   });
 });
 
@@ -491,5 +602,176 @@ describe("admin mutations write the audit log", () => {
     expect(response.status).toBe(200);
     const [row] = await auditRows("user.disconnect");
     expect(JSON.parse(row!.after_json!)).toEqual({ closed_sockets: 0 });
+  });
+});
+
+// ── The shop catalog ────────────────────────────────────────────────────────
+
+describe("the shop catalog card", () => {
+  const ETAG = 'W/"catalog-1"';
+  const as = (method: string, path: string) =>
+    call(method, path, { cookie: "admin-token" });
+  const blockPage = () =>
+    new Response(
+      "<!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title></head></html>",
+      { status: 403, statusText: "Forbidden" },
+    );
+
+  async function storedCatalog() {
+    return db
+      .prepare(
+        `SELECT etag, item_count, synced_at FROM collectible_catalog_cache WHERE source = 'discord-collectibles'`,
+      )
+      .first<{ etag: string; item_count: number; synced_at: string }>();
+  }
+
+  beforeEach(async () => {
+    resetCollectiblesCatalogMemory();
+    await as("GET", "/api/live"); // creates the catalog tables
+    await run(`DELETE FROM admin_audit_log`);
+    await run(`DELETE FROM collectible_catalog_sync_status`);
+    const catalog = normalizeYapperCatalog(fixture);
+    await run(
+      `INSERT OR REPLACE INTO collectible_catalog_cache (source, payload, etag, category_count, item_count, synced_at)
+       VALUES ('discord-collectibles', ?, ?, ?, ?, ?)`,
+      await encodeCatalogPayload(catalog),
+      ETAG,
+      catalog.categories.length,
+      catalog.items.length,
+      "2026-10-24T00:41:16.641Z",
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("shows on Live ops: last synced, items, last error, the fetcher", async () => {
+    const live = (await (await as("GET", "/api/live")).json()) as {
+      catalog: Record<string, unknown> & { fetcher: unknown };
+    };
+    expect(live.catalog).toMatchObject({
+      synced_at: "2026-10-24T00:41:16.641Z",
+      items: normalizeYapperCatalog(fixture).items.length,
+      stale: true,
+      last_outcome: null,
+      last_error: null,
+      retry_after_ms: 0,
+      fetcher: { last_success_at: null },
+    });
+  });
+
+  it("Refresh now runs the sync here and logs who asked", async () => {
+    const upstream = vi.fn<typeof fetch>(async (_input, init) =>
+      new Headers(init?.headers).get("if-none-match") === ETAG
+        ? new Response(null, { status: 304, headers: { etag: ETAG } })
+        : new Response("unexpected", { status: 500 }),
+    );
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await as("POST", "/api/catalog/refresh");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      catalog: Record<string, unknown>;
+    };
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(String(upstream.mock.calls[0]![0])).toBe(
+      "https://api.yapper.dev/v4/categories/catalog",
+    );
+    expect(body.catalog).toMatchObject({
+      stale: false,
+      last_outcome: "not_modified",
+      last_trigger: "manual",
+      consecutive_failures: 0,
+    });
+    expect((await storedCatalog())?.synced_at).not.toBe(
+      "2026-10-24T00:41:16.641Z",
+    );
+
+    const [row] = await auditRows("catalog.refresh");
+    expect(row).toMatchObject({
+      actor_id: ADMIN,
+      target_type: "site",
+      target_id: null,
+      cf_ray: "test-ray-1",
+    });
+    expect(JSON.parse(row!.before_json!)).toEqual({
+      synced_at: "2026-10-24T00:41:16.641Z",
+      items: normalizeYapperCatalog(fixture).items.length,
+    });
+    expect(JSON.parse(row!.after_json!)).toMatchObject({
+      outcome: "not_modified",
+    });
+
+    // Once per cooldown, and a refused try logs nothing.
+    const again = await as("POST", "/api/catalog/refresh");
+    expect(again.status).toBe(429);
+    expect(Number(again.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(await again.json()).toMatchObject({
+      code: "CATALOG_REFRESH_COOLDOWN",
+    });
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(await auditRows("catalog.refresh")).toHaveLength(1);
+  });
+
+  it("a fetcher push does not start the cooldown", async () => {
+    await run(
+      `INSERT INTO collectible_catalog_sync_status (source, last_attempt_at, last_success_at, last_outcome, consecutive_failures, last_trigger)
+       VALUES ('discord-collectibles', ?, ?, 'not_modified', 0, 'ingest')`,
+      new Date().toISOString(),
+      new Date().toISOString(),
+    );
+    const live = (await (await as("GET", "/api/live")).json()) as {
+      catalog: { retry_after_ms: number; last_trigger: string };
+    };
+    expect(live.catalog).toMatchObject({
+      retry_after_ms: 0,
+      last_trigger: "ingest",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(
+        async () =>
+          new Response(null, { status: 304, headers: { etag: ETAG } }),
+      ),
+    );
+    expect((await as("POST", "/api/catalog/refresh")).status).toBe(200);
+  });
+
+  it("a failed refresh keeps the catalog and records the reason", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => blockPage()),
+    );
+    const before = await storedCatalog();
+
+    const response = await as("POST", "/api/catalog/refresh");
+    expect(response.status).toBe(502);
+    const reason =
+      'Yapper catalog fetch failed with 403 Forbidden: an HTML page titled "Attention Required! | Cloudflare"';
+    expect(await response.json()).toEqual({
+      code: "CATALOG_REFRESH_FAILED",
+      error: `The refresh failed; the last good catalog stays. ${reason}`,
+    });
+    expect(await storedCatalog()).toEqual(before);
+
+    const [row] = await auditRows("catalog.refresh");
+    expect(JSON.parse(row!.after_json!)).toEqual({
+      outcome: "failed",
+      synced_at: before!.synced_at,
+      items: before!.item_count,
+      error: reason,
+    });
+    const live = (await (await as("GET", "/api/live")).json()) as {
+      catalog: Record<string, unknown>;
+    };
+    expect(live.catalog).toMatchObject({
+      last_outcome: "failed",
+      last_trigger: "manual",
+      last_error: reason,
+      last_failure_at: expect.any(String),
+      consecutive_failures: 1,
+      stale: true,
+    });
   });
 });

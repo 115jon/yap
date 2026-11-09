@@ -1142,6 +1142,33 @@ function withFreshness(
 
 // ── Upstream ────────────────────────────────────────────────────────────────
 
+/**
+ * A failed upstream answer as one short line for the status row: a JSON
+ * error's message, an HTML block page's title, or the start of the text.
+ */
+export function describeUpstreamBody(text: string): string {
+  const body = text.replace(/\s+/g, " ").trim();
+  if (!body) return "";
+  if (body.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(body) as Record<string, unknown>;
+      const message = parsed.message ?? parsed.error;
+      if (typeof message === "string" && message.trim()) {
+        return message.trim().slice(0, 160);
+      }
+    } catch {
+      // not JSON after all; fall through
+    }
+  }
+  if (/^<(?:!doctype|html|head|body)\b/i.test(body)) {
+    const title = /<title[^>]*>([^<]*)<\/title>/i.exec(body)?.[1]?.trim();
+    return title
+      ? `an HTML page titled "${title.slice(0, 120)}"`
+      : "an HTML page";
+  }
+  return body.slice(0, 160);
+}
+
 type UpstreamResult =
   | { notModified: true; etag: string | null }
   | { notModified: false; etag: string | null; raw: unknown[] };
@@ -1167,7 +1194,7 @@ async function fetchYapperCatalog(
   if (!response.ok) {
     let detail = "";
     try {
-      detail = (await response.text()).replace(/\s+/g, " ").slice(0, 160);
+      detail = describeUpstreamBody(await response.text());
     } catch {
       // body unreadable; the status is enough
     }
@@ -1335,18 +1362,17 @@ function scheduleBackgroundRefresh(
  * Serves the cached catalog without waiting on upstream whenever one exists.
  * A stale cache is returned as-is (stale: true) and refreshed in the
  * background through `waitUntil`, throttled. Only an empty cache blocks on
- * upstream. `forceRefresh` is for admins and is never exposed to everyone.
+ * upstream. Nothing here forces a refresh: that is the cron's job, and the
+ * admin console's (`syncCollectiblesCatalog` with trigger "manual").
  */
 export async function getCollectiblesCatalog(
   db: D1Database,
   options: {
-    forceRefresh?: boolean;
     waitUntil?: (promise: Promise<unknown>) => void;
   } = {},
 ): Promise<CollectiblesCatalog> {
   const now = Date.now();
   if (
-    !options.forceRefresh &&
     memoryCatalogEntry &&
     memorySyncStatus &&
     now - memoryCatalogEntry.loadedAtMs < MEMORY_RECHECK_MS
@@ -1371,21 +1397,12 @@ export async function getCollectiblesCatalog(
   if (cached && row) {
     primeMemoryCatalog(cached, row.etag, row.synced_at);
     const served = withFreshness(cached, row.synced_at, now);
-    if (options.forceRefresh) {
-      try {
-        return await syncCollectiblesCatalog(db, { trigger: "manual" });
-      } catch {
-        return withFreshness(cached, row.synced_at, now);
-      }
-    }
     if (served.stale) scheduleBackgroundRefresh(db, options.waitUntil, now);
     return served;
   }
 
   try {
-    return await syncCollectiblesCatalog(db, {
-      trigger: options.forceRefresh ? "manual" : "request",
-    });
+    return await syncCollectiblesCatalog(db, { trigger: "request" });
   } catch (error) {
     console.error("Collectibles catalog unavailable:", describeError(error));
     throw new Error("Unable to load collectibles catalog");
@@ -1401,6 +1418,11 @@ export async function getCollectiblesSyncStatus(
   return status;
 }
 
+/** True while this isolate has an upstream sync or ingest running. */
+export function isCollectiblesSyncInFlight(): boolean {
+  return inFlightCatalogSync !== null;
+}
+
 /** Milliseconds until a manual sync is allowed again (0 = allowed now). */
 export function manualSyncRetryAfterMs(
   status: CollectiblesSyncStatus,
@@ -1409,6 +1431,83 @@ export function manualSyncRetryAfterMs(
   const lastAttemptMs = Date.parse(status.lastAttemptAt ?? "");
   if (Number.isNaN(lastAttemptMs)) return 0;
   return Math.max(0, lastAttemptMs + MANUAL_SYNC_COOLDOWN_MS - now);
+}
+
+/**
+ * The hourly cron job. Null when the fetch failed but a recent ingest keeps
+ * the catalog current. Any other failure is already in the status row; it is
+ * rethrown with when the off-Cloudflare fetcher last pushed, so the cron's
+ * own record (scheduled_job_runs) says why nothing is refreshing.
+ */
+export async function runCollectiblesCatalogCron(
+  db: D1Database,
+  options: Pick<SyncCollectiblesOptions, "validation"> = {},
+): Promise<CollectiblesCatalog | null> {
+  try {
+    return await syncCollectiblesCatalog(db, { ...options, trigger: "cron" });
+  } catch (error) {
+    if (error instanceof CatalogFetchDeferredError) return null;
+    const ingest = await readSyncStatusRow(db, INGEST_STATUS_SOURCE).catch(
+      () => null,
+    );
+    throw new Error(
+      `${describeError(error)}; the fetcher last pushed ${ingest?.last_success_at ?? "never"}`,
+    );
+  }
+}
+
+export type CollectiblesCatalogHealth = {
+  /** The stored catalog; null when nothing has ever been stored. */
+  catalog: {
+    syncedAt: string;
+    items: number;
+    categories: number;
+    stale: boolean;
+  } | null;
+  /** Every refresh of the stored catalog: cron, manual, request and ingest. */
+  sync: CollectiblesSyncStatus & { lastTrigger?: string };
+  /** Pushes from the off-Cloudflare fetcher only. */
+  ingest: CollectiblesSyncStatus;
+};
+
+/** What the admin console shows about the catalog. Reads only; no payload. */
+export async function getCollectiblesCatalogHealth(
+  db: D1Database,
+  now = Date.now(),
+): Promise<CollectiblesCatalogHealth> {
+  await ensureCatalogTables(db);
+  const [row, sync, ingest] = await Promise.all([
+    db
+      .prepare(
+        `SELECT synced_at, item_count, category_count
+         FROM collectible_catalog_cache
+         WHERE source = ?`,
+      )
+      .bind(CACHE_SOURCE)
+      .first<
+        Pick<CatalogCacheRow, "synced_at" | "item_count" | "category_count">
+      >(),
+    readSyncStatusRow(db),
+    readSyncStatusRow(db, INGEST_STATUS_SOURCE),
+  ]);
+  const syncedAtMs = Date.parse(row?.synced_at ?? "");
+  return {
+    catalog: row
+      ? {
+          syncedAt: row.synced_at,
+          items: row.item_count,
+          categories: row.category_count,
+          stale:
+            Number.isNaN(syncedAtMs) ||
+            now - syncedAtMs > CATALOG_STALE_AFTER_MS,
+        }
+      : null,
+    sync: {
+      ...rowToSyncStatus(sync),
+      lastTrigger: sync?.last_trigger ?? undefined,
+    },
+    ingest: rowToSyncStatus(ingest),
+  };
 }
 
 // ── Ingest (upstream fetched off Cloudflare and pushed here) ────────────────
