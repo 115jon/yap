@@ -19,6 +19,8 @@ import {
 import type { D1Database } from "@cloudflare/workers-types";
 import type { UserBadge } from "@/lib/badges";
 import type { Entitlement } from "@/lib/entitlements";
+import type { PublicConnection } from "@/lib/connections";
+import { getShownConnections } from "@/services/connection.service";
 import { getProfileExtras } from "@/services/entitlement.service";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -52,11 +54,17 @@ export interface UserProfile {
   entitlement: Entitlement;
   /** Earned badges in display order, Loud included while subscribed. */
   badges: UserBadge[];
+  /** Connections with "Show on profile" on (provider, name, URL, avatar). */
+  connections: PublicConnection[];
 }
 
 type UserProfileRow = Omit<
   UserProfile,
-  "display_name_style" | "share_activity" | "entitlement" | "badges"
+  | "display_name_style"
+  | "share_activity"
+  | "entitlement"
+  | "badges"
+  | "connections"
 > & {
   display_name_style: string | null;
   share_activity: number | null;
@@ -90,7 +98,7 @@ export async function getMe(
 ): Promise<UserProfile> {
   await ensureUserProfileSchema(db);
 
-  const [user, extras] = await Promise.all([
+  const [user, extras, connections] = await Promise.all([
     db
       .prepare(
         `SELECT id, username, display_name, avatar_url, avatar_display, banner_url, banner_content_type, nameplate_url, nameplate_content_type, profile_accent_color, profile_background_color, profile_banner_color, display_name_style, theme_preference, theme_sync_enabled, media_content_filter, share_activity, updated_at, created_at, bio, pronouns, status, custom_status FROM users WHERE id = ?`,
@@ -98,6 +106,7 @@ export async function getMe(
       .bind(userId)
       .first<UserProfileRow>(),
     getProfileExtras(db, userId),
+    getShownConnections(db, userId),
   ]);
 
   if (!user) {
@@ -116,6 +125,7 @@ export async function getMe(
     share_activity: user.share_activity !== 0,
     entitlement: extras.entitlement,
     badges: extras.badges,
+    connections,
   };
 }
 

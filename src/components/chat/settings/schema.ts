@@ -9,9 +9,14 @@
  */
 
 import type { IconName } from "@/components/ui/icon";
+import {
+  CONNECTION_PROVIDER_INFO,
+  CONNECTION_PROVIDERS,
+} from "@/lib/connections";
 
 export type SettingsPanelId =
   | "account"
+  | "connections"
   | "loud"
   | "sessions"
   | "privacy"
@@ -144,6 +149,46 @@ const SETTINGS_PANELS: SettingsPanelDef[] = [
         ],
       },
     ],
+  },
+  {
+    id: "connections",
+    title: "Connections",
+    icon: "connections",
+    headline: "Your other accounts.",
+    blurb:
+      "Link accounts you own on other services and choose which ones your profile shows.",
+    // One card per provider (lib/connections.ts): its account, then the
+    // profile switch once something is linked.
+    sections: CONNECTION_PROVIDERS.map((provider) => {
+      const info = CONNECTION_PROVIDER_INFO[provider];
+      const keywords = [
+        ...info.keywords,
+        "connection",
+        "connections",
+        "link",
+        "linked account",
+        "connect",
+        "unlink",
+      ];
+      return {
+        id: `connection-${provider}`,
+        title: info.label,
+        desc: info.blurb,
+        rows: [
+          {
+            id: `${provider}-account`,
+            label: `${info.label} account`,
+            keywords,
+          },
+          {
+            id: `${provider}-show-on-profile`,
+            label: "Show on profile",
+            desc: `People who open your profile see your ${info.label} name and a link to it.`,
+            keywords: [...keywords, "profile", "public", "hide", "visible"],
+          },
+        ],
+      };
+    }),
   },
   {
     id: "loud",
@@ -807,7 +852,10 @@ export const SETTINGS_NAV_GROUPS: Array<{
   title: string;
   ids: SettingsPanelId[];
 }> = [
-  { title: "You", ids: ["account", "loud", "sessions", "privacy"] },
+  {
+    title: "You",
+    ids: ["account", "connections", "loud", "sessions", "privacy"],
+  },
   { title: "Calls", ids: ["voice", "soundboard", "keybinds"] },
   { title: "App", ids: ["appearance", "notifications", "desktop"] },
 ];

@@ -248,6 +248,50 @@ describe("chat actions read-state writes", () => {
     );
   });
 
+  it("keeps the profile's shown connections on the current user", async () => {
+    mocks.apiGet.mockImplementation((url: string) =>
+      url === "/api/users/me"
+        ? Promise.resolve({
+            id: "user-1",
+            username: "user",
+            media_content_filter: "standard",
+            theme_sync_enabled: 0,
+            connections: [
+              {
+                provider: "steam",
+                display_name: "Gordon",
+                profile_url:
+                  "https://steamcommunity.com/profiles/76561197960287930",
+                avatar_url: null,
+              },
+              { provider: "myspace", display_name: "Tom" },
+              "junk",
+            ],
+          })
+        : Promise.resolve([]),
+    );
+    let state: ChatState = {
+      ...initialState,
+      user: { id: "user-1" } as ChatState["user"],
+    };
+    const actions = createChatActions(
+      () => state,
+      (action) => {
+        state = chatReducer(state, action);
+      },
+    );
+
+    expect(await actions.loadCurrentUser("user-1")).toBe(true);
+    expect(state.user?.connections).toEqual([
+      {
+        provider: "steam",
+        display_name: "Gordon",
+        profile_url: "https://steamcommunity.com/profiles/76561197960287930",
+        avatar_url: null,
+      },
+    ]);
+  });
+
   it("retries first-load AUTH_REQUIRED until the bearer lands", async () => {
     vi.useFakeTimers();
     const requestedUrls: string[] = [];

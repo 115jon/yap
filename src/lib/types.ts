@@ -1,4 +1,5 @@
 import type { UserBadge } from "@/lib/badges";
+import type { PublicConnection } from "@/lib/connections";
 import type { Entitlement } from "@/lib/entitlements";
 import type { MediaContentFilter } from "@/lib/media-content-filter";
 import type { AvatarDisplay } from "@/lib/avatar-display";
@@ -145,6 +146,8 @@ export interface User {
   entitlement?: Entitlement;
   /** Earned badges in display order (users/me and profiles). */
   badges?: UserBadge[];
+  /** Linked accounts shown on the profile (users/me and profiles). */
+  connections?: PublicConnection[];
 }
 
 /** Server object */

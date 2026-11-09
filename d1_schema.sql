@@ -493,6 +493,35 @@ CREATE TABLE IF NOT EXISTS pending_upload_parts (
     PRIMARY KEY (upload_id, part_number)
 );
 
+-- Connections (migration 042): verified links to accounts on other services.
+-- One external account per Yap account, one account per provider per user.
+CREATE TABLE IF NOT EXISTS user_connections (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    profile_url TEXT,
+    avatar_url TEXT,
+    show_on_profile INTEGER NOT NULL DEFAULT 1 CHECK (show_on_profile IN (0, 1)),
+    metadata TEXT NOT NULL DEFAULT '{}',
+    verified_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, provider),
+    UNIQUE (provider, external_id)
+);
+
+-- A link in flight (start route to provider callback), consumed once.
+CREATE TABLE IF NOT EXISTS connection_link_states (
+    state_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    binding_hash TEXT NOT NULL,
+    return_to TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 -- Read states per user
 CREATE INDEX IF NOT EXISTS idx_read_states_user_id ON read_states(user_id);
 
@@ -515,6 +544,7 @@ CREATE INDEX IF NOT EXISTS idx_user_entitlements_stripe_customer
     WHERE stripe_customer_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_user_badges_badge ON user_badges(badge_id);
 CREATE INDEX IF NOT EXISTS idx_user_stats_voice ON user_stats(voice_seconds);
+CREATE INDEX IF NOT EXISTS idx_connection_link_states_expires ON connection_link_states(expires_at);
 
 -- ── Audit Log ────────────────────────────────────────────────────────────
 

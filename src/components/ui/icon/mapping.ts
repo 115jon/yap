@@ -211,6 +211,10 @@ export const ICONS = {
   zap: { glyph: "lightning" },
   gamepad: { glyph: "game-controller" },
 
+  /* Connections (one per provider, lib/connections.ts) */
+  connections: { glyph: "plugs-connected", fill: true },
+  steam: { glyph: "steam-logo", fill: true },
+
   /* Files (attachments) */
   file: { glyph: "file" },
   fileAdd: { glyph: "file-plus" },

@@ -4,6 +4,7 @@ import { getUnreadChannelState } from "@/lib/desktop-notifications";
 import { syncDesktopNotificationState } from "@/lib/desktop-native-sync";
 import { parseMediaContentFilter } from "@/lib/media-content-filter";
 import { parseUserBadges } from "@/lib/badges";
+import { parsePublicConnections } from "@/lib/connections";
 import { parseEntitlement } from "@/lib/entitlements";
 import type { ChatAction, ChatState } from "@/lib/chat-reducer";
 import type {
@@ -823,6 +824,7 @@ export function createChatActions(
           };
           entitlement?: unknown;
           badges?: unknown;
+          connections?: unknown;
         }>("/api/users/me"),
       );
       if (
@@ -876,6 +878,8 @@ export function createChatActions(
           custom_status: profile.custom_status ?? current?.custom_status,
           entitlement: parseEntitlement(profile.entitlement),
           badges: parseUserBadges(profile.badges),
+          // The profile's own Connections block reads these (no fetch for self).
+          connections: parsePublicConnections(profile.connections),
         },
       });
       // Also update member caches and voice states when display-only fields change.
