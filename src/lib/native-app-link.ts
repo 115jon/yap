@@ -1,7 +1,10 @@
 /**
- * The native Windows client ("Yap Native", desktop-native/) and its own link
- * scheme, `yap-native://`. It is a separate app from the Tauri desktop app,
- * which owns `yap://`; nothing here touches `yap://`.
+ * The native Windows client ("Yap", desktop-native/; "Yap Native" until it
+ * replaced the Tauri desktop app) and the link scheme only it reads,
+ * `yap-native://`. The native app owns `yap://` too now, but the Tauri app
+ * still has `yap://` on a PC that has not moved over yet, so the web keeps
+ * making `yap-native://` links, which the native app reads as its own
+ * `yap://` ones. Nothing here makes a `yap://` link.
  *
  * The one hand-off the web makes is after a device sign-in: the native app
  * signs in with a Kova device code and opens /activate in the browser. Once
@@ -13,7 +16,7 @@
  * The web also offers the invite page's "Open in Yap Native" key, an explicit
  * `yap-native://invite/<code>` link the user clicks. It names only the invite
  * code that is already in the web URL. Other links are left to the browser's
- * own "Open Yap Native?" prompt.
+ * own "Open Yap?" prompt.
  *
  * The native parser (desktop-native/rust/crates/yap-core/src/links.rs) is
  * strict: invite codes of letters, digits, `-` and `_`. A link it would
@@ -26,15 +29,21 @@ import {
 } from "@/lib/device-code-format";
 import { isDesktop, isMobile, isTauri, isWindows } from "@/lib/platform";
 
-/** The native client's scheme. Never the Tauri app's `yap:`. */
+/** The native client's own scheme. Never `yap:`, which the Tauri app may still own. */
 export const NATIVE_APP_SCHEME = "yap-native";
 
 /**
  * The label the native client sends when it starts a device sign-in
- * (desktop-native/rust/crates/yap-core/src/auth.rs `start`). The Tauri app
- * sends "Yap Desktop", the mobile app "Yap Mobile".
+ * (desktop-native/rust/crates/yap-core/src/auth.rs `DEVICE_LABEL`). The
+ * Tauri app sends "Yap Desktop", the mobile app "Yap Mobile".
  */
-export const NATIVE_APP_DEVICE_LABEL = "Yap Native";
+export const NATIVE_APP_DEVICE_LABEL = "Yap";
+
+/** The labels the native client has sent: today's, then "Yap Native". */
+const NATIVE_APP_DEVICE_LABELS: readonly string[] = [
+  NATIVE_APP_DEVICE_LABEL,
+  "Yap Native",
+];
 
 /**
  * Whether a device request came from the native client. The label is what
@@ -42,7 +51,8 @@ export const NATIVE_APP_DEVICE_LABEL = "Yap Native";
  * app's link; a wrong guess opens nothing that matters.
  */
 export function isNativeAppDevice(device: { label?: string | null }): boolean {
-  return device.label?.trim() === NATIVE_APP_DEVICE_LABEL;
+  const label = device.label?.trim();
+  return label !== undefined && NATIVE_APP_DEVICE_LABELS.includes(label);
 }
 
 /**
@@ -71,7 +81,7 @@ export function nativeInviteLink(code: string): string | null {
 }
 
 /**
- * Whether this browser could hand a link to Yap Native: a browser on
+ * Whether this browser could hand a link to the Yap app: a browser on
  * Windows, not the Tauri desktop app (it renders this same UI and owns
  * `yap://`) and not the mobile app. False during server rendering.
  */
@@ -92,8 +102,8 @@ function assignLocation(url: string): void {
 let launcher: (url: string) => void = assignLocation;
 
 /**
- * Hands a `yap-native://` link to the browser, which asks "Open Yap
- * Native?" (or opens it at once where the user chose to always allow it).
+ * Hands a `yap-native://` link to the browser, which asks "Open Yap?"
+ * (or opens it at once where the user chose to always allow it).
  * The page stays where it is. Anything but our scheme is ignored.
  */
 export function launchNativeApp(url: string): void {
