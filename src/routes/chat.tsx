@@ -1,6 +1,7 @@
 import CommandMenu from "@/components/CommandMenu";
 import { ChatGateway } from "@/components/chat/ChatGateway";
 import ChatPageClient from "@/components/chat/ChatPageClient";
+import { ConnectionReturn } from "@/components/chat/ConnectionReturn";
 import { ConnectionOverlay } from "@/components/chat/ConnectionOverlay";
 import { ImageViewerModal } from "@/components/chat/ImageViewerModal";
 import { SettingsHost } from "@/components/chat/SettingsHost";
@@ -119,6 +120,7 @@ function ChatLayout() {
         <ChatPageClient />
         <ImageViewerModal />
         <SettingsHost />
+        <ConnectionReturn />
         <CommandMenu />
       </ConnectionOverlay>
     </>

@@ -50,6 +50,7 @@ import {
 import ProfileEditorModal from "./ProfileEditorModal";
 import ThemePreviewSidebar from "./ThemePreviewSidebar";
 import AccountPanel from "./settings/AccountPanel";
+import ConnectionsPanel from "./settings/ConnectionsPanel";
 import LoudPanel from "./settings/LoudPanel";
 import AppearancePanel from "./settings/AppearancePanel";
 import DesktopPanel from "./settings/DesktopPanel";
@@ -108,6 +109,7 @@ interface SettingsModalProps {
 
 const PANEL_COMPONENTS: Record<SettingsPanelId, ComponentType> = {
   account: AccountPanel,
+  connections: ConnectionsPanel,
   loud: LoudPanel,
   sessions: SessionsPanel,
   privacy: PrivacyPanel,
