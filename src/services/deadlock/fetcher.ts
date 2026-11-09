@@ -115,7 +115,15 @@ export interface RefreshOutcome {
     | "protected"
     | "failed"
     | "skipped";
-  error?: ApiFailureKind | "no_manifest";
+  error?: ApiFailureKind | "no_manifest" | "exception";
+}
+
+/**
+ * Our own limits (the outbound budget, a global pause after the API said
+ * to wait): the run is skipped, and no account is charged a failure.
+ */
+function isLocalHold(kind: ApiFailureKind): boolean {
+  return kind === "budget" || kind === "paused";
 }
 
 /** When an account is next due after a good fetch. */
@@ -229,10 +237,17 @@ function signalOf(rank: ApiRank | undefined, stats: HeroStatRow[]): string {
   return `${rank?.last_match?.match_id ?? 0}:${matches}:${last}`;
 }
 
-/** What the old digest knew about its newest match, reused when unchanged. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * What the old digest knew about its newest match, reused when unchanged.
+ * Null when that read had failed (no level), so it is tried again.
+ */
 function extrasFrom(digest: DeadlockDigest | null): MatchExtras | null {
   const last = digest?.last_match;
-  if (!last) return null;
+  if (!last || last.level === null) return null;
   return {
     match_id: last.id,
     level: last.level,
@@ -280,61 +295,83 @@ export async function refreshDeadlockAccounts(
   }
 
   const joined = ids.join(",");
-  const [ranks, heroStats] = await Promise.all([
+  // Hero stats default to normal games; Street Brawl is asked for apart,
+  // so a brawl moves the change signal too.
+  const [ranks, heroStats, brawlStats] = await Promise.all([
     deps.api.get<ApiRank[]>("/v1/players/rank", { account_ids: joined }),
     deps.api.get<HeroStatRow[]>("/v1/players/hero-stats", {
       account_ids: joined,
     }),
+    deps.api.get<HeroStatRow[]>("/v1/players/hero-stats", {
+      account_ids: joined,
+      game_mode: "street_brawl",
+    }),
   ]);
-  if (!ranks.ok || !heroStats.ok) {
-    const failed = !ranks.ok ? ranks : heroStats;
-    if (!failed.ok) {
-      await recordFailures(
-        deps.db,
-        rows,
-        now,
-        failed.kind,
-        failed.retryAfterMs,
-      );
+  const failed = [ranks, heroStats, brawlStats].find((answer) => !answer.ok);
+  if (failed && !failed.ok) {
+    if (isLocalHold(failed.kind)) {
       return rows.map((row) => ({
         account_id: row.account_id,
-        result: "failed",
+        result: "skipped",
         error: failed.kind,
       }));
     }
+    await recordFailures(deps.db, rows, now, failed.kind, failed.retryAfterMs);
+    return rows.map((row) => ({
+      account_id: row.account_id,
+      result: "failed",
+      error: failed.kind,
+    }));
   }
   const rankById = new Map<number, ApiRank>();
   for (const rank of ranks.ok && Array.isArray(ranks.body) ? ranks.body : []) {
-    if (rank && typeof rank.account_id === "number") {
+    if (isRecord(rank) && typeof rank.account_id === "number") {
       rankById.set(rank.account_id, rank);
     }
   }
   const statsById = new Map<number, HeroStatRow[]>();
-  for (const row of heroStats.ok && Array.isArray(heroStats.body)
-    ? heroStats.body
-    : []) {
-    if (!row || typeof row.account_id !== "number") continue;
-    const list = statsById.get(row.account_id) ?? [];
-    list.push(row);
-    statsById.set(row.account_id, list);
+  for (const answer of [heroStats, brawlStats]) {
+    for (const row of answer.ok && Array.isArray(answer.body)
+      ? answer.body
+      : []) {
+      if (!isRecord(row) || typeof row.account_id !== "number") continue;
+      const list = statsById.get(row.account_id) ?? [];
+      list.push(row);
+      statsById.set(row.account_id, list);
+    }
   }
 
   const snapshots = await snapshotsFor(deps.db, ids);
   const outcomes: RefreshOutcome[] = [];
   // One account at a time: the API client already keeps two calls in
   // flight, and a history is up to a few MB to parse.
+  // One account's surprise (a body that breaks the reduction, a D1 hiccup)
+  // is that account's failure, never the batch's.
   for (const row of rows) {
-    outcomes.push(
-      await refreshOne(deps, {
-        row,
-        snapshot: snapshots.get(row.account_id) ?? null,
-        rank: rankById.get(row.account_id),
-        stats: statsById.get(row.account_id) ?? [],
-        manifest,
-        reason,
-        now,
-      }),
-    );
+    try {
+      outcomes.push(
+        await refreshOne(deps, {
+          row,
+          snapshot: snapshots.get(row.account_id) ?? null,
+          rank: rankById.get(row.account_id),
+          stats: statsById.get(row.account_id) ?? [],
+          manifest,
+          reason,
+          now,
+        }),
+      );
+    } catch {
+      try {
+        await recordFailures(deps.db, [row], now, "unavailable", null);
+      } catch {
+        // D1 itself is failing; the row is still claimed until next_due_at.
+      }
+      outcomes.push({
+        account_id: row.account_id,
+        result: "failed",
+        error: "exception",
+      });
+    }
   }
   return outcomes;
 }
@@ -363,7 +400,10 @@ async function refreshOne(
       await markProtected(deps, row, now);
       return { account_id: accountId, result: "protected" };
     }
-    if (single.ok && single.body && typeof single.body === "object") {
+    if (!single.ok && isLocalHold(single.kind)) {
+      return { account_id: accountId, result: "skipped", error: single.kind };
+    }
+    if (single.ok && isRecord(single.body)) {
       rank = { ...single.body, account_id: accountId };
     }
   }
@@ -394,6 +434,13 @@ async function refreshOne(
         await markProtected(deps, row, now);
         return { account_id: accountId, result: "protected" };
       }
+      if (isLocalHold(history.kind)) {
+        return {
+          account_id: accountId,
+          result: "skipped",
+          error: history.kind,
+        };
+      }
       await recordFailures(
         deps.db,
         [row],
@@ -403,7 +450,28 @@ async function refreshOne(
       );
       return { account_id: accountId, result: "failed", error: history.kind };
     }
-    const rows = Array.isArray(history.body) ? history.body : [];
+    // Not a list, or an empty one under a 429 (the stored-history fallback
+    // came back empty): the API is unwell, not the account empty. The last
+    // good digest stays.
+    const limited = history.status === 429;
+    if (
+      !Array.isArray(history.body) ||
+      (limited && history.body.length === 0)
+    ) {
+      await recordFailures(
+        deps.db,
+        [row],
+        now,
+        limited ? "rate_limited" : "unavailable",
+        history.retryAfterMs,
+      );
+      return {
+        account_id: accountId,
+        result: "failed",
+        error: limited ? "rate_limited" : "unavailable",
+      };
+    }
+    const rows = history.body.filter(isRecord) as ApiHistoryRow[];
     historyAt = now;
     if (rows.length === 0) {
       await writeResult(deps, row, {
@@ -425,7 +493,8 @@ async function refreshOne(
       const metadata = await deps.api.get<unknown>(
         `/v1/matches/${newest}/metadata`,
       );
-      // Optional: a failed metadata read still updates everything else.
+      // Optional: a failed metadata read still updates everything else,
+      // and is tried again next time (extrasFrom skips an empty one).
       if (metadata.ok) extras = reduceMatchMetadata(metadata.body, accountId);
     }
     digest = buildDigest({
@@ -502,8 +571,12 @@ async function writeResult(
   await db.batch([
     db
       .prepare(
+        // Only while the account is still tracked: an unlink that landed
+        // during the fetch must not bring the snapshot back.
         `INSERT INTO deadlock_snapshots (account_id, user_id, status, digest, fetched_at, newest_match_id)
-         VALUES (?, ?, ?, ?, ?, ?)
+         SELECT ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (SELECT 1 FROM deadlock_fetch_state
+                       WHERE account_id = ?1 AND user_id = ?2)
          ON CONFLICT(account_id) DO UPDATE SET
            user_id = excluded.user_id, status = excluded.status,
            digest = excluded.digest, fetched_at = excluded.fetched_at,
@@ -537,7 +610,9 @@ async function markProtected(
     db
       .prepare(
         `INSERT INTO deadlock_snapshots (account_id, user_id, status, digest, fetched_at, newest_match_id)
-         VALUES (?, ?, 'protected', NULL, ?, NULL)
+         SELECT ?1, ?2, 'protected', NULL, ?3, NULL
+         WHERE EXISTS (SELECT 1 FROM deadlock_fetch_state
+                       WHERE account_id = ?1 AND user_id = ?2)
          ON CONFLICT(account_id) DO UPDATE SET
            status = 'protected', digest = NULL, fetched_at = excluded.fetched_at,
            newest_match_id = NULL`,

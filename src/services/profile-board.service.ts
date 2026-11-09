@@ -598,10 +598,15 @@ export async function boardData(
             : "30d",
         track: !!deadlockWidget,
         now,
-      }).then((view) => {
-        data.deadlock = view.data;
-        if (view.refresh !== null) input.onDeadlockRefresh?.(view.refresh);
-      }),
+      })
+        .then((view) => {
+          data.deadlock = view.data;
+          if (view.refresh !== null) input.onDeadlockRefresh?.(view.refresh);
+        })
+        // D1 trouble here costs the plate, never the board.
+        .catch(() => {
+          delete data.deadlock;
+        }),
     );
   }
 
@@ -711,8 +716,8 @@ export async function getBoardView(
   // plate is the owner's alone.
   if (
     !isOwner &&
-    data.deadlock &&
-    isOwnerOnlyDeadlockState(data.deadlock.state)
+    board.widgets.some((widget) => widget.type === "deadlock") &&
+    (!data.deadlock || isOwnerOnlyDeadlockState(data.deadlock.state))
   ) {
     board = {
       v: 1,

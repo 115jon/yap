@@ -213,17 +213,61 @@ export async function loadManifest(
  * (so only allowed hosts); each image at most 2 MB and an image type.
  * Returns the keys stored.
  */
+/** The copy in R2 was made from this manifest version (else re-copied). */
+async function isCurrent(
+  bucket: R2Bucket,
+  objectKey: string,
+  version: number,
+): Promise<boolean> {
+  const head = await bucket.head(objectKey);
+  return !!head && head.customMetadata?.v === String(version);
+}
+
+/** The body, or null past `limit` bytes (read in chunks, never whole). */
+async function readImage(
+  response: Response,
+  limit: number,
+): Promise<Uint8Array | null> {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > limit) {
+    await response.body?.cancel();
+    return null;
+  }
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 export async function mirrorDeadlockAssets(
   deps: Pick<AssetDeps, "bucket" | "fetch">,
-  manifest: Pick<StoredManifest, "sources">,
+  manifest: Pick<StoredManifest, "sources" | "version">,
   keys: readonly string[],
 ): Promise<string[]> {
   const stored: string[] = [];
+  const version = manifest.version ?? 0;
   for (const key of keys) {
     const source = manifest.sources[key];
     if (!source || !DEADLOCK_ASSET_KEY_PATTERN.test(key)) continue;
     const objectKey = assetObjectKey(key);
-    if (await deps.bucket.head(objectKey)) continue;
+    if (await isCurrent(deps.bucket, objectKey, version)) continue;
     let response: Response;
     try {
       response = await deps.fetch(source, {
@@ -241,10 +285,11 @@ export async function mirrorDeadlockAssets(
       await response.body?.cancel();
       continue;
     }
-    const bytes = await response.arrayBuffer();
-    if (bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE_BYTES) continue;
+    const bytes = await readImage(response, MAX_IMAGE_BYTES);
+    if (!bytes || bytes.byteLength === 0) continue;
     await deps.bucket.put(objectKey, bytes, {
       httpMetadata: { contentType: type },
+      customMetadata: { v: String(version) },
     });
     stored.push(key);
   }
@@ -252,9 +297,10 @@ export async function mirrorDeadlockAssets(
 }
 
 /**
- * The daily asset job: re-reads the manifest when the client version
- * moved (or none is stored), then mirrors up to a batch of missing hero
- * and rank images. Items are mirrored on demand (mirrorDeadlockAssets).
+ * The hourly asset job: re-reads the manifest when the client version
+ * moved (or none is stored), then copies up to a batch of hero and rank
+ * images that are missing or were copied for an older version (a patch can
+ * redraw them). Items are mirrored on demand (mirrorDeadlockAssets).
  */
 export async function syncDeadlockAssets(deps: AssetDeps): Promise<{
   version: number | null;
@@ -284,7 +330,11 @@ export async function syncDeadlockAssets(deps: AssetDeps): Promise<{
   const missing: string[] = [];
   for (const key of wanted) {
     if (missing.length >= MIRROR_BATCH) break;
-    if (!(await deps.bucket.head(assetObjectKey(key)))) missing.push(key);
+    if (
+      !(await isCurrent(deps.bucket, assetObjectKey(key), manifest.version))
+    ) {
+      missing.push(key);
+    }
   }
   const mirrored = await mirrorDeadlockAssets(deps, manifest, missing);
   return { version, refreshed, mirrored };

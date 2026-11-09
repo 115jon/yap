@@ -238,6 +238,26 @@ export async function linkConnection(
     .bind(provider, account.externalId)
     .first<{ user_id: string }>();
   if (owner && owner.user_id !== userId) return { ok: false, reason: "taken" };
+  if (provider === "steam") {
+    // Another Steam account replaces this one: its Deadlock stats go now,
+    // not at the next reconcile.
+    const current = await db
+      .prepare(
+        `SELECT external_id FROM user_connections WHERE user_id = ? AND provider = 'steam'`,
+      )
+      .bind(userId)
+      .first<{ external_id: string }>();
+    if (current && current.external_id !== account.externalId) {
+      await db.batch([
+        db
+          .prepare(`DELETE FROM deadlock_fetch_state WHERE user_id = ?`)
+          .bind(userId),
+        db
+          .prepare(`DELETE FROM deadlock_snapshots WHERE user_id = ?`)
+          .bind(userId),
+      ]);
+    }
+  }
   try {
     await db
       .prepare(

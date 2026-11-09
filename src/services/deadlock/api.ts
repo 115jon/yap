@@ -6,7 +6,10 @@
  *
  *   ok            the body, parsed (size-capped)
  *   protected     403: the account asked the API to delete its data
- *   rate_limited  429/503, or the budget is spent; `retryAfterMs` set
+ *   rate_limited  429/503; `retryAfterMs` set, and the whole API is paused
+ *                 for that long (`pause`), for every account and isolate
+ *   budget        Yap's own outbound budget is spent (nothing was sent)
+ *   paused        an earlier answer asked to wait (nothing was sent)
  *   timeout       504 or our own timeout; backs off 10 minutes by default
  *   unavailable   anything else (5xx, network, bad JSON)
  *   not_found     404
@@ -35,10 +38,18 @@ export type ApiFailureKind =
   | "rate_limited"
   | "timeout"
   | "unavailable"
-  | "not_found";
+  | "not_found"
+  | "budget"
+  | "paused";
 
 export type ApiResult<T> =
-  | { ok: true; status: number; body: T }
+  | {
+      ok: true;
+      status: number;
+      body: T;
+      /** Retry-After on an accepted status (a 429 that carries data). */
+      retryAfterMs: number | null;
+    }
   | {
       ok: false;
       kind: ApiFailureKind;
@@ -51,6 +62,14 @@ export interface DeadlockApiDeps {
   fetch: typeof fetch;
   /** Takes one request from the global budget; false when it is spent. */
   budget?: () => Promise<boolean>;
+  /**
+   * The API-wide pause shared by every run (KV in production): `until`
+   * reads it, `hold` extends it after a 429/503/504.
+   */
+  pause?: {
+    until(): Promise<number | null>;
+    hold(untilMs: number): Promise<void>;
+  };
   userAgent?: string;
   base?: string;
   timeoutMs?: number;
@@ -130,15 +149,43 @@ export function createDeadlockApi(deps: DeadlockApiDeps): DeadlockApi {
     waiting.shift()?.();
   };
 
+  // The shared pause, read once per client and raised locally after.
+  let pausedUntil: number | null | undefined;
+  const pausedFor = async (): Promise<number> => {
+    if (pausedUntil === undefined) {
+      try {
+        pausedUntil = (await deps.pause?.until()) ?? null;
+      } catch {
+        pausedUntil = null;
+      }
+    }
+    return pausedUntil === null ? 0 : Math.max(0, pausedUntil - now());
+  };
+  const holdFor = async (ms: number | null) => {
+    if (!ms || ms <= 0) return;
+    const until = now() + ms;
+    if (pausedUntil && pausedUntil >= until) return;
+    pausedUntil = until;
+    try {
+      await deps.pause?.hold(until);
+    } catch {
+      // The local pause still holds for this run.
+    }
+  };
+
   async function get<T>(
     path: string,
     params: Record<string, string | number | undefined> = {},
     options: { acceptStatuses?: number[]; maxBytes?: number } = {},
   ): Promise<ApiResult<T>> {
+    const wait = await pausedFor();
+    if (wait > 0) {
+      return { ok: false, kind: "paused", status: 0, retryAfterMs: wait };
+    }
     if (deps.budget && !(await deps.budget())) {
       return {
         ok: false,
-        kind: "rate_limited",
+        kind: "budget",
         status: 0,
         retryAfterMs: DEFAULT_RETRY_MS,
       };
@@ -183,6 +230,13 @@ export function createDeadlockApi(deps: DeadlockApiDeps): DeadlockApi {
       const accepted =
         response.status === 200 ||
         (options.acceptStatuses ?? []).includes(response.status);
+      // The API is shedding load: everyone waits, not just this account.
+      if ([429, 503, 504].includes(response.status)) {
+        await holdFor(
+          retryAfter ??
+            (response.status === 504 ? TIMEOUT_RETRY_MS : DEFAULT_RETRY_MS),
+        );
+      }
       if (!accepted) {
         await response.body?.cancel();
         if (response.status === 403) {
@@ -233,7 +287,7 @@ export function createDeadlockApi(deps: DeadlockApiDeps): DeadlockApi {
           ok: false,
           kind: "unavailable",
           status: response.status,
-          retryAfterMs: null,
+          retryAfterMs: retryAfter,
         };
       }
       try {
@@ -241,13 +295,14 @@ export function createDeadlockApi(deps: DeadlockApiDeps): DeadlockApi {
           ok: true,
           status: response.status,
           body: JSON.parse(text) as T,
+          retryAfterMs: retryAfter,
         };
       } catch {
         return {
           ok: false,
           kind: "unavailable",
           status: response.status,
-          retryAfterMs: null,
+          retryAfterMs: retryAfter,
         };
       }
     } finally {

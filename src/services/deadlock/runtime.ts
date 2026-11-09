@@ -8,7 +8,7 @@
 
 import { env } from "cloudflare:workers";
 
-import { checkRateLimitDO } from "@/lib/rate-limit";
+import { checkRateLimitDOFailClosed } from "@/lib/rate-limit";
 import type { BackgroundTaskEnvelope } from "@/lib/background-tasks";
 
 import { createDeadlockApi } from "./api";
@@ -48,6 +48,26 @@ async function broadcast(target: Record<string, string>, data: unknown) {
   });
 }
 
+/** KV key of the API-wide pause (epoch ms) after a 429/503/504. */
+export const DEADLOCK_PAUSE_KEY = "deadlock:paused_until";
+
+/** The shared pause in KV; it expires on its own. */
+export function kvPause(kv: KVNamespace) {
+  return {
+    async until() {
+      const value = Number(await kv.get(DEADLOCK_PAUSE_KEY));
+      return Number.isFinite(value) && value > 0 ? value : null;
+    },
+    async hold(untilMs: number) {
+      const ttl = Math.ceil((untilMs - Date.now()) / 1000);
+      // KV needs at least 60 s; a shorter pause just lasts a minute.
+      await kv.put(DEADLOCK_PAUSE_KEY, String(untilMs), {
+        expirationTtl: Math.max(60, ttl),
+      });
+    },
+  };
+}
+
 export function productionFetcherDeps(): FetcherDeps {
   const e = bindings();
   const db = e.DB as unknown as D1Database;
@@ -59,12 +79,14 @@ export function productionFetcherDeps(): FetcherDeps {
     api: createDeadlockApi({
       fetch: (input, init) => fetch(input, init),
       userAgent: USER_AGENT,
+      // Fail closed: without the limiter, nothing is sent this run.
       budget: async () =>
-        (await checkRateLimitDO(
+        (await checkRateLimitDOFailClosed(
           "deadlock-api",
           "deadlock-api",
           DEADLOCK_API_BUDGET,
         )) === null,
+      pause: kvPause(e.CACHE as unknown as KVNamespace),
     }),
     // A data-only update: open profiles refetch whatever the version.
     notify: async (userId) => {

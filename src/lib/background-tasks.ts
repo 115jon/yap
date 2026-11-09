@@ -736,8 +736,13 @@ async function consumeBackgroundTask(
       const { runDeadlockRefresh } =
         await import("@/services/deadlock/runtime");
       // Failures are written per account (backoff, Retry-After); the
-      // message itself never retries.
-      await runDeadlockRefresh(task.accountIds, task.reason);
+      // message itself never retries, even when the run throws (the
+      // accounts stay due and the cron picks them up).
+      try {
+        await runDeadlockRefresh(task.accountIds, task.reason);
+      } catch (error: unknown) {
+        console.error("Deadlock refresh failed; left to the cron", error);
+      }
     } else {
       await processR2CleanupTask(env.DB, env.BUCKET, task);
     }

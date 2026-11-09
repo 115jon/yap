@@ -594,7 +594,7 @@ function widgetTypes(board: ProfileBoard): string[] {
 // ── Fetching ───────────────────────────────────────────────────────────────
 
 describe("batching", () => {
-  it("fetches three due accounts with one rank call and one hero-stats call", async () => {
+  it("fetches three due accounts with one rank call and one hero-stats call per mode", async () => {
     const mock = createMock();
     const clock = { now: NOW };
     const players = [await addPlayer(), await addPlayer(), await addPlayer()];
@@ -612,19 +612,22 @@ describe("batching", () => {
       "updated",
     ]);
     const wanted = players.map((p) => p.accountId).sort();
-    for (const route of [
-      /^\/v1\/players\/rank$/,
-      /^\/v1\/players\/hero-stats$/,
-    ]) {
-      const batch = mock.calls.filter((url) => route.test(url.pathname));
-      expect(batch).toHaveLength(1);
-      const sent = batch[0]!.searchParams
-        .get("account_ids")!
-        .split(",")
-        .map(Number)
-        .sort();
-      expect(sent).toEqual(wanted);
-    }
+    const ids = (url: URL) =>
+      url.searchParams.get("account_ids")!.split(",").map(Number).sort();
+    const ranks = mock.calls.filter((url) =>
+      /^\/v1\/players\/rank$/.test(url.pathname),
+    );
+    expect(ranks).toHaveLength(1);
+    expect(ids(ranks[0]!)).toEqual(wanted);
+    // Hero stats: normal games, and Street Brawl apart (both batched).
+    const stats = mock.calls.filter((url) =>
+      /^\/v1\/players\/hero-stats$/.test(url.pathname),
+    );
+    expect(stats.map((url) => url.searchParams.get("game_mode"))).toEqual([
+      null,
+      "street_brawl",
+    ]);
+    for (const url of stats) expect(ids(url)).toEqual(wanted);
     // The history is per account.
     const historyCalls = mock.calls
       .filter((url) => /^\/v1\/players\/\d+\/match-history$/.test(url.pathname))
@@ -738,7 +741,7 @@ describe("change detection", () => {
     );
     expect(quiet.result).toBe("unchanged");
     expect(mock.count(/^\/v1\/players\/rank$/)).toBe(2);
-    expect(mock.count(/^\/v1\/players\/hero-stats$/)).toBe(2);
+    expect(mock.count(/^\/v1\/players\/hero-stats$/)).toBe(4);
     expect(mock.count(historyRoute)).toBe(1);
     expect(mock.count(metadataRoute)).toBe(1);
 
@@ -978,8 +981,13 @@ describe("stale serving", () => {
     expect(board.data.deadlock?.state).toBe("ok");
     expect(board.data.deadlock?.stale).toBe(true);
     expect(board.data.deadlock?.digest?.computed_at).toBe(good.computed_at);
-    expect(board.data.deadlock?.digest?.last_match?.id).toBe(
-      good.last_match?.id,
+    // Others never get real match ids (they find the match's players).
+    expect(board.data.deadlock?.digest?.last_match?.id).toBe(1);
+    expect(board.data.deadlock?.digest?.last10.map((m) => m.id)).toEqual(
+      good.last10.map((_, index) => index + 1),
+    );
+    expect(JSON.stringify(board.data.deadlock)).not.toContain(
+      String(good.last_match?.id),
     );
   });
 });
@@ -1565,5 +1573,360 @@ describe("unlinking Steam", () => {
     expect(await snapshotOf(staying.accountId)).not.toBeNull();
     // Nothing left to unlink.
     expect(await unlinkConnection(db, leaving.userId, "steam")).toBe(false);
+  });
+});
+
+// ── Review regressions ─────────────────────────────────────────────────────
+
+describe("review regressions", () => {
+  it("keeps the good digest when the history answers 429 with nothing, or junk", async () => {
+    const mock = createMock();
+    const clock = { now: NOW };
+    const player = await addFetchedPlayer(mock, clock);
+    const good = digestOf(await snapshotOf(player.accountId));
+
+    for (const answer of [
+      () =>
+        new Response("[]", {
+          status: 429,
+          headers: { "retry-after": "120" },
+        }),
+      () => Response.json({ error: "not a list" }),
+    ]) {
+      clock.now += 30 * MINUTE;
+      await db
+        .prepare(
+          `UPDATE deadlock_fetch_state SET retry_at = NULL, next_due_at = ? WHERE account_id = ?`,
+        )
+        .bind(clock.now, player.accountId)
+        .run();
+      mock.state.override = (url) =>
+        /match-history$/.test(url.pathname) ? answer() : null;
+      const { deps } = createFetcher(mock, clock);
+      const outcome = onlyOutcome(
+        await refreshDeadlockAccounts(deps, {
+          accountIds: [player.accountId],
+          reason: "manual",
+        }),
+      );
+      expect(outcome.result).toBe("failed");
+      const snapshot = await snapshotOf(player.accountId);
+      expect(snapshot?.status).toBe("ok");
+      expect(digestOf(snapshot)).toEqual(good);
+    }
+  });
+
+  it("reads a failed match's metadata again on the next fetch", async () => {
+    const mock = createMock();
+    const clock = { now: NOW };
+    const player = await addPlayer();
+    mock.setPlayer(player.accountId, { newestMatchId: nextMatchId() });
+    mock.state.override = (url) =>
+      /metadata$/.test(url.pathname)
+        ? new Response("busy", { status: 500 })
+        : null;
+    const { deps } = createFetcher(mock, clock);
+    await refreshDeadlockAccounts(deps, { accountIds: [player.accountId] });
+    expect(
+      digestOf(await snapshotOf(player.accountId)).last_match?.level,
+    ).toBeNull();
+
+    mock.state.override = null;
+    clock.now += 20 * MINUTE;
+    await refreshDeadlockAccounts(deps, {
+      accountIds: [player.accountId],
+      reason: "manual",
+    });
+    expect(mock.count(/^\/v1\/matches\/\d+\/metadata$/)).toBe(2);
+    expect(digestOf(await snapshotOf(player.accountId)).last_match?.level).toBe(
+      28,
+    );
+  });
+
+  it("skips a run the budget denies without charging anyone a failure", async () => {
+    const mock = createMock();
+    const clock = { now: NOW };
+    const player = await addPlayer();
+    mock.setPlayer(player.accountId, { newestMatchId: nextMatchId() });
+    const deps: FetcherDeps = {
+      ...createFetcher(mock, clock).deps,
+      api: createDeadlockApi({
+        fetch: mock.fetch,
+        now: () => clock.now,
+        budget: async () => false,
+      }),
+    };
+    const outcome = onlyOutcome(await refreshDeadlockAccounts(deps));
+    expect(outcome).toMatchObject({ result: "skipped", error: "budget" });
+    expect(mock.calls).toHaveLength(0);
+    const state = await fetchStateOf(player.accountId);
+    expect(state?.fail_count).toBe(0);
+    expect(state?.retry_at).toBeNull();
+  });
+
+  it("pauses the whole API after a 429, for every later run and account", async () => {
+    const mock = createMock();
+    const clock = { now: NOW };
+    const first = await addPlayer();
+    mock.setPlayer(first.accountId, { newestMatchId: nextMatchId() });
+    let pausedUntil: number | null = null;
+    const pause = {
+      until: async () => pausedUntil,
+      hold: async (until: number) => {
+        pausedUntil = until;
+      },
+    };
+    const apiWith = () =>
+      createDeadlockApi({ fetch: mock.fetch, now: () => clock.now, pause });
+    mock.state.override = (url) =>
+      url.pathname === "/v1/players/rank"
+        ? new Response("slow down", {
+            status: 429,
+            headers: { "retry-after": "600" },
+          })
+        : null;
+    const base = createFetcher(mock, clock).deps;
+    await refreshDeadlockAccounts({ ...base, api: apiWith() });
+    expect(pausedUntil).toBe(NOW + 600_000);
+    expect((await fetchStateOf(first.accountId))?.fail_count).toBe(1);
+
+    // Another account, another run, inside the pause: nothing is sent.
+    mock.state.override = null;
+    const second = await addPlayer();
+    mock.setPlayer(second.accountId, { newestMatchId: nextMatchId() });
+    const before = mock.calls.length;
+    clock.now += 5 * MINUTE;
+    const outcome = onlyOutcome(
+      await refreshDeadlockAccounts({ ...base, api: apiWith() }),
+    );
+    expect(outcome).toMatchObject({
+      account_id: second.accountId,
+      result: "skipped",
+      error: "paused",
+    });
+    expect(mock.calls.length).toBe(before);
+    expect((await fetchStateOf(second.accountId))?.fail_count).toBe(0);
+  });
+
+  it("fails one account on an exception and still fetches the rest", async () => {
+    const mock = createMock();
+    const clock = { now: NOW };
+    const bad = await addPlayer();
+    const good = await addPlayer();
+    mock.setPlayer(bad.accountId, { newestMatchId: nextMatchId() });
+    mock.setPlayer(good.accountId, { newestMatchId: nextMatchId() });
+    // Null rows in a history are skipped, not thrown on.
+    mock.state.history.set(good.accountId, [
+      null as unknown as Record<string, unknown>,
+      ...(mock.state.history.get(good.accountId) ?? []),
+    ]);
+    const throwing = new Proxy(db, {
+      get(target, key, receiver) {
+        if (key !== "prepare") return Reflect.get(target, key, receiver);
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (!sql.includes("INSERT INTO deadlock_snapshots")) return statement;
+          return {
+            bind: (...args: unknown[]) => {
+              if (args[0] === bad.accountId) throw new Error("D1 hiccup");
+              return statement.bind(...args);
+            },
+          };
+        };
+      },
+    });
+    const { deps } = createFetcher(mock, clock);
+    const outcomes = await refreshDeadlockAccounts({ ...deps, db: throwing });
+    const byId = new Map(outcomes.map((o) => [o.account_id, o]));
+    expect(byId.get(bad.accountId)).toMatchObject({
+      result: "failed",
+      error: "exception",
+    });
+    expect(byId.get(good.accountId)?.result).toBe("updated");
+    expect((await fetchStateOf(bad.accountId))?.fail_count).toBe(1);
+    expect((await snapshotOf(good.accountId))?.status).toBe("ok");
+  });
+
+  it("queues post-game checks once per ten minutes, reconnects included", async () => {
+    const player = await addPlayer({ tracked: false });
+    await trackAccount(player.userId, player.accountId, NOW + 6 * HOUR);
+    const sent: unknown[] = [];
+    const liveEnv = {
+      DB: db,
+      BACKGROUND_TASKS: {
+        async send(body: never) {
+          sent.push(body);
+        },
+      },
+    };
+    const deadlock = (phase?: "post_match" | "in_match"): GameActivity => ({
+      kind: "playing",
+      name: "Deadlock",
+      app_id: DEADLOCK_APP_ID,
+      started_at: NOW,
+      source: "detected",
+      ...(phase ? { game: { kind: "deadlock" as const, phase } } : {}),
+    });
+    await noteDeadlockActivity(liveEnv, player.userId, deadlock(), null, NOW);
+    expect(sent).toHaveLength(2);
+    // A reconnect: the game "starts" and "ends" again a minute later.
+    await noteDeadlockActivity(
+      liveEnv,
+      player.userId,
+      null,
+      deadlock(),
+      NOW + MINUTE,
+    );
+    await noteDeadlockActivity(
+      liveEnv,
+      player.userId,
+      deadlock(),
+      null,
+      NOW + 2 * MINUTE,
+    );
+    // A flapping phase.
+    for (let i = 0; i < 5; i += 1) {
+      await noteDeadlockActivity(
+        liveEnv,
+        player.userId,
+        deadlock("in_match"),
+        deadlock("post_match"),
+        NOW + (3 + i) * MINUTE,
+      );
+    }
+    expect(sent).toHaveLength(2);
+    await noteDeadlockActivity(
+      liveEnv,
+      player.userId,
+      deadlock("in_match"),
+      deadlock("post_match"),
+      NOW + 11 * MINUTE,
+    );
+    expect(sent).toHaveLength(4);
+  });
+
+  it("does not bring a snapshot back when Steam was unlinked mid-fetch", async () => {
+    const mock = createMock();
+    const clock = { now: NOW };
+    const player = await addPlayer();
+    mock.setPlayer(player.accountId, { newestMatchId: nextMatchId() });
+    const { deps } = createFetcher(mock, clock);
+    const racing = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const href =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      if (/match-history$/.test(new URL(href).pathname)) {
+        await unlinkConnection(db, player.userId, "steam");
+      }
+      return mock.fetch(input, init);
+    }) as typeof fetch;
+    await refreshDeadlockAccounts({
+      ...deps,
+      api: createDeadlockApi({ fetch: racing, now: () => clock.now }),
+    });
+    expect(await snapshotOf(player.accountId)).toBeNull();
+    expect(await fetchStateOf(player.accountId)).toBeNull();
+  });
+
+  it("drops the old account's stats when another Steam account is linked", async () => {
+    const mock = createMock();
+    const clock = { now: NOW };
+    const player = await addFetchedPlayer(mock, clock);
+    expect(await snapshotOf(player.accountId)).not.toBeNull();
+    await linkSteam(player.userId, nextAccountId(), "kiwi_alt");
+    expect(await snapshotOf(player.accountId)).toBeNull();
+    expect(await fetchStateOf(player.accountId)).toBeNull();
+  });
+
+  it("names only party members who show Steam on their profile", async () => {
+    const a = await addPlayer({ tracked: false });
+    const hidden = await addPlayer({ tracked: false });
+    await db
+      .prepare(
+        `UPDATE user_connections SET show_on_profile = 0 WHERE user_id = ?`,
+      )
+      .bind(hidden.userId)
+      .run();
+    const resolved = await resolveLiveState(db, a.userId, {
+      kind: "playing",
+      name: "Deadlock",
+      app_id: DEADLOCK_APP_ID,
+      started_at: NOW,
+      source: "detected",
+      game: {
+        kind: "deadlock",
+        phase: "in_match",
+        account_id: a.accountId,
+        party: [hidden.accountId],
+      },
+    });
+    expect(resolved?.game?.party_user_ids).toBeUndefined();
+  });
+
+  it("re-copies art copied for an older version and refuses one over 2 MB", async () => {
+    const mock = createMock();
+    const key = "hero_haze_sm";
+    const manifest: StoredManifest = {
+      ...manifestFixture(),
+      version: 7,
+      sources: {
+        [key]: `${ART}/heroes/haze_sm.png`,
+        hero_big_sm: `${ART}/big.png`,
+      },
+    };
+    await bucket.delete(assetObjectKey("hero_big_sm"));
+    await bucket.put(assetObjectKey(key), new Uint8Array([1]), {
+      customMetadata: { v: "6" },
+    });
+    mock.state.override = (url) =>
+      url.pathname.endsWith("/big.png")
+        ? new Response(new Uint8Array(8), {
+            status: 200,
+            headers: {
+              "content-type": "image/png",
+              "content-length": String(3 * 1024 * 1024),
+            },
+          })
+        : null;
+    const stored = await mirrorDeadlockAssets(
+      { bucket, fetch: mock.fetch },
+      manifest,
+      [key, "hero_big_sm"],
+    );
+    expect(stored).toEqual([key]);
+    const object = await bucket.head(assetObjectKey(key));
+    expect(object?.customMetadata?.v).toBe("7");
+    expect(object?.size).toBe(PNG_BYTES.byteLength);
+    expect(await bucket.head(assetObjectKey("hero_big_sm"))).toBeNull();
+    // Current now: not fetched again.
+    const calls = mock.calls.length;
+    await mirrorDeadlockAssets({ bucket, fetch: mock.fetch }, manifest, [key]);
+    expect(mock.calls.length).toBe(calls);
+  });
+
+  it("omits the plate, not the board, when the Deadlock read fails", async () => {
+    const mock = createMock();
+    const clock = { now: NOW };
+    const player = await addFetchedPlayer(mock, clock);
+    const viewer = await addUser("viewer");
+    await db
+      .prepare(
+        `ALTER TABLE deadlock_snapshots RENAME TO deadlock_snapshots_off`,
+      )
+      .run();
+    try {
+      const board = await viewBoard(player.userId, viewer);
+      expect(widgetTypes(board.board)).not.toContain("deadlock");
+      expect(board.data.deadlock).toBeUndefined();
+    } finally {
+      await db
+        .prepare(
+          `ALTER TABLE deadlock_snapshots_off RENAME TO deadlock_snapshots`,
+        )
+        .run();
+    }
   });
 });

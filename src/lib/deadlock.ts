@@ -371,7 +371,10 @@ export function buildDigest(input: {
   now: number;
 }): DeadlockDigest {
   const { manifest, now } = input;
-  const matches = input.history
+  const rows = input.history.filter(
+    (row): row is ApiHistoryRow => !!row && typeof row === "object",
+  );
+  const matches = rows
     .filter((row) => num(row.match_id) > 0 && num(row.start_time) > 0)
     .map(toMatch)
     .sort((a, b) => b.at - a.at || b.id - a.id);
@@ -391,7 +394,7 @@ export function buildDigest(input: {
     ? ranked.filter((match) => match.at >= season.start)
     : ranked;
   const placed = seasonRanked.filter((match) => match.badge !== null);
-  const calibrationPlayed = input.history.filter(
+  const calibrationPlayed = rows.filter(
     (row) =>
       matchMode(row) === "ranked" &&
       (!season || num(row.start_time) >= season.start) &&
@@ -526,6 +529,7 @@ export function reduceMatchMetadata(
         | undefined);
   const held: number[] = [];
   for (const raw of Array.isArray(player.items) ? player.items : []) {
+    if (!raw || typeof raw !== "object") continue;
     const item = raw as Record<string, unknown>;
     const id = num(item.item_id);
     if (!id || num(item.sold_time_s) > 0) continue;
@@ -578,8 +582,10 @@ export function isOwnerOnlyDeadlockState(state: DeadlockState): boolean {
 }
 
 /**
- * The digest as one range needs it (what others receive): the other ranges
- * are emptied so the owner's choice is the only one sent.
+ * The digest as another viewer receives it: only the owner's range (the
+ * others emptied), and no real match ids. A match id finds the match's
+ * public metadata, which names every player's Steam account, so others get
+ * positions (1 is the newest) that only key the list.
  */
 export function digestForRange(
   digest: DeadlockDigest,
@@ -589,7 +595,12 @@ export function digestForRange(
   for (const key of DEADLOCK_RANGES) {
     if (key !== range) ranges[key] = emptyRange();
   }
-  return { ...digest, ranges };
+  return {
+    ...digest,
+    ranges,
+    last10: digest.last10.map((match, index) => ({ ...match, id: index + 1 })),
+    last_match: digest.last_match ? { ...digest.last_match, id: 1 } : null,
+  };
 }
 
 /** (K + A) / D with one decimal, D at least 1. */
