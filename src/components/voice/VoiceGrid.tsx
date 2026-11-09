@@ -496,6 +496,7 @@ function FocusedStage({
           <Slider
             label={isFocusedScreen ? "Stream volume" : "User volume"}
             value={focusedPeerVolume}
+            boost
             onChange={(value) => {
               if (isFocusedScreen) setPeerStreamVolume(focusedUserId, value);
               else setPeerVolume(focusedUserId, value);

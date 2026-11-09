@@ -278,7 +278,10 @@ export default defineConfig({
     },
     {
       // AudioWorklet scope globals are not part of Oxlint's browser env.
-      files: ["src/lib/voice/vad-processor.worklet.js"],
+      files: [
+        "src/lib/voice/vad-processor.worklet.js",
+        "src/lib/voice/boost-limiter.worklet.js",
+      ],
       globals: {
         AudioWorkletProcessor: "readonly",
         registerProcessor: "readonly",
