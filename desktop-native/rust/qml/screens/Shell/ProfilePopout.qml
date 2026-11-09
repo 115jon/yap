@@ -8,10 +8,13 @@ import com.yap.native
 // what opened it, kept 12 px inside the window. Someone else's card has
 // Message (the DM, created when needed) with the friend actions
 // (ProfileFriendActions) and, when known, About me and
-// their roles in the shown server. With Manage roles the roles row ends in
-// an Add a role key: a menu of the server's roles, each checked while the
-// member has it, that gives or takes it at once (rolled back with the
-// reason if the server refuses). Opens like a popover: scale 0.97 and a
+// their roles in the shown server. Your own card has Edit profile instead
+// (the profile editor). A profile that did not load says why under the
+// actions (RowError, describeApiError's copy). With Manage roles each role
+// chip has a remove key, and the roles row ends in an Add a role key: a
+// menu of the server's roles, each checked while the member has it, that
+// gives or takes it at once (rolled back with the reason if the server
+// refuses). Opens like a popover: scale 0.97 and a
 // fade over 200 ms (exit 140). Esc or a press outside closes it.
 T.Popup {
     id: popup
@@ -58,6 +61,9 @@ T.Popup {
     }
 
     parent: T.Overlay.overlay
+    // It grows from the edge beside its anchor (the web's
+    // `--transform-origin`), not from its centre.
+    transformOrigin: side === "left" ? T.Popup.TopRight : side === "top" ? T.Popup.BottomLeft : T.Popup.TopLeft
     width: card.implicitWidth
     height: card.implicitHeight
     padding: 0
@@ -117,6 +123,24 @@ T.Popup {
             }
         }
 
+        // ProfileActionRow `selfAction`.
+        KitButton {
+            visible: Profile.me && Profile.userId.length > 0
+            variant: "primary"
+            ground: Theme.ply3
+            iconName: "edit"
+            text: qsTr("Edit profile")
+            onClicked: {
+                popup.close()
+                SettingsNav.profileEditorRequested()
+            }
+        }
+
+        RowError {
+            above: 0
+            text: Profile.loadError
+        }
+
         // "Playing a game", first of the sections (ProfileSections).
         ProfileGame {
             game: Profile.game
@@ -164,7 +188,8 @@ T.Popup {
                         required property string modelData
                         required property int index
                         readonly property string tone: Profile.roleColors[index] ?? ""
-                        width: Math.min(chipRow.implicitWidth + 8 + 10, parent ? parent.width : 300)
+                        readonly property bool removable: Admin.canManageRoles && !Nav.home
+                        width: Math.min(chipRow.implicitWidth + 8 + (removable ? 2 : 10), parent ? parent.width : 300)
                         height: 24
                         radius: Theme.radius
                         color: Theme.tint1
@@ -186,6 +211,17 @@ T.Popup {
                                 text: chip.modelData
                                 color: Theme.ink1
                                 font: Theme.type.captionStrong
+                            }
+                            // IconButton close, 20 px, muted (ProfileRoleChips `onRemove`).
+                            IconKey {
+                                visible: chip.removable
+                                anchors.verticalCenter: parent.verticalCenter
+                                size: 20
+                                glyph: Theme.iconSm
+                                iconName: "close"
+                                tone: "muted"
+                                tip: qsTr("Remove the %1 role").arg(chip.modelData)
+                                onClicked: Admin.toggleMemberRole(Profile.userId, Profile.roleIds[chip.index] ?? "")
                             }
                         }
                     }

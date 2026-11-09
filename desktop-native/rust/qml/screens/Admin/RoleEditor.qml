@@ -1,5 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Templates as T
+import Yap.Chrome
 import com.yap.native
 
 // The role editor (RoleManagement.tsx RoleEditor): the role's dot and name
@@ -195,14 +197,41 @@ Column {
             layout: "block"
             label: qsTr("Colour")
             description: qsTr("Names with this role show in this colour. Leave empty for none.")
-            Rectangle {
-                width: 40
-                height: 40
-                radius: Theme.radius
-                color: /^#[0-9a-f]{6}$/i.test(root.color) ? root.color : Theme.tint1
-                border.width: 1
-                border.color: Theme.lineField
-                Accessible.ignored: true
+            // The colour input (RoleManagement.tsx `<input type="color">`,
+            // which Chromium opens as Windows' colour dialog): a 32 px
+            // swatch with a line-field edge and 2 px inset, on the colour
+            // in use, or #99aab5 (PICKER_START) while there is none.
+            T.AbstractButton {
+                id: picker
+                readonly property bool valid: /^#[0-9a-f]{6}$/i.test(root.color)
+                anchors.verticalCenter: parent.verticalCenter
+                width: 32
+                height: 32
+                focusPolicy: Qt.StrongFocus
+                scale: down ? Theme.scalePress : 1
+                Behavior on scale { NumberAnimation { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+                Accessible.role: Accessible.Button
+                Accessible.name: qsTr("Pick a role colour")
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
+                background: Rectangle {
+                    radius: 6
+                    color: "transparent"
+                    border.width: picker.visualFocus ? 2 : 1
+                    border.color: picker.visualFocus ? Theme.focus : Theme.lineField
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: 3
+                        radius: 3
+                        color: picker.valid ? root.color : "#99aab5"
+                    }
+                }
+                onClicked: {
+                    const picked = Files.pickColor(picker.valid ? root.color : "#99aab5")
+                    if (picked.length === 0)
+                        return
+                    root.color = picked.toLowerCase()
+                    Admin.clear("role.color")
+                }
             }
             KitField {
                 width: 160

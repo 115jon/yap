@@ -442,7 +442,48 @@ impl State {
             self.tree_manage_all(),
         );
         self.add_voice_status(&mut rows);
+        self.fold_rows(&mut rows);
         rows
+    }
+
+    /// Marks each row under a collapsed category, and the label itself.
+    fn fold_rows(&self, rows: &mut [ChannelTreeRow]) {
+        let mut folded = false;
+        for row in rows {
+            if row.kind == TreeKind::Label {
+                folded = self.collapsed.contains(&row.id);
+            }
+            row.folded = folded;
+        }
+    }
+
+    /// Collapses a category, or expands it; kept for the next launch.
+    fn toggle_category(&mut self, fx: &mut Effects, id: &str) {
+        if id.is_empty() || self.signed_in().is_none() {
+            return;
+        }
+        if !self.collapsed.remove(id) {
+            self.collapsed.insert(id.to_owned());
+        }
+        self.sync_tree(fx);
+        let ids = self.collapsed.iter().cloned().collect();
+        self.persist(fx, CacheWrite::Collapsed(ids));
+    }
+
+    /// The channel menu's Mark as read: the channel up to its newest
+    /// message; the open one also drops its divider.
+    fn mark_channel_read(&mut self, fx: &mut Effects, channel_id: &str) {
+        if channel_id.is_empty() || self.signed_in().is_none() {
+            return;
+        }
+        if self.active_channel.as_deref() == Some(channel_id) {
+            self.release_read_hold();
+            self.mark_read(fx, channel_id, None);
+            self.read_seen_mentions(fx, true);
+            self.set_divider(fx, None);
+            return;
+        }
+        self.mark_read(fx, channel_id, None);
     }
 
     /// ChannelSidebar.tsx: the status shows under a voice channel while
@@ -1481,6 +1522,8 @@ impl State {
             } => self.toast_reply(fx, &channel_id, message_id, content.trim(), nonce, sent_at),
             Command::ToastMarkRead(channel_id) => self.toast_mark_read(fx, &channel_id),
             Command::MarkServerRead(server_id) => self.mark_server_read(fx, &server_id),
+            Command::MarkChannelRead(channel_id) => self.mark_channel_read(fx, &channel_id),
+            Command::ToggleCategory(id) => self.toggle_category(fx, &id),
             Command::SetStatus {
                 status,
                 custom_status,
@@ -1799,10 +1842,12 @@ impl State {
             voice,
             scroll_positions,
             last_channels,
+            collapsed_categories,
             ..
         } = snapshot;
         self.scroll_positions = scroll_positions.into_iter().collect();
         self.last_channels = last_channels.into_iter().collect();
+        self.collapsed = collapsed_categories.into_iter().collect();
         if let Some(prefs) = voice.filter(|p| *p != self.voice_prefs) {
             self.voice_prefs = prefs;
             self.emit_voice(fx);
@@ -1971,6 +2016,7 @@ impl State {
         // Nothing of this account's stays in memory for the next one.
         self.warm.clear();
         self.last_channels.clear();
+        self.collapsed.clear();
         self.open_confirmed = (0, 0);
         self.disk_shown = false;
         self.forget_volatile_caches();

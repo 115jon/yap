@@ -76,12 +76,18 @@ AppPopup {
                 Keys.onReturnPressed: Apps.ltSearch(text)
                 Keys.onEnterPressed: Apps.ltSearch(text)
             }
-            Row {
+            Item {
+                width: searchTabs.width
                 height: 32
-                Accessible.role: Accessible.PageTabList
-                Accessible.name: qsTr("Search for")
-                AppTab { text: qsTr("Tracks"); on: !root.collections; onClicked: Apps.ltFilter("track") }
-                AppTab { text: qsTr("Collections"); on: root.collections; onClicked: Apps.ltFilter("collection") }
+                Row {
+                    id: searchTabs
+                    height: 32
+                    Accessible.role: Accessible.PageTabList
+                    Accessible.name: qsTr("Search for")
+                    AppTab { text: qsTr("Tracks"); on: !root.collections; onClicked: Apps.ltFilter("track") }
+                    AppTab { text: qsTr("Collections"); on: root.collections; onClicked: Apps.ltFilter("collection") }
+                }
+                TabRule { row: searchTabs }
             }
             Rectangle {
                 visible: (root.l.feedback ?? "").length > 0
@@ -217,12 +223,14 @@ AppPopup {
                 width: parent.width
                 height: 32
                 Row {
+                    id: activityTabs
                     height: parent.height
                     Accessible.role: Accessible.PageTabList
                     Accessible.name: qsTr("Listen Together room activity")
                     AppTab { text: qsTr("Queue"); count: (root.l.queue ?? []).length; on: root.tab === "queue"; onClicked: root.tab = "queue" }
                     AppTab { text: qsTr("Recently played"); count: (root.l.recent ?? []).length; on: root.tab === "recent"; onClicked: root.tab = "recent" }
                 }
+                TabRule { row: activityTabs }
                 KitButton {
                     visible: root.tab === "queue" && (root.l.queue ?? []).length > 0 && !root.confirmClear
                     anchors.right: parent.right

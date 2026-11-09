@@ -23,6 +23,9 @@ pub mod qobject {
         /// Input devices: `default` first, then endpoint ids, with their
         /// names (the default's is the system default's name, or empty).
         #[qproperty(QStringList, input_ids, cxx_name = "inputIds")]
+        /// A scan found no input device (VoiceVideoPanel.tsx "No
+        /// microphone found"); false until the first scan answers.
+        #[qproperty(bool, no_microphone, cxx_name = "noMicrophone")]
         #[qproperty(QStringList, input_names, cxx_name = "inputNames")]
         #[qproperty(QStringList, output_ids, cxx_name = "outputIds")]
         #[qproperty(QStringList, output_names, cxx_name = "outputNames")]
@@ -324,6 +327,7 @@ pub fn set_live_level(level: Option<f64>) {
 #[derive(Default)]
 pub struct AudioRust {
     input_ids: QStringList,
+    no_microphone: bool,
     input_names: QStringList,
     output_ids: QStringList,
     output_names: QStringList,
@@ -571,9 +575,18 @@ impl qobject::Audio {
         }
         let qt = self.qt_thread();
         std::thread::spawn(move || {
-            let devices = LibwebrtcEngine.devices();
+            let mut devices = LibwebrtcEngine.devices();
+            // Tests: YAP_TEST_NO_MIC=1 lists no input device.
+            if std::env::var_os("YAP_TEST_NO_MIC").is_some_and(|v| v == "1") {
+                devices.inputs.clear();
+                devices.default_input = None;
+            }
             let _ = qt.queue(move |mut audio| {
                 audio.as_mut().rust_mut().refreshing = false;
+                let none = devices.inputs.is_empty() && devices.default_input.is_none();
+                if audio.rust().no_microphone != none {
+                    audio.as_mut().set_no_microphone(none);
+                }
                 // Unchanged lists keep the menus' rows as they are.
                 if audio.rust().devices != devices {
                     audio.as_mut().rust_mut().devices = devices;

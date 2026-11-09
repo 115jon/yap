@@ -412,6 +412,16 @@ pub mod qobject {
         #[cxx_name = "markServerRead"]
         fn mark_server_read(self: &Chat, server_id: &QString);
 
+        /// The channel menu's Mark as read.
+        #[qinvokable]
+        #[cxx_name = "markChannelRead"]
+        fn mark_channel_read(self: &Chat, channel_id: &QString);
+
+        /// A category label's click: collapse or expand it (kept per user).
+        #[qinvokable]
+        #[cxx_name = "toggleCategory"]
+        fn toggle_category(self: &Chat, category_id: &QString);
+
         /// Filters `MentionListModel` by username; an empty query closes it.
         #[qinvokable]
         #[cxx_name = "queryMentions"]
@@ -627,6 +637,7 @@ pub mod qobject {
         /// Roles in the shown server, highest first, with their colours.
         #[qproperty(QStringList, role_names, cxx_name = "roleNames")]
         #[qproperty(QStringList, role_colors, cxx_name = "roleColors")]
+        #[qproperty(QStringList, role_ids, cxx_name = "roleIds")]
         #[qproperty(bool, me)]
         /// The avatar decoration (APNG URL), or empty.
         #[qproperty(QString, deco)]
@@ -926,6 +937,7 @@ pub struct ProfileRust {
     banner_color: QString,
     role_names: QStringList,
     role_colors: QStringList,
+    role_ids: QStringList,
     me: bool,
     deco: QString,
     effect: QString,
@@ -1175,6 +1187,14 @@ impl qobject::Chat {
 
     pub fn mark_server_read(&self, server_id: &QString) {
         client::command(Command::MarkServerRead(server_id.to_string()));
+    }
+
+    pub fn mark_channel_read(&self, channel_id: &QString) {
+        client::command(Command::MarkChannelRead(channel_id.to_string()));
+    }
+
+    pub fn toggle_category(&self, category_id: &QString) {
+        client::command(Command::ToggleCategory(category_id.to_string()));
     }
 
     pub fn query_mentions(&self, query: &QString, open: bool) {

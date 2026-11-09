@@ -1528,3 +1528,75 @@ Behaviour, not pixels: what a channel or server switch does on each side.
 | S4  | channel switch    | A channel visited before cost a skeleton and a page each time (the web keeps the store's messages per channel). Native shows it from its warm cache at once and refetches quietly.                                                                                       |
 | S5  | composer          | The one composer kept its text across channels (a risk of posting in the wrong one). Each channel keeps its own draft and reply now (kept in memory while the app runs, cleared by a send), and the composer takes the keys after a switch.                              |
 | S6  | keys (beyond web) | Alt+Up/Down, Alt+Shift+Up/Down (unread) and Ctrl+Alt+Up/Down (servers), and Esc in an empty composer to mark the channel read. None of them was bound before; Esc keeps its earlier uses (reply, mention list, pickers, popups) first.                                   |
+
+## Parity pass (2026-11-08, branch native/parity)
+
+Twelve open gaps from a read-only sweep, each checked against both
+codebases first. Native ran as "Native Spike" (profile `spike`) and
+"Spike Peer" (`spikepeer`) in "Native Spike Lab" and their DM, with fake
+devices only. Web references come from the local `/ui-fixtures` route in
+headless Edge (`F:/ct/yapn/tmp/parity/web/`). Native captures are in
+`F:/ct/yapn/tmp/parity/native/`.
+
+### Closed
+
+| #   | Gap                           | What changed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Evidence                                                                                                                                       |
+| --- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | mic and deafen in fullscreen  | VoiceView.qml: while `stageFullscreen` hides the account row, the stage bar leads with Mute/Unmute and Deafen/Undeafen (VoiceControls.tsx `ownsMicDeafen`). With no microphone, the mic key is disabled and says "No microphone detected".                                                                                                                                                                                                                                                                                                                                                                | The same keys on the DM call's expanded dock: `dm-expanded.png`                                                                                |
+| P2  | Mark as read on a channel     | TreeMenu.qml: "Mark as read" (markRead glyph) comes first, behind its own rule. yap-core `Command::MarkChannelRead` marks that channel read up to its newest message. On the open channel it also drops the divider and the seen mentions.                                                                                                                                                                                                                                                                                                                                                                | `unread-pair.png` (a bold row and rail pip, then read), `channel-menu-crop.png`                                                                |
+| P3  | collapsible categories        | A label's click collapses or expands it (`Command::ToggleCategory`). Tree rows carry `folded`. Under a collapsed category, a row folds to no height and fades over dur-3, except the open channel and the call (ChannelSidebar.tsx `hidden`). The chevron turns -90 degrees over dur-2, and the name goes to ink-2 on hover. Rows ease only for 300 ms after a click (ShellState.folding), so a pooled row never animates. The state is kept per user in `snapshot.db` (`collapsed_categories`, schema 5). Reduced motion follows Windows (Theme durations).                                              | `collapsed-crop.png`; after a restart, `restart-collapsed.png`; web `web-collapsed.png`                                                        |
+| P4  | own profile card              | ProfilePopout.qml: your own card has the primary Edit profile key, which opens the profile editor.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | `own-profile.png`, `edit-profile.png`                                                                                                          |
+| P5  | removing a role from the card | With Manage roles, each role chip has a 20 px muted close key ("Remove the X role"). It takes the role at once, and a refusal rolls back with the reason. `ProfileView.role_ids` feeds it.                                                                                                                                                                                                                                                                                                                                                                                                                | `role-chip.png`, `role-removed.png` (PUT ok)                                                                                                   |
+| P6  | DM call video stage           | DmCallRegion.qml becomes a stage when a camera or share is live, or with Expand call or Hide chat. The stage is 320 px high (256 under 768 wide), with tiles in a row (at most 400 wide). A click puts a tile on stage (FocusedStage, shared with the voice view), with Stop watching on a remote share. The dock gains Hide chat / Show chat (leading) and Expand call / Collapse call (trailing), on ply-1 with a seam. Expanded, the call covers the shell under the title bar (no rail, sidebar or panels), fits its tiles to a grid and leads with mic and deafen. Hide chat covers the chat column. | `dm-audio.png`, `dm-video.png`, `dm-focused.png`, `dm-expanded.png`, `dm-expanded-grid.png`, `dm-chat-hidden.png`; web `web-dm-call-video.png` |
+| P7  | profile load error            | The popout shows a RowError with describeApiError's copy ("Unable to load Spike Peer's profile. Try again in a moment.").                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `profile-error.png` (`YAP_TEST_HTTP_STATUS=/profile$=500`)                                                                                     |
+| P8  | no microphone                 | Audio has `noMicrophone`: a scan found no input. Voice & video's Microphone row then reads "No microphone found. Plug one in, then retry." with Retry, which scans again. Tests use `YAP_TEST_NO_MIC=1`.                                                                                                                                                                                                                                                                                                                                                                                                  | `no-mic.png`                                                                                                                                   |
+| P9  | role colour picker            | RoleEditor.qml: the 32 px swatch (line-field edge, 2 px inset) opens Windows' colour dialog (`Files.pickColor`), as Chromium's `<input type=color>` does. It starts on the colour, or #99aab5, and the pick is stored lowercase.                                                                                                                                                                                                                                                                                                                                                                          | `role-color.png` (`YAP_PICK_COLOR`)                                                                                                            |
+| P10 | motion                        | A message we delete fades out over dur-3-exit before the store drops it, with no list transition. The animation lets go of the row first, and a guard restores a row the store kept. Menus grow from their top-left corner, device menus from their bottom-left, the profile popout from the edge beside its anchor, and the profile colour popover from its top-left. The Listen Together tab strips use TabRule, so the rule slides.                                                                                                                                                                    | `delete-early-crop.png` (mid-fade)                                                                                                             |
+| P11 | voice details window          | The yap-voice stats tick is 2 s (`STATS_EVERY`), as in useVoiceStats.ts, so 24 samples span 48 s. The stats line still logs at most every 5 s.                                                                                                                                                                                                                                                                                                                                                                                                                                                            | `voice-details.png` ("LAST 48 S")                                                                                                              |
+| P12 | stream stills                 | The sidebar's stream hover card shows the still (object-cover) in place of the placeholder. The members tray shows an unwatched share's still under the ply-2/85 scrim. The focused stage shows the still (object-contain) until the first frame. Tree member rows carry `preview`.                                                                                                                                                                                                                                                                                                                       | `hover-card.png`, `tray-still.png`, `stage-poster.png`                                                                                         |
+
+Notes:
+
+- The web keeps collapsed categories only for the life of the page (a
+  `useReducer` Set in ChannelSidebar.tsx). Native keeps them across
+  launches, per user, as the task asked. Hidden rows keep the list's 2 px
+  gap, as the web's collapsed rows keep the flex gap.
+- The DM call keeps Hide chat and Collapse call while they are on, even if
+  the video stops. The web hides both with the video, which can leave an
+  expanded call with no way back.
+
+### Not at parity
+
+- Icon colours on hover still snap. Icons are rasters tinted by the image
+  provider, so easing them needs a cross-fade of two rasters per key, which
+  is not cheap on rows.
+- A menu that opens upward because it would not fit (the message menu
+  near the bottom) still grows from its top-left corner: Qt decides where
+  it opens after the origin is set.
+- Mic and deafen in the voice view's fullscreen were checked by code, and
+  live on the DM call's expanded dock, which uses the same keys. They were
+  not checked in OS fullscreen, which would cover a monitor in use.
+- The delete fade and the collapse ease were captured as single frames,
+  not as frame sequences.
+- There is no web reference for the own profile card, the no-microphone
+  row or the role remove key: the fixtures fake devices and show someone
+  else's card. Their copy and tokens are checked by source.
+
+### Checks
+
+- `cargo test -p yap-core -p yap-protocol -p yap-cache -p yap-voice -p yap-realtime`
+  (`LK_CUSTOM_WEBRTC` set, target `F:/ct/yapn/check-parity`): 1404 passed, 0 failed.
+- `cargo clippy --workspace --all-targets -- -D warnings` (`QMAKE` set to
+  the p8 qmake) is clean.
+- `build.ps1` into `F:/ct/yapn/rel-parity` was green three times
+  (`F:/ct/yapn/build-parity-0.log` to `-2.log`).
+- Found while testing:
+  - Build 1 crashed after a delete: the fade's NumberAnimation kept the
+    deleted row as its target, which is not a guarded reference. Fixed in
+    build 2 and retested.
+  - Creating a role with no colour failed once with "Unable to create this
+    role". With a colour it worked. Not looked into.
+  - Each role list refresh after creating a role logged 13
+    "QQmlVMEMetaObject: Internal error - attempted to evaluate a function
+    in an invalid context" warnings (server settings, Roles). Not looked
+    into; it may predate this pass.

@@ -2,8 +2,9 @@ import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
 
-// A tab in a voice app's panel (ui/tabs.tsx): ink-1 and a 2 px rule when
-// chosen, its count beside it when there is one.
+// A tab in a voice app's panel (ui/tabs.tsx): ink-1 when chosen, its count
+// beside it when there is one. The 2 px rule is the strip's TabRule, which
+// slides between tabs.
 T.AbstractButton {
     id: tab
 
@@ -39,13 +40,6 @@ T.AbstractButton {
         }
     }
     background: Item {
-        Rectangle {
-            visible: tab.on
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 2
-            color: Theme.ink1
-        }
         Rectangle {
             visible: tab.visualFocus
             anchors.fill: parent

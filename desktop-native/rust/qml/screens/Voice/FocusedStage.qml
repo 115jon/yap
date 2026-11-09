@@ -24,6 +24,9 @@ Item {
     readonly property bool showsVideo: tile.video && tile.videoKey.length > 0
         && !(screen && tile.me && ShellState.sharePreviewPaused)
     readonly property bool hasFrame: media.item !== null && media.item.hasFrame
+    // A watched share's still until its video plays.
+    readonly property bool poster: screen && !tile.me && showsVideo && !hasFrame
+        && (tile.preview ?? "").length > 0
 
     // RestoreNone: when the stage moves to another tile, the old slot must not
     // put its stale values back after the new one wrote its own; the view
@@ -92,9 +95,24 @@ Item {
                 fillMode: VideoOutput.PreserveAspectFit
             }
         }
+        // Someone else's share before its first frame: their still stands
+        // in (VoiceGrid.tsx `focusedThumbnailPoster`, object-contain).
+        Loader {
+            anchors.fill: parent
+            active: root.poster
+            sourceComponent: Image {
+                source: root.tile.preview
+                fillMode: Image.PreserveAspectFit
+                asynchronous: false
+                cache: false
+                retainWhileLoading: true
+                smooth: true
+                Accessible.name: qsTr("%1 stream thumbnail").arg(root.tile.name)
+            }
+        }
         StreamLoading {
             anchors.fill: parent
-            visible: !root.hasFrame
+            visible: !root.hasFrame && !root.poster
             name: root.tile.name
         }
     }

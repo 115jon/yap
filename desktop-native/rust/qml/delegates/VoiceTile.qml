@@ -60,7 +60,12 @@ Item {
         && (!screen || me || watching || focused) && !previewPaused
     readonly property bool watchPrompt: screen && !me && !watching && !focused && !tray
     readonly property bool playing: showsVideo && surface.item !== null && surface.item.hasFrame
-    readonly property bool hasStill: screen && !me && !tray && inView && preview.length > 0
+    // A tray thumbnail of an unwatched share: its still under the scrim,
+    // as the Watch prompt's ground (ParticipantCard.tsx shows the prompt in
+    // the tray too; the 144 px thumbnail keeps the still and the owner's
+    // avatar, without the prompt's line and key).
+    readonly property bool trayPrompt: tray && screen && !me && !watching && !focused
+    readonly property bool hasStill: screen && !me && !(tray && focused) && inView && preview.length > 0
     // A watched share before its first frame: the still stands in for the
     // spinner (`shouldRenderThumbnailPoster`), and counts as media.
     readonly property bool poster: hasStill && showsVideo && !playing
@@ -139,7 +144,7 @@ Item {
         Loader {
             anchors.fill: parent
             anchors.margins: 1
-            active: root.hasStill && (root.watchPrompt || root.poster)
+            active: root.hasStill && (root.watchPrompt || root.trayPrompt || root.poster)
             sourceComponent: Image {
                 clip: true
                 source: root.preview
@@ -156,7 +161,7 @@ Item {
         Rectangle {
             anchors.fill: parent
             anchors.margins: 1
-            visible: root.watchPrompt && root.hasStill
+            visible: (root.watchPrompt || root.trayPrompt) && root.hasStill
             color: Theme.ply2
             opacity: 0.85
         }

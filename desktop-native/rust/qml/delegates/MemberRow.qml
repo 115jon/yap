@@ -23,6 +23,8 @@ Item {
     required property bool live
     // Camera on (`self_video`).
     property bool video: false
+    // Their share's still (a data: URL), for the stream card.
+    property string preview: ""
     // Their voice session is coming back (voice-presence.ts): the leaf at
     // half strength, its LED out.
     property bool reconnecting: false
@@ -172,6 +174,7 @@ Item {
             anchorItem: root
             name: root.name
             me: root.me
+            preview: root.preview
             onHeldChanged: if (!held) cardClose.restart()
             onWatchRequested: {
                 close()

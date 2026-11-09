@@ -22,7 +22,7 @@ RowLayout {
     readonly property bool docked: width >= 1024
     // Search, a thread or pins take the members' place (ChatArea.tsx). In
     // the voice chat's column they open as the sheet.
-    readonly property bool panelShown: ShellState.sidePanel.length > 0 && (chatShown || voiceChat)
+    readonly property bool panelShown: ShellState.sidePanel.length > 0 && (chatShown || voiceChat) && !ShellState.callExpanded
     readonly property bool searchShown: ShellState.sidePanel === "search"
     // Below 1024 the voice chat is a right sheet over the view with a scrim
     // (side-panel.tsx `sheet`); its title opens the details as a second
@@ -30,7 +30,7 @@ RowLayout {
     readonly property bool voiceSheetWanted: voiceChat && !docked
     property bool voiceSheetShown: false
     readonly property bool membersShown: ((ShellState.showMembers || ShellState.showDetails) && chatShown
-            || ShellState.showDetails && voiceSheetWanted) && !panelShown
+            || ShellState.showDetails && voiceSheetWanted) && !panelShown && !ShellState.callExpanded
     readonly property bool sheetWanted: membersShown && !docked
     readonly property bool panelSheetWanted: panelShown && (!docked || voiceChat)
 
@@ -165,13 +165,13 @@ RowLayout {
     }
 
     ServerRail {
-        visible: !ShellState.stageFullscreen
+        visible: !ShellState.stageFullscreen && !ShellState.callExpanded
         Layout.fillHeight: true
         Layout.preferredWidth: Theme.rail
     }
     ChannelSidebar {
         id: sidebar
-        visible: !ShellState.stageFullscreen
+        visible: !ShellState.stageFullscreen && !ShellState.callExpanded
         Layout.fillHeight: true
         Layout.preferredWidth: Theme.treePanel
     }

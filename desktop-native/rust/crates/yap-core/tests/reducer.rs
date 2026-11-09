@@ -379,6 +379,8 @@ fn channels_result_should_open_the_first_text_channel_and_request_its_page() {
         status_channel: String::new(),
         occupants: 0,
         started_at: 0,
+        folded: false,
+        preview: String::new(),
     };
     // Members have not answered: no Manage channels yet. An empty voice
     // channel draws its own status rows.
@@ -2263,6 +2265,7 @@ fn snapshot() -> Snapshot {
         voice: None,
         scroll_positions: Vec::new(),
         last_channels: Vec::new(),
+        collapsed_categories: Vec::new(),
     }
 }
 

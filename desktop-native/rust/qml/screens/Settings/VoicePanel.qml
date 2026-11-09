@@ -41,10 +41,19 @@ Column {
     SettingsCard {
         width: parent.width
         sectionId: "input"
+        // MicrophoneRows: with no input device, one line and Retry (a new
+        // scan) stand in for the picker.
         SettingsRow {
             rowId: "microphone"
-            layout: "field"
+            layout: Audio.noMicrophone ? "inline" : "field"
+            description: Audio.noMicrophone ? qsTr("No microphone found. Plug one in, then retry.") : ""
+            KitButton {
+                visible: Audio.noMicrophone
+                text: qsTr("Retry")
+                onClicked: Audio.refreshDevices()
+            }
             SelectField {
+                visible: !Audio.noMicrophone
                 width: parent.width
                 large: true
                 text: SettingsNav.label("microphone")

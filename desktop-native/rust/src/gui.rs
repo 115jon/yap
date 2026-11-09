@@ -436,6 +436,7 @@ fn set_profile(mut profile: Pin<&mut Profile>, view: &ProfileView) {
     profile
         .as_mut()
         .set_role_colors(string_list(&view.role_colors));
+    profile.as_mut().set_role_ids(string_list(&view.role_ids));
     profile
         .as_mut()
         .set_role_names(string_list(&view.role_names));

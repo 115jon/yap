@@ -774,6 +774,15 @@ fn show_profile_should_show_what_the_lists_know_with_roles_at_once() {
 }
 
 #[test]
+fn the_profile_roles_should_carry_their_ids_for_the_remove_keys() {
+    let mut client = Client::online();
+    let fx = client.command(Command::ShowProfile(Some(ALICE.into())));
+    let view = profile(&fx).expect("profile");
+    assert_eq!(view.role_ids.len(), view.role_names.len());
+    assert!(view.role_ids.iter().all(|id| !id.is_empty()));
+}
+
+#[test]
 fn the_profile_answer_should_add_the_bio_and_banner() {
     let mut client = Client::online();
     client.command(Command::ShowProfile(Some(ALICE.into())));

@@ -1,6 +1,6 @@
 //! The typed client state. Only [`super::reduce`] mutates it.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use yap_cache::Snapshot;
@@ -1276,6 +1276,9 @@ pub struct State {
     /// The last text channel opened per server, and the last DM under
     /// `@me` (useChatPageLogic.ts `lastActiveChannels`).
     pub(super) last_channels: HashMap<String, String>,
+    /// The sidebar's collapsed categories (ChannelSidebar.tsx
+    /// `collapsedCategories`), kept per user in the snapshot.
+    pub(super) collapsed: BTreeSet<String>,
     /// The open channel's rows came from the disk window (not yet confirmed).
     pub(super) disk_shown: bool,
     /// The open channel landed at its end when its cached rows showed: the
@@ -1375,6 +1378,7 @@ impl State {
             page_asked_ms: 0,
             now_ms: None,
             last_channels: HashMap::new(),
+            collapsed: BTreeSet::new(),
             disk_shown: false,
             open_at_end: false,
             next_id: 0,
@@ -1449,6 +1453,11 @@ impl State {
     /// Fresh gateway sessions so far.
     pub fn gateway_generation(&self) -> u64 {
         self.gateway_generation
+    }
+
+    /// The sidebar's collapsed categories.
+    pub fn collapsed_categories(&self) -> &BTreeSet<String> {
+        &self.collapsed
     }
 
     /// The channel a server (or `@me`) opens on next.
