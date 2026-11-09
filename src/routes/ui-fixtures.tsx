@@ -34,6 +34,8 @@
  *   `&name=<effect>&wave=1` dresses every fixture user in a style)
  *   chunked-upload (big-file progress tiles; a live run with cancel)
  *   site-banner (the site announcement strip in each tone)
+ *   pb-* profile boards: pb-board*, pb-activity*, pb-wishlist*, pb-edit*,
+ *   pb-studio* (dev/profile-board-fixtures.tsx)
  *   settings-connections (`&state=empty|linked|hidden|error`) and
  *   connections-profile (the profile's Connections block)
  */

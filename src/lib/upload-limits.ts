@@ -22,6 +22,8 @@ export const UPLOAD_LIMITS = {
   avatar: 8 * MB,
   /** POST /api/profile-assets/manage, kind=banner */
   banner: 8 * MB,
+  /** POST /api/users/me/board/assets (Photo strip and Custom widgets) */
+  profileWidget: 8 * MB,
   /** POST /api/channels/:id/messages/upload */
   attachment: 25 * MB,
   /** POST /api/channels/:id/messages/gif (the reported size) */
@@ -44,6 +46,7 @@ export const BIG_UPLOAD_LIMITS: Partial<Record<UploadKind, number>> = {
   attachment: 500 * MB,
   avatar: 25 * MB,
   banner: 25 * MB,
+  profileWidget: 25 * MB,
 };
 
 /**

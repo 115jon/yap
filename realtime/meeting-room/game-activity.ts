@@ -96,6 +96,13 @@ export interface GameActivityHost {
   send(ws: WebSocket, msg: { op: number; d: unknown }): void;
   dispatchOp: number;
   log: { error(...args: unknown[]): void };
+  /**
+   * A session's game ended (cleared, replaced by another game, or its
+   * socket closed) while its owner shared activity: the profile Activity
+   * timeline and play-time rollup record it. Called once per session's
+   * game; the writer is idempotent across sessions reporting the same one.
+   */
+  onGameEnded?(userId: string, activity: GameActivity, endedAt: number): void;
 }
 
 const AUDIENCE_QUERIES = [
@@ -201,7 +208,7 @@ export class GameActivityRegistry {
     now = Date.now(),
   ): Promise<boolean> {
     const previous = this.bySession.get(sessionId);
-    if (activity === null) return this.removeSession(sessionId);
+    if (activity === null) return this.removeSession(sessionId, now);
     const picked = pickGameActivity(activity);
     const next: GameActivity = {
       ...picked,
@@ -219,14 +226,24 @@ export class GameActivityRegistry {
       // A profile update (setShare) may have answered while D1 was read.
       if (!this.shareByUser.has(userId)) this.shareByUser.set(userId, share);
     }
+    if (
+      previous &&
+      previous.userId === userId &&
+      (previous.activity.name !== next.name ||
+        previous.activity.started_at !== next.started_at)
+    ) {
+      this.reportEnded(previous, now);
+    }
     this.bySession.set(sessionId, { userId, activity: next, updatedAt: now });
     this.persist(sessionId);
     return true;
   }
 
   /** The socket closed: its activity goes with it. */
-  removeSession(sessionId: string): boolean {
-    if (!this.bySession.has(sessionId)) return false;
+  removeSession(sessionId: string, now = Date.now()): boolean {
+    const entry = this.bySession.get(sessionId);
+    if (!entry) return false;
+    this.reportEnded(entry, now);
     this.bySession.delete(sessionId);
     this.host.waitUntil(
       this.host.storage
@@ -236,6 +253,17 @@ export class GameActivityRegistry {
         ),
     );
     return true;
+  }
+
+  /** Hands an ended game to the host, if its owner shares activity. */
+  private reportEnded(entry: SessionActivity, endedAt: number) {
+    if (!this.host.onGameEnded) return;
+    if (this.shareByUser.get(entry.userId) !== true) return;
+    try {
+      this.host.onGameEnded(entry.userId, entry.activity, endedAt);
+    } catch (error) {
+      this.host.log.error("Game end report failed", error);
+    }
   }
 
   /** The user has an activity, or their audience last heard one. */

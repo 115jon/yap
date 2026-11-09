@@ -46,6 +46,7 @@ import {
 } from "./src/lib/background-tasks";
 import { retryR2Cleanup } from "./src/services/r2-cleanup.service";
 import { sweepAutoBadges } from "./src/services/badge.service";
+import { pruneProfileActivity } from "./src/services/profile-activity.service";
 import { cfTimeZone, TIME_ZONE_HEADER } from "./src/lib/request-time-zone";
 import { cleanupStalePendingUploads } from "./src/services/multipart-upload.service";
 import {
@@ -517,6 +518,15 @@ export default {
                 run: async () => {
                   const awarded = await sweepAutoBadges(env.DB);
                   console.info("Badge sweep completed", awarded);
+                },
+              },
+              {
+                // Profile Activity past each owner's retention (7, 30 or
+                // 90 days) is deleted, not hidden.
+                name: "Profile activity retention",
+                run: async () => {
+                  const deleted = await pruneProfileActivity(env.DB);
+                  console.info("Profile activity pruned", { deleted });
                 },
               },
             ]

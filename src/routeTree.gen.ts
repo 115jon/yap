@@ -75,7 +75,12 @@ import { Route as ApiAuthDesktopRouteImport } from './routes/api/auth/desktop'
 import { Route as ApiAttachmentsSplatRouteImport } from './routes/api/attachments/$'
 import { Route as ApiAdminBadgesRouteImport } from './routes/api/admin/badges'
 import { Route as ApiInvitesCodeIndexRouteImport } from './routes/api/invites/$code/index'
+import { Route as ApiUsersIdWishlistRouteImport } from './routes/api/users/$id/wishlist'
+import { Route as ApiUsersIdProfilePrefsRouteImport } from './routes/api/users/$id/profile-prefs'
 import { Route as ApiUsersIdProfileRouteImport } from './routes/api/users/$id/profile'
+import { Route as ApiUsersIdGuestbookRouteImport } from './routes/api/users/$id/guestbook'
+import { Route as ApiUsersIdBoardRouteImport } from './routes/api/users/$id/board'
+import { Route as ApiUsersIdActivityRouteImport } from './routes/api/users/$id/activity'
 import { Route as ApiSoundboardUploadsIdRouteImport } from './routes/api/soundboard/uploads/$id'
 import { Route as ApiSharedMessagesTokenPreviewImageRouteImport } from './routes/api/shared-messages/$token/preview-image'
 import { Route as ApiServersIdSoundboardRouteImport } from './routes/api/servers/$id/soundboard'
@@ -109,6 +114,10 @@ import { Route as ApiChannelsIdMessagesRouteImport } from './routes/api/channels
 import { Route as ApiChannelsIdMediaRouteImport } from './routes/api/channels/$id/media'
 import { Route as ApiCallsIdDeclineRouteImport } from './routes/api/calls/$id/decline'
 import { Route as ApiCallsIdAcceptRouteImport } from './routes/api/calls/$id/accept'
+import { Route as ApiUsersIdGuestbookBlocksRouteImport } from './routes/api/users/$id/guestbook/blocks'
+import { Route as ApiUsersIdGuestbookNoteIdRouteImport } from './routes/api/users/$id/guestbook/$noteId'
+import { Route as ApiUsersIdBoardAssetsRouteImport } from './routes/api/users/$id/board/assets'
+import { Route as ApiUsersIdActivityEventIdRouteImport } from './routes/api/users/$id/activity/$eventId'
 import { Route as ApiSharedMessagesTokenMediaSplatRouteImport } from './routes/api/shared-messages/$token/media/$'
 import { Route as ApiServersIdRolesRoleIdRouteImport } from './routes/api/servers/$id/roles/$roleId'
 import { Route as ApiServersIdMembersUserIdRouteImport } from './routes/api/servers/$id/members/$userId'
@@ -119,6 +128,7 @@ import { Route as ApiChannelsIdUploadsUploadIdRouteImport } from './routes/api/c
 import { Route as ApiChannelsIdPermissionsTargetIdRouteImport } from './routes/api/channels/$id/permissions/$targetId'
 import { Route as ApiChannelsIdMessagesUploadRouteImport } from './routes/api/channels/$id/messages/upload'
 import { Route as ApiChannelsIdMessagesGifRouteImport } from './routes/api/channels/$id/messages/gif'
+import { Route as ApiUsersIdGuestbookBlocksUserIdRouteImport } from './routes/api/users/$id/guestbook/blocks/$userId'
 import { Route as ApiServersIdMembersUserIdRolesRouteImport } from './routes/api/servers/$id/members/$userId/roles'
 import { Route as ApiChannelsIdUploadsUploadIdCompleteRouteImport } from './routes/api/channels/$id/uploads/$uploadId/complete'
 import { Route as ApiChannelsIdUploadsUploadIdPartsPartNumberRouteImport } from './routes/api/channels/$id/uploads/$uploadId/parts/$partNumber'
@@ -456,9 +466,34 @@ const ApiInvitesCodeIndexRoute = ApiInvitesCodeIndexRouteImport.update({
   path: '/api/invites/$code/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiUsersIdWishlistRoute = ApiUsersIdWishlistRouteImport.update({
+  id: '/api/users/$id/wishlist',
+  path: '/api/users/$id/wishlist',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiUsersIdProfilePrefsRoute = ApiUsersIdProfilePrefsRouteImport.update({
+  id: '/api/users/$id/profile-prefs',
+  path: '/api/users/$id/profile-prefs',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiUsersIdProfileRoute = ApiUsersIdProfileRouteImport.update({
   id: '/api/users/$id/profile',
   path: '/api/users/$id/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiUsersIdGuestbookRoute = ApiUsersIdGuestbookRouteImport.update({
+  id: '/api/users/$id/guestbook',
+  path: '/api/users/$id/guestbook',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiUsersIdBoardRoute = ApiUsersIdBoardRouteImport.update({
+  id: '/api/users/$id/board',
+  path: '/api/users/$id/board',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiUsersIdActivityRoute = ApiUsersIdActivityRouteImport.update({
+  id: '/api/users/$id/activity',
+  path: '/api/users/$id/activity',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSoundboardUploadsIdRoute = ApiSoundboardUploadsIdRouteImport.update({
@@ -633,6 +668,29 @@ const ApiCallsIdAcceptRoute = ApiCallsIdAcceptRouteImport.update({
   path: '/api/calls/$id/accept',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiUsersIdGuestbookBlocksRoute =
+  ApiUsersIdGuestbookBlocksRouteImport.update({
+    id: '/blocks',
+    path: '/blocks',
+    getParentRoute: () => ApiUsersIdGuestbookRoute,
+  } as any)
+const ApiUsersIdGuestbookNoteIdRoute =
+  ApiUsersIdGuestbookNoteIdRouteImport.update({
+    id: '/$noteId',
+    path: '/$noteId',
+    getParentRoute: () => ApiUsersIdGuestbookRoute,
+  } as any)
+const ApiUsersIdBoardAssetsRoute = ApiUsersIdBoardAssetsRouteImport.update({
+  id: '/assets',
+  path: '/assets',
+  getParentRoute: () => ApiUsersIdBoardRoute,
+} as any)
+const ApiUsersIdActivityEventIdRoute =
+  ApiUsersIdActivityEventIdRouteImport.update({
+    id: '/$eventId',
+    path: '/$eventId',
+    getParentRoute: () => ApiUsersIdActivityRoute,
+  } as any)
 const ApiSharedMessagesTokenMediaSplatRoute =
   ApiSharedMessagesTokenMediaSplatRouteImport.update({
     id: '/media/$',
@@ -690,6 +748,12 @@ const ApiChannelsIdMessagesGifRoute =
     id: '/gif',
     path: '/gif',
     getParentRoute: () => ApiChannelsIdMessagesRoute,
+  } as any)
+const ApiUsersIdGuestbookBlocksUserIdRoute =
+  ApiUsersIdGuestbookBlocksUserIdRouteImport.update({
+    id: '/$userId',
+    path: '/$userId',
+    getParentRoute: () => ApiUsersIdGuestbookBlocksRoute,
   } as any)
 const ApiServersIdMembersUserIdRolesRoute =
   ApiServersIdMembersUserIdRolesRouteImport.update({
@@ -809,7 +873,12 @@ export interface FileRoutesByFullPath {
   '/api/servers/$id/soundboard': typeof ApiServersIdSoundboardRoute
   '/api/shared-messages/$token/preview-image': typeof ApiSharedMessagesTokenPreviewImageRoute
   '/api/soundboard/uploads/$id': typeof ApiSoundboardUploadsIdRoute
+  '/api/users/$id/activity': typeof ApiUsersIdActivityRouteWithChildren
+  '/api/users/$id/board': typeof ApiUsersIdBoardRouteWithChildren
+  '/api/users/$id/guestbook': typeof ApiUsersIdGuestbookRouteWithChildren
   '/api/users/$id/profile': typeof ApiUsersIdProfileRoute
+  '/api/users/$id/profile-prefs': typeof ApiUsersIdProfilePrefsRoute
+  '/api/users/$id/wishlist': typeof ApiUsersIdWishlistRoute
   '/api/invites/$code/': typeof ApiInvitesCodeIndexRoute
   '/api/channels/$id/messages/gif': typeof ApiChannelsIdMessagesGifRoute
   '/api/channels/$id/messages/upload': typeof ApiChannelsIdMessagesUploadRoute
@@ -821,8 +890,13 @@ export interface FileRoutesByFullPath {
   '/api/servers/$id/members/$userId': typeof ApiServersIdMembersUserIdRouteWithChildren
   '/api/servers/$id/roles/$roleId': typeof ApiServersIdRolesRoleIdRoute
   '/api/shared-messages/$token/media/$': typeof ApiSharedMessagesTokenMediaSplatRoute
+  '/api/users/$id/activity/$eventId': typeof ApiUsersIdActivityEventIdRoute
+  '/api/users/$id/board/assets': typeof ApiUsersIdBoardAssetsRoute
+  '/api/users/$id/guestbook/$noteId': typeof ApiUsersIdGuestbookNoteIdRoute
+  '/api/users/$id/guestbook/blocks': typeof ApiUsersIdGuestbookBlocksRouteWithChildren
   '/api/channels/$id/uploads/$uploadId/complete': typeof ApiChannelsIdUploadsUploadIdCompleteRoute
   '/api/servers/$id/members/$userId/roles': typeof ApiServersIdMembersUserIdRolesRoute
+  '/api/users/$id/guestbook/blocks/$userId': typeof ApiUsersIdGuestbookBlocksUserIdRoute
   '/api/channels/$id/uploads/$uploadId/parts/$partNumber': typeof ApiChannelsIdUploadsUploadIdPartsPartNumberRoute
 }
 export interface FileRoutesByTo {
@@ -924,7 +998,12 @@ export interface FileRoutesByTo {
   '/api/servers/$id/soundboard': typeof ApiServersIdSoundboardRoute
   '/api/shared-messages/$token/preview-image': typeof ApiSharedMessagesTokenPreviewImageRoute
   '/api/soundboard/uploads/$id': typeof ApiSoundboardUploadsIdRoute
+  '/api/users/$id/activity': typeof ApiUsersIdActivityRouteWithChildren
+  '/api/users/$id/board': typeof ApiUsersIdBoardRouteWithChildren
+  '/api/users/$id/guestbook': typeof ApiUsersIdGuestbookRouteWithChildren
   '/api/users/$id/profile': typeof ApiUsersIdProfileRoute
+  '/api/users/$id/profile-prefs': typeof ApiUsersIdProfilePrefsRoute
+  '/api/users/$id/wishlist': typeof ApiUsersIdWishlistRoute
   '/api/invites/$code': typeof ApiInvitesCodeIndexRoute
   '/api/channels/$id/messages/gif': typeof ApiChannelsIdMessagesGifRoute
   '/api/channels/$id/messages/upload': typeof ApiChannelsIdMessagesUploadRoute
@@ -936,8 +1015,13 @@ export interface FileRoutesByTo {
   '/api/servers/$id/members/$userId': typeof ApiServersIdMembersUserIdRouteWithChildren
   '/api/servers/$id/roles/$roleId': typeof ApiServersIdRolesRoleIdRoute
   '/api/shared-messages/$token/media/$': typeof ApiSharedMessagesTokenMediaSplatRoute
+  '/api/users/$id/activity/$eventId': typeof ApiUsersIdActivityEventIdRoute
+  '/api/users/$id/board/assets': typeof ApiUsersIdBoardAssetsRoute
+  '/api/users/$id/guestbook/$noteId': typeof ApiUsersIdGuestbookNoteIdRoute
+  '/api/users/$id/guestbook/blocks': typeof ApiUsersIdGuestbookBlocksRouteWithChildren
   '/api/channels/$id/uploads/$uploadId/complete': typeof ApiChannelsIdUploadsUploadIdCompleteRoute
   '/api/servers/$id/members/$userId/roles': typeof ApiServersIdMembersUserIdRolesRoute
+  '/api/users/$id/guestbook/blocks/$userId': typeof ApiUsersIdGuestbookBlocksUserIdRoute
   '/api/channels/$id/uploads/$uploadId/parts/$partNumber': typeof ApiChannelsIdUploadsUploadIdPartsPartNumberRoute
 }
 export interface FileRoutesById {
@@ -1040,7 +1124,12 @@ export interface FileRoutesById {
   '/api/servers/$id/soundboard': typeof ApiServersIdSoundboardRoute
   '/api/shared-messages/$token/preview-image': typeof ApiSharedMessagesTokenPreviewImageRoute
   '/api/soundboard/uploads/$id': typeof ApiSoundboardUploadsIdRoute
+  '/api/users/$id/activity': typeof ApiUsersIdActivityRouteWithChildren
+  '/api/users/$id/board': typeof ApiUsersIdBoardRouteWithChildren
+  '/api/users/$id/guestbook': typeof ApiUsersIdGuestbookRouteWithChildren
   '/api/users/$id/profile': typeof ApiUsersIdProfileRoute
+  '/api/users/$id/profile-prefs': typeof ApiUsersIdProfilePrefsRoute
+  '/api/users/$id/wishlist': typeof ApiUsersIdWishlistRoute
   '/api/invites/$code/': typeof ApiInvitesCodeIndexRoute
   '/api/channels/$id/messages/gif': typeof ApiChannelsIdMessagesGifRoute
   '/api/channels/$id/messages/upload': typeof ApiChannelsIdMessagesUploadRoute
@@ -1052,8 +1141,13 @@ export interface FileRoutesById {
   '/api/servers/$id/members/$userId': typeof ApiServersIdMembersUserIdRouteWithChildren
   '/api/servers/$id/roles/$roleId': typeof ApiServersIdRolesRoleIdRoute
   '/api/shared-messages/$token/media/$': typeof ApiSharedMessagesTokenMediaSplatRoute
+  '/api/users/$id/activity/$eventId': typeof ApiUsersIdActivityEventIdRoute
+  '/api/users/$id/board/assets': typeof ApiUsersIdBoardAssetsRoute
+  '/api/users/$id/guestbook/$noteId': typeof ApiUsersIdGuestbookNoteIdRoute
+  '/api/users/$id/guestbook/blocks': typeof ApiUsersIdGuestbookBlocksRouteWithChildren
   '/api/channels/$id/uploads/$uploadId/complete': typeof ApiChannelsIdUploadsUploadIdCompleteRoute
   '/api/servers/$id/members/$userId/roles': typeof ApiServersIdMembersUserIdRolesRoute
+  '/api/users/$id/guestbook/blocks/$userId': typeof ApiUsersIdGuestbookBlocksUserIdRoute
   '/api/channels/$id/uploads/$uploadId/parts/$partNumber': typeof ApiChannelsIdUploadsUploadIdPartsPartNumberRoute
 }
 export interface FileRouteTypes {
@@ -1157,7 +1251,12 @@ export interface FileRouteTypes {
     | '/api/servers/$id/soundboard'
     | '/api/shared-messages/$token/preview-image'
     | '/api/soundboard/uploads/$id'
+    | '/api/users/$id/activity'
+    | '/api/users/$id/board'
+    | '/api/users/$id/guestbook'
     | '/api/users/$id/profile'
+    | '/api/users/$id/profile-prefs'
+    | '/api/users/$id/wishlist'
     | '/api/invites/$code/'
     | '/api/channels/$id/messages/gif'
     | '/api/channels/$id/messages/upload'
@@ -1169,8 +1268,13 @@ export interface FileRouteTypes {
     | '/api/servers/$id/members/$userId'
     | '/api/servers/$id/roles/$roleId'
     | '/api/shared-messages/$token/media/$'
+    | '/api/users/$id/activity/$eventId'
+    | '/api/users/$id/board/assets'
+    | '/api/users/$id/guestbook/$noteId'
+    | '/api/users/$id/guestbook/blocks'
     | '/api/channels/$id/uploads/$uploadId/complete'
     | '/api/servers/$id/members/$userId/roles'
+    | '/api/users/$id/guestbook/blocks/$userId'
     | '/api/channels/$id/uploads/$uploadId/parts/$partNumber'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -1272,7 +1376,12 @@ export interface FileRouteTypes {
     | '/api/servers/$id/soundboard'
     | '/api/shared-messages/$token/preview-image'
     | '/api/soundboard/uploads/$id'
+    | '/api/users/$id/activity'
+    | '/api/users/$id/board'
+    | '/api/users/$id/guestbook'
     | '/api/users/$id/profile'
+    | '/api/users/$id/profile-prefs'
+    | '/api/users/$id/wishlist'
     | '/api/invites/$code'
     | '/api/channels/$id/messages/gif'
     | '/api/channels/$id/messages/upload'
@@ -1284,8 +1393,13 @@ export interface FileRouteTypes {
     | '/api/servers/$id/members/$userId'
     | '/api/servers/$id/roles/$roleId'
     | '/api/shared-messages/$token/media/$'
+    | '/api/users/$id/activity/$eventId'
+    | '/api/users/$id/board/assets'
+    | '/api/users/$id/guestbook/$noteId'
+    | '/api/users/$id/guestbook/blocks'
     | '/api/channels/$id/uploads/$uploadId/complete'
     | '/api/servers/$id/members/$userId/roles'
+    | '/api/users/$id/guestbook/blocks/$userId'
     | '/api/channels/$id/uploads/$uploadId/parts/$partNumber'
   id:
     | '__root__'
@@ -1387,7 +1501,12 @@ export interface FileRouteTypes {
     | '/api/servers/$id/soundboard'
     | '/api/shared-messages/$token/preview-image'
     | '/api/soundboard/uploads/$id'
+    | '/api/users/$id/activity'
+    | '/api/users/$id/board'
+    | '/api/users/$id/guestbook'
     | '/api/users/$id/profile'
+    | '/api/users/$id/profile-prefs'
+    | '/api/users/$id/wishlist'
     | '/api/invites/$code/'
     | '/api/channels/$id/messages/gif'
     | '/api/channels/$id/messages/upload'
@@ -1399,8 +1518,13 @@ export interface FileRouteTypes {
     | '/api/servers/$id/members/$userId'
     | '/api/servers/$id/roles/$roleId'
     | '/api/shared-messages/$token/media/$'
+    | '/api/users/$id/activity/$eventId'
+    | '/api/users/$id/board/assets'
+    | '/api/users/$id/guestbook/$noteId'
+    | '/api/users/$id/guestbook/blocks'
     | '/api/channels/$id/uploads/$uploadId/complete'
     | '/api/servers/$id/members/$userId/roles'
+    | '/api/users/$id/guestbook/blocks/$userId'
     | '/api/channels/$id/uploads/$uploadId/parts/$partNumber'
   fileRoutesById: FileRoutesById
 }
@@ -1470,7 +1594,12 @@ export interface RootRouteChildren {
   ApiInvitesCodeJoinRoute: typeof ApiInvitesCodeJoinRoute
   ApiMessagesIdShareRoute: typeof ApiMessagesIdShareRoute
   ApiSoundboardUploadsIdRoute: typeof ApiSoundboardUploadsIdRoute
+  ApiUsersIdActivityRoute: typeof ApiUsersIdActivityRouteWithChildren
+  ApiUsersIdBoardRoute: typeof ApiUsersIdBoardRouteWithChildren
+  ApiUsersIdGuestbookRoute: typeof ApiUsersIdGuestbookRouteWithChildren
   ApiUsersIdProfileRoute: typeof ApiUsersIdProfileRoute
+  ApiUsersIdProfilePrefsRoute: typeof ApiUsersIdProfilePrefsRoute
+  ApiUsersIdWishlistRoute: typeof ApiUsersIdWishlistRoute
   ApiInvitesCodeIndexRoute: typeof ApiInvitesCodeIndexRoute
 }
 
@@ -1938,11 +2067,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiInvitesCodeIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/users/$id/wishlist': {
+      id: '/api/users/$id/wishlist'
+      path: '/api/users/$id/wishlist'
+      fullPath: '/api/users/$id/wishlist'
+      preLoaderRoute: typeof ApiUsersIdWishlistRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/users/$id/profile-prefs': {
+      id: '/api/users/$id/profile-prefs'
+      path: '/api/users/$id/profile-prefs'
+      fullPath: '/api/users/$id/profile-prefs'
+      preLoaderRoute: typeof ApiUsersIdProfilePrefsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/users/$id/profile': {
       id: '/api/users/$id/profile'
       path: '/api/users/$id/profile'
       fullPath: '/api/users/$id/profile'
       preLoaderRoute: typeof ApiUsersIdProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/users/$id/guestbook': {
+      id: '/api/users/$id/guestbook'
+      path: '/api/users/$id/guestbook'
+      fullPath: '/api/users/$id/guestbook'
+      preLoaderRoute: typeof ApiUsersIdGuestbookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/users/$id/board': {
+      id: '/api/users/$id/board'
+      path: '/api/users/$id/board'
+      fullPath: '/api/users/$id/board'
+      preLoaderRoute: typeof ApiUsersIdBoardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/users/$id/activity': {
+      id: '/api/users/$id/activity'
+      path: '/api/users/$id/activity'
+      fullPath: '/api/users/$id/activity'
+      preLoaderRoute: typeof ApiUsersIdActivityRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/soundboard/uploads/$id': {
@@ -2176,6 +2340,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCallsIdAcceptRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/users/$id/guestbook/blocks': {
+      id: '/api/users/$id/guestbook/blocks'
+      path: '/blocks'
+      fullPath: '/api/users/$id/guestbook/blocks'
+      preLoaderRoute: typeof ApiUsersIdGuestbookBlocksRouteImport
+      parentRoute: typeof ApiUsersIdGuestbookRoute
+    }
+    '/api/users/$id/guestbook/$noteId': {
+      id: '/api/users/$id/guestbook/$noteId'
+      path: '/$noteId'
+      fullPath: '/api/users/$id/guestbook/$noteId'
+      preLoaderRoute: typeof ApiUsersIdGuestbookNoteIdRouteImport
+      parentRoute: typeof ApiUsersIdGuestbookRoute
+    }
+    '/api/users/$id/board/assets': {
+      id: '/api/users/$id/board/assets'
+      path: '/assets'
+      fullPath: '/api/users/$id/board/assets'
+      preLoaderRoute: typeof ApiUsersIdBoardAssetsRouteImport
+      parentRoute: typeof ApiUsersIdBoardRoute
+    }
+    '/api/users/$id/activity/$eventId': {
+      id: '/api/users/$id/activity/$eventId'
+      path: '/$eventId'
+      fullPath: '/api/users/$id/activity/$eventId'
+      preLoaderRoute: typeof ApiUsersIdActivityEventIdRouteImport
+      parentRoute: typeof ApiUsersIdActivityRoute
+    }
     '/api/shared-messages/$token/media/$': {
       id: '/api/shared-messages/$token/media/$'
       path: '/media/$'
@@ -2245,6 +2437,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/channels/$id/messages/gif'
       preLoaderRoute: typeof ApiChannelsIdMessagesGifRouteImport
       parentRoute: typeof ApiChannelsIdMessagesRoute
+    }
+    '/api/users/$id/guestbook/blocks/$userId': {
+      id: '/api/users/$id/guestbook/blocks/$userId'
+      path: '/$userId'
+      fullPath: '/api/users/$id/guestbook/blocks/$userId'
+      preLoaderRoute: typeof ApiUsersIdGuestbookBlocksUserIdRouteImport
+      parentRoute: typeof ApiUsersIdGuestbookBlocksRoute
     }
     '/api/servers/$id/members/$userId/roles': {
       id: '/api/servers/$id/members/$userId/roles'
@@ -2564,6 +2763,56 @@ const ApiSharedMessagesTokenRouteWithChildren =
     ApiSharedMessagesTokenRouteChildren,
   )
 
+interface ApiUsersIdActivityRouteChildren {
+  ApiUsersIdActivityEventIdRoute: typeof ApiUsersIdActivityEventIdRoute
+}
+
+const ApiUsersIdActivityRouteChildren: ApiUsersIdActivityRouteChildren = {
+  ApiUsersIdActivityEventIdRoute: ApiUsersIdActivityEventIdRoute,
+}
+
+const ApiUsersIdActivityRouteWithChildren =
+  ApiUsersIdActivityRoute._addFileChildren(ApiUsersIdActivityRouteChildren)
+
+interface ApiUsersIdBoardRouteChildren {
+  ApiUsersIdBoardAssetsRoute: typeof ApiUsersIdBoardAssetsRoute
+}
+
+const ApiUsersIdBoardRouteChildren: ApiUsersIdBoardRouteChildren = {
+  ApiUsersIdBoardAssetsRoute: ApiUsersIdBoardAssetsRoute,
+}
+
+const ApiUsersIdBoardRouteWithChildren = ApiUsersIdBoardRoute._addFileChildren(
+  ApiUsersIdBoardRouteChildren,
+)
+
+interface ApiUsersIdGuestbookBlocksRouteChildren {
+  ApiUsersIdGuestbookBlocksUserIdRoute: typeof ApiUsersIdGuestbookBlocksUserIdRoute
+}
+
+const ApiUsersIdGuestbookBlocksRouteChildren: ApiUsersIdGuestbookBlocksRouteChildren =
+  {
+    ApiUsersIdGuestbookBlocksUserIdRoute: ApiUsersIdGuestbookBlocksUserIdRoute,
+  }
+
+const ApiUsersIdGuestbookBlocksRouteWithChildren =
+  ApiUsersIdGuestbookBlocksRoute._addFileChildren(
+    ApiUsersIdGuestbookBlocksRouteChildren,
+  )
+
+interface ApiUsersIdGuestbookRouteChildren {
+  ApiUsersIdGuestbookNoteIdRoute: typeof ApiUsersIdGuestbookNoteIdRoute
+  ApiUsersIdGuestbookBlocksRoute: typeof ApiUsersIdGuestbookBlocksRouteWithChildren
+}
+
+const ApiUsersIdGuestbookRouteChildren: ApiUsersIdGuestbookRouteChildren = {
+  ApiUsersIdGuestbookNoteIdRoute: ApiUsersIdGuestbookNoteIdRoute,
+  ApiUsersIdGuestbookBlocksRoute: ApiUsersIdGuestbookBlocksRouteWithChildren,
+}
+
+const ApiUsersIdGuestbookRouteWithChildren =
+  ApiUsersIdGuestbookRoute._addFileChildren(ApiUsersIdGuestbookRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActivateRoute: ActivateRoute,
@@ -2630,7 +2879,12 @@ const rootRouteChildren: RootRouteChildren = {
   ApiInvitesCodeJoinRoute: ApiInvitesCodeJoinRoute,
   ApiMessagesIdShareRoute: ApiMessagesIdShareRoute,
   ApiSoundboardUploadsIdRoute: ApiSoundboardUploadsIdRoute,
+  ApiUsersIdActivityRoute: ApiUsersIdActivityRouteWithChildren,
+  ApiUsersIdBoardRoute: ApiUsersIdBoardRouteWithChildren,
+  ApiUsersIdGuestbookRoute: ApiUsersIdGuestbookRouteWithChildren,
   ApiUsersIdProfileRoute: ApiUsersIdProfileRoute,
+  ApiUsersIdProfilePrefsRoute: ApiUsersIdProfilePrefsRoute,
+  ApiUsersIdWishlistRoute: ApiUsersIdWishlistRoute,
   ApiInvitesCodeIndexRoute: ApiInvitesCodeIndexRoute,
 }
 export const routeTree = rootRouteImport
