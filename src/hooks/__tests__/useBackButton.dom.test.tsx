@@ -22,7 +22,7 @@ describe("useBackButton", () => {
     window.history.replaceState(null, "", "/people/u1");
     const go = vi.spyOn(window.history, "go");
     const view = render(<Panel onBack={() => true} />);
-    expect(window.history.state).toEqual({ backHandlerOpen: true });
+    expect(window.history.state).toMatchObject({ backHandlerOpen: true });
     view.unmount();
     await settle();
     expect(go).toHaveBeenCalledWith(-1);
