@@ -8,6 +8,7 @@ import type { IconName } from "@/components/ui/icon";
 import type {
   BoardResponse,
   BoardUserRef,
+  GuestbookDenial,
   QuoteSnapshot,
   WidgetType,
 } from "@/lib/profile-board";
@@ -153,4 +154,24 @@ export function visibleWidgetCount(
   const drafts = new Set(response.drafts);
   return response.board.widgets.filter((widget) => !drafts.has(widget.id))
     .length;
+}
+
+// ── Guestbook ──────────────────────────────────────────────────────────────
+
+/** Why the viewer can't sign, and what would change it, in one line. */
+export function guestbookDenialCopy(
+  denial: GuestbookDenial | null | undefined,
+  ownerName: string,
+): string {
+  switch (denial) {
+    case "GUESTBOOK_OFF":
+      return `${ownerName} closed their guestbook.`;
+    case "GUESTBOOK_BLOCKED":
+      return `You can't sign ${ownerName}'s guestbook.`;
+    case "GUESTBOOK_OWN":
+      return "This is your guestbook.";
+    default:
+      // GUESTBOOK_NO_SHARED_SPACE, and servers that don't send a reason.
+      return `Only people who share a server or a DM with ${ownerName} can sign. Join one of their servers or message them first.`;
+  }
 }

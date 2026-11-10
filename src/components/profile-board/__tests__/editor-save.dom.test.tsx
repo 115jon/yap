@@ -24,6 +24,7 @@ import * as api from "@/lib/profile-board-api";
 import type { BoardResponse, ProfileBoard } from "@/lib/profile-board";
 
 import BoardEditor from "../BoardEditor";
+import { ProfilePanel } from "../ProfilePanel";
 import { draftStorageKey } from "../useBoardEditor";
 import {
   boardOf,
@@ -205,5 +206,33 @@ describe("edit in place: saving", () => {
       "w-count",
     ]);
     expect(localStorage.getItem(draftStorageKey(OWNER.id))).toBeNull();
+  });
+});
+
+describe("the profile panel after a save", () => {
+  it("fetches the board again, so a plate just added gets its data", async () => {
+    const fetchBoard = vi.mocked(api.fetchProfileBoard);
+    fetchBoard.mockReset();
+    fetchBoard.mockResolvedValue(boardOf());
+    save.mockImplementation(async (board, version) => ({
+      board,
+      version: version + 1,
+      drafts: [],
+      dropped: [],
+      updated_at: "2026-11-27T20:31:00Z",
+    }));
+    const { container } = render(
+      <ProfilePanel userId={OWNER.id} isOwner displayName="Jon" now={NOW} />,
+      { wrapper: Providers },
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Edit board" }));
+    await screen.findByRole("button", { name: "Done" });
+    expect(fetchBoard).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(cellOf(container, "w-links"), { key: "Delete" });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    // The save answers with the board but no widget data; the gateway's
+    // update for our own save is skipped (same version), so the panel
+    // refetches by itself.
+    await waitFor(() => expect(fetchBoard).toHaveBeenCalledTimes(2));
   });
 });

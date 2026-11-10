@@ -23,6 +23,7 @@ import * as React from "react";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { FocusScope } from "@radix-ui/react-focus-scope";
 
+import { OverModalScroll } from "./over-modal-scroll";
 import {
   isDialogTopmost,
   KEYBOARD_PRESENCE_VARS,
@@ -249,60 +250,62 @@ function MenuPanel({
       {...{ [FLOATING_LAYER_ATTR]: "" }}
       className="pointer-events-auto"
     >
-      <MenuPrimitive.Positioner
-        side={side ?? (isSubmenu ? "inline-end" : "bottom")}
-        align={align ?? "start"}
-        // Submenus sit 2px off the parent panel with their first row level
-        // with the trigger row (panel padding 4 + border 1).
-        sideOffset={sideOffset ?? (isSubmenu ? 2 : 6)}
-        alignOffset={alignOffset ?? (isSubmenu ? -5 : 0)}
-        collisionPadding={collisionPaddingBelowChrome()}
-        anchor={anchor}
-        className={cn(
-          context?.overModal ? "z-70" : stacked ? "z-60" : "z-50",
-          "outline-none",
-        )}
-      >
-        <MenuPrimitive.Popup
-          data-slot="dropdown-menu-content"
-          data-dialog-root-id={isSubmenu ? undefined : context?.id}
-          data-dialog-back-enabled={isSubmenu ? undefined : "true"}
-          finalFocus={finalFocus}
-          // Supported by Base UI's MenuPopup, not yet in its public types.
-          {...(initialFocus === undefined
-            ? null
-            : ({ initialFocus } as object))}
+      <OverModalScroll overModal={context?.overModal}>
+        <MenuPrimitive.Positioner
+          side={side ?? (isSubmenu ? "inline-end" : "bottom")}
+          align={align ?? "start"}
+          // Submenus sit 2px off the parent panel with their first row level
+          // with the trigger row (panel padding 4 + border 1).
+          sideOffset={sideOffset ?? (isSubmenu ? 2 : 6)}
+          alignOffset={alignOffset ?? (isSubmenu ? -5 : 0)}
+          collisionPadding={collisionPaddingBelowChrome()}
+          anchor={anchor}
           className={cn(
-            MENU_PANEL,
-            "flex max-h-(--available-height) w-max max-w-[min(280px,var(--available-width))] min-w-[200px] flex-col overflow-y-auto text-ink-1 outline-none",
-            PANEL_MOTION,
-            className,
+            context?.overModal ? "z-70" : stacked ? "z-60" : "z-50",
+            "outline-none",
           )}
-          data-keyboard={context?.byKeyboard ? "" : undefined}
-          style={{
-            ...(isSubmenu ? SUBMENU_PRESENCE_VARS : MENU_PRESENCE_VARS),
-            ...(context?.byKeyboard ? KEYBOARD_PRESENCE_VARS : null),
-            ...style,
-          }}
-          {...props}
         >
-          {/*
-           * Pauses the focus trap of a Radix dialog under this menu (Radix
-           * keeps one scope stack). The top-level panel leaves open/close
-           * focus to Base UI (`initialFocus` / `finalFocus`); a submenu lets
-           * the scope focus its first control, so custom submenu content
-           * (a reaction strip, a slider) is reachable from the keyboard, and
-           * hands focus back to its trigger row when it closes.
-           */}
-          <FocusScope
-            asChild
-            onMountAutoFocus={isSubmenu ? undefined : preventDefault}
-            onUnmountAutoFocus={isSubmenu ? undefined : preventDefault}
+          <MenuPrimitive.Popup
+            data-slot="dropdown-menu-content"
+            data-dialog-root-id={isSubmenu ? undefined : context?.id}
+            data-dialog-back-enabled={isSubmenu ? undefined : "true"}
+            finalFocus={finalFocus}
+            // Supported by Base UI's MenuPopup, not yet in its public types.
+            {...(initialFocus === undefined
+              ? null
+              : ({ initialFocus } as object))}
+            className={cn(
+              MENU_PANEL,
+              "flex max-h-(--available-height) w-max max-w-[min(280px,var(--available-width))] min-w-[200px] flex-col overflow-y-auto text-ink-1 outline-none",
+              PANEL_MOTION,
+              className,
+            )}
+            data-keyboard={context?.byKeyboard ? "" : undefined}
+            style={{
+              ...(isSubmenu ? SUBMENU_PRESENCE_VARS : MENU_PRESENCE_VARS),
+              ...(context?.byKeyboard ? KEYBOARD_PRESENCE_VARS : null),
+              ...style,
+            }}
+            {...props}
           >
-            <div className="contents">{children}</div>
-          </FocusScope>
-        </MenuPrimitive.Popup>
-      </MenuPrimitive.Positioner>
+            {/*
+             * Pauses the focus trap of a Radix dialog under this menu (Radix
+             * keeps one scope stack). The top-level panel leaves open/close
+             * focus to Base UI (`initialFocus` / `finalFocus`); a submenu lets
+             * the scope focus its first control, so custom submenu content
+             * (a reaction strip, a slider) is reachable from the keyboard, and
+             * hands focus back to its trigger row when it closes.
+             */}
+            <FocusScope
+              asChild
+              onMountAutoFocus={isSubmenu ? undefined : preventDefault}
+              onUnmountAutoFocus={isSubmenu ? undefined : preventDefault}
+            >
+              <div className="contents">{children}</div>
+            </FocusScope>
+          </MenuPrimitive.Popup>
+        </MenuPrimitive.Positioner>
+      </OverModalScroll>
     </MenuPrimitive.Portal>
   );
 }

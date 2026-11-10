@@ -28,12 +28,13 @@ import {
   GUESTBOOK_PREVIEW,
   TEXT_LIMITS,
   textLength,
+  type BoardData,
   type BoardUserRef,
   type GuestbookNote,
 } from "@/lib/profile-board";
 import { cn } from "@/lib/utils";
 
-import { formatAge, userName } from "../board-format";
+import { formatAge, guestbookDenialCopy, userName } from "../board-format";
 import { useBoardMedia } from "../board-context";
 import { Plate, WidgetEmpty, type WidgetProps } from "./shared";
 
@@ -46,12 +47,25 @@ function errorMessage(error: unknown, fallback: string): string {
     : fallback;
 }
 
+/**
+ * The owner's guestbook before the board's data has it (the plate was just
+ * added in the editor, or saved a moment ago and the data is on its way):
+ * an open, empty book, never "unavailable".
+ */
+const OWNER_PREVIEW: NonNullable<BoardData["guestbook"]> = {
+  enabled: true,
+  notes: [],
+  total: 0,
+  can_post: false,
+  denial: "GUESTBOOK_OWN",
+};
+
 export function GuestbookWidget({
   widget,
   data,
   ctx,
 }: WidgetProps<"guestbook">) {
-  const book = data.guestbook;
+  const book = data.guestbook ?? (ctx.isOwner ? OWNER_PREVIEW : undefined);
   const [added, setAdded] = useState<GuestbookNote[]>([]);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
   const [blocking, setBlocking] = useState<BoardUserRef | null>(null);
@@ -80,9 +94,15 @@ export function GuestbookWidget({
   );
 
   if (!book) {
+    // Only a board fetched without the guestbook's data gets here (a
+    // response from before the plate existed); reopening refetches it.
     return (
       <Plate widget={widget} ctx={ctx}>
-        <WidgetEmpty icon="rules" title="Guestbook unavailable" />
+        <WidgetEmpty
+          icon="rules"
+          title="Couldn't load the guestbook"
+          hint="Close and reopen the profile to try again."
+        />
       </Plate>
     );
   }
@@ -233,8 +253,10 @@ export function GuestbookWidget({
   ) : null;
 
   const foot = !book.enabled ? (
-    <p className="text-ui-xs text-pretty text-ink-3">
-      {ctx.isOwner ? "Your guestbook is closed." : "This guestbook is closed."}
+    <p data-slot="guestbook-note" className="text-ui-xs text-pretty text-ink-3">
+      {ctx.isOwner
+        ? "Your guestbook is closed: nobody can sign it."
+        : guestbookDenialCopy("GUESTBOOK_OFF", ctx.ownerName)}
     </p>
   ) : canPost ? (
     <NoteField
@@ -243,8 +265,10 @@ export function GuestbookWidget({
       onTyping={() => setError(null)}
     />
   ) : !ctx.isOwner ? (
-    <p className="text-ui-xs text-pretty text-ink-3">
-      Only people who share a server or a DM with {ctx.ownerName} can sign.
+    <p data-slot="guestbook-note" className="text-ui-xs text-pretty text-ink-3">
+      {ctx.viewer
+        ? guestbookDenialCopy(book.denial, ctx.ownerName)
+        : `Sign in to leave ${ctx.ownerName} a note.`}
     </p>
   ) : null;
 

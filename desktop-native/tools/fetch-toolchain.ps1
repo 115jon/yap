@@ -40,16 +40,20 @@ if ((Test-Path $stamp) -and ((Get-Content -Raw $stamp).Trim() -eq $lockHash) -an
     (Test-Path "$Dest/qt/bin/qmake.exe") -and (Test-Path "$Dest/libwebrtc/lib")) {
     Write-Host "==> toolchain $($toolchain.tag) already unpacked in $Dest"
 } else {
-    foreach ($asset in $toolchain.assets) {
-        if (Test-Asset $asset) {
-            Write-Host "==> $($asset.name): cached, checksum ok"
-            continue
+    # Every missing asset in one gh call, which downloads them side by side.
+    $missing = @($toolchain.assets | Where-Object { -not (Test-Asset $_) })
+    foreach ($asset in $toolchain.assets | Where-Object { $_ -notin $missing }) {
+        Write-Host "==> $($asset.name): cached, checksum ok"
+    }
+    if ($missing) {
+        Write-Host "==> downloading $(($missing | ForEach-Object { "$($_.name) ($([math]::Round([long]$_.size / 1MB)) MB)" }) -join ', ')"
+        $patterns = $missing | ForEach-Object { "--pattern", $_.name }
+        gh release download $toolchain.tag --repo $Repo @patterns --dir $DownloadDir --clobber
+        if ($LASTEXITCODE) { throw "gh release download $($toolchain.tag) failed ($LASTEXITCODE)" }
+        foreach ($asset in $missing) {
+            if (-not (Test-Asset $asset)) { throw "$($asset.name) does not match tools/toolchain.lock.json (size or SHA-256)" }
         }
-        Write-Host "==> downloading $($asset.name) ($([math]::Round([long]$asset.size / 1MB)) MB)"
-        gh release download $toolchain.tag --repo $Repo --pattern $asset.name --dir $DownloadDir --clobber
-        if ($LASTEXITCODE) { throw "gh release download $($toolchain.tag) $($asset.name) failed ($LASTEXITCODE)" }
-        if (-not (Test-Asset $asset)) { throw "$($asset.name) does not match tools/toolchain.lock.json (size or SHA-256)" }
-        Write-Host "    checksum ok"
+        Write-Host "    checksums ok"
     }
 
     foreach ($dir in @("qt", "libwebrtc")) {
@@ -58,11 +62,18 @@ if ((Test-Path $stamp) -and ((Get-Content -Raw $stamp).Trim() -eq $lockHash) -an
     $sevenZip = (Get-Command 7z -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1)
     $sevenZip = if ($sevenZip) { $sevenZip.Source } else { "$env:ProgramFiles\7-Zip\7z.exe" }
     if (-not (Test-Path $sevenZip)) { throw "7-Zip not found" }
-    # One archive per component; a split one is opened at its first volume.
-    foreach ($first in $toolchain.assets | Where-Object { $_.name -match '\.7z(\.001)?$' }) {
+    # One archive per component, unpacked side by side (each 7z is mostly
+    # writing small files); a split one is opened at its first volume.
+    $unpack = foreach ($first in $toolchain.assets | Where-Object { $_.name -match '\.7z(\.001)?$' }) {
         Write-Host "==> unpacking $($first.name)"
-        & $sevenZip x -y -bso0 -bsp0 "-o$Dest" (Join-Path $DownloadDir $first.name)
-        if ($LASTEXITCODE) { throw "7z x $($first.name) failed ($LASTEXITCODE)" }
+        $p = Start-Process -FilePath $sevenZip -NoNewWindow -PassThru -ArgumentList @(
+            "x", "-y", "-bso0", "-bsp0", "`"-o$Dest`"", "`"$(Join-Path $DownloadDir $first.name)`"")
+        $null = $p.Handle  # keeps the exit code readable after it exits
+        [pscustomobject]@{ Name = $first.name; Process = $p }
+    }
+    foreach ($u in $unpack) {
+        $u.Process.WaitForExit()
+        if ($u.Process.ExitCode) { throw "7z x $($u.Name) failed ($($u.Process.ExitCode))" }
     }
     if (-not (Test-Path "$Dest/qt/bin/qmake.exe")) { throw "The Qt archive has no qt/bin/qmake.exe" }
     if (-not (Test-Path "$Dest/libwebrtc/lib")) { throw "The libwebrtc archive has no libwebrtc/lib" }

@@ -5,8 +5,15 @@
  * demand, like Activity and Wishlist).
  *
  * The panel is a size container: below 540px (the phone sheet) its gutters
- * drop to 16px. It does not scroll itself; the modal owns the scroller, and
- * the tab strip sticks to its top.
+ * drop to 16px. The host decides whether it scrolls (the desktop modal caps
+ * its height and makes it the scroller; the phone sheet scrolls it with the
+ * card); the tab strip sticks to the scroller's top. Neither part shrinks,
+ * so a capped panel scrolls instead of squashing the strip.
+ *
+ * The owner's empty board is not a lone message at the foot of the
+ * profile: it is the Rack's own shape (BoardEmpty), a full-width plate with
+ * the call to action over dashed slots for the widgets people add first,
+ * in the board column beside the profile card.
  */
 
 import { lazy, Suspense, useId, useState, type ReactNode } from "react";
@@ -16,15 +23,17 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import { Num } from "@/components/ui/num";
 import { Tabs, tabId, type TabItem } from "@/components/ui/tabs";
-import type {
-  ActivityPage,
-  BoardResponse,
-  QuoteSnapshot,
-  WishlistItem,
+import {
+  WIDGET_SPECS,
+  type ActivityPage,
+  type BoardResponse,
+  type QuoteSnapshot,
+  type WidgetType,
+  type WishlistItem,
 } from "@/lib/profile-board";
 import { cn } from "@/lib/utils";
 
-import { visibleWidgetCount } from "./board-format";
+import { visibleWidgetCount, WIDGET_ICON } from "./board-format";
 import { ProfileBoard } from "./ProfileBoard";
 import { useProfileBoard } from "./useProfileBoard";
 
@@ -54,6 +63,11 @@ export interface ProfilePanelProps {
   /** Frozen clock (fixtures, tests). */
   now?: number;
   className?: string;
+  /**
+   * Classes for the sticky tab strip (the profile modal keeps its end clear
+   * of the dialog's close key).
+   */
+  headerClassName?: string;
 }
 
 export function ProfilePanel({
@@ -67,6 +81,7 @@ export function ProfilePanel({
   onOpenMessage,
   now,
   className,
+  headerClassName,
 }: ProfilePanelProps) {
   const idBase = useId();
   const panelId = `${idBase}-panel`;
@@ -126,7 +141,14 @@ export function ProfilePanel({
         <BoardEditor
           initial={response}
           onExit={(next) => {
-            if (next) board.replace(next);
+            if (next) {
+              board.replace(next);
+              // A save answers with the board, not its data: a plate just
+              // added (Guestbook, Listening, Top games…) has nothing to show
+              // until the board is fetched again. The gateway's update for
+              // our own save is skipped (same version), so fetch it here.
+              if (next.version !== response.version) board.retry();
+            }
             setEditing(false);
           }}
           onOpenStudio={onOpenStudio}
@@ -148,17 +170,7 @@ export function ProfilePanel({
       );
   } else if (response.board.widgets.length === 0 || count === 0) {
     body = owns ? (
-      <EmptyState
-        data-slot="board-empty"
-        title="Your board is empty"
-        description="Add what you're playing, your mood, photos or a countdown. Everyone who opens your profile sees it."
-        action={
-          <Button variant="primary" onClick={() => setEditing(true)}>
-            Edit board
-          </Button>
-        }
-        className="min-h-[320px]"
-      />
+      <BoardEmpty onEdit={() => setEditing(true)} />
     ) : (
       <p
         data-slot="board-empty"
@@ -186,7 +198,12 @@ export function ProfilePanel({
         className,
       )}
     >
-      <div className="sticky top-0 z-10 flex h-14 items-end gap-3 border-b border-line bg-ply-3 px-7 @max-[540px]/panel:h-12 @max-[540px]/panel:px-4">
+      <div
+        className={cn(
+          "sticky top-0 z-10 flex h-14 shrink-0 items-end gap-3 border-b border-line bg-ply-3 px-7 @max-[540px]/panel:h-12 @max-[540px]/panel:px-4",
+          headerClassName,
+        )}
+      >
         <Tabs
           label={`${displayName}'s profile`}
           items={items}
@@ -216,7 +233,7 @@ export function ProfilePanel({
         id={panelId}
         role="tabpanel"
         aria-labelledby={tabId(idBase, tab)}
-        className="px-7 pt-5 pb-7 @max-[540px]/panel:px-4 @max-[540px]/panel:pt-4 @max-[540px]/panel:pb-6"
+        className="shrink-0 px-7 pt-5 pb-7 @max-[540px]/panel:px-4 @max-[540px]/panel:pt-4 @max-[540px]/panel:pb-6"
       >
         {body}
       </div>
@@ -229,6 +246,74 @@ function TabLoading() {
     <p role="status" className="py-6 text-ui-sm text-ink-3">
       Loading…
     </p>
+  );
+}
+
+/** The widgets an empty board suggests first, as dashed Rack slots. */
+const EMPTY_SLOTS: readonly WidgetType[] = [
+  "now_playing",
+  "mood",
+  "photos",
+  "countdown",
+];
+
+/**
+ * The owner's empty board, in the Rack's shape: a full-width plate with
+ * the call to action (EmptyState) over dashed S slots for the widgets
+ * people add first. A slot is a mouse shortcut into the editor; keyboard
+ * and screen reader users get the one "Edit board" button. Below 540px of
+ * rack the slots drop to one row.
+ */
+function BoardEmpty({ onEdit }: { onEdit(): void }) {
+  return (
+    <div data-slot="board-empty" className="@container/rack pt-2">
+      <div className="grid grid-cols-2 gap-x-3.5 gap-y-[22px] @max-[540px]/rack:gap-x-2.5 @max-[540px]/rack:gap-y-5">
+        <section
+          aria-label="Your board"
+          className="relative col-span-2 rounded-[2px] border border-line-strong bg-ply-2 [--legend-ground:var(--plate-ground,var(--ply-3))]"
+        >
+          <span
+            aria-hidden="true"
+            className="silkscreen pointer-events-none absolute -top-[7px] left-2.5 inline-flex items-center gap-1.5 bg-(--legend-ground) px-1 text-ink-2"
+          >
+            <Icon name="sparkle" size="xs" />
+            Your board
+          </span>
+          <EmptyState
+            size="sm"
+            title="Your board is empty"
+            description="Add what you're playing, your mood, photos or a countdown. Everyone who opens your profile sees it."
+            action={
+              <Button variant="primary" size="sm" onClick={onEdit}>
+                <Icon name="edit" size="sm" />
+                Edit board
+              </Button>
+            }
+            className="py-7"
+          />
+        </section>
+        {EMPTY_SLOTS.map((type, index) => (
+          <button
+            key={type}
+            type="button"
+            tabIndex={-1}
+            aria-hidden="true"
+            data-slot="board-empty-slot"
+            onClick={onEdit}
+            className={cn(
+              "group/slot flex h-[calc(var(--rack-unit,168px)*0.6)] min-w-0 flex-col items-center justify-center gap-1.5 rounded-[2px] border border-dashed border-line-strong px-3 text-ink-3 transition-colors duration-(--dur-1)",
+              "pointer-fine:hover:border-ink-3 pointer-fine:hover:bg-tint-1 pointer-fine:hover:text-ink-2",
+              index >= 2 && "@max-[540px]/rack:hidden",
+            )}
+          >
+            <Icon name={WIDGET_ICON[type]} size="md" />
+            <span className="silkscreen max-w-full truncate">
+              {WIDGET_SPECS[type].name}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
