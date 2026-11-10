@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Qt's splash (the activity's android.app.splash_screen_drawable, kept
+     until main.cpp hides it at the first frame) and the window background
+     before Android 12: the theme's ply-0 with the mark in the middle. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splash_background" />
+    <item
+        android:width="128dp"
+        android:height="128dp"
+        android:gravity="center"
+        android:drawable="@drawable/yap_mark" />
+</layer-list>
