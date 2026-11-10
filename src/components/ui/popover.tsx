@@ -24,6 +24,7 @@ import * as React from "react";
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { FocusScope } from "@radix-ui/react-focus-scope";
 
+import { OverModalScroll } from "./over-modal-scroll";
 import {
   isDialogTopmost,
   KEYBOARD_PRESENCE_VARS,
@@ -242,57 +243,59 @@ const PopoverContent = React.forwardRef<HTMLDivElement, PopoverContentProps>(
         // on <body>; the popover must still take clicks.
         className="pointer-events-auto"
       >
-        <PopoverPrimitive.Positioner
-          side={side}
-          align={align}
-          sideOffset={sideOffset}
-          alignOffset={alignOffset}
-          collisionPadding={collisionPaddingBelowChrome(collisionPadding)}
-          anchor={anchor}
-          className={cn(
-            context?.overModal ? "z-70" : stacked ? "z-60" : "z-50",
-            "outline-none",
-            positionerClassName,
-          )}
-        >
-          <PopoverPrimitive.Popup
-            ref={ref}
-            data-slot="popover-content"
-            data-dialog-root-id={context?.id}
-            data-dialog-back-enabled="true"
-            initialFocus={initialFocus}
-            finalFocus={finalFocus}
+        <OverModalScroll overModal={context?.overModal}>
+          <PopoverPrimitive.Positioner
+            side={side}
+            align={align}
+            sideOffset={sideOffset}
+            alignOffset={alignOffset}
+            collisionPadding={collisionPaddingBelowChrome(collisionPadding)}
+            anchor={anchor}
             className={cn(
-              MENU_PANEL,
-              VARIANT[variant],
-              "flex max-h-(--available-height) origin-(--transform-origin) flex-col overflow-y-auto text-ink-1 outline-none",
-              // Presence (styles/motion.css): fade + scale from the anchor.
-              "rm-presence",
-              className,
+              context?.overModal ? "z-70" : stacked ? "z-60" : "z-50",
+              "outline-none",
+              positionerClassName,
             )}
-            data-keyboard={context?.byKeyboard ? "" : undefined}
-            style={{
-              ...POPOVER_PRESENCE_VARS,
-              ...(context?.byKeyboard ? KEYBOARD_PRESENCE_VARS : null),
-              ...style,
-            }}
-            {...props}
           >
-            {/*
-             * Pauses the focus trap of a Radix dialog under this popover
-             * (Radix keeps one scope stack); see ui/drawer.tsx. Its own
-             * auto-focus is off so Base UI's `initialFocus` / return focus
-             * decide where focus goes, not "first focusable".
-             */}
-            <FocusScope
-              asChild
-              onMountAutoFocus={preventDefault}
-              onUnmountAutoFocus={preventDefault}
+            <PopoverPrimitive.Popup
+              ref={ref}
+              data-slot="popover-content"
+              data-dialog-root-id={context?.id}
+              data-dialog-back-enabled="true"
+              initialFocus={initialFocus}
+              finalFocus={finalFocus}
+              className={cn(
+                MENU_PANEL,
+                VARIANT[variant],
+                "flex max-h-(--available-height) origin-(--transform-origin) flex-col overflow-y-auto text-ink-1 outline-none",
+                // Presence (styles/motion.css): fade + scale from the anchor.
+                "rm-presence",
+                className,
+              )}
+              data-keyboard={context?.byKeyboard ? "" : undefined}
+              style={{
+                ...POPOVER_PRESENCE_VARS,
+                ...(context?.byKeyboard ? KEYBOARD_PRESENCE_VARS : null),
+                ...style,
+              }}
+              {...props}
             >
-              <div className="contents">{children}</div>
-            </FocusScope>
-          </PopoverPrimitive.Popup>
-        </PopoverPrimitive.Positioner>
+              {/*
+               * Pauses the focus trap of a Radix dialog under this popover
+               * (Radix keeps one scope stack); see ui/drawer.tsx. Its own
+               * auto-focus is off so Base UI's `initialFocus` / return focus
+               * decide where focus goes, not "first focusable".
+               */}
+              <FocusScope
+                asChild
+                onMountAutoFocus={preventDefault}
+                onUnmountAutoFocus={preventDefault}
+              >
+                <div className="contents">{children}</div>
+              </FocusScope>
+            </PopoverPrimitive.Popup>
+          </PopoverPrimitive.Positioner>
+        </OverModalScroll>
       </PopoverPrimitive.Portal>
     );
   },
