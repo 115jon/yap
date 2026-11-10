@@ -321,5 +321,10 @@ jobs:
       - name: Build for the iOS simulator (x86_64, release)
         run: bash desktop-native/mobile/qt/build.sh ios-simulator Release
 
-      - name: Size
-        run: du -sh "$YAPM"/build/qt-ios-simulator-Release/*.app
+      # The static plugins linked in (Q_IMPORT_PLUGIN's initializers): the
+      # platform, image formats and the QML modules' plugins.
+      - name: Size and linked plugins
+        run: |
+          app="$YAPM/build/qt-ios-simulator-Release/yapqt.app"
+          du -sh "$app"
+          nm "$app/yapqt" | grep -oE 'qt_static_plugin_[A-Za-z0-9_]+' | sort -u
