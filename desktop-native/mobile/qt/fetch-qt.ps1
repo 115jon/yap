@@ -102,7 +102,10 @@ foreach ($name in $Set) {
     $s = $s.Value
     $prefix = Join-Path $Dest $s.dir
     # The stamp is the set's archive list: a re-pinned lock unpacks afresh.
-    $want = ($s.archives | ForEach-Object { "$($_.sha256) $($_.url) $($_.PSObject.Properties['subdir'].Value)" }) -join "`n"
+    $want = ($s.archives | ForEach-Object {
+        $sub = if ($_.PSObject.Properties['subdir']) { " $($_.subdir)" } else { "" }
+        "$($_.sha256) $($_.url)$sub"
+    }) -join "`n"
     $stamp = Join-Path $prefix ".qt-sdk-lock"
     if ((Test-Path $stamp) -and ((Get-Content -Raw $stamp) -eq $want)) {
         Write-Host "==> $name already unpacked in $prefix"
