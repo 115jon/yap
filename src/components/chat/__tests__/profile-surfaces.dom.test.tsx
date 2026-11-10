@@ -126,10 +126,36 @@ describe("UserProfileModal", () => {
     expect(document.body.querySelectorAll(SOLID)).toHaveLength(0);
   });
 
+  it("puts the board column beside the card, inside a size container", async () => {
+    render(<UserProfileModal open user={grace} onClose={() => {}} />);
+    const panel = await waitFor(() => {
+      const found = document.body.querySelector<HTMLElement>(
+        '[data-slot="profile-panel"]',
+      );
+      if (!found) throw new Error("no panel yet");
+      return found;
+    });
+    const grid = panel.parentElement!;
+    expect(grid.className).toContain("@min-[720px]/profile:grid-cols-");
+    // A container query never matches the element that declares the
+    // container: the grid needs the container on an ancestor, or the two
+    // columns never come and the board sits under the card, out of reach.
+    const declares = (el: Element) =>
+      el.className.split(/\s+/).includes("@container/profile");
+    expect(declares(grid)).toBe(false);
+    expect(declares(grid.parentElement!)).toBe(true);
+  });
+
   it("has no fake tabs and one solid button", async () => {
     render(<UserProfileModal open user={grace} onClose={() => {}} />);
     await screen.findByRole("button", { name: "Message" });
-    expect(screen.queryByRole("tab")).toBeNull();
+    // The board column's Board · Activity · Wishlist tabs are real; the
+    // card itself has none.
+    expect(
+      screen
+        .queryAllByRole("tab")
+        .filter((tab) => !tab.closest('[data-slot="profile-panel"]')),
+    ).toHaveLength(0);
     expect(document.body.querySelectorAll(SOLID)).toHaveLength(1);
   });
 

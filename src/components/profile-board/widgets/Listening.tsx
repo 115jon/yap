@@ -1,11 +1,14 @@
 /**
  * Listening: the owner's last Listen Together session. Another user's live
  * room state is not on this client, so the widget shows the last session
- * the server recorded (no LED: nothing here is live).
+ * the server recorded (no LED: nothing here is live). The voice room writes
+ * it when a session of ACTIVITY_MIN_LISTEN_TRACKS or more ends; until then
+ * the plate says how one gets here.
  */
 
 import { Icon } from "@/components/ui/icon";
 import { Num } from "@/components/ui/num";
+import { ACTIVITY_MIN_LISTEN_TRACKS } from "@/lib/profile-board";
 import { cn } from "@/lib/utils";
 
 import { formatAgo } from "../board-format";
@@ -20,16 +23,23 @@ export function ListeningWidget({
   const now = ctx.at;
 
   if (!last || last.tracks <= 0) {
+    // Say what will show here and how it gets here: an empty plate that
+    // only said "No Listen Together yet" read as a missing feature.
     return (
       <Plate widget={widget} ctx={ctx}>
         <WidgetEmpty
           icon="headphones"
-          title="No Listen Together yet"
-          hint={
-            widget.size === "M"
-              ? "Sessions of 3 tracks or more show up here."
-              : undefined
+          title={
+            ctx.isOwner
+              ? "Your last Listen Together shows here"
+              : "No Listen Together to show"
           }
+          hint={
+            ctx.isOwner
+              ? `In a voice channel, open the Soundboard and pick Listen Together. Sessions of ${ACTIVITY_MIN_LISTEN_TRACKS} tracks or more count.`
+              : `${ctx.ownerName}'s last session of ${ACTIVITY_MIN_LISTEN_TRACKS} tracks or more in voice shows here.`
+          }
+          className="[&>p:last-child]:line-clamp-3 @max-[200px]/cell:[&>p:last-child]:line-clamp-2"
         />
       </Plate>
     );
