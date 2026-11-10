@@ -161,6 +161,7 @@ jobs:
             "$RUNNER_TEMP/swift/yap_mobile.swift"
 
   qt-android:
+    name: qt-android (${{ matrix.abi }})
     needs: changes
     if: ${{ needs.changes.outputs.qt == 'true' }}
     runs-on: ubuntu-latest
