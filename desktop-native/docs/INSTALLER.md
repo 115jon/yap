@@ -227,10 +227,12 @@ which pins a client to that release's feed.
 unauthenticated API call, `GET /repos/115jon/yap/releases?per_page=100`
 (up to three pages while no native release has turned up), within the API's
 60 requests an hour per IP. From the list it keeps the **native releases**:
-not drafts, tag `desktop-native-v` plus a semver, and on stable neither a
-GitHub pre-release nor a pre-release version; beta keeps them all. The
-web app's `v3.x`, `mobile-v*`, `cef-build-assets` and the
-`native-toolchain-*` release never match. It then reads
+not drafts, tag `desktop-native-v` plus a semver (the legacy form) or `v`
+plus a semver whose major is 4 or more (the plain release line is the
+native app's from 4.0.0), and on stable neither a GitHub pre-release nor a
+pre-release version; beta keeps them all. The Tauri app's `v3.x` and
+older, `mobile-v*`, `cef-build-assets` and the `native-toolchain-*`
+release never match (`release_tag_version`). It then reads
 `releases.<channel>.json` from the newest native release that has one, and
 downloads each package from the newest native release that has a file of
 that name, both from the public download URLs (GitHub's CDN, no API call).
@@ -608,7 +610,10 @@ alph-obs-signed-hook` by
   already resident in them; otherwise they use WGC.
 - **Licence.** The files are GPL-2.0, run as separate processes and a
   separate DLL, never linked; the corresponding source is named in the
-  lock's `sources`.
+  lock's `sources`. The package carries `obs-capture\LICENSE-GPLv2.txt`
+  and `obs-capture\SOURCE-OFFER.md` (from `packaging/obs-capture/`), and
+  the release workflow attaches the source archives (`package.ps1
+-ObsSourcesDir`, uploaded with the packages).
 
 ## Signing
 
