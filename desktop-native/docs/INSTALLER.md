@@ -711,19 +711,35 @@ is cached: the toolchain archives (above), the crates (a few seconds from
 crates.io) and ONNX Runtime (2 s from nuget.org) download each run.
 
 **Toolchain.** No action provides a static, patched Qt, so it comes from
-the `native-toolchain-qt6.11.3-yap-webrtc-a545de4` release (a pre-release,
-never latest): the Qt build (`patches/qt/build-qt.ps1`, MSVC 14.44, LTCG)
-pruned by `tools/toolchain-qt.exclude`, and LiveKit's libwebrtc
-`webrtc-a545de4` as `webrtc-sys` downloads it. `tools/package-toolchain.ps1`
-makes the archives (7-Zip, volumes under 2 GB) and
-`tools/toolchain.lock.json` (every asset's size and SHA-256);
-`tools/fetch-toolchain.ps1` downloads them, checks them against the lock,
-unpacks them and sets `YAP_QT_DIR`, `QMAKE`, `YAP_LIBWEBRTC_DIR` and
+the `native-toolchain-qt6.11.3-yap-webrtc-a545de4-r2` release (a
+pre-release, never latest): the Qt build (`patches/qt/build-qt.ps1`, MSVC
+14.44, LTCG) without its docs, SBOMs and PDBs (`tools/toolchain-qt.exclude`),
+and LiveKit's libwebrtc `webrtc-a545de4` as `webrtc-sys` downloads it.
+`tools/package-toolchain.ps1` makes the archives (7-Zip, volumes under
+2 GB), their `*.contents.sha256` lists (every file's SHA-256) and
+`tools/toolchain.lock.json` (every asset's size and SHA-256). Before it
+writes the lock it lists each archive (`7z l -slt`), unpacks it into a
+scratch folder and compares every file's size and SHA-256 with the source,
+and it refuses a packed file that holds the packing PC's profile path (the
+release is public). `tools/fetch-toolchain.ps1` downloads the assets,
+checks them against the lock, refuses a contents list with an empty `.lib`
+or `.obj`, unpacks the archives, hashes every unpacked file against the
+contents lists, and sets `YAP_QT_DIR`, `QMAKE`, `YAP_LIBWEBRTC_DIR` and
 `LK_CUSTOM_WEBRTC`. Both archives download in one `gh` call and unpack side
-by side (about 30 s). They are not cached: the download takes about 15 s,
-no faster from the Actions cache, and the cache budget goes to sccache.
-The Qt archive adds `bin/qt.conf` (`Prefix = ..`): a static Qt is not
-relocatable, and cxx-qt asks qmake for its paths.
+by side: 702 MB of Qt (8.4 GB unpacked) and 47 MB of libwebrtc (0.4 GB).
+On the packing PC (24 threads) the whole fetch took 56 s, of which the
+contents check (45,537 files, 8.6 GB, just unpacked) took 6 s. They are not cached: the download is no faster from the Actions
+cache, and the cache budget goes to sccache. The Qt archive adds
+`bin/qt.conf` (`Prefix = ..`): a static Qt is not relocatable, and cxx-qt
+asks qmake for its paths. Its `bin/qt-cmake*.bat` use the `cmake` on PATH
+instead of the packing PC's.
+
+The first release, `native-toolchain-qt6.11.3-yap-webrtc-a545de4` (kept for
+old commits), packed 176 Qt libraries and objects that a clean build did
+not read as empty files. `import QtQuick.Window` (the profile board's
+`WidgetImage.qml`) linked one of them, and the link failed with
+`LNK1136: invalid or corrupt file`. Every library and object is now packed
+whole.
 
 Qt's libraries are link-time code, which links only with the MSVC that
 compiled them: the build job runs on `windows-2022` (Visual Studio 2022,

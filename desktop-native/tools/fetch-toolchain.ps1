@@ -1,7 +1,9 @@
 # Downloads, checks and unpacks the native build toolchain: the static,
 # patched Qt 6.11.3 and LiveKit's prebuilt libwebrtc, from the GitHub release
 # that tools/package-toolchain.ps1 made. tools/toolchain.lock.json names the
-# release and every asset's size and SHA-256; any mismatch stops here.
+# release and every asset's size and SHA-256; any mismatch stops here, and
+# so does any unpacked file that differs from the archive's
+# *.contents.sha256 list.
 #
 #   ./tools/fetch-toolchain.ps1 -Dest D:/toolchain                   # gh CLI, signed in
 #   ./tools/fetch-toolchain.ps1 -Dest $env:RUNNER_TEMP/tc -DownloadDir $env:RUNNER_TEMP/tc-dl
@@ -20,6 +22,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+. "$PSScriptRoot/toolchain-files.ps1"
 
 $lockText = Get-Content -Raw $Lock
 $toolchain = $lockText | ConvertFrom-Json
@@ -56,6 +59,21 @@ if ((Test-Path $stamp) -and ((Get-Content -Raw $stamp).Trim() -eq $lockHash) -an
         Write-Host "    checksums ok"
     }
 
+    # The contents lists (*.contents.sha256: "<sha256>  <component>/<path>").
+    # An empty library or object never links (LNK1136), so a list with one
+    # is refused before anything is unpacked.
+    $want = @{}
+    foreach ($list in $toolchain.assets | Where-Object { $_.name -like '*.contents.sha256' }) {
+        foreach ($line in [IO.File]::ReadAllLines((Join-Path $DownloadDir $list.name))) {
+            if ($line -notmatch '^([0-9a-f]{64})  ([^/]+/.+)$') { throw "$($list.name): unreadable line '$line'" }
+            $want[$Matches[2]] = $Matches[1]
+        }
+    }
+    if (-not $want.Count) { throw "tools/toolchain.lock.json lists no *.contents.sha256" }
+    $empty = @($want.Keys | Where-Object { $want[$_] -eq $EmptySha256 -and $_ -match '\.(lib|obj)$' } | Sort-Object)
+    if ($empty) { throw "The toolchain packs $($empty.Count) empty libraries or objects, which do not link:`n  $(($empty | Select-Object -First 20) -join "`n  ")" }
+    $components = @($want.Keys | ForEach-Object { $_.Split('/')[0] } | Sort-Object -Unique)
+
     foreach ($dir in @("qt", "libwebrtc")) {
         if (Test-Path "$Dest/$dir") { Remove-Item -Recurse -Force "$Dest/$dir" }
     }
@@ -77,6 +95,27 @@ if ((Test-Path $stamp) -and ((Get-Content -Raw $stamp).Trim() -eq $lockHash) -an
     }
     if (-not (Test-Path "$Dest/qt/bin/qmake.exe")) { throw "The Qt archive has no qt/bin/qmake.exe" }
     if (-not (Test-Path "$Dest/libwebrtc/lib")) { throw "The libwebrtc archive has no libwebrtc/lib" }
+
+    # Every unpacked file against its archive's contents list (hashed in
+    # parallel): a missing, extra, emptied or changed file stops here, not
+    # at the link.
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $got = @(foreach ($dir in $components) {
+        $root = (Resolve-Path "$Dest/$dir").Path
+        Get-ChildItem -Recurse -File -Force $root | ForEach-Object {
+            [pscustomobject]@{ Rel = "$dir/" + ($_.FullName.Substring($root.Length + 1) -replace '\\', '/'); Path = $_.FullName; Length = $_.Length }
+        }
+    })
+    $digests = Get-FileDigests $got
+    $bad = [Collections.Generic.List[string]]::new()
+    foreach ($rel in $want.Keys) {
+        if (-not $digests.ContainsKey($rel)) { $bad.Add("missing: $rel") }
+        elseif ($digests[$rel].Hash -ne $want[$rel]) { $bad.Add("SHA-256 differs ($($digests[$rel].Length) bytes): $rel") }
+    }
+    foreach ($rel in $digests.Keys) { if (-not $want.ContainsKey($rel)) { $bad.Add("not in the contents list: $rel") } }
+    if ($bad.Count) { throw "The unpacked toolchain does not match its contents lists ($($bad.Count)):`n  $(($bad | Sort-Object | Select-Object -First 40) -join "`n  ")" }
+    $gb = [math]::Round((($got | Measure-Object Length -Sum).Sum) / 1GB, 1)
+    Write-Host "==> contents ok: $($digests.Count) files, $gb GB, SHA-256 in $([math]::Round($watch.Elapsed.TotalSeconds, 1)) s"
     Set-Content -LiteralPath $stamp -Value $lockHash -NoNewline
 }
 

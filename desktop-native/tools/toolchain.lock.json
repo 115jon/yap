@@ -1,13 +1,12 @@
 {
-  "tag": "native-toolchain-qt6.11.3-yap-webrtc-a545de4",
+  "tag": "native-toolchain-qt6.11.3-yap-webrtc-a545de4-r2",
   "msvc": "14.44.35207",
   "qt": {
     "version": "6.11.3",
     "build": "qt-custom-6.11p8",
     "script": "desktop-native/patches/qt/build-qt.ps1",
     "patches": "desktop-native/patches/qt/6.11.3",
-    "files": 6781,
-    "stubs": 176
+    "files": 6782
   },
   "libwebrtc": {
     "build": "webrtc-a545de4",
@@ -18,13 +17,13 @@
   "assets": [
     {
       "name": "qt-6.11.3-yap-p8-msvc-x64-static.7z.001",
-      "size": 456363316,
-      "sha256": "b3fd97981bc7e4df0f9adb5ca289e8f021388429e9947e7b2e1a61494426cf8d"
+      "size": 735976675,
+      "sha256": "6d99f3ce5a5875816a1d184e20c18c1fe033b9b9a0bab57f0904230b656150f8"
     },
     {
       "name": "qt-6.11.3-yap-p8-msvc-x64-static.7z.contents.sha256",
       "size": 828375,
-      "sha256": "1a55576e8d76463a7b17e2ac513c9cad77579f98ac4026b167b799877aaaee58"
+      "sha256": "0d85f09ae096e82a390c1e8675b5bae5211ebed5c9c74baa05e0941dfc987b8c"
     },
     {
       "name": "libwebrtc-webrtc-a545de4-win-x64-release.7z.001",
