@@ -66,11 +66,11 @@ async fn device_post(
 pub const DEVICE_LABEL: &str = "Yap";
 
 pub async fn start(http: &Client) -> Result<DeviceStart, AuthError> {
-    let hostname = std::env::var("COMPUTERNAME").ok();
+    let cfg = config::get();
     let (status, body) = device_post(
         http,
         "start",
-        json!({ "platform": "windows", "label": DEVICE_LABEL, "hostname": hostname }),
+        json!({ "platform": cfg.platform, "label": DEVICE_LABEL, "hostname": cfg.device_name }),
     )
     .await?;
     if !status.is_success() {

@@ -296,14 +296,29 @@ fn log_migration(root: &Path, migration: &Migration) {
     }
 }
 
+/// The folder the app's data lives under, when the app names it ([`set_base`]).
+static BASE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Names the folder the app's data lives under, in place of
+/// `%LOCALAPPDATA%`: a phone app's private data folder. Call it before
+/// anything reads [`data_root`] (it resolves once); `false` if a base was
+/// already set.
+pub fn set_base(base: PathBuf) -> bool {
+    BASE.set(base).is_ok()
+}
+
 /// This process's app folder, resolved (and the old folder moved) once,
 /// for the Rust side and the C++ shell alike (`yap_profile_data_root`).
-/// `None` without `LOCALAPPDATA`.
+/// Under the app's base ([`set_base`]), else `%LOCALAPPDATA%`; `None`
+/// without either.
 pub fn data_root() -> Option<PathBuf> {
     static ROOT: OnceLock<Option<PathBuf>> = OnceLock::new();
     ROOT.get_or_init(|| {
-        let base = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty())?;
-        Some(resolve_root(Path::new(&base), current()).0)
+        let base = match BASE.get() {
+            Some(base) => base.clone(),
+            None => PathBuf::from(std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty())?),
+        };
+        Some(resolve_root(&base, current()).0)
     })
     .clone()
 }
