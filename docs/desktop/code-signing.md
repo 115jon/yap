@@ -3,7 +3,9 @@
 One Basic Artifact Signing account signs Windows binaries for all of the
 maintainer's projects. Basic is $9.99/month and includes 5,000 signatures a
 month across every repo that uses it; each further signature costs $0.005. Every
-file signed is one signature, so a Yap release uses about seven.
+file signed is one signature, so a Yap release (the native app,
+`.github/workflows/desktop-native-release.yml`) uses four: `Yap.exe`, and
+the `Update.exe`, root stub and `Setup.exe` that vpk signs.
 
 | Setting                              | Where                                                                   |
 | ------------------------------------ | ----------------------------------------------------------------------- |

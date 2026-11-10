@@ -23,40 +23,42 @@ assist review but do not hold a signing role.
 
 ## Signing scope
 
-The release workflow (`.github/workflows/desktop-release.yml`) signs:
+From 4.0.0 the Windows app is the native client (`desktop-native/`). Its
+release workflow (`.github/workflows/desktop-native-release.yml`) signs:
 
-| File                                                                 | Origin                                                      |
-| -------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `app-<version>\Yap.exe` (the app, built as `ralph-meet-desktop.exe`) | this repository                                             |
-| Root `Yap.exe` / `YapLauncher.exe` (launcher stub)                   | this repository (`desktop/launcher`)                        |
-| `YapSetup.exe` (installer, also kept as `Update.exe`)                | this repository (`desktop/installer`)                       |
-| `libcef.dll`, `chrome_elf.dll`, `bootstrap.exe`, `bootstrapc.exe`    | the project's custom CEF build (`cef-build-assets` release) |
+| File                                                               | Origin                               |
+| ------------------------------------------------------------------ | ------------------------------------ |
+| `Yap.exe` (the app)                                                | this repository (`desktop-native/`)  |
+| `Update.exe`, the root `Yap.exe` stub, and `Yap.App-win-Setup.exe` | Velopack (`vpk`), signed when packed |
 
-It never signs or re-signs the OBS Studio capture files
-(`obs-capture/obs-signed/graphics-hook*.dll`, `inject-helper*.exe`,
-`get-graphics-offsets*.exe`). They ship byte-for-byte as OBS released them and
-keep the OBS Project, LLC signature that anti-cheat vendors allowlist.
-`desktop/scripts/stage-payload.ps1` fails the build if their hashes differ from
-`desktop/packaging/obs-signed-hook.lock.json`. Other bundled runtime files
-(DirectX, ANGLE and SwiftShader DLLs, data files) ship as received.
+`YapSetup.exe` on a 4.x release is a byte-for-byte copy of
+`Yap.App-win-Setup.exe`. It never signs or re-signs the OBS Studio capture
+files (`graphics-hook*.dll`, `inject-helper*.exe`, `get-graphics-offsets*.exe`)
+or Microsoft's ONNX Runtime: they ship as their vendors released them, with
+their vendors' signatures. `desktop-native/tools/package.ps1` fails the build
+if the OBS files' hashes differ from `desktop/packaging/obs-signed-hook.lock.json`.
+
+The Tauri app's releases (3.x, `.github/workflows/desktop-release.yml`)
+signed its app, launcher stub, `YapSetup.exe` and the project's custom CEF
+binaries the same way.
 
 ## Release controls
 
 Each release follows this sequence:
 
 1. The maintainer merges the release-please PR on `main`. Release-please tags the
-   release and calls the desktop release workflow on a GitHub-hosted runner.
+   release and calls the native release workflow on a GitHub-hosted runner.
 2. The workflow signs in to Azure with a GitHub OIDC token. The Entra app
    registration trusts only this repository's `main` branch and `v*` tags, and
    holds only the Artifact Signing Certificate Profile Signer role. No Azure
-   secret is stored in GitHub.
-3. CI signs the app, launcher, and custom CEF binaries before packing the
-   payload, then signs `YapSetup.exe` once the installer is built.
+   secret is stored in GitHub. The build job, which runs third-party build
+   scripts, gets neither the OIDC token nor a write token.
+3. CI signs `Yap.exe`, then Velopack signs `Update.exe`, the stub and
+   `Setup.exe` as it packs them.
 4. `desktop/scripts/verify-authenticode.ps1` runs `signtool verify /pa` on every
    signed file and checks the signer name and timestamp. Any failure stops the
    release.
-5. Only then does CI cover the signed installer with the Tauri updater
-   (minisign) signature in `latest.json`, upload it, and publish the release.
+5. Only then does CI upload the packages and publish the release.
 
 ## Privacy policy
 
@@ -67,7 +69,7 @@ data transfers.
 
 ## Verification and incident response
 
-Check a download with `signtool verify /pa YapSetup.exe`, or in the file's
+Check a download with `signtool verify /pa Yap.App-win-Setup.exe`, or in the file's
 Properties → Digital Signatures tab. The signer must be `Jonathan Martinez`.
 
 Report suspected malicious artifacts, signing-policy violations, or certificate

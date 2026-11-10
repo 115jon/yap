@@ -1,0 +1,104 @@
+name: Release Watchdog
+
+# Daily: checks what github.com/<repo>/releases/latest serves, as
+# desktop-native-release.yml checks it right after publishing
+# (desktop-native/tools/tauri-bridge.ps1 -Mode VerifyLatest):
+#
+# - latest is a native release (v4+): latest/download/latest.json is the
+#   Tauri bridge's latest.json byte for byte, and latest/download/ serves
+#   Yap.App-win-Setup.exe, YapSetup.exe and releases.win.json.
+# - latest is still the Tauri app (v3.x, before 4.0.0): its latest.json is
+#   valid (version, url, minisign key id) and its YapSetup.exe answers 200.
+# - anything else (a desktop-native-v* release became latest): a failure,
+#   because Tauri installs then get a 404 for latest.json.
+#
+# A failure opens an issue labelled release-watchdog, or comments on the
+# open one. While a release is being published (release-please's draft, or
+# the native workflow running) the check is skipped.
+on:
+  schedule:
+    - cron: "17 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-watchdog
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Draft releases are listed only with write access.
+      contents: write
+      issues: write
+      actions: read
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BRIDGE_TAG: ${{ vars.TAURI_BRIDGE_TAG }}
+      LABEL: release-watchdog
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # A release in flight moves latest on purpose: release-please makes the
+      # release a draft until the native workflow publishes it.
+      - name: Release in progress?
+        id: busy
+        run: |
+          $running = @("release-please.yml", "desktop-native-release.yml" | ForEach-Object {
+            gh run list --repo $env:REPO --workflow $_ --limit 20 --json status --jq '.[] | select(.status != "completed") | .status'
+          }) | Where-Object { $_ }
+          # A draft v* release from the last 6 hours; an older one is a stuck
+          # release, which the check below should report, not hide.
+          $since = (Get-Date).ToUniversalTime().AddHours(-6).ToString("yyyy-MM-ddTHH:mm:ssZ")
+          $drafts = @(gh api "repos/$env:REPO/releases?per_page=30" --jq ".[] | select(.draft and (.tag_name | test(`"^v[0-9]+[.][0-9]+[.][0-9]+$`")) and .created_at > `"$since`") | .tag_name")
+          $busy = ($running.Count -gt 0) -or ($drafts.Count -gt 0)
+          if ($busy) {
+            Write-Host "::notice::Skipped: a release is in progress (runs: $($running.Count), draft v* releases: $($drafts -join ', '))."
+          }
+          "busy=$($busy.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Check releases/latest
+        id: check
+        if: steps.busy.outputs.busy != 'true'
+        run: |
+          $log = "$env:RUNNER_TEMP/watchdog.txt"
+          try {
+            ./desktop-native/tools/tauri-bridge.ps1 -Mode VerifyLatest -BridgeTag "$env:BRIDGE_TAG" *>&1 | Tee-Object -FilePath $log
+            "ok=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } catch {
+            $_.Exception.Message | Out-File -FilePath $log -Encoding utf8 -Append
+            Write-Host "::error title=releases/latest check failed::$($_.Exception.Message -replace "`r?`n", ' ')"
+            "ok=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            exit 1
+          }
+
+      - name: Open or update the issue
+        if: failure() && steps.check.outputs.ok == 'false'
+        run: |
+          $run = "${{ github.server_url }}/$env:REPO/actions/runs/${{ github.run_id }}"
+          $details = Get-Content -Raw "$env:RUNNER_TEMP/watchdog.txt"
+          $body = @(
+            "The daily releases/latest check failed ([run]($run)).", "",
+            '```text', $details.Trim(), '```', "",
+            "Tauri installs update from ``releases/latest/download/latest.json``; native installs and the website read the latest release.",
+            "See desktop-native/docs/INSTALLER.md, ""Publishing a release"". Close this issue once the check passes."
+          ) -join "`n"
+          $file = "$env:RUNNER_TEMP/issue.md"
+          Set-Content -Encoding utf8NoBOM $file $body
+          gh label create $env:LABEL --repo $env:REPO --color B60205 --description "Release watchdog failures" --force | Out-Null
+          $open = gh issue list --repo $env:REPO --label $env:LABEL --state open --json number --jq '.[0].number'
+          if ($open) {
+            gh issue comment $open --repo $env:REPO --body-file $file
+            Write-Host "==> commented on #$open"
+          } else {
+            gh issue create --repo $env:REPO --label $env:LABEL --title "Release watchdog: releases/latest check failed" --body-file $file
+          }

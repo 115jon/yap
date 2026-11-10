@@ -44,6 +44,9 @@ jobs:
           # Hide the release until the desktop job uploads the installer and publishes it.
           gh release edit ${{ steps.release.outputs.tag_name }} --draft=true -R ${{ github.repository }}
 
+  # The native app (desktop-native/) is the desktop release from 4.0.0. The
+  # Tauri app's desktop-release.yml is no longer called here; it stays
+  # dispatch-only until desktop/ is removed.
   desktop:
     name: desktop release
     needs: release
@@ -53,8 +56,9 @@ jobs:
       # Azure Artifact Signing logs in with the GitHub OIDC token.
       id-token: write
     # Called directly instead of relying on the tag push, so the build runs
-    # whichever token created the tag, and it saves caches on main.
-    uses: ./.github/workflows/desktop-release.yml
+    # whichever token created the tag, signs under this run's refs/heads/main
+    # OIDC subject, and saves its caches on main.
+    uses: ./.github/workflows/desktop-native-release.yml
     with:
       release_tag: ${{ needs.release.outputs.tag_name }}
     secrets: inherit
@@ -64,6 +68,26 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The PAT, so the Cargo.lock push below triggers CI on the release PR.
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      # release-please-config.json's release-as pins the next version (4.0.0
+      # for the native cutover) and keeps proposing it until it is removed.
+      # Once that version is tagged, stop here rather than open a second
+      # release PR for it.
+      - name: Check release-as
+        run: |
+          pinned=$(jq -r '.packages["."]["release-as"] // empty' release-please-config.json)
+          if [ -n "$pinned" ] && git ls-remote --exit-code --tags origin "refs/tags/v$pinned" >/dev/null; then
+            echo "::error file=release-please-config.json::v$pinned is tagged, but release-please-config.json still has \"release-as\": \"$pinned\". Remove it so the next release PR uses conventional commits."
+            exit 1
+          fi
+          echo "release-as: ${pinned:-none}"
+
       - name: Open or update the release PR
         # googleapis/release-please-action v4.4.1
         uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071
@@ -72,3 +96,32 @@ jobs:
           # the required `required` check would never report on the release PR.
           token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           skip-github-release: true
+
+      # release-please bumps desktop-native/rust/Cargo.toml's
+      # [workspace.package] version but not Cargo.lock, and the native
+      # release builds with --locked. Sync the workspace crates' lock entries
+      # on the release PR's branch. release-please rebuilds that branch from
+      # main whenever the PR changes, so this runs every time; it commits only
+      # when the lock is out of date, and never force-pushes.
+      - name: Sync desktop-native Cargo.lock on the release PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          branches=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \
+            --label "autorelease: pending" --json headRefName --jq '.[].headRefName')
+          if [ -z "$branches" ]; then echo "No open release PR."; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for branch in $branches; do
+            echo "==> $branch"
+            git fetch --no-tags origin "refs/heads/$branch"
+            git checkout --quiet --detach FETCH_HEAD
+            node desktop-native/tools/sync-cargo-lock-version.mjs
+            if git diff --quiet -- desktop-native/rust/Cargo.lock; then
+              echo "Cargo.lock is in sync on $branch."
+              continue
+            fi
+            git add desktop-native/rust/Cargo.lock
+            git commit --quiet -m "chore(release): sync desktop-native Cargo.lock"
+            git push origin "HEAD:refs/heads/$branch"
+          done
