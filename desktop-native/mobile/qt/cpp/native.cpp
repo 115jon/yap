@@ -6,6 +6,8 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QKeyEvent>
 
+#include <atomic>
+
 #ifdef Q_OS_ANDROID
 #include <QtCore/QJniEnvironment>
 #include <QtCore/QJniObject>
@@ -16,7 +18,7 @@ extern "C" void yap_mobile_flush();
 
 namespace {
 
-Native* g_native = nullptr;
+std::atomic<Native*> g_native { nullptr };
 
 #ifdef Q_OS_ANDROID
 constexpr char kShim[] = "dev/yap/qtproto/NativeShim";
@@ -25,28 +27,28 @@ constexpr char kShim[] = "dev/yap/qtproto/NativeShim";
 template <typename F>
 void post(F&& f)
 {
-  if (Native* native = g_native)
+  if (Native* native = g_native.load())
     QMetaObject::invokeMethod(native, std::forward<F>(f), Qt::QueuedConnection);
 }
 
 void jniBackProgress(JNIEnv*, jclass, jfloat progress)
 {
-  post([progress] { g_native->onBackProgress(progress); });
+  post([progress] { Native::instance()->onBackProgress(progress); });
 }
 
 void jniBackCancelled(JNIEnv*, jclass)
 {
-  post([] { g_native->onBackCancelled(); });
+  post([] { Native::instance()->onBackCancelled(); });
 }
 
 void jniBackInvoked(JNIEnv*, jclass)
 {
-  post([] { g_native->onBackInvoked(); });
+  post([] { Native::instance()->onBackInvoked(); });
 }
 
 void jniIme(JNIEnv*, jclass, jfloat dp)
 {
-  post([dp] { g_native->onIme(dp); });
+  post([dp] { Native::instance()->onIme(dp); });
 }
 #endif
 
@@ -82,9 +84,14 @@ Native::Native(QObject* parent)
 #endif
 }
 
+Native::~Native()
+{
+  g_native = nullptr;
+}
+
 Native* Native::instance()
 {
-  return g_native;
+  return g_native.load();
 }
 
 void Native::setHandlesBack(bool on)
@@ -173,7 +180,9 @@ void Native::onIme(qreal dp)
 
 bool Native::eventFilter(QObject* watched, QEvent* event)
 {
-  if (event->type() == QEvent::KeyRelease && m_handlesBack) {
+  // Back as a key (before API 33): a page to pop, or leaving at the root,
+  // never Qt's default of closing the window.
+  if (event->type() == QEvent::KeyRelease) {
     if (static_cast<QKeyEvent*>(event)->key() == Qt::Key_Back) {
       onBackInvoked();
       return true;

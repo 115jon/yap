@@ -4,6 +4,7 @@
     <application
         android:name=".YapApp"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:label="Yap core proto"
         android:theme="@style/Theme.Proto">
         <activity

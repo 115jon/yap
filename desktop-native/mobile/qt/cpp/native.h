@@ -34,6 +34,7 @@ public:
   Q_ENUM(Haptic)
 
   explicit Native(QObject* parent = nullptr);
+  ~Native() override;
   static Native* instance();
 
   bool handlesBack() const { return m_handlesBack; }

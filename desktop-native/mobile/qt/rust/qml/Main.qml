@@ -42,6 +42,13 @@ Window {
         }
     }
 
+    // The open channel counts as read (and its mentions as seen) only while
+    // its page is on screen with the app in front, as the desktop ties it to
+    // window focus.
+    readonly property bool reading: Session.phase === Session.Ready && stack.depth > 1
+        && Qt.application.state === Qt.ApplicationActive
+    onReadingChanged: Chat.setFocused(reading)
+
     Item {
         id: content
         anchors.fill: parent

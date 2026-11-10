@@ -14,6 +14,8 @@ Rectangle {
     signal send(string text)
 
     function submit() {
+        // The keyboard's word in progress is not in `text` until committed.
+        Qt.inputMethod.commit()
         const text = field.text.trim()
         if (text.length === 0)
             return
@@ -90,7 +92,7 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         iconName: "send"
         tip: qsTr("Send")
-        enabled: field.text.trim().length > 0
+        enabled: (field.text + field.preeditText).trim().length > 0
         onClicked: root.submit()
     }
 }

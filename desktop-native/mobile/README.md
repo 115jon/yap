@@ -317,8 +317,8 @@ Each is its own commit, and the desktop resolves and behaves as before:
    runtime.
 2. **Installer, updater and the Tauri migration behind a `desktop`
    feature** in yap-core (on by default). Mobile builds without them, which
-   also drops `rusty-leveldb` (and its stray cdylib) and `semver` from the
-   mobile graph. A `yap-desktop` crate can take them when the desktop
+   also drops `rusty-leveldb` (and its stray cdylib) from the mobile graph,
+   and yap-core no longer depends on `semver` there. A `yap-desktop` crate can take them when the desktop
    moves to `desktop/`.
 3. **Markdown: Qt rich text is fine for QML on mobile.** The shared
    `MessageDelegate` draws the core's `html` (bold, italic, code, links,

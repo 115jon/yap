@@ -121,7 +121,17 @@ Item {
         }
 
         delegate: MessageDelegate {
+            id: row
             width: view.width
+            // Touch has no right click: a long press opens the share sheet
+            // with the message's text (the desktop's menu is not on mobile).
+            TapHandler {
+                acceptedDevices: PointerDevice.TouchScreen
+                onLongPressed: {
+                    Native.haptic(Native.LongPress)
+                    Native.share(row.body)
+                }
+            }
             today: Chat.today
             editingId: ""
             highlightId: ""
@@ -132,10 +142,6 @@ Item {
                 Chat.toggleReaction(id, emoji)
             }
             onLinkOpened: url => Qt.openUrlExternally(url)
-            onMenuRequested: (id, author, text, mine, anchor, x, y) => {
-                Native.haptic(Native.LongPress)
-                Native.share(text)
-            }
         }
 
         function nearEnd() {
@@ -198,13 +204,8 @@ Item {
             root.followEnd = true
             Chat.sendMessage(text, "")
         }
-        onFocusChanged: Chat.setFocused(composer.activeFocus)
     }
 
     // Open at the newest message once the first rows have laid out.
-    Component.onCompleted: {
-        Chat.setFocused(true)
-        Qt.callLater(view.positionViewAtEnd)
-    }
-    Component.onDestruction: Chat.setFocused(false)
+    Component.onCompleted: Qt.callLater(view.positionViewAtEnd)
 }

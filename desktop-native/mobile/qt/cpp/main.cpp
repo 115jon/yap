@@ -9,6 +9,9 @@
 #include <QtCore/QFile>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QSysInfo>
+#ifdef Q_OS_ANDROID
+#include <QtCore/QJniObject>
+#endif
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtQml/QQmlApplicationEngine>
@@ -52,8 +55,11 @@ int main(int argc, char* argv[])
   // the device's name for the sign-in, before the core's threads exist.
   const QString data = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
   QDir().mkpath(data);
-  yap_mobile_init(QFile::encodeName(data).constData(),
-                  QSysInfo::prettyProductName().toUtf8().constData());
+  QString device = QSysInfo::prettyProductName();
+#ifdef Q_OS_ANDROID
+  device = QJniObject::getStaticObjectField<jstring>("android/os/Build", "MODEL").toString();
+#endif
+  yap_mobile_init(QFile::encodeName(data).constData(), device.toUtf8().constData());
 
   registerFonts();
 

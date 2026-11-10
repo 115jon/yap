@@ -42,15 +42,27 @@ public final class NativeShim {
     }
 
     private static void installOnUi() {
+        // The keyboard (API 30+: WindowInsets.Type and the insets animation;
+        // before that Qt's own adjustNothing handling is all there is): the
+        // resting IME inset after any change, through the decor view's
+        // listener, which hands the insets on unchanged so Qt's safe-area
+        // handling still sees them; and every frame of the IME animation
+        // through the content view. Not the decor view: Qt sets its own
+        // animation callback there on each showKeyboard, replacing ours.
+        if (Build.VERSION.SDK_INT >= 30) {
+            installIme();
+        }
+        installBack();
+    }
+
+    private static void installIme() {
         View decor = activity.getWindow().getDecorView();
-        // The keyboard: the IME inset on every frame of its animation, and
-        // its resting value after any change. The listener hands the insets
-        // on unchanged, so Qt's own safe-area handling still sees them.
         decor.setOnApplyWindowInsetsListener((v, insets) -> {
             reportIme(insets);
             return v.onApplyWindowInsets(insets);
         });
-        decor.setWindowInsetsAnimationCallback(
+        View content = activity.findViewById(android.R.id.content);
+        content.setWindowInsetsAnimationCallback(
                 new WindowInsetsAnimation.Callback(
                         WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
                     @Override
@@ -60,7 +72,9 @@ public final class NativeShim {
                         return insets;
                     }
                 });
+    }
 
+    private static void installBack() {
         // The back gesture. API 34+: the predictive preview's progress.
         if (Build.VERSION.SDK_INT >= 34) {
             back = new OnBackAnimationCallback() {

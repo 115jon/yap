@@ -3,8 +3,8 @@
      the predictive back gesture on (the shim registers its callback only
      while there is a page to go back to; at the root the system plays its
      own back-to-home preview), the keyboard left to the app (adjustNothing:
-     the composer follows the IME inset itself, frame by frame), and no Auto
-     Backup of the session file. -->
+     the composer follows the IME inset itself, frame by frame), and the
+     session file kept out of cloud backup and device-to-device transfer. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="dev.yap.qtproto"
     android:installLocation="auto"
@@ -24,6 +24,7 @@
         android:label="Yap (Qt)"
         android:icon="-- %%INSERT_APP_ICON%% --"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true">
         <activity
             android:name="org.qtproject.qt.android.bindings.QtActivity"
