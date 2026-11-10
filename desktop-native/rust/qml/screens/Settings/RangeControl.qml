@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // A value fader (primitives.tsx RangeControl, ui/slider.tsx): an 8 px
 // tint-3 track whose range is the accent dither ramp, a 12 x 28 ink-1

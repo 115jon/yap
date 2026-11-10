@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // A profile effect over a profile surface (ProfileCollectiblesLayer.tsx,
 // profile-effect-playback.ts). The effect's 450 x 880 stage covers the

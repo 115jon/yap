@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // TikTok and Instagram (LinkEmbed.tsx TikTokEmbed :1176, InstagramEmbed
 // :3971): a compact 400 card. The header, the author (32 px avatar, name,

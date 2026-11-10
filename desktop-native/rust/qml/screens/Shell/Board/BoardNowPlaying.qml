@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Now playing (widgets/NowPlaying.tsx): the owner's live game from
 // presence (ctx.game), else the last finished game when the owner chose

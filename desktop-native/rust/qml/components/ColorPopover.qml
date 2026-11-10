@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Templates as T
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // The colour picker (what Chromium's popup gives the web's
 // `<input type="color">`): a saturation/brightness square, a hue slider,

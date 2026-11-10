@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Yap.Mobile
 import com.yap.native
+import Yap.Ui
 
 // The mobile shell: one full-screen window drawn edge to edge (the system
 // bars float over it; SafeArea keeps content clear of them), a stack of

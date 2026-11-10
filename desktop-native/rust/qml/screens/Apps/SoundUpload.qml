@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // Add sound (SoundboardPicker.tsx upload form): an audio file, its name,
 // an optional emoji and its volume. Uploaded to the call's server (50 MB at

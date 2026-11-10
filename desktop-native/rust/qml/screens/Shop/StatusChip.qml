@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // "Leaves in 3 days" / "Retired" on collection art (ShopView.tsx
 // StatusChip): its own media scrim and white ink, a clock or a lock.

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // What the call is listening to, under our voice channel's people
 // (ListenTogetherSidebarStatus.tsx): ml-7 mr-2 mb-1, px-1 py-1, gap-2; a

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // ExternalLinkConfirmModal.tsx with useExternalLinkConfirmation.tsx: a link
 // that leaves the app (another origin, not a trusted host) asks first.

@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Server settings → Audit log (AuditLogTab.tsx): entries as sentences
 // ("Native Spike updated role Moderator") with targets by name (the id in

@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // "Restart to update" in the title bar (src/updater.rs): shown once an
 // update is downloaded and no call is up (`Updater.prompt`). A title bar

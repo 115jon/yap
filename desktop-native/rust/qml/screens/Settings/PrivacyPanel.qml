@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // Privacy & safety (PrivacyPanel.tsx). Activity: "Share my activity",
 // saved to the account. Media filter: the four levels as a

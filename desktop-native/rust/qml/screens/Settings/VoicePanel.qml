@@ -2,6 +2,7 @@ import QtQuick
 import QtMultimedia as QM
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // Voice & video (VoiceVideoPanel.tsx, CameraCard.tsx). Input: microphone,
 // input volume, input profile. Processing (set by the profile unless it is

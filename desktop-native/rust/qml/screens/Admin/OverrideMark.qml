@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // An override's mark (ChannelPermissionsTab.tsx OverrideMark): a role's
 // colour dot in a 24 px slot, or the member's 24 px avatar.

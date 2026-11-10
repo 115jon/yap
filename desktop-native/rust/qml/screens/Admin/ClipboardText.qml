@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Puts text on the clipboard without touching anything else (a hidden
 // edit's copy), only ever from a click. With YAP_NO_CLIPBOARD=1 it only

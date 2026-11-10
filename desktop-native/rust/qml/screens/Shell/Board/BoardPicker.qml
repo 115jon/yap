@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The widget picker (WidgetPicker.tsx): what "+ Add a widget" opens. The
 // catalogue by group (Games, Voice & music, Show off, Social, Yours), each

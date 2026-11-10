@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The search combobox (SearchPanel.tsx `field`): one line, 32 high, ply-2
 // on a line-field edge that turns focus ink with a ring. The search glyph,

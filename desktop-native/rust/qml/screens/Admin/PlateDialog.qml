@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The kit's dialog plate (ui/dialog.tsx, responsive-dialog.tsx at md, top
 // placement): ply-3 with a line-strong edge, 24 padding; an optional

@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Placement, S (Deadlock.tsx PlacementBody): the unranked badge, matches
 // left, one pip per placement match (solid for a win, ink-3 for a loss,

@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // An item on a shop tile (ShopItemCard.tsx ItemStage, CollectiblePreviews):
 //   avatar_decoration  your avatar (round) at 44 % of the tile, the still

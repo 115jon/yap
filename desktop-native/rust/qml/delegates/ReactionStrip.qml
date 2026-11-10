@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The reactions under a message (MessageItem.tsx): 28 px chips, 6 px
 // apart, wrapping; a 16 px emoji and the count in Martian 11/600. Yours

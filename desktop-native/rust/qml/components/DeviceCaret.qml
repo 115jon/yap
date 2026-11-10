@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // A 10 x 40 caret beside a dock key; it opens (and closes) its device menu.
 T.AbstractButton {

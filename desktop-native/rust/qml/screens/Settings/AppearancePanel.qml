@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // Appearance (AppearancePanel.tsx): the theme as a grid of thumbnails (each
 // theme's own colours, Match system split light and dark), synced to the

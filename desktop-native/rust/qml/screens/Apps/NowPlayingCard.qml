@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Effects
 import com.yap.native
+import Yap.Ui
 
 // What the room is listening to, floating over the call
 // (FloatingListenTogetherPlayer.tsx on FloatingSurface.tsx, the card body

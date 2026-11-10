@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Label over value (Deadlock.tsx Stat): silkscreen label, the value in
 // 18 px numbers with an optional small unit ("%", "k").

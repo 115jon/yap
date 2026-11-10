@@ -4,6 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // Device-code sign-in, the desktop app's PublicFrame (src/components/auth/
 // PublicFrame.tsx, home = null; panels from DesktopLogin.tsx): a still

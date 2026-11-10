@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A stream on its way (StreamLoadingIndicator.tsx): the pending spinner, one
 // of the allowed loops, but only for 8 s; then it settles into a still

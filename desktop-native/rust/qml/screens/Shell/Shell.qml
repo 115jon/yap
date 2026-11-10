@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The signed-in shell: server rail, the tree panel (or the DM list at
 // Home), then the open conversation: its messages, a voice channel's view,

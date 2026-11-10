@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A confirm that runs its request from the confirm key and stays open with
 // the reason when it fails (ui/confirm-dialog.tsx): delete channel, delete

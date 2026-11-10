@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The tooltip, C1 inverted (ui/tooltip.tsx): ink-1 fill, ply-0 text at
 // 12/500, 28 high (more when it wraps), 4 x 8 padding, 2 px corners; 500

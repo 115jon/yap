@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // The 32 px window chrome (desktop/desktop-entry.tsx, desktop/styles.css):
 // back and forward on the left, the centred location title, "Restart to

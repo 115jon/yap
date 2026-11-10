@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The rail pill (ServerList.tsx RailSlot): one 4x32 bar on the rail's left
 // edge, rounded on the right, scaled on Y so the motion stays on the

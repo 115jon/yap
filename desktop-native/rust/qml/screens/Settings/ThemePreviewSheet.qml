@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The live theme preview (ThemePreviewSidebar.tsx): a right side sheet
 // with no scrim, so the app behind shows each theme as you pick it. Escape,

@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The tree panel (ChannelSidebar.tsx): the 48 px server header with its
 // chevron and theme banner (it opens the server menu), then the Talk Tree

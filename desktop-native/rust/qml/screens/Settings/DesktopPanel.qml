@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // Desktop app (DesktopPanel.tsx): startup and closing, kept in
 // `desktop-settings.json` (open on startup is the `Yap` Run value),

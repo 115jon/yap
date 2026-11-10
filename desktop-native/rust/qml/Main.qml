@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // Bootstrap: the window, its chrome, the core, and one screen per phase.
 // main.cpp shows the window once the native frame is set up.

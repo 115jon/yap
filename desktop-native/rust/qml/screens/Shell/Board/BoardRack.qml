@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The Rack (ProfileBoard.tsx BoardRack, spec §1 "A · Rack"): the board's
 // widgets on two columns of 168 px rows, placed at the cells the core

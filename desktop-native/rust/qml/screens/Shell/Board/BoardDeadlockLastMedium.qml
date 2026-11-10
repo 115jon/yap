@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Last match, M (Deadlock.tsx LastMatchMedium): the hero's art band with
 // the result and mode, the hero and the K/D/A big, up to six numbers

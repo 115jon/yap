@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One row's entrance (styles/motion.css .rm-list-enter): it fades in and
 // rises the last 4 px over 200 ms, ease-out. The row carries the shift as

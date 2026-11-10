@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The full profile's side column (ProfilePanel.tsx): Board · Activity ·
 // Wishlist rule tabs over the chosen tab. The Board tab shows the Rack; the

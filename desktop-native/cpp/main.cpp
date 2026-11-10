@@ -928,7 +928,7 @@ int main(int argc, char* argv[])
   // then binds it to the saved choice (Settings.theme), which starts from
   // YAP_THEME too; assigning Theme.themeId re-themes everything.
   if (QObject* theme =
-        engine.singletonInstance<QObject*>("com.yap.native", "Theme")) {
+        engine.singletonInstance<QObject*>("Yap.Ui", "Theme")) {
     const QString id = qEnvironmentVariable("YAP_THEME");
     if (!id.isEmpty())
       theme->setProperty("themeId", id);
@@ -987,7 +987,7 @@ int main(int argc, char* argv[])
     new PopupPressSink(&engine, window);
 #ifdef Q_OS_WIN
     app.installNativeEventFilter(new MotionWatch(
-      engine.singletonInstance<QObject*>("com.yap.native", "Theme")));
+      engine.singletonInstance<QObject*>("Yap.Ui", "Theme")));
     std::fprintf(stderr, "[motion] reduced motion %s at start\n", reducedMotion() ? "on" : "off");
     if (qEnvironmentVariableIntValue("YAP_TEST_POINTER") != 0) {
       app.installNativeEventFilter(new TestPointer(window));

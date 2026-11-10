@@ -17,3 +17,6 @@ mod gui;
 mod models;
 #[path = "../../../common/platform.rs"]
 mod platform;
+
+// The view layer shared with the desktop (QML module Yap.Ui).
+use yap_ui as _;

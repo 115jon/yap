@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The ground the floating players share (floating-geometry.ts and the
 // stacking registry of FloatingSurface.tsx): the Now Playing card and the

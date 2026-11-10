@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A voice channel's status line under its row, mobile side: the text only
 // (the desktop's adds clip previews through WebmPlayer).

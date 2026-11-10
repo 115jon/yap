@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Voice hours (widgets/VoiceHours.tsx): time in calls this month (or the
 // last 30 days), day by day. The chart is the board's still dither in

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // Voice details (VoiceDetailsPanel.tsx), anchored above its trigger: the
 // Connection tab (the transport's state three up; the "Connection" figure

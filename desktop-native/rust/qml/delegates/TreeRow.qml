@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One row of ChannelTreeModel: a category label, a channel, or someone in a
 // voice channel (a Talk Tree leaf under it). Labels and channels open their

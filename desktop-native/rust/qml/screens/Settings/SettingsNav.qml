@@ -1,6 +1,7 @@
 pragma Singleton
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The settings dialog's shared state (SettingsContext): which panel shows,
 // the search query, the row a search hit or a deep link landed on, and the

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A collection in the Featured rail (ShopView.tsx CollectionCard): its
 // featured block (or strip art) at 1037:463 on its colours, the status

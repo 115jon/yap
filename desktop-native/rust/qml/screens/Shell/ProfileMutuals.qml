@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // ProfileSections' "Mutual servers" and "Mutual friends" (ProfileCard.tsx):
 // each a 12/500 ink-2 heading with its count in ink-3 Num, 8 over a wrap of

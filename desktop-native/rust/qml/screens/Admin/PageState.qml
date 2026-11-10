@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A whole page's empty or failed state (server-settings/states.tsx
 // PageState, LoadError; ui/empty-state.tsx): the EmptyState anatomy

@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One override's editor (ChannelPermissionsTab.tsx OverrideEditor): its
 // mark and name, what Inherit means for a role or a member, Remove (not for

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Deadlock (widgets/Deadlock.tsx): the owner's career (rank, hero pool, the
 // last ten matches, the rank over 30 days) from the server's digest of

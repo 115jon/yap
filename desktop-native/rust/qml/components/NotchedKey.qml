@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The primary key, C2 (ui/button.tsx): primary-fill with the top-right
 // corner cut (rm-notch, 7.07 px along the diagonal) and a still dithered

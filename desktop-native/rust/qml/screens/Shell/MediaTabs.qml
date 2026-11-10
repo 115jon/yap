@@ -4,6 +4,7 @@ import QtQuick.Controls.Basic
 import Yap.Chrome
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // The channel details' Media, Links and Files tabs (MemberList.tsx
 // MediaTabContent, LinksTabContent, FilesTabContent), loaded afresh each

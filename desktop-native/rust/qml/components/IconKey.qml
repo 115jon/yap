@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // An icon-only key (ui/IconButton.tsx and the dock recipe, ui/dock.ts).
 //   tone "ghost"  ink-2, ink-1 on hover          (quiet rest)

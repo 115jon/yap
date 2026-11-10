@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The text channel header (ChatHeader.tsx): 48, px-4. The title key (the
 // channel glyph at 20 in ink-3, Bricolage 18/800; in a DM the mention glyph,

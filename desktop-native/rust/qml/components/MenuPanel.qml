@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The menu panel (ui/menu.ts): ply-3 with a 1 px line-strong edge and a
 // 2 px ink-1 top rule, 4 px padding, 200-280 wide. Rows are MenuRow. Opens

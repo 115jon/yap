@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The one solid danger key of a call surface (ui/dock.ts DOCK_LEAVE):
 // Leave, Decline and Cancel call end the call.

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The collectibles shop (ShopView.tsx), in place of Home's Friends: the
 // 48 px bar (the title, "Every collectible is free to equip" with the

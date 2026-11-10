@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A text or voice channel in the tree (sidebar-row.ts TREE_ROW): 32 high,
 // a 16 px ink-3 glyph centred in a 20 px slot, Geist 14/500. Idle is ink-2,

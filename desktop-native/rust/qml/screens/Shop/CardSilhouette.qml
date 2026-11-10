@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A small profile-card silhouette behind effect and frame thumbnails
 // (CollectiblePreviews.tsx CardSilhouette): ply-2, a tint-2 banner, the

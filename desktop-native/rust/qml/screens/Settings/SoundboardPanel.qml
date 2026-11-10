@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Soundboard (SoundboardPanel.tsx): the playback volume, kept on this
 // device, and the join and leave sounds for All servers or one server,

@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The three plans (TierCards.tsx): Yap, Yap Loud and Founder side by side
 // from 720 px (stacked below), each a 2 px-cornered ply-2 card with a 16 px

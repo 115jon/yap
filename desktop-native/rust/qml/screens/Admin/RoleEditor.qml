@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The role editor (RoleManagement.tsx RoleEditor): the role's dot and name
 // with Delete (an irreversible inline confirm), then Display (name and

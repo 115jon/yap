@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The last ten as hero faces (Deadlock.tsx Strip, L): five across, a win a
 // full face over a solid W, a loss a dimmed face over an outlined L.

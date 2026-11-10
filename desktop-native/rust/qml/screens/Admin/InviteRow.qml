@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One invite link (InvitesTab.tsx InviteRow): the inviter's avatar, the
 // code in mono, then "#channel · by Name · 2 of 10 uses · Expires in 4h

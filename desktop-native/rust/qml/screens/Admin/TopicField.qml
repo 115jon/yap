@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A multi-line text field on the kit's field edge (ui/textarea.tsx): ply-2,
 // a 1 px line-field edge (ink-2 on hover, a 2 px ink-1 ring on focus),

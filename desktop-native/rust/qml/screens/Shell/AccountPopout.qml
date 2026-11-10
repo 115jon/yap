@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The account popover (UserAccountPopover.tsx): your profile card over
 // the account row, 8 px above it. The status line under your name edits the

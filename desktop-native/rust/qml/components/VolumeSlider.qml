@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The volume slider (AudioDeviceMenu.tsx VolumeSlider, ContextMenuItems
 // Slider): the label and the Martian percentage over a 4 px tint-3 track

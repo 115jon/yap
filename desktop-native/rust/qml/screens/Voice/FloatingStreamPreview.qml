@@ -1,6 +1,7 @@
 import QtQuick
 import QtMultimedia
 import com.yap.native
+import Yap.Ui
 
 // FloatingStreamPreview.tsx on the desktop FloatingSurface: a share that
 // floats over the chat while you are in the call but looking elsewhere -

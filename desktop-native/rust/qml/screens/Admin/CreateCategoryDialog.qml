@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Create category (CreateCategoryModal.tsx): "Category name" as a plain
 // label over a 40 px input (Label + Input, gap 6, no legend plate), the

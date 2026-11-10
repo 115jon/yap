@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // A voice channel's view. Before you join (voice/VoiceLanding.tsx): the
 // still level meter, the channel, who is already in it and one Join key;

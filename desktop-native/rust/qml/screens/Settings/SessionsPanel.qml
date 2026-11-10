@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Sessions (SessionsPanel.tsx): this device, then every other one, from
 // `/api/sessions`; placeholder rows while they load, the error with Try

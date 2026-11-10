@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One message (MessageItem.tsx): pl-4 pr-6, a 40 px avatar, 12 px gap, so
 // the text column starts at x=68. A new author group adds 16 px above;

@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The Activity tab (ProfileActivity.tsx): games, voice, streams, Listen
 // Together, badges and servers joined, grouped by day (Today, Yesterday,

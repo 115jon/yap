@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The C1 secondary key at sm (ui/button.tsx): 32 px, a 2 px line-strong
 // edge, no fill, a Bricolage 600 label at 14 px. Hover and press are an

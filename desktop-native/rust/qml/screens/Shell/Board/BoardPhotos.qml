@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Photo strip (widgets/Photos.tsx): one to four of the owner's pictures,
 // cropped into fixed boxes so the plate never changes shape, with an

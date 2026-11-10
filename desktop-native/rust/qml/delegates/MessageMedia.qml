@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A message's attachments (MessageItem.tsx): images first (ImageGrid.tsx:
 // one image fits 640 x 400 at its own aspect and is never upscaled; two

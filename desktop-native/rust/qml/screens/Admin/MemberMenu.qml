@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A member's right-click menu in the member panel (MemberList.tsx
 // handleMemberContext): Profile (the full profile), Message, Start a call

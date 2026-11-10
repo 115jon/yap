@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Mobile
 import com.yap.native
+import Yap.Ui
 
 // The home page, phone layout: the server rail and the open server's
 // channel tree side by side (the desktop's two left columns). The rows are

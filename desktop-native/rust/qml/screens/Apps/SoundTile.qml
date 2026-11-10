@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One sound cell (SoundboardPicker.tsx:336-441 SoundTile): a square tint-1
 // cell (tint-2 hovered, 8 px corners) with the 24 px glyph in ink-3 over

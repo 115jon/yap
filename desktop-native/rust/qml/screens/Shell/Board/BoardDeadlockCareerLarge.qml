@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Career, L (Deadlock.tsx CareerLarge): three zones split by hairlines, the
 // hero pool (dropped at 560 px and under), the last ten as faces, and the

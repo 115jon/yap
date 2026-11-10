@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // A voice app's popover over the stage bar: ply-3 with the ink seam on
 // top, opened 8 px above its key and kept inside the window.

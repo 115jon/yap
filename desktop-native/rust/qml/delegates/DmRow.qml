@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A conversation in the home list (DMListPanel.tsx, sidebar-row.ts): 32
 // high, 40 with a custom status line; px-2, gap 8, a 24 px avatar with its

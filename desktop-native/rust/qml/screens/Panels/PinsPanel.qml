@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // PinnedMessagesSidebar.tsx: "Pinned messages", the open channel's pins
 // newest first as rows on the panel ply with seams. Loading shows three

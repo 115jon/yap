@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Server settings → Roles (RoleManagement.tsx), split: the role list (256)
 // beside the editor. "New role" opens a draft at the end of the list. The

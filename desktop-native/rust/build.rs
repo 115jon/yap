@@ -350,7 +350,6 @@ fn main() {
     // (docs/PERFORMANCE.md, pass 5).
     std::env::set_var("QT_BUILD_UTILS_DISCARD_QML_CONTENTS", "1");
     let files = QML.iter().map(|path| QmlFile::from(*path)).chain([
-        QmlFile::from("qml/theme/Theme.qml").singleton(true),
         QmlFile::from("qml/screens/Shell/ShellState.qml").singleton(true),
         QmlFile::from("qml/screens/Settings/SettingsNav.qml").singleton(true),
         QmlFile::from("qml/components/GameClock.qml").singleton(true),

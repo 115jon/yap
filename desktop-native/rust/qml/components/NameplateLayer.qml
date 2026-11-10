@@ -3,6 +3,7 @@ import QtMultimedia
 import Yap.Chrome
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // A nameplate behind a row (UserNameplateLayer.tsx, ProfileAssetLayer.tsx):
 // the still frame covering the row, anchored right where the art is; the

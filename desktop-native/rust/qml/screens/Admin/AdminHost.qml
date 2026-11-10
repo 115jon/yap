@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Where server administration opens from (ShellState's requests): server
 // and channel settings, the create and invite dialogs, and the confirms for

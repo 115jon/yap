@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A zone's head (Deadlock.tsx ZoneHead): the silkscreen label, and an
 // aside in small numbers at the right end.

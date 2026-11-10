@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The cold load (chat/ColdLoad.tsx, wider screens): a compact plate in the
 // middle of the window over a dimmed, still outline of the app, so it reads

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // An embed's header row (EmbedChrome.tsx EmbedHeader): a 6 px dot in the
 // embed's colour, the site, "· date" when the post has one (EmbedDate:

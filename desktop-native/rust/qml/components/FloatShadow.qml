@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Effects
 import com.yap.native
+import Yap.Ui
 
 // Elevation for floats (tokens.css): shadow-2 `0 8px 24px -6px` at .6 of
 // the scheme's shadow alpha for menus, popovers, toasts and the hover bar;

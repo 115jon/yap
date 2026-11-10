@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // The call strip above the account row while in a call (VoiceDashboard
 // pared down): a 2 px ink-1 rule, the LED label and where the call is,

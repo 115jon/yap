@@ -3,6 +3,7 @@ import QtQuick.Controls.Basic
 import QtMultimedia as QM
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // Camera (CameraSettingsModal.tsx: ResponsiveDialogContent size lg,
 // placement top, p-0), with CameraCard's rows bare as its body. The header

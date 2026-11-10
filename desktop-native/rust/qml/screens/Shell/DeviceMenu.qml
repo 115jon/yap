@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Templates as T
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // The menu behind a mic, headphone or camera caret (AudioDeviceMenu.tsx):
 // the title, the devices as radio rows (the system default first), the

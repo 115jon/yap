@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The rank at the end of each of the last 30 days (Deadlock.tsx
 // RankHistory), the sanctioned dither: 2 px cells in accent ink, a crisp

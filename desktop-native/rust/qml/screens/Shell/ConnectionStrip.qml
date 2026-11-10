@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The chat column's connection strip (ConnectionBanner.tsx, variant A):
 // a drop of the chat link that outlives its 3 s grace (GRACE_MS), then

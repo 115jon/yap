@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The Wishlist tab (ProfileWishlist.tsx), a hint list: shop collectibles by
 // name and free-text hints. Others see it read-only; the owner adds a hint

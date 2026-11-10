@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // Custom sounds (experimental) (CustomSoundsCard.tsx): Use custom sounds
 // (off while sounds are off), Import several files (each file's name

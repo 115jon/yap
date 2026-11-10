@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // Stream quality (StreamQualityControl.tsx): a Resolution row and a Frame
 // rate row of chips over one preset list (screen-share-support.ts), and

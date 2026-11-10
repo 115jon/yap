@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // A voice channel's status after its people (ChannelSidebar.tsx), indented
 // to the name (pl-7), 2 over and 4 under. Once we are connected there it is

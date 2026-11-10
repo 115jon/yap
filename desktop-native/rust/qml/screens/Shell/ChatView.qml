@@ -4,6 +4,7 @@ import QtQuick.Controls.Basic
 import Yap.Chrome
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // One text channel: header, live message list, typing line, composer.
 // The list reports when it shows its end (read marks), asks for older

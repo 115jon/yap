@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Who watches a stream (StreamWatcherList.tsx): up to four 24 px avatars
 // overlapping by 8, "+N" past them, then "3 viewers" over the first two

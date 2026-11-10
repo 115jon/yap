@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Career, S (Deadlock.tsx CareerSmall): the big rank badge, its name and
 // the share won big; the range's matches and the main hero at the foot.

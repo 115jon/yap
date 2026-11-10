@@ -40,6 +40,10 @@ cxx_qt_import_crate(
 cxx_qt_import_qml_module(yap_mobile_qml
   URI "com.yap.native"
   SOURCE_CRATE yap_mobile_qt)
+# The view layer shared with the desktop, built by the yap-ui crate.
+cxx_qt_import_qml_module(yap_ui_qml
+  URI "Yap.Ui"
+  SOURCE_CRATE yap_mobile_qt)
 
 set(DESKTOP ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 
@@ -53,6 +57,7 @@ qt_add_executable(yapqt
 target_include_directories(yapqt PRIVATE ${DESKTOP}/cpp cpp)
 target_link_libraries(yapqt PRIVATE
   yap_mobile_qml
+  yap_ui_qml
   Qt::Gui Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg Qt::QuickPrivate)
 
 set_target_properties(yapqt PROPERTIES

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One settings row (primitives.tsx SettingsRow): the label (Geist 15/500)
 // over its description (13, ink-2) on the leading side, the control on the

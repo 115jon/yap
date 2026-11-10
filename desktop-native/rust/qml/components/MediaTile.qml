@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // One picture of a message (ImageGrid.tsx tile): a 1 px seam, a tint-1
 // ground while it loads, cover (`fill`) or contain, GIFs animated while on

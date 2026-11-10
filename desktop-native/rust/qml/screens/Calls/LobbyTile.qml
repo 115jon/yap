@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A person in a DM call's lobby or while it rings (DMCallRegion.tsx
 // LobbyTile): the call tile's anatomy (ply-2, a 1 px seam, the avatar

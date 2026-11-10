@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // Create channel (CreateChannelModal.tsx): the type as two choice cards
 // under the fieldset's "Channel type" legend (13/500, 8 above the cards),

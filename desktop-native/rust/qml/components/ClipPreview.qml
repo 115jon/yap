@@ -3,6 +3,7 @@ import QtMultimedia
 import Yap.Chrome
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // A clip that rests on its first frame and plays, muted and looping, only
 // while `active` (pointed at or focused): the vibe dialog's recents and the

@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Channel settings → Overview (ChannelSettingsModal.tsx): Channel details,
 // "Text channel, created …": the name (text channels show how it will read,

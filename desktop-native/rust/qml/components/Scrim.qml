@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // A modal popup's scrim. It dims the window below the title bar: the bar's
 // window keys are Windows caption keys (WindowChrome) and its caption drags

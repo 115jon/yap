@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // Home with no conversation open (FriendsView.tsx): the 48 px header with
 // the members glyph, "Friends", the tabs (Online, All, Pending with the

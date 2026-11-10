@@ -4,6 +4,7 @@ import QtQuick.Controls.Basic
 import Yap.Chrome
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // The media viewer (ImageViewerModal.tsx and its parts), under the title
 // bar on the scrim laid twice (about .8 in dark).

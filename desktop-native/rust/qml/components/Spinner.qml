@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The app's loading spinner (the web's `<Spinner />`, ui/button.tsx): the
 // Phosphor "loader" glyph turning once per Theme.durSpin, still under

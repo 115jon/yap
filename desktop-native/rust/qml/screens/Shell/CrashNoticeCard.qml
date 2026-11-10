@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // The last run crashed (cpp/crashnotice.*): a toast card (ui/toast.tsx) at
 // the window's bottom right until dismissed. Open folder shows the dumps;

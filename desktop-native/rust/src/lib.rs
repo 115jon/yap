@@ -50,3 +50,6 @@ mod video;
 #[cfg(windows)]
 mod webembed;
 mod webm;
+
+// The shared view layer (QML module Yap.Ui): linked for its C++ and QML.
+use yap_ui as _;

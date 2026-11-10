@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // An inline text action ("Retry", "Esc to cancel"): 12 px in accent ink,
 // underlined on hover.

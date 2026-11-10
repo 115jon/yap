@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The settings switch (ui/switch.tsx, md): a 56 x 28 tint-3 track that
 // fills with primary-fill when on, a talk LED on its leading end while on,

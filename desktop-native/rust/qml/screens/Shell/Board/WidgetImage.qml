@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import com.yap.native
+import Yap.Ui
 
 // A user image cropped into its box (shared.tsx WidgetImage): the caller
 // sizes it. ply-4 behind, 2 px corners; a broken-image glyph when it fails.

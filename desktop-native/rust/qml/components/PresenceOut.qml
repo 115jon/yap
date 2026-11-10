@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A popup's exit (styles/motion.css .rm-presence[data-ending-style]): it
 // fades out and shrinks to `toScale` (0.985) faster than it came in

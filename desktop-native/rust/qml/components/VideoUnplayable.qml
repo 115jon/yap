@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // A video that will not play (VideoAttachment.tsx `mediaError`): ply-2,
 // p-5, the 32 px alert in ink-3, "This video cannot be played here" at

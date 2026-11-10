@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The play disc (MediaPlayButton.tsx): 48 px, ply-3 with a seam, the
 // ink-1 play glyph nudged 1 px right; ply-4 on hover.

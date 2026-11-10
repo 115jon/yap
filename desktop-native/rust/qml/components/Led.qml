@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A status LED (ui/led.tsx): 6 px, `line-strong` when off. A lit LED gets
 // the halo (2 px ring at 22 %, soft 8 px disc at 45 %); only opacity moves.

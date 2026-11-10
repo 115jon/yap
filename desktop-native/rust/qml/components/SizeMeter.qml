@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The too-big size meter (toobig-spec.md): a 6 px track spanning
 // max(size, limit); the part within the limit in the accent ink, the

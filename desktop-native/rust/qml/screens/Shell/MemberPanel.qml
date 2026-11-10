@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The member panel (MemberList.tsx members tab): role groups and Offline as
 // tree branches, px-2, rows 2 px apart. Docked it is a 240 px ply-0 column

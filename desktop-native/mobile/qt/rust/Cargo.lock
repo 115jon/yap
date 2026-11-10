@@ -2159,7 +2159,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "yap-anim"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "gif",
  "image",
@@ -2168,7 +2168,7 @@ dependencies = [
 
 [[package]]
 name = "yap-cache"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "rusqlite",
  "serde",
@@ -2179,7 +2179,7 @@ dependencies = [
 
 [[package]]
 name = "yap-core"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "futures-util",
  "keyring",
@@ -2194,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "yap-protocol"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "serde",
  "serde_json",
@@ -2203,7 +2203,7 @@ dependencies = [
 
 [[package]]
 name = "yap-realtime"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "futures-util",
  "serde_json",
@@ -2211,6 +2211,16 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "yap-protocol",
+]
+
+[[package]]
+name = "yap-ui"
+version = "0.2.26"
+dependencies = [
+ "cxx",
+ "cxx-qt",
+ "cxx-qt-build",
+ "cxx-qt-lib",
 ]
 
 [[package]]
@@ -2232,6 +2242,7 @@ dependencies = [
  "yap-core",
  "yap-protocol",
  "yap-realtime",
+ "yap-ui",
 ]
 
 [[package]]

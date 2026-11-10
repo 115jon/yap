@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // Links (widgets/Links.tsx): up to five labelled links (three on S), each
 // a row with its host. They open in the browser only when clicked; the

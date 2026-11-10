@@ -5,6 +5,7 @@ import QtMultimedia
 import Yap.Chrome
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // A video in the chat (VideoAttachment.tsx, VideoPlayerControls.tsx):
 // the poster with the play disc and a duration badge until clicked, then

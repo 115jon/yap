@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // The call area of a DM (DMCallRegion.tsx), in the chat column above the
 // messages while the DM's call rings or has someone in it. Before we are

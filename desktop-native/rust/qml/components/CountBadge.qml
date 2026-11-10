@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // CountBadge (ui/badge.tsx): an 18 px badge-fill chip, 4 px padding,
 // Martian 11/600, "99+" past 99. `ring` cuts it out of `ground` (the rail

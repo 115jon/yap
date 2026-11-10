@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // An LED and its silkscreen word (ui/led.tsx LedLabel): `ledState` live, idle,
 // talk or off. `plain` keeps the word in ink-2 instead of the LED's ink.

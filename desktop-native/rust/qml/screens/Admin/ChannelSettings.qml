@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Channel settings (ChannelSettingsModal.tsx) on the shared workbench:
 // Overview (name, topic, public sharing) and Permissions (per role and

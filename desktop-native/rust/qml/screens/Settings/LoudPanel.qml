@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Settings > Yap Loud (LoudPanel.tsx): the plan in force, with its Founder
 // or Loud badge and "Founder · lifetime" (else the plan's name), then the

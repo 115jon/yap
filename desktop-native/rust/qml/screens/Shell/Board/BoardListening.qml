@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Listening (widgets/Listening.tsx): the owner's last Listen Together
 // session as the server recorded it. Another user's live room state is not

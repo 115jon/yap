@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The profile card's "Playing a game" (ProfileCard.tsx, GameActivityCard):
 // the game's 40 px icon (left out when it has none or it fails, so the

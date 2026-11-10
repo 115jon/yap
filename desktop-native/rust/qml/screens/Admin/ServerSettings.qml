@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Server settings (ServerSettingsModal.tsx) on the shared workbench: the
 // pages this user may see (Overview; Roles with Manage roles; Invites with

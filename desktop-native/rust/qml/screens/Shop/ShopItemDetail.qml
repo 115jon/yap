@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // An item's detail (ShopItemDetail.tsx): a dialog with the live preview on
 // you at the left (on the collection's colours; the art plays here and

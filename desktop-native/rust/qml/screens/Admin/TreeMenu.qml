@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The tree's right-click menus (ChannelSidebar.tsx `useSidebarContextMenus`):
 //   channel   Mark as read; Invite to channel, Copy link; Mute channel and Notification settings (disabled,

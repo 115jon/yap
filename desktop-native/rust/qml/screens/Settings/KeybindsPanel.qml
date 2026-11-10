@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Keybinds: the call keys (global, through Hotkeys' low-level hook), push
 // to talk's options, soundboard keys, then the built-in shortcuts. A row

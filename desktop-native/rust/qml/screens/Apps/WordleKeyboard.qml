@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The on-screen keyboard: three rows, Enter and Backspace on the last,
 // each letter coloured by its best mark so far.

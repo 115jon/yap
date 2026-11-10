@@ -52,6 +52,11 @@ endif()
 cxx_qt_import_qml_module(yap_native_qml
   URI "com.yap.native"
   SOURCE_CRATE yap_native)
+# The view layer shared with the mobile app: the yap-ui crate, a dependency
+# of yap_native, builds it and exports it beside com.yap.native.
+cxx_qt_import_qml_module(yap_ui_qml
+  URI "Yap.Ui"
+  SOURCE_CRATE yap_native)
 
 qt_add_executable(YapNative WIN32
   cpp/main.cpp
@@ -99,6 +104,7 @@ target_compile_definitions(YapNative PRIVATE
 # QWindowSystemInterface, as a real key does, so shortcuts see it.
 target_link_libraries(YapNative PRIVATE
   yap_native_qml
+  yap_ui_qml
   Qt::Gui Qt::Multimedia Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg
   Qt::GuiPrivate Qt::MultimediaPrivate Qt::QuickPrivate)
 

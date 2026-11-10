@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Static rows at the real row height while a list loads (states.tsx
 // SkeletonRows): a ply-2 box with hairlines, each row an avatar block and

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A widget with nothing to show (shared.tsx WidgetEmpty): a quiet glyph,
 // one line and a hint, centred down the plate's body. No art, no action.

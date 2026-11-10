@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The account row (UserPanel.tsx): 64 high, pl-3 pr-1, gap 4. A 40 px
 // avatar with its presence LED in a square notch cut from the ply, the

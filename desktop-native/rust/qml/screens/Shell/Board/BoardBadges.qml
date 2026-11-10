@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Badge case (widgets/Badges.tsx): the owner's badges in the order they
 // picked (or newest first), drawn by UserBadges. S is a row of marks with

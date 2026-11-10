@@ -4021,6 +4021,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "yap-ui"
+version = "0.2.26"
+dependencies = [
+ "cxx",
+ "cxx-qt",
+ "cxx-qt-build",
+ "cxx-qt-lib",
+]
+
+[[package]]
 name = "yap-voice"
 version = "0.2.26"
 dependencies = [
@@ -4085,6 +4095,7 @@ dependencies = [
  "yap-realtime",
  "yap-segment",
  "yap-speaker",
+ "yap-ui",
  "yap-voice",
  "yap-webm",
 ]

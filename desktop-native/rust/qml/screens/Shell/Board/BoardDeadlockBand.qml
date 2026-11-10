@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The hero art band (Deadlock.tsx Band / ArtTag / ArtClock): the hero's
 // colour as a 140° gradient into black, a faint 6 px grille, the hero card

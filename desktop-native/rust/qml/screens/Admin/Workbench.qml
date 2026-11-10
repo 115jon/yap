@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The settings workbench every settings-like surface shares
 // (SettingsWorkbench.tsx), here for server and channel settings: a

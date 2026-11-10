@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The Daily Word bar: title and date, hard mode, hints (unlock the next,
 // list the unlocked), Reveal answer with its confirm, and Leave.

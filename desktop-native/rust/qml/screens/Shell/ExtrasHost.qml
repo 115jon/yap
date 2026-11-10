@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The shell's extra dialogs, opened through ShellState from anywhere: the
 // quick switcher (Ctrl+K, CommandMenu.tsx), who reacted, Share message,

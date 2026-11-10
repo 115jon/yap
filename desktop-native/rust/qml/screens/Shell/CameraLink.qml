@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // Ties the camera capture (the `Camera` singleton) to the saved choice and
 // to the call: it captures while the call wants the camera, and a capture

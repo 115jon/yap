@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One person already in the channel, on the voice landing: a 24 px avatar,
 // the name in Bricolage 14/700, and their state: deafened, muted, or the

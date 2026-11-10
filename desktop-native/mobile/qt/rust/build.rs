@@ -39,7 +39,7 @@ const SHARED_QML: &[&str] = &[
 ];
 
 /// Shared singletons (same source, `pragma Singleton`).
-const SHARED_SINGLETONS: &[&str] = &["qml/theme/Theme.qml", "qml/screens/Shell/ShellState.qml"];
+const SHARED_SINGLETONS: &[&str] = &["qml/screens/Shell/ShellState.qml"];
 
 /// The desktop's Rust that compiles here unchanged: the list models. It
 /// lands in `src/` (gitignored there): cxx-qt-build takes the bridge files

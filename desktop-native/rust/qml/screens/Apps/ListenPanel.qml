@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // Listen Together (ListenTogetherPanel.tsx): search tracks or collections,
 // or paste a YouTube or Spotify link (a playlist previews with Play now and

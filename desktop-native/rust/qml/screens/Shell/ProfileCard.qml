@@ -3,6 +3,7 @@ import QtQuick.Effects
 import QtQuick.Templates as T
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // The profile card (ProfileCard.tsx), at two sizes: `popover` has a 96 px
 // banner (the banner picture, else the banner colour, else accent-tint), a

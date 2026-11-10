@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One playing sound (ActiveSoundboardEffectList.tsx): the owner's initial,
 // the name over who played it, pause or resume (yours only) and stop, then

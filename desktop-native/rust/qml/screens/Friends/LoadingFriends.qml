@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The Friends list loading (FriendsView.tsx skeleton): a branch label bar,
 // then three 32 px rows of a 24 px avatar block and a name bar on tint-2.

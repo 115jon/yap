@@ -3,6 +3,7 @@ import QtMultimedia
 import QtQuick.Effects
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // The tile on stage (VoiceGrid.tsx FocusedStage): media letterboxed in its
 // own black box inside the stage padding; a person without media gets the

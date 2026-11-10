@@ -4,6 +4,7 @@ import QtMultimedia
 import Yap.Chrome
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // Floating sticker reactions over the call (StickerReactionsOverlay.tsx):
 // each `reaction.sticker` that lands plays once in its display mode:

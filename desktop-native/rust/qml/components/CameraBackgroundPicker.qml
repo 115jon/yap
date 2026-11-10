@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // The camera background tiles (CameraCard.tsx `camera-background`): None,
 // Blur, the account's uploads (each with a remove key on hover), then

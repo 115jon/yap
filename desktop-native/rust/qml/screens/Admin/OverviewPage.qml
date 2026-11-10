@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // Server settings → Overview (OverviewPage.tsx): Server profile (the icon
 // with Upload or Change and Remove, the name; read-only without Manage

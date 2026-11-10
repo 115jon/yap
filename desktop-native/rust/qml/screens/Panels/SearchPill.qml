@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // What a result carries (SearchResultItem.tsx ATTACHMENT_PILL): 24 high,
 // up to 200, ply-2 on a hairline, a 12 px glyph and the name at 12.

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // The bell's inbox (NotificationBell.tsx): a non-modal 380 wide menu
 // panel under the bell, at most 560 tall. Its header (48, px-4, a seam):

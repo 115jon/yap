@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // An error line with a dismiss key (the picker's and panel's errors).
 Rectangle {

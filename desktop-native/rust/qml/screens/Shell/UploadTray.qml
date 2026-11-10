@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The composer's attachments (AttachmentList.tsx): 96 px tiles 8 px apart,
 // wrapping, at most 256 high. A finished tile shows its picture (or the

@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // Create a server (CreateServerModal.tsx): the icon key (64 px, a dashed
 // edge; Upload image or Change, and Remove), "Server icon, optional" with

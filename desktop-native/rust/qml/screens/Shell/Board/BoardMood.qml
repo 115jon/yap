@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Mood (widgets/Mood.tsx): Yappy in a pose (the still bark frame or a
 // YappyPose) beside one line about how it's going, and when that line

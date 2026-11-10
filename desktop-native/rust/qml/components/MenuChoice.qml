@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // A radio row (DropdownMenuRadioItem): the 16 px check slot, the label,
 // and an optional Martian hint at the right end in ink-3.

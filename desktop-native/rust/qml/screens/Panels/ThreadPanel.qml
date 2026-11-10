@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // ThreadSidebar.tsx: "Thread" with "N replies" after it; the root message
 // with its header over a seam, the replies label (or "No replies yet. Start

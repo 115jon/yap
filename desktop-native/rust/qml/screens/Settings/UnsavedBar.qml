@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The one save pattern for settings that don't save on change
 // (UnsavedBar.tsx): hidden while clean, it slides up with a fade over dur-3

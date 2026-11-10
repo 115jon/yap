@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The full profile (UserProfileModal.tsx): what the popout's avatar and
 // banner and every "Profile" menu row open (Friends, DMs, the member list,

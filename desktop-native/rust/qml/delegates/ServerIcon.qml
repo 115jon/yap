@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // One rail tile (ServerList.tsx RAIL_TILE): a 40 px tint-1 key with a
 // Bricolage 800 initial; selected is the primary key. `active` is the

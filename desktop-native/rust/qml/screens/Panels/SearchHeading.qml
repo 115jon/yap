@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A group label inside the search panel (SearchPanel.tsx GROUP_LABEL):
 // sentence case, 12/500, ink-3, px-2 pt-2 pb-1; 12 more above each group

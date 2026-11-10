@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A join or leave sound (SoundboardPanel.tsx `TriggerRow`): the sound and
 // whether it comes from All servers, Preview, Change (a chooser of the

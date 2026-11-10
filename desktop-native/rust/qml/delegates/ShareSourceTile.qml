@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // One source in the share picker (DesktopScreenPickerUI.tsx SourceGrid): a
 // ply-2 tile with a line edge, its still letterboxed on tint-1 over a 44 px

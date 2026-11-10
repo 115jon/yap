@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import QtQuick.Templates as T
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // The invite page (routes/invite.$code.tsx, chat/InviteClient.tsx) as the
 // web shows it: a whole public page over the app (below the title bar), on

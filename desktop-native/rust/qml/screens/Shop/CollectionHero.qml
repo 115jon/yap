@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A collection's hero (ShopView.tsx CollectionHero): the hero art over the
 // collection's colours, a scrim from the left so the white type reads,

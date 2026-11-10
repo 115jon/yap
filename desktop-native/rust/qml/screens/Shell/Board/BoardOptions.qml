@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // A widget's options (editor-fields.tsx, the inspector as the toolbar's
 // "More options" popover): the fields its type has, each written straight
