@@ -20,6 +20,7 @@ import type {
   BoardConflictBody,
   BoardResponse,
   BoardSaveResponse,
+  GuestbookDenial,
   GuestbookNote,
   ProfileBoard,
   ProfilePrefs,
@@ -105,6 +106,7 @@ export interface GuestbookPage {
   next_cursor: string | null;
   enabled: boolean;
   can_post: boolean;
+  denial?: GuestbookDenial | null;
   blocked?: BoardUserRef[];
 }
 

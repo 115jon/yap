@@ -307,7 +307,7 @@ describe("guestbook", () => {
     expect(screen.queryByLabelText("Leave Kiwi a note")).toBeNull();
     expect(
       screen.getByText(
-        "Only people who share a server or a DM with Kiwi can sign.",
+        "Only people who share a server or a DM with Kiwi can sign. Join one of their servers or message them first.",
       ),
     ).toBeInTheDocument();
     unmount();
@@ -315,7 +315,9 @@ describe("guestbook", () => {
       widgets: [guestbook],
       data: data({ enabled: false, can_post: false }),
     });
-    expect(screen.getByText("This guestbook is closed.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Kiwi closed their guestbook."),
+    ).toBeInTheDocument();
     expect(screen.queryByLabelText("Leave Kiwi a note")).toBeNull();
   });
 });
