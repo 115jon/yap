@@ -50,6 +50,32 @@ fn trace_http() -> bool {
     *ON.get_or_init(|| std::env::var("YAP_TRACE_HTTP").is_ok_and(|v| v == "1"))
 }
 
+/// `YAP_TRACE_GAMES=1`: each op 43 frame as it goes to the gateway, with
+/// the Steam ids replaced by their count.
+fn trace_activity(frame: &yap_protocol::Frame) {
+    static ON: OnceLock<bool> = OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var("YAP_TRACE_GAMES").is_ok_and(|v| v == "1")) {
+        return;
+    }
+    if frame.op != i64::from(yap_protocol::GatewayOp::ActivityUpdate.code()) {
+        return;
+    }
+    let mut d = frame.d.clone();
+    if let Some(game) = d
+        .get_mut("game_activity")
+        .and_then(|a| a.get_mut("game"))
+        .and_then(Value::as_object_mut)
+    {
+        if game.contains_key("account_id") {
+            game.insert("account_id".into(), Value::from("<set>"));
+        }
+        if let Some(party) = game.get("party").and_then(Value::as_array).map(Vec::len) {
+            game.insert("party".into(), Value::from(format!("<{party} ids>")));
+        }
+    }
+    eprintln!("[gateway] op 43 {d}");
+}
+
 /// The answer to a prefetch the runner dropped.
 pub const PREFETCH_BUSY: &str = "prefetch skipped: busy";
 
@@ -582,6 +608,7 @@ impl Runner {
                 self.gateway = Some(self.realtime.spawn_gateway(api, user_id, events));
             }
             Effect::GatewaySend(frame) => {
+                trace_activity(&frame);
                 if let Some(gateway) = &self.gateway {
                     let _ = gateway.outgoing.send(frame.encode());
                 }

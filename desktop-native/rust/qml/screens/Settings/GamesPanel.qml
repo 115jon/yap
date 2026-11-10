@@ -13,8 +13,27 @@ Column {
     readonly property var games: JSON.parse(Games.games.length > 0 ? Games.games : "[]")
     readonly property var running: JSON.parse(Games.running.length > 0 ? Games.running : "[]")
     property bool picking: false
+    readonly property var deadlock: JSON.parse(Games.deadlock.length > 0 ? Games.deadlock : "{}")
 
     spacing: 40
+
+    // What the live stats are doing while Deadlock runs.
+    function deadlockNote() {
+        const status = root.deadlock.status
+        if (status === "missing" || status === "stale")
+            return qsTr("Deadlock is running without live stats. Next time, launch it from here or add the launch option in Steam.")
+        const phases = {
+            "menu": qsTr("In the menu"),
+            "hideout": qsTr("In the Hideout"),
+            "queue": qsTr("Looking for a match"),
+            "match_intro": qsTr("Match starting"),
+            "in_match": qsTr("In a match"),
+            "post_match": qsTr("Match over"),
+            "spectating": qsTr("Spectating")
+        }
+        const phase = phases[root.deadlock.phase] ?? qsTr("Reading the game's log")
+        return qsTr("Live stats are on: %1.").arg(phase)
+    }
 
     function lastPlayed(game) {
         if (game.playing)
@@ -41,6 +60,84 @@ Column {
             checked: Games.detection
             onToggled: Games.enableDetection(!Games.detection)
         }
+    }
+
+    // Deadlock's live stats: the game writes console.log only when started
+    // with -condebug, so offer that start and the launch option, and say so
+    // gently while it runs without one.
+    SettingsCard {
+        id: deadlockCard
+        width: parent.width
+        sectionId: "deadlock-live"
+        property bool copied: false
+
+        SettingsRow {
+            rowId: "deadlock-launch"
+            layout: "inline"
+            KitButton {
+                variant: "secondary"
+                size: "sm"
+                iconName: "play"
+                text: qsTr("Launch")
+                Accessible.name: qsTr("Launch Deadlock with live stats")
+                onClicked: Games.launchDeadlock()
+            }
+        }
+        SettingsRow {
+            rowId: "deadlock-launch-option"
+            layout: "inline"
+            Row {
+                spacing: 8
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: optionText.implicitWidth + 16
+                    height: 28
+                    radius: Theme.radius
+                    color: Theme.tint2
+                    Text {
+                        id: optionText
+                        anchors.centerIn: parent
+                        textFormat: Text.PlainText
+                        text: root.deadlock.launchOption ?? "-condebug"
+                        color: Theme.ink1
+                        font: Theme.type.code
+                    }
+                }
+                KitButton {
+                    anchors.verticalCenter: parent.verticalCenter
+                    size: "sm"
+                    variant: "ghost"
+                    iconName: deadlockCard.copied ? "check" : "copy"
+                    text: deadlockCard.copied ? qsTr("Copied") : qsTr("Copy")
+                    Accessible.name: qsTr("Copy the launch option")
+                    onClicked: {
+                        optionClipboard.copyText(optionText.text)
+                        deadlockCard.copied = true
+                        copiedTimer.restart()
+                    }
+                }
+            }
+        }
+        SettingsRow {
+            custom: true
+            hideLabel: true
+            layout: "block"
+            visible: root.deadlock.running === true && root.deadlock.status !== "waiting"
+            Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+                text: root.deadlockNote()
+                color: root.deadlock.status === "live" ? Theme.accentInk : Theme.ink2
+                font: Theme.type.description
+            }
+        }
+        Timer {
+            id: copiedTimer
+            interval: 2000
+            onTriggered: deadlockCard.copied = false
+        }
+        ClipboardText { id: optionClipboard }
     }
 
     SettingsCard {

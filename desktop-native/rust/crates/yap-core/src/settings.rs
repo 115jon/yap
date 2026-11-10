@@ -919,6 +919,25 @@ pub const PANELS: &[PanelDef] = &[
                 )],
             ),
             section(
+                "deadlock-live",
+                "Deadlock live stats",
+                "With -condebug, Deadlock writes a log on this computer. Yap reads it to show your hero, mode and match time. It never touches the game.",
+                &[
+                    row(
+                        "deadlock-launch",
+                        "Launch Deadlock with live stats",
+                        "Starts Deadlock through Steam with -condebug. Steam asks first.",
+                        &["deadlock", "live", "stats", "hero", "match", "condebug", "launch", "steam"],
+                    ),
+                    row(
+                        "deadlock-launch-option",
+                        "Or set it once in Steam",
+                        "In Steam, open Deadlock's Properties and add this under Launch options.",
+                        &["deadlock", "launch options", "condebug", "steam", "properties"],
+                    ),
+                ],
+            ),
+            section(
                 "detected-games",
                 "Your games",
                 "",

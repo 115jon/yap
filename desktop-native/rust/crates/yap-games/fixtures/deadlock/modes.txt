@@ -1,0 +1,38 @@
+11/09 21:00:00 [Client] CL:  Connected to '127.0.0.1:27015'
+11/09 21:00:00 [Client] Map: "dl_hideout"
+11/09 21:00:01 [Server] SV:  "Test Player<0><[U:1:1000001]><>" STEAM USERID validated
+11/09 21:00:30 Entering matchmaking for region 0 with search key ''
+11/09 21:01:10 [GCClient] Send msg 9012 (k_EMsgClientToGCStopMatchmaking), 8 bytes
+11/09 21:01:20 Entering matchmaking for region 0 with search key ''
+11/09 21:02:00 Lobby 1 for Match 2 created
+11/09 21:02:01 [Client] CL:  Connected to '=[A:1:1:1]'
+11/09 21:02:01 [Client] Map: "start"
+11/09 21:02:02 [Client] Players: 8 (0 bots) / 32 humans
+ VMDL Camera Pose Success! "models/heroes_staging/bebop/bebop.vmdl" has loaded camera poses from vmdl:  "near_" Poses: 3
+11/09 21:02:10 [Client] Created physics for dl_midtown
+11/09 21:02:20 OnGameStateChanged: GameInProgress (7)
+11/09 21:12:00 OnGameStateChanged: PostGame (8)
+11/09 21:12:01 Lobby 1 for Match 2 destroyed
+11/09 21:12:10 [Client] Map: "dl_hideout"
+11/09 21:13:00 Lobby 3 for Match 4 created
+11/09 21:13:01 [Client] CL:  Connected to '=[A:1:1:2]'
+11/09 21:13:01 [Client] Map: "start"
+11/09 21:13:02 [Client] Players: 12 (11 bots) / 32 humans
+ VMDL Camera Pose Success! "models/heroes_wip/tengu/tengu_v2/tengu.vmdl" has loaded camera poses from vmdl:  "near_" Poses: 3
+11/09 21:13:10 [Client] Created physics for dl_midtown
+11/09 21:13:20 OnGameStateChanged: GameInProgress (7)
+11/09 21:30:00 [Client] Disconnecting from server: NETWORK_DISCONNECT_DISCONNECT_BY_USER
+11/09 21:30:05 [Client] Map: "dl_hideout"
+11/09 21:31:00 Lobby 5 for Match 6 created
+11/09 21:31:00 lobby match_mode: k_ECitadelMatchMode_PrivateLobby
+11/09 21:31:01 [Client] Map: "start"
+11/09 21:31:10 [Client] Created physics for dl_midtown
+11/09 21:31:20 OnGameStateChanged: GameInProgress (7)
+11/09 21:40:00 OnGameStateChanged: PostGame (8)
+11/09 21:40:05 [Client] Map: "dl_hideout"
+11/09 21:41:00 Playing Broadcast
+ VMDL Camera Pose Success! "models/heroes_staging/viper/viper.vmdl" has loaded camera poses from vmdl:  "near_" Poses: 3
+11/09 21:45:00 [Client] Disconnecting from server: NETWORK_DISCONNECT_DISCONNECT_BY_USER
+11/09 21:45:01 [Client] CL:  Connected to '127.0.0.1:27015'
+11/09 21:45:02 [Client] Map: "new_player_basics"
+11/09 21:45:03 OnGameStateChanged: GameInProgress (7)

@@ -241,6 +241,12 @@ the decisions.
   (detection on/off, the games seen with when they last ran and Hide, and
   Add it from what has a window), kept in the profile's `games.json`.
   `cargo run --release -p yap-games --example probe` measures its cost.
+  While Deadlock runs, its live state (phase, hero, mode, match clock,
+  party) goes along in the activity's `game` field, read from the
+  `console.log` the game writes when started with `-condebug`
+  (`yap_games::deadlock`); Registered games has "Launch Deadlock with live
+  stats" and the launch option to copy, and says so while the game runs
+  without it. `YAP_TEST_DEADLOCK_LOG=<path>` follows that file instead.
 
 - Media in messages as the web draws it: pictures (one fitted in 640 x 400,
   or the 2-10 tile grid; GIFs animate; sensitive ones blurred behind
