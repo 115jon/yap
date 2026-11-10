@@ -7,11 +7,14 @@ import com.yap.native
 // The full profile (UserProfileModal.tsx): what the popout's avatar and
 // banner and every "Profile" menu row open (Friends, DMs, the member list,
 // a message, a voice occupant). The shared ProfileCard at modal size (a
-// 176 px banner, the 112 px avatar, the name at 28/600), 640 wide
-// (md:max-w-640, 16 px from the window's sides), anchored at max(48, 12 %
-// of the window) and growing downward, so loading or the block confirm
-// never recentres it; one scroller, the window less 24 px under it. The
-// dialog's 40 px tint-2 close sits on the banner 16 in. Someone else's has
+// 176 px banner, the 112 px avatar, the name at 28/600), 376 wide beside
+// the board column (BoardPanel: Board, Activity, Wishlist), about 1120 in
+// all (16 px from the window's sides) and stacked under 720, anchored at
+// max(48, 12 % of the window) and growing downward, so loading or the block
+// confirm never recentres it; side by side each column scrolls on its own
+// and the board column runs the full height, the window less 24 px under
+// it. The dialog's 40 px tint-2 close sits 16 in from the modal's top
+// right. Someone else's has
 // the actions (ProfileActionRow with Call; only Try again when the profile
 // failed to load); your own has Edit profile. Then the load error, Playing
 // a game, About me (the message grammar, markdown.rs), Roles in the shown
@@ -36,6 +39,7 @@ T.Popup {
         revealedSpoilers = {}
         returnFocus = parent ? parent.Window.activeFocusItem : null
         Profile.show(userId)
+        Board.open(userId)
         if (userId !== Session.meId)
             Friends.refresh()
         open()
@@ -55,26 +59,50 @@ T.Popup {
 
     parent: T.Overlay.overlay
     readonly property real topAt: Math.max(48, (parent ? parent.height : 800) * 0.12)
-    width: Math.min(640, (parent ? parent.width : 680) - 32)
-    height: Math.min(card.implicitHeight, (parent ? parent.height : 800) - topAt - 24)
+    // Card (376) beside the board column, about 1120 in all; stacked, one
+    // scroller, under 720 (UserProfileModal.tsx).
+    width: Math.min(1120, (parent ? parent.width : 680) - 32)
+    readonly property real room: (parent ? parent.height : 800) - topAt - 24
+    readonly property bool wide: width >= 720
+    readonly property int cardWidth: wide ? 376 : width
+    height: wide ? Math.min(room, Math.max(card.implicitHeight, panel.implicitHeight + 2))
+        : Math.min(room, card.implicitHeight + panel.implicitHeight + 1)
     x: Math.round(((parent ? parent.width : 680) - width) / 2)
     y: topAt
     padding: 0
     modal: true
     dim: true
     focus: true
+    // With unsaved board edits nothing closes it on its own: Esc, the scrim
+    // and the close key go through the board's discard confirm.
     closePolicy: actions.confirmBlock ? T.Popup.CloseOnPressOutside
+        : panel.unsaved ? T.Popup.NoAutoClose
         : T.Popup.CloseOnEscape | T.Popup.CloseOnPressOutside
+
+    // Closes now, or asks first while board edits are unsaved.
+    function requestClose() {
+        if (panel.mayClose())
+            close()
+    }
     onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
     onClosed: {
         Profile.close(shownId)
+        Board.close()
         const back = returnFocus
         returnFocus = null
         if (back && back.visible)
             back.forceActiveFocus()
     }
 
-    Overlay.modal: Scrim {}
+    Overlay.modal: Scrim {
+        stepsBack: panel.unsaved && !actions.confirmBlock
+        onTapped: popup.requestClose()
+    }
+    Shortcut {
+        sequence: "Esc"
+        enabled: popup.visible && !actions.confirmBlock && panel.unsaved
+        onActivated: popup.requestClose()
+    }
 
     // Esc backs out of the block confirm before the profile.
     Shortcut {
@@ -86,12 +114,25 @@ T.Popup {
     background: null
 
     contentItem: Flickable {
+        // Stacked: this one scrolls both columns. Side by side each column
+        // scrolls on its own and this one stays put (it takes no wheel).
+        id: outer
+        clip: !popup.wide
+        contentWidth: width
+        contentHeight: popup.wide ? height : card.implicitHeight + panel.implicitHeight + 1
+        boundsBehavior: Flickable.StopAtBounds
+        interactive: !popup.wide && contentHeight > height
+        ScrollBar.vertical: ThinScrollBar { visible: !popup.wide && outer.contentHeight > outer.height }
+
+    Flickable {
         id: scroller
+        width: popup.cardWidth
+        height: popup.wide ? Math.min(card.implicitHeight, outer.height) : card.implicitHeight
         clip: true
         contentWidth: width
         contentHeight: card.implicitHeight
         boundsBehavior: Flickable.StopAtBounds
-        interactive: contentHeight > height
+        interactive: popup.wide && contentHeight > height
         ScrollBar.vertical: ThinScrollBar {}
         Accessible.role: Accessible.Dialog
         Accessible.name: qsTr("%1's profile").arg(Profile.name)
@@ -168,6 +209,7 @@ T.Popup {
                 width: parent.width
                 spacing: 8
                 Text {
+                    textFormat: Text.PlainText
                     text: qsTr("About me")
                     color: Theme.ink2
                     font: Theme.type.captionStrong
@@ -211,6 +253,7 @@ T.Popup {
                 width: parent.width
                 spacing: 8
                 Text {
+                    textFormat: Text.PlainText
                     text: qsTr("Roles")
                     color: Theme.ink2
                     font: Theme.type.captionStrong
@@ -259,20 +302,71 @@ T.Popup {
             }
         }
 
-        // The dialog's close key: 40 px tint-2, the 20 px X, 16 in.
-        IconKey {
-            x: card.width - card.inSide - width - 16
-            y: card.inTop + 16
-            z: 3
-            size: 40
-            iconName: "close"
-            tone: "toggled"
-            // The Bold X on tint-2 (the toggled tone's Fill glyph is the X
-            // in a square).
-            iconVariant: "idle"
-            tip: qsTr("Close")
-            onClicked: popup.close()
+    }
+
+    // The board column (ProfilePanel): beside the card, or under it.
+    Flickable {
+        id: panelScroller
+        x: popup.wide ? popup.cardWidth : 0
+        y: popup.wide ? 0 : card.implicitHeight + 1
+        width: popup.width - x
+        // Side by side it runs the modal's full height, as the card does.
+        height: popup.wide ? outer.height : panel.implicitHeight + 1
+        clip: true
+        contentWidth: width
+        contentHeight: panel.height + 2
+        boundsBehavior: Flickable.StopAtBounds
+        interactive: popup.wide && contentHeight > height
+        ScrollBar.vertical: ThinScrollBar {}
+
+        BoardPanel {
+            id: panel
+            x: popup.wide ? 0 : 1
+            y: 1
+            width: panelScroller.width - (popup.wide ? 1 : 2)
+            height: Math.max(implicitHeight, popup.wide ? panelScroller.height - 2 : 0)
+            // The close key sits at the header's right end side by side.
+            closeReserve: popup.wide ? 64 : 0
+            ownerName: Profile.name
+            ownerAvatar: Profile.avatar
+            ownerInitials: Profile.initials
+            scroller: panelScroller
+            onCloseRequested: popup.close()
         }
+    }
+    // Its edge: line-strong, none against the card when side by side.
+    Rectangle {
+        x: panelScroller.x
+        y: panelScroller.y
+        width: panelScroller.width
+        height: panelScroller.height
+        color: "transparent"
+        border.width: 1
+        border.color: Theme.lineStrong
+        Rectangle {
+            visible: popup.wide
+            width: 1
+            height: parent.height
+            color: Theme.ply3
+        }
+    }
+
+    // The dialog's close key (40 px tint-2, the 20 px X): the modal's top
+    // right, 16 in, as on the web: over the board column's tabs side by
+    // side (clear of Edit board), over the card's banner when stacked.
+    IconKey {
+        x: popup.width - width - 16 - (popup.wide ? 0 : card.inSide)
+        y: 16 + (popup.wide ? 0 : card.inTop)
+        z: 5
+        size: 40
+        iconName: "close"
+        tone: "toggled"
+        // The Bold X on tint-2 (the toggled tone's Fill glyph is the X
+        // in a square).
+        iconVariant: "idle"
+        tip: qsTr("Close")
+        onClicked: popup.requestClose()
+    }
     }
 
     enter: PresenceIn { fromScale: Theme.scaleDialog }

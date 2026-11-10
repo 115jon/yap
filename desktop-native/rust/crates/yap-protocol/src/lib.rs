@@ -11,6 +11,7 @@ pub mod frame;
 pub mod game_activity;
 pub mod opcode;
 pub mod payload;
+pub mod profile_board;
 pub mod rest;
 pub mod tiers;
 pub mod voice_app;
