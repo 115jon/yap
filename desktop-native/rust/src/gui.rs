@@ -25,6 +25,7 @@ use yap_core::ViewUpdate;
 use crate::bridge::qobject::{Chat, Nav, Profile, Session, Voice};
 use crate::client;
 use crate::models::{self, qobject as m};
+use crate::platform::platform;
 
 /// The rows of each list model.
 #[derive(Default)]
@@ -572,8 +573,7 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             with::<Chat>(|chat| chat.set_hovered_mention(q(&json)));
         }
         ViewUpdate::Voice(view) => {
-            // The updater's restart waits while a call is up.
-            crate::updater::set_in_call(!view.channel_id.is_empty());
+            platform().in_call(!view.channel_id.is_empty());
             with::<Voice>(|voice| set_voice(voice, &view));
             scalars(|s| s.voice = view);
         }
@@ -639,14 +639,9 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             scalars(|s| s.gif_favorites = text);
         }
         ViewUpdate::Apps(view) => crate::apps::on_view(*view),
-        ViewUpdate::CameraBackgrounds(view) => crate::audio::on_backgrounds(*view),
         ViewUpdate::Extras(view) => crate::extras::on_view(*view),
         ViewUpdate::Invites(view) => crate::invites::on_view(*view),
-        ViewUpdate::Toast(toast) => crate::desktop::on_toast(&toast),
-        ViewUpdate::Sound(sound) => crate::sound::play(sound),
-        ViewUpdate::StopSound(sound) => crate::sound::stop(sound),
         ViewUpdate::Calls(view) => crate::calls::on_view(*view),
-        ViewUpdate::Badge(badge) => crate::desktop::on_badge(badge),
         ViewUpdate::Uploads(diff) => models::apply::<m::UploadListModel>(diff),
         ViewUpdate::UploadCounts {
             ready,
@@ -661,7 +656,6 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             with::<Chat>(|chat| set_gifs(chat, &view));
             scalars(|s| s.gifs = view);
         }
-        ViewUpdate::MediaAuth(token) => crate::media::set_token(token),
         ViewUpdate::Saved { path, open } => {
             with::<Chat>(|chat| chat.saved(q(&path), open));
         }
@@ -678,5 +672,7 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             });
             scalars(|s| s.newer = (loading, more));
         }
+        // The rest is the app's (toasts, sounds, the badge, ...).
+        other => platform().on_update(other),
     }
 }

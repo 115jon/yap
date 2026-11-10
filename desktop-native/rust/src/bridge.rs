@@ -1031,7 +1031,7 @@ impl qobject::Chat {
             .map(|p| p.to_string())
             .filter(|p| !p.is_empty())
             .collect();
-        let files = crate::media::upload_files(&paths);
+        let files = crate::platform::platform().upload_files(&paths);
         if !files.is_empty() {
             client::command(Command::AddUploads(files));
         }
@@ -1327,7 +1327,7 @@ impl qobject::Voice {
         }
         let qt = self.qt_thread();
         std::thread::spawn(move || {
-            let json = crate::share::sources_json();
+            let json = crate::platform::platform().share_sources_json();
             let _ = qt.queue(move |mut voice| {
                 voice.as_mut().rust_mut().share_refreshing = false;
                 let json = QString::from(json.as_str());
@@ -1378,16 +1378,16 @@ impl qobject::Voice {
     }
 
     pub fn new_surface(&self) -> i32 {
-        crate::video::new_surface()
+        crate::platform::platform().new_video_surface()
     }
 
     pub fn report_video(&self, surface: i32, key: &QString, width: i32, height: i32) {
         let px = |n: i32| u32::try_from(n).unwrap_or(0);
-        crate::video::report(surface, &key.to_string(), px(width), px(height));
+        crate::platform::platform().report_video(surface, &key.to_string(), px(width), px(height));
     }
 
     pub fn set_stage(&self, participant_id: &QString) {
-        crate::video::set_stage(&participant_id.to_string());
+        crate::platform::platform().set_video_stage(&participant_id.to_string());
     }
 }
 

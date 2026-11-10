@@ -736,6 +736,9 @@ extern "C" void yap_tauri_app_started();
 // The in-app updater (rust/src/updater.rs): with install on quit, hands a
 // downloaded update to Velopack's updater. Not while Windows shuts down.
 extern "C" void yap_updater_quit(bool session_ending);
+// The desktop's side of the shared view layer (rust/src/native.rs), before
+// QML loads.
+extern "C" void yap_desktop_init();
 
 int main(int argc, char* argv[])
 {
@@ -861,6 +864,8 @@ int main(int argc, char* argv[])
   registerFonts();
   std::fprintf(stderr, "[startup] fonts after %lld ms\n",
                static_cast<long long>(startup.elapsed()));
+
+  yap_desktop_init();
 
   auto* chrome = new WindowChrome(&app);
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "WindowChrome", chrome);

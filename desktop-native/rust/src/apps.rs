@@ -509,7 +509,7 @@ impl qobject::Apps {
     pub fn start_activity(&self, activity: &QString) {
         send(AppsCommand::StartActivity {
             activity: text(activity),
-            now_ms: client::voice::now_ms(),
+            now_ms: client::now_ms(),
         });
     }
 
@@ -519,7 +519,7 @@ impl qobject::Apps {
 
     pub fn wordle_open(&self) {
         send(AppsCommand::WordleOpen {
-            date: yap_core::wordle::new_york_date(client::voice::now_ms()),
+            date: yap_core::wordle::new_york_date(client::now_ms()),
         });
     }
 
@@ -602,17 +602,17 @@ impl qobject::Apps {
     }
 
     pub fn sample(self: Pin<&mut Self>) {
-        self.set_level(crate::apps_audio::level());
+        self.set_level(crate::platform::platform().player_level());
     }
 
     pub fn now_ms(&self) -> f64 {
         #[expect(clippy::cast_precision_loss, reason = "epoch ms fit f64 exactly")]
-        let now = client::voice::now_ms() as f64;
+        let now = client::now_ms() as f64;
         now
     }
 
     pub fn lt_position_ms(&self) -> f64 {
-        let now = client::voice::now_ms();
+        let now = client::now_ms();
         LT_CLOCK.with(|clock| clock.get().live_ms(now))
     }
 }
