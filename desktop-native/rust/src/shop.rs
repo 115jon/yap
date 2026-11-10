@@ -145,9 +145,7 @@ pub(crate) fn on_view(view: ShopView) {
 }
 
 impl gui::Slot for qobject::Shop {
-    fn slot(objects: &mut gui::Objects) -> &mut Option<std::ptr::NonNull<Self>> {
-        &mut objects.shop
-    }
+    crate::slot_cell!(qobject::Shop);
 
     fn restore(self: Pin<&mut Self>) {
         let view = gui::shop_view();

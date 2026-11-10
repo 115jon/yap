@@ -310,9 +310,7 @@ pub(crate) fn send_local_settings() {
 }
 
 impl gui::Slot for qobject::Apps {
-    fn slot(objects: &mut gui::Objects) -> &mut Option<std::ptr::NonNull<Self>> {
-        &mut objects.apps
-    }
+    crate::slot_cell!(qobject::Apps);
 
     fn restore(self: Pin<&mut Self>) {
         apply(self, &gui::apps_view());

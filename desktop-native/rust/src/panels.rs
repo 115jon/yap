@@ -120,9 +120,7 @@ pub(crate) fn on_view(view: PanelsView) {
 }
 
 impl gui::Slot for qobject::Panels {
-    fn slot(objects: &mut gui::Objects) -> &mut Option<std::ptr::NonNull<Self>> {
-        &mut objects.panels
-    }
+    crate::slot_cell!(qobject::Panels);
 
     fn restore(self: Pin<&mut Self>) {
         apply(self, &gui::panels_view());

@@ -411,9 +411,7 @@ fn build(search: &str, muted: bool, deafened: bool, theme: &str) -> Value {
 }
 
 impl gui::Slot for qobject::CommandMenu {
-    fn slot(objects: &mut gui::Objects) -> &mut Option<std::ptr::NonNull<Self>> {
-        &mut objects.command_menu
-    }
+    crate::slot_cell!(qobject::CommandMenu);
 }
 
 impl cxx_qt::Initialize for qobject::CommandMenu {

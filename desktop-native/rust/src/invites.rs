@@ -180,9 +180,7 @@ pub(crate) fn on_view(view: InviteView) {
 }
 
 impl gui::Slot for qobject::Invites {
-    fn slot(objects: &mut gui::Objects) -> &mut Option<std::ptr::NonNull<Self>> {
-        &mut objects.invites
-    }
+    crate::slot_cell!(qobject::Invites);
 
     fn restore(self: Pin<&mut Self>) {
         let view = LAST.with(|last| last.borrow().0.clone());

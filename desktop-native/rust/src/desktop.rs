@@ -353,9 +353,7 @@ pub(crate) fn on_toast(toast: &ToastView) {
 }
 
 impl gui::Slot for qobject::Desktop {
-    fn slot(objects: &mut gui::Objects) -> &mut Option<std::ptr::NonNull<Self>> {
-        &mut objects.desktop
-    }
+    crate::slot_cell!(qobject::Desktop);
 
     fn restore(mut self: Pin<&mut Self>) {
         apply_settings(self.as_mut(), current());

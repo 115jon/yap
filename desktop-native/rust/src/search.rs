@@ -191,9 +191,7 @@ pub(crate) fn on_view(view: SearchView) {
 }
 
 impl gui::Slot for qobject::Search {
-    fn slot(objects: &mut gui::Objects) -> &mut Option<std::ptr::NonNull<Self>> {
-        &mut objects.search
-    }
+    crate::slot_cell!(qobject::Search);
 
     fn restore(self: Pin<&mut Self>) {
         let view = SEARCH.with(|s| s.borrow().1.clone());

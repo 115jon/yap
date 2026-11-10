@@ -266,9 +266,7 @@ pub(crate) fn on_view(view: AdminView) {
 }
 
 impl gui::Slot for qobject::Admin {
-    fn slot(objects: &mut gui::Objects) -> &mut Option<std::ptr::NonNull<Self>> {
-        &mut objects.admin
-    }
+    crate::slot_cell!(qobject::Admin);
 
     fn restore(mut self: Pin<&mut Self>) {
         self.as_mut()

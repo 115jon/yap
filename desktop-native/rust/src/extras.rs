@@ -271,9 +271,7 @@ pub(crate) fn on_view(view: ExtrasView) {
 }
 
 impl gui::Slot for qobject::Extras {
-    fn slot(objects: &mut gui::Objects) -> &mut Option<std::ptr::NonNull<Self>> {
-        &mut objects.extras
-    }
+    crate::slot_cell!(qobject::Extras);
 
     fn restore(self: Pin<&mut Self>) {
         apply(self, &gui::extras_view());

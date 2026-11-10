@@ -106,9 +106,7 @@ pub(crate) fn on_view(view: FriendsView) {
 }
 
 impl gui::Slot for qobject::Friends {
-    fn slot(objects: &mut gui::Objects) -> &mut Option<std::ptr::NonNull<Self>> {
-        &mut objects.friends
-    }
+    crate::slot_cell!(qobject::Friends);
 
     fn restore(self: Pin<&mut Self>) {
         apply(self, &gui::friends_view());

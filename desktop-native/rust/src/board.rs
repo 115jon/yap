@@ -215,9 +215,7 @@ pub(crate) fn on_view(view: BoardView) {
 }
 
 impl gui::Slot for qobject::Board {
-    fn slot(objects: &mut gui::Objects) -> &mut Option<std::ptr::NonNull<Self>> {
-        &mut objects.board
-    }
+    crate::slot_cell!(qobject::Board);
 
     fn restore(self: Pin<&mut Self>) {
         apply(self, &gui::board_view());

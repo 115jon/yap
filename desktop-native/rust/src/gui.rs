@@ -6,8 +6,9 @@
 //! Qt calls back (`data()`, bindings, handlers) synchronously.
 
 use core::pin::Pin;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::ptr::NonNull;
+use std::thread::LocalKey;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cxx_qt_lib::QString;
@@ -82,59 +83,49 @@ struct Scalars {
     calls: yap_core::store::calls::CallsView,
 }
 
-/// The live QObjects. Each registers from its constructor and clears its
-/// slot from its destructor, both on the GUI thread.
-#[derive(Default)]
-pub struct Objects {
-    pub(crate) desktop: Option<NonNull<crate::desktop::qobject::Desktop>>,
-    pub(crate) settings: Option<NonNull<crate::settings::qobject::Settings>>,
-    pub(crate) admin: Option<NonNull<crate::admin::qobject::Admin>>,
-    pub(crate) panels: Option<NonNull<crate::panels::qobject::Panels>>,
-    pub(crate) search: Option<NonNull<crate::search::qobject::Search>>,
-    pub(crate) friends: Option<NonNull<crate::friends::qobject::Friends>>,
-    pub(crate) shop: Option<NonNull<crate::shop::qobject::Shop>>,
-    pub(crate) board: Option<NonNull<crate::board::qobject::Board>>,
-    pub(crate) invites: Option<NonNull<crate::invites::qobject::Invites>>,
-    pub(crate) apps: Option<NonNull<crate::apps::qobject::Apps>>,
-    pub(crate) extras: Option<NonNull<crate::extras::qobject::Extras>>,
-    pub(crate) calls: Option<NonNull<crate::calls::qobject::Calls>>,
-    pub(crate) command_menu: Option<NonNull<crate::command_menu::qobject::CommandMenu>>,
-    pub(crate) custom_sounds: Option<NonNull<crate::custom_sounds::qobject::CustomSounds>>,
-    nav: Option<NonNull<Nav>>,
-    chat: Option<NonNull<Chat>>,
-    voice: Option<NonNull<Voice>>,
-    profile: Option<NonNull<Profile>>,
-    servers: Option<NonNull<m::ServerListModel>>,
-    tree: Option<NonNull<m::ChannelTreeModel>>,
-    messages: Option<NonNull<m::MessageListModel>>,
-    roster: Option<NonNull<m::VoiceRosterModel>>,
-    tiles: Option<NonNull<m::VoiceTileModel>>,
-    mentions: Option<NonNull<m::MentionListModel>>,
-    dms: Option<NonNull<m::DmListModel>>,
-    members: Option<NonNull<m::MemberListModel>>,
-    uploads: Option<NonNull<m::UploadListModel>>,
-    gifs: Option<NonNull<m::GifListModel>>,
-    emoji: Option<NonNull<m::EmojiGridModel>>,
-    thread: Option<NonNull<m::ThreadMessageModel>>,
-    pins: Option<NonNull<m::PinnedMessageModel>>,
-}
-
 #[derive(Default)]
 struct Gui {
     rows: Rows,
     scalars: Scalars,
-    objects: Objects,
 }
 
 thread_local! {
     static GUI: RefCell<Gui> = RefCell::new(Gui::default());
 }
 
-/// A QObject type with a registry slot. `restore` brings a late-created
-/// object up to date.
+/// A QObject type with a registry slot: a thread-local cell holding the live
+/// object's address (one per type, so types in other crates have slots too;
+/// [`slot!`](crate::slot) and [`slot_cell!`](crate::slot_cell) write it).
+/// `restore` brings a late-created object up to date.
 pub(crate) trait Slot: Sized + 'static {
-    fn slot(objects: &mut Objects) -> &mut Option<NonNull<Self>>;
+    fn cell() -> &'static LocalKey<Cell<Option<NonNull<Self>>>>;
     fn restore(self: Pin<&mut Self>) {}
+}
+
+/// The `cell` of a [`Slot`] impl for `$ty`.
+#[macro_export]
+macro_rules! slot_cell {
+    ($ty:ty) => {
+        fn cell() -> &'static ::std::thread::LocalKey<
+            ::std::cell::Cell<::core::option::Option<::core::ptr::NonNull<$ty>>>,
+        > {
+            ::std::thread_local! {
+                static CELL: ::std::cell::Cell<::core::option::Option<::core::ptr::NonNull<$ty>>> =
+                    const { ::std::cell::Cell::new(None) };
+            }
+            &CELL
+        }
+    };
+}
+
+/// [`Slot`] impls with nothing to restore.
+#[macro_export]
+macro_rules! slot {
+    ($($ty:ty),* $(,)?) => {$(
+        impl $crate::gui::Slot for $ty {
+            $crate::slot_cell!($ty);
+        }
+    )*};
 }
 
 pub(crate) fn with_rows<T>(f: impl FnOnce(&Rows) -> T) -> T {
@@ -148,22 +139,18 @@ pub(crate) fn with_rows_mut<T>(f: impl FnOnce(&mut Rows) -> T) -> T {
 pub(crate) fn register<T: Slot>(mut this: Pin<&mut T>) {
     // SAFETY: only the address is kept; QObjects never move.
     let ptr = NonNull::from(unsafe { this.as_mut().get_unchecked_mut() });
-    GUI.with(|gui| *T::slot(&mut gui.borrow_mut().objects) = Some(ptr));
+    T::cell().with(|cell| cell.set(Some(ptr)));
     this.restore();
 }
 
 pub(crate) fn unregister<T: Slot>() {
-    // At thread exit the state may already be gone; nothing to clear then.
-    let _ = GUI.try_with(|gui| {
-        if let Ok(mut gui) = gui.try_borrow_mut() {
-            *T::slot(&mut gui.objects) = None;
-        }
-    });
+    // At thread exit the cell may already be gone; nothing to clear then.
+    let _ = T::cell().try_with(|cell| cell.set(None));
 }
 
 /// The live object of a type, if QML has created it.
 pub(crate) fn object<T: Slot>() -> Option<Pin<&'static mut T>> {
-    let ptr = GUI.with(|gui| *T::slot(&mut gui.borrow_mut().objects))?;
+    let ptr = T::cell().try_with(Cell::get).ok().flatten()?;
     // SAFETY: the pointer was registered by the object's constructor and is
     // cleared by its destructor, both on this thread, which is the only one
     // that calls this. The object never moves. The `'static` borrow is only
@@ -294,9 +281,7 @@ fn today() -> i32 {
 }
 
 impl Slot for Nav {
-    fn slot(objects: &mut Objects) -> &mut Option<NonNull<Self>> {
-        &mut objects.nav
-    }
+    crate::slot_cell!(Nav);
 
     fn restore(mut self: Pin<&mut Self>) {
         let (connected, link, server, channel, panel, home, dm, unread) = GUI.with(|gui| {
@@ -326,9 +311,7 @@ impl Slot for Nav {
 }
 
 impl Slot for Chat {
-    fn slot(objects: &mut Objects) -> &mut Option<NonNull<Self>> {
-        &mut objects.chat
-    }
+    crate::slot_cell!(Chat);
 
     fn restore(mut self: Pin<&mut Self>) {
         let (typing, unread, history, manage, read_only, uploads, gifs, newer, favorites) = GUI
@@ -366,9 +349,7 @@ impl Slot for Chat {
 }
 
 impl Slot for Voice {
-    fn slot(objects: &mut Objects) -> &mut Option<NonNull<Self>> {
-        &mut objects.voice
-    }
+    crate::slot_cell!(Voice);
 
     fn restore(self: Pin<&mut Self>) {
         let voice = GUI.with(|gui| gui.borrow().scalars.voice.clone());
@@ -377,9 +358,7 @@ impl Slot for Voice {
 }
 
 impl Slot for Profile {
-    fn slot(objects: &mut Objects) -> &mut Option<NonNull<Self>> {
-        &mut objects.profile
-    }
+    crate::slot_cell!(Profile);
 
     fn restore(self: Pin<&mut Self>) {
         let profile = GUI.with(|gui| gui.borrow().scalars.profile.clone());
@@ -387,30 +366,20 @@ impl Slot for Profile {
     }
 }
 
-macro_rules! model_slots {
-    ($($model:ident => $field:ident),* $(,)?) => {$(
-        impl Slot for m::$model {
-            fn slot(objects: &mut Objects) -> &mut Option<NonNull<Self>> {
-                &mut objects.$field
-            }
-        }
-    )*};
-}
-
-model_slots!(
-    ServerListModel => servers,
-    ChannelTreeModel => tree,
-    MessageListModel => messages,
-    VoiceRosterModel => roster,
-    VoiceTileModel => tiles,
-    MentionListModel => mentions,
-    DmListModel => dms,
-    MemberListModel => members,
-    UploadListModel => uploads,
-    GifListModel => gifs,
-    EmojiGridModel => emoji,
-    ThreadMessageModel => thread,
-    PinnedMessageModel => pins,
+crate::slot!(
+    m::ServerListModel,
+    m::ChannelTreeModel,
+    m::MessageListModel,
+    m::VoiceRosterModel,
+    m::VoiceTileModel,
+    m::MentionListModel,
+    m::DmListModel,
+    m::MemberListModel,
+    m::UploadListModel,
+    m::GifListModel,
+    m::EmojiGridModel,
+    m::ThreadMessageModel,
+    m::PinnedMessageModel,
 );
 
 fn int(n: i64) -> i32 {

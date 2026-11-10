@@ -480,9 +480,7 @@ pub(crate) fn on_view(view: SettingsView) {
 }
 
 impl gui::Slot for qobject::Settings {
-    fn slot(objects: &mut gui::Objects) -> &mut Option<std::ptr::NonNull<Self>> {
-        &mut objects.settings
-    }
+    crate::slot_cell!(qobject::Settings);
 
     fn restore(mut self: Pin<&mut Self>) {
         self.as_mut().set_theme(q(&initial_theme()));

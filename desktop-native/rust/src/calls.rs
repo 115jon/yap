@@ -158,9 +158,7 @@ pub(crate) fn on_view(view: CallsView) {
 }
 
 impl gui::Slot for qobject::Calls {
-    fn slot(objects: &mut gui::Objects) -> &mut Option<std::ptr::NonNull<Self>> {
-        &mut objects.calls
-    }
+    crate::slot_cell!(qobject::Calls);
 
     fn restore(self: Pin<&mut Self>) {
         apply(self, &gui::calls_view());
