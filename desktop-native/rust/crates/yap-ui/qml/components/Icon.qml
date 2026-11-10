@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // A Phosphor glyph by app concept (assets/icons/manifest.json, the web's

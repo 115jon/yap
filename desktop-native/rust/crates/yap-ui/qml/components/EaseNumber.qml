@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // A number (opacity, scale, a slide) that eases to its new value, ease-out

@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // One row's entrance (styles/motion.css .rm-list-enter): it fades in and

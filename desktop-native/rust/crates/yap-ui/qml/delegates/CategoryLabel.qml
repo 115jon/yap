@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // A tree branch label (sidebar-row.ts TREE_BRANCH_LABEL): a fixed 24 px

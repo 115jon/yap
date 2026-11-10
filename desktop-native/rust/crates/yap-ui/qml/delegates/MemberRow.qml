@@ -1,6 +1,6 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
+import Yap.Platform
 
 // A Talk Tree leaf (ui/tree.tsx, ChannelSidebar.tsx VoiceOccupantLeaf):
 // someone in a voice channel, hung off the trunk that drops from the

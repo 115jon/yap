@@ -33,6 +33,13 @@ ApplicationWindow {
     readonly property string named: DesktopShell.profile.length > 0 ? " (" + DesktopShell.profile + ")" : ""
     title: (location.length > 0 ? location : "Yap") + named
 
+    // The shared shell state reads the desktop's "don't ask again".
+    Binding {
+        target: ShellState
+        property: "skipVoiceSwitch"
+        value: Desktop.skipVoiceSwitch
+    }
+
     Component.onCompleted: {
         Session.start()
         Desktop.setWindowShown(shownOnScreen)

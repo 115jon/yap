@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // A popup's entrance (styles/motion.css .rm-presence): it fades in and

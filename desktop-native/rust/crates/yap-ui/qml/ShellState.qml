@@ -1,5 +1,6 @@
 pragma Singleton
 import QtQuick
+import Yap.Ui
 
 // Shell-wide UI state that is not the core's: whether the member panel is
 // shown (on by default, as the web's `showMembers`), and requests for the
@@ -9,10 +10,11 @@ import QtQuick
 // picture sizes (so a row lays out at once the next time) and the
 // sensitive media shown.
 //
-// Pure state: it imports nothing of com.yap.native. A composite singleton
-// that imports its own module depends on every other composite singleton
-// in it, so two that both import it form a cycle (Qt warns "Cyclic
-// dependency detected"). SettingsNav is the one that does; the keys' logic
+// Mostly pure state. It imports its own module (Yap.Ui) for the Voice and
+// Nav singletons `watchStream` calls. A composite singleton that imports
+// its own module depends on every other composite singleton in it, so two
+// that both import it form a cycle (Qt warns "Cyclic dependency
+// detected"): Theme, the other one here, imports nothing. The keys' logic
 // lives where the Rust objects are (CameraLink, ShareLink).
 QtObject {
     id: state
@@ -132,13 +134,17 @@ QtObject {
     // Watch stream (the sidebar's hover card, `handleWatchLiveStream`):
     // open that voice channel, joining it if we are not there (asking
     // first when in another call), and put the share on stage.
+    // "Don't ask again" on the voice switch confirm (the app's setting:
+    // the desktop binds it to Desktop.skipVoiceSwitch).
+    property bool skipVoiceSwitch: false
+
     function watchStream(channelId, userId) {
         pendingStreamTile = "screen:" + userId
         if (Voice.channelId === channelId) {
             Nav.selectChannel(channelId)
             return
         }
-        if (Voice.channelId.length > 0 && !Desktop.skipVoiceSwitch) {
+        if (Voice.channelId.length > 0 && !skipVoiceSwitch) {
             voiceSwitchRequested(channelId, voiceChannelNames[channelId] ?? "", true)
             return
         }

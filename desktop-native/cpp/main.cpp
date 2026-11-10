@@ -740,6 +740,25 @@ extern "C" void yap_updater_quit(bool session_ending);
 // QML loads.
 extern "C" void yap_desktop_init();
 
+// The Yap.Platform types (see main): com.yap.native's own files, under the
+// names the shared QML uses.
+static void registerPlatformTypes()
+{
+  static const struct
+  {
+    const char* path;
+    const char* name;
+  } types[] = {
+    { "delegates/EmbedCard.qml", "EmbedCard" },
+    { "delegates/MessageMedia.qml", "MessageMedia" },
+    { "delegates/VoiceStatusLine.qml", "VoiceStatusLine" },
+    { "components/VoiceStreamHoverCard.qml", "VoiceStreamHoverCard" },
+  };
+  for (const auto& type : types)
+    qmlRegisterType(QUrl(QStringLiteral("qrc:/qt/qml/com/yap/native/qml/") + QLatin1String(type.path)),
+                    "Yap.Platform", 1, 0, type.name);
+}
+
 int main(int argc, char* argv[])
 {
   // YAP_DEBUG_HEAP (diagnostics): allocation stacks from here on.
@@ -919,6 +938,12 @@ int main(int argc, char* argv[])
     app.installEventFilter(wheelScroll);
   qmlRegisterSingletonInstance("Yap.Media", 1, 0, "WheelScroll", wheelScroll);
 
+  // The desktop's side of the shared QML's seams (Yap.Ui imports
+  // Yap.Platform): rich embeds and media through WebView2, Media
+  // Foundation and libvpx, the voice status line with its clip previews,
+  // and the stream preview card. The mobile app registers its own.
+  registerPlatformTypes();
+
   QQmlApplicationEngine engine;
   // Not owned by the engine; it outlives it here.
   engine.setNetworkAccessManagerFactory(&networkFactory);
@@ -941,7 +966,7 @@ int main(int argc, char* argv[])
   }
   // YAP_EMBED_MUTED=1 starts every chat player muted (test runs).
   if (QObject* state =
-        engine.singletonInstance<QObject*>("com.yap.native", "ShellState"))
+        engine.singletonInstance<QObject*>("Yap.Ui", "ShellState"))
   {
     state->setProperty("mediaMuted", qEnvironmentVariableIntValue("YAP_EMBED_MUTED") != 0);
     // YAP_NO_CLIPBOARD=1: copies are logged, never put on the clipboard.

@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // A colour that eases to its new value (Tailwind transition-colors at

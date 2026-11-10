@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Templates as T
-import com.yap.native
 import Yap.Ui
 
 // The kit's keys (ui/button.tsx), squared 2 px corners and Bricolage 600:

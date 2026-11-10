@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Effects
 import Yap.Media
-import com.yap.native
 import Yap.Ui
 
 // Square avatar with 2 px corners (ui/avatar.tsx): the picture when there

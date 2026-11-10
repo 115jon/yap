@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls.Basic
-import com.yap.native
 import Yap.Ui
 
 // The inline edit box (MessageItem.tsx): the composer's plate at 15/22,

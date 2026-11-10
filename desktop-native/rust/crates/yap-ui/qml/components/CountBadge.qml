@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // CountBadge (ui/badge.tsx): an 18 px badge-fill chip, 4 px padding,

@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Templates as T
-import com.yap.native
 import Yap.Ui
 
 // The tooltip, C1 inverted (ui/tooltip.tsx): ink-1 fill, ply-0 text at

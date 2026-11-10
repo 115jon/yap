@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // A text or voice channel in the tree (sidebar-row.ts TREE_ROW): 32 high,

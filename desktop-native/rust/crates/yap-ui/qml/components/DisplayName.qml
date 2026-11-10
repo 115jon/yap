@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Effects
-import com.yap.native
 import Yap.Ui
 
 // A display name in its owner's style (ProfileDisplayName.tsx,

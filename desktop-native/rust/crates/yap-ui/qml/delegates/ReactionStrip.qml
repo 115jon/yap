@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // The reactions under a message (MessageItem.tsx): 28 px chips, 6 px

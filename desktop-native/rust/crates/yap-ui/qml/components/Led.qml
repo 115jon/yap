@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // A status LED (ui/led.tsx): 6 px, `line-strong` when off. A lit LED gets
