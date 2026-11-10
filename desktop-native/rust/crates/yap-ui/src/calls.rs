@@ -150,7 +150,7 @@ fn apply(mut object: Pin<&mut qobject::Calls>, view: &CallsView) {
 }
 
 /// The store's calls view changed.
-pub(crate) fn on_view(view: CallsView) {
+pub fn on_view(view: CallsView) {
     if let Some(object) = gui::object::<qobject::Calls>() {
         apply(object, &view);
     }

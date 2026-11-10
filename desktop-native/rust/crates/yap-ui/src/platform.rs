@@ -3,7 +3,8 @@
 //! TLS stack, the token store, realtime (gateway, voice, the local player),
 //! files, screen share and video, and the view updates only a desktop shows
 //! (toasts, sounds, the tray badge) are the app's. The app installs its
-//! [`Platform`] once, before QML loads (`yap_desktop_init`).
+//! [`Platform`] once, before QML loads (the desktop's `yap_desktop_init`,
+//! the mobile app's `yap_mobile_init`).
 
 use std::sync::{Arc, OnceLock};
 
@@ -69,6 +70,15 @@ pub trait Platform: Send + Sync + 'static {
     fn set_video_stage(&self, participant_id: &str) {
         let _ = participant_id;
     }
+
+    /// Screen share lists only our own windows (`YAP_SHARE_ONLY_OURS=1`,
+    /// tests).
+    fn share_only_ours(&self) -> bool {
+        false
+    }
+
+    /// The `Apps` object exists: the app sends its local sound settings.
+    fn apps_created(&self) {}
 
     /// The local player's output level, 0 to 1 (Listen Together's meter).
     fn player_level(&self) -> f64 {

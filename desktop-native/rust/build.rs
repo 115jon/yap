@@ -356,28 +356,11 @@ fn main() {
     ]);
     CxxQtBuilder::new_qml_module(QmlModule::new("com.yap.native").qml_files(files))
         .files([
-            "src/admin.rs",
-            "src/apps.rs",
             "src/audio.rs",
-            "src/board.rs",
-            "src/bridge.rs",
-            "src/calls.rs",
-            "src/color.rs",
-            "src/command_menu.rs",
             "src/custom_sounds.rs",
             "src/desktop.rs",
-            "src/extras.rs",
-            "src/friends.rs",
             "src/games.rs",
             "src/hotkeys.rs",
-            "src/invites.rs",
-            "src/limits.rs",
-            "src/models.rs",
-            "src/panels.rs",
-            "src/picker.rs",
-            "src/search.rs",
-            "src/settings.rs",
-            "src/shop.rs",
             "src/updater.rs",
         ])
         .build();

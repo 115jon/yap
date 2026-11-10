@@ -1,24 +1,16 @@
 //! Yap, the native Windows client: a Rust core (auth, REST, gateway, state) behind QML
-//! singletons. Domain objects (`Session`, `Nav`, `Chat`, `Voice`) live in
-//! [`bridge`], list models in [`models`], and the GUI-thread state they
-//! share in [`gui`]. The voice settings are [`audio`]; remote video between
-//! the call and the UI is [`video`], our camera's frames into it
-//! [`camera`], the share picker's sources and pictures [`share`], and the
-//! settings dialog's side of the core [`settings`]; the in-app updater is
-//! [`updater`].
+//! singletons. The view layer it shares with the mobile app is `yap_ui`
+//! (domain objects, list models, the GUI-thread registry, the core's
+//! runtime); this crate is the desktop's [`Platform`](yap_ui::platform::Platform)
+//! ([`native`]) and its desktop-only objects. The voice settings are
+//! [`audio`]; remote video between the call and the UI is [`video`], our
+//! camera's frames into it [`camera`], the share picker's sources and
+//! pictures [`share`]; the in-app updater is [`updater`].
 
-mod admin;
-mod anim;
-mod apps;
 mod apps_audio;
 mod audio;
-mod board;
-mod bridge;
-mod calls;
 mod camera;
 mod client;
-mod color;
-mod command_menu;
 #[cfg(windows)]
 mod crash;
 mod custom_sounds;
@@ -26,26 +18,14 @@ mod custom_sounds;
 // and the three ids it acts on), one argument over clippy's limit.
 #[allow(clippy::too_many_arguments)]
 mod desktop;
-mod extras;
-mod friends;
 mod games;
-mod gui;
 mod hotkeys;
 #[cfg(windows)]
 mod installer;
-mod invites;
-mod limits;
 mod loopback;
 mod media;
-mod models;
 mod native;
-mod panels;
-mod picker;
-mod platform;
-mod search;
-mod settings;
 mod share;
-mod shop;
 mod sound;
 mod updater;
 mod video;
@@ -53,5 +33,5 @@ mod video;
 mod webembed;
 mod webm;
 
-// The shared view layer (QML module Yap.Ui): linked for its C++ and QML.
-use yap_ui as _;
+// The shared view layer's modules this crate reaches, under their old paths.
+use yap_ui::{apps, bridge, gui, platform};

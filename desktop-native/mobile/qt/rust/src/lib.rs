@@ -7,7 +7,7 @@
 
 // The desktop's picture decoder behind AnimatedPicture (both unchanged:
 // this file and cpp/animatedpicture.cpp).
-#[path = "../../../../rust/src/anim.rs"]
+#[path = "../../../../rust/crates/yap-ui/src/anim.rs"]
 #[allow(dead_code)]
 mod anim;
 mod bridge;

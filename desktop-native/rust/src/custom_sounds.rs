@@ -266,7 +266,7 @@ fn refresh(mut object: Pin<&mut qobject::CustomSounds>) {
 }
 
 impl gui::Slot for qobject::CustomSounds {
-    crate::slot_cell!(qobject::CustomSounds);
+    yap_ui::slot_cell!(qobject::CustomSounds);
 
     fn restore(self: Pin<&mut Self>) {
         refresh(self);

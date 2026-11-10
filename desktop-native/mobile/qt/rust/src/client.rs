@@ -3,7 +3,7 @@
 //! session token in an app-private file, and the one command channel the
 //! QML singletons send through.
 
-#[path = "../../../../rust/src/client/gateway.rs"]
+#[path = "../../../../rust/crates/yap-ui/src/client/gateway.rs"]
 mod gateway;
 
 use std::ffi::{c_char, CStr};

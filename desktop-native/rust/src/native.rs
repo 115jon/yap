@@ -114,6 +114,14 @@ impl Platform for Desktop {
         crate::video::set_stage(participant_id);
     }
 
+    fn share_only_ours(&self) -> bool {
+        yap_capture::only_ours()
+    }
+
+    fn apps_created(&self) {
+        crate::desktop::send_local_settings();
+    }
+
     fn player_level(&self) -> f64 {
         crate::apps_audio::level()
     }

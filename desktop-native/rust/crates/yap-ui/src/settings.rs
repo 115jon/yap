@@ -472,7 +472,7 @@ fn apply(mut object: Pin<&mut qobject::Settings>, view: &SettingsView) {
 }
 
 /// The store's settings view changed.
-pub(crate) fn on_view(view: SettingsView) {
+pub fn on_view(view: SettingsView) {
     if let Some(object) = gui::object::<qobject::Settings>() {
         apply(object, &view);
     }

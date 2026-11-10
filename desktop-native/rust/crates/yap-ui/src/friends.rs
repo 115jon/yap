@@ -98,7 +98,7 @@ fn apply(mut object: Pin<&mut qobject::Friends>, view: &FriendsView) {
 }
 
 /// The store's friends view changed.
-pub(crate) fn on_view(view: FriendsView) {
+pub fn on_view(view: FriendsView) {
     if let Some(object) = gui::object::<qobject::Friends>() {
         apply(object, &view);
     }

@@ -456,7 +456,7 @@ impl qobject::CommandMenu {
 }
 
 /// Puts a visited place first in the stored recents.
-pub(crate) fn record_target(target: RecentTarget) {
+pub fn record_target(target: RecentTarget) {
     if target.server_id.is_empty() || target.channel_id.is_empty() {
         return;
     }

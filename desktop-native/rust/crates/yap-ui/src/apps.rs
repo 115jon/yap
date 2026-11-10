@@ -271,7 +271,8 @@ pub fn play_sound(sound_id: &str) {
     send(AppsCommand::Play(sound_id.to_owned()));
 }
 
-fn send(command: AppsCommand) {
+/// Sends a Listen Together / soundboard command to the core.
+pub fn send(command: AppsCommand) {
     client::command(Command::Apps(command));
 }
 
@@ -290,23 +291,12 @@ thread_local! {
 }
 
 /// The store's apps view changed.
-pub(crate) fn on_view(view: AppsView) {
+pub fn on_view(view: AppsView) {
     LT_CLOCK.with(|clock| clock.set(LtClock::of(&view.listen)));
     if let Some(object) = gui::object::<qobject::Apps>() {
         apply(object, &view);
     }
     gui::keep_apps(view);
-}
-
-/// The device's sound settings, for join and leave sounds and the
-/// automatic clip volume.
-pub(crate) fn send_local_settings() {
-    let s = crate::desktop::current();
-    send(AppsCommand::LocalSettings {
-        sounds_enabled: s.sounds,
-        sound_volume: s.sound_settings.sound_volume,
-        soundboard_volume: s.sound_settings.soundboard_volume,
-    });
 }
 
 impl gui::Slot for qobject::Apps {
@@ -320,7 +310,8 @@ impl gui::Slot for qobject::Apps {
 impl cxx_qt::Initialize for qobject::Apps {
     fn initialize(self: Pin<&mut Self>) {
         gui::register(self);
-        send_local_settings();
+        // The device's sound settings (the app keeps them).
+        crate::platform::platform().apps_created();
         send_local_sounds();
     }
 }

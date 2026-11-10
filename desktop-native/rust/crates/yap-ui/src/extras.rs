@@ -263,7 +263,7 @@ fn apply(mut object: Pin<&mut qobject::Extras>, view: &ExtrasView) {
 }
 
 /// The store's extras view changed.
-pub(crate) fn on_view(view: ExtrasView) {
+pub fn on_view(view: ExtrasView) {
     if let Some(object) = gui::object::<qobject::Extras>() {
         apply(object, &view);
     }

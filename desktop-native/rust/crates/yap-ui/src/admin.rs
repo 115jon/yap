@@ -258,7 +258,7 @@ fn apply(mut object: Pin<&mut qobject::Admin>, view: &AdminView) {
 }
 
 /// The store's admin view changed.
-pub(crate) fn on_view(view: AdminView) {
+pub fn on_view(view: AdminView) {
     if let Some(object) = gui::object::<qobject::Admin>() {
         apply(object, &view);
     }
@@ -309,7 +309,7 @@ struct OverrideForm {
 }
 
 /// An image file a server icon can be (OverviewPage.tsx `ICON_TYPES`).
-pub(crate) fn icon_content_type(path: &str) -> Option<&'static str> {
+pub fn icon_content_type(path: &str) -> Option<&'static str> {
     let ext = std::path::Path::new(path)
         .extension()?
         .to_string_lossy()

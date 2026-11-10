@@ -143,7 +143,7 @@ fn state_json(view: &InviteView) -> String {
 }
 
 /// The store's view changed: the JSON, then the signals for new bumps.
-pub(crate) fn on_view(view: InviteView) {
+pub fn on_view(view: InviteView) {
     let [landing, jump, settings, nav] = LAST.with(|last| {
         let mut last = last.borrow_mut();
         let seqs = [

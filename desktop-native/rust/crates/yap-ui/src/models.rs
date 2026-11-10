@@ -924,7 +924,7 @@ fn qt_index(i: usize) -> i32 {
 
 /// One model type: its rows in [`Rows`] and the inherited
 /// `QAbstractItemModel` calls the diff adapter needs.
-pub(crate) trait ListModel: Slot {
+pub trait ListModel: Slot {
     type Row: Row;
 
     fn rows(rows: &Rows) -> &Vec<Self::Row>;
@@ -1132,7 +1132,7 @@ impl ListModel for qobject::MessageListModel {
 /// Applies one diff to a model's rows, with the matching begin/end calls and
 /// `dataChanged` for exactly the changed roles. Without a live model object
 /// (QML has not touched it yet) only the rows change.
-pub(crate) fn apply<M: ListModel>(diff: ViewDiff<M::Row>) {
+pub fn apply<M: ListModel>(diff: ViewDiff<M::Row>) {
     let Some(mut model) = gui::object::<M>() else {
         if !gui::with_rows_mut(|rows| diff.apply(M::rows_mut(rows))) {
             eprintln!("[model] dropped a diff that does not fit");

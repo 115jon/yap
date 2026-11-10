@@ -94,7 +94,7 @@ fn mirror_to(desktop: &Path, rel: &str, to: &Path) -> String {
 fn main() {
     let desktop = Path::new("../../../rust");
     for rel in SHARED_RUST {
-        mirror_to(desktop, rel, Path::new(rel));
+        mirror_to(desktop, &format!("crates/yap-ui/{rel}"), Path::new(rel));
     }
     let files = SHARED_QML
         .iter()

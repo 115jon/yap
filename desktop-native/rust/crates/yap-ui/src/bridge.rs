@@ -994,7 +994,7 @@ fn next_nonce(now: Duration) -> String {
 }
 
 /// A fresh nonce and the local send time, as the composer stamps a send.
-pub(crate) fn stamp() -> (String, String) {
+pub fn stamp() -> (String, String) {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
@@ -1341,7 +1341,7 @@ impl qobject::Voice {
     }
 
     pub fn share_only_ours(&self) -> bool {
-        yap_capture::only_ours()
+        crate::platform::platform().share_only_ours()
     }
 
     pub fn start_share(

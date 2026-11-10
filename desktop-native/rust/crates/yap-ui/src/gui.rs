@@ -98,7 +98,7 @@ thread_local! {
 /// object's address (one per type, so types in other crates have slots too;
 /// [`slot!`](crate::slot) and [`slot_cell!`](crate::slot_cell) write it).
 /// `restore` brings a late-created object up to date.
-pub(crate) trait Slot: Sized + 'static {
+pub trait Slot: Sized + 'static {
     fn cell() -> &'static LocalKey<Cell<Option<NonNull<Self>>>>;
     fn restore(self: Pin<&mut Self>) {}
 }
@@ -129,28 +129,28 @@ macro_rules! slot {
     )*};
 }
 
-pub(crate) fn with_rows<T>(f: impl FnOnce(&Rows) -> T) -> T {
+pub fn with_rows<T>(f: impl FnOnce(&Rows) -> T) -> T {
     GUI.with(|gui| f(&gui.borrow().rows))
 }
 
-pub(crate) fn with_rows_mut<T>(f: impl FnOnce(&mut Rows) -> T) -> T {
+pub fn with_rows_mut<T>(f: impl FnOnce(&mut Rows) -> T) -> T {
     GUI.with(|gui| f(&mut gui.borrow_mut().rows))
 }
 
-pub(crate) fn register<T: Slot>(mut this: Pin<&mut T>) {
+pub fn register<T: Slot>(mut this: Pin<&mut T>) {
     // SAFETY: only the address is kept; QObjects never move.
     let ptr = NonNull::from(unsafe { this.as_mut().get_unchecked_mut() });
     T::cell().with(|cell| cell.set(Some(ptr)));
     this.restore();
 }
 
-pub(crate) fn unregister<T: Slot>() {
+pub fn unregister<T: Slot>() {
     // At thread exit the cell may already be gone; nothing to clear then.
     let _ = T::cell().try_with(|cell| cell.set(None));
 }
 
 /// The live object of a type, if QML has created it.
-pub(crate) fn object<T: Slot>() -> Option<Pin<&'static mut T>> {
+pub fn object<T: Slot>() -> Option<Pin<&'static mut T>> {
     let ptr = T::cell().try_with(Cell::get).ok().flatten()?;
     // SAFETY: the pointer was registered by the object's constructor and is
     // cleared by its destructor, both on this thread, which is the only one
@@ -170,35 +170,35 @@ fn scalars(f: impl FnOnce(&mut Scalars)) {
 }
 
 /// Keeps the settings view for a `Settings` object QML creates later.
-pub(crate) fn keep_settings(view: SettingsView) {
+pub fn keep_settings(view: SettingsView) {
     scalars(|s| s.settings = view);
 }
 
-pub(crate) fn settings_view() -> SettingsView {
+pub fn settings_view() -> SettingsView {
     GUI.with(|gui| gui.borrow().scalars.settings.clone())
 }
 
 /// Keeps the admin view for an `Admin` object QML creates later.
-pub(crate) fn keep_admin(view: AdminView) {
+pub fn keep_admin(view: AdminView) {
     scalars(|s| s.admin = view);
 }
 
-pub(crate) fn admin_view() -> AdminView {
+pub fn admin_view() -> AdminView {
     GUI.with(|gui| gui.borrow().scalars.admin.clone())
 }
 
 /// Keeps the panels' view for a `Panels` object QML creates later.
-pub(crate) fn keep_panels(view: PanelsView) {
+pub fn keep_panels(view: PanelsView) {
     scalars(|s| s.panels = view);
 }
 
-pub(crate) fn panels_view() -> PanelsView {
+pub fn panels_view() -> PanelsView {
     GUI.with(|gui| gui.borrow().scalars.panels.clone())
 }
 
 /// What a message link needs: the open server (`None` at Home or in a
 /// DM) and the open channel.
-pub(crate) fn link_route() -> (Option<String>, String) {
+pub fn link_route() -> (Option<String>, String) {
     GUI.with(|gui| {
         let s = &gui.borrow().scalars;
         let dm = s.home || !s.dm.user_id.is_empty();
@@ -209,61 +209,61 @@ pub(crate) fn link_route() -> (Option<String>, String) {
 
 /// Keeps the friends view for a `Friends` object QML creates later.
 /// Keeps the board view for a `Board` object QML creates later.
-pub(crate) fn keep_board(view: yap_core::store::board::BoardView) {
+pub fn keep_board(view: yap_core::store::board::BoardView) {
     scalars(|s| s.board = view);
 }
 
-pub(crate) fn board_view() -> yap_core::store::board::BoardView {
+pub fn board_view() -> yap_core::store::board::BoardView {
     GUI.with(|gui| gui.borrow().scalars.board.clone())
 }
 
 /// Keeps the shop view for a `Shop` object QML creates later.
-pub(crate) fn keep_shop(view: yap_core::store::shop::ShopView) {
+pub fn keep_shop(view: yap_core::store::shop::ShopView) {
     scalars(|s| s.shop = view);
 }
 
-pub(crate) fn shop_view() -> yap_core::store::shop::ShopView {
+pub fn shop_view() -> yap_core::store::shop::ShopView {
     GUI.with(|gui| gui.borrow().scalars.shop.clone())
 }
 
-pub(crate) fn keep_friends(view: yap_core::store::FriendsView) {
+pub fn keep_friends(view: yap_core::store::FriendsView) {
     scalars(|s| s.friends = view);
 }
 
-pub(crate) fn friends_view() -> yap_core::store::FriendsView {
+pub fn friends_view() -> yap_core::store::FriendsView {
     GUI.with(|gui| gui.borrow().scalars.friends.clone())
 }
 
 /// Keeps the apps view for an `Apps` object QML creates later.
-pub(crate) fn keep_apps(view: yap_core::store::apps::AppsView) {
+pub fn keep_apps(view: yap_core::store::apps::AppsView) {
     scalars(|s| s.apps = view);
 }
 
-pub(crate) fn apps_view() -> yap_core::store::apps::AppsView {
+pub fn apps_view() -> yap_core::store::apps::AppsView {
     GUI.with(|gui| gui.borrow().scalars.apps.clone())
 }
 
 /// Keeps the extras view for an `Extras` object QML creates later.
-pub(crate) fn keep_extras(view: yap_core::store::extras::ExtrasView) {
+pub fn keep_extras(view: yap_core::store::extras::ExtrasView) {
     scalars(|s| s.extras = view);
 }
 
-pub(crate) fn extras_view() -> yap_core::store::extras::ExtrasView {
+pub fn extras_view() -> yap_core::store::extras::ExtrasView {
     GUI.with(|gui| gui.borrow().scalars.extras.clone())
 }
 
 /// Keeps the calls view for a `Calls` object QML creates later.
-pub(crate) fn keep_calls(view: yap_core::store::calls::CallsView) {
+pub fn keep_calls(view: yap_core::store::calls::CallsView) {
     scalars(|s| s.calls = view);
 }
 
-pub(crate) fn calls_view() -> yap_core::store::calls::CallsView {
+pub fn calls_view() -> yap_core::store::calls::CallsView {
     GUI.with(|gui| gui.borrow().scalars.calls.clone())
 }
 
 /// Where the user is, for the quick switcher: the open server (empty at
 /// Home), the open channel, and whether Home shows.
-pub(crate) fn place() -> (String, String, bool) {
+pub fn place() -> (String, String, bool) {
     GUI.with(|gui| {
         let s = &gui.borrow().scalars;
         (s.server.0.clone(), s.channel.0.clone(), s.home)
@@ -523,7 +523,7 @@ fn set_me(mut session: Pin<&mut Session>, me: &MeView) {
 }
 
 /// Applies one drained batch, in order, on the GUI thread.
-pub(crate) fn apply(mut session: Pin<&mut Session>, updates: Vec<ViewUpdate>) {
+pub fn apply(mut session: Pin<&mut Session>, updates: Vec<ViewUpdate>) {
     for update in updates {
         apply_one(session.as_mut(), update);
     }

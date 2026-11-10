@@ -4028,6 +4028,17 @@ dependencies = [
  "cxx-qt",
  "cxx-qt-build",
  "cxx-qt-lib",
+ "image",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+ "yap-anim",
+ "yap-cache",
+ "yap-core",
+ "yap-protocol",
+ "yap-realtime",
 ]
 
 [[package]]

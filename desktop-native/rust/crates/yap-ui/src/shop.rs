@@ -137,7 +137,7 @@ fn apply(mut object: Pin<&mut qobject::Shop>, view: &ShopView) {
 }
 
 /// The store's shop view changed.
-pub(crate) fn on_view(view: ShopView) {
+pub fn on_view(view: ShopView) {
     if let Some(object) = gui::object::<qobject::Shop>() {
         apply(object, &view);
     }

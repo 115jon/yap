@@ -174,7 +174,7 @@ fn apply(object: Pin<&mut qobject::Search>, view: &SearchView) {
 
 /// The store's search view changed: show it, and store this scope's
 /// recents when they moved.
-pub(crate) fn on_view(view: SearchView) {
+pub fn on_view(view: SearchView) {
     if !view.scope_key.is_empty() {
         let mut all = recents();
         let stored = all.get(&view.scope_key).map_or(&[][..], Vec::as_slice);
