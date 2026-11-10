@@ -79,6 +79,13 @@ $sevenZip = foreach ($name in "7z", "7zz", "7za") {
 }
 if (-not $sevenZip -and $IsWindows -and (Test-Path "$env:ProgramFiles\7-Zip\7z.exe")) { $sevenZip = "$env:ProgramFiles\7-Zip\7z.exe" }
 if (-not $sevenZip) { throw "7-Zip not found (7z, 7zz or 7za on PATH)" }
+# Qt's Linux and macOS archives chain symbolic links (libQt6DBus.so ->
+# libQt6DBus.so.6 -> ...), which 7-Zip 21 and later skip as "dangerous"
+# unless told otherwise (-snld). p7zip 16 restores them without the switch,
+# and does not know it.
+$sevenZipArgs = @()
+$banner = (& $sevenZip 2>&1 | Select-Object -First 4) -join "`n"
+if ($banner -match '7-Zip(?: \(\w\))? (\d+)\.' -and [int]$Matches[1] -ge 21) { $sevenZipArgs += "-snld" }
 
 function Get-Sha256($path) { (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant() }
 
@@ -112,7 +119,7 @@ foreach ($name in $Set) {
                 throw "$($a.url): SHA-256 $got, the lock says $($a.sha256)"
             }
         }
-        & $sevenZip x -y -bso0 -bsp0 "-o$prefix" $file
+        & $sevenZip x -y -bso0 -bsp0 @sevenZipArgs "-o$prefix" $file
         if ($LASTEXITCODE) { throw "7z x $file failed ($LASTEXITCODE)" }
     }
     if (-not (Test-Path (Join-Path $prefix "lib/cmake/Qt6/Qt6Config.cmake"))) { throw "$name unpacked without lib/cmake/Qt6" }
