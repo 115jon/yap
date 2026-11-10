@@ -59,12 +59,15 @@ pub mod native_share;
 // (Req 12.2, 12.5).
 #[cfg(desktop)]
 mod app_updates;
+#[cfg(windows)]
+mod authenticode;
 mod desktop_settings;
 #[cfg(feature = "native-screen-share")]
 pub mod game_capture;
 mod hardware_encoder;
 mod main_window;
 mod media_devices;
+mod native_handoff;
 mod occlusion;
 mod permissions;
 mod screen_capture;
@@ -139,7 +142,7 @@ fn legacy_windows_app_data_roots() -> Vec<std::path::PathBuf> {
 }
 
 #[cfg(target_os = "windows")]
-fn versioned_windows_install_root_from_exe_path(
+pub(crate) fn versioned_windows_install_root_from_exe_path(
     exe_path: &std::path::Path,
 ) -> Option<std::path::PathBuf> {
     let install_dir = exe_path.parent()?;
@@ -617,6 +620,20 @@ pub fn run() {
         Err(err) => {
             eprintln!("[RestartHelper] {err}");
             std::process::exit(1);
+        }
+    }
+
+    // The native app handoff (native_handoff): the headless run, and, once
+    // the handoff is done, the native app instead of this one, before any
+    // window or CEF profile exists. CEF's own child processes skip it.
+    #[cfg(target_os = "windows")]
+    {
+        if native_handoff::headless_requested() {
+            std::process::exit(native_handoff::run_headless());
+        }
+        let is_cef_child = std::env::args().any(|arg| arg.starts_with("--type="));
+        if !is_cef_child && native_handoff::launch_native_if_done() {
+            return;
         }
     }
 
