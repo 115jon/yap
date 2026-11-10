@@ -5,6 +5,7 @@
 
 import type { BadgeAwardSource, BadgeId } from "@/lib/badges";
 import type { Entitlement, Tier } from "@/lib/entitlements";
+import type { NativeHandoffConfig } from "@/lib/native-handoff";
 import type { SiteAnnouncement, SiteFlags } from "@/lib/site-flags";
 
 // ── People ──────────────────────────────────────────────────────────────────
@@ -110,6 +111,7 @@ export const ADMIN_ACTIONS = [
   "user.disconnect",
   "flags.update",
   "announcement.update",
+  "native_handoff.update",
   "catalog.refresh",
 ] as const;
 export type AdminAction = (typeof ADMIN_ACTIONS)[number];
@@ -313,9 +315,12 @@ export interface AdminInsights {
 export interface AdminSettingsResponse {
   flags: SiteFlags;
   announcement: SiteAnnouncement | null;
+  /** The Tauri app's handoff to the native app (GET /api/desktop/native-handoff). */
+  nativeHandoff: NativeHandoffConfig;
   updated: {
     flags: { at: string; by: string | null } | null;
     announcement: { at: string; by: string | null } | null;
+    nativeHandoff: { at: string; by: string | null } | null;
   };
 }
 
@@ -329,4 +334,6 @@ export interface AdminSettingsRequest {
     link_label?: string | null;
     expires_at?: string | null;
   } | null;
+  /** Either field, or both; the other keeps its stored value. */
+  nativeHandoff?: Partial<NativeHandoffConfig>;
 }
