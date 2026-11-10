@@ -63,6 +63,31 @@ carries the avatar address; the Yap apps show the avatar only to the user, in
 settings, through Yap's own media proxy.
 Unlinking deletes the stored connection at once.
 
+## Deadlock stats
+
+A user who links Steam and puts the Deadlock widget on their profile board
+has their Deadlock stats shown there. Yap's server, never a user's device,
+sends that Steam account number to deadlock-api.com, a community API, and
+reads the account's rank, per-hero totals, match history and the newest
+match's details. Deadlock match data is public there whatever the Steam
+privacy settings are.
+
+Yap keeps only a small summary (rank, the last ten matches, totals for 7
+days, 30 days and the season, the newest match's items and damage) and when
+it was fetched. It does not keep the full match history, other players'
+account numbers or the Steam friends list (which Yap never requests). Hero,
+rank and item pictures are copied to Yap's own storage, so the apps never
+load them from a third party. The summary is deleted when Steam is unlinked
+or the widget leaves the board. An account that asked deadlock-api.com to
+delete its data (deadlock-api.com/data-privacy) shows nothing.
+
+When the desktop app reports what the user is doing in Deadlock (the phase,
+hero and mode, read from the game's own log), the account number in that
+log is checked against the linked one on Yap's server and is not stored or
+shown. Party members are shown only when they are Yap users who linked their
+own Steam account; other party members' account numbers are dropped. This
+follows "Share my activity", like other game activity.
+
 ## Where information is sent
 
 Yap uses these services:
@@ -74,6 +99,8 @@ Yap uses these services:
 - GitHub Releases for published desktop releases and desktop update metadata.
 - WebRTC/SFU services used by Yap for voice, video, and screen sharing.
 - `steamcommunity.com` when a user links a Steam account (see Connections).
+- `deadlock-api.com`, from Yap's server only, for Deadlock stats (see
+  Deadlock stats).
 
 The web and desktop applications can also connect to locations selected by the
 user or supplied in user content, such as a shared link, embed, attachment, or

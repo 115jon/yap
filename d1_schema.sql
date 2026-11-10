@@ -699,3 +699,38 @@ CREATE TABLE IF NOT EXISTS profile_guestbook_blocks (
     created_at TEXT NOT NULL,
     PRIMARY KEY (owner_id, blocked_user_id)
 );
+
+-- Deadlock widget career stats (migration 044).
+CREATE TABLE IF NOT EXISTS deadlock_snapshots (
+    account_id INTEGER PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'ok', 'empty', 'protected')),
+    digest TEXT,
+    fetched_at INTEGER,
+    newest_match_id INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_deadlock_snapshots_user
+    ON deadlock_snapshots(user_id);
+
+CREATE TABLE IF NOT EXISTS deadlock_fetch_state (
+    account_id INTEGER PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    next_due_at INTEGER NOT NULL,
+    retry_at INTEGER,
+    fail_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    attempted_at INTEGER,
+    signal TEXT,
+    history_at INTEGER,
+    live_since INTEGER,
+    live_until INTEGER,
+    queued_at INTEGER,
+    post_game_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_deadlock_fetch_state_due
+    ON deadlock_fetch_state(next_due_at);
+CREATE INDEX IF NOT EXISTS idx_deadlock_fetch_state_user
+    ON deadlock_fetch_state(user_id);

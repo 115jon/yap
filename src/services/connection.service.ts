@@ -238,6 +238,26 @@ export async function linkConnection(
     .bind(provider, account.externalId)
     .first<{ user_id: string }>();
   if (owner && owner.user_id !== userId) return { ok: false, reason: "taken" };
+  if (provider === "steam") {
+    // Another Steam account replaces this one: its Deadlock stats go now,
+    // not at the next reconcile.
+    const current = await db
+      .prepare(
+        `SELECT external_id FROM user_connections WHERE user_id = ? AND provider = 'steam'`,
+      )
+      .bind(userId)
+      .first<{ external_id: string }>();
+    if (current && current.external_id !== account.externalId) {
+      await db.batch([
+        db
+          .prepare(`DELETE FROM deadlock_fetch_state WHERE user_id = ?`)
+          .bind(userId),
+        db
+          .prepare(`DELETE FROM deadlock_snapshots WHERE user_id = ?`)
+          .bind(userId),
+      ]);
+    }
+  }
   try {
     await db
       .prepare(
@@ -344,7 +364,11 @@ export async function setShowOnProfile(
   return (result.meta?.changes ?? 0) > 0;
 }
 
-/** Deletes the link and any link in flight. False when nothing was linked. */
+/**
+ * Deletes the link and any link in flight. Unlinking Steam also deletes
+ * the Deadlock stats kept for it (migration 044), at once. False when
+ * nothing was linked.
+ */
 export async function unlinkConnection(
   db: D1Database,
   userId: string,
@@ -361,6 +385,16 @@ export async function unlinkConnection(
         `DELETE FROM connection_link_states WHERE user_id = ? AND provider = ?`,
       )
       .bind(userId, provider),
+    ...(provider === "steam"
+      ? [
+          db
+            .prepare(`DELETE FROM deadlock_fetch_state WHERE user_id = ?`)
+            .bind(userId),
+          db
+            .prepare(`DELETE FROM deadlock_snapshots WHERE user_id = ?`)
+            .bind(userId),
+        ]
+      : []),
   ]);
   return (deleted?.meta?.changes ?? 0) > 0;
 }

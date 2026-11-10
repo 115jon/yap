@@ -188,6 +188,13 @@ export function useBoardEditor(
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<BoardConflictBody | null>(null);
   const [response, setResponse] = useState<BoardResponse>(initial);
+  // Widget data refreshed under an open editor (the Deadlock stats landed)
+  // shows at once; the board itself stays the editor's.
+  const [seenData, setSeenData] = useState(initial.data);
+  if (initial.data !== seenData && initial.user_id === response.user_id) {
+    setSeenData(initial.data);
+    setResponse((prev) => ({ ...prev, data: initial.data }));
+  }
   const mine = useMyEntitlement();
   const entitlement = override ?? mine;
 

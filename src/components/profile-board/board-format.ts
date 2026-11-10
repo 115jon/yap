@@ -39,6 +39,7 @@ export interface BoardCtx {
 export const WIDGET_ICON: Record<WidgetType, IconName> = {
   now_playing: "gamepad",
   top_games: "trophy",
+  deadlock: "sword",
   voice_hours: "mic",
   listening: "headphones",
   badges: "verified",

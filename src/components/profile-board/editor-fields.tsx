@@ -27,6 +27,7 @@ import {
   WIDGET_SPECS,
   type AnyProfileWidget,
   type BoardData,
+  type DeadlockAtRest,
   type MoodPose,
   type TopGamesRange,
   type VoiceHoursPeriod,
@@ -36,6 +37,9 @@ import {
 import { canAdd, SIZE_LABELS } from "@/lib/profile-board-editor";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/stores/chat-store";
+import { openSettings } from "@/components/chat/settings/settings-links";
+import { Switch } from "@/components/ui/switch";
+import { DEADLOCK_CREDIT, type DeadlockRange } from "@/lib/deadlock";
 
 import { useBoardMedia } from "./board-context";
 import { WIDGET_ICON } from "./board-format";
@@ -471,6 +475,14 @@ function TypeFields({
           onChange={(range) => set<"top_games">({ range })}
         />
       );
+    case "deadlock":
+      return (
+        <DeadlockFields
+          cfg={widget.cfg}
+          data={data}
+          onChange={(cfg) => set<"deadlock">(cfg)}
+        />
+      );
     case "voice_hours":
       return (
         <ChoiceField
@@ -650,6 +662,155 @@ export function trimLines(lines: string[]): string[] {
   const next = [...lines];
   while (next.length > 0 && next.at(-1) === "") next.pop();
   return next;
+}
+
+/**
+ * The Deadlock plate's setup (mockup 05, in the inspector): the Steam
+ * link, what the plate shows at rest, the range, the party, the
+ * `-condebug` launch option for live matches, and where the data comes
+ * from. Every game mode counts; there is no ranked-only switch.
+ */
+function DeadlockFields({
+  cfg,
+  data,
+  onChange,
+}: {
+  cfg: WidgetConfigMap["deadlock"];
+  data: BoardData;
+  onChange(cfg: Partial<WidgetConfigMap["deadlock"]>): void;
+}) {
+  const partyId = useId();
+  const [copied, setCopied] = useState(false);
+  const deadlock = data.deadlock;
+  const linked = deadlock && deadlock.state !== "not_linked";
+  return (
+    <div data-slot="deadlock-fields" className="flex flex-col gap-4">
+      {linked ? (
+        <div className="flex items-center gap-2.5 rounded-[2px] bg-ply-2 p-2.5 shadow-[inset_0_0_0_1px_var(--line-strong)]">
+          <Icon name="steam" size="md" className="shrink-0 text-ink-2" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-ui-sm font-semibold text-ink-1">
+              {deadlock.persona ?? "Steam account"}
+            </p>
+            <p className="flex items-center gap-1 text-ui-xs text-success-ink">
+              <Icon name="verified" size="xs" />
+              Verified through Steam
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => openSettings({ panel: "connections" })}
+          >
+            Manage
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-col items-start gap-2">
+          <Note>
+            Deadlock stats belong to a Steam account. Link the one you play on
+            in Connections; Steam tells Yap your account ID and nothing else.
+          </Note>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => openSettings({ panel: "connections" })}
+          >
+            <Icon name="steam" size="sm" />
+            Link Steam
+          </Button>
+        </div>
+      )}
+      <ChoiceField
+        label="When you're not playing"
+        value={cfg.at_rest}
+        items={[
+          { value: "career" as DeadlockAtRest, label: "Career" },
+          { value: "last_match" as DeadlockAtRest, label: "Last match" },
+        ]}
+        onChange={(at_rest) => onChange({ at_rest })}
+      />
+      <ChoiceField
+        label="Count"
+        value={cfg.range}
+        items={[
+          { value: "7d" as DeadlockRange, label: "7 days" },
+          { value: "30d" as DeadlockRange, label: "30 days" },
+          { value: "season" as DeadlockRange, label: "Season" },
+        ]}
+        onChange={(range) => onChange({ range })}
+      />
+      <p className="-mt-2 text-ui-xs text-pretty text-ink-3">
+        Every mode counts: ranked, unranked and Street Brawl.
+      </p>
+      <div className="flex items-center justify-between gap-3">
+        <label htmlFor={partyId} className="flex min-w-0 flex-col">
+          <span className="text-ui-sm font-medium text-ink-1">Show party</span>
+          <span className="text-ui-xs text-pretty text-ink-3">
+            Names friends in your party who linked Steam on Yap too.
+          </span>
+        </label>
+        <Switch
+          id={partyId}
+          checked={cfg.show_party}
+          onCheckedChange={(show_party) => onChange({ show_party })}
+        />
+      </div>
+      <div className="flex flex-col gap-1.5 border-t border-line pt-4">
+        <span className="silkscreen text-ink-3">Live match on desktop</span>
+        <p className="text-ui-xs text-pretty text-ink-2">
+          Deadlock writes what you're doing to a log file when it starts with{" "}
+          <code className="rounded-[2px] bg-tint-2 px-1.5 py-0.5 font-silk text-[12px] text-ink-1">
+            -condebug
+          </code>
+          . Yap desktop reads that file and nothing else: no memory reads,
+          nothing added to the game.
+        </p>
+        <div className="flex h-9 items-center gap-2 rounded-[2px] bg-ply-0 pr-1 pl-2.5 shadow-[inset_0_0_0_1px_var(--line-strong)]">
+          <code className="font-silk text-[12px] font-semibold text-ink-1">
+            -condebug
+          </code>
+          <IconButton
+            className="ml-auto"
+            size={28}
+            tooltip={copied ? "Copied" : "Copy launch option"}
+            icon={copied ? "check" : "copy"}
+            onClick={() => {
+              void navigator.clipboard?.writeText("-condebug").then(
+                () => setCopied(true),
+                () => undefined,
+              );
+            }}
+          />
+        </div>
+        <p className="text-ui-xs text-pretty text-ink-3">
+          Steam › Deadlock › Properties › Launch options. Without it you still
+          get career stats and “Playing Deadlock”.
+        </p>
+      </div>
+      <div className="flex flex-col gap-1.5 rounded-[2px] bg-ply-2 p-3 shadow-[inset_0_0_0_1px_var(--line-strong)]">
+        <p className="flex items-center gap-2 font-display text-[14px] leading-[18px] font-bold text-ink-1">
+          <Icon name="globe" size="sm" />
+          Your matches are public anyway
+        </p>
+        <p className="text-ui-xs text-pretty text-ink-2">
+          Deadlock match history is public on deadlock-api.com and tracker sites
+          whether or not you link it. Linking only changes what Yap shows. To
+          remove it at the source, use{" "}
+          <a
+            href="https://deadlock-api.com/data-privacy"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-ink-1 underline underline-offset-[3px]"
+          >
+            deadlock-api.com/data-privacy
+          </a>
+          .
+        </p>
+        <p className="text-ui-xs text-ink-3">{DEADLOCK_CREDIT}</p>
+      </div>
+    </div>
+  );
 }
 
 function Note({ children }: { children: ReactNode }) {

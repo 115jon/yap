@@ -28,6 +28,7 @@ import { isAnimatedImage } from "@/lib/profile-board-images";
 import type { RateLimitOptions } from "@/lib/rate-limit";
 import { ServiceError } from "@/lib/service-error";
 import { tooLargeMessage, uploadLimitFor } from "@/lib/upload-limits";
+import { deadlockBoardData } from "@/services/deadlock/board";
 import { getEntitlement } from "@/services/entitlement.service";
 import {
   listProfileActivity,
@@ -75,6 +76,11 @@ export interface ProfileBoardDeps {
     userId: string,
     action: ProfileBoardRateAction,
   ): Promise<Response | null>;
+  /**
+   * Queues one Deadlock stats fetch (a viewed plate is old, or the owner
+   * just put the widget on their board). Unset: plates refresh on the cron.
+   */
+  deadlockRefresh?(accountId: number): Promise<void>;
   /** Tells the owner's servers the board moved on (open profiles refetch). */
   broadcastBoardUpdate?(userId: string, version: number): Promise<void>;
   waitUntil?(promise: Promise<unknown>): void;
@@ -153,6 +159,9 @@ export function createProfileBoardHandlers(deps: ProfileBoardDeps) {
           ownerId: targetId(id, session.userId),
           viewerId: session.userId,
           now: now(),
+          onDeadlockRefresh: (accountId) => {
+            if (deps.deadlockRefresh) later(deps.deadlockRefresh(accountId));
+          },
         });
         return json(view);
       } catch (e) {
@@ -214,6 +223,22 @@ export function createProfileBoardHandlers(deps: ProfileBoardDeps) {
         later(
           cleanupWidgetAssets(deps.bucket, session.userId, saved.board, now()),
         );
+        const deadlock = saved.board.widgets.find((w) => w.type === "deadlock");
+        if (deadlock?.type === "deadlock" && deps.deadlockRefresh) {
+          // A plate just added starts tracking and fetches right away.
+          const refresh = deps.deadlockRefresh;
+          later(
+            deadlockBoardData(deps.db, {
+              ownerId: session.userId,
+              isOwner: true,
+              range: deadlock.cfg.range,
+              track: true,
+              now: now(),
+            }).then((view) =>
+              view.refresh !== null ? refresh(view.refresh) : undefined,
+            ),
+          );
+        }
         return json(saved);
       } catch (e) {
         return fromServiceError(e);

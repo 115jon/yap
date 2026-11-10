@@ -33,8 +33,10 @@ import {
   type WidgetCategory,
   type WidgetType,
 } from "@/lib/profile-board";
+import { DEADLOCK_ICON_PATH } from "@/lib/deadlock";
 import { cn } from "@/lib/utils";
 
+import { useBoardMedia } from "./board-context";
 import { WIDGET_ICON } from "./board-format";
 import { LoudLock } from "./editor-fields";
 
@@ -55,7 +57,8 @@ export function pickerEntries(
 ): PickerEntry[] {
   const order: WidgetType[] = [
     "custom",
-    ...WIDGET_TYPES.filter((type) => type !== "custom"),
+    "deadlock",
+    ...WIDGET_TYPES.filter((type) => type !== "custom" && type !== "deadlock"),
   ];
   const full = board.widgets.length >= MAX_WIDGETS;
   return order.map((type) => {
@@ -190,6 +193,7 @@ export function PickerBody({
 
   const activeEntry = entries[current];
   const used = board.widgets.length;
+  const media = useBoardMedia();
 
   return (
     <div
@@ -288,23 +292,48 @@ export function PickerBody({
               onClick={() => choose(entry)}
               className={cn(
                 "relative flex min-w-0 cursor-default items-start gap-3 rounded-[2px] border border-line-strong p-3 transition-colors duration-(--dur-1)",
-                entry.type === "custom" && "col-span-full",
+                (entry.type === "custom" || entry.type === "deadlock") &&
+                  "col-span-full",
                 on && "bg-tint-1 border-ink-2",
                 disabled && "opacity-60",
               )}
             >
-              <span className="grid size-10 shrink-0 place-items-center rounded-[2px] border border-line-strong text-ink-2">
-                <Icon
-                  name={entry.locked ? "lock" : WIDGET_ICON[entry.type]}
-                  size="md"
-                />
-              </span>
+              {entry.type === "deadlock" ? (
+                <span className="size-10 shrink-0 overflow-hidden rounded-[2px] bg-black">
+                  <img
+                    src={media.url(DEADLOCK_ICON_PATH)}
+                    alt=""
+                    className="size-full object-cover"
+                    draggable={false}
+                  />
+                </span>
+              ) : (
+                <span className="grid size-10 shrink-0 place-items-center rounded-[2px] border border-line-strong text-ink-2">
+                  <Icon
+                    name={entry.locked ? "lock" : WIDGET_ICON[entry.type]}
+                    size="md"
+                  />
+                </span>
+              )}
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="truncate font-display text-[15px] leading-5 font-bold text-ink-1">
                     {spec.name}
                   </span>
                   {entry.locked ? <LoudLock /> : null}
+                  {entry.type === "deadlock" ? (
+                    <>
+                      <span className="silkscreen rounded-[2px] bg-tint-2 px-1 text-ink-3">
+                        New
+                      </span>
+                      {entry.added === 0 ? (
+                        <span className="silkscreen ml-auto inline-flex shrink-0 items-center gap-1 text-ink-3">
+                          <Icon name="steam" size="xs" />
+                          Needs Steam
+                        </span>
+                      ) : null}
+                    </>
+                  ) : null}
                   {entry.added > 0 ? (
                     <Icon
                       name="check"

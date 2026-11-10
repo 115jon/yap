@@ -103,6 +103,27 @@ export interface GameActivityHost {
    * game; the writer is idempotent across sessions reporting the same one.
    */
   onGameEnded?(userId: string, activity: GameActivity, endedAt: number): void;
+  /**
+   * A session's activity changed (set, replaced or cleared; null is none)
+   * while its owner shared activity. The Deadlock fetcher moves its cadence
+   * from this.
+   */
+  onActivityChanged?(
+    userId: string,
+    previous: GameActivity | null,
+    next: GameActivity | null,
+    at: number,
+  ): void;
+  /**
+   * What others (and the user's own sessions) receive of a stored activity
+   * (`raw` reads any user's stored one). The Deadlock party is cut to
+   * mutual claims here. Unset: the stored activity as is.
+   */
+  present?(
+    userId: string,
+    activity: GameActivity | null,
+    raw: (userId: string) => GameActivity | null,
+  ): GameActivity | null;
 }
 
 const AUDIENCE_QUERIES = [
@@ -236,7 +257,26 @@ export class GameActivityRegistry {
     }
     this.bySession.set(sessionId, { userId, activity: next, updatedAt: now });
     this.persist(sessionId);
+    this.reportChanged(userId, previous?.activity ?? null, next, now);
+    this.refreshParty(previous?.activity ?? null, next);
     return true;
+  }
+
+  /**
+   * A party claim changed: the members' own broadcasts may now name (or
+   * stop naming) this user, so they go out again.
+   */
+  private refreshParty(
+    previous: GameActivity | null,
+    next: GameActivity | null,
+  ) {
+    const members = new Set([
+      ...(previous?.game?.party_user_ids ?? []),
+      ...(next?.game?.party_user_ids ?? []),
+    ]);
+    for (const memberId of members) {
+      if (this.hasActivityFor(memberId)) this.schedule(memberId);
+    }
   }
 
   /** The socket closed: its activity goes with it. */
@@ -244,7 +284,9 @@ export class GameActivityRegistry {
     const entry = this.bySession.get(sessionId);
     if (!entry) return false;
     this.reportEnded(entry, now);
+    this.reportChanged(entry.userId, entry.activity, null, now);
     this.bySession.delete(sessionId);
+    this.refreshParty(entry.activity, null);
     this.host.waitUntil(
       this.host.storage
         .delete(GAME_ACTIVITY_STORAGE_PREFIX + sessionId)
@@ -266,6 +308,21 @@ export class GameActivityRegistry {
     }
   }
 
+  private reportChanged(
+    userId: string,
+    previous: GameActivity | null,
+    next: GameActivity | null,
+    at: number,
+  ) {
+    if (!this.host.onActivityChanged) return;
+    if (this.shareByUser.get(userId) !== true) return;
+    try {
+      this.host.onActivityChanged(userId, previous, next, at);
+    } catch (error) {
+      this.host.log.error("Activity change report failed", error);
+    }
+  }
+
   /** The user has an activity, or their audience last heard one. */
   hasActivityFor(userId: string): boolean {
     const state = this.broadcasts.get(userId);
@@ -282,6 +339,14 @@ export class GameActivityRegistry {
    * have sharing off (or its flag could not be read).
    */
   visible(userId: string): GameActivity | null {
+    const stored = this.storedVisible(userId);
+    return this.host.present
+      ? this.host.present(userId, stored, (id) => this.storedVisible(id))
+      : stored;
+  }
+
+  /** `visible` before `present`: the stored activity, claims and all. */
+  private storedVisible(userId: string): GameActivity | null {
     if (this.shareByUser.get(userId) !== true) return null;
     if (this.host.presenceSnapshot(userId).status === "offline") return null;
     let newest: SessionActivity | null = null;
