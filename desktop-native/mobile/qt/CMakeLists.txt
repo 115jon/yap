@@ -120,10 +120,13 @@ if(ANDROID)
 endif()
 
 # --- iOS: a compile and link check for the simulator ---------------------
-# (build.sh ios-simulator; CI's qt-ios job.) Qt for iOS is static: Qt's
-# finalizer imports the QML plugins the QML under this folder uses, and the
-# platform plugin. Qt writes a default Info.plist from these properties.
+# (build.sh ios-simulator; CI's qt-ios job.) Qt for iOS is static, so the
+# QML modules' plugins are linked in: qmlimportscanner reads the QML under
+# this folder (the mobile QML, and the shared desktop QML that build.rs
+# mirrors into rust/shared once cargo has run). Qt writes a default
+# Info.plist from these properties.
 if(IOS)
+  qt_import_qml_plugins(yapqt)
   set_target_properties(yapqt PROPERTIES
     MACOSX_BUNDLE TRUE
     MACOSX_BUNDLE_GUI_IDENTIFIER "${YAP_ANDROID_APP_ID}"

@@ -73,6 +73,9 @@ build="$yapm/build/qt-$abi-$config"
 if [[ "$abi" == ios-simulator ]]; then
   # Qt for iOS ships static libraries for arm64 devices and x86_64
   # simulators (no arm64 simulator slice), so the simulator build is x86_64.
+  # cxx-qt-build's C++ and the Rust code target Qt's minimum iOS, as the
+  # link does (not the SDK's own version).
+  export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-17.0}"
   cmake -G Ninja -S "$here" -B "$build" \
     -DCMAKE_BUILD_TYPE="$config" \
     -DCMAKE_TOOLCHAIN_FILE="$qt/lib/cmake/Qt6/qt.toolchain.cmake" \
