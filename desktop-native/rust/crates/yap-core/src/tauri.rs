@@ -25,6 +25,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde_json::Value;
 use yap_cache::settings::{self as native, AppearancePrefs, DesktopSettings, WindowState};
@@ -80,6 +81,63 @@ pub const IMPORT_ATTEMPTS: u64 = 3;
 /// the Tauri uninstaller runs, so a later launch can put them back if this
 /// one ends first.
 pub const SAVED_SHORTCUTS_DIR: &str = "tauri-shortcuts";
+
+/// How long this app must stay up after its interface loaded before the
+/// Tauri app is uninstalled. The Tauri 3.14 bridge starts this app and
+/// waits 8 s for it to keep running before it exits; a build that crashes
+/// on start must never take the working Tauri app with it, so the
+/// uninstall waits well past that.
+pub const UNINSTALL_DEFER: Duration = Duration::from_secs(20);
+
+/// When the Tauri uninstall may run on this launch: only once it was armed
+/// at launch (a Tauri install was found and attempts remain), the interface
+/// loaded ([`UninstallDeferral::app_started`], the shell's
+/// `yap_tauri_app_started` once Main.qml has its window, shown or in the
+/// tray), and [`UNINSTALL_DEFER`] passed since. Times are offsets on one
+/// clock (the caller's `Instant`), so tests need none. It fires once.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct UninstallDeferral {
+    armed: bool,
+    started_at: Option<Duration>,
+    fired: bool,
+}
+
+impl UninstallDeferral {
+    /// At launch, before anything is uninstalled.
+    pub fn arm(&mut self) {
+        self.armed = true;
+    }
+
+    /// The interface loaded at `now`; later calls change nothing.
+    pub fn app_started(&mut self, now: Duration) {
+        if self.started_at.is_none() {
+            self.started_at = Some(now);
+        }
+    }
+
+    /// True once: armed, started, and up for [`UNINSTALL_DEFER`] at `now`.
+    pub fn due(&mut self, now: Duration) -> bool {
+        let due = self.armed
+            && !self.fired
+            && self
+                .started_at
+                .is_some_and(|at| now.saturating_sub(at) >= UNINSTALL_DEFER);
+        if due {
+            self.fired = true;
+        }
+        due
+    }
+
+    /// How long until [`Self::due`] can be true; `None` while it never can
+    /// (not armed, not started, or fired already).
+    pub fn wait(&self, now: Duration) -> Option<Duration> {
+        if !self.armed || self.fired {
+            return None;
+        }
+        let at = self.started_at?;
+        Some((at + UNINSTALL_DEFER).saturating_sub(now))
+    }
+}
 
 /// The folders that matter, from the caller (known folders on Windows,
 /// fixture folders in tests).
