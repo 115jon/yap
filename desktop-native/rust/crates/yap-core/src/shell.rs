@@ -9,9 +9,9 @@ use std::time::{Duration, Instant};
 
 use yap_protocol::rest::{Message, Notification, User};
 
-/// The name the tray and toasts use (`install::TITLE`): this app replaces
-/// the Tauri desktop app under its name.
-pub const APP_NAME: &str = crate::install::TITLE;
+/// The name the tray and toasts use (`install::TITLE` is this too): this
+/// app replaces the Tauri desktop app under its name.
+pub const APP_NAME: &str = "Yap";
 
 /// The badge count stops here (desktop-notifications.ts `MAX_BADGE_COUNT`).
 pub const MAX_BADGE_COUNT: usize = 99;

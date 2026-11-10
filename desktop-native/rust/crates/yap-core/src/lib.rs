@@ -22,6 +22,7 @@ pub mod emoji;
 pub mod faults;
 pub mod fixture;
 pub mod gif_favorite;
+#[cfg(feature = "desktop")]
 pub mod install;
 pub mod limits;
 pub mod links;
@@ -33,7 +34,9 @@ pub mod settings;
 pub mod shell;
 pub mod store;
 pub mod synth;
+#[cfg(feature = "desktop")]
 pub mod tauri;
+#[cfg(feature = "desktop")]
 pub mod update;
 pub mod wordle;
 
