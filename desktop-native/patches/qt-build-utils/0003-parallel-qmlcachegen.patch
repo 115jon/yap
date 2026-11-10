@@ -1,0 +1,47 @@
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -386,19 +386,37 @@
+                 qmldir_qrc_path: qrc_path.clone(),
+             };
+             let mut qml_resource_paths = Vec::new();
+-            for file in qml_files {
+-                let result = QtToolQmlCacheGen::new(self.qt_installation.as_ref())
+-                    .compile(qml_cache_args.clone(), file.get_path());
++            // Yap patch (desktop-native/patches/qt-build-utils): one
++            // qmlcachegen for the module (its constructor runs `--help`),
++            // and the files compiled side by side on every core. The
++            // results keep the files' order, so the output is unchanged.
++            let qmlcachegen = QtToolQmlCacheGen::new(self.qt_installation.as_ref());
++            let next = std::sync::atomic::AtomicUsize::new(0);
++            let results =
++                std::sync::Mutex::new((0..qml_files.len()).map(|_| None).collect::<Vec<_>>());
++            let threads = std::thread::available_parallelism()
++                .map_or(1, |n| n.get())
++                .min(qml_files.len());
++            std::thread::scope(|scope| {
++                for _ in 0..threads {
++                    scope.spawn(|| loop {
++                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++                        let Some(file) = qml_files.get(i) else { break };
++                        let result = qmlcachegen.compile(qml_cache_args.clone(), file.get_path());
++                        results.lock().unwrap()[i] = Some(result);
++                    });
++                }
++            });
++            for result in results.into_inner().unwrap() {
++                let result = result.expect("qmlcachegen produced no result");
+                 qmlcachegen_file_paths.push(result.qml_cache_path);
+                 qml_resource_paths.push(result.qml_resource_path);
+             }
+ 
+             // If there are no QML files there is nothing for qmlcachegen to run with
+             if !qml_files.is_empty() {
+-                qmlcachegen_file_paths.push(
+-                    QtToolQmlCacheGen::new(self.qt_installation.as_ref())
+-                        .compile_loader(qml_cache_args.clone(), &qml_resource_paths),
+-                );
++                qmlcachegen_file_paths
++                    .push(qmlcachegen.compile_loader(qml_cache_args.clone(), &qml_resource_paths));
+             }
+         }
+ 
