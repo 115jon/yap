@@ -42,16 +42,15 @@
 #include <functional>
 
 #include "animatedpicture.h"
+#include "yap_ui.h"
 #include "authmedia.h"
 #include "camera.h"
 #include "compat.h"
 #include "composerhighlighter.h"
 #include "crashnotice.h"
 #include "desktopshell.h"
-#include "ditherprovider.h"
 #include "eyedropper.h"
 #include "heaptrace.h"
-#include "iconprovider.h"
 #include "logfile.h"
 #include "mediashell.h"
 #include "profile.h"
@@ -915,10 +914,7 @@ int main(int argc, char* argv[])
   // pattern, no device opened).
   auto* camera = new CameraCapture(&app);
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "Camera", camera);
-  // APNG and animated WebP (decorations, effects, X GIFs), and the web
-  // players (WebView2).
-  qmlRegisterType<AnimatedPicture>("Yap.Media", 1, 0, "AnimatedPicture");
-  qmlRegisterType<ViewportWatch>("Yap.Media", 1, 0, "ViewportWatch");
+  // The web players (WebView2) and the composer's highlighter.
   qmlRegisterType<WebEmbed>("Yap.Media", 1, 0, "WebEmbed");
   qmlRegisterType<ComposerHighlighter>("Yap.Media", 1, 0,
                                        "ComposerHighlighter");
@@ -947,8 +943,9 @@ int main(int argc, char* argv[])
   QQmlApplicationEngine engine;
   // Not owned by the engine; it outlives it here.
   engine.setNetworkAccessManagerFactory(&networkFactory);
-  engine.addImageProvider(QStringLiteral("icon"), new IconProvider);
-  engine.addImageProvider(QStringLiteral("dither"), new DitherProvider);
+  // AnimatedPicture and ViewportWatch (Yap.Media), the icon and dither
+  // providers: the C++ shared with the mobile app (yap-ui's cpp/).
+  yap_ui_register(engine);
   engine.addImageProvider(QStringLiteral("share"), new ShareProvider);
   QObject::connect(
     &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
