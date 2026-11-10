@@ -1,0 +1,674 @@
+{
+  "user_id": "u-me",
+  "board": {
+    "v": 1,
+    "widgets": [
+      {
+        "id": "w-nowplay",
+        "type": "now_playing",
+        "size": "L",
+        "cfg": {
+          "when_idle": "last_played"
+        }
+      },
+      {
+        "id": "w-mood",
+        "type": "mood",
+        "size": "S",
+        "cfg": {
+          "pose": "bark",
+          "text": "ranked grind. send snacks",
+          "clears_at": "2026-11-28T00:00:00Z"
+        }
+      },
+      {
+        "id": "w-countdown",
+        "type": "countdown",
+        "size": "S",
+        "cfg": {
+          "title": "Raid night: Vault of Glass",
+          "at": "2026-11-29T21:00:00Z"
+        }
+      },
+      {
+        "id": "w-voice",
+        "type": "voice_hours",
+        "size": "M",
+        "cfg": {
+          "period": "month"
+        }
+      },
+      {
+        "id": "w-topgames",
+        "type": "top_games",
+        "size": "M",
+        "cfg": {
+          "range": "30d"
+        }
+      },
+      {
+        "id": "w-badges",
+        "type": "badges",
+        "size": "S",
+        "cfg": {
+          "badge_ids": []
+        }
+      },
+      {
+        "id": "w-listen",
+        "type": "listening",
+        "size": "S",
+        "cfg": {}
+      },
+      {
+        "id": "w-quote",
+        "type": "quote",
+        "size": "L",
+        "cfg": {
+          "message_id": "m-uninstall",
+          "snapshot": {
+            "text": "if we lose this one I'm uninstalling. (we lost. I did not uninstall.) @Mo you owe me a rematch",
+            "at": "2026-10-12T01:14:00Z",
+            "channel_id": "c-general",
+            "channel_name": "general",
+            "server_id": "s-raidhq",
+            "server_name": "Raid HQ"
+          }
+        }
+      },
+      {
+        "id": "w-photos",
+        "type": "photos",
+        "size": "M",
+        "cfg": {
+          "photos": [
+            {
+              "asset": "kiwiphoto0001beach.webp",
+              "alt": "Sunset over the beach in Lisbon"
+            },
+            {
+              "asset": "kiwiphoto0002mochi.gif",
+              "alt": "Mochi the cat supervising"
+            }
+          ],
+          "caption": "Lisbon trip, and Mochi supervising the build"
+        }
+      },
+      {
+        "id": "w-guestbook",
+        "type": "guestbook",
+        "size": "M",
+        "cfg": {}
+      },
+      {
+        "id": "w-links",
+        "type": "links",
+        "size": "S",
+        "cfg": {
+          "links": [
+            {
+              "label": "Art",
+              "url": "https://kiwi.page/art"
+            },
+            {
+              "label": "Twitch",
+              "url": "https://www.twitch.tv/kiwiyaps"
+            },
+            {
+              "label": "Ko-fi",
+              "url": "https://ko-fi.com/kiwiyaps"
+            }
+          ]
+        }
+      },
+      {
+        "id": "w-servers",
+        "type": "servers",
+        "size": "S",
+        "cfg": {
+          "server_ids": ["s-raidhq", "s-cozy", "s-ranked", "s-books"]
+        }
+      },
+      {
+        "id": "w-custom",
+        "type": "custom",
+        "size": "L",
+        "cfg": {
+          "legend": "Commissions",
+          "title": "Commissions open",
+          "asset": "kiwicustom0001chibi.webp",
+          "lines": [
+            "Chibi icons, from 15 €",
+            "Emote packs, 5 for 30 €",
+            "DM me here on Yap",
+            "Queue: 3 of 5 slots open"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 7,
+  "drafts": ["w-custom"],
+  "is_owner": true,
+  "data": {
+    "last_game": {
+      "name": "Balatro",
+      "icon_url": "fixture/game/balatro",
+      "ended_at": "2026-11-26T18:30:00.000Z",
+      "seconds": 8040
+    },
+    "game_totals": {
+      "deadlock": {
+        "week": 40800,
+        "all": 763200
+      },
+      "balatro": {
+        "week": 11100,
+        "all": 230400
+      }
+    },
+    "top_games": {
+      "range": "30d",
+      "games": [
+        {
+          "name": "Deadlock",
+          "icon_url": "fixture/game/deadlock",
+          "seconds": 149400
+        },
+        {
+          "name": "Balatro",
+          "icon_url": "fixture/game/balatro",
+          "seconds": 65520
+        },
+        {
+          "name": "Marvel Rivals",
+          "icon_url": "fixture/game/rivals",
+          "seconds": 43200
+        },
+        {
+          "name": "Stardew Valley",
+          "icon_url": "fixture/game/stardew",
+          "seconds": 23040
+        },
+        {
+          "name": "Helldivers 2",
+          "icon_url": "fixture/game/helldivers",
+          "seconds": 11160
+        }
+      ],
+      "total_seconds": 291600,
+      "game_count": 9
+    },
+    "voice_hours": {
+      "period": "month",
+      "start_day": "2026-11-01",
+      "days": [
+        1440, 7560, 0, 4320, 12240, 2880, 0, 0, 9360, 6840, 1080, 14760, 3960,
+        0, 7920, 10800, 2160, 5400, 0, 3240, 10080, 4680, 720, 0, 6120, 8640,
+        3600
+      ],
+      "total_seconds": 127800,
+      "previous_seconds": 116280,
+      "stream_seconds": 22320,
+      "longest_seconds": 20460
+    },
+    "last_listen": {
+      "tracks": 12,
+      "top_track": "Night Drive (Slowed)",
+      "ended_at": "2026-11-26T17:30:00.000Z"
+    },
+    "badges": [
+      {
+        "id": "night-owl",
+        "awarded_at": "2026-11-03T03:12:00Z"
+      },
+      {
+        "id": "voice-regular",
+        "awarded_at": "2026-10-20T22:00:00Z"
+      },
+      {
+        "id": "server-owner",
+        "awarded_at": "2026-08-14T18:00:00Z"
+      },
+      {
+        "id": "early-yapper",
+        "awarded_at": "2025-06-26T12:00:00Z"
+      },
+      {
+        "id": "founder",
+        "awarded_at": "2025-06-26T12:00:00Z"
+      }
+    ],
+    "servers": [
+      {
+        "id": "s-raidhq",
+        "name": "Raid HQ",
+        "icon_url": null,
+        "member_count": 14,
+        "viewer_is_member": true
+      },
+      {
+        "id": "s-cozy",
+        "name": "Cozy Corner",
+        "icon_url": null,
+        "member_count": 9,
+        "viewer_is_member": true
+      },
+      {
+        "id": "s-ranked",
+        "name": "Ranked Pain",
+        "icon_url": null,
+        "member_count": 6,
+        "viewer_is_member": false
+      },
+      {
+        "id": "s-books",
+        "name": "Book Club",
+        "icon_url": null,
+        "member_count": 5,
+        "viewer_is_member": false
+      }
+    ],
+    "quote_visible": true,
+    "guestbook": {
+      "enabled": true,
+      "notes": [
+        {
+          "id": "note-juno",
+          "author": {
+            "id": "u-juno",
+            "username": "juno",
+            "display_name": "Juno",
+            "avatar_url": null
+          },
+          "body": "best duo partner, terrible taste in music",
+          "created_at": "2026-11-25T20:30:00.000Z"
+        },
+        {
+          "id": "note-mo",
+          "author": {
+            "id": "u-mo",
+            "username": "mo",
+            "display_name": "Mo",
+            "avatar_url": null
+          },
+          "body": "carried me through plat. I owe you one",
+          "created_at": "2026-11-22T20:30:00.000Z"
+        },
+        {
+          "id": "note-pip",
+          "author": {
+            "id": "u-pip",
+            "username": "pip",
+            "display_name": "Pip",
+            "avatar_url": null
+          },
+          "body": "the cat avatar >>>",
+          "created_at": "2026-11-19T20:30:00.000Z"
+        }
+      ],
+      "total": 12,
+      "can_post": false
+    },
+    "deadlock": {
+      "state": "ok",
+      "digest": {
+        "v": 1,
+        "computed_at": 1795811400,
+        "rank": {
+          "badge": 74,
+          "calibration_left": null
+        },
+        "previous_badge": 72,
+        "season": {
+          "name": "Beta Season 2",
+          "start": 1795293000,
+          "calibration_matches": 8
+        },
+        "ranges": {
+          "7d": {
+            "matches": 36,
+            "wins": 16,
+            "kills": 212,
+            "deaths": 195,
+            "assists": 325,
+            "seconds": 67996,
+            "rank_delta": 450,
+            "pool": [
+              {
+                "hero": 20,
+                "matches": 19,
+                "wins": 10
+              },
+              {
+                "hero": 7,
+                "matches": 9,
+                "wins": 2
+              },
+              {
+                "hero": 13,
+                "matches": 5,
+                "wins": 1
+              },
+              {
+                "hero": 59,
+                "matches": 2,
+                "wins": 2
+              },
+              {
+                "hero": 15,
+                "matches": 1,
+                "wins": 1
+              }
+            ]
+          },
+          "30d": {
+            "matches": 112,
+            "wins": 59,
+            "kills": 668,
+            "deaths": 575,
+            "assists": 1009,
+            "seconds": 212396,
+            "rank_delta": 450,
+            "pool": [
+              {
+                "hero": 13,
+                "matches": 38,
+                "wins": 22
+              },
+              {
+                "hero": 59,
+                "matches": 24,
+                "wins": 12
+              },
+              {
+                "hero": 20,
+                "matches": 19,
+                "wins": 10
+              },
+              {
+                "hero": 15,
+                "matches": 17,
+                "wins": 8
+              },
+              {
+                "hero": 7,
+                "matches": 14,
+                "wins": 7
+              }
+            ]
+          },
+          "season": {
+            "matches": 32,
+            "wins": 15,
+            "kills": 188,
+            "deaths": 175,
+            "assists": 289,
+            "seconds": 60396,
+            "rank_delta": 450,
+            "pool": [
+              {
+                "hero": 20,
+                "matches": 19,
+                "wins": 10
+              },
+              {
+                "hero": 7,
+                "matches": 5,
+                "wins": 1
+              },
+              {
+                "hero": 13,
+                "matches": 5,
+                "wins": 1
+              },
+              {
+                "hero": 59,
+                "matches": 2,
+                "wins": 2
+              },
+              {
+                "hero": 15,
+                "matches": 1,
+                "wins": 1
+              }
+            ]
+          }
+        },
+        "all_time": {
+          "matches": 640,
+          "wins": 323
+        },
+        "last10": [
+          {
+            "id": 134401103,
+            "hero": 13,
+            "win": true,
+            "k": 9,
+            "d": 3,
+            "a": 9,
+            "souls": 35400,
+            "last_hits": 152,
+            "duration": 1812,
+            "at": 1795802388,
+            "mode": "ranked",
+            "badge": 74,
+            "delta": 440
+          },
+          {
+            "id": 134401104,
+            "hero": 59,
+            "win": true,
+            "k": 7,
+            "d": 2,
+            "a": 14,
+            "souls": 28200,
+            "last_hits": 152,
+            "duration": 1361,
+            "at": 1795800139,
+            "mode": "ranked",
+            "badge": 74,
+            "delta": 90
+          },
+          {
+            "id": 134401105,
+            "hero": 13,
+            "win": false,
+            "k": 3,
+            "d": 14,
+            "a": 1,
+            "souls": 19400,
+            "last_hits": 152,
+            "duration": 1445,
+            "at": 1795797355,
+            "mode": "ranked",
+            "badge": 74,
+            "delta": -110
+          },
+          {
+            "id": 134401106,
+            "hero": 20,
+            "win": true,
+            "k": 4,
+            "d": 15,
+            "a": 13,
+            "souls": 54100,
+            "last_hits": 152,
+            "duration": 2710,
+            "at": 1795793390,
+            "mode": "ranked",
+            "badge": 73,
+            "delta": 90
+          },
+          {
+            "id": 134401107,
+            "hero": 13,
+            "win": false,
+            "k": 2,
+            "d": 4,
+            "a": 2,
+            "souls": 12100,
+            "last_hits": 152,
+            "duration": 902,
+            "at": 1795792498,
+            "mode": "ranked",
+            "badge": 73,
+            "delta": -110
+          },
+          {
+            "id": 134401108,
+            "hero": 15,
+            "win": true,
+            "k": 12,
+            "d": 3,
+            "a": 17,
+            "souls": 74200,
+            "last_hits": 152,
+            "duration": 2791,
+            "at": 1795787909,
+            "mode": "ranked",
+            "badge": 73,
+            "delta": 90
+          },
+          {
+            "id": 134401109,
+            "hero": 13,
+            "win": false,
+            "k": 7,
+            "d": 7,
+            "a": 12,
+            "souls": 42700,
+            "last_hits": 152,
+            "duration": 1988,
+            "at": 1795786012,
+            "mode": "ranked",
+            "badge": 73,
+            "delta": -110
+          },
+          {
+            "id": 134401110,
+            "hero": 7,
+            "win": true,
+            "k": 11,
+            "d": 5,
+            "a": 6,
+            "souls": 48900,
+            "last_hits": 152,
+            "duration": 2200,
+            "at": 1795783100,
+            "mode": "ranked",
+            "badge": 73,
+            "delta": 90
+          },
+          {
+            "id": 134401111,
+            "hero": 59,
+            "win": true,
+            "k": 6,
+            "d": 6,
+            "a": 15,
+            "souls": 39000,
+            "last_hits": 152,
+            "duration": 2052,
+            "at": 1795780548,
+            "mode": "ranked",
+            "badge": 73,
+            "delta": 90
+          },
+          {
+            "id": 134401112,
+            "hero": 13,
+            "win": false,
+            "k": 1,
+            "d": 6,
+            "a": 8,
+            "souls": 31900,
+            "last_hits": 152,
+            "duration": 1935,
+            "at": 1795777965,
+            "mode": "ranked",
+            "badge": 73,
+            "delta": -110
+          }
+        ],
+        "last_match": {
+          "id": 134401103,
+          "hero": 13,
+          "win": true,
+          "k": 9,
+          "d": 3,
+          "a": 9,
+          "souls": 35400,
+          "last_hits": 152,
+          "duration": 1812,
+          "at": 1795802388,
+          "mode": "ranked",
+          "badge": 74,
+          "delta": 440,
+          "level": 30,
+          "hero_damage": 24100,
+          "objective_damage": 9800,
+          "items": [2010, 2011, 2012, 2013, 2014, 2015]
+        },
+        "rank_days": [
+          63, 63, 64, 64, 63, 64, 65, 65, 64, 65, 66, 66, 71, 71, 66, 71, 72,
+          72, 71, 72, 72, 73, 72, 0, 0, 65, 66, 71, 73, 74
+        ],
+        "rank_days_start": "2026-10-29",
+        "last_played_at": 1795802388,
+        "last_ranked_at": 1795802388,
+        "heroes": {
+          "7": {
+            "key": "wraith",
+            "name": "Wraith",
+            "color": "#944D78"
+          },
+          "13": {
+            "key": "haze",
+            "name": "Haze",
+            "color": "#AC6133"
+          },
+          "15": {
+            "key": "chrono",
+            "name": "Paradox",
+            "color": "#983952"
+          },
+          "20": {
+            "key": "tengu",
+            "name": "Ivy",
+            "color": "#9D8CA9"
+          },
+          "59": {
+            "key": "astro",
+            "name": "Holliday",
+            "color": "#A35A1B"
+          }
+        },
+        "items": {
+          "2010": {
+            "name": "Fleetfoot"
+          },
+          "2011": {
+            "name": "Hunter's Aura"
+          },
+          "2012": {
+            "name": "Point Blank"
+          },
+          "2013": {
+            "name": "Unstoppable"
+          },
+          "2014": {
+            "name": "Counterspell"
+          },
+          "2015": {
+            "name": "Slowing Hex"
+          }
+        }
+      },
+      "fetched_at": "2026-11-27T20:26:00.000Z",
+      "stale": false,
+      "persona": "kiwi_yaps"
+    }
+  },
+  "updated_at": "2026-11-27T20:00:00.000Z"
+}

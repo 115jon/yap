@@ -687,6 +687,7 @@ pub(super) struct Projection {
     pub friends: super::FriendsView,
     pub apps: super::apps::AppsView,
     pub shop: super::shop::ShopView,
+    pub board: super::board::BoardView,
     /// The saved favourites' `provider:id`.
     pub favorites: Vec<String>,
     pub extras: super::extras::ExtrasView,
@@ -849,6 +850,8 @@ pub(super) struct Pending {
     pub apps: HashMap<RequestId, super::apps::AppsOp>,
     /// The shop.
     pub shop: HashMap<RequestId, super::shop::ShopOp>,
+    /// The open profile's board column.
+    pub board: HashMap<RequestId, super::board::BoardOp>,
     /// GIF and clip favourites.
     pub favorites: HashMap<RequestId, super::favorites::FavoritesOp>,
     /// Camera backgrounds.
@@ -1259,6 +1262,8 @@ pub struct State {
     pub(super) apps: super::apps::AppsState,
     /// The collectibles shop.
     pub(super) shop: super::shop::ShopState,
+    /// The open full profile's board, tabs and editor.
+    pub(super) board: super::board::BoardState,
     /// GIF and clip favourites.
     pub(super) favorites: super::favorites::FavoritesState,
     /// The account's camera backgrounds.
@@ -1378,6 +1383,7 @@ impl State {
             invites: super::InviteState::default(),
             apps: super::apps::AppsState::new(),
             shop: Default::default(),
+            board: Default::default(),
             favorites: Default::default(),
             backgrounds: Default::default(),
             extras: Default::default(),

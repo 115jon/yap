@@ -640,7 +640,20 @@ RowLayout {
             if (Session.phase !== Session.Ready) {
                 SettingsNav.close()
                 profileEditor.item?.close()
+            } else if (ShellState.testOpenProfile.length > 0) {
+                testProfile.start()
             }
+        }
+    }
+    // YAP_TEST_OPEN_PROFILE: once, a moment after the shell is ready.
+    Timer {
+        id: testProfile
+        interval: 2500
+        Component.onCompleted: if (Session.phase === Session.Ready && ShellState.testOpenProfile.length > 0) start()
+        onTriggered: {
+            const id = ShellState.testOpenProfile === "me" ? Session.meId : ShellState.testOpenProfile
+            ShellState.testOpenProfile = ""
+            ShellState.showFullProfile(id)
         }
     }
 

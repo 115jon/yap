@@ -294,6 +294,10 @@ impl State {
         if view != self.view.profile {
             self.view.profile = view.clone();
             fx.view(ViewUpdate::Profile(Box::new(view)));
+            // The board's live plates follow the same presence.
+            if self.board.user_id.is_some() {
+                self.sync_board(fx);
+            }
         }
     }
 
