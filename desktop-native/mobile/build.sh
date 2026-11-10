@@ -23,15 +23,15 @@ cargo_profile=(); [[ "$profile" == "release" ]] && cargo_profile=(--release)
 
 cd "$here/rust"
 cargo ndk "${targets[@]}" -P 26 -o "$here/android/app/src/main/jniLibs" build "${cargo_profile[@]}" --lib
-# cargo-ndk copies every cdylib in the graph (rusty-leveldb builds one);
-# the app needs only ours.
+# cargo-ndk copies every cdylib in the graph; the app needs only ours.
 find "$here/android/app/src/main/jniLibs" -name '*.so' ! -name libyap_mobile.so -delete
 
 # Bindings come from a host build: the release .so has its symbol table
 # (and so UniFFI's metadata) stripped.
 cargo build -q --lib
+target="${CARGO_TARGET_DIR:-target}"
 host_lib=""
-for f in target/debug/libyap_mobile.so target/debug/libyap_mobile.dylib target/debug/yap_mobile.dll; do
+for f in "$target"/debug/libyap_mobile.so "$target"/debug/libyap_mobile.dylib "$target"/debug/yap_mobile.dll; do
   [[ -f "$f" ]] && host_lib="$f" && break
 done
 cargo run -q --bin uniffi-bindgen -- generate --library "$host_lib" --language kotlin \

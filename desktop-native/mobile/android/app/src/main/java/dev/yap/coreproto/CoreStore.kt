@@ -71,6 +71,7 @@ class CoreStore(context: Context) : Listener {
 
     val core: Core = Core.start(
         context.filesDir.absolutePath,
+        android.os.Build.MODEL,
         DeviceTime,
         this,
         PrefsVault(context),

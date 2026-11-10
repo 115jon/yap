@@ -1,0 +1,10 @@
+# Every crate of the graph links for Android through the NDK's clang, not
+# only the final one (Corrosion's flags after `--` reach only that): a
+# dependency's cdylib (rusty-leveldb) would otherwise link for the host.
+# Naming lld here also skips qt-build-utils' probe for a system `ld`, which
+# a Windows host does not have.
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=--target=x86_64-linux-android28", "-C", "link-arg=-fuse-ld=lld"]
+
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=--target=aarch64-linux-android28", "-C", "link-arg=-fuse-ld=lld"]

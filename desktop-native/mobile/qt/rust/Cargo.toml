@@ -1,0 +1,48 @@
+# The Qt Quick mobile prototype's Rust side (desktop-native/mobile/README.md,
+# "Qt Quick on Android"): yap-core behind the same cxx-qt QML singletons and
+# list models the desktop uses, so the desktop's QML runs on it unchanged.
+# Its own workspace, like mobile/rust: the desktop workspace's vendored
+# [patch] set (libwebrtc, webrtc-sys, qt-build-utils) is not needed here.
+[workspace]
+members = ["."]
+resolver = "2"
+
+[package]
+name = "yap_mobile_qt"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+name = "yap_mobile_qt"
+
+[dependencies]
+cxx = "1"
+cxx-qt = "0.10"
+cxx-qt-lib = "0.10"
+# The desktop crates, unchanged, on the rustls backend.
+yap-core = { path = "../../../rust/crates/yap-core", default-features = false, features = ["rustls"] }
+yap-cache = { path = "../../../rust/crates/yap-cache" }
+yap-protocol = { path = "../../../rust/crates/yap-protocol" }
+# The desktop's picture decoding (GIF, APNG, WebP) behind AnimatedPicture.
+yap-anim = { path = "../../../rust/crates/yap-anim" }
+yap-realtime = { path = "../../../rust/crates/yap-realtime", default-features = false, features = ["rustls"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "1"
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+libc = "0.2"
+
+[build-dependencies]
+cxx-qt-build = "0.10"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = "s"
+strip = "symbols"
