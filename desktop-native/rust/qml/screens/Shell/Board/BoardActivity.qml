@@ -37,6 +37,7 @@ Column {
                 Accessible.name: modelData.label
                 Accessible.checked: on
                 Text {
+                    textFormat: Text.PlainText
                     id: label
                     anchors.centerIn: parent
                     text: chip.modelData.label
@@ -67,6 +68,7 @@ Column {
             Row {
                 spacing: 8
                 Text {
+                    textFormat: Text.PlainText
                     anchors.verticalCenter: parent.verticalCenter
                     text: qsTr("Keep for")
                     color: Theme.ink2
@@ -86,6 +88,7 @@ Column {
                         Accessible.name: qsTr("%1 days").arg(modelData)
                         Accessible.checked: on
                         Text {
+                            textFormat: Text.PlainText
                             id: keepText
                             anchors.centerIn: parent
                             text: qsTr("%1 days").arg(keep.modelData)
@@ -98,6 +101,7 @@ Column {
                 }
             }
             Text {
+                textFormat: Text.PlainText
                 text: qsTr("Only you see")
                 color: Theme.ink2
                 font: Theme.type.silk
@@ -131,6 +135,7 @@ Column {
                                 color: hideChip.on ? Theme.accentInk : Theme.ink3
                             }
                             Text {
+                                textFormat: Text.PlainText
                                 text: hideChip.modelData.label
                                 color: Theme.ink1
                                 font: Theme.type.caption
@@ -145,6 +150,7 @@ Column {
     }
 
     Text {
+        textFormat: Text.PlainText
         visible: (root.view?.loading ?? false) && !(root.view?.loaded ?? false)
         text: qsTr("Loading…")
         color: Theme.ink3
@@ -155,6 +161,7 @@ Column {
         width: parent.width
         spacing: 8
         Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: root.view?.error ?? ""
             wrapMode: Text.Wrap
@@ -170,6 +177,7 @@ Column {
         }
     }
     Text {
+        textFormat: Text.PlainText
         visible: (root.view?.loaded ?? false) && root.days.length === 0
         width: parent.width
         text: root.owner ? qsTr("Nothing here yet. Games, calls, streams, Listen Together and badges show up as they happen.")
@@ -190,6 +198,7 @@ Column {
                 width: parent.width
                 height: 24
                 Text {
+                    textFormat: Text.PlainText
                     anchors.verticalCenter: parent.verticalCenter
                     width: parent.width - n.implicitWidth
                     text: day.modelData.label
@@ -198,6 +207,7 @@ Column {
                     Accessible.role: Accessible.Heading
                 }
                 Text {
+                    textFormat: Text.PlainText
                     id: n
                     anchors.verticalCenter: parent.verticalCenter
                     text: String(day.modelData.events.length)
@@ -261,6 +271,7 @@ Column {
                                 font: Theme.type.row
                             }
                             Text {
+                                textFormat: Text.PlainText
                                 visible: event.modelData.hidden
                                 anchors.baseline: parent.children[0].baseline
                                 text: qsTr("Hidden")
@@ -285,6 +296,7 @@ Column {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 10
                         Text {
+                            textFormat: Text.PlainText
                             anchors.verticalCenter: parent.verticalCenter
                             visible: text.length > 0
                             text: event.modelData.duration
@@ -292,6 +304,7 @@ Column {
                             font: Theme.type.numSm
                         }
                         Text {
+                            textFormat: Text.PlainText
                             anchors.verticalCenter: parent.verticalCenter
                             text: event.modelData.time
                             color: Theme.ink3

@@ -53,7 +53,9 @@ WidgetPlate {
                 Accessible.role: Accessible.Link
                 Accessible.name: label
                 Accessible.description: url
-                onClicked: if (url.length > 0) Qt.openUrlExternally(url)
+                // Only https, as the server stores them (cleanUrl): never
+                // another scheme from a stale or hostile board.
+                onClicked: if (/^https:\/\//i.test(url)) Qt.openUrlExternally(url)
 
                 HoverHandler { cursorShape: Qt.PointingHandCursor }
 

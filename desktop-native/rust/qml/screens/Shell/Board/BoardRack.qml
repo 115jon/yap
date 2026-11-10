@@ -258,6 +258,7 @@ Item {
                             Accessible.name: modelData === "S" ? qsTr("Small") : modelData === "L" ? qsTr("Large") : qsTr("Medium")
                             Accessible.checked: on
                             Text {
+                                textFormat: Text.PlainText
                                 anchors.centerIn: parent
                                 text: sizeKey.modelData
                                 color: sizeKey.on ? Theme.primaryFillInk : Theme.ink2

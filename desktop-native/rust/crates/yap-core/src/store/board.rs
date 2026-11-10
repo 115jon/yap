@@ -217,8 +217,17 @@ pub enum BoardOp {
         id: String,
         hidden: bool,
     },
-    Prefs,
+    /// The guestbook switch.
+    GuestbookPrefs,
+    /// Activity retention or hidden kinds; `previous` comes back on a failure.
+    ActivityPrefs {
+        previous: ActivitySettings,
+    },
     Wishlist,
+    /// A wishlist save; `previous` comes back on a failure.
+    SaveWishlist {
+        previous: Vec<WishlistItem>,
+    },
     Post {
         pending: String,
     },

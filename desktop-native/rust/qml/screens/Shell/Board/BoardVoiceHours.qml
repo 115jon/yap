@@ -78,6 +78,7 @@ WidgetPlate {
                 lineHeightMode: Text.FixedHeight
             }
             Text {
+                textFormat: Text.PlainText
                 anchors.baseline: totalNumber.baseline
                 leftPadding: 4
                 text: "h"

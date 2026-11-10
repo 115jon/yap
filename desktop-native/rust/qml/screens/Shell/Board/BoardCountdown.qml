@@ -158,6 +158,7 @@ WidgetPlate {
                 lineHeightMode: Text.FixedHeight
             }
             Text {
+                textFormat: Text.PlainText
                 visible: parent.days > 0
                 anchors.baseline: hourNum.baseline
                 leftPadding: 2
@@ -176,6 +177,7 @@ WidgetPlate {
                 lineHeightMode: Text.FixedHeight
             }
             Text {
+                textFormat: Text.PlainText
                 anchors.baseline: hourNum.baseline
                 leftPadding: 2
                 text: "h"
@@ -195,6 +197,7 @@ WidgetPlate {
                 lineHeightMode: Text.FixedHeight
             }
             Text {
+                textFormat: Text.PlainText
                 visible: parent.days === 0
                 anchors.baseline: hourNum.baseline
                 leftPadding: 2
@@ -204,6 +207,7 @@ WidgetPlate {
             }
             // Past a day: the minutes small, dropped under 200 px.
             Text {
+                textFormat: Text.PlainText
                 visible: parent.days > 0 && !root.slim
                 anchors.baseline: hourNum.baseline
                 leftPadding: 6

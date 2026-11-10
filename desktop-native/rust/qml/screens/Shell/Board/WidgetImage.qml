@@ -70,6 +70,7 @@ Rectangle {
         radius: Theme.radius
         color: Qt.alpha(Theme.ply0, 0.8)
         Text {
+            textFormat: Text.PlainText
             id: gifTag
             anchors.centerIn: parent
             text: "GIF"

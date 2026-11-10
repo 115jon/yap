@@ -58,6 +58,7 @@ T.Popup {
             Row {
                 width: parent.width
                 Text {
+                    textFormat: Text.PlainText
                     width: parent.width - count.implicitWidth
                     text: qsTr("Add a widget")
                     color: Theme.ink1
@@ -65,6 +66,7 @@ T.Popup {
                     Accessible.role: Accessible.Heading
                 }
                 Text {
+                    textFormat: Text.PlainText
                     id: count
                     anchors.baseline: parent.children[0].baseline
                     text: qsTr("%1 of %2 used").arg(picker.used).arg(picker.max)
@@ -82,6 +84,7 @@ T.Popup {
                     spacing: 6
                     readonly property var items: picker.catalog.filter(item => item.category === modelData.id)
                     Text {
+                        textFormat: Text.PlainText
                         text: group.modelData.label
                         color: Theme.ink3
                         font: Theme.type.silk
@@ -125,11 +128,13 @@ T.Popup {
                                 Row {
                                     spacing: 8
                                     Text {
+                                        textFormat: Text.PlainText
                                         text: row.modelData.name
                                         color: Theme.ink1
                                         font: Theme.type.labelStrong
                                     }
                                     Text {
+                                        textFormat: Text.PlainText
                                         anchors.baseline: parent.children[0].baseline
                                         text: row.modelData.sizes.join(" ")
                                         color: Theme.ink3
@@ -159,6 +164,7 @@ T.Popup {
                                     color: Theme.accentInk
                                 }
                                 Text {
+                                    textFormat: Text.PlainText
                                     anchors.verticalCenter: parent.verticalCenter
                                     text: row.capped ? (row.full ? qsTr("Full") : row.modelData.max > 1 ? qsTr("%1 of %1").arg(row.modelData.max) : qsTr("Added"))
                                         : row.modelData.locked ? qsTr("Loud") : ""

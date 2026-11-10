@@ -39,6 +39,43 @@ Rectangle {
         ownerInitials: ownerInitials
     })
     property bool confirmDiscard: false
+    // What the discard confirm goes on to once confirmed: a tab, or
+    // closing the profile (`closeRequested`).
+    property string pendingTab: ""
+    property bool pendingClose: false
+    readonly property bool unsaved: editing && (st.dirty ?? false)
+    signal closeRequested()
+
+    // A tab, through the discard confirm while the draft has changes.
+    // The tab already shown does nothing.
+    function chooseTab(id) {
+        if (id === tab)
+            return
+        if (unsaved) {
+            pendingTab = id
+            pendingClose = false
+            askDiscard()
+        } else {
+            Board.setTab(id)
+        }
+    }
+
+    // Closing the profile: true when it may close now; otherwise the
+    // confirm shows and closes it once the changes are discarded.
+    function mayClose() {
+        if (!unsaved)
+            return true
+        pendingTab = ""
+        pendingClose = true
+        askDiscard()
+        return false
+    }
+
+    function askDiscard() {
+        confirmDiscard = true
+        if (scroller)
+            scroller.contentY = 0
+    }
 
     function parse(text, fallback) {
         if (!text || text.length === 0)
@@ -52,7 +89,11 @@ Rectangle {
 
     implicitHeight: header.height + body.implicitHeight + (narrow ? 40 : 48)
     color: Theme.ply3
-    onEditingChanged: confirmDiscard = false
+    onEditingChanged: {
+        confirmDiscard = false
+        pendingTab = ""
+        pendingClose = false
+    }
 
     // ── Tabs ────────────────────────────────────────────────────────────
     // Sticks to the top of the column while it scrolls (sticky top-0).
@@ -86,19 +127,21 @@ Rectangle {
                     Accessible.role: Accessible.PageTab
                     Accessible.name: modelData.label + (count > 0 ? " " + count : "")
                     Accessible.checked: on
-                    Keys.onSpacePressed: Board.setTab(modelData.id)
-                    Keys.onReturnPressed: Board.setTab(modelData.id)
+                    Keys.onSpacePressed: panel.chooseTab(modelData.id)
+                    Keys.onReturnPressed: panel.chooseTab(modelData.id)
                     Row {
                         id: tabRow
                         anchors.bottom: parent.bottom
                         anchors.bottomMargin: 12
                         spacing: 6
                         Text {
+                            textFormat: Text.PlainText
                             text: tabKey.modelData.label
                             color: tabKey.on || tabHover.hovered ? Theme.ink1 : Theme.ink2
                             font: Qt.font({ family: "Yap Bricolage Key Bold", pixelSize: 15, weight: Font.Bold })
                         }
                         Text {
+                            textFormat: Text.PlainText
                             visible: tabKey.count > 0
                             anchors.baseline: parent.children[0].baseline
                             text: String(tabKey.count)
@@ -107,7 +150,7 @@ Rectangle {
                         }
                     }
                     HoverHandler { id: tabHover; cursorShape: Qt.PointingHandCursor }
-                    TapHandler { onTapped: Board.setTab(tabKey.modelData.id) }
+                    TapHandler { onTapped: panel.chooseTab(tabKey.modelData.id) }
                 }
             }
         }
@@ -184,6 +227,7 @@ Rectangle {
                     height: 32
                     spacing: 8
                     Text {
+                        textFormat: Text.PlainText
                         anchors.verticalCenter: parent.verticalCenter
                         visible: panel.width > 620
                         text: qsTr("Preview as")
@@ -205,6 +249,7 @@ Rectangle {
                                 Accessible.name: qsTr("Preview as %1").arg(modelData.label)
                                 Accessible.checked: on
                                 Text {
+                                    textFormat: Text.PlainText
                                     id: segText
                                     anchors.centerIn: parent
                                     text: seg.modelData.label
@@ -281,9 +326,11 @@ Rectangle {
                         variant: "secondary"
                         text: panel.confirmDiscard ? qsTr("Keep editing") : (panel.st.conflict ?? false) ? qsTr("Use theirs") : qsTr("Try again")
                         onClicked: {
-                            if (panel.confirmDiscard)
+                            if (panel.confirmDiscard) {
                                 panel.confirmDiscard = false
-                            else if (panel.st.conflict ?? false)
+                                panel.pendingTab = ""
+                                panel.pendingClose = false
+                            } else if (panel.st.conflict ?? false)
                                 Board.useTheirs()
                             else
                                 Board.done()
@@ -296,8 +343,14 @@ Rectangle {
                         text: panel.confirmDiscard ? qsTr("Discard") : qsTr("Keep mine")
                         onClicked: {
                             if (panel.confirmDiscard) {
+                                const tab = panel.pendingTab
+                                const close = panel.pendingClose
                                 panel.confirmDiscard = false
                                 Board.discard()
+                                if (close)
+                                    panel.closeRequested()
+                                else if (tab.length > 0)
+                                    Board.setTab(tab)
                             } else {
                                 Board.keepMine()
                             }
@@ -325,6 +378,7 @@ Rectangle {
                     color: Theme.ink2
                 }
                 Text {
+                    textFormat: Text.PlainText
                     anchors.verticalCenter: parent.verticalCenter
                     text: panel.st.preview === "friend" ? qsTr("Previewing as a friend") : qsTr("Previewing as someone you don't know")
                     color: Theme.ink2
@@ -362,6 +416,7 @@ Rectangle {
             width: parent.width
             spacing: 12
             Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 text: panel.st.error ?? ""
                 wrapMode: Text.Wrap
@@ -419,6 +474,7 @@ Rectangle {
                             color: Theme.ink2
                         }
                         Text {
+                            textFormat: Text.PlainText
                             anchors.verticalCenter: parent.verticalCenter
                             text: qsTr("Your board")
                             color: Theme.ink2
@@ -446,6 +502,7 @@ Rectangle {
                         width: parent.width
                         spacing: 4
                         Text {
+                            textFormat: Text.PlainText
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
                             text: qsTr("Your board is empty")
@@ -456,6 +513,7 @@ Rectangle {
                             Accessible.role: Accessible.Heading
                         }
                         Text {
+                            textFormat: Text.PlainText
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
                             text: qsTr("Add what you're playing, your mood, photos or a countdown. Everyone who opens your profile sees it.")
@@ -510,6 +568,7 @@ Rectangle {
                                 color: ghostHover.hovered ? Theme.ink2 : Theme.ink3
                             }
                             Text {
+                                textFormat: Text.PlainText
                                 width: parent.width
                                 horizontalAlignment: Text.AlignHCenter
                                 text: ghost.modelData.name
@@ -525,6 +584,7 @@ Rectangle {
             }
         }
         Text {
+            textFormat: Text.PlainText
             visible: panel.tab === "board" && !panel.editing && (panel.st.empty ?? false) && !(panel.st.isOwner ?? false)
             width: parent.width
             text: qsTr("%1 hasn't added anything to their board yet.").arg(panel.ownerName)
@@ -610,12 +670,14 @@ Rectangle {
                     }
                 }
                 Text {
+                    textFormat: Text.PlainText
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: addSlot.full ? qsTr("Board is full") : qsTr("Add a widget")
                     color: Theme.ink1
                     font: Qt.font({ family: "Yap Bricolage Key Bold", pixelSize: 15, weight: Font.Bold })
                 }
                 Text {
+                    textFormat: Text.PlainText
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: qsTr("%1 of %2 used").arg(panel.st.count ?? 0).arg(panel.st.max ?? 12)
                     color: Theme.ink3
@@ -628,6 +690,7 @@ Rectangle {
 
         // The keys.
         Text {
+            textFormat: Text.PlainText
             visible: panel.tab === "board" && panel.editing && !panel.previewing && !panel.narrow
             width: parent.width
             wrapMode: Text.Wrap

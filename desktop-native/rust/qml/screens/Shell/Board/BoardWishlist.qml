@@ -21,6 +21,7 @@ Column {
     spacing: 12
 
     Text {
+        textFormat: Text.PlainText
         visible: (root.view?.loading ?? false) && !(root.view?.loaded ?? false)
         text: qsTr("Loading…")
         color: Theme.ink3
@@ -31,6 +32,7 @@ Column {
         width: parent.width
         spacing: 8
         Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: root.view?.error ?? ""
             wrapMode: Text.Wrap
@@ -47,6 +49,7 @@ Column {
         }
     }
     Text {
+        textFormat: Text.PlainText
         visible: (root.view?.loaded ?? false) && root.items.length === 0
         width: parent.width
         text: root.owner ? qsTr("Hint at what you'd like: shop items or anything else. Everyone who opens your profile can see it.")
@@ -96,6 +99,7 @@ Column {
                     width: parent.width - 60 - 40
                     spacing: 2
                     Text {
+                        textFormat: Text.PlainText
                         text: item.modelData.kind === "shop" ? qsTr("Shop") : qsTr("Hint")
                         color: Theme.ink3
                         font: Theme.type.silk

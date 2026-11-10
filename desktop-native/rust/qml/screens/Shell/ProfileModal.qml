@@ -73,8 +73,17 @@ T.Popup {
     modal: true
     dim: true
     focus: true
+    // With unsaved board edits nothing closes it on its own: Esc, the scrim
+    // and the close key go through the board's discard confirm.
     closePolicy: actions.confirmBlock ? T.Popup.CloseOnPressOutside
+        : panel.unsaved ? T.Popup.NoAutoClose
         : T.Popup.CloseOnEscape | T.Popup.CloseOnPressOutside
+
+    // Closes now, or asks first while board edits are unsaved.
+    function requestClose() {
+        if (panel.mayClose())
+            close()
+    }
     onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
     onClosed: {
         Profile.close(shownId)
@@ -85,7 +94,15 @@ T.Popup {
             back.forceActiveFocus()
     }
 
-    Overlay.modal: Scrim {}
+    Overlay.modal: Scrim {
+        stepsBack: panel.unsaved && !actions.confirmBlock
+        onTapped: popup.requestClose()
+    }
+    Shortcut {
+        sequence: "Esc"
+        enabled: popup.visible && !actions.confirmBlock && panel.unsaved
+        onActivated: popup.requestClose()
+    }
 
     // Esc backs out of the block confirm before the profile.
     Shortcut {
@@ -192,6 +209,7 @@ T.Popup {
                 width: parent.width
                 spacing: 8
                 Text {
+                    textFormat: Text.PlainText
                     text: qsTr("About me")
                     color: Theme.ink2
                     font: Theme.type.captionStrong
@@ -235,6 +253,7 @@ T.Popup {
                 width: parent.width
                 spacing: 8
                 Text {
+                    textFormat: Text.PlainText
                     text: qsTr("Roles")
                     color: Theme.ink2
                     font: Theme.type.captionStrong
@@ -312,6 +331,7 @@ T.Popup {
             ownerAvatar: Profile.avatar
             ownerInitials: Profile.initials
             scroller: panelScroller
+            onCloseRequested: popup.close()
         }
     }
     // Its edge: line-strong, none against the card when side by side.
@@ -345,7 +365,7 @@ T.Popup {
         // in a square).
         iconVariant: "idle"
         tip: qsTr("Close")
-        onClicked: popup.close()
+        onClicked: popup.requestClose()
     }
     }
 

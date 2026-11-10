@@ -413,3 +413,120 @@ fn previews_sign_the_guestbook_as_their_audience_would() {
     assert_eq!(book["can_post"], false);
     assert_eq!(book["denial"], "GUESTBOOK_NO_SHARED_SPACE");
 }
+
+fn activity_with_settings(client: &mut Client) {
+    let mut page = fixture("profile-activity.json");
+    page["is_owner"] = json!(true);
+    page["settings"] = json!({ "retention_days": 30, "hidden_kinds": [] });
+    client.board(BoardCommand::Tab("activity".into()));
+    client.respond_to(
+        |r| matches!(r, ApiRequest::Board(BoardRequest::Activity { .. })),
+        page,
+    );
+}
+
+fn is_prefs(r: &ApiRequest) -> bool {
+    matches!(r, ApiRequest::Board(BoardRequest::Prefs(_)))
+}
+
+#[test]
+fn the_tab_already_shown_keeps_an_edit() {
+    let mut client = own_board();
+    client.board(BoardCommand::Edit(true));
+    client.board(BoardCommand::Act(EditAction::Remove("w-mood".into())));
+    client.board(BoardCommand::Tab("board".into()));
+    let state = client.state();
+    assert_eq!(state["editing"], true);
+    assert_eq!(state["dirty"], true);
+}
+
+#[test]
+fn a_failed_activity_setting_goes_back_and_says_so_on_the_tab() {
+    let mut client = own_board();
+    activity_with_settings(&mut client);
+    client.board(BoardCommand::Retention(7));
+    let activity =
+        |client: &Client| -> Value { serde_json::from_str(&client.view.activity).unwrap() };
+    assert_eq!(activity(&client)["settings"]["retention"], 7);
+    client.fail(is_prefs, 500, "Something broke");
+    let view = activity(&client);
+    assert_eq!(view["settings"]["retention"], 30);
+    assert_eq!(view["error"], "Something broke");
+    assert_eq!(
+        client.state()["guestbookError"],
+        "",
+        "not the guestbook's slot"
+    );
+
+    client.board(BoardCommand::HideKind {
+        kind: "game".into(),
+        hidden: true,
+    });
+    assert_eq!(activity(&client)["settings"]["hidden"], json!(["game"]));
+    assert_eq!(
+        activity(&client)["error"],
+        "",
+        "a new try clears the old error"
+    );
+    client.fail(is_prefs, 429, "Slow down");
+    assert_eq!(activity(&client)["settings"]["hidden"], json!([]));
+}
+
+#[test]
+fn a_failed_wishlist_save_puts_the_saved_list_back() {
+    let mut client = own_board();
+    client.board(BoardCommand::Tab("wishlist".into()));
+    client.respond_to(
+        |r| matches!(r, ApiRequest::Board(BoardRequest::Wishlist(_))),
+        fixture("profile-wishlist.json"),
+    );
+    let items = |client: &Client| -> usize {
+        let view: Value = serde_json::from_str(&client.view.wishlist).unwrap();
+        view["items"].as_array().map_or(0, Vec::len)
+    };
+    assert_eq!(items(&client), 6);
+    client.board(BoardCommand::SaveWishlist(Vec::new()));
+    assert_eq!(items(&client), 0, "shown at once");
+    client.fail(
+        |r| matches!(r, ApiRequest::Board(BoardRequest::SaveWishlist(_))),
+        500,
+        "Nope",
+    );
+    assert_eq!(items(&client), 6);
+    let view: Value = serde_json::from_str(&client.view.wishlist).unwrap();
+    assert_eq!(view["error"], "Nope");
+}
+
+#[test]
+fn only_the_owners_presence_touches_the_board() {
+    let mut client = own_board();
+    let session = client.state.session().expect("session").id;
+    let presence = |user: &str| {
+        let data = json!({
+            "user_id": user,
+            "status": "online",
+            "game_activity": { "kind": "playing", "name": "Balatro", "started_at": 1, "source": "detected" }
+        });
+        GatewayEvent::Dispatch(yap_core::store::Dispatch::decode("PRESENCE_UPDATE", data).unwrap())
+    };
+    let before = client.view.clone();
+    let fx = reduce(
+        &mut client.state,
+        Input::Gateway {
+            session,
+            event: presence("u-stranger"),
+        },
+    );
+    assert!(
+        !fx.iter()
+            .any(|e| matches!(e, Effect::View(ViewUpdate::Board(_)))),
+        "someone else's presence leaves the board alone"
+    );
+    assert_eq!(client.view, before);
+    client.input(Input::Gateway {
+        session,
+        event: presence("u-me"),
+    });
+    let state = client.state();
+    assert_eq!(state["ctx"]["game"]["name"], "Balatro");
+}

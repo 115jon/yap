@@ -130,6 +130,15 @@ impl State {
                 self.board = Default::default();
             }
             BoardCommand::Tab(tab) => {
+                // The tab already shown: nothing (an edit in progress stays).
+                let shown = if self.board.tab.is_empty() {
+                    "board"
+                } else {
+                    self.board.tab.as_str()
+                };
+                if tab == shown {
+                    return self.sync_board(fx);
+                }
                 self.board.tab = tab;
                 self.board.edit = None;
                 self.load_tab(fx);
@@ -190,19 +199,32 @@ impl State {
                 let Some(settings) = self.board.activity.settings.as_mut() else {
                     return self.sync_board(fx);
                 };
+                let previous = settings.clone();
                 settings.hidden_kinds.retain(|k| k != &kind);
                 if hidden {
                     settings.hidden_kinds.push(kind);
                 }
                 let patch = json!({ "activity": { "hidden_kinds": settings.hidden_kinds } });
-                self.board_http(fx, BoardRequest::Prefs(patch), BoardOp::Prefs);
+                self.board.activity.error.clear();
+                self.board_http(
+                    fx,
+                    BoardRequest::Prefs(patch),
+                    BoardOp::ActivityPrefs { previous },
+                );
             }
             BoardCommand::Retention(days) => {
-                if let Some(settings) = self.board.activity.settings.as_mut() {
-                    settings.retention_days = days;
-                }
+                let Some(settings) = self.board.activity.settings.as_mut() else {
+                    return self.sync_board(fx);
+                };
+                let previous = settings.clone();
+                settings.retention_days = days;
                 let patch = json!({ "activity": { "retention_days": days } });
-                self.board_http(fx, BoardRequest::Prefs(patch), BoardOp::Prefs);
+                self.board.activity.error.clear();
+                self.board_http(
+                    fx,
+                    BoardRequest::Prefs(patch),
+                    BoardOp::ActivityPrefs { previous },
+                );
             }
             BoardCommand::GuestbookPost { body, now_ms } => {
                 let body = body.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -282,7 +304,7 @@ impl State {
                 self.board_http(
                     fx,
                     BoardRequest::Prefs(json!({ "guestbook_enabled": enabled })),
-                    BoardOp::Prefs,
+                    BoardOp::GuestbookPrefs,
                 );
             }
             BoardCommand::Edit(start) => {
@@ -343,10 +365,13 @@ impl State {
                 }
             }
             BoardCommand::SaveWishlist(items) => {
-                self.board.wishlist.items = items.clone();
+                let previous = std::mem::replace(&mut self.board.wishlist.items, items.clone());
                 self.board.wishlist.error.clear();
-                self.board.wishlist.saving =
-                    self.board_http(fx, BoardRequest::SaveWishlist(items), BoardOp::Wishlist);
+                self.board.wishlist.saving = self.board_http(
+                    fx,
+                    BoardRequest::SaveWishlist(items),
+                    BoardOp::SaveWishlist { previous },
+                );
             }
             BoardCommand::Updated {
                 user_id,
@@ -506,16 +531,29 @@ impl State {
                     self.board.activity.error = "Couldn't change that event. Try again.".into();
                 }
             }
-            BoardOp::Prefs => match result {
+            BoardOp::ActivityPrefs { previous } => match result {
+                Ok(BoardReply::Prefs(prefs)) => {
+                    if let Ok(settings) = serde_json::from_value(prefs["activity"].clone()) {
+                        if self.board.activity.settings.is_some() {
+                            self.board.activity.settings = Some(settings);
+                        }
+                    }
+                }
+                Err(error) => {
+                    // Back to what the server still has, and the tab says why.
+                    if self.board.activity.settings.is_some() {
+                        self.board.activity.settings = Some(previous);
+                    }
+                    self.board.activity.error =
+                        server_words(&error, "Couldn't save that setting. Try again.");
+                }
+                Ok(_) => {}
+            },
+            BoardOp::GuestbookPrefs => match result {
                 Ok(BoardReply::Prefs(prefs)) => {
                     if let Some(enabled) = prefs.get("guestbook_enabled").and_then(Value::as_bool) {
                         if self.board.guestbook_enabled.is_some() {
                             self.board.guestbook_enabled = Some(enabled);
-                        }
-                    }
-                    if let Ok(settings) = serde_json::from_value(prefs["activity"].clone()) {
-                        if self.board.activity.settings.is_some() {
-                            self.board.activity.settings = Some(settings);
                         }
                     }
                 }
@@ -528,22 +566,36 @@ impl State {
             },
             BoardOp::Wishlist => {
                 let tab = &mut self.board.wishlist;
-                if tab.loading != Some(id) && tab.saving != Some(id) {
+                if tab.loading != Some(id) {
                     return true;
                 }
-                let saving = tab.saving == Some(id);
                 tab.loading = None;
-                tab.saving = None;
                 match result {
                     Ok(BoardReply::Wishlist(list)) => {
                         tab.items = list.items;
                         tab.loaded = true;
                         tab.error.clear();
                     }
-                    Err(error) if saving => {
-                        tab.error = server_words(&error, "Couldn't save your wishlist.")
-                    }
                     Err(error) => tab.error = describe_api_error(&error, "load the wishlist"),
+                    Ok(_) => {}
+                }
+            }
+            BoardOp::SaveWishlist { previous } => {
+                let tab = &mut self.board.wishlist;
+                if tab.saving != Some(id) {
+                    return true;
+                }
+                tab.saving = None;
+                match result {
+                    Ok(BoardReply::Wishlist(list)) => {
+                        tab.items = list.items;
+                        tab.error.clear();
+                    }
+                    Err(error) => {
+                        // The list goes back to what the server still has.
+                        tab.items = previous;
+                        tab.error = server_words(&error, "Couldn't save your wishlist.");
+                    }
                     Ok(_) => {}
                 }
             }
@@ -609,6 +661,22 @@ impl State {
         }
         self.sync_board(fx);
         true
+    }
+
+    /// Whether a presence change for `user_id` shows on the open board: its
+    /// owner's live game, or someone in the owner's Deadlock party.
+    pub(super) fn board_watches(&self, user_id: &str) -> bool {
+        let Some(owner) = self.board_owner() else {
+            return false;
+        };
+        if owner == user_id {
+            return true;
+        }
+        self.presence
+            .game_of(&owner)
+            .and_then(|game| game.game.as_ref())
+            .and_then(|live| live.party_user_ids.as_ref())
+            .is_some_and(|party| party.iter().any(|id| id == user_id))
     }
 
     /// The owner's live game for the Now playing and Deadlock plates.

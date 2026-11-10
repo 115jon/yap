@@ -265,16 +265,31 @@ WidgetPlate {
                     padding: 0
                     verticalAlignment: TextInput.AlignVCenter
                     color: Theme.ink1
-                    placeholderText: qsTr("Leave %1 a note…").arg(root.ctx?.ownerName ?? "")
-                    placeholderTextColor: Theme.ink3
                     selectionColor: Theme.selection
                     selectedTextColor: Theme.ink1
                     font: Theme.type.description
                     selectByMouse: true
                     Accessible.name: qsTr("Leave %1 a note").arg(root.ctx?.ownerName ?? "")
-                    onAccepted: send.clicked()
+                    // Not while a post is in flight: the store would drop it
+                    // and the words would be gone.
+                    onAccepted: if (send.enabled) send.clicked()
                     // A failed post puts the words back (Guestbook.tsx).
                     property string kept: ""
+                }
+                // The placeholder, drawn as plain text: the owner's name is
+                // theirs to choose, so it never goes through a styled-text
+                // path that could load an image.
+                Text {
+                    textFormat: Text.PlainText
+                    x: field.x
+                    width: field.width
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: field.text.length === 0 && field.preeditText.length === 0
+                    text: qsTr("Leave %1 a note…").arg(root.ctx?.ownerName ?? "")
+                    elide: Text.ElideRight
+                    color: Theme.ink3
+                    font: Theme.type.description
+                    Accessible.ignored: true
                 }
                 Connections {
                     target: root
@@ -285,6 +300,7 @@ WidgetPlate {
                     }
                 }
                 Text {
+                    textFormat: Text.PlainText
                     id: count
                     visible: parent.remaining < 40
                     anchors.right: send.left
@@ -307,7 +323,7 @@ WidgetPlate {
                     opacity: enabled ? 1 : 0.45
                     onClicked: {
                         const body = field.text.trim()
-                        if (body.length === 0 || body.length > root.limit)
+                        if (!enabled || body.length === 0 || body.length > root.limit)
                             return
                         field.kept = field.text
                         field.text = ""

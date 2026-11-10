@@ -3906,8 +3906,10 @@ impl State {
                 if update.status == "offline" {
                     self.on_call_peer_offline(fx, &update.user_id);
                 }
+                let user_id = update.user_id.clone();
                 self.on_presence(fx, update);
-                if self.board.user_id.is_some() {
+                // Only the open board's owner and their party change it.
+                if self.board_watches(&user_id) {
                     self.sync_board(fx);
                 }
             }

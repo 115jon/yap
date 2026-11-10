@@ -50,6 +50,7 @@ T.Popup {
         width: parent ? parent.width : 0
         spacing: 6
         Text {
+            textFormat: Text.PlainText
             text: choice.label
             color: Theme.ink2
             font: Theme.type.silk
@@ -71,6 +72,7 @@ T.Popup {
                     Accessible.name: modelData.label
                     Accessible.checked: on
                     Text {
+                        textFormat: Text.PlainText
                         id: chipText
                         anchors.centerIn: parent
                         text: chip.modelData.label
@@ -96,8 +98,16 @@ T.Popup {
         KitField {
             id: input
             small: true
-            text: plate.value
             maximumLength: plate.limit
+            // The draft's value, except while typing: the store answers each
+            // key a moment later, and a stale answer must not overwrite
+            // what was typed since (undo still updates an unfocused field).
+            Binding on text {
+                value: plate.value
+                when: !input.activeFocus
+                restoreMode: Binding.RestoreNone
+            }
+            Component.onCompleted: text = plate.value
             placeholderText: plate.placeholder
             Accessible.name: plate.label
             onTextEdited: plate.edited(text)
@@ -234,6 +244,7 @@ T.Popup {
             }
             // listening
             Text {
+                textFormat: Text.PlainText
                 visible: options.kind === "listening"
                 width: parent.width
                 text: qsTr("Shows the track you're sharing in Listen Together, or the last one. Nothing to set.")
@@ -247,6 +258,7 @@ T.Popup {
                 width: parent.width
                 spacing: 2
                 Text {
+                    textFormat: Text.PlainText
                     text: qsTr("Badges (up to 8; none picked shows them all)")
                     color: Theme.ink2
                     font: Theme.type.silk
@@ -263,6 +275,7 @@ T.Popup {
                     }
                 }
                 Text {
+                    textFormat: Text.PlainText
                     visible: (options.boardState?.myBadges ?? []).length === 0
                     text: qsTr("No badges yet.")
                     color: Theme.ink3
@@ -275,6 +288,7 @@ T.Popup {
                 width: parent.width
                 spacing: 2
                 Text {
+                    textFormat: Text.PlainText
                     text: qsTr("Servers (up to 4)")
                     color: Theme.ink2
                     font: Theme.type.silk
@@ -306,6 +320,7 @@ T.Popup {
                 }
             }
             Text {
+                textFormat: Text.PlainText
                 visible: options.kind === "quote"
                 width: parent.width
                 text: qsTr("The message is pinned as it is now when you press Done. Only messages you sent can be pinned.")
@@ -321,6 +336,7 @@ T.Popup {
                 onToggled: Board.setGuestbookEnabled(!on)
             }
             Text {
+                textFormat: Text.PlainText
                 visible: options.kind === "guestbook"
                 width: parent.width
                 text: qsTr("People who share a server or a DM with you can leave a note. You can delete notes and block people from the note's menu.")
@@ -355,6 +371,7 @@ T.Popup {
                 }
             }
             Text {
+                textFormat: Text.PlainText
                 visible: options.kind === "mood" && !!options.cfg.clears_at
                 text: qsTr("Clears %1").arg(Board.dateTime(options.cfg.clears_at ?? ""))
                 color: Theme.ink3
@@ -395,24 +412,27 @@ T.Popup {
                 onEdited: text => options.set("caption", text, true)
             }
             Repeater {
-                model: options.kind === "photos" ? (options.cfg.photos ?? []) : []
+                // A count, not the array: an edit makes a new array, and a
+                // model change would rebuild the rows (and drop the focus)
+                // on every key.
+                model: options.kind === "photos" ? (options.cfg.photos ?? []).length : 0
                 delegate: Row {
                     id: photoRow
-                    required property var modelData
+                    readonly property var item: (options.cfg.photos ?? [])[index] ?? ({})
                     required property int index
                     width: column.width
                     spacing: 8
                     WidgetImage {
                         width: 40
                         height: 40
-                        source: photoRow.modelData.url ?? ""
+                        source: photoRow.item.url ?? ""
                         decodeWidth: 80
                     }
                     Field {
                         width: parent.width - 40 - 8 - 32 - 8
                         label: qsTr("Describe picture %1").arg(photoRow.index + 1)
                         limit: 80
-                        value: photoRow.modelData.alt ?? ""
+                        value: photoRow.item.alt ?? ""
                         onEdited: text => {
                             const next = (options.cfg.photos ?? []).map(p => ({ asset: p.asset, alt: p.alt }))
                             next[photoRow.index].alt = text
@@ -435,10 +455,10 @@ T.Popup {
             }
             // links
             Repeater {
-                model: options.kind === "links" ? (options.cfg.links ?? []) : []
+                model: options.kind === "links" ? (options.cfg.links ?? []).length : 0
                 delegate: Column {
                     id: linkRow
-                    required property var modelData
+                    readonly property var item: (options.cfg.links ?? [])[index] ?? ({})
                     required property int index
                     width: column.width
                     spacing: 8
@@ -454,7 +474,7 @@ T.Popup {
                             width: (parent.width - 40 - 8) * 0.4
                             label: qsTr("Label")
                             limit: 24
-                            value: linkRow.modelData.label ?? ""
+                            value: linkRow.item.label ?? ""
                             onEdited: text => linkRow.update("label", text)
                         }
                         Field {
@@ -462,7 +482,7 @@ T.Popup {
                             label: qsTr("Link %1").arg(linkRow.index + 1)
                             limit: 200
                             placeholder: "https://"
-                            value: linkRow.modelData.url ?? ""
+                            value: linkRow.item.url ?? ""
                             onEdited: text => linkRow.update("url", text)
                         }
                         IconKey {
@@ -534,6 +554,7 @@ T.Popup {
                 onClicked: options.set("asset", null)
             }
             Text {
+                textFormat: Text.PlainText
                 visible: options.kind === "photos" || options.kind === "custom"
                 width: parent.width
                 text: qsTr("Adding pictures isn't in the desktop app yet: add them from Yap on the web.")
@@ -542,6 +563,7 @@ T.Popup {
                 font: Theme.type.caption
             }
             Text {
+                textFormat: Text.PlainText
                 visible: options.kind === "custom" && !(options.boardState?.canCustom ?? false)
                 width: parent.width
                 text: qsTr("Custom widgets show to others with Yap Loud. Until then this one is a draft only you see.")
