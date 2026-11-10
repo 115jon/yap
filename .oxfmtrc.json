@@ -32,6 +32,7 @@
     "package-lock.json",
     "Cargo.lock",
     "*.lock",
+    "desktop-native/mobile/qt/qt-sdk.lock.json",
     "**/*.toml",
     "desktop/src-tauri/**",
     "mobile/src-tauri/**",
