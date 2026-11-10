@@ -1,3 +1,4 @@
+import { navigateToBoardMessage } from "@/lib/profile-board-events";
 import {
   ProfileActionNotices,
   ProfileActionRow,
@@ -308,6 +309,10 @@ export default function MobileProfileSheet({
               onOpenStudio={() => {
                 onClose();
                 dispatchOpenProfileStudioEvent();
+              }}
+              onOpenMessage={(messageId, snapshot) => {
+                onClose();
+                navigateToBoardMessage(messageId, snapshot);
               }}
               className="mt-2 border-t border-line"
             />

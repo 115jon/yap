@@ -3,6 +3,8 @@
  *
  *   sp-profile-modal[-friend|-pending|-blocked|-error|-block-confirm]
  *                                                         UserProfileModal
+ *   sp-profile-modal-board          the real modal (Radix dialog and its
+ *                                   scroll lock) over Kiwi's full board
  *   sp-profile-popover[-banner|-self]                     UserProfilePopover
  *   sp-profile-view[-self]          the full profile: banner, badges,
  *                                   markdown bio, roles (UserProfileModal)
@@ -13,6 +15,8 @@
 
 import { AvatarFrameEditor } from "@/components/chat/AvatarFrameEditor";
 import { AvatarPickerModal } from "@/components/chat/AvatarPickerModal";
+import { BoardFixtureMedia } from "@/components/dev/profile-board/board-fixtures";
+import { FIXTURE_BOARD } from "@/components/profile-board/fixtures";
 import UserAccountPopover from "@/components/chat/UserAccountPopover";
 import UserProfileModal from "@/components/chat/UserProfileModal";
 import UserProfilePopover from "@/components/chat/UserProfilePopover";
@@ -33,6 +37,7 @@ const PROFILE_SURFACES = [
   "sp-profile-modal-blocked",
   "sp-profile-modal-error",
   "sp-profile-modal-block-confirm",
+  "sp-profile-modal-board",
   "sp-profile-popover",
   "sp-profile-popover-banner",
   "sp-profile-popover-self",
@@ -135,6 +140,20 @@ export function profileRoutes(surface: string): StubRoute[] {
       },
     },
     {
+      path: /^\/api\/users\/[^/]+\/board$/,
+      method: "GET",
+      reply: ({ url }) =>
+        surface === "sp-profile-modal-board"
+          ? ok({ ...FIXTURE_BOARD, user_id: url.pathname.split("/")[3] })
+          : ok({
+              ...FIXTURE_BOARD,
+              user_id: url.pathname.split("/")[3],
+              is_owner: url.pathname.split("/")[3] === me.id,
+              board: { v: 1, widgets: [] },
+              data: {},
+            }),
+    },
+    {
       path: /^\/api\/servers\/s-1\/roles$/,
       method: "GET",
       reply: () => ok(FIXTURE_ROLES),
@@ -201,6 +220,13 @@ function ProfilesFixture({ surface }: { surface: string }) {
   useSeedRelationships(surface, grace);
   const noop = () => {};
 
+  if (surface === "sp-profile-modal-board") {
+    return (
+      <BoardFixtureMedia>
+        <UserProfileModal open user={grace} onClose={noop} />
+      </BoardFixtureMedia>
+    );
+  }
   if (surface.startsWith("sp-profile-modal")) {
     return (
       <UserProfileModal

@@ -37,3 +37,24 @@ export function onProfileBoardUpdate(listener: Listener): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
+
+/**
+ * Opens a pinned message (the Quote plate's Jump) in the chat, through the
+ * same `navigate-channel` event the notification inbox uses. The host
+ * closes the profile first.
+ */
+export function navigateToBoardMessage(
+  messageId: string,
+  snapshot: { channel_id: string; server_id: string | null },
+): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("navigate-channel", {
+      detail: {
+        channelId: snapshot.channel_id,
+        messageId,
+        serverId: snapshot.server_id,
+      },
+    }),
+  );
+}

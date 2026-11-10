@@ -17,6 +17,7 @@ import {
   cleanGuestbookBody,
   GUESTBOOK_DAILY_LIMIT,
   type BoardUserRef,
+  type GuestbookDenial,
   type GuestbookNote,
 } from "@/lib/profile-board";
 import { ServiceError } from "@/lib/service-error";
@@ -75,11 +76,7 @@ export async function isGuestbookBlocked(
   return Boolean(row);
 }
 
-export type GuestbookDenial =
-  | "GUESTBOOK_OWN"
-  | "GUESTBOOK_OFF"
-  | "GUESTBOOK_BLOCKED"
-  | "GUESTBOOK_NO_SHARED_SPACE";
+export type { GuestbookDenial };
 
 /** Why `authorId` may not post on `ownerId`'s guestbook, or null. */
 export async function guestbookDenial(
@@ -208,6 +205,8 @@ export interface GuestbookPage {
   next_cursor: string | null;
   enabled: boolean;
   can_post: boolean;
+  /** Why the viewer may not post; null when they may. */
+  denial: GuestbookDenial | null;
   /** Owner only: who is blocked from the guestbook. */
   blocked?: BoardUserRef[];
 }
@@ -242,6 +241,7 @@ export async function listGuestbook(
       next_cursor: null,
       enabled: false,
       can_post: false,
+      denial: "GUESTBOOK_OFF",
     };
   }
 
@@ -277,6 +277,7 @@ export async function listGuestbook(
       rows.length > limit && last ? `${last.created_at}|${last.id}` : null,
     enabled: prefs.guestbook_enabled,
     can_post: denial === null,
+    denial,
   };
   if (isOwner) result.blocked = await listGuestbookBlocks(db, input.ownerId);
   return result;
