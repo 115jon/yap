@@ -6,6 +6,7 @@ import { CacheKey } from "@/lib/cache";
 import { ServiceError } from "@/lib/service-error";
 import type { D1Database } from "@cloudflare/workers-types";
 import type { BroadcastDescriptor } from "./server.service";
+import { recordServerJoin } from "./profile-activity.service";
 
 // ─── listRelationships ───────────────────────────────────────────────────────
 
@@ -681,6 +682,8 @@ export async function joinServer(
       .bind(invite.server_id, userId, everyoneRole.id),
     db.prepare(`UPDATE invites SET uses = uses + 1 WHERE code = ?`).bind(code),
   ]);
+  // "Joined <server>" on the profile Activity timeline; never fails the join.
+  await recordServerJoin(db, userId, invite.server_id, now);
 
   return {
     joined: true,

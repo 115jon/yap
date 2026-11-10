@@ -419,6 +419,46 @@ The native client detects the game itself and reports it with op 43.
   (`GamesPanel.qml`, the `Games` QObject in `src/games.rs`): the detection
   switch, the games seen (last played, Hide) and Add it from the programs
   with a window, in the profile's `games.json` (yap-cache `GamesPrefs`).
+- **Deadlock live state** (`yap_games::deadlock`, 2026-11-09). The
+  structured `game_activity.game` the gateway checks
+  (`src/services/deadlock/live.ts`): phase, hero, mode, `phase_started_at`,
+  the Steam `account_id` and the `party`'s account ids.
+  - Source: the `console.log` Deadlock writes under
+    `<install>/game/citadel/` when started with `-condebug`; the install is
+    the Steam library whose `appmanifest_1422450.acf` exists
+    (`libraryfolders.vdf`, `installdir`). Only that file is read, opened
+    read-only per read with every share mode; no process is opened for it,
+    nothing is injected and no game file is written.
+  - Followed only while the detector reports Deadlock (`src/games.rs`
+    starts a `Watcher` on the report and drops it when the game stops, so
+    the activity then clears as before). One thread reads once a second:
+    the bytes added since the last read, 512 KiB at most per read, lines
+    capped at 4 KiB, the first read from the last 4 MiB. A shorter file or
+    a different first 64 bytes means the game recreated it (it does on
+    every start): the parser starts over. So does a quit line inside one
+    file.
+  - Parsing (`parse.rs`) follows the signals Deadlock RPC
+    (HeyTariq/deadlock-rpc, GPL-3.0) reads, reimplemented from a 2026 log's
+    line shapes, one entry per shape in `signal`: maps and connections
+    (Hideout or a match, a local server), matchmaking start and stop,
+    `Lobby … for Match … created/destroyed`, `OnGameStateChanged` (only
+    once a match formed: the Hideout runs the same states), the camera
+    pose's hero folder (the newest in the Hideout, the first after a match
+    forms: later ones are kill cams), `[Client] Players: N (B bots)`, bot
+    set-up, a `k_ECitadelMatchMode_*` name when the game prints one, party
+    events and the local server's `[U:1:id] STEAM USERID validated`. A full
+    6v6 without a named mode sends no `mode` (the log does not say ranked
+    or not). Line times (`MM/DD HH:MM:SS`, no year) become epoch ms once
+    per phase against the file's write time.
+  - Status: `live` once the file was written by this run (or an earlier
+    write that did not end with a quit, since detection may start after the
+    game), else after 45 s `missing` or `stale`, which the page shows as a
+    hint. Nothing live is sent unless `live`.
+  - Sending: a change waits 1.5 s to settle (8 s at most), then goes when
+    the last update is 3 s old and fewer than 10 went in the past minute,
+    leaving 2 of the gateway's 12 op 43 frames a minute for detection and
+    the restatements. `hero_<key>_sm.png` on `/api/game-assets/…` is the
+    large image. Traces (`YAP_TRACE_GAMES=1`) name phases, never ids.
 - **Cost** (this PC: 24 threads, about 600 processes; `probe`):
   - The catalog: 628 KiB gzipped in the exe (the exe grew by 1,023,488
     bytes with the code and QML); loaded in 28-30 ms; 1,465 KiB kept on

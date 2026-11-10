@@ -7,6 +7,12 @@
 //!
 //! The catalog is the bundled snapshot or the copy a daily refresh keeps
 //! (`/desktop/game-catalog.json` on the API origin, with its ETag).
+//!
+//! While the detector reports Deadlock, `yap_games::deadlock` follows the
+//! game's `console.log` on its own thread and its live state rides along
+//! in the activity's `game` field (throttled there to the gateway's op 43
+//! limit); it stops when the game does. `YAP_TEST_DEADLOCK_LOG=<path>`
+//! follows that file instead of the one in the Steam library.
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -31,6 +37,11 @@ pub mod qobject {
         /// `[{exe, title, added}]`.
         #[qproperty(QString, running)]
         #[qproperty(bool, loading)]
+        /// Deadlock's live stats: JSON `{running, status, phase, hero,
+        /// launchUrl, launchOption}`; `status` is `waiting`, `live`,
+        /// `missing` (no console.log) or `stale` (an earlier run's), empty
+        /// while Deadlock is not running.
+        #[qproperty(QString, deadlock)]
         type Games = super::GamesRust;
 
         #[qinvokable]
@@ -55,6 +66,12 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "loadRunning"]
         fn load_running(self: Pin<&mut Games>);
+
+        /// Starts Deadlock through Steam with `-condebug` (Steam asks
+        /// first). `YAP_LOG_EXTERNAL_OPEN=1` only logs it.
+        #[qinvokable]
+        #[cxx_name = "launchDeadlock"]
+        fn launch_deadlock(self: Pin<&mut Games>);
     }
 
     impl cxx_qt::Threading for Games {}
@@ -69,7 +86,9 @@ use cxx_qt::{CxxQtThread, Threading};
 use cxx_qt_lib::QString;
 use yap_cache::settings::{self, AddedGame, GamesPrefs};
 use yap_core::store::Command;
+use yap_games::deadlock::{self, watch::LogStatus};
 use yap_games::{Detected, FakeProcess, Rules};
+use yap_protocol::game_activity::{DeadlockLiveState, GameActivity};
 
 use crate::client;
 
@@ -80,6 +99,7 @@ pub struct GamesRust {
     games: QString,
     running: QString,
     loading: bool,
+    deadlock: QString,
 }
 
 struct Shared {
@@ -90,6 +110,12 @@ struct Shared {
     #[cfg(windows)]
     detector: Option<yap_games::detector::Detector>,
     qt: Option<CxxQtThread<qobject::Games>>,
+    /// The Deadlock run being followed (its `started_at`), its watcher,
+    /// what its log says and whether the log is being written.
+    watching: Option<i64>,
+    watcher: Option<deadlock::watch::Watcher>,
+    live: Option<DeadlockLiveState>,
+    log_status: Option<LogStatus>,
 }
 
 fn shared() -> &'static Mutex<Shared> {
@@ -105,6 +131,10 @@ fn shared() -> &'static Mutex<Shared> {
             #[cfg(windows)]
             detector: None,
             qt: None,
+            watching: None,
+            watcher: None,
+            live: None,
+            log_status: None,
         })
     })
 }
@@ -133,9 +163,103 @@ fn save(s: &Shared) {
     }
 }
 
+/// What goes to the core: the detected game, with Deadlock's live state.
+fn activity(s: &Shared) -> Option<Box<GameActivity>> {
+    let game = s.current.as_ref()?;
+    let live = s.live.as_ref().filter(|_| s.watching.is_some());
+    Some(Box::new(deadlock::with_live(game.activity(), live)))
+}
+
+/// Tells the core (under the lock, so two threads never reorder updates).
+fn send_activity(s: &Shared) {
+    client::command(Command::SetGameActivity(activity(s)));
+}
+
+/// Follows Deadlock's log for the run that started at `started` (epoch ms).
+fn watch_deadlock(started: i64) -> Option<deadlock::watch::Watcher> {
+    let Some(path) = deadlock::locate::console_log() else {
+        eprintln!("[games] Deadlock's install was not found: no live stats");
+        return None;
+    };
+    let config = deadlock::watch::WatchConfig {
+        path,
+        game_started_at: started,
+        trace: std::env::var("YAP_TRACE_GAMES").is_ok_and(|v| v == "1"),
+    };
+    deadlock::watch::Watcher::spawn(
+        config,
+        Box::new(move |live| {
+            let qt = with(|s| {
+                if s.watching != Some(started) {
+                    return None;
+                }
+                s.live = live;
+                send_activity(s);
+                s.qt.clone()
+            });
+            if let Some(qt) = qt {
+                let _ = qt.queue(refresh);
+            }
+        }),
+        Box::new(move |status| {
+            eprintln!("[games] Deadlock log {}", status.as_str());
+            let qt = with(|s| {
+                if s.watching != Some(started) {
+                    return None;
+                }
+                s.log_status = Some(status);
+                s.qt.clone()
+            });
+            if let Some(qt) = qt {
+                let _ = qt.queue(refresh);
+            }
+        }),
+    )
+}
+
+/// Starts or stops following Deadlock's log with what the detector says.
+fn follow_deadlock(detected: Option<&Detected>) {
+    let run = detected
+        .filter(|game| deadlock::is_deadlock(game))
+        .map(|game| game.started_at);
+    let (stopped, start) = with(|s| {
+        if s.watching == run {
+            return (None, None);
+        }
+        s.watching = run;
+        s.live = None;
+        s.log_status = run.map(|_| LogStatus::Waiting);
+        (s.watcher.take(), run)
+    });
+    // Joined outside the lock: its callbacks take it.
+    drop(stopped);
+    if let Some(started) = start {
+        let watcher = watch_deadlock(started);
+        with(|s| {
+            if s.watching == Some(started) {
+                s.watcher = watcher;
+            }
+        });
+    }
+}
+
+fn deadlock_json(s: &Shared) -> String {
+    let live = s.live.as_ref();
+    serde_json::json!({
+        "running": s.watching.is_some(),
+        "status": s.log_status.map_or("", LogStatus::as_str),
+        "phase": live.map_or("", |l| l.phase.as_str()),
+        "hero": live.and_then(|l| l.hero.as_deref()).unwrap_or_default(),
+        "launchUrl": deadlock::LAUNCH_URL,
+        "launchOption": deadlock::LAUNCH_OPTION,
+    })
+    .to_string()
+}
+
 /// The detector heard of a change (on its thread).
 fn on_change(detected: Option<Detected>) {
     let now = yap_games::refresh::now_ms();
+    follow_deadlock(detected.as_ref());
     let qt = with(|s| {
         if let Some(game) = &detected {
             let icon = game.icon_path().unwrap_or_default();
@@ -149,11 +273,9 @@ fn on_change(detected: Option<Detected>) {
         }
         s.current.clone_from(&detected);
         save(s);
+        send_activity(s);
         s.qt.clone()
     });
-    client::command(Command::SetGameActivity(
-        detected.map(|game| Box::new(game.activity())),
-    ));
     if let Some(qt) = qt {
         let _ = qt.queue(refresh);
     }
@@ -296,17 +418,18 @@ fn games_json(s: &Shared) -> String {
 
 /// Puts the shared state on the object.
 fn refresh(mut object: Pin<&mut qobject::Games>) {
-    let (detection, playing, games) = with(|s| {
+    let (detection, playing, games, live) = with(|s| {
         let playing = s
             .current
             .as_ref()
             .filter(|g| !s.prefs.is_hidden(&g.key))
             .map(|g| g.name.clone())
             .unwrap_or_default();
-        (s.prefs.detection, playing, games_json(s))
+        (s.prefs.detection, playing, games_json(s), deadlock_json(s))
     });
     object.as_mut().set_detection(detection);
     object.as_mut().set_playing(QString::from(&playing));
+    object.as_mut().set_deadlock(QString::from(&live));
     object.set_games(QString::from(&games));
 }
 
@@ -404,6 +527,32 @@ impl qobject::Games {
                 object.set_loading(false);
             });
         });
+    }
+
+    pub fn launch_deadlock(self: Pin<&mut Self>) {
+        let url = deadlock::LAUNCH_URL;
+        if std::env::var("YAP_LOG_EXTERNAL_OPEN").is_ok_and(|v| v != "0" && !v.is_empty()) {
+            eprintln!("[external] open {url}");
+            return;
+        }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::UI::Shell::ShellExecuteW;
+            let wide = |text: &str| -> Vec<u16> { text.encode_utf16().chain([0]).collect() };
+            let (verb, file) = (wide("open"), wide(url));
+            // SAFETY: both strings are NUL-terminated and outlive the call;
+            // 1 is SW_SHOWNORMAL. The URL is our constant, never input.
+            unsafe {
+                ShellExecuteW(
+                    std::ptr::null_mut(),
+                    verb.as_ptr(),
+                    file.as_ptr(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    1,
+                );
+            }
+        }
     }
 
     /// `added` on each listed program, from the prefs.

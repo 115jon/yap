@@ -34,7 +34,14 @@ import { dispatchOpenProfileEditorEvent } from "@/lib/profile-editor-events";
 import type { Role, User } from "@/lib/types";
 import { useChatActions, useChatStore } from "@/stores/chat-store";
 import { useGameActivity } from "@/hooks/useGameActivity";
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { dispatchOpenProfileStudioEvent } from "@/lib/profile-studio-events";
+
+// The board column (Board, Activity, Wishlist) loads with the modal's first
+// open, not with the chat shell.
+const ProfilePanel = lazy(
+  () => import("@/components/profile-board/ProfilePanel"),
+);
 
 interface Props {
   open: boolean;
@@ -58,10 +65,11 @@ type ProfileResponse = {
 
 /**
  * The full profile: what the popover's avatar and every "Profile" menu row
- * open. A large top-anchored dialog on desktop (the shared ProfileCard at
- * modal size, 640 wide), the phone profile sheet (MobileProfileSheet) on
- * phones. Your own profile has Edit profile in place of the relationship
- * actions.
+ * open. A large top-anchored dialog on desktop: the shared ProfileCard at
+ * modal size (376 wide) beside the board column (ProfilePanel: Board,
+ * Activity, Wishlist), about 1120 wide in all and stacked under 720. The
+ * phone profile sheet (MobileProfileSheet) on phones. Your own profile has
+ * Edit profile in place of the relationship actions.
  */
 export default function UserProfileModal(props: Props) {
   const isMobile = useIsMobile();
@@ -197,7 +205,7 @@ function DesktopUserProfileModal({
         // frame art sits in the dialog box around it. The primitive's close
         // (28/16 at 16/16) sits on the banner.
         className="gap-0"
-        dialogClassName="flex flex-col overflow-visible border-0 bg-transparent p-0 shadow-none md:max-w-[640px]"
+        dialogClassName="flex flex-col overflow-visible border-0 bg-transparent p-0 shadow-none md:max-w-[1120px]"
       >
         <ResponsiveDialogTitle className="sr-only">
           {`${displayName}'s profile`}
@@ -206,57 +214,74 @@ function DesktopUserProfileModal({
           {`@${resolvedUser.username}, ${statusLabel}`}
         </ResponsiveDialogDescription>
 
-        <ProfileCard
-          size="modal"
-          user={resolvedUser}
-          theme={theme}
-          name={displayName}
-          status={status}
-          replayEffectOnBannerHover={!isMe}
-          surfaceClassName="shadow-modal"
-          scrollClassName="md:max-h-[calc(100dvh-max(48px,12vh)-24px-var(--rm-profile-frame-reserve-y,0px))]"
-          actions={
-            <ProfileActionRow
-              controller={actions}
-              size="modal"
-              loadError={Boolean(profileError)}
-              onRetry={retry}
-              selfAction={
-                <Button
-                  onClick={() => {
-                    onClose();
-                    dispatchOpenProfileEditorEvent();
-                  }}
-                >
-                  <Icon name="edit" size="sm" />
-                  Edit profile
-                </Button>
+        <div className="@container/profile grid grid-cols-1 items-start @min-[720px]/profile:grid-cols-[376px_minmax(0,1fr)]">
+          <ProfileCard
+            size="modal"
+            user={resolvedUser}
+            theme={theme}
+            name={displayName}
+            status={status}
+            replayEffectOnBannerHover={!isMe}
+            surfaceClassName="shadow-modal"
+            scrollClassName="md:max-h-[calc(100dvh-max(48px,12vh)-24px-var(--rm-profile-frame-reserve-y,0px))]"
+            actions={
+              <ProfileActionRow
+                controller={actions}
+                size="modal"
+                loadError={Boolean(profileError)}
+                onRetry={retry}
+                selfAction={
+                  <Button
+                    onClick={() => {
+                      onClose();
+                      dispatchOpenProfileEditorEvent();
+                    }}
+                  >
+                    <Icon name="edit" size="sm" />
+                    Edit profile
+                  </Button>
+                }
+                extra={
+                  <Button variant="secondary" onClick={() => void call()}>
+                    <Icon name="call" size="sm" />
+                    Call
+                  </Button>
+                }
+              />
+            }
+          >
+            <ProfileActionNotices controller={actions} />
+            {profileError ? (
+              <RowError className="mt-0">{profileError}</RowError>
+            ) : null}
+            <ProfileSections
+              gameActivity={gameActivity}
+              bio={resolvedUser.bio}
+              connections={resolvedUser.connections}
+              bioMarkdown
+              roles={
+                roles.length > 0 ? <ProfileRoleChips roles={roles} /> : null
               }
-              extra={
-                <Button variant="secondary" onClick={() => void call()}>
-                  <Icon name="call" size="sm" />
-                  Call
-                </Button>
-              }
+              mutualServers={isMe ? null : profileData?.mutualServers}
+              mutualFriends={isMe ? null : profileData?.mutualFriends}
+              memberSince={hasReferenceDate ? referenceDate : null}
             />
-          }
-        >
-          <ProfileActionNotices controller={actions} />
-          {profileError ? (
-            <RowError className="mt-0">{profileError}</RowError>
-          ) : null}
-          <ProfileSections
-            gameActivity={gameActivity}
-            bio={resolvedUser.bio}
-            connections={resolvedUser.connections}
-            bioMarkdown
-            roles={roles.length > 0 ? <ProfileRoleChips roles={roles} /> : null}
-            mutualServers={isMe ? null : profileData?.mutualServers}
-            mutualFriends={isMe ? null : profileData?.mutualFriends}
-            memberSince={hasReferenceDate ? referenceDate : null}
-          />
-          <ProfileBlockConfirm controller={actions} />
-        </ProfileCard>
+            <ProfileBlockConfirm controller={actions} />
+          </ProfileCard>
+          <Suspense fallback={null}>
+            <ProfilePanel
+              userId={resolvedUser.id}
+              isOwner={isMe}
+              displayName={displayName}
+              avatarUrl={resolvedUser.avatar_url}
+              onOpenStudio={() => {
+                onClose();
+                dispatchOpenProfileStudioEvent();
+              }}
+              className="border border-line-strong bg-ply-3 shadow-modal @min-[720px]/profile:border-l-0 @max-[720px]/profile:border-t-0 md:max-h-[calc(100dvh-max(48px,12vh)-24px)] md:overflow-y-auto"
+            />
+          </Suspense>
+        </div>
       </ResponsiveDialogContent>
     </ResponsiveDialog>
   );

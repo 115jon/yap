@@ -8,6 +8,11 @@ export type { MessagePostprocessingTask } from "@/services/message.service";
 import { fcmSenderFor } from "@/server/fcm";
 import { sendMessagePushes } from "@/services/push.service";
 import {
+  DEADLOCK_REFRESH_TASK,
+  parseDeadlockRefreshTask,
+  type DeadlockRefreshTask,
+} from "@/services/deadlock/tasks";
+import {
   processR2CleanupTask,
   recordR2CleanupFailure,
   type R2CleanupTask,
@@ -63,7 +68,8 @@ interface R2CleanupEnvelopeTask extends R2CleanupTask {
 type BackgroundTask =
   | PresenceCacheInvalidationTask
   | MessagePostprocessingEnvelopeTask
-  | R2CleanupEnvelopeTask;
+  | R2CleanupEnvelopeTask
+  | DeadlockRefreshTask;
 
 export interface BackgroundTaskEnvelope {
   version: typeof BACKGROUND_TASK_VERSION;
@@ -290,6 +296,13 @@ export function parseBackgroundTask(value: unknown): BackgroundTaskParseResult {
     return taskSizeBytes(normalized) > MAX_QUEUE_MESSAGE_BYTES
       ? { ok: false, reason: "oversized-task" }
       : { ok: true, value: normalized };
+  }
+
+  if (task.type === DEADLOCK_REFRESH_TASK) {
+    const parsed = parseDeadlockRefreshTask(task);
+    return parsed
+      ? { ok: true, value: { version: BACKGROUND_TASK_VERSION, task: parsed } }
+      : { ok: false, reason: "malformed-task" };
   }
 
   return { ok: false, reason: "unknown-task" };
@@ -718,6 +731,18 @@ async function consumeBackgroundTask(
         outcome,
         env.BACKGROUND_TASKS,
       );
+    } else if (task.type === DEADLOCK_REFRESH_TASK) {
+      // Loaded on demand: most queue messages are embeds and cleanups.
+      const { runDeadlockRefresh } =
+        await import("@/services/deadlock/runtime");
+      // Failures are written per account (backoff, Retry-After); the
+      // message itself never retries, even when the run throws (the
+      // accounts stay due and the cron picks them up).
+      try {
+        await runDeadlockRefresh(task.accountIds, task.reason);
+      } catch (error: unknown) {
+        console.error("Deadlock refresh failed; left to the cron", error);
+      }
     } else {
       await processR2CleanupTask(env.DB, env.BUCKET, task);
     }

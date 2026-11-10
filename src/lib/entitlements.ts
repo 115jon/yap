@@ -12,6 +12,10 @@
  *   hdStreams   the client only: 1440p and 4K are hidden from people
  *               without it, but nothing on the server stops a client that
  *               asks for them. Server enforcement (the SFU path) comes later.
+ *   customWidgets  the server: a Custom profile widget is stored for anyone
+ *               but only shown to others while the owner has the perk
+ *               (profile-board.ts boardForViewer); a lapsed plan hides it
+ *               without deleting it.
  *   the rest    the client only, for now (profile styling)
  */
 
@@ -28,6 +32,7 @@ export const PERKS = [
   "animatedProfile",
   "profileThemes",
   "founderEffect",
+  "customWidgets",
 ] as const;
 export type Perk = (typeof PERKS)[number];
 
@@ -59,6 +64,7 @@ const TIER_PERKS: Record<Tier, ReadonlySet<Perk>> = {
     "allNameStyles",
     "animatedProfile",
     "profileThemes",
+    "customWidgets",
   ]),
   // Everything in Loud, forever, plus the Founder-only effect.
   founder: new Set(PERKS),
@@ -166,6 +172,7 @@ export const TIER_PLANS: readonly TierPlan[] = [
       "Every name style and animated effect",
       "Animated avatar, banner and nameplate",
       "Custom profile themes",
+      "Custom profile widgets",
       "The Loud badge",
     ],
   },

@@ -53,6 +53,73 @@ export const GameActivitySource = Schema.Literals([
   "manual",
 ]);
 
+/** Deadlock's phases as the desktop app reads them from the game's log. */
+export const DEADLOCK_LIVE_PHASES = [
+  "menu",
+  "hideout",
+  "queue",
+  "match_intro",
+  "in_match",
+  "post_match",
+  "spectating",
+] as const;
+
+export const DEADLOCK_LIVE_MODES = [
+  "ranked",
+  "unranked",
+  "brawl",
+  "bots",
+  "private",
+  "other",
+] as const;
+
+/** Most party members a live state may name (Deadlock parties are 6). */
+export const DEADLOCK_PARTY_MAX = 5;
+
+const AccountId = Schema.Finite.check(
+  Schema.isInt(),
+  Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(0xffffffff),
+);
+const UserIdText = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9_-]{1,64}$/),
+);
+
+/**
+ * A structured live state for a game Yap understands, so the profile widget
+ * renders it without parsing `details`/`state` text. Deadlock only for now;
+ * the desktop app fills it from Deadlock's own console.log (`-condebug`).
+ *
+ * Two fields only go one way. A client sends `account_id` (the Steam
+ * account the log says is playing) and `party` (the party's account ids);
+ * the gateway checks `account_id` against the user's linked Steam account,
+ * maps `party` to Yap users who linked theirs, and replaces both with
+ * `party_user_ids` before anything is stored or sent. Viewers never see an
+ * account id. A `party_user_ids` sent by a client is discarded.
+ */
+export const DeadlockLiveState = Schema.Struct({
+  kind: Schema.Literal("deadlock"),
+  phase: Schema.Literals(DEADLOCK_LIVE_PHASES),
+  /** The hero's class name without its prefix: `haze` for `hero_haze`. */
+  hero: Schema.optional(
+    Schema.String.check(Schema.isPattern(/^[a-z0-9_]{1,40}$/)),
+  ),
+  mode: Schema.optional(Schema.Literals(DEADLOCK_LIVE_MODES)),
+  /** Epoch ms the current phase began (the match clock in a match). */
+  phase_started_at: Schema.optional(
+    Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+  ),
+  account_id: Schema.optional(AccountId),
+  party: Schema.optional(
+    Schema.Array(AccountId).check(Schema.isMaxLength(DEADLOCK_PARTY_MAX)),
+  ),
+  party_user_ids: Schema.optional(
+    Schema.Array(UserIdText).check(Schema.isMaxLength(DEADLOCK_PARTY_MAX)),
+  ),
+});
+
+export type DeadlockLiveState = typeof DeadlockLiveState.Type;
+
 export const GameActivity = Schema.Struct({
   kind: Schema.Literal("playing"),
   name: ActivityName,
@@ -69,6 +136,8 @@ export const GameActivity = Schema.Struct({
   large_image: Schema.optional(OwnImagePath),
   small_image: Schema.optional(OwnImagePath),
   source: GameActivitySource,
+  /** Structured live state (see DeadlockLiveState). */
+  game: Schema.optional(DeadlockLiveState),
 });
 
 export type GameActivity = typeof GameActivity.Type;
@@ -109,5 +178,22 @@ export function pickGameActivity(value: GameActivity): GameActivity {
   if (value.state !== undefined) activity.state = value.state;
   if (value.large_image !== undefined) activity.large_image = value.large_image;
   if (value.small_image !== undefined) activity.small_image = value.small_image;
+  if (value.game !== undefined) activity.game = pickLiveState(value.game);
   return activity;
+}
+
+/** Copies the declared fields of a checked live state, nothing else. */
+export function pickLiveState(value: DeadlockLiveState): DeadlockLiveState {
+  const live: {
+    -readonly [K in keyof DeadlockLiveState]: DeadlockLiveState[K];
+  } = { kind: "deadlock", phase: value.phase };
+  if (value.hero !== undefined) live.hero = value.hero;
+  if (value.mode !== undefined) live.mode = value.mode;
+  if (value.phase_started_at !== undefined)
+    live.phase_started_at = Math.floor(value.phase_started_at);
+  if (value.account_id !== undefined) live.account_id = value.account_id;
+  if (value.party !== undefined) live.party = [...value.party];
+  if (value.party_user_ids !== undefined)
+    live.party_user_ids = [...value.party_user_ids];
+  return live;
 }

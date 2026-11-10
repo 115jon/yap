@@ -29,8 +29,13 @@ import { useGameActivity } from "@/hooks/useGameActivity";
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/IconButton";
 
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useShallow } from "zustand/shallow";
+import { dispatchOpenProfileStudioEvent } from "@/lib/profile-studio-events";
+
+const ProfilePanel = lazy(
+  () => import("@/components/profile-board/ProfilePanel"),
+);
 
 interface MobileProfileSheetProps {
   open: boolean;
@@ -293,6 +298,20 @@ export default function MobileProfileSheet({
           />
           {modActions}
           <ProfileBlockConfirm controller={actions} />
+          {/* Board, Activity and Wishlist under the card (phone layout). */}
+          <Suspense fallback={null}>
+            <ProfilePanel
+              userId={resolvedUser.id}
+              isOwner={isMe}
+              displayName={displayName}
+              avatarUrl={resolvedUser.avatar_url}
+              onOpenStudio={() => {
+                onClose();
+                dispatchOpenProfileStudioEvent();
+              }}
+              className="mt-2 border-t border-line"
+            />
+          </Suspense>
         </ProfileCard>
       </DrawerContent>
     </Drawer>

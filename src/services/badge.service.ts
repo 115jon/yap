@@ -23,6 +23,7 @@ import {
   type BadgeAwardSource,
   type BadgeId,
 } from "@/lib/badges";
+import { badgeActivityStatement } from "@/services/profile-activity.service";
 
 /** Awards `badgeId` unless the user already has it. True when it was new. */
 export async function awardBadge(
@@ -39,7 +40,28 @@ export async function awardBadge(
     )
     .bind(badgeId, now, source, userId)
     .run();
-  return (result.meta?.changes ?? 0) > 0;
+  const awarded = (result.meta?.changes ?? 0) > 0;
+  if (awarded) await recordBadgeActivity(db, now, userId);
+  return awarded;
+}
+
+/**
+ * The profile Activity events for awards made at `awardedAt` (all users,
+ * or one). A separate, best-effort write after the award: a timeline that
+ * fails to update never costs the badge.
+ */
+export async function recordBadgeActivity(
+  db: D1Database,
+  awardedAt: string,
+  userId?: string,
+): Promise<void> {
+  try {
+    await badgeActivityStatement(db, awardedAt, userId).run();
+  } catch (error) {
+    console.warn(
+      `profile_activity badge write failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 export async function revokeBadge(
@@ -210,6 +232,7 @@ export async function sweepAutoBadges(
       )
       .bind(now, VOICE_REGULAR_SECONDS),
   ]);
+  await recordBadgeActivity(db, now);
   return {
     "early-yapper": early?.meta?.changes ?? 0,
     "server-owner": owner?.meta?.changes ?? 0,

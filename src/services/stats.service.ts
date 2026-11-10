@@ -12,7 +12,11 @@ import type {
 
 import { isNightOwlMoment } from "@/lib/badges";
 import { utcOffsetMinutesIn } from "@/lib/request-time-zone";
-import { nightOwlAward, voiceRegularCheck } from "@/services/badge.service";
+import {
+  nightOwlAward,
+  recordBadgeActivity,
+  voiceRegularCheck,
+} from "@/services/badge.service";
 
 /**
  * One message written by `userId` at `now`: messages_sent + 1, and Night
@@ -140,6 +144,11 @@ export function recordMessageSent(
       db,
       () => messageSentStatements(db, userId, now, timeZone),
       "message",
+    ).then(() =>
+      // Night owl, if this message earned it, on the Activity timeline.
+      isNightOwlMoment(now, utcOffsetMinutesIn(timeZone, now))
+        ? recordBadgeActivity(db, now.toISOString(), userId)
+        : undefined,
     ),
     runStatWrite(
       db,
@@ -162,6 +171,9 @@ export function recordVoiceSession(
       db,
       () => voiceSessionStatements(db, userId, session),
       "voice session",
+    ).then(() =>
+      // Voice regular, if this session earned it, on the Activity timeline.
+      recordBadgeActivity(db, session.endedAt.toISOString(), userId),
     ),
     runStatWrite(
       db,

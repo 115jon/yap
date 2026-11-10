@@ -98,6 +98,12 @@ import {
 } from "./voice-room/demo-chat-store";
 import { StreamWatcherStore } from "./voice-room/stream-watcher-store";
 import { ListenTogetherStore } from "./voice-room/listen-together-store";
+import {
+  initListenActivitySchema,
+  ListenActivityTracker,
+} from "./voice-room/listen-activity";
+import { recordListenSession } from "../src/services/profile-activity.service";
+import { resolveRoomVoiceChannelId } from "./voice-roster";
 import { RadioStationResolver } from "./voice-room/radio-station-resolver";
 import { SfuClient } from "./voice-room/sfu-client";
 import { sanitizeVoiceAppEvent } from "./voice-room-events";
@@ -251,6 +257,9 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
   private demoChatStore: DemoChatStore;
   private streamWatcherStore: StreamWatcherStore;
   private listenTogetherStore: ListenTogetherStore;
+  private listenActivity: ListenActivityTracker;
+  /** The voice channel this room serves, learned from admission. */
+  private voiceChannelId: string | null = null;
   private radioStationResolver: RadioStationResolver;
   private sfuClient: SfuClient;
   private roomSlug: string = "";
@@ -273,6 +282,14 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       this.sql,
       () => this.roomSlug,
     );
+    this.listenActivity = new ListenActivityTracker({
+      sql: this.sql,
+      getRoomKey: () => this.roomSlug,
+      getChannelId: () => this.voiceChannelId,
+      record: (input) => {
+        this.ctx.waitUntil(recordListenSession(this.env.DB, input));
+      },
+    });
     this.radioStationResolver = new RadioStationResolver({
       fetch: (...args) => globalThis.fetch(...args),
     });
@@ -300,6 +317,8 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     this.ctx.blockConcurrencyWhile(async () => {
       const stored = await this.ctx.storage.get<string>("roomSlug");
       if (stored) this.roomSlug = stored;
+      this.voiceChannelId =
+        (await this.ctx.storage.get<string>("voiceChannelId")) ?? null;
     });
   }
 
@@ -447,6 +466,8 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       // Existing SQLite-backed Durable Objects already have the column.
     }
 
+    initListenActivitySchema(this.sql);
+
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS listen_together_queue (
         entry_id TEXT PRIMARY KEY,
@@ -513,6 +534,16 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
         return unauthorizedUpgrade();
       }
       const { admission } = admitted;
+      const admittedChannelId = resolveRoomVoiceChannelId(
+        this.roomSlug,
+        admission,
+      );
+      if (admittedChannelId && admittedChannelId !== this.voiceChannelId) {
+        this.voiceChannelId = admittedChannelId;
+        this.ctx.storage
+          .put("voiceChannelId", admittedChannelId)
+          .catch(() => {});
+      }
 
       log.info(`New connection, gateway_version=${gatewayVersion}`);
       const accepted = acceptSocket(
@@ -900,7 +931,47 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     state: ListenTogetherPersistentState,
     queue: ListenTogetherQueueEntry[],
   ) {
+    const previousEntryId = this.loadListenTogetherState().currentEntryId;
     this.listenTogetherStore.persist(state, queue);
+    this.recordListenActivityForChange(previousEntryId, state, queue);
+  }
+
+  /**
+   * Profile Activity: a new current entry is a track every user in the room
+   * heard; no current entry means the queue stopped, so sessions end.
+   */
+  private recordListenActivityForChange(
+    previousEntryId: string | null,
+    state: ListenTogetherPersistentState,
+    queue: ListenTogetherQueueEntry[],
+  ) {
+    if (state.currentEntryId === previousEntryId) return;
+    if (!state.currentEntryId) {
+      this.listenActivity.flushAll();
+      return;
+    }
+    const entry =
+      queue.find((candidate) => candidate.entryId === state.currentEntryId) ??
+      state.recentlyPlayed?.find(
+        (candidate) => candidate.entry.entryId === state.currentEntryId,
+      )?.entry;
+    const userIds = [
+      ...this.sql.exec(
+        "SELECT DISTINCT user_id FROM participants WHERE user_id IS NOT NULL",
+      ),
+    ].flatMap((row) => (typeof row.user_id === "string" ? [row.user_id] : []));
+    this.listenActivity.trackStarted(entry?.track.title ?? "", userIds);
+  }
+
+  /** A participant is gone: end its user's listening session if no other participant of theirs is left. */
+  private flushListenActivityIfUserGone(userId: string) {
+    const remaining = [
+      ...this.sql.exec(
+        "SELECT 1 AS present FROM participants WHERE user_id = ? LIMIT 1",
+        userId,
+      ),
+    ];
+    if (remaining.length === 0) this.listenActivity.flushUser(userId);
   }
 
   private getListenTogetherSnapshot(
@@ -4178,7 +4249,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     this.invalidateNativeScreenOperation(participantId);
     const participant = [
       ...this.sql.exec(
-        "SELECT speaking, native_screen_session_id FROM participants WHERE id = ?",
+        "SELECT speaking, native_screen_session_id, user_id FROM participants WHERE id = ?",
         participantId,
       ),
     ][0];
@@ -4227,6 +4298,9 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
       this.clearStreamWatchersByParticipantId(participantId);
     this.sql.exec("DELETE FROM tracks WHERE participant_id = ?", participantId);
     this.sql.exec("DELETE FROM participants WHERE id = ?", participantId);
+    if (typeof participant?.user_id === "string") {
+      this.flushListenActivityIfUserGone(participant.user_id);
+    }
 
     this.broadcastStoppedTracks(participantId, tracks, excludeWs);
     if (didChangeStreamWatchers) {

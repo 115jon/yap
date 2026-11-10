@@ -84,6 +84,15 @@ import {
   recordVoiceSession,
 } from "../src/services/stats.service";
 import {
+  recordCallSession,
+  recordGameSession,
+} from "../src/services/profile-activity.service";
+import {
+  mutualParty,
+  noteDeadlockActivity,
+  resolveLiveState,
+} from "../src/services/deadlock/live";
+import {
   acceptSocket,
   admitSocket,
   isOpcodeAllowed,
@@ -453,6 +462,8 @@ export class MeetingRoom extends DurableObject<Env> {
   private readonly rateLimiter: SocketRateLimiter;
   /** Global gateway: each session's game activity (realtime/meeting-room/game-activity.ts). */
   private readonly gameActivity: GameActivityRegistry;
+  /** Global: the newest op-43 frame per session (handleActivityUpdate). */
+  private readonly activitySeq = new Map<string, number>();
   /** Non-standby Identify calls in flight: participantId -> admitted subject. */
   private identifyingVoiceJoins = new Map<string, string>();
   private readonly nextVoiceJoinGrantSeq = createVoiceJoinGrantSequence();
@@ -576,6 +587,30 @@ export class MeetingRoom extends DurableObject<Env> {
       send: (ws, msg) => this.sendTo(ws, msg),
       dispatchOp: Op.Dispatch,
       log: presenceLog,
+      // Finished games go to the profile Activity timeline and Top games.
+      onGameEnded: (userId, activity, endedAt) => {
+        this.ctx.waitUntil(
+          recordGameSession(this.env.DB, {
+            userId,
+            name: activity.name,
+            iconUrl: activity.icon_url ?? null,
+            startedAt: activity.started_at,
+            endedAt,
+          }),
+        );
+      },
+      // Deadlock: fetch career stats faster while the game runs and right
+      // after a match (src/services/deadlock/live.ts).
+      // Party members are named only when both sides claim each other.
+      present: (userId, activity, raw) => mutualParty(userId, activity, raw),
+      onActivityChanged: (userId, previous, next, at) => {
+        this.ctx.waitUntil(
+          noteDeadlockActivity(this.env, userId, previous, next, at).catch(
+            (error) =>
+              presenceLog.warn("Deadlock cadence update failed", error),
+          ),
+        );
+      },
     });
 
     // Cloudflare's auto-response absorbs messages at the edge, preventing the DO
@@ -3159,8 +3194,24 @@ export class MeetingRoom extends DurableObject<Env> {
       session.stream_ms =
         (session.stream_ms ?? 0) +
         sessionSeconds(session.stream_started_at, now) * 1000;
+      this.recordStreamActivity(session, now);
       delete session.stream_started_at;
     }
+  }
+
+  /** A screen share that ended: one profile Activity event (5 min or more). */
+  private recordStreamActivity(session: WsAttachment, endedAt: number): void {
+    const startedAt = session.stream_started_at;
+    if (startedAt === undefined || !session.user_id) return;
+    this.ctx.waitUntil(
+      recordCallSession(this.env.DB, "stream", {
+        userId: session.user_id,
+        sessionKey: `${session.id}:${startedAt}`,
+        channelId: this.voiceRosterChannelId,
+        startedAt,
+        endedAt,
+      }),
+    );
   }
 
   /**
@@ -3199,6 +3250,18 @@ export class MeetingRoom extends DurableObject<Env> {
         endedAt: new Date(endedAt),
       }),
     );
+    // The profile Activity timeline: the call (15 min or more), and a share
+    // still open when it ended.
+    this.ctx.waitUntil(
+      recordCallSession(this.env.DB, "voice", {
+        userId: session.user_id,
+        sessionKey: key,
+        channelId: this.voiceRosterChannelId,
+        startedAt: joinedAt,
+        endedAt,
+      }),
+    );
+    if (session.self_stream) this.recordStreamActivity(session, endedAt);
   }
 
   // ── One voice session per user ─────────────────────────────────────────
@@ -4608,11 +4671,20 @@ export class MeetingRoom extends DurableObject<Env> {
     const userId = session?.user_id;
     if (!session || !userId) return;
 
-    const changed = await this.gameActivity.set(
-      session.id,
+    // A structured live state is checked against the linked Steam account
+    // and its party mapped to Yap users; account ids go no further. The
+    // check awaits D1, so frames are numbered per session and a result a
+    // newer frame overtook is dropped.
+    const seq = (this.activitySeq.get(session.id) ?? 0) + 1;
+    this.activitySeq.set(session.id, seq);
+    const activity = await resolveLiveState(
+      this.env.DB,
       userId,
       d.game_activity,
     );
+    if (this.getSession(ws) !== session) return;
+    if (this.activitySeq.get(session.id) !== seq) return;
+    const changed = await this.gameActivity.set(session.id, userId, activity);
     // Closed while share_activity was read: the close dropped its activity.
     if (this.getSession(ws) !== session) {
       this.gameActivity.removeSession(session.id);
@@ -4698,6 +4770,7 @@ export class MeetingRoom extends DurableObject<Env> {
     this.closedSockets.add(ws);
     // Its game activity goes with it (the client re-sends after a resume).
     const hadGameActivity = this.gameActivity.removeSession(session.id);
+    this.activitySeq.delete(session.id);
 
     // Broadcast updated presence/platform state before cleanup
     if (session.user_id && !session.standby) {

@@ -46,6 +46,7 @@ import {
 } from "./src/lib/background-tasks";
 import { retryR2Cleanup } from "./src/services/r2-cleanup.service";
 import { sweepAutoBadges } from "./src/services/badge.service";
+import { pruneProfileActivity } from "./src/services/profile-activity.service";
 import { cfTimeZone, TIME_ZONE_HEADER } from "./src/lib/request-time-zone";
 import { cleanupStalePendingUploads } from "./src/services/multipart-upload.service";
 import {
@@ -61,6 +62,8 @@ import {
 
 /** wrangler.toml [triggers]: maintenance jobs run every 6h. */
 const MAINTENANCE_CRON = "0 */6 * * *";
+/** wrangler.toml [triggers]: the Deadlock stats sweep, every 10 minutes. */
+const DEADLOCK_CRON = "*/10 * * * *";
 import {
   appendRealtimeAdmissionHeaders,
   createRealtimeAdmissionContext,
@@ -510,6 +513,7 @@ export default {
         jobs: isDailySlot(controller.cron, controller.scheduledTime, [
           MAINTENANCE_CRON,
           COLLECTIBLES_SYNC_CRON,
+          DEADLOCK_CRON,
         ])
           ? [
               {
@@ -517,6 +521,15 @@ export default {
                 run: async () => {
                   const awarded = await sweepAutoBadges(env.DB);
                   console.info("Badge sweep completed", awarded);
+                },
+              },
+              {
+                // Profile Activity past each owner's retention (7, 30 or
+                // 90 days) is deleted, not hidden.
+                name: "Profile activity retention",
+                run: async () => {
+                  const deleted = await pruneProfileActivity(env.DB);
+                  console.info("Profile activity pruned", { deleted });
                 },
               },
             ]
@@ -542,6 +555,41 @@ export default {
           {
             name: "Stale chunked upload cleanup",
             run: () => cleanupStalePendingUploads(env.DB, env.BUCKET),
+          },
+        ],
+      },
+      // Deadlock widget: track who has it, fetch accounts that are due
+      // (every 10 min while playing, 6 h otherwise; src/services/deadlock).
+      deadlock: {
+        crons: [DEADLOCK_CRON],
+        jobs: [
+          {
+            name: "Deadlock stats sweep",
+            run: async () => {
+              const { runDeadlockCron } =
+                await import("./src/services/deadlock/runtime");
+              console.info("Deadlock stats sweep", await runDeadlockCron());
+            },
+          },
+        ],
+      },
+      // Hero, rank and item art and names, mirrored a batch an hour until
+      // complete; re-read when the game's client version moves.
+      deadlockAssets: {
+        crons: [COLLECTIBLES_SYNC_CRON],
+        jobs: [
+          {
+            name: "Deadlock asset sync",
+            run: async () => {
+              const { runDeadlockAssetSync } =
+                await import("./src/services/deadlock/runtime");
+              const result = await runDeadlockAssetSync();
+              console.info("Deadlock asset sync", {
+                version: result.version,
+                refreshed: result.refreshed,
+                mirrored: result.mirrored.length,
+              });
+            },
           },
         ],
       },

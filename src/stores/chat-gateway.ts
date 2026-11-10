@@ -1,4 +1,5 @@
 import { recheckAppSession } from "@/lib/app-session-recovery";
+import { emitProfileBoardUpdate } from "@/lib/profile-board-events";
 import type { ChatAction, ChatState } from "@/lib/chat-reducer";
 import { clog } from "@/lib/console-logger";
 import { getDisplayName } from "@/lib/display-name";
@@ -623,6 +624,9 @@ export function createChatGateway(
         });
         break;
       }
+      case "PROFILE_BOARD_UPDATE":
+        emitProfileBoardUpdate(d.data);
+        break;
       case "GUILD_UPDATE":
         dispatch({
           type: "UPDATE_SERVER",

@@ -18,6 +18,12 @@ const runCollectiblesCatalogCron = vi.hoisted(() =>
     syncedAt: "2026-07-22T00:00:00.000Z",
   })),
 );
+const runDeadlockAssetSync = vi.hoisted(() =>
+  vi.fn(async () => ({ version: 1, refreshed: false, mirrored: [] })),
+);
+const runDeadlockCron = vi.hoisted(() =>
+  vi.fn(async () => ({ added: 0, dropped: 0, fetched: 0 })),
+);
 const tanStackHandler = vi.hoisted(() =>
   vi.fn(
     async () =>
@@ -72,6 +78,10 @@ vi.mock("../../../src/services/multipart-upload.service", () => ({
   cleanupStalePendingUploads,
 }));
 
+vi.mock("../../../src/services/deadlock/runtime", () => ({
+  runDeadlockAssetSync,
+  runDeadlockCron,
+}));
 vi.mock("../../../src/lib/collectibles-catalog", () => ({
   COLLECTIBLES_SYNC_CRON: "17 * * * *",
   runCollectiblesCatalogCron,
@@ -178,8 +188,26 @@ describe("custom server soundboard media rate limiting", () => {
     expect(waitUntil).toHaveBeenCalledTimes(4);
   });
 
+  it("runs the Deadlock stats sweep alone on its 10-minute cron", async () => {
+    runDeadlockCron.mockClear();
+    runCollectiblesCatalogCron.mockClear();
+    const waitUntil = vi.fn();
+    const env = { DB: {} } as Parameters<typeof server.scheduled>[1];
+    await server.scheduled(
+      { cron: "*/10 * * * *" } as ScheduledController,
+      env,
+      {
+        waitUntil,
+      } as unknown as ExecutionContext,
+    );
+    expect(runDeadlockCron).toHaveBeenCalledTimes(1);
+    expect(runCollectiblesCatalogCron).not.toHaveBeenCalled();
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+  });
+
   it("syncs the catalog on its hourly cron and isolates its failure", async () => {
     runCollectiblesCatalogCron.mockClear();
+    runDeadlockCron.mockClear();
     retryMessagePostprocessing.mockClear();
     cleanupStalePendingUploads.mockClear();
     runCollectiblesCatalogCron.mockRejectedValueOnce(new Error("upstream 403"));
@@ -198,7 +226,10 @@ describe("custom server soundboard media rate limiting", () => {
     expect(retryMessagePostprocessing).toHaveBeenCalledWith(env);
     // And stale chunked uploads, hourly.
     expect(cleanupStalePendingUploads).toHaveBeenCalledWith(env.DB, undefined);
-    expect(waitUntil).toHaveBeenCalledTimes(3);
+    // And the Deadlock art mirror (its stats sweep has its own cron).
+    expect(runDeadlockAssetSync).toHaveBeenCalled();
+    expect(runDeadlockCron).not.toHaveBeenCalled();
+    expect(waitUntil).toHaveBeenCalledTimes(4);
     const results = await Promise.all(
       waitUntil.mock.calls.map((call) => call[0]),
     );

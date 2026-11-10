@@ -10,6 +10,7 @@ import DMSidebar from "@/components/chat/DMSidebar";
 import FloatingStreamPreview from "@/components/chat/FloatingStreamPreview";
 import FriendsView from "@/components/chat/FriendsView";
 import ProfileModalHost from "@/components/chat/ProfileModalHost";
+import ProfileStudioHost from "@/components/chat/ProfileStudioHost";
 import { MobileNavigationSheet } from "@/components/chat/MobileNavigationSheet";
 import ServerList from "@/components/chat/ServerList";
 import UserPanel from "@/components/chat/UserPanel";
@@ -1695,6 +1696,7 @@ export default function ChatPage() {
         ) : null}
 
         <ProfileModalHost />
+        <ProfileStudioHost />
 
         <Suspense fallback={null}>
           <AudioInteractionModal
