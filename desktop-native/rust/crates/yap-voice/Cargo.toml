@@ -24,7 +24,7 @@ webrtc-sys = { version = "=0.3.52", optional = true }
 # RNNoise with its original model, the one the web's WASM build carries.
 # Without its CLI (`bin`) and resampling (`dasp`) features.
 nnnoiseless = { version = "0.5.2", default-features = false }
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["native-tls"] }
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

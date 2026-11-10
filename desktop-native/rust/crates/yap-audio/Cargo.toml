@@ -15,7 +15,7 @@ default = []
 libopus = []
 
 [dependencies]
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["native-tls"] }
 rubato = "5.0.1"
 symphonia = { version = "0.5.5", default-features = false, features = ["aac", "flac", "isomp4", "mkv", "mp3", "ogg", "pcm", "vorbis", "wav"] }
 tokio = { workspace = true, features = ["net"] }

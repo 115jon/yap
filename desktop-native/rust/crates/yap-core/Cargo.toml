@@ -24,6 +24,14 @@ tokio = { workspace = true, features = ["fs", "io-util"] }
 yap-cache.workspace = true
 yap-protocol.workspace = true
 
+[features]
+# The TLS backend: native-tls (SChannel on Windows) for desktop, rustls
+# (no system OpenSSL) for Android and iOS. The caller of `runtime::spawn`
+# brings a client built for rustls (desktop-native/mobile).
+default = ["native-tls"]
+native-tls = ["reqwest/native-tls"]
+rustls = ["reqwest/rustls-no-provider"]
+
 [dev-dependencies]
 tempfile = "3.27.0"
 

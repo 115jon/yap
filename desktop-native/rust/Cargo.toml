@@ -25,7 +25,9 @@ publish = false
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = "1.0.154"
 keyring = { version = "3", features = ["windows-native"] }
-reqwest = { version = "0.13.5", default-features = false, features = ["json", "native-tls"] }
+# No TLS backend here: each crate picks one (native-tls on desktop, rustls
+# on mobile, desktop-native/mobile), since a member cannot drop a feature.
+reqwest = { version = "0.13.5", default-features = false, features = ["json"] }
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 yap-cache = { path = "crates/yap-cache" }
@@ -63,7 +65,7 @@ cxx = "1"
 cxx-qt = "0.10"
 cxx-qt-lib = "0.10"
 futures-util = "0.3.34"
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["native-tls"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["net", "io-util"] }

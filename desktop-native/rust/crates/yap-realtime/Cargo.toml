@@ -11,8 +11,16 @@ futures-util = "0.3.34"
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tokio-tungstenite = { version = "0.30.0", features = ["native-tls"] }
+tokio-tungstenite = "0.30.0"
 yap-protocol.workspace = true
+
+[features]
+# The socket's TLS backend, as in yap-core: native-tls on desktop, rustls
+# with the bundled web roots on mobile (the process's rustls crypto
+# provider must be installed first).
+default = ["native-tls"]
+native-tls = ["tokio-tungstenite/native-tls"]
+rustls = ["tokio-tungstenite/rustls-tls-webpki-roots"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["net"] }
