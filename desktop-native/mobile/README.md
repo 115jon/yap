@@ -192,16 +192,37 @@ Compose baseline:
 
 ## Size: what is in the APK, and what can go
 
-arm64, release, shared Qt libraries from download.qt.io (`qt/build.sh`):
+arm64, release, shared Qt libraries from download.qt.io (`qt/build.sh`,
+signed by `qt/sign.sh`), measured 2026-11-10. Libraries are stored
+uncompressed in the APK (page-aligned, loaded in place), so the APK is
+about the sum of its parts; gzip -9 of the whole APK stands in for the
+download size.
 
-| Part                                                                                                   | Size    | xz     |
-| ------------------------------------------------------------------------------------------------------ | ------- | ------ |
-| `libyapqt` (the core, the bridge, the QML compiled to C++, cxx-qt, AnimatedPicture)                    | 13.8 MB | 4.0 MB |
-| Qt Gui, Quick, Core, Qml                                                                               | 26.6 MB | 6.4 MB |
-| Qt QuickTemplates2, QuickControls2 (Basic), Network, QmlModels, Svg, OpenGL, QuickShapes, QuickEffects | 9.6 MB  | 2.0 MB |
-| Plugins: android platform, gif/jpeg/webp/svg, the OpenSSL TLS backend, offscreen                       | 1.9 MB  | 0.5 MB |
-| `libc++_shared`                                                                                        | 1.3 MB  | 0.3 MB |
-| `classes.dex` (Qt's Java, the shim)                                                                    | 5.3 MB  | —      |
+| Part                                                                                                   | Before  | After   |
+| ------------------------------------------------------------------------------------------------------ | ------- | ------- |
+| `libyapqt` (the core, the bridge, the QML compiled to C++, cxx-qt, AnimatedPicture)                    | 14.7 MB | 14.4 MB |
+| Qt Gui, Quick, Core, Qml                                                                               | 27.7 MB | 27.7 MB |
+| Qt QuickTemplates2, QuickControls2 (Basic), Network, QmlModels, Svg, OpenGL, QuickShapes, QuickEffects | 10.2 MB | 10.2 MB |
+| Plugins: android platform, gif/jpeg/webp/svg (before: also the OpenSSL TLS backend and offscreen)      | 1.9 MB  | 1.5 MB  |
+| QML plugin stubs (`libqml_*`)                                                                          | 0.1 MB  | 0.1 MB  |
+| `libc++_shared`                                                                                        | 1.3 MB  | 1.3 MB  |
+| `classes.dex` (Qt's Java, the shim, AndroidX)                                                          | 5.3 MB  | 0.3 MB  |
+| **APK**                                                                                                | 61.5 MB | 55.7 MB |
+| **APK, gzip -9**                                                                                       | 22.3 MB | 20.5 MB |
+
+What made the difference:
+
+- **R8** (`qt/android/build.gradle`, Qt 6.11's template plus a release
+  `minifyEnabled`/`shrinkResources`; `proguard-rules.pro` keeps
+  `org.qtproject.qt.android.**` and `dev.yap.**`, which C++ reaches over
+  JNI by name): the dex was mostly Kotlin, kotlinx coroutines and AndroidX
+  that `androidx.core` pulls in. 5.3 MB to 0.27 MB.
+- **Two plugins dropped** (`qt_import_plugins(... EXCLUDE ...)`): the
+  offscreen platform plugin and the OpenSSL TLS backend (Qt for Android
+  ships no libssl, so it never loaded). 0.4 MB.
+- **Identical code folding** for `libyapqt` (`-Wl,--icf=all`): 0.33 MB.
+  `--icf=safe` folded nothing. `--gc-sections` was already on (the NDK's
+  toolchain file), and Gradle strips the libraries it packages.
 
 Modules used: Core, Gui, Network, Qml (QmlModels, QmlMeta, WorkerScript),
 Quick, QuickControls2 with the Basic style, QuickTemplates2, QuickEffects
@@ -209,15 +230,14 @@ Quick, QuickControls2 with the Basic style, QuickTemplates2, QuickEffects
 
 Dropped already (`qt_import_plugins` in `qt/CMakeLists.txt`): the QML
 debugger and profiler services, the TIFF/ICO/ICNS/TGA/WBMP decoders, icon
-engines, network information. Not linked at all: Multimedia, WebView,
-Widgets, Quick 3D, the other Controls styles, SQL.
+engines, network information, offscreen, the OpenSSL backend. Not linked
+at all: Multimedia, WebView, Widgets, Quick 3D, the other Controls styles,
+SQL.
 
 Next savings, not measured yet:
 
-- R8 on the Java side (5.3 MB of dex);
 - the desktop's bytecode-only QML (`patches/qt-build-utils`; desktop pass 5
   saved 2.8 MiB);
-- the offscreen platform plugin and the OpenSSL backend (both unused);
 - a static Qt for Android with LTO. That needs Qt built from source for
   Android (hours, about 15 GB). Not attempted here, so static vs shared is
   open.
@@ -274,8 +294,10 @@ desktop-native/mobile/
 │   │                    (client.rs) and the com.yap.mobile module; links yap-ui
 │   │   └── qml/         mobile shell and pages; seams/ (Yap.Platform types)
 │   ├── cpp/             main.cpp, native.* (the platform shim)
-│   ├── android/         manifest and NativeShim.java
-│   └── build.sh         Qt for Android + cxx-qt-cmake → APK
+│   ├── android/         manifest, NativeShim.java, icon and splash, build.gradle (R8)
+│   ├── build.sh         Qt + cxx-qt-cmake → APK (Android) or .app (iOS simulator)
+│   ├── fetch-qt.ps1     Qt 6.11.3 from download.qt.io, pinned by qt-sdk.lock.json
+│   └── sign.sh          zipalign + apksigner (v2/v3), .sha256
 ├── rust/ android/ build.sh    the Compose baseline (UniFFI)
 └── docs/                screenshots
 ```
@@ -284,25 +306,50 @@ desktop-native/mobile/
 
 Needs:
 
-- Qt 6.11.3 for Android, one prefix per ABI. download.qt.io's
-  `all_os/android/qt6_6113/*` archives, about 51 MB each; aqtinstall 3.3
-  does not know 6.11's layout yet;
-- a desktop Qt 6.11.3 for the host tools (`QT_HOST_PATH`; the custom static
-  build in `tools/toolchain.lock.json` works);
-- the Android SDK and NDK 27, JDK 17+, Ninja, and Rust with the Android
-  targets.
+- Qt 6.11.3: the target Qt (Android, one prefix per ABI, or iOS) and a
+  desktop Qt 6.11.3 for the host tools (`QT_HOST_PATH`). `qt/fetch-qt.ps1`
+  downloads exactly the archives `qt/qt-sdk.lock.json` names from
+  download.qt.io and checks each one's SHA-256; `-Refresh` re-pins them from
+  the repository's `Updates.xml` and the `.sha256` files download.qt.io
+  publishes next to each archive. Sets: `android-x86_64`,
+  `android-arm64_v8a`, `host-linux`, `host-mac`, `ios` (qtbase,
+  qtdeclarative, qtsvg, qtimageformats, and ICU on Linux). On Windows the
+  host is the custom static Qt in `tools/toolchain.lock.json`;
+- the Android SDK, NDK r27c (27.2.12479018, the one Qt 6.11.3 for Android
+  was built with; `build.sh` takes `$ANDROID_NDK_ROOT` or the SDK's
+  `ndk/27.2.12479018`, and NDK 27.1 also works), JDK 17+, Ninja, 7-Zip,
+  PowerShell 7, and Rust with the Android targets.
 
 ```sh
+pwsh desktop-native/mobile/qt/fetch-qt.ps1 -Dest $YAPM/qt -Set android-x86_64   # + host-linux off Windows
 export QT_HOST_PATH=<desktop Qt 6.11.3> ANDROID_SDK_ROOT=<sdk>
-YAPM=<a build folder off the system drive> \
-  bash desktop-native/mobile/qt/build.sh x86_64 Release   # or arm64-v8a
-# then zipalign and apksigner the unsigned APK it prints, and adb install
+YAPM=<a build folder off the system drive>   bash desktop-native/mobile/qt/build.sh x86_64 Release   # or arm64-v8a; -D... go to CMake
+bash desktop-native/mobile/qt/sign.sh <the unsigned APK it prints> yap-qt.apk   # debug keystore by default
+adb install -r yap-qt.apk
 adb logcat -s yap-core default                             # core log, QML warnings, [frames]
 ```
 
-`build.sh` points the downloaded Qt's `qmake` wrapper and `target_qt.conf`
-at `QT_HOST_PATH`, as aqtinstall does. Gradle's cache and the build tree go
-under `$YAPM`.
+`build.sh` points the downloaded target Qt's `qmake` wrapper (`qmake.bat`
+on Windows, a shell wrapper elsewhere) and `target_qt.conf` at
+`QT_HOST_PATH`, as aqtinstall does. Gradle's cache and the build tree go
+under `$YAPM`; the target Qt defaults to `$YAPM/qt/<set dir>`
+(`QT_TARGET_ROOT` overrides it). A rebuild in the same tree keeps libraries
+androiddeployqt copied before, so a plugin dropped from the build stays in
+the APK until `android-build/libs` is cleared.
+
+Packaging, from CMake cache variables: `YAP_ANDROID_APP_ID` (default
+`dev.yap.qtproto`; also the Gradle namespace and the iOS bundle id),
+`YAP_ANDROID_VERSION_CODE` (1) and `YAP_ANDROID_VERSION_NAME` (0.1.0). The
+manifest has no `package` attribute. The launcher icon is adaptive, with a
+monochrome layer for themed icons; the splash is ply-0 (light `#f4f4f5`,
+dark `#000000`) with the mark: the system splash on Android 12+, the
+window background before, then Qt's sticky splash, which `main.cpp` fades
+out at the first frame.
+
+`build.sh ios-simulator Release` configures the same project with Qt for
+iOS and builds an unsigned simulator `.app` (x86_64: Qt's iOS libraries
+have arm64 device and x86_64 simulator slices only). It is a compile and
+link check; nothing runs it.
 
 ### Build and run the Compose baseline
 
@@ -322,9 +369,14 @@ POST https://<kova>/api/pub/apps/<publishable key>/device/approve  {"userCode": 
 
 CI (`.github/workflows/desktop-native-mobile.yml`) builds the Compose
 baseline's APK on Ubuntu, and on macOS cross-compiles the core for iOS and
-type-checks its Swift bindings. A CI job for the Qt app needs Qt for Android
-on the runner (and Qt for iOS on macOS for the iOS check). That is the next
-CI step.
+type-checks its Swift bindings. For the Qt app, `qt-android` builds the
+x86_64 and arm64-v8a APKs on Ubuntu with the pinned Qt (archives cached by
+the lock's hash) and NDK r27c, signs them with a throwaway key made in the
+job, and uploads each APK with its `.sha256` (14 days; version code
+`run * 10 + 2` for arm64, `+ 4` for x86_64, version name
+`0.1.<run>+<commit>`). `qt-ios` builds the simulator `.app` on macOS when
+`mobile/qt` or the workflow changes, by hand, and weekly. Each job runs only
+when its own inputs change.
 
 ## Core refactors in this branch
 
