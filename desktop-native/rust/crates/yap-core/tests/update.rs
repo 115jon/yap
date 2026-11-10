@@ -11,8 +11,8 @@ use yap_core::update::{
     native_releases, newest_full, parse_feed, parse_feed_file, parse_github_releases,
     parse_version, pin_allows, plain_notes, release_tag_version, restart_args, save_prefs,
     short_error, Channel, Feed, FeedAsset, FeedOrigin, Launch, Off, Phase, Prefs, Timing, Updater,
-    CHECK_EVERY, DEFAULT_FEED_URL, FIRST_CHECK, GITHUB_MAX_PAGES, GITHUB_PAGE_SIZE, PREFS_FILE,
-    RELEASE_TAG_PREFIX, RETRY_FIRST, RETRY_MAX,
+    CHECK_EVERY, DEFAULT_FEED_URL, FIRST_CHECK, GITHUB_MAX_PAGES, GITHUB_PAGE_SIZE,
+    NATIVE_MIN_MAJOR, PREFS_FILE, RELEASE_TAG_PREFIX, RETRY_FIRST, RETRY_MAX,
 };
 
 const ROOT: &str = r"C:\Users\u\AppData\Local\Yap.App";
@@ -240,6 +240,7 @@ fn tags(releases: &[&yap_core::update::GithubRelease]) -> Vec<String> {
 #[test]
 fn native_release_tags_should_carry_a_semver() {
     assert_eq!(RELEASE_TAG_PREFIX, "desktop-native-v");
+    assert_eq!(NATIVE_MIN_MAJOR, 4);
     assert_eq!(
         release_tag_version("desktop-native-v0.2.24")
             .unwrap()
@@ -252,9 +253,26 @@ fn native_release_tags_should_carry_a_semver() {
             .to_string(),
         "0.2.25-beta.1"
     );
+    // The plain line is the native app's from 4.0.0.
+    assert_eq!(release_tag_version("v4.0.0").unwrap().to_string(), "4.0.0");
+    assert_eq!(
+        release_tag_version("v4.1.0-beta.1").unwrap().to_string(),
+        "4.1.0-beta.1"
+    );
+    assert_eq!(
+        release_tag_version("v12.0.3").unwrap().to_string(),
+        "12.0.3"
+    );
     for tag in [
         "v3.13.0",
+        "v3.14.0",
+        "v3.99.99-beta.1",
         "v0.2.24",
+        "v4",
+        "v4.0",
+        "V4.0.0",
+        "4.0.0",
+        "desktop-native-v3",
         "mobile-v0.5.1",
         "native-toolchain-qt6.11.3-yap-webrtc-a545de4",
         "desktop-native-vnext",
@@ -269,12 +287,31 @@ fn native_release_tags_should_carry_a_semver() {
 fn stable_should_read_only_published_native_stable_releases_newest_first() {
     let releases = github_fixture();
     let stable = native_releases(&releases, Channel::Stable);
-    // No draft, no web/mobile/toolchain release, no pre-release; semver
-    // order (0.2.24 before 0.2.3), not the API's.
+    // No draft, no Tauri (v3.x)/mobile/toolchain release, no pre-release;
+    // semver order (4.0.1 before 4.0.0 before 0.2.24 before 0.2.3), not the
+    // API's. v4.0.1 is listed here and skipped for its feed later.
     assert_eq!(
         tags(&stable),
-        ["desktop-native-v0.2.24", "desktop-native-v0.2.3"]
+        [
+            "v4.0.1",
+            "v4.0.0",
+            "desktop-native-v0.2.24",
+            "desktop-native-v0.2.3"
+        ]
     );
+}
+
+#[test]
+fn the_tauri_v3_line_should_never_be_an_update_source() {
+    let releases = github_fixture();
+    // The fixture's v3.14.0 has latest.json and even a releases.win.json.
+    for channel in [Channel::Stable, Channel::Beta] {
+        let read = native_releases(&releases, channel);
+        assert!(!tags(&read).contains(&"v3.14.0".to_string()), "{channel:?}");
+        assert_eq!(github_asset_url(&read, "latest.json"), None, "{channel:?}");
+    }
+    let stable = native_releases(&releases, Channel::Stable);
+    assert!(!github_feed_url(&stable, "win").unwrap().contains("v3.14.0"));
 }
 
 #[test]
@@ -284,6 +321,9 @@ fn beta_should_read_pre_releases_too() {
     assert_eq!(
         tags(&beta),
         [
+            "v4.1.0-beta.1",
+            "v4.0.1",
+            "v4.0.0",
             "desktop-native-v0.2.25-beta.1",
             "desktop-native-v0.2.24",
             "desktop-native-v0.2.3"
@@ -310,24 +350,25 @@ fn a_github_pre_release_or_beta_version_should_never_reach_stable() {
         .iter()
         .any(|t| t.ends_with("0.2.30") || t.contains("beta")));
     let beta = tags(&native_releases(&releases, Channel::Beta));
-    assert_eq!(beta[0], "desktop-native-v0.2.31-beta.2");
-    assert_eq!(beta[1], "desktop-native-v0.2.30");
+    assert!(beta.contains(&"desktop-native-v0.2.31-beta.2".to_string()));
+    assert!(beta.contains(&"desktop-native-v0.2.30".to_string()));
 }
 
 #[test]
 fn the_feed_file_should_come_from_the_newest_release_that_has_it() {
     let releases = github_fixture();
     let stable = native_releases(&releases, Channel::Stable);
-    // Asset names match case-insensitively, as GitHub's do.
+    // v4.0.1 is newer but has no feed (nothing uploaded yet): v4.0.0's is
+    // read, not an older legacy release's.
     assert_eq!(
         github_feed_url(&stable, "win"),
-        Some("https://github.com/115jon/yap/releases/download/desktop-native-v0.2.24/releases.win.json")
+        Some("https://github.com/115jon/yap/releases/download/v4.0.0/releases.win.json")
     );
     assert_eq!(github_feed_url(&stable, "beta"), None);
     let beta = native_releases(&releases, Channel::Beta);
     assert_eq!(
         github_feed_url(&beta, "beta"),
-        Some("https://github.com/115jon/yap/releases/download/desktop-native-v0.2.25-beta.1/releases.beta.json")
+        Some("https://github.com/115jon/yap/releases/download/v4.1.0-beta.1/releases.beta.json")
     );
     // The beta channel's stable feed is still the newest stable release's.
     assert_eq!(
@@ -339,9 +380,33 @@ fn the_feed_file_should_come_from_the_newest_release_that_has_it() {
 }
 
 #[test]
+fn a_legacy_feed_should_serve_until_a_v4_release_carries_one() {
+    let releases: Vec<_> = github_fixture()
+        .into_iter()
+        .filter(|r| !r.tag_name.starts_with('v'))
+        .collect();
+    let stable = native_releases(&releases, Channel::Stable);
+    // Asset names match case-insensitively, as GitHub's do (the fixture's
+    // 0.2.24 file is "Releases.Win.json").
+    assert_eq!(
+        github_feed_url(&stable, "win"),
+        Some("https://github.com/115jon/yap/releases/download/desktop-native-v0.2.24/releases.win.json")
+    );
+    let beta = native_releases(&releases, Channel::Beta);
+    assert_eq!(
+        github_feed_url(&beta, "beta"),
+        Some("https://github.com/115jon/yap/releases/download/desktop-native-v0.2.25-beta.1/releases.beta.json")
+    );
+}
+
+#[test]
 fn packages_should_download_from_the_release_that_has_them() {
     let releases = github_fixture();
     let stable = native_releases(&releases, Channel::Stable);
+    assert_eq!(
+        github_asset_url(&stable, "Yap.App-4.0.0-full.nupkg"),
+        Some("https://github.com/115jon/yap/releases/download/v4.0.0/Yap.App-4.0.0-full.nupkg")
+    );
     assert_eq!(
         github_asset_url(&stable, "Yap.App-0.2.24-delta.nupkg"),
         Some("https://github.com/115jon/yap/releases/download/desktop-native-v0.2.24/Yap.App-0.2.24-delta.nupkg")
@@ -353,6 +418,10 @@ fn packages_should_download_from_the_release_that_has_them() {
     // A stable copy never downloads a beta's package.
     assert_eq!(
         github_asset_url(&stable, "Yap.App-0.2.25-beta.1-full.nupkg"),
+        None
+    );
+    assert_eq!(
+        github_asset_url(&stable, "Yap.App-4.1.0-beta.1-full.nupkg"),
         None
     );
     assert_eq!(github_asset_url(&stable, "Yap.App-9.9.9-full.nupkg"), None);
