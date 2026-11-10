@@ -325,3 +325,76 @@ fn unknown_payload_fields_should_be_ignored() {
         serde_json::from_value(json!({"heartbeat_interval": 1, "extra": [1, 2]})).expect("decodes");
     assert_eq!(hello.heartbeat_interval, Some(1));
 }
+
+#[test]
+fn a_full_profile_board_should_decode_every_widget_and_its_data() {
+    use yap_protocol::profile_board::BoardResponse;
+    let board: BoardResponse = rest("profile-board.json");
+    assert!(board.is_owner);
+    assert_eq!(board.version, 7);
+    assert_eq!(board.drafts, ["w-custom"]);
+    let kinds: Vec<&str> = board
+        .board
+        .widgets
+        .iter()
+        .map(|w| w.kind.as_str())
+        .collect();
+    assert_eq!(kinds.len(), 13);
+    assert!(kinds.contains(&"guestbook") && kinds.contains(&"custom"));
+    let data = &board.data;
+    assert_eq!(data.top_games.as_ref().map(|t| t.games.len()), Some(5));
+    assert_eq!(
+        data.voice_hours.as_ref().map(|v| v.days.len()),
+        Some(27),
+        "one entry per day so far"
+    );
+    assert_eq!(data.badges.as_ref().map(Vec::len), Some(5));
+    assert_eq!(
+        data.servers.as_ref().map(|s| s[2].viewer_is_member),
+        Some(false)
+    );
+    let guestbook = data.guestbook.as_ref().expect("guestbook");
+    assert!(guestbook.enabled && !guestbook.notes.is_empty());
+    assert_eq!(guestbook.notes[0].author.name(), "Juno");
+    let deadlock = data.deadlock.as_ref().expect("deadlock");
+    assert_eq!(deadlock.state, "ok");
+    let digest = deadlock.digest.as_ref().expect("digest");
+    assert_eq!(digest["rank"]["badge"], 74);
+    assert_eq!(digest["last10"].as_array().map(Vec::len), Some(10));
+    assert_eq!(
+        data.last_game
+            .as_ref()
+            .and_then(|g| g.as_ref())
+            .map(|g| g.name.as_str()),
+        Some("Balatro")
+    );
+}
+
+#[test]
+fn an_empty_profile_board_should_decode_with_no_data() {
+    use yap_protocol::profile_board::BoardResponse;
+    let board: BoardResponse = rest("profile-board-empty.json");
+    assert!(!board.is_owner && board.board.widgets.is_empty());
+    assert_eq!(board.data, Default::default());
+    assert_eq!(board.updated_at, None);
+}
+
+#[test]
+fn profile_activity_wishlist_and_guestbook_should_decode() {
+    use yap_protocol::profile_board::{
+        ActivityPage, GuestbookPage, WishlistItem, WishlistResponse,
+    };
+    let activity: ActivityPage = rest("profile-activity.json");
+    assert_eq!(activity.events.len(), 11);
+    assert_eq!(activity.events[2].reference.as_deref(), Some("night-owl"));
+    assert_eq!(
+        activity.events[1].data.server_name.as_deref(),
+        Some("Raid HQ")
+    );
+    let wishlist: WishlistResponse = rest("profile-wishlist.json");
+    assert_eq!(wishlist.items.len(), 6);
+    assert!(matches!(&wishlist.items[2], WishlistItem::Hint { text, .. } if text.contains("cats")));
+    let guestbook: GuestbookPage = rest("profile-guestbook.json");
+    assert_eq!(guestbook.blocked.as_ref().map(Vec::len), Some(1));
+    assert!(guestbook.total >= guestbook.notes.len() as i64);
+}

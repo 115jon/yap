@@ -350,6 +350,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       BUILD: ${{ github.workspace }}\_release\build
       OUT: ${{ github.workspace }}\_release\out
+      OBS_SOURCES: ${{ github.workspace }}\_release\obs-signed-sources
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -371,8 +372,11 @@ jobs:
 
       # The previous release of this channel, so vpk merges its feed and
       # builds a delta against its full package (the same files
-      # `vpk download` fetches). Only desktop-native-v* releases count, and
-      # stable never reads a pre-release.
+      # `vpk download` fetches). A native release is tagged
+      # desktop-native-v<semver> (the legacy form) or v<semver> with major
+      # >= 4 (the native app's from 4.0.0); the Tauri app's v3.x and older
+      # never count. This is yap_core::update::release_tag_version. Stable
+      # never reads a pre-release.
       - name: Previous release
         run: |
           New-Item -ItemType Directory -Force $env:OUT | Out-Null
@@ -380,12 +384,22 @@ jobs:
           $json = gh api "repos/${{ github.repository }}/releases?per_page=100" --paginate
           if ($LASTEXITCODE) { throw "Could not list the releases ($LASTEXITCODE)" }
           $releases = $json | ConvertFrom-Json
-          $previous = $releases |
-            Where-Object { -not $_.draft -and $_.tag_name.StartsWith($env:TAG_PREFIX) } |
-            Where-Object { $env:CHANNEL -eq "beta" -or -not $_.prerelease } |
-            Where-Object { $_.assets.name -contains $feed } |
-            Sort-Object { [System.Management.Automation.SemanticVersion]$_.tag_name.Substring($env:TAG_PREFIX.Length) } -Descending |
-            Select-Object -First 1
+          function Get-NativeVersion([string]$tag) {
+            $text = if ($tag.StartsWith($env:TAG_PREFIX)) { $tag.Substring($env:TAG_PREFIX.Length) }
+                    elseif ($tag -match '^v(?:[4-9]|[1-9]\d+)\.') { $tag.Substring(1) }
+                    else { return $null }
+            $v = $null
+            if ([System.Management.Automation.SemanticVersion]::TryParse($text, [ref]$v)) { return $v }
+            return $null
+          }
+          $native = $releases | Where-Object { -not $_.draft } |
+            ForEach-Object { [pscustomobject]@{ Release = $_; Version = Get-NativeVersion $_.tag_name } } |
+            Where-Object Version
+          $previous = $native |
+            Where-Object { $env:CHANNEL -eq "beta" -or -not $_.Release.prerelease } |
+            Where-Object { $_.Release.assets.name -contains $feed } |
+            Sort-Object Version -Descending |
+            Select-Object -First 1 -ExpandProperty Release
           if (-not $previous) { Write-Host "==> no earlier ${feed}: the first release of this channel, no delta"; exit 0 }
           gh release download $previous.tag_name --repo ${{ github.repository }} --pattern $feed --dir $env:OUT
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -395,7 +409,9 @@ jobs:
           if ([System.Management.Automation.SemanticVersion]$full.Version -ge [System.Management.Automation.SemanticVersion]$env:VERSION) {
             throw "$env:VERSION is not newer than the published $($full.Version)."
           }
-          $source = $releases | Where-Object { $_.assets.name -contains $full.FileName } | Select-Object -First 1
+          $source = $native | Where-Object { $_.Release.assets.name -contains $full.FileName } |
+            Select-Object -First 1 -ExpandProperty Release
+          if (-not $source) { throw "No native release carries $($full.FileName)" }
           gh release download $source.tag_name --repo ${{ github.repository }} --pattern $full.FileName --dir $env:OUT
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $sha = (Get-FileHash -Algorithm SHA256 "$env:OUT\$($full.FileName)").Hash
@@ -453,6 +469,9 @@ jobs:
             Channel = $env:CHANNEL
             ReleaseNotes = "$env:RUNNER_TEMP\notes.md"
             ObsCacheDir = "$env:RUNNER_TEMP\obs-signed-hook"
+            # The hook's GPL-2.0 corresponding source (OBS, Detours,
+            # obs-deps), checked against the lock; uploaded to the release.
+            ObsSourcesDir = $env:OBS_SOURCES
           }
           if ($env:DRY_RUN -ne "true") { $pack.Sign = $true }
           ./desktop-native/tools/package.ps1 @pack
@@ -470,9 +489,10 @@ jobs:
           ./desktop/scripts/verify-authenticode.ps1 -ExpectedSigner $env:ARTIFACT_SIGNING_SIGNER -Path $files
 
       # A draft first, so nothing is visible while files upload; packages
-      # before the feed file, so a client never sees an entry whose package
-      # is missing. Then publish with make_latest=false and check that the
-      # Tauri app's "latest" release did not move.
+      # and the OBS source archives before the feed file, so a client never
+      # sees an entry whose package is missing. Then publish with
+      # make_latest=false and check that the Tauri app's "latest" release did
+      # not move.
       - name: Publish the GitHub release
         run: |
           $repo = "${{ github.repository }}"
@@ -480,7 +500,13 @@ jobs:
             Get-ChildItem $env:OUT -Filter "$env:PACK_ID-$env:VERSION-*.nupkg"
             Get-Item "$env:OUT\$env:PACK_ID-$env:CHANNEL-Setup.exe"
             Get-ChildItem $env:OUT -Filter "$env:PACK_ID-$env:CHANNEL-Portable.zip"
+            # GPL-2.0 corresponding source for the OBS capture binaries in the
+            # package (obs-capture/SOURCE-OFFER.md points here), as the Tauri
+            # release attaches it. package.ps1 -ObsSourcesDir fetched and
+            # checked them.
+            Get-ChildItem -LiteralPath $env:OBS_SOURCES -File
           ) | Where-Object { $_ }
+          if (@(Get-ChildItem -LiteralPath $env:OBS_SOURCES -File).Count -eq 0) { throw "No OBS source archives in $env:OBS_SOURCES" }
           $feed = Get-Item "$env:OUT\releases.$env:CHANNEL.json"
 
           $sums = ($files + $feed | ForEach-Object { "$((Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant())  $($_.Name)" }) -join "`n"
@@ -490,6 +516,7 @@ jobs:
             "---", "",
             "Native Windows app ($kind channel, ``$env:CHANNEL``), built from ${{ github.sha }} by [run ${{ github.run_id }}](${{ github.server_url }}/$repo/actions/runs/${{ github.run_id }}).",
             "Install with ``$env:PACK_ID-$env:CHANNEL-Setup.exe``; installed copies update from this release's ``releases.$env:CHANNEL.json``.",
+            "The OBS Studio game-capture files in the package are GPL-2.0; their corresponding source (OBS, Detours, obs-deps archives) is attached to this release.",
             "", '```text', $sums, '```'
           ) -join "`n"
           if ($env:DRY_RUN -eq "true") { $body += "`n`n**Dry run: unsigned, never to be published.**" }

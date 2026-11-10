@@ -58,7 +58,7 @@ describe("HomePageClient", () => {
     });
     expect(downloads.length).toBeGreaterThan(0);
     for (const link of downloads) {
-      expect(link.getAttribute("href")).toMatch(/RalphMeetSetup\.exe$/);
+      expect(link.getAttribute("href")).toMatch(/YapSetup\.exe$/);
     }
 
     fireEvent.click(

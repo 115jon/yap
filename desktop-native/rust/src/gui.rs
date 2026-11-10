@@ -75,6 +75,7 @@ struct Scalars {
     friends: yap_core::store::FriendsView,
     apps: yap_core::store::apps::AppsView,
     shop: yap_core::store::shop::ShopView,
+    board: yap_core::store::board::BoardView,
     /// The saved favourites' `provider:id`, as JSON.
     gif_favorites: String,
     extras: yap_core::store::extras::ExtrasView,
@@ -92,6 +93,7 @@ pub struct Objects {
     pub(crate) search: Option<NonNull<crate::search::qobject::Search>>,
     pub(crate) friends: Option<NonNull<crate::friends::qobject::Friends>>,
     pub(crate) shop: Option<NonNull<crate::shop::qobject::Shop>>,
+    pub(crate) board: Option<NonNull<crate::board::qobject::Board>>,
     pub(crate) invites: Option<NonNull<crate::invites::qobject::Invites>>,
     pub(crate) apps: Option<NonNull<crate::apps::qobject::Apps>>,
     pub(crate) extras: Option<NonNull<crate::extras::qobject::Extras>>,
@@ -218,6 +220,15 @@ pub(crate) fn link_route() -> (Option<String>, String) {
 }
 
 /// Keeps the friends view for a `Friends` object QML creates later.
+/// Keeps the board view for a `Board` object QML creates later.
+pub(crate) fn keep_board(view: yap_core::store::board::BoardView) {
+    scalars(|s| s.board = view);
+}
+
+pub(crate) fn board_view() -> yap_core::store::board::BoardView {
+    GUI.with(|gui| gui.borrow().scalars.board.clone())
+}
+
 /// Keeps the shop view for a `Shop` object QML creates later.
 pub(crate) fn keep_shop(view: yap_core::store::shop::ShopView) {
     scalars(|s| s.shop = view);
@@ -652,6 +663,7 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::Search(view) => crate::search::on_view(*view),
         ViewUpdate::Friends(view) => crate::friends::on_view(*view),
         ViewUpdate::Shop(view) => crate::shop::on_view(*view),
+        ViewUpdate::Board(view) => crate::board::on_view(*view),
         ViewUpdate::GifFavorites(keys) => {
             let text = serde_json::to_string(&keys).unwrap_or_else(|_| "[]".into());
             with::<Chat>(|chat| chat.set_gif_favorites(q(&text)));

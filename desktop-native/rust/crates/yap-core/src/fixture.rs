@@ -69,9 +69,10 @@ impl Fixture {
         match request {
             ApiRequest::Apps(_) => ApiResponse::Done,
             // No shop or lookups offline: they fail like a dead network.
-            ApiRequest::Shop(_) | ApiRequest::Embeds(_) | ApiRequest::RemoveEmbeds { .. } => {
-                ApiResponse::Done
-            }
+            ApiRequest::Shop(_)
+            | ApiRequest::Board(_)
+            | ApiRequest::Embeds(_)
+            | ApiRequest::RemoveEmbeds { .. } => ApiResponse::Done,
             ApiRequest::Favorites(_) => ApiResponse::Favorites(Vec::new()),
             ApiRequest::Backgrounds(_) => ApiResponse::Backgrounds(
                 crate::store::backgrounds::BackgroundsResponse::List(Vec::new()),

@@ -16,15 +16,19 @@ use crate::install;
 
 /// Where the released app looks for updates when nothing overrides it: the
 /// GitHub Releases of the repository, read as [`Feed::Github`]. Each native
-/// release (tag [`RELEASE_TAG_PREFIX`]`<version>`) carries Velopack's feed
+/// release (see [`release_tag_version`] for its tag) carries Velopack's feed
 /// files (`releases.<channel>.json`) and its `.nupkg` packages. See
 /// INSTALLER.md, "Publishing a release".
 pub const DEFAULT_FEED_URL: &str = "https://github.com/115jon/yap";
 
-/// The tag prefix of the native app's releases. The same repository has the
-/// web app's `v3.x` releases, `mobile-v*` and the build-asset releases;
-/// only tags with this prefix and a semver after it are update sources.
+/// The legacy tag prefix of the native app's releases (`desktop-native-v0.2.x`),
+/// published while the Tauri app still owned the plain `v*` line.
 pub const RELEASE_TAG_PREFIX: &str = "desktop-native-v";
+
+/// The first major version of the plain `v<semver>` release line that is the
+/// native app's. The Tauri app published `v3.x` and older on the same
+/// line; those are never update sources.
+pub const NATIVE_MIN_MAJOR: u64 = 4;
 
 /// Releases asked for per GitHub API page (the API's maximum).
 pub const GITHUB_PAGE_SIZE: usize = 100;
@@ -322,16 +326,25 @@ pub fn parse_github_releases(json: &str) -> Result<Vec<GithubRelease>, serde_jso
     serde_json::from_str(json)
 }
 
-/// The version a native release tag names: [`RELEASE_TAG_PREFIX`] and a
-/// semver (`desktop-native-v0.2.24`, `desktop-native-v0.2.25-beta.1`).
+/// The version a native release tag names: either the legacy
+/// [`RELEASE_TAG_PREFIX`] and a semver (`desktop-native-v0.2.24`,
+/// `desktop-native-v0.2.25-beta.1`), or `v` and a semver whose major is at
+/// least [`NATIVE_MIN_MAJOR`] (`v4.0.0`, `v4.1.0-beta.1`). The Tauri app's
+/// `v3.x` and older, `mobile-v*` and the toolchain releases never match.
 pub fn release_tag_version(tag: &str) -> Option<Version> {
-    Version::parse(tag.strip_prefix(RELEASE_TAG_PREFIX)?).ok()
+    if let Some(rest) = tag.strip_prefix(RELEASE_TAG_PREFIX) {
+        return Version::parse(rest).ok();
+    }
+    let version = Version::parse(tag.strip_prefix('v')?).ok()?;
+    (version.major >= NATIVE_MIN_MAJOR).then_some(version)
 }
 
 /// The native releases a channel reads, newest version first: published
-/// (no drafts), a [`RELEASE_TAG_PREFIX`] tag, and for stable neither a
-/// GitHub pre-release nor a pre-release version. Beta reads them all. The
-/// web app's `v3.x`, `mobile-v*` and the toolchain releases never match.
+/// (no drafts), a tag [`release_tag_version`] accepts, and for stable
+/// neither a GitHub pre-release nor a pre-release version. Beta reads them
+/// all. The Tauri app's `v3.x`, `mobile-v*` and the toolchain releases never
+/// match. A release without the channel's feed file is passed over later, by
+/// [`github_feed_url`].
 pub fn native_releases(releases: &[GithubRelease], channel: Channel) -> Vec<&GithubRelease> {
     let mut out: Vec<(&GithubRelease, Version)> = releases
         .iter()

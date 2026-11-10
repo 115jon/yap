@@ -12,6 +12,7 @@ mod anim;
 mod apps;
 mod apps_audio;
 mod audio;
+mod board;
 mod bridge;
 mod calls;
 mod camera;
