@@ -60,6 +60,7 @@ import { Route as ApiListenTogetherResolveRouteImport } from './routes/api/liste
 import { Route as ApiGameIconsSplatRouteImport } from './routes/api/game-icons/$'
 import { Route as ApiGameAssetsSplatRouteImport } from './routes/api/game-assets/$'
 import { Route as ApiEmbedsPrefetchRouteImport } from './routes/api/embeds/prefetch'
+import { Route as ApiDesktopNativeHandoffRouteImport } from './routes/api/desktop/native-handoff'
 import { Route as ApiConnectionsProviderRouteImport } from './routes/api/connections/$provider'
 import { Route as ApiCollectiblesIngestRouteImport } from './routes/api/collectibles/ingest'
 import { Route as ApiCollectiblesCatalogRouteImport } from './routes/api/collectibles/catalog'
@@ -389,6 +390,11 @@ const ApiGameAssetsSplatRoute = ApiGameAssetsSplatRouteImport.update({
 const ApiEmbedsPrefetchRoute = ApiEmbedsPrefetchRouteImport.update({
   id: '/api/embeds/prefetch',
   path: '/api/embeds/prefetch',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDesktopNativeHandoffRoute = ApiDesktopNativeHandoffRouteImport.update({
+  id: '/api/desktop/native-handoff',
+  path: '/api/desktop/native-handoff',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiConnectionsProviderRoute = ApiConnectionsProviderRouteImport.update({
@@ -827,6 +833,7 @@ export interface FileRoutesByFullPath {
   '/api/collectibles/catalog': typeof ApiCollectiblesCatalogRoute
   '/api/collectibles/ingest': typeof ApiCollectiblesIngestRoute
   '/api/connections/$provider': typeof ApiConnectionsProviderRouteWithChildren
+  '/api/desktop/native-handoff': typeof ApiDesktopNativeHandoffRoute
   '/api/embeds/prefetch': typeof ApiEmbedsPrefetchRoute
   '/api/game-assets/$': typeof ApiGameAssetsSplatRoute
   '/api/game-icons/$': typeof ApiGameIconsSplatRoute
@@ -953,6 +960,7 @@ export interface FileRoutesByTo {
   '/api/collectibles/catalog': typeof ApiCollectiblesCatalogRoute
   '/api/collectibles/ingest': typeof ApiCollectiblesIngestRoute
   '/api/connections/$provider': typeof ApiConnectionsProviderRouteWithChildren
+  '/api/desktop/native-handoff': typeof ApiDesktopNativeHandoffRoute
   '/api/embeds/prefetch': typeof ApiEmbedsPrefetchRoute
   '/api/game-assets/$': typeof ApiGameAssetsSplatRoute
   '/api/game-icons/$': typeof ApiGameIconsSplatRoute
@@ -1080,6 +1088,7 @@ export interface FileRoutesById {
   '/api/collectibles/catalog': typeof ApiCollectiblesCatalogRoute
   '/api/collectibles/ingest': typeof ApiCollectiblesIngestRoute
   '/api/connections/$provider': typeof ApiConnectionsProviderRouteWithChildren
+  '/api/desktop/native-handoff': typeof ApiDesktopNativeHandoffRoute
   '/api/embeds/prefetch': typeof ApiEmbedsPrefetchRoute
   '/api/game-assets/$': typeof ApiGameAssetsSplatRoute
   '/api/game-icons/$': typeof ApiGameIconsSplatRoute
@@ -1208,6 +1217,7 @@ export interface FileRouteTypes {
     | '/api/collectibles/catalog'
     | '/api/collectibles/ingest'
     | '/api/connections/$provider'
+    | '/api/desktop/native-handoff'
     | '/api/embeds/prefetch'
     | '/api/game-assets/$'
     | '/api/game-icons/$'
@@ -1334,6 +1344,7 @@ export interface FileRouteTypes {
     | '/api/collectibles/catalog'
     | '/api/collectibles/ingest'
     | '/api/connections/$provider'
+    | '/api/desktop/native-handoff'
     | '/api/embeds/prefetch'
     | '/api/game-assets/$'
     | '/api/game-icons/$'
@@ -1460,6 +1471,7 @@ export interface FileRouteTypes {
     | '/api/collectibles/catalog'
     | '/api/collectibles/ingest'
     | '/api/connections/$provider'
+    | '/api/desktop/native-handoff'
     | '/api/embeds/prefetch'
     | '/api/game-assets/$'
     | '/api/game-icons/$'
@@ -1584,6 +1596,7 @@ export interface RootRouteChildren {
   ApiCollectiblesApplyRoute: typeof ApiCollectiblesApplyRoute
   ApiCollectiblesCatalogRoute: typeof ApiCollectiblesCatalogRoute
   ApiCollectiblesIngestRoute: typeof ApiCollectiblesIngestRoute
+  ApiDesktopNativeHandoffRoute: typeof ApiDesktopNativeHandoffRoute
   ApiEmbedsPrefetchRoute: typeof ApiEmbedsPrefetchRoute
   ApiGameAssetsSplatRoute: typeof ApiGameAssetsSplatRoute
   ApiGameIconsSplatRoute: typeof ApiGameIconsSplatRoute
@@ -1973,6 +1986,13 @@ declare module '@tanstack/react-router' {
       path: '/api/embeds/prefetch'
       fullPath: '/api/embeds/prefetch'
       preLoaderRoute: typeof ApiEmbedsPrefetchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/desktop/native-handoff': {
+      id: '/api/desktop/native-handoff'
+      path: '/api/desktop/native-handoff'
+      fullPath: '/api/desktop/native-handoff'
+      preLoaderRoute: typeof ApiDesktopNativeHandoffRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/connections/$provider': {
@@ -2877,6 +2897,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiCollectiblesApplyRoute: ApiCollectiblesApplyRoute,
   ApiCollectiblesCatalogRoute: ApiCollectiblesCatalogRoute,
   ApiCollectiblesIngestRoute: ApiCollectiblesIngestRoute,
+  ApiDesktopNativeHandoffRoute: ApiDesktopNativeHandoffRoute,
   ApiEmbedsPrefetchRoute: ApiEmbedsPrefetchRoute,
   ApiGameAssetsSplatRoute: ApiGameAssetsSplatRoute,
   ApiGameIconsSplatRoute: ApiGameIconsSplatRoute,

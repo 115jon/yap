@@ -499,3 +499,59 @@ fn no_tauri_data_means_no_import_and_no_marker() {
         before
     );
 }
+
+// ── The deferred uninstall ──────────────────────────────────────────────
+
+mod deferral {
+    use std::time::Duration;
+
+    use yap_core::tauri::{UninstallDeferral, UNINSTALL_DEFER};
+
+    const S: fn(u64) -> Duration = Duration::from_secs;
+
+    #[test]
+    fn it_waits_for_the_interface_and_then_the_whole_delay() {
+        assert!(
+            UNINSTALL_DEFER > S(8),
+            "longer than the Tauri bridge's liveness window"
+        );
+        let mut d = UninstallDeferral::default();
+        d.arm();
+        // Armed at launch, but the interface has not loaded: never.
+        assert!(!d.due(S(600)));
+        assert_eq!(d.wait(S(600)), None);
+        d.app_started(S(3));
+        assert!(!d.due(S(3)));
+        assert!(!d.due(S(3) + UNINSTALL_DEFER - Duration::from_millis(1)));
+        assert_eq!(d.wait(S(13)), Some(UNINSTALL_DEFER - S(10)));
+        assert!(d.due(S(3) + UNINSTALL_DEFER));
+    }
+
+    #[test]
+    fn it_fires_once() {
+        let mut d = UninstallDeferral::default();
+        d.arm();
+        d.app_started(S(0));
+        assert!(d.due(UNINSTALL_DEFER));
+        assert!(!d.due(UNINSTALL_DEFER * 2));
+        assert_eq!(d.wait(UNINSTALL_DEFER * 2), None);
+    }
+
+    #[test]
+    fn a_later_start_signal_does_not_move_the_clock() {
+        let mut d = UninstallDeferral::default();
+        d.arm();
+        d.app_started(S(1));
+        d.app_started(S(100));
+        assert!(d.due(S(1) + UNINSTALL_DEFER));
+    }
+
+    #[test]
+    fn nothing_runs_when_it_was_never_armed() {
+        // No Tauri install, or its attempts were used up.
+        let mut d = UninstallDeferral::default();
+        d.app_started(S(0));
+        assert!(!d.due(S(3600)));
+        assert_eq!(d.wait(S(3600)), None);
+    }
+}

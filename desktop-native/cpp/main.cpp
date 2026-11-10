@@ -727,9 +727,12 @@ static void dumpObjectCounts(QQmlApplicationEngine& engine)
 // uninstall hook runs and exits here; any other launch returns at once.
 extern "C" void yap_velopack_startup();
 // The released install's default profile only (rust/src/installer.rs):
-// imports the Tauri app's preferences once, then uninstalls it in the
-// background. A no-op for every other build and profile.
+// imports the Tauri app's preferences once and arms its uninstall. A no-op
+// for every other build and profile.
 extern "C" void yap_replace_tauri_at_launch();
+// Main.qml has its window: the armed Tauri uninstall runs 20 s later, so a
+// build that crashes on start never removes the working Tauri app.
+extern "C" void yap_tauri_app_started();
 // The in-app updater (rust/src/updater.rs): with install on quit, hands a
 // downloaded update to Velopack's updater. Not while Windows shuts down.
 extern "C" void yap_updater_quit(bool session_ending);
@@ -961,6 +964,8 @@ int main(int argc, char* argv[])
     Compat::quitting();
     return -1;
   }
+  if (first)
+    yap_tauri_app_started();
 
   if (auto* window =
         qobject_cast<QQuickWindow*>(engine.rootObjects().first())) {

@@ -6,6 +6,13 @@
 //
 // Also exposes `check_and_install` for the silent startup check in lib.rs.
 //
+// The native handoff (native_handoff.rs) goes first: while the native app is
+// on offer, `fetch_update` answers its version ("4.x.y") and `install_update`
+// installs it and exits instead of running the Tauri updater. Otherwise both
+// fall back to the Tauri updater, so a 3.14.x can still ship. The launch
+// updater window counts as automatic (it installs what it finds by itself);
+// the main window's toast and Settings as prompted (a click installs).
+//
 // Design notes:
 // - On Windows, `install()` exits the process automatically (installer limitation).
 //   The frontend should display a "Restarting…" message and stop expecting a reply.
@@ -15,9 +22,10 @@
 use std::{sync::Mutex, time::Duration};
 
 use serde::Serialize;
-use tauri::{ipc::Channel, AppHandle, Manager, Runtime, State};
+use tauri::{ipc::Channel, AppHandle, Manager, Runtime, State, Window};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
+use crate::native_handoff::{self, policy::Trigger};
 use crate::native_share::{prepare_native_share_for_update, NativeShareState};
 
 // ── Public types ─────────────────────────────────────────────────────────
@@ -63,6 +71,8 @@ pub enum Error {
     NoPendingUpdate,
     #[error("update check timed out")]
     Timeout,
+    #[error("{0}")]
+    Handoff(String),
 }
 
 impl Serialize for Error {
@@ -88,14 +98,36 @@ type Result<T> = std::result::Result<T, Error>;
 #[tauri::command]
 pub async fn fetch_update<R: Runtime>(
     app: AppHandle<R>,
+    window: Window<R>,
     pending_update: State<'_, PendingUpdate>,
 ) -> Result<Option<UpdateMetadata>> {
     log::info!("[Updater] checking for updates…");
     log::debug!("[Updater] fetch_update command invoked by frontend");
 
-    let update = tokio::time::timeout(Duration::from_secs(10), app.updater()?.check())
-        .await
-        .map_err(|_| Error::Timeout)??;
+    // Both at once: the handoff's answer (within its own budget) wins; the
+    // Tauri updater's is used only when it has none.
+    let tauri_check = async {
+        tokio::time::timeout(Duration::from_secs(10), app.updater()?.check())
+            .await
+            .map_err(|_| Error::Timeout)?
+            .map_err(Error::from)
+    };
+    let (native, tauri) = tokio::join!(native_handoff::check(trigger_for(&window)), tauri_check);
+    native_handoff::set_offered(native.clone());
+    if let Some(release) = native {
+        log::info!(
+            "[Updater] the native app {} is on offer (handoff)",
+            release.version
+        );
+        *pending_update.0.lock().unwrap() = None;
+        return Ok(Some(UpdateMetadata {
+            version: release.version,
+            current_version: app.package_info().version.to_string(),
+            notes: Some(native_handoff::UPDATE_NOTES.to_owned()),
+        }));
+    }
+
+    let update = tauri?;
 
     let metadata = update.as_ref().map(|u| {
         log::info!(
@@ -125,10 +157,16 @@ pub async fn fetch_update<R: Runtime>(
 /// IPC message it will receive before the window disappears.
 #[tauri::command]
 pub async fn install_update(
+    app: AppHandle<crate::TauriRuntime>,
+    window: Window<crate::TauriRuntime>,
     pending_update: State<'_, PendingUpdate>,
     native_share_state: State<'_, NativeShareState>,
     on_event: Channel<DownloadEvent>,
 ) -> Result<()> {
+    if let Some(release) = native_handoff::take_offered() {
+        return install_native(&app, &window, release, native_share_state.inner(), on_event).await;
+    }
+
     let Some(update) = pending_update.0.lock().unwrap().take() else {
         return Err(Error::NoPendingUpdate);
     };
@@ -160,6 +198,81 @@ pub async fn install_update(
         .await?;
 
     Ok(())
+}
+
+/// The launch updater window installs what it finds by itself; the main
+/// window only on a click.
+fn trigger_for<R: Runtime>(window: &Window<R>) -> Trigger {
+    if window.label() == "updater" {
+        Trigger::Automatic
+    } else {
+        Trigger::Prompted
+    }
+}
+
+/// `install_update` for the native app: the handoff, then this app exits.
+/// A failure leaves this app running (the web UI shows the error), and the
+/// one that uses up the automatic attempts opens the download page.
+#[cfg(windows)]
+async fn install_native(
+    app: &AppHandle<crate::TauriRuntime>,
+    window: &Window<crate::TauriRuntime>,
+    release: native_handoff::policy::NativeRelease,
+    native_share_state: &NativeShareState,
+    on_event: Channel<DownloadEvent>,
+) -> Result<()> {
+    log::info!(
+        "[Updater] handing off to the native app {}",
+        release.version
+    );
+    let outcome = native_handoff::run(
+        release,
+        trigger_for(window),
+        |event| {
+            let _ = on_event.send(event);
+        },
+        || async {
+            let prep = prepare_native_share_for_update(native_share_state).await;
+            log::info!(
+                "[Updater] native-share prep before the handoff: shutdown_required={} hook_related_active={} residual_state_detected={}",
+                prep.shutdown_required(),
+                prep.hook_related_state_was_active(),
+                prep.residual_state_detected(),
+            );
+        },
+    )
+    .await;
+    match outcome {
+        Ok(()) => {
+            log::info!("[Updater] the native app is up; exiting");
+            crate::spawn_app_exit(app, "native-handoff", false);
+            Ok(())
+        }
+        Err(failure) => {
+            log::warn!("[Updater] handoff failed: {}", failure.message);
+            if failure.open_download_page {
+                use tauri_plugin_opener::OpenerExt;
+                if let Err(e) = app
+                    .opener()
+                    .open_url(native_handoff::DOWNLOAD_PAGE, None::<&str>)
+                {
+                    log::warn!("[Updater] could not open the download page: {e}");
+                }
+            }
+            Err(Error::Handoff(failure.message))
+        }
+    }
+}
+
+#[cfg(not(windows))]
+async fn install_native(
+    _app: &AppHandle<crate::TauriRuntime>,
+    _window: &Window<crate::TauriRuntime>,
+    _release: native_handoff::policy::NativeRelease,
+    _native_share_state: &NativeShareState,
+    _on_event: Channel<DownloadEvent>,
+) -> Result<()> {
+    Err(Error::Handoff("no native app on this platform".into()))
 }
 
 // ── Background startup check ─────────────────────────────────────────────

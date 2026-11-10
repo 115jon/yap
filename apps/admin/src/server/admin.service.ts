@@ -30,6 +30,10 @@ import {
 import { isTier, parseEntitlement, type Entitlement } from "@/lib/entitlements";
 import { genId } from "@/lib/id";
 import {
+  parseRolloutPercent,
+  type NativeHandoffConfig,
+} from "@/lib/native-handoff";
+import {
   ANNOUNCEMENT_MAX_LENGTH,
   isAnnouncementTone,
   parseSiteFlags,
@@ -1015,7 +1019,7 @@ async function settingsResponse(
     updated_by: string | null;
   }>(
     db.prepare(
-      `SELECT key, updated_at, updated_by FROM site_settings WHERE key IN ('flags', 'announcement')`,
+      `SELECT key, updated_at, updated_by FROM site_settings WHERE key IN ('flags', 'announcement', 'nativeHandoff')`,
     ),
   );
   const byKey = new Map(meta.map((row) => [row.key, row]));
@@ -1026,8 +1030,50 @@ async function settingsResponse(
   return {
     flags: settings.flags,
     announcement: settings.announcement,
-    updated: { flags: stamp("flags"), announcement: stamp("announcement") },
+    nativeHandoff: settings.nativeHandoff,
+    updated: {
+      flags: stamp("flags"),
+      announcement: stamp("announcement"),
+      nativeHandoff: stamp("nativeHandoff"),
+    },
   };
+}
+
+/** A patch of the native handoff switch over its stored value. */
+function parseNativeHandoffInput(
+  value: unknown,
+  current: NativeHandoffConfig,
+):
+  | { ok: true; nativeHandoff: NativeHandoffConfig }
+  | { ok: false; response: Response } {
+  const invalid = (message: string) => ({
+    ok: false as const,
+    response: fail(message, 400, "INVALID_NATIVE_HANDOFF"),
+  });
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return invalid("The handoff switch is not readable.");
+  }
+  const raw = value as Record<string, unknown>;
+  for (const key of Object.keys(raw)) {
+    if (key !== "enabled" && key !== "rolloutPercent") {
+      return invalid(`Unknown handoff setting: ${key}.`);
+    }
+  }
+  const next = { ...current };
+  if (raw.enabled !== undefined) {
+    if (typeof raw.enabled !== "boolean") {
+      return invalid("The handoff has to be on or off.");
+    }
+    next.enabled = raw.enabled;
+  }
+  if (raw.rolloutPercent !== undefined) {
+    const percent = parseRolloutPercent(raw.rolloutPercent);
+    if (percent === null) {
+      return invalid("The rollout is a whole percent from 0 to 100.");
+    }
+    next.rolloutPercent = percent;
+  }
+  return { ok: true, nativeHandoff: next };
 }
 
 function parseAnnouncementInput(
@@ -1201,6 +1247,35 @@ async function putSettings(
         at,
       }),
     );
+  }
+
+  if (body.nativeHandoff !== undefined) {
+    const parsed = parseNativeHandoffInput(
+      body.nativeHandoff,
+      current.nativeHandoff,
+    );
+    if (!parsed.ok) return parsed.response;
+    const next = parsed.nativeHandoff;
+    if (
+      next.enabled !== current.nativeHandoff.enabled ||
+      next.rolloutPercent !== current.nativeHandoff.rolloutPercent
+    ) {
+      statements.push(
+        siteSettingStatement(db, "nativeHandoff", next, actorId, at),
+      );
+      statements.push(
+        auditStatement(db, {
+          actorId,
+          action: "native_handoff.update",
+          targetType: "site",
+          targetId: "nativeHandoff",
+          before: current.nativeHandoff,
+          after: next,
+          request,
+          at,
+        }),
+      );
+    }
   }
 
   if (statements.length) {

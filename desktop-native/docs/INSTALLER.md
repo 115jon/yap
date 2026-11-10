@@ -417,8 +417,13 @@ starts and before anything reads the settings:
    `Yap.Data\tauri-shortcuts\` before the uninstaller starts, so a launch
    after one that ended mid-uninstall puts back any that are gone; the
    folder goes once the Tauri app is gone.
-5. **Uninstall, the supported way**, on a background thread:
-   `"<root>\Update.exe" --uninstall /S` without a window, up to 120 s.
+5. **Uninstall, the supported way**, deferred until this launch has
+   stayed up: the launch only arms it; once Main.qml has its window (shown,
+   or in the tray) the shell calls `yap_tauri_app_started`, and 20 s later
+   (`tauri::UNINSTALL_DEFER`, `tauri::UninstallDeferral`) a background
+   thread counts the attempt and runs `"<root>\Update.exe" --uninstall /S`
+   without a window, up to 120 s. A build that crashes on start leaves the
+   Tauri app working.
 6. **Restore and clean up**: put back any saved shortcut that is gone; delete
    the Run value `Yap` and `Software\Classes\yap` only if they still point
    into `%LOCALAPPDATA%\Yap` (`tauri::remove_leftovers`); register `yap://`
@@ -429,6 +434,51 @@ prefix. Only the Tauri uninstaller deletes anything of the Tauri app, and only
 inside its root; `%APPDATA%\Yap` is read, never changed. Tests:
 `crates/yap-core/tests/tauri_replace.rs` (fixture folders, an in-memory
 registry, a LevelDB built in memory).
+
+### How the Tauri app gets here (3.14, the bridge)
+
+The last Tauri release installs this app itself
+(`desktop/src-tauri/src/native_handoff`). It stays dormant until all of
+these hold:
+
+- **The remote switch** (`GET /api/desktop/native-handoff`, the admin
+  console's Switches) is on, and the install's bucket is below its rollout
+  percent. The switch is off at 0 % by default, and an unreachable endpoint
+  means no handoff.
+- **A native release exists**: among the 30 newest releases
+  (`GET /repos/115jon/yap/releases?per_page=30`, not `releases/latest`),
+  the highest one tagged exactly `vX.Y.Z` with X >= 4, neither a draft nor
+  a prerelease, with an asset named `Yap.App-win-Setup.exe` that has a
+  `sha256:` digest and a size of 10–500 MB, downloading from this
+  repository. The `desktop-native-v*` tags never match, so the cutover
+  publishes `v4.x.y` releases. Which release is "latest" does not matter
+  to the bridge: the Tauri updater keeps reading
+  `releases/latest/download/latest.json`, so a 3.14.x can still ship, and
+  the cutover carries 3.14's `latest.json` onto each v4 release (planned
+  separately) for when one is latest. GitHub is asked at most once per
+  6 h after a "not yet" and once an hour after an error.
+- **Windows** is build 17763 or later, the floor of Qt 6.11.
+
+The Setup is downloaded to `%TEMP%\yap-native-handoff`, checked against
+the digest, moved alone into a fresh `attempt-<guid>` folder there (no
+junctions, nothing beside it), held open with read sharing only, and
+checked with `WinVerifyTrust`, revocation checked online for the whole
+chain (an unanswered check is a failure, never a pass): subject CN
+`Jonathan Martinez`, an issuer CN starting with `Microsoft ID Verified CS`,
+a timestamp, and the EKUs code signing (`1.3.6.1.5.5.7.3.3`) and this
+account's Artifact Signing identity validation
+(`1.3.6.1.4.1.311.97.726408799.228623495.642435689.37395988`, on every
+certificate under that validation; a new identity validation needs a new
+bridge). It runs as `--silent --log %TEMP%\yap-native-handoff\setup.log`
+(silent never starts the app). `current\Yap.exe` gets the same signature
+check, and the Tauri app starts that file (held open until it runs), not
+the root stub. It counts the handoff done only if `current\Yap.exe` still
+runs 8 s later, then exits; the deferred uninstall above starts later
+still. Later Tauri launches start the native app instead (after two
+failed redirects in a row they start Tauri again). State, attempts and
+opt-out are in `%APPDATA%\Yap\native-handoff.json` (an unreadable file
+keeps the bridge dormant and is never rewritten); the log is
+`%TEMP%\yap-native-handoff\handoff.log`.
 
 ## Rename from Yap Native
 

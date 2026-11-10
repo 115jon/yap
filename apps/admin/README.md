@@ -10,7 +10,7 @@ It has five sections:
 - **People:** every account with its plan, badges, stats and storage. Plans and manual badges are changed here, and sign-in can be suspended or live connections closed.
 - **Live ops:** who is online, voice rooms, uploads in flight, D1 and R2 totals, the deploy, the shop catalog (last synced, items, last error, the fetcher's last push, and Refresh now) and cron runs.
 - **Insights:** daily charts.
-- **Switches:** kill switches and the site banner.
+- **Switches:** kill switches, the site banner and the desktop native handoff (on/off and a rollout percent, off at 0 % by default; read by the Tauri app from `GET /api/desktop/native-handoff`).
 - **Audit log:** every admin change.
 
 ## How it is put together
@@ -36,7 +36,7 @@ It has five sections:
   - `MeetingRoom` `/admin/introspect` and `/admin/disconnect-user`
   - `VoiceRoom` `/disconnect-participant`
 - **Writes the main Worker enforces.** The main Worker reads and enforces what this Worker writes:
-  - `site_settings`: the switches and the banner, through a 10 s cache.
+  - `site_settings`: the switches, the banner and the native handoff (`nativeHandoff`), through a 10 s cache.
   - `users.suspended_at`: through a 15 s cache. The disconnect closes sockets at once.
 
 ## Who gets in

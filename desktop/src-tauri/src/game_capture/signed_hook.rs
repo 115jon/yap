@@ -7,8 +7,9 @@
 //! `desktop/packaging/obs-signed-hook.lock.json`, embedded here. Before every
 //! injection each file is opened without write or delete sharing, its SHA-256
 //! is checked against the lock, and its Authenticode signature and signer are
-//! checked with `WinVerifyTrust`. The handles stay open until the helper has
-//! exited, so the files cannot be swapped between the check and the use.
+//! checked with `WinVerifyTrust` (`crate::authenticode`). The handles stay
+//! open until the helper has exited, so the files cannot be swapped between
+//! the check and the use.
 //!
 //! The stock DLL stays loaded in a game until the game exits. To keep a locked
 //! DLL out of the versioned `app-<ver>` folders (which the updater deletes),
@@ -23,23 +24,19 @@
 
 use std::fs::File;
 use std::io::Read;
-use std::os::windows::fs::OpenOptionsExt;
-use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use sha2::{Digest, Sha256};
 
+pub use crate::authenticode::Signer;
+use crate::authenticode::{open_read_shared, verify_signature};
 use crate::game_capture::inject::Bitness;
 
 const LOCK_JSON: &str = include_str!("../../../packaging/obs-signed-hook.lock.json");
 
 /// The folder, next to the binary, that the installer ships the set in.
 pub const BUNDLED_SUBDIR: &str = r"obs-capture\obs-signed";
-
-/// `FILE_SHARE_READ`: others may read (and the loader may map the image), but
-/// nobody may write, rename, or delete the file while we hold it.
-const FILE_SHARE_READ: u32 = 0x1;
 
 #[derive(Debug, serde::Deserialize)]
 pub struct Lock {
@@ -98,13 +95,6 @@ pub fn file_names(bitness: Bitness) -> [&'static str; 3] {
     }
 }
 
-/// A file's signer, read from its verified Authenticode signature.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Signer {
-    pub subject: String,
-    pub thumbprint: String,
-}
-
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|b| format!("{b:02x}")).collect()
@@ -141,123 +131,9 @@ fn check_against_lock(
     Ok(())
 }
 
-/// `WinVerifyTrust` (Authenticode policy, no UI, no network revocation fetch)
-/// on an open file, then the primary signer's subject and SHA-1 thumbprint.
-pub fn verify_signature(path: &Path, file: &File) -> Result<Signer, String> {
-    use windows::core::{HSTRING, PCWSTR};
-    use windows::Win32::Foundation::{HANDLE, HWND};
-    use windows::Win32::Security::Cryptography::{
-        CertGetCertificateContextProperty, CertGetNameStringW, CERT_NAME_SIMPLE_DISPLAY_TYPE,
-        CERT_SHA1_HASH_PROP_ID,
-    };
-    use windows::Win32::Security::WinTrust::{
-        WTHelperGetProvCertFromChain, WTHelperGetProvSignerFromChain,
-        WTHelperProvDataFromStateData, WinVerifyTrust, WINTRUST_ACTION_GENERIC_VERIFY_V2,
-        WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO, WTD_CACHE_ONLY_URL_RETRIEVAL,
-        WTD_CHOICE_FILE, WTD_REVOKE_NONE, WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY,
-        WTD_UI_NONE,
-    };
-
-    let wide_path = HSTRING::from(path.as_os_str());
-    let mut file_info = WINTRUST_FILE_INFO {
-        cbStruct: std::mem::size_of::<WINTRUST_FILE_INFO>() as u32,
-        pcwszFilePath: PCWSTR(wide_path.as_ptr()),
-        hFile: HANDLE(file.as_raw_handle()),
-        pgKnownSubject: std::ptr::null_mut(),
-    };
-    let mut data = WINTRUST_DATA {
-        cbStruct: std::mem::size_of::<WINTRUST_DATA>() as u32,
-        dwUIChoice: WTD_UI_NONE,
-        fdwRevocationChecks: WTD_REVOKE_NONE,
-        dwUnionChoice: WTD_CHOICE_FILE,
-        Anonymous: WINTRUST_DATA_0 {
-            pFile: &mut file_info,
-        },
-        dwStateAction: WTD_STATEACTION_VERIFY,
-        dwProvFlags: WTD_CACHE_ONLY_URL_RETRIEVAL,
-        ..Default::default()
-    };
-    let mut action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
-    // SAFETY: `data` and everything it points at outlive both calls.
-    let status = unsafe {
-        WinVerifyTrust(
-            HWND(-1isize as *mut _),
-            &mut action,
-            (&mut data as *mut WINTRUST_DATA).cast(),
-        )
-    };
-
-    let signer = (|| {
-        if status != 0 {
-            return Err(format!(
-                "Authenticode verification failed ({:#010x})",
-                status as u32
-            ));
-        }
-        // SAFETY: valid state data from the successful verify above; the
-        // returned pointers stay valid until WTD_STATEACTION_CLOSE.
-        unsafe {
-            let prov = WTHelperProvDataFromStateData(data.hWVTStateData);
-            if prov.is_null() {
-                return Err("no provider data".into());
-            }
-            let sgnr = WTHelperGetProvSignerFromChain(prov, 0, false, 0);
-            if sgnr.is_null() {
-                return Err("no signer".into());
-            }
-            let cert = WTHelperGetProvCertFromChain(sgnr, 0);
-            if cert.is_null() || (*cert).pCert.is_null() {
-                return Err("no signer certificate".into());
-            }
-            let context = (*cert).pCert;
-            let mut name = [0u16; 256];
-            let len = CertGetNameStringW(
-                context,
-                CERT_NAME_SIMPLE_DISPLAY_TYPE,
-                0,
-                None,
-                Some(&mut name),
-            ) as usize;
-            let subject = String::from_utf16_lossy(&name[..len.saturating_sub(1)]);
-            let mut hash = [0u8; 20];
-            let mut hash_len = hash.len() as u32;
-            CertGetCertificateContextProperty(
-                context,
-                CERT_SHA1_HASH_PROP_ID,
-                Some(hash.as_mut_ptr().cast()),
-                &mut hash_len,
-            )
-            .map_err(|e| format!("certificate thumbprint: {e}"))?;
-            let thumbprint = hash[..hash_len as usize]
-                .iter()
-                .map(|b| format!("{b:02X}"))
-                .collect();
-            Ok(Signer {
-                subject,
-                thumbprint,
-            })
-        }
-    })();
-
-    data.dwStateAction = WTD_STATEACTION_CLOSE;
-    // SAFETY: closes the state opened above.
-    unsafe {
-        WinVerifyTrust(
-            HWND(-1isize as *mut _),
-            &mut action,
-            (&mut data as *mut WINTRUST_DATA).cast(),
-        );
-    }
-    signer
-}
-
 /// Open `path` with read-only sharing and read it whole.
 fn open_locked(path: &Path) -> Result<(File, Vec<u8>), String> {
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .share_mode(FILE_SHARE_READ)
-        .open(path)
-        .map_err(|e| format!("open {}: {e}", path.display()))?;
+    let mut file = open_read_shared(path)?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
         .map_err(|e| format!("read {}: {e}", path.display()))?;
@@ -446,6 +322,7 @@ mod tests {
         Signer {
             subject: lock().signer_subject.clone(),
             thumbprint: "cd".repeat(20),
+            ..Signer::default()
         }
     }
 

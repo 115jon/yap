@@ -187,7 +187,9 @@ jobs:
           RALPH_GAME_CAPTURE_HOOK: "1"
         # Unit tests for the lock, the runtime WinVerifyTrust/SHA-256 check
         # against the fetched files, the flavor policy, and the stock-hook pacer.
-        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --features cef,native-screen-share,game-capture-hook --lib -- signed_hook hook_policy timer_pacing vulkan_layer
+        # Also the native handoff (its rules, the Setup checks, the marker) and
+        # the shared Authenticode reader.
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --features cef,native-screen-share,game-capture-hook --lib -- signed_hook hook_policy timer_pacing vulkan_layer native_handoff authenticode
 
   # The root Yap.exe launcher stub (desktop/launcher). Standalone crate
   # with no Tauri or CEF dependencies, so it needs none of the desktop job's setup.
