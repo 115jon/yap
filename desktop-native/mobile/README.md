@@ -139,8 +139,8 @@ both apps alike; compare them with each other, not with a phone.
 | Snapshot read (cached content)     | 222–280 ms                                                                  | 7–75 ms                                                                                 |
 | Scrolling `#general` (24 flings)   | 751 frames; jank 6.4%; frame time p50 18 ms, p90 23 ms, p95 32 ms (gfxinfo) | about 1,460 frames; swap interval p50 16.6 ms, p95 18–19 ms; 8 frames over 34 ms (0.5%) |
 | Memory after scrolling (PSS)       | 60 MB                                                                       | 148 MB (87 MB before opening the channel)                                               |
-| APK, x86_64                        | 19.5 MB (12.6 MB gzipped), R8 off                                           | 61.4 MB                                                                                 |
-| APK, arm64                         | core 8.7 MB (4.0 MB gzipped) plus Compose; about 12 MB gzipped              | **58.4 MB, 21.2 MB gzipped** (native libraries 13.4 MB xz)                              |
+| APK, x86_64                        | 19.5 MB (12.6 MB gzipped), R8 off                                           | 57.1 MB                                                                                 |
+| APK, arm64                         | core 8.7 MB (4.0 MB gzipped) plus Compose; about 12 MB gzipped              | **55.7 MB, 20.5 MB gzipped** (was 61.5 MB, 22.3 MB; "Size" below)                       |
 
 The two scroll columns measure different things. gfxinfo times each
 frame's work on the UI and render threads; Qt's column is the interval
@@ -215,8 +215,9 @@ What made the difference:
 - **R8** (`qt/android/build.gradle`, Qt 6.11's template plus a release
   `minifyEnabled`/`shrinkResources`; `proguard-rules.pro` keeps
   `org.qtproject.qt.android.**` and `dev.yap.**`, which C++ reaches over
-  JNI by name): the dex was mostly Kotlin, kotlinx coroutines and AndroidX
-  that `androidx.core` pulls in. 5.3 MB to 0.27 MB.
+  JNI by name, and the AndroidX font and `FileProvider` calls Qt's platform
+  plugin makes the same way): the dex was mostly Kotlin, kotlinx coroutines
+  and AndroidX that `androidx.core` pulls in. 5.3 MB to 0.30 MB.
 - **Two plugins dropped** (`qt_import_plugins(... EXCLUDE ...)`): the
   offscreen platform plugin and the OpenSSL TLS backend (Qt for Android
   ships no libssl, so it never loaded). 0.4 MB.
@@ -339,8 +340,10 @@ the APK until `android-build/libs` is cleared.
 
 Packaging, from CMake cache variables: `YAP_ANDROID_APP_ID` (default
 `dev.yap.qtproto`; also the Gradle namespace and the iOS bundle id),
-`YAP_ANDROID_VERSION_CODE` (1) and `YAP_ANDROID_VERSION_NAME` (0.1.0). The
-manifest has no `package` attribute. The launcher icon is adaptive, with a
+`YAP_ANDROID_VERSION_CODE` (1) and `YAP_ANDROID_VERSION_NAME` (0.1.0);
+`YAP_ANDROID_COMPILE_SDK` and `YAP_ANDROID_BUILD_TOOLS` pin the SDK
+platform and build tools (default: the newest installed). The manifest has
+no `package` attribute. The launcher icon is adaptive, with a
 monochrome layer for themed icons; the splash is ply-0 (light `#f4f4f5`,
 dark `#000000`) with the mark: the system splash on Android 12+, the
 window background before, then Qt's sticky splash, which `main.cpp` fades
