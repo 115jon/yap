@@ -286,6 +286,9 @@ QtObject {
     // "wave"}`) that every DisplayName wears instead of its owner's, so
     // each effect can be seen in every surface without saving a profile.
     property string testNameStyle: ""
+    // YAP_TEST_OPEN_PROFILE (set by main.cpp, tests only): a user id, or
+    // `me`, whose full profile opens once the shell is ready.
+    property string testOpenProfile: ""
     // Copy image (ImageViewerToolbar.tsx handleCopyImage: the file itself,
     // fetched, onto the clipboard). ChatView downloads it with the session
     // into the copy cache and its `saved` handler puts it on the clipboard

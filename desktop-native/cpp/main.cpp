@@ -946,6 +946,9 @@ int main(int argc, char* argv[])
     // style locally (`{"font","effect","primary","secondary","wave"}`, the
     // shape the views carry); nothing is saved.
     state->setProperty("testNameStyle", qEnvironmentVariable("YAP_TEST_NAME_STYLE"));
+    // YAP_TEST_OPEN_PROFILE=<user id>|me (tests): the full profile opens on
+    // that user once signed in, as a click on their name would.
+    state->setProperty("testOpenProfile", qEnvironmentVariable("YAP_TEST_OPEN_PROFILE"));
   }
 
   engine.loadFromModule("com.yap.native", "Main");
