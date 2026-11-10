@@ -55,7 +55,22 @@ case "$(uname -s)" in
     printf '#!/bin/sh\nexec "%s/bin/qmake" -qtconf "$(dirname "$0")/target_qt.conf" "$@"\n' "$host" >"$qt/bin/qmake"
     cp "$qt/bin/qmake" "$qt/bin/qmake6"
     chmod +x "$qt/bin/qmake" "$qt/bin/qmake6"
-    host_libexec=libexec
+    # The host's tools for cxx-qt-build (moc, rcc, qmlcachegen, ...), through
+    # wrappers: download.qt.io's desktop rcc compresses with zstd by default,
+    # which Qt for Android cannot read (QT_FEATURE_zstd off; the link fails
+    # on qt_resourceFeatureZstd). CMake's own rcc calls already pass
+    # --no-zstd for such a target.
+    host_libexec="$qt/yap-host-libexec"
+    rm -rf "$host_libexec"
+    mkdir -p "$host_libexec"
+    for tool in "$host"/libexec/*; do
+      [[ -f "$tool" && -x "$tool" ]] || continue
+      name="$(basename "$tool")"
+      extra=""
+      [[ "$name" == rcc ]] && extra=" --no-zstd"
+      printf '#!/bin/sh\nexec "%s"%s "$@"\n' "$tool" "$extra" >"$host_libexec/$name"
+      chmod +x "$host_libexec/$name"
+    done
     host_spec="$("$host/bin/qmake" -query QMAKE_SPEC)"
     ;;
 esac
