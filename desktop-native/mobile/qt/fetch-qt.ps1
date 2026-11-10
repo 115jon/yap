@@ -80,12 +80,14 @@ $sevenZip = foreach ($name in "7z", "7zz", "7za") {
 if (-not $sevenZip -and $IsWindows -and (Test-Path "$env:ProgramFiles\7-Zip\7z.exe")) { $sevenZip = "$env:ProgramFiles\7-Zip\7z.exe" }
 if (-not $sevenZip) { throw "7-Zip not found (7z, 7zz or 7za on PATH)" }
 # Qt's Linux and macOS archives chain symbolic links (libQt6DBus.so ->
-# libQt6DBus.so.6 -> ...), which 7-Zip 21 and later skip as "dangerous"
-# unless told otherwise (-snld). p7zip 16 restores them without the switch,
-# and does not know it.
+# libQt6DBus.so.6 -> ...), which 7-Zip 25 and later refuse as "dangerous
+# links" unless told otherwise (-snld20). Older 7-Zip and p7zip restore
+# them without the switch, and do not know it.
 $sevenZipArgs = @()
 $banner = (& $sevenZip 2>&1 | Select-Object -First 4) -join "`n"
-if ($banner -match '7-Zip(?: \(\w\))? (\d+)\.' -and [int]$Matches[1] -ge 21) { $sevenZipArgs += "-snld" }
+if ($banner -match '7-Zip(?: \(\w\))? (\d+)\.' -and [int]$Matches[1] -ge 25) { $sevenZipArgs += "-snld20" }
+$version = ($banner -split "`n" | Where-Object { $_ -match '7-Zip' } | Select-Object -First 1)
+Write-Host "==> $sevenZip $(if ($version) { "[$($version.Trim())]" }) $sevenZipArgs"
 
 function Get-Sha256($path) { (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant() }
 
