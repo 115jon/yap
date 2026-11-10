@@ -53,7 +53,12 @@ if ($Refresh) {
                 $sha = ((Invoke-WebRequest -Uri "$url.sha256").Content.ToString().Trim() -split '\s+')[0].ToLowerInvariant()
                 if ($sha -notmatch '^[0-9a-f]{64}$') { throw "$url.sha256: unreadable" }
                 Write-Host "    $module  $sha"
-                $archives.Add([ordered]@{ url = $url; sha256 = $sha })
+                $entry = [ordered]@{ url = $url; sha256 = $sha }
+                # Most archives unpack at the prefix; some (ICU on Linux)
+                # into a folder under it, as the package's Extract says.
+                $extract = @($pkg.Operations.Operation | Where-Object { $_.name -eq 'Extract' -and $_.Argument[1] -eq $file })
+                if ($extract -and $extract[0].Argument[0] -match '^@TargetDir@/[^/]+/[^/]+/(.+)$') { $entry.subdir = $Matches[1] }
+                $archives.Add($entry)
             }
         }
         if (-not $archives.Count) { throw "$($prop.Name): no archives of the lock's modules" }
@@ -97,7 +102,7 @@ foreach ($name in $Set) {
     $s = $s.Value
     $prefix = Join-Path $Dest $s.dir
     # The stamp is the set's archive list: a re-pinned lock unpacks afresh.
-    $want = ($s.archives | ForEach-Object { "$($_.sha256) $($_.url)" }) -join "`n"
+    $want = ($s.archives | ForEach-Object { "$($_.sha256) $($_.url) $($_.PSObject.Properties['subdir'].Value)" }) -join "`n"
     $stamp = Join-Path $prefix ".qt-sdk-lock"
     if ((Test-Path $stamp) -and ((Get-Content -Raw $stamp) -eq $want)) {
         Write-Host "==> $name already unpacked in $prefix"
@@ -121,7 +126,9 @@ foreach ($name in $Set) {
                 throw "$($a.url): SHA-256 $got, the lock says $($a.sha256)"
             }
         }
-        & $sevenZip x -y -bso0 -bsp0 @sevenZipArgs "-o$prefix" $file
+        $into = $prefix
+        if ($a.PSObject.Properties['subdir']) { $into = Join-Path $prefix $a.subdir }
+        & $sevenZip x -y -bso0 -bsp0 @sevenZipArgs "-o$into" $file
         if ($LASTEXITCODE) { throw "7z x $file failed ($LASTEXITCODE)" }
     }
     if (-not (Test-Path (Join-Path $prefix "lib/cmake/Qt6/Qt6Config.cmake"))) { throw "$name unpacked without lib/cmake/Qt6" }
