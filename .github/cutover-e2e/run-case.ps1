@@ -66,11 +66,13 @@ $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $SchemeCommandKey = 'HKCU:\Software\Classes\yap\shell\open\command'
 
 $BridgeVersion = $BridgeTag.TrimStart('v')
-$NativeVersion = ($NativeTag -replace '^desktop-native-v', '')
-# The override's tag must be vX.Y.Z with X >= 4 (policy::accept); the native
-# 0.A.B release stands in as v4.A.B.
+# desktop-native-vX.Y.Z (before 4.0.0) or release-please's vX.Y.Z (4.0.0 on).
+$NativeVersion = ($NativeTag -replace '^(desktop-native-)?v', '')
+# The override's tag must be vX.Y.Z with X >= 4 (policy::accept): a v4+
+# release is itself, a native 0.A.B release stands in as v4.A.B.
 $nv = $NativeVersion.Split('.')
-$OverrideTag = "v4.$($nv[1]).$($nv[2])"
+$NativeMajor = [int]$nv[0]
+$OverrideTag = if ($NativeMajor -ge 4) { "v$NativeVersion" } else { "v4.$($nv[1]).$($nv[2])" }
 $OverrideVersion = $OverrideTag.TrimStart('v')
 
 $SignerName = 'Jonathan Martinez'
@@ -563,13 +565,13 @@ function Assert-Cutover([object] $run) {
   $runValue = Get-RegValue $RunKey 'Yap'
   $runOk = "$runValue" -like "*\Yap.App\*"
   $runDetail = "Run\Yap -> $runValue (Run key present before seeding: $($script:RunKeyBefore), as the bridge started: $($script:RunKeyAtBridge))"
-  if ($Case -eq 'native-installed' -and -not $runOk -and -not $script:RunKeyAtBridge) {
-    # KNOWN NATIVE BUG: DesktopShell::setAutostart (desktop-native/cpp/
-    # desktopshell.cpp) opens the Run key with RegOpenKeyExW, which fails
-    # when the key does not exist, and returns without a log line, so open
-    # on startup is never written there. Make this a hard check once it
-    # creates the key (RegCreateKeyExW, as the Tauri app does).
-    Check 'run-value-to-native' $false "KNOWN BUG (native setAutostart cannot create a missing Run key): $runDetail" -Soft
+  if ($Case -eq 'native-installed' -and -not $runOk -and -not $script:RunKeyAtBridge -and $NativeMajor -lt 4) {
+    # KNOWN BUG in native releases before 4.0.0: DesktopShell::setAutostart
+    # (desktop-native/cpp/desktopshell.cpp) opened the Run key with
+    # RegOpenKeyExW, which fails when the key does not exist, so open on
+    # startup was never written there. 4.0.0 creates the key
+    # (RegCreateKeyExW), so from 4.0.0 this is the hard check below.
+    Check 'run-value-to-native' $false "KNOWN BUG before 4.0.0 (native setAutostart cannot create a missing Run key): $runDetail" -Soft
   }
   else {
     Check 'run-value-to-native' $runOk $runDetail

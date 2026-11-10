@@ -303,8 +303,11 @@ version gets a release page. What that costs, and how it is handled:
   is deleted or made a draft, and that can be a release without
   `latest.json` (on 2026-11-10, while 3.14.0 was a draft,
   `desktop-native-v0.2.26` was latest). release-please's draft makes this
-  happen during every release run; it ends when the run publishes. If
-  it lasts, mark a good release latest by hand
+  happen during every release run, so `release-please.yml` records latest
+  before it creates the release and, right after making it a draft, marks
+  that one latest again if it serves the bridge's `latest.json` (the bridge
+  itself, or a v4+ carrying the same bytes), otherwise the bridge. If
+  latest still ends up wrong, mark a good release latest by hand
   (`gh release edit <tag> --latest`). The watchdog below reports it.
 - **The API rate limit**: 60 unauthenticated requests an hour per IP. One
   call per check, a check every 6 h, retries backing off to an hour; a
@@ -329,7 +332,10 @@ native update.
    (`release-please-config.json`, extra-files), and `release-please.yml`
    then sets the workspace crates' versions in `rust/Cargo.lock` on the
    PR's branch (`tools/sync-cargo-lock-version.mjs`: the members' entries
-   only, never the `[patch]` crates; the build runs `--locked`).
+   only, never the `[patch]` crates; the build runs `--locked`), with
+   `main`'s copy of the script, pushing with the PAT so CI runs again.
+   `ci.yml`'s `quality` job (under `required`) runs the script with
+   `--check`, so a release PR whose lock is stale cannot merge.
 2. On the merge, `release-please.yml` creates the release and tag
    `vx.y.z`, makes it a draft, and calls
    `desktop-native-release.yml` with `release_tag` ("CI" below).
@@ -347,8 +353,10 @@ native update.
    latest is the new tag, that `releases/latest/download/latest.json` is
    the bridge's file byte for byte, and that `latest/download/` serves
    `Yap.App-win-Setup.exe`, `YapSetup.exe` and `releases.win.json`. Any
-   failure fails the run. `release-watchdog.yml` repeats the check daily
-   and opens (or comments on) an issue labelled `release-watchdog`.
+   failure fails the run. `release-watchdog.yml` repeats the check daily,
+   also reports a `vx.y.z` draft older than 6 hours (a release run that
+   never published), and opens (or comments on) an issue labelled
+   `release-watchdog`.
 5. Check: an installed copy finds the version ("Check for updates").
 
 The bridge tag is `packaging/tauri-bridge.json`'s `tag` (`v3.14.0`). The
@@ -365,9 +373,10 @@ does not matter, and the Tauri updater never fetches it from a v4 release
 
 **`release-as`**: `release-please-config.json` pins the first native
 version with `"release-as": "4.0.0"`. Remove it in the first PR after
-4.0.0 is released: until then release-please would propose 4.0.0 again,
-so `release-please.yml` fails its release-pr job once `v4.0.0` exists and
-the pin is still there. A `Release-As: 4.0.0` commit footer was not used:
+4.0.0 is released: until then release-please would propose 4.0.0 again.
+On the run that creates `v4.0.0`, `release-please.yml` warns and skips the
+release PR; on any later run with the pin still there, its release-pr job
+fails. A `Release-As: 4.0.0` commit footer was not used:
 it only works in a conventional commit that reaches `main` with its body
 intact, which depends on how the PR is merged.
 

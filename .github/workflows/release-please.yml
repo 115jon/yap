@@ -27,7 +27,16 @@ jobs:
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
     steps:
+      # Which release Tauri installs read latest.json from right now, so it
+      # can be put back while the new release is a draft (below).
+      - name: Record the latest release
+        id: before
+        run: echo "tag=$(gh api "repos/$REPO/releases/latest" --jq .tag_name 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub release for a merged release PR
         id: release
         # googleapis/release-please-action v4.4.1
@@ -39,10 +48,51 @@ jobs:
       - name: Mark Release as Draft
         if: ${{ steps.release.outputs.releases_created == 'true' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag_name }}
         run: |
           # Hide the release until the desktop job uploads the installer and publishes it.
-          gh release edit ${{ steps.release.outputs.tag_name }} --draft=true -R ${{ github.repository }}
+          gh release edit "$TAG" --draft=true -R "$REPO"
+
+      # Making the new release a draft lets GitHub pick a new latest by date,
+      # which can be a release without latest.json (desktop-native-v*), so
+      # Tauri installs would get a 404 until the desktop job publishes. Put
+      # latest back on the release from before if it serves the Tauri
+      # bridge's latest.json (the bridge itself, or a v4+ carrying the same
+      # bytes), otherwise on the bridge. Never fails the job: the desktop job
+      # must still run.
+      - name: Checkout the bridge config
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: desktop-native/packaging/tauri-bridge.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Keep latest on a release that serves the bridge
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        env:
+          TAG: ${{ steps.release.outputs.tag_name }}
+          PREVIOUS: ${{ steps.before.outputs.tag }}
+          BRIDGE_TAG: ${{ vars.TAURI_BRIDGE_TAG }}
+        run: |
+          bridge=${BRIDGE_TAG:-$(jq -r .tag desktop-native/packaging/tauri-bridge.json)}
+          pick=$bridge
+          if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$TAG" ] && [ "$PREVIOUS" != "$bridge" ] &&
+            [[ "$PREVIOUS" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]] && [ "${BASH_REMATCH[1]}" -ge 4 ]; then
+            mkdir -p "$RUNNER_TEMP/prev" "$RUNNER_TEMP/bridge"
+            if gh release download "$PREVIOUS" -R "$REPO" -p latest.json -D "$RUNNER_TEMP/prev" &&
+              gh release download "$bridge" -R "$REPO" -p latest.json -D "$RUNNER_TEMP/bridge" &&
+              cmp -s "$RUNNER_TEMP/prev/latest.json" "$RUNNER_TEMP/bridge/latest.json"; then
+              pick=$PREVIOUS
+            else
+              echo "::warning::$PREVIOUS does not serve $bridge's latest.json; using $bridge."
+            fi
+          fi
+          if gh release edit "$pick" --latest -R "$REPO"; then
+            echo "latest: $pick (was ${PREVIOUS:-unknown}) while $TAG is a draft"
+          else
+            echo "::warning::Could not mark $pick latest; Tauri installs may get no latest.json until $TAG is published."
+          fi
 
   # The native app (desktop-native/) is the desktop release from 4.0.0. The
   # Tauri app's desktop-release.yml is no longer called here; it stays
@@ -57,38 +107,54 @@ jobs:
       id-token: write
     # Called directly instead of relying on the tag push, so the build runs
     # whichever token created the tag, signs under this run's refs/heads/main
-    # OIDC subject, and saves its caches on main.
+    # OIDC subject, and saves its caches on main. No secrets: the native
+    # workflow uses github.token, OIDC and repository variables only.
     uses: ./.github/workflows/desktop-native-release.yml
     with:
       release_tag: ${{ needs.release.outputs.tag_name }}
-    secrets: inherit
 
   release-pr:
     name: release-pr
     needs: release
     runs-on: ubuntu-latest
+    env:
+      REPO: ${{ github.repository }}
     steps:
+      # main's tree, without stored credentials: the PAT goes only to the
+      # release-please step and the one push below.
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          # The PAT, so the Cargo.lock push below triggers CI on the release PR.
-          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
+          persist-credentials: false
 
       # release-please-config.json's release-as pins the next version (4.0.0
       # for the native cutover) and keeps proposing it until it is removed.
-      # Once that version is tagged, stop here rather than open a second
-      # release PR for it.
+      # On the run that creates that release, warn and skip the release PR
+      # (it would be a second PR for the same version); on any later run,
+      # fail.
       - name: Check release-as
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASED: ${{ needs.release.outputs.releases_created }}
         run: |
           pinned=$(jq -r '.packages["."]["release-as"] // empty' release-please-config.json)
-          if [ -n "$pinned" ] && git ls-remote --exit-code --tags origin "refs/tags/v$pinned" >/dev/null; then
-            echo "::error file=release-please-config.json::v$pinned is tagged, but release-please-config.json still has \"release-as\": \"$pinned\". Remove it so the next release PR uses conventional commits."
+          if [ -n "$pinned" ] && gh api "repos/$REPO/git/ref/tags/v$pinned" >/dev/null 2>&1; then
+            msg="v$pinned is tagged, but release-please-config.json still has \"release-as\": \"$pinned\". Remove it so the next release PR uses conventional commits."
+            if [ "$RELEASED" = "true" ]; then
+              echo "::warning file=release-please-config.json::$msg The release PR is skipped until then."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error file=release-please-config.json::$msg"
             exit 1
           fi
           echo "release-as: ${pinned:-none}"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Open or update the release PR
+        id: rp
+        if: ${{ steps.guard.outputs.skip != 'true' }}
         # googleapis/release-please-action v4.4.1
         uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071
         with:
@@ -100,28 +166,56 @@ jobs:
       # release-please bumps desktop-native/rust/Cargo.toml's
       # [workspace.package] version but not Cargo.lock, and the native
       # release builds with --locked. Sync the workspace crates' lock entries
-      # on the release PR's branch. release-please rebuilds that branch from
-      # main whenever the PR changes, so this runs every time; it commits only
-      # when the lock is out of date, and never force-pushes.
+      # on the release PR's branch, with main's copy of the script.
+      # release-please rebuilds that branch from main whenever the PR
+      # changes, so this runs every time; it commits only when the lock is out
+      # of date, and never force-pushes. The PR comes from the action's output
+      # and the pulls REST API (not `gh pr list`, whose search index can miss
+      # a PR made seconds ago), same-repo release-please--* branches only.
+      # ci.yml checks the lock too, so a stale one cannot merge.
       - name: Sync desktop-native Cargo.lock on the release PR
+        if: ${{ steps.guard.outputs.skip != 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          # The PAT, so the push triggers CI on the release PR. Only the push
+          # uses it.
+          PUSH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          PRS_CREATED: ${{ steps.rp.outputs.prs_created }}
+          PRS: ${{ steps.rp.outputs.prs }}
         run: |
-          branches=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \
-            --label "autorelease: pending" --json headRefName --jq '.[].headRefName')
-          if [ -z "$branches" ]; then echo "No open release PR."; exit 0; fi
+          script="$RUNNER_TEMP/sync-cargo-lock-version.mjs"
+          cp desktop-native/tools/sync-cargo-lock-version.mjs "$script"
+          auth() { printf 'http.https://github.com/.extraheader=AUTHORIZATION: basic %s' "$(printf 'x-access-token:%s' "$1" | base64 -w0)"; }
+
+          reported=$(jq -r '.[]?.headBranchName // empty' <<<"${PRS:-[]}")
+          listed=""
+          for attempt in 1 2 3 4 5; do
+            listed=$(gh api --paginate "repos/$REPO/pulls?state=open&base=main&per_page=100" \
+              --jq '.[] | select(.head.repo.full_name == $ENV.REPO and (.head.ref | startswith("release-please--")) and any(.labels[]; .name == "autorelease: pending")) | .head.ref')
+            if [ -n "$listed" ] || [ "$PRS_CREATED" != "true" ] || [ "$attempt" = 5 ]; then break; fi
+            sleep $((attempt * 5))
+          done
+          branches=$(printf '%s\n%s\n' "$reported" "$listed" | grep '^release-please--' | sort -u || true)
+          if [ -z "$branches" ]; then
+            if [ "$PRS_CREATED" = "true" ]; then
+              echo "::error::release-please reported a release PR, but no open same-repo release-please--* PR was found (reported: ${reported:-none})."
+              exit 1
+            fi
+            echo "No open release PR."
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           for branch in $branches; do
             echo "==> $branch"
-            git fetch --no-tags origin "refs/heads/$branch"
+            git -c "$(auth "$GH_TOKEN")" fetch --no-tags origin "refs/heads/$branch"
             git checkout --quiet --detach FETCH_HEAD
-            node desktop-native/tools/sync-cargo-lock-version.mjs
+            node "$script" desktop-native/rust
             if git diff --quiet -- desktop-native/rust/Cargo.lock; then
               echo "Cargo.lock is in sync on $branch."
               continue
             fi
             git add desktop-native/rust/Cargo.lock
             git commit --quiet -m "chore(release): sync desktop-native Cargo.lock"
-            git push origin "HEAD:refs/heads/$branch"
+            git -c "$(auth "$PUSH_TOKEN")" push origin "HEAD:refs/heads/$branch"
           done

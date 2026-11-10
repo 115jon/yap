@@ -26,7 +26,7 @@ on:
         description: "The Tauri release with the bridge (its YapSetup.exe is the update)"
         default: "v3.14.0"
       native_tag:
-        description: "The native release (desktop-native-v*); empty: the newest"
+        description: "The native release (v4+ or desktop-native-v*); empty: the highest stable v4+ with Yap.App-win-Setup.exe, else the newest desktop-native-v*"
         default: ""
       cases:
         description: "Comma-separated cases; empty: all"
@@ -66,10 +66,23 @@ jobs:
           [ "$(jq -r .draft <<<"$bridge")" = false ] || { echo "::error::$BRIDGE_TAG is a draft"; exit 1; }
           jq -e '.assets[] | select(.name == "YapSetup.exe")' <<<"$bridge" >/dev/null || { echo "::error::$BRIDGE_TAG has no YapSetup.exe"; exit 1; }
           if [ -z "$NATIVE_TAG" ]; then
-            NATIVE_TAG=$(gh api "repos/$REPO/releases?per_page=100" --jq '[.[] | select(.draft == false and .prerelease == false and (.tag_name | startswith("desktop-native-v")))] | sort_by(.tag_name | ltrimstr("desktop-native-v") | split(".") | map(tonumber)) | last | .tag_name')
+            # Every page: the native release can be older than the newest 100.
+            releases=$(gh api --paginate "repos/$REPO/releases?per_page=100" --jq '.[] | select(.draft == false and .prerelease == false) | {tag: .tag_name, setup: ([.assets[].name] | index("Yap.App-win-Setup.exe") != null)}' | jq -s .)
+            # From 4.0.0 native releases are release-please's vX.Y.Z; before,
+            # desktop-native-vX.Y.Z.
+            NATIVE_TAG=$(jq -r '[.[] | select(.setup and (.tag | test("^v[0-9]+[.][0-9]+[.][0-9]+$"))) | . + {v: (.tag | ltrimstr("v") | split(".") | map(tonumber))} | select(.v[0] >= 4)] | sort_by(.v) | last | .tag // empty' <<<"$releases")
+            if [ -z "$NATIVE_TAG" ]; then
+              NATIVE_TAG=$(jq -r '[.[] | select(.setup and (.tag | test("^desktop-native-v[0-9]+[.][0-9]+[.][0-9]+$"))) | . + {v: (.tag | ltrimstr("desktop-native-v") | split(".") | map(tonumber))}] | sort_by(.v) | last | .tag // empty' <<<"$releases")
+            fi
+            [ -n "$NATIVE_TAG" ] || { echo "::error::No stable native release with Yap.App-win-Setup.exe"; exit 1; }
           fi
           gh api "repos/$REPO/releases/tags/$NATIVE_TAG" --jq '.assets[] | select(.name == "Yap.App-win-Setup.exe") | .name' | grep -q . || { echo "::error::$NATIVE_TAG has no Yap.App-win-Setup.exe"; exit 1; }
           latest=$(gh api "repos/$REPO/releases/latest" --jq .tag_name)
+          # The 3.13 app's own updater reaches the bridge when latest.json
+          # (whichever release is latest: the bridge, or a v4 carrying its
+          # file) names the bridge's version.
+          served=$(curl -fsSL --retry 3 "https://github.com/$REPO/releases/latest/download/latest.json" | jq -r '.version // empty' 2>/dev/null || true)
+          bridge_is_latest=$([ "$served" = "${BRIDGE_TAG#v}" ] && echo true || echo false)
           all='["happy","rerun","native-installed","tampered","unsigned","switch-off"]'
           if [ -n "$CASES" ]; then
             all=$(jq -cn --arg c "$CASES" '$c | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
@@ -77,11 +90,11 @@ jobs:
           {
             echo "bridge_tag=$BRIDGE_TAG"
             echo "native_tag=$NATIVE_TAG"
-            echo "bridge_is_latest=$([ "$latest" = "$BRIDGE_TAG" ] && echo true || echo false)"
+            echo "bridge_is_latest=$bridge_is_latest"
             echo "matrix=$(jq -cn --argjson c "$all" '{os: ["windows-2025", "windows-2022"], case: $c}')"
           } >> "$GITHUB_OUTPUT"
           {
-            echo "bridge **$BRIDGE_TAG**, native **$NATIVE_TAG**, from **$OLD_TAG**; latest release: $latest"
+            echo "bridge **$BRIDGE_TAG**, native **$NATIVE_TAG**, from **$OLD_TAG**; latest release: $latest (latest.json version: ${served:-none})"
             echo "cases: $all"
           } >> "$GITHUB_STEP_SUMMARY"
 
