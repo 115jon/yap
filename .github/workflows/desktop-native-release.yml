@@ -4,43 +4,67 @@ name: "Desktop Native Release"
 # Velopack and publishes it as a GitHub release that the in-app updater reads
 # (desktop-native/docs/INSTALLER.md, "Updates" and "Publishing a release").
 #
-# Manual only. Tags are desktop-native-v<version>: never v*, which belong to
-# the web app's release-please releases. Every native release is published
-# with make_latest=false, because the Tauri app's updater reads
-# releases/latest/download/latest.json.
+# Two modes:
+#
+# - Release (release_tag set): the stable release of the release-please line.
+#   release-please.yml creates v<x.y.z> (x >= 4), marks it a draft and calls
+#   this workflow with release_tag. The run builds that tag, uploads into the
+#   existing draft (release-please's changelog is the release notes), carries
+#   the Tauri bridge's latest.json (desktop-native/packaging/tauri-bridge.json,
+#   repo variable TAURI_BRIDGE_TAG) so Tauri installs still find the bridge,
+#   and publishes it as GitHub's "latest". A manual dispatch with release_tag
+#   rebuilds a release whose call failed (it must still be a draft).
+# - Manual (no release_tag, dispatch only): betas, tagged
+#   desktop-native-v<x.y.z-pre> (a pre-release, never latest), and stable
+#   desktop-native-v0.x builds from before the cutover (make_latest=false).
+#   From 4.0.0 a stable release comes only from release-please: v* tags and
+#   the version line are release-please's, and a manual vX.Y.Z would take a
+#   version its next release PR proposes.
 #
 # Signing uses the OIDC federated credentials on AZURE_CLIENT_ID, which
-# trust refs/heads/main and v* tags only: a signed release must be
-# dispatched from main. dry_run skips signing (so it works from any branch)
-# and leaves the release as a draft, which never creates the tag.
+# trust refs/heads/main and v* tags only. The OIDC subject is the ref the run
+# starts from: main for release-please.yml's call and for a dispatch from
+# main. dry_run skips signing (so it works from any branch) and leaves the
+# release as a draft, which never creates the tag.
 #
 # Toolchain: the static, patched Qt 6.11.3 and LiveKit's libwebrtc come from
 # the release named in desktop-native/tools/toolchain.lock.json
 # (tools/package-toolchain.ps1 makes it; tools/fetch-toolchain.ps1 checks
 # and unpacks it).
 on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: "The release-please tag to build and publish (v4.0.0 or later); its release must be a draft"
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: "Rebuild a release-please release whose run failed: its tag (v4.0.0 or later; the release must still be a draft). Set, the other inputs are ignored."
+        required: false
+        default: ""
+        type: string
       version:
-        description: "Version, e.g. 0.2.24 (win) or 0.2.25-beta.1 (beta). Its x.y.z must equal [workspace.package] in desktop-native/rust/Cargo.toml. Empty: that version."
+        description: "Manual: version, e.g. 4.1.0-beta.1 (beta) or 0.2.27 (pre-4.0 stable). Its x.y.z must equal [workspace.package] in desktop-native/rust/Cargo.toml. Empty: that version."
         required: false
         default: ""
         type: string
       channel:
-        description: "Update channel: win (stable) or beta"
+        description: "Manual: update channel, beta, or win (stable; before 4.0.0 only)"
         required: true
-        default: win
+        default: beta
         type: choice
         options:
           - win
           - beta
       notes:
-        description: "Release notes (Markdown; shown in Settings > Desktop app). Empty: a default line."
+        description: "Manual: release notes (Markdown; shown in Settings > Desktop app). Empty: a default line."
         required: false
         default: ""
         type: string
       dry_run:
-        description: "Dry run: no signing, publish only a draft release (any branch)"
+        description: "Manual: dry run, no signing, publish only a draft release (any branch)"
         required: false
         default: false
         type: boolean
@@ -60,60 +84,126 @@ env:
   # Signer common name on the Artifact Signing public-trust certificate.
   ARTIFACT_SIGNING_SIGNER: "Jonathan Martinez"
   PACK_ID: Yap.App
+  # Manual releases; release mode publishes release-please's v<x.y.z>.
   TAG_PREFIX: desktop-native-v
 
 jobs:
   # Checks the inputs and works out the version and tag; no build yet.
   plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    permissions:
+      # Write only so the release list includes drafts (release-please's
+      # draft in release mode, a dry run's in manual mode); this job runs
+      # only this repository's scripts.
+      contents: write
     outputs:
+      mode: ${{ steps.plan.outputs.mode }}
       version: ${{ steps.plan.outputs.version }}
       tag: ${{ steps.plan.outputs.tag }}
       prerelease: ${{ steps.plan.outputs.prerelease }}
       channel: ${{ steps.plan.outputs.channel }}
       dry_run: ${{ steps.plan.outputs.dry_run }}
     steps:
+      # Release mode builds the tag release-please made; manual runs the
+      # commit they were started on.
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
 
       - name: Plan the release
         id: plan
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_CHANNEL: ${{ inputs.channel || 'win' }}
-          # Anything but a manual run is a dry run.
-          DRY_RUN: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run || false }}
+          EVENT_NAME: ${{ github.event_name }}
+          GIT_REF: ${{ github.ref }}
+          REPO: ${{ github.repository }}
         run: |
           $cargo = Get-Content -Raw desktop-native/rust/Cargo.toml
           $base = [regex]::Match($cargo, '(?m)^version = "(\d+\.\d+\.\d+)"').Groups[1].Value
           if (-not $base) { throw "No [workspace.package] version in desktop-native/rust/Cargo.toml" }
-          $version = if ($env:INPUT_VERSION) { $env:INPUT_VERSION.Trim() } else { $base }
-          $m = [regex]::Match($version, '^(\d+\.\d+\.\d+)(-[0-9A-Za-z.-]+)?$')
-          if (-not $m.Success) { throw "Version '$version' is not x.y.z or x.y.z-pre" }
-          if ($m.Groups[1].Value -ne $base) {
-            throw "Version $version does not match Cargo.toml's $base (the exe embeds Cargo.toml's version); bump it first."
-          }
-          $pre = $m.Groups[2].Success
-          if ($env:INPUT_CHANNEL -eq "win" -and $pre) { throw "The win channel takes a plain x.y.z; use beta for $version." }
-          if ($env:INPUT_CHANNEL -eq "beta" -and -not $pre) { throw "The beta channel takes a pre-release version (x.y.z-beta.N)." }
-          if ($env:DRY_RUN -ne "true" -and "${{ github.ref }}" -ne "refs/heads/main") {
-            throw "A signed release must run from main (the Artifact Signing credential trusts main and v* tags only). Use dry_run elsewhere."
-          }
-          $tag = "$env:TAG_PREFIX$version"
-          $existing = gh api "repos/${{ github.repository }}/releases?per_page=100" --paginate --jq '.[].tag_name'
+          $releases = @(gh api "repos/$env:REPO/releases?per_page=100" --paginate --jq '.[] | {tag_name, draft, prerelease}' | ConvertFrom-Json)
           if ($LASTEXITCODE) { throw "Could not list the releases ($LASTEXITCODE)" }
-          # Drafts count: a dry run's draft must be deleted before the next run.
-          if ($existing -contains $tag) { throw "A release (or draft) $tag already exists." }
-          git ls-remote --exit-code --tags origin "refs/tags/$tag" | Out-Null
-          if ($LASTEXITCODE -eq 0) { throw "Tag $tag already exists." }
-          "version=$version", "tag=$tag", "prerelease=$($pre.ToString().ToLowerInvariant())",
-            "channel=$env:INPUT_CHANNEL", "dry_run=$env:DRY_RUN" |
+
+          if ($env:RELEASE_TAG) {
+            # Release mode: release-please's tag and draft release.
+            $tag = $env:RELEASE_TAG.Trim()
+            $m = [regex]::Match($tag, '^v((\d+)\.\d+\.\d+)$')
+            if (-not $m.Success) { throw "release_tag '$tag' is not v<x.y.z>" }
+            if ([int]$m.Groups[2].Value -lt 4) {
+              throw "release_tag $tag is below v4.0.0: the native updater (yap_core::update::release_tag_version) ignores v3.x and older tags."
+            }
+            $version = $m.Groups[1].Value
+            if ($version -ne $base) {
+              throw "release_tag $tag does not match desktop-native/rust/Cargo.toml's $base at that tag (release-please-config.json's extra-files bump it)."
+            }
+            if ($env:EVENT_NAME -eq "workflow_dispatch" -and $env:INPUT_DRY_RUN -eq "true") {
+              throw "dry_run with release_tag is not supported: it would upload unsigned files into the real release."
+            }
+            if ($env:GIT_REF -ne "refs/heads/main") {
+              throw "A signed release must run from main (the Artifact Signing credential trusts main and v* tags only); this run is on $env:GIT_REF."
+            }
+            git ls-remote --exit-code --tags origin "refs/tags/$tag" | Out-Null
+            if ($LASTEXITCODE) { throw "Tag $tag does not exist." }
+            $release = @($releases | Where-Object tag_name -eq $tag)
+            if ($release.Count -ne 1) { throw "Expected one release for $tag, found $($release.Count)." }
+            if (-not $release[0].draft) {
+              throw "Release $tag is already published. To rebuild it, make it a draft first (gh release edit $tag --draft=true)."
+            }
+            if ($release[0].prerelease) { throw "Release $tag is a pre-release; a release-please release is stable." }
+            # The build runs cargo --locked.
+            node desktop-native/tools/sync-cargo-lock-version.mjs --check
+            if ($LASTEXITCODE) { throw "desktop-native/rust/Cargo.lock at $tag is out of date with Cargo.toml (release-please.yml syncs it on the release PR)." }
+            $mode = "release"; $channel = "win"; $pre = $false; $dryRun = "false"
+          } else {
+            # Manual mode.
+            if ($env:EVENT_NAME -ne "workflow_dispatch") { throw "Without release_tag this workflow runs only by hand." }
+            $dryRun = $env:INPUT_DRY_RUN
+            $version = if ($env:INPUT_VERSION) { $env:INPUT_VERSION.Trim() } else { $base }
+            $m = [regex]::Match($version, '^((\d+)\.\d+\.\d+)(-[0-9A-Za-z.-]+)?$')
+            if (-not $m.Success) { throw "Version '$version' is not x.y.z or x.y.z-pre" }
+            if ($m.Groups[1].Value -ne $base) {
+              throw "Version $version does not match Cargo.toml's $base (the exe embeds Cargo.toml's version); bump it first."
+            }
+            $pre = $m.Groups[3].Success
+            $channel = $env:INPUT_CHANNEL
+            if ($channel -eq "win" -and $pre) { throw "The win channel takes a plain x.y.z; use beta for $version." }
+            if ($channel -eq "beta" -and -not $pre) { throw "The beta channel takes a pre-release version (x.y.z-beta.N)." }
+            if ($channel -eq "win" -and [int]$m.Groups[2].Value -ge 4) {
+              throw "Stable $version comes from release-please (v$version, published as latest), not a manual run. Merge the release PR, or rerun a failed release with release_tag."
+            }
+            if ($dryRun -ne "true" -and $env:GIT_REF -ne "refs/heads/main") {
+              throw "A signed release must run from main (the Artifact Signing credential trusts main and v* tags only). Use dry_run elsewhere."
+            }
+            $tag = "$env:TAG_PREFIX$version"
+            # Drafts count: a dry run's draft must be deleted before the next run.
+            if ($releases.tag_name -contains $tag) { throw "A release (or draft) $tag already exists." }
+            git ls-remote --exit-code --tags origin "refs/tags/$tag" | Out-Null
+            if ($LASTEXITCODE -eq 0) { throw "Tag $tag already exists." }
+            $mode = "manual"
+          }
+          "mode=$mode", "version=$version", "tag=$tag", "prerelease=$($pre.ToString().ToLowerInvariant())",
+            "channel=$channel", "dry_run=$dryRun" |
             Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "==> $tag (channel $env:INPUT_CHANNEL, dry run $env:DRY_RUN)"
+          Write-Host "==> $mode $tag (channel $channel, dry run $dryRun)"
           exit 0
+
+      # Fails before the long build if the latest.json that Tauri installs
+      # will read is missing or wrong. The release job fetches and checks it
+      # again before it uploads it.
+      - name: Check the Tauri bridge
+        if: steps.plan.outputs.mode == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRIDGE_TAG: ${{ vars.TAURI_BRIDGE_TAG }}
+        run: ./desktop-native/tools/tauri-bridge.ps1 -Mode Fetch -BridgeTag "$env:BRIDGE_TAG" -OutFile "$env:RUNNER_TEMP/bridge/latest.json"
 
   # The dependency audit (desktop-native/rust/deny.toml; LIBRARIES.md §18),
   # with cargo-deny's release binary rather than a 4-minute `cargo install`.
@@ -129,6 +219,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
 
       - name: cargo-deny
         uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
@@ -164,6 +256,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
@@ -217,6 +311,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
@@ -354,6 +450,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
 
       - name: Download the build
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -418,12 +516,41 @@ jobs:
           if ($sha -ne $full.SHA256) { throw "$($full.FileName) does not match its feed entry" }
           Write-Host "==> delta base $($full.FileName) from $($source.tag_name)"
 
+      # Release mode: release-please's changelog section (the draft's body)
+      # is both the GitHub release text and Velopack's --releaseNotes (shown
+      # in Settings > Desktop app). The part this workflow appends below
+      # NATIVE_MARKER is dropped, so a rerun does not append it twice.
+      # Manual mode: the notes input.
       - name: Release notes
         env:
           NOTES: ${{ inputs.notes }}
+          MODE: ${{ needs.plan.outputs.mode }}
+          NATIVE_MARKER: "<!-- desktop-native-release -->"
         run: |
-          $notes = if ($env:NOTES.Trim()) { $env:NOTES.Trim() } else { "Yap $env:VERSION." }
+          # gh prints UTF-8 (the changelog has emoji); read it as such.
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+          $changelog = ""
+          if ($env:MODE -eq "release") {
+            $draft = @(gh api "repos/${{ github.repository }}/releases?per_page=100" --paginate --jq ".[] | select(.draft and .tag_name == `"$env:TAG`")" | ConvertFrom-Json)
+            if ($LASTEXITCODE -or $draft.Count -ne 1) { throw "Could not read the draft release $env:TAG" }
+            $changelog = [string]$draft[0].body
+            $cut = $changelog.IndexOf($env:NATIVE_MARKER)
+            if ($cut -ge 0) { $changelog = $changelog.Substring(0, $cut) }
+            $changelog = $changelog.Trim()
+            Set-Content -Encoding utf8NoBOM "$env:RUNNER_TEMP\changelog.md" $changelog
+          }
+          $notes = if ($changelog) { $changelog } elseif ("$env:NOTES".Trim()) { "$env:NOTES".Trim() } else { "Yap $env:VERSION." }
+          # vpk stores the notes (Markdown and HTML) in the feed, which keeps
+          # every version's: a long changelog is cut at a line, with a link.
+          $limit = 8000
+          if ($changelog -and $notes.Length -gt $limit) {
+            $cut = $notes.LastIndexOf("`n", $limit)
+            $notes = $notes.Substring(0, [math]::Max($cut, 0)).TrimEnd() +
+              "`n`n[The full changelog](${{ github.server_url }}/${{ github.repository }}/releases/tag/$env:TAG)"
+          }
           Set-Content -Encoding utf8NoBOM "$env:RUNNER_TEMP\notes.md" $notes
+          Write-Host "==> release notes ($($notes.Length) chars):"
+          Write-Host $notes
 
       # OIDC federated credential on AZURE_CLIENT_ID: main and v* tags only.
       # The service principal holds only Artifact Signing Certificate Profile
@@ -488,12 +615,13 @@ jobs:
           if ($files.Count -ne 4) { throw "Expected Setup.exe and three exes in the package, found $($files.Count)" }
           ./desktop/scripts/verify-authenticode.ps1 -ExpectedSigner $env:ARTIFACT_SIGNING_SIGNER -Path $files
 
-      # A draft first, so nothing is visible while files upload; packages
-      # and the OBS source archives before the feed file, so a client never
-      # sees an entry whose package is missing. Then publish with
-      # make_latest=false and check that the Tauri app's "latest" release did
-      # not move.
+      # Manual mode. A draft first, so nothing is visible while files
+      # upload; packages and the OBS source archives before the feed file, so
+      # a client never sees an entry whose package is missing. Then publish
+      # with make_latest=false and check that the "latest" release did not
+      # move.
       - name: Publish the GitHub release
+        if: needs.plan.outputs.mode == 'manual'
         run: |
           $repo = "${{ github.repository }}"
           $files = @(
@@ -561,10 +689,112 @@ jobs:
           "Published [$env:TAG](${{ github.server_url }}/$repo/releases/tag/$env:TAG) ($env:CHANNEL)." |
             Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
 
-      # A failed upload leaves a draft that would block the next run (the
-      # plan job refuses an existing tag). Only ever a draft is deleted.
+      # Release mode. Tauri installs read releases/latest/download/latest.json,
+      # so the release that becomes latest must carry the bridge release's
+      # latest.json byte for byte (its url names the bridge's YapSetup.exe by
+      # tag). Fetched and checked again here: version, url, the minisign key
+      # id against packaging/tauri-bridge.json's pubkey, and a 200 on the url.
+      - name: Tauri bridge latest.json
+        if: needs.plan.outputs.mode == 'release'
+        env:
+          BRIDGE_TAG: ${{ vars.TAURI_BRIDGE_TAG }}
+        run: ./desktop-native/tools/tauri-bridge.ps1 -Mode Fetch -BridgeTag "$env:BRIDGE_TAG" -OutFile "$env:RUNNER_TEMP\bridge\latest.json"
+
+      # Release mode: into release-please's draft (it made the tag and the
+      # changelog). Everything but the feed first, the feed last, --clobber so
+      # a rerun replaces a partial upload. Setup.exe is also attached as
+      # YapSetup.exe, the name README and the website's fallback link use
+      # (releases/latest/download/YapSetup.exe): Velopack's Setup finds its
+      # package in its own file (current_exe), whatever it is called. Then
+      # published as latest, with the native footer after the changelog.
+      - name: Publish the release-please release
+        if: needs.plan.outputs.mode == 'release'
+        env:
+          BRIDGE_TAG: ${{ vars.TAURI_BRIDGE_TAG }}
+          NATIVE_MARKER: "<!-- desktop-native-release -->"
+        run: |
+          $repo = "${{ github.repository }}"
+          $commit = (git rev-parse HEAD).Trim()
+          $draft = @(gh api "repos/$repo/releases?per_page=100" --paginate --jq ".[] | select(.draft and .tag_name == `"$env:TAG`") | {id, tag_name}" | ConvertFrom-Json)
+          if ($LASTEXITCODE -or $draft.Count -ne 1) { throw "Expected one draft release $env:TAG, found $($draft.Count)" }
+          $id = $draft[0].id
+          $bridgeTag = if ($env:BRIDGE_TAG) { $env:BRIDGE_TAG } else { (Get-Content -Raw desktop-native/packaging/tauri-bridge.json | ConvertFrom-Json).tag }
+
+          $setup = Get-Item "$env:OUT\$env:PACK_ID-$env:CHANNEL-Setup.exe"
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\alias" | Out-Null
+          $alias = Copy-Item $setup.FullName "$env:RUNNER_TEMP\alias\YapSetup.exe" -PassThru
+          $files = @(
+            Get-ChildItem $env:OUT -Filter "$env:PACK_ID-$env:VERSION-*.nupkg"
+            $setup
+            $alias
+            Get-ChildItem $env:OUT -Filter "$env:PACK_ID-$env:CHANNEL-Portable.zip"
+            # GPL-2.0 corresponding source for the OBS capture binaries in the
+            # package (obs-capture/SOURCE-OFFER.md points here).
+            Get-ChildItem -LiteralPath $env:OBS_SOURCES -File
+            # The Tauri updater manifest, the bridge's bytes.
+            Get-Item "$env:RUNNER_TEMP\bridge\latest.json"
+          ) | Where-Object { $_ }
+          if (@(Get-ChildItem -LiteralPath $env:OBS_SOURCES -File).Count -eq 0) { throw "No OBS source archives in $env:OBS_SOURCES" }
+          $feed = Get-Item "$env:OUT\releases.$env:CHANNEL.json"
+
+          $sums = ($files + $feed | ForEach-Object { "$((Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant())  $($_.Name)" }) -join "`n"
+          $body = @(
+            "$(Get-Content -Raw "$env:RUNNER_TEMP\changelog.md")".Trim(), "",
+            $env:NATIVE_MARKER, "",
+            "---", "",
+            "Native Windows app (stable channel, ``$env:CHANNEL``), built from $commit by [run ${{ github.run_id }}](${{ github.server_url }}/$repo/actions/runs/${{ github.run_id }}).",
+            "Install with ``$env:PACK_ID-$env:CHANNEL-Setup.exe`` (the same file as ``YapSetup.exe``); installed copies update from this release's ``releases.$env:CHANNEL.json``.",
+            "``latest.json`` is the Tauri app's updater manifest from [$bridgeTag](${{ github.server_url }}/$repo/releases/tag/$bridgeTag): it moves Tauri installs to that release, which replaces them with this app.",
+            "The OBS Studio game-capture files in the package are GPL-2.0; their corresponding source (OBS, Detours, obs-deps archives) is attached to this release.",
+            "", '```text', $sums, '```'
+          ) -join "`n"
+
+          gh release upload $env:TAG --repo $repo --clobber @($files.FullName)
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          gh release upload $env:TAG --repo $repo --clobber $feed.FullName
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+          # Every file is on the draft, at its size, before it goes public.
+          $assets = gh api "repos/$repo/releases/$id" --jq '.assets[] | {name, size}' | ConvertFrom-Json
+          foreach ($f in $files + $feed) {
+            $a = $assets | Where-Object name -eq $f.Name
+            if (-not $a -or $a.size -ne $f.Length) { throw "$($f.Name) is missing from the draft or the wrong size" }
+          }
+
+          $payload = "$env:RUNNER_TEMP\publish.json"
+          @{ draft = $false; make_latest = "true"; body = $body } | ConvertTo-Json | Set-Content -Encoding utf8NoBOM $payload
+          gh api -X PATCH "repos/$repo/releases/$id" --input $payload | Out-Null
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Write-Host "==> published $env:TAG (release $id) as latest"
+          "Published [$env:TAG](${{ github.server_url }}/$repo/releases/tag/$env:TAG) as latest, carrying $bridgeTag's latest.json." |
+            Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+
+      # Release mode: what the world now sees. latest must be this tag,
+      # latest/download/latest.json the bridge's bytes, and latest/download/
+      # must serve Yap.App-win-Setup.exe, YapSetup.exe and releases.win.json.
+      # .github/workflows/release-watchdog.yml repeats this daily.
+      - name: Check releases/latest
+        if: needs.plan.outputs.mode == 'release'
+        env:
+          BRIDGE_TAG: ${{ vars.TAURI_BRIDGE_TAG }}
+        run: |
+          try {
+            ./desktop-native/tools/tauri-bridge.ps1 -Mode VerifyLatest -BridgeTag "$env:BRIDGE_TAG" -ExpectedLatest $env:TAG
+          } catch {
+            $msg = $_.Exception.Message
+            Write-Host "::error title=releases/latest is wrong after publishing $env:TAG::$($msg -replace "`r?`n", ' ')"
+            @("## releases/latest is wrong after publishing $env:TAG", "", '```text', $msg, '```', "",
+              "Tauri installs may not reach the bridge. Fix the release's assets, or mark the previous good release latest (gh release edit <tag> --latest).") -join "`n" |
+              Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+            throw
+          }
+
+      # Manual mode: a failed upload leaves a draft that would block the next
+      # run (the plan job refuses an existing tag). Only ever a draft is
+      # deleted. Never in release mode: that draft is release-please's
+      # release, which a rerun (release_tag) uploads into again.
       - name: Delete the draft after a failure
-        if: failure()
+        if: failure() && needs.plan.outputs.mode == 'manual'
         run: |
           $repo = "${{ github.repository }}"
           $draft = gh api "repos/$repo/releases" --paginate --jq ".[] | select(.draft and .tag_name == `"$env:TAG`") | .id" | Select-Object -First 1
