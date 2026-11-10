@@ -11,12 +11,14 @@
 //! No Qt and no network: the app hands it catalog bytes and takes its events.
 
 pub mod catalog;
+pub mod deadlock;
 #[cfg(windows)]
 pub mod detector;
 pub mod matcher;
 pub mod refresh;
 #[cfg(windows)]
 mod steam;
+mod vdf;
 #[cfg(windows)]
 mod win;
 

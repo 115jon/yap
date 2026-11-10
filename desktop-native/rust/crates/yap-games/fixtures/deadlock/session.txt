@@ -1,0 +1,95 @@
+﻿11/09 20:00:00 [RenderSystem] Creating device for graphics adapter 0 'Test Adapter' [vendorid 0x0000]: 1.0.0.0
+11/09 20:00:01 [NetworkCodeGen] ncg: CStreetBrawlController                                       | codegen
+11/09 20:00:01 [NetworkCodeGen] ncg: ECitadelMatchMode                                            | enum
+11/09 20:00:05 [HostStateManager] Host activate: Idle (levelload)
+11/09 20:00:05 [Hideout] Hideout Lobby Connection State: Invalid (-1)
+11/09 20:00:06 [Client] CL:  Connected to 'loopback:1'
+11/09 20:00:06 [Client] Map: "<empty>"
+11/09 20:00:06 [Client] Players: 1 (0 bots) / 1 humans
+11/09 20:00:07 [Client] Disconnecting from server: NETWORK_DISCONNECT_LOOPDEACTIVATE
+11/09 20:00:07 [Server] SV:  Server shutting down: NETWORK_DISCONNECT_LOOPDEACTIVATE (55)
+11/09 20:00:07 Precaching 0 heroes in CCitadelGameRules::BuildGameSessionManifest
+11/09 20:01:00 [Client] CL:  Connected to '127.0.0.1:27015'
+11/09 20:01:00 [Client] Map: "dl_hideout"
+11/09 20:01:00 [Client] Players: 1 (0 bots) / 31 humans
+11/09 20:01:01 [Server] Created physics for dl_hideout
+11/09 20:01:01 Initializing bot for player slot 2: k_ECitadelBotDifficulty_Easy
+11/09 20:01:01 [HostStateManager] Host activate: Loading (dl_hideout)
+11/09 20:01:01 [Hideout] Hideout Lobby Connection State: NoLobby (0)
+11/09 20:01:01 ChangeGameState: WaitingForPlayersToJoin (2)
+11/09 20:01:01 [Server] SV:  "Test Player<0><[U:1:1000001]><>" STEAM USERID validated
+11/09 20:01:01 ChangeGameState: HeroSelection (3)
+11/09 20:01:01 ChangeGameState: MatchIntro (4)
+11/09 20:01:01 ChangeGameState: WaitForMapToLoad (5)
+11/09 20:01:01 ChangeGameState: PreGameWait (6)
+11/09 20:01:01 ChangeGameState: GameInProgress (7)
+11/09 20:01:02 [Client] Created physics for dl_hideout
+11/09 20:01:02 OnGameStateChanged: HeroSelection (3)
+11/09 20:01:03 OnGameStateChanged: GameInProgress (7)
+11/09 20:01:20 [Server] Loaded hero 275/hero_inferno
+11/09 20:01:21 [Server] Loaded hero 279/hero_vampirebat
+ VMDL Camera Pose Success! "models/heroes_wip/vampirebat/vampirebat.vmdl" has loaded camera poses from vmdl:  "near_" Poses: 3, "far_" Poses: 3 ,"gunaim_" Poses:  3
+11/09 20:02:30 [Server] Loaded hero 279/hero_haze
+ VMDL Camera Pose Success! "models/heroes_staging/haze/haze.vmdl" has loaded camera poses from vmdl:  "near_" Poses: 3, "far_" Poses: 3 ,"gunaim_" Poses:  3
+11/09 20:03:00 [GCClient] Recv msg 9135 (k_EMsgGCToClientPartyEvent), 25 bytes
+11/09 20:03:00 CMsgGCToClientPartyEvent: { party_id: 777000111 event: k_eJoinedParty initiator_account_id: 2000002 }
+11/09 20:03:00 [Hideout] Hideout Lobby Connection State: NoServer (1)
+11/09 20:03:01 [Hideout] Hideout Lobby Connection State: TryingToConnect (4)
+11/09 20:03:01 [Client] Disconnecting from server: NETWORK_DISCONNECT_LOOPDEACTIVATE
+11/09 20:03:02 [Client] CL:  Connected to '=[A:1:123456:7890]'
+11/09 20:03:02 [Client] Map: "dl_hideout"
+11/09 20:03:02 [Client] Players: 2 (3 bots) / 32 humans
+11/09 20:03:07 [HostStateManager] Host activate: Remote Connect (=[A:1:123456:7890])
+11/09 20:03:07 [Hideout] Hideout Lobby Connection State: Connected (5)
+11/09 20:03:08 [Client] Created physics for dl_hideout
+11/09 20:03:08 OnGameStateChanged: GameInProgress (7)
+11/09 20:03:20 CMsgGCToClientPartyEvent: { party_id: 777000111 event: k_eJoinedParty initiator_account_id: 3000003 }
+11/09 20:03:45 CMsgGCToClientPartyEvent: { party_id: 777000111 event: k_eDraftEnded_User initiator_account_id: 2000002 }
+11/09 20:04:00 Entering matchmaking for region 0 with search key ''
+11/09 20:04:00 [GCClient] Send msg 9010 (k_EMsgServerToGCEnterMatchmaking), 43 bytes
+11/09 20:04:30 CMsgGCToClientPartyEvent: { party_id: 777000111 event: k_eLeftParty initiator_account_id: 3000003 }
+11/09 20:06:49 [Citadel Play Controller] CCitadel_PlayController::OnMatchFormed
+11/09 20:06:49 Lobby 55501 for Match 66601 created
+11/09 20:06:49 [Client] Disconnecting from server: NETWORK_DISCONNECT_LOOPDEACTIVATE
+11/09 20:06:50 [Client] CL:  Connected to '=[A:1:222222:3333]'
+11/09 20:06:50 [Client] Map: "start"
+11/09 20:06:50 [Client] Players: 12 (1 bots) / 32 humans
+11/09 20:06:52 [HostStateManager] Host activate: Remote Connect (=[A:1:222222:3333])
+11/09 20:06:52 [Hideout] Hideout Lobby Connection State: Invalid (-1)
+11/09 20:06:53 OnGameStateChanged: WaitingForPlayersToJoin (2)
+ VMDL Camera Pose Success! "models/heroes_staging/haze/haze.vmdl" has loaded camera poses from vmdl:  "near_" Poses: 3, "far_" Poses: 3 ,"gunaim_" Poses:  3
+11/09 20:07:02 OnGameStateChanged: MatchIntro (4)
+11/09 20:07:08 [Client] Created physics for dl_midtown
+11/09 20:07:08 OnGameStateChanged: WaitForMapToLoad (5)
+11/09 20:07:08 OnGameStateChanged: PreGameWait (6)
+11/09 20:07:37 OnGameStateChanged: GameInProgress (7)
+ VMDL Camera Pose Success! "models/heroes_staging/warden/warden.vmdl" has loaded camera poses from vmdl:  "near_" Poses: 3, "far_" Poses: 3 ,"gunaim_" Poses:  3
+ VMDL Camera Pose Success! "models/heroes_staging/haze/haze.vmdl" has loaded camera poses from vmdl:  "near_" Poses: 3, "far_" Poses: 3 ,"gunaim_" Poses:  3
+ VMDL Camera Pose Success! "models/heroes_staging/viper/viper.vmdl" has loaded camera poses from vmdl:  "near_" Poses: 3, "far_" Poses: 3 ,"gunaim_" Poses:  3
+11/09 20:49:31 OnGameStateChanged: PostGame (8)
+11/09 20:49:32 Lobby 55501 for Match 66601 destroyed
+11/09 20:49:41 OnGameStateChanged: End (11)
+11/09 20:49:41 [Client] Disconnecting from server: NETWORK_DISCONNECT_DISCONNECT_BY_USER
+11/09 20:49:41 [HostStateManager] Host activate: Idle (levelload)
+11/09 20:49:42 [Client] CL:  Connected to 'loopback:1'
+11/09 20:49:42 [Client] Map: "<empty>"
+11/09 20:49:42 [Client] Players: 1 (0 bots) / 1 humans
+11/09 20:49:42 [Client] Disconnecting from server: NETWORK_DISCONNECT_LOOPDEACTIVATE
+11/09 20:49:42 [Client] CL:  Connected to '=[A:1:123456:7890]'
+11/09 20:49:42 [Client] Map: "dl_hideout"
+11/09 20:49:42 [Client] Players: 2 (3 bots) / 32 humans
+11/09 20:49:44 [HostStateManager] Host activate: Remote Connect (=[A:1:123456:7890])
+11/09 20:49:44 [Hideout] Hideout Lobby Connection State: Connected (5)
+11/09 20:49:45 [Client] Created physics for dl_hideout
+11/09 20:49:45 OnGameStateChanged: GameInProgress (7)
+ VMDL Camera Pose Success! "models/heroes_staging/haze/haze.vmdl" has loaded camera poses from vmdl:  "near_" Poses: 3, "far_" Poses: 3 ,"gunaim_" Poses:  3
+11/09 20:52:00 CMsgGCToClientPartyEvent: { party_id: 777000111 event: k_eLeftParty initiator_account_id: 1000001 }
+11/09 20:52:00 [Hideout] Hideout Lobby Connection State: NoLobby (0)
+11/09 20:52:00 [Client] Disconnecting from server: NETWORK_DISCONNECT_SHUTDOWN
+11/09 20:52:01 [Client] CL:  Connected to '127.0.0.1:27015'
+11/09 20:52:01 [Client] Map: "dl_hideout"
+11/09 20:55:13 [Client] Disconnecting from server: NETWORK_DISCONNECT_EXITING
+11/09 20:55:14 [HostStateManager] Host activate: Quitting
+11/09 20:55:14 Dispatching EventAppShutdown_t {
+11/09 20:55:14 } Dispatched EventAppShutdown_t
+11/09 20:55:14 Source2Shutdown

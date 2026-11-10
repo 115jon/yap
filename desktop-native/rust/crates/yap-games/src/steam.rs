@@ -3,7 +3,7 @@
 //! An app the catalog does not know is named from its
 //! `steamapps\appmanifest_<id>.acf`.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use windows_sys::Win32::Foundation::{ERROR_SUCCESS, HANDLE};
 use windows_sys::Win32::System::Registry::{
@@ -12,6 +12,7 @@ use windows_sys::Win32::System::Registry::{
 };
 use windows_sys::Win32::System::Threading::CreateEventW;
 
+use crate::vdf::{steam_libraries, vdf_values};
 use crate::win::Owned;
 
 fn wide(text: &str) -> Vec<u16> {
@@ -103,12 +104,7 @@ impl SteamWatch {
     /// An app's name from its manifest, in any Steam library.
     pub(crate) fn manifest_name(&self, app: u32) -> Option<String> {
         let steam = self.steam_path()?;
-        let mut libraries = vec![steam.join("steamapps")];
-        if let Ok(vdf) = std::fs::read_to_string(steam.join("steamapps").join("libraryfolders.vdf"))
-        {
-            libraries.extend(vdf_values(&vdf, "path").map(|p| Path::new(&p).join("steamapps")));
-        }
-        libraries.iter().find_map(|library| {
+        steam_libraries(&steam).iter().find_map(|library| {
             let text =
                 std::fs::read_to_string(library.join(format!("appmanifest_{app}.acf"))).ok()?;
             let name = vdf_values(&text, "name").next();
@@ -148,30 +144,20 @@ fn read_string(key: HKEY, value: &str) -> Option<String> {
     Some(String::from_utf16_lossy(&buffer[..end]))
 }
 
-/// The values of `"key"  "value"` lines in a Valve KeyValues file, with
-/// `\\` unescaped.
-pub(crate) fn vdf_values<'a>(text: &'a str, key: &'a str) -> impl Iterator<Item = String> + 'a {
-    let quoted = format!("\"{key}\"");
-    text.lines().filter_map(move |line| {
-        let rest = line.trim().strip_prefix(quoted.as_str())?;
-        let value = rest.trim().strip_prefix('"')?.strip_suffix('"')?;
-        Some(value.replace("\\\\", "\\"))
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::vdf_values;
-
-    #[test]
-    fn manifest_names_and_library_paths_are_read() {
-        let acf = "\"AppState\"\n{\n\t\"appid\"\t\t\"570\"\n\t\"name\"\t\t\"Dota 2\"\n}\n";
-        assert_eq!(vdf_values(acf, "name").collect::<Vec<_>>(), ["Dota 2"]);
-        let vdf =
-            "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"D:\\\\SteamLibrary\"\n\t}\n}";
-        assert_eq!(
-            vdf_values(vdf, "path").collect::<Vec<_>>(),
-            [r"D:\SteamLibrary"]
-        );
+/// Steam's install folder (`HKCU\Software\Valve\Steam` `SteamPath`), read
+/// once without watching.
+pub(crate) fn steam_path() -> Option<PathBuf> {
+    let path = wide(r"Software\Valve\Steam");
+    let mut key: HKEY = std::ptr::null_mut();
+    // SAFETY: the key is opened read-only and closed below.
+    unsafe {
+        if RegOpenKeyExW(HKEY_CURRENT_USER, path.as_ptr(), 0, KEY_QUERY_VALUE, &mut key)
+            != ERROR_SUCCESS
+        {
+            return None;
+        }
+        let value = read_string(key, "SteamPath");
+        RegCloseKey(key);
+        value.map(PathBuf::from)
     }
 }
