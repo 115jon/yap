@@ -1,0 +1,39 @@
+{
+  "items": [
+    {
+      "id": "w1",
+      "kind": "shop",
+      "sku": "np-nightdrive",
+      "name": "Night Drive"
+    },
+    {
+      "id": "w2",
+      "kind": "shop",
+      "sku": "fx-glasshouse",
+      "name": "Glasshouse"
+    },
+    {
+      "id": "w3",
+      "kind": "hint",
+      "text": "Anything with cats. Or a cat. Mostly cats."
+    },
+    {
+      "id": "w4",
+      "kind": "shop",
+      "sku": "np-tidelines",
+      "name": "Tidelines"
+    },
+    {
+      "id": "w5",
+      "kind": "shop",
+      "sku": "retired-ember",
+      "name": "Ember Ring"
+    },
+    {
+      "id": "w6",
+      "kind": "hint",
+      "text": "A Balatro deck with the gold stake art"
+    }
+  ],
+  "is_owner": false
+}

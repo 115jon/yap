@@ -428,6 +428,8 @@ pub enum ApiRequest {
     Apps(super::apps::AppsRequest),
     /// The collectibles shop.
     Shop(super::shop::ShopRequest),
+    /// Profile boards, Activity, the guestbook and the wishlist.
+    Board(super::board::BoardRequest),
     /// A TikTok or Instagram lookup.
     Embeds(super::embeds::EmbedsRequest),
     /// The GIF and clip favourites.
@@ -494,6 +496,7 @@ pub enum ApiResponse {
     Invites(super::InviteResponse),
     Apps(super::apps::AppsResponse),
     Shop(super::shop::ShopResponse),
+    Board(super::board::BoardReply),
     /// A lookup's payload, as served.
     Embeds(Value),
     /// The whole favourites list.
@@ -557,6 +560,7 @@ impl ApiRequest {
             Self::Invites(request) => request.method(),
             Self::Apps(request) => request.method(),
             Self::Shop(request) => request.method(),
+            Self::Board(request) => request.method(),
             Self::Embeds(request) => request.method(),
             Self::Favorites(request) => request.method(),
             Self::Backgrounds(request) => request.method(),
@@ -606,6 +610,7 @@ impl ApiRequest {
             Self::Invites(request) => request.path(),
             Self::Apps(request) => request.path(),
             Self::Shop(request) => request.path(),
+            Self::Board(request) => request.path(),
             Self::Embeds(request) => request.path(),
             Self::Favorites(request) => request.path(),
             Self::Backgrounds(request) => request.path(),
@@ -733,6 +738,7 @@ impl ApiRequest {
             Self::Invites(request) => request.body(),
             Self::Apps(request) => request.body(),
             Self::Shop(request) => request.body(),
+            Self::Board(request) => request.body(),
             Self::Embeds(_) => Value::Null,
             Self::Favorites(request) => request.body(),
             Self::Backgrounds(request) => request.body(),
@@ -827,6 +833,7 @@ impl ApiRequest {
             Self::Invites(request) => ApiResponse::Invites(request.decode(body)?),
             Self::Apps(request) => ApiResponse::Apps(request.decode(body)?),
             Self::Shop(request) => ApiResponse::Shop(request.decode(body)?),
+            Self::Board(request) => ApiResponse::Board(request.decode(body)?),
             Self::Embeds(_) => ApiResponse::Embeds(body),
             Self::Favorites(request) => ApiResponse::Favorites(request.decode(body)?),
             Self::Backgrounds(request) => ApiResponse::Backgrounds(request.decode(body)?),
