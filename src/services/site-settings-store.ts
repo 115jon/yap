@@ -1,10 +1,14 @@
 /**
  * The site settings row store: D1 `site_settings` read and written as plain
- * statements (shapes in lib/site-flags.ts). No caching and no request
+ * statements (shapes in lib/site-flags.ts and lib/native-handoff.ts). No caching and no request
  * helpers, so the main Worker (services/site-flags.service.ts, which caches
  * and enforces) and the admin Worker (apps/admin, which writes) share it.
  */
 
+import {
+  parseNativeHandoff,
+  type NativeHandoffConfig,
+} from "@/lib/native-handoff";
 import {
   parseAnnouncement,
   parseSiteFlags,
@@ -15,9 +19,25 @@ import {
 export interface SiteSettings {
   flags: SiteFlags;
   announcement: SiteAnnouncement | null;
+  /** The Tauri app's handoff to the native app (off by default). */
+  nativeHandoff: NativeHandoffConfig;
 }
 
-export type SiteSettingKey = "flags" | "announcement";
+export const SITE_SETTING_KEYS = [
+  "flags",
+  "announcement",
+  "nativeHandoff",
+] as const;
+export type SiteSettingKey = (typeof SITE_SETTING_KEYS)[number];
+
+/** The settings when nothing is stored (or D1 cannot be read). */
+export function defaultSiteSettings(): SiteSettings {
+  return {
+    flags: parseSiteFlags(null),
+    announcement: null,
+    nativeHandoff: parseNativeHandoff(null),
+  };
+}
 
 function parseJson(value: string | null | undefined): unknown {
   if (!value) return null;
@@ -34,13 +54,14 @@ export async function readSiteSettings(
 ): Promise<SiteSettings> {
   const { results } = await db
     .prepare(
-      `SELECT key, value FROM site_settings WHERE key IN ('flags', 'announcement')`,
+      `SELECT key, value FROM site_settings WHERE key IN ('flags', 'announcement', 'nativeHandoff')`,
     )
     .all<{ key: string; value: string }>();
   const byKey = new Map((results ?? []).map((row) => [row.key, row.value]));
   return {
     flags: parseSiteFlags(parseJson(byKey.get("flags"))),
     announcement: parseAnnouncement(parseJson(byKey.get("announcement"))),
+    nativeHandoff: parseNativeHandoff(parseJson(byKey.get("nativeHandoff"))),
   };
 }
 

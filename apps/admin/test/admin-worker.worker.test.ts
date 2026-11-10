@@ -570,6 +570,74 @@ describe("admin mutations write the audit log", () => {
     });
   });
 
+  it("settings: the native handoff starts off and is validated and logged", async () => {
+    const initial = (await (await as("GET", "/api/settings")).json()) as {
+      nativeHandoff: unknown;
+      updated: { nativeHandoff: unknown };
+    };
+    expect(initial.nativeHandoff).toEqual({
+      enabled: false,
+      rolloutPercent: 0,
+    });
+    expect(initial.updated.nativeHandoff).toBeNull();
+
+    for (const nativeHandoff of [
+      { enabled: "yes" },
+      { rolloutPercent: 101 },
+      { rolloutPercent: -1 },
+      { rolloutPercent: 12.5 },
+      { rolloutPercent: "50" },
+      { enabled: true, everyone: true },
+      [true],
+      "on",
+    ]) {
+      const refused = await as("PUT", "/api/settings", { nativeHandoff });
+      expect(refused.status).toBe(400);
+      expect(await refused.json()).toMatchObject({
+        code: "INVALID_NATIVE_HANDOFF",
+      });
+    }
+    expect(await auditRows("native_handoff.update")).toHaveLength(0);
+
+    const rollout = await as("PUT", "/api/settings", {
+      nativeHandoff: { rolloutPercent: 10 },
+    });
+    expect(await rollout.json()).toMatchObject({
+      nativeHandoff: { enabled: false, rolloutPercent: 10 },
+      updated: { nativeHandoff: { by: ADMIN } },
+    });
+    const on = await as("PUT", "/api/settings", {
+      nativeHandoff: { enabled: true },
+    });
+    expect(await on.json()).toMatchObject({
+      nativeHandoff: { enabled: true, rolloutPercent: 10 },
+    });
+    // The same value again changes nothing and logs nothing.
+    await as("PUT", "/api/settings", { nativeHandoff: { enabled: true } });
+
+    const rows = await auditRows("native_handoff.update");
+    expect(rows).toHaveLength(2);
+    expect(JSON.parse(rows[0]!.before_json!)).toEqual({
+      enabled: false,
+      rolloutPercent: 10,
+    });
+    expect(JSON.parse(rows[0]!.after_json!)).toEqual({
+      enabled: true,
+      rolloutPercent: 10,
+    });
+    const { results } = await db
+      .prepare(`SELECT value FROM site_settings WHERE key = 'nativeHandoff'`)
+      .all<{ value: string }>();
+    expect(JSON.parse(results[0]!.value)).toEqual({
+      enabled: true,
+      rolloutPercent: 10,
+    });
+
+    await as("PUT", "/api/settings", {
+      nativeHandoff: { enabled: false, rolloutPercent: 0 },
+    });
+  });
+
   it("suspension is logged, and an admin cannot suspend themselves", async () => {
     expect(
       (
