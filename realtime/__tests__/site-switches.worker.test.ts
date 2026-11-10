@@ -45,6 +45,9 @@ const StreamRoute = (
 const SiteConfigRoute = (await loadRoute("../../src/routes/api/site-config"))
   .Route;
 const MeRoute = (await loadRoute("../../src/routes/api/users/me")).Route;
+const NativeHandoffRoute = (
+  await loadRoute("../../src/routes/api/desktop/native-handoff")
+).Route;
 
 // What the main Worker enforces from the admin console's writes (apps/admin):
 // suspensions and the kill switches, against miniflare's D1 and the real
@@ -322,6 +325,51 @@ describe("the public site config", () => {
     expect(await ended.json()).toMatchObject({ announcement: null });
     await run(`DELETE FROM site_settings WHERE key = 'announcement'`);
     await setFlag("listenTogether", true);
+  });
+});
+
+describe("the desktop native handoff switch", () => {
+  const read = async () => {
+    invalidateSiteSettingsCache();
+    const response = await handler(
+      NativeHandoffRoute,
+      "GET",
+    )({ request: req("GET", "/api/desktop/native-handoff", null) });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=60");
+    return response.json();
+  };
+  const store = (value: string) =>
+    run(
+      `INSERT OR REPLACE INTO site_settings (key, value, updated_at, updated_by) VALUES ('nativeHandoff', ?, ?, 'test')`,
+      value,
+      new Date().toISOString(),
+    );
+
+  afterEach(async () => {
+    await run(`DELETE FROM site_settings WHERE key = 'nativeHandoff'`);
+    invalidateSiteSettingsCache();
+  });
+
+  it("is off at 0 % until it is set", async () => {
+    await run(`DELETE FROM site_settings WHERE key = 'nativeHandoff'`);
+    expect(await read()).toEqual({ enabled: false, rolloutPercent: 0 });
+  });
+
+  it("serves what the admin console stored, and nothing else", async () => {
+    await store(JSON.stringify({ enabled: true, rolloutPercent: 25 }));
+    expect(await read()).toEqual({ enabled: true, rolloutPercent: 25 });
+  });
+
+  it("serves off for a stored value it cannot read", async () => {
+    for (const value of [
+      "not json",
+      JSON.stringify({ enabled: "true", rolloutPercent: 50 }),
+      JSON.stringify({ enabled: true, rolloutPercent: 500 }),
+    ]) {
+      await store(value);
+      expect(await read()).toEqual({ enabled: false, rolloutPercent: 0 });
+    }
   });
 });
 

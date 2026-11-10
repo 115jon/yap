@@ -13,7 +13,8 @@
 //! once, `yap_profile_data_root`), the Run value rule
 //! (`yap_run_value_may_change`) and, on the released install's first
 //! launches, the replacement of the Tauri desktop app
-//! (`yap_replace_tauri_at_launch`, `yap_core::tauri`).
+//! (`yap_replace_tauri_at_launch`, then `yap_tauri_app_started`,
+//! `yap_core::tauri`).
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -257,8 +258,10 @@ const UNINSTALL_WAIT: Duration = Duration::from_secs(120);
 
 /// On the released install's default-profile launches, before the settings
 /// load: imports the Tauri app's preferences once (synchronously, a few
-/// file reads), then, if the Tauri app is still installed, uninstalls it on
-/// a thread of its own. Anything else (a dev build, a copy, a test install,
+/// file reads), then, if the Tauri app is still installed, arms its
+/// uninstall, which runs only after `yap_tauri_app_started` and
+/// `tauri::UNINSTALL_DEFER` more (so a launch that crashes early leaves the
+/// Tauri app working). Anything else (a dev build, a copy, a test install,
 /// a named profile) does nothing. Logged to `installer.log`. Never unwinds
 /// into C++.
 #[no_mangle]
@@ -311,10 +314,89 @@ pub extern "C" fn yap_replace_tauri_at_launch() {
             ));
             return;
         }
-        write_attempts(&data, attempts + 1);
+        // Not now: only once this launch has stayed up
+        // (`yap_tauri_app_started`, `tauri::UninstallDeferral`).
+        let mut deferral = tauri::UninstallDeferral::default();
+        deferral.arm();
+        *PENDING_REPLACE.lock().unwrap_or_else(|e| e.into_inner()) = Some(PendingReplace {
+            paths,
+            root,
+            exe,
+            saved_dir,
+            data,
+            deferral,
+        });
+        log_line(&format!(
+            "[tauri] uninstall deferred until the app has been up {} s",
+            tauri::UNINSTALL_DEFER.as_secs()
+        ));
+    };
+    if std::panic::catch_unwind(run).is_err() {
+        eprintln!("[tauri] replacement check panicked");
+    }
+}
+
+/// The uninstall `yap_replace_tauri_at_launch` found to do, waiting for
+/// `yap_tauri_app_started`.
+struct PendingReplace {
+    paths: tauri::Paths,
+    root: String,
+    exe: String,
+    saved_dir: PathBuf,
+    data: PathBuf,
+    deferral: tauri::UninstallDeferral,
+}
+
+static PENDING_REPLACE: std::sync::Mutex<Option<PendingReplace>> = std::sync::Mutex::new(None);
+
+/// The shell calls this once Main.qml has its window (shown, or in the tray
+/// on a minimized start). If the launch found the Tauri app to replace, a
+/// thread waits [`tauri::UNINSTALL_DEFER`] more, then counts the attempt and
+/// runs the uninstaller. A launch that crashes before then leaves the Tauri
+/// app as it was (the Tauri 3.14 bridge counts that as a failed handoff and
+/// keeps working). Never unwinds into C++.
+#[no_mangle]
+pub extern "C" fn yap_tauri_app_started() {
+    let run = || {
+        let Some(mut pending) = PENDING_REPLACE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        else {
+            eprintln!("[tauri] app started: no Tauri replacement armed");
+            return;
+        };
+        eprintln!(
+            "[tauri] app started: Tauri uninstall in {} s",
+            tauri::UNINSTALL_DEFER.as_secs()
+        );
+        log_line(&format!(
+            "[tauri] app started; uninstalling in {} s",
+            tauri::UNINSTALL_DEFER.as_secs()
+        ));
+        let clock = Instant::now();
+        pending.deferral.app_started(clock.elapsed());
         let _ = std::thread::Builder::new()
             .name("tauri-replace".into())
             .spawn(move || {
+                loop {
+                    if pending.deferral.due(clock.elapsed()) {
+                        break;
+                    }
+                    let Some(wait) = pending.deferral.wait(clock.elapsed()) else {
+                        return;
+                    };
+                    std::thread::sleep(wait.max(Duration::from_millis(100)));
+                }
+                let PendingReplace {
+                    paths,
+                    root,
+                    exe,
+                    saved_dir,
+                    data,
+                    ..
+                } = pending;
+                write_attempts(&data, read_attempts(&data) + 1);
                 let outcome = std::panic::catch_unwind(|| replace(&paths, &root, &exe, &saved_dir));
                 if outcome.is_err() {
                     log_line("[tauri] replacement panicked");
@@ -322,7 +404,7 @@ pub extern "C" fn yap_replace_tauri_at_launch() {
             });
     };
     if std::panic::catch_unwind(run).is_err() {
-        eprintln!("[tauri] replacement check panicked");
+        eprintln!("[tauri] deferred replacement panicked");
     }
 }
 

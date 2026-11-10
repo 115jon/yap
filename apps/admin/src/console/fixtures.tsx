@@ -900,9 +900,11 @@ function settings(): AdminSettingsResponse {
       expires_at: iso(NOW + 10 * 3_600_000),
       updated_at: iso(NOW - 4 * DAY),
     },
+    nativeHandoff: { enabled: false, rolloutPercent: 0 },
     updated: {
       flags: { at: iso(NOW - 18 * 60_000), by: ADMIN_ID },
       announcement: { at: iso(NOW - 4 * DAY), by: ADMIN_ID },
+      nativeHandoff: null,
     },
   };
 }

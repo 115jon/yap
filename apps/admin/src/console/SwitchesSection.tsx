@@ -1,8 +1,10 @@
 /**
- * Switches: the site's kill switches and the announcement banner. Each
- * switch is wired into its real server path (services/site-flags.service),
- * so off means the path refuses with 503 FEATURE_PAUSED and a sentence the
- * clients show. Turning one off asks first; turning one on does not.
+ * Switches: the site's kill switches, the announcement banner and the
+ * desktop native handoff. Each kill switch is wired into its real server
+ * path (services/site-flags.service), so off means the path refuses with 503
+ * FEATURE_PAUSED and a sentence the clients show. Turning one off asks first;
+ * turning one on does not. The handoff is the other way round: it starts
+ * off, turning it on asks first, and off stops it at once.
  */
 
 import { useEffect, useState } from "react";
@@ -21,6 +23,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 import type { AdminSettingsResponse } from "../shared/admin-api";
 import { describeApiError } from "@/lib/api-errors";
+import {
+  parseRolloutPercent,
+  type NativeHandoffConfig,
+} from "@/lib/native-handoff";
 import {
   activeAnnouncement,
   ANNOUNCEMENT_MAX_LENGTH,
@@ -80,6 +86,7 @@ export function SwitchesSection() {
           <div className="mx-auto grid w-full max-w-[1180px] gap-x-12 gap-y-10 px-6 pt-6 pb-12 max-md:px-3 max-md:pt-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <FlagsCard settings={settings} now={now} />
             <AnnouncementCard settings={settings} now={now} />
+            <NativeHandoffCard settings={settings} now={now} />
           </div>
         ) : null}
       </div>
@@ -224,6 +231,210 @@ function FlagsCard({
         confirmLabel="Turn off"
         errorAction="turn it off"
         onConfirm={() => (pending ? write(pending, false) : undefined)}
+      />
+    </RuleCard>
+  );
+}
+
+function NativeHandoffCard({
+  settings,
+  now,
+}: {
+  settings: SettingsResource;
+  now: number;
+}) {
+  const transport = useAdminTransport();
+  const data = settings.data!;
+  const current = data.nativeHandoff;
+  const [percentText, setPercentText] = useState(
+    String(current.rolloutPercent),
+  );
+  const [confirming, setConfirming] = useState(false);
+  // A raise while the handoff is on moves more installs: asked first.
+  const [raiseTo, setRaiseTo] = useState<number | null>(null);
+  const [busy, setBusy] = useState<"switch" | "rollout" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // A save elsewhere (or the first load) resets the field to what is stored.
+  useEffect(() => {
+    setPercentText(String(current.rolloutPercent));
+  }, [current.rolloutPercent]);
+
+  const percent = parseRolloutPercent(
+    percentText.trim() === "" ? Number.NaN : Number(percentText),
+  );
+  const percentChanged = percent !== null && percent !== current.rolloutPercent;
+
+  const write = async (
+    patch: Partial<NativeHandoffConfig>,
+    what: "switch" | "rollout",
+  ) => {
+    const previous = data;
+    settings.mutate((value) =>
+      value
+        ? { ...value, nativeHandoff: { ...value.nativeHandoff, ...patch } }
+        : value,
+    );
+    setBusy(what);
+    setError(null);
+    try {
+      const next = await transport.send<AdminSettingsResponse>(
+        "PUT",
+        "/api/settings",
+        { nativeHandoff: patch },
+      );
+      settings.mutate(() => next);
+      toast.success(
+        what === "switch"
+          ? `Native handoff ${patch.enabled ? "on" : "off"}`
+          : `Rollout set to ${patch.rolloutPercent}%`,
+      );
+    } catch (err) {
+      settings.mutate(() => previous);
+      throw err;
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <RuleCard
+      legend="Desktop"
+      index={
+        current.enabled ? (
+          <LedLabel state={current.rolloutPercent > 0 ? "talk" : "idle"}>
+            On · {current.rolloutPercent}%
+          </LedLabel>
+        ) : (
+          <LedLabel state="off">Off</LedLabel>
+        )
+      }
+      title="Native app handoff"
+    >
+      <div className="flex flex-col gap-5">
+        <p className="text-ui-sm text-pretty text-ink-2">
+          The Tauri desktop app (3.14) downloads the native app from the latest
+          GitHub release, checks its signature, installs it and closes. The
+          native app then imports its settings and uninstalls it. Nothing
+          happens until the latest release is a native one (v4 or later).
+        </p>
+        <div className="flex min-h-16 items-start gap-4 border-b border-line pb-3">
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <span
+              id="admin-native-handoff-label"
+              className="text-ui-base font-medium text-ink-1"
+            >
+              Hand off to the native app
+            </span>
+            <span className="text-ui-sm text-pretty text-ink-2">
+              Off stops new handoffs within a few minutes. Installs that already
+              moved stay moved.
+            </span>
+          </div>
+          <Switch
+            aria-labelledby="admin-native-handoff-label"
+            checked={current.enabled}
+            disabled={busy !== null}
+            onCheckedChange={(checked) => {
+              if (checked) {
+                setConfirming(true);
+              } else {
+                void write({ enabled: false }, "switch").catch((err) =>
+                  toast.error(describeApiError(err, "turn the handoff off")),
+                );
+              }
+            }}
+            className="mt-0.5"
+          />
+        </div>
+        <FieldPlate
+          label="Rollout"
+          htmlFor="admin-native-handoff-rollout"
+          hint="Percent of installs, 0–100"
+        >
+          <div className="flex items-center gap-3">
+            <Input
+              id="admin-native-handoff-rollout"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={100}
+              step={1}
+              value={percentText}
+              onChange={(event) => setPercentText(event.target.value)}
+              className="w-28"
+            />
+            <Button
+              variant="secondary"
+              size="lg"
+              loading={busy === "rollout"}
+              disabled={!percentChanged || busy !== null}
+              onClick={() => {
+                if (percent === null) return;
+                if (current.enabled && percent > current.rolloutPercent) {
+                  setRaiseTo(percent);
+                  return;
+                }
+                void write({ rolloutPercent: percent }, "rollout").catch(
+                  (err) =>
+                    setError(describeApiError(err, "change the rollout")),
+                );
+              }}
+            >
+              Save rollout
+            </Button>
+          </div>
+        </FieldPlate>
+        <p className="text-ui-xs text-pretty text-ink-3">
+          Each install has a fixed bucket from 0 to 99 and hands off once its
+          bucket is below the rollout, so raising it only adds installs. An app
+          that cannot reach this switch stays put.
+        </p>
+        {error ? (
+          <p role="alert" className="text-ui-sm text-danger-ink">
+            {error}
+          </p>
+        ) : null}
+        {data.updated.nativeHandoff ? (
+          <p
+            className="text-ui-xs text-ink-3"
+            title={formatDateTime(data.updated.nativeHandoff.at)}
+          >
+            Last changed {formatAgo(data.updated.nativeHandoff.at, now)}.
+          </p>
+        ) : null}
+      </div>
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Turn on the native handoff?"
+        description={
+          current.rolloutPercent > 0
+            ? `${current.rolloutPercent}% of Tauri installs will install the native app and close the next time they check for updates, once the latest release is a native one.`
+            : "The rollout is 0%, so no install moves until you raise it."
+        }
+        confirmLabel="Turn on"
+        errorAction="turn the handoff on"
+        onConfirm={() => write({ enabled: true }, "switch")}
+      />
+      <ConfirmDialog
+        open={raiseTo !== null}
+        onOpenChange={(open) => {
+          if (!open) setRaiseTo(null);
+        }}
+        title={raiseTo !== null ? `Raise the rollout to ${raiseTo}%?` : ""}
+        description={
+          raiseTo !== null
+            ? `The handoff is on: ${raiseTo}% of Tauri installs (now ${current.rolloutPercent}%) will install the native app and close the next time they check for updates.`
+            : null
+        }
+        confirmLabel="Raise rollout"
+        errorAction="change the rollout"
+        onConfirm={() =>
+          raiseTo !== null
+            ? write({ rolloutPercent: raiseTo }, "rollout")
+            : undefined
+        }
       />
     </RuleCard>
   );

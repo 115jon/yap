@@ -49,6 +49,10 @@ param(
     # reused across runs. -ObsZip uses an OBS release zip already on disk.
     [string]$ObsCacheDir = $(if ($env:YAP_OBS_CACHE_DIR) { $env:YAP_OBS_CACHE_DIR } else { Join-Path $env:TEMP "ralph-obs-signed-hook" }),
     [string]$ObsZip,
+    # Also download the hook's GPL-2.0 corresponding source archives (OBS,
+    # Detours, obs-deps; checked against the same lock) into this folder, for
+    # the release to attach. They are not part of the package.
+    [string]$ObsSourcesDir,
     # Leave the hook files out (the hook then always falls back to WGC).
     [switch]$NoCaptureHook,
     # Camera backgrounds (docs/LIBRARIES.md): ONNX Runtime 1.24.4's DirectML
@@ -113,7 +117,8 @@ $exe = Join-Path $BuildDir "Yap.exe"
 if (-not (Test-Path $exe)) { throw "No $exe; build first or drop -SkipBuild." }
 
 # The package is exactly what is staged: the one static exe, the game
-# capture hook's six OBS-signed files, and the camera background runtime.
+# capture hook's six OBS-signed files with their GPL-2.0 licence and source
+# offer, and the camera background runtime.
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
 $stage = Join-Path $OutDir "stage-$PackId-$Version"
@@ -126,11 +131,15 @@ Copy-Item $exe $stage
 # script downloads the pinned OBS zip if needed and checks every file against
 # desktop/packaging/obs-signed-hook.lock.json: SHA-256, a valid Authenticode
 # signature, the signer and its thumbprint. Any mismatch stops the build.
+# LICENSE-GPLv2.txt and SOURCE-OFFER.md (packaging/obs-capture/) sit beside
+# obs-signed\ in obs-capture\; the offer points at the sources the release
+# carries (-ObsSourcesDir).
 if (-not $NoCaptureHook) {
     $hookDir = Join-Path $stage "obs-capture\obs-signed"
     $fetch = Join-Path $root "..\desktop\scripts\fetch-obs-signed-hook.ps1"
     $fetchArgs = @{ Destination = $hookDir; CacheDir = $ObsCacheDir }
     if ($ObsZip) { $fetchArgs.ZipPath = $ObsZip }
+    if ($ObsSourcesDir) { $fetchArgs.SourcesDir = $ObsSourcesDir }
     & $fetch @fetchArgs
     if (-not $?) { throw "fetch-obs-signed-hook.ps1 failed" }
     $lock = Get-Content -Raw (Join-Path $root "..\desktop\packaging\obs-signed-hook.lock.json") | ConvertFrom-Json
@@ -138,6 +147,11 @@ if (-not $NoCaptureHook) {
         $staged = Join-Path $hookDir $file.name
         $sha = (Get-FileHash -Algorithm SHA256 $staged).Hash.ToLowerInvariant()
         if ($sha -ne $file.sha256) { throw "Staged $($file.name) does not match the lock" }
+    }
+    foreach ($doc in @("LICENSE-GPLv2.txt", "SOURCE-OFFER.md")) {
+        $src = Join-Path $root "packaging\obs-capture\$doc"
+        if (-not (Test-Path $src)) { throw "Missing $src (the hook's GPL-2.0 licence and source offer ship with it)" }
+        Copy-Item $src (Join-Path $stage "obs-capture")
     }
     Write-Host "==> OBS-signed capture hook $($lock.obs_version) staged and checked"
 }

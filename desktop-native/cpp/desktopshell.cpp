@@ -708,9 +708,18 @@ bool DesktopShell::setAutostart(bool enabled)
     return false;
   }
   HKEY key = nullptr;
-  if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_SET_VALUE, &key) !=
-      ERROR_SUCCESS)
-    return false;
+  // A fresh profile may have no Run key yet: create it when turning on (as
+  // the Tauri app did); with no key there is nothing to turn off.
+  const LONG opened =
+    enabled ? RegCreateKeyExW(HKEY_CURRENT_USER, kRunKey, 0, nullptr, 0,
+                              KEY_SET_VALUE, nullptr, &key, nullptr)
+            : RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_SET_VALUE, &key);
+  if (opened != ERROR_SUCCESS) {
+    const bool nothingToRemove = !enabled && opened == ERROR_FILE_NOT_FOUND;
+    std::fprintf(stderr, "[autostart] %s: Run key -> %ld\n",
+                 enabled ? "on" : "off", long(opened));
+    return nothingToRemove;
+  }
   LONG result;
   if (enabled) {
     // desktop `build_windows_startup_command`: the quoted path, --autostart.

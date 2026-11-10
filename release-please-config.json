@@ -5,38 +5,12 @@
     ".": {
       "release-type": "node",
       "include-component-in-tag": false,
+      "release-as": "4.0.0",
       "extra-files": [
-        "desktop/package.json",
-        "mobile/package.json",
-        {
-          "type": "json",
-          "path": "desktop/src-tauri/tauri.conf.json",
-          "jsonpath": "$.version"
-        },
         {
           "type": "toml",
-          "path": "desktop/src-tauri/Cargo.toml",
-          "jsonpath": "$.package.version"
-        },
-        {
-          "type": "toml",
-          "path": "desktop/launcher/Cargo.toml",
-          "jsonpath": "$.package.version"
-        },
-        {
-          "type": "xml",
-          "path": "desktop/installer/installer.csproj",
-          "xpath": "//Project/PropertyGroup/Version"
-        },
-        {
-          "type": "json",
-          "path": "mobile/src-tauri/tauri.conf.json",
-          "jsonpath": "$.version"
-        },
-        {
-          "type": "toml",
-          "path": "mobile/src-tauri/Cargo.toml",
-          "jsonpath": "$.package.version"
+          "path": "desktop-native/rust/Cargo.toml",
+          "jsonpath": "$.workspace.package.version"
         }
       ]
     }

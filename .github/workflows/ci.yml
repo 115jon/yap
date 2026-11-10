@@ -85,6 +85,12 @@ jobs:
       - name: Setup pnpm workspace
         uses: ./.github/actions/setup-pnpm
 
+      # The native release builds with cargo --locked, and release-please
+      # bumps desktop-native/rust/Cargo.toml without Cargo.lock: a release PR
+      # whose lock sync (release-please.yml) has not landed fails here.
+      - name: Check desktop-native Cargo.lock
+        run: node desktop-native/tools/sync-cargo-lock-version.mjs --check
+
       - name: Check formatting
         run: pnpm run format:check
 

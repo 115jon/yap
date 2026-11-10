@@ -1260,6 +1260,8 @@ pub enum ViewUpdate {
     Friends(Box<super::FriendsView>),
     /// The collectibles shop and pickers.
     Shop(Box<super::shop::ShopView>),
+    /// The full profile's board column.
+    Board(Box<super::board::BoardView>),
     /// The saved GIF and clip favourites (`provider:id`).
     GifFavorites(Vec<String>),
     /// The account's camera backgrounds.

@@ -1,0 +1,148 @@
+# The Tauri -> native cutover, end to end, on throwaway hosted runners:
+# the real v3.13.0 install, the update to the bridge release (3.14), the
+# bridge's headless run (--yap-native-handoff) against the signed native
+# Setup, and the native app's first launch (settings import, then the Tauri
+# uninstall). Never run .github/cutover-e2e/run-case.ps1 anywhere else.
+#
+# Cases (each on a fresh runner):
+#   happy             3.13 -> 3.14 (the 3.13 app's own updater when the bridge
+#                     release is latest), handoff, import, Tauri removed
+#   rerun             the same (downloading from GitHub), then a second run:
+#                     launch only, nothing reinstalled
+#   native-installed  the native app installed first: launch only, no Setup
+#   tampered          a Setup whose bytes differ from the digest: exit 1
+#   unsigned          a Setup without its signature: exit 1
+#   switch-off        the switch off: exit 2, nothing attempted
+#
+# The bridge reads YAP_HANDOFF_RELEASE only outside an install
+# (versioned_windows_install_root_from_exe_path: a folder named app-*), so
+# the cases copy the installed app-<version> folder elsewhere and run that.
+name: Desktop Cutover E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      bridge_tag:
+        description: "The Tauri release with the bridge (its YapSetup.exe is the update)"
+        default: "v3.14.0"
+      native_tag:
+        description: "The native release (v4+ or desktop-native-v*); empty: the highest stable v4+ with Yap.App-win-Setup.exe, else the newest desktop-native-v*"
+        default: ""
+      cases:
+        description: "Comma-separated cases; empty: all"
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-cutover-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REPO: 115jon/yap
+  OLD_TAG: v3.13.0
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      bridge_tag: ${{ steps.r.outputs.bridge_tag }}
+      native_tag: ${{ steps.r.outputs.native_tag }}
+      bridge_is_latest: ${{ steps.r.outputs.bridge_is_latest }}
+      matrix: ${{ steps.r.outputs.matrix }}
+    steps:
+      - id: r
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRIDGE_TAG: ${{ inputs.bridge_tag || 'v3.14.0' }}
+          NATIVE_TAG: ${{ inputs.native_tag }}
+          CASES: ${{ inputs.cases }}
+        run: |
+          set -euo pipefail
+          bridge=$(gh api "repos/$REPO/releases/tags/$BRIDGE_TAG" 2>/dev/null) || { echo "::error::$BRIDGE_TAG is not a published release (a draft has no tag URL)"; exit 1; }
+          [ "$(jq -r .draft <<<"$bridge")" = false ] || { echo "::error::$BRIDGE_TAG is a draft"; exit 1; }
+          jq -e '.assets[] | select(.name == "YapSetup.exe")' <<<"$bridge" >/dev/null || { echo "::error::$BRIDGE_TAG has no YapSetup.exe"; exit 1; }
+          if [ -z "$NATIVE_TAG" ]; then
+            # Every page: the native release can be older than the newest 100.
+            releases=$(gh api --paginate "repos/$REPO/releases?per_page=100" --jq '.[] | select(.draft == false and .prerelease == false) | {tag: .tag_name, setup: ([.assets[].name] | index("Yap.App-win-Setup.exe") != null)}' | jq -s .)
+            # From 4.0.0 native releases are release-please's vX.Y.Z; before,
+            # desktop-native-vX.Y.Z.
+            NATIVE_TAG=$(jq -r '[.[] | select(.setup and (.tag | test("^v[0-9]+[.][0-9]+[.][0-9]+$"))) | . + {v: (.tag | ltrimstr("v") | split(".") | map(tonumber))} | select(.v[0] >= 4)] | sort_by(.v) | last | .tag // empty' <<<"$releases")
+            if [ -z "$NATIVE_TAG" ]; then
+              NATIVE_TAG=$(jq -r '[.[] | select(.setup and (.tag | test("^desktop-native-v[0-9]+[.][0-9]+[.][0-9]+$"))) | . + {v: (.tag | ltrimstr("desktop-native-v") | split(".") | map(tonumber))}] | sort_by(.v) | last | .tag // empty' <<<"$releases")
+            fi
+            [ -n "$NATIVE_TAG" ] || { echo "::error::No stable native release with Yap.App-win-Setup.exe"; exit 1; }
+          fi
+          gh api "repos/$REPO/releases/tags/$NATIVE_TAG" --jq '.assets[] | select(.name == "Yap.App-win-Setup.exe") | .name' | grep -q . || { echo "::error::$NATIVE_TAG has no Yap.App-win-Setup.exe"; exit 1; }
+          latest=$(gh api "repos/$REPO/releases/latest" --jq .tag_name)
+          # The 3.13 app's own updater reaches the bridge when latest.json
+          # (whichever release is latest: the bridge, or a v4 carrying its
+          # file) names the bridge's version.
+          served=$(curl -fsSL --retry 3 "https://github.com/$REPO/releases/latest/download/latest.json" | jq -r '.version // empty' 2>/dev/null || true)
+          bridge_is_latest=$([ "$served" = "${BRIDGE_TAG#v}" ] && echo true || echo false)
+          all='["happy","rerun","native-installed","tampered","unsigned","switch-off"]'
+          if [ -n "$CASES" ]; then
+            all=$(jq -cn --arg c "$CASES" '$c | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+          fi
+          {
+            echo "bridge_tag=$BRIDGE_TAG"
+            echo "native_tag=$NATIVE_TAG"
+            echo "bridge_is_latest=$bridge_is_latest"
+            echo "matrix=$(jq -cn --argjson c "$all" '{os: ["windows-2025", "windows-2022"], case: $c}')"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "bridge **$BRIDGE_TAG**, native **$NATIVE_TAG**, from **$OLD_TAG**; latest release: $latest (latest.json version: ${served:-none})"
+            echo "cases: $all"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  e2e:
+    needs: resolve
+    name: ${{ matrix.case }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          sparse-checkout: .github/cutover-e2e
+          persist-credentials: false
+
+      - name: Build the localStorage fixture tool
+        shell: pwsh
+        working-directory: .github/cutover-e2e/localstorage-fixture
+        run: |
+          cargo build --release --locked
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Run the case
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CASE: ${{ matrix.case }}
+          BRIDGE_TAG: ${{ needs.resolve.outputs.bridge_tag }}
+          NATIVE_TAG: ${{ needs.resolve.outputs.native_tag }}
+          BRIDGE_IS_LATEST: ${{ needs.resolve.outputs.bridge_is_latest }}
+        run: |
+          ./.github/cutover-e2e/run-case.ps1 `
+            -Case $env:CASE `
+            -BridgeTag $env:BRIDGE_TAG `
+            -NativeTag $env:NATIVE_TAG `
+            -OldTag $env:OLD_TAG `
+            -Repo $env:REPO `
+            -BridgeIsLatest ($env:BRIDGE_IS_LATEST -eq 'true') `
+            -FixtureExe (Join-Path $env:GITHUB_WORKSPACE '.github\cutover-e2e\localstorage-fixture\target\release\localstorage-fixture.exe') `
+            -Out (Join-Path $env:RUNNER_TEMP 'cutover-out')
+
+      - name: Upload the evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cutover-${{ matrix.case }}-${{ matrix.os }}
+          path: ${{ runner.temp }}/cutover-out
+          if-no-files-found: warn
+          retention-days: 14

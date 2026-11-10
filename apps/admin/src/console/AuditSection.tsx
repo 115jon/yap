@@ -36,6 +36,7 @@ const ACTION_LABEL: Record<string, string> = {
   "user.disconnect": "Disconnected",
   "flags.update": "Switch",
   "announcement.update": "Banner",
+  "native_handoff.update": "Native handoff",
   "catalog.refresh": "Catalog",
 };
 
@@ -87,6 +88,8 @@ export function describeChange(entry: AdminAuditEntry): string {
       return entry.after && typeof after.text === "string"
         ? `“${after.text}”`
         : "Cleared";
+    case "native_handoff.update":
+      return `${after.enabled === true ? "On" : "Off"}, ${Number(after.rolloutPercent ?? 0)}% of installs`;
     case "catalog.refresh": {
       if (typeof after.error === "string")
         return `Refresh failed: ${after.error}`;

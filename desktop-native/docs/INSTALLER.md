@@ -227,10 +227,12 @@ which pins a client to that release's feed.
 unauthenticated API call, `GET /repos/115jon/yap/releases?per_page=100`
 (up to three pages while no native release has turned up), within the API's
 60 requests an hour per IP. From the list it keeps the **native releases**:
-not drafts, tag `desktop-native-v` plus a semver, and on stable neither a
-GitHub pre-release nor a pre-release version; beta keeps them all. The
-web app's `v3.x`, `mobile-v*`, `cef-build-assets` and the
-`native-toolchain-*` release never match. It then reads
+not drafts, tag `desktop-native-v` plus a semver (the legacy form) or `v`
+plus a semver whose major is 4 or more (the plain release line is the
+native app's from 4.0.0), and on stable neither a GitHub pre-release nor a
+pre-release version; beta keeps them all. The Tauri app's `v3.x` and
+older, `mobile-v*`, `cef-build-assets` and the `native-toolchain-*`
+release never match (`release_tag_version`). It then reads
 `releases.<channel>.json` from the newest native release that has one, and
 downloads each package from the newest native release that has a file of
 that name, both from the public download URLs (GitHub's CDN, no API call).
@@ -246,15 +248,20 @@ one place: Velopack asks for
 `<base>/releases.<channel>.json?localVersion=...&id=...&stagingId=...` and
 then `<base>/<FileName>`.
 
-What a native release holds:
+What a stable native release holds (release-please's `v4.0.0` and later;
+the `desktop-native-v0.2.x` releases before it have neither `YapSetup.exe`
+nor `latest.json`):
 
 ```
-desktop-native-v0.2.24/
+v4.0.0/
   releases.win.json            # the channel's feed (uploaded last)
-  Yap.App-0.2.24-full.nupkg
-  Yap.App-0.2.24-delta.nupkg   # from the previous release's full package
+  Yap.App-4.0.0-full.nupkg
+  Yap.App-4.0.0-delta.nupkg    # from the previous release's full package
   Yap.App-win-Setup.exe        # the installer
   Yap.App-win-Portable.zip
+  YapSetup.exe                 # the same installer, for latest/download/YapSetup.exe links
+  latest.json                  # the Tauri bridge's updater manifest, byte for byte
+  OBS-Studio-*-Sources.tar.gz  # GPL-2.0 source of the capture hook (and Detours, obs-deps)
 ```
 
 A beta (`desktop-native-v0.2.25-beta.1`, a GitHub pre-release) holds
@@ -287,13 +294,21 @@ nothing new to run or pay for, CI needs only `GITHUB_TOKEN`, and every
 version gets a release page. What that costs, and how it is handled:
 
 - **The Tauri app's updater** reads `releases/latest/download/latest.json`.
-  Until the cutover ("Replacing the Tauri app") a native release must
-  never be "latest": the workflow creates it as a draft with
-  `--latest=false`, publishes it with `make_latest=false`, then checks that
-  `releases/latest` did not move (and restores it and fails if it did).
-  If the current latest web release is ever deleted, GitHub picks a new
-  latest by date and could pick a native one: mark a web release latest
-  again by hand.
+  From 4.0.0 a native release is "latest", so each stable one carries the
+  Tauri bridge's `latest.json` ("Publishing a release"), which sends Tauri
+  installs to the bridge's `YapSetup.exe` by its tag URL. Manual releases
+  (betas, pre-4.0 `desktop-native-v*`) are never latest: published with
+  `make_latest=false`, and the workflow checks that `releases/latest` did
+  not move. GitHub picks a new latest by date whenever the latest release
+  is deleted or made a draft, and that can be a release without
+  `latest.json` (on 2026-11-10, while 3.14.0 was a draft,
+  `desktop-native-v0.2.26` was latest). release-please's draft makes this
+  happen during every release run, so `release-please.yml` records latest
+  before it creates the release and, right after making it a draft, marks
+  that one latest again if it serves the bridge's `latest.json` (the bridge
+  itself, or a v4+ carrying the same bytes), otherwise the bridge. If
+  latest still ends up wrong, mark a good release latest by hand
+  (`gh release edit <tag> --latest`). The watchdog below reports it.
 - **The API rate limit**: 60 unauthenticated requests an hour per IP. One
   call per check, a check every 6 h, retries backing off to an hour; a
   rate-limited check reads "Couldn't reach the update server" and retries.
@@ -308,31 +323,92 @@ the new place and publish that release to both.
 
 ### Publishing a release
 
-By CI: `.github/workflows/desktop-native-release.yml` ("CI" below) does all
-of it. Stable:
+**Stable** releases come from release-please, as the web app's always did:
+one version line (`v4.0.0`, `v4.0.1`, ...), and every release ships a
+native update.
 
-1. Bump `[workspace.package] version` in `rust/Cargo.toml` and merge it to
-   `main`.
-2. Actions > Desktop Native Release > Run workflow, **from `main`**:
-   `version` empty (or the same `0.2.24`), `channel` `win`, `notes` the
-   release notes (Markdown, shown in Settings > Desktop app).
-3. The run tests, builds, signs, packs (with a delta against the previous
-   native release) and publishes `desktop-native-v0.2.24`, never "latest".
-4. Check: the release lists `releases.win.json`, and an installed copy
-   finds the version ("Check for updates").
+1. Merge the release PR (`chore(main): release x.y.z`). release-please
+   bumps `[workspace.package] version` in `rust/Cargo.toml`
+   (`release-please-config.json`, extra-files), and `release-please.yml`
+   then sets the workspace crates' versions in `rust/Cargo.lock` on the
+   PR's branch (`tools/sync-cargo-lock-version.mjs`: the members' entries
+   only, never the `[patch]` crates; the build runs `--locked`), with
+   `main`'s copy of the script, pushing with the PAT so CI runs again.
+   `ci.yml`'s `quality` job (under `required`) runs the script with
+   `--check`, so a release PR whose lock is stale cannot merge.
+2. On the merge, `release-please.yml` creates the release and tag
+   `vx.y.z`, makes it a draft, and calls
+   `desktop-native-release.yml` with `release_tag` ("CI" below).
+3. The run builds that tag, checks that the tag's version is Cargo.toml's,
+   uploads into the draft, uses release-please's changelog as the release
+   notes (cut to 8,000 characters for Velopack, which keeps every
+   version's notes in the feed), and publishes it as latest.
+4. Before it publishes, it downloads the Tauri bridge's `latest.json` and
+   checks it (`tools/tauri-bridge.ps1 -Mode Fetch`): version is the bridge
+   tag's, the url is `.../releases/download/<bridge tag>/YapSetup.exe`,
+   the minisign key id is that of the pubkey in
+   `packaging/tauri-bridge.json` (the Tauri app's
+   `plugins.updater.pubkey`), and the url answers 200. It uploads that
+   file unchanged. After publishing, `-Mode VerifyLatest` checks that
+   latest is the new tag, that `releases/latest/download/latest.json` is
+   the bridge's file byte for byte, and that `latest/download/` serves
+   `Yap.App-win-Setup.exe`, `YapSetup.exe` and `releases.win.json`. Any
+   failure fails the run. `release-watchdog.yml` repeats the check daily,
+   also reports a `vx.y.z` draft older than 6 hours (a release run that
+   never published), and opens (or comments on) an issue labelled
+   `release-watchdog`.
+5. Check: an installed copy finds the version ("Check for updates").
 
-A beta is the same with `channel` `beta` and a pre-release version
-(`0.2.25-beta.1`, whose `0.2.25` must be Cargo.toml's): a GitHub
-pre-release with `releases.beta.json`. Beta users read the stable feed too,
-so nothing is copied between channels.
+The bridge tag is `packaging/tauri-bridge.json`'s `tag` (`v3.14.0`). The
+repository variable `TAURI_BRIDGE_TAG` overrides it (the run warns when
+they differ), for a 3.14.x that replaces the bridge; it must be a
+published Tauri release (`v3.x`) with `latest.json` and `YapSetup.exe`.
+Change the file afterwards so the two agree.
+
+`YapSetup.exe` is a copy of `Yap.App-win-Setup.exe`: README and the
+website's fallback link `releases/latest/download/YapSetup.exe`. Velopack's
+Setup reads its package from its own file (`current_exe`), so the name
+does not matter, and the Tauri updater never fetches it from a v4 release
+(the carried `latest.json` names the bridge's tag).
+
+**`release-as`**: `release-please-config.json` pins the first native
+version with `"release-as": "4.0.0"`. Remove it in the first PR after
+4.0.0 is released: until then release-please would propose 4.0.0 again.
+On the run that creates `v4.0.0`, `release-please.yml` warns and skips the
+release PR; on any later run with the pin still there, its release-pr job
+fails. A `Release-As: 4.0.0` commit footer was not used:
+it only works in a conventional commit that reaches `main` with its body
+intact, which depends on how the PR is merged.
+
+**A failed release run** leaves release-please's draft in place (never
+deleted). Fix the cause, then rerun the failed jobs, or Actions > Desktop
+Native Release > Run workflow from `main` with `release_tag` `vx.y.z`; the
+release must still be a draft, and the upload replaces what the failed run
+left.
+
+**Betas** are manual: Run workflow from `main` with `channel` `beta` and a
+pre-release version (`4.1.0-beta.1`, whose `4.1.0` must be Cargo.toml's,
+so bump it on `main` first; the next release PR sets it to whatever it
+releases). The tag is `desktop-native-v4.1.0-beta.1`, a GitHub pre-release
+with `releases.beta.json`, never latest. Beta users read the stable feed
+too, so nothing is copied between channels. Betas keep the
+`desktop-native-v` prefix so release-please never sees a `v*` tag it did
+not make.
+
+**Manual stable** runs (`channel` `win`) are refused from 4.0.0: a manual
+`vx.y.z` would take a version release-please's next PR proposes. Before
+the 4.0.0 release they still publish `desktop-native-v0.2.x` with
+`make_latest=false`.
 
 By hand (a release CI cannot make): download the previous release's
 `releases.<channel>.json` and full `.nupkg` into one folder, run
 `./tools/package.ps1 -Sign -OutDir <folder> -Version <v> -Channel <c> -ReleaseNotes notes.md`
-there (`-Sign` needs the Signer role, see "Signing"), then
-`gh release create desktop-native-v<v> --draft --latest=false`, upload the
-new packages, Setup.exe and the Portable zip, then the feed file, and
-publish with `gh api -X PATCH repos/115jon/yap/releases/<id> -F draft=false -f make_latest=false`.
+there (`-Sign` needs the Signer role, see "Signing"), upload the new
+packages, Setup.exe (and as `YapSetup.exe`), the Portable zip, the OBS
+source archives and, for a stable release, the bridge's `latest.json`
+(`tools/tauri-bridge.ps1 -Mode Fetch -OutFile latest.json`) into the
+release's draft, then the feed file, publish it, and run
+`tools/tauri-bridge.ps1 -Mode VerifyLatest -ExpectedLatest v<v>`.
 
 ### Test hooks and a local feed
 
@@ -415,8 +491,13 @@ starts and before anything reads the settings:
    `Yap.Data\tauri-shortcuts\` before the uninstaller starts, so a launch
    after one that ended mid-uninstall puts back any that are gone; the
    folder goes once the Tauri app is gone.
-5. **Uninstall, the supported way**, on a background thread:
-   `"<root>\Update.exe" --uninstall /S` without a window, up to 120 s.
+5. **Uninstall, the supported way**, deferred until this launch has
+   stayed up: the launch only arms it; once Main.qml has its window (shown,
+   or in the tray) the shell calls `yap_tauri_app_started`, and 20 s later
+   (`tauri::UNINSTALL_DEFER`, `tauri::UninstallDeferral`) a background
+   thread counts the attempt and runs `"<root>\Update.exe" --uninstall /S`
+   without a window, up to 120 s. A build that crashes on start leaves the
+   Tauri app working.
 6. **Restore and clean up**: put back any saved shortcut that is gone; delete
    the Run value `Yap` and `Software\Classes\yap` only if they still point
    into `%LOCALAPPDATA%\Yap` (`tauri::remove_leftovers`); register `yap://`
@@ -427,6 +508,51 @@ prefix. Only the Tauri uninstaller deletes anything of the Tauri app, and only
 inside its root; `%APPDATA%\Yap` is read, never changed. Tests:
 `crates/yap-core/tests/tauri_replace.rs` (fixture folders, an in-memory
 registry, a LevelDB built in memory).
+
+### How the Tauri app gets here (3.14, the bridge)
+
+The last Tauri release installs this app itself
+(`desktop/src-tauri/src/native_handoff`). It stays dormant until all of
+these hold:
+
+- **The remote switch** (`GET /api/desktop/native-handoff`, the admin
+  console's Switches) is on, and the install's bucket is below its rollout
+  percent. The switch is off at 0 % by default, and an unreachable endpoint
+  means no handoff.
+- **A native release exists**: among the 30 newest releases
+  (`GET /repos/115jon/yap/releases?per_page=30`, not `releases/latest`),
+  the highest one tagged exactly `vX.Y.Z` with X >= 4, neither a draft nor
+  a prerelease, with an asset named `Yap.App-win-Setup.exe` that has a
+  `sha256:` digest and a size of 10–500 MB, downloading from this
+  repository. The `desktop-native-v*` tags never match, so the cutover
+  publishes `v4.x.y` releases. Which release is "latest" does not matter
+  to the bridge: the Tauri updater keeps reading
+  `releases/latest/download/latest.json`, so a 3.14.x can still ship, and
+  each stable v4 release carries 3.14's `latest.json` ("Publishing a
+  release"). GitHub is asked at most once per
+  6 h after a "not yet" and once an hour after an error.
+- **Windows** is build 17763 or later, the floor of Qt 6.11.
+
+The Setup is downloaded to `%TEMP%\yap-native-handoff`, checked against
+the digest, moved alone into a fresh `attempt-<guid>` folder there (no
+junctions, nothing beside it), held open with read sharing only, and
+checked with `WinVerifyTrust`, revocation checked online for the whole
+chain (an unanswered check is a failure, never a pass): subject CN
+`Jonathan Martinez`, an issuer CN starting with `Microsoft ID Verified CS`,
+a timestamp, and the EKUs code signing (`1.3.6.1.5.5.7.3.3`) and this
+account's Artifact Signing identity validation
+(`1.3.6.1.4.1.311.97.726408799.228623495.642435689.37395988`, on every
+certificate under that validation; a new identity validation needs a new
+bridge). It runs as `--silent --log %TEMP%\yap-native-handoff\setup.log`
+(silent never starts the app). `current\Yap.exe` gets the same signature
+check, and the Tauri app starts that file (held open until it runs), not
+the root stub. It counts the handoff done only if `current\Yap.exe` still
+runs 8 s later, then exits; the deferred uninstall above starts later
+still. Later Tauri launches start the native app instead (after two
+failed redirects in a row they start Tauri again). State, attempts and
+opt-out are in `%APPDATA%\Yap\native-handoff.json` (an unreadable file
+keeps the bridge dormant and is never rewritten); the log is
+`%TEMP%\yap-native-handoff\handoff.log`.
 
 ## Rename from Yap Native
 
@@ -608,7 +734,10 @@ alph-obs-signed-hook` by
   already resident in them; otherwise they use WGC.
 - **Licence.** The files are GPL-2.0, run as separate processes and a
   separate DLL, never linked; the corresponding source is named in the
-  lock's `sources`.
+  lock's `sources`. The package carries `obs-capture\LICENSE-GPLv2.txt`
+  and `obs-capture\SOURCE-OFFER.md` (from `packaging/obs-capture/`), and
+  the release workflow attaches the source archives (`package.ps1
+-ObsSourcesDir`, uploaded with the packages).
 
 ## Signing
 
@@ -630,18 +759,29 @@ someone with Owner must first assign the Signer role to that user.
 
 ## CI
 
-`.github/workflows/desktop-native-release.yml`, manual (`workflow_dispatch`)
-only, one run at a time (concurrency group `desktop-native-release`).
-Inputs: `version` (empty: Cargo.toml's), `channel` (`win` or `beta`),
-`notes`, and `dry_run`.
+`.github/workflows/desktop-native-release.yml`, one run at a time
+(concurrency group `desktop-native-release`), in two modes:
 
-| job       | runner        | token                                | does                                                                                                                                                                                                                                                                                                                                                                |
-| --------- | ------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plan`    | ubuntu-latest | `contents: read`                     | checks the version against Cargo.toml and the channel (beta takes `x.y.z-pre`), refuses a tag or release (drafts too) that exists, and a signed run off `main`                                                                                                                                                                                                      |
-| `deny`    | ubuntu-latest | `contents: read`                     | `cargo deny check` with cargo-deny's release binary (`taiki-e/install-action`)                                                                                                                                                                                                                                                                                      |
-| `test`    | windows-2022  | `contents: read`                     | `cargo test` (the workspace without `yap_native` and `yap-audio`), through sccache                                                                                                                                                                                                                                                                                  |
-| `build`   | windows-2022  | `contents: read`                     | the toolchain (below), ONNX Runtime from nuget.org (hash-checked), `build.ps1` through sccache; uploads `Yap.exe` and the runtime, and the cargo `--timings` report and `.ninja_log`                                                                                                                                                                                |
-| `release` | windows-2025  | `contents: write`, `id-token: write` | after the other four: the previous release of the channel (feed and full package, for the delta), `azure/login` (OIDC) and `azure/artifact-signing-action` on `Yap.exe`, `package.ps1 -Sign` (vpk signs Update.exe, the stub and Setup.exe), `verify-authenticode.ps1`, then the release: a draft, packages, then the feed file, published with `make_latest=false` |
+- **Release** (`release_tag`): `release-please.yml` calls it
+  (`workflow_call`) for each release it creates; a dispatch with
+  `release_tag` reruns one. Builds `refs/tags/<tag>`, requires the tag's
+  version to be Cargo.toml's and the release to be release-please's draft,
+  carries the bridge's `latest.json`, publishes with `make_latest=true`
+  and checks `releases/latest` ("Publishing a release").
+- **Manual** (dispatch without `release_tag`): `version` (empty:
+  Cargo.toml's), `channel` (`beta`, or `win` before 4.0.0), `notes`, and
+  `dry_run`. Tags `desktop-native-v<version>`, `make_latest=false`.
+
+`desktop-release.yml` (the Tauri app) is no longer called by
+release-please; it stays, dispatch only, until `desktop/` is removed.
+
+| job       | runner        | token                                | does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------- | ------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan`    | ubuntu-latest | `contents: write` (to list drafts)   | release mode: the tag (`v4+`) against Cargo.toml, the draft, `Cargo.lock` (`sync-cargo-lock-version.mjs --check`) and the bridge (`tauri-bridge.ps1 -Mode Fetch`); manual: the version and channel (beta takes `x.y.z-pre`, `win` only below 4.0.0), refuses a tag or release (drafts too) that exists; both refuse a signed run off `main`                                                                                                                                                                                                       |
+| `deny`    | ubuntu-latest | `contents: read`                     | `cargo deny check` with cargo-deny's release binary (`taiki-e/install-action`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `test`    | windows-2022  | `contents: read`                     | `cargo test` (the workspace without `yap_native` and `yap-audio`), through sccache                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `build`   | windows-2022  | `contents: read`                     | the toolchain (below), ONNX Runtime from nuget.org (hash-checked), `build.ps1` through sccache; uploads `Yap.exe` and the runtime, and the cargo `--timings` report and `.ninja_log`                                                                                                                                                                                                                                                                                                                                                              |
+| `release` | windows-2025  | `contents: write`, `id-token: write` | after the other four: the previous release of the channel (feed and full package, for the delta), `azure/login` (OIDC) and `azure/artifact-signing-action` on `Yap.exe`, `package.ps1 -Sign` (vpk signs Update.exe, the stub and Setup.exe), `verify-authenticode.ps1`, then the release: release mode uploads into release-please's draft (with `YapSetup.exe` and the bridge's `latest.json`), publishes it as latest and checks `releases/latest`; manual mode makes a draft, packages, then the feed file, published with `make_latest=false` |
 
 The build job runs third-party build scripts, so it gets neither the write
 token nor OIDC; signing and publishing happen in the release job only.
@@ -655,7 +795,9 @@ job refuses to run while it exists.
 `AZURE_CLIENT_ID` trust `refs/heads/main` and `v*` tags only (immutable
 subject form, docs/desktop/code-signing.md). The job's OIDC subject is the
 ref the workflow runs from, not the release tag, so a dispatch from `main`
-that creates `desktop-native-v*` needs no new credential. A
+that creates `desktop-native-v*`, and release-please's call (its run is a
+push to `main`; a called workflow's subject is the caller's ref), need no
+new credential. A
 `push: tags: desktop-native-v*` trigger would; it would need a flexible
 credential matching
 `repo:115jon@<owner id>/yap@<repo id>:ref:refs/tags/desktop-native-v*`.
@@ -706,19 +848,35 @@ is cached: the toolchain archives (above), the crates (a few seconds from
 crates.io) and ONNX Runtime (2 s from nuget.org) download each run.
 
 **Toolchain.** No action provides a static, patched Qt, so it comes from
-the `native-toolchain-qt6.11.3-yap-webrtc-a545de4` release (a pre-release,
-never latest): the Qt build (`patches/qt/build-qt.ps1`, MSVC 14.44, LTCG)
-pruned by `tools/toolchain-qt.exclude`, and LiveKit's libwebrtc
-`webrtc-a545de4` as `webrtc-sys` downloads it. `tools/package-toolchain.ps1`
-makes the archives (7-Zip, volumes under 2 GB) and
-`tools/toolchain.lock.json` (every asset's size and SHA-256);
-`tools/fetch-toolchain.ps1` downloads them, checks them against the lock,
-unpacks them and sets `YAP_QT_DIR`, `QMAKE`, `YAP_LIBWEBRTC_DIR` and
+the `native-toolchain-qt6.11.3-yap-webrtc-a545de4-r2` release (a
+pre-release, never latest): the Qt build (`patches/qt/build-qt.ps1`, MSVC
+14.44, LTCG) without its docs, SBOMs and PDBs (`tools/toolchain-qt.exclude`),
+and LiveKit's libwebrtc `webrtc-a545de4` as `webrtc-sys` downloads it.
+`tools/package-toolchain.ps1` makes the archives (7-Zip, volumes under
+2 GB), their `*.contents.sha256` lists (every file's SHA-256) and
+`tools/toolchain.lock.json` (every asset's size and SHA-256). Before it
+writes the lock it lists each archive (`7z l -slt`), unpacks it into a
+scratch folder and compares every file's size and SHA-256 with the source,
+and it refuses a packed file that holds the packing PC's profile path (the
+release is public). `tools/fetch-toolchain.ps1` downloads the assets,
+checks them against the lock, refuses a contents list with an empty `.lib`
+or `.obj`, unpacks the archives, hashes every unpacked file against the
+contents lists, and sets `YAP_QT_DIR`, `QMAKE`, `YAP_LIBWEBRTC_DIR` and
 `LK_CUSTOM_WEBRTC`. Both archives download in one `gh` call and unpack side
-by side (about 30 s). They are not cached: the download takes about 15 s,
-no faster from the Actions cache, and the cache budget goes to sccache.
-The Qt archive adds `bin/qt.conf` (`Prefix = ..`): a static Qt is not
-relocatable, and cxx-qt asks qmake for its paths.
+by side: 702 MB of Qt (8.4 GB unpacked) and 47 MB of libwebrtc (0.4 GB).
+On the packing PC (24 threads) the whole fetch took 56 s, of which the
+contents check (45,537 files, 8.6 GB, just unpacked) took 6 s. They are not cached: the download is no faster from the Actions
+cache, and the cache budget goes to sccache. The Qt archive adds
+`bin/qt.conf` (`Prefix = ..`): a static Qt is not relocatable, and cxx-qt
+asks qmake for its paths. Its `bin/qt-cmake*.bat` use the `cmake` on PATH
+instead of the packing PC's.
+
+The first release, `native-toolchain-qt6.11.3-yap-webrtc-a545de4` (kept for
+old commits), packed 176 Qt libraries and objects that a clean build did
+not read as empty files. `import QtQuick.Window` (the profile board's
+`WidgetImage.qml`) linked one of them, and the link failed with
+`LNK1136: invalid or corrupt file`. Every library and object is now packed
+whole.
 
 Qt's libraries are link-time code, which links only with the MSVC that
 compiled them: the build job runs on `windows-2022` (Visual Studio 2022,

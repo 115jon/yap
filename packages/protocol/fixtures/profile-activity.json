@@ -1,0 +1,150 @@
+{
+  "events": [
+    {
+      "id": "a1",
+      "kind": "game",
+      "ref": null,
+      "data": {
+        "name": "Deadlock",
+        "icon_url": "/src/components/dev/assets/cover-slowfires.webp"
+      },
+      "started_at": "2026-11-27T15:12:00.000Z",
+      "ended_at": "2026-11-27T16:54:00.000Z",
+      "seconds": 6120,
+      "hidden": false
+    },
+    {
+      "id": "a2",
+      "kind": "voice",
+      "ref": null,
+      "data": {
+        "channel_id": "c-lounge",
+        "channel_name": "Lounge",
+        "server_id": "s-raid",
+        "server_name": "Raid HQ"
+      },
+      "started_at": "2026-11-27T09:18:00.000Z",
+      "ended_at": "2026-11-27T12:58:00.000Z",
+      "seconds": 13200,
+      "hidden": false
+    },
+    {
+      "id": "a3",
+      "kind": "badge",
+      "ref": "night-owl",
+      "data": {},
+      "started_at": "2026-11-27T09:02:00.000Z",
+      "ended_at": null,
+      "seconds": null,
+      "hidden": false
+    },
+    {
+      "id": "a4",
+      "kind": "stream",
+      "ref": null,
+      "data": {
+        "name": "Balatro",
+        "channel_id": "c-stage",
+        "channel_name": "Stage",
+        "server_id": "s-raid",
+        "server_name": "Raid HQ"
+      },
+      "started_at": "2026-11-27T03:10:00.000Z",
+      "ended_at": "2026-11-27T03:58:00.000Z",
+      "seconds": 2880,
+      "hidden": false
+    },
+    {
+      "id": "a5",
+      "kind": "listen",
+      "ref": null,
+      "data": {
+        "tracks": 12,
+        "top_track": "Night Drive (Slowed)",
+        "channel_id": "c-lounge",
+        "channel_name": "Lounge",
+        "server_id": "s-raid",
+        "server_name": "Raid HQ"
+      },
+      "started_at": "2026-11-27T01:30:00.000Z",
+      "ended_at": "2026-11-27T02:34:00.000Z",
+      "seconds": 3840,
+      "hidden": false
+    },
+    {
+      "id": "a6",
+      "kind": "voice",
+      "ref": null,
+      "data": {},
+      "started_at": "2026-11-26T04:40:00.000Z",
+      "ended_at": "2026-11-26T05:55:00.000Z",
+      "seconds": 4500,
+      "hidden": false
+    },
+    {
+      "id": "a7",
+      "kind": "server_join",
+      "ref": "s-cozy",
+      "data": {
+        "server_id": "s-cozy",
+        "server_name": "Cozy Corner"
+      },
+      "started_at": "2026-11-25T00:05:00.000Z",
+      "ended_at": null,
+      "seconds": null,
+      "hidden": false
+    },
+    {
+      "id": "a8",
+      "kind": "game",
+      "ref": null,
+      "data": {
+        "name": "Stardew Valley",
+        "icon_url": "/src/components/dev/assets/cover-paperboats.webp"
+      },
+      "started_at": "2026-11-24T02:15:00.000Z",
+      "ended_at": "2026-11-24T04:20:00.000Z",
+      "seconds": 7500,
+      "hidden": false
+    },
+    {
+      "id": "a9",
+      "kind": "badge",
+      "ref": "voice-regular",
+      "data": {},
+      "started_at": "2026-11-22T18:00:00.000Z",
+      "ended_at": null,
+      "seconds": null,
+      "hidden": false
+    },
+    {
+      "id": "a10",
+      "kind": "game",
+      "ref": null,
+      "data": {
+        "name": "Hades II"
+      },
+      "started_at": "2026-11-19T05:01:00.000Z",
+      "ended_at": "2026-11-19T06:29:00.000Z",
+      "seconds": 5280,
+      "hidden": false
+    },
+    {
+      "id": "a11",
+      "kind": "voice",
+      "ref": null,
+      "data": {
+        "channel_id": "c-raid",
+        "channel_name": "Raid night",
+        "server_id": "s-raid",
+        "server_name": "Raid HQ"
+      },
+      "started_at": "2026-11-19T02:30:00.000Z",
+      "ended_at": "2026-11-19T05:05:00.000Z",
+      "seconds": 9300,
+      "hidden": false
+    }
+  ],
+  "next_cursor": null,
+  "is_owner": false
+}

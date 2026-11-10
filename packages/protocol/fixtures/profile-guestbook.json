@@ -1,0 +1,49 @@
+{
+  "notes": [
+    {
+      "id": "note-juno",
+      "author": {
+        "id": "u-juno",
+        "username": "juno",
+        "display_name": "Juno",
+        "avatar_url": null
+      },
+      "body": "best duo partner, terrible taste in music",
+      "created_at": "2026-11-25T20:30:00.000Z"
+    },
+    {
+      "id": "note-mo",
+      "author": {
+        "id": "u-mo",
+        "username": "mo",
+        "display_name": "Mo",
+        "avatar_url": null
+      },
+      "body": "carried me through plat. I owe you one",
+      "created_at": "2026-11-22T20:30:00.000Z"
+    },
+    {
+      "id": "note-pip",
+      "author": {
+        "id": "u-pip",
+        "username": "pip",
+        "display_name": "Pip",
+        "avatar_url": null
+      },
+      "body": "the cat avatar >>>",
+      "created_at": "2026-11-19T20:30:00.000Z"
+    }
+  ],
+  "total": 12,
+  "next_cursor": null,
+  "enabled": true,
+  "can_post": false,
+  "blocked": [
+    {
+      "id": "u-troll",
+      "username": "troll",
+      "display_name": null,
+      "avatar_url": null
+    }
+  ]
+}

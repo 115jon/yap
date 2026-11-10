@@ -290,6 +290,8 @@ pub enum Command {
     Apps(super::apps::AppsCommand),
     /// The collectibles shop and pickers.
     Shop(super::shop::ShopCommand),
+    /// The full profile's board column.
+    Board(super::board::BoardCommand),
     /// A TikTok or Instagram card asks for its media.
     Embeds(super::embeds::EmbedsCommand),
     /// The GIF and clip favourites' stars.
@@ -493,6 +495,8 @@ pub enum Dispatch {
     CallRinging(CallRinging),
     /// A ring is over (`CALL_RING_STOP`).
     CallRingStop(CallRingStop),
+    /// A profile board was saved (`PROFILE_BOARD_UPDATE`).
+    BoardUpdate(yap_protocol::profile_board::BoardUpdate),
 }
 
 impl Dispatch {
@@ -549,6 +553,7 @@ impl Dispatch {
             "CALL_RING" => Self::CallRing(serde_json::from_value(data).ok()?),
             "CALL_RINGING" => Self::CallRinging(serde_json::from_value(data).ok()?),
             "CALL_RING_STOP" => Self::CallRingStop(serde_json::from_value(data).ok()?),
+            "PROFILE_BOARD_UPDATE" => Self::BoardUpdate(serde_json::from_value(data).ok()?),
             _ => return None,
         })
     }
