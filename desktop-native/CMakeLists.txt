@@ -40,6 +40,14 @@ cxx_qt_import_crate(
   CRATES yap_native
   LOCKED
   QT_MODULES Qt::Core Qt::Gui Qt::Qml Qt::Quick Qt::QuickControls2)
+# Extra `cargo build` flags that do not change the output, such as CI's
+# --timings report (docs/INSTALLER.md, "CI"). From the environment on the
+# first configure.
+set(YAP_CARGO_FLAGS "$ENV{YAP_CARGO_FLAGS}" CACHE STRING "Extra cargo build flags")
+if(YAP_CARGO_FLAGS)
+  separate_arguments(_yap_cargo_flags NATIVE_COMMAND "${YAP_CARGO_FLAGS}")
+  corrosion_set_cargo_flags(yap_native ${_yap_cargo_flags})
+endif()
 
 cxx_qt_import_qml_module(yap_native_qml
   URI "com.yap.native"

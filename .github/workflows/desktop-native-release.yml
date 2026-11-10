@@ -115,9 +115,90 @@ jobs:
           Write-Host "==> $tag (channel $env:INPUT_CHANNEL, dry run $env:DRY_RUN)"
           exit 0
 
-  # Tests and builds Yap.exe. Read-only token, no OIDC: build scripts run here.
+  # The dependency audit (desktop-native/rust/deny.toml; LIBRARIES.md §18),
+  # with cargo-deny's release binary rather than a 4-minute `cargo install`.
+  # The [patch] path crates must exist for cargo metadata (vendor.ps1).
+  deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: cargo-deny
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-deny@0.20.2
+
+      - name: Dependency audit (cargo deny)
+        run: |
+          ./desktop-native/patches/vendor.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Push-Location desktop-native/rust
+          cargo deny check
+          $code = $LASTEXITCODE
+          Pop-Location
+          exit $code
+
+  # The workspace tests that run headless (README, "Testing"): not the app
+  # crate (Qt) or yap-audio (an audio device). Beside the build, not before it.
+  test:
+    # Visual Studio 2022, as the build.
+    runs-on: windows-2022
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      TOOLCHAIN_DIR: ${{ github.workspace }}\..\toolchain
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_IDLE_TIMEOUT: "0"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
+
+      - name: sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.19.0
+
+      - name: Toolchain (static Qt, libwebrtc)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./desktop-native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir "$env:TOOLCHAIN_DIR-download"
+
+      - name: Cargo test
+        run: |
+          ./desktop-native/patches/vendor.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64" | Out-Null
+          Push-Location desktop-native/rust
+          cargo test --workspace --locked --exclude yap_native --exclude yap-audio --target-dir ../build/test-target
+          $code = $LASTEXITCODE
+          Pop-Location
+          exit $code
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  # Builds Yap.exe. Read-only token, no OIDC: build scripts run here. Like
+  # deny and test it starts without waiting for plan; release waits for all.
   build:
-    needs: plan
     # Visual Studio 2022 (MSVC 14.44), which Qt's LTCG libraries need:
     # windows-2025 is now the VS 2026 image.
     runs-on: windows-2022
@@ -131,6 +212,8 @@ jobs:
       YAP_NATIVE_BUILD_DIR: ${{ github.workspace }}\desktop-native\build\ci
       YAP_ORT_DIR: ${{ github.workspace }}\desktop-native\build\onnxruntime
       TOOLCHAIN_DIR: ${{ github.workspace }}\..\toolchain
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_IDLE_TIMEOUT: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -138,29 +221,39 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
 
-      # Registry and git deps, plus the dependency builds of both target
-      # dirs (the release build's and the tests').
-      - name: Rust cache
-        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
-          workspaces: |
-            desktop-native/rust -> ../build/ci/cargo/build
-            desktop-native/rust -> ../build/test-target
-          cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.19.0
 
-      # The archives (about 1.4 GB), keyed on the lock file; checksums are
-      # checked again after a hit.
-      - name: Toolchain cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ${{ env.TOOLCHAIN_DIR }}-download
-          key: native-toolchain-${{ hashFiles('desktop-native/tools/toolchain.lock.json') }}
-
-      - name: Toolchain (static Qt, libwebrtc)
+      # While the toolchain downloads and unpacks: the patched crates
+      # (vendor.ps1, about 50 s of `cargo fetch`) and the rustc wrapper
+      # (tools/ci/sccache-wrapper.rs, which keeps yap_native's over-long
+      # command line away from sccache).
+      - name: Toolchain (static Qt, libwebrtc), patched crates, sccache wrapper
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./desktop-native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir "$env:TOOLCHAIN_DIR-download"
+        run: |
+          $wrapper = "$env:RUNNER_TEMP\sccache-wrapper"
+          New-Item -ItemType Directory -Force $wrapper | Out-Null
+          $jobs = @(
+            @{ Name = "vendor.ps1"; File = "pwsh"; Args = @("-NoProfile", "-File", "desktop-native/patches/vendor.ps1") }
+            @{ Name = "sccache-wrapper.rs"; File = "rustc"; Args = @("-O", "--edition", "2021", "desktop-native/tools/ci/sccache-wrapper.rs", "-o", "$wrapper\sccache.exe") }
+          ) | ForEach-Object {
+            $log = Join-Path $env:RUNNER_TEMP $_.Name
+            $p = Start-Process $_.File -ArgumentList $_.Args -NoNewWindow -PassThru -RedirectStandardOutput "$log.out" -RedirectStandardError "$log.err"
+            $null = $p.Handle
+            [pscustomobject]@{ Name = $_.Name; Process = $p; Log = $log }
+          }
+          ./desktop-native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir "$env:TOOLCHAIN_DIR-download"
+          foreach ($j in $jobs) {
+            $j.Process.WaitForExit()
+            Write-Host "==> $($j.Name)"
+            Get-Content "$($j.Log).out", "$($j.Log).err" | Write-Host
+            if ($j.Process.ExitCode) { throw "$($j.Name) failed ($($j.Process.ExitCode))" }
+          }
+          "RUSTC_WRAPPER=$wrapper\sccache.exe", "YAP_SCCACHE=$env:SCCACHE_PATH" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       # Qt's libraries are link-time code (-ltcg), which links only with the
       # MSVC that compiled them (toolchain.lock.json's msvc).
@@ -177,34 +270,6 @@ jobs:
           }
           if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { choco install ninja --no-progress -y }
           ninja --version
-
-      # The dependency audit (desktop-native/rust/deny.toml; LIBRARIES.md
-      # §18) before the long build. The [patch] path crates must exist for
-      # cargo metadata (vendor.ps1; build.ps1 then finds them up to date).
-      - name: Dependency audit (cargo deny)
-        run: |
-          cargo install cargo-deny --locked --version 0.20.2
-          ./desktop-native/patches/vendor.ps1
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          Push-Location desktop-native/rust
-          cargo deny check
-          $code = $LASTEXITCODE
-          Pop-Location
-          exit $code
-
-      # The workspace tests that run headless (README, "Testing"): not the
-      # app crate (Qt) or yap-audio (an audio device).
-      - name: Cargo test
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vs = & $vswhere -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
-          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
-          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64" | Out-Null
-          Push-Location desktop-native/rust
-          cargo test --workspace --locked --exclude yap_native --exclude yap-audio --target-dir ../build/test-target
-          $code = $LASTEXITCODE
-          Pop-Location
-          exit $code
 
       # ONNX Runtime 1.24.4, DirectML build (camera backgrounds;
       # docs/LIBRARIES.md §12.3), from nuget.org, checked by hash. Its DLL
@@ -223,12 +288,24 @@ jobs:
           Copy-Item "$tmp\LICENSE" "$env:YAP_ORT_DIR\LICENSE-onnxruntime.txt"
           Copy-Item "$tmp\ThirdPartyNotices.txt" "$env:YAP_ORT_DIR\ThirdPartyNotices-onnxruntime.txt"
 
+      # sccache caches rustc (RUSTC_WRAPPER, the wrapper above), the C++
+      # that build scripts compile with `cc` (which takes a RUSTC_WRAPPER
+      # named sccache as its own wrapper) and CMake's cl.exe (the launcher):
+      # docs/INSTALLER.md, "CI". The cargo --timings report and Ninja's log
+      # are uploaded below.
       - name: Build Yap.exe
+        env:
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+          YAP_CARGO_FLAGS: --timings
         run: |
           ./desktop-native/build.ps1 -QtDir $env:YAP_QT_DIR -BuildDir $env:YAP_NATIVE_BUILD_DIR
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $exe = Get-Item "$env:YAP_NATIVE_BUILD_DIR\Yap.exe"
           Write-Host "==> Yap.exe $([math]::Round($exe.Length / 1MB, 1)) MB"
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
       - name: Upload the unsigned build
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -240,9 +317,21 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Upload the build timings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: yap-native-timings
+          path: |
+            desktop-native/build/ci/cargo/build/cargo-timings/cargo-timing.html
+            desktop-native/build/ci/.ninja_log
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7
+
   # Signs, packs and publishes. The only job with OIDC and a write token.
   release:
-    needs: [plan, build]
+    needs: [plan, deny, test, build]
     runs-on: windows-2025
     timeout-minutes: 45
     permissions:

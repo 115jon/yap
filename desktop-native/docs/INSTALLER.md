@@ -635,11 +635,13 @@ only, one run at a time (concurrency group `desktop-native-release`).
 Inputs: `version` (empty: Cargo.toml's), `channel` (`win` or `beta`),
 `notes`, and `dry_run`.
 
-| job       | runner        | token                                | does                                                                                                                                                                                                                                                                                                                                          |
-| --------- | ------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plan`    | ubuntu-latest | `contents: read`                     | checks the version against Cargo.toml and the channel (beta takes `x.y.z-pre`), refuses a tag or release (drafts too) that exists, and a signed run off `main`                                                                                                                                                                                |
-| `build`   | windows-2022  | `contents: read`                     | the toolchain (below), `cargo deny`, `cargo test` (the workspace without `yap_native` and `yap-audio`), ONNX Runtime from nuget.org (hash-checked), `build.ps1`; uploads `Yap.exe` and the runtime                                                                                                                                            |
-| `release` | windows-2025  | `contents: write`, `id-token: write` | the previous release of the channel (feed and full package, for the delta), `azure/login` (OIDC) and `azure/artifact-signing-action` on `Yap.exe`, `package.ps1 -Sign` (vpk signs Update.exe, the stub and Setup.exe), `verify-authenticode.ps1`, then the release: a draft, packages, then the feed file, published with `make_latest=false` |
+| job       | runner        | token                                | does                                                                                                                                                                                                                                                                                                                                                                |
+| --------- | ------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan`    | ubuntu-latest | `contents: read`                     | checks the version against Cargo.toml and the channel (beta takes `x.y.z-pre`), refuses a tag or release (drafts too) that exists, and a signed run off `main`                                                                                                                                                                                                      |
+| `deny`    | ubuntu-latest | `contents: read`                     | `cargo deny check` with cargo-deny's release binary (`taiki-e/install-action`)                                                                                                                                                                                                                                                                                      |
+| `test`    | windows-2022  | `contents: read`                     | `cargo test` (the workspace without `yap_native` and `yap-audio`), through sccache                                                                                                                                                                                                                                                                                  |
+| `build`   | windows-2022  | `contents: read`                     | the toolchain (below), ONNX Runtime from nuget.org (hash-checked), `build.ps1` through sccache; uploads `Yap.exe` and the runtime, and the cargo `--timings` report and `.ninja_log`                                                                                                                                                                                |
+| `release` | windows-2025  | `contents: write`, `id-token: write` | after the other four: the previous release of the channel (feed and full package, for the delta), `azure/login` (OIDC) and `azure/artifact-signing-action` on `Yap.exe`, `package.ps1 -Sign` (vpk signs Update.exe, the stub and Setup.exe), `verify-authenticode.ps1`, then the release: a draft, packages, then the feed file, published with `make_latest=false` |
 
 The build job runs third-party build scripts, so it gets neither the write
 token nor OIDC; signing and publishing happen in the release job only.
@@ -658,6 +660,51 @@ that creates `desktop-native-v*` needs no new credential. A
 credential matching
 `repo:115jon@<owner id>/yap@<repo id>:ref:refs/tags/desktop-native-v*`.
 
+**Speed.** `deny`, `test` and `build` run side by side; `build` is the long
+pole. Measured on the 4-core `windows-2022` runner, 2026-11-10:
+
+| run                                   | `build` job | whole run |
+| ------------------------------------- | ----------- | --------- |
+| before (one job, no compiler cache)   | 36 min      | 38 min    |
+| sccache cold (nothing cached)         | 30 min      | 31 min    |
+| sccache warm (the previous release's) | 15 min      | 16 min    |
+
+What it does, warm:
+
+- **sccache** (`mozilla-actions/sccache-action`, the Actions cache backend,
+  `SCCACHE_GHA_ENABLED`) caches every rustc and C/C++ compile: the
+  dependency crates, the C++ that build scripts compile with `cc`
+  (cxx-qt-lib's Qt bindings, webrtc-sys, the bridge and QML code of
+  `yap_native`), and CMake's `cpp/` (`CMAKE_CXX_COMPILER_LAUNCHER`). About
+  90 % of the compiles hit (98 % of the C/C++). rustc goes through `tools/ci/sccache-wrapper.rs`
+  (named `sccache.exe`, so `cc` still uses it): `yap_native`'s rustc
+  command line is too long for sccache to start, and a staticlib is never
+  cached anyway, so that call goes straight to rustc.
+- **Not cacheable**, and now most of the run: `yap_native` itself (rustc and
+  the fat LTO, about 3.6 min), its build script (moc, qmlcachegen, about
+  1.3 min) and the LTCG link of `Yap.exe` over the static Qt (about 5.5
+  min). These keep the shipped binary as it was: no profile was changed.
+- **Overlap**: `vendor.ps1` and the wrapper build run while the toolchain
+  downloads; qmlcachegen runs on every core, with one tool check for the
+  module (`patches/qt-build-utils/0003`).
+- **Tried, not kept**: a ReFS Dev Drive for `desktop-native/build`
+  (`samypr100/setup-dev-drive`; the same cargo and link times, Defender's
+  real-time scan is already off on the runner), and
+  `[profile.release.build-override] opt-level = 3` (faster build scripts,
+  but a different `Yap.exe`: 5.6 KB larger).
+
+**Cache budget.** The repository has 10 GB of Actions cache, shared with
+the web app's workflows (LRU, and anything unread for 7 days goes).
+sccache stores one entry per compiled unit: one cold run writes about
+1,400 entries, 0.8 GB (the release build and the tests' debug build). Each
+change to a dependency, the toolchain or the Rust version adds entries
+beside the old ones until they age out. Entries written on `main`
+are read by every branch; a branch's entries only by that branch, so only
+the release runs from `main` keep a warm cache. A release more than a few
+days after the last one may find it evicted and build cold. Nothing else
+is cached: the toolchain archives (above), the crates (a few seconds from
+crates.io) and ONNX Runtime (2 s from nuget.org) download each run.
+
 **Toolchain.** No action provides a static, patched Qt, so it comes from
 the `native-toolchain-qt6.11.3-yap-webrtc-a545de4` release (a pre-release,
 never latest): the Qt build (`patches/qt/build-qt.ps1`, MSVC 14.44, LTCG)
@@ -667,9 +714,11 @@ makes the archives (7-Zip, volumes under 2 GB) and
 `tools/toolchain.lock.json` (every asset's size and SHA-256);
 `tools/fetch-toolchain.ps1` downloads them, checks them against the lock,
 unpacks them and sets `YAP_QT_DIR`, `QMAKE`, `YAP_LIBWEBRTC_DIR` and
-`LK_CUSTOM_WEBRTC`. The archives are cached per lock file, and checked
-again on a hit. The Qt archive adds `bin/qt.conf` (`Prefix = ..`): a static
-Qt is not relocatable, and cxx-qt asks qmake for its paths.
+`LK_CUSTOM_WEBRTC`. Both archives download in one `gh` call and unpack side
+by side (about 30 s). They are not cached: the download takes about 15 s,
+no faster from the Actions cache, and the cache budget goes to sccache.
+The Qt archive adds `bin/qt.conf` (`Prefix = ..`): a static Qt is not
+relocatable, and cxx-qt asks qmake for its paths.
 
 Qt's libraries are link-time code, which links only with the MSVC that
 compiled them: the build job runs on `windows-2022` (Visual Studio 2022,
