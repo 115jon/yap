@@ -16,7 +16,8 @@ param([switch]$Force)
 $ErrorActionPreference = "Stop"
 $crates = [ordered]@{
     # qmlcachegen's bytecode-only mode for the QML files rust/build.rs names,
-    # and the .qml files in the resources left empty (DISCARD_QML_CONTENTS).
+    # the .qml files in the resources left empty (DISCARD_QML_CONTENTS), and
+    # qmlcachegen run on every core (CI time).
     "qt-build-utils" = "0.10.0"
     # No AV1 encoder or decoder (exe size); H.264 decoded by Media Foundation,
     # on the GPU where it can, into textures the UI draws as they are; VP9

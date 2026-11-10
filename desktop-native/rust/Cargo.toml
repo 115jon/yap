@@ -189,7 +189,8 @@ opt-level = 3
 # Patched dependencies (desktop-native/patches, docs/LIBRARIES.md): the
 # copies are made by patches/vendor.ps1 (build.ps1 runs it).
 #   qt-build-utils: qmlcachegen's bytecode-only mode for the QML files
-#   rust/build.rs names, and empty .qml files in the resources.
+#   rust/build.rs names, empty .qml files in the resources, and
+#   qmlcachegen run on every core.
 #   webrtc-sys: no AV1 encoder or decoder, and H.264 decoded by Media
 #   Foundation (on the GPU where it can) instead of FFmpeg, into D3D11
 #   textures the UI draws without a copy.
