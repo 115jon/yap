@@ -299,12 +299,15 @@ fn log_migration(root: &Path, migration: &Migration) {
 /// The folder the app's data lives under, when the app names it ([`set_base`]).
 static BASE: OnceLock<PathBuf> = OnceLock::new();
 
+/// [`data_root`], once resolved.
+static ROOT: OnceLock<Option<PathBuf>> = OnceLock::new();
+
 /// Names the folder the app's data lives under, in place of
 /// `%LOCALAPPDATA%`: a phone app's private data folder. Call it before
-/// anything reads [`data_root`] (it resolves once); `false` if a base was
-/// already set.
+/// anything reads [`data_root`] (it resolves once); `false`, and ignored,
+/// if a base was already set or the root has already resolved.
 pub fn set_base(base: PathBuf) -> bool {
-    BASE.set(base).is_ok()
+    ROOT.get().is_none() && BASE.set(base).is_ok()
 }
 
 /// This process's app folder, resolved (and the old folder moved) once,
@@ -312,7 +315,6 @@ pub fn set_base(base: PathBuf) -> bool {
 /// Under the app's base ([`set_base`]), else `%LOCALAPPDATA%`; `None`
 /// without either.
 pub fn data_root() -> Option<PathBuf> {
-    static ROOT: OnceLock<Option<PathBuf>> = OnceLock::new();
     ROOT.get_or_init(|| {
         let base = match BASE.get() {
             Some(base) => base.clone(),
