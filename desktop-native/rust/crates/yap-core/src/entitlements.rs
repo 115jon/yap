@@ -21,16 +21,19 @@ pub enum Perk {
     AnimatedProfile,
     ProfileThemes,
     FounderEffect,
+    /// `customWidgets`: a Custom profile widget shows to others.
+    CustomWidgets,
 }
 
 impl Perk {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::BigUploads,
         Self::HdStreams,
         Self::AllNameStyles,
         Self::AnimatedProfile,
         Self::ProfileThemes,
         Self::FounderEffect,
+        Self::CustomWidgets,
     ];
 }
 

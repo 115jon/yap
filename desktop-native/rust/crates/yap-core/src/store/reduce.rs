@@ -4,6 +4,7 @@
 mod admin;
 mod apps;
 mod backgrounds;
+mod board;
 mod calls;
 mod embeds;
 mod extras;
@@ -1768,6 +1769,7 @@ impl State {
             Command::Friends(command) => self.on_friends(fx, command),
             Command::Apps(command) => self.on_apps(fx, command),
             Command::Shop(command) => self.on_shop(fx, command),
+            Command::Board(command) => self.on_board(fx, command),
             Command::Embeds(command) => self.on_embeds(fx, command),
             Command::Favorites(command) => self.on_favorites(fx, command),
             Command::Backgrounds(command) => self.on_backgrounds(fx, command),
@@ -2018,6 +2020,7 @@ impl State {
         self.clear_friends();
         self.clear_invites();
         self.clear_shop();
+        self.board = Default::default();
         self.leave_voice(fx);
         self.calls = Default::default();
         fx.view(ViewUpdate::StopSound(Sound::Ring));
@@ -2174,6 +2177,7 @@ impl State {
             || self.route_invites_http(fx, id, &mut answer)
             || self.route_apps_http(fx, id, &mut answer)
             || self.route_shop_http(fx, id, &mut answer)
+            || self.route_board_http(fx, id, &mut answer)
             || self.route_embeds_http(fx, id, &mut answer)
             || self.route_favorites_http(fx, id, &mut answer)
             || self.route_backgrounds_http(fx, id, &mut answer)
@@ -3903,6 +3907,9 @@ impl State {
                     self.on_call_peer_offline(fx, &update.user_id);
                 }
                 self.on_presence(fx, update);
+                if self.board.user_id.is_some() {
+                    self.sync_board(fx);
+                }
             }
             Dispatch::PresenceList(list) => self.on_presence_list(fx, list),
             Dispatch::MemberAdd(add) => self.on_member_add(fx, *add),
@@ -3923,6 +3930,14 @@ impl State {
             Dispatch::CallRing(ring) => self.on_call_ring(fx, ring),
             Dispatch::CallRinging(ringing) => self.on_call_ringing(fx, ringing),
             Dispatch::CallRingStop(stop) => self.on_call_ring_stop(fx, stop),
+            Dispatch::BoardUpdate(update) => self.on_board(
+                fx,
+                super::board::BoardCommand::Updated {
+                    user_id: update.user_id,
+                    version: update.version,
+                    data: update.data,
+                },
+            ),
         }
     }
 
