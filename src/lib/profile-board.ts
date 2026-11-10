@@ -942,6 +942,9 @@ export interface BoardData {
     /** Whether the viewer may post (not the owner, shares a server or DM,
      * not blocked from it, guestbook on). */
     can_post: boolean;
+    /** Why the viewer may not post (null when they may), so the plate can
+     * say so. Absent from older servers. */
+    denial?: GuestbookDenial | null;
   };
 }
 
@@ -1135,6 +1138,17 @@ export function parseWishlist(value: unknown): WishlistItem[] {
 }
 
 // ── Guestbook ──────────────────────────────────────────────────────────────
+
+/**
+ * Why someone may not sign a guestbook: it is theirs, the owner closed it,
+ * either side blocked the other (or the owner blocked them from it), or they
+ * share no server or DM with the owner.
+ */
+export type GuestbookDenial =
+  | "GUESTBOOK_OWN"
+  | "GUESTBOOK_OFF"
+  | "GUESTBOOK_BLOCKED"
+  | "GUESTBOOK_NO_SHARED_SPACE";
 
 /** Notes one author may leave on one owner's guestbook per day. */
 export const GUESTBOOK_DAILY_LIMIT = 5;

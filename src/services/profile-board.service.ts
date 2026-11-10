@@ -660,6 +660,7 @@ export async function boardData(
             notes: page.notes,
             total: page.total,
             can_post: page.can_post,
+            denial: page.denial,
           };
         },
       ),

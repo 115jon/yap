@@ -683,10 +683,24 @@ describe("guestbook", () => {
       await sign(owner, friend, text);
     const theirs = (await view(owner, friend)).body.data.guestbook;
     expect(theirs?.notes).toHaveLength(3);
-    expect(theirs).toMatchObject({ total: 4, can_post: true, enabled: true });
-    expect((await view(owner, stranger)).body.data.guestbook?.can_post).toBe(
-      false,
-    );
+    expect(theirs).toMatchObject({
+      total: 4,
+      can_post: true,
+      enabled: true,
+      denial: null,
+    });
+    // Why someone can't sign travels with the board, so the plate can say.
+    expect((await view(owner, stranger)).body.data.guestbook).toMatchObject({
+      can_post: false,
+      denial: "GUESTBOOK_NO_SHARED_SPACE",
+    });
+    // The owner sees their own notes (and isn't told they're barred).
+    expect((await view(owner, owner)).body.data.guestbook).toMatchObject({
+      total: 4,
+      enabled: true,
+      can_post: false,
+      denial: "GUESTBOOK_OWN",
+    });
   });
 });
 
