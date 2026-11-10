@@ -76,6 +76,8 @@ jobs:
               - 'desktop-native/rust/crates/**'
               - 'desktop-native/rust/qml/**'
               - 'desktop-native/rust/src/models.rs'
+              - 'desktop-native/rust/src/anim.rs'
+              - 'desktop-native/rust/src/client/gateway.rs'
               - 'desktop-native/cpp/**'
               - 'desktop-native/assets/**'
             ios:
@@ -246,7 +248,9 @@ jobs:
           code=$(( RUN * 10 + ${{ matrix.digit }} ))
           bash desktop-native/mobile/qt/build.sh ${{ matrix.abi }} Release \
             -DYAP_ANDROID_VERSION_CODE="$code" \
-            -DYAP_ANDROID_VERSION_NAME="0.1.$RUN+${SHA::7}"
+            -DYAP_ANDROID_VERSION_NAME="0.1.$RUN+${SHA::7}" \
+            -DYAP_ANDROID_COMPILE_SDK=android-36 \
+            -DYAP_ANDROID_BUILD_TOOLS="$BUILD_TOOLS"
 
       # Pull requests sign with a throwaway key made here: the APK installs
       # for testing, and no key leaves the job.

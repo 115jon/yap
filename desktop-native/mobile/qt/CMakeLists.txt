@@ -101,6 +101,17 @@ set_target_properties(yapqt PROPERTIES
   QT_ANDROID_PACKAGE_NAME "${YAP_ANDROID_APP_ID}"
   QT_ANDROID_VERSION_CODE "${YAP_ANDROID_VERSION_CODE}"
   QT_ANDROID_VERSION_NAME "${YAP_ANDROID_VERSION_NAME}")
+# The SDK platform and build tools androiddeployqt compiles with; empty
+# takes the newest installed. CI pins both, so the runner image's newest
+# platform does not decide.
+set(YAP_ANDROID_COMPILE_SDK "" CACHE STRING "Android SDK platform to compile with (e.g. android-36)")
+set(YAP_ANDROID_BUILD_TOOLS "" CACHE STRING "Android SDK build-tools revision (e.g. 36.0.0)")
+if(YAP_ANDROID_COMPILE_SDK)
+  set_target_properties(yapqt PROPERTIES QT_ANDROID_COMPILE_SDK_VERSION "${YAP_ANDROID_COMPILE_SDK}")
+endif()
+if(YAP_ANDROID_BUILD_TOOLS)
+  set_target_properties(yapqt PROPERTIES QT_ANDROID_SDK_BUILD_TOOLS_REVISION "${YAP_ANDROID_BUILD_TOOLS}")
+endif()
 
 # --- Size: plugins nobody loads ------------------------------------------
 # The offscreen platform plugin (the android one draws) and the OpenSSL TLS
