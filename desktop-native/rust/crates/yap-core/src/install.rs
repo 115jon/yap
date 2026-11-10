@@ -39,7 +39,7 @@ pub const EXE_NAME: &str = "Yap.exe";
 pub const LEGACY_EXE_NAME: &str = "YapNative.exe";
 
 /// The installed app's title: shortcuts, Apps & features, the tray.
-pub const TITLE: &str = "Yap";
+pub const TITLE: &str = crate::shell::APP_NAME;
 
 /// The default profile's AppUserModelID (shortcuts, the taskbar, toasts):
 /// the Tauri app's, so pins and toast settings carry over. A named profile
