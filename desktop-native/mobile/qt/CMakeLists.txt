@@ -60,14 +60,12 @@ target_link_libraries(yapqt PRIVATE
   yap_ui_cpp
   Qt::Gui Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg Qt::QuickPrivate)
 
+# The application id and version: the packaging block at the end.
 set_target_properties(yapqt PROPERTIES
-  QT_ANDROID_PACKAGE_NAME dev.yap.qtproto
   QT_ANDROID_APP_NAME "Yap (Qt)"
   QT_ANDROID_PACKAGE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/android
   QT_ANDROID_MIN_SDK_VERSION 28
   QT_ANDROID_TARGET_SDK_VERSION 36
-  QT_ANDROID_VERSION_CODE 1
-  QT_ANDROID_VERSION_NAME 0.1.0
   # Where androiddeployqt's import scan looks for the QML modules to
   # bundle: this app's and the shared Yap.Ui's, which lives in yap-ui.
   QT_QML_ROOT_PATH "${CMAKE_CURRENT_SOURCE_DIR};${DESKTOP}/rust/crates/yap-ui/qml")
@@ -90,3 +88,66 @@ qt_add_resources(yapqt yap_assets
 qt_import_plugins(yapqt
   INCLUDE_BY_TYPE imageformats Qt::QGifPlugin Qt::QJpegPlugin Qt::QWebpPlugin Qt::QSvgPlugin
   EXCLUDE_BY_TYPE qmltooling iconengines networkinformation)
+
+# --- Packaging: application id and version -------------------------------
+# CI passes the version per run (desktop-native-mobile.yml: code = run * 10
+# + an ABI digit, name 0.1.<run>+<commit>); local builds get 0.1.0 (1).
+# The id is the Gradle namespace and application id (androiddeployqt writes
+# it to gradle.properties), and the iOS bundle identifier.
+set(YAP_ANDROID_APP_ID "dev.yap.qtproto" CACHE STRING "Android application id (and iOS bundle id)")
+set(YAP_ANDROID_VERSION_CODE "1" CACHE STRING "Android versionCode")
+set(YAP_ANDROID_VERSION_NAME "0.1.0" CACHE STRING "Android versionName")
+set_target_properties(yapqt PROPERTIES
+  QT_ANDROID_PACKAGE_NAME "${YAP_ANDROID_APP_ID}"
+  QT_ANDROID_VERSION_CODE "${YAP_ANDROID_VERSION_CODE}"
+  QT_ANDROID_VERSION_NAME "${YAP_ANDROID_VERSION_NAME}")
+# The SDK platform and build tools androiddeployqt compiles with; empty
+# takes the newest installed. CI pins both, so the runner image's newest
+# platform does not decide.
+set(YAP_ANDROID_COMPILE_SDK "" CACHE STRING "Android SDK platform to compile with (e.g. android-36)")
+set(YAP_ANDROID_BUILD_TOOLS "" CACHE STRING "Android SDK build-tools revision (e.g. 36.0.0)")
+if(YAP_ANDROID_COMPILE_SDK)
+  set_target_properties(yapqt PROPERTIES QT_ANDROID_COMPILE_SDK_VERSION "${YAP_ANDROID_COMPILE_SDK}")
+endif()
+if(YAP_ANDROID_BUILD_TOOLS)
+  set_target_properties(yapqt PROPERTIES QT_ANDROID_SDK_BUILD_TOOLS_REVISION "${YAP_ANDROID_BUILD_TOOLS}")
+endif()
+
+# --- Size: plugins nobody loads ------------------------------------------
+# The offscreen platform plugin (the android one draws) and the OpenSSL TLS
+# backend. Qt for Android ships no libssl, so the backend never loaded:
+# Qt Network's HTTPS image loads fail either way until they go through the
+# core's rustls client (README, "Gaps found"). Bundling android_openssl
+# instead would need this plugin back.
+qt_import_plugins(yapqt
+  EXCLUDE Qt::QOffscreenIntegrationPlugin Qt::QTlsBackendOpenSSLPlugin)
+
+# --- Size: link flags ------------------------------------------------------
+# The NDK's toolchain already links with --gc-sections, and the APK's
+# libraries are stripped by Gradle. Identical code folding saves 0.3 MB on
+# arm64 (measured; --icf=safe saved nothing, as lld then keeps every
+# function whose address might be taken). Qt runs folded the same way on
+# Windows, where MSVC's release /OPT:ICF folds alike.
+if(ANDROID)
+  target_link_options(yapqt PRIVATE "$<$<NOT:$<CONFIG:Debug>>:LINKER:--icf=all>")
+endif()
+
+# --- iOS: a compile and link check for the simulator ---------------------
+# (build.sh ios-simulator; CI's qt-ios job.) Qt for iOS is static, so the
+# QML modules' plugins are linked in: qmlimportscanner reads the mobile QML
+# under this folder, the shared Yap.Ui QML (yap-ui) and the desktop QML
+# (desktop-only modules such as QtMultimedia are not in this Qt and are
+# skipped). Qt writes a default Info.plist from these properties.
+if(IOS)
+  set_property(TARGET yapqt APPEND PROPERTY QT_QML_IMPORT_SCANNER_EXTRA_ROOT_PATHS
+    ${DESKTOP}/rust/crates/yap-ui/qml ${DESKTOP}/rust/qml)
+  qt_import_qml_plugins(yapqt)
+  set_target_properties(yapqt PROPERTIES
+    MACOSX_BUNDLE TRUE
+    MACOSX_BUNDLE_GUI_IDENTIFIER "${YAP_ANDROID_APP_ID}"
+    MACOSX_BUNDLE_BUNDLE_NAME "Yap (Qt)"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${YAP_ANDROID_VERSION_NAME}"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${YAP_ANDROID_VERSION_CODE}"
+    XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${YAP_ANDROID_APP_ID}"
+    XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED NO)
+endif()

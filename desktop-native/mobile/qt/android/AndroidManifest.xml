@@ -1,12 +1,15 @@
 <?xml version="1.0"?>
-<!-- Qt 6.11's template (src/android/templates) with three changes:
+<!-- Qt 6.11's template (src/android/templates) with these changes:
      the predictive back gesture on (the shim registers its callback only
      while there is a page to go back to; at the root the system plays its
      own back-to-home preview), the keyboard left to the app (adjustNothing:
-     the composer follows the IME inset itself, frame by frame), and the
-     session file kept out of cloud backup and device-to-device transfer. -->
+     the composer follows the IME inset itself, frame by frame), the
+     session file kept out of cloud backup and device-to-device transfer,
+     the adaptive icon, and the splash: the theme's (system splash on
+     Android 12+, window background before) hands over to Qt's, which stays
+     until main.cpp hides it at the first frame. No package attribute: the
+     application id is CMake's YAP_ANDROID_APP_ID (Gradle's namespace). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="dev.yap.qtproto"
     android:installLocation="auto"
     android:versionCode="-- %%INSERT_VERSION_CODE%% --"
     android:versionName="-- %%INSERT_VERSION_NAME%% --">
@@ -22,7 +25,7 @@
         android:name="org.qtproject.qt.android.bindings.QtApplication"
         android:hardwareAccelerated="true"
         android:label="Yap (Qt)"
-        android:icon="-- %%INSERT_APP_ICON%% --"
+        android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true">
@@ -32,6 +35,7 @@
             android:label="Yap (Qt)"
             android:launchMode="singleTop"
             android:screenOrientation="unspecified"
+            android:theme="@style/YapTheme"
             android:windowSoftInputMode="adjustNothing"
             android:exported="true">
             <intent-filter>
@@ -46,6 +50,13 @@
             <meta-data
                 android:name="android.app.arguments"
                 android:value="-- %%INSERT_APP_ARGUMENTS%% --" />
+
+            <meta-data
+                android:name="android.app.splash_screen_drawable"
+                android:resource="@drawable/splash" />
+            <meta-data
+                android:name="android.app.splash_screen_sticky"
+                android:value="true" />
         </activity>
 
         <provider

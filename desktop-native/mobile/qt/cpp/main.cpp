@@ -11,6 +11,7 @@
 #include <QtCore/QSysInfo>
 #ifdef Q_OS_ANDROID
 #include <QtCore/QJniObject>
+#include <QtCore/qcoreapplication_platform.h>
 #endif
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
@@ -130,6 +131,11 @@ int main(int argc, char* argv[])
                                           return;
                                         qInfo("[startup] first frame %lld ms",
                                               static_cast<long long>(startup.elapsed()));
+#ifdef Q_OS_ANDROID
+                                        // Qt's splash (sticky in the manifest)
+                                        // fades out over the first frame.
+                                        QNativeInterface::QAndroidApplication::hideSplashScreen(200);
+#endif
                                       });
                    });
   engine.loadFromModule("com.yap.mobile", "Main");

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Resource shrinking (build.gradle): Qt's Java finds its library lists
+     (res/values/libs.xml, written by androiddeployqt) and its strings by
+     name at run time, which the shrinker cannot see. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@array/*,@string/*" />
