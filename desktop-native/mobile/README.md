@@ -168,7 +168,15 @@ Rotation is unlocked; a phone in landscape is the middle row.
 Back steps through what is on top, in order: a sheet or stacked page
 (profile, settings), members, the chat, then the drawer, where the app
 leaves. `Native.handlesBack` is true only while something is above the
-drawer, so at the root the system plays its own back-to-home preview. The
+drawer, so at the root the system plays its own back-to-home preview. Leaving
+never ends the process: Qt's activity exits when it is destroyed, and from
+Android 14 the system keeps a root launcher activity on Back only when the
+home app started it (`shouldMoveTaskToBack`); started from a notification, a
+link or `adb`, it is finished and the next start is cold. The shim checks how
+the activity was started (`NativeShim.keepsTaskAtRoot`: a plain launcher
+intent whose referrer is the home app) and otherwise keeps its callback at the
+root, where Back moves the task to the back itself. That case has no
+back-to-home preview: the system plays it only for its own handler. The
 predictive gesture's progress drives whichever is on top: a stacked page
 shrinks or drops, the pager's chat follows the finger 40% of the way toward
 the page behind and the spring finishes or returns it.
@@ -216,6 +224,10 @@ Not there yet:
 - Voice channels in the tree do nothing on a tap.
 - Side by side, the image viewer covers the chat column, not the window:
   it lives in the chat page.
+- Open interaction: a message's swipe to reply has not been tried against
+  the pan's direction gate. The gate decides at 6dp, before the pan's 14dp
+  threshold, so a leftward handler on a row should keep its touch; a touch
+  that jumps past both in one event could still go to the pan.
 
 <p>
 <img src="docs/qt-nav-drawer.png" width="180" alt="Qt: the drawer with the chat's peek">
@@ -369,8 +381,10 @@ Next savings, not measured yet:
   and the API's avatars answer `max-age=0` with an ETag it does not honour
   (`200`, not `304`), so each avatar is fetched again per launch.
 - **Exit.** Qt's Android exit path tears down the engine while the core's
-  threads run. Call `yap_mobile_flush` on going to the background (done)
-  and leave by moving the task back, never by quitting the engine.
+  threads run (it ends in a SIGABRT on a render helper thread). Call
+  `yap_mobile_flush` on going to the background (done) and leave by moving
+  the task back, never by quitting the engine or letting the system finish
+  the activity (see "Navigation": Back at the root).
 - **Memory.** 148 MB after a long scroll. Next step: a heap profile of
   `MessageDelegate` on a phone (the desktop's delegate carries hover cards,
   popups and loaders a phone never opens).
