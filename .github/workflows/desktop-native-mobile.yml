@@ -239,6 +239,23 @@ jobs:
           key: qt-${{ matrix.abi }}-${{ hashFiles('desktop-native/mobile/qt/qt-sdk.lock.json') }}
           workspaces: desktop-native/mobile/qt/rust -> ../../../../.yapm/build/qt-${{ matrix.abi }}-Release/cargo/build
 
+      # Firebase for push notifications (mobile/qt/android/build.gradle):
+      # the dev.yap.app config from the QT_GOOGLE_SERVICES_JSON_BASE64
+      # secret, decoded into the build folder (never the repository).
+      # Without the secret (a pull request from a fork) the APK builds
+      # without pushes.
+      - name: Firebase configuration
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.QT_GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            mkdir -p "$YAPM"
+            printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d >"$YAPM/google-services.json"
+            echo "YAP_GOOGLE_SERVICES_JSON=$YAPM/google-services.json" >>"$GITHUB_ENV"
+          else
+            echo "No Firebase configuration: building without push notifications"
+          fi
+
       - name: Build the APK (${{ matrix.abi }}, release)
         env:
           RUN: ${{ github.run_number }}
