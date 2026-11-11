@@ -970,7 +970,7 @@ Popup {
                             StatRow {
                                 required property var modelData
                                 required property int index
-                                last: index === (root.stats.incoming.filter(v => v.width > 0).length - 1)
+                                last: !!root.stats && !!root.stats.incoming && index === (root.stats.incoming.filter(v => v.width > 0).length - 1)
                                 label: modelData.key || qsTr("Unrouted")
                                 value: qsTr("%1 %2×%3 · %4 fps · %5 · %6 ms · %7 dropped")
                                     .arg(modelData.codec)
