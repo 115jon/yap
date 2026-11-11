@@ -135,14 +135,12 @@ endif()
 # --- iOS: a compile and link check for the simulator ---------------------
 # (build.sh ios-simulator; CI's qt-ios job.) Qt for iOS is static, so the
 # QML modules' plugins are linked in: qmlimportscanner reads the mobile QML
-# under this folder and, since build.rs mirrors the shared desktop QML only
-# when cargo runs (after this scan), the desktop folders it comes from
-# (their other files add QtQuick.Layouts; QtMultimedia is not in this Qt
-# and is skipped). Qt writes a default Info.plist from these properties.
+# under this folder, the shared Yap.Ui QML (yap-ui) and the desktop QML
+# (desktop-only modules such as QtMultimedia are not in this Qt and are
+# skipped). Qt writes a default Info.plist from these properties.
 if(IOS)
   set_property(TARGET yapqt APPEND PROPERTY QT_QML_IMPORT_SCANNER_EXTRA_ROOT_PATHS
-    ${DESKTOP}/rust/qml/components ${DESKTOP}/rust/qml/delegates
-    ${DESKTOP}/rust/qml/theme ${DESKTOP}/rust/qml/screens/Shell)
+    ${DESKTOP}/rust/crates/yap-ui/qml ${DESKTOP}/rust/qml)
   qt_import_qml_plugins(yapqt)
   set_target_properties(yapqt PROPERTIES
     MACOSX_BUNDLE TRUE
