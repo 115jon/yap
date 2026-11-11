@@ -49,7 +49,8 @@ that feel off, each with a known fix.
 - **The price, against the Compose baseline:**
   - about 9 MB more to download (21 MB vs 12.6 MB gzipped);
   - 2.5x the memory after scrolling (148 MB vs 60 MB PSS);
-  - Qt's own HTTPS needs OpenSSL on Android (see "Gaps").
+  - Qt's own HTTPS needs OpenSSL on Android; pictures go over the core's
+    rustls client instead (see "Gaps").
 
 Keep the Rust boundary exactly as it is: the core does not know which view
 layer draws it, and the Compose baseline proves a native view stays possible
@@ -247,16 +248,25 @@ Next savings, not measured yet:
 
 ## Gaps found
 
-- **HTTPS for Qt's own network loads.** The core's HTTP is rustls, but
-  `Image` and `AnimatedPicture` load avatars and attachments through Qt
-  Network. On Android that needs OpenSSL (`libssl`/`libcrypto`), which Qt
-  does not ship. Two ways out: bundle KDAB's `android_openssl` (about 3 MB
-  per ABI), or give the engine a `QNetworkAccessManagerFactory` whose
-  replies come from the core's rustls client. The second keeps one TLS
-  stack and also carries the session for private media, as the desktop's
-  `AuthMedia` does. `qt/CMakeLists.txt` drops Qt's OpenSSL TLS plugin from
-  the APK; the first way would need that `qt_import_plugins` exclusion
-  removed.
+- **HTTPS for Qt's own network loads (done).** `Image` and
+  `AnimatedPicture` load avatars, server icons, attachments and GIFs
+  through Qt Network, whose HTTPS needs OpenSSL on Android, which Qt does
+  not ship (`qt/CMakeLists.txt` drops Qt's OpenSSL TLS plugin). The
+  engine's `QQmlNetworkAccessManagerFactory` (`qt/cpp/rustnetwork.cpp`)
+  answers every http(s) GET with a `QNetworkReply` fed by the core's
+  rustls client (`qt/rust/src/http.rs`, its own two-thread runtime, bodies
+  capped at 32 MiB); `qrc:`, `file:` and image providers stay Qt's. The
+  session goes only to the API's private media (`media_needs_auth`, the
+  desktop's rule, from `ViewUpdate::MediaAuth` in the mobile `Platform`),
+  and reqwest drops it on a redirect to another host. The disk cache (the
+  app's cache folder, 256 MiB) is done in the manager, since
+  `QNetworkDiskCache` only plugs into Qt's own HTTP backend: Qt's load
+  rules (fresh copies served, stale ones revalidated with
+  `If-None-Match`/`If-Modified-Since`), and with no network the last copy
+  is shown. Private media and redirected answers are never cached. Open:
+  the cache is not emptied on sign-out (only public pictures are in it),
+  and the API's avatars answer `max-age=0` with an ETag it does not honour
+  (`200`, not `304`), so each avatar is fetched again per launch.
 - **Exit.** Qt's Android exit path tears down the engine while the core's
   threads run. Call `yap_mobile_flush` on going to the background (done)
   and leave by moving the task back, never by quitting the engine.
@@ -473,7 +483,8 @@ Each crate was checked by compiling it for `x86_64-linux-android` (NDK 27).
 2. Fix the "feels off" list: a hover flag, a text scale in `Theme`, the
    IME Send action, per-platform size tokens.
 3. Images over the core's rustls (a `QNetworkAccessManagerFactory`), then
-   avatars and attachments.
+   avatars and attachments (done; GIF attachments still show their first
+   frame until `MessageMedia` uses `AnimatedPicture`).
 4. Size: R8, bytecode-only QML, and a static-Qt measurement.
 5. CI: Qt for Android on Ubuntu; Qt for iOS on macOS for a compile check of
    the same QML module.

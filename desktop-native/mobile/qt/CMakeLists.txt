@@ -52,7 +52,8 @@ include(${DESKTOP}/rust/crates/yap-ui/cpp/yap_ui.cmake)
 
 qt_add_executable(yapqt
   cpp/main.cpp
-  cpp/native.cpp cpp/native.h)
+  cpp/native.cpp cpp/native.h
+  cpp/rustnetwork.cpp cpp/rustnetwork.h)
 target_include_directories(yapqt PRIVATE cpp)
 target_link_libraries(yapqt PRIVATE
   yap_mobile_qml
@@ -115,10 +116,9 @@ endif()
 
 # --- Size: plugins nobody loads ------------------------------------------
 # The offscreen platform plugin (the android one draws) and the OpenSSL TLS
-# backend. Qt for Android ships no libssl, so the backend never loaded:
-# Qt Network's HTTPS image loads fail either way until they go through the
-# core's rustls client (README, "Gaps found"). Bundling android_openssl
-# instead would need this plugin back.
+# backend. Qt for Android ships no libssl, so the backend never loaded;
+# network pictures go through the core's rustls client instead
+# (cpp/rustnetwork.cpp, README "Gaps found").
 qt_import_plugins(yapqt
   EXCLUDE Qt::QOffscreenIntegrationPlugin Qt::QTlsBackendOpenSSLPlugin)
 
