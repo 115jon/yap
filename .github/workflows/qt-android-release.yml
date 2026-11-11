@@ -5,25 +5,31 @@ name: "Qt Android Release"
 # pre-release (desktop-native/mobile/README.md, "Releases").
 #
 # - A qt-android-v<x.y.z> tag builds version x.y.z; the tag must match
-#   desktop-native/mobile/qt/VERSION.
+#   desktop-native/mobile/qt/VERSION and point at a commit on main.
 # - A manual run builds <VERSION>-build.<run> from the ref it starts on and
 #   names its draft qt-android-v<that version> (a draft creates no tag
-#   until someone publishes it).
+#   until someone publishes it; that tag does not match the trigger).
 #
 # Jobs and what each can reach:
 # - plan: the version, the tag and the version codes. No secrets.
 # - build: compiles the core and the APKs (third-party crates' build
 #   scripts run here), unsigned. Only the Firebase client configuration,
-#   which ends up inside the APK anyway. No cargo cache: a release builds
-#   from clean sources (the Qt archives' cache is checked against
-#   qt-sdk.lock.json's SHA-256s by fetch-qt.ps1).
+#   which ends up inside the APK anyway. No caches: a release builds from
+#   clean sources, and fetch-qt.ps1 checks each Qt archive it downloads
+#   against qt-sdk.lock.json's SHA-256.
 # - sign: the release key, from the android-release environment, whose
 #   deployment policy admits main and qt-android-v* tags only. It runs only
 #   the repository's sign.sh and the SDK's zipalign, apksigner and aapt2 on
 #   the unsigned APKs, checks the certificate, the application id and the
-#   version, and deletes the key. No write token.
+#   version, and deletes the key. No write token. The signed APKs' SHA-256s
+#   are its outputs.
 # - smoke: the signed x86_64 APK cold-started on an emulator.
-# - publish: the draft pre-release (contents: write). No key.
+# - publish: the draft pre-release (contents: write), after checking the
+#   APKs against the sign job's SHA-256s. No key.
+#
+# Anyone who can push a qt-android-v* tag can have it signed: the
+# environment admits the tag pattern, and the ancestry check in plan only
+# catches mistakes (the workflow file is the tagged commit's).
 #
 # Version codes: (1000000 + run) * 10 + the ABI digit (2 arm64-v8a,
 # 4 x86_64), above every CI build of desktop-native-mobile.yml (run * 10 +
@@ -32,7 +38,9 @@ name: "Qt Android Release"
 on:
   push:
     tags:
-      - "qt-android-v*"
+      # x.y.z only, so publishing a manual run's draft (its tag has a
+      # -build.<run> suffix) starts nothing.
+      - "qt-android-v[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
 
 permissions:
@@ -41,6 +49,11 @@ permissions:
 concurrency:
   group: qt-android-release-${{ github.ref }}
   cancel-in-progress: false
+
+defaults:
+  run:
+    # bash -eo pipefail
+    shell: bash
 
 env:
   CARGO_INCREMENTAL: 0
@@ -65,6 +78,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Version, tag and version codes
         id: plan
@@ -78,6 +92,11 @@ jobs:
             want="${GITHUB_REF_NAME#qt-android-v}"
             if [ "$want" != "$base" ]; then
               echo "::error::tag $GITHUB_REF_NAME does not match VERSION $base"
+              exit 1
+            fi
+            git fetch -q --no-tags origin main
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+              echo "::error::tag $GITHUB_REF_NAME is not on main"
               exit 1
             fi
             version="$base"
@@ -146,12 +165,6 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >>"$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VERSION" >>"$GITHUB_ENV"
 
-      - name: Cache the Qt archives
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: .yapm/qt-download
-          key: qt-sdk-${{ matrix.qt }}-host-linux-${{ hashFiles('desktop-native/mobile/qt/qt-sdk.lock.json') }}
-
       - name: Qt 6.11.3 (host and target)
         shell: pwsh
         run: |
@@ -207,6 +220,9 @@ jobs:
     # Holds the release key's secrets; its deployment policy admits main and
     # qt-android-v* tags only.
     environment: android-release
+    outputs:
+      sha256_arm64: ${{ steps.sign.outputs.sha256_arm64 }}
+      sha256_x86_64: ${{ steps.sign.outputs.sha256_x86_64 }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -240,6 +256,7 @@ jobs:
           (umask 077 && printf '%s' "$KEYSTORE_BASE64" | base64 -d >"$RUNNER_TEMP/key/release.p12")
 
       - name: Sign and check
+        id: sign
         env:
           YAP_KEYSTORE_PASS: ${{ secrets.QT_ANDROID_KEYSTORE_PASSWORD }}
           YAP_KEY_ALIAS: ${{ secrets.QT_ANDROID_KEY_ALIAS }}
@@ -268,6 +285,7 @@ jobs:
               echo "::error::$apk: expected \"$want\""
               exit 1
             fi
+            echo "sha256_${abi%-v8a}=$(sha256sum "$apk" | cut -d ' ' -f 1)" >>"$GITHUB_OUTPUT"
           done
           ls -l out
 
@@ -283,7 +301,8 @@ jobs:
             out/*.apk
             out/*.apk.sha256
           if-no-files-found: error
-          retention-days: 14
+          # Public (the repository is): keep it no longer than the run needs.
+          retention-days: 1
 
   # The signed x86_64 APK cold-started on an emulator (API 35), as CI's
   # qt-android-smoke does with the debug-signed one.
@@ -342,10 +361,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.plan.outputs.tag }}
           VERSION: ${{ needs.plan.outputs.version }}
+          SHA256_ARM64: ${{ needs.sign.outputs.sha256_arm64 }}
+          SHA256_X86_64: ${{ needs.sign.outputs.sha256_x86_64 }}
         run: |
-          (cd out && sha256sum -c ./*.sha256)
-          state="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
-            --jq ".[] | select(.tag_name == \"$TAG\") | if .draft then \"draft\" else \"published\" end" | head -n 1)"
+          # The APKs as the sign job made them (the smoke job ran in between).
+          printf '%s  %s\n' "$SHA256_ARM64" "yap-qt-$VERSION-arm64-v8a.apk" \
+            "$SHA256_X86_64" "yap-qt-$VERSION-x86_64.apk" >expected.sha256
+          if [ "$(wc -l <expected.sha256)" -ne 2 ] || grep -qv '^[0-9a-f]\{64\}  ' expected.sha256; then
+            echo "::error::the sign job's SHA-256 outputs are missing"
+            exit 1
+          fi
+          (cd out && sha256sum -c ../expected.sha256 && sha256sum -c ./*.sha256)
+          states="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+            --jq ".[] | select(.tag_name == \"$TAG\") | if .draft then \"draft\" else \"published\" end")"
+          state="${states%%$'\n'*}"
+          if [[ "$states" == *published* ]]; then state=published; fi
           if [ "$state" = published ]; then
             echo "::error::$TAG is already published; bump desktop-native/mobile/qt/VERSION"
             exit 1
@@ -358,6 +388,8 @@ jobs:
           if [ -z "$state" ]; then
             gh release create "$TAG" -R "$GITHUB_REPOSITORY" --draft --prerelease --latest=false \
               --target "$GITHUB_SHA" --title "Yap for Android (Qt) $VERSION" --notes "$notes"
+          else
+            gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --notes "$notes"
           fi
           gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber out/*.apk out/*.apk.sha256
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json name,isDraft,isPrerelease,assets \
