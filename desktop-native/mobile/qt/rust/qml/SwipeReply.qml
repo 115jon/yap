@@ -51,11 +51,19 @@ Item {
                 spring.stop()
                 return
             }
-            if (swipe.armed)
-                swipe.triggered()
+            // A lift past the threshold replies; a drag something took
+            // away (`canceled`, emitted right after this) does not.
+            swipe.lifted = swipe.armed
+            Qt.callLater(swipe.finish)
             spring.restart()
         }
-        onCanceled: spring.restart()
+        onCanceled: swipe.lifted = false
+    }
+    property bool lifted: false
+    function finish() {
+        if (lifted)
+            triggered()
+        lifted = false
     }
     // The list holds still while the row is dragged.
     Binding {

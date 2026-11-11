@@ -16,10 +16,23 @@ FocusScope {
 
     signal closed()
 
+    // Up (or on its way out): its own word, since `visible` also goes false
+    // when something above the page hides.
+    property bool up: false
+    onVisibleChanged: if (!visible && up) {
+        // Hidden from above while open: gone at once, Back given back.
+        fade.stop()
+        Native.popBackLayer(page)
+        up = false
+        shown = 0
+        back = 0
+        closed()
+    }
+
     function open(body) {
         text = body
         edit.deselect()
-        visible = true
+        up = true
         Qt.inputMethod.hide()
         forceActiveFocus()
         Native.pushBackLayer(page)
@@ -27,7 +40,7 @@ FocusScope {
         fade.restart()
     }
     function close() {
-        if (!visible || fade.to === 0)
+        if (!up || fade.to === 0)
             return
         Native.popBackLayer(page)
         edit.deselect()
@@ -38,7 +51,7 @@ FocusScope {
     function backCancelled() { back = 0 }
     function backInvoked() { close() }
 
-    visible: false
+    visible: up
     z: 110
     opacity: shown * (1 - back * 0.2)
     scale: 1 - back * 0.08
@@ -53,7 +66,7 @@ FocusScope {
         easing.type: Easing.BezierSpline
         easing.bezierCurve: Theme.easeOut
         onFinished: if (to === 0) {
-            page.visible = false
+            page.up = false
             page.back = 0
             page.closed()
         }

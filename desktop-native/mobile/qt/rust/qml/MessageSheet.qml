@@ -111,6 +111,11 @@ BottomSheet {
                         scale: chipTap.pressed ? Theme.scalePressIcon : 1
                         Accessible.role: Accessible.Button
                         Accessible.name: qsTr("React with %1").arg(":" + chip.modelData.s + ":")
+                        Accessible.onPressAction: chip.pick()
+                        function pick() {
+                            sheet.close()
+                            sheet.reactionPicked(chip.modelData.e)
+                        }
                         EmojiGlyph {
                             anchors.centerIn: parent
                             size: 26
@@ -119,14 +124,12 @@ BottomSheet {
                         }
                         TapHandler {
                             id: chipTap
-                            onTapped: {
-                                sheet.close()
-                                sheet.reactionPicked(chip.modelData.e)
-                            }
+                            onTapped: chip.pick()
                         }
                     }
                 }
                 Rectangle {
+                    id: more
                     width: quickRow.cell
                     height: Theme.controlLg
                     radius: Theme.radius
@@ -134,6 +137,11 @@ BottomSheet {
                     scale: moreTap.pressed ? Theme.scalePressIcon : 1
                     Accessible.role: Accessible.Button
                     Accessible.name: qsTr("Add reaction")
+                    Accessible.onPressAction: more.pick()
+                    function pick() {
+                        sheet.close()
+                        sheet.morePicked()
+                    }
                     Icon {
                         anchors.centerIn: parent
                         name: "react"
@@ -142,10 +150,7 @@ BottomSheet {
                     }
                     TapHandler {
                         id: moreTap
-                        onTapped: {
-                            sheet.close()
-                            sheet.morePicked()
-                        }
+                        onTapped: more.pick()
                     }
                 }
             }

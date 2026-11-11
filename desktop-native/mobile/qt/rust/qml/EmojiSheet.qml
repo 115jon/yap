@@ -115,6 +115,7 @@ BottomSheet {
             color: sheet.tonesOpen ? Theme.tint2 : toneTap.pressed ? Theme.tint3 : Theme.tint1
             Accessible.role: Accessible.Button
             Accessible.name: qsTr("Choose emoji skin tone")
+            Accessible.onPressAction: sheet.tonesOpen = !sheet.tonesOpen
             EmojiGlyph {
                 anchors.centerIn: parent
                 size: 24
@@ -147,6 +148,14 @@ BottomSheet {
                     Accessible.role: Accessible.RadioButton
                     Accessible.name: sheet.toneNames[index]
                     Accessible.checked: Emoji.skinTone === index
+                    Accessible.onPressAction: tone.pick()
+                    function pick() {
+                        Native.haptic(Native.Tick)
+                        const y = grid.contentY
+                        Emoji.setTone(tone.index)
+                        grid.contentY = y
+                        sheet.tonesOpen = false
+                    }
                     EmojiGlyph {
                         anchors.centerIn: parent
                         size: 24
@@ -155,13 +164,7 @@ BottomSheet {
                     }
                     TapHandler {
                         id: pickTone
-                        onTapped: {
-                            Native.haptic(Native.Tick)
-                            const y = grid.contentY
-                            Emoji.setTone(tone.index)
-                            grid.contentY = y
-                            sheet.tonesOpen = false
-                        }
+                        onTapped: tone.pick()
                     }
                 }
             }
@@ -217,6 +220,15 @@ BottomSheet {
                         height: grid.cell
                         Accessible.role: Accessible.Button
                         Accessible.name: ":" + cell.modelData.s + ":"
+                        Accessible.onPressAction: cell.pick()
+                        function pick() {
+                            // Not ready yet (a creation still generating).
+                            if (cell.modelData.e.length === 0)
+                                return
+                            Emoji.remember(cell.modelData.e)
+                            sheet.close()
+                            sheet.picked(cell.modelData.e)
+                        }
                         Rectangle {
                             anchors.fill: parent
                             anchors.margins: 2
@@ -231,14 +243,7 @@ BottomSheet {
                         }
                         TapHandler {
                             id: cellTap
-                            onTapped: {
-                                // Not ready yet (a creation still generating).
-                                if (cell.modelData.e.length === 0)
-                                    return
-                                Emoji.remember(cell.modelData.e)
-                                sheet.close()
-                                sheet.picked(cell.modelData.e)
-                            }
+                            onTapped: cell.pick()
                         }
                     }
                 }

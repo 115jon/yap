@@ -40,17 +40,19 @@ FocusScope {
     // themes' scrim leaves it).
     property bool darkBars: false
 
-    // Up, or on its way in or out.
-    readonly property bool opened: visible
+    // Up, or on its way in or out. Its own word: `visible` also goes false
+    // when something above the sheet hides.
+    property bool up: false
+    readonly property bool opened: up
     signal closed()
 
     function open() {
-        if (visible && !closing)
+        if (up && !closing)
             return
         closing = false
         back = 0
         pull = 0
-        visible = true
+        up = true
         Qt.inputMethod.hide()
         forceActiveFocus()
         Native.pushBackLayer(sheet)
@@ -63,7 +65,7 @@ FocusScope {
     }
 
     function close() {
-        if (!visible || closing)
+        if (!up || closing)
             return
         closing = true
         detent = 0
@@ -87,8 +89,21 @@ FocusScope {
         close()
     }
 
-    visible: false
+    visible: up
     z: 100
+    // Hidden from above while open (the page under it went away): gone at
+    // once, and Back is given back.
+    onVisibleChanged: if (!visible && up) {
+        settle.stop()
+        Native.popBackLayer(sheet)
+        Native.releaseDarkBars(sheet)
+        up = false
+        closing = false
+        detent = 0
+        extent = 0
+        pull = 0
+        closed()
+    }
     Component.onDestruction: {
         Native.popBackLayer(sheet)
         Native.releaseDarkBars(sheet)
@@ -175,7 +190,7 @@ FocusScope {
     }
     // The content, the window or the keyboard changed under an open sheet.
     function refit() {
-        if (!visible || closing || dragging || pull > 0)
+        if (!up || closing || dragging || pull > 0)
             return
         if (detent === 2 && !expandable)
             detent = 1
@@ -193,7 +208,7 @@ FocusScope {
         easing.type: Easing.BezierSpline
         easing.bezierCurve: Theme.easeDrawer
         onFinished: if (sheet.closing) {
-            sheet.visible = false
+            sheet.up = false
             sheet.closing = false
             sheet.closed()
         }
@@ -247,7 +262,7 @@ FocusScope {
             id: drag
             target: null
             xAxis.enabled: false
-            enabled: sheet.flickable === null || !sheet.atTop
+            enabled: !sheet.closing && (sheet.flickable === null || !sheet.atTop)
             onActiveChanged: active ? sheet.dragBegan() : sheet.dragEnded()
             onActiveTranslationChanged: if (active) sheet.dragMoved(activeTranslation.y)
         }
@@ -257,6 +272,7 @@ FocusScope {
             DragHandler {
                 id: gripDrag
                 target: null
+                enabled: !sheet.closing
                 xAxis.enabled: false
                 onActiveChanged: active ? sheet.dragBegan() : sheet.dragEnded()
                 onActiveTranslationChanged: if (active) sheet.dragMoved(activeTranslation.y)
@@ -323,9 +339,17 @@ FocusScope {
         property: "boundsMovement"
         value: Flickable.StopAtBounds
     }
+    // Content that fits still takes the drag, so its overshoot moves the
+    // sheet (a Flickable's default only flicks what overflows).
+    Binding {
+        target: sheet.flickable
+        when: sheet.flickable !== null
+        property: "flickableDirection"
+        value: Flickable.VerticalFlick
+    }
     Connections {
         target: sheet.flickable
-        enabled: sheet.visible && !sheet.closing
+        enabled: sheet.up && !sheet.closing
         function onVerticalOvershootChanged() {
             const list = sheet.flickable
             if (!list.dragging)

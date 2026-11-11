@@ -45,6 +45,11 @@ BottomSheet {
             Accessible.role: Accessible.PageTab
             Accessible.name: tab.modelData.label + " " + tab.modelData.count
             Accessible.selected: tab.modelData.selected
+            Accessible.onPressAction: tab.pick()
+            function pick() {
+                Native.haptic(Native.Tick)
+                Extras.selectReaction(tab.modelData.emoji)
+            }
             Row {
                 id: tabContent
                 anchors.centerIn: parent
@@ -73,10 +78,7 @@ BottomSheet {
             }
             TapHandler {
                 id: tabTap
-                onTapped: {
-                    Native.haptic(Native.Tick)
-                    Extras.selectReaction(tab.modelData.emoji)
-                }
+                onTapped: tab.pick()
             }
         }
     }
@@ -96,6 +98,11 @@ BottomSheet {
             height: 56
             Accessible.role: Accessible.ListItem
             Accessible.name: person.modelData.name
+            Accessible.onPressAction: person.pick()
+            function pick() {
+                sheet.close()
+                sheet.profileRequested(person.modelData.userId)
+            }
             Rectangle {
                 anchors.fill: parent
                 color: personTap.pressed ? Theme.tint2 : "transparent"
@@ -134,10 +141,7 @@ BottomSheet {
             }
             TapHandler {
                 id: personTap
-                onTapped: {
-                    sheet.close()
-                    sheet.profileRequested(person.modelData.userId)
-                }
+                onTapped: person.pick()
             }
         }
         footer: Text {
