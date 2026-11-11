@@ -2769,6 +2769,7 @@ impl State {
         self.seen_from = None;
         // Where the list lands is the UI's to report once it has rows.
         self.at_bottom = false;
+        self.open_focused = self.focused;
         if self.divider.take().is_some() {
             self.emit_unread(fx);
         }
@@ -2992,7 +2993,7 @@ impl State {
         // the read mark (useChatArea.ts), cached rows on screen or not.
         let placed = match &self.divider {
             Some(_) => false,
-            None if (at_end || (shown && self.open_at_end)) && self.focused => false,
+            None if (at_end || (shown && self.open_at_end)) && self.in_view_since_open() => false,
             None => {
                 self.divider = self.divider_for(&log);
                 self.divider.is_some()

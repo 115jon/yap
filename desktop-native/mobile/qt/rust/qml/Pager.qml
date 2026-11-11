@@ -30,6 +30,8 @@ Item {
     signal friendsRequested()
     signal voiceRequested(string channelId)
     signal callRequested()
+    // A message's "N replies": its thread, as a page.
+    signal threadRequested(string messageId)
 
     readonly property bool wide: width >= 840
     readonly property bool docked: width >= 1200
@@ -255,6 +257,7 @@ Item {
 
     DrawerPage {
         id: drawer
+        chatHasRows: chat.hasRows
         x: pager.wide ? 0
             : -pager.parallax * (1 - Math.max(0, Math.min(1, pager.offset / Math.max(1, pager.drawerWidth))))
         width: pager.drawerWidth
@@ -299,6 +302,7 @@ Item {
             onMenuRequested: pager.show("drawer")
             onMembersRequested: pager.toggleMembers()
             onProfileRequested: userId => pager.profileRequested(userId)
+            onThreadRequested: messageId => pager.threadRequested(messageId)
         }
 
         // Side by side with nothing open: where the conversation will be.

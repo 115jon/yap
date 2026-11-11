@@ -12,8 +12,20 @@ Item {
     id: root
 
     signal conversationOpened()
+    // The open conversation shows rows (picking it again only goes back).
+    property bool chatHasRows: false
     signal profileRequested(string userId)
     signal friendsRequested()
+
+    // A conversation picked in the drawer. The open one picked again is a
+    // way back to it, not a reload: the desktop's reselect lays the list
+    // out afresh and drops its unread divider (the core opens it cold, at
+    // its end, already read). It reloads only when nothing showed.
+    function openConversation(channelId) {
+        if (channelId !== Nav.activeChannelId || !root.chatHasRows)
+            Nav.selectChannel(channelId)
+        root.conversationOpened()
+    }
 
     PlatformList {
         id: list
@@ -95,8 +107,7 @@ Item {
             width: list.width
             active: dm.channelId === Nav.activeChannelId
             onSelected: {
-                Nav.selectChannel(dm.channelId)
-                root.conversationOpened()
+                root.openConversation(dm.channelId)
             }
             onProfileRequested: root.profileRequested(dm.userId)
         }

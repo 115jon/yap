@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   issueSocketTicket,
   verifySocketTicket,
@@ -152,6 +152,57 @@ async function shortenJoinWait(roomName: string, waitMs = 100) {
   });
 }
 
+/**
+ * For a refusal test: the room's join wait ends only once the MeetingRoom has
+ * answered the fallback check. A refusal ("denied") needs that "not joined"
+ * answer before the wait ends; an answer that lands after a short real wait
+ * makes the verdict "unverified" (close 1013, no error frame) instead.
+ *
+ * The wait is made long and the room's setTimeout faked; expire() waits for
+ * the check's answer, then runs the wait's timer inside the room (workerd
+ * refuses to settle a room's timer from the test's I/O context). Call it with
+ * fake timers installed before the identify is sent. No vi.waitFor between
+ * install and expire(): it advances fake timers from the test's context.
+ */
+async function holdJoinWaitForCheck(roomName: string) {
+  let answered = false;
+  await runInDurableObject(voiceRoom(roomName), (instance) => {
+    const live = instance as unknown as {
+      voiceJoinGrantWaitMs: number;
+      checkVoiceJoinGrant(query: unknown): Promise<boolean | null>;
+    };
+    live.voiceJoinGrantWaitMs = 60_000;
+    const check = live.checkVoiceJoinGrant.bind(live);
+    live.checkVoiceJoinGrant = async (query) => {
+      const answer = await check(query);
+      answered = true;
+      return answer;
+    };
+  });
+  return {
+    async expire() {
+      // Polled rather than awaited: awaiting a promise the room settles would
+      // continue the test inside the room's I/O context. scheduler.wait is
+      // workerd's own timer, which the fake timers leave alone.
+      const deadline = Date.now() + 4_000;
+      while (!answered) {
+        if (Date.now() > deadline) throw new Error("join check never answered");
+        await scheduler.wait(5);
+      }
+      await runInDurableObject(voiceRoom(roomName), () => {
+        vi.advanceTimersByTime(60_000);
+      });
+    },
+  };
+}
+
+function fakeRoomTimers() {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+}
+
 async function voiceToken(
   participantId: string,
   roomName: string,
@@ -180,6 +231,14 @@ async function sendVoiceIdentify(
   );
 }
 
+/**
+ * The MeetingRoom pushes grants with a fire-and-forget fetch, so the
+ * VoiceRoom's stored grant is the only thing to wait on. vi.waitFor's default
+ * 1 s is shorter than that push can take while the whole suite runs at once
+ * (seen locally on 24 cores); wait up to just under the 5 s test timeout.
+ */
+const GRANT_PUSH_WAIT = { timeout: 4_000, interval: 20 };
+
 async function waitForGrant(
   roomName: string,
   participantId: string,
@@ -197,7 +256,7 @@ async function waitForGrant(
       ).voiceJoinGrants.isGranted(participantId, subject),
     );
     expect(granted).toBe(expected);
-  });
+  }, GRANT_PUSH_WAIT);
 }
 
 describe("voice join grants", () => {
@@ -205,7 +264,7 @@ describe("voice join grants", () => {
     const roomName = crypto.randomUUID();
     const participantId = crypto.randomUUID();
     const voice = await openVoiceSocket(roomName, "lurker");
-    await shortenJoinWait(roomName);
+    const joinWait = await holdJoinWaitForCheck(roomName);
 
     // The unidentified (standby) socket itself stays usable.
     const ack = nextMessage(voice, HEARTBEAT_ACK);
@@ -215,11 +274,11 @@ describe("voice join grants", () => {
     const ready = nextMessageOrNull(voice, VOICE_READY, 500);
     const error = nextMessage(voice, ERROR);
     const close = closed(voice);
-    await sendVoiceIdentify(
-      voice,
-      participantId,
-      await voiceToken(participantId, roomName, "lurker"),
-    );
+    const token = await voiceToken(participantId, roomName, "lurker");
+    fakeRoomTimers();
+    await sendVoiceIdentify(voice, participantId, token);
+    await joinWait.expire();
+    vi.useRealTimers();
 
     await expect(error).resolves.toMatchObject({
       d: { code: 4008, message: "Voice channel join required" },
@@ -262,9 +321,12 @@ describe("voice join grants", () => {
     const token = await voiceToken(participantId, roomName, subject);
 
     const standbyVoice = await openVoiceSocket(roomName, subject);
-    await shortenJoinWait(roomName);
+    const joinWait = await holdJoinWaitForCheck(roomName);
     const refused = nextMessage(standbyVoice, ERROR);
+    fakeRoomTimers();
     await sendVoiceIdentify(standbyVoice, participantId, token);
+    await joinWait.expire();
+    vi.useRealTimers();
     await expect(refused).resolves.toMatchObject({
       d: { code: 4008, message: "Voice channel join required" },
     });

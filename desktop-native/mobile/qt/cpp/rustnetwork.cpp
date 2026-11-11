@@ -23,6 +23,7 @@ struct YapHttpSink
 void* yap_http_get(const char* url, size_t len, const char* headers, size_t hlen, YapHttpSink sink);
 void yap_http_cancel(void* handle);
 bool yap_http_private(const char* url, size_t len);
+uint64_t yap_http_session_generation();
 }
 
 namespace {
@@ -147,6 +148,86 @@ QNetworkReply::NetworkError statusError(int status)
   }
 }
 
+// Private media never goes to the disk cache, but an animated picture is
+// fetched twice in a row: its still (QML's Image, which tells its size) and,
+// once its row has stood for a moment, its player (AnimatedPicture). The
+// last few private GIF and WebP files stay in memory for a minute, so the
+// player (and the viewer, opened soon after) gets the bytes the still had.
+// Only under the session that fetched them: a sign-out (or another account)
+// never gets them back.
+// Shared by every thread's manager (QML's picture reader has its own).
+class RecentPrivate
+{
+public:
+  static RecentPrivate& instance()
+  {
+    static RecentPrivate recent;
+    return recent;
+  }
+
+  // Only files that animate: a still picture is not asked for twice.
+  static bool wanted(const QByteArray& body)
+  {
+    return body.size() <= kMaxEntry
+      && (body.startsWith("GIF87a") || body.startsWith("GIF89a")
+          || (body.size() >= 12 && body.startsWith("RIFF") && body.mid(8, 4) == "WEBP"));
+  }
+
+  bool find(const QUrl& url, QByteArray* body, RawHeaders* headers)
+  {
+    QMutexLocker locked(&m_lock);
+    expire();
+    for (const Entry& entry : std::as_const(m_entries)) {
+      if (entry.url == url && entry.session == yap_http_session_generation()) {
+        *body = entry.body;
+        *headers = entry.headers;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // `session`: yap_http_session_generation() when the request started.
+  void put(const QUrl& url, const QByteArray& body, const RawHeaders& headers, quint64 session)
+  {
+    QMutexLocker locked(&m_lock);
+    expire();
+    m_entries.removeIf([&url](const Entry& e) { return e.url == url; });
+    m_entries.append({ url, body, headers, QDateTime::currentMSecsSinceEpoch(), session });
+    qsizetype bytes = 0;
+    for (const Entry& entry : std::as_const(m_entries))
+      bytes += entry.body.size();
+    // Oldest first.
+    while (bytes > kMaxBytes && !m_entries.isEmpty())
+      bytes -= m_entries.takeFirst().body.size();
+  }
+
+private:
+  static constexpr qsizetype kMaxEntry = 8 * 1024 * 1024;
+  static constexpr qsizetype kMaxBytes = 16 * 1024 * 1024;
+  static constexpr qint64 kKeepMs = 60 * 1000;
+
+  struct Entry
+  {
+    QUrl url;
+    QByteArray body;
+    RawHeaders headers;
+    qint64 at = 0;
+    quint64 session = 0;
+  };
+
+  void expire()
+  {
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const quint64 session = yap_http_session_generation();
+    m_entries.removeIf(
+      [now, session](const Entry& e) { return now - e.at > kKeepMs || e.session != session; });
+  }
+
+  QMutex m_lock;
+  QList<Entry> m_entries;
+};
+
 } // namespace
 
 // Shared by the reply and the Rust task (http.rs holds one reference
@@ -206,8 +287,23 @@ RustReply::RustReply(const QNetworkRequest& request, QNetworkDiskCache* cache, Q
   const bool privateMedia = yap_http_private(url.constData(), size_t(url.size()));
   // Private media stays out of the disk cache, as on the desktop: never
   // stored, never read back (and out of the next account's reach).
+  m_private = privateMedia;
+  m_session = yap_http_session_generation();
   if (!privateMedia)
     m_cache = cache;
+  const int loadControl = request.attribute(QNetworkRequest::CacheLoadControlAttribute,
+                                            QNetworkRequest::PreferNetwork).toInt();
+  if (privateMedia && loadControl != QNetworkRequest::AlwaysNetwork) {
+    QByteArray body;
+    RawHeaders headers;
+    if (RecentPrivate::instance().find(request.url(), &body, &headers)) {
+      qInfo("[net] an animated picture fetched moments ago: %lld bytes from memory",
+            static_cast<long long>(body.size()));
+      QMetaObject::invokeMethod(
+        this, [this, body, headers] { serveRecent(body, headers); }, Qt::QueuedConnection);
+      return;
+    }
+  }
   m_save = m_cache && request.attribute(QNetworkRequest::CacheSaveControlAttribute, true).toBool();
   const int load = request.attribute(QNetworkRequest::CacheLoadControlAttribute,
                                      QNetworkRequest::PreferNetwork).toInt();
@@ -302,8 +398,10 @@ void RustReply::onHead(int status, const QByteArray& headers, qint64 length, boo
   m_status = status;
   m_headers = parseHeaders(headers);
   // A redirect's body belongs to another URL: not cached under this one.
-  if (redirected)
+  if (redirected) {
     m_save = false;
+    m_redirected = true;
+  }
   if (status == 304 && m_stale.isValid())
     return; // the cached copy answers, in onDone
   for (const auto& [key, value] : m_headers)
@@ -367,6 +465,8 @@ void RustReply::onDone(int code, const QString& message)
   }
   if (m_status == 200 && m_save)
     store();
+  if (m_status == 200 && m_private && !m_redirected && RecentPrivate::wanted(m_buffer))
+    RecentPrivate::instance().put(url(), m_buffer, m_headers, m_session);
   finishOk();
 }
 
@@ -418,6 +518,24 @@ void RustReply::serveCached()
     else
       m_cache->remove(url());
   }
+  emit metaDataChanged();
+  emit downloadProgress(m_received, m_total);
+  emit readyRead();
+  finishOk();
+}
+
+void RustReply::serveRecent(const QByteArray& body, const RawHeaders& headers)
+{
+  if (m_done)
+    return;
+  m_buffer = body;
+  m_read = 0;
+  m_received = m_buffer.size();
+  m_total = m_received;
+  for (const auto& [key, value] : headers)
+    setRawHeader(key, value);
+  setAttribute(QNetworkRequest::HttpStatusCodeAttribute, 200);
+  setAttribute(QNetworkRequest::SourceIsFromCacheAttribute, true);
   emit metaDataChanged();
   emit downloadProgress(m_received, m_total);
   emit readyRead();

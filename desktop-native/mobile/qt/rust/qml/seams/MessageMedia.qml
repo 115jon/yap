@@ -129,7 +129,10 @@ Column {
                     // for each size it is drawn at).
                     Timer {
                         interval: 400
-                        running: frame.animated && !player.active
+                        // Not while the still loads: the player then gets
+                        // its bytes from memory (RecentPrivate), not a
+                        // second download alongside.
+                        running: frame.animated && !player.active && still.status !== Image.Loading
                             && (frame.known !== null || still.status === Image.Error)
                         onTriggered: player.active = true
                     }

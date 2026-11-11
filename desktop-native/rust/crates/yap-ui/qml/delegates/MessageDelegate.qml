@@ -862,6 +862,7 @@ Item {
                     scale: chipTap.pressed ? Theme.scalePressIcon : 1
                     Accessible.role: Accessible.Button
                     Accessible.name: chipLabel.text
+                    Accessible.onPressAction: if (root.threadActions) root.threadRequested(root.messageId)
                     Row {
                         id: chipRow
                         x: 8

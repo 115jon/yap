@@ -42,6 +42,8 @@ protected:
 private:
   void startNetwork(const QByteArray& extraHeaders);
   void serveCached();
+  // A private animated picture fetched moments ago (RecentPrivate).
+  void serveRecent(const QByteArray& body, const QList<QPair<QByteArray, QByteArray>>& headers);
   void store();
   void fail(NetworkError code, const QString& message);
   void finishOk();
@@ -59,6 +61,9 @@ private:
   qint64 m_total = -1;
   int m_status = 0;
   bool m_done = false;
+  bool m_private = false;    // the API's media: never on disk
+  bool m_redirected = false; // the body is another URL's
+  quint64 m_session = 0;     // the media session it was asked under
 };
 
 class RustNetworkAccessManager : public QNetworkAccessManager

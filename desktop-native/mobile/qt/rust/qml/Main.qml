@@ -99,7 +99,7 @@ Window {
         closeTop(true)
         // The core opens a DM the list does not have yet once it answers;
         // the chat slides in when the conversation is the open one.
-        Nav.openChannel(request.channelId, request.serverId)
+        window.openUnseen(() => Nav.openChannel(request.channelId, request.serverId))
         if (request.userId)
             pager.showDmWhenOpen(request.userId)
         else
@@ -110,6 +110,16 @@ Window {
         function onOpenRequested() {
             window.openFromNotification()
         }
+    }
+
+    // A conversation opened by the app (a notification, a profile's
+    // Message): the core hears it was picked out of view, as a pick in the
+    // drawer is, so whether it shows its unread divider does not depend on
+    // which arrives first, the page or the chat sliding in (focus).
+    function openUnseen(open) {
+        Chat.setFocused(false)
+        open()
+        Qt.callLater(() => Chat.setFocused(window.reading))
     }
 
     // A profile, over whatever is showing.
@@ -125,6 +135,14 @@ Window {
         Qt.inputMethod.hide()
         stack.sheet = false
         stack.push(settingsPage)
+    }
+    // A message's thread, over the chat.
+    function openThread(messageId) {
+        if (messageId.length === 0 || stack.busy || stack.currentItem?.rootId === messageId)
+            return
+        Qt.inputMethod.hide()
+        stack.sheet = false
+        stack.push(threadPage, { rootId: messageId })
     }
     function openFriends() {
         if (stack.busy)
@@ -257,6 +275,7 @@ Window {
                 onFriendsRequested: window.openFriends()
                 onVoiceRequested: channelId => window.joinVoice(channelId)
                 onCallRequested: window.openCall()
+                onThreadRequested: messageId => window.openThread(messageId)
             }
 
             pushEnter: Transition {
@@ -289,7 +308,7 @@ Window {
                     // Back to the pager; the chat slides in once the DM
                     // (made now if they never talked) is the open one.
                     window.closeTop(true)
-                    Nav.openDm(userId)
+                    window.openUnseen(() => Nav.openDm(userId))
                     pager.showDmWhenOpen(userId)
                 }
             }
@@ -313,13 +332,20 @@ Window {
             }
         }
         Component {
+            id: threadPage
+            ThreadPage {
+                onCloseRequested: window.closeTop(false)
+                onProfileRequested: userId => window.openProfile(userId)
+            }
+        }
+        Component {
             id: friendsPage
             FriendsPage {
                 onCloseRequested: window.closeTop(false)
                 onProfileRequested: userId => window.openProfile(userId)
                 onMessageRequested: userId => {
                     window.closeTop(true)
-                    Nav.openDm(userId)
+                    window.openUnseen(() => Nav.openDm(userId))
                     pager.showDmWhenOpen(userId)
                 }
             }
