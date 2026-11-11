@@ -9,8 +9,8 @@ import Yap.Ui
 // desktop's rule cards). Status and its custom line (Session.setStatus);
 // Appearance (the core's themes, kept on this device in appearance.json
 // and synced to the account when asked); Text size (a factor over the
-// system's, this phone's own); Notifications (once the push shim exposes
-// them); Devices (the account's sessions, others signed out after a
+// system's, this phone's own); Notifications (the push shim's permission
+// state); Devices (the account's sessions, others signed out after a
 // confirm); About; Sign out, confirmed in place. Opened from the account
 // row at the drawer's foot.
 Rectangle {
@@ -64,10 +64,6 @@ Rectangle {
         { factor: 1.15, label: qsTr("Large") },
         { factor: 1.3, label: qsTr("Larger") }
     ]
-    // The push shim's notification state, when this build has it.
-    readonly property bool hasPush: Native.notificationsEnabled !== undefined
-    // The section numbers, counting only the sections shown.
-    readonly property int devicesNumber: hasPush ? 5 : 4
 
     readonly property var sessions: {
         try {
@@ -331,29 +327,22 @@ Rectangle {
             Section {
                 number: 4
                 title: qsTr("Notifications")
-                visible: root.hasPush
-                Loader {
-                    width: parent.width
-                    active: root.hasPush
-                    sourceComponent: Column {
-                        width: parent ? parent.width : 0
-                        spacing: 8
-                        SwitchItem {
-                            text: qsTr("Push notifications")
-                            description: Native.notificationsEnabled
-                                ? qsTr("Messages and calls reach this phone.")
-                                : qsTr("Turn them on to hear about messages and calls.")
-                            checked: Native.notificationsEnabled === true
-                            // Android asks once; after that it is the
-                            // system's own settings.
-                            onToggled: Native.requestNotifications()
-                        }
-                    }
+                SwitchItem {
+                    text: qsTr("Push notifications")
+                    description: Native.notificationsEnabled
+                        ? qsTr("New messages reach this phone. Turn them off in Android's settings.")
+                        : qsTr("Turn them on to hear about new messages.")
+                    checked: Native.notificationsEnabled
+                    // Once on, only Android's settings turn them off.
+                    locked: Native.notificationsEnabled
+                    // The permission dialog while Android still shows it,
+                    // else the app's notification settings (the shim).
+                    onToggled: Native.requestNotifications()
                 }
             }
 
             Section {
-                number: root.devicesNumber
+                number: 5
                 title: qsTr("Devices")
                 Loader {
                     width: parent.width
@@ -395,7 +384,7 @@ Rectangle {
             }
 
             Section {
-                number: root.devicesNumber + 1
+                number: 6
                 title: qsTr("About")
                 InfoRow {
                     text: qsTr("Version")
@@ -562,6 +551,8 @@ Rectangle {
         property string text
         property string description
         property bool checked: false
+        // Shown, but a tap changes nothing.
+        property bool locked: false
         signal toggled()
         width: parent ? parent.width : 0
         height: Math.max(56, itemLabels.implicitHeight + 16)
@@ -570,13 +561,13 @@ Rectangle {
         Accessible.description: description
         Accessible.checkable: true
         Accessible.checked: checked
-        Accessible.onPressAction: item.toggled()
+        Accessible.onPressAction: if (!item.locked) item.toggled()
         Rectangle {
             anchors.fill: parent
             anchors.leftMargin: -8
             anchors.rightMargin: -8
             radius: Theme.radius
-            color: itemTap.pressed ? Theme.tint2 : "transparent"
+            color: itemTap.pressed && !item.locked ? Theme.tint2 : "transparent"
             Behavior on color { ColorAnimation { duration: Theme.dur1 } }
         }
         Column {
@@ -617,6 +608,8 @@ Rectangle {
         TapHandler {
             id: itemTap
             onTapped: {
+                if (item.locked)
+                    return
                 Native.haptic(Native.Tick)
                 item.toggled()
             }
