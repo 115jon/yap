@@ -211,8 +211,8 @@ jobs:
             git -c "$(auth "$GH_TOKEN")" fetch --no-tags origin "refs/heads/$branch"
             git checkout --quiet --detach FETCH_HEAD
             # The mobile prototypes' workspaces use the same crates by path.
-            locks="desktop-native/rust/Cargo.lock desktop-native/mobile/qt/rust/Cargo.lock desktop-native/mobile/rust/Cargo.lock"
-            node "$script" --also desktop-native/mobile/qt/rust/Cargo.lock --also desktop-native/mobile/rust/Cargo.lock desktop-native/rust
+            locks="desktop-native/rust/Cargo.lock desktop-native/mobile/qt/rust/Cargo.lock"
+            node "$script" --also desktop-native/mobile/qt/rust/Cargo.lock desktop-native/rust
             if git diff --quiet -- $locks; then
               echo "Cargo.lock is in sync on $branch."
               continue
