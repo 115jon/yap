@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.0.2](https://github.com/115jon/yap/compare/v4.0.1...v4.0.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* **desktop-native:** 🐛 guard voice details' inbound rows on leave ([0143d7a](https://github.com/115jon/yap/commit/0143d7afb26f23b4c8498687504ff965dfa4f37a))
+* **desktop-native:** 🐛 stop a refused camera pull from ending a share ([a420142](https://github.com/115jon/yap/commit/a4201429339f04fb6641a2f1caa134f4c83112cc))
+* **desktop-native:** a refused camera pull no longer ends a live share ([f94719a](https://github.com/115jon/yap/commit/f94719a02b399e7b29997f6d47dfcdd06a612397))
+
 ## [4.0.1](https://github.com/115jon/yap/compare/v4.0.0...v4.0.1) (2026-11-11)
 
 
