@@ -167,7 +167,7 @@ Item {
             color: Theme.mutedState
         }
     }
-    HoverHandler { id: hover }
+    HoverHandler { id: hover; enabled: Theme.hoverUi }
 
     // Someone live: their stream card while the row or the card is hovered
     // (VoiceStreamHoverCard.tsx); it closes 90 ms after both are left.

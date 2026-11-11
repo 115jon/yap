@@ -6,7 +6,9 @@ import Yap.Platform
 // the text column starts at x=68. A new author group adds 16 px above;
 // every row has 2 px vertical padding. A grouped message (same author, a
 // few minutes later) drops the avatar and name and shows its time in the
-// gutter on hover. Above the header: the "New" divider (24) and a reply's
+// gutter on hover. Under a finger (Theme.touch) nothing hovers: a long press
+// asks for the menu, and the text is not selected by a press. Above the
+// header: the "New" divider (24) and a reply's
 // quoted line (20) with its guide stroke from the avatar. Under the body:
 // link previews, attachments, then the reactions. Every value is a
 // MessageListModel role, already formatted; media roles are JSON, parsed
@@ -179,8 +181,15 @@ Item {
     // parity/server-channel-web.png; 5 drifted ~10 px by the screen's foot).
     readonly property int headTop: 16 + 2 + 4
     readonly property int padTop: dividerHeight + (grouped ? 2 : headTop)
-    readonly property int headerTop: padTop + (hasReply ? 20 : 0)
+    // The quoted line's box: 20, more when the text size is scaled up.
+    readonly property int replyBox: Math.max(20, Theme.type.captionLine + 4)
+    readonly property int headerTop: padTop + (hasReply ? replyBox : 0)
+    // The pointer is on the row. Never under a finger: Qt synthesises hover
+    // from a touch, which would leave the bar and the tint on a tapped row.
+    readonly property bool hot: Theme.hoverUi && hover.hovered
     readonly property bool shiftHeld: (hover.point.modifiers & Qt.ShiftModifier) !== 0
+    // A sideways drag of the row (the phone's swipe to reply), in px.
+    property real swipe: 0
     readonly property Item bodyItem: editing && editor.item ? editor : bodyText
 
     // ||Spoilers|| show once clicked, each on its own (MarkdownRenderer.tsx
@@ -262,7 +271,7 @@ Item {
     // in and rises 4 px (VirtualMessageList.tsx `entering`, rm-list-enter);
     // the list calls enter() as it makes that row. The entrance writes the
     // opacity itself, so the dim's binding goes back on when it ends.
-    transform: Translate { id: lift }
+    transform: Translate { id: lift; x: root.swipe }
     function enter() {
         entrance.restart()
     }
@@ -280,7 +289,7 @@ Item {
         width: parent.width
         height: parent.height - y - footSlot.height
         color: root.isCall ? "transparent" : root.mentioned ? Theme.accentTint
-             : hover.hovered ? Theme.tint1 : "transparent"
+             : root.hot ? Theme.tint1 : "transparent"
         EaseColor on color {}
     }
 
@@ -358,7 +367,7 @@ Item {
         }
     }
 
-    HoverHandler { id: hover }
+    HoverHandler { id: hover; enabled: Theme.hoverUi }
     // The keyboard focus ring (outline-2 in focus ink, inset).
     Rectangle {
         visible: root.keyFocused
@@ -376,6 +385,25 @@ Item {
         enabled: !root.editing && !root.pending && !root.failed && !root.isCall
         onTapped: point => root.menuRequested(root.messageId, root.author, root.body, root.mine,
                                               root, point.position.x, point.position.y)
+    }
+    // Under a finger a long press opens it, anywhere on the row, the text
+    // included (it takes no selection there; see bodyText). The handler sits
+    // on an item over the row's content: the text and the keys take a press
+    // for themselves, and one under them would never hear of it. Android's
+    // default long-press time, not Qt's 800 ms.
+    Loader {
+        anchors.fill: parent
+        z: 3
+        active: Theme.touch
+        sourceComponent: Item {
+            TapHandler {
+                acceptedDevices: PointerDevice.TouchScreen
+                enabled: !root.editing && !root.pending && !root.failed && !root.isCall
+                longPressThreshold: 0.4
+                onLongPressed: root.menuRequested(root.messageId, root.author, root.body, root.mine,
+                                                  root, point.position.x, point.position.y)
+            }
+        }
     }
 
     // NewMessageSeparator: a 24x2 badge rule, "NEW" in danger-ink, a seam.
@@ -421,7 +449,7 @@ Item {
         x: 0
         y: root.padTop
         width: parent.width
-        height: 20
+        height: root.replyBox
 
         Rectangle {
             x: 36
@@ -477,7 +505,7 @@ Item {
         MouseArea {
             id: replyHover
             anchors.fill: parent
-            hoverEnabled: true
+            hoverEnabled: Theme.hoverUi
             cursorShape: Qt.PointingHandCursor
             onClicked: root.jumpRequested(root.replyId)
         }
@@ -505,14 +533,14 @@ Item {
         // Resting on it loads the profile, so the popout opens with its
         // banner playing (the web's hover prefetch).
         HoverHandler {
-            enabled: !root.pending && !root.failed
+            enabled: Theme.hoverUi && !root.pending && !root.failed
             onHoveredChanged: ShellState.prefetchProfile(hovered ? root.authorId : "", root.avatar)
         }
     }
 
     Text {
         // Gutter time for grouped messages: Martian 11, right-aligned.
-        visible: root.grouped && hover.hovered && !root.isCall
+        visible: root.grouped && root.hot && !root.isCall
         x: 16
         width: 40
         y: bodyText.y + 4
@@ -540,7 +568,7 @@ Item {
         // author's own style when they have one (ProfileDisplayName).
         DisplayName {
             id: authorText
-            playing: hover.hovered
+            playing: root.hot
             height: Theme.type.authorLine
             // One line, elided at the end, leaving the time and the pin
             // their room (MessageItem.tsx: the name truncates).
@@ -557,6 +585,7 @@ Item {
                 onClicked: root.profileRequested(root.authorId, authorAvatar)
             }
             HoverHandler {
+                enabled: Theme.hoverUi
                 onHoveredChanged: ShellState.prefetchProfile(hovered ? root.authorId : "", root.avatar)
             }
         }
@@ -569,7 +598,7 @@ Item {
             font: Theme.type.numSm
             Accessible.name: root.fullTime(root.createdAt)
             // MessageHeaderTime: the full date in a tooltip on hover.
-            HoverHandler { id: timeHover }
+            HoverHandler { id: timeHover; enabled: Theme.hoverUi }
             LazyPopup {
                 when: timeHover.hovered
                 sourceComponent: Tooltip { visible: timeHover.hovered; text: root.fullTime(root.createdAt) }
@@ -597,19 +626,21 @@ Item {
         y: root.grouped ? root.headerTop : meta.y + Theme.type.authorLine
         width: root.width - x - 24
         readOnly: true
-        selectByMouse: true
+        // Under a finger a press on the text belongs to the row (a long press
+        // opens the menu, whose "Select text" gives the selection handles).
+        selectByMouse: !Theme.touch
         wrapMode: TextEdit.Wrap
         // yap-core markdown.rs: the web's grammar as Qt rich text.
         textFormat: TextEdit.RichText
         // The web's 22 px line box (text-ui-base 15/22).
-        text: "<div style=\"line-height:22px\">" + Theme.richText(root.shadeSpoilers(Theme.underlineLink(root.imagesReady ? root.html
+        text: "<div style=\"line-height:" + Theme.type.messageLine + "px\">" + Theme.richText(root.shadeSpoilers(Theme.underlineLink(root.imagesReady ? root.html
             : root.html.replace(/<img [^>]*>/g, "&#8195;&#8202;"), hotLink.startsWith("spoiler:") || hotLink.startsWith("edited:") ? "" : hotLink),
             hotLink), false, root.mentioned) + "</div>"
         // The hovered link, underlined (kept while the pointer is on it:
         // re-setting the text clears `hoveredLink` until the next move). A
         // hidden spoiler tints instead; "(edited)" shows its time.
         property string hotLink: ""
-        onHoveredLinkChanged: if (hoveredLink.length > 0) {
+        onHoveredLinkChanged: if (hoveredLink.length > 0 && Theme.hoverUi) {
             if (hoveredLink !== hotLink && hoveredLink.startsWith("edited:"))
                 editedTip.x = bodyHover.point.position.x
             hotLink = hoveredLink
@@ -635,6 +666,7 @@ Item {
 
         HoverHandler {
             id: bodyHover
+            enabled: Theme.hoverUi
             cursorShape: root.isLive(bodyText.hotLink) ? Qt.PointingHandCursor : Qt.IBeamCursor
             onHoveredChanged: if (!hovered) bodyText.hotLink = ""
             // Off a link (but still on the text): drop the underline.
@@ -708,7 +740,7 @@ Item {
                     onOpenImage: (images, index) => root.imageOpened(images, index)
                     onExpandVideo: (source, position) => ShellState.videoViewerRequested(source, position)
                 }
-                HoverHandler { id: embedHover }
+                HoverHandler { id: embedHover; enabled: Theme.hoverUi }
                 // Our own message: the x that removes every preview, just
                 // outside the card's corner, shown while the embed is
                 // hovered or the key has focus (LinkEmbed.tsx). Shift skips
@@ -723,7 +755,7 @@ Item {
                     // Revealed, not created, on hover (the web's opacity-0
                     // REVEAL): it stays clickable and reachable by Tab.
                     visible: root.mine && !root.pending
-                    opacity: embedHover.hovered || activeFocus ? 1 : 0
+                    opacity: embedHover.hovered || activeFocus || Theme.touch ? 1 : 0
                     color: removeArea.containsMouse ? Theme.tint1 : "transparent"
                     EaseColor on color {}
                     activeFocusOnTab: root.mine
@@ -740,7 +772,9 @@ Item {
                     MouseArea {
                         id: removeArea
                         anchors.fill: parent
-                        hoverEnabled: true
+                        // A finger gets the 20 px key's whole corner.
+                        anchors.margins: Theme.touch ? -14 : 0
+                        hoverEnabled: Theme.hoverUi
                         cursorShape: Qt.PointingHandCursor
                         onClicked: mouse => root.embedsRemoveRequested(root.messageId, (mouse.modifiers & Qt.ShiftModifier) !== 0)
                     }
@@ -783,7 +817,7 @@ Item {
             sourceComponent: ReactionStrip {
                 width: extras.width
                 chips: root.reactionChips
-                rowHovered: hover.hovered && !root.pending && !root.failed
+                rowHovered: root.hot && !root.pending && !root.failed
                 onToggled: emoji => root.reactionToggled(root.messageId, emoji)
                 onAddRequested: anchor => root.reactionPickerRequested(root.messageId, anchor, true)
                 onDetailsRequested: emoji => root.reactionDetailsRequested(root.messageId, emoji)
@@ -838,7 +872,7 @@ Item {
                         id: chipTap
                         anchors.fill: parent
                         enabled: root.threadActions
-                        hoverEnabled: true
+                        hoverEnabled: Theme.hoverUi
                         cursorShape: root.threadActions ? Qt.PointingHandCursor : Qt.ArrowCursor
                         onClicked: root.threadRequested(root.messageId)
                     }
@@ -900,9 +934,9 @@ Item {
     // can overhang the row above. Holding Shift swaps More for Delete. It
     // stays while `keepBar` holds, and fades in from scale .97 over 100 ms
     // from its bottom-right corner.
-    z: hover.hovered || keepBar || keyFocused ? 1 : 0
+    z: hot || keepBar || keyFocused ? 1 : 0
     Loader {
-        active: (hover.hovered || root.keepBar || root.keyFocused) && !root.editing && !root.pending && !root.failed && !root.isCall
+        active: (root.hot || root.keepBar || root.keyFocused) && !root.editing && !root.pending && !root.failed && !root.isCall
         anchors.right: parent.right
         anchors.rightMargin: 24
         // -top-4 from the row box, which starts under the group margin.

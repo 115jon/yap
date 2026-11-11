@@ -143,7 +143,10 @@ Flow {
             MouseArea {
                 id: chipHover
                 anchors.fill: parent
-                hoverEnabled: true
+                // A finger gets 40 px of height around the 28 px chip.
+                anchors.topMargin: Theme.touch ? -6 : 0
+                anchors.bottomMargin: Theme.touch ? -6 : 0
+                hoverEnabled: Theme.hoverUi
                 cursorShape: Qt.PointingHandCursor
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onClicked: mouse => {
@@ -160,7 +163,8 @@ Flow {
 
     IconKey {
         id: addKey
-        visible: root.rowHovered
+        // Always there under a finger, which has no hover to reveal it.
+        visible: root.rowHovered || Theme.touch
         size: 28
         tone: "muted"
         iconName: "react"

@@ -156,7 +156,7 @@ Item {
         }
     }
 
-    HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+    HoverHandler { id: hover; enabled: Theme.hoverUi; cursorShape: Qt.PointingHandCursor }
     TapHandler { id: tap; onTapped: entry.selected() }
     TapHandler {
         acceptedButtons: Qt.RightButton

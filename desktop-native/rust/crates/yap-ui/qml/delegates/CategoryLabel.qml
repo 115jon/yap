@@ -28,7 +28,7 @@ Item {
         anchors.bottom: parent.bottom
         width: parent.width
         height: Theme.branchLabel
-        HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+        HoverHandler { id: hover; enabled: Theme.hoverUi; cursorShape: Qt.PointingHandCursor }
         TapHandler { onTapped: root.toggled() }
     }
     Icon {
