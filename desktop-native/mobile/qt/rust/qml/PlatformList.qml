@@ -20,7 +20,7 @@ ListView {
     flickDeceleration: Native.flingDeceleration
     pixelAligned: true
     reuseItems: true
-    cacheBuffer: height
+    cacheBuffer: Math.max(0, height)
 
     // The stretch: up to 5% of the height, eased like EdgeEffect's.
     transform: Scale {
