@@ -207,6 +207,9 @@ pub enum HttpReason {
     Prefetch,
     /// The saved scroll position's window (`around=`).
     Window,
+    /// Asked on the way out of a session (the push token's DELETE): the
+    /// session's revoke waits for it, briefly, so the token still works.
+    SignOut,
 }
 
 impl HttpReason {
@@ -217,6 +220,7 @@ impl HttpReason {
             Self::Revalidate => "revalidate",
             Self::Prefetch => "prefetch",
             Self::Window => "window",
+            Self::SignOut => "sign-out",
         }
     }
 }
@@ -410,6 +414,17 @@ pub enum ApiRequest {
     RevokeShare {
         share_id: String,
     },
+    /// Register this device's push token (`POST /api/push-tokens`).
+    RegisterPush {
+        token: String,
+        platform: String,
+        app_variant: Option<String>,
+        push_format: Option<String>,
+    },
+    /// Forget it (`DELETE /api/push-tokens`).
+    UnregisterPush {
+        token: String,
+    },
     /// Kova's own session (on the auth server): the account's email.
     KovaSession,
     /// Kova's linked sign-in methods (on the auth server).
@@ -573,7 +588,11 @@ impl ApiRequest {
             | Self::SetPresence { .. }
             | Self::GifUpload { .. } => Method::Post,
             Self::UpdateProfile(_) => Method::Patch,
-            Self::DeleteBanner | Self::DeleteNameplate | Self::RevokeShare { .. } => Method::Delete,
+            Self::DeleteBanner
+            | Self::DeleteNameplate
+            | Self::RevokeShare { .. }
+            | Self::UnregisterPush { .. } => Method::Delete,
+            Self::RegisterPush { .. } => Method::Post,
             Self::Sessions
             | Self::Shares
             | Self::KovaSession
@@ -647,6 +666,7 @@ impl ApiRequest {
             Self::BillingStatus => "/api/billing/status".into(),
             Self::Shares => "/api/shares".into(),
             Self::RevokeShare { share_id } => format!("/api/shares/{}", query_value(share_id)),
+            Self::RegisterPush { .. } | Self::UnregisterPush { .. } => "/api/push-tokens".into(),
             Self::KovaSession => "/api/auth/get-session".into(),
             Self::KovaAccounts => "/api/auth/list-accounts".into(),
             Self::React { channel_id, .. } => format!("/api/channels/{channel_id}/reactions"),
@@ -800,6 +820,22 @@ impl ApiRequest {
             Self::UpdateProfile(patch) => patch.clone(),
             Self::DeleteBanner => json!({ "kind": "banner" }),
             Self::DeleteNameplate => json!({ "kind": "nameplate" }),
+            Self::RegisterPush {
+                token,
+                platform,
+                app_variant,
+                push_format,
+            } => {
+                let mut body = json!({ "token": token, "platform": platform });
+                if let Some(variant) = app_variant {
+                    body["app_variant"] = json!(variant);
+                }
+                if let Some(format) = push_format {
+                    body["push_format"] = json!(format);
+                }
+                body
+            }
+            Self::UnregisterPush { token } => json!({ "token": token }),
             Self::Sessions
             | Self::Shares
             | Self::RevokeShare { .. }
@@ -925,7 +961,9 @@ impl ApiRequest {
             Self::UpdateProfile(_)
             | Self::DeleteBanner
             | Self::DeleteNameplate
-            | Self::RevokeShare { .. } => ApiResponse::Done,
+            | Self::RevokeShare { .. }
+            | Self::RegisterPush { .. }
+            | Self::UnregisterPush { .. } => ApiResponse::Done,
             Self::DeleteMessage { .. }
             | Self::React { .. }
             | Self::GifShare { .. }

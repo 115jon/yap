@@ -642,6 +642,16 @@ pub struct VoiceCall {
     pub spatial: String,
 }
 
+/// What [`super::Command::RegisterPush`] gave: the body of
+/// `POST /api/push-tokens`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PushRegistration {
+    pub(super) token: String,
+    pub(super) platform: String,
+    pub(super) format: Option<String>,
+    pub(super) app_variant: Option<String>,
+}
+
 /// A hidden standby session warming a voice channel's join
 /// (voice-standby.ts): promoted by the next join of that channel.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1226,6 +1236,21 @@ pub struct State {
     pub(super) standby_paused: bool,
     /// Counts hides and shows; a grace timer for an older one is ignored.
     pub(super) window_generation: u64,
+    /// This device's push token ([`super::Command::RegisterPush`]), kept
+    /// across sessions.
+    pub(super) push: Option<PushRegistration>,
+    /// It is registered (or being registered) for the current session's
+    /// account.
+    pub(super) push_registered: bool,
+    /// The registration in flight: a failure clears `push_registered`, and
+    /// the next gateway Ready tries again.
+    pub(super) push_request: Option<super::RequestId>,
+    /// A phone app is in the background ([`super::Command::Suspend`]).
+    pub(super) suspended: bool,
+    /// Counts suspends and resumes; a grace timer for an older one is ignored.
+    pub(super) suspend_generation: u64,
+    /// The gateway was closed for the background and reconnects on resume.
+    pub(super) gateway_suspended: bool,
     /// The pending roster check after a gateway Ready or Resumed, and the
     /// channels whose roster the server sent since.
     pub(super) voice_roster_check: u64,
@@ -1249,6 +1274,9 @@ pub struct State {
     pub(super) tree_server: Option<String>,
     /// A channel to open once its server's tree answers (a toast click).
     pub(super) wanted_channel: Option<String>,
+    /// A DM to open once the DM list answers (a phone notification's tap
+    /// at launch, before the list is in).
+    pub(super) wanted_dm: Option<String>,
     /// Messages that were toasted (the notification for one does not toast).
     pub(super) toasted: Toasted,
     pub(super) settings: SettingsState,
@@ -1363,6 +1391,12 @@ impl State {
             window_shown: true,
             standby_paused: false,
             window_generation: 0,
+            push: None,
+            push_registered: false,
+            push_request: None,
+            suspended: false,
+            suspend_generation: 0,
+            gateway_suspended: false,
             voice_roster_check: 0,
             voice_confirmed: HashSet::new(),
             calls: Default::default(),
@@ -1374,6 +1408,7 @@ impl State {
             voice_chat: false,
             tree_server: None,
             wanted_channel: None,
+            wanted_dm: None,
             toasted: Toasted::default(),
             settings: SettingsState::default(),
             admin: super::AdminState::default(),
