@@ -8,7 +8,7 @@ prototypes on the same unchanged core, and their side-by-side measurements:
 
 - `qt/`: **Qt Quick on Android**, the main path. The desktop's QML,
   list models and portable C++ run on a phone, under a mobile shell and a
-  thin platform shim. Application id `dev.yap.qtproto`.
+  thin platform shim. Application id `dev.yap.app`, label "Yap".
 - `rust/` and `android/`: **the Compose baseline**. The same core behind
   UniFFI with Jetpack Compose views, kept to compare against. Application
   id `dev.yap.coreproto`.
@@ -122,7 +122,7 @@ One crate, one QML module, two consumers. No file is copied:
 | Share sheet                       | **No** (Qt has `QDesktopServices` for URLs only)                                                                                                   | Shim: `ACTION_SEND` chooser, from the message sheet's Share                                                                                                                                                                                                                                                                                                                                                                                | Verified: the system sheet opens with the message's text                                                                                             |
 | Photo picker                      | **No.** Qt's `FileDialog` opens the documents UI                                                                                                   | Shim: the system photo picker (`ACTION_PICK_IMAGES`, no permission) on 13+, `GET_CONTENT` on images and videos before; each item copied into the cache for the core's path-based upload                                                                                                                                                                                                                                                    | Verified on API 35: three pictures picked, uploaded with progress, one retried, sent                                                                 |
 | Pinch, double-tap, swipe away     | **Native** building blocks: `PinchArea`, `TapHandler`, `DragHandler`, a snapping `ListView`                                                        | `ImageViewerPage`: zoom about the fingers or the tap, pan, page between pictures, swipe down to close with the scrim fading; Back closes it first                                                                                                                                                                                                                                                                                          | Double-tap, paging, swipe down and Back verified; pinch needs two fingers, which `adb` cannot send                                                   |
-| Notifications                     | **No** FCM/APNs module                                                                                                                             | —                                                                                                                                                                                                                                                                                                                                                                                                                                          | Platform code (FirebaseMessagingService, APNs) under any option, the same work as for Compose                                                        |
+| Notifications                     | **No** FCM/APNs module                                                                                                                             | Shim: a FirebaseMessagingService drawing the server's data-only pushes (MessagingStyle, Reply, Mark as read), the core registering the token ("Push notifications" below)                                                                                                                                                                                                                                                                  | Verified on API 35 (Google APIs): a DM pushed in the background and with the process killed, Reply, tap to open; APNs not started                    |
 | Text selection handles            | **Native**: Qt Quick's text fields draw Android-style handles and the cut/copy/paste bar                                                           | `persistentSelection` on the composer. In the list a press on a message's text belongs to the row (`selectByMouse: !Theme.touch`); the sheet's Select text puts the text on a page of its own                                                                                                                                                                                                                                              | Verified on that page: a long press selects a word and shows the handles and the Copy / Select all bar                                               |
 | 60/120 Hz                         | **Native**: the threaded render loop is paced by vsync at the display's rate                                                                       | `[frames]` pacing log (the render thread's swap intervals)                                                                                                                                                                                                                                                                                                                                                                                 | 60 Hz verified (the emulator's display); 120 Hz needs a device                                                                                       |
 | Hover and right-click affordances | Qt synthesises hover from touch                                                                                                                    | `Theme.hoverUi` off: the shared delegates' hover handlers, tints, hover-revealed keys, tooltips and hover prefetch are gated on it. `Theme.touch` on: a long press on a message emits what a right click does (`menuRequested`), rows tint while pressed, rows and keys take the touch sizes, a small key answers within 48 px (`Theme.hitMin`), and the right-click handlers are off (a touch carries no button, so a tap passed for one) | Verified: no hover bar or tint after a tap; a long press anywhere on a message, its text included, opens the sheet                                   |
@@ -437,12 +437,13 @@ These are open questions for the owner, written up here, not decided:
 ```
 desktop-native/mobile/
 ├── common/platform.rs   rustls client and the logcat bridge, used by both
-├── qt/                  Qt Quick app (dev.yap.qtproto)
+├── qt/                  Qt Quick app (dev.yap.app)
 │   ├── rust/            cxx-qt crate yap_mobile_qt: the mobile Platform
 │   │                    (client.rs) and the com.yap.mobile module; links yap-ui
 │   │   └── qml/         mobile shell, pager and pages; seams/ (Yap.Platform types)
-│   ├── cpp/             main.cpp, native.* (the platform shim)
-│   ├── android/         manifest, NativeShim.java, icon and splash, build.gradle (R8)
+│   ├── cpp/             main.cpp, native.* (the platform shim), push.cpp
+│   ├── android/         manifest, NativeShim.java, push/ (FCM), icon and splash,
+│   │                    build.gradle (R8, Firebase)
 │   ├── build.sh         Qt + cxx-qt-cmake → APK (Android) or .app (iOS simulator)
 │   ├── fetch-qt.ps1     Qt 6.11.3 from download.qt.io, pinned by qt-sdk.lock.json
 │   ├── sign.sh          zipalign + apksigner (v2/v3), .sha256
@@ -496,6 +497,72 @@ in the app cache until the next start.
 <img src="docs/qt-image-viewer.png" width="180" alt="Qt: the image viewer">
 </p>
 
+### Push notifications
+
+The server's push path is the Expo app's (`/api/push-tokens`,
+`src/services/push.service.ts`): the app registers its FCM token with
+`push_format: "native"` and `app_variant: "qt"`, and the server sends
+data-only pushes (`ralph: "2"`, `kind: message | read`) that the app draws.
+
+- **Token.** At each start the shim asks FCM for the token
+  (`push/PushShim.java`) and hands it to the core (`rust/src/push.rs`,
+  `Command::RegisterPush`), which registers it once the session's `me` is
+  known, and again for each account signed in later (a failed try again at
+  the next gateway Ready). A rotated token
+  (`onNewToken`) registers the same way, or, with the app killed, straight
+  from Java with the stored session. Sign-out unregisters first
+  (`DELETE /api/push-tokens`; the session's revoke waits for it, at most
+  3 s).
+- **Drawing** (`push/MessageNotifier.java`, a port of the Expo app's
+  `MessageNotifier.kt`): one MessagingStyle notification per conversation,
+  with the sender's avatar, the last eight messages and the brand accent,
+  grouped under a summary, on the channels `dms`, `mentions` and `other`
+  (the Expo app's ids). Each conversation gets a long-lived shortcut, so it
+  is listed under Android 11+'s Conversations. A read push (`kind: read`,
+  read on another device) takes the conversation's notification down.
+- **Actions.** Reply (RemoteInput, an answer to the newest message) and Mark
+  as read. With the app running they go into the core as the desktop's
+  toast actions (`Command::ToastReply` only with the app in front,
+  `ToastMarkRead`); otherwise the receiver calls the API, and a failed
+  reply shows as "Not sent: ...", with the session file the core keeps
+  (`client.rs` `SESSION_FILE`; its folder and the API's origin are handed
+  over at each start, `PushStore`).
+- **Tap.** The notification opens the app at its conversation: the intent
+  carries the channel, server and (a DM's) person ids. `YapActivity` (Qt's
+  activity) hands each fresh start's and `onNewIntent`'s tap to the shim,
+  which keeps it until Qt is up (a task relaunched from Recents gets the tap
+  before `main()` runs); a restored or from-Recents start's old intent is
+  ignored. `Native.openRequested` / `takeOpenRequest()` give it to
+  `Main.qml`, which calls `Nav.openChannel` (the core's `OpenChannel`,
+  switching servers first; a DM the list does not have yet, as on a launch
+  from the cache, opens when the list answers) once signed in, and slides
+  the chat in.
+- **In front.** `Native.activeConversation` is the conversation being read
+  (`Main.qml` binds it to `Nav.activeChannelId` while the chat is on screen
+  and the app is active): its pushes are not shown and its notification is
+  taken down.
+- **Permission.** `POST_NOTIFICATIONS` (API 33+) is asked for once, when
+  the first conversation opens. `Native.notificationsEnabled` (read again
+  whenever the app returns) and `Native.requestNotifications()` (the dialog
+  while it can still show, else the app's notification settings) are for
+  Settings.
+- **Background.** `Session.setVisible(false)` also sends
+  `Command::Suspend(true)`: a minute into the background the gateway
+  closes (a call or a session still booting puts it off by another minute),
+  and it reconnects (a Ready that refetches what is on screen) as soon as
+  the app is back. The desktop never suspends.
+
+Firebase is set up without the google-services Gradle plugin:
+`android/build.gradle` reads the `google-services.json` that
+`YAP_GOOGLE_SERVICES_JSON` names, takes the client for the application id,
+and writes the string resources the plugin would (`google_app_id`,
+`google_api_key`, `gcm_defaultSenderId`, `project_id`), from which
+FirebaseInitProvider starts Firebase. The file holds API keys and stays out
+of the repository; CI decodes the `QT_GOOGLE_SERVICES_JSON_BASE64` secret
+into the build folder. Without it the APK builds and runs, with no pushes.
+`dev.yap.app` is registered in the Firebase project the server's
+`FCM_SERVICE_ACCOUNT` sends from.
+
 ### Build and run the Qt app
 
 Needs:
@@ -532,7 +599,7 @@ androiddeployqt copied before, so a plugin dropped from the build stays in
 the APK until `android-build/libs` is cleared.
 
 Packaging, from CMake cache variables: `YAP_ANDROID_APP_ID` (default
-`dev.yap.qtproto`; also the Gradle namespace and the iOS bundle id),
+`dev.yap.app`; also the Gradle namespace and the iOS bundle id),
 `YAP_ANDROID_VERSION_CODE` (1) and `YAP_ANDROID_VERSION_NAME` (0.1.0);
 `YAP_ANDROID_COMPILE_SDK` and `YAP_ANDROID_BUILD_TOOLS` pin the SDK
 platform and build tools (default: the newest installed). The manifest has
@@ -666,4 +733,5 @@ Each crate was checked by compiling it for `x86_64-linux-android` (NDK 27).
 4. Size: R8, bytecode-only QML, and a static-Qt measurement.
 5. CI: Qt for Android on Ubuntu; Qt for iOS on macOS for a compile check of
    the same QML module.
-6. Voice and push: upstream libwebrtc on Android, a foreground service, FCM.
+6. Voice: upstream libwebrtc on Android, a foreground service. Push (FCM) is
+   done ("Push notifications"); call rings and APNs are not.

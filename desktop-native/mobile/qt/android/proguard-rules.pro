@@ -1,7 +1,9 @@
 # R8 rules for release builds (build.gradle). Qt's C++ calls its Java side
 # over JNI by class, method and field name, and so does Native
-# (cpp/native.cpp -> dev.yap.qtproto.NativeShim): none of it may be renamed
-# or removed, even when no Java code calls it.
+# (cpp/native.cpp -> dev.yap.qtproto.NativeShim, cpp/push.cpp ->
+# dev.yap.qtproto.push.PushShim): none of it may be renamed or removed, even
+# when no Java code calls it. The push service and receiver are kept by the
+# manifest; Firebase brings its own consumer rules.
 -keep class org.qtproject.qt.android.** { *; }
 -keep class dev.yap.** { *; }
 -keepclasseswithmembernames,includedescriptorclasses class * {

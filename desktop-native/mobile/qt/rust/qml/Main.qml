@@ -74,6 +74,35 @@ Window {
         && Qt.application.state === Qt.ApplicationActive
     onReadingChanged: Chat.setFocused(reading)
 
+    // Push notifications: the conversation being read gets none (and its
+    // notification goes), and a tapped one opens once signed in.
+    Binding {
+        target: Native
+        property: "activeConversation"
+        value: window.reading ? Nav.activeChannelId : ""
+    }
+    function openFromNotification() {
+        if (!ready)
+            return
+        const request = Native.takeOpenRequest()
+        if (!request.channelId)
+            return
+        closeTop(true)
+        // The core opens a DM the list does not have yet once it answers;
+        // the chat slides in when the conversation is the open one.
+        Nav.openChannel(request.channelId, request.serverId)
+        if (request.userId)
+            pager.showDmWhenOpen(request.userId)
+        else
+            pager.show("chat")
+    }
+    Connections {
+        target: Native
+        function onOpenRequested() {
+            window.openFromNotification()
+        }
+    }
+
     // A profile, over whatever is showing.
     function openProfile(userId) {
         // One sheet per person: a second tap must not stack another.
@@ -116,10 +145,14 @@ Window {
     // Signed out (here or by the server): nothing stays stacked for the
     // next account.
     onReadyChanged: {
-        if (ready)
+        if (ready) {
+            openFromNotification()
             return
+        }
         stack.pop(null, StackView.Immediate)
         pager.snap()
+        if (Session.phase === Session.SignedOut)
+            Native.forgetNotifications()
     }
 
     Item {

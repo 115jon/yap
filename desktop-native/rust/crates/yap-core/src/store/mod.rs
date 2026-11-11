@@ -50,7 +50,7 @@ pub use friends::{
 };
 pub use input::{Command, Dispatch, GatewayEvent, Input, ProfileDraft, SignInEvent, UploadFile};
 pub use invites::{InviteCommand, InviteRequest, InviteResponse, InviteState};
-pub use reduce::reduce;
+pub use reduce::{reduce, SUSPEND_GRACE};
 pub use search::{SearchCommand, SearchRequest, SearchScope, SearchState, SearchView};
 pub use state::{
     live_status, pending_id, Divider, GatewayStatus, GifBrowse, MessageLog, Outgoing, Phase,

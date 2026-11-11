@@ -416,6 +416,12 @@ impl State {
         self.forget_lost_dms();
         self.sync_social(fx);
         self.emit_active_dm(fx);
+        // A DM asked for before the list was in (Command::OpenChannel).
+        if let Some(id) = self.wanted_dm.take() {
+            if self.dm(&id).is_some() {
+                self.select_dm(fx, &id);
+            }
+        }
     }
 
     /// A DM someone opened (`DM_CHANNEL_CREATE`) or we did: on top.

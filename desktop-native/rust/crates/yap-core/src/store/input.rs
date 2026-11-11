@@ -25,6 +25,29 @@ pub enum Command {
     RetryGateway,
     /// The window is on screen (`false`: minimised or hidden to the tray).
     WindowShown(bool),
+    /// A phone app went to the background (`true`) or came back. After
+    /// [`super::reduce::SUSPEND_GRACE`] in the background the gateway
+    /// closes (the phone's pushes take over); in front again it reconnects
+    /// at once, and its Ready refetches what is on screen. The desktop
+    /// never sends it: a hidden window keeps its gateway.
+    Suspend(bool),
+    /// This device's push token for whoever is signed in
+    /// (`POST /api/push-tokens`, as the Expo app sends it): registered once
+    /// the session's `me` is known, and again for each account signed in
+    /// later. `platform` is `android` or `ios`; `format` `native` asks for
+    /// the data-only pushes the app draws itself; `app_variant` names the
+    /// build. A new token (rotation) replaces the old one.
+    RegisterPush {
+        token: String,
+        platform: String,
+        format: Option<String>,
+        app_variant: Option<String>,
+    },
+    /// Forget the token on the server (`DELETE /api/push-tokens`) and stop
+    /// registering it: the device gets no more pushes. [`Command::SignOut`]
+    /// unregisters by itself first (while the session can still ask), and
+    /// keeps the token for the next account.
+    UnregisterPush,
     StartSignIn,
     CancelSignIn,
     UseToken(String),
@@ -413,6 +436,11 @@ pub enum Input {
     /// server down): ask again, if this session is still booting.
     BootRetry {
         session: SessionId,
+    },
+    /// The app has been in the background for
+    /// [`super::reduce::SUSPEND_GRACE`]. Only the newest suspend counts.
+    SuspendElapsed {
+        generation: u64,
     },
 }
 

@@ -9,3 +9,5 @@ mod client;
 mod http;
 #[path = "../../../common/platform.rs"]
 mod platform;
+// The FCM token and a notification's actions (cpp/push.cpp).
+mod push;

@@ -101,6 +101,7 @@ Native::Native(QObject* parent)
   m_deceleration = QJniObject::callStaticMethod<jfloat>(kShim, "flingDeceleration");
   readConfiguration();
   applyBars();
+  installPush();
   // Text size, Remove animations and the wallpaper accent can change while
   // the app is away; read them again when it comes back, and the keyboard's
   // inset, which can go stale behind another activity (the photo picker).
@@ -109,6 +110,8 @@ Native::Native(QObject* parent)
       m_leftSincePick = true;
     if (s == Qt::ApplicationActive) {
       readConfiguration();
+      // The permission or the app's switch may have changed in Settings.
+      readNotificationsEnabled();
       QJniObject::callStaticMethod<void>(kShim, "refreshIme");
     }
   });

@@ -89,9 +89,11 @@ pub mod qobject {
         fn choose_status(self: &Session, status: &QString, custom_status: &QString);
 
         /// A phone app came to the foreground (`true`) or went to the
-        /// background: the core keeps its gateway and timers as for a
-        /// shown window. (The desktop reports its window through
-        /// `Desktop.setWindowShown`.)
+        /// background: the core keeps its timers as for a shown window,
+        /// and closes the gateway a minute into the background
+        /// (`Command::Suspend`), reconnecting when the app is back. (The
+        /// desktop reports its window through `Desktop.setWindowShown`,
+        /// which never suspends.)
         #[qinvokable]
         #[cxx_name = "setVisible"]
         fn set_visible(self: &Session, visible: bool);
@@ -170,6 +172,13 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "openDm"]
         fn open_dm(self: &Nav, user_id: &QString);
+
+        /// A channel or DM by id from anywhere (a notification's tap),
+        /// switching servers first; `server_id` is the hint for a channel
+        /// no loaded tree has (empty: none).
+        #[qinvokable]
+        #[cxx_name = "openChannel"]
+        fn open_channel(self: &Nav, channel_id: &QString, server_id: &QString);
 
         /// The open voice channel's text chat beside its view, or not.
         #[qinvokable]
@@ -907,6 +916,7 @@ impl qobject::Session {
 
     pub fn set_visible(&self, visible: bool) {
         client::command(Command::WindowShown(visible));
+        client::command(Command::Suspend(!visible));
     }
 }
 
@@ -941,6 +951,14 @@ impl qobject::Nav {
 
     pub fn open_dm(&self, user_id: &QString) {
         client::command(Command::OpenDm(user_id.to_string()));
+    }
+
+    pub fn open_channel(&self, channel_id: &QString, server_id: &QString) {
+        let server_id = server_id.to_string();
+        client::command(Command::OpenChannel {
+            channel_id: channel_id.to_string(),
+            server_id: (!server_id.is_empty()).then_some(server_id),
+        });
     }
 
     pub fn show_voice_chat(&self, show: bool) {

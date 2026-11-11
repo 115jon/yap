@@ -13,6 +13,7 @@ mod friends;
 mod games;
 mod invites;
 mod media;
+mod push;
 mod search;
 mod settings;
 mod shop;
@@ -47,6 +48,7 @@ use crate::api::{ApiError, Token};
 use crate::command_menu::RecentTarget;
 use crate::shell::{self, Sound};
 use crate::store::calls::{CallsCommand, RingStatus};
+pub use push::SUSPEND_GRACE;
 use yap_protocol::payload::VoiceChannelMember;
 
 const SESSION_ENDED: &str = "Your session ended. Sign in again.";
@@ -133,6 +135,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
             }
         }
         Input::BootRetry { session } => state.on_boot_retry(&mut fx, session),
+        Input::SuspendElapsed { generation } => state.on_suspend_elapsed(&mut fx, generation),
     }
     state.sync_activity(&mut fx);
     state.sync_settings(&mut fx);
@@ -656,7 +659,15 @@ impl State {
                 self.wanted_channel = Some(id.to_owned());
                 self.select_server(fx, server);
             }
-            None => {}
+            // Neither a known DM nor a loaded server's channel: a DM the
+            // list does not have yet (a launch from a notification shows
+            // the cached view first). It opens when the list answers.
+            None => {
+                self.wanted_dm = Some(id.to_owned());
+                if self.pending.dms.is_none() {
+                    self.pending.dms = self.http(fx, ApiRequest::Dms);
+                }
+            }
         }
     }
 
@@ -1519,8 +1530,20 @@ impl State {
                 }
             }
             Command::SignOut => {
+                // While the session can still ask; its revoke waits for it.
+                self.unregister_push(fx, true);
                 self.forget_user(fx);
                 self.end_session(fx, true);
+            }
+            // Somewhere else picked: a DM still wanted from a tap is not.
+            Command::SelectServer(_)
+            | Command::SelectHome
+            | Command::SelectHomeLast
+            | Command::SelectChannel(_)
+            | Command::OpenDm(_)
+                if self.wanted_dm.take().is_some() =>
+            {
+                self.on_command(fx, command);
             }
             Command::SelectServer(id) => self.select_server(fx, id),
             Command::SelectHome => self.select_home(fx),
@@ -1576,6 +1599,22 @@ impl State {
             } => self.edit_message(fx, &message_id, content.trim()),
             Command::DeleteMessage(id) => self.delete_message(fx, &id),
             Command::WindowShown(shown) => self.set_window_shown(fx, shown),
+            Command::Suspend(suspended) => self.set_suspended(fx, suspended),
+            Command::RegisterPush {
+                token,
+                platform,
+                format,
+                app_variant,
+            } => self.register_push(
+                fx,
+                super::state::PushRegistration {
+                    token,
+                    platform,
+                    format,
+                    app_variant,
+                },
+            ),
+            Command::UnregisterPush => self.unregister_push(fx, false),
             Command::Typing => {
                 if let (Some(channel_id), Some(_)) = (self.active_channel.clone(), self.signed_in())
                 {
@@ -2013,6 +2052,10 @@ impl State {
     fn end_session(&mut self, fx: &mut Effects, revoke: bool) {
         // A sign-out during a drop: the next session starts with no strip.
         self.set_link(fx, 0, false);
+        // The next account registers the push token again.
+        self.push_registered = false;
+        self.push_request = None;
+        self.gateway_suspended = false;
         self.clear_settings();
         self.clear_admin();
         self.clear_panels();
@@ -2075,6 +2118,7 @@ impl State {
         self.members.clear();
         self.clear_social(fx);
         self.wanted_channel = None;
+        self.wanted_dm = None;
         self.toasted = shell::Toasted::default();
         self.sync_tray_badge(fx);
         self.outbox.clear();
@@ -2167,7 +2211,8 @@ impl State {
         result: Result<ApiResponse, ApiError>,
     ) {
         let mut answer = Some(result);
-        if self.route_prefetch(fx, id, &mut answer)
+        if self.route_push_http(id, &mut answer)
+            || self.route_prefetch(fx, id, &mut answer)
             || self.route_calls_http(fx, id, &mut answer)
             || self.route_settings_http(fx, id, &mut answer)
             || self.route_admin_http(fx, id, &mut answer)
@@ -2301,6 +2346,7 @@ impl State {
             session.me = Some(me.clone());
             // Its read states and notifications were asked for already.
             self.persist(fx, CacheWrite::Me(Box::new(me)));
+            self.sync_push(fx);
             return;
         }
         fx.push(Effect::StoreToken(session.token.clone()));
@@ -2313,6 +2359,7 @@ impl State {
         });
         session.me = Some(me.clone());
         self.persist(fx, CacheWrite::Me(Box::new(me)));
+        self.sync_push(fx);
         // Reached after launch retries: the gateway reports its own now.
         self.set_link(fx, 0, false);
         self.load_unread(fx);
@@ -3658,6 +3705,8 @@ impl State {
                 self.sync_subscriptions(fx);
                 self.expect_voice_rosters(fx);
                 self.flush_preview_clear(fx);
+                // A push registration that failed tries again.
+                self.sync_push(fx);
                 // Every warm log needs its refetch from here on: events of
                 // the old session may be lost.
                 self.gateway_generation += 1;

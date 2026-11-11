@@ -3,3 +3,5 @@ rust/target/
 rust/.qmlls.ini
 tools/.cache/
 rust/vendor/
+# Firebase app configs (API keys; the Qt app reads one from YAP_GOOGLE_SERVICES_JSON).
+google-services*.json

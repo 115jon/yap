@@ -19,6 +19,9 @@
 #   the SDK's ndk/$YAP_NDK_VERSION, 27.2.12479018, r27c, the NDK Qt 6.11.3
 #   for Android was built with), JDK 17+.
 #   Ninja, CMake 3.24+, and Rust with the target's standard library.
+#   Optional: YAP_GOOGLE_SERVICES_JSON, a google-services.json with the
+#   application id's Firebase app (push notifications; android/build.gradle).
+#   Without it the APK has no pushes.
 # Build trees, Gradle's cache and cargo's output live under $YAPM (default
 # F:/ct/yapm), never on the system drive.
 set -euo pipefail
