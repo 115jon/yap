@@ -33,10 +33,13 @@ that feel off, each with a known fix.
   GUI-thread registry, the core's runtime and gateway, and the portable C++
   (`AnimatedPicture`, the icon and dither image providers). Together with
   the core, that is everything a row shows and every rule behind it.
-- **Per platform:** about 3,900 lines of QML (shell, pager, pages,
-  composer, and the mobile side of four seams), about 130 lines of Rust (the app's
-  `Platform`: TLS client, realtime, token store), and about 450 lines of
-  C++/Java shim for back, keyboard, haptics, share, text size and fling.
+- **Per platform:** about 5,650 lines of QML (shell, pager, pages,
+  composer, upload tray, image viewer, the sheets and message actions, and
+  the mobile side of four seams), about 720 lines of Rust (the app's
+  `Platform`: TLS client, realtime, token store, and the HTTP behind Qt's
+  own loads), and about 1,650 lines of C++/Java: the shim for back,
+  keyboard, haptics, share, the photo picker, text size, fling and the
+  system bars, and Qt's network access over the core's client.
 - **Verified on the emulator:**
   - Kova sign-in, the server rail, the channel tree and `#general`, with
     the desktop's grouping, mention rows, role colours and Markdown;
@@ -113,7 +116,7 @@ One crate, one QML module, two consumers. No file is copied:
 | Keyboard resize                   | **Partly.** With edge to edge (targetSdk 35+) the window is not resized and Qt reports no IME inset in `SafeArea`                                  | Java shim: the resting IME inset from the decor view's insets, and every frame of the animation from a `WindowInsetsAnimation` callback on the content view (Qt replaces the decor view's own); the composer sits on it (`adjustNothing`)                                                                                                                                                                                                  | Verified at rest: the composer sits on the keyboard and the list stays at its end. The per-frame path is in place but was not captured mid-animation |
 | IME action, autocorrect           | **Native**: suggestions, auto-capitals and autocorrect come through Qt's input connection. `EnterKey.type` sets the action for a single-line field | Nothing for the action: Android gives a multi-line field no Send action, so the soft keyboard's Enter adds a line and the send key sends. With a hardware keyboard Enter sends and Shift+Enter adds a line                                                                                                                                                                                                                                 | Verified: suggestions, Enter adding a line, the send key. Not checked with a hardware keyboard                                                       |
 | Scroll physics, overscroll, fling | **Partly.** Qt's own rubber band, close to iOS's bounce. No Android stretch; fling speed and friction are Qt's defaults                            | `PlatformList`: the Android 12+ stretch emulated from `verticalOvershoot` (content stays put, scales from the far edge); fling speed and a friction matching `OverScroller`'s spline from `ViewConfiguration` via the shim                                                                                                                                                                                                                 | Fling verified by the scroll runs. The stretch is implemented but not yet compared frame by frame                                                    |
-| Haptics                           | **No.**                                                                                                                                            | Shim: `View.performHapticFeedback`. The policy: a long-press tick when the message sheet opens, a tick at the swipe-to-reply threshold and for a reaction, confirm on a confirmed delete, reject on a failed send. Nothing on navigation or a plain send                                                                                                                                                                                   | Wired; the emulator has no vibrator to confirm it                                                                                                    |
+| Haptics                           | **No.**                                                                                                                                            | Shim: `View.performHapticFeedback`. The policy: a long-press tick when the message sheet opens, a tick at the swipe-to-reply threshold and for a reaction, confirm on a confirmed delete, reject on a failed send. Nothing on a tap that navigates or a plain send (the pager ticks when a pan lands on another page)                                                                                                                      | Wired; the emulator has no vibrator to confirm it                                                                                                    |
 | System font, dynamic text size    | **Partly.** Qt's default font is the system's; explicit `pixelSize`s ignore the system text size                                                   | Shim reads `Configuration.fontScale` (`Native.fontScale`); `Main.qml` binds `Theme.textScale` to it (0.85 to 2.0). Every type role, its tracking and its line box scale with it, and the px sizes in the core's rich text; icons, avatars and hit areas do not                                                                                                                                                                             | Verified at 1.3: names, messages, times, rows and sheets scale and nothing clips. Read when the app returns to the front, not live                   |
 | Dark mode, Material You           | **Native**: `Application.styleHints.colorScheme`, live                                                                                             | `Theme.themeId` follows it. The shim reads Material You's `system_accent1` (`Native.accent`)                                                                                                                                                                                                                                                                                                                                               | Light/dark verified. The accent is not used: Yap's themes are brand palettes (owner decision)                                                        |
 | Share sheet                       | **No** (Qt has `QDesktopServices` for URLs only)                                                                                                   | Shim: `ACTION_SEND` chooser, from the message sheet's Share                                                                                                                                                                                                                                                                                                                                                                                | Verified: the system sheet opens with the message's text                                                                                             |
@@ -127,8 +130,8 @@ One crate, one QML module, two consumers. No file is copied:
 | Message actions                   | —                                                                                                                                                  | `MessageSheet` (quick reactions, Reply, Edit, View reactions, Copy text, Select text, Share, Copy link, Mark unread, Profile, Remove embeds, Delete), `EmojiSheet` on the desktop picker's `Emoji` and `EmojiGridModel` (search, skin tone, recents), `ReactionSheet` on `Extras.reactions`, `ConfirmSheet`, `SelectTextPage`, and `SwipeReply` (a leftward drag of the row, armed at 64 px)                                               | Verified, and read back as the peer account: a reaction, a reply, an edit and a delete. Profile only loads `Profile`; its page is the shell's        |
 | System bar icons                  | Not relied on                                                                                                                                      | Shim: `Native.lightBars` (`WindowInsetsController.setSystemBarsAppearance`; the view flags before API 30), bound to the theme's ground. `Native.holdDarkBars` keeps them light over a dark surface                                                                                                                                                                                                                                         | Verified: dark icons on the light theme, light icons on the dark one. `holdDarkBars` has no user yet                                                 |
 
-The shim is one C++ singleton (`qt/cpp/native.*`, 280 lines) over one Java
-class (`qt/android/src/dev/yap/qtproto/NativeShim.java`, 170 lines). An
+The shim is one C++ singleton (`qt/cpp/native.*`, 500 lines) over one Java
+class (`qt/android/src/dev/yap/qtproto/NativeShim.java`, 445 lines). An
 iOS build backs the same `Native` properties with Swift or Objective-C:
 `UIScreenEdgePanGestureRecognizer` for back, keyboard notifications,
 `UIFeedbackGenerator`, `UIActivityViewController`, Dynamic Type's
@@ -230,10 +233,10 @@ Not there yet:
 - Voice channels in the tree do nothing on a tap.
 - Side by side, the image viewer covers the chat column, not the window:
   it lives in the chat page.
-- Open interaction: a message's swipe to reply has not been tried against
-  the pan's direction gate. The gate decides at 6dp, before the pan's 14dp
-  threshold, so a leftward handler on a row should keep its touch; a touch
-  that jumps past both in one event could still go to the pan.
+- A message's swipe to reply and the pan share the chat: tried together, a
+  leftward drag that starts on a message replies and the page stays, and a
+  rightward one opens the drawer (the row's handler has no axis for it). A
+  touch that jumps past both thresholds in one event was not tried.
 
 <p>
 <img src="docs/qt-nav-drawer.png" width="180" alt="Qt: the drawer with the chat's peek">
