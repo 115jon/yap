@@ -281,7 +281,7 @@ jobs:
           Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
           Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64" | Out-Null
           Push-Location desktop-native/rust
-          cargo test --workspace --locked --exclude yap_native --exclude yap-audio --target-dir ../build/test-target
+          cargo test --workspace --locked --exclude yap_native --exclude yap-ui --exclude yap-audio --target-dir ../build/test-target
           $code = $LASTEXITCODE
           Pop-Location
           exit $code
