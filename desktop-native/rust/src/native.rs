@@ -77,7 +77,7 @@ impl Platform for Desktop {
         voice::send_disconnect_beacon(std::time::Duration::from_millis(800));
     }
 
-    fn on_update(&self, update: ViewUpdate) {
+    fn on_update(&self, update: ViewUpdate) -> bool {
         match update {
             ViewUpdate::CameraBackgrounds(view) => crate::audio::on_backgrounds(*view),
             ViewUpdate::Toast(toast) => crate::desktop::on_toast(&toast),
@@ -85,8 +85,9 @@ impl Platform for Desktop {
             ViewUpdate::StopSound(sound) => crate::sound::stop(sound),
             ViewUpdate::Badge(badge) => crate::desktop::on_badge(badge),
             ViewUpdate::MediaAuth(token) => crate::media::set_token(token),
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     fn in_call(&self, in_call: bool) {

@@ -673,6 +673,31 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             scalars(|s| s.newer = (loading, more));
         }
         // The rest is the app's (toasts, sounds, the badge, ...).
-        other => platform().on_update(other),
+        other => {
+            let name = variant_name(&other);
+            if !platform().on_update(other) {
+                unhandled(name);
+            }
+        }
     }
+}
+
+/// `Toast` of `Toast(ToastView { .. })`: the variant's name, from its Debug.
+fn variant_name(update: &ViewUpdate) -> String {
+    format!("{update:?}")
+        .chars()
+        .take_while(char::is_ascii_alphanumeric)
+        .collect()
+}
+
+/// Logs a view update nothing handles, once per variant.
+fn unhandled(name: String) {
+    thread_local! {
+        static SEEN: RefCell<std::collections::HashSet<String>> = RefCell::default();
+    }
+    SEEN.with(|seen| {
+        if seen.borrow_mut().insert(name.clone()) {
+            eprintln!("[view] no handler for the core's {name} update");
+        }
+    });
 }

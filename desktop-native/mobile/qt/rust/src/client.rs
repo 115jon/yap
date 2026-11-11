@@ -9,8 +9,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use yap_core::auth::TokenStore;
 use yap_core::{
-    Api, GatewayEvents, GatewayHandle, Realtime, Token, VoiceCommand, VoiceEvents, VoiceTarget,
-    VoiceUpdate,
+    Api, GatewayEvents, GatewayHandle, Realtime, Token, ViewUpdate, VoiceCommand, VoiceEvents,
+    VoiceTarget, VoiceUpdate,
 };
 use yap_ui::client::gateway;
 use yap_ui::platform::{self, Platform};
@@ -62,9 +62,8 @@ impl TokenStore for FileVault {
     }
 }
 
-/// The phone's platform. Updates the shared registry does not show
-/// (toasts, sounds, the tray badge, ...) are dropped: the phone has no
-/// such surfaces yet.
+/// The phone's platform. The desktop-only view updates (toasts, sounds,
+/// the tray badge, ...) are dropped: the phone has no such surfaces yet.
 struct Mobile {
     data: PathBuf,
 }
@@ -80,6 +79,19 @@ impl Platform for Mobile {
 
     fn token_store(&self) -> Arc<dyn TokenStore> {
         Arc::new(FileVault(self.data.join("session.token")))
+    }
+
+    fn on_update(&self, update: ViewUpdate) -> bool {
+        // Known and not shown here yet; anything else is logged as unhandled.
+        matches!(
+            update,
+            ViewUpdate::CameraBackgrounds(_)
+                | ViewUpdate::Toast(_)
+                | ViewUpdate::Sound(_)
+                | ViewUpdate::StopSound(_)
+                | ViewUpdate::Badge(_)
+                | ViewUpdate::MediaAuth(_)
+        )
     }
 }
 

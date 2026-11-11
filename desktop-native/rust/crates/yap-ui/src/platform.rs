@@ -33,9 +33,12 @@ pub trait Platform: Send + Sync + 'static {
     fn shutting_down(&self) {}
 
     /// A view update the shared registry does not handle, in order, on the
-    /// GUI thread.
-    fn on_update(&self, update: ViewUpdate) {
+    /// GUI thread. `false`: the app has no handler for it either (the
+    /// registry logs the variant once, so a new core update is not lost
+    /// silently).
+    fn on_update(&self, update: ViewUpdate) -> bool {
         let _ = update;
+        false
     }
 
     /// We joined (`true`) or left a call (GUI thread).
