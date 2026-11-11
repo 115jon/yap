@@ -10,6 +10,7 @@
 
 #include <QtCore/QMetaObject>
 #include <QtCore/QStandardPaths>
+#include <QtCore/QTimer>
 
 #include <utility>
 
@@ -118,10 +119,19 @@ void Native::setActiveConversation(const QString& channelId)
 #ifdef Q_OS_ANDROID
   QJniObject::callStaticMethod<void>(kPush, "setActiveConversation", "(Ljava/lang/String;)V",
                                      QJniObject::fromString(channelId).object<jstring>());
-  // The first conversation opened asks for the permission (API 33+, once).
+  // The first conversation opened asks for the permission (API 33+, once),
+  // after the chat has slid in: the system's dialog pauses the app, and
+  // asked at once it froze the page half way across.
   if (!channelId.isEmpty() && !m_notificationsEnabled
-      && QJniObject::callStaticMethod<jboolean>(kPush, "neverAsked"))
-    requestNotifications();
+      && QJniObject::callStaticMethod<jboolean>(kPush, "neverAsked")) {
+    QTimer::singleShot(600, this, [this] {
+      // Still reading, and not asked meanwhile (a second conversation
+      // opened inside the wait): asking twice would open the settings.
+      if (!m_activeConversation.isEmpty() && !m_notificationsEnabled
+          && QJniObject::callStaticMethod<jboolean>(kPush, "neverAsked"))
+        requestNotifications();
+    });
+  }
 #endif
   emit activeConversationChanged();
 }
