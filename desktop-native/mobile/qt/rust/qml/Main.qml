@@ -19,11 +19,31 @@ Window {
     color: Theme.ply0
     title: "Yap"
 
-    // The system's light or dark mode picks the theme, live.
+    // The theme picked in Settings (kept on this device, or synced from the
+    // account); "system", the phone's default, follows the light or dark
+    // mode, live.
     Binding {
         target: Theme
         property: "themeId"
-        value: Application.styleHints.colorScheme === Qt.ColorScheme.Light ? "light" : "dark"
+        value: Settings.theme.length > 0 && Settings.theme !== "system" ? Settings.theme
+            : Application.styleHints.colorScheme === Qt.ColorScheme.Light ? "light" : "dark"
+    }
+    // The system's text size times this phone's factor (Settings > Text
+    // size), within what the layouts take. Theme.textScale comes with the
+    // shared touch tokens; until a build has it, nothing is bound.
+    Binding {
+        target: Theme
+        property: "textScale"
+        when: Theme.textScale !== undefined
+        value: Math.max(0.85, Math.min(2.0, Native.fontScale * Prefs.textFactor))
+    }
+    // Dark status and navigation bar icons on a light theme, once the shim
+    // has the switch (a picked theme can differ from the system's mode).
+    Binding {
+        target: Native
+        property: "lightBars"
+        when: Native.lightBars !== undefined
+        value: Theme.lightGround
     }
     Binding {
         target: Theme
@@ -117,6 +137,13 @@ Window {
         stack.sheet = false
         stack.push(settingsPage)
     }
+    function openFriends() {
+        if (stack.busy)
+            return
+        Qt.inputMethod.hide()
+        stack.sheet = false
+        stack.push(friendsPage)
+    }
     // Close what is on top, or everything down to the pager.
     function closeTop(all) {
         if (stack.depth < 2)
@@ -191,6 +218,7 @@ Window {
                 id: pager
                 onProfileRequested: userId => window.openProfile(userId)
                 onSettingsRequested: window.openSettings()
+                onFriendsRequested: window.openFriends()
             }
 
             pushEnter: Transition {
@@ -232,6 +260,18 @@ Window {
             id: settingsPage
             SettingsPage {
                 onCloseRequested: window.closeTop(false)
+            }
+        }
+        Component {
+            id: friendsPage
+            FriendsPage {
+                onCloseRequested: window.closeTop(false)
+                onProfileRequested: userId => window.openProfile(userId)
+                onMessageRequested: userId => {
+                    window.closeTop(true)
+                    Nav.openDm(userId)
+                    pager.showDmWhenOpen(userId)
+                }
             }
         }
     }

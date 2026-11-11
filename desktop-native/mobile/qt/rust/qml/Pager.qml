@@ -27,6 +27,7 @@ Item {
 
     signal profileRequested(string userId)
     signal settingsRequested()
+    signal friendsRequested()
 
     readonly property bool wide: width >= 840
     readonly property bool docked: width >= 1200
@@ -260,6 +261,7 @@ Item {
         onConversationOpened: pager.show("chat")
         onProfileRequested: userId => pager.profileRequested(userId)
         onSettingsRequested: pager.settingsRequested()
+        onFriendsRequested: pager.friendsRequested()
     }
 
     Item {

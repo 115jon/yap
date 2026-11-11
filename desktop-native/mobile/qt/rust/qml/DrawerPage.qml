@@ -14,6 +14,7 @@ Item {
     signal conversationOpened()
     signal profileRequested(string userId)
     signal settingsRequested()
+    signal friendsRequested()
 
     // The window's insets where this page meets its edges, read once here:
     // a child that asks for its own would feed its position back in.
@@ -198,6 +199,7 @@ Item {
             sourceComponent: DmsPane {
                 onConversationOpened: root.conversationOpened()
                 onProfileRequested: userId => root.profileRequested(userId)
+                onFriendsRequested: root.friendsRequested()
             }
         }
     }
