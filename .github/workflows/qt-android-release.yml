@@ -1,0 +1,364 @@
+name: "Qt Android Release"
+
+# Tester builds of the Qt Quick app (desktop-native/mobile/qt, application id
+# dev.yap.app), signed with its release key and published as a draft
+# pre-release (desktop-native/mobile/README.md, "Releases").
+#
+# - A qt-android-v<x.y.z> tag builds version x.y.z; the tag must match
+#   desktop-native/mobile/qt/VERSION.
+# - A manual run builds <VERSION>-build.<run> from the ref it starts on and
+#   names its draft qt-android-v<that version> (a draft creates no tag
+#   until someone publishes it).
+#
+# Jobs and what each can reach:
+# - plan: the version, the tag and the version codes. No secrets.
+# - build: compiles the core and the APKs (third-party crates' build
+#   scripts run here), unsigned. Only the Firebase client configuration,
+#   which ends up inside the APK anyway. No cargo cache: a release builds
+#   from clean sources (the Qt archives' cache is checked against
+#   qt-sdk.lock.json's SHA-256s by fetch-qt.ps1).
+# - sign: the release key, from the android-release environment, whose
+#   deployment policy admits main and qt-android-v* tags only. It runs only
+#   the repository's sign.sh and the SDK's zipalign, apksigner and aapt2 on
+#   the unsigned APKs, checks the certificate, the application id and the
+#   version, and deletes the key. No write token.
+# - smoke: the signed x86_64 APK cold-started on an emulator.
+# - publish: the draft pre-release (contents: write). No key.
+#
+# Version codes: (1000000 + run) * 10 + the ABI digit (2 arm64-v8a,
+# 4 x86_64), above every CI build of desktop-native-mobile.yml (run * 10 +
+# digit), and rising with this workflow's run number. Renaming this file
+# restarts the run number: keep the name, or raise the offset.
+on:
+  push:
+    tags:
+      - "qt-android-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qt-android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  # SHA-256 of the release certificate (alias yapapp). The sign job fails
+  # if an APK carries any other.
+  EXPECTED_CERT_SHA256: "75:E0:D8:E0:22:4A:9F:32:D8:CC:40:C7:B9:5A:E7:82:43:B3:97:21:5A:99:C1:FE:D6:01:50:FC:6E:FF:B8:9C"
+  APP_ID: dev.yap.app
+  BUILD_TOOLS: 36.0.0
+
+jobs:
+  plan:
+    if: ${{ github.repository == '115jon/yap' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      code_base: ${{ steps.plan.outputs.code_base }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Version, tag and version codes
+        id: plan
+        run: |
+          base="$(head -n 1 desktop-native/mobile/qt/VERSION)"
+          if ! [[ "$base" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::desktop-native/mobile/qt/VERSION must be x.y.z, got '$base'"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            want="${GITHUB_REF_NAME#qt-android-v}"
+            if [ "$want" != "$base" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match VERSION $base"
+              exit 1
+            fi
+            version="$base"
+          else
+            version="$base-build.$GITHUB_RUN_NUMBER"
+          fi
+          {
+            echo "version=$version"
+            echo "tag=qt-android-v$version"
+            echo "code_base=$(( (1000000 + GITHUB_RUN_NUMBER) * 10 ))"
+          } >>"$GITHUB_OUTPUT"
+          echo "Version $version, tag qt-android-v$version, run $GITHUB_RUN_NUMBER"
+
+  build:
+    name: build (${{ matrix.abi }})
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - abi: arm64-v8a
+            rust: aarch64-linux-android
+            qt: android-arm64_v8a
+            qt_dir: android_arm64_v8a
+            digit: 2
+          - abi: x86_64
+            rust: x86_64-linux-android
+            qt: android-x86_64
+            qt_dir: android_x86_64
+            digit: 4
+    env:
+      YAPM: ${{ github.workspace }}/.yapm
+      QT_HOST_PATH: ${{ github.workspace }}/.yapm/qt/gcc_64
+      QT_TARGET_ROOT: ${{ github.workspace }}/.yapm/qt/${{ matrix.qt_dir }}
+      # The NDK Qt 6.11.3 for Android was built with (r27c).
+      NDK_VERSION: 27.2.12479018
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
+        with:
+          targets: ${{ matrix.rust }}
+
+      - name: JDK 17
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Ninja and 7-Zip
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build p7zip-full
+
+      - name: Android NDK, platform and build tools
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "ndk;$NDK_VERSION" "platforms;android-36" "build-tools;$BUILD_TOOLS" >/dev/null
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >>"$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VERSION" >>"$GITHUB_ENV"
+
+      - name: Cache the Qt archives
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .yapm/qt-download
+          key: qt-sdk-${{ matrix.qt }}-host-linux-${{ hashFiles('desktop-native/mobile/qt/qt-sdk.lock.json') }}
+
+      - name: Qt 6.11.3 (host and target)
+        shell: pwsh
+        run: |
+          ./desktop-native/mobile/qt/fetch-qt.ps1 -Dest .yapm/qt -DownloadDir .yapm/qt-download `
+            -Set host-linux,${{ matrix.qt }}
+
+      # Push notifications need the dev.yap.app Firebase client
+      # (android/build.gradle). A release without it would ship without
+      # pushes, so it fails instead.
+      - name: Firebase configuration
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.QT_GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "::error::QT_GOOGLE_SERVICES_JSON_BASE64 is not set"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/firebase"
+          printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d >"$RUNNER_TEMP/firebase/google-services.json"
+          echo "YAP_GOOGLE_SERVICES_JSON=$RUNNER_TEMP/firebase/google-services.json" >>"$GITHUB_ENV"
+
+      - name: Build the APK (${{ matrix.abi }}, release)
+        env:
+          CODE: ${{ needs.plan.outputs.code_base }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          bash desktop-native/mobile/qt/build.sh ${{ matrix.abi }} Release \
+            -DYAP_ANDROID_APP_ID="$APP_ID" \
+            -DYAP_ANDROID_VERSION_CODE="$(( CODE + ${{ matrix.digit }} ))" \
+            -DYAP_ANDROID_VERSION_NAME="$VERSION" \
+            -DYAP_ANDROID_COMPILE_SDK=android-36 \
+            -DYAP_ANDROID_BUILD_TOOLS="$BUILD_TOOLS"
+          mkdir -p unsigned
+          cp "$YAPM/build/qt-${{ matrix.abi }}-Release/android-build/build/outputs/apk/release/android-build-release-unsigned.apk" \
+            "unsigned/yap-qt-${{ matrix.abi }}-unsigned.apk"
+
+      - name: Remove the Firebase configuration
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/firebase"
+
+      - name: Upload the unsigned APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-${{ matrix.abi }}
+          path: unsigned/yap-qt-${{ matrix.abi }}-unsigned.apk
+          if-no-files-found: error
+          retention-days: 1
+
+  sign:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Holds the release key's secrets; its deployment policy admits main and
+    # qt-android-v* tags only.
+    environment: android-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: desktop-native/mobile/qt/sign.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Build tools
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "build-tools;$BUILD_TOOLS" >/dev/null
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >>"$GITHUB_ENV"
+
+      - name: Download the unsigned APKs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: unsigned-*
+          merge-multiple: true
+          path: unsigned
+
+      - name: Decode the release key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.QT_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::QT_ANDROID_KEYSTORE_BASE64 is not available to this run"
+            exit 1
+          fi
+          mkdir -m 700 "$RUNNER_TEMP/key"
+          (umask 077 && printf '%s' "$KEYSTORE_BASE64" | base64 -d >"$RUNNER_TEMP/key/release.p12")
+
+      - name: Sign and check
+        env:
+          YAP_KEYSTORE_PASS: ${{ secrets.QT_ANDROID_KEYSTORE_PASSWORD }}
+          YAP_KEY_ALIAS: ${{ secrets.QT_ANDROID_KEY_ALIAS }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          CODE: ${{ needs.plan.outputs.code_base }}
+        run: |
+          export YAP_KEYSTORE="$RUNNER_TEMP/key/release.p12" YAP_BUILD_TOOLS="$BUILD_TOOLS"
+          bt="$ANDROID_HOME/build-tools/$BUILD_TOOLS"
+          expected="$(echo "$EXPECTED_CERT_SHA256" | tr -d ':' | tr 'A-F' 'a-f')"
+          mkdir -p out
+          for abi_digit in arm64-v8a:2 x86_64:4; do
+            abi="${abi_digit%%:*}" digit="${abi_digit##*:}"
+            apk="out/yap-qt-$VERSION-$abi.apk"
+            bash desktop-native/mobile/qt/sign.sh "unsigned/yap-qt-$abi-unsigned.apk" "$apk"
+            certs="$("$bt/apksigner" verify --min-sdk-version 28 --print-certs "$apk")"
+            echo "$certs"
+            actual="$(echo "$certs" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+            if [ "$actual" != "$expected" ] || [ "$(echo "$certs" | grep -c '^Signer #[0-9]* certificate DN:')" -ne 1 ]; then
+              echo "::error::$apk is not signed with the release certificate alone (got ${actual:-none})"
+              exit 1
+            fi
+            badging="$("$bt/aapt2" dump badging "$apk" | head -n 1)"
+            echo "$badging"
+            want="package: name='$APP_ID' versionCode='$(( CODE + digit ))' versionName='$VERSION'"
+            if [[ "$badging" != "$want"* ]]; then
+              echo "::error::$apk: expected \"$want\""
+              exit 1
+            fi
+          done
+          ls -l out
+
+      - name: Remove the release key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/key"
+
+      - name: Upload the signed APKs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: yap-qt-${{ needs.plan.outputs.version }}
+          path: |
+            out/*.apk
+            out/*.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  # The signed x86_64 APK cold-started on an emulator (API 35), as CI's
+  # qt-android-smoke does with the debug-signed one.
+  smoke:
+    needs: [plan, sign]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Download the signed APKs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: yap-qt-${{ needs.plan.outputs.version }}
+          path: out
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Cold start on an emulator
+        # ReactiveCircus/android-emulator-runner v2.38.0
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: bash desktop-native/mobile/qt/smoke.sh out/yap-qt-${{ needs.plan.outputs.version }}-x86_64.apk 180
+
+  publish:
+    needs: [plan, sign, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download the signed APKs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: yap-qt-${{ needs.plan.outputs.version }}
+          path: out
+
+      # Always a draft pre-release: the owner reads it and publishes it by
+      # hand (publishing a manual run's draft creates its tag at the commit
+      # built). A rerun uploads into its own draft again; a published
+      # release with the tag is left alone.
+      - name: Draft pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          (cd out && sha256sum -c ./*.sha256)
+          state="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+            --jq ".[] | select(.tag_name == \"$TAG\") | if .draft then \"draft\" else \"published\" end" | head -n 1)"
+          if [ "$state" = published ]; then
+            echo "::error::$TAG is already published; bump desktop-native/mobile/qt/VERSION"
+            exit 1
+          fi
+          notes="Tester build of the Qt app (dev.yap.app) from $GITHUB_SHA.
+
+          - arm64-v8a: phones. x86_64: emulators.
+          - Signed with the Yap for Android (Qt) release key, certificate SHA-256 \`$EXPECTED_CERT_SHA256\`. It installs over an earlier release build, not over a CI (debug-signed) build.
+          - Each APK's SHA-256 is in its \`.sha256\` file."
+          if [ -z "$state" ]; then
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --draft --prerelease --latest=false \
+              --target "$GITHUB_SHA" --title "Yap for Android (Qt) $VERSION" --notes "$notes"
+          fi
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber out/*.apk out/*.apk.sha256
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json name,isDraft,isPrerelease,assets \
+            --jq '{name, isDraft, isPrerelease, assets: [.assets[].name]}'
