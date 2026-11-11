@@ -3,16 +3,21 @@
 How much of the native desktop client (`desktop-native/`) Android and iOS
 can share, and how. The goal (owner, 2026-11-10) is to share the Qt/QML
 views themselves, not only the Rust core, and make them look and behave
-native on each platform. This folder holds the research, two Android
-prototypes on the same unchanged core, and their side-by-side measurements:
+native on each platform. This folder holds the research, the Qt Quick
+prototype on the unchanged core, and the side-by-side measurements against
+a Compose baseline that has since been archived:
 
 - `qt/`: **Qt Quick on Android**, the main path. The desktop's QML,
   list models and portable C++ run on a phone, under a mobile shell and a
   thin platform shim. Application id `dev.yap.app`, label "Yap" (CI's
   builds: `dev.yap.app.ci`, "Yap CI").
-- `rust/` and `android/`: **the Compose baseline**. The same core behind
-  UniFFI with Jetpack Compose views, kept to compare against. Application
-  id `dev.yap.coreproto`.
+- **The Compose baseline** (archived): the same core behind UniFFI with
+  Jetpack Compose views (crate `yap-mobile`, `mobile/rust` and
+  `mobile/android`, application id `dev.yap.coreproto`), kept to compare
+  against. Owner decision 2026-11-11: it was tagged and deleted from the
+  tree. It lives at the tag `archive/compose-baseline`
+  ([browse it](https://github.com/115jon/yap/tree/archive/compose-baseline/desktop-native/mobile)).
+  The comparison and measurements below stay as history.
 
 The Expo app (`apps/mobile`) is untouched and keeps shipping. Nothing here
 is built by its workflows or changes its package, signing or store listing.
@@ -61,7 +66,7 @@ that feel off, each with a known fix.
     rustls client instead (see "Gaps").
 
 Keep the Rust boundary exactly as it is: the core does not know which view
-layer draws it, and the Compose baseline proves a native view stays possible
+layer draws it, and the archived Compose baseline proved a native view stays possible
 for any one surface (for example a call screen) if Qt ever falls short there.
 
 ## What is shared, what is per platform
@@ -493,7 +498,7 @@ These are open questions for the owner, written up here, not decided:
 
 ```
 desktop-native/mobile/
-├── common/platform.rs   rustls client and the logcat bridge, used by both
+├── common/platform.rs   rustls client and the logcat bridge (the Qt crate includes it)
 ├── qt/                  Qt Quick app (dev.yap.app)
 │   ├── rust/            cxx-qt crate yap_mobile_qt: the mobile Platform
 │   │                    (client.rs) and the com.yap.mobile module; links yap-ui
@@ -508,7 +513,6 @@ desktop-native/mobile/
 │   ├── sign.sh          zipalign + apksigner (v2/v3), .sha256
 │   ├── smoke.sh         install, cold start, wait for the first frame
 │   └── ci/              the public CI debug keystore (not for release)
-├── rust/ android/ build.sh    the Compose baseline (UniFFI)
 └── docs/                screenshots
 ```
 
@@ -958,14 +962,9 @@ iOS and builds an unsigned simulator `.app` (x86_64: Qt's iOS libraries
 have arm64 device and x86_64 simulator slices only). It is a compile and
 link check; nothing runs it.
 
-### Build and run the Compose baseline
+### Sign-in on a test build
 
-```sh
-CARGO_TARGET_DIR=<off the system drive> bash desktop-native/mobile/build.sh x86_64 release
-adb install -r desktop-native/mobile/android/app/build/outputs/apk/release/app-release.apk
-```
-
-Sign-in in both shows a device code. Open the link in any signed-in
+Sign-in shows a device code. Open the link in any signed-in
 browser, or approve it with a test account's session:
 
 ```
@@ -974,9 +973,7 @@ POST https://<kova>/api/pub/apps/<publishable key>/device/approve  {"userCode": 
      Authorization: Bearer <session>, Origin: <yap web origin>
 ```
 
-CI (`.github/workflows/desktop-native-mobile.yml`) builds the Compose
-baseline's APK on Ubuntu, and on macOS cross-compiles the core for iOS and
-type-checks its Swift bindings. For the Qt app, `qt-android` builds the
+CI (`.github/workflows/desktop-native-mobile.yml`): `qt-android` builds the
 x86_64 and arm64-v8a APKs on Ubuntu with the pinned Qt (archives cached by
 the lock's hash) and NDK r27c, signs them with the public CI debug key
 (`qt/ci/debug.keystore`, so one run's APK installs over another's; never a
@@ -1073,7 +1070,7 @@ Each is its own commit, and the desktop resolves and behaves as before:
    through `Config::from_env`). The device sign-in's platform and device
    name are now config: Kova accepted `android` from the Qt prototype.
    `yap_cache::profile::set_base(path)` replaces `%LOCALAPPDATA%`. Both
-   mobile apps use these instead of setting environment variables at
+   mobile apps (the Qt app and the archived baseline) used these instead of setting environment variables at
    runtime.
 2. **Installer, updater and the Tauri migration behind a `desktop`
    feature** in yap-core (on by default). Mobile builds without them, which
@@ -1083,7 +1080,7 @@ Each is its own commit, and the desktop resolves and behaves as before:
 3. **Markdown: Qt rich text is fine for QML on mobile.** The shared
    `MessageDelegate` draws the core's `html` (bold, italic, code, links,
    mentions) unchanged on Android. A span tree is only needed if a
-   non-Qt view (the Compose baseline) is kept.
+   non-Qt view (like the archived Compose baseline) is kept.
 4. **The Windows-only libwebrtc patches are already gated.** By inspection
    of `patches/webrtc-sys`: the Media Foundation and D3D11 sources build
    only for `target_os == "windows"`, the decoder factory's hooks are under
@@ -1137,10 +1134,10 @@ Each crate was checked by compiling it for `x86_64-linux-android` (NDK 27).
 
   It shares nothing with the desktop's QML, so it misses the goal.
 
-- **(c) UniFFI core + Compose/SwiftUI**: the baseline above. It is the most
+- **(c) UniFFI core + Compose/SwiftUI**: the archived baseline above. It is the most
   native and the lightest (12 MB download, 60 MB), but every row is written
   twice more and drifts from the desktop's design. It stays the fallback for
-  a single surface.
+  a single surface (recoverable from the archive tag).
 - **(d) Hybrids**:
   - the Expo app on the same core through `uniffi-bindgen-react-native`, a
     migration path that freezes nothing;

@@ -1,7 +1,7 @@
 # The Qt Quick mobile prototype's Rust side (desktop-native/mobile/README.md,
 # "Qt Quick on Android"): yap-core behind the same cxx-qt QML singletons and
 # list models the desktop uses, so the desktop's QML runs on it unchanged.
-# Its own workspace, like mobile/rust, with the desktop's vendored LiveKit
+# Its own workspace, with the desktop's vendored LiveKit
 # crates patched in below (voice calls); the patched qt-build-utils is not
 # needed here.
 [workspace]

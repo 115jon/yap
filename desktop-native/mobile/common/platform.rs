@@ -1,5 +1,5 @@
-//! What both mobile prototypes (the UniFFI core in `mobile/rust` and the Qt
-//! Quick app in `mobile/qt`) need from the platform under the unchanged
+//! What the mobile app (the Qt Quick app in `mobile/qt`; the archived UniFFI
+//! baseline shared this file) needs from the platform under the unchanged
 //! core: an HTTP client on rustls (Android has no system OpenSSL for
 //! native-tls) and the core's stderr log in logcat.
 

@@ -2,9 +2,9 @@ name: "Desktop Native Mobile Prototype"
 
 # The mobile prototypes on the native core (desktop-native/mobile/README.md).
 #
-# - android, ios-bindings: the Compose baseline, the desktop crates behind
-#   UniFFI. Android builds the APK the emulator runs; iOS checks that the
-#   core cross-compiles and that the generated Swift bindings type-check.
+# The Compose + UniFFI baseline was archived at the tag
+# archive/compose-baseline and no longer builds here.
+#
 # - qt-android: the Qt Quick app (desktop-native/mobile/qt) for x86_64 and
 #   arm64-v8a, signed with the public CI debug key, as artifacts (tester
 #   builds with the release key: qt-android-release.yml). Anyone can sign
@@ -55,7 +55,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       # Manual and scheduled runs build everything.
-      uniffi: ${{ steps.filter.outputs.uniffi || 'true' }}
       qt: ${{ steps.filter.outputs.qt || 'true' }}
       ios: ${{ steps.filter.outputs.ios || 'true' }}
     steps:
@@ -66,15 +65,6 @@ jobs:
         uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad
         with:
           filters: |
-            uniffi:
-              - '.github/workflows/desktop-native-mobile.yml'
-              - 'desktop-native/mobile/android/**'
-              - 'desktop-native/mobile/rust/**'
-              - 'desktop-native/mobile/common/**'
-              - 'desktop-native/mobile/build.sh'
-              - 'desktop-native/rust/Cargo.toml'
-              - 'desktop-native/rust/Cargo.lock'
-              - 'desktop-native/rust/crates/**'
             qt:
               - '.github/workflows/desktop-native-mobile.yml'
               - 'desktop-native/mobile/qt/**'
@@ -91,84 +81,6 @@ jobs:
               - 'desktop-native/mobile/qt/**'
               - 'desktop-native/rust/crates/yap-ui/**'
               - 'desktop-native/patches/**'
-
-  android:
-    needs: changes
-    if: ${{ needs.changes.outputs.uniffi == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-
-      - name: Rust
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
-        with:
-          targets: x86_64-linux-android
-
-      - name: cargo-ndk
-        run: cargo install cargo-ndk --locked --version 4.1.2
-
-      # Gradle 8.13 does not run on the image's default JDK 25.
-      - name: JDK 17
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
-        with:
-          distribution: temurin
-          java-version: 17
-
-      # The runner image carries the SDK (ANDROID_HOME) and its newest NDK;
-      # build.sh picks the newest NDK under the SDK.
-      - name: Build the core, bindings and APK (x86_64, release)
-        run: bash desktop-native/mobile/build.sh x86_64 release
-
-      - name: Sizes
-        run: |
-          ls -l desktop-native/mobile/android/app/src/main/jniLibs/x86_64/libyap_mobile.so
-          ls -l desktop-native/mobile/android/app/build/outputs/apk/release/app-release.apk
-
-      - name: Upload the APK
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: yap-core-proto-x86_64
-          path: desktop-native/mobile/android/app/build/outputs/apk/release/app-release.apk
-          retention-days: 7
-
-  ios-bindings:
-    needs: changes
-    if: ${{ needs.changes.outputs.uniffi == 'true' }}
-    runs-on: macos-latest
-    timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: desktop-native/mobile/rust
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-
-      - name: Rust
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
-        with:
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim
-
-      - name: Cross-compile the core (device and simulator)
-        run: |
-          cargo build --lib --release --target aarch64-apple-ios
-          cargo build --lib --release --target aarch64-apple-ios-sim
-          ls -l target/aarch64-apple-ios/release/libyap_mobile.a
-
-      # Bindings come from a host build (the metadata is the same).
-      - name: Generate the Swift bindings
-        run: |
-          cargo build --lib
-          cargo run -q --bin uniffi-bindgen -- generate --library target/debug/libyap_mobile.dylib \
-            --language swift --out-dir "$RUNNER_TEMP/swift"
-
-      - name: Type-check the bindings for the iOS simulator
-        run: |
-          xcrun --sdk iphonesimulator swiftc -typecheck \
-            -target arm64-apple-ios17.0-simulator \
-            -import-objc-header "$RUNNER_TEMP/swift/yap_mobileFFI.h" \
-            "$RUNNER_TEMP/swift/yap_mobile.swift"
 
   qt-android:
     name: qt-android (${{ matrix.abi }})
