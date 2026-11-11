@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // "Playing **Name**" on a row's second line, in the custom status's place

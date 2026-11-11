@@ -5,6 +5,8 @@ import Yap.Ui
 // The inline edit box (MessageItem.tsx): the composer's plate at 15/22,
 // one to eight lines, then "Esc to cancel · Enter to save". Enter saves,
 // Shift+Enter adds a line, Esc cancels. Saving it empty asks to delete.
+// Under a finger (Theme.touch) the line under it is a Cancel and a Save key,
+// and the soft keyboard's Enter adds a line.
 Column {
     id: root
 
@@ -47,7 +49,7 @@ Column {
                 Accessible.name: qsTr("Edit message")
 
                 function save(event) {
-                    if (event.modifiers & Qt.ShiftModifier) {
+                    if ((event.modifiers & Qt.ShiftModifier) || (Theme.touch && Qt.inputMethod.visible)) {
                         event.accepted = false
                         return
                     }
@@ -60,7 +62,33 @@ Column {
         }
     }
 
+    Loader {
+        active: Theme.touch
+        visible: active
+        anchors.right: parent.right
+        sourceComponent: Row {
+            topPadding: 4
+            spacing: 8
+            KitButton {
+                variant: "ghost"
+                size: "sm"
+                text: qsTr("Cancel")
+                onClicked: root.cancelled()
+            }
+            KitButton {
+                variant: "primary"
+                size: "sm"
+                text: qsTr("Save")
+                onClicked: {
+                    Qt.inputMethod.commit()
+                    root.saved(input.text)
+                }
+            }
+        }
+    }
+
     Row {
+        visible: !Theme.touch
         spacing: 4
         Text {
             text: qsTr("Esc to")

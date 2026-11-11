@@ -17,6 +17,24 @@ QtObject {
     // our fonts; YAP_TEXT_HINTING overrides). The type roles carry it.
     property int hinting: Qt.application.font.hintingPreference
 
+    // ---------- Input and text size (set by the app's shell) ----------
+    // The defaults are the desktop's: a pointer that hovers, no touch, text
+    // at its design size. The phone shell binds all three (mobile Main.qml).
+    // `hoverUi`: hover tints, hover-revealed keys, tooltips and hover
+    // prefetch are on. Off where Qt would synthesise hover from a touch.
+    property bool hoverUi: true
+    // `touch`: fingers. Rows and keys take the touch sizes below, a long
+    // press opens what a right click opens, and a press does not select
+    // text.
+    property bool touch: false
+    // The system's text size (Android's font scale; a settings factor can
+    // multiply it). Type roles and their line boxes scale; icons, avatars
+    // and hit areas do not.
+    property real textScale: 1
+    // The smallest hit area of a key under a finger, 0 for a pointer
+    // (DESIGN.md: 44 on coarse pointers; Android asks for 48).
+    readonly property int hitMin: touch ? 48 : 0
+
     // ---------- Layer 1: inputs (tokens.css:21-275) ----------
     // LEDs keep fixed hues; only their lightness moves with the scheme.
     readonly property var ledsDark: ({
@@ -262,26 +280,40 @@ QtObject {
     }
     function richText(html, revealed, mentioned) {
         const colors = revealed ? richRevealed : richColors
-        return html.replace(/%[A-Z]+%/g, token => token === "%MENTIONBG%" && mentioned
+        const out = html.replace(/%[A-Z]+%/g, token => token === "%MENTIONBG%" && mentioned
             ? mentionOnMention : colors[token] ?? token)
+        return textScale === 1 ? out : scaleRich(out)
+    }
+    // The core writes its rich text at the design size: the px sizes it
+    // names (code, "(edited)", the emoji pictures) follow the text scale.
+    function scaleRich(html) {
+        // Inside style attributes only: the same words in a message's own
+        // text are left alone (its quotes are escaped, so it has none).
+        return html.replace(/style="[^"]*"/g, style => style.replace(/font-size:(\d+)px/g,
+                (m, n) => "font-size:" + Math.round(n * textScale) + "px"))
+            .replace(/(<img [^>]*?)width="(\d+)" height="(\d+)"/g,
+                     (m, head, w, h) => head + "width=\"" + Math.round(w * textScale) + "\" height=\"" + Math.round(h * textScale) + "\"")
     }
 
     // ---------- Radii, spacing, sizes (DESIGN.md:125-136) ----------
+    // The `touch ?` values are the phone's (DESIGN.md Layout: 44 px rows and
+    // hit areas on coarse pointers, 48 px keys); the others the desktop's.
     readonly property int radius: 2
     readonly property int radiusSheet: 4
     readonly property int inset: 8
     readonly property int section: 16
     readonly property int chrome: 32
     readonly property int header: 48
-    readonly property int rail: 60
-    readonly property int railTile: 40
+    readonly property int rail: touch ? 72 : 60
+    readonly property int railTile: touch ? 48 : 40
     readonly property int treePanel: 264
-    readonly property int treeRow: 32
-    readonly property int occupantRow: 28
+    readonly property int treeRow: touch ? 44 : 32
+    readonly property int occupantRow: touch ? 40 : 28
     readonly property int branchLabel: 24
-    readonly property int control: 40
+    readonly property int control: touch ? 48 : 40
     readonly property int controlLg: 48
     readonly property int keyXs: 24
+    // Drawn at 32 on touch too; its hit area grows to hitMin (KitButton).
     readonly property int keySm: 32
     readonly property int countChip: 18
     readonly property int led: 6
@@ -357,69 +389,73 @@ QtObject {
     // One static cut per family (assets/fonts, LIBRARIES.md §1.3), so the
     // family alone picks the drawing; weight only restates it. Tracking is
     // em x size in px. Nothing is set below 11 px.
-    readonly property TypeScale type: TypeScale { hinting: theme.hinting }
+    readonly property TypeScale type: TypeScale { hinting: theme.hinting; scale: theme.textScale }
 
     component TypeScale: QtObject {
         // The text hinting in force (Theme.hinting), so the roles' fonts follows
         // a move to a screen at another scale.
         property int hinting: Font.PreferVerticalHinting
-        readonly property font poster: Qt.font({ family: "Yap Bricolage Poster", pixelSize: 40, weight: Font.ExtraBold, letterSpacing: -1.6, hintingPreference: hinting })
-        readonly property font headline: Qt.font({ family: "Yap Bricolage Poster", pixelSize: 44, weight: Font.ExtraBold, letterSpacing: -1.54, hintingPreference: hinting })
-        readonly property font dialogTitle: Qt.font({ family: "Yap Bricolage Title", pixelSize: 28, weight: Font.ExtraBold, letterSpacing: -0.84, hintingPreference: hinting })
-        readonly property font sectionTitle: Qt.font({ family: "Yap Bricolage Head", pixelSize: 20, weight: Font.Bold, letterSpacing: -0.2, hintingPreference: hinting })
-        readonly property font columnTitle: Qt.font({ family: "Yap Bricolage Head ExtraBold", pixelSize: 18, weight: Font.ExtraBold, letterSpacing: -0.36, hintingPreference: hinting })
-        readonly property font serverTitle: Qt.font({ family: "Yap Bricolage Head ExtraBold", pixelSize: 17, weight: Font.ExtraBold, letterSpacing: -0.17, hintingPreference: hinting })
-        readonly property font author: Qt.font({ family: "Yap Bricolage Key Bold", pixelSize: 15, weight: Font.Bold, hintingPreference: hinting })
-        readonly property font control: Qt.font({ family: "Yap Bricolage Key", pixelSize: 15, weight: Font.DemiBold, hintingPreference: hinting })
-        readonly property font controlSm: Qt.font({ family: "Yap Bricolage Key", pixelSize: 14, weight: Font.DemiBold, hintingPreference: hinting })
-        readonly property font railInitial: Qt.font({ family: "Yap Bricolage Key ExtraBold", pixelSize: 15, weight: Font.ExtraBold, hintingPreference: hinting })
-        readonly property font message: Qt.font({ family: "Yap Geist", pixelSize: 15, weight: Font.Normal, hintingPreference: hinting })
-        readonly property font row: Qt.font({ family: "Yap Geist Medium", pixelSize: 14, weight: Font.Medium, hintingPreference: hinting })
-        readonly property font rowUnread: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 14, weight: Font.DemiBold, hintingPreference: hinting })
-        readonly property font description: Qt.font({ family: "Yap Geist", pixelSize: 13, weight: Font.Normal, hintingPreference: hinting })
+        // Theme.textScale: every size, tracking and line box below is the
+        // desktop value times this (1 there, so nothing moves).
+        property real scale: 1
+        readonly property font poster: Qt.font({ family: "Yap Bricolage Poster", pixelSize: Math.round(40 * scale), weight: Font.ExtraBold, letterSpacing: -1.6 * scale, hintingPreference: hinting })
+        readonly property font headline: Qt.font({ family: "Yap Bricolage Poster", pixelSize: Math.round(44 * scale), weight: Font.ExtraBold, letterSpacing: -1.54 * scale, hintingPreference: hinting })
+        readonly property font dialogTitle: Qt.font({ family: "Yap Bricolage Title", pixelSize: Math.round(28 * scale), weight: Font.ExtraBold, letterSpacing: -0.84 * scale, hintingPreference: hinting })
+        readonly property font sectionTitle: Qt.font({ family: "Yap Bricolage Head", pixelSize: Math.round(20 * scale), weight: Font.Bold, letterSpacing: -0.2 * scale, hintingPreference: hinting })
+        readonly property font columnTitle: Qt.font({ family: "Yap Bricolage Head ExtraBold", pixelSize: Math.round(18 * scale), weight: Font.ExtraBold, letterSpacing: -0.36 * scale, hintingPreference: hinting })
+        readonly property font serverTitle: Qt.font({ family: "Yap Bricolage Head ExtraBold", pixelSize: Math.round(17 * scale), weight: Font.ExtraBold, letterSpacing: -0.17 * scale, hintingPreference: hinting })
+        readonly property font author: Qt.font({ family: "Yap Bricolage Key Bold", pixelSize: Math.round(15 * scale), weight: Font.Bold, hintingPreference: hinting })
+        readonly property font control: Qt.font({ family: "Yap Bricolage Key", pixelSize: Math.round(15 * scale), weight: Font.DemiBold, hintingPreference: hinting })
+        readonly property font controlSm: Qt.font({ family: "Yap Bricolage Key", pixelSize: Math.round(14 * scale), weight: Font.DemiBold, hintingPreference: hinting })
+        readonly property font railInitial: Qt.font({ family: "Yap Bricolage Key ExtraBold", pixelSize: Math.round(15 * scale), weight: Font.ExtraBold, hintingPreference: hinting })
+        readonly property font message: Qt.font({ family: "Yap Geist", pixelSize: Math.round(15 * scale), weight: Font.Normal, hintingPreference: hinting })
+        readonly property font row: Qt.font({ family: "Yap Geist Medium", pixelSize: Math.round(14 * scale), weight: Font.Medium, hintingPreference: hinting })
+        readonly property font rowUnread: Qt.font({ family: "Yap Geist SemiBold", pixelSize: Math.round(14 * scale), weight: Font.DemiBold, hintingPreference: hinting })
+        readonly property font description: Qt.font({ family: "Yap Geist", pixelSize: Math.round(13 * scale), weight: Font.Normal, hintingPreference: hinting })
         // text-ui-base: a C1 dialog's description (DialogDescription, 15/22).
-        readonly property font dialogBody: Qt.font({ family: "Yap Geist", pixelSize: 15, weight: Font.Normal, hintingPreference: hinting })
+        readonly property font dialogBody: Qt.font({ family: "Yap Geist", pixelSize: Math.round(15 * scale), weight: Font.Normal, hintingPreference: hinting })
         // A settings row's label (primitives.tsx: 15/500).
-        readonly property font setting: Qt.font({ family: "Yap Geist Medium", pixelSize: 15, weight: Font.Medium, hintingPreference: hinting })
-        readonly property font occupant: Qt.font({ family: "Yap Geist Medium", pixelSize: 13, weight: Font.Medium, hintingPreference: hinting })
-        readonly property font caption: Qt.font({ family: "Yap Geist", pixelSize: 12, weight: Font.Normal, hintingPreference: hinting })
-        readonly property font captionStrong: Qt.font({ family: "Yap Geist Medium", pixelSize: 12, weight: Font.Medium, hintingPreference: hinting })
-        readonly property font profileName: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 18, weight: Font.DemiBold, hintingPreference: hinting })
+        readonly property font setting: Qt.font({ family: "Yap Geist Medium", pixelSize: Math.round(15 * scale), weight: Font.Medium, hintingPreference: hinting })
+        readonly property font occupant: Qt.font({ family: "Yap Geist Medium", pixelSize: Math.round(13 * scale), weight: Font.Medium, hintingPreference: hinting })
+        readonly property font caption: Qt.font({ family: "Yap Geist", pixelSize: Math.round(12 * scale), weight: Font.Normal, hintingPreference: hinting })
+        readonly property font captionStrong: Qt.font({ family: "Yap Geist Medium", pixelSize: Math.round(12 * scale), weight: Font.Medium, hintingPreference: hinting })
+        readonly property font profileName: Qt.font({ family: "Yap Geist SemiBold", pixelSize: Math.round(18 * scale), weight: Font.DemiBold, hintingPreference: hinting })
         // text-ui-xl semibold: a page header's title (FriendsView.tsx h1).
-        readonly property font pageTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 22, weight: Font.DemiBold, letterSpacing: -0.22, hintingPreference: hinting })
+        readonly property font pageTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: Math.round(22 * scale), weight: Font.DemiBold, letterSpacing: -0.22 * scale, hintingPreference: hinting })
         // text-ui-2xl semibold: the full profile's name (ProfileCard.tsx modal).
-        readonly property font profileTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 28, weight: Font.DemiBold, letterSpacing: -0.42, hintingPreference: hinting })
+        readonly property font profileTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: Math.round(28 * scale), weight: Font.DemiBold, letterSpacing: -0.42 * scale, hintingPreference: hinting })
         // text-ui-md semibold: a popover's title (the bell's Inbox).
-        readonly property font menuTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 16, weight: Font.DemiBold, hintingPreference: hinting })
-        readonly property font panelTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 14, weight: Font.DemiBold, hintingPreference: hinting })
+        readonly property font menuTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: Math.round(16 * scale), weight: Font.DemiBold, hintingPreference: hinting })
+        readonly property font panelTitle: Qt.font({ family: "Yap Geist SemiBold", pixelSize: Math.round(14 * scale), weight: Font.DemiBold, hintingPreference: hinting })
         // text-ui-sm semibold: a small section heading (the vibe's Recents).
-        readonly property font labelStrong: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 13, weight: Font.DemiBold, hintingPreference: hinting })
+        readonly property font labelStrong: Qt.font({ family: "Yap Geist SemiBold", pixelSize: Math.round(13 * scale), weight: Font.DemiBold, hintingPreference: hinting })
         // text-ui-sm semibold: the media viewer's author (ImageViewerToolbar.tsx).
-        readonly property font nameSm: Qt.font({ family: "Yap Geist SemiBold", pixelSize: 13, weight: Font.DemiBold, hintingPreference: hinting })
+        readonly property font nameSm: Qt.font({ family: "Yap Geist SemiBold", pixelSize: Math.round(13 * scale), weight: Font.DemiBold, hintingPreference: hinting })
         // Silkscreen: condensed 500 on dark grounds, wide 600 on light.
         readonly property font silk: theme.lightGround
-            ? Qt.font({ family: "Yap Martian Num SemiBold", pixelSize: 11, weight: Font.DemiBold, letterSpacing: 1.1, capitalization: Font.AllUppercase, hintingPreference: hinting })
-            : Qt.font({ family: "Yap Martian Silk", pixelSize: 11, weight: Font.Medium, letterSpacing: 0.88, capitalization: Font.AllUppercase, hintingPreference: hinting })
-        readonly property font num: Qt.font({ family: "Yap Martian Num", pixelSize: 12, weight: Font.Medium, hintingPreference: hinting })
-        readonly property font numSm: Qt.font({ family: "Yap Martian Num", pixelSize: 11, weight: Font.Medium, hintingPreference: hinting })
-        readonly property font kbd: Qt.font({ family: "Yap Martian Num SemiBold", pixelSize: 11, weight: Font.DemiBold, hintingPreference: hinting })
-        readonly property font deviceCode: Qt.font({ family: "Yap Martian Num SemiBold", pixelSize: 28, weight: Font.DemiBold, letterSpacing: 1.12, hintingPreference: hinting })
-        readonly property font code: Qt.font({ family: "Yap Geist Mono", pixelSize: 13, weight: Font.Normal, hintingPreference: hinting })
+            ? Qt.font({ family: "Yap Martian Num SemiBold", pixelSize: Math.round(11 * scale), weight: Font.DemiBold, letterSpacing: 1.1 * scale, capitalization: Font.AllUppercase, hintingPreference: hinting })
+            : Qt.font({ family: "Yap Martian Silk", pixelSize: Math.round(11 * scale), weight: Font.Medium, letterSpacing: 0.88 * scale, capitalization: Font.AllUppercase, hintingPreference: hinting })
+        readonly property font num: Qt.font({ family: "Yap Martian Num", pixelSize: Math.round(12 * scale), weight: Font.Medium, hintingPreference: hinting })
+        readonly property font numSm: Qt.font({ family: "Yap Martian Num", pixelSize: Math.round(11 * scale), weight: Font.Medium, hintingPreference: hinting })
+        readonly property font kbd: Qt.font({ family: "Yap Martian Num SemiBold", pixelSize: Math.round(11 * scale), weight: Font.DemiBold, hintingPreference: hinting })
+        readonly property font deviceCode: Qt.font({ family: "Yap Martian Num SemiBold", pixelSize: Math.round(28 * scale), weight: Font.DemiBold, letterSpacing: 1.12 * scale, hintingPreference: hinting })
+        readonly property font code: Qt.font({ family: "Yap Geist Mono", pixelSize: Math.round(13 * scale), weight: Font.Normal, hintingPreference: hinting })
 
-        // Line boxes for Text.FixedHeight, per role.
-        readonly property int posterLine: 37
-        readonly property int headlineLine: 42
-        readonly property int dialogTitleLine: 32
-        readonly property int sectionTitleLine: 24
-        readonly property int columnTitleLine: 24
-        readonly property int authorLine: 20
-        readonly property int messageLine: 22
-        readonly property int dialogBodyLine: 22
-        readonly property int rowLine: 20
-        readonly property int descriptionLine: 18
-        readonly property int captionLine: 16
-        readonly property int silkLine: 14
-        readonly property int numLine: 16
-        readonly property int codeLine: 20
+        // Line boxes for Text.FixedHeight, per role (rounded up, so scaled
+        // text never clips).
+        readonly property int posterLine: Math.ceil(37 * scale)
+        readonly property int headlineLine: Math.ceil(42 * scale)
+        readonly property int dialogTitleLine: Math.ceil(32 * scale)
+        readonly property int sectionTitleLine: Math.ceil(24 * scale)
+        readonly property int columnTitleLine: Math.ceil(24 * scale)
+        readonly property int authorLine: Math.ceil(20 * scale)
+        readonly property int messageLine: Math.ceil(22 * scale)
+        readonly property int dialogBodyLine: Math.ceil(22 * scale)
+        readonly property int rowLine: Math.ceil(20 * scale)
+        readonly property int descriptionLine: Math.ceil(18 * scale)
+        readonly property int captionLine: Math.ceil(16 * scale)
+        readonly property int silkLine: Math.ceil(14 * scale)
+        readonly property int numLine: Math.ceil(16 * scale)
+        readonly property int codeLine: Math.ceil(20 * scale)
     }
 }

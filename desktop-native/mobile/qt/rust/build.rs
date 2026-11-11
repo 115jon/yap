@@ -1,16 +1,41 @@
 use cxx_qt_build::{CxxQtBuilder, QmlFile, QmlModule};
 
-/// The mobile shell (`com.yap.mobile`): the window, the phone pages, and the
-/// mobile side of each seam the shared QML (`Yap.Ui`, from the yap-ui crate)
-/// imports from `Yap.Platform`: rich embeds, media, the voice status line
-/// and the stream card. main.cpp registers those four under Yap.Platform.
+/// The mobile shell (`com.yap.mobile`): the window, the pager and its pages,
+/// and the mobile side of each seam the shared QML (`Yap.Ui`, from the
+/// yap-ui crate) imports from `Yap.Platform`: rich embeds, media, the voice
+/// status line and the stream card. main.cpp registers those four under
+/// Yap.Platform.
 const QML: &[&str] = &[
     "qml/Main.qml",
     "qml/SignInPage.qml",
-    "qml/ServersPage.qml",
+    "qml/Pager.qml",
+    "qml/DrawerPage.qml",
+    "qml/AccountBar.qml",
+    "qml/DmsPane.qml",
+    "qml/DmItem.qml",
     "qml/PlatformList.qml",
     "qml/ChatPage.qml",
+    "qml/MembersPage.qml",
+    "qml/MemberItem.qml",
+    "qml/ProfilePage.qml",
+    "qml/SettingsPage.qml",
+    "qml/FriendsPage.qml",
+    "qml/PageHeader.qml",
+    "qml/MobileField.qml",
+    "qml/InlineConfirm.qml",
     "qml/MobileComposer.qml",
+    "qml/UploadTray.qml",
+    "qml/ImageViewerPage.qml",
+    "qml/BottomSheet.qml",
+    "qml/SheetRow.qml",
+    "qml/EmojiGlyph.qml",
+    "qml/MessageActions.qml",
+    "qml/MessageSheet.qml",
+    "qml/EmojiSheet.qml",
+    "qml/ReactionSheet.qml",
+    "qml/ConfirmSheet.qml",
+    "qml/SelectTextPage.qml",
+    "qml/SwipeReply.qml",
     "qml/seams/EmbedCard.qml",
     "qml/seams/MessageMedia.qml",
     "qml/seams/VoiceStatusLine.qml",
@@ -18,6 +43,12 @@ const QML: &[&str] = &[
 ];
 
 fn main() {
-    let files = QML.iter().map(|path| QmlFile::from(*path));
+    let files = QML
+        .iter()
+        .map(|path| QmlFile::from(*path))
+        // Each channel's unsent text, kept across chat pages.
+        .chain(std::iter::once(QmlFile::from("qml/Drafts.qml").singleton(true)))
+        // This phone's own settings (QSettings).
+        .chain(std::iter::once(QmlFile::from("qml/Prefs.qml").singleton(true)));
     CxxQtBuilder::new_qml_module(QmlModule::new("com.yap.mobile").qml_files(files)).build();
 }

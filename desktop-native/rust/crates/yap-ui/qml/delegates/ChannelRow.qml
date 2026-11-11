@@ -37,7 +37,8 @@ Rectangle {
 
     height: Theme.treeRow
     radius: Theme.radius
-    color: active ? Theme.tint2 : hover.hovered ? Theme.tint1 : "transparent"
+    // Under a finger the row tints while it is pressed, not hovered.
+    color: active ? Theme.tint2 : hover.hovered || (Theme.touch && tap.pressed) ? Theme.tint1 : "transparent"
     Behavior on color { ColorAnimation { duration: Theme.dur1 } }
 
     Accessible.role: Accessible.Button
@@ -162,21 +163,30 @@ Rectangle {
         tip: qsTr("Channel settings")
         onClicked: row.settingsRequested()
     }
-    HoverHandler { id: hover; cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.PointingHandCursor }
+    HoverHandler { id: hover; enabled: Theme.hoverUi; cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.PointingHandCursor }
     Timer {
         interval: 120
         running: hover.hovered && !row.voice && !row.active && !drag.active
         onTriggered: row.rested()
     }
-    TapHandler { onTapped: row.selected() }
+    TapHandler {
+        id: tap
+        onTapped: row.selected()
+        // A finger's right click.
+        onLongPressed: if (Theme.touch) row.menuRequested(row, point.position)
+    }
     TapHandler {
         acceptedButtons: Qt.RightButton
+        // A finger's tap is not a right click (a touch carries no button,
+        // so the filter above lets it through).
+        enabled: !Theme.touch
         onTapped: eventPoint => row.menuRequested(row, eventPoint.position)
     }
     DragHandler {
         id: drag
         target: null
-        enabled: row.draggable
+        // Not under a finger: a vertical drag there scrolls the list.
+        enabled: row.draggable && !Theme.touch
         dragThreshold: 5
         yAxis.enabled: true
         xAxis.enabled: false

@@ -13,7 +13,7 @@ set(CMAKE_AUTOMOC ON)
 # Only what the shared QML and the shell use: no Multimedia, WebView,
 # Widgets, Svg widgets, Quick 3D or the Controls styles beyond Basic.
 find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Svg)
-find_package(Qt6 REQUIRED COMPONENTS QuickPrivate)
+find_package(Qt6 REQUIRED COMPONENTS CorePrivate QuickPrivate)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -52,22 +52,22 @@ include(${DESKTOP}/rust/crates/yap-ui/cpp/yap_ui.cmake)
 
 qt_add_executable(yapqt
   cpp/main.cpp
-  cpp/native.cpp cpp/native.h)
+  cpp/native.cpp cpp/native.h
+  cpp/push.cpp
+  cpp/rustnetwork.cpp cpp/rustnetwork.h)
 target_include_directories(yapqt PRIVATE cpp)
 target_link_libraries(yapqt PRIVATE
   yap_mobile_qml
   yap_ui_qml
   yap_ui_cpp
-  Qt::Gui Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg Qt::QuickPrivate)
+  Qt::Gui Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg Qt::CorePrivate Qt::QuickPrivate)
 
+# The application id and version: the packaging block at the end.
 set_target_properties(yapqt PROPERTIES
-  QT_ANDROID_PACKAGE_NAME dev.yap.qtproto
-  QT_ANDROID_APP_NAME "Yap (Qt)"
+  QT_ANDROID_APP_NAME "Yap"
   QT_ANDROID_PACKAGE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/android
   QT_ANDROID_MIN_SDK_VERSION 28
   QT_ANDROID_TARGET_SDK_VERSION 36
-  QT_ANDROID_VERSION_CODE 1
-  QT_ANDROID_VERSION_NAME 0.1.0
   # Where androiddeployqt's import scan looks for the QML modules to
   # bundle: this app's and the shared Yap.Ui's, which lives in yap-ui.
   QT_QML_ROOT_PATH "${CMAKE_CURRENT_SOURCE_DIR};${DESKTOP}/rust/crates/yap-ui/qml")
@@ -77,7 +77,8 @@ set_target_properties(yapqt PROPERTIES
 file(GLOB YAP_FONT_FILES RELATIVE ${DESKTOP}/assets CONFIGURE_DEPENDS ${DESKTOP}/assets/fonts/*.ttf)
 file(STRINGS ${DESKTOP}/assets/icons/files.txt YAP_ICON_NAMES)
 list(TRANSFORM YAP_ICON_NAMES PREPEND icons/ OUTPUT_VARIABLE YAP_ICON_FILES)
-set(YAP_ASSET_FILES ${YAP_FONT_FILES} ${YAP_ICON_FILES})
+# Home's Yappy mark on the rail (Theme.homeMark).
+set(YAP_ASSET_FILES ${YAP_FONT_FILES} ${YAP_ICON_FILES} svg/home-light.svg svg/home-dark.svg)
 list(TRANSFORM YAP_ASSET_FILES PREPEND ${DESKTOP}/assets/ OUTPUT_VARIABLE YAP_ASSET_PATHS)
 qt_add_resources(yapqt yap_assets
   PREFIX /
@@ -90,3 +91,67 @@ qt_add_resources(yapqt yap_assets
 qt_import_plugins(yapqt
   INCLUDE_BY_TYPE imageformats Qt::QGifPlugin Qt::QJpegPlugin Qt::QWebpPlugin Qt::QSvgPlugin
   EXCLUDE_BY_TYPE qmltooling iconengines networkinformation)
+
+# --- Packaging: application id and version -------------------------------
+# CI passes the version per run (desktop-native-mobile.yml: code = run * 10
+# + an ABI digit, name 0.1.<run>+<commit>); local builds get 0.1.0 (1).
+# The id is the Gradle namespace and application id (androiddeployqt writes
+# it to gradle.properties), and the iOS bundle identifier. dev.yap.app is
+# the app's own (registered in Firebase for push notifications; Gradle
+# reads its client from YAP_GOOGLE_SERVICES_JSON, android/build.gradle).
+set(YAP_ANDROID_APP_ID "dev.yap.app" CACHE STRING "Android application id (and iOS bundle id)")
+set(YAP_ANDROID_VERSION_CODE "1" CACHE STRING "Android versionCode")
+set(YAP_ANDROID_VERSION_NAME "0.1.0" CACHE STRING "Android versionName")
+set_target_properties(yapqt PROPERTIES
+  QT_ANDROID_PACKAGE_NAME "${YAP_ANDROID_APP_ID}"
+  QT_ANDROID_VERSION_CODE "${YAP_ANDROID_VERSION_CODE}"
+  QT_ANDROID_VERSION_NAME "${YAP_ANDROID_VERSION_NAME}")
+# The SDK platform and build tools androiddeployqt compiles with; empty
+# takes the newest installed. CI pins both, so the runner image's newest
+# platform does not decide.
+set(YAP_ANDROID_COMPILE_SDK "" CACHE STRING "Android SDK platform to compile with (e.g. android-36)")
+set(YAP_ANDROID_BUILD_TOOLS "" CACHE STRING "Android SDK build-tools revision (e.g. 36.0.0)")
+if(YAP_ANDROID_COMPILE_SDK)
+  set_target_properties(yapqt PROPERTIES QT_ANDROID_COMPILE_SDK_VERSION "${YAP_ANDROID_COMPILE_SDK}")
+endif()
+if(YAP_ANDROID_BUILD_TOOLS)
+  set_target_properties(yapqt PROPERTIES QT_ANDROID_SDK_BUILD_TOOLS_REVISION "${YAP_ANDROID_BUILD_TOOLS}")
+endif()
+
+# --- Size: plugins nobody loads ------------------------------------------
+# The offscreen platform plugin (the android one draws) and the OpenSSL TLS
+# backend. Qt for Android ships no libssl, so the backend never loaded;
+# network pictures go through the core's rustls client instead
+# (cpp/rustnetwork.cpp, README "Gaps found").
+qt_import_plugins(yapqt
+  EXCLUDE Qt::QOffscreenIntegrationPlugin Qt::QTlsBackendOpenSSLPlugin)
+
+# --- Size: link flags ------------------------------------------------------
+# The NDK's toolchain already links with --gc-sections, and the APK's
+# libraries are stripped by Gradle. Identical code folding saves 0.3 MB on
+# arm64 (measured; --icf=safe saved nothing, as lld then keeps every
+# function whose address might be taken). Qt runs folded the same way on
+# Windows, where MSVC's release /OPT:ICF folds alike.
+if(ANDROID)
+  target_link_options(yapqt PRIVATE "$<$<NOT:$<CONFIG:Debug>>:LINKER:--icf=all>")
+endif()
+
+# --- iOS: a compile and link check for the simulator ---------------------
+# (build.sh ios-simulator; CI's qt-ios job.) Qt for iOS is static, so the
+# QML modules' plugins are linked in: qmlimportscanner reads the mobile QML
+# under this folder, the shared Yap.Ui QML (yap-ui) and the desktop QML
+# (desktop-only modules such as QtMultimedia are not in this Qt and are
+# skipped). Qt writes a default Info.plist from these properties.
+if(IOS)
+  set_property(TARGET yapqt APPEND PROPERTY QT_QML_IMPORT_SCANNER_EXTRA_ROOT_PATHS
+    ${DESKTOP}/rust/crates/yap-ui/qml ${DESKTOP}/rust/qml)
+  qt_import_qml_plugins(yapqt)
+  set_target_properties(yapqt PROPERTIES
+    MACOSX_BUNDLE TRUE
+    MACOSX_BUNDLE_GUI_IDENTIFIER "${YAP_ANDROID_APP_ID}"
+    MACOSX_BUNDLE_BUNDLE_NAME "Yap"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${YAP_ANDROID_VERSION_NAME}"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${YAP_ANDROID_VERSION_CODE}"
+    XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${YAP_ANDROID_APP_ID}"
+    XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED NO)
+endif()

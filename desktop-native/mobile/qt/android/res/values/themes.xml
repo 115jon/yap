@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Qt's own default theme for this API level (QtActivityBase picks
+         Holo.Light below API 29, DeviceDefault.DayNight from 29) with the
+         splash as the window background, so launch shows ply-0 and the
+         mark until Qt's splash and then the first frame take over. -->
+    <style name="YapTheme" parent="android:Theme.Holo.Light">
+        <item name="android:windowBackground">@drawable/splash</item>
+    </style>
+</resources>

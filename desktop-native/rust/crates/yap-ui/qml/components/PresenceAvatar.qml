@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // An avatar with presence (ui/avatar.tsx): the LED sits in a square notch

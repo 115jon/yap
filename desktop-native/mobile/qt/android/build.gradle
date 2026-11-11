@@ -1,0 +1,159 @@
+// Qt 6.11's template (src/android/templates/build.gradle) with release
+// builds shrunk by R8: the dex was 5.3 MB, mostly Kotlin, kotlinx
+// coroutines and AndroidX that androidx.core pulls in and Qt's Java barely
+// uses. proguard-rules.pro keeps what C++ reaches over JNI by name. And
+// Firebase Cloud Messaging for push notifications, configured below.
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        //noinspection AndroidGradlePluginVersion
+        classpath 'com.android.tools.build:gradle:9.0.0'
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+apply plugin: qtGradlePluginType
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'])
+    //noinspection GradleDependency
+    implementation 'androidx.core:core:1.17.0'
+    // Push notifications (src/dev/yap/qtproto/push); the version the Expo
+    // app's notifications build against.
+    implementation 'com.google.firebase:firebase-messaging:25.0.1'
+}
+
+// Firebase without the google-services plugin: the string resources it
+// would generate (FirebaseInitProvider starts Firebase from them), taken
+// from the google-services.json that YAP_GOOGLE_SERVICES_JSON names, for
+// this application id's client only. Without it the app builds and runs
+// with no pushes (forks, local builds without the file). The file holds
+// API keys: it stays outside the repository (README, "Push notifications").
+def firebaseRes = layout.buildDirectory.dir('generated/yap-firebase/res').get().asFile
+def googleServicesPath = System.getenv('YAP_GOOGLE_SERVICES_JSON')
+if (googleServicesPath) {
+    def googleServices = file(googleServicesPath)
+    if (!googleServices.isFile()) {
+        throw new GradleException("YAP_GOOGLE_SERVICES_JSON: no file at ${googleServicesPath}")
+    }
+    // A fixed message on any failure: the parser's own would quote the file
+    // (API keys) into the build log.
+    def json
+    def client
+    try {
+        json = new groovy.json.JsonSlurper().parse(googleServices)
+        client = json.client.find {
+            it.client_info?.android_client_info?.package_name == androidPackageName
+        }
+    } catch (Exception ignored) {
+        throw new GradleException('YAP_GOOGLE_SERVICES_JSON is not a google-services.json')
+    }
+    if (client == null) {
+        throw new GradleException("google-services.json has no Android app ${androidPackageName}")
+    }
+    def strings = [
+        google_app_id: client.client_info.mobilesdk_app_id,
+        gcm_defaultSenderId: json.project_info.project_number,
+        project_id: json.project_info.project_id,
+        google_api_key: client.api_key?.getAt(0)?.current_key,
+        google_storage_bucket: json.project_info.storage_bucket,
+    ].findAll { it.value }
+    def values = new File(firebaseRes, 'values/yap_firebase.xml')
+    values.parentFile.mkdirs()
+    def escape = { String text ->
+        text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            .replace('"', '\\"').replace("'", "\\'")
+    }
+    values.text = '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n' +
+        strings.collect { name, value ->
+            "    <string name=\"${name}\" translatable=\"false\">${escape(value.toString())}</string>\n"
+        }.join('') +
+        '</resources>\n'
+    println "Firebase: push notifications configured for ${androidPackageName}"
+} else {
+    delete firebaseRes
+    println 'Firebase: YAP_GOOGLE_SERVICES_JSON not set, building without push notifications'
+}
+
+android {
+    /*******************************************************
+     * The following variables:
+     * - androidBuildToolsVersion,
+     * - androidCompileSdkVersion
+     * - qtAndroidDir - holds the path to qt android files
+     *                   needed to build any Qt application
+     *                   on Android.
+     * - qtGradlePluginType - whether to build an app or a library
+     *
+     * are defined in gradle.properties file. This file is
+     * updated by QtCreator and androiddeployqt tools.
+     * Changing them manually might break the compilation!
+     *******************************************************/
+
+    namespace = androidPackageName
+    compileSdkVersion androidCompileSdkVersion
+    buildToolsVersion androidBuildToolsVersion
+    ndkVersion = androidNdkVersion
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = [qtAndroidDir + '/src', 'src', 'java']
+            kotlin.srcDirs = [qtAndroidDir + '/src', 'src', 'kotlin']
+            aidl.srcDirs = [qtAndroidDir + '/src', 'src', 'aidl']
+            res.srcDirs = [qtAndroidDir + '/res', 'res', firebaseRes]
+            resources.srcDirs = ['resources']
+            renderscript.srcDirs = ['src']
+            assets.srcDirs = ['assets']
+            jniLibs.srcDirs = ['libs']
+       }
+    }
+
+    tasks.withType(JavaCompile) {
+        options.incremental = true
+        options.compilerArgs += ['-Xlint:all']
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lintOptions {
+        abortOnError = false
+    }
+
+    aaptOptions {
+        // Do not compress Qt binary resources file
+        noCompress 'rcc'
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = legacyPackaging.toBoolean()
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = true
+            shrinkResources = true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    defaultConfig {
+        resConfig "en"
+        minSdkVersion qtMinSdkVersion
+        targetSdkVersion qtTargetSdkVersion
+        ndk.abiFilters = qtTargetAbiList.split(",")
+    }
+}

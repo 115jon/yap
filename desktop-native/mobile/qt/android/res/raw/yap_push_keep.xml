@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Resource shrinking (build.gradle): the push code finds these by name
+     (push/MessageNotifier.java; R's package is the application id, which
+     the build chooses). -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/yap_notify_*,@color/yap_accent" />

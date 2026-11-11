@@ -37,6 +37,17 @@ pub type Sink = Box<dyn Fn(Vec<ViewUpdate>) + Send + Sync>;
 /// latency of a burst; an idle store flushes after every input.
 const MAX_INPUTS_PER_BATCH: usize = 64;
 
+/// How long a session's revoke waits for the requests it asked for on its
+/// way out (the push token's DELETE; the Expo app bounds it alike).
+const SIGN_OUT_WAIT: Duration = Duration::from_secs(3);
+
+/// Waits for each task in turn (their results are reported elsewhere).
+async fn wait_all(tasks: Vec<JoinHandle<()>>) {
+    for task in tasks {
+        let _ = task.await;
+    }
+}
+
 /// HTTP requests in flight at once; more wait for a slot.
 const MAX_HTTP_IN_FLIGHT: usize = 8;
 
@@ -294,6 +305,9 @@ pub struct Runner {
     calls: HashMap<CallId, UnboundedSender<VoiceCommand>>,
     /// The running device sign-in, and what wakes its poll early.
     sign_in: Option<(JoinHandle<()>, Arc<Notify>)>,
+    /// Requests a session asked for on its way out (`HttpReason::SignOut`):
+    /// the next `Revoke` waits for them, so the token still works.
+    sign_out_requests: Vec<JoinHandle<()>>,
     /// Uploads in flight, so a cancel can stop them (and abort a chunked
     /// one on the server).
     uploads: HashMap<RequestId, UploadTask>,
@@ -355,6 +369,7 @@ impl Runner {
             gateway: None,
             calls: HashMap::new(),
             sign_in: None,
+            sign_out_requests: Vec::new(),
             uploads: HashMap::new(),
             resume: None,
             startup_marks: Vec::new(),
@@ -544,7 +559,7 @@ impl Runner {
                 }
                 let api = Api::new(self.http.clone(), token);
                 let slots = Arc::clone(&self.http_slots);
-                tokio::spawn(async move {
+                let task = tokio::spawn(async move {
                     // The semaphore is never closed, so a permit always comes.
                     let _permit = slots.acquire_owned().await;
                     let started = Instant::now();
@@ -573,6 +588,10 @@ impl Runner {
                     }
                     let _ = inbox.send(Input::Http { id, result });
                 });
+                if reason == HttpReason::SignOut {
+                    self.sign_out_requests.retain(|task| !task.is_finished());
+                    self.sign_out_requests.push(task);
+                }
             }
             Effect::LoadWindow {
                 user_id,
@@ -664,7 +683,13 @@ impl Runner {
             Effect::ClearToken => self.keyring(KeyringOp::Clear),
             Effect::Revoke(token) => {
                 let http = self.http.clone();
-                tokio::spawn(async move { auth::revoke(&http, &token).await });
+                let before = std::mem::take(&mut self.sign_out_requests);
+                tokio::spawn(async move {
+                    // Bounded: offline, the sign-out still revokes.
+                    let wait = wait_all(before);
+                    let _ = tokio::time::timeout(SIGN_OUT_WAIT, wait).await;
+                    auth::revoke(&http, &token).await;
+                });
             }
             Effect::SignInStart(attempt) => {
                 self.cancel_sign_in();

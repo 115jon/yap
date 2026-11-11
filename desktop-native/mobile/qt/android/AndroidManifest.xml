@@ -1,16 +1,32 @@
 <?xml version="1.0"?>
-<!-- Qt 6.11's template (src/android/templates) with three changes:
-     the predictive back gesture on (the shim registers its callback only
-     while there is a page to go back to; at the root the system plays its
-     own back-to-home preview), the keyboard left to the app (adjustNothing:
-     the composer follows the IME inset itself, frame by frame), and the
-     session file kept out of cloud backup and device-to-device transfer. -->
+<!-- Qt 6.11's template (src/android/templates) with these changes:
+     the predictive back gesture on (the shim registers its callback while
+     there is a page to go back to; at the root the system plays its own
+     back-to-home preview when it keeps the task alive, see
+     NativeShim.keepsTaskAtRoot), the keyboard left to the app (adjustNothing:
+     the composer follows the IME inset itself, frame by frame), the
+     session file kept out of cloud backup and device-to-device transfer,
+     the adaptive icon, and the splash: the theme's (system splash on
+     Android 12+, window background before) hands over to Qt's, which stays
+     until main.cpp hides it at the first frame; and push notifications
+     (the FCM service, the Reply and Mark as read receiver, the permission).
+     No package attribute: the application id is CMake's YAP_ANDROID_APP_ID
+     (Gradle's namespace). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="dev.yap.qtproto"
     android:installLocation="auto"
     android:versionCode="-- %%INSERT_VERSION_CODE%% --"
     android:versionName="-- %%INSERT_VERSION_NAME%% --">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Message notifications (API 33+ asks; push/PushShim, Native). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The shim asks which app is the home screen (was this start the
+         launcher's? NativeShim.keepsTaskAtRoot). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+    </queries>
     <!-- %%INSERT_PERMISSIONS -->
     <!-- %%INSERT_FEATURES -->
     <supports-screens
@@ -21,17 +37,18 @@
     <application
         android:name="org.qtproject.qt.android.bindings.QtApplication"
         android:hardwareAccelerated="true"
-        android:label="Yap (Qt)"
-        android:icon="-- %%INSERT_APP_ICON%% --"
+        android:label="Yap"
+        android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true">
         <activity
-            android:name="org.qtproject.qt.android.bindings.QtActivity"
+            android:name="dev.yap.qtproto.YapActivity"
             android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
-            android:label="Yap (Qt)"
+            android:label="Yap"
             android:launchMode="singleTop"
             android:screenOrientation="unspecified"
+            android:theme="@style/YapTheme"
             android:windowSoftInputMode="adjustNothing"
             android:exported="true">
             <intent-filter>
@@ -46,7 +63,38 @@
             <meta-data
                 android:name="android.app.arguments"
                 android:value="-- %%INSERT_APP_ARGUMENTS%% --" />
+
+            <meta-data
+                android:name="android.app.splash_screen_drawable"
+                android:resource="@drawable/splash" />
+            <meta-data
+                android:name="android.app.splash_screen_sticky"
+                android:value="true" />
         </activity>
+
+        <!-- Yap's data-only pushes, drawn natively (push/MessageNotifier),
+             also with the app killed. -->
+        <service
+            android:name="dev.yap.qtproto.push.YapMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <!-- A notification's Reply and Mark as read. -->
+        <receiver
+            android:name="dev.yap.qtproto.push.NotificationActionReceiver"
+            android:exported="false" />
+        <!-- What FCM uses for a push it draws itself (none of Yap's do). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="other" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/yap_notify_small" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/yap_accent" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

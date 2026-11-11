@@ -5,5 +5,9 @@
 //! this crate's QML module, `com.yap.mobile`.
 
 mod client;
+// Qt's network loads over the core's rustls (cpp/rustnetwork.cpp).
+mod http;
 #[path = "../../../common/platform.rs"]
 mod platform;
+// The FCM token and a notification's actions (cpp/push.cpp).
+mod push;

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Android 12+ splash icon: 288 dp with no icon background, the mark
+     128 dp across in the middle (inside the 192 dp circle the system keeps),
+     the same size and place as Qt's splash (splash.xml) that follows it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="288"
+    android:viewportHeight="288">
+    <group
+        android:translateX="80"
+        android:translateY="80"
+        android:scaleX="4"
+        android:scaleY="4">
+        <path
+            android:fillColor="#ff3d8b"
+            android:pathData="M2,0L12,10L2,10ZM2,10L21,10L21,24L2,24ZM21,12L32,12L32,19L21,19ZM17,22L28,22L28,26L17,26ZM4,24L18,24L18,32L4,32Z" />
+        <path
+            android:fillColor="#000000"
+            android:pathData="M4,5L8,9L4,9ZM13,13L17,13L17,17L13,17ZM29,12L32,12L32,15L29,15Z" />
+    </group>
+</vector>

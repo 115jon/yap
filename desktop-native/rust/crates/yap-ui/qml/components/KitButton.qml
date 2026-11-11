@@ -39,6 +39,15 @@ T.Button {
     rightPadding: notched ? 12 : leftPadding
     font: variant === "rule" ? Qt.font({ family: "Yap Bricolage Key Bold", pixelSize: 15, weight: Font.Bold })
         : size === "sm" ? Theme.type.controlSm : Theme.type.control
+    hoverEnabled: Theme.hoverUi
+    // Under a finger a 32 px key answers within Theme.hitMin of height.
+    containmentMask: Theme.hitMin > height ? hit : null
+    Item {
+        id: hit
+        anchors.centerIn: parent
+        width: control.width
+        height: Math.max(control.height, Theme.hitMin)
+    }
     opacity: enabled || filled ? 1 : 0.45
     scale: down ? Theme.scalePress : 1
     Behavior on scale { NumberAnimation { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }

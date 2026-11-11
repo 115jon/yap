@@ -8,7 +8,7 @@ prototypes on the same unchanged core, and their side-by-side measurements:
 
 - `qt/`: **Qt Quick on Android**, the main path. The desktop's QML,
   list models and portable C++ run on a phone, under a mobile shell and a
-  thin platform shim. Application id `dev.yap.qtproto`.
+  thin platform shim. Application id `dev.yap.app`, label "Yap".
 - `rust/` and `android/`: **the Compose baseline**. The same core behind
   UniFFI with Jetpack Compose views, kept to compare against. Application
   id `dev.yap.coreproto`.
@@ -27,16 +27,20 @@ that feel off, each with a known fix.
 - **Shared, one copy:** the `yap-ui` crate (`desktop-native/rust/crates/yap-ui`),
   which both apps link. It holds the `Yap.Ui` QML module (`Theme`,
   `ShellState`, `MessageDelegate`, `TreeRow`, `ServerIcon` and the
-  components they use: 30 files, 4,720 lines), the domain objects (`Session`, `Nav`,
+  components they use: 36 files, 5,408 lines), the domain objects (`Session`, `Nav`,
   `Chat`, `Voice`, `Profile` and the portable singletons such as `Admin`,
   `Emoji`, `Extras`, `Invites`, `Panels`), all 13 list models, the
   GUI-thread registry, the core's runtime and gateway, and the portable C++
   (`AnimatedPicture`, the icon and dither image providers). Together with
   the core, that is everything a row shows and every rule behind it.
-- **Per platform:** about 840 lines of QML (shell, pages, composer, and
-  the mobile side of four seams), about 130 lines of Rust (the app's
-  `Platform`: TLS client, realtime, token store), and about 450 lines of
-  C++/Java shim for back, keyboard, haptics, share, text size and fling.
+- **Per platform:** about 7,400 lines of QML (shell, pager, pages,
+  composer, upload tray, image viewer, the sheets and message actions,
+  Settings and Friends, and
+  the mobile side of four seams), about 720 lines of Rust (the app's
+  `Platform`: TLS client, realtime, token store, and the HTTP behind Qt's
+  own loads), and about 1,650 lines of C++/Java: the shim for back,
+  keyboard, haptics, share, the photo picker, text size, fling and the
+  system bars, and Qt's network access over the core's client.
 - **Verified on the emulator:**
   - Kova sign-in, the server rail, the channel tree and `#general`, with
     the desktop's grouping, mention rows, role colours and Markdown;
@@ -45,11 +49,15 @@ that feel off, each with a known fix.
   - the keyboard pushing the composer up as it animates;
   - the predictive back gesture (the page follows the finger, then pops);
   - edge to edge under the system bars, and light mode from the system;
-  - 60 Hz scrolling through 170 messages.
+  - 60 Hz scrolling through 170 messages;
+  - a long press opening the message sheet, and from it a reaction, a
+    reply, an edit and a delete arriving at the peer; swipe to reply; the
+    emoji sheet's search and skin tone; text at the system's 1.3 size.
 - **The price, against the Compose baseline:**
   - about 9 MB more to download (21 MB vs 12.6 MB gzipped);
   - 2.5x the memory after scrolling (148 MB vs 60 MB PSS);
-  - Qt's own HTTPS needs OpenSSL on Android (see "Gaps").
+  - Qt's own HTTPS needs OpenSSL on Android; pictures go over the core's
+    rustls client instead (see "Gaps").
 
 Keep the Rust boundary exactly as it is: the core does not know which view
 layer draws it, and the Compose baseline proves a native view stays possible
@@ -57,15 +65,15 @@ for any one surface (for example a call screen) if Qt ever falls short there.
 
 ## What is shared, what is per platform
 
-| Layer                         | Shared with desktop (unchanged)                                                                                                                                                                                                                                                                                                                       | Per platform                                                                                                                                                                                                                                               |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Core                          | `yap-core`, `yap-cache`, `yap-realtime`, `yap-protocol`, `yap-anim`; `gateway.rs`                                                                                                                                                                                                                                                                     | TLS backend (rustls on mobile), the token store (an app-private file; Keystore in a release), the config and data folder handed in (`yap_mobile_init`)                                                                                                     |
-| Models and bridge objects     | yap-ui: every `QAbstractListModel` (servers, tree, messages, members, DMs, …), `Session`/`Nav`/`Chat`/`Voice`/`Profile` and the portable singletons, one definition for both apps; the registry and the order view updates apply in                                                                                                                   | The app's `Platform` (`yap_ui::platform`): HTTP client, realtime, token store, start and quit hooks, the view updates only it shows (toasts, sounds, badge), uploads, share sources, video. Desktop: `rust/src/native.rs`; mobile: `qt/rust/src/client.rs` |
-| Theme tokens                  | `Theme.qml` (palettes, type roles, motion, spacing), `ShellState.qml`                                                                                                                                                                                                                                                                                 | Which theme (`Theme.themeId` follows the system's light/dark); a text scale is still missing (see the checklist)                                                                                                                                           |
-| Components and list delegates | `Yap.Ui`: `MessageDelegate` (the message renderer: grouping, replies, reactions, mention and pending rows, Markdown via Qt rich text), `TreeRow`, `ChannelRow`, `CategoryLabel`, `MemberRow`, `ServerIcon`, `RailPill`, `CountBadge`, `Avatar`, `DisplayName`, `Icon`, `IconKey`, `KitButton`, `Led`, `Spinner`, `LinkText`, `LazyPopup`, `Tooltip` … | Each app's side of the four seams the shared files import from `Yap.Platform`, with the same API: `EmbedCard`, `MessageMedia`, `VoiceStatusLine`, `VoiceStreamHoverCard` (mobile: `qt/rust/qml/seams`; desktop: its own `com.yap.native` files)            |
-| C++                           | yap-ui `cpp/`: `AnimatedPicture` and `ViewportWatch` (GIF/APNG/WebP through yap-anim), the `icon` and `dither` image providers, `yap_ui_register(engine)`; `yap_ui.cmake` compiles them in each app's target                                                                                                                                          | `Native` (the platform shim) and `main.cpp`. The Windows C++ (window chrome, toasts, WebView2, Media Foundation, D3D11 video) stays desktop-only                                                                                                           |
-| Page layouts and navigation   | —                                                                                                                                                                                                                                                                                                                                                     | Phone pages (`ServersPage`: rail and tree side by side; `ChatPage`; `SignInPage`), a `StackView` with the platform's transitions and back, `PlatformList` (the platform's scroll feel)                                                                     |
-| Shell                         | —                                                                                                                                                                                                                                                                                                                                                     | `Main.qml` (edge to edge, phases, foreground/background), the Android manifest, the Java shim                                                                                                                                                              |
+| Layer                         | Shared with desktop (unchanged)                                                                                                                                                                                                                                                                                                                       | Per platform                                                                                                                                                                                                                                                                                                     |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Core                          | `yap-core`, `yap-cache`, `yap-realtime`, `yap-protocol`, `yap-anim`; `gateway.rs`                                                                                                                                                                                                                                                                     | TLS backend (rustls on mobile), the token store (an app-private file; Keystore in a release), the config and data folder handed in (`yap_mobile_init`)                                                                                                                                                           |
+| Models and bridge objects     | yap-ui: every `QAbstractListModel` (servers, tree, messages, members, DMs, …), `Session`/`Nav`/`Chat`/`Voice`/`Profile` and the portable singletons, one definition for both apps; the registry and the order view updates apply in                                                                                                                   | The app's `Platform` (`yap_ui::platform`): HTTP client, realtime, token store, start and quit hooks, the view updates only it shows (toasts, sounds, badge), uploads, share sources, video. Desktop: `rust/src/native.rs`; mobile: `qt/rust/src/client.rs`                                                       |
+| Theme tokens                  | `Theme.qml` (palettes, type roles, motion, spacing), `ShellState.qml`                                                                                                                                                                                                                                                                                 | Which theme (Settings' choice; Match system, the default, follows the light/dark mode), the text size factor (`Prefs`), and the input flags the shell binds: `Theme.touch`, `Theme.hoverUi`, `Theme.textScale`                                                                                                   |
+| Components and list delegates | `Yap.Ui`: `MessageDelegate` (the message renderer: grouping, replies, reactions, mention and pending rows, Markdown via Qt rich text), `TreeRow`, `ChannelRow`, `CategoryLabel`, `MemberRow`, `ServerIcon`, `RailPill`, `CountBadge`, `Avatar`, `DisplayName`, `Icon`, `IconKey`, `KitButton`, `Led`, `Spinner`, `LinkText`, `LazyPopup`, `Tooltip` … | Each app's side of the four seams the shared files import from `Yap.Platform`, with the same API: `EmbedCard`, `MessageMedia`, `VoiceStatusLine`, `VoiceStreamHoverCard` (mobile: `qt/rust/qml/seams`; desktop: its own `com.yap.native` files)                                                                  |
+| C++                           | yap-ui `cpp/`: `AnimatedPicture` and `ViewportWatch` (GIF/APNG/WebP through yap-anim), the `icon` and `dither` image providers, `yap_ui_register(engine)`; `yap_ui.cmake` compiles them in each app's target                                                                                                                                          | `Native` (the platform shim) and `main.cpp`. The Windows C++ (window chrome, toasts, WebView2, Media Foundation, D3D11 video) stays desktop-only                                                                                                                                                                 |
+| Page layouts and navigation   | `ConnectionStrip`, `UnreadBanner`, `PresenceAvatar`, `GameLine` (moved into `Yap.Ui` for the phone pages; the desktop uses the same files)                                                                                                                                                                                                            | The pager and its pages (`Pager`, `DrawerPage`, `DmsPane`, `ChatPage`, `MembersPage`), the stacked `ProfilePage`, `SettingsPage` and `FriendsPage`, phone-sized rows where the desktop's are pointer-sized (`DmItem`, `MemberItem`, `AccountBar`), `PlatformList` (the platform's scroll feel). See "Navigation" |
+| Shell                         | —                                                                                                                                                                                                                                                                                                                                                     | `Main.qml` (edge to edge, phases, foreground/background), the Android manifest, the Java shim                                                                                                                                                                                                                    |
 
 ### How the sharing is built
 
@@ -102,28 +110,144 @@ One crate, one QML module, two consumers. No file is copied:
 
 ## Native look and feel on Qt Quick 6.11
 
-| Behaviour                         | What Qt 6.11 does by itself                                                                                                                        | What the prototype adds                                                                                                                                                                                                                   | State                                                                                                                                                |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Edge to edge, insets              | **Native.** `Qt.ExpandedClientAreaHint` draws under the bars; the `SafeArea` attached property gives the bar and cutout margins                    | Pages pad by `SafeArea.margins`                                                                                                                                                                                                           | Verified, including a taller status bar after a reboot                                                                                               |
-| Predictive back                   | **No.** Qt's manifest template turns `enableOnBackInvokedCallback` off and Back arrives as a key                                                   | Java shim: an `OnBackAnimationCallback` registered only while there is a page to pop, its progress driving the page, so the system plays its own back-to-home preview at the root. Before API 33, Back stays a key the shim handles       | Verified: the page follows the finger, then pops; the app stays open                                                                                 |
-| Keyboard resize                   | **Partly.** With edge to edge (targetSdk 35+) the window is not resized and Qt reports no IME inset in `SafeArea`                                  | Java shim: the resting IME inset from the decor view's insets, and every frame of the animation from a `WindowInsetsAnimation` callback on the content view (Qt replaces the decor view's own); the composer sits on it (`adjustNothing`) | Verified at rest: the composer sits on the keyboard and the list stays at its end. The per-frame path is in place but was not captured mid-animation |
-| IME action, autocorrect           | **Native**: suggestions, auto-capitals and autocorrect come through Qt's input connection. `EnterKey.type` sets the action for a single-line field | `EnterKey.type: Qt.EnterKeySend` on the composer                                                                                                                                                                                          | Suggestions verified. The Send action does not reach the IME for a multi-line `TextArea` (still ↵)                                                   |
-| Scroll physics, overscroll, fling | **Partly.** Qt's own rubber band, close to iOS's bounce. No Android stretch; fling speed and friction are Qt's defaults                            | `PlatformList`: the Android 12+ stretch emulated from `verticalOvershoot` (content stays put, scales from the far edge); fling speed and a friction matching `OverScroller`'s spline from `ViewConfiguration` via the shim                | Fling verified by the scroll runs. The stretch is implemented but not yet compared frame by frame                                                    |
-| Haptics                           | **No.**                                                                                                                                            | Shim: `View.performHapticFeedback` (tick, long press, confirm, reject) on taps, sends and reactions                                                                                                                                       | Wired; the emulator has no vibrator to confirm it                                                                                                    |
-| System font, dynamic text size    | **Partly.** Qt's default font is the system's; explicit `pixelSize`s ignore the system text size                                                   | Shim reads `Configuration.fontScale` (`Native.fontScale`)                                                                                                                                                                                 | Not applied yet: the shared `Theme` needs a `textScale` multiplier on its type roles (desktop at 1)                                                  |
-| Dark mode, Material You           | **Native**: `Application.styleHints.colorScheme`, live                                                                                             | `Theme.themeId` follows it. The shim reads Material You's `system_accent1` (`Native.accent`)                                                                                                                                              | Light/dark verified. The accent is not used: Yap's themes are brand palettes (owner decision)                                                        |
-| Share sheet                       | **No** (Qt has `QDesktopServices` for URLs only)                                                                                                   | Shim: `ACTION_SEND` chooser, on a long press on a message row                                                                                                                                                                             | Wired, but a long press on the text itself starts text selection first; a phone message menu should own the gesture                                  |
-| Notifications                     | **No** FCM/APNs module                                                                                                                             | —                                                                                                                                                                                                                                         | Platform code (FirebaseMessagingService, APNs) under any option, the same work as for Compose                                                        |
-| Text selection handles            | **Native**: Qt Quick's text fields draw Android-style handles and the cut/copy/paste bar                                                           | `persistentSelection` on the composer                                                                                                                                                                                                     | Verified: a long press on a message's text shows the handles and the Copy / Select all bar                                                           |
-| 60/120 Hz                         | **Native**: the threaded render loop is paced by vsync at the display's rate                                                                       | `[frames]` pacing log (the render thread's swap intervals)                                                                                                                                                                                | 60 Hz verified (the emulator's display); 120 Hz needs a device                                                                                       |
-| Hover and right-click affordances | Qt synthesises hover from touch                                                                                                                    | —                                                                                                                                                                                                                                         | Feels off: the desktop's message hover bar shows on touch (see below)                                                                                |
+| Behaviour                         | What Qt 6.11 does by itself                                                                                                                        | What the prototype adds                                                                                                                                                                                                                                                                                                                                                                                                                    | State                                                                                                                                                |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Edge to edge, insets              | **Native.** `Qt.ExpandedClientAreaHint` draws under the bars; the `SafeArea` attached property gives the bar and cutout margins                    | Pages pad by `SafeArea.margins`                                                                                                                                                                                                                                                                                                                                                                                                            | Verified, including a taller status bar after a reboot                                                                                               |
+| Predictive back                   | **No.** Qt's manifest template turns `enableOnBackInvokedCallback` off and Back arrives as a key                                                   | Java shim: an `OnBackAnimationCallback` registered only while there is a page to pop, its progress driving the page, so the system plays its own back-to-home preview at the root. Before API 33, Back stays a key the shim handles                                                                                                                                                                                                        | Verified: the page follows the finger, then pops; the app stays open                                                                                 |
+| Keyboard resize                   | **Partly.** With edge to edge (targetSdk 35+) the window is not resized and Qt reports no IME inset in `SafeArea`                                  | Java shim: the resting IME inset from the decor view's insets, and every frame of the animation from a `WindowInsetsAnimation` callback on the content view (Qt replaces the decor view's own); the composer sits on it (`adjustNothing`)                                                                                                                                                                                                  | Verified at rest: the composer sits on the keyboard and the list stays at its end. The per-frame path is in place but was not captured mid-animation |
+| IME action, autocorrect           | **Native**: suggestions, auto-capitals and autocorrect come through Qt's input connection. `EnterKey.type` sets the action for a single-line field | Nothing for the action: Android gives a multi-line field no Send action, so the soft keyboard's Enter adds a line and the send key sends. With a hardware keyboard Enter sends and Shift+Enter adds a line                                                                                                                                                                                                                                 | Verified: suggestions, Enter adding a line, the send key. Not checked with a hardware keyboard                                                       |
+| Scroll physics, overscroll, fling | **Partly.** Qt's own rubber band, close to iOS's bounce. No Android stretch; fling speed and friction are Qt's defaults                            | `PlatformList`: the Android 12+ stretch emulated from `verticalOvershoot` (content stays put, scales from the far edge); fling speed and a friction matching `OverScroller`'s spline from `ViewConfiguration` via the shim                                                                                                                                                                                                                 | Fling verified by the scroll runs. The stretch is implemented but not yet compared frame by frame                                                    |
+| Haptics                           | **No.**                                                                                                                                            | Shim: `View.performHapticFeedback`. The policy: a long-press tick when the message sheet opens, a tick at the swipe-to-reply threshold and for a reaction, confirm on a confirmed delete, reject on a failed send. Nothing on a tap that navigates or a plain send (the pager ticks when a pan lands on another page)                                                                                                                      | Wired; the emulator has no vibrator to confirm it                                                                                                    |
+| System font, dynamic text size    | **Partly.** Qt's default font is the system's; explicit `pixelSize`s ignore the system text size                                                   | Shim reads `Configuration.fontScale` (`Native.fontScale`); `Main.qml` binds `Theme.textScale` to it times Settings' text size factor (0.85 to 2.0). Every type role, its tracking and its line box scale with it, and the px sizes in the core's rich text; icons, avatars and hit areas do not                                                                                                                                            | Verified at 1.3: names, messages, times, rows and sheets scale and nothing clips. Read when the app returns to the front, not live                   |
+| Dark mode, Material You           | **Native**: `Application.styleHints.colorScheme`, live                                                                                             | `Theme.themeId` follows it. The shim reads Material You's `system_accent1` (`Native.accent`)                                                                                                                                                                                                                                                                                                                                               | Light/dark verified. The accent is not used: Yap's themes are brand palettes (owner decision)                                                        |
+| Share sheet                       | **No** (Qt has `QDesktopServices` for URLs only)                                                                                                   | Shim: `ACTION_SEND` chooser, from the message sheet's Share                                                                                                                                                                                                                                                                                                                                                                                | Verified: the system sheet opens with the message's text                                                                                             |
+| Photo picker                      | **No.** Qt's `FileDialog` opens the documents UI                                                                                                   | Shim: the system photo picker (`ACTION_PICK_IMAGES`, no permission) on 13+, `GET_CONTENT` on images and videos before; each item copied into the cache for the core's path-based upload                                                                                                                                                                                                                                                    | Verified on API 35: three pictures picked, uploaded with progress, one retried, sent                                                                 |
+| Pinch, double-tap, swipe away     | **Native** building blocks: `PinchArea`, `TapHandler`, `DragHandler`, a snapping `ListView`                                                        | `ImageViewerPage`: zoom about the fingers or the tap, pan, page between pictures, swipe down to close with the scrim fading; Back closes it first                                                                                                                                                                                                                                                                                          | Double-tap, paging, swipe down and Back verified; pinch needs two fingers, which `adb` cannot send                                                   |
+| Notifications                     | **No** FCM/APNs module                                                                                                                             | Shim: a FirebaseMessagingService drawing the server's data-only pushes (MessagingStyle, Reply, Mark as read), the core registering the token ("Push notifications" below)                                                                                                                                                                                                                                                                  | Verified on API 35 (Google APIs): a DM pushed in the background and with the process killed, Reply, tap to open; APNs not started                    |
+| Text selection handles            | **Native**: Qt Quick's text fields draw Android-style handles and the cut/copy/paste bar                                                           | `persistentSelection` on the composer. In the list a press on a message's text belongs to the row (`selectByMouse: !Theme.touch`); the sheet's Select text puts the text on a page of its own                                                                                                                                                                                                                                              | Verified on that page: a long press selects a word and shows the handles and the Copy / Select all bar                                               |
+| 60/120 Hz                         | **Native**: the threaded render loop is paced by vsync at the display's rate                                                                       | `[frames]` pacing log (the render thread's swap intervals)                                                                                                                                                                                                                                                                                                                                                                                 | 60 Hz verified (the emulator's display); 120 Hz needs a device                                                                                       |
+| Hover and right-click affordances | Qt synthesises hover from touch                                                                                                                    | `Theme.hoverUi` off: the shared delegates' hover handlers, tints, hover-revealed keys, tooltips and hover prefetch are gated on it. `Theme.touch` on: a long press on a message emits what a right click does (`menuRequested`), rows tint while pressed, rows and keys take the touch sizes, a small key answers within 48 px (`Theme.hitMin`), and the right-click handlers are off (a touch carries no button, so a tap passed for one) | Verified: no hover bar or tint after a tap; a long press anywhere on a message, its text included, opens the sheet                                   |
+| Bottom sheets                     | **No.** Controls' `Drawer` has no detents and no nested scrolling                                                                                  | `BottomSheet.qml`: a scrim, 4 px top corners, a resting detent at 60 % of the window and a pull to full height, a drag or fling down to close, an inner list that hands its top edge to the sheet, the keyboard pushing it up. Back closes it and the predictive back gesture moves it first (`Native.pushBackLayer`)                                                                                                                      | Verified: open, pull to full, drag to close, Back, the back preview, a search field with the keyboard up                                             |
+| Message actions                   | —                                                                                                                                                  | `MessageSheet` (quick reactions, Reply, Edit, View reactions, Copy text, Select text, Share, Copy link, Mark unread, Profile, Remove embeds, Delete), `EmojiSheet` on the desktop picker's `Emoji` and `EmojiGridModel` (search, skin tone, recents), `ReactionSheet` on `Extras.reactions`, `ConfirmSheet`, `SelectTextPage`, and `SwipeReply` (a leftward drag of the row, armed at 64 px)                                               | Verified, and read back as the peer account: a reaction, a reply, an edit and a delete. Profile only loads `Profile`; its page is the shell's        |
+| System bar icons                  | Not relied on                                                                                                                                      | Shim: `Native.lightBars` (`WindowInsetsController.setSystemBarsAppearance`; the view flags before API 30), bound to the theme's ground. `Native.holdDarkBars` keeps them light over a dark surface                                                                                                                                                                                                                                         | Verified: dark icons on the light theme, light icons on the dark one. `holdDarkBars` has no user yet                                                 |
 
-The shim is one C++ singleton (`qt/cpp/native.*`, 280 lines) over one Java
-class (`qt/android/src/dev/yap/qtproto/NativeShim.java`, 170 lines). An
+The shim is one C++ singleton (`qt/cpp/native.*`, 500 lines) over one Java
+class (`qt/android/src/dev/yap/qtproto/NativeShim.java`, 445 lines). An
 iOS build backs the same `Native` properties with Swift or Objective-C:
 `UIScreenEdgePanGestureRecognizer` for back, keyboard notifications,
 `UIFeedbackGenerator`, `UIActivityViewController`, Dynamic Type's
 `preferredContentSizeCategory`.
+
+## Navigation
+
+The shell is Discord's three pages, as approved for the Expo app
+(`apps/mobile` `HomePager.tsx`), in Yap's instrument language:
+
+- **Drawer** (underneath): the server rail with Home on top, the open
+  server's channel tree or Home's direct messages beside it, your account
+  along the foot.
+- **Chat** (over it): a swipe right or the header's menu key slides it aside
+  to a 56dp peek; picking a conversation, a tap on the peek or a swipe left
+  brings it back.
+- **Members** (to the chat's right): opened by the header's key only. A
+  leftward drag on the chat is left free for a message's own gesture, and
+  Android's gesture navigation owns the right edge.
+
+`Pager.qml` moves one number, the chat's offset. A `DragHandler` on an item
+over the pages watches every touch and claims it after 14dp of sideways
+travel; a list that started scrolling first keeps its touch. `DragHandler`
+has no direction of its own, so a `PointHandler` beside it reads which way
+the touch set off (at 6dp) and switches the pan off until the finger lifts
+when it is the wrong way: from the chat only a rightward drag pans, from the
+drawer only a leftward one. On release a
+flick over 500dp/s decides the page, otherwise 35% of the way does, and
+DESIGN's panel spring finishes the move: critically damped (stiffness 360,
+no overshoot), about 250ms, started at the finger's velocity. Qt's
+`SpringAnimation` cannot start from a velocity, so the spring is a
+`FrameAnimation` integrator. Under Remove animations the page lands at
+once.
+
+| Width         | Layout                                                                                 |
+| ------------- | -------------------------------------------------------------------------------------- |
+| under 840dp   | the pager                                                                              |
+| 840 to 1199dp | drawer (324dp) and chat side by side; members slide over the chat's right edge (320dp) |
+| 1200dp and up | members are a 280dp column of their own, shown until their key hides it                |
+
+Rotation is unlocked; a phone in landscape is the middle row.
+
+Back steps through what is on top, in order: a sheet or stacked page
+(profile, settings), members, the chat, then the drawer, where the app
+leaves. `Native.handlesBack` is true only while something is above the
+drawer, so at the root the system plays its own back-to-home preview. Leaving
+never ends the process: Qt's activity exits when it is destroyed, and from
+Android 14 the system keeps a root launcher activity on Back only when the
+home app started it (`shouldMoveTaskToBack`); started from a notification, a
+link or `adb`, it is finished and the next start is cold. The shim checks how
+the activity was started (`NativeShim.keepsTaskAtRoot`: a plain launcher
+intent whose referrer is the home app) and otherwise keeps its callback at the
+root, where Back moves the task to the back itself. That case has no
+back-to-home preview: the system plays it only for its own handler. The
+predictive gesture's progress drives whichever is on top: a stacked page
+shrinks or drops, the pager's chat follows the finger 40% of the way toward
+the page behind and the spring finishes or returns it.
+
+What rides on the desktop's objects unchanged: `Nav.selectHomeLast`,
+`selectServer`, `selectChannel` and `openDm`; `DmListModel` and
+`MemberListModel`; `Nav.dmUnread` for Home's count; the unread and mention
+marks the shared `ServerIcon` and `TreeRow` already draw; `ConnectionStrip`
+(`Nav.linkAttempt`, `linkOffline`, `retryLink`) and `UnreadBanner` (with a
+phone-only jump to the first unread message) under the chat header; the
+`Profile` object behind the profile sheet. The conversation counts as read
+only while the chat page is on screen with nothing over it. The chat page
+now outlives the conversation, so it lands each one as the desktop does (on
+the unread divider under the banner, else at the end, again on
+`Chat.reland`) and reports the top row with `Chat.setSeenFrom`, which is
+what clears a mention's count.
+
+Verified on the emulator (portrait 411dp, landscape 914dp): the pan both
+ways, a short drag returning, a flick, the peek's tap, a leftward drag on
+the chat moving nothing, a vertical scroll not panning; Home and server
+switching; a DM opened from the list and from a profile's Message; Home's
+count for an unread DM; a peer mention raising the server's count and
+opening the channel clearing it; Back through sheet, members, chat and
+drawer; the predictive gesture on the chat and on the profile sheet,
+committed and cancelled; "Back online" on the strip; landscape side by side
+with the members panel. Not verified: the 1200dp members column (the shared
+emulator's size must not be changed), the strip's offline and reconnecting
+states (the emulator keeps its mobile data), haptics, and the unread
+banner's jump (no unread backlog arrived while the app was closed).
+
+Not there yet:
+
+- The profile is a phone layout of the `Profile` fields, not the desktop's
+  `ProfileCard`: that card needs QtMultimedia and five desktop-only layers
+  (effects, frames, video banners, badges, platform icons). It rises as a
+  page of the stack; it moves into the shared bottom sheet (drag to
+  dismiss) when that lands.
+- `DmItem` and `MemberItem` are phone rows on the shared models. The
+  desktop's `DmRow` and `MemberEntry` carry right-click menus, nameplates
+  and hover prefetch, and are 32 to 40 px high; sharing them waits for the
+  touch gating of the shared delegates.
+- The rail has no unread-DM avatar keys under Home (the desktop's), no
+  create-server tile and no shop row. Friends is the first row of Home's
+  pane ("Settings and Friends").
+- Voice channels in the tree do nothing on a tap.
+- Side by side, the image viewer covers the chat column, not the window:
+  it lives in the chat page.
+- A message's swipe to reply and the pan share the chat: tried together, a
+  leftward drag that starts on a message replies and the page stays, and a
+  rightward one opens the drawer (the row's handler has no axis for it). A
+  touch that jumps past both thresholds in one event was not tried.
+
+<p>
+<img src="docs/qt-nav-drawer.png" width="180" alt="Qt: the drawer with the chat's peek">
+<img src="docs/qt-nav-dms.png" width="180" alt="Qt: Home's direct messages">
+<img src="docs/qt-nav-members.png" width="180" alt="Qt: the members page">
+<img src="docs/qt-nav-profile.png" width="180" alt="Qt: a profile">
+</p>
+<p>
+<img src="docs/qt-nav-landscape.png" width="540" alt="Qt: drawer and chat side by side in landscape">
+</p>
 
 ## Side by side (same emulator, same account, same channel)
 
@@ -139,8 +263,8 @@ both apps alike; compare them with each other, not with a phone.
 | Snapshot read (cached content)     | 222–280 ms                                                                  | 7–75 ms                                                                                 |
 | Scrolling `#general` (24 flings)   | 751 frames; jank 6.4%; frame time p50 18 ms, p90 23 ms, p95 32 ms (gfxinfo) | about 1,460 frames; swap interval p50 16.6 ms, p95 18–19 ms; 8 frames over 34 ms (0.5%) |
 | Memory after scrolling (PSS)       | 60 MB                                                                       | 148 MB (87 MB before opening the channel)                                               |
-| APK, x86_64                        | 19.5 MB (12.6 MB gzipped), R8 off                                           | 61.4 MB                                                                                 |
-| APK, arm64                         | core 8.7 MB (4.0 MB gzipped) plus Compose; about 12 MB gzipped              | **58.4 MB, 21.2 MB gzipped** (native libraries 13.4 MB xz)                              |
+| APK, x86_64                        | 19.5 MB (12.6 MB gzipped), R8 off                                           | 57.1 MB                                                                                 |
+| APK, arm64                         | core 8.7 MB (4.0 MB gzipped) plus Compose; about 12 MB gzipped              | **55.7 MB, 20.5 MB gzipped** (was 61.5 MB, 22.3 MB; "Size" below)                       |
 
 The two scroll columns measure different things. gfxinfo times each
 frame's work on the UI and render threads; Qt's column is the interval
@@ -161,23 +285,32 @@ with a few spikes when new rows are created.
 <img src="docs/compose-servers.png" width="180" alt="Compose: channel list">
 <img src="docs/compose-chat.png" width="180" alt="Compose: #general">
 </p>
+<p>
+<img src="docs/qt-message-sheet.png" width="180" alt="Qt: the message sheet after a long press">
+<img src="docs/qt-emoji-sheet.png" width="180" alt="Qt: the emoji sheet, searching">
+<img src="docs/qt-swipe-reply.png" width="180" alt="Qt: swipe to reply, armed">
+<img src="docs/qt-inline-edit.png" width="180" alt="Qt: editing a message in place">
+<img src="docs/qt-text-scale.png" width="180" alt="Qt: the system text size at 1.3">
+<img src="docs/qt-sheet-dark.png" width="180" alt="Qt: the message sheet, dark theme">
+</p>
 
 ### What feels off
 
 Qt Quick:
 
-1. The desktop's hover action bar (react, reply, edit, more) shows on a
-   touched message, because Qt synthesises hover from touch. Fix: a
-   `Theme.hoverUi` (or `ShellState`) flag the shared delegate reads, off
-   on touch platforms, and a long-press menu in its place.
-2. The composer's IME shows ↵, not Send (`EnterKey` with a multi-line
-   `TextArea`).
-3. Text does not follow the system text size (no `textScale` in the shared
-   `Theme` yet).
-4. Desktop proportions in places: 40 px avatars and the desktop's row
-   padding read slightly small on a phone. These are tokens, so they can be
-   tuned per platform.
-5. The first cold start is slow (qmlcachegen compiles the QML to C++ but
+1. A grouped message shows no time: the desktop shows it in the gutter on
+   hover, and the phone has no hover. The sheet's header names it.
+2. The long press is a fixed 400 ms (Android's default), not the system's
+   "Touch & hold delay" setting.
+3. Copying says nothing by itself. Android 13 and later show their own
+   clipboard chip; before that there is no confirmation (no toast host yet).
+4. The text size is read when the app comes back to the front, not while
+   it is open.
+5. A sheet at its resting height runs under the gesture bar: its last row
+   is reachable only after a pull up.
+6. Swipe to reply takes leftward drags that start on a message. A pager or
+   a drawer behind the chat gets the rightward ones and the header's.
+7. The first cold start is slow (qmlcachegen compiles the QML to C++ but
    Qt's own libraries load as 15 shared objects); the second and later are
    comparable to Compose.
 
@@ -192,16 +325,40 @@ Compose baseline:
 
 ## Size: what is in the APK, and what can go
 
-arm64, release, shared Qt libraries from download.qt.io (`qt/build.sh`):
+arm64, release, shared Qt libraries from download.qt.io (`qt/build.sh`,
+signed by `qt/sign.sh`), measured 2026-11-10 before the shared `yap-ui`
+crate landed (with it, CI's arm64 APK is 57.9 MB, 21.2 MB gzipped; the
+`qt-android` job prints the per-library list). Libraries are stored
+uncompressed in the APK (page-aligned, loaded in place), so the APK is
+about the sum of its parts; gzip -9 of the whole APK stands in for the
+download size.
 
-| Part                                                                                                   | Size    | xz     |
-| ------------------------------------------------------------------------------------------------------ | ------- | ------ |
-| `libyapqt` (the core, the bridge, the QML compiled to C++, cxx-qt, AnimatedPicture)                    | 13.8 MB | 4.0 MB |
-| Qt Gui, Quick, Core, Qml                                                                               | 26.6 MB | 6.4 MB |
-| Qt QuickTemplates2, QuickControls2 (Basic), Network, QmlModels, Svg, OpenGL, QuickShapes, QuickEffects | 9.6 MB  | 2.0 MB |
-| Plugins: android platform, gif/jpeg/webp/svg, the OpenSSL TLS backend, offscreen                       | 1.9 MB  | 0.5 MB |
-| `libc++_shared`                                                                                        | 1.3 MB  | 0.3 MB |
-| `classes.dex` (Qt's Java, the shim)                                                                    | 5.3 MB  | —      |
+| Part                                                                                                   | Before  | After   |
+| ------------------------------------------------------------------------------------------------------ | ------- | ------- |
+| `libyapqt` (the core, the bridge, the QML compiled to C++, cxx-qt, AnimatedPicture)                    | 14.7 MB | 14.4 MB |
+| Qt Gui, Quick, Core, Qml                                                                               | 27.7 MB | 27.7 MB |
+| Qt QuickTemplates2, QuickControls2 (Basic), Network, QmlModels, Svg, OpenGL, QuickShapes, QuickEffects | 10.2 MB | 10.2 MB |
+| Plugins: android platform, gif/jpeg/webp/svg (before: also the OpenSSL TLS backend and offscreen)      | 1.9 MB  | 1.5 MB  |
+| QML plugin stubs (`libqml_*`)                                                                          | 0.1 MB  | 0.1 MB  |
+| `libc++_shared`                                                                                        | 1.3 MB  | 1.3 MB  |
+| `classes.dex` (Qt's Java, the shim, AndroidX)                                                          | 5.3 MB  | 0.3 MB  |
+| **APK**                                                                                                | 61.5 MB | 55.7 MB |
+| **APK, gzip -9**                                                                                       | 22.3 MB | 20.5 MB |
+
+What made the difference:
+
+- **R8** (`qt/android/build.gradle`, Qt 6.11's template plus a release
+  `minifyEnabled`/`shrinkResources`; `proguard-rules.pro` keeps
+  `org.qtproject.qt.android.**` and `dev.yap.**`, which C++ reaches over
+  JNI by name, and the AndroidX font and `FileProvider` calls Qt's platform
+  plugin makes the same way): the dex was mostly Kotlin, kotlinx coroutines
+  and AndroidX that `androidx.core` pulls in. 5.3 MB to 0.30 MB.
+- **Two plugins dropped** (`qt_import_plugins(... EXCLUDE ...)`): the
+  offscreen platform plugin and the OpenSSL TLS backend (Qt for Android
+  ships no libssl, so it never loaded). 0.4 MB.
+- **Identical code folding** for `libyapqt` (`-Wl,--icf=all`): 0.33 MB.
+  `--icf=safe` folded nothing. `--gc-sections` was already on (the NDK's
+  toolchain file), and Gradle strips the libraries it packages.
 
 Modules used: Core, Gui, Network, Qml (QmlModels, QmlMeta, WorkerScript),
 Quick, QuickControls2 with the Basic style, QuickTemplates2, QuickEffects
@@ -209,32 +366,44 @@ Quick, QuickControls2 with the Basic style, QuickTemplates2, QuickEffects
 
 Dropped already (`qt_import_plugins` in `qt/CMakeLists.txt`): the QML
 debugger and profiler services, the TIFF/ICO/ICNS/TGA/WBMP decoders, icon
-engines, network information. Not linked at all: Multimedia, WebView,
-Widgets, Quick 3D, the other Controls styles, SQL.
+engines, network information, offscreen, the OpenSSL backend. Not linked
+at all: Multimedia, WebView, Widgets, Quick 3D, the other Controls styles,
+SQL.
 
 Next savings, not measured yet:
 
-- R8 on the Java side (5.3 MB of dex);
 - the desktop's bytecode-only QML (`patches/qt-build-utils`; desktop pass 5
   saved 2.8 MiB);
-- the offscreen platform plugin and the OpenSSL backend (both unused);
 - a static Qt for Android with LTO. That needs Qt built from source for
   Android (hours, about 15 GB). Not attempted here, so static vs shared is
   open.
 
 ## Gaps found
 
-- **HTTPS for Qt's own network loads.** The core's HTTP is rustls, but
-  `Image` and `AnimatedPicture` load avatars and attachments through Qt
-  Network. On Android that needs OpenSSL (`libssl`/`libcrypto`), which Qt
-  does not ship. Two ways out: bundle KDAB's `android_openssl` (about 3 MB
-  per ABI), or give the engine a `QNetworkAccessManagerFactory` whose
-  replies come from the core's rustls client. The second keeps one TLS
-  stack and also carries the session for private media, as the desktop's
-  `AuthMedia` does.
+- **HTTPS for Qt's own network loads (done).** `Image` and
+  `AnimatedPicture` load avatars, server icons, attachments and GIFs
+  through Qt Network, whose HTTPS needs OpenSSL on Android, which Qt does
+  not ship (`qt/CMakeLists.txt` drops Qt's OpenSSL TLS plugin). The
+  engine's `QQmlNetworkAccessManagerFactory` (`qt/cpp/rustnetwork.cpp`)
+  answers every http(s) GET with a `QNetworkReply` fed by the core's
+  rustls client (`qt/rust/src/http.rs`, its own two-thread runtime, bodies
+  capped at 32 MiB); `qrc:`, `file:` and image providers stay Qt's. The
+  session goes only to the API's private media (`media_needs_auth`, the
+  desktop's rule, from `ViewUpdate::MediaAuth` in the mobile `Platform`),
+  and reqwest drops it on a redirect to another host. The disk cache (the
+  app's cache folder, 256 MiB) is done in the manager, since
+  `QNetworkDiskCache` only plugs into Qt's own HTTP backend: Qt's load
+  rules (fresh copies served, stale ones revalidated with
+  `If-None-Match`/`If-Modified-Since`), and with no network the last copy
+  is shown. Private media and redirected answers are never cached. Open:
+  the cache is not emptied on sign-out (only public pictures are in it),
+  and the API's avatars answer `max-age=0` with an ETag it does not honour
+  (`200`, not `304`), so each avatar is fetched again per launch.
 - **Exit.** Qt's Android exit path tears down the engine while the core's
-  threads run. Call `yap_mobile_flush` on going to the background (done)
-  and leave by moving the task back, never by quitting the engine.
+  threads run (it ends in a SIGABRT on a render helper thread). Call
+  `yap_mobile_flush` on going to the background (done) and leave by moving
+  the task back, never by quitting the engine or letting the system finish
+  the activity (see "Navigation": Back at the root).
 - **Memory.** 148 MB after a long scroll. Next step: a heap profile of
   `MessageDelegate` on a phone (the desktop's delegate carries hover cards,
   popups and loaders a phone never opens).
@@ -269,40 +438,249 @@ These are open questions for the owner, written up here, not decided:
 ```
 desktop-native/mobile/
 ├── common/platform.rs   rustls client and the logcat bridge, used by both
-├── qt/                  Qt Quick app (dev.yap.qtproto)
+├── qt/                  Qt Quick app (dev.yap.app)
 │   ├── rust/            cxx-qt crate yap_mobile_qt: the mobile Platform
 │   │                    (client.rs) and the com.yap.mobile module; links yap-ui
-│   │   └── qml/         mobile shell and pages; seams/ (Yap.Platform types)
-│   ├── cpp/             main.cpp, native.* (the platform shim)
-│   ├── android/         manifest and NativeShim.java
-│   └── build.sh         Qt for Android + cxx-qt-cmake → APK
+│   │   └── qml/         mobile shell, pager and pages; seams/ (Yap.Platform types)
+│   ├── cpp/             main.cpp, native.* (the platform shim), push.cpp
+│   ├── android/         manifest, NativeShim.java, push/ (FCM), icon and splash,
+│   │                    build.gradle (R8, Firebase)
+│   ├── build.sh         Qt + cxx-qt-cmake → APK (Android) or .app (iOS simulator)
+│   ├── fetch-qt.ps1     Qt 6.11.3 from download.qt.io, pinned by qt-sdk.lock.json
+│   ├── sign.sh          zipalign + apksigner (v2/v3), .sha256
+│   ├── smoke.sh         install, cold start, wait for the first frame
+│   └── ci/              the public CI debug keystore (not for release)
 ├── rust/ android/ build.sh    the Compose baseline (UniFFI)
 └── docs/                screenshots
 ```
+
+### The chat page: composer, attachments, image viewer
+
+`MobileComposer.qml`, `UploadTray.qml` and `ImageViewerPage.qml`, on the
+shared `Chat` API (no core changes):
+
+- **Reply.** `ChatPage.startReply(messageId, author, text)` shows the reply
+  bar (the author, the text on one line, Cancel) and opens the keyboard; the
+  send carries `reply_to_id`. The long-press sheet and swipe to reply call it.
+- **Mentions.** Typing `@sp` asks `Chat.queryMentions`; up to five members
+  float above the composer and a tap puts `@username ` in. The keyboard's
+  word in progress (preedit) counts, so suggestions follow Gboard's
+  composing text, and it is committed before the insert.
+- **Emoji.** A row of the recents (`Emoji.quick`) and common emoji as text,
+  inserted at the caret. The full picker is the shared `EmojiSheet` once it
+  lands; server emoji need the desktop's placeholder handling.
+- **Attachments.** `+` opens the photo picker (`Native.pickMedia`). The tray
+  shows each file's picture, progress and size; remove or cancel, mark
+  sensitive, tap a failed tile to retry (its reason shows in the notice
+  line), tap a finished picture to view it. Files over the limit stay as the
+  core's too-big cards (they are not copied: a sparse file of their size
+  stands in). Sending works with text, pictures or both.
+- **The rest.** Send is enabled by typed text (preedit included) or a
+  finished upload; typing pings go at most every 3 s (the core sends every
+  one it is asked to); the field grows to five lines; each channel keeps its
+  unsent text and reply while the app runs (`Drafts`, cleared on sign-out).
+- **Viewer.** A tap on a message's picture opens it full screen over the
+  chat: pinch or double-tap to zoom, pan, swipe sideways between the
+  message's pictures, swipe down or Back to close, a tap to show or hide the
+  bar (close, `2 / 3`, the name, Share for the link).
+
+Not done yet: a camera shot from the composer; video in the viewer; saving
+to the gallery; sensitive pictures are not blurred in the viewer; on 13+ the
+photo picker names files by their media id (`1000000302.jpg`), not the
+original name; the status bar icons stay dark over the viewer in the light
+theme until the shim can switch them (`Native.lightBars`); picked copies stay
+in the app cache until the next start.
+
+<p>
+<img src="docs/qt-mention.png" width="180" alt="Qt: @ suggestions above the composer">
+<img src="docs/qt-reply.png" width="180" alt="Qt: replying to a message">
+<img src="docs/qt-upload-tray.png" width="180" alt="Qt: two pictures in the upload tray">
+<img src="docs/qt-image-viewer.png" width="180" alt="Qt: the image viewer">
+</p>
+
+### Push notifications
+
+The server's push path is the Expo app's (`/api/push-tokens`,
+`src/services/push.service.ts`): the app registers its FCM token with
+`push_format: "native"` and `app_variant: "qt"`, and the server sends
+data-only pushes (`ralph: "2"`, `kind: message | read`) that the app draws.
+
+- **Token.** At each start the shim asks FCM for the token
+  (`push/PushShim.java`) and hands it to the core (`rust/src/push.rs`,
+  `Command::RegisterPush`), which registers it once the session's `me` is
+  known, and again for each account signed in later (a failed try again at
+  the next gateway Ready). A rotated token
+  (`onNewToken`) registers the same way, or, with the app killed, straight
+  from Java with the stored session. Sign-out unregisters first
+  (`DELETE /api/push-tokens`; the session's revoke waits for it, at most
+  3 s).
+- **Drawing** (`push/MessageNotifier.java`, a port of the Expo app's
+  `MessageNotifier.kt`): one MessagingStyle notification per conversation,
+  with the sender's avatar, the last eight messages and the brand accent,
+  grouped under a summary, on the channels `dms`, `mentions` and `other`
+  (the Expo app's ids). Each conversation gets a long-lived shortcut, so it
+  is listed under Android 11+'s Conversations. A read push (`kind: read`,
+  read on another device) takes the conversation's notification down.
+- **Actions.** Reply (RemoteInput, an answer to the newest message) and Mark
+  as read. With the app running they go into the core as the desktop's
+  toast actions (`Command::ToastReply` only with the app in front,
+  `ToastMarkRead`); otherwise the receiver calls the API, and a failed
+  reply shows as "Not sent: ...", with the session file the core keeps
+  (`client.rs` `SESSION_FILE`; its folder and the API's origin are handed
+  over at each start, `PushStore`).
+- **Tap.** The notification opens the app at its conversation: the intent
+  carries the channel, server and (a DM's) person ids. `YapActivity` (Qt's
+  activity) hands each fresh start's and `onNewIntent`'s tap to the shim,
+  which keeps it until Qt is up (a task relaunched from Recents gets the tap
+  before `main()` runs); a restored or from-Recents start's old intent is
+  ignored. `Native.openRequested` / `takeOpenRequest()` give it to
+  `Main.qml`, which calls `Nav.openChannel` (the core's `OpenChannel`,
+  switching servers first; a DM the list does not have yet, as on a launch
+  from the cache, opens when the list answers) once signed in, and slides
+  the chat in.
+- **In front.** `Native.activeConversation` is the conversation being read
+  (`Main.qml` binds it to `Nav.activeChannelId` while the chat is on screen
+  and the app is active): its pushes are not shown and its notification is
+  taken down.
+- **Permission.** `POST_NOTIFICATIONS` (API 33+) is asked for once, when
+  the first conversation opens. `Native.notificationsEnabled` (read again
+  whenever the app returns) and `Native.requestNotifications()` (the dialog
+  while it can still show, else the app's notification settings) are for
+  Settings.
+- **Background.** `Session.setVisible(false)` also sends
+  `Command::Suspend(true)`: a minute into the background the gateway
+  closes (a call or a session still booting puts it off by another minute),
+  and it reconnects (a Ready that refetches what is on screen) as soon as
+  the app is back. The desktop never suspends.
+
+Firebase is set up without the google-services Gradle plugin:
+`android/build.gradle` reads the `google-services.json` that
+`YAP_GOOGLE_SERVICES_JSON` names, takes the client for the application id,
+and writes the string resources the plugin would (`google_app_id`,
+`google_api_key`, `gcm_defaultSenderId`, `project_id`), from which
+FirebaseInitProvider starts Firebase. The file holds API keys and stays out
+of the repository; CI decodes the `QT_GOOGLE_SERVICES_JSON_BASE64` secret
+into the build folder. Without it the APK builds and runs, with no pushes.
+`dev.yap.app` is registered in the Firebase project the server's
+`FCM_SERVICE_ACCOUNT` sends from.
+
+### Settings and Friends
+
+Both are pages of the stack (they slide in from the right), built on the
+desktop's objects with phone list layouts:
+
+- **Settings** (the account row at the drawer's foot): who is signed in,
+  then numbered sections under 2px ink rules (the desktop's rule cards).
+  _Status_: Online, Idle, Do not disturb, Invisible and the custom status
+  line (`Session.setStatus`). _Appearance_: the core's seven themes as
+  thumbnails (`Settings.chooseTheme`, kept in this device's
+  `appearance.json`; "Use on all my devices" is `Settings.changeThemeSync`).
+  A phone starts on Match system: `yap_mobile_init` seeds `system` before
+  the core reads the file (the core's default is the desktop's `dark`), and
+  `Main.qml` maps `system` to the light or dark mode, live. _Text size_: a
+  factor (0.85, 1, 1.15, 1.3) over the system's font scale, kept in the
+  app's QSettings (`Prefs.textFactor`); `Main.qml` binds
+  `Theme.textScale` to `clamp(Native.fontScale * factor, 0.85, 2)`, and the
+  section's sample is a message row at that size. _Notifications_: the
+  switch shows `Native.notificationsEnabled`; while off, a tap is
+  `Native.requestNotifications()` (Android's dialog while it still shows,
+  else the app's notification settings); once on, only Android's settings
+  turn them off, so the tap does nothing. _Devices_: the account's
+  sessions (`Settings.loadSessions`); another device signs out after a
+  confirm (`Extras.revokeSession`). The server lists only the current
+  session today (`GET /api/sessions` returns it alone, with `activity:
+null`), so the row reads "Desktop · Desktop client", the client's
+  fallback title, on a phone too, and other devices never show. _About_: the APK's version name, the
+  licence and the privacy policy. _Sign out_ asks first, in place.
+- **Friends** (the first row of Home's pane, with the incoming count): the
+  desktop's `Friends` object behind four tabs (Online, All, Pending,
+  Blocked; the page opens on Pending while requests wait) and Add friend by
+  username. A friend's row opens the DM; anyone else's opens the profile.
+  Requests carry Accept and Ignore or Cancel, a friend's more key opens
+  Profile, Remove and Block in the row, a blocked row has Unblock. Remove,
+  Ignore, Cancel and Block confirm in place (`InlineConfirm`, the desktop's
+  ConfirmStrip at phone size), where the request's progress and any
+  failure show; `ConfirmSheet` closes before the request answers.
+
+`SettingSwitch` and `TabRule` moved from the desktop's components into
+`Yap.Ui` for these pages; the desktop uses the same files.
+
+Verified on the emulator against the test accounts: Do not disturb and a
+custom status set on the phone and read back as the peer from
+`/api/friends`; themes switched live (Midnight, back to Match system) and
+the choice and the Larger factor kept across a force-stop; a request from
+the peer arriving on Pending, accepted on the phone (the peer's list showed
+the friendship), removed after the confirm, then a request sent from the
+phone's Add friend and accepted by the peer arriving live; Message opening
+the DM; Block from a friend's row (the account's list showed the block)
+and Unblock from the Blocked tab; Sign out returning to sign-in and a new
+device code signing in again; Larger scaling the chat's names, messages
+and times to 1.3 (the system at 1.0), and the status bar's icons turning
+light on Midnight under a light system; Notifications off on a fresh
+install, Allow in Android's dialog turning it on, and after a revoke and a
+second refusal the tap opening the app's notification settings, where
+turning them on showed on return. Not verified: signing out another device
+(the server lists one session), and the licence links opening a browser.
+
+<p>
+<img src="docs/qt-settings.png" width="180" alt="Qt: Settings, account and status">
+<img src="docs/qt-settings-theme.png" width="180" alt="Qt: Settings in Midnight, the theme thumbnails">
+<img src="docs/qt-settings-larger.png" width="180" alt="Qt: the chat at the Larger text size">
+<img src="docs/qt-settings-notifications.png" width="180" alt="Qt: Settings, notifications on">
+<img src="docs/qt-friends-pending.png" width="180" alt="Qt: Friends, an incoming request">
+<img src="docs/qt-friends-actions.png" width="180" alt="Qt: Friends, a friend's actions">
+</p>
 
 ### Build and run the Qt app
 
 Needs:
 
-- Qt 6.11.3 for Android, one prefix per ABI. download.qt.io's
-  `all_os/android/qt6_6113/*` archives, about 51 MB each; aqtinstall 3.3
-  does not know 6.11's layout yet;
-- a desktop Qt 6.11.3 for the host tools (`QT_HOST_PATH`; the custom static
-  build in `tools/toolchain.lock.json` works);
-- the Android SDK and NDK 27, JDK 17+, Ninja, and Rust with the Android
-  targets.
+- Qt 6.11.3: the target Qt (Android, one prefix per ABI, or iOS) and a
+  desktop Qt 6.11.3 for the host tools (`QT_HOST_PATH`). `qt/fetch-qt.ps1`
+  downloads exactly the archives `qt/qt-sdk.lock.json` names from
+  download.qt.io and checks each one's SHA-256; `-Refresh` re-pins them from
+  the repository's `Updates.xml` and the `.sha256` files download.qt.io
+  publishes next to each archive. Sets: `android-x86_64`,
+  `android-arm64_v8a`, `host-linux`, `host-mac`, `ios` (qtbase,
+  qtdeclarative, qtsvg, qtimageformats, and ICU on Linux). On Windows the
+  host is the custom static Qt in `tools/toolchain.lock.json`;
+- the Android SDK, NDK r27c (27.2.12479018, the one Qt 6.11.3 for Android
+  was built with; `build.sh` takes `$ANDROID_NDK_ROOT` or the SDK's
+  `ndk/27.2.12479018`, and NDK 27.1 also works), JDK 17+, Ninja, 7-Zip,
+  PowerShell 7, and Rust with the Android targets.
 
 ```sh
+pwsh desktop-native/mobile/qt/fetch-qt.ps1 -Dest $YAPM/qt -Set android-x86_64   # + host-linux off Windows
 export QT_HOST_PATH=<desktop Qt 6.11.3> ANDROID_SDK_ROOT=<sdk>
-YAPM=<a build folder off the system drive> \
-  bash desktop-native/mobile/qt/build.sh x86_64 Release   # or arm64-v8a
-# then zipalign and apksigner the unsigned APK it prints, and adb install
+YAPM=<a build folder off the system drive>   bash desktop-native/mobile/qt/build.sh x86_64 Release   # or arm64-v8a; -D... go to CMake
+bash desktop-native/mobile/qt/sign.sh <the unsigned APK it prints> yap-qt.apk   # debug keystore by default
+adb install -r yap-qt.apk
 adb logcat -s yap-core default                             # core log, QML warnings, [frames]
 ```
 
-`build.sh` points the downloaded Qt's `qmake` wrapper and `target_qt.conf`
-at `QT_HOST_PATH`, as aqtinstall does. Gradle's cache and the build tree go
-under `$YAPM`.
+`build.sh` points the downloaded target Qt's `qmake` wrapper (`qmake.bat`
+on Windows, a shell wrapper elsewhere) and `target_qt.conf` at
+`QT_HOST_PATH`, as aqtinstall does. Gradle's cache and the build tree go
+under `$YAPM`; the target Qt defaults to `$YAPM/qt/<set dir>`
+(`QT_TARGET_ROOT` overrides it). A rebuild in the same tree keeps libraries
+androiddeployqt copied before, so a plugin dropped from the build stays in
+the APK until `android-build/libs` is cleared.
+
+Packaging, from CMake cache variables: `YAP_ANDROID_APP_ID` (default
+`dev.yap.app`; also the Gradle namespace and the iOS bundle id),
+`YAP_ANDROID_VERSION_CODE` (1) and `YAP_ANDROID_VERSION_NAME` (0.1.0);
+`YAP_ANDROID_COMPILE_SDK` and `YAP_ANDROID_BUILD_TOOLS` pin the SDK
+platform and build tools (default: the newest installed). The manifest has
+no `package` attribute. The launcher icon is adaptive, with a
+monochrome layer for themed icons; the splash is ply-0 (light `#f4f4f5`,
+dark `#000000`) with the mark: the system splash on Android 12+, the
+window background before, then Qt's sticky splash, which `main.cpp` fades
+out at the first frame.
+
+`build.sh ios-simulator Release` configures the same project with Qt for
+iOS and builds an unsigned simulator `.app` (x86_64: Qt's iOS libraries
+have arm64 device and x86_64 simulator slices only). It is a compile and
+link check; nothing runs it.
 
 ### Build and run the Compose baseline
 
@@ -322,9 +700,18 @@ POST https://<kova>/api/pub/apps/<publishable key>/device/approve  {"userCode": 
 
 CI (`.github/workflows/desktop-native-mobile.yml`) builds the Compose
 baseline's APK on Ubuntu, and on macOS cross-compiles the core for iOS and
-type-checks its Swift bindings. A CI job for the Qt app needs Qt for Android
-on the runner (and Qt for iOS on macOS for the iOS check). That is the next
-CI step.
+type-checks its Swift bindings. For the Qt app, `qt-android` builds the
+x86_64 and arm64-v8a APKs on Ubuntu with the pinned Qt (archives cached by
+the lock's hash) and NDK r27c, signs them with the public CI debug key
+(`qt/ci/debug.keystore`, so one run's APK installs over another's; never a
+release key), and uploads each APK with its `.sha256` (14 days; version
+code `run * 10 + 2` for arm64, `+ 4` for x86_64, version name
+`0.1.<run>+<commit built>`). `qt-android-smoke` cold-starts the x86_64 APK
+on an API 35 emulator and fails unless it logs `[startup] first frame`
+(`qt/smoke.sh`, which also works against a local emulator; it checks
+start-up only, not sign-in). `qt-ios` builds the simulator `.app` on macOS when
+`mobile/qt` or the workflow changes, by hand, and weekly. Each job runs only
+when its own inputs change.
 
 ## Core refactors in this branch
 
@@ -405,11 +792,14 @@ Each crate was checked by compiling it for `x86_64-linux-android` (NDK 27).
 1. Done: the shared crate and QML module (`yap-ui`, "How the sharing is
    built"). Next on it: the slim-QML size patch for the mobile build, and
    more of the desktop's QML moved into `Yap.Ui` as phone pages need it.
-2. Fix the "feels off" list: a hover flag, a text scale in `Theme`, the
-   IME Send action, per-platform size tokens.
+2. Done: the hover and touch flags, the text scale and the touch size
+   tokens in `Theme`, and the message sheet with its actions. Left: the
+   "feels off" list above.
 3. Images over the core's rustls (a `QNetworkAccessManagerFactory`), then
-   avatars and attachments.
+   avatars and attachments (done; GIF attachments still show their first
+   frame until `MessageMedia` uses `AnimatedPicture`).
 4. Size: R8, bytecode-only QML, and a static-Qt measurement.
 5. CI: Qt for Android on Ubuntu; Qt for iOS on macOS for a compile check of
    the same QML module.
-6. Voice and push: upstream libwebrtc on Android, a foreground service, FCM.
+6. Voice: upstream libwebrtc on Android, a foreground service. Push (FCM) is
+   done ("Push notifications"); call rings and APNs are not.

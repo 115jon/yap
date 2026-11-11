@@ -3,14 +3,15 @@
 //! and the data folder and device name handed to the core.
 
 use std::ffi::{c_char, CStr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use yap_core::auth::TokenStore;
 use yap_core::{
-    Api, GatewayEvents, GatewayHandle, Realtime, Token, ViewUpdate, VoiceCommand, VoiceEvents,
-    VoiceTarget, VoiceUpdate,
+    Api, GatewayEvents, GatewayHandle, Realtime, Token, UploadFile, ViewUpdate, VoiceCommand,
+    VoiceEvents, VoiceTarget, VoiceUpdate,
 };
 use yap_ui::client::gateway;
 use yap_ui::platform::{self, Platform};
@@ -37,6 +38,10 @@ impl Realtime for MobileRealtime {
         )));
     }
 }
+
+/// The session file's name in the data folder. The Java side reads it too
+/// (push/PushStore.java), for a notification's Reply with the app killed.
+pub const SESSION_FILE: &str = "session.token";
 
 /// The session token in the app's private data folder (other apps cannot
 /// read it; Auto Backup is off in the manifest). Prototype only: a release
@@ -78,10 +83,42 @@ impl Platform for Mobile {
     }
 
     fn token_store(&self) -> Arc<dyn TokenStore> {
-        Arc::new(FileVault(self.data.join("session.token")))
+        Arc::new(FileVault(self.data.join(SESSION_FILE)))
+    }
+
+    fn started(&self, commands: &tokio::sync::mpsc::UnboundedSender<yap_core::Command>) {
+        crate::push::started(commands);
+    }
+
+    /// The photo picker's copies in the app cache (`Native.pickMedia`):
+    /// named after the picked item, with the extension its type implies.
+    fn upload_files(&self, paths: &[String]) -> Vec<UploadFile> {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        paths
+            .iter()
+            .enumerate()
+            .filter_map(|(i, path)| {
+                let meta = std::fs::metadata(path).ok().filter(|m| m.is_file())?;
+                let name = Path::new(path).file_name()?.to_string_lossy().into_owned();
+                Some(UploadFile {
+                    local_id: format!("upload-{stamp:x}-{i}"),
+                    path: path.clone(),
+                    content_type: content_type(&name).to_owned(),
+                    name,
+                    size: meta.len(),
+                })
+            })
+            .collect()
     }
 
     fn on_update(&self, update: ViewUpdate) -> bool {
+        // The session for private media (attachments, custom emoji).
+        if let ViewUpdate::MediaAuth(token) = update {
+            crate::http::set_token(token);
+            return true;
+        }
         // Known and not shown here yet; anything else is logged as unhandled.
         matches!(
             update,
@@ -90,8 +127,32 @@ impl Platform for Mobile {
                 | ViewUpdate::Sound(_)
                 | ViewUpdate::StopSound(_)
                 | ViewUpdate::Badge(_)
-                | ViewUpdate::MediaAuth(_)
         )
+    }
+}
+
+/// The MIME type for a picked file's name: the picker offers photos and
+/// videos (the server stores `application/octet-stream` for anything else).
+fn content_type(name: &str) -> &'static str {
+    let ext = name
+        .rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" | "jfif" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "avif" => "image/avif",
+        "heic" => "image/heic",
+        "heif" => "image/heif",
+        "mp4" | "m4v" => "video/mp4",
+        "webm" => "video/webm",
+        "3gp" => "video/3gpp",
+        "mov" => "video/quicktime",
+        "mkv" => "video/x-matroska",
+        _ => "application/octet-stream",
     }
 }
 
@@ -115,11 +176,31 @@ pub extern "C" fn yap_mobile_init(data_dir: *const c_char, device_name: *const c
     crate::platform::stderr_to_logcat();
     let data = text(data_dir).map_or_else(|| PathBuf::from("."), PathBuf::from);
     yap_cache::profile::set_base(data.clone());
+    seed_theme();
     let mut config = yap_core::config::Config::from_env();
     config.platform = std::env::consts::OS.to_owned();
     config.device_name = text(device_name);
     let _ = yap_core::config::set(config);
     platform::install(Mobile { data });
+}
+
+/// A phone follows the system's light or dark mode until a theme is picked
+/// in Settings: before the first, this device's appearance file says
+/// `system` (the core's default is the desktop's `dark`).
+fn seed_theme() {
+    use yap_cache::settings::{self as prefs, AppearancePrefs, APPEARANCE_FILE};
+    let Some(dir) = prefs::app_dir() else {
+        return;
+    };
+    if dir.join(APPEARANCE_FILE).exists() {
+        return;
+    }
+    let seed = AppearancePrefs {
+        theme: "system".into(),
+    };
+    if let Err(error) = prefs::save_appearance(&dir, &seed) {
+        eprintln!("[settings] theme not seeded: {error}");
+    }
 }
 
 /// Commits the snapshot cache's pending write (the app going to the

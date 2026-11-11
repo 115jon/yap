@@ -1,21 +1,41 @@
 package dev.yap.qtproto;
 
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ContentResolver;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.database.Cursor;
 import android.hardware.SensorManager;
+import android.net.Uri;
 import android.os.Build;
+import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.provider.Settings;
+import android.util.Log;
+import android.webkit.MimeTypeMap;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.WindowInsets;
 import android.view.WindowInsetsAnimation;
+import android.view.WindowInsetsController;
 import android.window.BackEvent;
 import android.window.OnBackAnimationCallback;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.RandomAccessFile;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * The Android side of `Native` (cpp/native.h): what Qt Quick does not do by
@@ -29,16 +49,34 @@ public final class NativeShim {
     static native void nativeBackCancelled();
     static native void nativeBackInvoked();
     static native void nativeIme(float dp);
+    static native void nativeMediaCopying();
+    static native void nativeMediaPicked(String[] paths, int failed);
+
+    /** The most files one pick hands to the tray. */
+    private static final int PICK_MAX = 10;
+    /** Picked files are copied under the cache, here, until the next start. */
+    private static final String UPLOADS = "uploads";
+    /** File names stay well under the file system's 255 bytes. */
+    private static final int NAME_BYTES = 160;
+    /** The account's attachment limit for the pick under way (bytes). */
+    private static volatile long pickLimit = Long.MAX_VALUE;
 
     private static Activity activity;
     private static OnBackInvokedCallback back;
     private static boolean backRegistered;
+    /** The app has a page to go back to (Native.handlesBack). */
+    private static boolean backWanted;
+    /** Back at the root leaves the task alive without our help. */
+    private static boolean systemKeepsTask;
     private static float density = 1f;
 
     public static void install(Activity a) {
         activity = a;
         density = a.getResources().getDisplayMetrics().density;
         a.runOnUiThread(NativeShim::installOnUi);
+        // Nothing uploads before the app is up: last run's copies can go.
+        final File uploads = new File(a.getCacheDir(), UPLOADS);
+        new Thread(() -> deleteTree(uploads), "yap-uploads-clean").start();
     }
 
     private static void installOnUi() {
@@ -95,24 +133,83 @@ public final class NativeShim {
         } else if (Build.VERSION.SDK_INT >= 33) {
             back = NativeShim::nativeBackInvoked;
         }
+        systemKeepsTask = keepsTaskAtRoot();
+        applyBack();
+    }
+
+    /**
+     * Whether the system moves the task to the back, instead of finishing
+     * the activity, when Back reaches its default handler at the root.
+     * Finishing ends the process (Qt's onDestroy exits), so the next start
+     * would be a cold one. Android 12 and 13 keep any launcher activity that
+     * is its task's base; Android 14 and later only one the home app started
+     * (ActivityClientController.shouldMoveTaskToBack), so a start from a
+     * notification, a link or another app is finished. There the app takes
+     * Back at the root itself and moves the task back (leave()); the price
+     * is the system's back-to-home preview, which only its own handler gets.
+     */
+    private static boolean keepsTaskAtRoot() {
+        if (Build.VERSION.SDK_INT < 34) return true;
+        Intent intent = activity.getIntent();
+        if (intent == null || !Intent.ACTION_MAIN.equals(intent.getAction())
+                || intent.getCategories() == null || intent.getCategories().size() != 1
+                || !intent.hasCategory(Intent.CATEGORY_LAUNCHER)
+                || intent.getData() != null || intent.getType() != null) {
+            return false;
+        }
+        Uri referrer = activity.getReferrer();
+        if (referrer == null || !"android-app".equals(referrer.getScheme())) return false;
+        ResolveInfo home = activity.getPackageManager().resolveActivity(
+                new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
+                PackageManager.MATCH_DEFAULT_ONLY);
+        return home != null && home.activityInfo != null
+                && home.activityInfo.packageName.equals(referrer.getHost());
+    }
+
+    /** On the UI thread: our callback is in place exactly while it must be. */
+    private static void applyBack() {
+        if (back == null) return;
+        boolean on = backWanted || !systemKeepsTask;
+        OnBackInvokedDispatcher d = activity.getOnBackInvokedDispatcher();
+        if (on && !backRegistered) {
+            d.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, back);
+            backRegistered = true;
+        } else if (!on && backRegistered) {
+            d.unregisterOnBackInvokedCallback(back);
+            backRegistered = false;
+        }
     }
 
     private static void reportIme(WindowInsets insets) {
         nativeIme(insets.getInsets(WindowInsets.Type.ime()).bottom / density);
     }
 
-    /** Takes the back gesture while the app has a page to go back to. */
-    public static void setHandlesBack(boolean on) {
-        if (activity == null || back == null) return;
+    /**
+     * The IME inset as it is now. Back from another activity (the photo
+     * picker) the keyboard may have gone while the listeners were not
+     * called, which would leave the composer floating where it was.
+     */
+    public static void refreshIme() {
+        if (activity == null || Build.VERSION.SDK_INT < 30) return;
         activity.runOnUiThread(() -> {
-            OnBackInvokedDispatcher d = activity.getOnBackInvokedDispatcher();
-            if (on && !backRegistered) {
-                d.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, back);
-                backRegistered = true;
-            } else if (!on && backRegistered) {
-                d.unregisterOnBackInvokedCallback(back);
-                backRegistered = false;
-            }
+            View decor = activity.getWindow().getDecorView();
+            decor.post(() -> {
+                WindowInsets insets = decor.getRootWindowInsets();
+                if (insets != null) reportIme(insets);
+            });
+        });
+    }
+
+    /**
+     * Takes the back gesture while the app has a page to go back to, and at
+     * the root too when the system would finish the activity there
+     * (keepsTaskAtRoot).
+     */
+    public static void setHandlesBack(boolean on) {
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            backWanted = on;
+            applyBack();
         });
     }
 
@@ -129,6 +226,31 @@ public final class NativeShim {
         }
         activity.runOnUiThread(
                 () -> activity.getWindow().getDecorView().performHapticFeedback(constant));
+    }
+
+    /**
+     * Dark status and navigation bar icons (`light`: the ground under the
+     * bars is light), or light ones.
+     */
+    @SuppressWarnings("deprecation")
+    public static void setLightBars(boolean light) {
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            View decor = activity.getWindow().getDecorView();
+            if (Build.VERSION.SDK_INT >= 30) {
+                WindowInsetsController c = decor.getWindowInsetsController();
+                if (c == null) return;
+                int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                c.setSystemBarsAppearance(light ? mask : 0, mask);
+            } else {
+                // API 28 and 29: the view flags (status bar 23+, navigation 26+).
+                int mask = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                        | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                int flags = decor.getSystemUiVisibility();
+                decor.setSystemUiVisibility(light ? flags | mask : flags & ~mask);
+            }
+        });
     }
 
     public static void share(String text) {
@@ -181,5 +303,143 @@ public final class NativeShim {
         double distance = friction * Math.exp(rate / (rate - 1.0) * l);
         double decel = v * v / (2.0 * distance);
         return (float) (decel / density);
+    }
+
+    // ---- Photos and videos for the composer ---------------------------------
+
+    /**
+     * The system photo picker (API 33+: no permission, the user chooses what
+     * the app sees), else the documents UI on images and videos. The C++
+     * side starts it for a result (QtAndroidPrivate::startActivity).
+     */
+    public static Intent pickMediaIntent(long limitBytes) {
+        pickLimit = limitBytes > 0 ? limitBytes : Long.MAX_VALUE;
+        if (Build.VERSION.SDK_INT >= 33) {
+            return new Intent(MediaStore.ACTION_PICK_IMAGES)
+                    .putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX,
+                            Math.min(PICK_MAX, MediaStore.getPickImagesMaxLimit()));
+        }
+        return new Intent(Intent.ACTION_GET_CONTENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("*/*")
+                .putExtra(Intent.EXTRA_MIME_TYPES, new String[] {"image/*", "video/*"})
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+    }
+
+    /**
+     * The picker's result. The core uploads from a path and a content://
+     * grant ends with the activity, so each item is copied into the app's
+     * cache under its display name (with the extension its type implies),
+     * off the UI thread; the paths go back through nativeMediaPicked, with
+     * how many picked items could not be read. An item over the account's
+     * limit is not copied: a sparse file of its size stands in, which the
+     * core turns into its too-big card without reading it.
+     */
+    public static void mediaPicked(int resultCode, Intent data) {
+        final List<Uri> uris = new ArrayList<>();
+        if (activity != null && resultCode == Activity.RESULT_OK && data != null) {
+            ClipData clip = data.getClipData();
+            if (clip != null) {
+                for (int i = 0; i < clip.getItemCount() && uris.size() < PICK_MAX; i++) {
+                    Uri uri = clip.getItemAt(i).getUri();
+                    if (uri != null) uris.add(uri);
+                }
+            } else if (data.getData() != null) {
+                uris.add(data.getData());
+            }
+        }
+        if (uris.isEmpty()) {
+            nativeMediaPicked(new String[0], 0);
+            return;
+        }
+        nativeMediaCopying();
+        final File batch = new File(new File(activity.getCacheDir(), UPLOADS),
+                Long.toString(System.nanoTime()));
+        new Thread(() -> {
+            List<String> paths = new ArrayList<>();
+            for (int i = 0; i < uris.size(); i++) {
+                // One folder per item: two picks may share a display name.
+                File copy = copyIn(uris.get(i), new File(batch, Integer.toString(i)));
+                if (copy != null) paths.add(copy.getAbsolutePath());
+            }
+            nativeMediaPicked(paths.toArray(new String[0]), uris.size() - paths.size());
+        }, "yap-pick-copy").start();
+    }
+
+    private static File copyIn(Uri uri, File dir) {
+        ContentResolver resolver = activity.getContentResolver();
+        if (!dir.mkdirs() && !dir.isDirectory()) return null;
+        File out = new File(dir, fileName(resolver, uri, resolver.getType(uri)));
+        long size = size(resolver, uri);
+        if (size > pickLimit) {
+            try (RandomAccessFile stand = new RandomAccessFile(out, "rw")) {
+                stand.setLength(size);
+                return out;
+            } catch (IOException e) {
+                Log.w("yap-native", "could not size a picked file", e);
+                out.delete();
+                return null;
+            }
+        }
+        try (InputStream in = resolver.openInputStream(uri)) {
+            if (in == null) return null;
+            try (OutputStream to = new FileOutputStream(out)) {
+                byte[] buffer = new byte[64 * 1024];
+                int n;
+                while ((n = in.read(buffer)) > 0) to.write(buffer, 0, n);
+            }
+            return out;
+        } catch (IOException | RuntimeException e) {
+            Log.w("yap-native", "could not copy a picked file", e);
+            out.delete();
+            return null;
+        }
+    }
+
+    /** The item's size from its provider, or -1 when it does not say. */
+    private static long size(ContentResolver resolver, Uri uri) {
+        try (Cursor c = resolver.query(uri, new String[] {OpenableColumns.SIZE},
+                null, null, null)) {
+            if (c != null && c.moveToFirst() && !c.isNull(0)) return c.getLong(0);
+        } catch (RuntimeException e) {
+            // No size column: copied in full.
+        }
+        return -1;
+    }
+
+    /** The item's display name, safe as a file name, with its type's extension. */
+    private static String fileName(ContentResolver resolver, Uri uri, String mime) {
+        String name = null;
+        try (Cursor c = resolver.query(uri, new String[] {OpenableColumns.DISPLAY_NAME},
+                null, null, null)) {
+            if (c != null && c.moveToFirst() && !c.isNull(0)) name = c.getString(0);
+        } catch (RuntimeException e) {
+            // A provider without the column: the URI's last segment below.
+        }
+        if (name == null || name.trim().isEmpty()) name = uri.getLastPathSegment();
+        if (name == null) name = "";
+        name = name.replaceAll("[\\\\/:*?\"<>|\\x00-\\x1f]", "_").replaceAll("^[.\\s]+", "").trim();
+        if (name.isEmpty()) name = "file";
+        // The core types an upload by its extension.
+        String ext = mime == null ? null : MimeTypeMap.getSingleton().getExtensionFromMimeType(mime);
+        String lower = name.toLowerCase(Locale.ROOT);
+        if (ext != null && !lower.endsWith("." + ext)
+                && !(ext.equals("jpg") && (lower.endsWith(".jpeg") || lower.endsWith(".jfif")))) {
+            name = name + "." + ext;
+        }
+        // Too long in bytes: whole code points go from the front, so the
+        // extension stays.
+        while (name.getBytes(StandardCharsets.UTF_8).length > NAME_BYTES) {
+            name = name.substring(Character.charCount(name.codePointAt(0)));
+        }
+        return name;
+    }
+
+    private static void deleteTree(File file) {
+        File[] children = file.listFiles();
+        if (children != null) {
+            for (File child : children) deleteTree(child);
+        }
+        file.delete();
     }
 }

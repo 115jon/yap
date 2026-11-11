@@ -11,6 +11,7 @@
 #include <QtCore/QSysInfo>
 #ifdef Q_OS_ANDROID
 #include <QtCore/QJniObject>
+#include <QtCore/qcoreapplication_platform.h>
 #endif
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
@@ -25,6 +26,7 @@
 #include <vector>
 
 #include "native.h"
+#include "rustnetwork.h"
 #include "yap_ui.h"
 
 extern "C" void yap_mobile_init(const char* data_dir, const char* device_name);
@@ -73,6 +75,10 @@ int main(int argc, char* argv[])
   qmlRegisterSingletonInstance("Yap.Mobile", 1, 0, "Native", native);
 
   QQmlApplicationEngine engine;
+  // Network pictures over the core's rustls client, with a disk cache in
+  // the app's cache folder (Qt's own HTTPS would need OpenSSL).
+  engine.setNetworkAccessManagerFactory(new RustNetworkFactory(
+    QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/images")));
   // AnimatedPicture and ViewportWatch (Yap.Media; GIF, APNG and WebP
   // through yap-anim), the icon and dither providers: the desktop's C++.
   yap_ui_register(engine);
@@ -130,6 +136,11 @@ int main(int argc, char* argv[])
                                           return;
                                         qInfo("[startup] first frame %lld ms",
                                               static_cast<long long>(startup.elapsed()));
+#ifdef Q_OS_ANDROID
+                                        // Qt's splash (sticky in the manifest)
+                                        // fades out over the first frame.
+                                        QNativeInterface::QAndroidApplication::hideSplashScreen(200);
+#endif
                                       });
                    });
   engine.loadFromModule("com.yap.mobile", "Main");

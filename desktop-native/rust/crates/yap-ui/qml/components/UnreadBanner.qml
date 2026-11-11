@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // UnreadBanner.tsx: pinned over the top of the list (it overlays, so the
@@ -14,6 +13,12 @@ Rectangle {
     required property int sinceDay
     required property int today
     signal markRead()
+    // A phone taps the summary to jump to the first unread message, and
+    // gets a key tall enough for a thumb (the row's own height is the
+    // caller's). Off on the desktop, which has neither.
+    property bool jumpable: false
+    property int keyHeight: 24
+    signal jumpRequested()
 
     readonly property string dayPart: sinceDay === today ? ""
         : sinceDay === today - 1 ? qsTr("yesterday at ") : qsTr("%1 at ").arg(sinceDate)
@@ -70,6 +75,16 @@ Rectangle {
         height: 1
         color: Theme.badge
     }
+    Item {
+        anchors.left: parent.left
+        anchors.right: markKey.left
+        height: parent.height
+        visible: root.jumpable
+        Accessible.role: Accessible.Button
+        Accessible.name: qsTr("Jump to the first new message")
+        Accessible.onPressAction: root.jumpRequested()
+        TapHandler { onTapped: root.jumpRequested() }
+    }
     // Ghost key: "Mark as read" with a check.
     Rectangle {
         id: markKey
@@ -77,7 +92,7 @@ Rectangle {
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
         width: markRow.implicitWidth + 16
-        height: 24
+        height: root.keyHeight
         radius: Theme.radius
         color: markHover.hovered ? Theme.tint1 : "transparent"
         EaseColor on color {}
