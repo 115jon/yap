@@ -76,7 +76,8 @@ set_target_properties(yapqt PROPERTIES
 file(GLOB YAP_FONT_FILES RELATIVE ${DESKTOP}/assets CONFIGURE_DEPENDS ${DESKTOP}/assets/fonts/*.ttf)
 file(STRINGS ${DESKTOP}/assets/icons/files.txt YAP_ICON_NAMES)
 list(TRANSFORM YAP_ICON_NAMES PREPEND icons/ OUTPUT_VARIABLE YAP_ICON_FILES)
-set(YAP_ASSET_FILES ${YAP_FONT_FILES} ${YAP_ICON_FILES})
+# Home's Yappy mark on the rail (Theme.homeMark).
+set(YAP_ASSET_FILES ${YAP_FONT_FILES} ${YAP_ICON_FILES} svg/home-light.svg svg/home-dark.svg)
 list(TRANSFORM YAP_ASSET_FILES PREPEND ${DESKTOP}/assets/ OUTPUT_VARIABLE YAP_ASSET_PATHS)
 qt_add_resources(yapqt yap_assets
   PREFIX /

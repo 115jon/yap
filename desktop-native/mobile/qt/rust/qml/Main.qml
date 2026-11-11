@@ -5,9 +5,11 @@ import com.yap.mobile
 import Yap.Ui
 
 // The mobile shell: one full-screen window drawn edge to edge (the system
-// bars float over it; SafeArea keeps content clear of them), a stack of
-// pages with the platform's back gesture, and the desktop's sign-in phases.
-// The pages are per platform; the rows inside them are the desktop's.
+// bars float over it; SafeArea keeps content clear of them), the desktop's
+// sign-in phases, and the navigation: Home's pager (drawer, chat, members)
+// with pages and sheets stacked over it, and the platform's back gesture
+// stepping through them. The pages are per platform; the rows inside them
+// are the desktop's.
 Window {
     id: window
 
@@ -29,7 +31,14 @@ Window {
         value: Native.reducedMotion
     }
 
-    Component.onCompleted: Session.start()
+    Component.onCompleted: {
+        // The core starts out focused; say so before anything loads, or a
+        // conversation restored under the drawer counts as read.
+        Chat.setFocused(reading)
+        Session.start()
+    }
+
+    readonly property bool ready: Session.phase === Session.Ready
 
     // Foreground / background: the core keeps the gateway as for a shown
     // window, and the snapshot cache is committed on the way out.
@@ -43,12 +52,60 @@ Window {
         }
     }
 
-    // The open channel counts as read (and its mentions as seen) only while
-    // its page is on screen with the app in front, as the desktop ties it to
-    // window focus.
-    readonly property bool reading: Session.phase === Session.Ready && stack.depth > 1
+    // The open conversation counts as read (and its mentions as seen) only
+    // while it is on screen with nothing over it and the app in front, as
+    // the desktop ties it to window focus.
+    readonly property bool reading: ready && stack.depth === 1 && pager.chatShown
         && Qt.application.state === Qt.ApplicationActive
     onReadingChanged: Chat.setFocused(reading)
+
+    // A profile, over whatever is showing.
+    function openProfile(userId) {
+        // One sheet per person: a second tap must not stack another.
+        if (userId.length === 0 || stack.busy || stack.currentItem?.userId === userId)
+            return
+        Qt.inputMethod.hide()
+        stack.sheet = true
+        stack.push(profilePage, { userId: userId })
+    }
+    function openSettings() {
+        Qt.inputMethod.hide()
+        stack.sheet = false
+        stack.push(settingsPage)
+    }
+    // Close what is on top, or everything down to the pager.
+    function closeTop(all) {
+        if (stack.depth < 2)
+            return
+        stack.sheet = stack.currentItem.sheet
+        if (all)
+            stack.pop(null)
+        else
+            stack.pop()
+    }
+
+    // Back, in order: a sheet or stacked page, then what is over the chat
+    // (its image viewer), the pager's pages (members, chat), then out of
+    // the app from the drawer.
+    function goBack() {
+        if (!ready) {
+            Native.leave()
+            return
+        }
+        if (stack.depth > 1)
+            closeTop(false)
+        else if (!pager.back())
+            Native.leave()
+    }
+
+    // Signed out (here or by the server): nothing stays stacked for the
+    // next account.
+    onReadyChanged: {
+        if (ready)
+            return
+        stack.pop(null, StackView.Immediate)
+        pager.snap()
+    }
 
     Item {
         id: content
@@ -73,18 +130,26 @@ Window {
         StackView {
             id: stack
             anchors.fill: parent
-            visible: Session.phase === Session.Ready
+            visible: window.ready
             enabled: visible
-            initialItem: ServersPage {
-                onChannelOpened: stack.push(chatPage)
+
+            // A sheet rises from the bottom edge and drops back; a page
+            // slides and fades in from the right (Android's default
+            // activity transition; iOS would push from the right edge).
+            // Set before each push and pop, for the item that moves.
+            property bool sheet: false
+
+            initialItem: Pager {
+                id: pager
+                onProfileRequested: userId => window.openProfile(userId)
+                onSettingsRequested: window.openSettings()
             }
 
-            // Android's slide-and-fade between pages (the system default
-            // activity transition); iOS would push from the right edge.
             pushEnter: Transition {
                 ParallelAnimation {
-                    NumberAnimation { property: "x"; from: stack.width * 0.25; to: 0; duration: Theme.durSheet; easing.type: Easing.OutCubic }
-                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.durSheet; easing.type: Easing.OutCubic }
+                    NumberAnimation { property: "x"; from: stack.sheet ? 0 : stack.width * 0.25; to: 0; duration: Theme.durSheet; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
+                    NumberAnimation { property: "y"; from: stack.sheet ? stack.height : 0; to: 0; duration: Theme.durSheet; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeDrawer }
+                    NumberAnimation { property: "opacity"; from: stack.sheet ? 1 : 0; to: 1; duration: Theme.durSheet; easing.type: Easing.OutCubic }
                 }
             }
             pushExit: Transition {
@@ -95,46 +160,65 @@ Window {
             }
             popExit: Transition {
                 ParallelAnimation {
-                    NumberAnimation { property: "x"; to: stack.width * 0.25; duration: Theme.durSheet; easing.type: Easing.InCubic }
-                    NumberAnimation { property: "opacity"; to: 0; duration: Theme.durSheet; easing.type: Easing.InCubic }
+                    NumberAnimation { property: "x"; to: stack.sheet ? 0 : stack.width * 0.25; duration: Theme.dur4Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+                    NumberAnimation { property: "y"; to: stack.sheet ? stack.height : 0; duration: Theme.dur4Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
+                    NumberAnimation { property: "opacity"; to: stack.sheet ? 1 : 0; duration: Theme.dur4Exit; easing.type: Easing.OutCubic }
                 }
             }
         }
 
         Component {
-            id: chatPage
-            ChatPage {
-                onBack: stack.pop()
+            id: profilePage
+            ProfilePage {
+                onCloseRequested: window.closeTop(false)
+                onMessageRequested: userId => {
+                    // Back to the pager; the chat slides in once the DM
+                    // (made now if they never talked) is the open one.
+                    window.closeTop(true)
+                    Nav.openDm(userId)
+                    pager.showDmWhenOpen(userId)
+                }
+            }
+        }
+        Component {
+            id: settingsPage
+            SettingsPage {
+                onCloseRequested: window.closeTop(false)
             }
         }
     }
 
-    // The system back gesture (and the predictive back preview, through
-    // Native's shim): close the chat page, else leave the app as usual.
+    // The system back gesture and its predictive preview, through Native's
+    // shim: the progress drives whichever is on top.
     Connections {
         target: Native
         function onBackProgressed(progress) {
-            if (stack.depth > 1)
-                stack.currentItem.backProgress = progress
-        }
-        function onBackCancelled() {
-            if (stack.depth > 1)
-                stack.currentItem.backProgress = 0
-        }
-        function onBackInvoked() {
-            // A page may close something over it first (ChatPage's viewer).
-            const page = stack.currentItem
-            if (stack.depth > 1 && typeof page.closeOverlay === "function" && page.closeOverlay())
+            if (!window.ready)
                 return
             if (stack.depth > 1)
-                stack.pop()
+                stack.currentItem.backProgress = progress
             else
-                Native.leave()
+                pager.backPreview(progress)
+        }
+        function onBackCancelled() {
+            if (!window.ready)
+                return
+            if (stack.depth > 1)
+                stack.currentItem.backProgress = 0
+            else
+                pager.backCancel()
+        }
+        function onBackInvoked() {
+            window.goBack()
         }
     }
+    // True only while something is above the drawer: at the root the system
+    // plays its own back-to-home preview. Where it would finish the activity
+    // instead (not started by the launcher, Android 14+), the shim still
+    // takes Back and goBack() leaves by moving the task back.
     Binding {
         target: Native
         property: "handlesBack"
-        value: stack.depth > 1
+        value: window.ready && (stack.depth > 1 || pager.canGoBack)
     }
 }

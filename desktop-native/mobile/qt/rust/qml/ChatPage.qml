@@ -3,24 +3,104 @@ import Yap.Mobile
 import com.yap.mobile
 import Yap.Ui
 
-// The open channel, phone layout: a header with the back key, the
-// desktop's MessageDelegate rows on its MessageListModel, the typing line
-// and the composer. The keyboard pushes the composer up as it animates in
-// (Native.imeHeight follows the IME inset frame by frame).
+// The open conversation, the pager's middle page: a header (the drawer
+// key, the channel or the DM's other half, the members key), the link
+// strip and the unread banner under it, the desktop's MessageDelegate rows
+// on its MessageListModel, the typing line and the composer. The keyboard
+// pushes the composer up as it animates in (Native.imeHeight follows the
+// IME inset frame by frame).
 Item {
     id: root
 
-    // The predictive back gesture's progress (0..1): the page follows the
-    // finger before the pop commits, as an Android activity does.
-    property real backProgress: 0
+    // The pager says which keys the header has: the drawer key (not side
+    // by side) and the members key (a server channel), lit while they show.
+    property bool menuKey: true
+    property bool membersKey: false
+    property bool membersOn: false
 
-    signal back()
+    signal menuRequested()
+    signal membersRequested()
+    signal profileRequested(string userId)
+
+    readonly property bool dm: Nav.dmUserId.length > 0
+
+    // The message menu's Edit lands here.
+    // TODO: edit `messageId` in place (the message sheets' work).
+    function startEdit(messageId) {}
+
+    // The page outlives the conversation, so each one lands as it opens:
+    // on the unread divider when there is one, else at its end (the
+    // desktop's land()). Until then nothing follows the end, so a row
+    // arriving cannot report the conversation read before the divider does.
+    property bool userMoved: false
+    function land() {
+        root.userMoved = false
+        root.followEnd = false
+        landing.tries = 5
+        landing.restart()
+    }
+    // False when there is no divider to stand on.
+    function placeAtUnread() {
+        const index = Chat.dividerId.length > 0 ? Chat.indexOfMessage(Chat.dividerId) : -1
+        if (index < 0)
+            return false
+        view.positionViewAtIndex(index, ListView.Beginning)
+        // Just under the banner, not behind it (unless the list ends here).
+        root.followEnd = view.nearEnd()
+        if (!root.followEnd)
+            view.contentY = Math.max(view.originY, view.contentY - banner.height)
+        return true
+    }
+    Connections {
+        target: Nav
+        function onActiveChannelIdChanged() {
+            root.land()
+        }
+    }
+    Connections {
+        target: Chat
+        // The divider was placed after the list had landed.
+        function onReland() {
+            if (!root.userMoved)
+                root.land()
+        }
+    }
+    // The rows arrive and size themselves over a few frames.
+    Timer {
+        id: landing
+        property int tries: 0
+        interval: 60
+        onTriggered: {
+            if (root.userMoved)
+                return
+            if (!root.placeAtUnread()) {
+                root.followEnd = true
+                view.positionViewAtEnd()
+            }
+            tries -= 1
+            if (tries > 0)
+                start()
+        }
+    }
+
+    // The banner's jump: the first unread message, under the banner.
+    function jumpToUnread() {
+        landing.stop()
+        root.placeAtUnread()
+    }
 
     // Reply to a message (the long-press sheet, swipe to reply, the hover
     // bar's Reply): the composer's reply bar shows and the keyboard opens.
     function startReply(messageId, author, text) {
         composer.startReply(messageId, author, text)
     }
+
+    // Something lies over the chat (the image viewer): Back and its
+    // gesture are that thing's, and the pager does not pan.
+    readonly property bool overlayShown: viewer.shown
+    // The back gesture's progress while it does (the viewer shrinks and
+    // fades); the pager passes it on.
+    property real backProgress: 0
 
     // Back closes what is over the chat first (the image viewer): true when
     // it took the gesture, so the page stays.
@@ -34,15 +114,14 @@ Item {
 
     readonly property real keyboard: Native.imeHeight
     readonly property real bottomInset: Math.max(SafeArea.margins.bottom, keyboard)
+    // Read here for the header: a key that asks for its own insets feeds
+    // its position back in.
+    readonly property real topInset: SafeArea.margins.top
+    readonly property real leftInset: SafeArea.margins.left
+    readonly property real rightInset: SafeArea.margins.right
 
     // Follow the newest message unless the user scrolled away from it.
     property bool followEnd: true
-
-    // While the viewer is up the gesture is its own (it shrinks and fades).
-    readonly property real pageBack: viewer.shown ? 0 : backProgress
-    x: pageBack * width * 0.1
-    scale: 1 - pageBack * 0.08
-    opacity: 1 - pageBack * 0.2
 
     Rectangle {
         anchors.fill: parent
@@ -52,7 +131,7 @@ Item {
     Rectangle {
         id: header
         width: parent.width
-        height: SafeArea.margins.top + 56
+        height: root.topInset + 56
         color: Theme.ply0
         z: 2
 
@@ -62,32 +141,74 @@ Item {
             height: 56
 
             IconKey {
-                id: backKey
+                id: drawerKey
                 anchors.left: parent.left
-                anchors.leftMargin: 8 + SafeArea.margins.left
+                anchors.leftMargin: 8 + root.leftInset
                 anchors.verticalCenter: parent.verticalCenter
-                iconName: "back"
-                tip: qsTr("Back")
-                onClicked: root.back()
+                visible: root.menuKey
+                iconName: "menu"
+                tip: qsTr("Servers and channels")
+                onClicked: root.menuRequested()
             }
-            Text {
-                anchors.left: backKey.right
-                anchors.leftMargin: 8
-                anchors.right: link.left
-                anchors.rightMargin: 12
-                anchors.verticalCenter: parent.verticalCenter
-                text: "#" + Nav.activeChannelName
-                color: Theme.ink1
-                font: Theme.type.columnTitle
-                elide: Text.ElideRight
+            // A DM's other half: the avatar and name open the profile.
+            Item {
+                id: title
+                anchors.left: root.menuKey ? drawerKey.right : parent.left
+                anchors.leftMargin: root.menuKey ? 8 : 16 + root.leftInset
+                anchors.right: peopleKey.visible ? peopleKey.left : parent.right
+                anchors.rightMargin: peopleKey.visible ? 8 : 16 + root.rightInset
+                height: parent.height
+                Accessible.role: root.dm ? Accessible.Button : Accessible.Heading
+                Accessible.name: root.dm ? qsTr("%1, view profile").arg(Nav.activeChannelName)
+                    : qsTr("Channel %1").arg(Nav.activeChannelName)
+                Accessible.onPressAction: if (root.dm) root.profileRequested(Nav.dmUserId)
+
+                Loader {
+                    id: face
+                    anchors.verticalCenter: parent.verticalCenter
+                    active: root.dm
+                    visible: active
+                    sourceComponent: Avatar {
+                        size: 28
+                        initials: Nav.activeChannelName.charAt(0).toUpperCase()
+                        source: Nav.dmAvatar
+                        deco: Nav.dmDeco
+                    }
+                }
+                Icon {
+                    id: glyph
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: !root.dm
+                    name: "textChannel"
+                    size: Theme.iconMd
+                    color: Theme.ink3
+                }
+                Text {
+                    anchors.left: root.dm ? face.right : glyph.right
+                    anchors.leftMargin: root.dm ? 10 : 6
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: Nav.activeChannelName
+                    color: Theme.ink1
+                    font: Theme.type.columnTitle
+                    elide: Text.ElideRight
+                }
+                TapHandler {
+                    enabled: root.dm
+                    onTapped: root.profileRequested(Nav.dmUserId)
+                }
             }
-            Led {
-                id: link
+            IconKey {
+                id: peopleKey
                 anchors.right: parent.right
-                anchors.rightMargin: 16 + SafeArea.margins.right
+                anchors.rightMargin: 8 + root.rightInset
                 anchors.verticalCenter: parent.verticalCenter
-                color: Nav.connected ? Theme.talk : Theme.idle
-                lit: true
+                visible: root.membersKey
+                iconName: "members"
+                tone: root.membersOn ? "toggled" : "ghost"
+                tip: root.membersOn ? qsTr("Hide members") : qsTr("Members")
+                onClicked: root.membersRequested()
             }
         }
         Rectangle {
@@ -98,9 +219,40 @@ Item {
         }
     }
 
+    // The chat link dropped, or just came back (the desktop's strip).
+    ConnectionStrip {
+        id: strip
+        anchors.top: header.bottom
+        width: parent.width
+        z: 2
+    }
+
+    // Unread from before this visit: how many and since when; a tap jumps
+    // to the first of them. It lies over the list, which never jumps.
+    UnreadBanner {
+        id: banner
+        anchors.top: strip.bottom
+        width: parent.width
+        height: 40
+        z: 2
+        visible: Chat.unreadBanner && Chat.dividerId.length > 0
+        count: Chat.unreadCount
+        sinceTime: Chat.unreadSinceTime
+        sinceDate: Chat.unreadSinceDate
+        sinceDay: Chat.unreadSinceDay
+        today: Chat.today
+        jumpable: true
+        keyHeight: 32
+        onJumpRequested: root.jumpToUnread()
+        onMarkRead: {
+            Native.haptic(Native.Tick)
+            Chat.markRead()
+        }
+    }
+
     PlatformList {
         id: view
-        anchors.top: header.bottom
+        anchors.top: strip.bottom
         anchors.bottom: typing.top
         anchors.left: parent.left
         anchors.right: parent.right
@@ -163,20 +315,32 @@ Item {
             onLinkOpened: url => Qt.openUrlExternally(url)
             onReplyRequested: (id, author, text) => root.startReply(id, author, text)
             onImageOpened: (images, index) => viewer.show(images, index)
+            onProfileRequested: (userId, anchor) => root.profileRequested(userId)
         }
 
         function nearEnd() {
             return contentHeight - (contentY - originY) - height < 48
         }
 
-        onMovementStarted: root.followEnd = false
+        onMovementStarted: {
+            root.userMoved = true
+            root.followEnd = false
+        }
         onMovementEnded: root.followEnd = nearEnd()
         onContentHeightChanged: if (root.followEnd) positionViewAtEnd()
         onHeightChanged: if (root.followEnd) positionViewAtEnd()
         onContentYChanged: {
             if (contentY - originY < 600 && Chat.hasOlder && !Chat.olderLoading && moving)
                 Chat.loadOlder()
-            Chat.setAtBottom(nearEnd())
+            const end = count > 0 && nearEnd()
+            if (end) {
+                // Mentions from the top row on have been seen (the
+                // desktop's reportPosition): their counts clear.
+                const top = itemAt(width / 2, contentY + 1)
+                if (top && top.messageId)
+                    Chat.setSeenFrom(top.messageId)
+            }
+            Chat.setAtBottom(end)
         }
         onCountChanged: if (root.followEnd) positionViewAtEnd()
 
@@ -218,7 +382,8 @@ Item {
         anchors.right: parent.right
         anchors.leftMargin: SafeArea.margins.left
         anchors.rightMargin: SafeArea.margins.right
-        placeholder: qsTr("Message #%1").arg(Nav.activeChannelName)
+        placeholder: root.dm ? qsTr("Message @%1").arg(Nav.activeChannelName)
+            : qsTr("Message #%1").arg(Nav.activeChannelName)
         enabled: !Chat.readOnly
         onSend: (text, replyToId) => {
             Native.haptic(Native.Confirm)
@@ -236,6 +401,5 @@ Item {
         backProgress: viewer.shown ? root.backProgress : 0
     }
 
-    // Open at the newest message once the first rows have laid out.
-    Component.onCompleted: Qt.callLater(view.positionViewAtEnd)
+    Component.onCompleted: root.land()
 }

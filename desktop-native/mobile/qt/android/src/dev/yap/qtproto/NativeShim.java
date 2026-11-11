@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.database.Cursor;
 import android.hardware.SensorManager;
 import android.net.Uri;
@@ -61,6 +63,10 @@ public final class NativeShim {
     private static Activity activity;
     private static OnBackInvokedCallback back;
     private static boolean backRegistered;
+    /** The app has a page to go back to (Native.handlesBack). */
+    private static boolean backWanted;
+    /** Back at the root leaves the task alive without our help. */
+    private static boolean systemKeepsTask;
     private static float density = 1f;
 
     public static void install(Activity a) {
@@ -126,6 +132,51 @@ public final class NativeShim {
         } else if (Build.VERSION.SDK_INT >= 33) {
             back = NativeShim::nativeBackInvoked;
         }
+        systemKeepsTask = keepsTaskAtRoot();
+        applyBack();
+    }
+
+    /**
+     * Whether the system moves the task to the back, instead of finishing
+     * the activity, when Back reaches its default handler at the root.
+     * Finishing ends the process (Qt's onDestroy exits), so the next start
+     * would be a cold one. Android 12 and 13 keep any launcher activity that
+     * is its task's base; Android 14 and later only one the home app started
+     * (ActivityClientController.shouldMoveTaskToBack), so a start from a
+     * notification, a link or another app is finished. There the app takes
+     * Back at the root itself and moves the task back (leave()); the price
+     * is the system's back-to-home preview, which only its own handler gets.
+     */
+    private static boolean keepsTaskAtRoot() {
+        if (Build.VERSION.SDK_INT < 34) return true;
+        Intent intent = activity.getIntent();
+        if (intent == null || !Intent.ACTION_MAIN.equals(intent.getAction())
+                || intent.getCategories() == null || intent.getCategories().size() != 1
+                || !intent.hasCategory(Intent.CATEGORY_LAUNCHER)
+                || intent.getData() != null || intent.getType() != null) {
+            return false;
+        }
+        Uri referrer = activity.getReferrer();
+        if (referrer == null || !"android-app".equals(referrer.getScheme())) return false;
+        ResolveInfo home = activity.getPackageManager().resolveActivity(
+                new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
+                PackageManager.MATCH_DEFAULT_ONLY);
+        return home != null && home.activityInfo != null
+                && home.activityInfo.packageName.equals(referrer.getHost());
+    }
+
+    /** On the UI thread: our callback is in place exactly while it must be. */
+    private static void applyBack() {
+        if (back == null) return;
+        boolean on = backWanted || !systemKeepsTask;
+        OnBackInvokedDispatcher d = activity.getOnBackInvokedDispatcher();
+        if (on && !backRegistered) {
+            d.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, back);
+            backRegistered = true;
+        } else if (!on && backRegistered) {
+            d.unregisterOnBackInvokedCallback(back);
+            backRegistered = false;
+        }
     }
 
     private static void reportIme(WindowInsets insets) {
@@ -148,18 +199,16 @@ public final class NativeShim {
         });
     }
 
-    /** Takes the back gesture while the app has a page to go back to. */
+    /**
+     * Takes the back gesture while the app has a page to go back to, and at
+     * the root too when the system would finish the activity there
+     * (keepsTaskAtRoot).
+     */
     public static void setHandlesBack(boolean on) {
-        if (activity == null || back == null) return;
+        if (activity == null) return;
         activity.runOnUiThread(() -> {
-            OnBackInvokedDispatcher d = activity.getOnBackInvokedDispatcher();
-            if (on && !backRegistered) {
-                d.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, back);
-                backRegistered = true;
-            } else if (!on && backRegistered) {
-                d.unregisterOnBackInvokedCallback(back);
-                backRegistered = false;
-            }
+            backWanted = on;
+            applyBack();
         });
     }
 
