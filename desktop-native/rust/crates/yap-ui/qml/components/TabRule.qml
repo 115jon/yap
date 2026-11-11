@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // The chosen tab's 2 px ink-1 rule (ui/tabs.tsx `rule`): one rule that

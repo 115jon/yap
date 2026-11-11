@@ -19,6 +19,10 @@ const QML: &[&str] = &[
     "qml/MemberItem.qml",
     "qml/ProfilePage.qml",
     "qml/SettingsPage.qml",
+    "qml/FriendsPage.qml",
+    "qml/PageHeader.qml",
+    "qml/MobileField.qml",
+    "qml/InlineConfirm.qml",
     "qml/MobileComposer.qml",
     "qml/UploadTray.qml",
     "qml/ImageViewerPage.qml",
@@ -43,6 +47,8 @@ fn main() {
         .iter()
         .map(|path| QmlFile::from(*path))
         // Each channel's unsent text, kept across chat pages.
-        .chain(std::iter::once(QmlFile::from("qml/Drafts.qml").singleton(true)));
+        .chain(std::iter::once(QmlFile::from("qml/Drafts.qml").singleton(true)))
+        // This phone's own settings (QSettings).
+        .chain(std::iter::once(QmlFile::from("qml/Prefs.qml").singleton(true)));
     CxxQtBuilder::new_qml_module(QmlModule::new("com.yap.mobile").qml_files(files)).build();
 }

@@ -176,11 +176,31 @@ pub extern "C" fn yap_mobile_init(data_dir: *const c_char, device_name: *const c
     crate::platform::stderr_to_logcat();
     let data = text(data_dir).map_or_else(|| PathBuf::from("."), PathBuf::from);
     yap_cache::profile::set_base(data.clone());
+    seed_theme();
     let mut config = yap_core::config::Config::from_env();
     config.platform = std::env::consts::OS.to_owned();
     config.device_name = text(device_name);
     let _ = yap_core::config::set(config);
     platform::install(Mobile { data });
+}
+
+/// A phone follows the system's light or dark mode until a theme is picked
+/// in Settings: before the first, this device's appearance file says
+/// `system` (the core's default is the desktop's `dark`).
+fn seed_theme() {
+    use yap_cache::settings::{self as prefs, AppearancePrefs, APPEARANCE_FILE};
+    let Some(dir) = prefs::app_dir() else {
+        return;
+    };
+    if dir.join(APPEARANCE_FILE).exists() {
+        return;
+    }
+    let seed = AppearancePrefs {
+        theme: "system".into(),
+    };
+    if let Err(error) = prefs::save_appearance(&dir, &seed) {
+        eprintln!("[settings] theme not seeded: {error}");
+    }
 }
 
 /// Commits the snapshot cache's pending write (the app going to the
