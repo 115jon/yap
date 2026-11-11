@@ -101,6 +101,15 @@ async function openVoiceSocket(
   return socket;
 }
 
+/**
+ * vi.waitFor for room work the test has just started. Its default 1 s is
+ * shorter than a room round trip can take when the whole suite runs at once;
+ * this waits up to just under the 5 s test timeout.
+ */
+const SETTLE = { timeout: 4_000, interval: 10 };
+const settle: typeof vi.waitFor = (callback, options = SETTLE) =>
+  vi.waitFor(callback, options);
+
 async function mockRadioBrowserStation(
   roomName: string,
   station: Record<string, unknown>,
@@ -112,6 +121,45 @@ async function mockRadioBrowserStation(
         headers: { "Content-Type": "application/json" },
       });
   });
+}
+
+/**
+ * Answers Radio Browser station lookups in this room with one station, but
+ * holds each answer until release(). The gate is made and opened inside the
+ * room: workerd refuses to settle a room's I/O from the test's context.
+ */
+async function holdRadioStationLookup(
+  room: DurableObjectStub,
+  stationName: string,
+): Promise<{ started: () => boolean; release: () => Promise<void> }> {
+  let started = false;
+  let open: (() => void) | undefined;
+  await runInDurableObject(room, () => {
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    globalThis.fetch = async (input) => {
+      if (!String(input).includes("/json/stations/byuuid/")) {
+        return new Response(null, { status: 404 });
+      }
+      started = true;
+      await gate;
+      return new Response(
+        JSON.stringify([
+          {
+            stationuuid: RADIO_STATION_UUID,
+            name: stationName,
+            url_resolved: "https://stream.example.com/held",
+          },
+        ]),
+        { headers: { "Content-Type": "application/json" } },
+      );
+    };
+  });
+  return {
+    started: () => started,
+    release: () => runInDurableObject(room, () => open?.()),
+  };
 }
 
 async function nextJsonMessage(
@@ -173,27 +221,6 @@ async function nextMessagesWithOpcodes(
   });
 }
 
-async function nextMessageWithOpcodeOrNull(
-  socket: WebSocket,
-  opcode: number,
-  timeoutMs = 250,
-): Promise<{ op: number; d: unknown } | null> {
-  return new Promise((resolve) => {
-    const onMessage = (event: MessageEvent<string>) => {
-      const message = JSON.parse(event.data) as { op: number; d: unknown };
-      if (message.op !== opcode) return;
-      clearTimeout(timer);
-      socket.removeEventListener("message", onMessage);
-      resolve(message);
-    };
-    const timer = setTimeout(() => {
-      socket.removeEventListener("message", onMessage);
-      resolve(null);
-    }, timeoutMs);
-    socket.addEventListener("message", onMessage);
-  });
-}
-
 async function nextMessageWithOpcodeAndType(
   socket: WebSocket,
   opcode: number,
@@ -208,36 +235,44 @@ async function nextMessageWithOpcodeAndType(
   }
 }
 
-async function nextMessageWithOpcodeAndTypeOrNull(
-  socket: WebSocket,
-  opcode: number,
-  eventType: string,
-  timeoutMs = 250,
-): Promise<{ op: number; d: unknown } | null> {
-  return new Promise((resolve) => {
-    const onMessage = (event: MessageEvent<string>) => {
-      const message = JSON.parse(event.data) as {
-        op: number;
-        d: unknown;
-      };
-      if (
-        message.op !== opcode ||
-        !message.d ||
-        typeof message.d !== "object" ||
-        (message.d as { type?: unknown }).type !== eventType
-      ) {
-        return;
-      }
-      clearTimeout(timer);
+/**
+ * Records every frame with this opcode (and event type, when given) from now
+ * on. settled() sends a heartbeat and returns what was recorded once its ACK
+ * arrives: the room answers in order, so anything it sent before handling the
+ * heartbeat is in the list. Use it once the room has handled the frames under
+ * test (their outcome arrived, or heartbeatBarrier on the sending sockets);
+ * no timing window is involved.
+ */
+function recordEvents(socket: WebSocket, opcode: number, eventType?: string) {
+  const events: Array<{ op: number; d: unknown }> = [];
+  const onMessage = (event: MessageEvent<string>) => {
+    const message = JSON.parse(event.data) as { op: number; d: unknown };
+    if (
+      message.op === opcode &&
+      (eventType === undefined ||
+        (message.d as { type?: unknown } | null)?.type === eventType)
+    ) {
+      events.push(message);
+    }
+  };
+  socket.addEventListener("message", onMessage);
+  return {
+    async settled() {
+      await heartbeatBarrier(socket);
       socket.removeEventListener("message", onMessage);
-      resolve(message);
-    };
-    const timer = setTimeout(() => {
-      socket.removeEventListener("message", onMessage);
-      resolve(null);
-    }, timeoutMs);
-    socket.addEventListener("message", onMessage);
-  });
+      return events;
+    },
+  };
+}
+
+/**
+ * Resolves once the room has handled every frame sent on this socket so far:
+ * it handles a socket's frames in order and answers the heartbeat last.
+ */
+async function heartbeatBarrier(socket: WebSocket) {
+  const ack = nextMessageWithOpcode(socket, 6);
+  socket.send(JSON.stringify({ op: 3, d: {} }));
+  await ack;
 }
 
 type ListenTogetherTestEvent = {
@@ -690,12 +725,8 @@ describe("VoiceRoom lifecycle", () => {
     const roomName = crypto.randomUUID();
     const socket = await openVoiceSocket(roomName);
     await identifyVoiceSocket(socket, crypto.randomUUID(), roomName);
-    const response = nextMessageWithOpcodeOrNull(socket, 18, 5_000);
-    const broadcast = nextMessageWithOpcodeAndTypeOrNull(
-      socket,
-      106,
-      "soundboard.play",
-    );
+    const response = nextMessageWithOpcode(socket, 18);
+    const broadcast = recordEvents(socket, 106, "soundboard.play");
 
     socket.send(
       JSON.stringify({
@@ -717,7 +748,7 @@ describe("VoiceRoom lifecycle", () => {
       op: 18,
       d: { code: 4000, message: "Soundboard event was rejected" },
     });
-    expect(await broadcast).toBeNull();
+    expect(await broadcast.settled()).toEqual([]);
     socket.close();
   });
 
@@ -1869,7 +1900,7 @@ describe("VoiceRoom lifecycle", () => {
     const socket = await openVoiceSocket(roomName, "standby-user");
     const room = env.VOICE_ROOM.get(env.VOICE_ROOM.idFromName(roomName));
 
-    await vi.waitFor(async () => {
+    await settle(async () => {
       const alarm = await runInDurableObject(room, (_instance, state) =>
         state.storage.getAlarm(),
       );
@@ -1929,7 +1960,7 @@ describe("VoiceRoom lifecycle", () => {
           },
         }),
       );
-      await vi.waitFor(() => {
+      await settle(() => {
         expect(check.started).toBe(true);
       });
 
@@ -1940,7 +1971,7 @@ describe("VoiceRoom lifecycle", () => {
       });
 
       check.released = true;
-      await vi.waitFor(() => {
+      await settle(() => {
         expect(verifySpy).toHaveReturned();
       });
       // The observer's heartbeat ack arrives after any broadcast before it.
@@ -2472,7 +2503,7 @@ describe("VoiceRoom lifecycle", () => {
       });
       const socket = await openVoiceSocket(roomName);
       await identifyVoiceSocket(socket, participantId, roomName);
-      const unsupported = nextMessageWithOpcodeOrNull(socket, 18);
+      const unsupported = nextMessageWithOpcode(socket, 18);
 
       socket.send(JSON.stringify({ op: message.op, d: message.d }));
 
@@ -2512,7 +2543,7 @@ describe("VoiceRoom lifecycle", () => {
       });
       const socket = await openVoiceSocket(roomName);
       await identifyVoiceSocket(socket, participantId, roomName);
-      const unknown = nextMessageWithOpcodeOrNull(socket, 18);
+      const unknown = nextMessageWithOpcode(socket, 18);
 
       socket.send(JSON.stringify({ op, d: {} }));
 
@@ -2685,7 +2716,7 @@ describe("VoiceRoom lifecycle", () => {
         ],
       },
     });
-    await vi.waitFor(() => {
+    await settle(() => {
       expect(
         callsRequests.filter((request) =>
           request.pathname.endsWith("/tracks/close"),
@@ -2741,7 +2772,7 @@ describe("VoiceRoom lifecycle", () => {
     );
 
     sendNativeScreenSelect(publisher, participantId, "native-stop-race");
-    await vi.waitFor(() => {
+    await settle(() => {
       expect(
         callsPaths.filter((pathname) => pathname.endsWith("/tracks/new")),
       ).toHaveLength(1);
@@ -2758,7 +2789,7 @@ describe("VoiceRoom lifecycle", () => {
     const stalePublication = hasMessageWithOpcode(observer, 12, 250);
     delayedTracksResponse.resolve(undefined);
 
-    await vi.waitFor(() => {
+    await settle(() => {
       expect(
         callsPaths.filter((pathname) =>
           pathname.endsWith("/sessions/native-stop-race-session/tracks/close"),
@@ -2850,7 +2881,7 @@ describe("VoiceRoom lifecycle", () => {
     );
 
     sendNativeScreenSelect(publisher, participantId, "native-first-request");
-    await vi.waitFor(() => expect(sessionRequestCount).toBe(1));
+    await settle(() => expect(sessionRequestCount).toBe(1));
 
     const latestMessages = nextMessagesWithOpcodes(publisher, [4, 10]);
     sendNativeScreenSelect(publisher, participantId, "native-latest-request");
@@ -2872,7 +2903,7 @@ describe("VoiceRoom lifecycle", () => {
     const staleDescription = hasMessageWithOpcode(publisher, 4, 250);
     const staleNegotiation = hasMessageWithOpcode(publisher, 10, 250);
     delayedFirstSession.resolve(undefined);
-    await vi.waitFor(() => {
+    await settle(() => {
       expect(
         callsPaths.filter((pathname) =>
           pathname.endsWith("/sessions/native-first-session/tracks/close"),
@@ -2908,7 +2939,7 @@ describe("VoiceRoom lifecycle", () => {
     });
 
     publisher.close();
-    await vi.waitFor(() => {
+    await settle(() => {
       expect(
         callsPaths.filter((pathname) =>
           pathname.endsWith("/sessions/native-latest-session/tracks/close"),
@@ -2968,7 +2999,7 @@ describe("VoiceRoom lifecycle", () => {
     );
 
     sendNativeScreenSelect(publisher, participantId, "native-disconnect-race");
-    await vi.waitFor(() => {
+    await settle(() => {
       expect(
         callsPaths.filter((pathname) => pathname.endsWith("/tracks/new")),
       ).toHaveLength(1);
@@ -2979,14 +3010,14 @@ describe("VoiceRoom lifecycle", () => {
     const stalePublication = hasMessageWithOpcode(observer, 12, 250);
     publisher.close();
     // Held through a possible reconnect; the native share ends at once.
-    await vi.waitFor(async () => {
+    await settle(async () => {
       expect(await heldUntil(roomName, participantId)).toEqual(
         expect.any(Number),
       );
     });
 
     delayedTracksResponse.resolve(undefined);
-    await vi.waitFor(() => {
+    await settle(() => {
       expect(
         callsPaths.filter((pathname) =>
           pathname.endsWith(
@@ -3214,7 +3245,7 @@ describe("VoiceRoom lifecycle", () => {
         },
       }),
     );
-    await vi.waitFor(async () => {
+    await settle(async () => {
       expect(await trackNames(roomName)).toContain(`cam-audio-${liveId}`);
     });
 
@@ -3278,7 +3309,7 @@ describe("VoiceRoom lifecycle", () => {
         },
       }),
     );
-    await vi.waitFor(async () => {
+    await settle(async () => {
       expect(await trackNames(roomName)).toContain(`cam-audio-${publisherId}`);
     });
 
@@ -3495,7 +3526,7 @@ describe("VoiceRoom lifecycle", () => {
       socket.send(JSON.stringify({ op: 11, d: null }));
       await closed;
 
-      await vi.waitFor(async () => {
+      await settle(async () => {
         expect(await participantRowCount(roomName, participantId)).toBe(0);
         expect(await attachedParticipants()).toEqual([]);
       });
@@ -3575,7 +3606,7 @@ describe("VoiceRoom lifecycle", () => {
       user_id: "owner-user",
     });
     await expect(owner.json()).resolves.toEqual({ disconnected: true });
-    await vi.waitFor(async () => {
+    await settle(async () => {
       expect(await participantRows()).toBe(0);
     });
   });
@@ -3851,31 +3882,14 @@ describe("VoiceRoom lifecycle", () => {
   it("serializes a delayed radio enqueue before a later clear", async () => {
     const roomName = crypto.randomUUID();
     const room = env.VOICE_ROOM.get(env.VOICE_ROOM.idFromName(roomName));
-    await runInDurableObject(room, () => {
-      globalThis.fetch = async (input) => {
-        if (!String(input).includes("/json/stations/byuuid/")) {
-          return new Response(null, { status: 404 });
-        }
-        await new Promise((release) => setTimeout(release, 50));
-        return new Response(
-          JSON.stringify([
-            {
-              stationuuid: RADIO_STATION_UUID,
-              name: "Delayed Radio Station",
-              url_resolved: "https://stream.example.com/delayed",
-            },
-          ]),
-          { headers: { "Content-Type": "application/json" } },
-        );
-      };
-    });
+    const lookup = await holdRadioStationLookup(room, "Delayed Radio Station");
     const socket = await openVoiceSocket(roomName);
     await identifyVoiceSocket(socket, crypto.randomUUID(), roomName);
-    const snapshots: unknown[] = [];
+    const snapshots: Array<{ snapshot: { queue: unknown[] } }> = [];
     socket.addEventListener("message", (event) => {
       const message = JSON.parse(event.data) as {
         op: number;
-        d: { type?: string };
+        d: { type?: string; snapshot: { queue: unknown[] } };
       };
       if (message.op === 106 && message.d.type === "listen_together.snapshot") {
         snapshots.push(message.d);
@@ -3900,44 +3914,35 @@ describe("VoiceRoom lifecycle", () => {
         },
       }),
     );
+    await settle(() => expect(lookup.started()).toBe(true));
     socket.send(
       JSON.stringify({
         op: 106,
         d: { type: "listen_together.clear", room_slug: roomName },
       }),
     );
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const finalSnapshot = snapshots.at(-1) as
-      | { snapshot: { queue: unknown[] } }
-      | undefined;
-    expect(finalSnapshot?.snapshot.queue).toEqual([]);
+    // The room answers the heartbeat after it has taken the clear frame, so
+    // the clear is in the room while the enqueue's lookup is still held.
+    const ack = nextMessageWithOpcode(socket, 6);
+    socket.send(JSON.stringify({ op: 3, d: {} }));
+    await ack;
+    expect(snapshots).toEqual([]);
+
+    await lookup.release();
+    // Enqueue first, then the clear: the last snapshot is empty.
+    await settle(() => expect(snapshots).toHaveLength(2));
+    expect(snapshots.map((event) => event.snapshot.queue.length)).toEqual([
+      1, 0,
+    ]);
     socket.close();
   });
 
   it("serves state requests while a radio mutation is stalled", async () => {
     const roomName = crypto.randomUUID();
     const room = env.VOICE_ROOM.get(env.VOICE_ROOM.idFromName(roomName));
-    let resolutionStarted = false;
-
-    await runInDurableObject(room, () => {
-      globalThis.fetch = async (input) => {
-        if (!String(input).includes("/json/stations/byuuid/")) {
-          return new Response(null, { status: 404 });
-        }
-        resolutionStarted = true;
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        return new Response(
-          JSON.stringify([
-            {
-              stationuuid: RADIO_STATION_UUID,
-              name: "Stalled Radio Station",
-              url_resolved: "https://stream.example.com/stalled",
-            },
-          ]),
-          { headers: { "Content-Type": "application/json" } },
-        );
-      };
-    });
+    // Held until released below, so the mutation is stalled for as long as
+    // the test needs rather than for a fixed time.
+    const lookup = await holdRadioStationLookup(room, "Stalled Radio Station");
 
     const socket = await openVoiceSocket(roomName);
     await identifyVoiceSocket(socket, crypto.randomUUID(), roomName);
@@ -3959,10 +3964,7 @@ describe("VoiceRoom lifecycle", () => {
         },
       }),
     );
-    for (let attempt = 0; attempt < 20 && !resolutionStarted; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    expect(resolutionStarted).toBe(true);
+    await settle(() => expect(lookup.started()).toBe(true));
 
     const stateRequest = nextMessageWithOpcodeAndType(
       socket,
@@ -3976,14 +3978,9 @@ describe("VoiceRoom lifecycle", () => {
       }),
     );
 
-    await expect(
-      Promise.race([
-        stateRequest,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("state request timed out")), 100),
-        ),
-      ]),
-    ).resolves.toMatchObject({
+    // The lookup never finishes on its own: a state request queued behind
+    // the mutation would time the test out instead of resolving.
+    await expect(stateRequest).resolves.toMatchObject({
       d: {
         type: "listen_together.snapshot",
         snapshot: { revision: 0, queue: [] },
@@ -3995,6 +3992,7 @@ describe("VoiceRoom lifecycle", () => {
       106,
       "listen_together.snapshot",
     );
+    await lookup.release();
     await expect(mutationSnapshot).resolves.toMatchObject({
       d: {
         type: "listen_together.snapshot",
@@ -4911,12 +4909,8 @@ describe("VoiceRoom lifecycle", () => {
       const roomName = crypto.randomUUID();
       const socket = await openVoiceSocket(roomName);
       await identifyVoiceSocket(socket, crypto.randomUUID(), roomName);
-      const response = nextMessageWithOpcodeOrNull(socket, 18, 5_000);
-      const broadcast = nextMessageWithOpcodeAndTypeOrNull(
-        socket,
-        106,
-        "soundboard.play",
-      );
+      const response = nextMessageWithOpcode(socket, 18);
+      const broadcast = recordEvents(socket, 106, "soundboard.play");
 
       socket.send(
         JSON.stringify({
@@ -4938,7 +4932,7 @@ describe("VoiceRoom lifecycle", () => {
         op: 18,
         d: { code: 4000, message: "Soundboard event was rejected" },
       });
-      expect(await broadcast).toBeNull();
+      expect(await broadcast.settled()).toEqual([]);
       socket.close();
     },
   );
@@ -4952,12 +4946,8 @@ describe("VoiceRoom lifecycle", () => {
     const roomName = crypto.randomUUID();
     const socket = await openVoiceSocket(roomName);
     await identifyVoiceSocket(socket, crypto.randomUUID(), roomName);
-    const response = nextMessageWithOpcodeOrNull(socket, 18, 5_000);
-    const broadcast = nextMessageWithOpcodeAndTypeOrNull(
-      socket,
-      106,
-      "soundboard.play",
-    );
+    const response = nextMessageWithOpcode(socket, 18);
+    const broadcast = recordEvents(socket, 106, "soundboard.play");
 
     socket.send(
       JSON.stringify({
@@ -4980,7 +4970,7 @@ describe("VoiceRoom lifecycle", () => {
       op: 18,
       d: { code: 4000, message: "Soundboard event was rejected" },
     });
-    expect(await broadcast).toBeNull();
+    expect(await broadcast.settled()).toEqual([]);
     socket.close();
   });
 
@@ -4995,12 +4985,8 @@ describe("VoiceRoom lifecycle", () => {
     const roomName = crypto.randomUUID();
     const socket = await openVoiceSocket(roomName);
     await identifyVoiceSocket(socket, crypto.randomUUID(), roomName);
-    const response = nextMessageWithOpcodeOrNull(socket, 18, 5_000);
-    const broadcast = nextMessageWithOpcodeAndTypeOrNull(
-      socket,
-      106,
-      "soundboard.play",
-    );
+    const response = nextMessageWithOpcode(socket, 18);
+    const broadcast = recordEvents(socket, 106, "soundboard.play");
 
     socket.send(
       JSON.stringify({
@@ -5019,7 +5005,7 @@ describe("VoiceRoom lifecycle", () => {
       op: 18,
       d: { code: 4000, message: "Soundboard event was rejected" },
     });
-    expect(await broadcast).toBeNull();
+    expect(await broadcast.settled()).toEqual([]);
     socket.close();
   });
 
@@ -5027,12 +5013,8 @@ describe("VoiceRoom lifecycle", () => {
     const roomName = crypto.randomUUID();
     const socket = await openVoiceSocket(roomName);
     await identifyVoiceSocket(socket, crypto.randomUUID(), roomName);
-    const response = nextMessageWithOpcodeOrNull(socket, 18, 5_000);
-    const broadcast = nextMessageWithOpcodeAndTypeOrNull(
-      socket,
-      106,
-      "soundboard.play",
-    );
+    const response = nextMessageWithOpcode(socket, 18);
+    const broadcast = recordEvents(socket, 106, "soundboard.play");
 
     socket.send(
       JSON.stringify({
@@ -5055,7 +5037,7 @@ describe("VoiceRoom lifecycle", () => {
       op: 18,
       d: { code: 4000, message: "Soundboard event was rejected" },
     });
-    expect(await broadcast).toBeNull();
+    expect(await broadcast.settled()).toEqual([]);
     socket.close();
   });
 
@@ -5220,11 +5202,7 @@ describe("VoiceRoom lifecycle", () => {
     const caller = await openVoiceSocket(roomName, "user");
     await identifyVoiceSocket(caller, crypto.randomUUID(), roomName, "user");
     const response = nextMessageWithOpcode(caller, 18);
-    const broadcast = nextMessageWithOpcodeAndTypeOrNull(
-      listener,
-      106,
-      "soundboard.stop",
-    );
+    const broadcast = recordEvents(listener, 106, "soundboard.stop");
 
     caller.send(
       JSON.stringify({
@@ -5241,7 +5219,7 @@ describe("VoiceRoom lifecycle", () => {
       op: 18,
       d: { code: 4000, message: "Soundboard event was rejected" },
     });
-    expect(await broadcast).toBeNull();
+    expect(await broadcast.settled()).toEqual([]);
     listener.close();
     caller.close();
   });
@@ -5279,12 +5257,8 @@ describe("VoiceRoom lifecycle", () => {
       roomName,
       "other-user",
     );
-    const response = nextMessageWithOpcodeOrNull(socket, 18, 5_000);
-    const broadcast = nextMessageWithOpcodeAndTypeOrNull(
-      socket,
-      106,
-      event.type,
-    );
+    const response = nextMessageWithOpcode(socket, 18);
+    const broadcast = recordEvents(socket, 106, event.type);
 
     socket.send(
       JSON.stringify({
@@ -5297,7 +5271,7 @@ describe("VoiceRoom lifecycle", () => {
       op: 18,
       d: { code: 4000, message: "Soundboard event was rejected" },
     });
-    expect(await broadcast).toBeNull();
+    expect(await broadcast.settled()).toEqual([]);
     socket.close();
   });
 
@@ -5442,11 +5416,7 @@ describe("VoiceRoom lifecycle", () => {
       unauthorizedId,
     );
     const response = nextMessageWithOpcode(socket, 18);
-    const broadcast = nextMessageWithOpcodeAndTypeOrNull(
-      socket,
-      106,
-      "soundboard.catalog-updated",
-    );
+    const broadcast = recordEvents(socket, 106, "soundboard.catalog-updated");
 
     socket.send(
       JSON.stringify({
@@ -5462,7 +5432,7 @@ describe("VoiceRoom lifecycle", () => {
     await expect(response).resolves.toMatchObject({
       d: { message: "Soundboard event was rejected" },
     });
-    await expect(broadcast).resolves.toBeNull();
+    expect(await broadcast.settled()).toEqual([]);
     socket.close();
   });
 
@@ -5470,12 +5440,8 @@ describe("VoiceRoom lifecycle", () => {
     const roomName = crypto.randomUUID();
     const socket = await openVoiceSocket(roomName);
     await identifyVoiceSocket(socket, crypto.randomUUID(), roomName);
-    const response = nextMessageWithOpcodeOrNull(socket, 18);
-    const broadcast = nextMessageWithOpcodeAndTypeOrNull(
-      socket,
-      106,
-      "soundboard.catalog-updated",
-    );
+    const response = nextMessageWithOpcode(socket, 18);
+    const broadcast = recordEvents(socket, 106, "soundboard.catalog-updated");
 
     socket.send(
       JSON.stringify({
@@ -5492,7 +5458,7 @@ describe("VoiceRoom lifecycle", () => {
       op: 18,
       d: { code: 4000, message: "Soundboard event was rejected" },
     });
-    await expect(broadcast).resolves.toBeNull();
+    expect(await broadcast.settled()).toEqual([]);
     socket.close();
   });
 
@@ -5500,12 +5466,8 @@ describe("VoiceRoom lifecycle", () => {
     const roomName = crypto.randomUUID();
     const socket = await openVoiceSocket(roomName);
     await identifyVoiceSocket(socket, crypto.randomUUID(), roomName);
-    const response = nextMessageWithOpcodeOrNull(socket, 18);
-    const broadcast = nextMessageWithOpcodeAndTypeOrNull(
-      socket,
-      106,
-      "soundboard.catalog-updated",
-    );
+    const response = nextMessageWithOpcode(socket, 18);
+    const broadcast = recordEvents(socket, 106, "soundboard.catalog-updated");
 
     socket.send(
       JSON.stringify({
@@ -5526,7 +5488,7 @@ describe("VoiceRoom lifecycle", () => {
       op: 18,
       d: { code: 4000, message: "Soundboard event was rejected" },
     });
-    await expect(broadcast).resolves.toBeNull();
+    expect(await broadcast.settled()).toEqual([]);
     socket.close();
   });
 
@@ -5618,12 +5580,8 @@ describe("VoiceRoom lifecycle", () => {
     const oversizedDataUrl = audioDataUrlForDecodedBytes(
       MAX_SOUNDBOARD_DATA_URL_BYTES + 1,
     );
-    const response = nextMessageWithOpcodeOrNull(socket, 18, 5_000);
-    const broadcast = nextMessageWithOpcodeAndTypeOrNull(
-      socket,
-      106,
-      "soundboard.play",
-    );
+    const response = nextMessageWithOpcode(socket, 18);
+    const broadcast = recordEvents(socket, 106, "soundboard.play");
 
     socket.send(
       JSON.stringify({
@@ -5646,7 +5604,7 @@ describe("VoiceRoom lifecycle", () => {
       op: 18,
       d: { code: 4000, message: "Soundboard event was rejected" },
     });
-    expect(await broadcast).toBeNull();
+    expect(await broadcast.settled()).toEqual([]);
     socket.close();
   });
 
@@ -5658,12 +5616,8 @@ describe("VoiceRoom lifecycle", () => {
       MAX_SOUNDBOARD_DATA_URL_BYTES + 1,
     );
 
-    const response = nextMessageWithOpcodeOrNull(socket, 18, 5_000);
-    const broadcast = nextMessageWithOpcodeAndTypeOrNull(
-      socket,
-      106,
-      "soundboard.play",
-    );
+    const response = nextMessageWithOpcode(socket, 18);
+    const broadcast = recordEvents(socket, 106, "soundboard.play");
     socket.send(
       JSON.stringify({
         op: 106,
@@ -5680,7 +5634,7 @@ describe("VoiceRoom lifecycle", () => {
       op: 18,
       d: { code: 4000, message: "Soundboard event was rejected" },
     });
-    expect(await broadcast).toBeNull();
+    expect(await broadcast.settled()).toEqual([]);
     socket.close();
   });
 
@@ -5828,7 +5782,7 @@ describe("VoiceRoom voice reconnect hold", () => {
     const frames = recordFrames(listener);
 
     publisher.close();
-    await vi.waitFor(async () => {
+    await settle(async () => {
       expect(await heldUntil(roomName, publisherId)).toEqual(
         expect.any(Number),
       );
@@ -5858,7 +5812,7 @@ describe("VoiceRoom voice reconnect hold", () => {
         ],
       },
     });
-    await vi.waitFor(async () => {
+    await settle(async () => {
       expect(await heldTrackFlags(roomName)).toEqual({
         [audio]: 0,
         [video]: 0,
@@ -5895,7 +5849,7 @@ describe("VoiceRoom voice reconnect hold", () => {
       { name: audio, sfu: "sfu-audio-1", kind: "audio" },
       { name: video, sfu: "sfu-video-1", kind: "video" },
     ]);
-    await vi.waitFor(async () => {
+    await settle(async () => {
       expect(await heldTrackFlags(roomName)).toEqual({
         [audio]: 0,
         [video]: 0,
@@ -5917,7 +5871,7 @@ describe("VoiceRoom voice reconnect hold", () => {
     const frames = recordFrames(listener);
 
     publisher.close();
-    await vi.waitFor(async () => {
+    await settle(async () => {
       expect(await heldUntil(roomName, publisherId)).toEqual(
         expect.any(Number),
       );
@@ -5964,7 +5918,7 @@ describe("VoiceRoom voice reconnect hold", () => {
     const frames = recordFrames(listener);
 
     publisher.close();
-    await vi.waitFor(async () => {
+    await settle(async () => {
       expect(await heldUntil(roomName, publisherId)).toEqual(
         expect.any(Number),
       );
@@ -6025,7 +5979,7 @@ describe("VoiceRoom voice reconnect hold", () => {
       await setUp();
 
     publisher.close();
-    await vi.waitFor(async () => {
+    await settle(async () => {
       expect(await heldUntil(roomName, publisherId)).toEqual(
         expect.any(Number),
       );
@@ -6179,7 +6133,7 @@ describe("VoiceRoom track-unavailable reports", () => {
         room.publisher,
         GatewayOp.RepublishRequest,
       );
-      const listenerCopy = nextMessageWithOpcodeOrNull(
+      const listenerCopy = recordEvents(
         room.listener,
         GatewayOp.RepublishRequest,
       );
@@ -6193,24 +6147,22 @@ describe("VoiceRoom track-unavailable reports", () => {
           session_id: room.sessionId,
         },
       });
-      expect(await listenerCopy).toBeNull();
+      expect(await listenerCopy.settled()).toEqual([]);
       room.close();
     },
   );
 
   it("ignores reports that do not match the publisher's current track", async () => {
     const room = await publishedRoom();
-    const request = nextMessageWithOpcodeOrNull(
-      room.publisher,
-      GatewayOp.RepublishRequest,
-    );
+    const request = recordEvents(room.publisher, GatewayOp.RepublishRequest);
     room.report(room.listener, { track_name: `cam-video-${room.publisherId}` });
     room.report(room.listener, { sfu_track_name: "republished-already" });
     room.report(room.listener, { session_id: "another-session" });
     room.report(room.listener, { participant_id: crypto.randomUUID() });
     // Nobody asks itself.
     room.report(room.publisher);
-    expect(await request).toBeNull();
+    await heartbeatBarrier(room.listener);
+    expect(await request.settled()).toEqual([]);
 
     // A listener in another room cannot reach this publisher.
     const otherRoom = crypto.randomUUID();
@@ -6221,12 +6173,15 @@ describe("VoiceRoom track-unavailable reports", () => {
       otherRoom,
       "outsider-user",
     );
-    const fromOutside = nextMessageWithOpcodeOrNull(
+    // The outsider's report goes to the other room's object; its own barrier
+    // shows it was handled there.
+    const fromOutside = recordEvents(
       room.publisher,
       GatewayOp.RepublishRequest,
     );
     room.report(outsider);
-    expect(await fromOutside).toBeNull();
+    await heartbeatBarrier(outsider);
+    expect(await fromOutside.settled()).toEqual([]);
 
     outsider.close();
     room.close();
@@ -6249,13 +6204,14 @@ describe("VoiceRoom track-unavailable reports", () => {
     room.report(room.listener);
     await first;
 
-    const limited = nextMessageWithOpcodeOrNull(
-      room.publisher,
-      GatewayOp.RepublishRequest,
-    );
+    const limited = recordEvents(room.publisher, GatewayOp.RepublishRequest);
     room.report(room.listener);
     room.report(second);
-    expect(await limited).toBeNull();
+    // Both reports are handled before the interval is expired below; a
+    // report still queued then would be let through and its request missed.
+    await heartbeatBarrier(room.listener);
+    await heartbeatBarrier(second);
+    expect(await limited.settled()).toEqual([]);
 
     await expireRepublishInterval(room.roomName);
     const later = nextMessageWithOpcode(
