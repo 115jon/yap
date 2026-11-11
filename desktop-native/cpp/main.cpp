@@ -1024,7 +1024,7 @@ int main(int argc, char* argv[])
     // Deep links: our own yap:// and yap-native:// (registered per user where it
     // differs), from this command line and from later instances.
     shell->setLinkHandler(
-      engine.singletonInstance<QObject*>("com.yap.native", "Invites"));
+      engine.singletonInstance<QObject*>("Yap.Ui", "Invites"));
     shell->attach(window, engine.singletonInstance<QObject*>(
                             "com.yap.native", "Desktop"));
     shell->registerUrlScheme();
