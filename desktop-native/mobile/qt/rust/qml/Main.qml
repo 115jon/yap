@@ -28,38 +28,22 @@ Window {
         value: Settings.theme.length > 0 && Settings.theme !== "system" ? Settings.theme
             : Application.styleHints.colorScheme === Qt.ColorScheme.Light ? "light" : "dark"
     }
-    // The system's text size times this phone's factor (Settings > Text
-    // size), within what the layouts take. Theme.textScale comes with the
-    // shared touch tokens; until a build has it, nothing is bound.
-    Binding {
-        target: Theme
-        property: "textScale"
-        when: Theme.textScale !== undefined
-        value: Math.max(0.85, Math.min(2.0, Native.fontScale * Prefs.textFactor))
-    }
-    // Dark status and navigation bar icons on a light theme, once the shim
-    // has the switch (a picked theme can differ from the system's mode).
-    Binding {
-        target: Native
-        property: "lightBars"
-        when: Native.lightBars !== undefined
-        value: Theme.lightGround
-    }
     Binding {
         target: Theme
         property: "reducedMotion"
         value: Native.reducedMotion
     }
-    // A phone: fingers, no hover, and the system's text size (a settings
-    // factor would multiply it here), within what the layouts take.
+    // A phone: fingers, no hover, and the system's text size times this
+    // phone's factor (Settings > Text size), within what the layouts take.
     Binding { target: Theme; property: "touch"; value: true }
     Binding { target: Theme; property: "hoverUi"; value: false }
     Binding {
         target: Theme
         property: "textScale"
-        value: Math.max(0.85, Math.min(2.0, Native.fontScale))
+        value: Math.max(0.85, Math.min(2.0, Native.fontScale * Prefs.textFactor))
     }
-    // Dark status and navigation bar icons on the light themes.
+    // Dark status and navigation bar icons on the light themes (a picked
+    // theme can differ from the system's mode).
     Binding {
         target: Native
         property: "lightBars"

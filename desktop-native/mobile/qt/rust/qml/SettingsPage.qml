@@ -64,15 +64,10 @@ Rectangle {
         { factor: 1.15, label: qsTr("Large") },
         { factor: 1.3, label: qsTr("Larger") }
     ]
-    // What Main.qml gives Theme.textScale (the same clamp).
-    readonly property real effectiveScale: Math.max(0.85, Math.min(2.0, Native.fontScale * Prefs.textFactor))
     // The push shim's notification state, when this build has it.
     readonly property bool hasPush: Native.notificationsEnabled !== undefined
-    // The shared Theme's text scale, when this build has it.
-    readonly property bool hasTextScale: Theme.textScale !== undefined
     // The section numbers, counting only the sections shown.
-    readonly property int pushNumber: hasTextScale ? 4 : 3
-    readonly property int devicesNumber: pushNumber + (hasPush ? 1 : 0)
+    readonly property int devicesNumber: hasPush ? 5 : 4
 
     readonly property var sessions: {
         try {
@@ -269,8 +264,6 @@ Rectangle {
             Section {
                 number: 3
                 title: qsTr("Text size")
-                // Only where the shared Theme scales its type.
-                visible: root.hasTextScale
                 Segmented {
                     width: parent.width
                     accessibleName: qsTr("Text size")
@@ -282,8 +275,8 @@ Rectangle {
                     onPicked: index => Prefs.textFactor = root.textSizes[index].factor
                 }
                 Item { width: 1; height: 12 }
-                // A message at the chosen size (drawn at the scale itself,
-                // so it reads the same with or without Theme.textScale).
+                // A message at the chosen size (the type roles already carry
+                // Theme.textScale).
                 Rectangle {
                     width: parent.width
                     height: sample.height + 24
@@ -312,9 +305,7 @@ Rectangle {
                                 text: Session.meName
                                 elide: Text.ElideRight
                                 color: Theme.ink1
-                                font.family: "Yap Bricolage Key Bold"
-                                font.weight: Font.Bold
-                                font.pixelSize: Math.round(15 * root.effectiveScale)
+                                font: Theme.type.author
                             }
                             Text {
                                 width: parent.width
@@ -322,8 +313,7 @@ Rectangle {
                                 text: qsTr("Messages, names and menus read at this size.")
                                 wrapMode: Text.Wrap
                                 color: Theme.ink1
-                                font.family: "Yap Geist"
-                                font.pixelSize: Math.round(15 * root.effectiveScale)
+                                font: Theme.type.message
                             }
                         }
                     }
@@ -339,7 +329,7 @@ Rectangle {
             }
 
             Section {
-                number: root.pushNumber
+                number: 4
                 title: qsTr("Notifications")
                 visible: root.hasPush
                 Loader {
