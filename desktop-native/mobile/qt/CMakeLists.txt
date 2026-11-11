@@ -7,6 +7,7 @@ cmake_minimum_required(VERSION 3.24)
 # The app's version (x.y.z) lives in VERSION: the release workflow
 # (qt-android-release.yml) and CI read the same file.
 file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION YAP_APP_VERSION LIMIT_COUNT 1)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION)
 if(NOT YAP_APP_VERSION MATCHES "^[0-9]+[.][0-9]+[.][0-9]+$")
   message(FATAL_ERROR "VERSION must be x.y.z, got '${YAP_APP_VERSION}'")
 endif()
@@ -109,7 +110,10 @@ qt_import_plugins(yapqt
 # reads its client from YAP_GOOGLE_SERVICES_JSON, android/build.gradle).
 set(YAP_ANDROID_APP_ID "dev.yap.app" CACHE STRING "Android application id (and iOS bundle id)")
 set(YAP_ANDROID_VERSION_CODE "1" CACHE STRING "Android versionCode")
-set(YAP_ANDROID_VERSION_NAME "${YAP_APP_VERSION}" CACHE STRING "Android versionName")
+set(YAP_ANDROID_VERSION_NAME "" CACHE STRING "Android versionName (empty: VERSION)")
+if(NOT YAP_ANDROID_VERSION_NAME)
+  set(YAP_ANDROID_VERSION_NAME "${YAP_APP_VERSION}")
+endif()
 set_target_properties(yapqt PROPERTIES
   QT_ANDROID_PACKAGE_NAME "${YAP_ANDROID_APP_ID}"
   QT_ANDROID_VERSION_CODE "${YAP_ANDROID_VERSION_CODE}"
