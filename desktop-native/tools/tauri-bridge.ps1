@@ -169,6 +169,7 @@ function Get-BridgeManifest {
     return , $bytes
 }
 
+# Never name another variable $bridge: names are case-insensitive, so it would overwrite this.
 $script:Bridge = Get-Content -Raw -LiteralPath $Config | ConvertFrom-Json
 foreach ($key in "tag", "installer", "pubkey") {
     if (-not $script:Bridge.$key) { throw "$Config has no '$key'" }
@@ -199,10 +200,10 @@ $base = "https://github.com/$Repo/releases/latest/download"
 $v = Get-TagVersion $latest
 if ($v -and $v.Major -ge 4) {
     try {
-        $bridge = Get-BridgeManifest
+        $bridgeBytes = Get-BridgeManifest
         $served = Get-UrlBytes "$base/latest.json"
-        if ([Convert]::ToBase64String($served) -ne [Convert]::ToBase64String($bridge)) {
-            $problems.Add("$base/latest.json ($($served.Length) bytes) is not the bridge's latest.json ($($bridge.Length) bytes)")
+        if ([Convert]::ToBase64String($served) -ne [Convert]::ToBase64String($bridgeBytes)) {
+            $problems.Add("$base/latest.json ($($served.Length) bytes) is not the bridge's latest.json ($($bridgeBytes.Length) bytes)")
         }
     } catch { $problems.Add($_.Exception.Message) }
     foreach ($name in $NativeSetup, $script:Bridge.installer, $NativeFeed) {

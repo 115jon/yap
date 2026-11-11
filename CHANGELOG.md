@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.0.1](https://github.com/115jon/yap/compare/v4.0.0...v4.0.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **api:** 🐛 list and revoke the user's sessions ([ceb43aa](https://github.com/115jon/yap/commit/ceb43aaa9578d23e1c2f4059abf144ae5916e549))
+* **api:** list and revoke the user's sessions ([bf81ba6](https://github.com/115jon/yap/commit/bf81ba6f50695a0b8504e90ea72c7e811458d140))
+
 ## [4.0.0](https://github.com/115jon/yap/compare/v3.14.0...v4.0.0) (2026-11-11)
 
 
