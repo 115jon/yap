@@ -414,15 +414,42 @@ Next savings, not measured yet:
   then the fonts are read from the mapped resource (Qt copied each file onto
   the heap), `DisplayName` builds its 20 animation objects only for a name
   style that moves, and pictures are decoded at the size they are drawn.
-  Keeping a third of a screen of rows built past each edge of the chat list,
-  not a whole one, saved another 10 MB but was withdrawn: the builds with it
-  hung when a channel with unread messages opened near a GIF row (the GUI
-  thread busy, memory growing past 1 GB; cause not established, which is
-  also why a GIF's player is built only once its row has stood for 400 ms).
-  Next: that hang, then the row buffer again; the shared delegate's hover
-  handlers, tooltips and loaders, which a phone never opens, behind
-  `Theme.hoverUi` (with a desktop comparison); and why about 8 MB of
-  pictures from rows scrolled past stay decoded.
+  The chat list no longer reuses rows (below): after 20 flings 119 MB PSS
+  (native heap 55 MB) against 131 MB (66 MB) with reuse in the same build
+  and session; the pool kept rows scrolled past, and their decoded
+  pictures, alive until they were handed out again. Keeping a third of a
+  screen of rows built past each edge of the chat list, not a whole one, is
+  not kept: with reuse it saved 10 MB, without it nothing (134 MB in that
+  session) and a fling builds more rows (183 against 129). Next: the shared
+  delegate's hover handlers, tooltips and loaders, which a phone never
+  opens, behind `Theme.hoverUi` (with a desktop comparison).
+- **The chat list's end.** Builds of the 2026-11-11 pass hung (the GUI
+  thread at 100%, the process past 1 GB) when the open channel was picked
+  again in the drawer with a message of pictures at the top of the screen.
+  The list rebuilt itself round after round, and each round built the row's
+  pictures again; with a GIF player built with its row that was a decoder
+  and a first frame a round (the likely source of the memory: nothing
+  queued to the GUI thread or marked for deletion is released while it does
+  not return to its event loop). The player is still built only once its
+  row has stood for 400 ms at its final size: a row built ahead of the
+  scroll and dropped costs no fetch, and the player is never resized
+  (attachments are private, so not in the disk cache: each size it is drawn
+  at is a download). Three things made the loop, and `ChatPage` now does
+  none of them:
+  - It called `positionViewAtEnd()` from the list's `contentHeight` and
+    `count` signals. Those fire inside the list's refill, which does not
+    nest: with the last row out of the cache buffer, the call released
+    every built row and built none. The end is now followed once per turn
+    of the event loop (`settle`, the desktop's `reflow`).
+  - Rows were reused. A pooled row handed to another message keeps its old
+    height until its columns lay out again, a pass after the list placed
+    it: a row of pictures placed short at the top of the screen grew by
+    hundreds of pixels, pushed the last rows out of the buffer, the list was
+    rebuilt around its end, and the row came back from the pool short
+    again. `reuseItems` is off for this list, as on the desktop; a new row
+    has its height when it is placed.
+  - A reset of the list (the open channel picked again) did not land it
+    again. It does now (`onModelReset`), as on the desktop.
 
 ## Licensing: owner decisions
 
