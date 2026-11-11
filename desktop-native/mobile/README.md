@@ -33,7 +33,7 @@ that feel off, each with a known fix.
   GUI-thread registry, the core's runtime and gateway, and the portable C++
   (`AnimatedPicture`, the icon and dither image providers). Together with
   the core, that is everything a row shows and every rule behind it.
-- **Per platform:** about 2,600 lines of QML (shell, pager, pages,
+- **Per platform:** about 3,900 lines of QML (shell, pager, pages,
   composer, and the mobile side of four seams), about 130 lines of Rust (the app's
   `Platform`: TLS client, realtime, token store), and about 450 lines of
   C++/Java shim for back, keyboard, haptics, share, text size and fling.
@@ -214,6 +214,8 @@ Not there yet:
 - The rail has no unread-DM avatar keys under Home (the desktop's), no
   create-server tile, no friends or shop rows.
 - Voice channels in the tree do nothing on a tap.
+- Side by side, the image viewer covers the chat column, not the window:
+  it lives in the chat page.
 
 <p>
 <img src="docs/qt-nav-drawer.png" width="180" alt="Qt: the drawer with the chat's peek">
