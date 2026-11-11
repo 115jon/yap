@@ -6,7 +6,8 @@ name: "Desktop Native Mobile Prototype"
 #   UniFFI. Android builds the APK the emulator runs; iOS checks that the
 #   core cross-compiles and that the generated Swift bindings type-check.
 # - qt-android: the Qt Quick app (desktop-native/mobile/qt) for x86_64 and
-#   arm64-v8a, signed with the public CI debug key, as artifacts. Qt comes
+#   arm64-v8a, signed with the public CI debug key, as artifacts (tester
+#   builds with the release key: qt-android-release.yml). Qt comes
 #   from download.qt.io, pinned by mobile/qt/qt-sdk.lock.json.
 # - qt-android-smoke: the x86_64 APK cold-started on an emulator.
 # - qt-ios: the same CMake project for the iOS simulator, a compile and link
@@ -262,10 +263,13 @@ jobs:
           # The commit actually built: on a pull request, the merge ref.
           SHA: ${{ github.sha }}
         run: |
+          # Below every release build's code (qt-android-release.yml); the
+          # name marks a CI build of mobile/qt/VERSION.
           code=$(( RUN * 10 + ${{ matrix.digit }} ))
+          base="$(head -n 1 desktop-native/mobile/qt/VERSION)"
           bash desktop-native/mobile/qt/build.sh ${{ matrix.abi }} Release \
             -DYAP_ANDROID_VERSION_CODE="$code" \
-            -DYAP_ANDROID_VERSION_NAME="0.1.$RUN+${SHA::7}" \
+            -DYAP_ANDROID_VERSION_NAME="$base-ci.$RUN+${SHA::7}" \
             -DYAP_ANDROID_COMPILE_SDK=android-36 \
             -DYAP_ANDROID_BUILD_TOOLS="$BUILD_TOOLS"
 
