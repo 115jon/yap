@@ -721,17 +721,19 @@ Tester builds of the Qt app come from
 release key (not the Expo app's key, and not the public CI key). Each run
 publishes a **draft** pre-release, "Yap for Android (Qt) <version>", with
 `yap-qt-<version>-arm64-v8a.apk` (phones), `yap-qt-<version>-x86_64.apk`
-(emulators) and a `.sha256` for each. Nobody else sees a draft until it is
-published.
+(emulators) and a `.sha256` for each. Only the repository's maintainers see
+a draft until it is published (the run's own artifacts are public for a day,
+as on any public repository).
 
 Cutting a tester build:
 
 1. Set the version in `desktop-native/mobile/qt/VERSION` (x.y.z; CMake, CI
    and the release workflow read it) and merge that to main.
 2. Either push a tag `qt-android-v<x.y.z>` matching `VERSION` (version name
-   x.y.z), or run the workflow by hand from main (Actions, "Qt Android
-   Release", Run workflow; version name `<VERSION>-build.<run>`, draft tag
-   `qt-android-v<that version>`).
+   x.y.z; the tag must be on main), or run the workflow by hand from main
+   (Actions, "Qt Android Release", Run workflow; version name
+   `<VERSION>-build.<run>`, draft tag `qt-android-v<that version>`, which
+   starts no further run when it is created).
 3. When the run is green, open the draft on the Releases page, check it and
    publish it as a pre-release (publishing a manual run's draft creates its
    tag at the commit built), or delete it.
@@ -743,7 +745,8 @@ alone can read the key, and checks that each APK carries exactly the release
 certificate (SHA-256
 `75:E0:D8:E0:22:4A:9F:32:D8:CC:40:C7:B9:5A:E7:82:43:B3:97:21:5A:99:C1:FE:D6:01:50:FC:6E:FF:B8:9C`),
 the application id `dev.yap.app`, and the version code and name. It then
-cold-starts the x86_64 APK on an emulator, and only then creates the draft.
+cold-starts the x86_64 APK on an emulator, and only then creates the draft
+(after checking the APKs are byte for byte the ones the sign job made).
 
 Version codes are `(1000000 + run) * 10 + 2` (arm64-v8a) or `+ 4` (x86_64),
 from the release workflow's run number, so each release is above the one
@@ -764,13 +767,14 @@ Testers install and update:
   signature conflict or "App not installed"); after that, releases update
   each other.
 
-The key: a PKCS12 keystore (RSA 4096, alias `yapapp`, valid 100 years) on
-the owner's machine under the user profile's `.config/yap/android-signing/`,
-readable by that user only, with its password in a file next to it. CI gets
-it from the `android-release` environment's secrets
+The key: a PKCS12 keystore (RSA 4096, alias `yapapp`, valid 100 years),
+kept by the owner outside the repository with access limited to the owner's
+account. CI gets it from the `android-release` environment's secrets
 (`QT_ANDROID_KEYSTORE_BASE64`, `QT_ANDROID_KEYSTORE_PASSWORD`,
-`QT_ANDROID_KEY_ALIAS`); the environment admits main and `qt-android-v*`
-tags only, so pull requests and other branches never see it. Back the
+`QT_ANDROID_KEY_ALIAS`). The environment admits main and `qt-android-v*`
+tags only, so pull requests, forks and other branches never see it; anyone
+who can push such a tag can have a commit signed, so only maintainers
+should. Back the
 keystore and its password up together somewhere offline or encrypted (a
 password manager can hold both). A lost key means every tester uninstalls
 and reinstalls, since no later build could update theirs; a leaked key means
