@@ -34,6 +34,11 @@ case "$abi" in
   *) echo "unknown target $abi (x86_64, arm64-v8a, ios-simulator)" >&2; exit 2 ;;
 esac
 qt="${QT_TARGET_ROOT:-${QT_ANDROID_ROOT:-$yapm/qt/$qt_dir}}"
+# The layout before fetch-qt.ps1: $YAPM/qt/x86_64, $YAPM/qt/arm64_v8a.
+if [[ -z "${QT_TARGET_ROOT:-}${QT_ANDROID_ROOT:-}" && ! -d "$qt" && "$qt_dir" == android_* \
+      && -d "$yapm/qt/${qt_dir#android_}" ]]; then
+  qt="$yapm/qt/${qt_dir#android_}"
+fi
 host="${QT_HOST_PATH:?set QT_HOST_PATH to a desktop Qt 6.11}"
 [[ -f "$qt/bin/target_qt.conf" ]] || { echo "no target Qt at $qt (bin/target_qt.conf)" >&2; exit 2; }
 
