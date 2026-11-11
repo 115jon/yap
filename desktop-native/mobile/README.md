@@ -8,7 +8,8 @@ prototypes on the same unchanged core, and their side-by-side measurements:
 
 - `qt/`: **Qt Quick on Android**, the main path. The desktop's QML,
   list models and portable C++ run on a phone, under a mobile shell and a
-  thin platform shim. Application id `dev.yap.app`, label "Yap".
+  thin platform shim. Application id `dev.yap.app`, label "Yap" (CI's
+  builds: `dev.yap.app.ci`, "Yap CI").
 - `rust/` and `android/`: **the Compose baseline**. The same core behind
   UniFFI with Jetpack Compose views, kept to compare against. Application
   id `dev.yap.coreproto`.
@@ -941,8 +942,9 @@ androiddeployqt copied before, so a plugin dropped from the build stays in
 the APK until `android-build/libs` is cleared.
 
 Packaging, from CMake cache variables: `YAP_ANDROID_APP_ID` (default
-`dev.yap.app`; also the Gradle namespace and the iOS bundle id),
-`YAP_ANDROID_VERSION_CODE` (1) and `YAP_ANDROID_VERSION_NAME` (`qt/VERSION`);
+`dev.yap.app`; also the Gradle namespace and the iOS bundle id; CI builds
+`dev.yap.app.ci`), `YAP_ANDROID_APP_NAME` (the launcher label, default
+"Yap"; CI's "Yap CI"), `YAP_ANDROID_VERSION_CODE` (1) and `YAP_ANDROID_VERSION_NAME` (`qt/VERSION`);
 `YAP_ANDROID_COMPILE_SDK` and `YAP_ANDROID_BUILD_TOOLS` pin the SDK
 platform and build tools (default: the newest installed). The manifest has
 no `package` attribute. The launcher icon is adaptive, with a
@@ -980,8 +982,14 @@ the lock's hash) and NDK r27c, signs them with the public CI debug key
 (`qt/ci/debug.keystore`, so one run's APK installs over another's; never a
 release key), and uploads each APK with its `.sha256` (14 days; version
 code `run * 10 + 2` for arm64, `+ 4` for x86_64, version name
-`<qt/VERSION>-ci.<run>+<commit built>`). `qt-android-smoke` cold-starts the x86_64 APK
-on an API 35 emulator and fails unless it logs `[startup] first frame`
+`<qt/VERSION>-ci.<run>+<commit built>`). Anyone can sign with that key, so
+CI's APKs are a separate app: application id `dev.yap.app.ci`, label "Yap
+CI", and no push notifications (no Firebase configuration; the Firebase
+project knows `dev.yap.app` only). A CI APK installs beside a tester's
+release build, and nothing signed with the public key can update the
+release app. Before building, the x86_64 job runs the session vault's tests
+(`cargo test` in `qt/vault`). `qt-android-smoke` cold-starts the x86_64 APK
+(`YAP_ANDROID_APP_ID=dev.yap.app.ci`) on an API 35 emulator and fails unless it logs `[startup] first frame`
 (`qt/smoke.sh`, which also works against a local emulator; it checks
 start-up only, not sign-in). `qt-ios` builds the simulator `.app` on macOS when
 `mobile/qt` or the workflow changes, by hand, and weekly. Each job runs only
@@ -1026,7 +1034,8 @@ from the release workflow's run number, so each release is above the one
 before and above every CI build (`run * 10 + digit` of the CI workflow).
 Renaming the workflow file restarts its run number; raise the offset if that
 happens. A CI build and a release build cannot update each other anyway:
-Android installs an update only when it is signed with the same key.
+they are different apps (`dev.yap.app.ci` and `dev.yap.app`), and Android
+installs an update only when it is signed with the same key.
 
 Testers install and update:
 
@@ -1035,10 +1044,11 @@ Testers install and update:
   manager). The file's SHA-256 should match its `.sha256`.
 - To update, install a newer release's APK the same way: it replaces the
   app in place and keeps the sign-in and settings.
-- A phone with a CI build (debug key) or a local build installed must
-  uninstall it once before the first release build (Android reports a
-  signature conflict or "App not installed"); after that, releases update
-  each other.
+- A phone with a local build (`dev.yap.app` signed with a debug key) or a
+  CI build from before CI had its own id (`dev.yap.app` too) must uninstall it
+  once before the first release build (Android reports a signature conflict
+  or "App not installed"); after that, releases update each other. Current
+  CI builds ("Yap CI") are their own app and stay installed beside it.
 
 The key: a PKCS12 keystore (RSA 4096, alias `yapapp`, valid 100 years),
 kept by the owner outside the repository with access limited to the owner's

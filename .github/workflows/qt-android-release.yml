@@ -349,7 +349,7 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: bash desktop-native/mobile/qt/smoke.sh out/yap-qt-${{ needs.plan.outputs.version }}-x86_64.apk 180
+          script: YAP_ANDROID_APP_ID=${{ env.APP_ID }} bash desktop-native/mobile/qt/smoke.sh out/yap-qt-${{ needs.plan.outputs.version }}-x86_64.apk 180
 
   publish:
     needs: [plan, sign, smoke]

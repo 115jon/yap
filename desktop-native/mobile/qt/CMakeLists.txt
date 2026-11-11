@@ -103,7 +103,6 @@ endif()
 
 # The application id and version: the packaging block at the end.
 set_target_properties(yapqt PROPERTIES
-  QT_ANDROID_APP_NAME "Yap"
   QT_ANDROID_PACKAGE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/android
   QT_ANDROID_MIN_SDK_VERSION 28
   QT_ANDROID_TARGET_SDK_VERSION 36
@@ -151,15 +150,21 @@ qt_import_plugins(yapqt
 # get <VERSION> (1).
 # The id is the Gradle namespace and application id (androiddeployqt writes
 # it to gradle.properties), and the iOS bundle identifier. dev.yap.app is
-# the app's own (registered in Firebase for push notifications; Gradle
-# reads its client from YAP_GOOGLE_SERVICES_JSON, android/build.gradle).
+# the app's own, for release builds and local ones (registered in Firebase
+# for push notifications; Gradle reads its client from
+# YAP_GOOGLE_SERVICES_JSON, android/build.gradle). CI's builds, signed with
+# the public CI key, are dev.yap.app.ci, labelled "Yap CI": anyone holding
+# that key could sign an update to them, so they never share the release
+# app's id (README, "Signing").
 set(YAP_ANDROID_APP_ID "dev.yap.app" CACHE STRING "Android application id (and iOS bundle id)")
+set(YAP_ANDROID_APP_NAME "Yap" CACHE STRING "The app's label on the launcher")
 set(YAP_ANDROID_VERSION_CODE "1" CACHE STRING "Android versionCode")
 set(YAP_ANDROID_VERSION_NAME "" CACHE STRING "Android versionName (empty: VERSION)")
 if(NOT YAP_ANDROID_VERSION_NAME)
   set(YAP_ANDROID_VERSION_NAME "${YAP_APP_VERSION}")
 endif()
 set_target_properties(yapqt PROPERTIES
+  QT_ANDROID_APP_NAME "${YAP_ANDROID_APP_NAME}"
   QT_ANDROID_PACKAGE_NAME "${YAP_ANDROID_APP_ID}"
   QT_ANDROID_VERSION_CODE "${YAP_ANDROID_VERSION_CODE}"
   QT_ANDROID_VERSION_NAME "${YAP_ANDROID_VERSION_NAME}")
