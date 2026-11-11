@@ -27,7 +27,14 @@ for ((i = 0; i < timeout; i += 2)); do
   fi
   sleep 2
 done
-"${adb[@]}" logcat -d | grep -E '\[startup\]|\[cache\]|FATAL|AndroidRuntime|libc  *:' | head -40 || true
+pid="$("${adb[@]}" shell pidof "$pkg" | tr -d '\r' || true)"
+if ((status)); then
+  # The app's own log (Qt's tags, the core's yap-core), and crashes.
+  echo "== app process: ${pid:-not running}"
+  "${adb[@]}" logcat -d | grep -E " ${pid:-NOPID} .* [VDIWEF] |FATAL|AndroidRuntime|DEBUG *:|ActivityManager: .*$pkg" | tail -80 || true
+else
+  "${adb[@]}" logcat -d | grep -E '\[startup\]|\[cache\]' || true
+fi
 "${adb[@]}" uninstall "$pkg" >/dev/null || true
 if ((status)); then
   echo "no '[startup] first frame' within ${timeout}s" >&2
