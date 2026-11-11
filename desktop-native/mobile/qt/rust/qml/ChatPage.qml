@@ -24,9 +24,29 @@ Item {
 
     readonly property bool dm: Nav.dmUserId.length > 0
 
-    // The message menu's Edit lands here.
-    // TODO: edit `messageId` in place (the message sheets' work).
-    function startEdit(messageId) {}
+    // The message being edited in place (its row shows the editor).
+    property string editingId: ""
+    // The message menu's Edit lands here: the row becomes the delegate's
+    // MessageEditor.
+    function startEdit(messageId) {
+        if (messageId.length === 0)
+            return
+        followEnd = false
+        editingId = messageId
+        Qt.callLater(revealEdit)
+    }
+    function endEdit() {
+        editingId = ""
+        Qt.inputMethod.hide()
+        followEnd = view.nearEnd()
+    }
+    // The edited row, whole, above the keyboard as it comes up.
+    function revealEdit() {
+        const index = editingId.length > 0 ? Chat.indexOfMessage(editingId) : -1
+        if (index >= 0)
+            view.positionViewAtIndex(index, ListView.Contain)
+    }
+    onKeyboardChanged: if (editingId.length > 0) Qt.callLater(revealEdit)
 
     // The page outlives the conversation, so each one lands as it opens:
     // on the unread divider when there is one, else at its end (the
@@ -95,9 +115,9 @@ Item {
         composer.startReply(messageId, author, text)
     }
 
-    // Something lies over the chat (the image viewer): Back and its
-    // gesture are that thing's, and the pager does not pan.
-    readonly property bool overlayShown: viewer.shown
+    // Something lies over the chat (the image viewer, a message sheet):
+    // Back and its gesture are that thing's, and the pager does not pan.
+    readonly property bool overlayShown: viewer.shown || actions.shown
     // The back gesture's progress while it does (the viewer shrinks and
     // fades); the pager passes it on.
     property real backProgress: 0
@@ -292,30 +312,48 @@ Item {
         }
 
         delegate: MessageDelegate {
-            id: row
+            id: message
             width: view.width
-            // Touch has no right click: a long press opens the share sheet
-            // with the message's text (the desktop's menu is not on mobile).
-            TapHandler {
-                acceptedDevices: PointerDevice.TouchScreen
-                onLongPressed: {
-                    Native.haptic(Native.LongPress)
-                    Native.share(row.body)
-                }
-            }
             today: Chat.today
-            editingId: ""
+            editingId: root.editingId
             highlightId: ""
+            // A long press (the delegate's, under a finger) opens the sheet;
+            // a swipe left replies.
+            onMenuRequested: actions.openFor(message)
+            SwipeReply {
+                row: message
+                view: view
+                enabled: !message.editing && !message.pending && !message.failed && !message.isCall
+                onTriggered: root.startReply(message.messageId, message.author, message.body)
+            }
+            onReplyRequested: (id, author, text) => root.startReply(id, author, text)
+            onEditRequested: id => root.startEdit(id)
+            onEditSaved: (id, text) => {
+                root.endEdit()
+                // Saved empty: ask to delete it, as the desktop does.
+                if (text.trim().length === 0)
+                    actions.confirmDelete(message)
+                else
+                    Chat.editMessage(id, text)
+            }
+            onEditCancelled: root.endEdit()
+            onProfileRequested: (userId, anchor) => root.profileRequested(userId)
             onRetryRequested: nonce => Chat.retrySend(nonce)
             onDiscardRequested: (nonce, text) => Chat.discardSend(nonce)
-            onReactionToggled: (id, emoji) => {
-                Native.haptic(Native.Tick)
-                Chat.toggleReaction(id, emoji)
-            }
+            onReactionToggled: (id, emoji) => actions.react(id, emoji)
+            onReactionPickerRequested: (id, anchor, toRight) => actions.pickReaction(id)
+            onReactionDetailsRequested: (id, emoji) => actions.showReactions(id, emoji)
             onLinkOpened: url => Qt.openUrlExternally(url)
-            onReplyRequested: (id, author, text) => root.startReply(id, author, text)
             onImageOpened: (images, index) => viewer.show(images, index)
-            onProfileRequested: (userId, anchor) => root.profileRequested(userId)
+            // A send of ours that failed: the reject haptic, once, for the
+            // row that was sending (not a pooled row reused for a failed one).
+            property string sending: ""
+            Component.onCompleted: if (pending) sending = nonce
+            onPendingChanged: if (pending) sending = nonce
+            onFailedChanged: if (failed && nonce.length > 0 && nonce === sending) {
+                sending = ""
+                Native.haptic(Native.Reject)
+            }
         }
 
         function nearEnd() {
@@ -386,11 +424,20 @@ Item {
             : qsTr("Message #%1").arg(Nav.activeChannelName)
         enabled: !Chat.readOnly
         onSend: (text, replyToId) => {
-            Native.haptic(Native.Confirm)
             root.followEnd = true
             Chat.sendMessage(text, replyToId)
         }
         onOpenImages: (images, index) => viewer.show(images, index)
+    }
+
+    // The message sheet and what it leads to, over the page.
+    MessageActions {
+        id: actions
+        anchors.fill: parent
+        z: 9
+        onReplyRequested: (messageId, author, text) => root.startReply(messageId, author, text)
+        onEditRequested: messageId => root.startEdit(messageId)
+        onProfileRequested: userId => root.profileRequested(userId)
     }
 
     // Over everything on the page, the header included.
@@ -399,6 +446,8 @@ Item {
         anchors.fill: parent
         z: 10
         backProgress: viewer.shown ? root.backProgress : 0
+        // Its ground is black whatever the theme: light bar icons while up.
+        onShownChanged: shown ? Native.holdDarkBars(viewer) : Native.releaseDarkBars(viewer)
     }
 
     Component.onCompleted: root.land()

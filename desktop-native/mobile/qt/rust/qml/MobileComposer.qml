@@ -9,8 +9,10 @@ import Yap.Ui
 // being answered, and Cancel), a notice line (an upload or send the core
 // refused), the emoji row, the upload tray, then the field row: attach,
 // the growing field (up to five lines) with the emoji key, and Send. Member
-// suggestions for `@` float above it all, over the messages. The IME shows
-// its Send action (EnterKey); autocorrect and suggestions stay on, as in
+// suggestions for `@` float above it all, over the messages. The soft
+// keyboard's Enter adds a line (Android gives a multi-line field no Send
+// action) and the send key sends; a hardware keyboard's Enter sends and
+// Shift+Enter adds a line. Autocorrect and suggestions stay on, as in
 // any Android messaging app, and the word being composed counts as typed
 // (Send, `@` suggestions, typing pings) before the keyboard commits it.
 // Each channel keeps its unsent text and reply (Drafts) while the app runs.
@@ -517,10 +519,10 @@ Rectangle {
                     // Text selection on touch: Qt draws the platform's handles
                     // and its cut/copy/paste bar (QtQuick native handles).
                     persistentSelection: true
-                    EnterKey.type: Qt.EnterKeySend
                     Keys.onReturnPressed: event => {
-                        // Shift+Enter (a hardware keyboard) is a new line.
-                        if (event.modifiers & Qt.ShiftModifier) {
+                        // A new line from the soft keyboard's Enter, and from
+                        // Shift+Enter; a hardware keyboard's Enter sends.
+                        if ((event.modifiers & Qt.ShiftModifier) || Qt.inputMethod.visible) {
                             event.accepted = false
                             return
                         }
