@@ -212,8 +212,10 @@ Window {
             window.goBack()
         }
     }
-    // Registered only while something is above the drawer, so at the root
-    // the system plays its own back-to-home preview.
+    // True only while something is above the drawer: at the root the system
+    // plays its own back-to-home preview. Where it would finish the activity
+    // instead (not started by the launcher, Android 14+), the shim still
+    // takes Back and goBack() leaves by moving the task back.
     Binding {
         target: Native
         property: "handlesBack"

@@ -1,8 +1,9 @@
 <?xml version="1.0"?>
 <!-- Qt 6.11's template (src/android/templates) with these changes:
-     the predictive back gesture on (the shim registers its callback only
-     while there is a page to go back to; at the root the system plays its
-     own back-to-home preview), the keyboard left to the app (adjustNothing:
+     the predictive back gesture on (the shim registers its callback while
+     there is a page to go back to; at the root the system plays its own
+     back-to-home preview when it keeps the task alive, see
+     NativeShim.keepsTaskAtRoot), the keyboard left to the app (adjustNothing:
      the composer follows the IME inset itself, frame by frame), the
      session file kept out of cloud backup and device-to-device transfer,
      the adaptive icon, and the splash: the theme's (system splash on
@@ -14,6 +15,14 @@
     android:versionCode="-- %%INSERT_VERSION_CODE%% --"
     android:versionName="-- %%INSERT_VERSION_NAME%% --">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The shim asks which app is the home screen (was this start the
+         launcher's? NativeShim.keepsTaskAtRoot). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+    </queries>
     <!-- %%INSERT_PERMISSIONS -->
     <!-- %%INSERT_FEATURES -->
     <supports-screens

@@ -129,8 +129,10 @@ void Native::setHandlesBack(bool on)
     return;
   m_handlesBack = on;
 #ifdef Q_OS_ANDROID
-  // Registered only while the app has somewhere to go back to, so at the
-  // root the system plays its own back-to-home preview.
+  // Registered while the app has somewhere to go back to. At the root the
+  // system plays its own back-to-home preview, unless it would finish the
+  // activity there; then the shim keeps the callback and the app leaves by
+  // moving its task back (NativeShim.keepsTaskAtRoot).
   QJniObject::callStaticMethod<void>(kShim, "setHandlesBack", "(Z)V", jboolean(on));
 #endif
   emit handlesBackChanged();
