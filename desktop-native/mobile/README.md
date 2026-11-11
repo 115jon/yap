@@ -581,11 +581,16 @@ desktop's objects with phone list layouts:
   factor (0.85, 1, 1.15, 1.3) over the system's font scale, kept in the
   app's QSettings (`Prefs.textFactor`); `Main.qml` binds
   `Theme.textScale` to `clamp(Native.fontScale * factor, 0.85, 2)`, and the
-  section's sample is a message row at that size. _Notifications_ shows
-  only when the shim exposes `Native.notificationsEnabled` (the push
-  work). _Devices_: the account's
+  section's sample is a message row at that size. _Notifications_: the
+  switch shows `Native.notificationsEnabled`; while off, a tap is
+  `Native.requestNotifications()` (Android's dialog while it still shows,
+  else the app's notification settings); once on, only Android's settings
+  turn them off, so the tap does nothing. _Devices_: the account's
   sessions (`Settings.loadSessions`); another device signs out after a
-  confirm (`Extras.revokeSession`). _About_: the APK's version name, the
+  confirm (`Extras.revokeSession`). The server lists only the current
+  session today (`GET /api/sessions` returns it alone, with `activity:
+null`), so the row reads "Desktop · Desktop client", the client's
+  fallback title, on a phone too, and other devices never show. _About_: the APK's version name, the
   licence and the privacy policy. _Sign out_ asks first, in place.
 - **Friends** (the first row of Home's pane, with the incoming count): the
   desktop's `Friends` object behind four tabs (Online, All, Pending,
@@ -611,14 +616,17 @@ the DM; Block from a friend's row (the account's list showed the block)
 and Unblock from the Blocked tab; Sign out returning to sign-in and a new
 device code signing in again; Larger scaling the chat's names, messages
 and times to 1.3 (the system at 1.0), and the status bar's icons turning
-light on Midnight under a light system. Not verified: the Notifications
-section (no push shim yet), signing out another device (the account had
-one session), and the licence links opening a browser.
+light on Midnight under a light system; Notifications off on a fresh
+install, Allow in Android's dialog turning it on, and after a revoke and a
+second refusal the tap opening the app's notification settings, where
+turning them on showed on return. Not verified: signing out another device
+(the server lists one session), and the licence links opening a browser.
 
 <p>
 <img src="docs/qt-settings.png" width="180" alt="Qt: Settings, account and status">
 <img src="docs/qt-settings-theme.png" width="180" alt="Qt: Settings in Midnight, the theme thumbnails">
 <img src="docs/qt-settings-larger.png" width="180" alt="Qt: the chat at the Larger text size">
+<img src="docs/qt-settings-notifications.png" width="180" alt="Qt: Settings, notifications on">
 <img src="docs/qt-friends-pending.png" width="180" alt="Qt: Friends, an incoming request">
 <img src="docs/qt-friends-actions.png" width="180" alt="Qt: Friends, a friend's actions">
 </p>
