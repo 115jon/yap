@@ -78,6 +78,92 @@ pub const LEAVE_SEND_WINDOW: Duration = Duration::from_millis(100);
 /// (ADMISSION.md "Room socket, op 40").
 pub const CREDENTIAL_REFRESH: Duration = Duration::from_secs(45 * 60);
 
+/// The wait before a failed pull of the same publication is asked for
+/// again; it doubles with each failure in a row (1 s, 2 s, 4 s, ...) up to
+/// [`PULL_RETRY_MAX`]. Without it every input (a mic level tick, a stats
+/// tick) asked again at once, and a pull the SFU refused ran into its rate
+/// limit within seconds.
+pub const PULL_RETRY_BACKOFF: Duration = Duration::from_secs(1);
+
+/// The longest wait between two pulls of a publication that keeps failing.
+pub const PULL_RETRY_MAX: Duration = Duration::from_secs(30);
+
+/// The longest `Retry-After` a rate-limited pull honours.
+pub const PULL_RETRY_AFTER_MAX: Duration = Duration::from_secs(120);
+
+/// A publication the SFU refused this many pulls of in a row (a 4xx: the
+/// same request would likely be refused again) is only asked for every
+/// [`PULL_RETRY_MAX`] from then on, until it is offered anew (another SFU
+/// track or session), a pull of it works or media is rebuilt.
+pub const MAX_REJECTED_PULLS: u32 = 3;
+
+/// Why a pull failed, as the driver classifies the SFU's answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullFailure {
+    /// The SFU kept answering `not_found_track_error` (not published yet,
+    /// or gone).
+    NotFound,
+    /// The proxy or the SFU refused the request (a 4xx other than 401,
+    /// 403, 408 and 429, or an `errorCode` on the renegotiation): asking
+    /// the same way again likely gets the same answer.
+    Rejected,
+    /// HTTP 429: wait `retry_after` (when the SFU said) or the backoff.
+    RateLimited { retry_after: Option<Duration> },
+    /// Anything else: a 5xx, the network, our own media, an expired voice
+    /// token (401) or a join grant the room has not confirmed yet (403).
+    Transient,
+}
+
+impl fmt::Display for PullFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotFound => f.write_str("not found"),
+            Self::Rejected => f.write_str("refused"),
+            Self::RateLimited { .. } => f.write_str("rate limited"),
+            Self::Transient => f.write_str("failed"),
+        }
+    }
+}
+
+impl PullFailure {
+    /// The wait before the `failures`-th failure in a row is retried.
+    pub fn backoff(self, failures: u32) -> Duration {
+        let doubled = PULL_RETRY_BACKOFF
+            .saturating_mul(2u32.saturating_pow(failures.saturating_sub(1)))
+            .min(PULL_RETRY_MAX);
+        match self {
+            Self::RateLimited {
+                retry_after: Some(after),
+            } => doubled.max(after.min(PULL_RETRY_AFTER_MAX)),
+            _ => doubled,
+        }
+    }
+}
+
+/// The failures in a row of one publication's pulls, and whether the next
+/// pull of it waits for its retry timer.
+#[derive(Debug, Clone)]
+struct PullRetry {
+    sfu_track_name: String,
+    session_id: String,
+    /// Failures in a row, of any kind (the backoff doubles with them).
+    failures: u32,
+    /// Refusals in a row ([`PullFailure::Rejected`]); any other outcome
+    /// starts it over.
+    rejected: u32,
+    /// The armed retry timer's token.
+    token: u64,
+    waiting: bool,
+}
+
+impl PullRetry {
+    fn holds(&self, offer: &Offer) -> bool {
+        self.waiting
+            && self.sfu_track_name == offer.sfu_track_name
+            && self.session_id == offer.session_id
+    }
+}
+
 /// The end reason when the room lost our session and identified a new
 /// participant (a Resume refused with 4006): the SFU session and the voice
 /// grant belong to the old one. The owner may join again at once.
@@ -344,6 +430,10 @@ pub enum Timer {
     Rebuild { token: u64 },
     /// Media `token` stayed connected for [`REBUILD_STABLE_AFTER`].
     MediaStable { token: u64 },
+    /// A failed pull of `track` may be asked for again.
+    PullRetry { track: String, token: u64 },
+    /// A 429's `Retry-After` is over: pulls may go out again.
+    PullsResume { token: u64 },
 }
 
 /// Everything the machine consumes.
@@ -383,6 +473,12 @@ pub enum Input {
     /// `not_found_track_error` (sent just before its failed [`Input::PullDone`]).
     PullNotFound {
         sfu_track_name: String,
+    },
+    /// Why the pull of `sfu_track_name` failed (sent just before its failed
+    /// [`Input::PullDone`]): the next pull of it waits a backoff.
+    PullFailed {
+        sfu_track_name: String,
+        failure: PullFailure,
     },
     /// A republish ([`Effect::Republish`]) landed: the new SFU track name.
     Republished(Result<(Republish, String), String>),
@@ -445,6 +541,10 @@ pub enum Notice {
     /// The spatial panel's room map changed: the room's state, or who sits
     /// where, or whether they hear it.
     Spatial(SpatialMap),
+    /// We are leaving (or giving up) while the room socket is down, so its
+    /// op 11 may never arrive: the owner posts the disconnect beacon now,
+    /// or the room keeps us as reconnecting for its whole grace.
+    LeaveUnheard,
 }
 
 /// Which of our publications a republish pushes again.
@@ -696,6 +796,15 @@ pub struct CallMachine {
     closed_video: HashSet<String>,
     /// Release timers of unwanted video pulls, by alias.
     releasing: HashMap<String, u64>,
+    /// Pulls that failed, by alias: the next one waits its backoff.
+    pull_retries: HashMap<String, PullRetry>,
+    /// A 429's `Retry-After` is running (its timer's token): no new pull of
+    /// anything goes out until it is over.
+    pulls_paused: Option<u64>,
+    /// The SFU refused a video pull on our session: video is pulled on
+    /// receive sessions of its own until media is rebuilt (see
+    /// [`CallMachine::on_pull_failed`]).
+    fresh_video: bool,
     /// Stats, the sentinels, op 109 reports and republish cooldowns.
     health: Health,
 }
@@ -757,6 +866,9 @@ impl CallMachine {
             standby_stale: false,
             closed_video: HashSet::new(),
             releasing: HashMap::new(),
+            pull_retries: HashMap::new(),
+            pulls_paused: None,
+            fresh_video: false,
             health: Health::default(),
         }
     }
@@ -823,6 +935,7 @@ impl CallMachine {
                 if mid.is_some() {
                     if let Some(alias) = self.tracks.pending_alias(&sfu_track_name) {
                         self.health.pulled(alias);
+                        self.pull_retries.remove(alias);
                     }
                 }
                 let closing = self.tracks.pull_done(&sfu_track_name, mid);
@@ -831,6 +944,13 @@ impl CallMachine {
             (_, Input::PullNotFound { sfu_track_name }) => {
                 self.on_pull_not_found(&mut fx, &sfu_track_name);
             }
+            (
+                _,
+                Input::PullFailed {
+                    sfu_track_name,
+                    failure,
+                },
+            ) => self.on_pull_failed(&mut fx, &sfu_track_name, failure),
             (_, Input::Republished(result)) => self.on_republished(&mut fx, result),
             (_, Input::Stats { stats, at_ms }) => self.on_stats(&mut fx, &stats, at_ms),
             (_, Input::Command(command)) => self.on_command(&mut fx, command),
@@ -855,14 +975,26 @@ impl CallMachine {
     /// Brings pulls, audio gains, frame routes and camera layers in line
     /// with the offers and the user's intent.
     fn sync_media(&mut self, fx: &mut Vec<Effect>) {
-        if self.connected {
-            // Pull what is wanted once media is up (VOICE_PROTOCOL.md §3.3c).
-            let (video, watched) = (&self.video, &self.watched);
-            let mut pulls = self
-                .tracks
-                .take_pulls(|offer| wanted(offer, video, watched));
+        if self.connected && self.pulls_paused.is_none() {
+            // Pull what is wanted once media is up (VOICE_PROTOCOL.md §3.3c),
+            // but not a publication whose last pull failed until its
+            // backoff is over, and nothing while the SFU asked us to wait.
+            let tracks = &self.tracks;
+            self.pull_retries
+                .retain(|alias, _| tracks.offer_of(alias).is_some());
+            let (video, watched, retries) = (&self.video, &self.watched, &self.pull_retries);
+            let mut pulls = self.tracks.take_pulls(|offer| {
+                if retries
+                    .get(&offer.track_name)
+                    .is_some_and(|retry| retry.holds(offer))
+                {
+                    return None;
+                }
+                wanted(offer, video, watched)
+            });
             for remote in &mut pulls {
-                remote.fresh = self.closed_video.contains(&remote.track_name);
+                remote.fresh = self.closed_video.contains(&remote.track_name)
+                    || (self.fresh_video && remote.kind == Kind::Video);
             }
             for remote in &pulls {
                 if remote.kind == Kind::Video && is_camera(&remote.track_name) {
@@ -1166,6 +1298,7 @@ impl CallMachine {
     fn fail(&mut self, fx: &mut Vec<Effect>, reason: String) {
         if self.sockets_open {
             self.disconnect(fx);
+            self.beacon_if_unheard(fx);
         }
         self.end(fx, Some(reason));
     }
@@ -1405,6 +1538,10 @@ impl CallMachine {
                 &self.voice_token,
             )));
             self.arm_refresh(fx);
+            // A refusal may have been the old token's: try again now.
+            for retry in self.pull_retries.values_mut() {
+                retry.waiting = false;
+            }
         }
     }
 
@@ -1904,6 +2041,7 @@ impl CallMachine {
             return self.end(fx, None);
         }
         self.release_shares(fx);
+        self.beacon_if_unheard(fx);
         fx.push(Effect::StopLocalMedia);
         if matches!(self.state, CallState::Joined | CallState::Reconnecting) {
             fx.push(Effect::ArmTimer {
@@ -1914,6 +2052,14 @@ impl CallMachine {
         } else {
             self.disconnect(fx);
             self.end(fx, None);
+        }
+    }
+
+    /// [`Notice::LeaveUnheard`] when the room socket is down: its op 11
+    /// would be dropped.
+    fn beacon_if_unheard(&self, fx: &mut Vec<Effect>) {
+        if self.room_identified && !self.room_up {
+            fx.push(Effect::Notify(Notice::LeaveUnheard));
         }
     }
 
@@ -1990,6 +2136,19 @@ impl CallMachine {
                     self.rebuilds = 0;
                 }
             }
+            Timer::PullRetry { track, token } => {
+                // The pull goes out again from sync_media, after this input.
+                if let Some(retry) = self.pull_retries.get_mut(&track) {
+                    if retry.token == token {
+                        retry.waiting = false;
+                    }
+                }
+            }
+            Timer::PullsResume { token } => {
+                if self.pulls_paused == Some(token) {
+                    self.pulls_paused = None;
+                }
+            }
             Timer::RefreshCredentials { token } => {
                 if self.sockets_open && token == self.refresh {
                     fx.push(Effect::Send(
@@ -2058,6 +2217,10 @@ impl CallMachine {
         self.routes.clear();
         self.layers.clear();
         self.releasing.clear();
+        // A refusal may have been the old session's state.
+        self.pull_retries.clear();
+        self.pulls_paused = None;
+        self.fresh_video = false;
         // Every closed slot belonged to the old connection.
         self.closed_video.clear();
         self.health.reset_media();
@@ -2108,6 +2271,97 @@ impl CallMachine {
             fx.push(Effect::Notify(Notice::Connected));
         }
         self.refresh_status(fx);
+    }
+
+    /// A pull failed: its publication waits a backoff before it is pulled
+    /// again (a 429's `Retry-After` holds every new pull), and one the SFU
+    /// refused [`MAX_REJECTED_PULLS`] times in a row is asked for only every
+    /// [`PULL_RETRY_MAX`].
+    ///
+    /// The SFU offers a pulled video in the video codecs our session has
+    /// negotiated so far, not in the one its publisher sends: once a
+    /// hardware share (H.264 alone) went out on our session, a VP8 camera is
+    /// offered as H.264 and our answer is refused (`invalid_session_
+    /// description`, "the subscriber's SDP is missing the published track's
+    /// codec"). So after a refused video pull, this one and every later
+    /// video pull go on receive sessions of their own, which know every
+    /// codec, until media is rebuilt.
+    /// Nothing else is touched: the call, its other pulls and a live share
+    /// carry on.
+    fn on_pull_failed(&mut self, fx: &mut Vec<Effect>, sfu_track_name: &str, failure: PullFailure) {
+        let Some(alias) = self.tracks.pending_alias(sfu_track_name).map(str::to_owned) else {
+            return;
+        };
+        let Some((session_id, kind)) = self
+            .tracks
+            .pull_of(&alias)
+            .map(|p| (p.session_id.clone(), p.kind))
+        else {
+            return;
+        };
+        let retry = self
+            .pull_retries
+            .entry(alias.clone())
+            .or_insert_with(|| PullRetry {
+                sfu_track_name: sfu_track_name.to_owned(),
+                session_id: session_id.clone(),
+                failures: 0,
+                rejected: 0,
+                token: 0,
+                waiting: false,
+            });
+        if retry.sfu_track_name != sfu_track_name || retry.session_id != session_id {
+            // Another publication of the alias: its own count.
+            retry.sfu_track_name = sfu_track_name.to_owned();
+            retry.session_id = session_id;
+            retry.failures = 0;
+            retry.rejected = 0;
+        }
+        retry.failures += 1;
+        if failure == PullFailure::Rejected {
+            retry.rejected += 1;
+        } else {
+            retry.rejected = 0;
+        }
+        retry.waiting = true;
+        self.next_token += 1;
+        retry.token = self.next_token;
+        let (failures, rejected) = (retry.failures, retry.rejected);
+        let after = if rejected >= MAX_REJECTED_PULLS {
+            PULL_RETRY_MAX
+        } else {
+            failure.backoff(failures)
+        };
+        if failure == PullFailure::Rejected && kind == Kind::Video && !self.fresh_video {
+            self.fresh_video = true;
+            fx.push(Effect::Log(format!(
+                "[voice] pull {alias} refused on our session; video goes on receive sessions of its own"
+            )));
+        }
+        fx.push(Effect::Log(format!(
+            "[voice] pull {alias} {failure} ({failures} in a row); next try in {} ms",
+            after.as_millis()
+        )));
+        fx.push(Effect::ArmTimer {
+            timer: Timer::PullRetry {
+                track: alias,
+                token: self.next_token,
+            },
+            after,
+        });
+        if let PullFailure::RateLimited {
+            retry_after: Some(wait),
+        } = failure
+        {
+            self.next_token += 1;
+            self.pulls_paused = Some(self.next_token);
+            fx.push(Effect::ArmTimer {
+                timer: Timer::PullsResume {
+                    token: self.next_token,
+                },
+                after: wait.min(PULL_RETRY_AFTER_MAX),
+            });
+        }
     }
 
     /// Arms a release for each live video pull nothing wants any more, and

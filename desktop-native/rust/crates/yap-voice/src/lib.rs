@@ -152,13 +152,14 @@ pub use layers::{Quality, RenderSize};
 pub use machine::{
     camera_alias, dm_call_slug, screen_alias, screen_audio_alias, stop_message, CallMachine,
     CallState, CallTarget, CameraPublished, Effect, Input, MediaEvent, MediaSpec, MediaState,
-    Notice, Published, Republish, RoomEvent, Socket, SocketSpec, StatsSample, Timer, UserCommand,
-    VideoIntent, VoiceEvent, VoiceStats, CALL_RESET, CREDENTIAL_REFRESH, LEAVE_SEND_WINDOW,
-    MAX_REBUILDS, REBUILD_BACKOFF, REBUILD_STABLE_AFTER, REMOTE_RECONNECT_GRACE,
+    Notice, Published, PullFailure, Republish, RoomEvent, Socket, SocketSpec, StatsSample, Timer,
+    UserCommand, VideoIntent, VoiceEvent, VoiceStats, CALL_RESET, CREDENTIAL_REFRESH,
+    LEAVE_SEND_WINDOW, MAX_REBUILDS, MAX_REJECTED_PULLS, PULL_RETRY_AFTER_MAX, PULL_RETRY_BACKOFF,
+    PULL_RETRY_MAX, REBUILD_BACKOFF, REBUILD_STABLE_AFTER, REMOTE_RECONNECT_GRACE,
     STANDBY_STALE_AFTER, STATS_SAMPLES, VIDEO_RELEASE_DELAY,
 };
 pub use roster::{Member, Roster};
-pub use sfu::{LayerUpdate, Pulled, Pushed, Sfu};
+pub use sfu::{LayerUpdate, Pulled, Pushed, Sfu, SfuError};
 pub use share::{
     push_screen_audio, push_screen_frame, CaptureEnded, NoCapture, ScreenFrame, ShareCaptured,
     ShareCapturer, ShareEncoding, ShareEnd, ShareInfo, ShareNotice, SharePublished, ShareQuality,

@@ -6,10 +6,61 @@
 
 use std::future::Future;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use reqwest::{Client, Method};
 use serde_json::{json, Value};
+
+/// A refused SFU request: an HTTP error from the proxy or the SFU, or a 2xx
+/// whose body carries an `errorCode`. Kept typed so callers can tell a
+/// request the SFU will never take (4xx) from one worth retrying (429, 5xx,
+/// transport errors are plain `reqwest` errors).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SfuError {
+    /// The operation (the path's last segment, never the path itself).
+    pub op: String,
+    /// The HTTP status; `None` for an `errorCode` in a 2xx body.
+    pub status: Option<u16>,
+    /// The response's `Retry-After`, when it sent one in seconds.
+    pub retry_after: Option<Duration>,
+    /// `error`, `errorCode` and `errorDescription`, as the body had them.
+    pub detail: String,
+}
+
+impl std::fmt::Display for SfuError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.status {
+            Some(status) => write!(f, "SFU {}: HTTP {status} {}", self.op, self.detail),
+            None => write!(f, "SFU {}: {}", self.op, self.detail),
+        }
+    }
+}
+
+impl std::error::Error for SfuError {}
+
+/// The parts of an SFU error body worth logging (no ids: Cloudflare's
+/// descriptions name tracks and mids, not sessions).
+fn error_detail(body: &Value) -> String {
+    ["error", "errorCode", "errorDescription"]
+        .iter()
+        .filter_map(|key| body.get(*key).and_then(Value::as_str))
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `Retry-After` in seconds (the HTTP-date form is not used by the proxy).
+fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(Duration::from_secs)
+}
 
 #[derive(Clone)]
 pub struct Sfu {
@@ -83,20 +134,28 @@ impl Sfu {
         // Without the URL: it holds our signed session capability.
         let response = request.send().await.map_err(reqwest::Error::without_url)?;
         let status = response.status();
+        let retry_after = retry_after(response.headers());
         let body: Value = response.json().await.unwrap_or(Value::Null);
         // Name the operation, not the path: the path holds our signed
         // session capability, which does not belong in the UI or logs.
         let op = path.rsplit('/').next().unwrap_or("call");
         if !status.is_success() {
-            let error = body.get("error").and_then(Value::as_str).unwrap_or("");
-            bail!("SFU {op}: HTTP {} {error}", status.as_u16());
+            return Err(SfuError {
+                op: op.to_owned(),
+                status: Some(status.as_u16()),
+                retry_after,
+                detail: error_detail(&body),
+            }
+            .into());
         }
-        if let Some(code) = body.get("errorCode").and_then(Value::as_str) {
-            let detail = body
-                .get("errorDescription")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            bail!("SFU {op}: {code} {detail}");
+        if body.get("errorCode").and_then(Value::as_str).is_some() {
+            return Err(SfuError {
+                op: op.to_owned(),
+                status: None,
+                retry_after: None,
+                detail: error_detail(&body),
+            }
+            .into());
         }
         Ok(body)
     }
