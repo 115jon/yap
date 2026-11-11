@@ -1,6 +1,7 @@
 //! The mobile app's side of the shared view layer: rustls HTTP, the shared
-//! gateway task (no voice yet), the session token in an app-private file,
-//! and the data folder and device name handed to the core.
+//! gateway task, voice calls on Android (`voice.rs`), the session token in
+//! an app-private file, and the data folder and device name handed to the
+//! core.
 
 use std::ffi::{c_char, CStr};
 use std::path::{Path, PathBuf};
@@ -11,7 +12,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver};
 use yap_core::auth::TokenStore;
 use yap_core::{
     Api, GatewayEvents, GatewayHandle, Realtime, Token, UploadFile, ViewUpdate, VoiceCommand,
-    VoiceEvents, VoiceTarget, VoiceUpdate,
+    VoiceEvents, VoiceTarget,
 };
 use yap_ui::client::gateway;
 use yap_ui::platform::{self, Platform};
@@ -20,11 +21,29 @@ struct MobileRealtime;
 
 impl Realtime for MobileRealtime {
     fn spawn_gateway(&self, api: Api, user_id: String, events: GatewayEvents) -> GatewayHandle {
+        // Signed in: if the last process died in a call (killed in the
+        // background), the room hears it left now.
+        #[cfg(target_os = "android")]
+        crate::voice::signed_in(&api, &user_id);
         let (outgoing, rx) = mpsc::unbounded_channel();
         let task = tokio::spawn(gateway::run(api, user_id, rx, events));
         GatewayHandle { outgoing, task }
     }
 
+    #[cfg(target_os = "android")]
+    fn spawn_voice(
+        &self,
+        api: Api,
+        http: reqwest::Client,
+        target: VoiceTarget,
+        commands: UnboundedReceiver<VoiceCommand>,
+        events: VoiceEvents,
+    ) {
+        crate::voice::spawn(api, http, target, commands, events);
+    }
+
+    // The iOS build is a compile and link check without libwebrtc.
+    #[cfg(not(target_os = "android"))]
     fn spawn_voice(
         &self,
         _api: Api,
@@ -33,8 +52,8 @@ impl Realtime for MobileRealtime {
         _commands: UnboundedReceiver<VoiceCommand>,
         events: VoiceEvents,
     ) {
-        events.send(VoiceUpdate::Ended(Some(
-            "Voice is not in the mobile prototype yet.".into(),
+        events.send(yap_core::VoiceUpdate::Ended(Some(
+            "Voice is not in this build yet.".into(),
         )));
     }
 }
@@ -180,6 +199,9 @@ pub extern "C" fn yap_mobile_init(data_dir: *const c_char, device_name: *const c
     let mut config = yap_core::config::Config::from_env();
     config.platform = std::env::consts::OS.to_owned();
     config.device_name = text(device_name);
+    // No hidden standby session on a voice landing: a phone joins when
+    // asked (and has no landing).
+    config.voice_standby = false;
     let _ = yap_core::config::set(config);
     platform::install(Mobile { data });
 }

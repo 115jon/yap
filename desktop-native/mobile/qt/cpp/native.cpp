@@ -102,6 +102,7 @@ Native::Native(QObject* parent)
   readConfiguration();
   applyBars();
   installPush();
+  installVoice();
   // Text size, Remove animations and the wallpaper accent can change while
   // the app is away; read them again when it comes back, and the keyboard's
   // inset, which can go stale behind another activity (the photo picker).

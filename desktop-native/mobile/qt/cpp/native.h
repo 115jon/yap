@@ -22,11 +22,16 @@
 //                  Mark as read, the conversation on screen (its pushes stay
 //                  quiet) and the notification permission (cpp/push.cpp,
 //                  android/src/dev/yap/qtproto/push)
+//   voice          the microphone permission, the call's audio routes
+//                  (speaker, earpiece, headset, Bluetooth) and what the call
+//                  notification shows (cpp/voice.cpp,
+//                  android/src/dev/yap/qtproto/voice)
 
 #include <QtCore/QList>
 #include <QtCore/QObject>
 #include <QtCore/QStringList>
 #include <QtCore/QPointer>
+#include <QtCore/QVariantList>
 #include <QtCore/QVariantMap>
 #include <QtGui/QColor>
 
@@ -53,6 +58,10 @@ class Native : public QObject
   // pushes are not shown, and its notification goes. The first one set
   // asks for the notification permission (API 33+, once).
   Q_PROPERTY(QString activeConversation READ activeConversation WRITE setActiveConversation NOTIFY activeConversationChanged)
+  // Where a running call can play and record, `[{id, name, active}]`:
+  // Bluetooth and a wired headset when there, the speaker, the earpiece.
+  // Empty outside a call.
+  Q_PROPERTY(QVariantList audioRoutes READ audioRoutes NOTIFY audioRoutesChanged)
 
 public:
   enum Haptic { Tick, LongPress, Confirm, Reject };
@@ -108,6 +117,21 @@ public:
   // Signed out: the account's notifications and conversation shortcuts go.
   Q_INVOKABLE void forgetNotifications() const;
 
+  QVariantList audioRoutes() const { return m_audioRoutes; }
+  // Asks for the microphone (the system dialog while it can still show);
+  // the answer arrives as microphoneAnswered, at once when already decided.
+  Q_INVOKABLE void requestMicrophone();
+  // The app's page in the system settings (a microphone refused for good).
+  Q_INVOKABLE void openAppSettings() const;
+  // Routes the running call (an id from audioRoutes).
+  Q_INVOKABLE void setAudioRoute(const QString& id) const;
+  // What the call notification shows: the channel, and the mic and deafen
+  // state its Mute action starts from.
+  Q_INVOKABLE void setCallState(const QString& channel, bool muted, bool deafened) const;
+  // The user set the mic or deafen themselves: an interruption (a phone
+  // call) that deafened the call no longer undoes it when it ends.
+  Q_INVOKABLE void callTouched() const;
+
   // From the shim, on the GUI thread.
   void onBackProgress(qreal progress);
   void onBackCancelled();
@@ -117,6 +141,7 @@ public:
   void onMediaCopying();
   void onMediaPicked(const QStringList& paths, int failed);
   void onOpenRequest(const QString& channelId, const QString& serverId, const QString& userId);
+  void onAudioRoutes(const QByteArray& json);
 
 signals:
   void handlesBackChanged();
@@ -133,6 +158,8 @@ signals:
   void notificationsEnabledChanged();
   void activeConversationChanged();
   void openRequested();
+  void audioRoutesChanged();
+  void microphoneAnswered(bool granted);
 
 protected:
   bool eventFilter(QObject* watched, QEvent* event) override;
@@ -151,6 +178,8 @@ private:
   // cpp/push.cpp.
   void installPush();
   void readNotificationsEnabled();
+  // cpp/voice.cpp.
+  void installVoice();
 
   bool m_handlesBack = false;
   qreal m_imeHeight = 0;
@@ -169,6 +198,8 @@ private:
   bool m_notificationsEnabled = false;
   QString m_activeConversation;
   QVariantMap m_openRequest;
+  QVariantList m_audioRoutes;
+  bool m_askingMicrophone = false;
 };
 
 // The shared desktop QML's `Yap.Chrome` singletons, mobile side.

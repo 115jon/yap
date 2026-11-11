@@ -7,9 +7,9 @@ import Yap.Ui
 // The mobile shell: one full-screen window drawn edge to edge (the system
 // bars float over it; SafeArea keeps content clear of them), the desktop's
 // sign-in phases, and the navigation: Home's pager (drawer, chat, members)
-// with pages and sheets stacked over it, and the platform's back gesture
-// stepping through them. The pages are per platform; the rows inside them
-// are the desktop's.
+// with pages and sheets stacked over it (a profile, Settings, Friends, the
+// call), and the platform's back gesture stepping through them. The pages
+// are per platform; the rows inside them are the desktop's.
 Window {
     id: window
 
@@ -128,6 +128,52 @@ Window {
         stack.sheet = false
         stack.push(friendsPage)
     }
+    // A voice channel's row: the call page if we are in it, else a join,
+    // once the microphone is allowed (the system asks the first time).
+    property string wantedVoice: ""
+    function joinVoice(channelId) {
+        if (channelId.length === 0)
+            return
+        if (Voice.channelId === channelId) {
+            openCall()
+            return
+        }
+        wantedVoice = channelId
+        Native.requestMicrophone()
+    }
+    function openCall() {
+        if (stack.busy || stack.currentItem?.isCall === true)
+            return
+        Qt.inputMethod.hide()
+        stack.sheet = false
+        stack.push(callPage)
+    }
+    Connections {
+        target: Native
+        function onMicrophoneAnswered(granted) {
+            const channelId = window.wantedVoice
+            window.wantedVoice = ""
+            if (channelId.length === 0 || !window.ready)
+                return
+            if (!granted) {
+                microphoneSheet.open()
+                return
+            }
+            Native.haptic(Native.Confirm)
+            Voice.join(channelId)
+            window.openCall()
+        }
+    }
+    // What the call notification shows, and where its Mute starts from.
+    // Sent once per update of the core's: its properties change one after
+    // another (a deafen mutes too), and the shim must not see the half-way
+    // state as a change the user made.
+    readonly property string callState: Voice.channelId + "\n" + Voice.channelName + "\n" + Voice.muted + Voice.deafened
+    onCallStateChanged: Qt.callLater(window.sendCallState)
+    function sendCallState() {
+        Native.setCallState(Voice.channelName, Voice.muted, Voice.deafened)
+    }
+
     // Close what is on top, or everything down to the pager.
     function closeTop(all) {
         if (stack.depth < 2)
@@ -204,6 +250,8 @@ Window {
                 onProfileRequested: userId => window.openProfile(userId)
                 onSettingsRequested: window.openSettings()
                 onFriendsRequested: window.openFriends()
+                onVoiceRequested: channelId => window.joinVoice(channelId)
+                onCallRequested: window.openCall()
             }
 
             pushEnter: Transition {
@@ -242,6 +290,18 @@ Window {
             }
         }
         Component {
+            id: callPage
+            CallPage {
+                id: callItem
+                onCloseRequested: {
+                    // Only while it is the page on top (its call can end
+                    // under a profile opened over it).
+                    if (stack.currentItem === callItem)
+                        window.closeTop(false)
+                }
+            }
+        }
+        Component {
             id: settingsPage
             SettingsPage {
                 onCloseRequested: window.closeTop(false)
@@ -259,6 +319,17 @@ Window {
                 }
             }
         }
+    }
+
+    // The microphone was refused: say what it is for, and where to allow it
+    // (after a second refusal Android no longer shows its dialog).
+    ConfirmSheet {
+        id: microphoneSheet
+        anchors.fill: parent
+        title: qsTr("Yap needs the microphone")
+        body: qsTr("Voice channels use your microphone while you are in a call. Allow it for Yap in the system settings, then join again.")
+        confirmText: qsTr("Open settings")
+        onConfirmed: Native.openAppSettings()
     }
 
     // The system back gesture and its predictive preview, through Native's

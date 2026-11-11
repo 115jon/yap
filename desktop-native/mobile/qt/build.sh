@@ -19,6 +19,9 @@
 #   the SDK's ndk/$YAP_NDK_VERSION, 27.2.12479018, r27c, the NDK Qt 6.11.3
 #   for Android was built with), JDK 17+.
 #   Ninja, CMake 3.24+, and Rust with the target's standard library.
+#   PowerShell 7 (pwsh) for patches/vendor.ps1. The first Android build of an
+#   ABI downloads LiveKit's prebuilt WebRTC for it (about 150 MB zipped, 700
+#   MB unpacked, into cargo's target folder under the build tree).
 #   Optional: YAP_GOOGLE_SERVICES_JSON, a google-services.json with the
 #   application id's Firebase app (push notifications; android/build.gradle).
 #   Without it the APK has no pushes.
@@ -43,6 +46,15 @@ if [[ -z "${QT_TARGET_ROOT:-}${QT_ANDROID_ROOT:-}" && ! -d "$qt" && "$qt_dir" ==
   qt="$yapm/qt/${qt_dir#android_}"
 fi
 host="${QT_HOST_PATH:?set QT_HOST_PATH to a desktop Qt 6.11}"
+
+# Voice calls build LiveKit's webrtc-sys and libwebrtc with the desktop's
+# patches: rust/Cargo.toml's [patch] names the copies patches/vendor.ps1
+# makes from the cargo registry (PowerShell 7; a no-op once they are there).
+# Every target needs them to resolve, the iOS check included.
+vendor="$here/../../patches/vendor.ps1"
+# A Windows path for pwsh from Git Bash (MSYS_NO_PATHCONV may be set).
+command -v cygpath >/dev/null 2>&1 && vendor="$(cygpath -m "$vendor")"
+pwsh -NoProfile -File "$vendor"
 [[ -f "$qt/bin/target_qt.conf" ]] || { echo "no target Qt at $qt (bin/target_qt.conf)" >&2; exit 2; }
 
 # Qt's online packages carry the Qt build machine's host paths in the qmake

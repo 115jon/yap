@@ -5,9 +5,10 @@ import com.yap.mobile
 import Yap.Ui
 
 // The drawer, under the chat: the server rail with Home on top, the open
-// server's channel tree (or Home's direct messages) beside it, and your
-// account along the bottom. The rows are the desktop's own delegates
-// (ServerIcon, TreeRow) on its own list models.
+// server's channel tree (or Home's direct messages) beside it, the call in
+// progress and your account along the bottom. The rows are the desktop's
+// own delegates (ServerIcon, TreeRow) on its own list models. A voice
+// channel's row joins it (or opens the call you are in there).
 Item {
     id: root
 
@@ -15,6 +16,10 @@ Item {
     signal profileRequested(string userId)
     signal settingsRequested()
     signal friendsRequested()
+    // A voice channel was tapped: join it, or open its call.
+    signal voiceRequested(string channelId)
+    // The call bar was tapped.
+    signal callRequested()
 
     // The window's insets where this page meets its edges, read once here:
     // a child that asks for its own would feed its position back in.
@@ -29,7 +34,7 @@ Item {
         id: rail
         width: Theme.railTile + 24 + root.leftInset
         anchors.top: parent.top
-        anchors.bottom: account.top
+        anchors.bottom: call.top
         color: Theme.ply0
 
         PlatformList {
@@ -120,7 +125,7 @@ Item {
         anchors.left: rail.right
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.bottom: account.top
+        anchors.bottom: call.top
         color: Theme.ply1
 
         Column {
@@ -180,8 +185,12 @@ Item {
                 activeId: Nav.activeChannelId
                 callId: Voice.channelId
                 onSelected: channelId => {
-                    if (row.kind !== "channel" || row.voice)
+                    if (row.kind !== "channel")
                         return
+                    if (row.voice) {
+                        root.voiceRequested(channelId)
+                        return
+                    }
                     Nav.selectChannel(channelId)
                     root.conversationOpened()
                 }
@@ -202,6 +211,15 @@ Item {
                 onFriendsRequested: root.friendsRequested()
             }
         }
+    }
+
+    CallBar {
+        id: call
+        anchors.bottom: account.top
+        width: parent.width
+        leftInset: root.leftInset
+        rightInset: root.rightInset
+        onCallRequested: root.callRequested()
     }
 
     AccountBar {

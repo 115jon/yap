@@ -28,6 +28,8 @@ Item {
     signal profileRequested(string userId)
     signal settingsRequested()
     signal friendsRequested()
+    signal voiceRequested(string channelId)
+    signal callRequested()
 
     readonly property bool wide: width >= 840
     readonly property bool docked: width >= 1200
@@ -262,6 +264,8 @@ Item {
         onProfileRequested: userId => pager.profileRequested(userId)
         onSettingsRequested: pager.settingsRequested()
         onFriendsRequested: pager.friendsRequested()
+        onVoiceRequested: channelId => pager.voiceRequested(channelId)
+        onCallRequested: pager.callRequested()
     }
 
     Item {

@@ -26,6 +26,8 @@ const QML: &[&str] = &[
     "qml/MobileComposer.qml",
     "qml/UploadTray.qml",
     "qml/ImageViewerPage.qml",
+    "qml/CallPage.qml",
+    "qml/CallBar.qml",
     "qml/BottomSheet.qml",
     "qml/SheetRow.qml",
     "qml/EmojiGlyph.qml",

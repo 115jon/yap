@@ -11,3 +11,6 @@ mod http;
 mod platform;
 // The FCM token and a notification's actions (cpp/push.cpp).
 mod push;
+// Voice calls and the call notification's actions (cpp/voice.cpp).
+#[cfg(target_os = "android")]
+mod voice;
