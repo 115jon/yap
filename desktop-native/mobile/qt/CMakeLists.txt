@@ -4,7 +4,8 @@ cmake_minimum_required(VERSION 3.24)
 # Android. Configure with Qt's Android toolchain (build.sh does):
 #   qt.toolchain.cmake, QT_HOST_PATH (a desktop Qt of the same version),
 #   ANDROID_SDK_ROOT, ANDROID_NDK_ROOT.
-# The app's version (x.y.z) lives in VERSION: the release workflow
+# The app's version (x.y.z) lives in VERSION, which release-please bumps
+# (release-please-config.json): the release workflow
 # (qt-android-release.yml) and CI read the same file.
 file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION YAP_APP_VERSION LIMIT_COUNT 1)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION)
@@ -146,8 +147,8 @@ qt_import_plugins(yapqt
 # --- Packaging: application id and version -------------------------------
 # CI passes the version per run (desktop-native-mobile.yml: code = run * 10
 # + an ABI digit, name <VERSION>-ci.<run>+<commit>; qt-android-release.yml:
-# code = (1000000 + run) * 10 + the digit, name <VERSION>); local builds
-# get <VERSION> (1).
+# code = (2000000 + minutes since 2026-01-01 UTC) * 10 + the digit, name
+# <VERSION>); local builds get <VERSION> (1).
 # The id is the Gradle namespace and application id (androiddeployqt writes
 # it to gradle.properties), and the iOS bundle identifier. dev.yap.app is
 # the app's own, for release builds and local ones (registered in Firebase

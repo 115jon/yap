@@ -1,53 +1,87 @@
 name: "Qt Android Release"
 
-# Tester builds of the Qt Quick app (desktop-native/mobile/qt, application id
-# dev.yap.app), signed with its release key and published as a draft
-# pre-release (desktop-native/mobile/README.md, "Releases").
+# Builds of the Qt Quick app (desktop-native/mobile/qt, application id
+# dev.yap.app), signed with its release key (desktop-native/mobile/README.md,
+# "Releases").
 #
-# - A qt-android-v<x.y.z> tag builds version x.y.z; the tag must match
-#   desktop-native/mobile/qt/VERSION and point at a commit on main.
-# - A manual run builds <VERSION>-build.<run> from the ref it starts on and
-#   names its draft qt-android-v<that version> (a draft creates no tag
-#   until someone publishes it; that tag does not match the trigger).
+# Two modes:
+#
+# - Release (release_tag set): release-please's qt-android-v<x.y.z>.
+#   release-please.yml creates that release when its Qt release PR is
+#   merged, marks it a draft pre-release and calls this workflow with
+#   release_tag. The run builds the tagged commit (its VERSION must be
+#   x.y.z), attaches the APKs to that draft (release-please's changelog is
+#   the notes) and publishes it as a pre-release, never GitHub's latest. A
+#   manual dispatch from main with release_tag rebuilds a release whose
+#   call failed (it must still be a draft).
+# - Manual (no release_tag, dispatch only): a test build of the commit the
+#   run starts on, version <VERSION>-build.<run>, uploaded to a draft
+#   pre-release qt-android-v<that version>. Drafts create no tag; delete
+#   the draft when done with it.
 #
 # Jobs and what each can reach:
-# - plan: the version, the tag and the version codes. No secrets.
+# - plan: the mode, the commit, the version and the version codes. Write
+#   only so the release list includes drafts; it runs no repository code.
 # - build: compiles the core and the APKs (third-party crates' build
 #   scripts run here), unsigned. Only the Firebase client configuration,
 #   which ends up inside the APK anyway. No caches: a release builds from
 #   clean sources, and fetch-qt.ps1 checks each Qt archive it downloads
 #   against qt-sdk.lock.json's SHA-256.
 # - sign: the release key, from the android-release environment, whose
-#   deployment policy admits main and qt-android-v* tags only. It runs only
-#   the repository's sign.sh and the SDK's zipalign, apksigner and aapt2 on
-#   the unsigned APKs, checks the certificate, the application id and the
+#   deployment policy admits refs/heads/main only (release-please.yml's
+#   call and dispatches from main both run there). It runs only the
+#   repository's sign.sh and the SDK's zipalign, apksigner and aapt2 on the
+#   unsigned APKs, checks the certificate, the application id and the
 #   version, and deletes the key. No write token. The signed APKs' SHA-256s
 #   are its outputs.
 # - smoke: the signed x86_64 APK cold-started on an emulator.
-# - publish: the draft pre-release (contents: write), after checking the
-#   APKs against the sign job's SHA-256s. No key.
+# - publish: the release (contents: write), after checking the APKs against
+#   the sign job's SHA-256s. No key.
 #
-# Anyone who can push a qt-android-v* tag can have it signed: the
-# environment admits the tag pattern, and the ancestry check in plan only
-# catches mistakes (the workflow file is the tagged commit's).
+# Who can have a commit signed: whoever can merge to main (the release PR,
+# or any commit a dispatch from main builds) or start this workflow on
+# main. qt-android-v* tags are release-please's (a repository ruleset lets
+# only admins create, move or delete them); a tag push starts nothing.
 #
-# Version codes: (1000000 + run) * 10 + the ABI digit (2 arm64-v8a,
-# 4 x86_64), above every CI build of desktop-native-mobile.yml (run * 10 +
-# digit), and rising with this workflow's run number. Renaming this file
-# restarts the run number: keep the name, or raise the offset.
+# Version codes: (2000000 + minutes since 2026-01-01 UTC) * 10 + the ABI
+# digit (2 arm64-v8a, 4 x86_64), from the plan job's clock: every build is
+# above the one before, whichever workflow run started it, and above the
+# earlier (1000000 + run) * 10 + digit release builds and every CI build of
+# desktop-native-mobile.yml (run * 10 + digit). The run number cannot be
+# used: a called workflow sees the caller's.
 on:
-  push:
-    tags:
-      # x.y.z only, so publishing a manual run's draft (its tag has a
-      # -build.<run> suffix) starts nothing.
-      - "qt-android-v[0-9]+.[0-9]+.[0-9]+"
+  workflow_call:
+    inputs:
+      release_tag:
+        description: "The release-please tag to build and publish (qt-android-v<x.y.z>); its release must be a draft"
+        required: true
+        type: string
+    secrets:
+      QT_GOOGLE_SERVICES_JSON_BASE64:
+        required: true
+      # Declared for the linter only; callers pass none of them. The sign
+      # job reads the android-release environment's secrets, which take
+      # precedence over anything a caller passes.
+      QT_ANDROID_KEYSTORE_BASE64:
+        required: false
+      QT_ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      QT_ANDROID_KEY_ALIAS:
+        required: false
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Rebuild a release-please release whose run failed: its tag (qt-android-v<x.y.z>; the release must still be a draft). Empty: a test build of this commit, uploaded to a draft."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: qt-android-release-${{ github.ref }}
+  # One run per release tag; manual test builds queue per ref.
+  group: qt-android-release-${{ inputs.release_tag || github.ref }}
   cancel-in-progress: false
 
 defaults:
@@ -69,46 +103,93 @@ jobs:
     if: ${{ github.repository == '115jon/yap' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      # Write only so the release list includes drafts (release-please's
+      # draft in release mode, an earlier test build's in manual mode).
+      contents: write
     outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      sha: ${{ steps.plan.outputs.sha }}
       version: ${{ steps.plan.outputs.version }}
       tag: ${{ steps.plan.outputs.tag }}
       code_base: ${{ steps.plan.outputs.code_base }}
     steps:
+      # Release mode builds the tag release-please made; manual runs the
+      # commit they were started on.
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Version, tag and version codes
+      - name: Mode, commit, version and version codes
         id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          GIT_REF: ${{ github.ref }}
+          REPO: ${{ github.repository }}
         run: |
           base="$(head -n 1 desktop-native/mobile/qt/VERSION)"
           if ! [[ "$base" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::desktop-native/mobile/qt/VERSION must be x.y.z, got '$base'"
             exit 1
           fi
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            want="${GITHUB_REF_NAME#qt-android-v}"
-            if [ "$want" != "$base" ]; then
-              echo "::error::tag $GITHUB_REF_NAME does not match VERSION $base"
+          # The signing environment admits main only; fail here, before the
+          # build, rather than at the sign job.
+          if [ "$GIT_REF" != refs/heads/main ]; then
+            echo "::error::A signed build runs from main (the android-release environment admits refs/heads/main only); this run is on $GIT_REF."
+            exit 1
+          fi
+          sha="$(git rev-parse HEAD)"
+          releases="$(gh api "repos/$REPO/releases?per_page=100" --paginate \
+            --jq '.[] | [.tag_name, (if .draft then "draft" else "published" end)] | @tsv')"
+          if [ -n "$RELEASE_TAG" ]; then
+            mode=release
+            tag="$RELEASE_TAG"
+            if ! [[ "$tag" =~ ^qt-android-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+              echo "::error::release_tag '$tag' is not qt-android-v<x.y.z>"
+              exit 1
+            fi
+            version="${BASH_REMATCH[1]}"
+            if [ "$version" != "$base" ]; then
+              echo "::error::release_tag $tag does not match desktop-native/mobile/qt/VERSION ($base) at that tag"
               exit 1
             fi
             git fetch -q --no-tags origin main
-            if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
-              echo "::error::tag $GITHUB_REF_NAME is not on main"
+            if ! git merge-base --is-ancestor "$sha" FETCH_HEAD; then
+              echo "::error::tag $tag is not on main"
               exit 1
             fi
-            version="$base"
+            states="$(awk -F '\t' -v t="$tag" '$1 == t { print $2 }' <<<"$releases")"
+            if [ "$states" != draft ]; then
+              echo "::error::Expected one draft release for $tag, found: ${states:-none}. To rebuild a published one, make it a draft first (gh release edit $tag --draft=true)."
+              exit 1
+            fi
           else
+            mode=manual
+            if [ "$EVENT_NAME" != workflow_dispatch ]; then
+              echo "::error::Without release_tag this workflow runs only by hand."
+              exit 1
+            fi
             version="$base-build.$GITHUB_RUN_NUMBER"
+            tag="qt-android-v$version"
+            if awk -F '\t' -v t="$tag" '$1 == t && $2 == "published" { found = 1 } END { exit !found }' <<<"$releases"; then
+              echo "::error::$tag is already published"
+              exit 1
+            fi
           fi
+          minutes=$(( ($(date -u +%s) - 1767225600) / 60 ))
           {
+            echo "mode=$mode"
+            echo "sha=$sha"
             echo "version=$version"
-            echo "tag=qt-android-v$version"
-            echo "code_base=$(( (1000000 + GITHUB_RUN_NUMBER) * 10 ))"
+            echo "tag=$tag"
+            echo "code_base=$(( (2000000 + minutes) * 10 ))"
           } >>"$GITHUB_OUTPUT"
-          echo "Version $version, tag qt-android-v$version, run $GITHUB_RUN_NUMBER"
+          echo "$mode: version $version, tag $tag, commit $sha"
 
   build:
     name: build (${{ matrix.abi }})
@@ -139,6 +220,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
 
       - name: Rust
@@ -229,8 +311,8 @@ jobs:
     needs: [plan, build]
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Holds the release key's secrets; its deployment policy admits main and
-    # qt-android-v* tags only.
+    # Holds the release key's secrets; its deployment policy admits
+    # refs/heads/main only.
     environment: android-release
     outputs:
       sha256_arm64: ${{ steps.sign.outputs.sha256_arm64 }}
@@ -239,6 +321,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
           sparse-checkout: desktop-native/mobile/qt/sign.sh
           sparse-checkout-cone-mode: false
@@ -326,6 +409,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
 
       - name: Download the signed APKs
@@ -364,19 +448,14 @@ jobs:
           name: yap-qt-${{ needs.plan.outputs.version }}
           path: out
 
-      # Always a draft pre-release: the owner reads it and publishes it by
-      # hand (publishing a manual run's draft creates its tag at the commit
-      # built). A rerun uploads into its own draft again; a published
-      # release with the tag is left alone.
-      - name: Draft pre-release
+
+      # The APKs as the sign job made them (the smoke job ran in between).
+      - name: Check the APKs
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.plan.outputs.tag }}
           VERSION: ${{ needs.plan.outputs.version }}
           SHA256_ARM64: ${{ needs.sign.outputs.sha256_arm64 }}
           SHA256_X86_64: ${{ needs.sign.outputs.sha256_x86_64 }}
         run: |
-          # The APKs as the sign job made them (the smoke job ran in between).
           printf '%s  %s\n' "$SHA256_ARM64" "yap-qt-$VERSION-arm64-v8a.apk" \
             "$SHA256_X86_64" "yap-qt-$VERSION-x86_64.apk" >expected.sha256
           if [ "$(wc -l <expected.sha256)" -ne 2 ] || grep -qv '^[0-9a-f]\{64\}  ' expected.sha256; then
@@ -384,24 +463,83 @@ jobs:
             exit 1
           fi
           (cd out && sha256sum -c ../expected.sha256 && sha256sum -c ./*.sha256)
+
+      # Release mode: release-please's draft gets the APKs and a footer under
+      # its changelog, then is published as a pre-release that never becomes
+      # GitHub's latest (the desktop's releases own that). A rerun uploads
+      # again and replaces the footer.
+      - name: Publish the release
+        if: ${{ needs.plan.outputs.mode == 'release' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
+          ids="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+            --jq ".[] | select(.tag_name == \"$TAG\") | [.id, .draft] | @tsv")"
+          if [ "$(grep -c . <<<"$ids")" -ne 1 ] || [ "$(cut -f 2 <<<"$ids")" != true ]; then
+            echo "::error::Expected one draft release for $TAG, found: ${ids:-none}"
+            exit 1
+          fi
+          id="$(cut -f 1 <<<"$ids")"
+          # The tag still names the commit built (the ruleset on
+          # qt-android-v* also stops it moving).
+          ref="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.type + " " + .object.sha')"
+          target="${ref#* }"
+          if [ "${ref%% *}" = tag ]; then
+            target="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$target" --jq .object.sha)"
+          fi
+          if [ "$target" != "$SHA" ]; then
+            echo "::error::$TAG now points at $target, not the commit built ($SHA)"
+            exit 1
+          fi
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber out/*.apk out/*.apk.sha256
+          marker="<!-- qt-android-assets -->"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$id" --jq .body >changelog.md
+          awk -v m="$marker" '$0 == m { exit } { print }' changelog.md >notes.md
+          cat >>notes.md <<EOF
+          $marker
+          ### Install
+
+          - \`yap-qt-$VERSION-arm64-v8a.apk\`: phones. \`yap-qt-$VERSION-x86_64.apk\`: emulators.
+          - Signed with the Yap for Android (Qt) release key, certificate SHA-256 \`$EXPECTED_CERT_SHA256\`. It installs over an earlier release build, not over a CI (debug-signed) build.
+          - Each APK's SHA-256 is in its \`.sha256\` file. Built from $SHA.
+          EOF
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$id" \
+            -f name="Yap for Android (Qt) $VERSION" -F body=@notes.md \
+            -F draft=false -F prerelease=true -f make_latest=false \
+            --jq '{name, tag_name, draft, prerelease, html_url, assets: [.assets[].name]}'
+
+      # Manual mode: a draft pre-release, never published by this workflow.
+      # A rerun uploads into its own draft again; a published release with
+      # the tag is left alone.
+      - name: Draft test build
+        if: ${{ needs.plan.outputs.mode == 'manual' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
           states="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
             --jq ".[] | select(.tag_name == \"$TAG\") | if .draft then \"draft\" else \"published\" end")"
           state="${states%%$'\n'*}"
           if [[ "$states" == *published* ]]; then state=published; fi
           if [ "$state" = published ]; then
-            echo "::error::$TAG is already published; bump desktop-native/mobile/qt/VERSION"
+            echo "::error::$TAG is already published"
             exit 1
           fi
-          notes="Tester build of the Qt app (dev.yap.app) from $GITHUB_SHA.
+          notes="Test build of the Qt app (dev.yap.app) from $SHA. A draft: delete it when done; release-please's qt-android-v<x.y.z> releases are the tester builds.
 
           - arm64-v8a: phones. x86_64: emulators.
           - Signed with the Yap for Android (Qt) release key, certificate SHA-256 \`$EXPECTED_CERT_SHA256\`. It installs over an earlier release build, not over a CI (debug-signed) build.
           - Each APK's SHA-256 is in its \`.sha256\` file."
           if [ -z "$state" ]; then
             gh release create "$TAG" -R "$GITHUB_REPOSITORY" --draft --prerelease --latest=false \
-              --target "$GITHUB_SHA" --title "Yap for Android (Qt) $VERSION" --notes "$notes"
+              --target "$SHA" --title "Yap for Android (Qt) $VERSION" --notes "$notes"
           else
-            gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --notes "$notes"
+            gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --target "$SHA" --notes "$notes"
           fi
           gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber out/*.apk out/*.apk.sha256
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json name,isDraft,isPrerelease,assets \

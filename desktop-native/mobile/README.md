@@ -1018,27 +1018,48 @@ when its own inputs change.
 
 ### Releases
 
-Tester builds of the Qt app come from
-`.github/workflows/qt-android-release.yml`, signed with the app's own
-release key (not the Expo app's key, and not the public CI key). Each run
-publishes a **draft** pre-release, "Yap for Android (Qt) <version>", with
-`yap-qt-<version>-arm64-v8a.apk` (phones), `yap-qt-<version>-x86_64.apk`
-(emulators) and a `.sha256` for each. Only the repository's maintainers see
-a draft until it is published (the run's own artifacts are public for a day,
-as on any public repository).
+Tester builds of the Qt app are release-please releases, like the desktop's
+semver line: no tags are pushed by hand and nothing waits for an approval.
+`release-please-config.json` has the app as its own package
+(`desktop-native/mobile/qt`, release type `simple`, component `qt-android`):
+its version is `desktop-native/mobile/qt/VERSION`, its changelog
+`desktop-native/mobile/qt/CHANGELOG.md`, its tags `qt-android-v<x.y.z>`, and
+its release PR is separate from the desktop's.
 
-Cutting a tester build:
+How a release happens:
 
-1. Set the version in `desktop-native/mobile/qt/VERSION` (x.y.z; CMake, CI
-   and the release workflow read it) and merge that to main.
-2. Either push a tag `qt-android-v<x.y.z>` matching `VERSION` (version name
-   x.y.z; the tag must be on main), or run the workflow by hand from main
-   (Actions, "Qt Android Release", Run workflow; version name
-   `<VERSION>-build.<run>`, draft tag `qt-android-v<that version>`, which
-   starts no further run when it is created).
-3. When the run is green, open the draft on the Releases page, check it and
-   publish it as a pre-release (publishing a manual run's draft creates its
-   tag at the commit built), or delete it.
+1. Commits that touch `desktop-native/mobile/qt/` with type `feat` or `fix`
+   (or a `!` breaking change) count for the app. Use scope `desktop-native`,
+   as for anything under `desktop-native/`, e.g.
+   `feat(desktop-native): pin a message from its menu on android`. While the
+   app is 0.x, `feat` and breaking changes bump the minor version and `fix`
+   the patch; `chore`, `refactor`, `build`, `ci`, `docs` and `test` release
+   nothing. The desktop's package (".") excludes `desktop-native/mobile/qt`,
+   so a commit that touches only the app is not in the desktop's changelog;
+   one that also touches other paths counts for both. Changes the app picks
+   up from outside its folder (the shared crates under
+   `desktop-native/rust/`) do not bump it: release those with a commit in
+   the app's folder, or a `Release-As: x.y.z` footer on a commit there.
+2. On every push to main, `.github/workflows/release-please.yml` opens or
+   updates the app's release PR, "chore(main): release qt-android
+   <x.y.z>" (branch `release-please--branches--main--components--qt-android`),
+   which bumps `VERSION`, writes the changelog and updates
+   `.release-please-manifest.json`.
+3. Merging that PR is the release. The same workflow then creates
+   `qt-android-v<x.y.z>` (tag and GitHub release, with the changelog as its
+   notes), marks it a draft pre-release, and calls
+   `.github/workflows/qt-android-release.yml` with the tag. That builds the
+   tagged commit, signs, smoke-tests, attaches
+   `yap-qt-<x.y.z>-arm64-v8a.apk` (phones), `yap-qt-<x.y.z>-x86_64.apk`
+   (emulators) and a `.sha256` for each, and publishes the release as
+   "Yap for Android (Qt) <x.y.z>": a pre-release, never GitHub's latest
+   (that stays with the desktop's releases). Until it is published, the
+   release is a draft only maintainers see.
+4. If the build fails after the release was created, fix the cause and run
+   "Qt Android Release" by hand from main with `release_tag` set to the
+   tag: it rebuilds into the same draft and publishes it. If a fix needs new
+   code, release a patch version instead and delete the failed draft (the
+   tag stays).
 
 The run builds both ABIs without the signing secrets (third-party build
 scripts run there; the Firebase client configuration is required, so a
@@ -1047,43 +1068,59 @@ alone can read the key, and checks that each APK carries exactly the release
 certificate (SHA-256
 `75:E0:D8:E0:22:4A:9F:32:D8:CC:40:C7:B9:5A:E7:82:43:B3:97:21:5A:99:C1:FE:D6:01:50:FC:6E:FF:B8:9C`),
 the application id `dev.yap.app`, and the version code and name. It then
-cold-starts the x86_64 APK on an emulator, and only then creates the draft
-(after checking the APKs are byte for byte the ones the sign job made).
+cold-starts the x86_64 APK on an emulator, and only then attaches the files
+(after checking the APKs are byte for byte the ones the sign job made). The
+run's own artifacts are public for a day, as on any public repository.
 
-Version codes are `(1000000 + run) * 10 + 2` (arm64-v8a) or `+ 4` (x86_64),
-from the release workflow's run number, so each release is above the one
-before and above every CI build (`run * 10 + digit` of the CI workflow).
-Renaming the workflow file restarts its run number; raise the offset if that
-happens. A CI build and a release build cannot update each other anyway:
-they are different apps (`dev.yap.app.ci` and `dev.yap.app`), and Android
-installs an update only when it is signed with the same key.
+Test builds: run "Qt Android Release" by hand from main with `release_tag`
+empty. It builds that commit as `<VERSION>-build.<run>` and uploads it to a
+draft pre-release `qt-android-v<that version>`, which it never publishes and
+which creates no tag. Delete the draft when done. A test build is signed
+with the same key, so it installs over a release and the next release
+installs over it.
+
+Version codes are `(2000000 + minutes since 2026-01-01 UTC) * 10 + 2`
+(arm64-v8a) or `+ 4` (x86_64), from the clock of the run's plan job, so
+every build is above the one before (release or test build), above the
+earlier `(1000000 + run) * 10 + digit` builds (0.2.0, 0.3.0) and above every
+CI build (`run * 10 + digit` of the CI workflow). A CI build and a release
+build cannot update each other anyway: they are different apps
+(`dev.yap.app.ci` and `dev.yap.app`), and Android installs an update only
+when it is signed with the same key.
 
 Testers install and update:
 
-- On the phone, open the release page, download the arm64-v8a APK and open
-  it; Android asks once to allow installs from the browser (or the file
-  manager). The file's SHA-256 should match its `.sha256`.
+- On the phone, open the newest "Yap for Android (Qt)" release on the
+  Releases page, download the arm64-v8a APK and open it; Android asks once
+  to allow installs from the browser (or the file manager). The file's
+  SHA-256 should match its `.sha256`.
 - To update, install a newer release's APK the same way: it replaces the
-  app in place and keeps the sign-in and settings.
+  app in place and keeps the sign-in and settings. The release's notes say
+  what changed.
 - A phone with a local build (`dev.yap.app` signed with a debug key) or a
   CI build from before CI had its own id (`dev.yap.app` too) must uninstall it
   once before the first release build (Android reports a signature conflict
   or "App not installed"); after that, releases update each other. Current
   CI builds ("Yap CI") are their own app and stay installed beside it.
 
+Who can have a commit signed: the key is in the `android-release`
+environment (secrets `QT_ANDROID_KEYSTORE_BASE64`,
+`QT_ANDROID_KEYSTORE_PASSWORD`, `QT_ANDROID_KEY_ALIAS`), whose deployment
+policy admits `refs/heads/main` only and has no required reviewers. Both the
+release-please call and a dispatch from main run there; pull requests, forks,
+other branches and tags never see the key. So whoever can merge to main or
+start the workflow on main can have a commit signed. `qt-android-v*` tags are
+release-please's: the repository ruleset "Protect qt-android tags" lets only
+repository admins create, move or delete them (release-please creates them
+with the owner's `RELEASE_TOKEN`), and pushing such a tag starts nothing.
+
 The key: a PKCS12 keystore (RSA 4096, alias `yapapp`, valid 100 years),
 kept by the owner outside the repository with access limited to the owner's
-account. CI gets it from the `android-release` environment's secrets
-(`QT_ANDROID_KEYSTORE_BASE64`, `QT_ANDROID_KEYSTORE_PASSWORD`,
-`QT_ANDROID_KEY_ALIAS`). The environment admits main and `qt-android-v*`
-tags only, so pull requests, forks and other branches never see it; anyone
-who can push such a tag can have a commit signed, so only maintainers
-should. Back the
-keystore and its password up together somewhere offline or encrypted (a
-password manager can hold both). A lost key means every tester uninstalls
-and reinstalls, since no later build could update theirs; a leaked key means
-the same, plus a new key, new secrets and a new `EXPECTED_CERT_SHA256` in
-the workflow.
+account. Back the keystore and its password up together somewhere offline
+or encrypted (a password manager can hold both). A lost key means every
+tester uninstalls and reinstalls, since no later build could update theirs;
+a leaked key means the same, plus a new key, new secrets and a new
+`EXPECTED_CERT_SHA256` in the workflow.
 
 ## Core refactors in this branch
 

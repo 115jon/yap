@@ -1,10 +1,12 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "bootstrap-sha": "6c803ac08a0633119ead1e6d8b5d8e791d260298",
+  "separate-pull-requests": true,
   "packages": {
     ".": {
       "release-type": "node",
       "include-component-in-tag": false,
+      "exclude-paths": ["desktop-native/mobile/qt"],
       "extra-files": [
         {
           "type": "toml",
@@ -12,6 +14,14 @@
           "jsonpath": "$.workspace.package.version"
         }
       ]
+    },
+    "desktop-native/mobile/qt": {
+      "release-type": "simple",
+      "component": "qt-android",
+      "package-name": "qt-android",
+      "version-file": "VERSION",
+      "bump-minor-pre-major": true,
+      "prerelease": true
     }
   }
 }
