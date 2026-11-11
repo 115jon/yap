@@ -11,8 +11,13 @@ Item {
     readonly property bool waiting: Session.phase === Session.DeviceCode
 
     Column {
-        anchors.centerIn: parent
-        anchors.verticalCenterOffset: -root.height * 0.06
+        // Centred as if the code and Cancel showed, so the wordmark stays
+        // where it is when they come (it jumped 70dp up).
+        readonly property real waitingExtra: root.waiting ? 0
+            : plate.height + cancel.height + 2 * spacing
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: Math.max(SafeArea.margins.top + 16,
+                    Math.round((root.height - height - waitingExtra) / 2 - root.height * 0.06))
         width: Math.min(parent.width - 48, 420)
         spacing: 20
 
@@ -36,6 +41,7 @@ Item {
         }
 
         Rectangle {
+            id: plate
             visible: root.waiting
             anchors.horizontalCenter: parent.horizontalCenter
             width: code.implicitWidth + 40
@@ -85,6 +91,7 @@ Item {
         }
 
         KitButton {
+            id: cancel
             visible: root.waiting
             anchors.horizontalCenter: parent.horizontalCenter
             width: parent.width
