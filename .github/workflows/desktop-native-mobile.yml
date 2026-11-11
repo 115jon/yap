@@ -67,23 +67,20 @@ jobs:
               - 'desktop-native/rust/Cargo.toml'
               - 'desktop-native/rust/Cargo.lock'
               - 'desktop-native/rust/crates/**'
-              - 'desktop-native/rust/src/client/gateway.rs'
             qt:
               - '.github/workflows/desktop-native-mobile.yml'
               - 'desktop-native/mobile/qt/**'
               - 'desktop-native/mobile/common/**'
               - 'desktop-native/rust/Cargo.toml'
               - 'desktop-native/rust/Cargo.lock'
+              # The crates include yap-ui (the shared Yap.Ui QML and C++).
               - 'desktop-native/rust/crates/**'
               - 'desktop-native/rust/qml/**'
-              - 'desktop-native/rust/src/models.rs'
-              - 'desktop-native/rust/src/anim.rs'
-              - 'desktop-native/rust/src/client/gateway.rs'
-              - 'desktop-native/cpp/**'
               - 'desktop-native/assets/**'
             ios:
               - '.github/workflows/desktop-native-mobile.yml'
               - 'desktop-native/mobile/qt/**'
+              - 'desktop-native/rust/crates/yap-ui/**'
 
   android:
     needs: changes
