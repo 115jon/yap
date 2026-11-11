@@ -24,17 +24,19 @@ small shims, and scrolling is smooth. The costs are measured, not
 estimated: a larger download, higher memory, and a short list of things
 that feel off, each with a known fix.
 
-- **Shared, unchanged:** 30 desktop QML files (4,710 lines: `Theme`,
-  `MessageDelegate`, `TreeRow`, `ServerIcon` and their components), the
-  desktop's `models.rs` (all 13 list models), `anim.rs` and `gateway.rs`, and
-  three desktop C++ files (`AnimatedPicture`, the icon and dither image
-  providers). Together with the core, that is everything a row shows and
-  every rule behind it.
-- **Per platform:** about 890 lines of QML (shell, pages, composer, and
-  the small mobile side of seven desktop seams), 890 lines of Rust (the
-  `Session`/`Nav`/`Chat` bridge and the registry the shared models compile
-  against), and about 450 lines of C++/Java shim for back, keyboard, haptics,
-  share, text size and fling.
+- **Shared, one copy:** the `yap-ui` crate (`desktop-native/rust/crates/yap-ui`),
+  which both apps link. It holds the `Yap.Ui` QML module (`Theme`,
+  `ShellState`, `MessageDelegate`, `TreeRow`, `ServerIcon` and the
+  components they use: 30 files, 4,720 lines), the domain objects (`Session`, `Nav`,
+  `Chat`, `Voice`, `Profile` and the portable singletons such as `Admin`,
+  `Emoji`, `Extras`, `Invites`, `Panels`), all 13 list models, the
+  GUI-thread registry, the core's runtime and gateway, and the portable C++
+  (`AnimatedPicture`, the icon and dither image providers). Together with
+  the core, that is everything a row shows and every rule behind it.
+- **Per platform:** about 840 lines of QML (shell, pages, composer, and
+  the mobile side of four seams), about 130 lines of Rust (the app's
+  `Platform`: TLS client, realtime, token store), and about 450 lines of
+  C++/Java shim for back, keyboard, haptics, share, text size and fling.
 - **Verified on the emulator:**
   - Kova sign-in, the server rail, the channel tree and `#general`, with
     the desktop's grouping, mention rows, role colours and Markdown;
@@ -58,26 +60,45 @@ for any one surface (for example a call screen) if Qt ever falls short there.
 | Layer                         | Shared with desktop (unchanged)                                                                                                                                                                                                                                                                                                             | Per platform                                                                                                                                                                                                                                                                           |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Core                          | `yap-core`, `yap-cache`, `yap-realtime`, `yap-protocol`, `yap-anim`; `gateway.rs`                                                                                                                                                                                                                                                           | TLS backend (rustls on mobile), the token store (an app-private file; Keystore in a release), the config and data folder handed in (`yap_mobile_init`)                                                                                                                                 |
-| Models and bridge objects     | `models.rs`: every `QAbstractListModel` (servers, tree, messages, members, DMs, …) with the same role names                                                                                                                                                                                                                                 | `bridge.rs`: the desktop's `Session`/`Nav`/`Chat` names and signatures, for the part the app covers. `gui.rs`: the registry `models.rs` compiles against. Splitting the desktop's bridge into a shared part and a desktop rest would let both apps compile one file                    |
+| Models and bridge objects     | yap-ui: every `QAbstractListModel` (servers, tree, messages, members, DMs, …), `Session`/`Nav`/`Chat`/`Voice`/`Profile` and the portable singletons, one definition for both apps; the registry and the order view updates apply in                                                                                                       | The app's `Platform` (`yap_ui::platform`): HTTP client, realtime, token store, start and quit hooks, the view updates only it shows (toasts, sounds, badge), uploads, share sources, video. Desktop: `rust/src/native.rs`; mobile: `qt/rust/src/client.rs`                              |
 | Theme tokens                  | `Theme.qml` (palettes, type roles, motion, spacing), `ShellState.qml`                                                                                                                                                                                                                                                                       | Which theme (`Theme.themeId` follows the system's light/dark); a text scale is still missing (see the checklist)                                                                                                                                                                       |
-| Components and list delegates | `MessageDelegate` (the message renderer: grouping, replies, reactions, mention and pending rows, Markdown via Qt rich text), `TreeRow`, `ChannelRow`, `CategoryLabel`, `MemberRow`, `ServerIcon`, `RailPill`, `CountBadge`, `Avatar`, `DisplayName`, `Icon`, `IconKey`, `KitButton`, `Led`, `Spinner`, `LinkText`, `LazyPopup`, `Tooltip` … | The mobile side of each desktop-only seam the shared files reach, with the same API: `EmbedCard`, `MessageMedia`, `VoiceStatusLine`, `VoiceStreamHoverCard`, and stub singletons for `Admin`, `Apps`, `Emoji`, `Extras`, `Invites`, `Panels`, `Profile`, `Voice` (`qt/rust/qml/seams`) |
-| C++                           | `AnimatedPicture` and `ViewportWatch` (GIF/APNG/WebP through yap-anim), the `icon` and `dither` image providers                                                                                                                                                                                                                             | `Native` (the platform shim) and `main.cpp`. The Windows C++ (window chrome, toasts, WebView2, Media Foundation, D3D11 video) stays desktop-only                                                                                                                                       |
+| Components and list delegates | `Yap.Ui`: `MessageDelegate` (the message renderer: grouping, replies, reactions, mention and pending rows, Markdown via Qt rich text), `TreeRow`, `ChannelRow`, `CategoryLabel`, `MemberRow`, `ServerIcon`, `RailPill`, `CountBadge`, `Avatar`, `DisplayName`, `Icon`, `IconKey`, `KitButton`, `Led`, `Spinner`, `LinkText`, `LazyPopup`, `Tooltip` … | Each app's side of the four seams the shared files import from `Yap.Platform`, with the same API: `EmbedCard`, `MessageMedia`, `VoiceStatusLine`, `VoiceStreamHoverCard` (mobile: `qt/rust/qml/seams`; desktop: its own `com.yap.native` files)                                              |
+| C++                           | yap-ui `cpp/`: `AnimatedPicture` and `ViewportWatch` (GIF/APNG/WebP through yap-anim), the `icon` and `dither` image providers, `yap_ui_register(engine)`; `yap_ui.cmake` compiles them in each app's target                                                                                                                              | `Native` (the platform shim) and `main.cpp`. The Windows C++ (window chrome, toasts, WebView2, Media Foundation, D3D11 video) stays desktop-only                                                                                                                                       |
 | Page layouts and navigation   | —                                                                                                                                                                                                                                                                                                                                           | Phone pages (`ServersPage`: rail and tree side by side; `ChatPage`; `SignInPage`), a `StackView` with the platform's transitions and back, `PlatformList` (the platform's scroll feel)                                                                                                 |
 | Shell                         | —                                                                                                                                                                                                                                                                                                                                           | `Main.qml` (edge to edge, phases, foreground/background), the Android manifest, the Java shim                                                                                                                                                                                          |
 
-The seam is clear in the code. The desktop's portable QML rests on three
-kinds of desktop-only thing:
+### How the sharing is built
 
-- C++ types in `Yap.Media` (video through Media Foundation, WebView2 embeds);
-- `Yap.Chrome` singletons (window chrome, desktop shell);
-- desktop domain singletons the prototype does not cover yet.
+One crate, one QML module, two consumers. No file is copied:
 
-Each one gets a mobile version under the same name. A shared file that
-reaches one of them does not change; the platform supplies the other side.
-build.rs mirrors the shared files from `desktop-native/rust` into the
-crate's module, gitignored, at build time. Once the desktop moves to
-`desktop/`, the shared files should become their own QML module and crate,
-with the desktop and mobile shells as two consumers.
+- **`yap-ui`** (`desktop-native/rust/crates/yap-ui`, `links = "yap_ui"`) is a
+  cxx-qt crate that owns the QML module `Yap.Ui` (its QML lives in the
+  crate, `qml/`; its bridge files in `src/`, one flat folder, as cxx-qt-build
+  requires). Its build script ends with `.build().export()`, so cxx-qt-build
+  hands its initializers to the app crate that links it and exports the
+  module under `CXX_QT_EXPORT_DIR/qml_modules/Yap/Ui`.
+- **Each app crate** (`yap_native` on the desktop, `yap_mobile_qt` here)
+  depends on it by path. Its CMake imports both modules from the one crate it
+  builds: `cxx_qt_import_qml_module(yap_ui_qml URI "Yap.Ui" SOURCE_CRATE
+  <app crate>)` beside its own, and includes `yap-ui/cpp/yap_ui.cmake` for the
+  shared C++ (an INTERFACE library, so it compiles with the app's flags).
+- **The app's own QML** is its own module: `com.yap.native` on the desktop,
+  `com.yap.mobile` here. Its files `import Yap.Ui`.
+- **Seams.** Shared QML imports `Yap.Platform` for the four types that
+  differ per app (`EmbedCard`, `MessageMedia`, `VoiceStatusLine`,
+  `VoiceStreamHoverCard`). Each app's `main.cpp` registers its own file for
+  each name by URL (`qmlRegisterType(QUrl("qrc:/qt/qml/<module>/..."),
+  "Yap.Platform", 1, 0, name)`); the desktop's are bytecode-only with the
+  sources discarded, which URL registration handles. `Yap.Media` and
+  `Yap.Chrome` stay C++ registrations: `yap_ui_register` adds the shared
+  `AnimatedPicture`; each app registers its `DesktopShell`.
+- **Rust seams** go through `yap_ui::platform::Platform`, installed once
+  before QML loads (`yap_desktop_init`, `yap_mobile_init`). The registry's
+  ordered `apply_one` handles every shared view update and hands the rest to
+  `Platform::on_update`.
+- The desktop's slim QML (bytecode only, sources discarded) is the
+  `slim-qml` feature of yap-ui, which `yap_native` turns on; it needs the
+  desktop's patched qt-build-utils and is off here.
 
 ## Native look and feel on Qt Quick 6.11
 
@@ -249,9 +270,9 @@ These are open questions for the owner, written up here, not decided:
 desktop-native/mobile/
 ├── common/platform.rs   rustls client and the logcat bridge, used by both
 ├── qt/                  Qt Quick app (dev.yap.qtproto)
-│   ├── rust/            cxx-qt crate: bridge.rs, gui.rs, client.rs; build.rs
-│   │                    mirrors the shared desktop QML and models.rs
-│   │   └── qml/         mobile shell and pages; seams/ (mobile side of desktop seams)
+│   ├── rust/            cxx-qt crate yap_mobile_qt: the mobile Platform
+│   │                    (client.rs) and the com.yap.mobile module; links yap-ui
+│   │   └── qml/         mobile shell and pages; seams/ (Yap.Platform types)
 │   ├── cpp/             main.cpp, native.* (the platform shim)
 │   ├── android/         manifest and NativeShim.java
 │   └── build.sh         Qt for Android + cxx-qt-cmake → APK
@@ -346,9 +367,8 @@ Each crate was checked by compiling it for `x86_64-linux-android` (NDK 27).
 | `yap-realtime`                     | builds with `rustls`                                                                                                                        | none                                                                                                                | TLS feature: **done**                                                                                                                                                                                                                           |
 | `yap-anim`                         | builds; used by the Qt app's `AnimatedPicture`                                                                                              | none                                                                                                                | none                                                                                                                                                                                                                                            |
 | `yap-webm`                         | builds                                                                                                                                      | none                                                                                                                | none                                                                                                                                                                                                                                            |
-| app crate `src/models.rs`          | builds unchanged in the Qt app                                                                                                              | none                                                                                                                | Move with `gui.rs`'s registry into a shared crate                                                                                                                                                                                               |
-| app crate `src/bridge.rs`/`gui.rs` | not portable as they are: they reach every desktop singleton                                                                                | voice, settings, admin, desktop shell objects                                                                       | Split into the shared domain objects (`Session`, `Nav`, `Chat`, `Profile`, …) and a desktop rest; the Qt app's `bridge.rs` is that shared part in miniature                                                                                     |
-| app crate `src/client/gateway.rs`  | builds (via `#[path]`)                                                                                                                      | none (no Qt, no Win32)                                                                                              | Move into `yap-realtime` or `yap-core` so both shells use it as a crate                                                                                                                                                                         |
+| `yap-ui`                           | builds and runs in the Qt app (x86_64 emulator)                                                                                             | none: what differs per app goes through its `Platform`                                                              | **done**: the models, registry, bridge (`Session`/`Nav`/`Chat`/`Voice`/`Profile`), portable singletons, runtime, gateway, `Yap.Ui` QML and portable C++ moved out of the app crate                                                              |
+| app crate `yap_native`             | not portable                                                                                                                                | the desktop's objects (`Desktop`, `Audio`, `Games`, `Hotkeys`, `Updater`, `CustomSounds`) and its `Platform`        | stays desktop-only                                                                                                                                                                                                                              |
 | app crate `src/client/voice.rs`    | not tried                                                                                                                                   | no Qt; drives `yap-voice` with the desktop's devices                                                                | Move the Qt-free call driver next to `yap-voice`                                                                                                                                                                                                |
 | `yap-voice` (no `libwebrtc`)       | builds once given the same TLS switch as yap-core                                                                                           | Win32 in 5 of 28 files: WASAPI devices, Media Foundation                                                            | 1. `default-features = false` for its `yap-realtime` dependency, forwarding the TLS feature. 2. Upstream LiveKit libwebrtc for Android/iOS (the patches are already Windows-gated). 3. libwebrtc's JNI init for its Android audio device module |
 | `yap-speaker`                      | builds (5 dead-code warnings)                                                                                                               | the WASAPI engine                                                                                                   | An AAudio/Oboe and AVAudioEngine sink, or libwebrtc's audio device module on mobile                                                                                                                                                             |
@@ -382,9 +402,9 @@ Each crate was checked by compiling it for `x86_64-linux-android` (NDK 27).
 
 ## Next steps for Qt Quick
 
-1. A shared crate and QML module out of `models.rs`, the registry and the
-   portable part of `bridge.rs`, plus the shared QML files, once the desktop
-   moves to `desktop/`.
+1. Done: the shared crate and QML module (`yap-ui`, "How the sharing is
+   built"). Next on it: the slim-QML size patch for the mobile build, and
+   more of the desktop's QML moved into `Yap.Ui` as phone pages need it.
 2. Fix the "feels off" list: a hover flag, a text scale in `Theme`, the
    IME Send action, per-platform size tokens.
 3. Images over the core's rustls (a `QNetworkAccessManagerFactory`), then

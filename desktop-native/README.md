@@ -868,9 +868,15 @@ cpp/webmplayer.*      WebmPlayer: yap-webm frames into a VideoOutput's sink
 cpp/authmedia.*       AuthMedia: private attachments through the loopback relay
 cpp/camera.*          our camera: devices, QCamera or the test pattern, frames out
 assets/, tools/       generated fonts, icons and brand SVGs, and their scripts
-rust/src/bridge.rs    YapClient QObject (properties, invokables, signals)
-rust/src/client/      core: config, api (REST), auth (device flow), gateway,
-                      socket (room/voice sockets), sfu (partytracks), voice (calls)
+rust/crates/yap-ui/   the view layer shared with the mobile app (QML module
+                      Yap.Ui): Session/Nav/Chat/Voice/Profile (src/bridge.rs),
+                      list models, GUI-thread registry, the core's runtime and
+                      gateway (src/client/), portable singletons, the shared
+                      rows and components (qml/), AnimatedPicture and the
+                      image providers (cpp/, yap_ui.cmake)
+rust/src/native.rs    the desktop's Platform for yap-ui (realtime, keyring,
+                      toasts, sounds, uploads, share, video)
+rust/src/client/      voice calls (the shared runtime is yap-ui's)
 rust/src/desktop.rs   Desktop QObject: shell settings, badge, toasts, window rect
 rust/src/crash.rs     minidumps on a crash (crash-handler + minidump-writer)
 rust/crates/yap-capture/src/hook/  game capture hook (OBS-signed graphics-hook)
