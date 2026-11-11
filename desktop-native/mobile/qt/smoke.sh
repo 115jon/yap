@@ -16,16 +16,23 @@ pkg=dev.yap.qtproto
 activity=org.qtproject.qt.android.bindings.QtActivity
 
 "${adb[@]}" wait-for-device
+until [[ "$("${adb[@]}" shell getprop sys.boot_completed | tr -d '\r')" == 1 ]]; do sleep 2; done
 "${adb[@]}" install -r "$apk"
-"${adb[@]}" logcat -c
-"${adb[@]}" shell am start -W -n "$pkg/$activity"
+# Two cold starts at most, half the time each: a freshly booted CI emulator
+# has once left the first launch without a frame or a log line.
 status=1
-for ((i = 0; i < timeout; i += 2)); do
-  if "${adb[@]}" logcat -d | grep -q '\[startup\] first frame'; then
-    status=0
-    break
-  fi
-  sleep 2
+for attempt in 1 2; do
+  "${adb[@]}" shell am force-stop "$pkg"
+  "${adb[@]}" logcat -c
+  "${adb[@]}" shell am start -W -n "$pkg/$activity"
+  for ((i = 0; i < timeout / 2; i += 2)); do
+    if "${adb[@]}" logcat -d | grep -q '\[startup\] first frame'; then
+      status=0
+      break 2
+    fi
+    sleep 2
+  done
+  echo "attempt $attempt: no first frame within $((timeout / 2))s"
 done
 pid="$("${adb[@]}" shell pidof "$pkg" | tr -d '\r' || true)"
 if ((status)); then
