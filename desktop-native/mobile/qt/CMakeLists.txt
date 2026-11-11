@@ -4,7 +4,13 @@ cmake_minimum_required(VERSION 3.24)
 # Android. Configure with Qt's Android toolchain (build.sh does):
 #   qt.toolchain.cmake, QT_HOST_PATH (a desktop Qt of the same version),
 #   ANDROID_SDK_ROOT, ANDROID_NDK_ROOT.
-project(YapQtProto VERSION 0.1.0 LANGUAGES CXX)
+# The app's version (x.y.z) lives in VERSION: the release workflow
+# (qt-android-release.yml) and CI read the same file.
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION YAP_APP_VERSION LIMIT_COUNT 1)
+if(NOT YAP_APP_VERSION MATCHES "^[0-9]+[.][0-9]+[.][0-9]+$")
+  message(FATAL_ERROR "VERSION must be x.y.z, got '${YAP_APP_VERSION}'")
+endif()
+project(YapQtProto VERSION ${YAP_APP_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -94,14 +100,16 @@ qt_import_plugins(yapqt
 
 # --- Packaging: application id and version -------------------------------
 # CI passes the version per run (desktop-native-mobile.yml: code = run * 10
-# + an ABI digit, name 0.1.<run>+<commit>); local builds get 0.1.0 (1).
+# + an ABI digit, name <VERSION>-ci.<run>+<commit>; qt-android-release.yml:
+# code = (1000000 + run) * 10 + the digit, name <VERSION>); local builds
+# get <VERSION> (1).
 # The id is the Gradle namespace and application id (androiddeployqt writes
 # it to gradle.properties), and the iOS bundle identifier. dev.yap.app is
 # the app's own (registered in Firebase for push notifications; Gradle
 # reads its client from YAP_GOOGLE_SERVICES_JSON, android/build.gradle).
 set(YAP_ANDROID_APP_ID "dev.yap.app" CACHE STRING "Android application id (and iOS bundle id)")
 set(YAP_ANDROID_VERSION_CODE "1" CACHE STRING "Android versionCode")
-set(YAP_ANDROID_VERSION_NAME "0.1.0" CACHE STRING "Android versionName")
+set(YAP_ANDROID_VERSION_NAME "${YAP_APP_VERSION}" CACHE STRING "Android versionName")
 set_target_properties(yapqt PROPERTIES
   QT_ANDROID_PACKAGE_NAME "${YAP_ANDROID_APP_ID}"
   QT_ANDROID_VERSION_CODE "${YAP_ANDROID_VERSION_CODE}"
