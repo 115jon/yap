@@ -20,3 +20,11 @@
 }
 # Qt's Java names optional platform classes it never needs on this build.
 -dontwarn org.qtproject.qt.android.**
+# libwebrtc's Java side (libwebrtc.jar, from the LiveKit prebuilt:
+# livekit.org.webrtc and the livekit.org.jni_zero glue under it): its C++
+# finds every class, method and field by name (the class loader, the audio
+# device module, the codec factories, ContextUtils), and its native methods
+# are bound by name to the Java_livekit_org_webrtc_* symbols in the app's
+# library.
+-keep class livekit.org.** { *; }
+-dontwarn livekit.org.**

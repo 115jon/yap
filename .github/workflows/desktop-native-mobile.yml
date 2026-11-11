@@ -23,6 +23,8 @@ on:
       - "desktop-native/rust/Cargo.toml"
       - "desktop-native/rust/Cargo.lock"
       - "desktop-native/rust/crates/**"
+      # The Qt app's voice builds the patched LiveKit crates (vendor.ps1).
+      - "desktop-native/patches/**"
       # The Qt app embeds the desktop's fonts and icons; its iOS check scans
       # the desktop QML for the QML plugins to link.
       - "desktop-native/rust/qml/**"
@@ -76,12 +78,14 @@ jobs:
               - 'desktop-native/rust/Cargo.lock'
               # The crates include yap-ui (the shared Yap.Ui QML and C++).
               - 'desktop-native/rust/crates/**'
+              - 'desktop-native/patches/**'
               - 'desktop-native/rust/qml/**'
               - 'desktop-native/assets/**'
             ios:
               - '.github/workflows/desktop-native-mobile.yml'
               - 'desktop-native/mobile/qt/**'
               - 'desktop-native/rust/crates/yap-ui/**'
+              - 'desktop-native/patches/**'
 
   android:
     needs: changes

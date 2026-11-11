@@ -102,6 +102,7 @@ Native::Native(QObject* parent)
   readConfiguration();
   applyBars();
   installPush();
+  installVoice();
   // Text size, Remove animations and the wallpaper accent can change while
   // the app is away; read them again when it comes back, and the keyboard's
   // inset, which can go stale behind another activity (the photo picker).
@@ -223,6 +224,9 @@ void Native::readConfiguration()
 
 void Native::haptic(Haptic kind) const
 {
+  // The QML keeps running in the background; nothing there is felt for.
+  if (QGuiApplication::applicationState() == Qt::ApplicationSuspended)
+    return;
 #ifdef Q_OS_ANDROID
   QJniObject::callStaticMethod<void>(kShim, "haptic", "(I)V", jint(kind));
 #else

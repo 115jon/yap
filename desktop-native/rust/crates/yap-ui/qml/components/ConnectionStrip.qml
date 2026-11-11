@@ -14,7 +14,11 @@ import Yap.Ui
 Rectangle {
     id: root
 
+    // Not while a phone app is off screen (suspended; a desktop never is):
+    // its gateway closes on purpose there, and the grace starts when the
+    // app is back, so a reconnect within it shows nothing.
     readonly property bool down: Session.phase === Session.Ready && !Nav.connected
+        && Qt.application.state !== Qt.ApplicationSuspended
     // The drop outlived the grace (gatewayBannerReducer "show").
     property bool graced: false
     property bool back: false

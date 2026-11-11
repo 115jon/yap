@@ -61,6 +61,7 @@ qt_add_executable(yapqt
   cpp/main.cpp
   cpp/native.cpp cpp/native.h
   cpp/push.cpp
+  cpp/voice.cpp
   cpp/rustnetwork.cpp cpp/rustnetwork.h)
 target_include_directories(yapqt PRIVATE cpp)
 target_link_libraries(yapqt PRIVATE
@@ -68,6 +69,36 @@ target_link_libraries(yapqt PRIVATE
   yap_ui_qml
   yap_ui_cpp
   Qt::Gui Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg Qt::CorePrivate Qt::QuickPrivate)
+
+# --- Voice: libwebrtc on Android --------------------------------------------
+# The Rust library carries LiveKit's prebuilt WebRTC (yap-voice). Its Java
+# side and the names Java binds to come out of yap-voice's build script
+# (rust/crates/yap-voice/build.rs, YAP_WEBRTC_EXPORT_DIR):
+#   libwebrtc.jar    livekit.org.webrtc.*, copied where Gradle picks up jars
+#                    (android/build.gradle: libs/*.jar);
+#   webrtc_jni.rsp   -Wl,--undefined=Java_livekit_org_webrtc_... for every
+#                    JNI entry point, which nothing native refers to: without
+#                    it the link drops them and the audio device module's
+#                    first Java-to-native call fails.
+# The NDK libraries are WebRTC's (OpenSL ES and AAudio audio, EGL for its
+# video); libc++ is the shared one Qt already loads.
+if(ANDROID)
+  set(YAP_WEBRTC_EXPORT ${CMAKE_CURRENT_BINARY_DIR}/webrtc)
+  if(NOT CMAKE_ANDROID_NDK)
+    set(CMAKE_ANDROID_NDK "${ANDROID_NDK_ROOT}")
+  endif()
+  corrosion_set_env_vars(yap_mobile_qt
+    "YAP_WEBRTC_EXPORT_DIR=${YAP_WEBRTC_EXPORT}"
+    # webrtc-sys looks for the NDK here (its sysroot and llvm tools).
+    "ANDROID_NDK_HOME=${CMAKE_ANDROID_NDK}")
+  target_link_options(yapqt PRIVATE "@${YAP_WEBRTC_EXPORT}/webrtc_jni.rsp")
+  target_link_libraries(yapqt PRIVATE OpenSLES aaudio EGL GLESv2 android log)
+  add_custom_command(TARGET yapqt POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/android-build/libs
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      ${YAP_WEBRTC_EXPORT}/libwebrtc.jar ${CMAKE_CURRENT_BINARY_DIR}/android-build/libs/libwebrtc.jar
+    VERBATIM)
+endif()
 
 # The application id and version: the packaging block at the end.
 set_target_properties(yapqt PROPERTIES

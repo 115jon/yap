@@ -292,8 +292,13 @@ fn default_device(name: String, id: String) -> Option<AudioDevice> {
         .then_some(AudioDevice { id, name })
 }
 
-/// Both lists, with the ADM up.
+/// Both lists, with the ADM up. Empty on Android: its device module has
+/// one input and one output without names (asking for one aborts), and the
+/// system routes them (the app picks the route through `AudioManager`).
 fn list_devices(f: &PeerConnectionFactory) -> AudioDevices {
+    if cfg!(target_os = "android") {
+        return AudioDevices::default();
+    }
     let count = |n: i16| u16::try_from(n).unwrap_or(0);
     AudioDevices {
         inputs: (0..count(f.recording_devices()))
@@ -322,6 +327,10 @@ fn list_devices(f: &PeerConnectionFactory) -> AudioDevices {
 /// Puts the ADM on the devices the choice resolves to, restarting capture
 /// or playout that was running. A line per switch.
 fn apply(f: &PeerConnectionFactory, sel: &mut Selection) -> Option<String> {
+    if cfg!(target_os = "android") {
+        // Nothing to select: the device module opens the system's route.
+        return None;
+    }
     let list = list_devices(f);
     if list.inputs.is_empty() || list.outputs.is_empty() {
         // Diagnostic: a call that can select no device sends no audio.

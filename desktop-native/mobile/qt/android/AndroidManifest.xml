@@ -8,8 +8,9 @@
      session file kept out of cloud backup and device-to-device transfer,
      the adaptive icon, and the splash: the theme's (system splash on
      Android 12+, window background before) hands over to Qt's, which stays
-     until main.cpp hides it at the first frame; and push notifications
-     (the FCM service, the Reply and Mark as read receiver, the permission).
+     until main.cpp hides it at the first frame; push notifications
+     (the FCM service, the Reply and Mark as read receiver, the permission);
+     and voice calls (the mic, the audio route, the call's service).
      No package attribute: the application id is CMake's YAP_ANDROID_APP_ID
      (Gradle's namespace). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -19,6 +20,17 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Message notifications (API 33+ asks; push/PushShim, Native). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Voice calls (voice/VoiceShim): the mic (asked at the first join);
+         the communication mode and the speaker, earpiece or headset route;
+         the call's foreground service, which keeps the call with the screen
+         off or the app in the background; and the proximity sensor's screen
+         lock while the earpiece plays. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <!-- The shim asks which app is the home screen (was this start the
          launcher's? NativeShim.keepsTaskAtRoot). -->
     <queries>
@@ -70,6 +82,18 @@
             <meta-data
                 android:name="android.app.splash_screen_sticky"
                 android:value="true" />
+            <!-- Qt's event loops keep running while the app is in the
+                 background. Without it Qt stops them there (QtLoader sets
+                 QT_BLOCK_EVENT_LOOPS_WHEN_SUSPENDED, read once at start, so
+                 it cannot be turned on for a call only), and the core's view
+                 updates wait for the Qt thread: over a call with the screen
+                 off they pile up and are all applied on return (README,
+                 "Voice calls"). Nothing draws meanwhile (the window is not
+                 exposed), and outside a call the gateway closes after its
+                 grace as before. -->
+            <meta-data
+                android:name="android.app.background_running"
+                android:value="true" />
         </activity>
 
         <!-- Yap's data-only pushes, drawn natively (push/MessageNotifier),
@@ -81,6 +105,14 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+        <!-- The call in progress: the ongoing notification with Mute and
+             Leave. Not restarted by the system: the call lives in the
+             process, and ends with it. -->
+        <service
+            android:name="dev.yap.qtproto.voice.VoiceService"
+            android:exported="false"
+            android:foregroundServiceType="microphone"
+            android:stopWithTask="false" />
         <!-- A notification's Reply and Mark as read. -->
         <receiver
             android:name="dev.yap.qtproto.push.NotificationActionReceiver"

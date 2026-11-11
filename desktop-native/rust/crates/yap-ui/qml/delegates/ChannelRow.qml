@@ -118,7 +118,9 @@ Rectangle {
             Timer {
                 interval: 1000
                 repeat: true
-                running: clock.visible && row.visible
+                // Not for a phone app off screen (a desktop is never
+                // suspended).
+                running: clock.visible && row.visible && Qt.application.state !== Qt.ApplicationSuspended
                 triggeredOnStart: true
                 onTriggered: clock.now = Date.now()
             }
