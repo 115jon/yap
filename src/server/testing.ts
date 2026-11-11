@@ -2,7 +2,7 @@
 // Route tests pass these to a route's handlers instead of mocking modules.
 // Only tests import this file.
 
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 
 import type { BroadcastDescriptor } from "@/services/server.service";
 import {
@@ -16,6 +16,20 @@ import type { RouteServices } from "@/server/edge";
 import { AuthUnavailable, Unauthenticated } from "@/server/errors";
 import { KovaAuth } from "@/server/kova-auth";
 
+type KovaAuthApi = Parameters<typeof KovaAuth.of>[0];
+
+/**
+ * The app-session calls of a Kova that predates them (404: `None`). Test
+ * Kovas spread this and override what the test is about.
+ */
+export const kovaWithoutAppSessions: Pick<
+  KovaAuthApi,
+  "listAppSessions" | "revokeAppSessions"
+> = {
+  listAppSessions: () => Effect.succeed(Option.none()),
+  revokeAppSessions: () => Effect.succeed(Option.none()),
+};
+
 /**
  * Kova that knows these sessions, keyed by the exact `authorization` or
  * `cookie` header value (`"Bearer t1"`, `"kova.session=abc"`), each mapped to
@@ -23,10 +37,15 @@ import { KovaAuth } from "@/server/kova-auth";
  */
 export function memoryAuth(
   sessions: Readonly<Record<string, string>>,
+  overrides: Partial<
+    Pick<KovaAuthApi, "listAppSessions" | "revokeAppSessions">
+  > = {},
 ): Layer.Layer<KovaAuth> {
   return Layer.succeed(
     KovaAuth,
     KovaAuth.of({
+      ...kovaWithoutAppSessions,
+      ...overrides,
       lookup: (headers) => {
         const userId =
           (headers.authorization && sessions[headers.authorization]) ||
@@ -49,6 +68,8 @@ export function brokenAuth(reason = "TypeError"): Layer.Layer<KovaAuth> {
     KovaAuth,
     KovaAuth.of({
       lookup: () => Effect.fail(new AuthUnavailable({ reason })),
+      listAppSessions: () => Effect.fail(new AuthUnavailable({ reason })),
+      revokeAppSessions: () => Effect.fail(new AuthUnavailable({ reason })),
     }),
   );
 }

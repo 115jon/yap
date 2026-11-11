@@ -1301,8 +1301,9 @@ pub struct PermissionOverride {
 
 // Settings
 
-/// One row of `GET /api/sessions` (`{ sessions: [...] }`). The server only
-/// knows the session making the call today, but the shape allows more.
+/// One row of `GET /api/sessions` (`{ sessions: [...] }`): the user's Yap
+/// sessions, the caller's own first (only that one while Kova cannot list
+/// app sessions).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct SessionInfo {

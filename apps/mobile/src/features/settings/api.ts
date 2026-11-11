@@ -20,9 +20,9 @@ export type AccountSession = typeof SessionSchema.Type;
 const SessionsSchema = Schema.Struct({ sessions: Schema.Array(SessionSchema) });
 
 /**
- * GET /api/sessions (src/routes/api/sessions.ts). Ralph Auth app sessions
- * are per app, so the server reports only the token's own session, and its
- * DELETE answers 501: there are no other sessions to list or sign out here.
+ * GET /api/sessions (src/server/routes/sessions.ts): the user's Yap sessions,
+ * this one first. While Kova cannot list app sessions the server reports only
+ * the token's own (`othersListed: false`), and its DELETE answers 501.
  */
 export async function fetchSessions(): Promise<readonly AccountSession[]> {
   return (await apiJson("/api/sessions", SessionsSchema)).sessions;

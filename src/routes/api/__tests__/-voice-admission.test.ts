@@ -12,7 +12,7 @@ import type { WorkerBindings } from "@/server/bindings";
 import { Unauthenticated } from "@/server/errors";
 import { KovaAuth } from "@/server/kova-auth";
 import { voiceAdmissionRoutes } from "@/server/routes/voice-admission";
-import { testServices } from "@/server/testing";
+import { kovaWithoutAppSessions, testServices } from "@/server/testing";
 import { verifyVoiceToken } from "../../../../realtime/voice-token";
 
 const ticketSecret = "test-realtime-ticket-secret";
@@ -28,6 +28,7 @@ let kovaLookups = 0;
 const countingAuth = Layer.succeed(
   KovaAuth,
   KovaAuth.of({
+    ...kovaWithoutAppSessions,
     // Counted when run, not when built: authenticate() builds its fallback
     // lookup up front and runs it only if the first finds no session.
     lookup: (headers) =>

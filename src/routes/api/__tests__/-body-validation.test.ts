@@ -64,7 +64,6 @@ import { PATCH as reorderChannels } from "../servers/$id/channels/reorder";
 import { PATCH as patchServerSettings } from "../servers/$id/settings";
 import { PATCH as patchSound } from "../servers/$id/soundboard";
 import { POST as createServer } from "../servers";
-import { DELETE as revokeSession } from "../sessions";
 import { PATCH as patchProfile } from "../update-profile";
 
 type Handler = (args: {
@@ -197,16 +196,6 @@ describe("route request bodies", () => {
         expect(response.status).toBe(400);
         expect(await codeOf(response)).toBe("INVALID_BODY");
       }
-    });
-
-    it("session revoke: a non-string id", async () => {
-      const response = await send(
-        revokeSession,
-        "DELETE",
-        JSON.stringify({ sessionId: 1 }),
-      );
-      expect(response.status).toBe(400);
-      expect(await codeOf(response)).toBe("INVALID_BODY");
     });
 
     it("profile asset delete: null body, and an unknown kind keeps its own error", async () => {

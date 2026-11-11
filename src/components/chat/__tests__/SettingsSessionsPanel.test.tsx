@@ -81,6 +81,26 @@ describe("SessionsPanel", () => {
     expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
   });
 
+  it("does not claim there are no other devices when the server could not list them", async () => {
+    vi.mocked(apiGet).mockResolvedValue({
+      sessions: [{ id: "here", isCurrent: true, lastActiveAt: Date.now() }],
+      othersListed: false,
+    });
+
+    render(<SessionsPanel />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.queryByText("No other devices are signed in."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Other signed-in devices can't be listed right now."),
+    ).toBeInTheDocument();
+  });
+
   it("does not claim there are no other devices after a failed load", async () => {
     vi.mocked(apiGet).mockRejectedValue(
       Object.assign(new Error("Authentication required"), { status: 401 }),

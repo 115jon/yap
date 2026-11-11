@@ -52,6 +52,32 @@ export interface KovaIdentity {
   readonly session: KovaAuthSession;
 }
 
+/**
+ * One of the caller's sessions for this app, as Kova lists them: never a
+ * token. Only `id` is required; the device fields are there when Kova kept
+ * what a device sign-in reported.
+ */
+export interface KovaAppSession {
+  id: string;
+  createdAt?: string | number | null;
+  updatedAt?: string | number | null;
+  /** When the session's token was last used, if Kova records it. */
+  lastActiveAt?: string | number | null;
+  expiresAt?: string | number | null;
+  userAgent?: string | null;
+  /** The device sign-in's `platform` (`windows`, `android`, ...). */
+  devicePlatform?: string | null;
+  /** The device sign-in's `hostname`. */
+  deviceName?: string | null;
+  city?: string | null;
+  country?: string | null;
+}
+
+/** Which of the caller's other sessions for this app to sign out. */
+export type AppSessionRevocation =
+  | { readonly sessionId: string }
+  | { readonly allOthers: true };
+
 /** The headers Kova reads a session from. Forwarded as they are, never logged. */
 export interface SessionHeaders {
   readonly authorization: string | null;
@@ -87,23 +113,47 @@ export class KovaAuth extends Context.Service<
     readonly lookup: (
       headers: SessionHeaders,
     ) => Effect.Effect<KovaIdentity, Unauthenticated | AuthUnavailable>;
+    /**
+     * The caller's sessions for this app. `None`: this Kova has no such
+     * endpoint yet (it answers 404), so only the caller's own is known.
+     */
+    readonly listAppSessions: (
+      headers: SessionHeaders,
+    ) => Effect.Effect<
+      Option.Option<ReadonlyArray<KovaAppSession>>,
+      Unauthenticated | AuthUnavailable | ServiceFailure
+    >;
+    /**
+     * Signs out other sessions of the caller's for this app; how many went
+     * (null when Kova did not say). `None`: this Kova cannot revoke another
+     * session yet.
+     */
+    readonly revokeAppSessions: (
+      headers: SessionHeaders,
+      revocation: AppSessionRevocation,
+    ) => Effect.Effect<
+      Option.Option<number | null>,
+      Unauthenticated | AuthUnavailable | ServiceFailure
+    >;
   }
 >()("ralph-meet/server/KovaAuth") {
   /** Kova over HTTP with these options. Tests point `fetch` at a fake Kova. */
   static layerWith(options: KovaOptions): Layer.Layer<KovaAuth> {
-    return Layer.succeed(
-      KovaAuth,
-      KovaAuth.of({ lookup: (headers) => lookupSession(options, headers) }),
-    );
+    return Layer.succeed(KovaAuth, kovaOver(options));
   }
 
   /** Kova from the Worker's env, falling back to the site defaults. */
-  static readonly layer: Layer.Layer<KovaAuth> = Layer.sync(KovaAuth, () => {
-    const options = liveOptions();
+  static readonly layer: Layer.Layer<KovaAuth> = Layer.sync(KovaAuth, () =>
+    kovaOver(liveOptions()),
+  );
+}
 
-    return KovaAuth.of({
-      lookup: (headers) => lookupSession(options, headers),
-    });
+function kovaOver(options: KovaOptions) {
+  return KovaAuth.of({
+    lookup: (headers) => lookupSession(options, headers),
+    listAppSessions: (headers) => listAppSessions(options, headers),
+    revokeAppSessions: (headers, revocation) =>
+      revokeAppSessions(options, headers, revocation),
   });
 }
 
@@ -198,6 +248,156 @@ function lookupSession(
   );
 }
 
+// ── The caller's app sessions ────────────────────────────────────────────────
+// Kova's stock list-sessions and revoke-other-sessions refuse app-scoped
+// tokens (they reach the platform session and its token), and its
+// /:pk/revoke-session only signs out the token presented. These two calls are
+// the app-scoped equivalents, scoped by Kova to `session.app_id` of the key
+// and the caller's user, never returning a token:
+//
+//   GET  /api/pub/apps/:pk/sessions          → { sessions: KovaAppSession[] }
+//   POST /api/pub/apps/:pk/sessions/revoke   { sessionId } | { allOthers: true }
+//                                            → { revoked?: number }
+//
+// A Kova without them answers 404, which reads as "not supported" (`None`).
+
+const decodeAppSessionsBody = Schema.decodeUnknownOption(
+  Schema.Struct({
+    sessions: Schema.Array(looseStruct({ id: Schema.String })),
+  }),
+);
+
+const decodeRevokedBody = Schema.decodeUnknownOption(
+  Schema.Struct({ revoked: Schema.optional(Schema.Number) }),
+);
+
+/**
+ * One call to an app-session endpoint. `None` for a 404 or 405 (this Kova
+ * has no such endpoint). Any other refusal, 401 included, is a 502: the
+ * caller's session was just looked up, and a 401 here would sign the client
+ * out over an answer about other sessions. The body is `null` when there is
+ * none (a 204).
+ */
+function appSessionCall(
+  options: KovaOptions,
+  headers: SessionHeaders,
+  path: string,
+  init: { method: "GET" | "POST"; body?: unknown },
+): Effect.Effect<
+  Option.Option<unknown>,
+  Unauthenticated | AuthUnavailable | ServiceFailure
+> {
+  if (!headers.authorization && !headers.cookie) {
+    return Effect.fail(new Unauthenticated());
+  }
+
+  const request = new Headers();
+  if (headers.authorization)
+    request.set("authorization", headers.authorization);
+  if (headers.cookie) request.set("cookie", headers.cookie);
+  if (options.publishableKey) {
+    request.set("x-publishable-key", options.publishableKey);
+  }
+  if (init.body !== undefined) request.set("content-type", "application/json");
+
+  const url = `${options.url}/api/pub/apps/${encodeURIComponent(options.publishableKey)}${path}`;
+
+  return Effect.gen(function* () {
+    const res = yield* Effect.tryPromise({
+      try: (signal) =>
+        options.fetch(url, {
+          method: init.method,
+          headers: request,
+          body: init.body === undefined ? undefined : JSON.stringify(init.body),
+          signal,
+        }),
+      catch: (error) =>
+        new AuthUnavailable({
+          reason: error instanceof Error ? error.name : "fetch failed",
+        }),
+    });
+
+    if (isKovaUnavailableStatus(res.status)) {
+      return yield* new AuthUnavailable({ reason: `HTTP ${res.status}` });
+    }
+    if (res.status === 404 || res.status === 405) return Option.none();
+    if (!res.ok) {
+      return yield* new ServiceFailure({
+        message: "The sign-in service refused to change this session.",
+        status: 502,
+        code: "KOVA_REFUSED",
+      });
+    }
+
+    const text = yield* Effect.tryPromise({
+      try: () => res.text(),
+      catch: () => new AuthUnavailable({ reason: "unreadable body" }),
+    });
+    if (!text.trim()) return Option.some<unknown>(null);
+    // A 2xx that is not JSON is a proxy or edge error page, not an answer.
+    return Option.some(
+      yield* Effect.try({
+        try: (): unknown => JSON.parse(text),
+        catch: () => new AuthUnavailable({ reason: "unreadable body" }),
+      }),
+    );
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: options.timeout,
+      orElse: () => Effect.fail(new AuthUnavailable({ reason: "timeout" })),
+    }),
+  );
+}
+
+function listAppSessions(options: KovaOptions, headers: SessionHeaders) {
+  return appSessionCall(options, headers, "/sessions", { method: "GET" }).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.succeed(Option.none()),
+        onSome: (body) => {
+          const decoded = decodeAppSessionsBody(body);
+          return Option.isNone(decoded)
+            ? Effect.fail(new AuthUnavailable({ reason: "unreadable body" }))
+            : // SAFETY: Kova's session rows; only `id` is checked, the other
+              // fields stay optional and are read defensively by callers.
+              Effect.succeed(
+                Option.some(
+                  decoded.value.sessions as ReadonlyArray<KovaAppSession>,
+                ),
+              );
+        },
+      }),
+    ),
+  );
+}
+
+function revokeAppSessions(
+  options: KovaOptions,
+  headers: SessionHeaders,
+  revocation: AppSessionRevocation,
+) {
+  return appSessionCall(options, headers, "/sessions/revoke", {
+    method: "POST",
+    body: revocation,
+  }).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.succeed(Option.none<number | null>()),
+        // Any 2xx means Kova did it; the count is a courtesy.
+        onSome: (body) =>
+          Effect.succeed(
+            Option.some(
+              Option.match(decodeRevokedBody(body), {
+                onNone: () => null,
+                onSome: (decoded) => decoded.revoked ?? null,
+              }),
+            ),
+          ),
+      }),
+    ),
+  );
+}
+
 function bearerToken(authorization: string | null): string | null {
   return authorization?.startsWith("Bearer ")
     ? authorization.slice("Bearer ".length)
@@ -242,18 +442,34 @@ export const authenticate = Effect.fn("kova.authenticate")(function* (
 });
 
 /**
- * The signed-in caller's user id: what `requireAuth` gave routes, as a typed
- * lookup. A suspended account (lib/suspension) fails with a 403
+ * The one credential a call about the caller's own sessions uses: the bearer
+ * (or `?token=`) alone when there is one, else the cookie. The caller is
+ * identified with exactly this (`signedInIdentity(request, credentials)`),
+ * so "the current session" and the session Kova acts for are the same.
+ */
+export function appSessionCredentials(request: Request): Credentials {
+  const credentials = credentialsOf(request);
+  const token =
+    bearerToken(credentials.authorization) || credentials.queryToken;
+  return token
+    ? { authorization: `Bearer ${token}`, cookie: null, queryToken: null }
+    : { ...credentials, queryToken: null };
+}
+
+/**
+ * The signed-in caller, user and session, from `credentials` (the request's
+ * own by default). A suspended account (lib/suspension) fails with a 403
  * ACCOUNT_SUSPENDED, as `requireAuth` answers it.
  */
-export function signedInUserId(
+export function signedInIdentity(
   request: Request,
+  credentials: Credentials = credentialsOf(request),
 ): Effect.Effect<
-  string,
+  KovaIdentity,
   Unauthenticated | AuthUnavailable | ServiceFailure,
   KovaAuth
 > {
-  return Effect.flatMap(authenticate(credentialsOf(request)), (identity) =>
+  return Effect.flatMap(authenticate(credentials), (identity) =>
     Effect.flatMap(
       Effect.promise(() => isSuspended(identity.user.id)),
       (suspended) =>
@@ -265,7 +481,21 @@ export function signedInUserId(
                 code: ACCOUNT_SUSPENDED,
               }),
             )
-          : Effect.succeed(identity.user.id),
+          : Effect.succeed(identity),
     ),
   );
+}
+
+/**
+ * The signed-in caller's user id: what `requireAuth` gave routes, as a typed
+ * lookup. A suspended account fails as in `signedInIdentity`.
+ */
+export function signedInUserId(
+  request: Request,
+): Effect.Effect<
+  string,
+  Unauthenticated | AuthUnavailable | ServiceFailure,
+  KovaAuth
+> {
+  return Effect.map(signedInIdentity(request), (identity) => identity.user.id);
 }

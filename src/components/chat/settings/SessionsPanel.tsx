@@ -146,6 +146,8 @@ function SessionSkeleton() {
 
 export default function SessionsPanel() {
   const [sessions, setSessions] = useState<any[]>([]);
+  // False when the server could not list other devices (only this one).
+  const [othersListed, setOthersListed] = useState(true);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sessionEnded, setSessionEnded] = useState(false);
@@ -156,8 +158,11 @@ export default function SessionsPanel() {
     setLoadError(null);
     setSessionEnded(false);
     try {
-      const data = await apiGet<{ sessions: any[] }>("/api/sessions");
+      const data = await apiGet<{ sessions: any[]; othersListed?: boolean }>(
+        "/api/sessions",
+      );
       setSessions(data.sessions);
+      setOthersListed(data.othersListed !== false);
     } catch (err: unknown) {
       setLoadError(describeApiError(err, "load your sessions"));
       setSessionEnded(isSessionEnded(err));
@@ -251,9 +256,13 @@ export default function SessionsPanel() {
                   />
                 ))}
               </ul>
-            ) : (
+            ) : othersListed ? (
               <p className="text-ui-sm text-ink-2">
                 No other devices are signed in.
+              </p>
+            ) : (
+              <p className="text-ui-sm text-ink-2">
+                Other signed-in devices can't be listed right now.
               </p>
             )
           }
