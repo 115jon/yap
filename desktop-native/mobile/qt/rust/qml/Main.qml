@@ -122,6 +122,10 @@ Window {
                 stack.currentItem.backProgress = 0
         }
         function onBackInvoked() {
+            // A page may close something over it first (ChatPage's viewer).
+            const page = stack.currentItem
+            if (stack.depth > 1 && typeof page.closeOverlay === "function" && page.closeOverlay())
+                return
             if (stack.depth > 1)
                 stack.pop()
             else

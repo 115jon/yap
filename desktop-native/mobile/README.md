@@ -114,6 +114,8 @@ One crate, one QML module, two consumers. No file is copied:
 | System font, dynamic text size    | **Partly.** Qt's default font is the system's; explicit `pixelSize`s ignore the system text size                                                   | Shim reads `Configuration.fontScale` (`Native.fontScale`)                                                                                                                                                                                 | Not applied yet: the shared `Theme` needs a `textScale` multiplier on its type roles (desktop at 1)                                                  |
 | Dark mode, Material You           | **Native**: `Application.styleHints.colorScheme`, live                                                                                             | `Theme.themeId` follows it. The shim reads Material You's `system_accent1` (`Native.accent`)                                                                                                                                              | Light/dark verified. The accent is not used: Yap's themes are brand palettes (owner decision)                                                        |
 | Share sheet                       | **No** (Qt has `QDesktopServices` for URLs only)                                                                                                   | Shim: `ACTION_SEND` chooser, on a long press on a message row                                                                                                                                                                             | Wired, but a long press on the text itself starts text selection first; a phone message menu should own the gesture                                  |
+| Photo picker                      | **No.** Qt's `FileDialog` opens the documents UI                                                                                                   | Shim: the system photo picker (`ACTION_PICK_IMAGES`, no permission) on 13+, `GET_CONTENT` on images and videos before; each item copied into the cache for the core's path-based upload                                                   | Verified on API 35: three pictures picked, uploaded with progress, one retried, sent                                                                 |
+| Pinch, double-tap, swipe away     | **Native** building blocks: `PinchArea`, `TapHandler`, `DragHandler`, a snapping `ListView`                                                        | `ImageViewerPage`: zoom about the fingers or the tap, pan, page between pictures, swipe down to close with the scrim fading; Back closes it first                                                                                         | Double-tap, paging, swipe down and Back verified; pinch needs two fingers, which `adb` cannot send                                                   |
 | Notifications                     | **No** FCM/APNs module                                                                                                                             | —                                                                                                                                                                                                                                         | Platform code (FirebaseMessagingService, APNs) under any option, the same work as for Compose                                                        |
 | Text selection handles            | **Native**: Qt Quick's text fields draw Android-style handles and the cut/copy/paste bar                                                           | `persistentSelection` on the composer                                                                                                                                                                                                     | Verified: a long press on a message's text shows the handles and the Copy / Select all bar                                                           |
 | 60/120 Hz                         | **Native**: the threaded render loop is paced by vsync at the display's rate                                                                       | `[frames]` pacing log (the render thread's swap intervals)                                                                                                                                                                                | 60 Hz verified (the emulator's display); 120 Hz needs a device                                                                                       |
@@ -318,6 +320,50 @@ desktop-native/mobile/
 ├── rust/ android/ build.sh    the Compose baseline (UniFFI)
 └── docs/                screenshots
 ```
+
+### The chat page: composer, attachments, image viewer
+
+`MobileComposer.qml`, `UploadTray.qml` and `ImageViewerPage.qml`, on the
+shared `Chat` API (no core changes):
+
+- **Reply.** `ChatPage.startReply(messageId, author, text)` shows the reply
+  bar (the author, the text on one line, Cancel) and opens the keyboard; the
+  send carries `reply_to_id`. The long-press sheet and swipe to reply call it.
+- **Mentions.** Typing `@sp` asks `Chat.queryMentions`; up to five members
+  float above the composer and a tap puts `@username ` in. The keyboard's
+  word in progress (preedit) counts, so suggestions follow Gboard's
+  composing text, and it is committed before the insert.
+- **Emoji.** A row of the recents (`Emoji.quick`) and common emoji as text,
+  inserted at the caret. The full picker is the shared `EmojiSheet` once it
+  lands; server emoji need the desktop's placeholder handling.
+- **Attachments.** `+` opens the photo picker (`Native.pickMedia`). The tray
+  shows each file's picture, progress and size; remove or cancel, mark
+  sensitive, tap a failed tile to retry (its reason shows in the notice
+  line), tap a finished picture to view it. Files over the limit stay as the
+  core's too-big cards (they are not copied: a sparse file of their size
+  stands in). Sending works with text, pictures or both.
+- **The rest.** Send is enabled by typed text (preedit included) or a
+  finished upload; typing pings go at most every 3 s (the core sends every
+  one it is asked to); the field grows to five lines; each channel keeps its
+  unsent text and reply while the app runs (`Drafts`, cleared on sign-out).
+- **Viewer.** A tap on a message's picture opens it full screen over the
+  chat: pinch or double-tap to zoom, pan, swipe sideways between the
+  message's pictures, swipe down or Back to close, a tap to show or hide the
+  bar (close, `2 / 3`, the name, Share for the link).
+
+Not done yet: a camera shot from the composer; video in the viewer; saving
+to the gallery; sensitive pictures are not blurred in the viewer; on 13+ the
+photo picker names files by their media id (`1000000302.jpg`), not the
+original name; the status bar icons stay dark over the viewer in the light
+theme until the shim can switch them (`Native.lightBars`); picked copies stay
+in the app cache until the next start.
+
+<p>
+<img src="docs/qt-mention.png" width="180" alt="Qt: @ suggestions above the composer">
+<img src="docs/qt-reply.png" width="180" alt="Qt: replying to a message">
+<img src="docs/qt-upload-tray.png" width="180" alt="Qt: two pictures in the upload tray">
+<img src="docs/qt-image-viewer.png" width="180" alt="Qt: the image viewer">
+</p>
 
 ### Build and run the Qt app
 
