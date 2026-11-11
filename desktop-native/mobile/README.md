@@ -414,7 +414,11 @@ video codecs an audio-only phone never runs.
   `QNetworkDiskCache` only plugs into Qt's own HTTP backend: Qt's load
   rules (fresh copies served, stale ones revalidated with
   `If-None-Match`/`If-Modified-Since`), and with no network the last copy
-  is shown. Private media and redirected answers are never cached. Open:
+  is shown. Private media and redirected answers are never cached on disk;
+  a private GIF or WebP stays in memory for a minute (16 MB at most, only
+  under the session that fetched it), so an animated attachment's player
+  and the viewer get the bytes its still had instead of a second download.
+  Open:
   the cache is not emptied on sign-out (only public pictures are in it),
   and the API's avatars answer `max-age=0` with an ETag it does not honour
   (`200`, not `304`), so each avatar is fetched again per launch.
@@ -468,6 +472,26 @@ video codecs an audio-only phone never runs.
     has its height when it is placed.
   - A reset of the list (the open channel picked again) did not land it
     again. It does now (`onModelReset`), as on the desktop.
+
+- **Read state on a phone.** The core reads "focused" as "the chat is on
+  screen" (`Main.reading`), and the phone picks a conversation from the
+  drawer, out of view, then slides it in. So: the open conversation picked
+  again in the drawer only slides back to it (the desktop's reselect
+  reloads it cold, already read, without its divider); the core decides "a
+  channel left at its end opens there without a divider" with the focus it
+  had when the channel was picked, not when its page answered
+  (`State::in_view_since_open`), so a pick from the drawer always gets its
+  "New" divider; opens the app makes itself (a notification, a profile's
+  Message) say they were out of view (`Main.openUnseen`). The list reports
+  where it landed even when nothing moves (a conversation shorter than the
+  screen), and the mentions counted as seen at the end start at the oldest
+  row that stood at the top during the visit, not at the last screenful.
+- **Accessibility under sheets (open).** Rows behind an open sheet stay in
+  the accessibility tree. Qt Quick hides an item from accessibility only
+  when it is invisible (`Accessible.ignored` drops the item but keeps its
+  children), and the page under a sheet must stay drawn; hiding it needs
+  a change in Qt's Android accessibility bridge or a modal flag on
+  `QAccessibleQuickItem`, and a TalkBack pass on a device.
 
 ## Licensing: owner decisions
 

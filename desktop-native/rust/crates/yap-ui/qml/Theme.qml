@@ -284,7 +284,11 @@ QtObject {
             ? mentionOnMention : colors[token] ?? token)
         // On a phone a code block's long line wraps: the column is narrow
         // and nothing scrolls sideways, so the line ran off the screen.
-        const out = touch ? colored.replace(/<pre style="/g, "<pre style=\"white-space:pre-wrap; ") : colored
+        // A fence's language tag (marked by markdown.rs) is not code: the
+        // desktop prints it as the first line, as the web does; a phone
+        // leaves it out.
+        const out = touch ? colored.replace(/<pre style="/g, "<pre style=\"white-space:pre-wrap; ")
+            .replace(/<span class="lang">[^<]*<\/span><br>/g, "") : colored
         return textScale === 1 ? out : scaleRich(out)
     }
     // The core writes its rich text at the design size: the px sizes it

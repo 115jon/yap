@@ -265,7 +265,9 @@ Item {
                         anchors.centerIn: parent
                         width: Math.min(implicitWidth, parent.width - 6)
                         textFormat: Text.PlainText
-                        text: tile.sizeText
+                        // Whole units from 100 up ("117 KB", not "116.5 …"):
+                        // the chip has the tile's 72dp less its margins.
+                        text: tile.sizeText.replace(/^(\d{3,})\.\d+/, n => String(Math.round(Number(n))))
                         elide: Text.ElideRight
                         color: Theme.ink2
                         font: Theme.type.numSm

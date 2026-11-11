@@ -21,8 +21,11 @@ Item {
     signal menuRequested()
     signal membersRequested()
     signal profileRequested(string userId)
+    signal threadRequested(string messageId)
 
     readonly property bool dm: Nav.dmUserId.length > 0
+    // The conversation shows rows (the drawer reopens it only when not).
+    readonly property bool hasRows: view.count > 0
 
     // The message being edited in place (its row shows the editor).
     property string editingId: ""
@@ -74,6 +77,10 @@ Item {
             view.positionViewAtEnd()
             root.followEnd = true
         }
+        root.noteTop()
+        // A conversation shorter than the list never moves it: say where
+        // it landed (the desktop's land() does too).
+        root.reportPosition()
         landing.tries -= 1
         if (landing.tries > 0)
             landing.start()
@@ -93,8 +100,38 @@ Item {
     Connections {
         target: Nav
         function onActiveChannelIdChanged() {
+            root.seenTop = ""
             root.land()
         }
+    }
+
+    // The oldest message that has stood at the top of the list this visit.
+    // Reaching the end then counts the mentions from it on as seen, not
+    // only the last screenful's: they were all scrolled past (useChatArea.ts
+    // marks each one that becomes visible).
+    property string seenTop: ""
+    function topId() {
+        const top = view.itemAt(view.width / 2, view.contentY + 1)
+        return top && top.messageId ? top.messageId : ""
+    }
+    function noteTop() {
+        const id = root.topId()
+        if (id.length === 0 || id === root.seenTop)
+            return
+        const seen = root.seenTop.length > 0 ? Chat.indexOfMessage(root.seenTop) : -1
+        if (seen < 0 || Chat.indexOfMessage(id) < seen)
+            root.seenTop = id
+    }
+    // At the end (or all of it on screen): read, and its mentions from the
+    // oldest top row on seen (the desktop's reportPosition).
+    function reportPosition() {
+        const end = view.count > 0 && view.nearEnd()
+        if (end) {
+            const from = root.seenTop.length > 0 ? root.seenTop : root.topId()
+            if (from.length > 0)
+                Chat.setSeenFrom(from)
+        }
+        Chat.setAtBottom(end)
     }
     Connections {
         target: Chat
@@ -170,6 +207,8 @@ Item {
         // It stops a fling, whose end reads followEnd from where the list
         // was (a send of ours while the list still coasts).
         root.followEnd = true
+        // Rows that fit move nothing, so nothing else reports them.
+        root.reportPosition()
     }
 
     Rectangle {
@@ -377,6 +416,8 @@ Item {
             }
             onEditCancelled: root.endEdit()
             onProfileRequested: (userId, anchor) => root.profileRequested(userId)
+            // The thread chip ("N replies"): the thread's page.
+            onThreadRequested: id => root.threadRequested(id)
             onRetryRequested: nonce => Chat.retrySend(nonce)
             onDiscardRequested: (nonce, text) => Chat.discardSend(nonce)
             onReactionToggled: (id, emoji) => actions.react(id, emoji)
@@ -403,22 +444,17 @@ Item {
             root.userMoved = true
             root.followEnd = false
         }
-        onMovementEnded: root.followEnd = nearEnd()
+        onMovementEnded: {
+            root.followEnd = nearEnd()
+            root.noteTop()
+        }
         onContentHeightChanged: root.settle()
         // The keyboard and the typing line, not the list's own layout.
         onHeightChanged: if (root.followEnd) positionViewAtEnd()
         onContentYChanged: {
             if (contentY - originY < 600 && Chat.hasOlder && !Chat.olderLoading && moving)
                 Chat.loadOlder()
-            const end = count > 0 && nearEnd()
-            if (end) {
-                // Mentions from the top row on have been seen (the
-                // desktop's reportPosition): their counts clear.
-                const top = itemAt(width / 2, contentY + 1)
-                if (top && top.messageId)
-                    Chat.setSeenFrom(top.messageId)
-            }
-            Chat.setAtBottom(end)
+            root.reportPosition()
         }
         onCountChanged: root.settle()
 
@@ -478,6 +514,7 @@ Item {
     // The message sheet and what it leads to, over the page.
     MessageActions {
         id: actions
+        prefetchEmoji: true
         anchors.fill: parent
         z: 9
         onReplyRequested: (messageId, author, text) => root.startReply(messageId, author, text)

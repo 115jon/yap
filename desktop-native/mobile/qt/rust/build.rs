@@ -20,6 +20,7 @@ const QML: &[&str] = &[
     "qml/ProfilePage.qml",
     "qml/SettingsPage.qml",
     "qml/FriendsPage.qml",
+    "qml/ThreadPage.qml",
     "qml/PageHeader.qml",
     "qml/MobileField.qml",
     "qml/InlineConfirm.qml",

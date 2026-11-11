@@ -1334,6 +1334,11 @@ pub struct State {
     /// refetch places no divider there in a focused window (as `on_page`
     /// does for a channel left at its end).
     pub(super) open_at_end: bool,
+    /// The window was focused when the open channel was picked. A channel
+    /// left at its end shows no divider only when it was opened in view
+    /// and is still in view when its rows come: a phone picks it from the
+    /// drawer, over which it then slides, before its page answers.
+    pub(super) open_focused: bool,
     pub(super) next_id: u64,
 }
 
@@ -1440,6 +1445,7 @@ impl State {
             collapsed: BTreeSet::new(),
             disk_shown: false,
             open_at_end: false,
+            open_focused: true,
             next_id: 0,
         }
     }
@@ -1592,6 +1598,13 @@ impl State {
         self.voice_view
             .as_deref()
             .or(self.active_channel.as_deref())
+    }
+
+    /// The window is focused and was when the open channel was picked: a
+    /// channel left at its end then opens there with no divider
+    /// (useChatArea.ts `landingAtBottom && windowFocused`).
+    pub(super) fn in_view_since_open(&self) -> bool {
+        self.focused && self.open_focused
     }
 
     /// The active channel's messages are on screen: no voice view covers

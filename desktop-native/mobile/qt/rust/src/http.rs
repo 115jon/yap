@@ -9,6 +9,7 @@
 //! scheme, host or port, so a redirect never carries it off the API.
 
 use std::ffi::{c_char, c_void};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, PoisonError, RwLock};
 use std::time::Duration;
 
@@ -30,11 +31,21 @@ const DONE_BAD_REQUEST: i32 = 3;
 const DONE_TIMEOUT: i32 = 4;
 
 static MEDIA_TOKEN: RwLock<Option<Token>> = RwLock::new(None);
+/// Bumped with every session change: private media the C++ side keeps in
+/// memory (`RecentPrivate`) belongs to the session it was fetched under.
+static TOKEN_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// The session for media requests (`ViewUpdate::MediaAuth`); `None` after
 /// sign-out.
 pub fn set_token(token: Option<Token>) {
     *MEDIA_TOKEN.write().unwrap_or_else(PoisonError::into_inner) = token;
+    TOKEN_GENERATION.fetch_add(1, Ordering::AcqRel);
+}
+
+/// Which session private media is fetched under now (see `set_token`).
+#[no_mangle]
+pub extern "C" fn yap_http_session_generation() -> u64 {
+    TOKEN_GENERATION.load(Ordering::Acquire)
 }
 
 /// `Bearer <session>` for `url` when it is the API at `api_base`'s private

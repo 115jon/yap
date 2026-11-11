@@ -17,6 +17,9 @@ Item {
 
     // The message the surfaces act on, a snapshot of its row.
     property var message: ({})
+    // Fetch the emoji sheet's first pictures ahead (one instance does: the
+    // chat's).
+    property bool prefetchEmoji: false
     // One of the surfaces is up: the page under it holds still (the pager
     // does not pan under a sheet).
     readonly property bool shown: [messageSheet, emojiSheet, reactionSheet, deleteSheet, selectPage]
@@ -61,7 +64,7 @@ Item {
     // The whole emoji picker, to react to a message.
     function pickReaction(messageId) {
         message = { id: messageId }
-        emojiSheet.load().openPicker()
+        openEmojiSheet()
     }
     // Who reacted to a message, on one emoji's tab.
     function showReactions(messageId, emoji) {
@@ -129,7 +132,7 @@ Item {
                 Emoji.remember(emoji)
                 root.react(root.message.id, emoji)
             }
-            onMorePicked: emojiSheet.load().openPicker()
+            onMorePicked: root.openEmojiSheet()
             onActionPicked: action => root.run(action)
         }
     }
@@ -139,6 +142,76 @@ Item {
             onPicked: emoji => root.react(root.message.id, emoji)
         }
     }
+    // The emoji sheet's first screens fetched ahead, once, a few seconds
+    // after signing in: each picture is its own download (Twemoji from the
+    // CDN, kept in the disk cache), so a first open showed holes for
+    // seconds. Loaded at the size the sheet's cells ask for on a phone held
+    // upright (30 px glyphs: 60 px pictures) and held (about 2.6 MB) until
+    // the sheet has opened on them; Qt's picture cache let the first ones
+    // go before then, and they came back from disk a second late.
+    Loader {
+        id: emojiWarm
+        property bool done: false
+        active: false
+        function release() {
+            done = true
+            active = false
+        }
+        Timer {
+            interval: 3000
+            running: root.prefetchEmoji && !emojiWarm.done && !emojiWarm.active && Session.phase === Session.Ready
+                && Qt.application.state === Qt.ApplicationActive
+            onTriggered: emojiWarm.active = true
+        }
+        sourceComponent: Item {
+            id: warm
+            visible: false
+            property var urls: []
+            Component.onCompleted: {
+                // The grid as the sheet opens on it (EmojiSheet.openPicker).
+                Emoji.setCreations(Extras.emojis)
+                Emoji.search("")
+                const out = []
+                // Rows: the section labels and runs of nine; about two
+                // screens of the sheet at rest.
+                for (let row = 0; row < 24; ++row) {
+                    const cells = Emoji.rowCells(row)
+                    if (!cells.startsWith("["))
+                        continue
+                    for (const cell of JSON.parse(cells))
+                        if (cell.u)
+                            out.push(cell.u)
+                }
+                urls = out
+            }
+            Repeater {
+                model: warm.urls
+                Image {
+                    required property string modelData
+                    asynchronous: true
+                    // EmojiSheet's cells (EmojiGlyph asks for twice
+                    // its size): Qt keys its picture cache by this.
+                    readonly property int glyph: Math.min(30, Math.floor((root.width - 16) / 9) - 12)
+                    sourceSize: Qt.size(glyph * 2, glyph * 2)
+                    source: modelData
+                }
+            }
+        }
+    }
+    // The sheet has its own copies a moment after it opens.
+    Timer {
+        id: warmRelease
+        interval: 5000
+        onTriggered: emojiWarm.release()
+    }
+    function openEmojiSheet() {
+        emojiSheet.load().openPicker()
+        if (emojiWarm.active)
+            warmRelease.restart()
+        else
+            emojiWarm.done = true // opened first: nothing to fetch ahead
+    }
+
     Lazy {
         id: reactionSheet
         sourceComponent: ReactionSheet {

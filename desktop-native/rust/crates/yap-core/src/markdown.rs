@@ -102,7 +102,7 @@ pub fn to_html_resolving(
             break;
         };
         text_block(&rest[..start], api_base, &mut out);
-        let code = rest[start + 3..start + 3 + len].trim();
+        let fence = &rest[start + 3..start + 3 + len];
         out.push_str(
             "<table width=\"100%\" border=\"1\" cellspacing=\"0\" cellpadding=\"12\" \
              style=\"border-color:%LINE%; border-style:solid; background-color:%BLOCKBG%; \
@@ -110,7 +110,18 @@ pub fn to_html_resolving(
         );
         out.push_str(MONO);
         out.push_str("\">");
-        escape_into(code, &mut out);
+        // The web prints a language tag as the code's first line, and so
+        // does this; it is marked (an unstyled span, drawn the same) so a
+        // phone can leave it out.
+        match fence_language(fence) {
+            Some((language, code)) => {
+                out.push_str(LANGUAGE_OPEN);
+                escape_into(language, &mut out);
+                out.push_str("</span><br>");
+                escape_into(code.trim_end(), &mut out);
+            }
+            None => escape_into(fence.trim(), &mut out),
+        }
         out.push_str("</pre></td></tr></table>");
         rest = &rest[start + 3 + len + 3..];
     }
@@ -165,6 +176,23 @@ fn text_block(text: &str, api_base: &Cx, out: &mut String) {
             inline(joined.strip_suffix('\n').unwrap_or(&joined), api_base, out);
         }
     }
+}
+
+/// How a fenced block's language tag starts (`Theme.richText` on a phone
+/// drops the tag and its line break).
+pub const LANGUAGE_OPEN: &str = "<span class=\"lang\">";
+
+/// A fence's language tag and the code under it: a first line of one word
+/// (letters, digits, `+-#._`, as Discord reads `` ```rust ``) with code on
+/// the lines after it. Anything else is all code.
+fn fence_language(fence: &str) -> Option<(&str, &str)> {
+    let (first, code) = fence.split_once('\n')?;
+    let word = !first.is_empty()
+        && first.len() <= 32
+        && first
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "+-#._".contains(c));
+    (word && !code.trim().is_empty()).then_some((first, code))
 }
 
 fn escape_into(text: &str, out: &mut String) {
@@ -565,6 +593,31 @@ mod tests {
         assert!(out.contains("let x = 1;"));
         assert!(out.starts_with("before<br>"));
         assert!(out.ends_with("<br>after"));
+    }
+
+    #[test]
+    fn a_fence_language_should_be_marked_and_print_as_before() {
+        let out = html("```rust\nlet x = 1;\n  y\n```");
+        assert!(out.contains("\"><span class=\"lang\">rust</span><br>let x = 1;<br>  y</pre>"));
+        // The text Qt draws is the old one: the tag, a break, the code.
+        let plain = out
+            .replace("<span class=\"lang\">", "")
+            .replace("</span>", "");
+        let before = html("```\nrust\nlet x = 1;\n  y\n```");
+        assert_eq!(plain, before);
+    }
+
+    #[test]
+    fn a_fence_without_a_language_line_should_be_all_code() {
+        for source in [
+            "```\nlet x = 1;\n```",
+            "```rust only```",
+            "```two words\nx\n```",
+            "```rust\n\n```",
+            "```rust\r\nx\n```",
+        ] {
+            assert!(!html(source).contains("class=\"lang\""), "{source}");
+        }
     }
 
     #[test]

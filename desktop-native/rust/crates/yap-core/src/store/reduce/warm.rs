@@ -161,7 +161,7 @@ impl State {
     ) {
         self.append_outgoing(&mut log);
         self.open_at_end = at_end;
-        if !(at_end && self.focused) {
+        if !(at_end && self.in_view_since_open()) {
             self.divider = self.divider_for(&log);
         }
         self.seen_floor = log.newest_sent().map(|m| m.created_at.clone());
