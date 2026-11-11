@@ -206,9 +206,21 @@ jobs:
           java-version: 17
 
       - name: Ninja and 7-Zip
+        # Skipped when the image has both. Otherwise retried: an unreachable
+        # mirror (security.ubuntu.com has failed to resolve on the runners)
+        # must not fail the build when the main archive answers.
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ninja-build p7zip-full
+          if command -v ninja >/dev/null && command -v 7z >/dev/null; then
+            ninja --version; exit 0
+          fi
+          for attempt in 1 2 3 4; do
+            sudo apt-get update -qq -o Acquire::Retries=3 || true
+            if sudo apt-get install -y -qq -o Acquire::Retries=3 ninja-build p7zip-full; then
+              exit 0
+            fi
+            sleep $((attempt * 15))
+          done
+          exit 1
 
       - name: Android NDK, platform and build tools
         run: |
