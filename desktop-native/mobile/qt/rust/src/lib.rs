@@ -5,5 +5,7 @@
 //! this crate's QML module, `com.yap.mobile`.
 
 mod client;
+// Qt's network loads over the core's rustls (cpp/rustnetwork.cpp).
+mod http;
 #[path = "../../../common/platform.rs"]
 mod platform;

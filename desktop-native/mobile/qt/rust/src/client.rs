@@ -82,6 +82,11 @@ impl Platform for Mobile {
     }
 
     fn on_update(&self, update: ViewUpdate) -> bool {
+        // The session for private media (attachments, custom emoji).
+        if let ViewUpdate::MediaAuth(token) = update {
+            crate::http::set_token(token);
+            return true;
+        }
         // Known and not shown here yet; anything else is logged as unhandled.
         matches!(
             update,
@@ -90,7 +95,6 @@ impl Platform for Mobile {
                 | ViewUpdate::Sound(_)
                 | ViewUpdate::StopSound(_)
                 | ViewUpdate::Badge(_)
-                | ViewUpdate::MediaAuth(_)
         )
     }
 }
