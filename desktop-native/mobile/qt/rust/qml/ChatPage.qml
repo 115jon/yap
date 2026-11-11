@@ -416,6 +416,8 @@ Item {
             }
             onEditCancelled: root.endEdit()
             onProfileRequested: (userId, anchor) => root.profileRequested(userId)
+            // The thread chip ("N replies"): the thread's page.
+            onThreadRequested: id => root.threadRequested(id)
             onRetryRequested: nonce => Chat.retrySend(nonce)
             onDiscardRequested: (nonce, text) => Chat.discardSend(nonce)
             onReactionToggled: (id, emoji) => actions.react(id, emoji)

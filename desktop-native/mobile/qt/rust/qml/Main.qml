@@ -136,6 +136,14 @@ Window {
         stack.sheet = false
         stack.push(settingsPage)
     }
+    // A message's thread, over the chat.
+    function openThread(messageId) {
+        if (messageId.length === 0 || stack.busy || stack.currentItem?.rootId === messageId)
+            return
+        Qt.inputMethod.hide()
+        stack.sheet = false
+        stack.push(threadPage, { rootId: messageId })
+    }
     function openFriends() {
         if (stack.busy)
             return
@@ -267,6 +275,7 @@ Window {
                 onFriendsRequested: window.openFriends()
                 onVoiceRequested: channelId => window.joinVoice(channelId)
                 onCallRequested: window.openCall()
+                onThreadRequested: messageId => window.openThread(messageId)
             }
 
             pushEnter: Transition {
@@ -320,6 +329,13 @@ Window {
             id: settingsPage
             SettingsPage {
                 onCloseRequested: window.closeTop(false)
+            }
+        }
+        Component {
+            id: threadPage
+            ThreadPage {
+                onCloseRequested: window.closeTop(false)
+                onProfileRequested: userId => window.openProfile(userId)
             }
         }
         Component {

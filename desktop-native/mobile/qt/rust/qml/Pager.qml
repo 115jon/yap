@@ -30,6 +30,8 @@ Item {
     signal friendsRequested()
     signal voiceRequested(string channelId)
     signal callRequested()
+    // A message's "N replies": its thread, as a page.
+    signal threadRequested(string messageId)
 
     readonly property bool wide: width >= 840
     readonly property bool docked: width >= 1200
@@ -300,6 +302,7 @@ Item {
             onMenuRequested: pager.show("drawer")
             onMembersRequested: pager.toggleMembers()
             onProfileRequested: userId => pager.profileRequested(userId)
+            onThreadRequested: messageId => pager.threadRequested(messageId)
         }
 
         // Side by side with nothing open: where the conversation will be.
