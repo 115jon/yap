@@ -7,6 +7,7 @@
 #include <QtCore/QDirIterator>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
+#include <QtCore/QResource>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QSysInfo>
 #ifdef Q_OS_ANDROID
@@ -31,12 +32,22 @@
 
 extern "C" void yap_mobile_init(const char* data_dir, const char* device_name);
 
+// The brand fonts, read in place: the resource is stored uncompressed
+// (CMakeLists.txt), so the font database and each FreeType face use the
+// bytes mapped with the library. From a path Qt copies every file onto the
+// heap, and once more for each face it opens (about 6 MB in all).
 static void registerFonts()
 {
   QDirIterator it(QStringLiteral(":/fonts"), { QStringLiteral("*.ttf") });
   int count = 0;
   while (it.hasNext()) {
-    if (QFontDatabase::addApplicationFont(it.next()) >= 0)
+    const QString path = it.next();
+    const QResource font(path);
+    const int id = font.isValid() && font.compressionAlgorithm() == QResource::NoCompression
+      ? QFontDatabase::addApplicationFontFromData(
+          QByteArray::fromRawData(reinterpret_cast<const char*>(font.data()), font.size()))
+      : QFontDatabase::addApplicationFont(path);
+    if (id >= 0)
       ++count;
   }
   if (count == 0)
