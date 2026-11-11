@@ -1,6 +1,6 @@
 import QtQuick
 import Yap.Mobile
-import com.yap.native
+import com.yap.mobile
 import Yap.Ui
 
 // The home page, phone layout: the server rail and the open server's

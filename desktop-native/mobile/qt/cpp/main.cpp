@@ -1,7 +1,7 @@
-// The Qt Quick mobile prototype's shell: the desktop's QML module
-// (com.yap.native, built by the Rust crate with the shared desktop files in
-// it), the desktop's portable C++ (AnimatedPicture, the icon provider), and
-// the mobile platform shim (Native).
+// The Qt Quick mobile prototype's shell: the view layer shared with the
+// desktop (QML module Yap.Ui and its C++, from the yap-ui crate), the phone
+// shell (com.yap.mobile, this app's crate), and the mobile platform shim
+// (Native).
 
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
@@ -24,10 +24,8 @@
 #include <cstdio>
 #include <vector>
 
-#include "animatedpicture.h"
-#include "ditherprovider.h"
-#include "iconprovider.h"
 #include "native.h"
+#include "yap_ui.h"
 
 extern "C" void yap_mobile_init(const char* data_dir, const char* device_name);
 
@@ -63,18 +61,21 @@ int main(int argc, char* argv[])
 
   registerFonts();
 
-  // The desktop's own C++ for pictures (GIF, APNG and WebP through
-  // yap-anim), under the URI the shared QML imports.
-  qmlRegisterType<AnimatedPicture>("Yap.Media", 1, 0, "AnimatedPicture");
-  qmlRegisterType<ViewportWatch>("Yap.Media", 1, 0, "ViewportWatch");
+  // The mobile side of the shared QML's seams (Yap.Ui imports
+  // Yap.Platform): this app's own files, under the names the shared QML
+  // uses. The desktop registers its own.
+  for (const char* name : { "EmbedCard", "MessageMedia", "VoiceStatusLine", "VoiceStreamHoverCard" })
+    qmlRegisterType(QUrl(QStringLiteral("qrc:/qt/qml/com/yap/mobile/qml/seams/%1.qml").arg(QLatin1String(name))),
+                    "Yap.Platform", 1, 0, name);
   auto* shell = new MobileShell(&app);
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "DesktopShell", shell);
   auto* native = new Native(&app);
   qmlRegisterSingletonInstance("Yap.Mobile", 1, 0, "Native", native);
 
   QQmlApplicationEngine engine;
-  engine.addImageProvider(QStringLiteral("icon"), new IconProvider);
-  engine.addImageProvider(QStringLiteral("dither"), new DitherProvider);
+  // AnimatedPicture and ViewportWatch (Yap.Media; GIF, APNG and WebP
+  // through yap-anim), the icon and dither providers: the desktop's C++.
+  yap_ui_register(engine);
   QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                    [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
   // The first frame on screen, for the cold-start comparison (README), and
@@ -131,6 +132,6 @@ int main(int argc, char* argv[])
                                               static_cast<long long>(startup.elapsed()));
                                       });
                    });
-  engine.loadFromModule("com.yap.native", "Main");
+  engine.loadFromModule("com.yap.mobile", "Main");
   return app.exec();
 }

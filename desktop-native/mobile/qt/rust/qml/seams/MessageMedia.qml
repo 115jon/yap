@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // A message's attachments, mobile side: images as pictures, the rest as a

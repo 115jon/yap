@@ -1,6 +1,3 @@
 /target
-# Mirrored from desktop-native/rust by build.rs.
-/shared
-/src/models.rs
 # Written by cxx-qt-build for the QML language server.
 /.qmlls.ini

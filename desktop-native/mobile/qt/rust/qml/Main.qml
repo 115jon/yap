@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import Yap.Mobile
-import com.yap.native
+import com.yap.mobile
 import Yap.Ui
 
 // The mobile shell: one full-screen window drawn edge to edge (the system

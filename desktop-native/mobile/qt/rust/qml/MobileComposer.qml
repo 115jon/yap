@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
-import com.yap.native
+import com.yap.mobile
 import Yap.Ui
 
 // The composer, phone layout: a growing field (up to five lines) and a send

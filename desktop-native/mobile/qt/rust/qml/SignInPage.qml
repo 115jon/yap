@@ -1,6 +1,6 @@
 import QtQuick
 import Yap.Mobile
-import com.yap.native
+import com.yap.mobile
 import Yap.Ui
 
 // Sign-in, phone layout: the same device-code flow as the desktop (the core
