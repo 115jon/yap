@@ -10,9 +10,11 @@ use yap_voice::layers::{LAYER_DOWNGRADE_DELAY, LAYER_SWITCH_SETTLE, LAYER_UPGRAD
 use yap_voice::wire::{Participant, RoomState, Track};
 use yap_voice::{
     CallMachine, CallState, CallTarget, CameraPublished, Effect, Input, Kind, LayerUpdate,
-    MediaEvent, MediaState, Member, Notice, Playback, Processing, Published, RenderSize, RoomEvent,
-    Sensitivity, Socket, SocketSpec, SpatialLocal, SpatialState, Timer, UserCommand, VideoIntent,
-    VoiceEvent, CREDENTIAL_REFRESH, LEAVE_SEND_WINDOW, REMOTE_RECONNECT_GRACE, SILENCE_DELAY_MS,
+    MediaEvent, MediaState, Member, Notice, Playback, Processing, Published, PullFailure,
+    RenderSize, RoomEvent, Sensitivity, Socket, SocketSpec, SpatialLocal, SpatialState, Timer,
+    UserCommand, VideoIntent, VoiceEvent, CREDENTIAL_REFRESH, LEAVE_SEND_WINDOW,
+    MAX_REJECTED_PULLS, PULL_RETRY_AFTER_MAX, PULL_RETRY_BACKOFF, PULL_RETRY_MAX,
+    REMOTE_RECONNECT_GRACE, SILENCE_DELAY_MS,
 };
 
 const ME: &str = "me-1";
@@ -2738,4 +2740,391 @@ fn an_unchanged_map_should_not_be_reported_again() {
     let mut m = joined_with_user();
     m.handle(spatial_local(true, true));
     assert!(last_map(&m.handle(level(0.0, 0))).is_none());
+}
+
+fn pull_failed(sfu: &str, failure: PullFailure) -> Input {
+    Input::PullFailed {
+        sfu_track_name: sfu.into(),
+        failure,
+    }
+}
+
+fn pull_none(sfu: &str) -> Input {
+    Input::PullDone {
+        sfu_track_name: sfu.into(),
+        mid: None,
+    }
+}
+
+/// The pull retry timer a failure armed, with its wait.
+fn retry_timer(fx: &[Effect]) -> Option<(Timer, Duration)> {
+    fx.iter().find_map(|e| match e {
+        Effect::ArmTimer { timer, after } if matches!(timer, Timer::PullRetry { .. }) => {
+            Some((timer.clone(), *after))
+        }
+        _ => None,
+    })
+}
+
+/// The in-flight pull of Ana's camera fails with `failure`, reported as
+/// the driver does (the reason, then the failed done); the reason's
+/// effects and the done's.
+fn camera_pull_fails(m: &mut CallMachine, failure: PullFailure) -> (Vec<Effect>, Vec<Effect>) {
+    let failed = m.handle(pull_failed("sfu-ana-cam", failure));
+    let done = m.handle(pull_none("sfu-ana-cam"));
+    (failed, done)
+}
+
+/// `with_camera`, shown in a tile, its pull in flight.
+fn camera_pulling() -> CallMachine {
+    let mut m = with_camera();
+    let fx = m.handle(show(&[(ANA_CAM, 640, 360)], None));
+    assert_eq!(pulls(&fx), vec!["sfu-ana-cam"]);
+    m
+}
+
+#[test]
+fn a_failed_pull_should_wait_its_backoff_instead_of_pulling_again_on_the_next_input() {
+    let mut m = camera_pulling();
+    let (failed, done) = camera_pull_fails(&mut m, PullFailure::Rejected);
+    assert!(pulls(&failed).is_empty() && pulls(&done).is_empty());
+    let (timer, after) = retry_timer(&failed).expect("a retry is armed");
+    assert_eq!(after, PULL_RETRY_BACKOFF);
+    // Mic level ticks and stats used to pull it again at once, each time.
+    for at in 0..20 {
+        assert!(pulls(&m.handle(level(0.0, at * 50))).is_empty());
+    }
+    assert!(pulls(&m.handle(Input::Timer(Timer::Stats))).is_empty());
+    assert_eq!(pulls(&m.handle(Input::Timer(timer))), vec!["sfu-ana-cam"]);
+}
+
+#[test]
+fn failed_pulls_in_a_row_should_double_their_wait_up_to_the_cap() {
+    let mut m = camera_pulling();
+    let mut waits = Vec::new();
+    for _ in 0..7 {
+        let (failed, _) = camera_pull_fails(&mut m, PullFailure::Transient);
+        let (timer, after) = retry_timer(&failed).expect("a retry is armed");
+        waits.push(after);
+        assert_eq!(pulls(&m.handle(Input::Timer(timer))), vec!["sfu-ana-cam"]);
+    }
+    assert_eq!(waits, [1, 2, 4, 8, 16, 30, 30].map(Duration::from_secs));
+    assert_eq!(PULL_RETRY_MAX, Duration::from_secs(30));
+}
+
+/// The pulls `fx` asks for, with whether each runs on its own session.
+fn fresh_pulls(fx: &[Effect]) -> Vec<(String, bool)> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::Pull(r) => Some((r.sfu_track_name.clone(), r.fresh)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_pull_the_sfu_keeps_refusing_should_slow_to_the_cap_but_never_stop() {
+    let mut m = camera_pulling();
+    let mut waits = Vec::new();
+    for _ in 0..MAX_REJECTED_PULLS + 2 {
+        let (failed, _) = camera_pull_fails(&mut m, PullFailure::Rejected);
+        let (timer, after) = retry_timer(&failed).expect("always retried");
+        waits.push(after);
+        assert_eq!(pulls(&m.handle(Input::Timer(timer))), vec!["sfu-ana-cam"]);
+    }
+    assert_eq!(waits, [1, 2, 30, 30, 30].map(Duration::from_secs));
+    // Between tries, nothing pulls it.
+    let (failed, _) = camera_pull_fails(&mut m, PullFailure::Rejected);
+    assert!(pulls(&m.handle(Input::Timer(Timer::Stats))).is_empty());
+    assert!(pulls(&m.handle(show(&[(ANA_CAM, 1280, 720)], None))).is_empty());
+    let _ = failed;
+    // Ana's camera pushed again (a new SFU track): pulled at once.
+    let fx = m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![camera("ana", "sfu-ana-cam-2")],
+    }));
+    assert_eq!(pulls(&fx), vec!["sfu-ana-cam-2"]);
+}
+
+#[test]
+fn only_refusals_in_a_row_should_reach_the_cap() {
+    let mut m = camera_pulling();
+    let mut waits = Vec::new();
+    for failure in [
+        PullFailure::Rejected,
+        PullFailure::Rejected,
+        PullFailure::Transient,
+        PullFailure::Rejected,
+    ] {
+        let (failed, _) = camera_pull_fails(&mut m, failure);
+        let (timer, after) = retry_timer(&failed).expect("retried");
+        waits.push(after);
+        m.handle(Input::Timer(timer));
+    }
+    // Doubling by all failures in a row; the refusal count started over.
+    assert_eq!(waits, [1, 2, 4, 8].map(Duration::from_secs));
+}
+
+#[test]
+fn a_refused_video_pull_should_be_tried_next_on_its_own_session() {
+    let mut m = camera_pulling();
+    let (failed, _) = camera_pull_fails(&mut m, PullFailure::Rejected);
+    let (timer, _) = retry_timer(&failed).expect("armed");
+    assert_eq!(
+        fresh_pulls(&m.handle(Input::Timer(timer))),
+        vec![("sfu-ana-cam".to_owned(), true)]
+    );
+    // Every later video pull too, but not audio.
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "bo".into(),
+        tracks: vec![
+            camera("bo", "sfu-bo-cam"),
+            track("bo", "cam-audio-bo", "sfu-bo"),
+        ],
+    }));
+    let mut later = fresh_pulls(&m.handle(show(
+        &[(ANA_CAM, 640, 360), ("cam-video-bo", 640, 360)],
+        None,
+    )));
+    later.sort();
+    assert!(
+        later.contains(&("sfu-bo-cam".to_owned(), true)),
+        "{later:?}"
+    );
+    assert!(!later.contains(&("sfu-bo".to_owned(), true)), "{later:?}");
+}
+
+#[test]
+fn a_rebuild_should_pull_video_on_our_session_again() {
+    let mut m = camera_pulling();
+    camera_pull_fails(&mut m, PullFailure::Rejected);
+    let (timer, _) = rebuild_timer(&m.handle(failed())).expect("armed");
+    m.handle(Input::Timer(timer));
+    m.handle(Input::Published(Ok(published())));
+    let fx = m.handle(connected());
+    assert!(
+        fresh_pulls(&fx).contains(&("sfu-ana-cam".to_owned(), false)),
+        "{:?}",
+        fresh_pulls(&fx)
+    );
+}
+
+#[test]
+fn a_transient_video_failure_should_stay_on_our_session() {
+    let mut m = camera_pulling();
+    let (failed, _) = camera_pull_fails(&mut m, PullFailure::Transient);
+    let (timer, _) = retry_timer(&failed).expect("armed");
+    assert_eq!(
+        fresh_pulls(&m.handle(Input::Timer(timer))),
+        vec![("sfu-ana-cam".to_owned(), false)]
+    );
+}
+
+#[test]
+fn a_refused_audio_pull_should_keep_being_retried() {
+    let mut m = joined();
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "bo".into(),
+        tracks: vec![track("bo", "cam-audio-bo", "sfu-bo")],
+    }));
+    for _ in 0..MAX_REJECTED_PULLS + 3 {
+        let failed = m.handle(pull_failed("sfu-bo", PullFailure::Rejected));
+        m.handle(pull_none("sfu-bo"));
+        let (timer, _) = retry_timer(&failed).expect("never given up");
+        assert_eq!(
+            fresh_pulls(&m.handle(Input::Timer(timer))),
+            vec![("sfu-bo".to_owned(), false)]
+        );
+    }
+}
+
+#[test]
+fn a_fresh_voice_token_should_end_the_waits() {
+    let mut m = camera_pulling();
+    for _ in 0..MAX_REJECTED_PULLS {
+        let (failed, _) = camera_pull_fails(&mut m, PullFailure::Rejected);
+        let (timer, _) = retry_timer(&failed).expect("armed");
+        m.handle(Input::Timer(timer));
+    }
+    camera_pull_fails(&mut m, PullFailure::Rejected);
+    let fx = m.handle(Input::Room(RoomEvent::Credentials {
+        voice_token: "tok-2".into(),
+    }));
+    assert_eq!(pulls(&fx), vec!["sfu-ana-cam"]);
+}
+
+#[test]
+fn a_retry_after_should_hold_every_new_pull() {
+    let mut m = camera_pulling();
+    let failed = m.handle(pull_failed(
+        "sfu-ana-cam",
+        PullFailure::RateLimited {
+            retry_after: Some(Duration::from_secs(20)),
+        },
+    ));
+    m.handle(pull_none("sfu-ana-cam"));
+    let resume = failed
+        .iter()
+        .find_map(|e| match e {
+            Effect::ArmTimer { timer, after } if matches!(timer, Timer::PullsResume { .. }) => {
+                Some((timer.clone(), *after))
+            }
+            _ => None,
+        })
+        .expect("a resume timer");
+    assert_eq!(resume.1, Duration::from_secs(20));
+    // Bo's mic offered meanwhile: held too.
+    let fx = m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "bo".into(),
+        tracks: vec![track("bo", "cam-audio-bo", "sfu-bo")],
+    }));
+    assert!(pulls(&fx).is_empty());
+    let (retry, _) = retry_timer(&failed).expect("armed");
+    assert!(pulls(&m.handle(Input::Timer(retry))).is_empty());
+    let mut after = pulls(&m.handle(Input::Timer(resume.0)));
+    after.sort();
+    assert_eq!(after, vec!["sfu-ana-cam", "sfu-bo"]);
+}
+
+#[test]
+fn a_not_found_or_rate_limited_pull_should_keep_retrying() {
+    for failure in [
+        PullFailure::NotFound,
+        PullFailure::RateLimited { retry_after: None },
+    ] {
+        let mut m = camera_pulling();
+        for _ in 0..MAX_REJECTED_PULLS + 2 {
+            let (failed, _) = camera_pull_fails(&mut m, failure);
+            let (timer, _) = retry_timer(&failed).expect("still retried");
+            m.handle(Input::Timer(timer));
+        }
+    }
+}
+
+#[test]
+fn a_rate_limited_pull_should_honour_retry_after() {
+    let mut m = camera_pulling();
+    let (failed, _) = camera_pull_fails(
+        &mut m,
+        PullFailure::RateLimited {
+            retry_after: Some(Duration::from_secs(12)),
+        },
+    );
+    assert_eq!(
+        retry_timer(&failed).map(|(_, after)| after),
+        Some(Duration::from_secs(12))
+    );
+    // Without a Retry-After, the backoff; a longer backoff wins; a huge
+    // Retry-After is capped.
+    let limited = |after: Option<u64>| PullFailure::RateLimited {
+        retry_after: after.map(Duration::from_secs),
+    };
+    assert_eq!(limited(None).backoff(2), Duration::from_secs(2));
+    assert_eq!(limited(Some(1)).backoff(4), Duration::from_secs(8));
+    assert_eq!(limited(Some(3600)).backoff(1), PULL_RETRY_AFTER_MAX);
+}
+
+#[test]
+fn a_pull_that_works_should_start_its_count_over() {
+    let mut m = camera_pulling();
+    for _ in 0..MAX_REJECTED_PULLS - 1 {
+        let (failed, _) = camera_pull_fails(&mut m, PullFailure::Rejected);
+        let (timer, _) = retry_timer(&failed).expect("armed");
+        m.handle(Input::Timer(timer));
+    }
+    m.handle(done("sfu-ana-cam", "m-cam"));
+    // Its publisher withdraws and pushes again under another SFU track;
+    // that pull failing is the first in a row again.
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![camera("ana", "sfu-ana-cam-2")],
+    }));
+    let failed = m.handle(pull_failed("sfu-ana-cam-2", PullFailure::Rejected));
+    assert_eq!(
+        retry_timer(&failed).map(|(_, after)| after),
+        Some(PULL_RETRY_BACKOFF)
+    );
+}
+
+#[test]
+fn a_failed_pull_should_leave_the_call_and_its_share_alone() {
+    let mut m = camera_pulling();
+    for _ in 0..10 {
+        let (failed, done) = camera_pull_fails(&mut m, PullFailure::Rejected);
+        for fx in [&failed, &done] {
+            assert!(ends(fx).is_empty());
+            assert_eq!(rebuilds(fx), 0);
+            assert!(closes(fx).is_empty());
+            assert!(!fx.iter().any(|e| matches!(
+                e,
+                Effect::UnpublishShare
+                    | Effect::SetShareLive(false)
+                    | Effect::Notify(Notice::Share(_))
+            )));
+        }
+        if let Some((timer, _)) = retry_timer(&failed) {
+            m.handle(Input::Timer(timer));
+        }
+    }
+    assert_eq!(m.state(), CallState::Joined);
+}
+
+#[test]
+fn a_rebuild_should_forget_the_pull_backoffs() {
+    let mut m = camera_pulling();
+    for _ in 0..MAX_REJECTED_PULLS {
+        let (failed, _) = camera_pull_fails(&mut m, PullFailure::Rejected);
+        if let Some((timer, _)) = retry_timer(&failed) {
+            m.handle(Input::Timer(timer));
+        }
+    }
+    let (timer, _) = rebuild_timer(&m.handle(failed())).expect("armed");
+    m.handle(Input::Timer(timer));
+    m.handle(Input::Published(Ok(published())));
+    let fx = m.handle(connected());
+    assert!(
+        pulls(&fx).contains(&"sfu-ana-cam".to_owned()),
+        "{:?}",
+        pulls(&fx)
+    );
+}
+
+#[test]
+fn a_stale_retry_timer_should_not_end_a_newer_backoff() {
+    let mut m = camera_pulling();
+    let (failed, _) = camera_pull_fails(&mut m, PullFailure::Transient);
+    let (first, _) = retry_timer(&failed).expect("armed");
+    assert_eq!(pulls(&m.handle(Input::Timer(first.clone()))).len(), 1);
+    camera_pull_fails(&mut m, PullFailure::Transient);
+    assert!(pulls(&m.handle(Input::Timer(first))).is_empty());
+}
+
+fn unheard(fx: &[Effect]) -> bool {
+    fx.contains(&Effect::Notify(Notice::LeaveUnheard))
+}
+
+#[test]
+fn a_leave_while_the_room_socket_is_down_should_ask_for_the_beacon() {
+    let mut m = joined();
+    m.handle(Input::Room(RoomEvent::Disconnected));
+    assert!(unheard(&m.handle(Input::Command(UserCommand::Leave))));
+}
+
+#[test]
+fn a_leave_mid_rebuild_with_the_room_up_should_rely_on_op_11() {
+    let mut m = joined();
+    let (timer, _) = rebuild_timer(&m.handle(failed())).expect("armed");
+    m.handle(Input::Timer(timer));
+    let fx = m.handle(Input::Command(UserCommand::Leave));
+    assert!(!unheard(&fx));
+    assert_eq!(m.state(), CallState::Leaving);
+}
+
+#[test]
+fn a_failure_while_the_room_socket_is_down_should_ask_for_the_beacon() {
+    let mut m = joined();
+    m.handle(Input::Room(RoomEvent::Disconnected));
+    let fx = m.handle(Input::Media(MediaEvent::Closed));
+    assert!(unheard(&fx));
+    assert_eq!(ends(&fx).len(), 1);
 }

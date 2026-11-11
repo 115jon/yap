@@ -433,25 +433,30 @@ pub fn send_disconnect_beacon(wait: Duration) {
             else {
                 return;
             };
-            let body = serde_json::json!({
-                "server_id": beacon.server_id,
-                "gateway_session_id": null,
-                "voice_session_id": beacon.participant_id,
-            });
-            let path = format!("/api/channels/{}/voice-disconnect", beacon.channel_id);
-            let result = runtime.block_on(beacon.api.post(&path, &body));
-            eprintln!(
-                "[voice] disconnect beacon: {}",
-                match result {
-                    Ok(_) => "sent".to_owned(),
-                    Err(error) => error.to_string(),
-                }
-            );
+            runtime.block_on(post_beacon(beacon, "disconnect beacon"));
             let _ = done.send(());
         });
     if spawned.is_ok() {
         let _ = finished.recv_timeout(wait);
     }
+}
+
+/// Posts `beacon` (`voice-disconnect`) and logs how it went.
+async fn post_beacon(beacon: Beacon, what: &'static str) {
+    let body = serde_json::json!({
+        "server_id": beacon.server_id,
+        "gateway_session_id": null,
+        "voice_session_id": beacon.participant_id,
+    });
+    let path = format!("/api/channels/{}/voice-disconnect", beacon.channel_id);
+    let result = beacon.api.post(&path, &body).await;
+    eprintln!(
+        "[voice] {what}: {}",
+        match result {
+            Ok(_) => "sent".to_owned(),
+            Err(error) => error.to_string(),
+        }
+    );
 }
 
 fn call_stats(stats: crate::VoiceStats) -> CallStats {
@@ -600,6 +605,19 @@ pub async fn run<H: Host>(
         Notice::Stats(stats) => events.send(VoiceUpdate::Stats(Box::new(call_stats(stats)))),
         Notice::InboundAudioStalled(stalled) => events.send(VoiceUpdate::InboundStalled(stalled)),
         Notice::MicStalled(stalled) => events.send(VoiceUpdate::MicStalled(stalled)),
+        Notice::LeaveUnheard => {
+            let mine = my_participant
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            let beacon = beacon()
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take_if(|b| Some(&b.participant_id) == mine.as_ref());
+            if let Some(beacon) = beacon.filter(|b| !b.server_id.is_empty()) {
+                tokio::spawn(post_beacon(beacon, "leave beacon"));
+            }
+        }
         Notice::Spatial(map) => events.send(VoiceUpdate::Spatial(map.to_value().to_string())),
         Notice::App(d) => {
             if let Some(event) = yap_protocol::voice_app::AppEvent::decode(&d) {

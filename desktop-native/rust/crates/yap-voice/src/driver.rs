@@ -21,9 +21,10 @@ use yap_realtime::{Config, Connection, Event, Policy, Reconnect, TicketError, Ti
 use crate::engine::{MediaEngine, MediaSession};
 use crate::machine::{
     CallMachine, CallTarget, CameraPublished, Effect, Input, MediaEvent, MediaSpec, MediaState,
-    Notice, Published, Republish, RoomEvent, Socket, SocketSpec, Timer, UserCommand, VoiceEvent,
+    Notice, Published, PullFailure, Republish, RoomEvent, Socket, SocketSpec, Timer, UserCommand,
+    VoiceEvent,
 };
-use crate::sfu::{LayerUpdate, Sfu, Signaling};
+use crate::sfu::{LayerUpdate, Sfu, SfuError, Signaling};
 use crate::share::{ShareCaptured, ShareCapturer, ShareEncoding, SharePublished};
 use crate::spatial::SpatialState;
 use crate::tracks::Remote;
@@ -184,6 +185,8 @@ enum Done {
     Share(Result<SharePublished, String>),
     /// The pull of this SFU track kept getting `not_found_track_error`.
     NotFound(String),
+    /// Why the pull of this SFU track failed (just before its `Pull(_, None)`).
+    Failed(String, PullFailure),
     Republished(Result<(Republish, String), String>),
 }
 
@@ -346,6 +349,56 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
                     }
                     continue;
                 }
+                // Opening media (the join's, or a rebuild's new SFU session)
+                // listens for a Leave meanwhile: a slow or refused SFU must
+                // not hold the leave back until the process is gone, or the
+                // room keeps us as reconnecting for its whole grace. Other
+                // commands wait for the result, as they always did.
+                let media = match effect {
+                    Effect::OpenMedia(spec) => Ok((spec, false)),
+                    Effect::RebuildMedia(spec) => Ok((spec, true)),
+                    other => Err(other),
+                };
+                let effect = match media {
+                    Ok((spec, rebuild)) => {
+                        if rebuild {
+                            self.drop_media(inbox);
+                        }
+                        let mut deferred = Vec::new();
+                        let opened = {
+                            let open = self.open_media(spec, inbox);
+                            tokio::pin!(open);
+                            loop {
+                                tokio::select! {
+                                    result = &mut open => break Some(result),
+                                    command = commands.recv(), if commands_open => {
+                                        let command = command.unwrap_or_else(|| {
+                                            commands_open = false;
+                                            UserCommand::Leave
+                                        });
+                                        let leave = command == UserCommand::Leave;
+                                        deferred.push(command);
+                                        if leave {
+                                            break None;
+                                        }
+                                    }
+                                }
+                            }
+                        };
+                        match opened {
+                            Some(result) => queue
+                                .extend(machine.handle(Input::Published(
+                                    result.map_err(|e| format!("{e:#}")),
+                                ))),
+                            None => eprintln!("[voice] left while media was opening"),
+                        }
+                        for command in deferred {
+                            queue.extend(machine.handle(Input::Command(command)));
+                        }
+                        continue;
+                    }
+                    Err(other) => other,
+                };
                 match self.apply(effect, inbox, notify).await {
                     Applied::Done => {}
                     Applied::Input(input) => queue.extend(machine.handle(input)),
@@ -402,6 +455,7 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
                     Some(Done::Camera(result)) => Input::CameraPublished(result),
                     Some(Done::Share(result)) => Input::SharePublished(result),
                     Some(Done::NotFound(sfu_track_name)) => Input::PullNotFound { sfu_track_name },
+                    Some(Done::Failed(sfu_track_name, failure)) => Input::PullFailed { sfu_track_name, failure },
                     Some(Done::Republished(result)) => Input::Republished(result),
                     None => {
                         inbox.pulls = None;
@@ -468,15 +522,8 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
                 return Applied::Input(Input::Admitted(self.admit(request).await));
             }
             Effect::OpenSockets { room, voice } => self.open_sockets(*room, *voice, inbox),
-            Effect::OpenMedia(spec) => {
-                let result = self.open_media(spec, inbox).await;
-                return Applied::Input(Input::Published(result.map_err(|e| format!("{e:#}"))));
-            }
-            Effect::RebuildMedia(spec) => {
-                self.drop_media(inbox);
-                let result = self.open_media(spec, inbox).await;
-                return Applied::Input(Input::Published(result.map_err(|e| format!("{e:#}"))));
-            }
+            // `run` opens media itself, listening for a Leave meanwhile.
+            Effect::OpenMedia(_) | Effect::RebuildMedia(_) => {}
             Effect::Republish(kind) => self.job(Job::Republish(kind)),
             Effect::PromoteMedia => {
                 if let Some(session) = &self.session {
@@ -858,6 +905,10 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
             Ok(opened) => opened,
             Err(error) => {
                 eprintln!("[voice] video session failed to open: {error}");
+                let _ = done.send(Done::Failed(
+                    remote.sfu_track_name.clone(),
+                    PullFailure::Transient,
+                ));
                 let _ = done.send(Done::Pull(remote.sfu_track_name, None));
                 return;
             }
@@ -1070,9 +1121,7 @@ async fn pull_worker<S: MediaSession, G: Signaling>(
                     }
                     Err(error) => {
                         eprintln!("[voice] pull {} failed: {error:#}", remote.track_name);
-                        if is_not_found(&error) {
-                            let _ = done.send(Done::NotFound(remote.sfu_track_name.clone()));
-                        }
+                        report_failure(&done, &remote.sfu_track_name, &error);
                         None
                     }
                 };
@@ -1165,6 +1214,40 @@ fn is_not_found(error: &anyhow::Error) -> bool {
     format!("{error:#}").contains("not_found")
 }
 
+/// What a failed pull's error means for the next try: a request the
+/// proxy or the SFU refused (4xx) gets the same answer again, a 429 asks
+/// us to wait, the rest (5xx, the network, our own media) may pass later.
+/// So may a 401 (the voice token expired: the room hands out a fresh one)
+/// and a 403 (the room had not confirmed our join grant yet).
+fn classify(error: &anyhow::Error) -> PullFailure {
+    if is_not_found(error) {
+        return PullFailure::NotFound;
+    }
+    let Some(refused) = error.chain().find_map(|e| e.downcast_ref::<SfuError>()) else {
+        return PullFailure::Transient;
+    };
+    match refused.status {
+        Some(429) => PullFailure::RateLimited {
+            retry_after: refused.retry_after,
+        },
+        Some(401 | 403 | 408) => PullFailure::Transient,
+        Some(status) if (400..500).contains(&status) => PullFailure::Rejected,
+        // An `errorCode` in a 2xx body: the SFU refused what we sent.
+        None => PullFailure::Rejected,
+        Some(_) => PullFailure::Transient,
+    }
+}
+
+/// Tells the machine why a pull failed (and, for `not_found`, that the
+/// publisher may need to push it again).
+fn report_failure(done: &UnboundedSender<Done>, sfu_track_name: &str, error: &anyhow::Error) {
+    let failure = classify(error);
+    if failure == PullFailure::NotFound {
+        let _ = done.send(Done::NotFound(sfu_track_name.to_owned()));
+    }
+    let _ = done.send(Done::Failed(sfu_track_name.to_owned(), failure));
+}
+
 /// Pushes the mic or the camera again under a new SFU track name
 /// (PartyTracks `republishTrack`).
 async fn republish<S: MediaSession, G: Signaling>(
@@ -1242,9 +1325,7 @@ async fn video_session<S: MediaSession, G: Signaling>(
                 "[voice] pull {} failed on video session {n}: {error:#}",
                 remote.track_name
             );
-            if is_not_found(&error) {
-                let _ = done.send(Done::NotFound(remote.sfu_track_name.clone()));
-            }
+            report_failure(&done, &remote.sfu_track_name, &error);
             let _ = done.send(Done::Pull(remote.sfu_track_name, None));
             session.close();
             return;
@@ -1429,7 +1510,9 @@ async fn close<S: MediaSession, G: Signaling>(
     Ok(())
 }
 
-/// SFU offers, we answer (§3.3c). Retries "track not ready yet" briefly.
+/// SFU offers, we answer (§3.3c). Retries "track not ready yet" (and a
+/// transient failure) briefly; a refusal or a rate limit goes back to the
+/// machine at once, which backs off.
 async fn pull<S: MediaSession, G: Signaling>(
     session: &S,
     sfu: &G,
@@ -1448,7 +1531,13 @@ async fn pull<S: MediaSession, G: Signaling>(
             .await
         {
             Ok(pulled) => break pulled,
-            Err(error) if delay < Duration::from_secs(5) => {
+            Err(error)
+                if delay < Duration::from_secs(5)
+                    && matches!(
+                        classify(&error),
+                        PullFailure::NotFound | PullFailure::Transient
+                    ) =>
+            {
                 eprintln!("[voice] pull retry: {error:#}");
                 tokio::time::sleep(delay).await;
                 delay *= 2;
@@ -1460,7 +1549,16 @@ async fn pull<S: MediaSession, G: Signaling>(
         return Ok(pulled.mid);
     };
     let answer = session.answer_offer(&offer).await?;
-    sfu.renegotiate(session_id, &answer).await?;
+    if let Err(error) = sfu.renegotiate(session_id, &answer).await {
+        // The SFU added the track (its mid) and we answered it, but the
+        // SFU refused the answer: close that mid on both sides, so failed
+        // pulls do not pile up receive transceivers on the session.
+        let mids = [pulled.mid.clone()];
+        if let Err(close_error) = close(session, sfu, session_id, &mids).await {
+            eprintln!("[voice] closing the refused pull's mid failed: {close_error:#}");
+        }
+        return Err(error);
+    }
     Ok(pulled.mid)
 }
 
@@ -1491,6 +1589,10 @@ mod tests {
         calls: Arc<Mutex<Vec<String>>>,
         flaky: Option<String>,
         failing_pushes: Arc<std::sync::atomic::AtomicUsize>,
+        /// Every `tracks/new` pull is refused with this.
+        pull_error: Option<SfuError>,
+        /// Every renegotiation is refused with this.
+        renegotiate_error: Option<SfuError>,
     }
 
     impl FakeSfu {
@@ -1551,6 +1653,9 @@ mod tests {
                 .iter()
                 .any(|c| c == &format!("pull {track_name}"));
             self.log(format!("pull {track_name}"));
+            if let Some(error) = &self.pull_error {
+                return Err(error.clone().into());
+            }
             if first && self.flaky.as_deref() == Some(track_name) {
                 return Err(anyhow!("track not ready"));
             }
@@ -1562,7 +1667,10 @@ mod tests {
 
         async fn renegotiate(&self, _: &str, answer_sdp: &str) -> Result<()> {
             self.log(format!("renegotiate {answer_sdp}"));
-            Ok(())
+            match &self.renegotiate_error {
+                Some(error) => Err(error.clone().into()),
+                None => Ok(()),
+            }
         }
 
         async fn close(&self, _: &str, mids: &[String], offer_sdp: &str) -> Result<String> {
@@ -1872,6 +1980,181 @@ mod tests {
             what: "close answer",
         }));
     }
+    fn refused(op: &str, status: Option<u16>, retry_after: Option<u64>) -> SfuError {
+        SfuError {
+            op: op.into(),
+            status,
+            retry_after: retry_after.map(Duration::from_secs),
+            detail: "invalid_session_description".into(),
+        }
+    }
+
+    #[test]
+    fn pull_failures_should_be_classified_by_what_the_sfu_said() {
+        let of = |e: SfuError| classify(&anyhow::Error::from(e).context("pull"));
+        assert_eq!(
+            of(refused("renegotiate", Some(400), None)),
+            PullFailure::Rejected
+        );
+        assert_eq!(of(refused("new", Some(406), None)), PullFailure::Rejected);
+        assert_eq!(of(refused("new", Some(410), None)), PullFailure::Rejected);
+        assert_eq!(of(refused("new", Some(401), None)), PullFailure::Transient);
+        assert_eq!(of(refused("new", Some(403), None)), PullFailure::Transient);
+        assert_eq!(
+            of(refused("renegotiate", None, None)),
+            PullFailure::Rejected
+        );
+        assert_eq!(
+            of(refused("new", Some(429), Some(7))),
+            PullFailure::RateLimited {
+                retry_after: Some(Duration::from_secs(7))
+            }
+        );
+        assert_eq!(of(refused("new", Some(408), None)), PullFailure::Transient);
+        assert_eq!(of(refused("new", Some(503), None)), PullFailure::Transient);
+        assert_eq!(
+            classify(&anyhow!("pull t: not_found_track_error")),
+            PullFailure::NotFound
+        );
+        assert_eq!(
+            classify(&anyhow!("connection reset")),
+            PullFailure::Transient
+        );
+    }
+
+    /// Runs one pull on a worker over `sfu`; its results, in order.
+    async fn pull_once(sfu: &FakeSfu) -> Vec<Done> {
+        let engine = FakeEngine::new();
+        let (jobs, mut done) = worker_on(&engine, sfu);
+        jobs.send(Job::Pull(remote("a"))).expect("worker alive");
+        drop(jobs);
+        let mut finished = Vec::new();
+        while let Some(item) = done.recv().await {
+            finished.push(item);
+        }
+        finished
+    }
+
+    #[tokio::test]
+    async fn a_refused_renegotiation_should_fail_the_pull_once_as_rejected() {
+        let sfu = FakeSfu {
+            renegotiate_error: Some(refused("renegotiate", Some(400), None)),
+            ..FakeSfu::default()
+        };
+        assert_eq!(
+            pull_once(&sfu).await,
+            vec![
+                Done::Failed("a".into(), PullFailure::Rejected),
+                Done::Pull("a".into(), None),
+            ]
+        );
+        assert_eq!(
+            sfu.calls(),
+            vec![
+                "pull a",
+                "renegotiate fake-answer",
+                "close mid-a fake-close-offer"
+            ],
+            "the refused mid is closed, not left behind"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_or_rate_limited_pull_should_not_be_retried_in_the_worker() {
+        for (error, failure) in [
+            (refused("new", Some(400), None), PullFailure::Rejected),
+            (
+                refused("new", Some(429), Some(3)),
+                PullFailure::RateLimited {
+                    retry_after: Some(Duration::from_secs(3)),
+                },
+            ),
+        ] {
+            let sfu = FakeSfu {
+                pull_error: Some(error),
+                ..FakeSfu::default()
+            };
+            assert_eq!(
+                pull_once(&sfu).await,
+                vec![
+                    Done::Failed("a".into(), failure),
+                    Done::Pull("a".into(), None),
+                ]
+            );
+            assert_eq!(sfu.calls(), vec!["pull a"], "one request, no tight retry");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pull_not_found_yet_should_still_be_retried_briefly() {
+        let sfu = FakeSfu {
+            flaky: Some("a".into()),
+            ..FakeSfu::default()
+        };
+        assert_eq!(
+            pull_once(&sfu).await,
+            vec![Done::Pull("a".into(), Some("mid-a".into()))]
+        );
+        assert_eq!(
+            sfu.calls(),
+            vec!["pull a", "pull a", "renegotiate fake-answer"]
+        );
+    }
+
+    /// A server that accepts connections and never answers: every SFU and
+    /// socket request on it hangs.
+    async fn silent_server() -> (String, JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let base = format!("http://{}", listener.local_addr().expect("addr"));
+        let held = tokio::spawn(async move {
+            let mut open = Vec::new();
+            while let Ok((stream, _)) = listener.accept().await {
+                open.push(stream);
+            }
+        });
+        (base, held)
+    }
+
+    #[tokio::test]
+    async fn leave_while_media_opens_should_not_wait_for_the_sfu() {
+        let (base, server) = silent_server().await;
+        let engine = FakeEngine::new();
+        let api = RecordedAdmission::answering(vec![Ok(json!({
+            "access_mode": "authenticated", "room_slug": "voice-s1-c1", "expires_at": 1,
+            "participant_id": "me-1", "room_ticket": "room-t", "voice_ticket": "voice-t",
+            "media": { "participant_id": "me-1", "voice_token": "tok-1", "ice_servers": [] },
+        }))]);
+        let env = CallEnv {
+            api_base: base.clone(),
+            origin: base,
+            ..env(&engine, api)
+        };
+        let (commands, rx) = mpsc::unbounded_channel();
+        let call = tokio::spawn(run_call(env, target(), rx, |_| {}));
+        // Media is opening: `sessions/new` hangs on the silent server.
+        let opened = async {
+            while !engine
+                .ops()
+                .iter()
+                .any(|op| matches!(op, FakeOp::Open { .. }))
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(5), opened)
+            .await
+            .expect("media opens");
+        commands.send(UserCommand::Leave).expect("open");
+        let ended = tokio::time::timeout(Duration::from_secs(5), call)
+            .await
+            .expect("the leave does not wait for the SFU")
+            .expect("ran");
+        assert_eq!(ended, None);
+        server.abort();
+    }
+
     #[tokio::test]
     async fn camera_should_push_once_then_resume_its_kept_track() {
         let engine = FakeEngine::new();
