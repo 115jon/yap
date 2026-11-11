@@ -13,7 +13,7 @@ set(CMAKE_AUTOMOC ON)
 # Only what the shared QML and the shell use: no Multimedia, WebView,
 # Widgets, Svg widgets, Quick 3D or the Controls styles beyond Basic.
 find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Svg)
-find_package(Qt6 REQUIRED COMPONENTS QuickPrivate)
+find_package(Qt6 REQUIRED COMPONENTS CorePrivate QuickPrivate)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -59,7 +59,7 @@ target_link_libraries(yapqt PRIVATE
   yap_mobile_qml
   yap_ui_qml
   yap_ui_cpp
-  Qt::Gui Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg Qt::QuickPrivate)
+  Qt::Gui Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg Qt::CorePrivate Qt::QuickPrivate)
 
 # The application id and version: the packaging block at the end.
 set_target_properties(yapqt PROPERTIES

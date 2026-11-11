@@ -11,6 +11,7 @@
 #ifdef Q_OS_ANDROID
 #include <QtCore/QJniEnvironment>
 #include <QtCore/QJniObject>
+#include <QtCore/private/qandroidextras_p.h>
 #include <QtCore/qnativeinterface.h>
 #endif
 
@@ -50,6 +51,26 @@ void jniIme(JNIEnv*, jclass, jfloat dp)
 {
   post([dp] { Native::instance()->onIme(dp); });
 }
+
+void jniMediaCopying(JNIEnv*, jclass)
+{
+  post([] { Native::instance()->onMediaCopying(); });
+}
+
+void jniMediaPicked(JNIEnv* env, jclass, jobjectArray paths)
+{
+  QStringList list;
+  const jsize n = paths ? env->GetArrayLength(paths) : 0;
+  for (jsize i = 0; i < n; ++i) {
+    auto path = static_cast<jstring>(env->GetObjectArrayElement(paths, i));
+    list.append(QJniObject(path).toString());
+    env->DeleteLocalRef(path);
+  }
+  post([list] { Native::instance()->onMediaPicked(list); });
+}
+
+// The picker's request code (any number of ours; Qt routes the result back).
+constexpr int kPickMedia = 0x5961;
 #endif
 
 } // namespace
@@ -66,6 +87,8 @@ Native::Native(QObject* parent)
     { "nativeBackCancelled", "()V", reinterpret_cast<void*>(jniBackCancelled) },
     { "nativeBackInvoked", "()V", reinterpret_cast<void*>(jniBackInvoked) },
     { "nativeIme", "(F)V", reinterpret_cast<void*>(jniIme) },
+    { "nativeMediaCopying", "()V", reinterpret_cast<void*>(jniMediaCopying) },
+    { "nativeMediaPicked", "([Ljava/lang/String;)V", reinterpret_cast<void*>(jniMediaPicked) },
   };
   QJniEnvironment env;
   if (!env.registerNativeMethods(kShim, methods, std::size(methods)))
@@ -152,6 +175,42 @@ void Native::leave() const
 void Native::flushCache() const
 {
   yap_mobile_flush();
+}
+
+void Native::pickMedia()
+{
+#ifdef Q_OS_ANDROID
+  if (m_pickingMedia)
+    return;
+  const QJniObject intent = QJniObject::callStaticObjectMethod(kShim, "pickMediaIntent",
+                                                               "()Landroid/content/Intent;");
+  if (!intent.isValid())
+    return;
+  // The result comes back on Android's UI thread; the shim copies the items
+  // off it and reports through nativeMediaPicked.
+  QtAndroidPrivate::startActivity(intent, kPickMedia, [](int, int resultCode, const QJniObject& data) {
+    QJniObject::callStaticMethod<void>(kShim, "mediaPicked", "(ILandroid/content/Intent;)V",
+                                       jint(resultCode), data.object());
+  });
+#endif
+}
+
+void Native::onMediaCopying()
+{
+  if (m_pickingMedia)
+    return;
+  m_pickingMedia = true;
+  emit pickingMediaChanged();
+}
+
+void Native::onMediaPicked(const QStringList& paths)
+{
+  if (m_pickingMedia) {
+    m_pickingMedia = false;
+    emit pickingMediaChanged();
+  }
+  if (!paths.isEmpty())
+    emit mediaPicked(paths);
 }
 
 void Native::onBackProgress(qreal progress)

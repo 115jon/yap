@@ -14,8 +14,11 @@
 //   motion         the animator duration scale (Remove animations)
 //   accent         Material You's system accent (Android 12+)
 //   fling          ViewConfiguration's fling speed and a matching friction
+//   media          the photo picker (ACTION_PICK_IMAGES, GET_CONTENT before
+//                  13), each item copied into the cache for the core
 
 #include <QtCore/QObject>
+#include <QtCore/QStringList>
 #include <QtGui/QColor>
 
 class Native : public QObject
@@ -28,6 +31,8 @@ class Native : public QObject
   Q_PROPERTY(QColor accent READ accent NOTIFY configurationChanged)
   Q_PROPERTY(qreal maxFlingVelocity READ maxFlingVelocity CONSTANT)
   Q_PROPERTY(qreal flingDeceleration READ flingDeceleration CONSTANT)
+  // Picked files are being copied in (a long video takes a moment).
+  Q_PROPERTY(bool pickingMedia READ pickingMedia NOTIFY pickingMediaChanged)
 
 public:
   enum Haptic { Tick, LongPress, Confirm, Reject };
@@ -45,6 +50,7 @@ public:
   QColor accent() const { return m_accent; }
   qreal maxFlingVelocity() const { return m_maxFling; }
   qreal flingDeceleration() const { return m_deceleration; }
+  bool pickingMedia() const { return m_pickingMedia; }
 
   Q_INVOKABLE void haptic(Haptic kind) const;
   Q_INVOKABLE void share(const QString& text) const;
@@ -53,6 +59,8 @@ public:
   Q_INVOKABLE void leave() const;
   // Commits the core's snapshot cache (the app going to the background).
   Q_INVOKABLE void flushCache() const;
+  // The system photo picker; the copies' paths arrive as mediaPicked.
+  Q_INVOKABLE void pickMedia();
 
   // From the shim, on the GUI thread.
   void onBackProgress(qreal progress);
@@ -60,6 +68,8 @@ public:
   void onBackInvoked();
   void onIme(qreal dp);
   void readConfiguration();
+  void onMediaCopying();
+  void onMediaPicked(const QStringList& paths);
 
 signals:
   void handlesBackChanged();
@@ -68,6 +78,9 @@ signals:
   void backProgressed(qreal progress);
   void backCancelled();
   void backInvoked();
+  void pickingMediaChanged();
+  // Local copies of what was picked (none: nothing was, or none could be read).
+  void mediaPicked(const QStringList& paths);
 
 protected:
   bool eventFilter(QObject* watched, QEvent* event) override;
@@ -80,6 +93,7 @@ private:
   QColor m_accent;
   qreal m_maxFling = 8000;
   qreal m_deceleration = 1500;
+  bool m_pickingMedia = false;
 };
 
 // The shared desktop QML's `Yap.Chrome` singletons, mobile side.

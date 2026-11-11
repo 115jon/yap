@@ -3,14 +3,15 @@
 //! and the data folder and device name handed to the core.
 
 use std::ffi::{c_char, CStr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use yap_core::auth::TokenStore;
 use yap_core::{
-    Api, GatewayEvents, GatewayHandle, Realtime, Token, ViewUpdate, VoiceCommand, VoiceEvents,
-    VoiceTarget, VoiceUpdate,
+    Api, GatewayEvents, GatewayHandle, Realtime, Token, UploadFile, ViewUpdate, VoiceCommand,
+    VoiceEvents, VoiceTarget, VoiceUpdate,
 };
 use yap_ui::client::gateway;
 use yap_ui::platform::{self, Platform};
@@ -81,6 +82,29 @@ impl Platform for Mobile {
         Arc::new(FileVault(self.data.join("session.token")))
     }
 
+    /// The photo picker's copies in the app cache (`Native.pickMedia`):
+    /// named after the picked item, with the extension its type implies.
+    fn upload_files(&self, paths: &[String]) -> Vec<UploadFile> {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        paths
+            .iter()
+            .enumerate()
+            .filter_map(|(i, path)| {
+                let meta = std::fs::metadata(path).ok().filter(|m| m.is_file())?;
+                let name = Path::new(path).file_name()?.to_string_lossy().into_owned();
+                Some(UploadFile {
+                    local_id: format!("upload-{stamp:x}-{i}"),
+                    path: path.clone(),
+                    content_type: content_type(&name).to_owned(),
+                    name,
+                    size: meta.len(),
+                })
+            })
+            .collect()
+    }
+
     fn on_update(&self, update: ViewUpdate) -> bool {
         // The session for private media (attachments, custom emoji).
         if let ViewUpdate::MediaAuth(token) = update {
@@ -96,6 +120,31 @@ impl Platform for Mobile {
                 | ViewUpdate::StopSound(_)
                 | ViewUpdate::Badge(_)
         )
+    }
+}
+
+/// The MIME type for a picked file's name: the picker offers photos and
+/// videos (the server stores `application/octet-stream` for anything else).
+fn content_type(name: &str) -> &'static str {
+    let ext = name
+        .rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" | "jfif" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "avif" => "image/avif",
+        "heic" => "image/heic",
+        "heif" => "image/heif",
+        "mp4" | "m4v" => "video/mp4",
+        "webm" => "video/webm",
+        "3gp" => "video/3gpp",
+        "mov" => "video/quicktime",
+        "mkv" => "video/x-matroska",
+        _ => "application/octet-stream",
     }
 }
 
