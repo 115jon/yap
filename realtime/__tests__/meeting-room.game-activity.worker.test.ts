@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   issueSocketTicket,
   verifySocketTicket,
@@ -9,7 +9,7 @@ import {
   appendRealtimeAdmissionHeaders,
   createRealtimeAdmissionContext,
 } from "../realtime-admission";
-import { GatewayOp } from "../../src/lib/gateway-protocol";
+import { GatewayOp, HEARTBEAT_FRAME } from "../../src/lib/gateway-protocol";
 import { GAME_ACTIVITY_STORAGE_PREFIX } from "../meeting-room/game-activity";
 
 // Game activity on the global gateway (realtime/meeting-room/game-activity.ts):
@@ -53,19 +53,26 @@ function gateway(objectName: string) {
   return env.MEETING_ROOM.get(env.MEETING_ROOM.idFromName(objectName));
 }
 
+/**
+ * vi.waitFor with room-sized patience: its default 1 s is shorter than a room
+ * round trip can take when the whole suite runs at once. 4 s stays under the
+ * 5 s test timeout. Each poll also advances fake timers by `interval`, so a
+ * whole wait advances them by at most 4 s.
+ */
+const SETTLE = { timeout: 4_000, interval: 5 };
+const settle: typeof vi.waitFor = (callback, options = SETTLE) =>
+  vi.waitFor(callback, options);
+
 async function waitForFrame(
   client: Client,
   predicate: (frame: Frame) => boolean,
   from = 0,
 ): Promise<Frame> {
   let found: Frame | undefined;
-  await vi.waitFor(
-    () => {
-      found = client.frames.slice(from).find(predicate);
-      expect(found).toBeDefined();
-    },
-    { timeout: 3_000, interval: 5 },
-  );
+  await settle(() => {
+    found = client.frames.slice(from).find(predicate);
+    expect(found).toBeDefined();
+  });
   return found as Frame;
 }
 
@@ -160,6 +167,38 @@ async function setBroadcastInterval(objectName: string, ms: number) {
         gameActivity: { broadcastIntervalMs: number };
       }
     ).gameActivity.broadcastIntervalMs = ms;
+  });
+}
+
+/**
+ * Runs the room's due fake timers. It has to happen inside the room: a timer
+ * callback resolves a promise the room created, and workerd refuses that
+ * from another I/O context ("Cannot perform I/O on behalf of a different
+ * Durable Object").
+ */
+async function advanceRoomTimers(objectName: string, ms: number) {
+  await runInDurableObject(gateway(objectName), () => {
+    vi.advanceTimersByTime(ms);
+  });
+}
+
+/** The coalescer's view of one user: is a flush waiting, what it would send. */
+async function broadcastState(objectName: string, userId: string) {
+  return runInDurableObject(gateway(objectName), (instance) => {
+    const gameActivity = (
+      instance as unknown as {
+        gameActivity: {
+          broadcasts: Map<string, { lastSentAt: number; pending: boolean }>;
+          visible(userId: string): { name?: string } | null;
+        };
+      }
+    ).gameActivity;
+    const state = gameActivity.broadcasts.get(userId);
+    return {
+      lastSentAt: state?.lastSentAt ?? 0,
+      pending: state?.pending ?? false,
+      visible: gameActivity.visible(userId)?.name ?? null,
+    };
   });
 }
 
@@ -274,7 +313,7 @@ describe("MeetingRoom game activity", () => {
       (frame) => frame.d?.data?.game_activity?.name === "Celeste",
     );
     const key = GAME_ACTIVITY_STORAGE_PREFIX + playerClient.sessionId;
-    await vi.waitFor(async () => {
+    await settle(async () => {
       const stored = await runInDurableObject(gateway(objectName), (_, state) =>
         state.storage.get(key),
       );
@@ -291,7 +330,7 @@ describe("MeetingRoom game activity", () => {
         frame.d.data.status === "offline",
       from,
     );
-    await vi.waitFor(async () => {
+    await settle(async () => {
       const stored = await runInDurableObject(gateway(objectName), (_, state) =>
         state.storage.get(key),
       );
@@ -406,14 +445,26 @@ describe("MeetingRoom game activity", () => {
 
   it("coalesces updates per user: the first goes now, then only the last", async () => {
     const objectName = crypto.randomUUID();
-    await setBroadcastInterval(objectName, 300);
+    // The room's setTimeout is faked and the window is 60 s, so whether "Two"
+    // and "Three" land inside it does not depend on how fast "One" arrived.
+    // Only advanceRoomTimers ends the window: vi.waitFor also advances fake
+    // timers, by its interval per poll, but each wait advances them by at
+    // most SETTLE.timeout (4 s) and the test does two before it. Date stays
+    // real: the room computes the wait from Date.now(), and tickets need it.
+    await setBroadcastInterval(objectName, 60_000);
     const player = `player-${crypto.randomUUID()}`;
     const mate = `mate-${crypto.randomUUID()}`;
     await shareServer(`server-${crypto.randomUUID()}`, [player, mate]);
     const playerClient = await connect(objectName, player);
     const mateClient = await connect(objectName, mate);
-
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+      playerClient.socket.close(1000, "done");
+      mateClient.socket.close(1000, "done");
+    });
     const startedAt = Date.now() - 1_000;
+    // Nothing was sent for this user yet, so the first update goes now.
     setActivity(playerClient, playing("One", { started_at: startedAt }));
     await waitForFrame(
       mateClient,
@@ -421,6 +472,16 @@ describe("MeetingRoom game activity", () => {
     );
     setActivity(playerClient, playing("Two", { started_at: startedAt }));
     setActivity(playerClient, playing("Three", { started_at: startedAt }));
+    // Both updates are handled, and one flush is waiting on the window.
+    await settle(async () => {
+      expect(await broadcastState(objectName, player)).toMatchObject({
+        pending: true,
+        visible: "Three",
+      });
+    });
+    expect(presenceUpdatesFor(mateClient, player)).toHaveLength(1);
+
+    await advanceRoomTimers(objectName, 60_000);
     await waitForFrame(
       mateClient,
       (frame) => frame.d?.data?.game_activity?.name === "Three",
@@ -431,12 +492,21 @@ describe("MeetingRoom game activity", () => {
       ),
     ).toEqual(["One", "Three"]);
 
-    // The same activity again changes nothing and sends nothing.
+    // The same activity again changes nothing and sends nothing. The
+    // player's heartbeat is answered after the update frame is handled, and
+    // by then no flush is waiting and none has stamped a new send.
+    const sent = await broadcastState(objectName, player);
+    expect(sent.pending).toBe(false);
     setActivity(playerClient, playing("Three", { started_at: startedAt }));
-    await sleep(450);
+    const acks = playerClient.frames.length;
+    playerClient.socket.send(HEARTBEAT_FRAME);
+    await waitForFrame(
+      playerClient,
+      (frame) => frame.op === GatewayOp.HeartbeatACK,
+      acks,
+    );
+    expect(await broadcastState(objectName, player)).toEqual(sent);
     expect(presenceUpdatesFor(mateClient, player)).toHaveLength(2);
-    playerClient.socket.close(1000, "done");
-    mateClient.socket.close(1000, "done");
   });
 
   it("rate limits ActivityUpdate at 12 a minute", async () => {
@@ -494,7 +564,7 @@ describe("MeetingRoom game activity", () => {
 
     // The mate drops; the player starts a game meanwhile.
     mateClient.socket.close();
-    await vi.waitFor(async () => {
+    await settle(async () => {
       const held = await runInDurableObject(gateway(objectName), (instance) =>
         (
           instance as unknown as { resumableSessions: Map<string, unknown> }
@@ -584,7 +654,7 @@ describe("MeetingRoom game activity", () => {
     await waitForFrame(resumed, (frame) => frame.op === GatewayOp.Resumed);
 
     const key = GAME_ACTIVITY_STORAGE_PREFIX + playerClient.sessionId;
-    await vi.waitFor(async () => {
+    await settle(async () => {
       const stored = await runInDurableObject(gateway(objectName), (_, state) =>
         state.storage.get(key),
       );
