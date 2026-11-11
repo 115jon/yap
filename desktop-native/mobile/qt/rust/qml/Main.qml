@@ -176,6 +176,7 @@ Window {
             sourceComponent: Item {
                 Spinner {
                     anchors.centerIn: parent
+                    running: true
                 }
             }
         }

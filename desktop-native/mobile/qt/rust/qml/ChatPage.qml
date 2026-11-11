@@ -396,7 +396,7 @@ Item {
 
     Spinner {
         anchors.centerIn: view
-        visible: Chat.pageLoading && view.count === 0
+        running: Chat.pageLoading && view.count === 0
     }
 
     Text {

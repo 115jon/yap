@@ -177,7 +177,7 @@ Rectangle {
                 Spinner {
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: root.avatarSize / 2 + 40
-                    visible: !root.loaded && Profile.loadError.length === 0
+                    running: !root.loaded && Profile.loadError.length === 0
                 }
             }
 
