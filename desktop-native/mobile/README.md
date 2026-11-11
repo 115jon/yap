@@ -27,14 +27,14 @@ that feel off, each with a known fix.
 - **Shared, one copy:** the `yap-ui` crate (`desktop-native/rust/crates/yap-ui`),
   which both apps link. It holds the `Yap.Ui` QML module (`Theme`,
   `ShellState`, `MessageDelegate`, `TreeRow`, `ServerIcon` and the
-  components they use: 30 files, 4,720 lines), the domain objects (`Session`, `Nav`,
+  components they use: 34 files, 5,130 lines), the domain objects (`Session`, `Nav`,
   `Chat`, `Voice`, `Profile` and the portable singletons such as `Admin`,
   `Emoji`, `Extras`, `Invites`, `Panels`), all 13 list models, the
   GUI-thread registry, the core's runtime and gateway, and the portable C++
   (`AnimatedPicture`, the icon and dither image providers). Together with
   the core, that is everything a row shows and every rule behind it.
-- **Per platform:** about 840 lines of QML (shell, pages, composer, and
-  the mobile side of four seams), about 130 lines of Rust (the app's
+- **Per platform:** about 2,600 lines of QML (shell, pager, pages,
+  composer, and the mobile side of four seams), about 130 lines of Rust (the app's
   `Platform`: TLS client, realtime, token store), and about 450 lines of
   C++/Java shim for back, keyboard, haptics, share, text size and fling.
 - **Verified on the emulator:**
@@ -65,7 +65,7 @@ for any one surface (for example a call screen) if Qt ever falls short there.
 | Theme tokens                  | `Theme.qml` (palettes, type roles, motion, spacing), `ShellState.qml`                                                                                                                                                                                                                                                                                 | Which theme (`Theme.themeId` follows the system's light/dark); a text scale is still missing (see the checklist)                                                                                                                                           |
 | Components and list delegates | `Yap.Ui`: `MessageDelegate` (the message renderer: grouping, replies, reactions, mention and pending rows, Markdown via Qt rich text), `TreeRow`, `ChannelRow`, `CategoryLabel`, `MemberRow`, `ServerIcon`, `RailPill`, `CountBadge`, `Avatar`, `DisplayName`, `Icon`, `IconKey`, `KitButton`, `Led`, `Spinner`, `LinkText`, `LazyPopup`, `Tooltip` … | Each app's side of the four seams the shared files import from `Yap.Platform`, with the same API: `EmbedCard`, `MessageMedia`, `VoiceStatusLine`, `VoiceStreamHoverCard` (mobile: `qt/rust/qml/seams`; desktop: its own `com.yap.native` files)            |
 | C++                           | yap-ui `cpp/`: `AnimatedPicture` and `ViewportWatch` (GIF/APNG/WebP through yap-anim), the `icon` and `dither` image providers, `yap_ui_register(engine)`; `yap_ui.cmake` compiles them in each app's target                                                                                                                                          | `Native` (the platform shim) and `main.cpp`. The Windows C++ (window chrome, toasts, WebView2, Media Foundation, D3D11 video) stays desktop-only                                                                                                           |
-| Page layouts and navigation   | —                                                                                                                                                                                                                                                                                                                                                     | Phone pages (`ServersPage`: rail and tree side by side; `ChatPage`; `SignInPage`), a `StackView` with the platform's transitions and back, `PlatformList` (the platform's scroll feel)                                                                     |
+| Page layouts and navigation   | `ConnectionStrip`, `UnreadBanner`, `PresenceAvatar`, `GameLine` (moved into `Yap.Ui` for the phone pages; the desktop uses the same files) | The pager and its pages (`Pager`, `DrawerPage`, `DmsPane`, `ChatPage`, `MembersPage`), the stacked `ProfilePage` and `SettingsPage`, phone-sized rows where the desktop's are pointer-sized (`DmItem`, `MemberItem`, `AccountBar`), `PlatformList` (the platform's scroll feel). See "Navigation" |
 | Shell                         | —                                                                                                                                                                                                                                                                                                                                                     | `Main.qml` (edge to edge, phases, foreground/background), the Android manifest, the Java shim                                                                                                                                                              |
 
 ### How the sharing is built
@@ -127,6 +127,103 @@ iOS build backs the same `Native` properties with Swift or Objective-C:
 `UIScreenEdgePanGestureRecognizer` for back, keyboard notifications,
 `UIFeedbackGenerator`, `UIActivityViewController`, Dynamic Type's
 `preferredContentSizeCategory`.
+
+## Navigation
+
+The shell is Discord's three pages, as approved for the Expo app
+(`apps/mobile` `HomePager.tsx`), in Yap's instrument language:
+
+- **Drawer** (underneath): the server rail with Home on top, the open
+  server's channel tree or Home's direct messages beside it, your account
+  along the foot.
+- **Chat** (over it): a swipe right or the header's menu key slides it aside
+  to a 56dp peek; picking a conversation, a tap on the peek or a swipe left
+  brings it back.
+- **Members** (to the chat's right): opened by the header's key only. A
+  leftward drag on the chat is left free for a message's own gesture, and
+  Android's gesture navigation owns the right edge.
+
+`Pager.qml` moves one number, the chat's offset. A `DragHandler` on an item
+over the pages watches every touch and claims it after 14dp of sideways
+travel; a list that started scrolling first keeps its touch. `DragHandler`
+has no direction of its own, so a `PointHandler` beside it reads which way
+the touch set off (at 6dp) and switches the pan off until the finger lifts
+when it is the wrong way: from the chat only a rightward drag pans, from the
+drawer only a leftward one. On release a
+flick over 500dp/s decides the page, otherwise 35% of the way does, and
+DESIGN's panel spring finishes the move: critically damped (stiffness 360,
+no overshoot), about 250ms, started at the finger's velocity. Qt's
+`SpringAnimation` cannot start from a velocity, so the spring is a
+`FrameAnimation` integrator. Under Remove animations the page lands at
+once.
+
+| Width          | Layout                                                                                    |
+| -------------- | ----------------------------------------------------------------------------------------- |
+| under 840dp    | the pager                                                                                 |
+| 840 to 1199dp  | drawer (324dp) and chat side by side; members slide over the chat's right edge (320dp)    |
+| 1200dp and up  | members are a 280dp column of their own, shown until their key hides it                   |
+
+Rotation is unlocked; a phone in landscape is the middle row.
+
+Back steps through what is on top, in order: a sheet or stacked page
+(profile, settings), members, the chat, then the drawer, where the app
+leaves. `Native.handlesBack` is true only while something is above the
+drawer, so at the root the system plays its own back-to-home preview. The
+predictive gesture's progress drives whichever is on top: a stacked page
+shrinks or drops, the pager's chat follows the finger 40% of the way toward
+the page behind and the spring finishes or returns it.
+
+What rides on the desktop's objects unchanged: `Nav.selectHomeLast`,
+`selectServer`, `selectChannel` and `openDm`; `DmListModel` and
+`MemberListModel`; `Nav.dmUnread` for Home's count; the unread and mention
+marks the shared `ServerIcon` and `TreeRow` already draw; `ConnectionStrip`
+(`Nav.linkAttempt`, `linkOffline`, `retryLink`) and `UnreadBanner` (with a
+phone-only jump to the first unread message) under the chat header; the
+`Profile` object behind the profile sheet. The conversation counts as read
+only while the chat page is on screen with nothing over it. The chat page
+now outlives the conversation, so it lands each one as the desktop does (on
+the unread divider under the banner, else at the end, again on
+`Chat.reland`) and reports the top row with `Chat.setSeenFrom`, which is
+what clears a mention's count.
+
+Verified on the emulator (portrait 411dp, landscape 914dp): the pan both
+ways, a short drag returning, a flick, the peek's tap, a leftward drag on
+the chat moving nothing, a vertical scroll not panning; Home and server
+switching; a DM opened from the list and from a profile's Message; Home's
+count for an unread DM; a peer mention raising the server's count and
+opening the channel clearing it; Back through sheet, members, chat and
+drawer; the predictive gesture on the chat and on the profile sheet,
+committed and cancelled; "Back online" on the strip; landscape side by side
+with the members panel. Not verified: the 1200dp members column (the shared
+emulator's size must not be changed), the strip's offline and reconnecting
+states (the emulator keeps its mobile data), haptics, and the unread
+banner's jump (no unread backlog arrived while the app was closed).
+
+Not there yet:
+
+- The profile is a phone layout of the `Profile` fields, not the desktop's
+  `ProfileCard`: that card needs QtMultimedia and five desktop-only layers
+  (effects, frames, video banners, badges, platform icons). It rises as a
+  page of the stack; it moves into the shared bottom sheet (drag to
+  dismiss) when that lands.
+- `DmItem` and `MemberItem` are phone rows on the shared models. The
+  desktop's `DmRow` and `MemberEntry` carry right-click menus, nameplates
+  and hover prefetch, and are 32 to 40 px high; sharing them waits for the
+  touch gating of the shared delegates.
+- Settings is a placeholder with Sign out.
+- The rail has no unread-DM avatar keys under Home (the desktop's), no
+  create-server tile, no friends or shop rows.
+- Voice channels in the tree do nothing on a tap.
+
+<p>
+<img src="docs/qt-nav-drawer.png" width="180" alt="Qt: the drawer with the chat's peek">
+<img src="docs/qt-nav-dms.png" width="180" alt="Qt: Home's direct messages">
+<img src="docs/qt-nav-members.png" width="180" alt="Qt: the members page">
+<img src="docs/qt-nav-profile.png" width="180" alt="Qt: a profile">
+</p>
+<p>
+<img src="docs/qt-nav-landscape.png" width="540" alt="Qt: drawer and chat side by side in landscape">
+</p>
 
 ## Side by side (same emulator, same account, same channel)
 
@@ -309,7 +406,7 @@ desktop-native/mobile/
 ├── qt/                  Qt Quick app (dev.yap.qtproto)
 │   ├── rust/            cxx-qt crate yap_mobile_qt: the mobile Platform
 │   │                    (client.rs) and the com.yap.mobile module; links yap-ui
-│   │   └── qml/         mobile shell and pages; seams/ (Yap.Platform types)
+│   │   └── qml/         mobile shell, pager and pages; seams/ (Yap.Platform types)
 │   ├── cpp/             main.cpp, native.* (the platform shim)
 │   ├── android/         manifest, NativeShim.java, icon and splash, build.gradle (R8)
 │   ├── build.sh         Qt + cxx-qt-cmake → APK (Android) or .app (iOS simulator)
