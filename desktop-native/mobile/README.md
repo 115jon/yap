@@ -252,7 +252,9 @@ Next savings, not measured yet:
   per ABI), or give the engine a `QNetworkAccessManagerFactory` whose
   replies come from the core's rustls client. The second keeps one TLS
   stack and also carries the session for private media, as the desktop's
-  `AuthMedia` does.
+  `AuthMedia` does. `qt/CMakeLists.txt` drops Qt's OpenSSL TLS plugin from
+  the APK; the first way would need that `qt_import_plugins` exclusion
+  removed.
 - **Exit.** Qt's Android exit path tears down the engine while the core's
   threads run. Call `yap_mobile_flush` on going to the background (done)
   and leave by moving the task back, never by quitting the engine.
@@ -298,7 +300,9 @@ desktop-native/mobile/
 │   ├── android/         manifest, NativeShim.java, icon and splash, build.gradle (R8)
 │   ├── build.sh         Qt + cxx-qt-cmake → APK (Android) or .app (iOS simulator)
 │   ├── fetch-qt.ps1     Qt 6.11.3 from download.qt.io, pinned by qt-sdk.lock.json
-│   └── sign.sh          zipalign + apksigner (v2/v3), .sha256
+│   ├── sign.sh          zipalign + apksigner (v2/v3), .sha256
+│   ├── smoke.sh         install, cold start, wait for the first frame
+│   └── ci/              the public CI debug keystore (not for release)
 ├── rust/ android/ build.sh    the Compose baseline (UniFFI)
 └── docs/                screenshots
 ```
@@ -374,10 +378,14 @@ CI (`.github/workflows/desktop-native-mobile.yml`) builds the Compose
 baseline's APK on Ubuntu, and on macOS cross-compiles the core for iOS and
 type-checks its Swift bindings. For the Qt app, `qt-android` builds the
 x86_64 and arm64-v8a APKs on Ubuntu with the pinned Qt (archives cached by
-the lock's hash) and NDK r27c, signs them with a throwaway key made in the
-job, and uploads each APK with its `.sha256` (14 days; version code
-`run * 10 + 2` for arm64, `+ 4` for x86_64, version name
-`0.1.<run>+<commit>`). `qt-ios` builds the simulator `.app` on macOS when
+the lock's hash) and NDK r27c, signs them with the public CI debug key
+(`qt/ci/debug.keystore`, so one run's APK installs over another's; never a
+release key), and uploads each APK with its `.sha256` (14 days; version
+code `run * 10 + 2` for arm64, `+ 4` for x86_64, version name
+`0.1.<run>+<commit built>`). `qt-android-smoke` cold-starts the x86_64 APK
+on an API 35 emulator and fails unless it logs `[startup] first frame`
+(`qt/smoke.sh`, which also works against a local emulator; it checks
+start-up only, not sign-in). `qt-ios` builds the simulator `.app` on macOS when
 `mobile/qt` or the workflow changes, by hand, and weekly. Each job runs only
 when its own inputs change.
 

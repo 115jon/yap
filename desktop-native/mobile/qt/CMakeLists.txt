@@ -115,8 +115,10 @@ endif()
 
 # --- Size: plugins nobody loads ------------------------------------------
 # The offscreen platform plugin (the android one draws) and the OpenSSL TLS
-# backend: Qt for Android ships no libssl, and the app's HTTPS goes through
-# the core's rustls client.
+# backend. Qt for Android ships no libssl, so the backend never loaded:
+# Qt Network's HTTPS image loads fail either way until they go through the
+# core's rustls client (README, "Gaps found"). Bundling android_openssl
+# instead would need this plugin back.
 qt_import_plugins(yapqt
   EXCLUDE Qt::QOffscreenIntegrationPlugin Qt::QTlsBackendOpenSSLPlugin)
 
