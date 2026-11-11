@@ -193,7 +193,9 @@ Compose baseline:
 ## Size: what is in the APK, and what can go
 
 arm64, release, shared Qt libraries from download.qt.io (`qt/build.sh`,
-signed by `qt/sign.sh`), measured 2026-11-10. Libraries are stored
+signed by `qt/sign.sh`), measured 2026-11-10 before the shared `yap-ui`
+crate landed (with it, CI's arm64 APK is 57.9 MB, 21.2 MB gzipped; the
+`qt-android` job prints the per-library list). Libraries are stored
 uncompressed in the APK (page-aligned, loaded in place), so the APK is
 about the sum of its parts; gzip -9 of the whole APK stands in for the
 download size.
