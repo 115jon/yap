@@ -1,7 +1,7 @@
 //! The mobile app's side of the shared view layer: rustls HTTP, the shared
-//! gateway task, voice calls on Android (`voice.rs`), the session token in
-//! an app-private file, and the data folder and device name handed to the
-//! core.
+//! gateway task, voice calls on Android (`voice.rs`), the session token
+//! sealed with an Android Keystore key, and the data folder and device name
+//! handed to the core.
 
 use std::ffi::{c_char, CStr};
 use std::path::{Path, PathBuf};
@@ -58,16 +58,114 @@ impl Realtime for MobileRealtime {
     }
 }
 
-/// The session file's name in the data folder. The Java side reads it too
-/// (push/PushStore.java), for a notification's Reply with the app killed.
-pub const SESSION_FILE: &str = "session.token";
+/// The session token on Android: sealed with an AES-GCM key in the Android
+/// Keystore (yap-mobile-vault, which also migrates an older build's plain
+/// file). The Java side opens the same file with the same key for a
+/// notification's Reply with the app killed (push/PushStore.java).
+#[cfg(target_os = "android")]
+mod keystore {
+    use std::ffi::c_void;
 
-/// The session token in the app's private data folder (other apps cannot
-/// read it; Auto Backup is off in the manifest). Prototype only: a release
-/// build wraps it with an Android Keystore key through a small Java shim,
-/// as the Compose baseline's notes say.
+    use yap_mobile_vault::{SealError, Sealer, Vault};
+
+    use super::{Token, TokenStore};
+
+    extern "C" {
+        /// cpp/keystore.cpp: TokenVault.java's seal (0), open (1) or reset
+        /// (2) of `len` bytes at `data`. The result goes to `sink(out, ...)`
+        /// before the call returns. [`OK`], [`INVALID`] (the bytes can never
+        /// open) or anything else (the Keystore could not be asked).
+        fn yap_mobile_keystore(
+            op: i32,
+            data: *const u8,
+            len: usize,
+            out: *mut c_void,
+            sink: extern "C" fn(*mut c_void, *const u8, usize),
+        ) -> i32;
+    }
+
+    const SEAL: i32 = 0;
+    const OPEN: i32 = 1;
+    const RESET: i32 = 2;
+
+    const OK: i32 = 0;
+    const INVALID: i32 = 1;
+
+    extern "C" fn sink(out: *mut c_void, data: *const u8, len: usize) {
+        if out.is_null() || data.is_null() || len == 0 {
+            return;
+        }
+        // SAFETY: `out` is the Vec `call` passes, alive and not otherwise
+        // borrowed during the call; `data` is `len` bytes the C++ side
+        // keeps alive until this returns.
+        let (out, bytes) = unsafe {
+            (
+                &mut *out.cast::<Vec<u8>>(),
+                std::slice::from_raw_parts(data, len),
+            )
+        };
+        out.extend_from_slice(bytes);
+    }
+
+    fn call(op: i32, input: &[u8]) -> Result<Vec<u8>, SealError> {
+        let mut out = Vec::new();
+        // SAFETY: `input` outlives the call; `sink` gets `out` back only
+        // while the call runs.
+        let status = unsafe {
+            yap_mobile_keystore(
+                op,
+                input.as_ptr(),
+                input.len(),
+                std::ptr::from_mut(&mut out).cast(),
+                sink,
+            )
+        };
+        match status {
+            OK => Ok(out),
+            INVALID => Err(SealError::Invalid("see yap-vault in the log".into())),
+            _ => Err(SealError::Unavailable("see yap-vault in the log".into())),
+        }
+    }
+
+    pub struct KeystoreSealer;
+
+    impl Sealer for KeystoreSealer {
+        fn seal(&self, plain: &[u8]) -> Result<Vec<u8>, SealError> {
+            call(SEAL, plain)
+        }
+
+        fn open(&self, sealed: &[u8]) -> Result<Vec<u8>, SealError> {
+            call(OPEN, sealed)
+        }
+
+        fn reset(&self) {
+            let _ = call(RESET, &[]);
+        }
+    }
+
+    pub struct SessionVault(pub Vault<KeystoreSealer>);
+
+    impl TokenStore for SessionVault {
+        fn load(&self) -> Option<Token> {
+            self.0.load().map(|token| Token::new(&token))
+        }
+
+        fn store(&self, token: &Token) {
+            self.0.store(token.as_str());
+        }
+
+        fn clear(&self) {
+            self.0.clear();
+        }
+    }
+}
+
+/// The iOS build is a compile and link check: the token in a plain file in
+/// the app's container until it has the Keychain.
+#[cfg(not(target_os = "android"))]
 struct FileVault(PathBuf);
 
+#[cfg(not(target_os = "android"))]
 impl TokenStore for FileVault {
     fn load(&self) -> Option<Token> {
         let text = std::fs::read_to_string(&self.0).ok()?;
@@ -102,7 +200,14 @@ impl Platform for Mobile {
     }
 
     fn token_store(&self) -> Arc<dyn TokenStore> {
-        Arc::new(FileVault(self.data.join(SESSION_FILE)))
+        #[cfg(target_os = "android")]
+        let store = keystore::SessionVault(yap_mobile_vault::Vault::in_dir(
+            keystore::KeystoreSealer,
+            &self.data,
+        ));
+        #[cfg(not(target_os = "android"))]
+        let store = FileVault(self.data.join(yap_mobile_vault::LEGACY_FILE));
+        Arc::new(store)
     }
 
     fn started(&self, commands: &tokio::sync::mpsc::UnboundedSender<yap_core::Command>) {

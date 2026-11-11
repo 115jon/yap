@@ -67,7 +67,7 @@ for any one surface (for example a call screen) if Qt ever falls short there.
 
 | Layer                         | Shared with desktop (unchanged)                                                                                                                                                                                                                                                                                                                       | Per platform                                                                                                                                                                                                                                                                                                     |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Core                          | `yap-core`, `yap-cache`, `yap-realtime`, `yap-protocol`, `yap-anim`; `gateway.rs`                                                                                                                                                                                                                                                                     | TLS backend (rustls on mobile), the token store (an app-private file; Keystore in a release), the config and data folder handed in (`yap_mobile_init`)                                                                                                                                                           |
+| Core                          | `yap-core`, `yap-cache`, `yap-realtime`, `yap-protocol`, `yap-anim`; `gateway.rs`                                                                                                                                                                                                                                                                     | TLS backend (rustls on mobile), the token store (sealed with an Android Keystore key, `qt/vault`), the config and data folder handed in (`yap_mobile_init`)                                                                                                                                                       |
 | Models and bridge objects     | yap-ui: every `QAbstractListModel` (servers, tree, messages, members, DMs, …), `Session`/`Nav`/`Chat`/`Voice`/`Profile` and the portable singletons, one definition for both apps; the registry and the order view updates apply in                                                                                                                   | The app's `Platform` (`yap_ui::platform`): HTTP client, realtime, token store, start and quit hooks, the view updates only it shows (toasts, sounds, badge), uploads, share sources, video. Desktop: `rust/src/native.rs`; mobile: `qt/rust/src/client.rs`                                                       |
 | Theme tokens                  | `Theme.qml` (palettes, type roles, motion, spacing), `ShellState.qml`                                                                                                                                                                                                                                                                                 | Which theme (Settings' choice; Match system, the default, follows the light/dark mode), the text size factor (`Prefs`), and the input flags the shell binds: `Theme.touch`, `Theme.hoverUi`, `Theme.textScale`                                                                                                   |
 | Components and list delegates | `Yap.Ui`: `MessageDelegate` (the message renderer: grouping, replies, reactions, mention and pending rows, Markdown via Qt rich text), `TreeRow`, `ChannelRow`, `CategoryLabel`, `MemberRow`, `ServerIcon`, `RailPill`, `CountBadge`, `Avatar`, `DisplayName`, `Icon`, `IconKey`, `KitButton`, `Led`, `Spinner`, `LinkText`, `LazyPopup`, `Tooltip` … | Each app's side of the four seams the shared files import from `Yap.Platform`, with the same API: `EmbedCard`, `MessageMedia`, `VoiceStatusLine`, `VoiceStreamHoverCard` (mobile: `qt/rust/qml/seams`; desktop: its own `com.yap.native` files)                                                                  |
@@ -497,8 +497,9 @@ desktop-native/mobile/
 │   ├── rust/            cxx-qt crate yap_mobile_qt: the mobile Platform
 │   │                    (client.rs) and the com.yap.mobile module; links yap-ui
 │   │   └── qml/         mobile shell, pager and pages; seams/ (Yap.Platform types)
-│   ├── cpp/             main.cpp, native.* (the platform shim), push.cpp
-│   ├── android/         manifest, NativeShim.java, push/ (FCM), icon and splash,
+│   ├── vault/           crate yap-mobile-vault: the sealed session file, migration
+│   ├── cpp/             main.cpp, native.* (the platform shim), push.cpp, keystore.cpp
+│   ├── android/         manifest, NativeShim.java, TokenVault.java, push/ (FCM), icon and splash,
 │   │                    build.gradle (R8, Firebase)
 │   ├── build.sh         Qt + cxx-qt-cmake → APK (Android) or .app (iOS simulator)
 │   ├── fetch-qt.ps1     Qt 6.11.3 from download.qt.io, pinned by qt-sdk.lock.json
@@ -581,9 +582,10 @@ data-only pushes (`ralph: "2"`, `kind: message | read`) that the app draws.
   as read. With the app running they go into the core as the desktop's
   toast actions (`Command::ToastReply` only with the app in front,
   `ToastMarkRead`); otherwise the receiver calls the API, and a failed
-  reply shows as "Not sent: ...", with the session file the core keeps
-  (`client.rs` `SESSION_FILE`; its folder and the API's origin are handed
-  over at each start, `PushStore`).
+  reply shows as "Not sent: ...", with the sealed session file the core
+  keeps, opened with the same Keystore key ("The session token" below;
+  its folder and the API's origin are handed over at each start,
+  `PushStore`).
 - **Tap.** The notification opens the app at its conversation: the intent
   carries the channel, server and (a DM's) person ids. `YapActivity` (Qt's
   activity) hands each fresh start's and `onNewIntent`'s tap to the shim,
@@ -615,10 +617,54 @@ Firebase is set up without the google-services Gradle plugin:
 and writes the string resources the plugin would (`google_app_id`,
 `google_api_key`, `gcm_defaultSenderId`, `project_id`), from which
 FirebaseInitProvider starts Firebase. The file holds API keys and stays out
-of the repository; CI decodes the `QT_GOOGLE_SERVICES_JSON_BASE64` secret
-into the build folder. Without it the APK builds and runs, with no pushes.
-`dev.yap.app` is registered in the Firebase project the server's
-`FCM_SERVICE_ACCOUNT` sends from.
+of the repository; the release workflow decodes the
+`QT_GOOGLE_SERVICES_JSON_BASE64` secret into the build folder. Without it
+the APK builds and runs, with no pushes. Only `dev.yap.app` is registered in
+the Firebase project the server's `FCM_SERVICE_ACCOUNT` sends from: CI's
+`dev.yap.app.ci` builds have no Firebase configuration and no pushes
+("Build and run the Qt app"); pushes are tested with local and release
+builds.
+
+### The session token
+
+The core keeps the session token in `session.sealed` in the app's data
+folder, sealed with AES-256-GCM under a key in the Android Keystore
+(`qt/vault`, the `yap-mobile-vault` crate: the file, its migration and
+failures; `android/src/dev/yap/qtproto/TokenVault.java`: the key, seal and
+open; `cpp/keystore.cpp`: the JNI call from the core's blocking thread).
+The push code opens the same file with the same key for a Reply with the
+app killed (`PushStore` → `TokenVault.readToken`); it never writes it. Each
+write goes to a temporary file that is synced and renamed over the old one,
+so a reader sees one whole version. The desktop is unchanged (its
+`Keyring`).
+
+- **The key.** Made on the device at the first seal, a sign-in or a
+  migration (alias
+  `yap.session.v1`), never exportable, the Keystore choosing every IV. It
+  needs no user authentication and no unlocked device: a notification's
+  Reply sends with the app killed and the phone locked. It works whenever
+  the app's own files can be read (after the first unlock since boot).
+- **What it protects against.** A copy of the app's files leaving the device
+  (a backup tool, a rooted phone's file copy, a forensic image) does not
+  give the token away without this device's key; cloud backup and
+  device-to-device transfer leave the files out anyway. It does not stop
+  code running as the app (or as root) on the device, which can ask the
+  Keystore to open the file as the app does.
+- **Migration.** Earlier builds kept the token in plain text
+  (`session.token`). The first start of this build seals it into
+  `session.sealed`, then deletes the plain file (also when sealing fails:
+  that run stays signed in, the next one asks to sign in). Until that start,
+  a Reply with the app killed reads the plain file.
+- **Failures sign out.** A sealed file that can never open (no key,
+  another key, a key the Keystore invalidated, the file damaged) is deleted
+  with its key, and the app shows the sign-in page; the next sign-in makes
+  a new key. A Keystore that cannot be asked (any other exception; tried
+  twice) signs out for that run only and keeps the file for the next
+  start. A seal
+  that fails gets a new key and one more try; if that fails too, nothing is
+  kept (an older sealed token is deleted). Sign-out deletes the sealed and
+  any plain file. Logs (`[session]` from the core, `yap-vault` from Java)
+  name the step and the exception class, never the token.
 
 ### Settings and Friends
 

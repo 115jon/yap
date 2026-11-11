@@ -3,18 +3,17 @@ package dev.yap.qtproto.push;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import dev.yap.qtproto.TokenVault;
+
 import java.io.File;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 
 /**
  * What the push code needs when the app is not running (a push, a Reply
  * with the app killed): where the core keeps its session file and the
  * API's origin, both handed over by the app at each start (PushShim.install),
  * and whether the notification permission was asked for. The session token
- * itself stays in the core's file (mobile/qt/rust/src/client.rs FileVault,
- * SESSION_FILE), read here only when needed.
+ * itself stays in the core's sealed file (mobile/qt/vault), opened
+ * here with the Keystore key only when needed (TokenVault).
  */
 final class PushStore {
     private PushStore() {}
@@ -23,8 +22,6 @@ final class PushStore {
     private static final String KEY_DATA_DIR = "dataDir";
     private static final String KEY_API_BASE = "apiBase";
     private static final String KEY_ASKED = "askedPermission";
-    /** client.rs SESSION_FILE. */
-    private static final String SESSION_FILE = "session.token";
 
     /** The session as the Java side sees it: the API and the bearer token. */
     static final class Session {
@@ -58,19 +55,18 @@ final class PushStore {
                 .apply();
     }
 
-    /** The signed-in session, or null when signed out (no session file). */
+    /**
+     * The signed-in session, or null when signed out (no session file) or
+     * when the sealed file does not open (the core signs out at its next
+     * start). On a background thread: it reads a file and uses the Keystore.
+     */
     static Session session(Context context) {
         SharedPreferences prefs = prefs(context);
         String dir = prefs.getString(KEY_DATA_DIR, null);
         String base = prefs.getString(KEY_API_BASE, null);
         if (dir == null || base == null) return null;
-        File file = new File(dir, SESSION_FILE);
-        try {
-            String token = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8).trim();
-            return token.isEmpty() ? null : new Session(base, token);
-        } catch (IOException e) {
-            return null;
-        }
+        String token = TokenVault.readToken(new File(dir));
+        return token == null ? null : new Session(base, token);
     }
 
     static boolean asked(Context context) {

@@ -2921,6 +2921,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "yap-mobile-vault"
+version = "0.1.0"
+
+[[package]]
 name = "yap-protocol"
 version = "4.0.0"
 dependencies = [
@@ -3012,6 +3016,7 @@ dependencies = [
  "webpki-roots 1.0.11",
  "yap-cache",
  "yap-core",
+ "yap-mobile-vault",
  "yap-protocol",
  "yap-realtime",
  "yap-ui",
