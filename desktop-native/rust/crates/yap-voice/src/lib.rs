@@ -113,8 +113,12 @@
 //! `YAP_ADM_AUDIO=1` falls back to libwebrtc's own device module (mixed
 //! playout, no RNNoise or panning).
 
+#[cfg(all(feature = "libwebrtc", target_os = "android"))]
+pub mod android;
 mod audio;
 pub mod background;
+#[cfg(feature = "store")]
+pub mod call;
 mod camera;
 mod driver;
 pub mod dsp;
