@@ -287,7 +287,10 @@ QtObject {
     // The core writes its rich text at the design size: the px sizes it
     // names (code, "(edited)", the emoji pictures) follow the text scale.
     function scaleRich(html) {
-        return html.replace(/font-size:(\d+)px/g, (m, n) => "font-size:" + Math.round(n * textScale) + "px")
+        // Inside style attributes only: the same words in a message's own
+        // text are left alone (its quotes are escaped, so it has none).
+        return html.replace(/style="[^"]*"/g, style => style.replace(/font-size:(\d+)px/g,
+                (m, n) => "font-size:" + Math.round(n * textScale) + "px"))
             .replace(/(<img [^>]*?)width="(\d+)" height="(\d+)"/g,
                      (m, head, w, h) => head + "width=\"" + Math.round(w * textScale) + "\" height=\"" + Math.round(h * textScale) + "\"")
     }

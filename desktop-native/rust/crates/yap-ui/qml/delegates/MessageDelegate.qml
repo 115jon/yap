@@ -190,6 +190,13 @@ Item {
     readonly property bool shiftHeld: (hover.point.modifiers & Qt.ShiftModifier) !== 0
     // A sideways drag of the row (the phone's swipe to reply), in px.
     property real swipe: 0
+    // A finger's long press has opened the menu and is still down: the
+    // row's content is off until it lifts, so the lift is not also a click
+    // on the chip, link or key under it.
+    property bool held: false
+    function letGo() {
+        held = false
+    }
     readonly property Item bodyItem: editing && editor.item ? editor : bodyText
 
     // ||Spoilers|| show once clicked, each on its own (MarkdownRenderer.tsx
@@ -240,6 +247,7 @@ Item {
     // A pooled row must not carry a selection, a revealed spoiler or the
     // dim into the row it is reused for.
     ListView.onPooled: {
+        held = false
         bodyText.deselect()
         revealedSpoilers = {}
         dim = false
@@ -400,8 +408,13 @@ Item {
                 acceptedDevices: PointerDevice.TouchScreen
                 enabled: !root.editing && !root.pending && !root.failed && !root.isCall
                 longPressThreshold: 0.4
-                onLongPressed: root.menuRequested(root.messageId, root.author, root.body, root.mine,
-                                                  root, point.position.x, point.position.y)
+                onLongPressed: {
+                    root.held = true
+                    root.menuRequested(root.messageId, root.author, root.body, root.mine,
+                                       root, point.position.x, point.position.y)
+                }
+                // After the lift has been delivered (to nothing).
+                onPressedChanged: if (!pressed && root.held) Qt.callLater(root.letGo)
             }
         }
     }
@@ -446,6 +459,7 @@ Item {
     Item {
         id: reply
         visible: root.hasReply
+        enabled: !root.held
         x: 0
         y: root.padTop
         width: parent.width
@@ -516,6 +530,7 @@ Item {
     Avatar {
         id: authorAvatar
         visible: !root.grouped && !root.isCall
+        enabled: !root.held
         x: 16
         y: root.headerTop + 2
         size: 40
@@ -560,6 +575,7 @@ Item {
     Row {
         id: meta
         visible: !root.grouped && !root.isCall
+        enabled: !root.held
         x: 68
         y: root.headerTop
         spacing: 8
@@ -621,6 +637,7 @@ Item {
     TextEdit {
         id: bodyText
         visible: !root.editing && root.hasText && !root.isCall
+        enabled: !root.held
         height: root.hasText ? implicitHeight : 0
         x: 68
         y: root.grouped ? root.headerTop : meta.y + Theme.type.authorLine
@@ -719,6 +736,7 @@ Item {
     Column {
         id: extras
         visible: !root.isCall
+        enabled: !root.held
         x: 68
         y: root.bodyItem.y + root.bodyItem.height
         width: root.width - x - 24
