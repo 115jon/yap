@@ -28,6 +28,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.RandomAccessFile;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -45,12 +47,16 @@ public final class NativeShim {
     static native void nativeBackInvoked();
     static native void nativeIme(float dp);
     static native void nativeMediaCopying();
-    static native void nativeMediaPicked(String[] paths);
+    static native void nativeMediaPicked(String[] paths, int failed);
 
     /** The most files one pick hands to the tray. */
     private static final int PICK_MAX = 10;
     /** Picked files are copied under the cache, here, until the next start. */
     private static final String UPLOADS = "uploads";
+    /** File names stay well under the file system's 255 bytes. */
+    private static final int NAME_BYTES = 160;
+    /** The account's attachment limit for the pick under way (bytes). */
+    private static volatile long pickLimit = Long.MAX_VALUE;
 
     private static Activity activity;
     private static OnBackInvokedCallback back;
@@ -124,6 +130,22 @@ public final class NativeShim {
 
     private static void reportIme(WindowInsets insets) {
         nativeIme(insets.getInsets(WindowInsets.Type.ime()).bottom / density);
+    }
+
+    /**
+     * The IME inset as it is now. Back from another activity (the photo
+     * picker) the keyboard may have gone while the listeners were not
+     * called, which would leave the composer floating where it was.
+     */
+    public static void refreshIme() {
+        if (activity == null || Build.VERSION.SDK_INT < 30) return;
+        activity.runOnUiThread(() -> {
+            View decor = activity.getWindow().getDecorView();
+            decor.post(() -> {
+                WindowInsets insets = decor.getRootWindowInsets();
+                if (insets != null) reportIme(insets);
+            });
+        });
     }
 
     /** Takes the back gesture while the app has a page to go back to. */
@@ -215,7 +237,8 @@ public final class NativeShim {
      * the app sees), else the documents UI on images and videos. The C++
      * side starts it for a result (QtAndroidPrivate::startActivity).
      */
-    public static Intent pickMediaIntent() {
+    public static Intent pickMediaIntent(long limitBytes) {
+        pickLimit = limitBytes > 0 ? limitBytes : Long.MAX_VALUE;
         if (Build.VERSION.SDK_INT >= 33) {
             return new Intent(MediaStore.ACTION_PICK_IMAGES)
                     .putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX,
@@ -232,8 +255,10 @@ public final class NativeShim {
      * The picker's result. The core uploads from a path and a content://
      * grant ends with the activity, so each item is copied into the app's
      * cache under its display name (with the extension its type implies),
-     * off the UI thread; the paths go back through nativeMediaPicked, empty
-     * when nothing was picked or nothing could be read.
+     * off the UI thread; the paths go back through nativeMediaPicked, with
+     * how many picked items could not be read. An item over the account's
+     * limit is not copied: a sparse file of its size stands in, which the
+     * core turns into its too-big card without reading it.
      */
     public static void mediaPicked(int resultCode, Intent data) {
         final List<Uri> uris = new ArrayList<>();
@@ -249,7 +274,7 @@ public final class NativeShim {
             }
         }
         if (uris.isEmpty()) {
-            nativeMediaPicked(new String[0]);
+            nativeMediaPicked(new String[0], 0);
             return;
         }
         nativeMediaCopying();
@@ -262,7 +287,7 @@ public final class NativeShim {
                 File copy = copyIn(uris.get(i), new File(batch, Integer.toString(i)));
                 if (copy != null) paths.add(copy.getAbsolutePath());
             }
-            nativeMediaPicked(paths.toArray(new String[0]));
+            nativeMediaPicked(paths.toArray(new String[0]), uris.size() - paths.size());
         }, "yap-pick-copy").start();
     }
 
@@ -270,6 +295,17 @@ public final class NativeShim {
         ContentResolver resolver = activity.getContentResolver();
         if (!dir.mkdirs() && !dir.isDirectory()) return null;
         File out = new File(dir, fileName(resolver, uri, resolver.getType(uri)));
+        long size = size(resolver, uri);
+        if (size > pickLimit) {
+            try (RandomAccessFile stand = new RandomAccessFile(out, "rw")) {
+                stand.setLength(size);
+                return out;
+            } catch (IOException e) {
+                Log.w("yap-native", "could not size a picked file", e);
+                out.delete();
+                return null;
+            }
+        }
         try (InputStream in = resolver.openInputStream(uri)) {
             if (in == null) return null;
             try (OutputStream to = new FileOutputStream(out)) {
@@ -285,6 +321,17 @@ public final class NativeShim {
         }
     }
 
+    /** The item's size from its provider, or -1 when it does not say. */
+    private static long size(ContentResolver resolver, Uri uri) {
+        try (Cursor c = resolver.query(uri, new String[] {OpenableColumns.SIZE},
+                null, null, null)) {
+            if (c != null && c.moveToFirst() && !c.isNull(0)) return c.getLong(0);
+        } catch (RuntimeException e) {
+            // No size column: copied in full.
+        }
+        return -1;
+    }
+
     /** The item's display name, safe as a file name, with its type's extension. */
     private static String fileName(ContentResolver resolver, Uri uri, String mime) {
         String name = null;
@@ -298,13 +345,17 @@ public final class NativeShim {
         if (name == null) name = "";
         name = name.replaceAll("[\\\\/:*?\"<>|\\x00-\\x1f]", "_").replaceAll("^[.\\s]+", "").trim();
         if (name.isEmpty()) name = "file";
-        if (name.length() > 120) name = name.substring(name.length() - 120);
         // The core types an upload by its extension.
         String ext = mime == null ? null : MimeTypeMap.getSingleton().getExtensionFromMimeType(mime);
         String lower = name.toLowerCase(Locale.ROOT);
         if (ext != null && !lower.endsWith("." + ext)
                 && !(ext.equals("jpg") && (lower.endsWith(".jpeg") || lower.endsWith(".jfif")))) {
             name = name + "." + ext;
+        }
+        // Too long in bytes: whole code points go from the front, so the
+        // extension stays.
+        while (name.getBytes(StandardCharsets.UTF_8).length > NAME_BYTES) {
+            name = name.substring(Character.charCount(name.codePointAt(0)));
         }
         return name;
     }

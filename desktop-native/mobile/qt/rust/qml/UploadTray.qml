@@ -22,6 +22,24 @@ Item {
     signal chooseAnother()
     // A failed tile was tapped: its error, for the composer's notice line.
     signal explain(string text)
+    // A finished picture was tapped: the tray's pictures, for the viewer.
+    signal preview(var images, int index)
+
+    // The finished pictures in tray order ({ url, name }, as the viewer
+    // takes them) and where `uploadId` is among them.
+    function pictures(uploadId) {
+        const images = []
+        let at = 0
+        for (let i = 0; i < tiles.count; i++) {
+            const tile = tiles.itemAtIndex(i)
+            if (!tile || tile.kind !== "image" || !tile.done || tile.preview.length === 0)
+                continue
+            if (tile.uploadId === uploadId)
+                at = images.length
+            images.push({ url: tile.preview, name: tile.name })
+        }
+        return { images: images, index: at }
+    }
 
     implicitHeight: shown ? 88 : 0
     clip: true
@@ -91,6 +109,8 @@ Item {
         orientation: ListView.Horizontal
         spacing: 8
         boundsBehavior: Flickable.StopAtBounds
+        // Every tile stays made (at most ten): pictures() reads them all.
+        cacheBuffer: 2000
         model: UploadListModel
 
         header: Item {
@@ -213,6 +233,14 @@ Item {
                 }
                 // The whole tile is the Retry key (a finger-sized target),
                 // and the reason shows in the composer's notice line.
+                // A finished picture opens in the viewer.
+                TapHandler {
+                    enabled: tile.done && tile.kind === "image"
+                    onTapped: {
+                        const set = root.pictures(tile.uploadId)
+                        root.preview(set.images, set.index)
+                    }
+                }
                 TapHandler {
                     enabled: tile.failed
                     onTapped: {
@@ -227,15 +255,15 @@ Item {
                     visible: (tile.done || tile.going) && tile.sizeText.length > 0
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
-                    anchors.margins: 4
-                    width: Math.min(sizeLabel.implicitWidth + 8, parent.width - 8)
+                    anchors.margins: 3
+                    width: Math.min(sizeLabel.implicitWidth + 6, parent.width - 6)
                     height: 16
                     radius: Theme.radius
                     color: Theme.ply3
                     Text {
                         id: sizeLabel
                         anchors.centerIn: parent
-                        width: Math.min(implicitWidth, parent.width - 8)
+                        width: Math.min(implicitWidth, parent.width - 6)
                         textFormat: Text.PlainText
                         text: tile.sizeText
                         elide: Text.ElideRight
@@ -274,6 +302,9 @@ Item {
                     }
                 }
                 TapHandler {
+                    // Its own tap: the tile under it (the viewer) must not
+                    // see it too.
+                    gesturePolicy: TapHandler.ReleaseWithinBounds
                     onTapped: {
                         Native.haptic(Native.Tick)
                         Chat.setUploadSensitive(tile.uploadId, !tile.nsfw)

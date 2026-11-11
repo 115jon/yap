@@ -1,6 +1,7 @@
 #include "native.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QDateTime>
 #include <QtCore/QMetaObject>
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
@@ -57,7 +58,7 @@ void jniMediaCopying(JNIEnv*, jclass)
   post([] { Native::instance()->onMediaCopying(); });
 }
 
-void jniMediaPicked(JNIEnv* env, jclass, jobjectArray paths)
+void jniMediaPicked(JNIEnv* env, jclass, jobjectArray paths, jint failed)
 {
   QStringList list;
   const jsize n = paths ? env->GetArrayLength(paths) : 0;
@@ -66,7 +67,7 @@ void jniMediaPicked(JNIEnv* env, jclass, jobjectArray paths)
     list.append(QJniObject(path).toString());
     env->DeleteLocalRef(path);
   }
-  post([list] { Native::instance()->onMediaPicked(list); });
+  post([list, failed] { Native::instance()->onMediaPicked(list, failed); });
 }
 
 // The picker's request code (any number of ours; Qt routes the result back).
@@ -88,7 +89,7 @@ Native::Native(QObject* parent)
     { "nativeBackInvoked", "()V", reinterpret_cast<void*>(jniBackInvoked) },
     { "nativeIme", "(F)V", reinterpret_cast<void*>(jniIme) },
     { "nativeMediaCopying", "()V", reinterpret_cast<void*>(jniMediaCopying) },
-    { "nativeMediaPicked", "([Ljava/lang/String;)V", reinterpret_cast<void*>(jniMediaPicked) },
+    { "nativeMediaPicked", "([Ljava/lang/String;I)V", reinterpret_cast<void*>(jniMediaPicked) },
   };
   QJniEnvironment env;
   if (!env.registerNativeMethods(kShim, methods, std::size(methods)))
@@ -99,10 +100,15 @@ Native::Native(QObject* parent)
   m_deceleration = QJniObject::callStaticMethod<jfloat>(kShim, "flingDeceleration");
   readConfiguration();
   // Text size, Remove animations and the wallpaper accent can change while
-  // the app is away; read them again when it comes back.
+  // the app is away; read them again when it comes back, and the keyboard's
+  // inset, which can go stale behind another activity (the photo picker).
   connect(qGuiApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState s) {
-    if (s == Qt::ApplicationActive)
+    if (s != Qt::ApplicationActive)
+      m_leftSincePick = true;
+    if (s == Qt::ApplicationActive) {
       readConfiguration();
+      QJniObject::callStaticMethod<void>(kShim, "refreshIme");
+    }
   });
 #endif
 }
@@ -177,21 +183,29 @@ void Native::flushCache() const
   yap_mobile_flush();
 }
 
-void Native::pickMedia()
+void Native::pickMedia(qreal limitBytes)
 {
 #ifdef Q_OS_ANDROID
-  if (m_pickingMedia)
+  // One picker at a time (a double tap on +). A picker that never showed
+  // (the app stayed in front for a few seconds) does not block the next.
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  if (m_pickingMedia || (m_pickerOpen && (m_leftSincePick || now - m_pickStartedMs < 3000)))
     return;
-  const QJniObject intent = QJniObject::callStaticObjectMethod(kShim, "pickMediaIntent",
-                                                               "()Landroid/content/Intent;");
+  const QJniObject intent = QJniObject::callStaticObjectMethod(
+      kShim, "pickMediaIntent", "(J)Landroid/content/Intent;", jlong(limitBytes));
   if (!intent.isValid())
     return;
+  m_pickerOpen = true;
+  m_leftSincePick = false;
+  m_pickStartedMs = now;
   // The result comes back on Android's UI thread; the shim copies the items
   // off it and reports through nativeMediaPicked.
   QtAndroidPrivate::startActivity(intent, kPickMedia, [](int, int resultCode, const QJniObject& data) {
     QJniObject::callStaticMethod<void>(kShim, "mediaPicked", "(ILandroid/content/Intent;)V",
                                        jint(resultCode), data.object());
   });
+#else
+  Q_UNUSED(limitBytes);
 #endif
 }
 
@@ -203,14 +217,14 @@ void Native::onMediaCopying()
   emit pickingMediaChanged();
 }
 
-void Native::onMediaPicked(const QStringList& paths)
+void Native::onMediaPicked(const QStringList& paths, int failed)
 {
+  m_pickerOpen = false;
   if (m_pickingMedia) {
     m_pickingMedia = false;
     emit pickingMediaChanged();
   }
-  if (!paths.isEmpty())
-    emit mediaPicked(paths);
+  emit mediaPicked(paths, failed);
 }
 
 void Native::onBackProgress(qreal progress)

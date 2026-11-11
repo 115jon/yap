@@ -24,6 +24,8 @@ Rectangle {
     property string replyToText: ""
 
     signal send(string text, string replyToId)
+    // An attached picture was tapped (the viewer's images and index).
+    signal openImages(var images, int index)
 
     // What is in the field, the keyboard's word in progress included.
     readonly property string typed: field.text + field.preeditText
@@ -183,15 +185,18 @@ Rectangle {
     property bool picking: false
     function pickMedia() {
         root.picking = true
-        Native.pickMedia()
+        Native.pickMedia(Settings.attachmentLimit)
     }
     Connections {
         target: Native
-        function onMediaPicked(paths) {
+        function onMediaPicked(paths, failed) {
             if (!root.picking)
                 return
             root.picking = false
-            Chat.addFiles(paths)
+            if (paths.length > 0)
+                Chat.addFiles(paths)
+            if (failed > 0)
+                root.showNotice(qsTr("%n of the picked files could not be read.", "", failed))
         }
     }
 
@@ -200,8 +205,12 @@ Rectangle {
     property bool emojiOpen: false
     // The recents (Emoji.quick, the web's quick reactions) and then the
     // common ones, as text: the keyboard's emoji font draws them, nothing
-    // loads. Server emoji need the desktop's placeholder machinery.
-    readonly property var emojiRow: {
+    // loads. Server emoji need the desktop's placeholder machinery. Taken
+    // as the row opens, so a pick does not reorder it under the finger.
+    property var emojiRow: []
+    onEmojiOpenChanged: {
+        if (!emojiOpen)
+            return
         const out = []
         const common = ["😂", "❤️", "👍", "😭", "🙏", "🔥", "😊", "🎉", "😍", "👀", "💀", "✨"]
         const recent = JSON.parse(Emoji.quick || "[]").map(c => c.e).filter(e => e && !e.startsWith("<"))
@@ -209,7 +218,7 @@ Rectangle {
             if (out.indexOf(e) < 0)
                 out.push(e)
         }
-        return out
+        root.emojiRow = out
     }
 
     implicitHeight: top.implicitHeight + fieldRow.height
@@ -241,6 +250,10 @@ Rectangle {
         border.color: Theme.lineStrong
         Accessible.role: Accessible.List
         Accessible.name: qsTr("Members")
+        // The panel floats over the messages: no tap on it reaches them.
+        TapHandler {
+            gesturePolicy: TapHandler.ReleaseWithinBounds
+        }
 
         ListView {
             id: suggestions
@@ -292,6 +305,7 @@ Rectangle {
                 }
                 TapHandler {
                     id: suggestionTap
+                    gesturePolicy: TapHandler.ReleaseWithinBounds
                     onTapped: root.insertMention(suggestion.username)
                 }
             }
@@ -419,6 +433,7 @@ Rectangle {
                 }
                 TapHandler {
                     id: emojiTap
+                    gesturePolicy: TapHandler.ReleaseWithinBounds
                     onTapped: {
                         Native.haptic(Native.Tick)
                         root.insertText(emojiCell.modelData)
@@ -433,6 +448,7 @@ Rectangle {
             height: implicitHeight
             onChooseAnother: root.pickMedia()
             onExplain: text => root.showNotice(text)
+            onPreview: (images, index) => root.openImages(images, index)
         }
     }
 

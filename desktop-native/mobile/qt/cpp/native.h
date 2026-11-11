@@ -59,8 +59,9 @@ public:
   Q_INVOKABLE void leave() const;
   // Commits the core's snapshot cache (the app going to the background).
   Q_INVOKABLE void flushCache() const;
-  // The system photo picker; the copies' paths arrive as mediaPicked.
-  Q_INVOKABLE void pickMedia();
+  // The system photo picker; the copies' paths arrive as mediaPicked. An
+  // item over `limitBytes` (the account's attachment limit) is not copied.
+  Q_INVOKABLE void pickMedia(qreal limitBytes);
 
   // From the shim, on the GUI thread.
   void onBackProgress(qreal progress);
@@ -69,7 +70,7 @@ public:
   void onIme(qreal dp);
   void readConfiguration();
   void onMediaCopying();
-  void onMediaPicked(const QStringList& paths);
+  void onMediaPicked(const QStringList& paths, int failed);
 
 signals:
   void handlesBackChanged();
@@ -79,8 +80,9 @@ signals:
   void backCancelled();
   void backInvoked();
   void pickingMediaChanged();
-  // Local copies of what was picked (none: nothing was, or none could be read).
-  void mediaPicked(const QStringList& paths);
+  // Local copies of what was picked (none: cancelled); `failed` items could
+  // not be read.
+  void mediaPicked(const QStringList& paths, int failed);
 
 protected:
   bool eventFilter(QObject* watched, QEvent* event) override;
@@ -94,6 +96,12 @@ private:
   qreal m_maxFling = 8000;
   qreal m_deceleration = 1500;
   bool m_pickingMedia = false;
+  // A picker was started and its result has not come back. Qt keeps one
+  // callback per request code, so a second picker must not start meanwhile.
+  bool m_pickerOpen = false;
+  // The app went to the background since (the picker did open).
+  bool m_leftSincePick = false;
+  qint64 m_pickStartedMs = 0;
 };
 
 // The shared desktop QML's `Yap.Chrome` singletons, mobile side.

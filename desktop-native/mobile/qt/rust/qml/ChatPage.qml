@@ -225,6 +225,7 @@ Item {
             root.followEnd = true
             Chat.sendMessage(text, replyToId)
         }
+        onOpenImages: (images, index) => viewer.show(images, index)
     }
 
     // Over everything on the page, the header included.

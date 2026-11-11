@@ -39,6 +39,9 @@ Item {
         root.dragY = 0
         root.chrome = true
         root.shown = true
+        // The viewer fills the page: the keyboard goes, and keys with it.
+        Qt.inputMethod.hide()
+        root.forceActiveFocus()
         pager.positionViewAtIndex(root.index, ListView.Beginning)
         pager.currentIndex = root.index
         enterAnim.restart()
@@ -115,6 +118,9 @@ Item {
 
             property real zoom: 1
             readonly property bool zoomed: zoom > 1.01
+            // A pinch ran in this touch: the finger left after it must not
+            // swipe the viewer away. Cleared on the next first touch.
+            property bool pinched: false
             // Where a double-tap zooms about (content coordinates).
             property point zoomCenter
 
@@ -170,6 +176,7 @@ Item {
                 height: Math.max(page.contentHeight, page.height)
                 property real startZoom: 1
                 onPinchStarted: {
+                    page.pinched = true
                     zoomAnim.stop()
                     startZoom = page.zoom
                 }
@@ -189,13 +196,13 @@ Item {
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
                     smooth: true
-                    mipmap: true
                     // Twice the screen: sharp at 2x, never the camera's full size.
                     sourceSize: Qt.size(Math.round(page.width * 2), Math.round(page.height * 2))
                     source: page.modelData.url || ""
                 }
 
                 TapHandler {
+                    onPressedChanged: if (pressed) page.pinched = false
                     onTapped: (eventPoint, button) => {
                         if (tapCount === 1)
                             chromeTimer.restart()
@@ -244,7 +251,7 @@ Item {
             // Swipe down (or up) to put the viewer away, while fitted.
             DragHandler {
                 id: dismissDrag
-                enabled: !page.zoomed
+                enabled: !page.zoomed && !page.pinched
                 target: null
                 xAxis.enabled: false
                 yAxis.enabled: true
@@ -327,7 +334,8 @@ Item {
                 tone: "onMedia"
                 iconName: "share"
                 tip: qsTr("Share")
-                enabled: root.current !== null && !!root.current.url
+                // A link only: an attached picture's local copy has none yet.
+                visible: root.current !== null && /^https?:/.test(String(root.current.url))
                 onClicked: Native.share(root.current.url)
             }
         }
