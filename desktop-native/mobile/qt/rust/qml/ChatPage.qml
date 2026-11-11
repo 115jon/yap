@@ -514,6 +514,7 @@ Item {
     // The message sheet and what it leads to, over the page.
     MessageActions {
         id: actions
+        prefetchEmoji: true
         anchors.fill: parent
         z: 9
         onReplyRequested: (messageId, author, text) => root.startReply(messageId, author, text)
