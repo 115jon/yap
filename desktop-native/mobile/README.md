@@ -27,7 +27,7 @@ that feel off, each with a known fix.
 - **Shared, one copy:** the `yap-ui` crate (`desktop-native/rust/crates/yap-ui`),
   which both apps link. It holds the `Yap.Ui` QML module (`Theme`,
   `ShellState`, `MessageDelegate`, `TreeRow`, `ServerIcon` and the
-  components they use: 34 files, 5,130 lines), the domain objects (`Session`, `Nav`,
+  components they use: 36 files, 5,248 lines), the domain objects (`Session`, `Nav`,
   `Chat`, `Voice`, `Profile` and the portable singletons such as `Admin`,
   `Emoji`, `Extras`, `Invites`, `Panels`), all 13 list models, the
   GUI-thread registry, the core's runtime and gateway, and the portable C++
@@ -68,10 +68,10 @@ for any one surface (for example a call screen) if Qt ever falls short there.
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Core                          | `yap-core`, `yap-cache`, `yap-realtime`, `yap-protocol`, `yap-anim`; `gateway.rs`                                                                                                                                                                                                                                                                     | TLS backend (rustls on mobile), the token store (an app-private file; Keystore in a release), the config and data folder handed in (`yap_mobile_init`)                                                                                                                                            |
 | Models and bridge objects     | yap-ui: every `QAbstractListModel` (servers, tree, messages, members, DMs, …), `Session`/`Nav`/`Chat`/`Voice`/`Profile` and the portable singletons, one definition for both apps; the registry and the order view updates apply in                                                                                                                   | The app's `Platform` (`yap_ui::platform`): HTTP client, realtime, token store, start and quit hooks, the view updates only it shows (toasts, sounds, badge), uploads, share sources, video. Desktop: `rust/src/native.rs`; mobile: `qt/rust/src/client.rs`                                        |
-| Theme tokens                  | `Theme.qml` (palettes, type roles, motion, spacing), `ShellState.qml`                                                                                                                                                                                                                                                                                 | Which theme (`Theme.themeId` follows the system's light/dark), and the input flags the shell binds: `Theme.touch`, `Theme.hoverUi`, `Theme.textScale`                                                                                                                                             |
+| Theme tokens                  | `Theme.qml` (palettes, type roles, motion, spacing), `ShellState.qml`                                                                                                                                                                                                                                                                                 | Which theme (Settings' choice; Match system, the default, follows the light/dark mode), the text size factor (`Prefs`), and the input flags the shell binds: `Theme.touch`, `Theme.hoverUi`, `Theme.textScale`                                                                                                                                             |
 | Components and list delegates | `Yap.Ui`: `MessageDelegate` (the message renderer: grouping, replies, reactions, mention and pending rows, Markdown via Qt rich text), `TreeRow`, `ChannelRow`, `CategoryLabel`, `MemberRow`, `ServerIcon`, `RailPill`, `CountBadge`, `Avatar`, `DisplayName`, `Icon`, `IconKey`, `KitButton`, `Led`, `Spinner`, `LinkText`, `LazyPopup`, `Tooltip` … | Each app's side of the four seams the shared files import from `Yap.Platform`, with the same API: `EmbedCard`, `MessageMedia`, `VoiceStatusLine`, `VoiceStreamHoverCard` (mobile: `qt/rust/qml/seams`; desktop: its own `com.yap.native` files)                                                   |
 | C++                           | yap-ui `cpp/`: `AnimatedPicture` and `ViewportWatch` (GIF/APNG/WebP through yap-anim), the `icon` and `dither` image providers, `yap_ui_register(engine)`; `yap_ui.cmake` compiles them in each app's target                                                                                                                                          | `Native` (the platform shim) and `main.cpp`. The Windows C++ (window chrome, toasts, WebView2, Media Foundation, D3D11 video) stays desktop-only                                                                                                                                                  |
-| Page layouts and navigation   | `ConnectionStrip`, `UnreadBanner`, `PresenceAvatar`, `GameLine` (moved into `Yap.Ui` for the phone pages; the desktop uses the same files)                                                                                                                                                                                                            | The pager and its pages (`Pager`, `DrawerPage`, `DmsPane`, `ChatPage`, `MembersPage`), the stacked `ProfilePage` and `SettingsPage`, phone-sized rows where the desktop's are pointer-sized (`DmItem`, `MemberItem`, `AccountBar`), `PlatformList` (the platform's scroll feel). See "Navigation" |
+| Page layouts and navigation   | `ConnectionStrip`, `UnreadBanner`, `PresenceAvatar`, `GameLine` (moved into `Yap.Ui` for the phone pages; the desktop uses the same files)                                                                                                                                                                                                            | The pager and its pages (`Pager`, `DrawerPage`, `DmsPane`, `ChatPage`, `MembersPage`), the stacked `ProfilePage`, `SettingsPage` and `FriendsPage`, phone-sized rows where the desktop's are pointer-sized (`DmItem`, `MemberItem`, `AccountBar`), `PlatformList` (the platform's scroll feel). See "Navigation" |
 | Shell                         | —                                                                                                                                                                                                                                                                                                                                                     | `Main.qml` (edge to edge, phases, foreground/background), the Android manifest, the Java shim                                                                                                                                                                                                     |
 
 ### How the sharing is built
@@ -227,9 +227,9 @@ Not there yet:
   desktop's `DmRow` and `MemberEntry` carry right-click menus, nameplates
   and hover prefetch, and are 32 to 40 px high; sharing them waits for the
   touch gating of the shared delegates.
-- Settings is a placeholder with Sign out.
 - The rail has no unread-DM avatar keys under Home (the desktop's), no
-  create-server tile, no friends or shop rows.
+  create-server tile and no shop row. Friends is the first row of Home's
+  pane ("Settings and Friends").
 - Voice channels in the tree do nothing on a tap.
 - Side by side, the image viewer covers the chat column, not the window:
   it lives in the chat page.
@@ -562,6 +562,69 @@ of the repository; CI decodes the `QT_GOOGLE_SERVICES_JSON_BASE64` secret
 into the build folder. Without it the APK builds and runs, with no pushes.
 `dev.yap.app` is registered in the Firebase project the server's
 `FCM_SERVICE_ACCOUNT` sends from.
+
+### Settings and Friends
+
+Both are pages of the stack (they slide in from the right), built on the
+desktop's objects with phone list layouts:
+
+- **Settings** (the account row at the drawer's foot): who is signed in,
+  then numbered sections under 2px ink rules (the desktop's rule cards).
+  _Status_: Online, Idle, Do not disturb, Invisible and the custom status
+  line (`Session.setStatus`). _Appearance_: the core's seven themes as
+  thumbnails (`Settings.chooseTheme`, kept in this device's
+  `appearance.json`; "Use on all my devices" is `Settings.changeThemeSync`).
+  A phone starts on Match system: `yap_mobile_init` seeds `system` before
+  the core reads the file (the core's default is the desktop's `dark`), and
+  `Main.qml` maps `system` to the light or dark mode, live. _Text size_: a
+  factor (0.85, 1, 1.15, 1.3) over the system's font scale, kept in the
+  app's QSettings (`Prefs.textFactor`); `Main.qml` binds
+  `Theme.textScale` to `clamp(Native.fontScale * factor, 0.85, 2)` when the
+  shared `Theme` has that property, and the section's sample is drawn at
+  the scale either way. _Notifications_ shows only when the shim exposes
+  `Native.notificationsEnabled` (the push work), and Text size only when
+  the shared `Theme` has `textScale` (the touch tokens' work); until then
+  the factor is kept but nothing shows it. _Devices_: the account's
+  sessions (`Settings.loadSessions`); another device signs out after a
+  confirm (`Extras.revokeSession`). _About_: the APK's version name, the
+  licence and the privacy policy. _Sign out_ asks first, in place.
+- **Friends** (the first row of Home's pane, with the incoming count): the
+  desktop's `Friends` object behind four tabs (Online, All, Pending,
+  Blocked; the page opens on Pending while requests wait) and Add friend by
+  username. A friend's row opens the DM; anyone else's opens the profile.
+  Requests carry Accept and Ignore or Cancel, a friend's more key opens
+  Profile, Remove and Block in the row, a blocked row has Unblock. Remove,
+  Ignore, Cancel and Block confirm in place (`InlineConfirm`) until the
+  shared bottom sheet lands.
+
+`SettingSwitch` and `TabRule` moved from the desktop's components into
+`Yap.Ui` for these pages; the desktop uses the same files.
+
+Verified on the emulator against the test accounts: Do not disturb and a
+custom status set on the phone and read back as the peer from
+`/api/friends`; themes switched live (Midnight, back to Match system) and
+the choice and the Larger factor kept across a force-stop; a request from
+the peer arriving on Pending, accepted on the phone (the peer's list showed
+the friendship), removed after the confirm, then a request sent from the
+phone's Add friend and accepted by the peer arriving live; Message opening
+the DM; Block from a friend's row (the account's list showed the block)
+and Unblock from the Blocked tab; Sign out returning to sign-in and a new
+device code signing in again. The factor was set and kept across a
+restart on a build where the section still showed. Not verified: the text
+factor's effect across the app (the shared `Theme.textScale` is not on
+main yet), the Notifications section (no push shim yet), signing out
+another device (the account had one session), and the licence links
+opening a browser. Known: the status
+bar's icons do not follow a theme that differs from the system's mode
+(dark icons on Midnight under a light system) until the shim's
+`Native.lightBars` lands; `Main.qml` binds it when present.
+
+<p>
+<img src="docs/qt-settings.png" width="180" alt="Qt: Settings, account and status">
+<img src="docs/qt-settings-theme.png" width="180" alt="Qt: Settings in Midnight, the theme thumbnails">
+<img src="docs/qt-friends-pending.png" width="180" alt="Qt: Friends, an incoming request">
+<img src="docs/qt-friends-actions.png" width="180" alt="Qt: Friends, a friend's actions">
+</p>
 
 ### Build and run the Qt app
 
