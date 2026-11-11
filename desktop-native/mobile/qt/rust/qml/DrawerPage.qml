@@ -86,7 +86,6 @@ Item {
                     TapHandler {
                         id: homeTap
                         onTapped: {
-                            Native.haptic(Native.Tick)
                             // The direct message opened last, or Home.
                             Nav.selectHomeLast()
                         }
@@ -109,7 +108,6 @@ Item {
                 width: servers.width
                 active: !Nav.home && icon.serverId === Nav.activeServerId
                 onSelected: {
-                    Native.haptic(Native.Tick)
                     Nav.selectServer(icon.serverId)
                 }
             }
@@ -183,7 +181,6 @@ Item {
                 onSelected: channelId => {
                     if (row.kind !== "channel" || row.voice)
                         return
-                    Native.haptic(Native.Tick)
                     Nav.selectChannel(channelId)
                     root.conversationOpened()
                 }

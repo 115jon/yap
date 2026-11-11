@@ -17,6 +17,10 @@ Item {
 
     // The message the surfaces act on, a snapshot of its row.
     property var message: ({})
+    // One of the surfaces is up: the page under it holds still (the pager
+    // does not pan under a sheet).
+    readonly property bool shown: [messageSheet, emojiSheet, reactionSheet, deleteSheet, selectPage]
+        .some(surface => surface.item !== null && surface.item.up)
 
     signal replyRequested(string messageId, string author, string text)
     signal editRequested(string messageId)
