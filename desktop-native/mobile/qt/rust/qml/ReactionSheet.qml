@@ -157,7 +157,7 @@ BottomSheet {
         }
         Spinner {
             anchors.centerIn: parent
-            visible: sheet.opened && sheet.tabs.length === 0
+            running: sheet.opened && sheet.tabs.length === 0
         }
     }
 }

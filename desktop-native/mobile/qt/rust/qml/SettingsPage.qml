@@ -116,6 +116,13 @@ Rectangle {
         boundsBehavior: Flickable.StopAtBounds
         flickDeceleration: Native.flingDeceleration
         maximumFlickVelocity: Native.maxFlingVelocity
+        // The sign-out question opens under the page's last key: the page
+        // follows it down once, or its two keys sat under the gesture bar.
+        property bool revealEnd: false
+        onContentHeightChanged: if (revealEnd) {
+            revealEnd = false
+            contentY = Math.max(0, contentHeight - height)
+        }
 
         Column {
             id: body
@@ -410,7 +417,10 @@ Rectangle {
                     variant: "destructive"
                     iconName: "logout"
                     text: qsTr("Sign out")
-                    onClicked: root.signOutArmed = true
+                    onClicked: {
+                        scroll.revealEnd = true
+                        root.signOutArmed = true
+                    }
                 }
                 Loader {
                     width: parent.width
@@ -419,7 +429,10 @@ Rectangle {
                     sourceComponent: InlineConfirm {
                         consequence: qsTr("Sign out of Yap on this phone? Your messages stay on your account.")
                         confirmLabel: qsTr("Sign out")
-                        onCancelled: root.signOutArmed = false
+                        onCancelled: {
+                            scroll.revealEnd = false
+                            root.signOutArmed = false
+                        }
                         onConfirmed: Session.signOut()
                     }
                 }

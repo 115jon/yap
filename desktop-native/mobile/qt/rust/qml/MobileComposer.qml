@@ -489,7 +489,8 @@ Rectangle {
             anchors.rightMargin: 4
             anchors.verticalCenter: parent.verticalCenter
             height: parent.height - 16
-            radius: height > 48 ? Theme.radiusSheet * 3 : height / 2
+            // DESIGN.md: a field is squared like every key and plate.
+            radius: Theme.radius
             color: Theme.ply1
             border.color: field.activeFocus ? Theme.lineStrong : Theme.line
 

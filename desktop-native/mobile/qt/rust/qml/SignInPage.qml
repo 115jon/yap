@@ -49,8 +49,20 @@ Item {
                 text: Session.userCode
                 color: Theme.ink1
                 font: Theme.type.deviceCode
+                // The plate reads the code out; not twice.
+                Accessible.ignored: true
             }
+            Accessible.role: Accessible.Button
+            Accessible.name: qsTr("Copy the code %1").arg(Session.userCode)
+            Accessible.onPressAction: Native.copy(Session.userCode)
+            // A tap copies it, and so does a long press (Android 13 and
+            // later show their clipboard chip; before that only the haptic
+            // says so).
             TapHandler {
+                onTapped: {
+                    Native.copy(Session.userCode)
+                    Native.haptic(Native.Tick)
+                }
                 onLongPressed: {
                     Native.copy(Session.userCode)
                     Native.haptic(Native.LongPress)

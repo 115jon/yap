@@ -16,9 +16,9 @@ import Yap.Ui
 //   }
 //   sheet.open()
 //
-// - It is as tall as its content, up to 60 % of the window. Taller content
-//   rests there and a pull up takes it to full height (under the status
-//   bar); `startFull` opens it there.
+// - It is as tall as its content when that fits in 80 % of the window.
+//   Taller content rests at 60 % and a pull up takes it to full height
+//   (under the status bar); `startFull` opens it there.
 // - A drag down closes it (a fling does from anywhere), a tap on the scrim
 //   closes it, and so does Back. The predictive back gesture moves it
 //   before it commits (Native's back layers).
@@ -116,8 +116,12 @@ FocusScope {
     readonly property real natural: chrome + contentHeight + bottomPad
     // The top detent: everything, or the window under the status bar.
     readonly property real full: Math.min(natural, height - topGap)
-    // The resting detent: 60 % of the window; with the keyboard up, the top.
-    readonly property real rest: Native.imeHeight > 0 ? full : Math.min(full, Math.round(height * 0.6))
+    // The resting detent: everything when it fits in 80 % of the window (a
+    // menu's last row, often the destructive one, is not left under the
+    // fold), else 60 % of the window; with the keyboard up, the top. So a
+    // sheet whose content grows past 80 % while it is open drops to 60 %.
+    readonly property real rest: Native.imeHeight > 0 || full <= Math.round(height * 0.8)
+        ? full : Math.min(full, Math.round(height * 0.6))
     readonly property bool expandable: full > rest + 1
     readonly property bool atTop: detent === 2 || (detent === 1 && !expandable)
 

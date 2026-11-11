@@ -3,6 +3,7 @@ import QtQuick
 import Yap.Mobile
 import com.yap.mobile
 import Yap.Ui
+import Yap.Media
 
 // The image viewer, phone layout: a message's pictures full screen on a
 // black scrim, over the chat. Pinch or double-tap to zoom (double-tap again
@@ -92,6 +93,12 @@ Item {
         color: "#000000"
         opacity: root.enter * (1 - root.dragFraction * 0.85) * (1 - root.backProgress * 0.5)
     }
+    // While the viewer is up nothing under it takes a touch: without this
+    // the chat behind it scrolled with the swipe that puts the viewer away,
+    // or took it.
+    MouseArea {
+        anchors.fill: parent
+    }
 
     ListView {
         id: pager
@@ -123,6 +130,18 @@ Item {
             property bool pinched: false
             // Where a double-tap zooms about (content coordinates).
             property point zoomCenter
+
+            readonly property string url: modelData.url || ""
+            readonly property bool webp: modelData.mime === "image/webp" || /\.webp($|[?#])/i.test(url)
+            readonly property bool animated: modelData.gif === true || webp
+            // AnimatedPicture.Status has Image.Status's order.
+            readonly property int status: !animated ? picture.status
+                : motion.item ? motion.item.status : Image.Loading
+            // Zoomed once: the picture is decoded at twice the screen from
+            // then on. Latched, so a pinch that hovers around 1x does not
+            // ask for the file again each time it crosses.
+            property bool sharp: false
+            onZoomedChanged: if (zoomed) sharp = true
 
             width: pager.width
             height: pager.height
@@ -191,14 +210,47 @@ Item {
 
                 Image {
                     id: picture
-                    width: page.contentWidth
-                    height: page.contentHeight
-                    fillMode: Image.PreserveAspectFit
+                    // Fitted in the page by hand, with Stretch: under
+                    // PreserveAspectFit Qt decodes to cover sourceSize (the
+                    // larger ratio, enlarging if it must), which made a
+                    // landscape picture 2.2 screens wide (18 MB) and a
+                    // portrait one softer than the screen.
+                    readonly property real fit: implicitWidth > 0 && implicitHeight > 0
+                        ? Math.min(page.contentWidth / implicitWidth, page.contentHeight / implicitHeight) : 0
+                    x: (page.contentWidth - width) / 2
+                    y: (page.contentHeight - height) / 2
+                    width: implicitWidth * fit
+                    height: implicitHeight * fit
+                    visible: !page.animated
+                    fillMode: Image.Stretch
                     asynchronous: true
                     smooth: true
-                    // Twice the screen: sharp at 2x, never the camera's full size.
-                    sourceSize: Qt.size(Math.round(page.width * 2), Math.round(page.height * 2))
-                    source: page.modelData.url || ""
+                    // Decoded to fit the screen's own pixels, and twice
+                    // that once zoomed (the fitted copy stays up until the
+                    // sharper one is in); never larger than the file.
+                    retainWhileLoading: true
+                    sourceSize: Qt.size(Math.round(page.width * Screen.devicePixelRatio * (page.sharp ? 2 : 1)),
+                                        Math.round(page.height * Screen.devicePixelRatio * (page.sharp ? 2 : 1)))
+                    source: page.animated ? "" : page.url
+                }
+                // A GIF or an animated WebP plays while it is the picture
+                // on screen (the shared AnimatedPicture, as in the list).
+                // The page's size, scaled by the zoom: AnimatedPicture
+                // decodes for the size it is given and fetches the file
+                // again for each new one, so it must not follow a pinch.
+                Loader {
+                    id: motion
+                    width: page.width
+                    height: page.height
+                    scale: page.zoom
+                    transformOrigin: Item.TopLeft
+                    active: page.animated
+                    sourceComponent: AnimatedPicture {
+                        stream: !page.webp
+                        source: page.url
+                        fillMode: AnimatedPicture.PreserveAspectFit
+                        playing: root.shown && page.ListView.isCurrentItem
+                    }
                 }
 
                 TapHandler {
@@ -227,11 +279,12 @@ Item {
 
             Spinner {
                 anchors.centerIn: parent
-                running: picture.status === Image.Loading
+                // Not over a picture that is up while its sharper copy loads.
+                running: page.status === Image.Loading && (page.animated || picture.implicitWidth === 0)
                 onMedia: true
             }
             Column {
-                visible: picture.status === Image.Error
+                visible: page.status === Image.Error
                 anchors.centerIn: parent
                 spacing: 8
                 Icon {

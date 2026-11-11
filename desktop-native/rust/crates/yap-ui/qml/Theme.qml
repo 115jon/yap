@@ -280,8 +280,11 @@ QtObject {
     }
     function richText(html, revealed, mentioned) {
         const colors = revealed ? richRevealed : richColors
-        const out = html.replace(/%[A-Z]+%/g, token => token === "%MENTIONBG%" && mentioned
+        const colored = html.replace(/%[A-Z]+%/g, token => token === "%MENTIONBG%" && mentioned
             ? mentionOnMention : colors[token] ?? token)
+        // On a phone a code block's long line wraps: the column is narrow
+        // and nothing scrolls sideways, so the line ran off the screen.
+        const out = touch ? colored.replace(/<pre style="/g, "<pre style=\"white-space:pre-wrap; ") : colored
         return textScale === 1 ? out : scaleRich(out)
     }
     // The core writes its rich text at the design size: the px sizes it

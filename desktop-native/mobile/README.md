@@ -127,7 +127,7 @@ One crate, one QML module, two consumers. No file is copied:
 | Text selection handles            | **Native**: Qt Quick's text fields draw Android-style handles and the cut/copy/paste bar                                                           | `persistentSelection` on the composer. In the list a press on a message's text belongs to the row (`selectByMouse: !Theme.touch`); the sheet's Select text puts the text on a page of its own                                                                                                                                                                                                                                              | Verified on that page: a long press selects a word and shows the handles and the Copy / Select all bar                                               |
 | 60/120 Hz                         | **Native**: the threaded render loop is paced by vsync at the display's rate                                                                       | `[frames]` pacing log (the render thread's swap intervals)                                                                                                                                                                                                                                                                                                                                                                                 | 60 Hz verified (the emulator's display); 120 Hz needs a device                                                                                       |
 | Hover and right-click affordances | Qt synthesises hover from touch                                                                                                                    | `Theme.hoverUi` off: the shared delegates' hover handlers, tints, hover-revealed keys, tooltips and hover prefetch are gated on it. `Theme.touch` on: a long press on a message emits what a right click does (`menuRequested`), rows tint while pressed, rows and keys take the touch sizes, a small key answers within 48 px (`Theme.hitMin`), and the right-click handlers are off (a touch carries no button, so a tap passed for one) | Verified: no hover bar or tint after a tap; a long press anywhere on a message, its text included, opens the sheet                                   |
-| Bottom sheets                     | **No.** Controls' `Drawer` has no detents and no nested scrolling                                                                                  | `BottomSheet.qml`: a scrim, 4 px top corners, a resting detent at 60 % of the window and a pull to full height, a drag or fling down to close, an inner list that hands its top edge to the sheet, the keyboard pushing it up. Back closes it and the predictive back gesture moves it first (`Native.pushBackLayer`)                                                                                                                      | Verified: open, pull to full, drag to close, Back, the back preview, a search field with the keyboard up                                             |
+| Bottom sheets                     | **No.** Controls' `Drawer` has no detents and no nested scrolling                                                                                  | `BottomSheet.qml`: a scrim, 4 px top corners, as tall as its content when that fits in 80 % of the window, else a resting detent at 60 % and a pull to full height, a drag or fling down to close, an inner list that hands its top edge to the sheet, the keyboard pushing it up. Back closes it and the predictive back gesture moves it first (`Native.pushBackLayer`)                                                                  | Verified: open, pull to full, drag to close, Back, the back preview, a search field with the keyboard up                                             |
 | Message actions                   | —                                                                                                                                                  | `MessageSheet` (quick reactions, Reply, Edit, View reactions, Copy text, Select text, Share, Copy link, Mark unread, Profile, Remove embeds, Delete), `EmojiSheet` on the desktop picker's `Emoji` and `EmojiGridModel` (search, skin tone, recents), `ReactionSheet` on `Extras.reactions`, `ConfirmSheet`, `SelectTextPage`, and `SwipeReply` (a leftward drag of the row, armed at 64 px)                                               | Verified, and read back as the peer account: a reaction, a reply, an edit and a delete. Profile only loads `Profile`; its page is the shell's        |
 | System bar icons                  | Not relied on                                                                                                                                      | Shim: `Native.lightBars` (`WindowInsetsController.setSystemBarsAppearance`; the view flags before API 30), bound to the theme's ground. `Native.holdDarkBars` keeps them light over a dark surface                                                                                                                                                                                                                                         | Verified: dark icons on the light theme, light icons on the dark one. `holdDarkBars` has no user yet                                                 |
 
@@ -306,8 +306,9 @@ Qt Quick:
    clipboard chip; before that there is no confirmation (no toast host yet).
 4. The text size is read when the app comes back to the front, not while
    it is open.
-5. A sheet at its resting height runs under the gesture bar: its last row
-   is reachable only after a pull up.
+5. A sheet taller than 80 % of the window rests at 60 % and runs under the
+   gesture bar there: its last row is reachable only after a pull up. (A
+   sheet that fits, the message sheet included, rests at its full height.)
 6. Swipe to reply takes leftward drags that start on a message. A pager or
    a drawer behind the chat gets the rightward ones and the header's.
 7. The first cold start is slow (qmlcachegen compiles the QML to C++ but
@@ -404,9 +405,51 @@ Next savings, not measured yet:
   `yap_mobile_flush` on going to the background (done) and leave by moving
   the task back, never by quitting the engine or letting the system finish
   the activity (see "Navigation": Back at the root).
-- **Memory.** 148 MB after a long scroll. Next step: a heap profile of
-  `MessageDelegate` on a phone (the desktop's delegate carries hover cards,
-  popups and loaders a phone never opens).
+- **Memory.** 156 MB PSS after a long scroll on the emulator (2026-11-11;
+  native heap 73 MB, from 96 MB), of which about 18 MB is the emulator's GL
+  pipe (`QemuPipeStream`), which a phone does not have. heapprofd on the
+  build before that pass (a cold start, `#general`, 24 flings) put the
+  native heap at: message rows and the other delegates 24 MB (a message row
+  costs roughly 270 KB), decoded pictures 14 MB, the brand fonts 6 MB. Since
+  then the fonts are read from the mapped resource (Qt copied each file onto
+  the heap), `DisplayName` builds its 20 animation objects only for a name
+  style that moves, and pictures are decoded at the size they are drawn.
+  The chat list no longer reuses rows (below): after 20 flings 119 MB PSS
+  (native heap 55 MB) against 131 MB (66 MB) with reuse in the same build
+  and session; the pool kept rows scrolled past, and their decoded
+  pictures, alive until they were handed out again. Keeping a third of a
+  screen of rows built past each edge of the chat list, not a whole one, is
+  not kept: with reuse it saved 10 MB, without it nothing (134 MB in that
+  session) and a fling builds more rows (183 against 129). Next: the shared
+  delegate's hover handlers, tooltips and loaders, which a phone never
+  opens, behind `Theme.hoverUi` (with a desktop comparison).
+- **The chat list's end.** Builds of the 2026-11-11 pass hung (the GUI
+  thread at 100%, the process past 1 GB) when the open channel was picked
+  again in the drawer with a message of pictures at the top of the screen.
+  The list rebuilt itself round after round, and each round built the row's
+  pictures again; with a GIF player built with its row that was a decoder
+  and a first frame a round (the likely source of the memory: nothing
+  queued to the GUI thread or marked for deletion is released while it does
+  not return to its event loop). The player is still built only once its
+  row has stood for 400 ms at its final size: a row built ahead of the
+  scroll and dropped costs no fetch, and the player is never resized
+  (attachments are private, so not in the disk cache: each size it is drawn
+  at is a download). Three things made the loop, and `ChatPage` now does
+  none of them:
+  - It called `positionViewAtEnd()` from the list's `contentHeight` and
+    `count` signals. Those fire inside the list's refill, which does not
+    nest: with the last row out of the cache buffer, the call released
+    every built row and built none. The end is now followed once per turn
+    of the event loop (`settle`, the desktop's `reflow`).
+  - Rows were reused. A pooled row handed to another message keeps its old
+    height until its columns lay out again, a pass after the list placed
+    it: a row of pictures placed short at the top of the screen grew by
+    hundreds of pixels, pushed the last rows out of the buffer, the list was
+    rebuilt around its end, and the row came back from the pool short
+    again. `reuseItems` is off for this list, as on the desktop; a new row
+    has its height when it is placed.
+  - A reset of the list (the open channel picked again) did not land it
+    again. It does now (`onModelReset`), as on the desktop.
 
 ## Licensing: owner decisions
 
@@ -864,8 +907,8 @@ Each crate was checked by compiling it for `x86_64-linux-android` (NDK 27).
    tokens in `Theme`, and the message sheet with its actions. Left: the
    "feels off" list above.
 3. Images over the core's rustls (a `QNetworkAccessManagerFactory`), then
-   avatars and attachments (done; GIF attachments still show their first
-   frame until `MessageMedia` uses `AnimatedPicture`).
+   avatars and attachments (done; GIFs and animated WebP play through
+   `AnimatedPicture`, in the list and in the viewer).
 4. Size: R8, bytecode-only QML, and a static-Qt measurement.
 5. CI: Qt for Android on Ubuntu; Qt for iOS on macOS for a compile check of
    the same QML module.

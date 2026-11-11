@@ -84,13 +84,26 @@ set_target_properties(yapqt PROPERTIES
 file(GLOB YAP_FONT_FILES RELATIVE ${DESKTOP}/assets CONFIGURE_DEPENDS ${DESKTOP}/assets/fonts/*.ttf)
 file(STRINGS ${DESKTOP}/assets/icons/files.txt YAP_ICON_NAMES)
 list(TRANSFORM YAP_ICON_NAMES PREPEND icons/ OUTPUT_VARIABLE YAP_ICON_FILES)
-# Home's Yappy mark on the rail (Theme.homeMark).
-set(YAP_ASSET_FILES ${YAP_FONT_FILES} ${YAP_ICON_FILES} svg/home-light.svg svg/home-dark.svg)
+# Home's Yappy mark on the rail: the plain themes' (Theme.homeMark) and the
+# brand themes' own (Theme.themeMark: Miku, Spider-Man).
+set(YAP_ASSET_FILES ${YAP_ICON_FILES}
+  svg/home-light.svg svg/home-dark.svg
+  svg/home-miku-light.svg svg/home-miku-dark.svg
+  svg/home-spiderman-light.svg svg/home-spiderman-dark.svg)
 list(TRANSFORM YAP_ASSET_FILES PREPEND ${DESKTOP}/assets/ OUTPUT_VARIABLE YAP_ASSET_PATHS)
 qt_add_resources(yapqt yap_assets
   PREFIX /
   BASE ${DESKTOP}/assets
   FILES ${YAP_ASSET_PATHS})
+# The fonts are stored as they are (2 MB; rcc's default threshold left them
+# uncompressed already, -no-compress makes that a rule): main.cpp hands Qt
+# the mapped bytes, so no font is copied onto the heap.
+list(TRANSFORM YAP_FONT_FILES PREPEND ${DESKTOP}/assets/ OUTPUT_VARIABLE YAP_FONT_PATHS)
+qt_add_resources(yapqt yap_fonts
+  PREFIX /
+  BASE ${DESKTOP}/assets
+  FILES ${YAP_FONT_PATHS}
+  OPTIONS -no-compress)
 
 # Only the plugins the app uses (androiddeployqt otherwise ships every one
 # of each module): GIF, JPEG, WebP and SVG pictures; no QML debugger or

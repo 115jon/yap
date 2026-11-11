@@ -56,8 +56,27 @@ Item {
     function land() {
         root.userMoved = false
         root.followEnd = false
-        landing.tries = 5
-        landing.restart()
+        landing.tries = 6
+        landing.stop()
+        // The first try once this event is done (the list has its new rows
+        // by then), before a frame shows them where a reset left them.
+        Qt.callLater(root.landStep)
+    }
+    // One try: the divider's place, else the end. Not against a finger.
+    function landStep() {
+        if (root.userMoved || view.dragging || landing.tries <= 0)
+            return
+        if (!root.placeAtUnread()) {
+            // Before, so a row that sizes itself meanwhile is followed, and
+            // after: positionViewAtEnd() stops a fling, whose end reads
+            // followEnd from where the list was.
+            root.followEnd = true
+            view.positionViewAtEnd()
+            root.followEnd = true
+        }
+        landing.tries -= 1
+        if (landing.tries > 0)
+            landing.start()
     }
     // False when there is no divider to stand on.
     function placeAtUnread() {
@@ -90,21 +109,12 @@ Item {
         id: landing
         property int tries: 0
         interval: 60
-        onTriggered: {
-            if (root.userMoved)
-                return
-            if (!root.placeAtUnread()) {
-                root.followEnd = true
-                view.positionViewAtEnd()
-            }
-            tries -= 1
-            if (tries > 0)
-                start()
-        }
+        onTriggered: root.landStep()
     }
 
     // The banner's jump: the first unread message, under the banner.
     function jumpToUnread() {
+        landing.tries = 0
         landing.stop()
         root.placeAtUnread()
     }
@@ -142,6 +152,25 @@ Item {
 
     // Follow the newest message unless the user scrolled away from it.
     property bool followEnd: true
+
+    // The list keeps to its end as rows arrive and resize, once per turn of
+    // the event loop (the desktop's reflow()) and never from inside the
+    // list's own signals: its content height and count change in the middle
+    // of its refill, where positionViewAtEnd() cannot build a row. Called
+    // there with the last row pushed out of the cache buffer (a row above
+    // it grew), it released every built row and built none.
+    function settle() {
+        if (root.followEnd)
+            Qt.callLater(root.settleNow)
+    }
+    function settleNow() {
+        if (!root.followEnd || view.dragging)
+            return
+        view.positionViewAtEnd()
+        // It stops a fling, whose end reads followEnd from where the list
+        // was (a send of ours while the list still coasts).
+        root.followEnd = true
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -280,6 +309,16 @@ Item {
         anchors.rightMargin: SafeArea.margins.right
         clip: true
         bottomMargin: 8
+        // No reuse, as on the desktop (ChatView): a pooled row handed to
+        // another message keeps its old height until its columns lay out
+        // again, a pass after the list has placed it. A row of pictures
+        // placed short at the top of the screen then grew by hundreds of
+        // pixels and pushed the last rows out of the cache buffer; following
+        // the end rebuilt the list around its last row, the tall row came
+        // back from the pool short again, and that went round for good. A
+        // new row has its height before the list places it (but for a
+        // picture not seen before, which grows once, when its size is learnt).
+        reuseItems: false
         model: MessageListModel
 
         // The desktop's day rule (ChatView's section delegate, condensed).
@@ -346,7 +385,7 @@ Item {
             onLinkOpened: url => Qt.openUrlExternally(url)
             onImageOpened: (images, index) => viewer.show(images, index)
             // A send of ours that failed: the reject haptic, once, for the
-            // row that was sending (not a pooled row reused for a failed one).
+            // row that was sending.
             property string sending: ""
             Component.onCompleted: if (pending) sending = nonce
             onPendingChanged: if (pending) sending = nonce
@@ -365,7 +404,8 @@ Item {
             root.followEnd = false
         }
         onMovementEnded: root.followEnd = nearEnd()
-        onContentHeightChanged: if (root.followEnd) positionViewAtEnd()
+        onContentHeightChanged: root.settle()
+        // The keyboard and the typing line, not the list's own layout.
         onHeightChanged: if (root.followEnd) positionViewAtEnd()
         onContentYChanged: {
             if (contentY - originY < 600 && Chat.hasOlder && !Chat.olderLoading && moving)
@@ -380,7 +420,7 @@ Item {
             }
             Chat.setAtBottom(end)
         }
-        onCountChanged: if (root.followEnd) positionViewAtEnd()
+        onCountChanged: root.settle()
 
         Connections {
             target: MessageListModel
@@ -388,15 +428,20 @@ Item {
             function onAppended(mine) {
                 if (mine)
                     root.followEnd = true
-                if (root.followEnd)
-                    view.positionViewAtEnd()
+                root.settle()
+            }
+            // The core laid the conversation out again (the open channel
+            // picked again in the drawer): land again, as the desktop does.
+            // The list is at its first row after a reset.
+            function onModelReset() {
+                root.land()
             }
         }
     }
 
     Spinner {
         anchors.centerIn: view
-        visible: Chat.pageLoading && view.count === 0
+        running: Chat.pageLoading && view.count === 0
     }
 
     Text {

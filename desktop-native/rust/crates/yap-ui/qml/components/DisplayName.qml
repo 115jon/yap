@@ -101,56 +101,65 @@ Item {
         bobY = 0
     }
 
-    SequentialAnimation {
-        running: root.moving && root.effect === "pop"
-        loops: Animation.Infinite
-        // cubic-bezier(0.33, 1, 0.68, 1) over the whole cycle, split at
-        // the keyframes.
-        NumberAnimation { target: root; property: "popY"; to: -0.04 * root.font.pixelSize; duration: 1058; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.33, 1, 0.68, 1, 1, 1] }
-        NumberAnimation { target: root; property: "popY"; to: 0.01 * root.font.pixelSize; duration: 587; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.33, 1, 0.68, 1, 1, 1] }
-        NumberAnimation { target: root; property: "popY"; to: 0; duration: 705; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.33, 1, 0.68, 1, 1, 1] }
-    }
-    // Holo: one 6em tile per 4 s, linear. Pixel shine: a 2.8 s loop (the
-    // shader steps it).
-    NumberAnimation {
-        target: root
-        property: "phase"
-        running: root.moving && (root.effect === "holo" || root.effect === "pixel")
-        from: 0
-        to: 1
-        duration: root.effect === "holo" ? 4000 : 2800
-        loops: Animation.Infinite
-    }
-    // Ember (2.2 s, linear between keys): the flame climbs and falls; the
-    // glow flickers on its own beat.
-    SequentialAnimation {
-        running: root.moving && root.effect === "ember"
-        loops: Animation.Infinite
-        NumberAnimation { target: root; property: "rise"; to: 0.38; duration: 660 }
-        NumberAnimation { target: root; property: "rise"; to: 0.12; duration: 484 }
-        NumberAnimation { target: root; property: "rise"; to: 0.46; duration: 572 }
-        NumberAnimation { target: root; property: "rise"; to: 0; duration: 484 }
-    }
-    SequentialAnimation {
-        running: root.moving && root.effect === "ember"
-        loops: Animation.Infinite
-        NumberAnimation { target: root; property: "flicker"; to: 0.62; duration: 198 }
-        NumberAnimation { target: root; property: "flicker"; to: 0.95; duration: 176 }
-        NumberAnimation { target: root; property: "flicker"; to: 0.74; duration: 286 }
-        NumberAnimation { target: root; property: "flicker"; to: 1; duration: 242 }
-        NumberAnimation { target: root; property: "flicker"; to: 0.58; duration: 242 }
-        NumberAnimation { target: root; property: "flicker"; to: 0.9; duration: 242 }
-        NumberAnimation { target: root; property: "flicker"; to: 0.7; duration: 330 }
-        NumberAnimation { target: root; property: "flicker"; to: 1; duration: 220 }
-        PauseAnimation { duration: 264 }
-    }
-    // Wave on a name that cannot be split: the whole name 0 -> -0.12em -> 0
-    // over 1.6 s (rm-name-bob).
-    SequentialAnimation {
-        running: root.moving && root.wave && root.letters === null
-        loops: Animation.Infinite
-        NumberAnimation { target: root; property: "bobY"; to: -0.12 * root.em; duration: 800; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.45, 0, 0.55, 1, 1, 1] }
-        NumberAnimation { target: root; property: "bobY"; to: 0; duration: 800; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.45, 0, 0.55, 1, 1, 1] }
+    // The clocks, built only for a style that moves: a plain name (nearly
+    // every row) and a still style carry none of these objects. Once built
+    // they stay (a style that stops moving stops them through `running`, as
+    // it always did, not by being torn down while they run).
+    Loader {
+        active: root.animated || status === Loader.Ready
+        sourceComponent: Item {
+            SequentialAnimation {
+                running: root.moving && root.effect === "pop"
+                loops: Animation.Infinite
+                // cubic-bezier(0.33, 1, 0.68, 1) over the whole cycle, split at
+                // the keyframes.
+                NumberAnimation { target: root; property: "popY"; to: -0.04 * root.font.pixelSize; duration: 1058; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.33, 1, 0.68, 1, 1, 1] }
+                NumberAnimation { target: root; property: "popY"; to: 0.01 * root.font.pixelSize; duration: 587; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.33, 1, 0.68, 1, 1, 1] }
+                NumberAnimation { target: root; property: "popY"; to: 0; duration: 705; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.33, 1, 0.68, 1, 1, 1] }
+            }
+            // Holo: one 6em tile per 4 s, linear. Pixel shine: a 2.8 s loop (the
+            // shader steps it).
+            NumberAnimation {
+                target: root
+                property: "phase"
+                running: root.moving && (root.effect === "holo" || root.effect === "pixel")
+                from: 0
+                to: 1
+                duration: root.effect === "holo" ? 4000 : 2800
+                loops: Animation.Infinite
+            }
+            // Ember (2.2 s, linear between keys): the flame climbs and falls; the
+            // glow flickers on its own beat.
+            SequentialAnimation {
+                running: root.moving && root.effect === "ember"
+                loops: Animation.Infinite
+                NumberAnimation { target: root; property: "rise"; to: 0.38; duration: 660 }
+                NumberAnimation { target: root; property: "rise"; to: 0.12; duration: 484 }
+                NumberAnimation { target: root; property: "rise"; to: 0.46; duration: 572 }
+                NumberAnimation { target: root; property: "rise"; to: 0; duration: 484 }
+            }
+            SequentialAnimation {
+                running: root.moving && root.effect === "ember"
+                loops: Animation.Infinite
+                NumberAnimation { target: root; property: "flicker"; to: 0.62; duration: 198 }
+                NumberAnimation { target: root; property: "flicker"; to: 0.95; duration: 176 }
+                NumberAnimation { target: root; property: "flicker"; to: 0.74; duration: 286 }
+                NumberAnimation { target: root; property: "flicker"; to: 1; duration: 242 }
+                NumberAnimation { target: root; property: "flicker"; to: 0.58; duration: 242 }
+                NumberAnimation { target: root; property: "flicker"; to: 0.9; duration: 242 }
+                NumberAnimation { target: root; property: "flicker"; to: 0.7; duration: 330 }
+                NumberAnimation { target: root; property: "flicker"; to: 1; duration: 220 }
+                PauseAnimation { duration: 264 }
+            }
+            // Wave on a name that cannot be split: the whole name 0 -> -0.12em -> 0
+            // over 1.6 s (rm-name-bob).
+            SequentialAnimation {
+                running: root.moving && root.wave && root.letters === null
+                loops: Animation.Infinite
+                NumberAnimation { target: root; property: "bobY"; to: -0.12 * root.em; duration: 800; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.45, 0, 0.55, 1, 1, 1] }
+                NumberAnimation { target: root; property: "bobY"; to: 0; duration: 800; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.45, 0, 0.55, 1, 1, 1] }
+            }
+        }
     }
 
     // ProfileDisplayName's readable pair, then the anchors the effects mix
