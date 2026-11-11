@@ -37,6 +37,7 @@ Item {
         repeat: true
         // isListenTogetherProgressRunning: only a track with a length runs.
         running: root.shown && root.l.paused === false && (root.l.durationMs ?? 0) > 0
+            && Qt.application.state !== Qt.ApplicationSuspended
         onTriggered: root.tick()
     }
 

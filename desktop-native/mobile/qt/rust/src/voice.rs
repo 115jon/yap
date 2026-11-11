@@ -1,7 +1,7 @@
 //! Voice calls on Android: the desktop's call (`yap_voice::call`, on
 //! libwebrtc's own Android audio device module) behind the phone's
 //! [`Realtime`](yap_core::Realtime), and the calls the Android shim makes
-//! while Qt's event loop sleeps in the background (cpp/voice.cpp,
+//! without going through Qt's thread (cpp/voice.cpp,
 //! android/src/dev/yap/qtproto/voice): the call notification's Mute and
 //! Leave, and an audio focus loss (a phone call).
 //!

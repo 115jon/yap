@@ -3,11 +3,11 @@
 // (rust/src/voice.rs). The call itself is the core's; here are libwebrtc's
 // start-up (it needs the JVM and the application context), the microphone
 // permission, the audio routes for the QML, and what the call notification
-// shows. Qt's event loop sleeps while the app is in the background, so the
-// two directions that must work then skip it: the core tells the shim that
-// a call started or ended from its own thread (yap_mobile_call_active), and
-// the notification's Mute and Leave and an audio focus loss go from the
-// shim's thread straight to the core.
+// shows. Two directions do not go through Qt's thread, so they work whatever
+// it is doing (and in a process the system started for the service alone):
+// the core tells the shim that a call started or ended from its own thread
+// (yap_mobile_call_active), and the notification's Mute and Leave and an
+// audio focus loss go from the shim's thread straight to the core.
 
 #include "native.h"
 

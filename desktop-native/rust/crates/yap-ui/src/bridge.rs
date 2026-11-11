@@ -710,7 +710,7 @@ pub mod qobject {
 use core::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QList, QString, QStringList};
@@ -859,6 +859,9 @@ struct Pending {
     queued: bool,
 }
 
+/// View updates in one drain from which it is logged as a backlog.
+const BACKLOG: usize = 500;
+
 impl qobject::Session {
     pub fn start(self: Pin<&mut Self>) {
         let qt = self.qt_thread();
@@ -877,7 +880,18 @@ impl qobject::Session {
                     waiting.queued = false;
                     std::mem::take(&mut waiting.updates)
                 };
+                // A backlog means the Qt thread was not running its loop
+                // (a phone app in the background without Qt's
+                // `android.app.background_running`): say how long it took
+                // to catch up. A running loop drains a handful at a time.
+                let backlog = (updates.len() >= BACKLOG).then(|| (updates.len(), Instant::now()));
                 gui::apply(session, updates);
+                if let Some((count, started)) = backlog {
+                    eprintln!(
+                        "[view] backlog: {count} updates applied in {} ms",
+                        started.elapsed().as_millis()
+                    );
+                }
             });
             // Fails only once the Session is gone (shutdown): nothing will
             // drain, so drop what is waiting instead of growing forever.

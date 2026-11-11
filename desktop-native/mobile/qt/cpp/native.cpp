@@ -224,6 +224,9 @@ void Native::readConfiguration()
 
 void Native::haptic(Haptic kind) const
 {
+  // The QML keeps running in the background; nothing there is felt for.
+  if (QGuiApplication::applicationState() == Qt::ApplicationSuspended)
+    return;
 #ifdef Q_OS_ANDROID
   QJniObject::callStaticMethod<void>(kShim, "haptic", "(I)V", jint(kind));
 #else

@@ -31,7 +31,12 @@ Window {
     Binding {
         target: Theme
         property: "reducedMotion"
-        value: Native.reducedMotion
+        // Also while the app is off screen (suspended, its surface gone):
+        // Qt keeps running in the background (the manifest's
+        // background_running, for a call's view updates), and a talk LED's
+        // fade there would only tick the animation timer for a frame nobody
+        // draws.
+        value: Native.reducedMotion || Qt.application.state === Qt.ApplicationSuspended
     }
     // A phone: fingers, no hover, and the system's text size times this
     // phone's factor (Settings > Text size), within what the layouts take.

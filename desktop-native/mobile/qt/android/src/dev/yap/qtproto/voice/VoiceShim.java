@@ -22,12 +22,12 @@ import androidx.core.content.ContextCompat;
  * ongoing notification with Mute and Leave; the audio session (mode, focus,
  * route) lives as long (CallAudio).
  *
- * Qt's event loop sleeps while the app is in the background, so nothing
- * here waits on it: the core says a call started or ended from its own
- * threads, and the notification's actions and a focus loss go straight to
- * the core. The state mirrored here (muted, deafened, the channel's name)
- * comes from the QML while the app is in front, and from this class's own
- * actions in between. The call's fields belong to the main thread.
+ * Nothing here waits on Qt's thread: the core says a call started or
+ * ended from its own threads, and the notification's actions and a focus
+ * loss go straight to the core. The state mirrored here (muted, deafened,
+ * the channel's name) comes from the QML, which keeps running in the
+ * background (the manifest's background_running), and from this class's
+ * own actions. The call's fields belong to the main thread.
  */
 public final class VoiceShim {
     private VoiceShim() {}
@@ -151,7 +151,7 @@ public final class VoiceShim {
         if (ready) nativeDeafen(false);
     }
 
-    /** From the QML (the app in front): what the notification shows. */
+    /** From the QML: what the notification shows. */
     public static void setState(String channel, boolean isMuted, boolean isDeafened) {
         main.post(() -> {
             String next = channel == null ? "" : channel;

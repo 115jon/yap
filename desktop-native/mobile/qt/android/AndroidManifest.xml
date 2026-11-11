@@ -82,6 +82,18 @@
             <meta-data
                 android:name="android.app.splash_screen_sticky"
                 android:value="true" />
+            <!-- Qt's event loops keep running while the app is in the
+                 background. Without it Qt stops them there (QtLoader sets
+                 QT_BLOCK_EVENT_LOOPS_WHEN_SUSPENDED, read once at start, so
+                 it cannot be turned on for a call only), and the core's view
+                 updates wait for the Qt thread: over a call with the screen
+                 off they pile up and are all applied on return (README,
+                 "Voice calls"). Nothing draws meanwhile (the window is not
+                 exposed), and outside a call the gateway closes after its
+                 grace as before. -->
+            <meta-data
+                android:name="android.app.background_running"
+                android:value="true" />
         </activity>
 
         <!-- Yap's data-only pushes, drawn natively (push/MessageNotifier),
