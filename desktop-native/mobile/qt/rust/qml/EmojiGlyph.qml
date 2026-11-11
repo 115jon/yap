@@ -2,8 +2,8 @@ import QtQuick
 import Yap.Ui
 
 // One emoji at `size`: the picker data's picture (Twemoji, or a custom
-// emoji's own), and the system's glyph for `emoji` until the picture has
-// loaded or when it cannot.
+// emoji's own), or the system's glyph for `emoji` when the picture cannot
+// load (not while it loads: the two styles would flash).
 Item {
     id: root
 
@@ -24,7 +24,8 @@ Item {
     Loader {
         anchors.centerIn: parent
         // A custom emoji's value is its token, not a glyph: nothing to draw.
-        active: picture.status !== Image.Ready && root.emoji.length > 0 && !root.emoji.startsWith("<")
+        active: (picture.status === Image.Error || root.url.length === 0)
+            && root.emoji.length > 0 && !root.emoji.startsWith("<")
         sourceComponent: Text {
             text: root.emoji
             textFormat: Text.PlainText
