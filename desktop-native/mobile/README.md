@@ -732,13 +732,12 @@ without libwebrtc. What is the phone's own:
 - **Background.** Android keeps a backgrounded app's mic only behind a
   foreground service of type microphone. `VoiceService` is that, with the
   ongoing notification: the channel, how long the call has run, Mute or
-  Unmute and Leave. It holds no call state. Qt's event loop sleeps while
-  the app is in the background, so neither direction waits on it: the core
-  tells the shim from its own thread that a call's task started or that
-  the last one ended (`yap_mobile_call_active`; the service stops 1.2 s
-  after, so a call the room restarts or moves keeps it), and the
-  notification's actions go from the shim straight to the core's command
-  channel. The service starts only with the permission and from the
+  Unmute and Leave. It holds no call state, and neither direction goes
+  through Qt's thread: the core tells the shim from its own thread that a
+  call's task started or that the last one ended
+  (`yap_mobile_call_active`; the service stops 1.2 s after, so a call the
+  room restarts or moves keeps it), and the notification's actions go from
+  the shim straight to the core's command channel. The service starts only with the permission and from the
   foreground (a join is a tap), which Android 14 requires of a microphone
   service. Swiping the task away ends the call: Qt ends the process when
   its activity is destroyed, so the service's `onTaskRemoved` and the
@@ -746,10 +745,27 @@ without libwebrtc. What is the phone's own:
   disconnect beacon, up to 800 ms on the main thread). The gateway stays up
   under a call (the core's background suspend skips it). A call the process
   died in without that is reported as left at the next sign-in (the
-  desktop's stale beacon). While the app is in the background the core's
-  view updates wait in one list for the Qt thread and are applied together
-  on return; a long call with the screen off makes that list long (not
-  measured).
+  desktop's stale beacon).
+- **Qt in the background.** Qt for Android stops its event loops while the
+  app is suspended unless the activity's `android.app.background_running`
+  is `true` (`QtLoader` turns it into `QT_BLOCK_EVENT_LOOPS_WHEN_SUSPENDED`
+  at start, so it cannot be switched on for a call only). The core's view
+  updates wait for the Qt thread in one list (yap-ui's `Session::start`),
+  and a call keeps them coming: the roster and the tree change with every
+  talk LED. Measured on the emulator over a call left in the background
+  with the screen off for 10 minutes, the peer's tone toggling its LED:
+  11,370 updates queued, the app's PSS up 8.8 MB (148.9 to 157.8 MB), and
+  1.06 s on the Qt thread applying them on return. The manifest now sets
+  it. The same 10 minutes then queue nothing (no drain reached the 500
+  updates from which the bridge logs a backlog) and return without the
+  stall; PSS went from 149.7 to 151.3 MB; nothing is drawn meanwhile (the
+  window is not exposed; no frame was swapped). `Main.qml` holds
+  `Theme.reducedMotion` while the app is suspended, so a talk LED's fade
+  does not tick the animation timer for frames nobody draws. The process
+  used 259 s of CPU over those 10 minutes against 247 s with the loops
+  stopped (the emulator's software audio is most of both; 267 s before the
+  motion hold). With no call, 90 s after going to the background, it used
+  0.06 s in a minute.
 - **Audio session.** `CallAudio`, for as long as the service: the
   communication mode, transient audio focus, and the route. An
   interruption deafens the call through the core and its end undeafens it,
@@ -823,8 +839,8 @@ call answered and held, or one that arrives after another app took focus
 for good; a restart or move of a call while in the background; a leave
 and a join within the service's 1.2 s; Android before 15; a real device
 (arm64 was built before the last Java and QML fixes and not run); a
-second phone participant; a long call with the screen off (the resume
-after it).
+second phone participant; a call in the background for longer than 10
+minutes.
 
 <p>
 <img src="docs/qt-call.png" width="180" alt="Qt: the call page, the peer speaking">
