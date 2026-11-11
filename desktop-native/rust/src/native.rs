@@ -118,6 +118,18 @@ impl Platform for Desktop {
         yap_capture::only_ours()
     }
 
+    fn scheme_registration(&self, exe: &str) -> String {
+        let default_profile = yap_cache::profile::current().is_none();
+        let released = yap_core::install::may_register_at_launch(exe, default_profile, |p| {
+            std::path::Path::new(p).is_file()
+        });
+        if released {
+            yap_core::links::scheme_registration_lines(exe)
+        } else {
+            String::new()
+        }
+    }
+
     fn apps_created(&self) {
         crate::desktop::send_local_settings();
     }

@@ -87,6 +87,14 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "setStatus"]
         fn choose_status(self: &Session, status: &QString, custom_status: &QString);
+
+        /// A phone app came to the foreground (`true`) or went to the
+        /// background: the core keeps its gateway and timers as for a
+        /// shown window. (The desktop reports its window through
+        /// `Desktop.setWindowShown`.)
+        #[qinvokable]
+        #[cxx_name = "setVisible"]
+        fn set_visible(self: &Session, visible: bool);
     }
 
     impl cxx_qt::Threading for Session {}
@@ -895,6 +903,10 @@ impl qobject::Session {
             status: status.to_string(),
             custom_status: (!custom.trim().is_empty()).then_some(custom),
         });
+    }
+
+    pub fn set_visible(&self, visible: bool) {
+        client::command(Command::WindowShown(visible));
     }
 }
 

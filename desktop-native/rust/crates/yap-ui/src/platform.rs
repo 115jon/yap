@@ -77,6 +77,13 @@ pub trait Platform: Send + Sync + 'static {
         false
     }
 
+    /// The link schemes' registration lines for `exe`, or empty when this
+    /// copy registers none (`Invites.schemeRegistration`).
+    fn scheme_registration(&self, exe: &str) -> String {
+        let _ = exe;
+        String::new()
+    }
+
     /// The `Apps` object exists: the app sends its local sound settings.
     fn apps_created(&self) {}
 

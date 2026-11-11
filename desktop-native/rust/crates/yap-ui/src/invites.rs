@@ -287,15 +287,6 @@ impl qobject::Invites {
     }
 
     pub fn scheme_registration(&self, exe: &QString) -> QString {
-        let exe = exe.to_string();
-        let default_profile = yap_cache::profile::current().is_none();
-        let released = yap_core::install::may_register_at_launch(&exe, default_profile, |p| {
-            std::path::Path::new(p).is_file()
-        });
-        if released {
-            q(&links::scheme_registration_lines(&exe))
-        } else {
-            QString::default()
-        }
+        q(&crate::platform::platform().scheme_registration(&exe.to_string()))
     }
 }
