@@ -390,7 +390,10 @@ Item {
     // Right-click opens the same menu as More, at the pointer.
     TapHandler {
         acceptedButtons: Qt.RightButton
-        enabled: !root.editing && !root.pending && !root.failed && !root.isCall
+        // Not under a finger: a touch carries no button, so its tap would
+        // pass for a right click wherever no item takes the press (a
+        // picture, the row's margins).
+        enabled: !Theme.touch && !root.editing && !root.pending && !root.failed && !root.isCall
         onTapped: point => root.menuRequested(root.messageId, root.author, root.body, root.mine,
                                               root, point.position.x, point.position.y)
     }

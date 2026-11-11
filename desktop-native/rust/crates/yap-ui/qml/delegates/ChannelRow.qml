@@ -177,6 +177,9 @@ Rectangle {
     }
     TapHandler {
         acceptedButtons: Qt.RightButton
+        // A finger's tap is not a right click (a touch carries no button,
+        // so the filter above lets it through).
+        enabled: !Theme.touch
         onTapped: eventPoint => row.menuRequested(row, eventPoint.position)
     }
     DragHandler {

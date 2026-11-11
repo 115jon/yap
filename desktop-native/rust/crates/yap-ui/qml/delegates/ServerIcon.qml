@@ -160,6 +160,9 @@ Item {
     TapHandler { id: tap; onTapped: entry.selected() }
     TapHandler {
         acceptedButtons: Qt.RightButton
+        // A finger's tap is not a right click (a touch carries no button,
+        // so the filter above lets it through); its long press is, below.
+        enabled: !Theme.touch
         onTapped: (point) => entry.menuRequested(point.position.x, point.position.y)
     }
     TapHandler {

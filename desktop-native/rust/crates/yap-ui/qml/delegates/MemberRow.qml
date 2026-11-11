@@ -50,7 +50,9 @@ Item {
                       muted ? qsTr("muted") : "", deafened ? qsTr("deafened") : ""].filter(s => s.length > 0).join(", ")
 
     TapHandler {
-        enabled: !root.me && root.userId.length > 0
+        // Not under a finger: a touch carries no button, so its tap would
+        // pass for a right click.
+        enabled: !Theme.touch && !root.me && root.userId.length > 0
         acceptedButtons: Qt.RightButton
         onTapped: eventPoint => ShellState.showPeerMenu(root.userId, root.name, root, eventPoint.position, root.channelId)
     }
