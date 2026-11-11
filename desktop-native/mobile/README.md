@@ -340,7 +340,8 @@ shared `Chat` API (no core changes):
   shows each file's picture, progress and size; remove or cancel, mark
   sensitive, tap a failed tile to retry (its reason shows in the notice
   line), tap a finished picture to view it. Files over the limit stay as the
-  core's too-big cards. Sending works with text, pictures or both.
+  core's too-big cards (they are not copied: a sparse file of their size
+  stands in). Sending works with text, pictures or both.
 - **The rest.** Send is enabled by typed text (preedit included) or a
   finished upload; typing pings go at most every 3 s (the core sends every
   one it is asked to); the field grows to five lines; each channel keeps its
@@ -354,12 +355,13 @@ Not done yet: a camera shot from the composer; video in the viewer; saving
 to the gallery; sensitive pictures are not blurred in the viewer; on 13+ the
 photo picker names files by their media id (`1000000302.jpg`), not the
 original name; the status bar icons stay dark over the viewer in the light
-theme until the shim can switch them (`Native.lightBars`).
+theme until the shim can switch them (`Native.lightBars`); picked copies stay
+in the app cache until the next start.
 
 <p>
 <img src="docs/qt-mention.png" width="180" alt="Qt: @ suggestions above the composer">
 <img src="docs/qt-reply.png" width="180" alt="Qt: replying to a message">
-<img src="docs/qt-upload-tray.png" width="180" alt="Qt: three pictures in the upload tray">
+<img src="docs/qt-upload-tray.png" width="180" alt="Qt: two pictures in the upload tray">
 <img src="docs/qt-image-viewer.png" width="180" alt="Qt: the image viewer">
 </p>
 
