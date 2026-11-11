@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One pin (PinnedMessagesSidebar.tsx `PinnedMessageItem`): px-4 py-3 on
 // the panel ply, tint-1 on hover, a seam below. A 32 px avatar, 12 px gap,

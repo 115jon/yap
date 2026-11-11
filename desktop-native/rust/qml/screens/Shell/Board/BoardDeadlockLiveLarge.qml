@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Live, L (Deadlock.tsx LivePlate, L): the hero's art band with the clock
 // on the left (dropped at 560 px and under, or with no known hero), what

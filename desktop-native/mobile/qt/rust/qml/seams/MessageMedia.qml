@@ -1,5 +1,5 @@
 import QtQuick
-import com.yap.native
+import Yap.Ui
 
 // A message's attachments, mobile side: images as pictures, the rest as a
 // named row. The desktop's MessageMedia adds video, GIF streaming and the

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // A device select (SettingsSelect on the FieldPlate recipe): ply-2, a 1 px
 // line-field edge (ink-2 on hover, ink-1 plus the ring on focus), 40 high

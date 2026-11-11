@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // The quick switcher (CommandMenu.tsx), Ctrl+K: a 536 wide menu panel
 // 12 % down the window over the scrim, with no open animation (a keyboard

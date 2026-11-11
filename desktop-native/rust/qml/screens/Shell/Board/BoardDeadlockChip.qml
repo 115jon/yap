@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A match result (Deadlock.tsx Result / WL): a win is a solid ink-1 key,
 // a loss an outlined one. `long` prints "Win"/"Loss" at 20 high; otherwise

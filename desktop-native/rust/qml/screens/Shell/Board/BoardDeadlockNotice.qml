@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The owner-only states (Deadlock.tsx NotLinkedPlate / OwnerNotice): not
 // linked ("Link Steam"), linked with no matches yet, and data deleted at

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Where creating and joining open from: the rail's Create a server
 // (ShellState.createServerRequested), the invite page a link opens over

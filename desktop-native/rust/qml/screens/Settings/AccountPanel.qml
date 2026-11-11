@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Account (AccountPanel.tsx). Profile: the avatar with Edit profile (the
 // profile editor), the display name and the username with their inline

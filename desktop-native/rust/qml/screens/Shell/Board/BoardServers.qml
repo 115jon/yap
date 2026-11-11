@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Favourite servers (widgets/Servers.tsx): up to 4 of the owner's servers
 // with their size, and whether the viewer is in each too. S is a row of

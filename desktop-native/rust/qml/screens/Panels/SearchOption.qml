@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One suggestion or idle row (SuggestionContent.tsx in OPTION_ROW): 32
 // high, px-2, a 20 px lead (glyph or picture), the label at 13/500 (a

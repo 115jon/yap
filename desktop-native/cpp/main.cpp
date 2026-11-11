@@ -42,16 +42,15 @@
 #include <functional>
 
 #include "animatedpicture.h"
+#include "yap_ui.h"
 #include "authmedia.h"
 #include "camera.h"
 #include "compat.h"
 #include "composerhighlighter.h"
 #include "crashnotice.h"
 #include "desktopshell.h"
-#include "ditherprovider.h"
 #include "eyedropper.h"
 #include "heaptrace.h"
-#include "iconprovider.h"
 #include "logfile.h"
 #include "mediashell.h"
 #include "profile.h"
@@ -736,6 +735,28 @@ extern "C" void yap_tauri_app_started();
 // The in-app updater (rust/src/updater.rs): with install on quit, hands a
 // downloaded update to Velopack's updater. Not while Windows shuts down.
 extern "C" void yap_updater_quit(bool session_ending);
+// The desktop's side of the shared view layer (rust/src/native.rs), before
+// QML loads.
+extern "C" void yap_desktop_init();
+
+// The Yap.Platform types (see main): com.yap.native's own files, under the
+// names the shared QML uses.
+static void registerPlatformTypes()
+{
+  static const struct
+  {
+    const char* path;
+    const char* name;
+  } types[] = {
+    { "delegates/EmbedCard.qml", "EmbedCard" },
+    { "delegates/MessageMedia.qml", "MessageMedia" },
+    { "delegates/VoiceStatusLine.qml", "VoiceStatusLine" },
+    { "components/VoiceStreamHoverCard.qml", "VoiceStreamHoverCard" },
+  };
+  for (const auto& type : types)
+    qmlRegisterType(QUrl(QStringLiteral("qrc:/qt/qml/com/yap/native/qml/") + QLatin1String(type.path)),
+                    "Yap.Platform", 1, 0, type.name);
+}
 
 int main(int argc, char* argv[])
 {
@@ -862,6 +883,8 @@ int main(int argc, char* argv[])
   std::fprintf(stderr, "[startup] fonts after %lld ms\n",
                static_cast<long long>(startup.elapsed()));
 
+  yap_desktop_init();
+
   auto* chrome = new WindowChrome(&app);
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "WindowChrome", chrome);
   app.installNativeEventFilter(chrome);
@@ -891,10 +914,7 @@ int main(int argc, char* argv[])
   // pattern, no device opened).
   auto* camera = new CameraCapture(&app);
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "Camera", camera);
-  // APNG and animated WebP (decorations, effects, X GIFs), and the web
-  // players (WebView2).
-  qmlRegisterType<AnimatedPicture>("Yap.Media", 1, 0, "AnimatedPicture");
-  qmlRegisterType<ViewportWatch>("Yap.Media", 1, 0, "ViewportWatch");
+  // The web players (WebView2) and the composer's highlighter.
   qmlRegisterType<WebEmbed>("Yap.Media", 1, 0, "WebEmbed");
   qmlRegisterType<ComposerHighlighter>("Yap.Media", 1, 0,
                                        "ComposerHighlighter");
@@ -914,11 +934,18 @@ int main(int argc, char* argv[])
     app.installEventFilter(wheelScroll);
   qmlRegisterSingletonInstance("Yap.Media", 1, 0, "WheelScroll", wheelScroll);
 
+  // The desktop's side of the shared QML's seams (Yap.Ui imports
+  // Yap.Platform): rich embeds and media through WebView2, Media
+  // Foundation and libvpx, the voice status line with its clip previews,
+  // and the stream preview card. The mobile app registers its own.
+  registerPlatformTypes();
+
   QQmlApplicationEngine engine;
   // Not owned by the engine; it outlives it here.
   engine.setNetworkAccessManagerFactory(&networkFactory);
-  engine.addImageProvider(QStringLiteral("icon"), new IconProvider);
-  engine.addImageProvider(QStringLiteral("dither"), new DitherProvider);
+  // AnimatedPicture and ViewportWatch (Yap.Media), the icon and dither
+  // providers: the C++ shared with the mobile app (yap-ui's cpp/).
+  yap_ui_register(engine);
   engine.addImageProvider(QStringLiteral("share"), new ShareProvider);
   QObject::connect(
     &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
@@ -928,7 +955,7 @@ int main(int argc, char* argv[])
   // then binds it to the saved choice (Settings.theme), which starts from
   // YAP_THEME too; assigning Theme.themeId re-themes everything.
   if (QObject* theme =
-        engine.singletonInstance<QObject*>("com.yap.native", "Theme")) {
+        engine.singletonInstance<QObject*>("Yap.Ui", "Theme")) {
     const QString id = qEnvironmentVariable("YAP_THEME");
     if (!id.isEmpty())
       theme->setProperty("themeId", id);
@@ -936,7 +963,7 @@ int main(int argc, char* argv[])
   }
   // YAP_EMBED_MUTED=1 starts every chat player muted (test runs).
   if (QObject* state =
-        engine.singletonInstance<QObject*>("com.yap.native", "ShellState"))
+        engine.singletonInstance<QObject*>("Yap.Ui", "ShellState"))
   {
     state->setProperty("mediaMuted", qEnvironmentVariableIntValue("YAP_EMBED_MUTED") != 0);
     // YAP_NO_CLIPBOARD=1: copies are logged, never put on the clipboard.
@@ -987,7 +1014,7 @@ int main(int argc, char* argv[])
     new PopupPressSink(&engine, window);
 #ifdef Q_OS_WIN
     app.installNativeEventFilter(new MotionWatch(
-      engine.singletonInstance<QObject*>("com.yap.native", "Theme")));
+      engine.singletonInstance<QObject*>("Yap.Ui", "Theme")));
     std::fprintf(stderr, "[motion] reduced motion %s at start\n", reducedMotion() ? "on" : "off");
     if (qEnvironmentVariableIntValue("YAP_TEST_POINTER") != 0) {
       app.installNativeEventFilter(new TestPointer(window));
@@ -997,7 +1024,7 @@ int main(int argc, char* argv[])
     // Deep links: our own yap:// and yap-native:// (registered per user where it
     // differs), from this command line and from later instances.
     shell->setLinkHandler(
-      engine.singletonInstance<QObject*>("com.yap.native", "Invites"));
+      engine.singletonInstance<QObject*>("Yap.Ui", "Invites"));
     shell->attach(window, engine.singletonInstance<QObject*>(
                             "com.yap.native", "Desktop"));
     shell->registerUrlScheme();

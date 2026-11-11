@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The last ten as letters only (Deadlock.tsx Letters, M): ten W/L keys
 // across the width, newest first.

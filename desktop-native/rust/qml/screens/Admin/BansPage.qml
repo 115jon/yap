@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Server settings → Bans (BansPage.tsx): each banned person with the reason
 // and who banned them when, and Unban behind a reversible inline confirm

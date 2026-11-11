@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // Display name style (SettingsAccountTab.tsx DisplayNameStyleDialog), over
 // the profile editor: a 56 px header, then the pickers beside a 280 px

@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Registered games (this client's own page, Discord's "Registered games"):
 // the detection switch, the games seen on this computer (newest first, with

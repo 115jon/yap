@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // Message search (SearchPanel.tsx): the combobox under the header, then
 // either the suggestions (typing a filter) or the body: the idle list

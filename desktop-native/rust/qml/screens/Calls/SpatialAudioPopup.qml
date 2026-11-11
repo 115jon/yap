@@ -4,6 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Templates as T
 import QtQuick.Effects
 import com.yap.native
+import Yap.Ui
 
 // Spatial audio (SpatialAudioPanel.tsx), anchored above the voice options
 // key: the room's shared placement for everyone in the call. The On/Off

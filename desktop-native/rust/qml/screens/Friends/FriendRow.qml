@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One person in the Friends view (FriendsView.tsx `renderRow`, the member
 // and DM row anatomy): 32 high, 40 with a friend's custom status, px-2,

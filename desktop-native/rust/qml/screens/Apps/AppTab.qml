@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // A tab in a voice app's panel (ui/tabs.tsx): ink-1 when chosen, its count
 // beside it when there is one. The 2 px rule is the strip's TabRule, which

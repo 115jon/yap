@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Countdown (widgets/Countdown.tsx): days, hours and minutes to a date the
 // owner set. The readout ticks once a minute, aligned to the minute, only

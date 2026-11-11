@@ -1,5 +1,5 @@
 import QtQuick
-import com.yap.native
+import Yap.Ui
 
 // A link preview, mobile side: the title and site of the desktop's card,
 // tappable. The desktop's EmbedCard plays video and web embeds through

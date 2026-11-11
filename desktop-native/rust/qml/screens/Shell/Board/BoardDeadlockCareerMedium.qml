@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Career, M (Deadlock.tsx CareerMedium): the rank badge and name with the
 // season and this week's points, four numbers for the range (won, KDA,

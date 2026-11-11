@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Remove friend, Ignore request or Cancel request, confirmed first
 // (FriendsView.tsx `removeCopy` and its ResponsiveDialog): Keep, and the

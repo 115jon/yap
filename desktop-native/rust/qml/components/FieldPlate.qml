@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The C2 legend plate (ui/input.tsx FieldPlate): the field's label printed
 // across its top edge in silkscreen, backed by the ground the plate sits

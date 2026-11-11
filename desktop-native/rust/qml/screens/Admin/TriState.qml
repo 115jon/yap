@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // Deny / Inherit / Allow for one permission (PermissionTriState.tsx): three
 // keys in a 1 px line-strong frame, the chosen one filled (danger tint,

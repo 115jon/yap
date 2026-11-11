@@ -250,6 +250,17 @@ pub fn current() -> DesktopSettings {
     with_shared(|s| s.settings)
 }
 
+/// The device's sound settings, for join and leave sounds and the
+/// automatic clip volume.
+pub fn send_local_settings() {
+    let s = current();
+    yap_ui::apps::send(yap_core::store::apps::AppsCommand::LocalSettings {
+        sounds_enabled: s.sounds,
+        sound_volume: s.sound_settings.sound_volume,
+        soundboard_volume: s.sound_settings.soundboard_volume,
+    });
+}
+
 /// What the tray shows: the core's badge, or nothing with notifications
 /// off (desktop-native-sync.ts clears it then).
 fn shown_badge() -> BadgeView {
@@ -323,7 +334,7 @@ fn store(mut desktop: Pin<&mut qobject::Desktop>, next: DesktopSettings) {
     }
     apply_settings(desktop.as_mut(), next);
     apply_badge(desktop);
-    crate::apps::send_local_settings();
+    send_local_settings();
     crate::apps_audio::set_soundboard_volume(next.sound_settings.soundboard_volume);
 }
 
@@ -353,9 +364,7 @@ pub(crate) fn on_toast(toast: &ToastView) {
 }
 
 impl gui::Slot for qobject::Desktop {
-    fn slot(objects: &mut gui::Objects) -> &mut Option<std::ptr::NonNull<Self>> {
-        &mut objects.desktop
-    }
+    yap_ui::slot_cell!(qobject::Desktop);
 
     fn restore(mut self: Pin<&mut Self>) {
         apply_settings(self.as_mut(), current());

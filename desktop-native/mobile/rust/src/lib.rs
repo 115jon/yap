@@ -27,7 +27,7 @@ use yap_core::{
 
 // The desktop gateway task, unchanged: it depends on yap-core and
 // yap-realtime only.
-#[path = "../../../rust/src/client/gateway.rs"]
+#[path = "../../../rust/crates/yap-ui/src/client/gateway.rs"]
 mod gateway;
 
 uniffi::setup_scaffolding!();

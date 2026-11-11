@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Channel settings → Permissions (ChannelPermissionsTab.tsx,
 // permission-model.ts), split: the overrides (@everyone first, then roles,

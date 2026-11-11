@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // VoiceSwitchModal.tsx (ConfirmCallDialog): joining another voice channel
 // while in one asks first: "Switch to Lounge?", "You'll leave General.",

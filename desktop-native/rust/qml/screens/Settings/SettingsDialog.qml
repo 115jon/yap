@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // User settings, the Studio workbench (SettingsModal.tsx, SettingsWorkbench
 // .tsx): min(1280, window - 32) x min(820, window - 32) over the scrim,

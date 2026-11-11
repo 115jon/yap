@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // Full Screen for a chat video (useVideoPlayer.ts toggleFullscreen: the
 // player's element fullscreen, `fixed inset-0 bg-black`): the video on

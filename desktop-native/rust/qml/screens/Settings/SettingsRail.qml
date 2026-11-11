@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The live preview rails (rails.tsx): the four pages where you judge a
 // feel rather than flip a fact. Each is a legend plate.

@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // A compatibility notice (cpp/compat.*), in the crash notice's toast card
 // (ui/toast.tsx) at the window's bottom right until dismissed:

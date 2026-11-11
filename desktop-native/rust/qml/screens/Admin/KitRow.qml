@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // A selectable list row (RoleList, the override list, pickers): 32 high
 // (`tall`: 40), tint-2 while current, tint-1 on hover, the focus ring on

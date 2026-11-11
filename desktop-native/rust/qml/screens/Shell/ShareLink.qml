@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The share picker, opened by the share key (ShellState.toggleShare). A new
 // share shows its own preview again. With "Always show stream preview" off

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A menu's title or group label (ui/menu.ts MENU_LABEL): a silkscreen row
 // in ink-3, 32 high, px-3.

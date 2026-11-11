@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // An inline error under a row or list (primitives.tsx RowError): danger
 // ink on the danger tint with a 2 px danger edge and the warning glyph.

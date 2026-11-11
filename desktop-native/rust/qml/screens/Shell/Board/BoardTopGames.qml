@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Top games (widgets/TopGames.tsx): the owner's most played over 7 days,
 // 30 days or all time. One series of magnitudes, so one neutral bar per

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // VoiceStreamHoverCard.tsx: hovering someone live in the sidebar's voice
 // roster. A 292 px ply-3 card (line edge, float shadow, 12 padding):

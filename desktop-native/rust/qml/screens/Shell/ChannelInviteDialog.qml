@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // Invite friends to a channel (ChannelInviteModal.tsx), the kit's C1
 // plate: "Invite · Server", "Invite friends to Server", the dithered rule,

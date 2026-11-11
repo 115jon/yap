@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The input sensitivity meter (InputSensitivityMeter.tsx, MicTestWidget):
 // the mic level as a ladder of 16 cells on tint-3, lit talk above the

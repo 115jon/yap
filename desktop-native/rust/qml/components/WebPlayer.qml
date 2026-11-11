@@ -3,6 +3,7 @@ import QtQuick.Controls.Basic
 import Yap.Chrome
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // A web player in place (the web's iframes: YouTube, Spotify, TikTok's own
 // player, rich players). At rest it is the poster with the play disc; the

@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Templates as T
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // The profile editor (ProfileEditorModal.tsx, SettingsAccountTab.tsx): the
 // workbench frame at min(1120, window - 32) over the stacked scrim. A 56 px

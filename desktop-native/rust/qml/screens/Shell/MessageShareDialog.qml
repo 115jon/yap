@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // Share message (MessageShareModal.tsx): "Creates a public snapshot link",
 // the message quoted (with the files the link leaves out), the link

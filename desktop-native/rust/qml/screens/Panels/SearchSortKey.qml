@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // A sort key in the results toolbar: 24 high, px-2, 12/500, ink-3 that
 // turns ink-1 on hover; pressed is tint-2 and ink-1.

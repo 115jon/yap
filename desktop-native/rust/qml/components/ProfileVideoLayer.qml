@@ -3,6 +3,7 @@ import QtMultimedia
 import Yap.Chrome
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // A profile video (ProfileAssetLayer.tsx `ProfileVideoLayer`): the banner
 // or another profile asset that is a video, covering the item, muted and

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One role chip (ProfileCard.tsx ProfileRoleChips): a 24 px tint-1 chip
 // with the role's 10 px dot (ink-3 when it has no colour) and its name at

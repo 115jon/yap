@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // A menu row (ui/menu.ts): 36 high, px-3, gap 12, Geist 14/500, an
 // optional 16 px ink-2 glyph; highlight tint-2 with no transition. `danger`

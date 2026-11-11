@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // PinModal.tsx: "Pin message" / "Unpin message", what it does in the
 // channel, the message quoted, the Shift hint (unpin only), then Cancel and

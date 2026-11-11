@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // A dialog footer key: ghost, or the primary fill (`primary`).
 Button {

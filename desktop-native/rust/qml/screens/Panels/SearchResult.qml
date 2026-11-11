@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One hit, drawn like a message row (SearchResultItem.tsx): a 24 px
 // picture, the name (role colour) with the time and a pin, the excerpt

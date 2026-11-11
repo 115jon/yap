@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // The shell's OS hooks that act on the core: a toast's Reply and Mark as
 // read (desktop-toasts.ts, ChatPageClient.tsx), and the taskbar thumbnail

@@ -3,6 +3,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Templates as T
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // Share your screen (DesktopScreenPickerModal.tsx in
 // ScreenSharePickerShell.tsx): the title and what this is; underline tabs

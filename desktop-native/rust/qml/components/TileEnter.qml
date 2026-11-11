@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A voice tile joining the grid (ParticipantCard.tsx): it fades in and
 // grows from 0.97 over 200 ms, ease-out, `delay` ms after play() (the tiles

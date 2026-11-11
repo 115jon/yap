@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The server header's menu (ChannelSidebar.tsx `handleServerHeaderClick`):
 // Invite to server; with Manage channels, Server settings, Create channel

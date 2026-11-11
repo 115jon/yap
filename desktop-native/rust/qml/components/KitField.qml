@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // A text field on the kit's field edge (ui/input.tsx FIELD): ply-2, a 1 px
 // line-field edge that turns ink-2 on hover and ink-1 on focus, with the

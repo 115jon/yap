@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A small call key: glyph plus silkscreen word on tint-1; lit keys take the
 // state's tint and ink.

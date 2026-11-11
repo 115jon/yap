@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Notifications (NotificationsPanel.tsx): desktop alerts, then the sound
 // effects (the master switch, the volume, each category, and Test), kept

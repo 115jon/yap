@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A C1 legend plate (ui/plate.tsx LegendPlate), the preview rail's frame:
 // ply-2 with a line-strong edge, its legend printed across the top edge

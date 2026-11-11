@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // The emoji picker (EmojiPicker.tsx, PickerSurface.tsx, PickerHeader.tsx,
 // picker-grid.ts): 420 wide, up to 560 high; the menu panel recipe (ply-3,

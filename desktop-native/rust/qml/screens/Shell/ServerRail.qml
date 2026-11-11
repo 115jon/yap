@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The 60 px rail (ServerList.tsx): Home with the Yappy mark, then the
 // unread DMs as avatar keys (three, then "+N"), a rule, one tile per

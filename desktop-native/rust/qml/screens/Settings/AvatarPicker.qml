@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // Choose an image (AvatarPickerModal.tsx): "Upload image" (from this
 // device), then Recent avatars, the last six uploads

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Live, S (and M without a known hero) (Deadlock.tsx LivePlate, compact):
 // the hero's face (or the rank badge), what they are doing, the mode or

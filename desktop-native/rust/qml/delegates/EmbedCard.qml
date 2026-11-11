@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One embed (LinkEmbed.tsx), from the row's `embeds` role, by `kind`
 // (store/view/embeds.rs):

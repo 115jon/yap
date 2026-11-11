@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // UnreadBanner.tsx: pinned over the top of the list (it overlays, so the
 // column never jumps): the "New" label, "N messages since [day at] time",

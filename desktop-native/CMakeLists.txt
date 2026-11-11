@@ -22,7 +22,7 @@ find_package(Qt6 REQUIRED COMPONENTS
   Core Gui Multimedia Network Qml Quick QuickControls2 Svg QmlImportScanner)
 # Private: QHwVideoBuffer and QRhi's native handles, for decoded video
 # drawn from its D3D11 texture (cpp/videohub.cpp); QSGPlainTexture, so a
-# streamed GIF uploads each frame into one texture (cpp/animatedpicture.cpp).
+# streamed GIF uploads each frame into one texture (yap-ui's cpp/animatedpicture.cpp).
 find_package(Qt6 REQUIRED COMPONENTS GuiPrivate MultimediaPrivate QuickPrivate)
 # qsb at build time: our ShaderEffect fragment shaders (shaders/).
 find_package(Qt6 REQUIRED COMPONENTS ShaderTools)
@@ -52,22 +52,28 @@ endif()
 cxx_qt_import_qml_module(yap_native_qml
   URI "com.yap.native"
   SOURCE_CRATE yap_native)
+# The view layer shared with the mobile app: the yap-ui crate, a dependency
+# of yap_native, builds it and exports it beside com.yap.native.
+cxx_qt_import_qml_module(yap_ui_qml
+  URI "Yap.Ui"
+  SOURCE_CRATE yap_native)
+
+# The C++ behind Yap.Ui (AnimatedPicture, the icon and dither providers),
+# shared with the mobile app; it compiles in this target, LTCG included.
+include(rust/crates/yap-ui/cpp/yap_ui.cmake)
 
 qt_add_executable(YapNative WIN32
   cpp/main.cpp
   cpp/app.rc
   cpp/app.manifest
-  cpp/animatedpicture.cpp cpp/animatedpicture.h
   cpp/authmedia.cpp cpp/authmedia.h
   cpp/camera.cpp cpp/camera.h
   cpp/compat.cpp cpp/compat.h
   cpp/composerhighlighter.cpp cpp/composerhighlighter.h
   cpp/crashnotice.cpp cpp/crashnotice.h
   cpp/desktopshell.cpp cpp/desktopshell.h
-  cpp/ditherprovider.cpp cpp/ditherprovider.h
   cpp/eyedropper.cpp cpp/eyedropper.h
   cpp/heaptrace.cpp cpp/heaptrace.h
-  cpp/iconprovider.cpp cpp/iconprovider.h
   cpp/logfile.cpp cpp/logfile.h
   cpp/mediafoundation.cpp cpp/mediafoundation.h
   cpp/mediashell.cpp cpp/mediashell.h
@@ -99,6 +105,8 @@ target_compile_definitions(YapNative PRIVATE
 # QWindowSystemInterface, as a real key does, so shortcuts see it.
 target_link_libraries(YapNative PRIVATE
   yap_native_qml
+  yap_ui_qml
+  yap_ui_cpp
   Qt::Gui Qt::Multimedia Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg
   Qt::GuiPrivate Qt::MultimediaPrivate Qt::QuickPrivate)
 

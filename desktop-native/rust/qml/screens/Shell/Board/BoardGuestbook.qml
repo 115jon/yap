@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // Guestbook (Guestbook.tsx): the latest notes, and a one-line field to
 // leave one when the server says the viewer may (`can_post`). Posting is

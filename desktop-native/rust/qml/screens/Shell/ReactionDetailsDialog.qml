@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // Who reacted (ReactionDetailsModal.tsx): a 400 wide dialog, "Reactions",
 // emoji tabs across the top (a 20 px emoji and its count, the selected one

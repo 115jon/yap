@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Mobile
-import com.yap.native
+import com.yap.mobile
+import Yap.Ui
 
 // The open channel, phone layout: a header with the back key, the
 // desktop's MessageDelegate rows on its MessageListModel, the typing line

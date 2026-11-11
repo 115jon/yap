@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Edit sound (UploadSoundModal.tsx with `editSound`): the name, an emoji
 // (empty clears it) and the sound's volume. Server sounds save through the

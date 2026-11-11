@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // UserPlatformIndicators.tsx: where someone is signed in, as glyphs 6 px
 // apart in desktop, mobile, web order, each with its tooltip. They are

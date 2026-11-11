@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The app's scrollbar (styles/foundation.css): an 8 px gutter with no
 // track and a 4 px pill, tint-2 (tint-3 hovered or dragged). Like the web's

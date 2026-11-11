@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The owner's party (Deadlock.tsx PartyStack / PartyLine): up to three
 // 16 px faces ringed in the plate's ply, then "With Mo and Ash" (or the

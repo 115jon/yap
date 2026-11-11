@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Pinned message (widgets/Quote.tsx): a snapshot of a message the owner
 // sent, as it was when pinned. A viewer outside the message's server sees

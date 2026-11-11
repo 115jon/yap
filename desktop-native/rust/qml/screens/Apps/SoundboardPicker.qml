@@ -4,6 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Templates as T
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // The soundboard picker (SoundboardPicker.tsx, PickerSurface.tsx,
 // PickerHeader.tsx, picker-grid.ts): a 420 wide popover, up to 600 high,

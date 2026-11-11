@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A C2 rule card (primitives.tsx SettingsCard, ui/plate.tsx RuleCard): no
 // box, a 2 px ink-1 rule, the section's silkscreen legend and its

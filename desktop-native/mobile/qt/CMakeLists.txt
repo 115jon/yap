@@ -38,21 +38,26 @@ cxx_qt_import_crate(
   QT_MODULES Qt::Core Qt::Gui Qt::Qml Qt::Quick Qt::QuickControls2)
 
 cxx_qt_import_qml_module(yap_mobile_qml
-  URI "com.yap.native"
+  URI "com.yap.mobile"
+  SOURCE_CRATE yap_mobile_qt)
+# The view layer shared with the desktop, built by the yap-ui crate.
+cxx_qt_import_qml_module(yap_ui_qml
+  URI "Yap.Ui"
   SOURCE_CRATE yap_mobile_qt)
 
 set(DESKTOP ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+# The C++ behind Yap.Ui (AnimatedPicture, the icon and dither providers),
+# shared with the desktop; it compiles in this target.
+include(${DESKTOP}/rust/crates/yap-ui/cpp/yap_ui.cmake)
 
 qt_add_executable(yapqt
   cpp/main.cpp
-  cpp/native.cpp cpp/native.h
-  # The desktop's portable C++, unchanged.
-  ${DESKTOP}/cpp/animatedpicture.cpp ${DESKTOP}/cpp/animatedpicture.h
-  ${DESKTOP}/cpp/ditherprovider.cpp ${DESKTOP}/cpp/ditherprovider.h
-  ${DESKTOP}/cpp/iconprovider.cpp ${DESKTOP}/cpp/iconprovider.h)
-target_include_directories(yapqt PRIVATE ${DESKTOP}/cpp cpp)
+  cpp/native.cpp cpp/native.h)
+target_include_directories(yapqt PRIVATE cpp)
 target_link_libraries(yapqt PRIVATE
   yap_mobile_qml
+  yap_ui_qml
+  yap_ui_cpp
   Qt::Gui Qt::Network Qt::Quick Qt::QuickControls2 Qt::Svg Qt::QuickPrivate)
 
 set_target_properties(yapqt PROPERTIES
@@ -62,7 +67,10 @@ set_target_properties(yapqt PROPERTIES
   QT_ANDROID_MIN_SDK_VERSION 28
   QT_ANDROID_TARGET_SDK_VERSION 36
   QT_ANDROID_VERSION_CODE 1
-  QT_ANDROID_VERSION_NAME 0.1.0)
+  QT_ANDROID_VERSION_NAME 0.1.0
+  # Where androiddeployqt's import scan looks for the QML modules to
+  # bundle: this app's and the shared Yap.Ui's, which lives in yap-ui.
+  QT_QML_ROOT_PATH "${CMAKE_CURRENT_SOURCE_DIR};${DESKTOP}/rust/crates/yap-ui/qml")
 
 # The desktop's brand fonts and Phosphor icons (desktop-native/assets),
 # embedded as :/fonts and :/icons as on the desktop.

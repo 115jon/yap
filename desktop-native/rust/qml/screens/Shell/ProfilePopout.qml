@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The user popout (UserProfilePopover.tsx): the profile card 8 px beside
 // what opened it, kept 12 px inside the window. Someone else's card has

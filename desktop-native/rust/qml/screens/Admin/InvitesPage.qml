@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Server settings → Invites (InvitesTab.tsx): Pause invites, the create
 // form (channel, expiry, uses, temporary membership; the link is copied once

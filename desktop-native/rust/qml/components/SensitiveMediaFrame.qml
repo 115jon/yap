@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // SensitiveMediaFrame.tsx: over blurred media, the scrim and a ply-3
 // float (line edge) so its text keeps contrast whatever is underneath:

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // The sign-in screen's key: filled when primary, outlined otherwise.
 Button {

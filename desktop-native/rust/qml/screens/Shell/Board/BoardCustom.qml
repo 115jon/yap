@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Custom (widgets/Custom.tsx): the paid plate. The owner names the legend,
 // writes a title and up to four short lines, and adds a picture. Without

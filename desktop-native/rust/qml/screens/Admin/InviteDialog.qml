@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Invite people (InviteModal.tsx), the kit's C1 plate: "Invite · Server"
 // kicker, the title, the dithered rule; Expire after and Max uses, then

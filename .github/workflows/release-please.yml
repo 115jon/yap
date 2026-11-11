@@ -210,12 +210,14 @@ jobs:
             echo "==> $branch"
             git -c "$(auth "$GH_TOKEN")" fetch --no-tags origin "refs/heads/$branch"
             git checkout --quiet --detach FETCH_HEAD
-            node "$script" desktop-native/rust
-            if git diff --quiet -- desktop-native/rust/Cargo.lock; then
+            # The mobile prototypes' workspaces use the same crates by path.
+            locks="desktop-native/rust/Cargo.lock desktop-native/mobile/qt/rust/Cargo.lock desktop-native/mobile/rust/Cargo.lock"
+            node "$script" --also desktop-native/mobile/qt/rust/Cargo.lock --also desktop-native/mobile/rust/Cargo.lock desktop-native/rust
+            if git diff --quiet -- $locks; then
               echo "Cargo.lock is in sync on $branch."
               continue
             fi
-            git add desktop-native/rust/Cargo.lock
+            git add $locks
             git commit --quiet -m "chore(release): sync desktop-native Cargo.lock"
             git -c "$(auth "$PUSH_TOKEN")" push origin "HEAD:refs/heads/$branch"
           done

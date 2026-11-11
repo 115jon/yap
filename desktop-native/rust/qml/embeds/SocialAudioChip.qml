@@ -2,6 +2,7 @@ import QtQuick
 import QtMultimedia
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // The post's sound (LinkEmbed.tsx SocialAudioChip): tint-1, the 40 px art
 // with a play disc over it when there is a preview, the title and artist.

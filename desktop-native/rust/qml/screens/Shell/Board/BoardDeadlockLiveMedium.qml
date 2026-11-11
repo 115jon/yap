@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Live, M with a known hero (Deadlock.tsx LivePlate, M): the hero's art
 // band with the mode tag (talk LED in a match) and the big live clock, the

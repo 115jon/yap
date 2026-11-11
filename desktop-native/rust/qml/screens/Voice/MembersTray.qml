@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Everyone in the call as a strip above the stage bar while a tile is on
 // stage (VoiceStage.tsx MembersTray): 144 px 16:9 thumbnails, 8 px apart,

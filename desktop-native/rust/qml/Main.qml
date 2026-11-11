@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // Bootstrap: the window, its chrome, the core, and one screen per phase.
 // main.cpp shows the window once the native frame is set up.
@@ -31,6 +32,13 @@ ApplicationWindow {
     // apart: "#general - Yap HQ (jon)".
     readonly property string named: DesktopShell.profile.length > 0 ? " (" + DesktopShell.profile + ")" : ""
     title: (location.length > 0 ? location : "Yap") + named
+
+    // The shared shell state reads the desktop's "don't ask again".
+    Binding {
+        target: ShellState
+        property: "skipVoiceSwitch"
+        value: Desktop.skipVoiceSwitch
+    }
 
     Component.onCompleted: {
         Session.start()

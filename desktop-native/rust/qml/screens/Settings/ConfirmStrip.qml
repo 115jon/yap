@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A two-step destructive action without a modal (primitives.tsx
 // ConfirmStrip): the consequence in the person's terms on tint-1 with a

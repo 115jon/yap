@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A title bar key (desktop/styles.css): an ink tint on hover (tint-2) and
 // press (tint-3), never a hue; Close turns danger-fill. No scale on chrome.

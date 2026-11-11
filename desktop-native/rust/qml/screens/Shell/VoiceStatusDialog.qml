@@ -4,6 +4,7 @@ import QtQuick.Controls.Basic
 import Yap.Chrome
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // A voice channel's status (VoiceChannelTextStatusModal.tsx and
 // VoiceChannelMediaStatusModal.tsx), for someone connected there, on the

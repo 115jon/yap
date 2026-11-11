@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // YouTubeEmbed (LinkEmbed.tsx :475): the card at the media width (640;
 // Shorts sit in a compact 400 card and stop at 560 high), header, title,

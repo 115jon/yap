@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // Activities (VoiceAppsModal.tsx): one card per activity; the card starts
 // it for the call. Warp Rush is not built here yet.

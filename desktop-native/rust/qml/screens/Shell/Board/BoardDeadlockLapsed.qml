@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Lapsed, any size (Deadlock.tsx LapsedBody): no match in 30 days, so the
 // tier badge dimmed, the rank and when it was last ranked, and the

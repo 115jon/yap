@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // Frame your avatar (AvatarFrameEditor.tsx): the picture in a 320 px
 // square on a tint-1 plate, dragged to place it and zoomed 1x to 4x; the

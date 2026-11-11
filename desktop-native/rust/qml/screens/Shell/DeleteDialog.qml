@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // DeleteMessageDialog.tsx: title, consequence, the message itself, the
 // Shift hint, then Cancel and Delete. Delete has focus; Esc cancels.

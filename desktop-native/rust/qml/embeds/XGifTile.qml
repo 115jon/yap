@@ -1,6 +1,7 @@
 import QtQuick
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // An X GIF (LinkEmbed.tsx XGifTile :3275): the animated WebP from
 // gif.fxtwitter.com through the media proxy (decoded natively), or, when

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One widget's plate on the Rack (WidgetPlate.tsx, DESIGN.md C1 legend
 // plate): ply-2, a line-strong edge, 2 px corners, the legend printed

@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The first fetch (Deadlock.tsx LoadingPlate): static blocks in the shape
 // of the career plate for the size. No shimmer: nothing moves at rest.

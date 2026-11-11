@@ -2,6 +2,7 @@ import QtQuick
 import QtMultimedia
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // A remote camera or share on screen (VideoPlayer.tsx): Qt Multimedia's
 // VideoOutput, fed by VideoHub under `videoKey` (the track alias). While it

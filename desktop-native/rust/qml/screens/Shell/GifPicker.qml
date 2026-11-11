@@ -7,6 +7,7 @@ import QtMultimedia
 import Yap.Chrome
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // The GIF picker (GifPickerModal.tsx): 420 wide, up to 600 high, opened
 // 8 px above its key. PickerHeader: a 48 px row (Back once off the start

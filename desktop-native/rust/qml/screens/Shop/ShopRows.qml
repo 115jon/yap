@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // The shop's body as a virtualised list (ShopView.tsx body): the rows the
 // store lays out (store/shop.rs) drawn by type. A grid row holds as many

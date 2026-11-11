@@ -16,7 +16,8 @@ on:
       - "desktop-native/rust/crates/yap-core/**"
       - "desktop-native/rust/crates/yap-protocol/**"
       - "desktop-native/rust/crates/yap-realtime/**"
-      - "desktop-native/rust/src/client/gateway.rs"
+      - "desktop-native/rust/crates/yap-anim/**"
+      - "desktop-native/rust/crates/yap-ui/**"
   workflow_dispatch:
 
 permissions:

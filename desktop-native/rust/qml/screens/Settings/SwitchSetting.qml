@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A settings row whose control is the switch (SettingsSwitch in an inline
 // row), named by the row. `toggled` asks for the flip; `checked` shows the

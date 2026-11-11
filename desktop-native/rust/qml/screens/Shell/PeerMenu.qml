@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Someone's menu in a call (StreamContextMenu.tsx, ContextMenu/RemoteMenu.tsx)
 // on their tile, their voice row or their floating stream, with no name

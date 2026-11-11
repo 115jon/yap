@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The talk-green key (ui/dock.ts CALL_ACCEPT): Join voice and Accept.
 IconKey {

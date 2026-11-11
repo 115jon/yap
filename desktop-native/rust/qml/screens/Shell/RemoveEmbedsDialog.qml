@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The confirm before clearing a message's previews for everyone
 // (RemoveEmbedsDialog.tsx). Nothing in the UI brings them back, so Remove

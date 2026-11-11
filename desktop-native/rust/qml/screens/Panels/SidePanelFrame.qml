@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A right-hand side panel (ui/side-panel.tsx): a 48 px header (px-4, pr-2,
 // the title at ui-row 14/600, then any adornment, the actions and a 32 px

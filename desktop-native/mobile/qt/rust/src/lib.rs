@@ -1,19 +1,9 @@
-//! The Qt Quick mobile prototype's Rust side. Same shape as the desktop app
-//! (`desktop-native/rust/src`): the QML singletons `Session`, `Nav` and
-//! `Chat` ([`bridge`]) forward intents to yap-core as commands; the core's
-//! view updates land on the GUI thread ([`gui`]) and go into the desktop's
-//! own list models, compiled here unchanged ([`models`], mirrored from
-//! `desktop-native/rust/src/models.rs` by build.rs).
+//! The Qt Quick mobile prototype's Rust side: the mobile app's
+//! [`Platform`](yap_ui::platform::Platform) ([`client`]). The QML
+//! singletons, the list models and the core's runtime are the desktop's,
+//! from the shared `yap_ui` crate (QML module `Yap.Ui`); the phone shell is
+//! this crate's QML module, `com.yap.mobile`.
 
-// The desktop's picture decoder behind AnimatedPicture (both unchanged:
-// this file and cpp/animatedpicture.cpp).
-#[path = "../../../../rust/src/anim.rs"]
-#[allow(dead_code)]
-mod anim;
-mod bridge;
 mod client;
-mod gui;
-// Mirrored from desktop-native/rust/src/models.rs by build.rs (gitignored).
-mod models;
 #[path = "../../../common/platform.rs"]
 mod platform;

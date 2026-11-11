@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // A profile colour (SettingsAccountTab.tsx ColorControl): the 8 preset
 // swatches, a "+" chip that opens the colour picker (ColorPopover: the

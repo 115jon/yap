@@ -26,9 +26,9 @@ cxx-qt-lib = "0.10"
 yap-core = { path = "../../../rust/crates/yap-core", default-features = false, features = ["rustls"] }
 yap-cache = { path = "../../../rust/crates/yap-cache" }
 yap-protocol = { path = "../../../rust/crates/yap-protocol" }
-# The desktop's picture decoding (GIF, APNG, WebP) behind AnimatedPicture.
-yap-anim = { path = "../../../rust/crates/yap-anim" }
 yap-realtime = { path = "../../../rust/crates/yap-realtime", default-features = false, features = ["rustls"] }
+# The view layer shared with the desktop (the Yap.Ui QML module).
+yap-ui = { path = "../../../rust/crates/yap-ui" }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 webpki-roots = "1"

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One member panel row (MemberList.tsx). A label is the branch label: 24
 // high, silkscreen ink-3, the count at the end, 16 above (8 for the first).

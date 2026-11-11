@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // The incoming call card (IncomingCallModal.tsx): a 320 float at the top
 // right with no scrim, shown while a call rings for us and its DM is not

@@ -3,6 +3,7 @@ import QtQuick.Templates as T
 import QtMultimedia
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // One tile on the call stage (ParticipantCard.tsx, TileParts.tsx): a person,
 // or someone's share. A ply-2 surface with a 1 px seam (accent while on

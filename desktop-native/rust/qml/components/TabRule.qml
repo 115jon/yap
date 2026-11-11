@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The chosen tab's 2 px ink-1 rule (ui/tabs.tsx `rule`): one rule that
 // slides and resizes to the chosen tab over 200 ms, ease-in-out, in place

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // One mirrored Deadlock image (Deadlock.tsx HeroIcon / RankBadge / item):
 // `cover` crops a hero face or an item onto ply-4; otherwise a rank badge

@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Daily Word (WordleActivityStage.tsx) in place of the call's tiles: the
 // board, the keyboard, hints, hard mode and the other players' marks.

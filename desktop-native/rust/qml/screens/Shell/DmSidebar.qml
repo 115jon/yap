@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The tree panel at Home (DMSidebar.tsx): the 48 px header with the
 // conversation finder, the "Direct messages" branch label on the row-name

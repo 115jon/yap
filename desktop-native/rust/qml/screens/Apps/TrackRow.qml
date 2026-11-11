@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A track in Listen Together (a search result or a queue entry): artwork,
 // title over artist, duration (or a word such as Radio), and the row's keys.

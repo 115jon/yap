@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // The profile editor's picker for one slot (CollectiblePicker.tsx,
 // CollectibleListbox.tsx), on the settings workbench's shell: the title and

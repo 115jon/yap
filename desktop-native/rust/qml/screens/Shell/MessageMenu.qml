@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Yap.Chrome
 import com.yap.native
+import Yap.Ui
 
 // The message menu (MessageItem.tsx `handleContextMenu`), for the chat and
 // the thread panel: four quick reactions over a seam, then Add reaction,

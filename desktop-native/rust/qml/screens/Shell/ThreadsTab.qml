@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // The member list's Threads tab (MemberList.tsx ThreadsTabContent): the
 // open channel's threads by latest reply, loaded afresh each time the tab

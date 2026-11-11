@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // A setting you switch (SettingsRow + SwitchControl, as a panel row): the
 // Geist 14/500 label over an ink-3 description, and the LED at the right

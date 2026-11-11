@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Last match, S (Deadlock.tsx LastMatchSmall): the rank with the range's
 // share won and matches, then under a hairline the last match: hero face,

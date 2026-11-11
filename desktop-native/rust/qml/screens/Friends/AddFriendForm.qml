@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The Add friend form under the Friends header (FriendsView.tsx): the
 // label, one line on how, the username field and Send request (at most

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // Yappy's too-big poses (toobig-spec.md): "stuffed" (A, a file wedged in
 // the open jaw, 40 cells wide), "sad" (B) and "squashed" (C), on the mark's

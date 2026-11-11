@@ -5,6 +5,7 @@ import QtQuick.Templates as T
 import Yap.Chrome
 import Yap.Media
 import com.yap.native
+import Yap.Ui
 
 // The composer (MessageInput.tsx): the reply indicator, then the plate:
 // ply-2 with a line-field seam, the upload tray on top, then flush 48 px

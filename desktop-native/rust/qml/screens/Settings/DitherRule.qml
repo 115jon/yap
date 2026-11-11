@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The poster's dithered rule (ui/dither.tsx DitherRule): 8 px high, 2 px
 // cells, the accent ink ramping from 95 % at the leading edge to 2 %,

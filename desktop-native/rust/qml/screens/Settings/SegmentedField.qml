@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import com.yap.native
+import Yap.Ui
 
 // Two to four choices as the C1 segmented rail (primitives.tsx
 // SegmentedField, ui/segmented-control.tsx): a 2 px ink-1 frame on ply-0,

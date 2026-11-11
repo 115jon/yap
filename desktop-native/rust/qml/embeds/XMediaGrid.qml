@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // An X post's media (LinkEmbed.tsx XMediaGrid :2664, XMediaTile :2851).
 // One item keeps its own aspect inside 520 x 420 (240 x 180 `compact`, a

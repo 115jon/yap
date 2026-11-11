@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // An X post (LinkEmbed.tsx XEmbed :2223): a 520 card. The header, the
 // author (32 px avatar, name, handle), the text (over five lines or 280

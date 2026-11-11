@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The others in the call who play: their name, streak and each guess as
 // coloured squares only (their letters stay hidden).

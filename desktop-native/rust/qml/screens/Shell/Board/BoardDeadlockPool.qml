@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The hero pool (Deadlock.tsx Pool): one row per hero, most played first:
 // face, name, a bar in accent ink scaled to the most played, games and the

@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // The drag of a floating player (FloatingSurface.tsx handlePointerDown,
 // handlePointerMove, endDrag): past 6 px (DRAG_THRESHOLD) the card follows

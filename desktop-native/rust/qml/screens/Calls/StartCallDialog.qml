@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import com.yap.native
+import Yap.Ui
 
 // StartCallModal.tsx (ConfirmCallDialog): "Call Ana?", "This rings Ana
 // right away.", Don't ask again (kept on this device), Cancel and Start

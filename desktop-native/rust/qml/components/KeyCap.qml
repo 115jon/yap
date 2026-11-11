@@ -1,5 +1,6 @@
 import QtQuick
 import com.yap.native
+import Yap.Ui
 
 // A key cap (ui/kbd.tsx): Martian 11/600, 2 px corners. `cap` is a tint-2
 // key with a 2 px ink-2 bottom edge, 24 high; `outline` a line-strong
