@@ -1,0 +1,298 @@
+pragma ComponentBehavior: Bound
+import QtQuick
+import Yap.Mobile
+import com.yap.mobile
+import Yap.Ui
+
+// The composer's attachments, phone layout (the desktop's UploadTray on a
+// touch row): 72 px tiles side by side, scrolled sideways. A finished tile
+// shows its picture (or the type glyph), the size chip and the sensitive
+// toggle; one still going is dimmed with its progress; a failed one says
+// so and Retry starts it again. Remove (or cancel) is always shown: touch
+// has no hover. A file over the limit is never uploaded: the core keeps it
+// as a too-big card (the desktop's TooBigCard copy, without the mascot),
+// and two or more of them fold into one card with "Remove the big ones".
+Item {
+    id: root
+
+    readonly property bool shown: tiles.count > 0
+    readonly property bool folded: Chat.uploadsTooBig >= 2
+
+    // Choose another: the card went; the composer opens the picker again.
+    signal chooseAnother()
+    // A failed tile was tapped: its error, for the composer's notice line.
+    signal explain(string text)
+
+    implicitHeight: shown ? 88 : 0
+    clip: true
+    Behavior on implicitHeight { NumberAnimation { duration: Theme.dur2; easing.type: Easing.OutCubic } }
+
+    Accessible.role: Accessible.List
+    Accessible.name: qsTr("Attachments")
+
+    component Card: Rectangle {
+        id: card
+        property var info: ({})
+        signal action(string id)
+        readonly property var actions: info.actions ?? []
+        width: 248
+        height: 72
+        radius: Theme.radius
+        color: Theme.ply2
+        border.width: 1
+        border.color: Theme.mix(Theme.warningInk, 0.36)
+        Accessible.role: Accessible.AlertMessage
+        Accessible.name: info.alert ?? ""
+        Column {
+            x: 10
+            y: 8
+            width: parent.width - 20
+            spacing: 2
+            Text {
+                width: parent.width
+                text: card.info.headline ?? ""
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                color: Theme.ink1
+                font: Theme.type.labelStrong
+            }
+            Text {
+                width: parent.width
+                text: card.info.line ?? ""
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                color: Theme.ink2
+                font: Theme.type.caption
+            }
+            Row {
+                spacing: 16
+                Repeater {
+                    model: card.actions
+                    LinkText {
+                        required property string modelData
+                        text: modelData === "remove" ? qsTr("Remove")
+                            : modelData === "choose" ? qsTr("Choose another")
+                            : modelData === "removeBig" ? qsTr("Remove the big ones")
+                            : modelData === "pick" ? qsTr("Pick another") : modelData
+                        onActivated: card.action(modelData)
+                    }
+                }
+            }
+        }
+    }
+
+    ListView {
+        id: tiles
+        anchors.fill: parent
+        anchors.topMargin: 8
+        anchors.bottomMargin: 8
+        leftMargin: 12
+        rightMargin: 12
+        orientation: ListView.Horizontal
+        spacing: 8
+        boundsBehavior: Flickable.StopAtBounds
+        model: UploadListModel
+
+        header: Item {
+            width: root.folded ? summary.width + 8 : 0
+            height: tiles.height
+            Card {
+                id: summary
+                visible: root.folded
+                info: root.folded ? JSON.parse(Limits.traySummary(Chat.uploadsTooBig, tiles.count - Chat.uploadsTooBig, Settings.attachmentLimit)) : ({})
+                onAction: id => {
+                    if (id === "removeBig")
+                        Chat.removeOversizedUploads()
+                }
+            }
+        }
+
+        add: Transition {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur3; easing.type: Easing.OutCubic }
+        }
+        displaced: Transition {
+            NumberAnimation { property: "x"; duration: Theme.dur3; easing.type: Easing.OutCubic }
+        }
+
+        delegate: Item {
+            id: tile
+            required property string uploadId
+            required property string name
+            required property string sizeText
+            required property string kind
+            required property string preview
+            required property string uploadState
+            required property int progress
+            required property string error
+            required property bool nsfw
+            required property string card
+            readonly property bool done: uploadState === "done"
+            readonly property bool failed: uploadState === "failed"
+            readonly property bool going: uploadState === "uploading"
+            readonly property bool isCard: card.length > 0
+            // Folded into the summary card.
+            readonly property bool hidden: root.folded && uploadState === "toobig"
+
+            width: hidden ? 0 : isCard ? tooBig.width : 72
+            height: 72
+            visible: !hidden
+            Accessible.role: Accessible.ListItem
+            Accessible.name: tile.failed ? qsTr("%1, upload failed. Tap to retry").arg(tile.name)
+                : tile.going ? qsTr("%1, uploading").arg(tile.name) : tile.name
+
+            Card {
+                id: tooBig
+                visible: tile.isCard
+                info: tile.isCard ? JSON.parse(tile.card) : ({})
+                onAction: id => {
+                    Chat.removeUpload(tile.uploadId)
+                    if (id === "choose")
+                        root.chooseAnother()
+                }
+            }
+
+            Rectangle {
+                id: frame
+                visible: !tile.isCard
+                anchors.fill: parent
+                radius: Theme.radius
+                color: Theme.tint2
+                border.width: 1
+                border.color: tile.nsfw ? Theme.warningInk : Theme.line
+                clip: true
+
+                Image {
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    visible: tile.kind === "image"
+                    opacity: tile.done ? 1 : tile.failed ? 0.2 : 0.4
+                    asynchronous: true
+                    fillMode: Image.PreserveAspectCrop
+                    // Sensitive: a small decode scaled up reads as the blur.
+                    sourceSize: tile.nsfw ? Qt.size(16, 16) : Qt.size(144, 144)
+                    source: tile.preview
+                }
+                Icon {
+                    visible: tile.kind !== "image" && !tile.failed
+                    anchors.centerIn: parent
+                    name: tile.kind === "video" ? "fileVideo" : "file"
+                    size: Theme.iconXl
+                    color: Theme.ink2
+                }
+                Spinner {
+                    running: tile.going
+                    anchors.centerIn: parent
+                    color: Theme.ink1
+                }
+                // The bar along the foot while it goes.
+                Rectangle {
+                    visible: tile.going && tile.progress > 0
+                    anchors.bottom: parent.bottom
+                    x: 1
+                    width: (parent.width - 2) * tile.progress / 1000
+                    height: 3
+                    color: Theme.accentInk
+                }
+                // Failed: the alert and Retry; a tap on the tile says why.
+                Column {
+                    visible: tile.failed
+                    anchors.centerIn: parent
+                    spacing: 2
+                    Icon {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        name: "alert"
+                        size: 20
+                        color: Theme.dangerInk
+                    }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: qsTr("Retry")
+                        color: Theme.accentInk
+                        font: Theme.type.captionStrong
+                    }
+                }
+                // The whole tile is the Retry key (a finger-sized target),
+                // and the reason shows in the composer's notice line.
+                TapHandler {
+                    enabled: tile.failed
+                    onTapped: {
+                        if (tile.error.length > 0)
+                            root.explain(tile.error)
+                        Chat.retryUpload(tile.uploadId)
+                    }
+                }
+
+                // The size chip, bottom right (the chunked progress reads here).
+                Rectangle {
+                    visible: (tile.done || tile.going) && tile.sizeText.length > 0
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.margins: 4
+                    width: Math.min(sizeLabel.implicitWidth + 8, parent.width - 8)
+                    height: 16
+                    radius: Theme.radius
+                    color: Theme.ply3
+                    Text {
+                        id: sizeLabel
+                        anchors.centerIn: parent
+                        width: Math.min(implicitWidth, parent.width - 8)
+                        textFormat: Text.PlainText
+                        text: tile.sizeText
+                        elide: Text.ElideRight
+                        color: Theme.ink2
+                        font: Theme.type.numSm
+                    }
+                }
+            }
+
+            // Mark sensitive, top left of a finished tile: a 32 px target
+            // around the 20 px chip.
+            Item {
+                id: sensitiveKey
+                visible: tile.done && !tile.isCard
+                anchors.left: parent.left
+                anchors.top: parent.top
+                width: 32
+                height: 32
+                Accessible.role: Accessible.CheckBox
+                Accessible.checkable: true
+                Accessible.checked: tile.nsfw
+                Accessible.name: tile.nsfw ? qsTr("%1 is marked sensitive. Unmark it").arg(tile.name)
+                    : qsTr("Mark %1 as sensitive").arg(tile.name)
+                Rectangle {
+                    x: 4
+                    y: 4
+                    width: 20
+                    height: 20
+                    radius: Theme.radius
+                    color: tile.nsfw ? Theme.warningTint : Theme.ply3
+                    Icon {
+                        anchors.centerIn: parent
+                        name: "warning"
+                        size: Theme.iconXs
+                        color: tile.nsfw ? Theme.warningInk : Theme.ink2
+                    }
+                }
+                TapHandler {
+                    onTapped: {
+                        Native.haptic(Native.Tick)
+                        Chat.setUploadSensitive(tile.uploadId, !tile.nsfw)
+                    }
+                }
+            }
+
+            // Remove (finished, failed) or cancel (going), top right.
+            IconKey {
+                focusPolicy: Qt.NoFocus
+                visible: !tile.isCard
+                anchors.right: parent.right
+                anchors.top: parent.top
+                size: 28
+                tone: "rest"
+                iconName: tile.done ? "trash" : "close"
+                tip: tile.going ? qsTr("Cancel uploading %1").arg(tile.name) : qsTr("Remove %1").arg(tile.name)
+                onClicked: Chat.removeUpload(tile.uploadId)
+            }
+        }
+    }
+}

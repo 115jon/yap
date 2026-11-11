@@ -16,6 +16,12 @@ Column {
     signal download(var item)
     signal expandVideo(var item)
 
+    // The pictures, in order: a tap opens the viewer on them.
+    function isPicture(item) {
+        return String(item.mime || "").startsWith("image/")
+    }
+    readonly property var images: items.filter(isPicture)
+
     spacing: 4
 
     Repeater {
@@ -24,7 +30,7 @@ Column {
             id: slot
             required property var modelData
             required property int index
-            readonly property bool picture: String(modelData.mime || "").startsWith("image/")
+            readonly property bool picture: root.isPicture(modelData)
             sourceComponent: picture ? image : file
 
             Component {
@@ -36,6 +42,9 @@ Column {
                     asynchronous: true
                     source: slot.modelData.url || ""
                     sourceSize.width: width * 2
+                    TapHandler {
+                        onTapped: root.openImage(root.images, root.items.slice(0, slot.index).filter(root.isPicture).length)
+                    }
                 }
             }
             Component {

@@ -16,15 +16,33 @@ Item {
 
     signal back()
 
+    // Reply to a message (the long-press sheet, swipe to reply, the hover
+    // bar's Reply): the composer's reply bar shows and the keyboard opens.
+    function startReply(messageId, author, text) {
+        composer.startReply(messageId, author, text)
+    }
+
+    // Back closes what is over the chat first (the image viewer): true when
+    // it took the gesture, so the page stays.
+    function closeOverlay() {
+        if (viewer.shown) {
+            viewer.close()
+            return true
+        }
+        return false
+    }
+
     readonly property real keyboard: Native.imeHeight
     readonly property real bottomInset: Math.max(SafeArea.margins.bottom, keyboard)
 
     // Follow the newest message unless the user scrolled away from it.
     property bool followEnd: true
 
-    x: backProgress * width * 0.1
-    scale: 1 - backProgress * 0.08
-    opacity: 1 - backProgress * 0.2
+    // While the viewer is up the gesture is its own (it shrinks and fades).
+    readonly property real pageBack: viewer.shown ? 0 : backProgress
+    x: pageBack * width * 0.1
+    scale: 1 - pageBack * 0.08
+    opacity: 1 - pageBack * 0.2
 
     Rectangle {
         anchors.fill: parent
@@ -143,6 +161,8 @@ Item {
                 Chat.toggleReaction(id, emoji)
             }
             onLinkOpened: url => Qt.openUrlExternally(url)
+            onReplyRequested: (id, author, text) => root.startReply(id, author, text)
+            onImageOpened: (images, index) => viewer.show(images, index)
         }
 
         function nearEnd() {
@@ -200,11 +220,19 @@ Item {
         anchors.rightMargin: SafeArea.margins.right
         placeholder: qsTr("Message #%1").arg(Nav.activeChannelName)
         enabled: !Chat.readOnly
-        onSend: text => {
+        onSend: (text, replyToId) => {
             Native.haptic(Native.Confirm)
             root.followEnd = true
-            Chat.sendMessage(text, "")
+            Chat.sendMessage(text, replyToId)
         }
+    }
+
+    // Over everything on the page, the header included.
+    ImageViewerPage {
+        id: viewer
+        anchors.fill: parent
+        z: 10
+        backProgress: viewer.shown ? root.backProgress : 0
     }
 
     // Open at the newest message once the first rows have laid out.
