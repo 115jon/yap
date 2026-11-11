@@ -231,7 +231,9 @@ Not there yet:
 - The rail has no unread-DM avatar keys under Home (the desktop's), no
   create-server tile and no shop row. Friends is the first row of Home's
   pane ("Settings and Friends").
-- Voice channels in the tree do nothing on a tap.
+- A voice channel's row joins its call and opens the call page ("Voice
+  calls"). There is no landing between the two (the desktop's shows who is
+  in the channel first); the tree's occupant rows show that.
 - Side by side, the image viewer covers the chat column, not the window:
   it lives in the chat page.
 - A message's swipe to reply and the pan share the chat: tried together, a
@@ -378,6 +380,16 @@ Next savings, not measured yet:
 - a static Qt for Android with LTO. That needs Qt built from source for
   Android (hours, about 15 GB). Not attempted here, so static vs shared is
   open.
+
+**Voice adds 14.4 MB** (arm64, release, measured 2026-11-11 with one
+toolchain on main at `bf81ba6f` and on the voice branch): the APK goes
+from 61.3 MB to 75.8 MB, and gzip -9 of it from 22.2 MB to 28.7 MB.
+`libyapqt` grows from 19.1 MB to 33.2 MB (libwebrtc, with its codecs, and
+the call), `classes.dex` from 0.93 MB to 1.32 MB (libwebrtc's Java side,
+kept whole for JNI). Not tried yet: keeping only the JNI entry points the
+audio device module and the codec factories use (the link keeps all 224,
+and with them the Java API's native side), and a WebRTC built without the
+video codecs an audio-only phone never runs.
 
 ## Gaps found
 
@@ -675,6 +687,157 @@ turning them on showed on return. Not verified: signing out another device
 <img src="docs/qt-friends-actions.png" width="180" alt="Qt: Friends, a friend's actions">
 </p>
 
+### Voice calls
+
+A voice channel's row in the drawer joins it. The call is the desktop's:
+`yap-voice` (the call state machine, the room and voice sockets, the SFU
+client, libwebrtc media) behind the phone's `Realtime::spawn_voice`,
+through the store driver both apps now run (`yap_voice::call`, "Core
+refactors"). Android only: the iOS build stays a compile and link check
+without libwebrtc. What is the phone's own:
+
+- **Media.** LiveKit's prebuilt WebRTC for Android (`webrtc-sys` 0.3.52 and
+  `libwebrtc` 0.3.55, the desktop's pins, with the desktop's patches:
+  `qt/rust/Cargo.toml` patches in the copies `patches/vendor.ps1` makes,
+  which `build.sh` runs; the Media Foundation and D3D11 patches in them
+  build only for Windows). Audio goes through libwebrtc's own Android
+  device module, `AudioRecord` on the `VOICE_COMMUNICATION` source and
+  `AudioTrack`, with the platform's echo canceller and noise suppressor
+  and WebRTC's processing. That is the path the desktop keeps behind
+  `YAP_ADM_AUDIO=1`, so the phone has no RNNoise and no per-person panning
+  (spatial audio is heard flat), and one mixed playout. The voice settings
+  are the defaults: the phone has no page for the output and per-person
+  volumes, sensitivity or processing yet. The soundboard's and Listen
+  Together's audio are not played (`yap-audio` is not in the app). No
+  camera, screen share or remote video yet: the phone asks for no video,
+  so none is pulled.
+- **Start-up.** libwebrtc needs the process's `JavaVM`, the application
+  context and its Java side (`livekit.org.webrtc.*`, in the prebuilt's
+  `libwebrtc.jar`). `VoiceShim.install` calls its `nativeInit` at start,
+  which hands both to `yap_voice::android::init`; it has to come from a
+  thread Java called into, because libwebrtc looks its classes up with
+  `FindClass` there. `yap-voice`'s build script writes what the packaging
+  needs into the folder `YAP_WEBRTC_EXPORT_DIR` names (CMake sets it): the
+  jar, which CMake copies to where Gradle picks up jars, and
+  `webrtc_jni.rsp`, a linker response file with `--undefined` for each of
+  the 224 `Java_livekit_org_webrtc_*` entry points. Java binds to those by
+  name in `libyapqt`, and nothing native refers to them, so the link would
+  drop them (webrtc-sys asks for the same with `cargo:rustc-link-arg`,
+  which does not reach a staticlib linked by CMake). R8 keeps
+  `livekit.org.**` (the classes and jni_zero's glue under it).
+- **Permission.** `RECORD_AUDIO`, asked at the first join
+  (`Native.requestMicrophone`). Refused, a sheet says what it is for and
+  opens the app's page in the system settings (after a second refusal
+  Android no longer shows its dialog).
+- **Background.** Android keeps a backgrounded app's mic only behind a
+  foreground service of type microphone. `VoiceService` is that, with the
+  ongoing notification: the channel, how long the call has run, Mute or
+  Unmute and Leave. It holds no call state. Qt's event loop sleeps while
+  the app is in the background, so neither direction waits on it: the core
+  tells the shim from its own thread that a call's task started or that
+  the last one ended (`yap_mobile_call_active`; the service stops 1.2 s
+  after, so a call the room restarts or moves keeps it), and the
+  notification's actions go from the shim straight to the core's command
+  channel. The service starts only with the permission and from the
+  foreground (a join is a tap), which Android 14 requires of a microphone
+  service. Swiping the task away ends the call: Qt ends the process when
+  its activity is destroyed, so the service's `onTaskRemoved` and the
+  activity's `onDestroy` first tell the room we left (the desktop's
+  disconnect beacon, up to 800 ms on the main thread). The gateway stays up
+  under a call (the core's background suspend skips it). A call the process
+  died in without that is reported as left at the next sign-in (the
+  desktop's stale beacon). While the app is in the background the core's
+  view updates wait in one list for the Qt thread and are applied together
+  on return; a long call with the screen off makes that list long (not
+  measured).
+- **Audio session.** `CallAudio`, for as long as the service: the
+  communication mode, transient audio focus, and the route. An
+  interruption deafens the call through the core and its end undeafens it,
+  unless the user changed it meanwhile; a call that ends interrupted takes
+  the deafen back, so the next one does not start with it. Interrupted is a
+  transient focus loss (a phone call, an alarm, the assistant) or, on
+  Android 12+, the telephony audio mode, which still tells when focus no
+  longer does. A focus loss for good (music started) leaves the call
+  alone; one that follows a transient loss, or a request refused at the
+  start, asks again every 2 s until the phone is free.
+  Routes are the speaker, the earpiece, a wired headset and a Bluetooth
+  one: `AudioManager.setCommunicationDevice` on Android 12+, the
+  speakerphone switch and Bluetooth SCO before. Automatic is Bluetooth,
+  then a wired headset, then the speaker; a headset that arrives takes the
+  call, and a pick holds while its device is there. The earpiece holds the
+  proximity sensor's screen lock. `BLUETOOTH_CONNECT` is not asked for:
+  these APIs route to a paired headset without it.
+- **UI.** `CallPage`, a page of the stack: the channel, the call's state as
+  an LED word with the link quality and round trip beside it, everyone in
+  the call as rows on `VoiceRosterModel` (the square avatar with the 2px
+  talk ring, the name, mute and deafen glyphs, the talk LED), a line when
+  audio stopped flowing one way or the call failed, and the dock: mic,
+  deafen, the route (a sheet of `Native.audioRoutes`) and Leave. Back
+  leaves the page, not the call. `CallBar`, above the account row in the
+  drawer while a call is up: the state and the channel, a tap opens the
+  page. It carries no controls (one dock). The tree's voice rows are the
+  desktop's (`TreeRow`), with the occupants and their LEDs. Mute, deafen
+  and the route tick (`Native.haptic`).
+
+Verified on the emulator (API 35, x86_64) as Native Spike in Native Spike
+Lab's General, against a headless Chromium as Spike Peer on the web client
+with a fake microphone (a tone):
+
+- the system's microphone dialog at the first join, the sheet after Don't
+  allow, and the join after While using the app;
+- both in each other's roster; audio both ways by the numbers: the phone's
+  log showed the peer's track arriving and decoding (`in[1]` bytes rising,
+  level up to 1.0) and its own leaving (`out[0]` bytes rising), and the
+  peer's `inbound-rtp` for the phone's track rose alongside. The
+  emulator's microphone is silent (level 0), so nobody heard the phone, and
+  nothing was listened to by ear;
+- the peer's talk ring and LED following its tone on the call page and in
+  the tree. The emulator drew 9 frames a second (the host was building),
+  and the 60 and 220 ms fades visibly trailed the state at that rate;
+- mute and deafen from the dock reaching the peer's view of the room
+  (`self_mute`, `self_deaf`), the phone's `out[0]` standing still while
+  muted and its inbound level at 0 while deafened;
+- Home, then the screen off for 89 s (past the 60 s suspend grace): the
+  service in the foreground with type microphone, the notification up, and
+  both byte counts still rising;
+- Mute from the notification with the app in the background (the peer saw
+  it, the notification turned to Muted and Unmute), then Leave from it:
+  the call left, the peer's list dropped the phone, the service and the
+  notification went;
+- joining again straight away (no close code 4010), and Leave from the
+  dock;
+- an incoming phone call from the emulator's console (`gsm call`): while it
+  rang (telecom held transient focus and the mode was the ringtone's) the
+  peer saw the phone deafened and muted, and after `gsm cancel` neither,
+  with the inbound level back;
+- the task removed during a call (`am stack remove`, what a swipe in
+  Recents does; adb's swipe did not move the card): the beacon went out,
+  the peer's list dropped the phone within 3 s, and the process ended with
+  no service or notification left. Before the service stopped itself here,
+  Android 15 started the process again for it and kept the notification
+  up.
+
+Not verified: any route but the speaker (the emulator lists one, so the
+route key stays off), Bluetooth and the earpiece's proximity lock; a phone
+call answered and held, or one that arrives after another app took focus
+for good; a restart or move of a call while in the background; a leave
+and a join within the service's 1.2 s; Android before 15; a real device
+(arm64 was built before the last Java and QML fixes and not run); a
+second phone participant; a long call with the screen off (the resume
+after it).
+
+<p>
+<img src="docs/qt-call.png" width="180" alt="Qt: the call page, the peer speaking">
+<img src="docs/qt-call-drawer.png" width="180" alt="Qt: the drawer in a call, the occupants and the call bar">
+</p>
+
+Next: remote video and shares on the call page (the desktop's
+`VideoOutput` seam takes I420 frames; the phone needs a surface for them),
+the camera, the in-call bar over the chat, DM calls and their ring, a
+landing that shows who is in a channel before joining, the phone's own
+audio path (RNNoise, panning, the soundboard), and iOS (AVAudioSession and
+CallKit in place of the service).
+
 ### Build and run the Qt app
 
 Needs:
@@ -691,7 +854,12 @@ Needs:
 - the Android SDK, NDK r27c (27.2.12479018, the one Qt 6.11.3 for Android
   was built with; `build.sh` takes `$ANDROID_NDK_ROOT` or the SDK's
   `ndk/27.2.12479018`, and NDK 27.1 also works), JDK 17+, Ninja, 7-Zip,
-  PowerShell 7, and Rust with the Android targets.
+  PowerShell 7, and Rust with the Android targets;
+- for voice, the cargo registry's `webrtc-sys` and `libwebrtc` at the
+  desktop's pins (`patches/vendor.ps1`, which `build.sh` runs, fetches and
+  patches them into `rust/vendor`), and network for the first build of an
+  ABI: webrtc-sys downloads LiveKit's prebuilt WebRTC for it (about 150 MB,
+  700 MB unpacked, kept in cargo's target folder under the build tree).
 
 ```sh
 pwsh desktop-native/mobile/qt/fetch-qt.ps1 -Dest $YAPM/qt -Set android-x86_64   # + host-linux off Windows
@@ -850,8 +1018,18 @@ Each is its own commit, and the desktop resolves and behaves as before:
    `#if defined(_WIN32)`, and the native-buffer accessor in
    `patches/libwebrtc` is `cfg(target_os = "windows")`. The others (no AV1,
    offer options) are platform-neutral and wanted on mobile too. Cargo's
-   `[patch]` is per workspace, so a mobile crate that builds voice lists
-   the same vendored copies.
+   `[patch]` is per workspace, so the Qt app's workspace lists the same
+   vendored copies (`qt/rust/Cargo.toml`).
+5. **The store's call driver is `yap_voice::call`** (feature `store`), moved
+   from the desktop's `src/client/voice.rs`: the store's commands and
+   voice settings in, its `VoiceUpdate`s out, admission, the disconnect
+   beacons, the share's stills. What differs per app is its `Host`: screen
+   capture, the videos on screen, the mic meter and the still's JPEG
+   encoder. The desktop's file is now that `Host` and re-exports; the
+   phone's is `qt/rust/src/voice.rs`. `yap-voice` takes the TLS backend as
+   a feature like `yap-core` (`native-tls` by default, `rustls` on the
+   phone), and on Android its engine lists no devices (the system routes
+   them) and offers `yap_voice::android::init`.
 
 ## Crate audit
 
@@ -867,9 +1045,9 @@ Each crate was checked by compiling it for `x86_64-linux-android` (NDK 27).
 | `yap-webm`                      | builds                                                                                                                                      | none                                                                                                                | none                                                                                                                                                                                                                                            |
 | `yap-ui`                        | builds and runs in the Qt app (x86_64 emulator)                                                                                             | none: what differs per app goes through its `Platform`                                                              | **done**: the models, registry, bridge (`Session`/`Nav`/`Chat`/`Voice`/`Profile`), portable singletons, runtime, gateway, `Yap.Ui` QML and portable C++ moved out of the app crate                                                              |
 | app crate `yap_native`          | not portable                                                                                                                                | the desktop's objects (`Desktop`, `Audio`, `Games`, `Hotkeys`, `Updater`, `CustomSounds`) and its `Platform`        | stays desktop-only                                                                                                                                                                                                                              |
-| app crate `src/client/voice.rs` | not tried                                                                                                                                   | no Qt; drives `yap-voice` with the desktop's devices                                                                | Move the Qt-free call driver next to `yap-voice`                                                                                                                                                                                                |
-| `yap-voice` (no `libwebrtc`)    | builds once given the same TLS switch as yap-core                                                                                           | Win32 in 5 of 28 files: WASAPI devices, Media Foundation                                                            | 1. `default-features = false` for its `yap-realtime` dependency, forwarding the TLS feature. 2. Upstream LiveKit libwebrtc for Android/iOS (the patches are already Windows-gated). 3. libwebrtc's JNI init for its Android audio device module |
-| `yap-speaker`                   | builds (5 dead-code warnings)                                                                                                               | the WASAPI engine                                                                                                   | An AAudio/Oboe and AVAudioEngine sink, or libwebrtc's audio device module on mobile                                                                                                                                                             |
+| app crate `src/client/voice.rs` | its driver moved to `yap_voice::call`, which builds and runs in the Qt app                                                                  | what is left: the desktop's `Host` (screen capture, video output, the mic meter)                                    | **done**: the Qt-free call driver is `yap_voice::call`                                                                                                                                                                                          |
+| `yap-voice`                     | builds with `rustls` and `libwebrtc` (LiveKit's Android prebuilt) and runs calls in the Qt app (x86_64 emulator; arm64 built)               | Win32 in 5 of 28 files: WASAPI devices, Media Foundation                                                            | **done** for Android: the TLS feature pair, the patched LiveKit crates in the phone's workspace, `yap_voice::android::init` for libwebrtc's JVM and context. iOS: the same with AVAudioSession, not tried                                       |
+| `yap-speaker`                   | builds (5 dead-code warnings); linked, not used: the phone's call plays through libwebrtc's device module                                   | the WASAPI engine                                                                                                   | An AAudio/Oboe and AVAudioEngine sink, for the phone's own audio path (RNNoise, panning, the soundboard)                                                                                                                                        |
 | `yap-audio`                     | builds once given the same TLS switch                                                                                                       | none (decode only)                                                                                                  | the TLS feature pair                                                                                                                                                                                                                            |
 | `yap-games`, `yap-hotkeys`      | build (Win32 gated out)                                                                                                                     | the whole purpose                                                                                                   | stay desktop-only                                                                                                                                                                                                                               |
 | `yap-capture`                   | not portable                                                                                                                                | Windows Graphics Capture, D3D11, the game hook                                                                      | stays desktop-only; mobile screen share is MediaProjection / ReplayKit                                                                                                                                                                          |
@@ -912,5 +1090,6 @@ Each crate was checked by compiling it for `x86_64-linux-android` (NDK 27).
 4. Size: R8, bytecode-only QML, and a static-Qt measurement.
 5. CI: Qt for Android on Ubuntu; Qt for iOS on macOS for a compile check of
    the same QML module.
-6. Voice: upstream libwebrtc on Android, a foreground service. Push (FCM) is
-   done ("Push notifications"); call rings and APNs are not.
+6. Voice on Android is done for audio ("Voice calls": its "Next" lists
+   video, DM calls and the phone's own audio path). Push (FCM) is done
+   ("Push notifications"); call rings and APNs are not.
