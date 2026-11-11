@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.0.0](https://github.com/115jon/yap/compare/v3.14.0...v4.0.0) (2026-11-11)
+
+
+### Bug Fixes
+
+* **desktop-native:** 🐛 create the run key when turning on autostart ([578a0ad](https://github.com/115jon/yap/commit/578a0adfe67664cadf1caa7d235170b16fb3e16c))
+
 ## [3.14.0](https://github.com/115jon/yap/compare/v3.13.0...v3.14.0) (2026-11-10)
 
 
