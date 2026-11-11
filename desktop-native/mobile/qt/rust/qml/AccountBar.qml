@@ -90,7 +90,6 @@ Rectangle {
         TapHandler {
             id: tap
             onTapped: {
-                Native.haptic(Native.Tick)
                 root.settingsRequested()
             }
         }

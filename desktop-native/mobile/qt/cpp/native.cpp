@@ -8,6 +8,7 @@
 #include <QtGui/QKeyEvent>
 
 #include <atomic>
+#include <utility>
 
 #ifdef Q_OS_ANDROID
 #include <QtCore/QJniEnvironment>
@@ -99,6 +100,7 @@ Native::Native(QObject* parent)
   m_maxFling = QJniObject::callStaticMethod<jfloat>(kShim, "maxFlingVelocity");
   m_deceleration = QJniObject::callStaticMethod<jfloat>(kShim, "flingDeceleration");
   readConfiguration();
+  applyBars();
   // Text size, Remove animations and the wallpaper accent can change while
   // the app is away; read them again when it comes back, and the keyboard's
   // inset, which can go stale behind another activity (the photo picker).
@@ -128,14 +130,81 @@ void Native::setHandlesBack(bool on)
   if (m_handlesBack == on)
     return;
   m_handlesBack = on;
-#ifdef Q_OS_ANDROID
-  // Registered while the app has somewhere to go back to. At the root the
-  // system plays its own back-to-home preview, unless it would finish the
-  // activity there; then the shim keeps the callback and the app leaves by
-  // moving its task back (NativeShim.keepsTaskAtRoot).
-  QJniObject::callStaticMethod<void>(kShim, "setHandlesBack", "(Z)V", jboolean(on));
-#endif
+  applyBack();
   emit handlesBackChanged();
+}
+
+QObject* Native::backLayer()
+{
+  m_backLayers.removeAll(QPointer<QObject>());
+  return m_backLayers.isEmpty() ? nullptr : m_backLayers.last().data();
+}
+
+void Native::applyBack()
+{
+  const bool take = m_handlesBack || backLayer();
+  if (std::exchange(m_backTaken, take) == take)
+    return;
+#ifdef Q_OS_ANDROID
+  // Registered while the app has somewhere to go back to (a page to pop, a
+  // layer to close). At the root the system plays its own back-to-home
+  // preview, unless it would finish the activity there; then the shim keeps
+  // the callback and the app leaves by moving its task back
+  // (NativeShim.keepsTaskAtRoot).
+  QJniObject::callStaticMethod<void>(kShim, "setHandlesBack", "(Z)V", jboolean(take));
+#endif
+}
+
+void Native::pushBackLayer(QObject* layer)
+{
+  if (!layer)
+    return;
+  m_backLayers.removeAll(QPointer<QObject>(layer));
+  m_backLayers.append(QPointer<QObject>(layer));
+  // A layer destroyed while up gives the gesture back.
+  connect(layer, &QObject::destroyed, this, &Native::applyBack, Qt::UniqueConnection);
+  applyBack();
+}
+
+void Native::popBackLayer(QObject* layer)
+{
+  m_backLayers.removeAll(QPointer<QObject>(layer));
+  applyBack();
+}
+
+void Native::setLightBars(bool on)
+{
+  if (m_lightBars == on)
+    return;
+  m_lightBars = on;
+  applyBars();
+  emit lightBarsChanged();
+}
+
+void Native::holdDarkBars(QObject* holder)
+{
+  if (!holder || m_darkHolds.contains(QPointer<QObject>(holder)))
+    return;
+  m_darkHolds.append(QPointer<QObject>(holder));
+  connect(holder, &QObject::destroyed, this, &Native::applyBars, Qt::UniqueConnection);
+  applyBars();
+}
+
+void Native::releaseDarkBars(QObject* holder)
+{
+  m_darkHolds.removeAll(QPointer<QObject>(holder));
+  applyBars();
+}
+
+void Native::applyBars()
+{
+  m_darkHolds.removeAll(QPointer<QObject>());
+  const bool light = m_lightBars && m_darkHolds.isEmpty();
+  if (std::exchange(m_barsLight, int(light)) == int(light))
+    return;
+#ifdef Q_OS_ANDROID
+  QJniObject::callStaticMethod<void>(kShim, "setLightBars", "(Z)V", jboolean(light));
+#endif
 }
 
 void Native::readConfiguration()
@@ -231,16 +300,28 @@ void Native::onMediaPicked(const QStringList& paths, int failed)
 
 void Native::onBackProgress(qreal progress)
 {
+  if (QObject* layer = backLayer()) {
+    QMetaObject::invokeMethod(layer, "backProgressed", Q_ARG(QVariant, QVariant(progress)));
+    return;
+  }
   emit backProgressed(progress);
 }
 
 void Native::onBackCancelled()
 {
+  if (QObject* layer = backLayer()) {
+    QMetaObject::invokeMethod(layer, "backCancelled");
+    return;
+  }
   emit backCancelled();
 }
 
 void Native::onBackInvoked()
 {
+  if (QObject* layer = backLayer()) {
+    QMetaObject::invokeMethod(layer, "backInvoked");
+    return;
+  }
   emit backProgressed(0);
   emit backInvoked();
 }

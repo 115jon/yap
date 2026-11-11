@@ -82,7 +82,6 @@ Rectangle {
             width: list.width
             ground: root.color
             onProfileRequested: userId => {
-                Native.haptic(Native.Tick)
                 root.profileRequested(userId)
             }
         }

@@ -51,7 +51,6 @@ Item {
             width: list.width
             active: dm.channelId === Nav.activeChannelId
             onSelected: {
-                Native.haptic(Native.Tick)
                 Nav.selectChannel(dm.channelId)
                 root.conversationOpened()
             }

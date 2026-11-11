@@ -28,7 +28,7 @@ Item {
         anchors.bottom: parent.bottom
         width: parent.width
         height: Theme.branchLabel
-        HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+        HoverHandler { id: hover; enabled: Theme.hoverUi; cursorShape: Qt.PointingHandCursor }
         TapHandler { onTapped: root.toggled() }
     }
     Icon {
@@ -47,6 +47,9 @@ Item {
     }
     TapHandler {
         acceptedButtons: Qt.RightButton
+        // A finger's tap is not a right click (a touch carries no button,
+        // so the filter above lets it through).
+        enabled: !Theme.touch
         onTapped: eventPoint => root.menuRequested(root, eventPoint.position)
     }
     Text {

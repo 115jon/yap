@@ -30,6 +30,21 @@ Window {
         property: "reducedMotion"
         value: Native.reducedMotion
     }
+    // A phone: fingers, no hover, and the system's text size (a settings
+    // factor would multiply it here), within what the layouts take.
+    Binding { target: Theme; property: "touch"; value: true }
+    Binding { target: Theme; property: "hoverUi"; value: false }
+    Binding {
+        target: Theme
+        property: "textScale"
+        value: Math.max(0.85, Math.min(2.0, Native.fontScale))
+    }
+    // Dark status and navigation bar icons on the light themes.
+    Binding {
+        target: Native
+        property: "lightBars"
+        value: Theme.lightGround
+    }
 
     Component.onCompleted: {
         // The core starts out focused; say so before anything loads, or a

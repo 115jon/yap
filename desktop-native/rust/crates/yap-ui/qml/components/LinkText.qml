@@ -23,6 +23,6 @@ Text {
     Keys.onReturnPressed: link.activated()
     Keys.onSpacePressed: link.activated()
 
-    HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+    HoverHandler { id: hover; enabled: Theme.hoverUi; cursorShape: Qt.PointingHandCursor }
     TapHandler { onTapped: link.activated() }
 }

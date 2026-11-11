@@ -20,6 +20,7 @@ import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.WindowInsets;
 import android.view.WindowInsetsAnimation;
+import android.view.WindowInsetsController;
 import android.window.BackEvent;
 import android.window.OnBackAnimationCallback;
 import android.window.OnBackInvokedCallback;
@@ -225,6 +226,31 @@ public final class NativeShim {
         }
         activity.runOnUiThread(
                 () -> activity.getWindow().getDecorView().performHapticFeedback(constant));
+    }
+
+    /**
+     * Dark status and navigation bar icons (`light`: the ground under the
+     * bars is light), or light ones.
+     */
+    @SuppressWarnings("deprecation")
+    public static void setLightBars(boolean light) {
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            View decor = activity.getWindow().getDecorView();
+            if (Build.VERSION.SDK_INT >= 30) {
+                WindowInsetsController c = decor.getWindowInsetsController();
+                if (c == null) return;
+                int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                c.setSystemBarsAppearance(light ? mask : 0, mask);
+            } else {
+                // API 28 and 29: the view flags (status bar 23+, navigation 26+).
+                int mask = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                        | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                int flags = decor.getSystemUiVisibility();
+                decor.setSystemUiVisibility(light ? flags | mask : flags & ~mask);
+            }
+        });
     }
 
     public static void share(String text) {

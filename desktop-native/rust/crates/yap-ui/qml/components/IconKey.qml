@@ -10,7 +10,9 @@ import Yap.Ui
 //   tone "toggled" tint-2, ink-1, the Fill glyph (a panel it opens is open)
 //   tone "live"   live tint and ink, the Fill glyph (camera on, sharing)
 //   tone "onMedia" white over a video's scrim (player controls)
-// 24/28 keys take a 16 px glyph, 32 an 18, 40 a 20, 48 a 24.
+// 24/28 keys take a 16 px glyph, 32 an 18, 40 a 20, 48 a 24. Under a finger
+// a smaller key answers within Theme.hitMin around its centre, drawn and
+// laid out at `size`.
 T.Button {
     id: control
 
@@ -37,6 +39,14 @@ T.Button {
     implicitWidth: size
     implicitHeight: size
     padding: 0
+    hoverEnabled: Theme.hoverUi
+    containmentMask: Theme.hitMin > Math.min(width, height) ? hit : null
+    Item {
+        id: hit
+        anchors.centerIn: parent
+        width: Math.max(control.width, Theme.hitMin)
+        height: Math.max(control.height, Theme.hitMin)
+    }
     scale: down ? Theme.scalePressIcon : 1
     Behavior on scale { NumberAnimation { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
 

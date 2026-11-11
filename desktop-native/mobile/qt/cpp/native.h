@@ -6,7 +6,9 @@
 // QML has one place to ask; an iOS build would back the same properties
 // with a Swift/ObjC shim.
 //
-//   back gesture   OnBackAnimationCallback: progress, cancel, invoke
+//   back gesture   OnBackAnimationCallback: progress, cancel, invoke; a
+//                  sheet or viewer on top takes it as a back layer
+//   system bars    light or dark status and navigation bar icons
 //   keyboard       the IME inset, frame by frame (WindowInsetsAnimation)
 //   haptics        View.performHapticFeedback
 //   share          the system share sheet (ACTION_SEND)
@@ -17,8 +19,10 @@
 //   media          the photo picker (ACTION_PICK_IMAGES, GET_CONTENT before
 //                  13), each item copied into the cache for the core
 
+#include <QtCore/QList>
 #include <QtCore/QObject>
 #include <QtCore/QStringList>
+#include <QtCore/QPointer>
 #include <QtGui/QColor>
 
 class Native : public QObject
@@ -33,6 +37,10 @@ class Native : public QObject
   Q_PROPERTY(qreal flingDeceleration READ flingDeceleration CONSTANT)
   // Picked files are being copied in (a long video takes a moment).
   Q_PROPERTY(bool pickingMedia READ pickingMedia NOTIFY pickingMediaChanged)
+  // Dark system bar icons, for a light ground (the light themes). While
+  // anything holds the bars dark (holdDarkBars: a viewer, a heavy scrim) the
+  // icons stay light whatever this says.
+  Q_PROPERTY(bool lightBars READ lightBars WRITE setLightBars NOTIFY lightBarsChanged)
 
 public:
   enum Haptic { Tick, LongPress, Confirm, Reject };
@@ -51,6 +59,19 @@ public:
   qreal maxFlingVelocity() const { return m_maxFling; }
   qreal flingDeceleration() const { return m_deceleration; }
   bool pickingMedia() const { return m_pickingMedia; }
+  bool lightBars() const { return m_lightBars; }
+  void setLightBars(bool on);
+
+  // A layer over the page (a sheet, a viewer) takes the back gesture while
+  // it is up: the newest layer gets `backProgressed(progress)`,
+  // `backCancelled()` and `backInvoked()` called on it (QML functions), the
+  // signals below stay quiet, and the gesture is taken even at the root.
+  Q_INVOKABLE void pushBackLayer(QObject* layer);
+  Q_INVOKABLE void popBackLayer(QObject* layer);
+  // Light system bar icons while `holder` lives and holds (a dark ground
+  // over a light theme).
+  Q_INVOKABLE void holdDarkBars(QObject* holder);
+  Q_INVOKABLE void releaseDarkBars(QObject* holder);
 
   Q_INVOKABLE void haptic(Haptic kind) const;
   Q_INVOKABLE void share(const QString& text) const;
@@ -74,6 +95,7 @@ public:
 
 signals:
   void handlesBackChanged();
+  void lightBarsChanged();
   void imeHeightChanged();
   void configurationChanged();
   void backProgressed(qreal progress);
@@ -88,6 +110,16 @@ protected:
   bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
+  QObject* backLayer();
+  void applyBack();
+  void applyBars();
+
+  QList<QPointer<QObject>> m_backLayers;
+  QList<QPointer<QObject>> m_darkHolds;
+  bool m_backTaken = false;
+  bool m_lightBars = false;
+  // What the system bars were last told: -1 nothing yet, else `light`.
+  int m_barsLight = -1;
   bool m_handlesBack = false;
   qreal m_imeHeight = 0;
   qreal m_fontScale = 1;
