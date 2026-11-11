@@ -53,6 +53,7 @@ include(${DESKTOP}/rust/crates/yap-ui/cpp/yap_ui.cmake)
 qt_add_executable(yapqt
   cpp/main.cpp
   cpp/native.cpp cpp/native.h
+  cpp/push.cpp
   cpp/rustnetwork.cpp cpp/rustnetwork.h)
 target_include_directories(yapqt PRIVATE cpp)
 target_link_libraries(yapqt PRIVATE
@@ -63,7 +64,7 @@ target_link_libraries(yapqt PRIVATE
 
 # The application id and version: the packaging block at the end.
 set_target_properties(yapqt PROPERTIES
-  QT_ANDROID_APP_NAME "Yap (Qt)"
+  QT_ANDROID_APP_NAME "Yap"
   QT_ANDROID_PACKAGE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/android
   QT_ANDROID_MIN_SDK_VERSION 28
   QT_ANDROID_TARGET_SDK_VERSION 36
@@ -95,8 +96,10 @@ qt_import_plugins(yapqt
 # CI passes the version per run (desktop-native-mobile.yml: code = run * 10
 # + an ABI digit, name 0.1.<run>+<commit>); local builds get 0.1.0 (1).
 # The id is the Gradle namespace and application id (androiddeployqt writes
-# it to gradle.properties), and the iOS bundle identifier.
-set(YAP_ANDROID_APP_ID "dev.yap.qtproto" CACHE STRING "Android application id (and iOS bundle id)")
+# it to gradle.properties), and the iOS bundle identifier. dev.yap.app is
+# the app's own (registered in Firebase for push notifications; Gradle
+# reads its client from YAP_GOOGLE_SERVICES_JSON, android/build.gradle).
+set(YAP_ANDROID_APP_ID "dev.yap.app" CACHE STRING "Android application id (and iOS bundle id)")
 set(YAP_ANDROID_VERSION_CODE "1" CACHE STRING "Android versionCode")
 set(YAP_ANDROID_VERSION_NAME "0.1.0" CACHE STRING "Android versionName")
 set_target_properties(yapqt PROPERTIES
@@ -146,7 +149,7 @@ if(IOS)
   set_target_properties(yapqt PROPERTIES
     MACOSX_BUNDLE TRUE
     MACOSX_BUNDLE_GUI_IDENTIFIER "${YAP_ANDROID_APP_ID}"
-    MACOSX_BUNDLE_BUNDLE_NAME "Yap (Qt)"
+    MACOSX_BUNDLE_BUNDLE_NAME "Yap"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${YAP_ANDROID_VERSION_NAME}"
     MACOSX_BUNDLE_BUNDLE_VERSION "${YAP_ANDROID_VERSION_CODE}"
     XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${YAP_ANDROID_APP_ID}"

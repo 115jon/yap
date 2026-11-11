@@ -39,6 +39,10 @@ impl Realtime for MobileRealtime {
     }
 }
 
+/// The session file's name in the data folder. The Java side reads it too
+/// (push/PushStore.java), for a notification's Reply with the app killed.
+pub const SESSION_FILE: &str = "session.token";
+
 /// The session token in the app's private data folder (other apps cannot
 /// read it; Auto Backup is off in the manifest). Prototype only: a release
 /// build wraps it with an Android Keystore key through a small Java shim,
@@ -79,7 +83,11 @@ impl Platform for Mobile {
     }
 
     fn token_store(&self) -> Arc<dyn TokenStore> {
-        Arc::new(FileVault(self.data.join("session.token")))
+        Arc::new(FileVault(self.data.join(SESSION_FILE)))
+    }
+
+    fn started(&self, commands: &tokio::sync::mpsc::UnboundedSender<yap_core::Command>) {
+        crate::push::started(commands);
     }
 
     /// The photo picker's copies in the app cache (`Native.pickMedia`):

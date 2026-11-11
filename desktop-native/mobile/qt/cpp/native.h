@@ -18,11 +18,16 @@
 //   fling          ViewConfiguration's fling speed and a matching friction
 //   media          the photo picker (ACTION_PICK_IMAGES, GET_CONTENT before
 //                  13), each item copied into the cache for the core
+//   push           FCM's token for the core, a notification's tap, Reply and
+//                  Mark as read, the conversation on screen (its pushes stay
+//                  quiet) and the notification permission (cpp/push.cpp,
+//                  android/src/dev/yap/qtproto/push)
 
 #include <QtCore/QList>
 #include <QtCore/QObject>
 #include <QtCore/QStringList>
 #include <QtCore/QPointer>
+#include <QtCore/QVariantMap>
 #include <QtGui/QColor>
 
 class Native : public QObject
@@ -41,6 +46,13 @@ class Native : public QObject
   // anything holds the bars dark (holdDarkBars: a viewer, a heavy scrim) the
   // icons stay light whatever this says.
   Q_PROPERTY(bool lightBars READ lightBars WRITE setLightBars NOTIFY lightBarsChanged)
+  // Message notifications can show (the permission on API 33+, and the
+  // app's switch in the system settings). Read again when the app returns.
+  Q_PROPERTY(bool notificationsEnabled READ notificationsEnabled NOTIFY notificationsEnabledChanged)
+  // The conversation on screen with the app in front (empty: none): its
+  // pushes are not shown, and its notification goes. The first one set
+  // asks for the notification permission (API 33+, once).
+  Q_PROPERTY(QString activeConversation READ activeConversation WRITE setActiveConversation NOTIFY activeConversationChanged)
 
 public:
   enum Haptic { Tick, LongPress, Confirm, Reject };
@@ -72,6 +84,9 @@ public:
   // over a light theme).
   Q_INVOKABLE void holdDarkBars(QObject* holder);
   Q_INVOKABLE void releaseDarkBars(QObject* holder);
+  bool notificationsEnabled() const { return m_notificationsEnabled; }
+  QString activeConversation() const { return m_activeConversation; }
+  void setActiveConversation(const QString& channelId);
 
   Q_INVOKABLE void haptic(Haptic kind) const;
   Q_INVOKABLE void share(const QString& text) const;
@@ -83,6 +98,15 @@ public:
   // The system photo picker; the copies' paths arrive as mediaPicked. An
   // item over `limitBytes` (the account's attachment limit) is not copied.
   Q_INVOKABLE void pickMedia(qreal limitBytes);
+  // Turns notifications on: the permission dialog while it can still show,
+  // else the app's notification settings.
+  Q_INVOKABLE void requestNotifications();
+  // The conversation a notification's tap asked for, once (`channelId`,
+  // `serverId`, and a DM's `userId`; empty: none). `openRequested` says one
+  // is waiting.
+  Q_INVOKABLE QVariantMap takeOpenRequest();
+  // Signed out: the account's notifications and conversation shortcuts go.
+  Q_INVOKABLE void forgetNotifications() const;
 
   // From the shim, on the GUI thread.
   void onBackProgress(qreal progress);
@@ -92,6 +116,7 @@ public:
   void readConfiguration();
   void onMediaCopying();
   void onMediaPicked(const QStringList& paths, int failed);
+  void onOpenRequest(const QString& channelId, const QString& serverId, const QString& userId);
 
 signals:
   void handlesBackChanged();
@@ -105,6 +130,9 @@ signals:
   // Local copies of what was picked (none: cancelled); `failed` items could
   // not be read.
   void mediaPicked(const QStringList& paths, int failed);
+  void notificationsEnabledChanged();
+  void activeConversationChanged();
+  void openRequested();
 
 protected:
   bool eventFilter(QObject* watched, QEvent* event) override;
@@ -120,6 +148,10 @@ private:
   bool m_lightBars = false;
   // What the system bars were last told: -1 nothing yet, else `light`.
   int m_barsLight = -1;
+  // cpp/push.cpp.
+  void installPush();
+  void readNotificationsEnabled();
+
   bool m_handlesBack = false;
   qreal m_imeHeight = 0;
   qreal m_fontScale = 1;
@@ -134,6 +166,9 @@ private:
   // The app went to the background since (the picker did open).
   bool m_leftSincePick = false;
   qint64 m_pickStartedMs = 0;
+  bool m_notificationsEnabled = false;
+  QString m_activeConversation;
+  QVariantMap m_openRequest;
 };
 
 // The shared desktop QML's `Yap.Chrome` singletons, mobile side.

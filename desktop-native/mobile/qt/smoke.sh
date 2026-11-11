@@ -12,8 +12,8 @@ apk="${1:?APK}"
 timeout="${2:-120}"
 adb=(adb)
 [[ -n "${ADB_SERIAL:-}" ]] && adb+=(-s "$ADB_SERIAL")
-pkg=dev.yap.qtproto
-activity=org.qtproject.qt.android.bindings.QtActivity
+pkg=dev.yap.app
+activity=dev.yap.qtproto.YapActivity
 
 "${adb[@]}" wait-for-device
 until [[ "$("${adb[@]}" shell getprop sys.boot_completed | tr -d '\r')" == 1 ]]; do sleep 2; done

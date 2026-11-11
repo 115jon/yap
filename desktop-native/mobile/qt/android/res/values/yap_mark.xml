@@ -8,4 +8,6 @@
     <color name="ic_launcher_background">#0b0b0d</color>
     <!-- The Theme's ply-0 (desktop-native/rust/qml/theme/Theme.qml), light. -->
     <color name="splash_background">#f4f4f5</color>
+    <!-- The Theme's accent ink (yap-ui Theme.qml), light: notifications. -->
+    <color name="yap_accent">#c0127a</color>
 </resources>
