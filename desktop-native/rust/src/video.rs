@@ -41,6 +41,39 @@ extern "C" {
     ) -> bool;
 }
 
+// `cargo test` links the crate without cpp/videohub.cpp, which CMake builds
+// into Yap.exe only; the test binary gets these stand-ins instead.
+#[cfg(test)]
+mod hub_stand_ins {
+    use std::ffi::c_char;
+
+    #[no_mangle]
+    extern "C" fn yap_video_frame(
+        _key: *const c_char,
+        _key_len: usize,
+        _width: u32,
+        _height: u32,
+        _rotation: u16,
+        _y: *const u8,
+        _stride_y: u32,
+        _u: *const u8,
+        _stride_u: u32,
+        _v: *const u8,
+        _stride_v: u32,
+    ) {
+    }
+
+    #[no_mangle]
+    extern "C" fn yap_video_native_frame(
+        _key: *const c_char,
+        _key_len: usize,
+        _buffer: *const std::ffi::c_void,
+        _rotation: u16,
+    ) -> bool {
+        false
+    }
+}
+
 /// Hands frames to the Qt video hub.
 pub struct QtOutput;
 
