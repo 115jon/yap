@@ -13,6 +13,8 @@ Item {
     id: root
 
     signal conversationOpened()
+    // The open conversation shows rows (picking it again only goes back).
+    property bool chatHasRows: false
     signal profileRequested(string userId)
     signal settingsRequested()
     signal friendsRequested()
@@ -20,6 +22,16 @@ Item {
     signal voiceRequested(string channelId)
     // The call bar was tapped.
     signal callRequested()
+
+    // A conversation picked in the drawer. The open one picked again is a
+    // way back to it, not a reload: the desktop's reselect lays the list
+    // out afresh and drops its unread divider (the core opens it cold, at
+    // its end, already read). It reloads only when nothing showed.
+    function openConversation(channelId) {
+        if (channelId !== Nav.activeChannelId || !root.chatHasRows)
+            Nav.selectChannel(channelId)
+        root.conversationOpened()
+    }
 
     // The window's insets where this page meets its edges, read once here:
     // a child that asks for its own would feed its position back in.
@@ -191,8 +203,7 @@ Item {
                         root.voiceRequested(channelId)
                         return
                     }
-                    Nav.selectChannel(channelId)
-                    root.conversationOpened()
+                    root.openConversation(channelId)
                 }
             }
         }
@@ -206,6 +217,7 @@ Item {
             active: Nav.home
             visible: active
             sourceComponent: DmsPane {
+                chatHasRows: root.chatHasRows
                 onConversationOpened: root.conversationOpened()
                 onProfileRequested: userId => root.profileRequested(userId)
                 onFriendsRequested: root.friendsRequested()

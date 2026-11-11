@@ -176,11 +176,15 @@ fn ids(state: &State) -> Vec<String> {
 
 struct Client {
     state: State,
+    /// Every effect so far (a request asked for during the boot).
+    asked: Vec<Effect>,
 }
 
 impl Client {
     fn input(&mut self, input: Input) -> Vec<Effect> {
-        reduce(&mut self.state, input)
+        let fx = reduce(&mut self.state, input);
+        self.asked.extend(fx.iter().cloned());
+        fx
     }
 
     fn command(&mut self, command: Command) -> Vec<Effect> {
@@ -218,6 +222,7 @@ impl Client {
     fn boot_with(tree: Value) -> Self {
         let mut client = Self {
             state: State::new(BASE),
+            asked: Vec::new(),
         };
         let fx = client.command(Command::UseToken("tok_fixture".into()));
         let me = request_for(&fx, &ApiRequest::Me);
@@ -448,6 +453,82 @@ fn sign_out_should_empty_the_warm_cache() {
     assert_eq!(client.state.last_channel(SERVER), None);
 }
 
+// The divider
+
+/// `c000` read at its end (where it reopens), out of the warm cache, and
+/// written to since: the late message's JSON.
+fn left_at_its_end_and_written_to(client: &mut Client, many: usize) -> Value {
+    let reads = ApiRequest::ReadStates;
+    let asked = request_for(&client.asked, &reads);
+    client.respond(
+        asked,
+        &reads,
+        json!({ "read_states": [], "last_messages": [] }),
+    );
+    client.command(Command::SetAtBottom(true));
+    for i in 1..many {
+        let id = format!("c{i:03}");
+        client.visit(&id, history(&id, "m", 0, 2));
+    }
+    assert!(!client.state.warm().contains("c000"));
+    let late = message_json("c000", "a002", "2026-11-04T11:00:00.000Z");
+    client.dispatch("MESSAGE_CREATE", late.clone());
+    assert!(client.state.is_unread("c000"));
+    late
+}
+
+#[test]
+fn a_cold_channel_left_at_its_end_and_picked_out_of_view_should_keep_its_divider() {
+    let many = WARM_ENTRIES + 2;
+    let mut client = Client::boot_with(tree_many(many));
+    let late = left_at_its_end_and_written_to(&mut client, many);
+    // A phone: picked in the drawer, out of view; the chat slides in
+    // before the page answers.
+    client.command(Command::SetFocused(false));
+    let fx = client.command(Command::SelectChannel("c000".into()));
+    client.command(Command::SetFocused(true));
+    let mut rows = history("c000", "a", 0, 2);
+    rows.push(late);
+    client.page(&fx, "c000", page(rows, false));
+    let divider = client.state.divider().map(|d| d.message_id.as_str());
+    assert_eq!(divider, Some("a002"));
+}
+
+#[test]
+fn a_disk_window_shown_after_focus_should_keep_the_divider_of_a_pick_out_of_view() {
+    let many = WARM_ENTRIES + 2;
+    let mut client = Client::boot_with(tree_many(many));
+    let late = left_at_its_end_and_written_to(&mut client, many);
+    client.command(Command::SetFocused(false));
+    client.command(Command::SelectChannel("c000".into()));
+    client.command(Command::SetFocused(true));
+    let mut rows = history("c000", "a", 0, 2);
+    rows.push(late);
+    let messages = rows
+        .into_iter()
+        .map(|m| serde_json::from_value(m).expect("message"))
+        .collect();
+    client.input(Input::WindowLoaded {
+        channel_id: "c000".into(),
+        messages,
+    });
+    let divider = client.state.divider().map(|d| d.message_id.as_str());
+    assert_eq!(divider, Some("a002"));
+}
+
+#[test]
+fn a_cold_channel_left_at_its_end_and_picked_in_view_should_open_without_a_divider() {
+    let many = WARM_ENTRIES + 2;
+    let mut client = Client::boot_with(tree_many(many));
+    let late = left_at_its_end_and_written_to(&mut client, many);
+    // The desktop: picked in a focused window.
+    let fx = client.command(Command::SelectChannel("c000".into()));
+    let mut rows = history("c000", "a", 0, 2);
+    rows.push(late);
+    client.page(&fx, "c000", page(rows, false));
+    assert!(client.state.divider().is_none());
+}
+
 // Caps
 
 #[test]
@@ -524,6 +605,7 @@ fn snapshot(cached: Vec<Value>) -> Snapshot {
 fn launch(snapshot: Snapshot) -> (Client, Vec<Effect>) {
     let mut client = Client {
         state: State::new(BASE),
+        asked: Vec::new(),
     };
     client.command(Command::Start);
     client.input(Input::TokenLoaded(Some(Token::new("tok_fixture"))));

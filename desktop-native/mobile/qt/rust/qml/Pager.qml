@@ -255,6 +255,7 @@ Item {
 
     DrawerPage {
         id: drawer
+        chatHasRows: chat.hasRows
         x: pager.wide ? 0
             : -pager.parallax * (1 - Math.max(0, Math.min(1, pager.offset / Math.max(1, pager.drawerWidth))))
         width: pager.drawerWidth

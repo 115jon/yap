@@ -99,7 +99,7 @@ Window {
         closeTop(true)
         // The core opens a DM the list does not have yet once it answers;
         // the chat slides in when the conversation is the open one.
-        Nav.openChannel(request.channelId, request.serverId)
+        window.openUnseen(() => Nav.openChannel(request.channelId, request.serverId))
         if (request.userId)
             pager.showDmWhenOpen(request.userId)
         else
@@ -110,6 +110,16 @@ Window {
         function onOpenRequested() {
             window.openFromNotification()
         }
+    }
+
+    // A conversation opened by the app (a notification, a profile's
+    // Message): the core hears it was picked out of view, as a pick in the
+    // drawer is, so whether it shows its unread divider does not depend on
+    // which arrives first, the page or the chat sliding in (focus).
+    function openUnseen(open) {
+        Chat.setFocused(false)
+        open()
+        Qt.callLater(() => Chat.setFocused(window.reading))
     }
 
     // A profile, over whatever is showing.
@@ -289,7 +299,7 @@ Window {
                     // Back to the pager; the chat slides in once the DM
                     // (made now if they never talked) is the open one.
                     window.closeTop(true)
-                    Nav.openDm(userId)
+                    window.openUnseen(() => Nav.openDm(userId))
                     pager.showDmWhenOpen(userId)
                 }
             }
@@ -319,7 +329,7 @@ Window {
                 onProfileRequested: userId => window.openProfile(userId)
                 onMessageRequested: userId => {
                     window.closeTop(true)
-                    Nav.openDm(userId)
+                    window.openUnseen(() => Nav.openDm(userId))
                     pager.showDmWhenOpen(userId)
                 }
             }
