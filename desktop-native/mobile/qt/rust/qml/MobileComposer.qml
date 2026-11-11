@@ -165,9 +165,22 @@ Rectangle {
     // ---- Notices ------------------------------------------------------------
 
     property string notice: ""
+    readonly property bool inFront: Qt.application.state === Qt.ApplicationActive
     function showNotice(text) {
         root.notice = text
-        noticeTimer.restart()
+        if (root.inFront)
+            noticeTimer.restart()
+        else
+            noticeTimer.stop()
+    }
+    // Its five seconds count only while the app is in front: one that came
+    // in the background (a call keeps the app running) waits for the
+    // return, then shows for its full time.
+    onInFrontChanged: {
+        if (!root.inFront)
+            noticeTimer.stop()
+        else if (root.notice.length > 0)
+            noticeTimer.restart()
     }
     Timer {
         id: noticeTimer
