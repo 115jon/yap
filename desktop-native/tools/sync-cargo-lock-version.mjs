@@ -12,8 +12,14 @@
 // crates (qt-build-utils, webrtc-sys, libwebrtc) are also lock entries
 // without a `source`, but they keep their own upstream versions.
 //
-// Usage: node desktop-native/tools/sync-cargo-lock-version.mjs [--check] [rust dir]
-//   --check  change nothing; exit 1 if the lock is out of date.
+// The mobile prototypes are workspaces of their own that use these crates
+// by path (desktop-native/mobile/qt/rust builds --locked), so their lock
+// files carry the same versions: `--also <Cargo.lock>` syncs another lock
+// to this workspace's versions (only the crates it has).
+//
+// Usage: node desktop-native/tools/sync-cargo-lock-version.mjs [--check]
+//          [--also <Cargo.lock>]... [rust dir]
+//   --check  change nothing; exit 1 if a lock is out of date.
 // Idempotent: a second run finds nothing to change.
 
 import fs from "node:fs";
@@ -22,9 +28,20 @@ import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
 const check = args.includes("--check");
-const rest = args.filter((a) => a !== "--check");
+const also = [];
+const rest = [];
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--check") continue;
+  if (args[i] === "--also" && i + 1 < args.length) {
+    also.push(path.resolve(args[++i]));
+    continue;
+  }
+  rest.push(args[i]);
+}
 if (rest.length > 1 || rest.some((a) => a.startsWith("-"))) {
-  console.error("usage: sync-cargo-lock-version.mjs [--check] [rust dir]");
+  console.error(
+    "usage: sync-cargo-lock-version.mjs [--check] [--also <Cargo.lock>]... [rust dir]",
+  );
   process.exit(2);
 }
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -102,54 +119,63 @@ for (const member of members) {
   wanted.set(name, packageVersion(body, workspaceVersion, file));
 }
 
-const lockFile = path.join(rustDir, "Cargo.lock");
-const lockText = fs.readFileSync(lockFile, "utf8");
-const eol = lockText.includes("\r\n") ? "\r\n" : "\n";
-// Blocks are separated by blank lines; each [[package]] block is one entry.
-const blocks = lockText.split(`${eol}${eol}`);
-const changed = [];
-const seen = new Set();
-const renamed = new Map(); // "name old" -> "name new", for dependency lists
-const out = blocks.map((block) => {
-  if (!block.startsWith("[[package]]")) return block;
-  const name = block.match(/^name = "([^"]+)"$/m)?.[1];
-  const version = block.match(/^version = "([^"]+)"$/m)?.[1];
-  const hasSource = /^source = /m.test(block);
-  if (!name || !version || hasSource || !wanted.has(name)) return block;
-  if (seen.has(name))
-    fail(`${name} appears twice without a source in Cargo.lock`);
-  seen.add(name);
-  const want = wanted.get(name);
-  if (version === want) return block;
-  changed.push(`${name} ${version} -> ${want}`);
-  renamed.set(`${name} ${version}`, `${name} ${want}`);
-  return block.replace(/^version = "[^"]+"$/m, `version = "${want}"`);
-});
-const missing = [...wanted.keys()].filter((n) => !seen.has(n));
-if (missing.length)
-  fail(`not in Cargo.lock as path packages: ${missing.join(", ")}`);
+// Syncs one lock file; `all`: every wanted crate must be in it (this
+// workspace's own lock). Returns the number of out-of-date crates.
+function sync(lockFile, all) {
+  const lockText = fs.readFileSync(lockFile, "utf8");
+  const eol = lockText.includes("\r\n") ? "\r\n" : "\n";
+  // Blocks are separated by blank lines; each [[package]] block is one entry.
+  const blocks = lockText.split(`${eol}${eol}`);
+  const changed = [];
+  const seen = new Set();
+  const renamed = new Map(); // "name old" -> "name new", for dependency lists
+  const out = blocks.map((block) => {
+    if (!block.startsWith("[[package]]")) return block;
+    const name = block.match(/^name = "([^"]+)"$/m)?.[1];
+    const version = block.match(/^version = "([^"]+)"$/m)?.[1];
+    const hasSource = /^source = /m.test(block);
+    if (!name || !version || hasSource || !wanted.has(name)) return block;
+    if (seen.has(name))
+      fail(`${name} appears twice without a source in ${lockFile}`);
+    seen.add(name);
+    const want = wanted.get(name);
+    if (version === want) return block;
+    changed.push(`${name} ${version} -> ${want}`);
+    renamed.set(`${name} ${version}`, `${name} ${want}`);
+    return block.replace(/^version = "[^"]+"$/m, `version = "${want}"`);
+  });
+  const missing = [...wanted.keys()].filter((n) => !seen.has(n));
+  if (all && missing.length)
+    fail(`not in ${lockFile} as path packages: ${missing.join(", ")}`);
 
-// A dependency is written "name version" only when the lock holds two
-// versions of that name; rewrite those references too.
-let result = out.join(`${eol}${eol}`);
-for (const [from, to] of renamed) {
-  result = result.split(`"${from}"`).join(`"${to}"`);
-  result = result.split(`"${from} (`).join(`"${to} (`);
+  // A dependency is written "name version" only when the lock holds two
+  // versions of that name; rewrite those references too.
+  let result = out.join(`${eol}${eol}`);
+  for (const [from, to] of renamed) {
+    result = result.split(`"${from}"`).join(`"${to}"`);
+    result = result.split(`"${from} (`).join(`"${to} (`);
+  }
+
+  if (!changed.length) {
+    console.log(
+      `${lockFile}: ${seen.size} workspace crates already at their Cargo.toml versions (${workspaceVersion}).`,
+    );
+    return 0;
+  }
+  for (const line of changed) console.log(`  ${line}`);
+  if (!check) {
+    fs.writeFileSync(lockFile, result);
+    console.log(
+      `${lockFile}: set ${changed.length} workspace crates to their Cargo.toml versions (${workspaceVersion}).`,
+    );
+  }
+  return changed.length;
 }
 
-if (!changed.length) {
-  console.log(
-    `Cargo.lock: ${wanted.size} workspace crates already at their Cargo.toml versions (${workspaceVersion}).`,
-  );
-  process.exit(0);
-}
-for (const line of changed) console.log(`  ${line}`);
-if (check) {
+let stale = sync(path.join(rustDir, "Cargo.lock"), true);
+for (const lockFile of also) stale += sync(lockFile, false);
+if (check && stale) {
   fail(
-    `Cargo.lock is out of date (${changed.length} crates); run node desktop-native/tools/sync-cargo-lock-version.mjs`,
+    `${stale} crates out of date; run node desktop-native/tools/sync-cargo-lock-version.mjs`,
   );
 }
-fs.writeFileSync(lockFile, result);
-console.log(
-  `Cargo.lock: set ${changed.length} workspace crates to their Cargo.toml versions (${workspaceVersion}).`,
-);
