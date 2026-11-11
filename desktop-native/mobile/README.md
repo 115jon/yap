@@ -8,7 +8,8 @@ prototypes on the same unchanged core, and their side-by-side measurements:
 
 - `qt/`: **Qt Quick on Android**, the main path. The desktop's QML,
   list models and portable C++ run on a phone, under a mobile shell and a
-  thin platform shim. Application id `dev.yap.app`, label "Yap".
+  thin platform shim. Application id `dev.yap.app`, label "Yap" (CI's
+  builds: `dev.yap.app.ci`, "Yap CI").
 - `rust/` and `android/`: **the Compose baseline**. The same core behind
   UniFFI with Jetpack Compose views, kept to compare against. Application
   id `dev.yap.coreproto`.
@@ -67,7 +68,7 @@ for any one surface (for example a call screen) if Qt ever falls short there.
 
 | Layer                         | Shared with desktop (unchanged)                                                                                                                                                                                                                                                                                                                       | Per platform                                                                                                                                                                                                                                                                                                     |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Core                          | `yap-core`, `yap-cache`, `yap-realtime`, `yap-protocol`, `yap-anim`; `gateway.rs`                                                                                                                                                                                                                                                                     | TLS backend (rustls on mobile), the token store (an app-private file; Keystore in a release), the config and data folder handed in (`yap_mobile_init`)                                                                                                                                                           |
+| Core                          | `yap-core`, `yap-cache`, `yap-realtime`, `yap-protocol`, `yap-anim`; `gateway.rs`                                                                                                                                                                                                                                                                     | TLS backend (rustls on mobile), the token store (sealed with an Android Keystore key, `qt/vault`), the config and data folder handed in (`yap_mobile_init`)                                                                                                                                                      |
 | Models and bridge objects     | yap-ui: every `QAbstractListModel` (servers, tree, messages, members, DMs, …), `Session`/`Nav`/`Chat`/`Voice`/`Profile` and the portable singletons, one definition for both apps; the registry and the order view updates apply in                                                                                                                   | The app's `Platform` (`yap_ui::platform`): HTTP client, realtime, token store, start and quit hooks, the view updates only it shows (toasts, sounds, badge), uploads, share sources, video. Desktop: `rust/src/native.rs`; mobile: `qt/rust/src/client.rs`                                                       |
 | Theme tokens                  | `Theme.qml` (palettes, type roles, motion, spacing), `ShellState.qml`                                                                                                                                                                                                                                                                                 | Which theme (Settings' choice; Match system, the default, follows the light/dark mode), the text size factor (`Prefs`), and the input flags the shell binds: `Theme.touch`, `Theme.hoverUi`, `Theme.textScale`                                                                                                   |
 | Components and list delegates | `Yap.Ui`: `MessageDelegate` (the message renderer: grouping, replies, reactions, mention and pending rows, Markdown via Qt rich text), `TreeRow`, `ChannelRow`, `CategoryLabel`, `MemberRow`, `ServerIcon`, `RailPill`, `CountBadge`, `Avatar`, `DisplayName`, `Icon`, `IconKey`, `KitButton`, `Led`, `Spinner`, `LinkText`, `LazyPopup`, `Tooltip` … | Each app's side of the four seams the shared files import from `Yap.Platform`, with the same API: `EmbedCard`, `MessageMedia`, `VoiceStatusLine`, `VoiceStreamHoverCard` (mobile: `qt/rust/qml/seams`; desktop: its own `com.yap.native` files)                                                                  |
@@ -497,8 +498,9 @@ desktop-native/mobile/
 │   ├── rust/            cxx-qt crate yap_mobile_qt: the mobile Platform
 │   │                    (client.rs) and the com.yap.mobile module; links yap-ui
 │   │   └── qml/         mobile shell, pager and pages; seams/ (Yap.Platform types)
-│   ├── cpp/             main.cpp, native.* (the platform shim), push.cpp
-│   ├── android/         manifest, NativeShim.java, push/ (FCM), icon and splash,
+│   ├── vault/           crate yap-mobile-vault: the sealed session file, migration
+│   ├── cpp/             main.cpp, native.* (the platform shim), push.cpp, keystore.cpp
+│   ├── android/         manifest, NativeShim.java, TokenVault.java, push/ (FCM), icon and splash,
 │   │                    build.gradle (R8, Firebase)
 │   ├── build.sh         Qt + cxx-qt-cmake → APK (Android) or .app (iOS simulator)
 │   ├── fetch-qt.ps1     Qt 6.11.3 from download.qt.io, pinned by qt-sdk.lock.json
@@ -581,9 +583,10 @@ data-only pushes (`ralph: "2"`, `kind: message | read`) that the app draws.
   as read. With the app running they go into the core as the desktop's
   toast actions (`Command::ToastReply` only with the app in front,
   `ToastMarkRead`); otherwise the receiver calls the API, and a failed
-  reply shows as "Not sent: ...", with the session file the core keeps
-  (`client.rs` `SESSION_FILE`; its folder and the API's origin are handed
-  over at each start, `PushStore`).
+  reply shows as "Not sent: ...", with the sealed session file the core
+  keeps, opened with the same Keystore key ("The session token" below;
+  its folder and the API's origin are handed over at each start,
+  `PushStore`).
 - **Tap.** The notification opens the app at its conversation: the intent
   carries the channel, server and (a DM's) person ids. `YapActivity` (Qt's
   activity) hands each fresh start's and `onNewIntent`'s tap to the shim,
@@ -615,10 +618,54 @@ Firebase is set up without the google-services Gradle plugin:
 and writes the string resources the plugin would (`google_app_id`,
 `google_api_key`, `gcm_defaultSenderId`, `project_id`), from which
 FirebaseInitProvider starts Firebase. The file holds API keys and stays out
-of the repository; CI decodes the `QT_GOOGLE_SERVICES_JSON_BASE64` secret
-into the build folder. Without it the APK builds and runs, with no pushes.
-`dev.yap.app` is registered in the Firebase project the server's
-`FCM_SERVICE_ACCOUNT` sends from.
+of the repository; the release workflow decodes the
+`QT_GOOGLE_SERVICES_JSON_BASE64` secret into the build folder. Without it
+the APK builds and runs, with no pushes. Only `dev.yap.app` is registered in
+the Firebase project the server's `FCM_SERVICE_ACCOUNT` sends from: CI's
+`dev.yap.app.ci` builds have no Firebase configuration and no pushes
+("Build and run the Qt app"); pushes are tested with local and release
+builds.
+
+### The session token
+
+The core keeps the session token in `session.sealed` in the app's data
+folder, sealed with AES-256-GCM under a key in the Android Keystore
+(`qt/vault`, the `yap-mobile-vault` crate: the file, its migration and
+failures; `android/src/dev/yap/qtproto/TokenVault.java`: the key, seal and
+open; `cpp/keystore.cpp`: the JNI call from the core's blocking thread).
+The push code opens the same file with the same key for a Reply with the
+app killed (`PushStore` → `TokenVault.readToken`); it never writes it. Each
+write goes to a temporary file that is synced and renamed over the old one,
+so a reader sees one whole version. The desktop is unchanged (its
+`Keyring`).
+
+- **The key.** Made on the device at the first seal, a sign-in or a
+  migration (alias
+  `yap.session.v1`), never exportable, the Keystore choosing every IV. It
+  needs no user authentication and no unlocked device: a notification's
+  Reply sends with the app killed and the phone locked. It works whenever
+  the app's own files can be read (after the first unlock since boot).
+- **What it protects against.** A copy of the app's files leaving the device
+  (a backup tool, a rooted phone's file copy, a forensic image) does not
+  give the token away without this device's key; cloud backup and
+  device-to-device transfer leave the files out anyway. It does not stop
+  code running as the app (or as root) on the device, which can ask the
+  Keystore to open the file as the app does.
+- **Migration.** Earlier builds kept the token in plain text
+  (`session.token`). The first start of this build seals it into
+  `session.sealed`, then deletes the plain file (also when sealing fails:
+  that run stays signed in, the next one asks to sign in). Until that start,
+  a Reply with the app killed reads the plain file.
+- **Failures sign out.** A sealed file that can never open (no key,
+  another key, a key the Keystore invalidated, the file damaged) is deleted
+  with its key, and the app shows the sign-in page; the next sign-in makes
+  a new key. A Keystore that cannot be asked (any other exception; tried
+  twice) signs out for that run only and keeps the file for the next
+  start. A seal
+  that fails gets a new key and one more try; if that fails too, nothing is
+  kept (an older sealed token is deleted). Sign-out deletes the sealed and
+  any plain file. Logs (`[session]` from the core, `yap-vault` from Java)
+  name the step and the exception class, never the token.
 
 ### Settings and Friends
 
@@ -895,8 +942,9 @@ androiddeployqt copied before, so a plugin dropped from the build stays in
 the APK until `android-build/libs` is cleared.
 
 Packaging, from CMake cache variables: `YAP_ANDROID_APP_ID` (default
-`dev.yap.app`; also the Gradle namespace and the iOS bundle id),
-`YAP_ANDROID_VERSION_CODE` (1) and `YAP_ANDROID_VERSION_NAME` (`qt/VERSION`);
+`dev.yap.app`; also the Gradle namespace and the iOS bundle id; CI builds
+`dev.yap.app.ci`), `YAP_ANDROID_APP_NAME` (the launcher label, default
+"Yap"; CI's "Yap CI"), `YAP_ANDROID_VERSION_CODE` (1) and `YAP_ANDROID_VERSION_NAME` (`qt/VERSION`);
 `YAP_ANDROID_COMPILE_SDK` and `YAP_ANDROID_BUILD_TOOLS` pin the SDK
 platform and build tools (default: the newest installed). The manifest has
 no `package` attribute. The launcher icon is adaptive, with a
@@ -934,8 +982,14 @@ the lock's hash) and NDK r27c, signs them with the public CI debug key
 (`qt/ci/debug.keystore`, so one run's APK installs over another's; never a
 release key), and uploads each APK with its `.sha256` (14 days; version
 code `run * 10 + 2` for arm64, `+ 4` for x86_64, version name
-`<qt/VERSION>-ci.<run>+<commit built>`). `qt-android-smoke` cold-starts the x86_64 APK
-on an API 35 emulator and fails unless it logs `[startup] first frame`
+`<qt/VERSION>-ci.<run>+<commit built>`). Anyone can sign with that key, so
+CI's APKs are a separate app: application id `dev.yap.app.ci`, label "Yap
+CI", and no push notifications (no Firebase configuration; the Firebase
+project knows `dev.yap.app` only). A CI APK installs beside a tester's
+release build, and nothing signed with the public key can update the
+release app. Before building, the x86_64 job runs the session vault's tests
+(`cargo test` in `qt/vault`). `qt-android-smoke` cold-starts the x86_64 APK
+(`YAP_ANDROID_APP_ID=dev.yap.app.ci`) on an API 35 emulator and fails unless it logs `[startup] first frame`
 (`qt/smoke.sh`, which also works against a local emulator; it checks
 start-up only, not sign-in). `qt-ios` builds the simulator `.app` on macOS when
 `mobile/qt` or the workflow changes, by hand, and weekly. Each job runs only
@@ -980,7 +1034,8 @@ from the release workflow's run number, so each release is above the one
 before and above every CI build (`run * 10 + digit` of the CI workflow).
 Renaming the workflow file restarts its run number; raise the offset if that
 happens. A CI build and a release build cannot update each other anyway:
-Android installs an update only when it is signed with the same key.
+they are different apps (`dev.yap.app.ci` and `dev.yap.app`), and Android
+installs an update only when it is signed with the same key.
 
 Testers install and update:
 
@@ -989,10 +1044,11 @@ Testers install and update:
   manager). The file's SHA-256 should match its `.sha256`.
 - To update, install a newer release's APK the same way: it replaces the
   app in place and keeps the sign-in and settings.
-- A phone with a CI build (debug key) or a local build installed must
-  uninstall it once before the first release build (Android reports a
-  signature conflict or "App not installed"); after that, releases update
-  each other.
+- A phone with a local build (`dev.yap.app` signed with a debug key) or a
+  CI build from before CI had its own id (`dev.yap.app` too) must uninstall it
+  once before the first release build (Android reports a signature conflict
+  or "App not installed"); after that, releases update each other. Current
+  CI builds ("Yap CI") are their own app and stay installed beside it.
 
 The key: a PKCS12 keystore (RSA 4096, alias `yapapp`, valid 100 years),
 kept by the owner outside the repository with access limited to the owner's

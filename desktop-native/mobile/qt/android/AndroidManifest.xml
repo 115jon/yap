@@ -5,14 +5,15 @@
      back-to-home preview when it keeps the task alive, see
      NativeShim.keepsTaskAtRoot), the keyboard left to the app (adjustNothing:
      the composer follows the IME inset itself, frame by frame), the
-     session file kept out of cloud backup and device-to-device transfer,
+     sealed session file kept out of cloud backup and device-to-device transfer,
      the adaptive icon, and the splash: the theme's (system splash on
      Android 12+, window background before) hands over to Qt's, which stays
      until main.cpp hides it at the first frame; push notifications
      (the FCM service, the Reply and Mark as read receiver, the permission);
      and voice calls (the mic, the audio route, the call's service).
      No package attribute: the application id is CMake's YAP_ANDROID_APP_ID
-     (Gradle's namespace). -->
+     (Gradle's namespace); the label is YAP_ANDROID_APP_NAME ("Yap", CI's
+     "Yap CI"). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     android:installLocation="auto"
     android:versionCode="-- %%INSERT_VERSION_CODE%% --"
@@ -49,7 +50,7 @@
     <application
         android:name="org.qtproject.qt.android.bindings.QtApplication"
         android:hardwareAccelerated="true"
-        android:label="Yap"
+        android:label="-- %%INSERT_APP_NAME%% --"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -57,7 +58,7 @@
         <activity
             android:name="dev.yap.qtproto.YapActivity"
             android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
-            android:label="Yap"
+            android:label="-- %%INSERT_APP_NAME%% --"
             android:launchMode="singleTop"
             android:screenOrientation="unspecified"
             android:theme="@style/YapTheme"

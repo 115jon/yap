@@ -5,14 +5,15 @@
 #
 #   desktop-native/mobile/qt/smoke.sh <apk> [timeout seconds, default 120]
 #
-# ADB_SERIAL picks the device (default: adb's only one). Uninstalls the app
-# afterwards.
+# ADB_SERIAL picks the device (default: adb's only one); YAP_ANDROID_APP_ID
+# is the APK's application id (default dev.yap.app; CI's builds are
+# dev.yap.app.ci). Uninstalls the app afterwards.
 set -euo pipefail
 apk="${1:?APK}"
 timeout="${2:-120}"
 adb=(adb)
 [[ -n "${ADB_SERIAL:-}" ]] && adb+=(-s "$ADB_SERIAL")
-pkg=dev.yap.app
+pkg="${YAP_ANDROID_APP_ID:-dev.yap.app}"
 activity=dev.yap.qtproto.YapActivity
 
 "${adb[@]}" wait-for-device

@@ -7,8 +7,11 @@ name: "Desktop Native Mobile Prototype"
 #   core cross-compiles and that the generated Swift bindings type-check.
 # - qt-android: the Qt Quick app (desktop-native/mobile/qt) for x86_64 and
 #   arm64-v8a, signed with the public CI debug key, as artifacts (tester
-#   builds with the release key: qt-android-release.yml). Qt comes
-#   from download.qt.io, pinned by mobile/qt/qt-sdk.lock.json.
+#   builds with the release key: qt-android-release.yml). Anyone can sign
+#   with that key, so these builds are their own app, dev.yap.app.ci ("Yap
+#   CI"), without push notifications: an APK signed with it can never
+#   update an installed dev.yap.app. Qt comes from download.qt.io, pinned by
+#   mobile/qt/qt-sdk.lock.json. The session vault's tests run first.
 # - qt-android-smoke: the x86_64 APK cold-started on an emulator.
 # - qt-ios: the same CMake project for the iOS simulator, a compile and link
 #   check (no signing, no run). It runs when mobile/qt changes, by hand, and
@@ -44,6 +47,8 @@ concurrency:
 env:
   CARGO_INCREMENTAL: 0
   CARGO_TERM_COLOR: always
+  # The Qt app's id for CI builds (never the release app's dev.yap.app).
+  YAP_CI_APP_ID: dev.yap.app.ci
 
 jobs:
   changes:
@@ -256,23 +261,14 @@ jobs:
           key: qt-${{ matrix.abi }}-${{ hashFiles('desktop-native/mobile/qt/qt-sdk.lock.json') }}
           workspaces: desktop-native/mobile/qt/rust -> ../../../../.yapm/build/qt-${{ matrix.abi }}-Release/cargo/build
 
-      # Firebase for push notifications (mobile/qt/android/build.gradle):
-      # the dev.yap.app config from the QT_GOOGLE_SERVICES_JSON_BASE64
-      # secret, decoded into the build folder (never the repository).
-      # Without the secret (a pull request from a fork) the APK builds
-      # without pushes.
-      - name: Firebase configuration
-        env:
-          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.QT_GOOGLE_SERVICES_JSON_BASE64 }}
-        run: |
-          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
-            mkdir -p "$YAPM"
-            printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d >"$YAPM/google-services.json"
-            echo "YAP_GOOGLE_SERVICES_JSON=$YAPM/google-services.json" >>"$GITHUB_ENV"
-          else
-            echo "No Firebase configuration: building without push notifications"
-          fi
+      # The session token's sealed file and its migration (no Qt needed).
+      - name: Session vault tests
+        if: ${{ matrix.abi == 'x86_64' }}
+        run: cargo test --locked --manifest-path desktop-native/mobile/qt/vault/Cargo.toml
 
+      # No Firebase configuration (YAP_GOOGLE_SERVICES_JSON unset): the
+      # Firebase project knows dev.yap.app only, and a CI build is not a
+      # tester's app. Pushes are tested with local and release builds.
       - name: Build the APK (${{ matrix.abi }}, release)
         env:
           RUN: ${{ github.run_number }}
@@ -284,13 +280,15 @@ jobs:
           code=$(( RUN * 10 + ${{ matrix.digit }} ))
           base="$(head -n 1 desktop-native/mobile/qt/VERSION)"
           bash desktop-native/mobile/qt/build.sh ${{ matrix.abi }} Release \
+            -DYAP_ANDROID_APP_ID="$YAP_CI_APP_ID" \
+            -DYAP_ANDROID_APP_NAME="Yap CI" \
             -DYAP_ANDROID_VERSION_CODE="$code" \
             -DYAP_ANDROID_VERSION_NAME="$base-ci.$RUN+${SHA::7}" \
             -DYAP_ANDROID_COMPILE_SDK=android-36 \
             -DYAP_ANDROID_BUILD_TOOLS="$BUILD_TOOLS"
 
       # The public CI debug key (mobile/qt/ci/README.md): one run's APK
-      # installs over another's. Not a release key.
+      # installs over another's (dev.yap.app.ci only). Not a release key.
       - name: Sign
         run: |
           mkdir -p out
@@ -345,7 +343,7 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: bash desktop-native/mobile/qt/smoke.sh out/yap-qt-x86_64.apk 180
+          script: YAP_ANDROID_APP_ID=${{ env.YAP_CI_APP_ID }} bash desktop-native/mobile/qt/smoke.sh out/yap-qt-x86_64.apk 180
 
   qt-ios:
     needs: changes
