@@ -35,6 +35,8 @@ public final class NotificationActionReceiver extends BroadcastReceiver {
     private static final String TAG = "yap-push";
     /** The pause before a Mark as read's one retry. */
     private static final long RETRY_MS = 1_500;
+    /** Mark as read's calls all end this long after the tap. */
+    private static final long DEADLINE_MS = 25_000;
     /** A failure faster than this is retried (PushApi's timeouts are 10 s). */
     private static final long QUICK_MS = 3_000;
 
@@ -73,6 +75,8 @@ public final class NotificationActionReceiver extends BroadcastReceiver {
         // ..." on a failure). The gateway's echo brings a reply into the
         // app's chat once it is back.
         final String text = reply;
+        // From now: a job may wait on WORKER behind another one.
+        final long deadline = SystemClock.elapsedRealtime() + DEADLINE_MS;
         final PendingResult pending = goAsync();
         WORKER.execute(() -> {
             try {
@@ -88,20 +92,22 @@ public final class NotificationActionReceiver extends BroadcastReceiver {
                     // Its notifications too, as the core's Mark as read does,
                     // or its mentions stay counted past the read mark.
                     // Both idempotent: retried once after a quick failure
-                    // (the network not there yet); a slow one is not, so
-                    // the work stays well inside the broadcast's time.
+                    // (the network not there yet); a slow one is not. All
+                    // of it ends by the deadline, well inside the time a
+                    // background broadcast gets (past it Android kills the
+                    // process, the app's included when it runs).
                     MessageNotifier.cancel(app, conversation.channelId);
                     long start = SystemClock.elapsedRealtime();
-                    int read = PushApi.markRead(session, conversation.channelId);
+                    int read = PushApi.markRead(session, conversation.channelId, deadline);
                     if (retry(read) && quick(start)) {
                         pause();
-                        read = PushApi.markRead(session, conversation.channelId);
+                        read = PushApi.markRead(session, conversation.channelId, deadline);
                     }
                     start = SystemClock.elapsedRealtime();
-                    int notifications = PushApi.markNotificationsRead(session, conversation.channelId);
+                    int notifications = PushApi.markNotificationsRead(session, conversation.channelId, deadline);
                     if (notifications < 0 && quick(start)) {
                         pause();
-                        notifications = PushApi.markNotificationsRead(session, conversation.channelId);
+                        notifications = PushApi.markNotificationsRead(session, conversation.channelId, deadline);
                     }
                     Log.i(TAG, "mark as read: read state " + read + ", notifications " + notifications);
                 }

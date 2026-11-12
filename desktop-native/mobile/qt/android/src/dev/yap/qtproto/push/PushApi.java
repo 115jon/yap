@@ -3,6 +3,7 @@ package dev.yap.qtproto.push;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
+import android.os.SystemClock;
 import android.util.Log;
 
 import org.json.JSONArray;
@@ -30,6 +31,10 @@ final class PushApi {
 
     private static final String TAG = "yap-push";
     private static final int TIMEOUT_MS = 10_000;
+    /** The shortest timeout a deadline-bound call starts with. */
+    private static final int MIN_TIMEOUT_MS = 1_000;
+    /** request() without a deadline: TIMEOUT_MS each way. */
+    static final long NO_DEADLINE = Long.MIN_VALUE;
     private static final int AVATAR_TIMEOUT_MS = 5_000;
     private static final int AVATAR_PX = 192;
     private static final int AVATAR_MAX_BYTES = 4 * 1024 * 1024;
@@ -49,9 +54,10 @@ final class PushApi {
         }
     }
 
-    /** PUT /api/channels/:id/read-state. */
-    static int markRead(PushStore.Session session, String channelId) {
-        return request(session, "PUT", "/api/channels/" + Uri.encode(channelId) + "/read-state", "{}");
+    /** PUT /api/channels/:id/read-state, done by `deadline` (elapsedRealtime). */
+    static int markRead(PushStore.Session session, String channelId, long deadline) {
+        return request(session, "PUT", "/api/channels/" + Uri.encode(channelId) + "/read-state", "{}",
+                deadline);
     }
 
     /**
@@ -59,10 +65,11 @@ final class PushApi {
      * Mark as read does while the app runs (toast_mark_read): the read state
      * alone leaves its mentions counted on every device. GET the unread
      * ones (the core's own page, 100), PATCH those of this channel. The
-     * PATCH's status, 0 when there was nothing to mark, -1 on a failure.
+     * PATCH's status, 0 when there was nothing to mark, -1 on a failure
+     * (or `deadline`, elapsedRealtime, passed first).
      */
-    static int markNotificationsRead(PushStore.Session session, String channelId) {
-        String body = get(session, "/api/notifications?limit=100&unread=true");
+    static int markNotificationsRead(PushStore.Session session, String channelId, long deadline) {
+        String body = get(session, "/api/notifications?limit=100&unread=true", deadline);
         if (body == null) return -1;
         try {
             JSONObject json = new JSONObject(body);
@@ -79,7 +86,7 @@ final class PushApi {
             }
             if (ids.isEmpty()) return 0;
             String patch = new JSONObject().put("ids", new JSONArray(ids)).toString();
-            return request(session, "PATCH", "/api/notifications", patch);
+            return request(session, "PATCH", "/api/notifications", patch, deadline);
         } catch (JSONException e) {
             Log.w(TAG, "notifications: unreadable answer");
             return -1;
@@ -102,12 +109,34 @@ final class PushApi {
     }
 
     private static int request(PushStore.Session session, String method, String path, String body) {
+        return request(session, method, path, body, NO_DEADLINE);
+    }
+
+    /**
+     * The connect and read timeouts for a call that must end by `deadline`
+     * (elapsedRealtime): each half of what is left, at most TIMEOUT_MS;
+     * 0 when the deadline has passed (no call).
+     */
+    private static int timeout(long deadline) {
+        if (deadline == NO_DEADLINE) return TIMEOUT_MS;
+        long left = deadline - SystemClock.elapsedRealtime();
+        if (left < 2 * MIN_TIMEOUT_MS) return 0;
+        return (int) Math.min(TIMEOUT_MS, left / 2);
+    }
+
+    private static int request(PushStore.Session session, String method, String path, String body,
+            long deadline) {
+        int timeout = timeout(deadline);
+        if (timeout == 0) {
+            Log.w(TAG, method + " skipped: out of time");
+            return -1;
+        }
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) new URL(session.apiBase + path).openConnection();
             connection.setRequestMethod(method);
-            connection.setConnectTimeout(TIMEOUT_MS);
-            connection.setReadTimeout(TIMEOUT_MS);
+            connection.setConnectTimeout(timeout);
+            connection.setReadTimeout(timeout);
             connection.setDoOutput(true);
             connection.setRequestProperty("Authorization", "Bearer " + session.token);
             connection.setRequestProperty("Content-Type", "application/json");
@@ -124,12 +153,17 @@ final class PushApi {
     }
 
     /** A GET's body on a 2xx, else null. */
-    private static String get(PushStore.Session session, String path) {
+    private static String get(PushStore.Session session, String path, long deadline) {
+        int timeout = timeout(deadline);
+        if (timeout == 0) {
+            Log.w(TAG, "GET skipped: out of time");
+            return null;
+        }
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) new URL(session.apiBase + path).openConnection();
-            connection.setConnectTimeout(TIMEOUT_MS);
-            connection.setReadTimeout(TIMEOUT_MS);
+            connection.setConnectTimeout(timeout);
+            connection.setReadTimeout(timeout);
             connection.setRequestProperty("Authorization", "Bearer " + session.token);
             int status = connection.getResponseCode();
             if (status < 200 || status > 299) {
