@@ -163,7 +163,7 @@ Rectangle {
     // messages, a tap puts `@username ` in.
     MentionPanel {
         id: mentionPanel
-        open: root.mentionOpen
+        open: core.mentionOpen
         heading: false
         z: 3
         x: 8
