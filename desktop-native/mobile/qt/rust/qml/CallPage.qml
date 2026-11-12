@@ -26,7 +26,7 @@ Rectangle {
     readonly property real leftInset: SafeArea.margins.left
     readonly property real rightInset: SafeArea.margins.right
     readonly property real topInset: SafeArea.margins.top
-    readonly property real bottomInset: SafeArea.margins.bottom
+    readonly property real bottomInset: Math.max(SafeArea.margins.bottom, Native.gestureInset)
 
     readonly property bool inCall: Voice.channelId.length > 0
     // The call's numbers (the desktop's voice details), every 5 s.

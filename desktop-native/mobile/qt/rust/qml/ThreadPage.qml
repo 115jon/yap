@@ -23,7 +23,7 @@ Rectangle {
     readonly property real leftInset: SafeArea.margins.left
     readonly property real rightInset: SafeArea.margins.right
     readonly property real topInset: SafeArea.margins.top
-    readonly property real bottomInset: Math.max(SafeArea.margins.bottom, Native.imeHeight)
+    readonly property real bottomInset: Math.max(SafeArea.margins.bottom, Native.gestureInset, Native.imeHeight)
 
     readonly property bool ready: !Panels.threadLoading && Panels.threadError.length === 0
         && Panels.threadRootId === rootId

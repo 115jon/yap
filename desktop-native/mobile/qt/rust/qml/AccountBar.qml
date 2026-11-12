@@ -16,7 +16,7 @@ Rectangle {
     // a child that asks for its own would feed its position back in.
     readonly property real leftInset: SafeArea.margins.left
     readonly property real rightInset: SafeArea.margins.right
-    readonly property real bottomInset: SafeArea.margins.bottom
+    readonly property real bottomInset: Math.max(SafeArea.margins.bottom, Native.gestureInset)
 
     readonly property string presence: Session.meStatus.length > 0 ? Session.meStatus : "online"
     readonly property string presenceWord: presence === "offline" ? qsTr("Invisible") : Theme.presenceWord(presence)

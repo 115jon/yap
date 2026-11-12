@@ -238,6 +238,9 @@ Window {
     Item {
         id: content
         anchors.fill: parent
+        // A freeform window's caption bar pushes the window down without
+        // shrinking it (Native.clippedBottom): the pages end above the cut.
+        anchors.bottomMargin: Native.clippedBottom
 
         Loader {
             anchors.fill: parent
@@ -357,6 +360,7 @@ Window {
     ConfirmSheet {
         id: microphoneSheet
         anchors.fill: parent
+        anchors.bottomMargin: Native.clippedBottom
         title: qsTr("Yap needs the microphone")
         body: qsTr("Voice channels use your microphone while you are in a call. Allow it for Yap in the system settings, then join again.")
         confirmText: qsTr("Open settings")

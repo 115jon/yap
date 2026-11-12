@@ -40,6 +40,14 @@ class Native : public QObject
   Q_OBJECT
   Q_PROPERTY(bool handlesBack READ handlesBack WRITE setHandlesBack NOTIFY handlesBackChanged)
   Q_PROPERTY(qreal imeHeight READ imeHeight NOTIFY imeHeightChanged)
+  // The bottom system gesture zone Qt's safe area leaves out (a phone with
+  // gesture navigation and no navigation bar inset): bottom controls keep
+  // clear of max(SafeArea bottom, this). And how far the window reaches
+  // below what shows of it (a freeform window's caption bar pushes it down
+  // without shrinking it): the shell's content ends this far above the
+  // bottom. Both in dp, 0 when none.
+  Q_PROPERTY(qreal gestureInset READ gestureInset NOTIFY edgesChanged)
+  Q_PROPERTY(qreal clippedBottom READ clippedBottom NOTIFY edgesChanged)
   Q_PROPERTY(qreal fontScale READ fontScale NOTIFY configurationChanged)
   Q_PROPERTY(bool reducedMotion READ reducedMotion NOTIFY configurationChanged)
   Q_PROPERTY(QColor accent READ accent NOTIFY configurationChanged)
@@ -74,6 +82,8 @@ public:
   bool handlesBack() const { return m_handlesBack; }
   void setHandlesBack(bool on);
   qreal imeHeight() const { return m_imeHeight; }
+  qreal gestureInset() const { return m_gestureInset; }
+  qreal clippedBottom() const { return m_clippedBottom; }
   qreal fontScale() const { return m_fontScale; }
   bool reducedMotion() const { return m_reducedMotion; }
   QColor accent() const { return m_accent; }
@@ -137,6 +147,7 @@ public:
   void onBackCancelled();
   void onBackInvoked();
   void onIme(qreal dp);
+  void onEdges(qreal gestureBottom, qreal clippedBottom);
   void readConfiguration();
   void onMediaCopying();
   void onMediaPicked(const QStringList& paths, int failed);
@@ -147,6 +158,7 @@ signals:
   void handlesBackChanged();
   void lightBarsChanged();
   void imeHeightChanged();
+  void edgesChanged();
   void configurationChanged();
   void backProgressed(qreal progress);
   void backCancelled();
@@ -185,6 +197,8 @@ private:
   // Back reaches the app through the shim's OnBackInvokedCallback (API 33+).
   bool m_backByCallback = false;
   qreal m_imeHeight = 0;
+  qreal m_gestureInset = 0;
+  qreal m_clippedBottom = 0;
   qreal m_fontScale = 1;
   bool m_reducedMotion = false;
   QColor m_accent;

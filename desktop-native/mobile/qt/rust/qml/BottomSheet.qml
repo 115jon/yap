@@ -111,7 +111,7 @@ FocusScope {
 
     // ---------- Geometry ----------
     readonly property real topGap: SafeArea.margins.top + 8
-    readonly property real bottomPad: Math.max(SafeArea.margins.bottom, Native.imeHeight)
+    readonly property real bottomPad: Math.max(SafeArea.margins.bottom, Native.gestureInset, Native.imeHeight)
     readonly property real chrome: 20 + (title.length > 0 ? titleText.height + 12 : 0)
     readonly property real natural: chrome + contentHeight + bottomPad
     // The top detent: everything, or the window under the status bar.

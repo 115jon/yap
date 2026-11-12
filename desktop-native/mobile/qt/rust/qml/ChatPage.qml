@@ -180,9 +180,11 @@ Item {
     }
 
     readonly property real keyboard: Native.imeHeight
-    readonly property real bottomInset: Math.max(SafeArea.margins.bottom, keyboard)
-    // Read here for the header: a key that asks for its own insets feeds
-    // its position back in.
+    // Clear of the bottom gesture zone too (Native.gestureInset).
+    readonly property real bottomInset: Math.max(SafeArea.margins.bottom, Native.gestureInset, keyboard)
+    // Read here, for the header, the list and the composer: an item that
+    // asks for its own insets and moves by them feeds its position back in
+    // (and ends up with none).
     readonly property real topInset: SafeArea.margins.top
     readonly property real leftInset: SafeArea.margins.left
     readonly property real rightInset: SafeArea.margins.right
