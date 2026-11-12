@@ -138,12 +138,6 @@ Rectangle {
         reuseItems: false
         bottomMargin: 8
         model: ThreadMessageModel
-        // New replies scroll into view (ThreadSidebar.tsx).
-        onCountChanged: Qt.callLater(list.positionViewAtEnd)
-        // The keyboard keeps the newest reply above the field.
-        property bool atEnd: true
-        onMovementEnded: atEnd = contentHeight - (contentY - originY) - height < 48
-        onHeightChanged: if (atEnd) positionViewAtEnd()
 
         delegate: MessageDelegate {
             id: row
@@ -178,6 +172,15 @@ Rectangle {
             }
             onImageOpened: (images, index) => viewer.show(images, index)
         }
+    }
+
+    // New replies scroll into view (ThreadSidebar.tsx), and the keyboard
+    // keeps the newest one above the field (Yap.Ui's ChatScroll, as the
+    // desktop's thread panel).
+    ChatScroll {
+        view: list
+        thread: true
+        endSlack: 56
     }
 
     Spinner {

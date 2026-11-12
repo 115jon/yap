@@ -15,6 +15,7 @@ fn main() {
         QmlFile::from("qml/Theme.qml").singleton(true),
         QmlFile::from("qml/ShellState.qml").singleton(true),
         QmlFile::from("qml/components/Avatar.qml"),
+        QmlFile::from("qml/components/ChatScroll.qml"),
         QmlFile::from("qml/components/CountBadge.qml"),
         QmlFile::from("qml/components/DisplayName.qml"),
         QmlFile::from("qml/components/EaseColor.qml"),

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import Yap.Chrome
+import Yap.Media
 import com.yap.native
 import Yap.Ui
 
@@ -113,8 +114,6 @@ SidePanelFrame {
         model: ThreadMessageModel
         boundsBehavior: Flickable.StopAtBounds
         bottomMargin: 16
-        // New replies scroll into view (ThreadSidebar.tsx).
-        onCountChanged: Qt.callLater(list.positionViewAtEnd)
 
         delegate: MessageDelegate {
             id: row
@@ -163,6 +162,15 @@ SidePanelFrame {
         }
 
         ScrollBar.vertical: ThinScrollBar {}
+    }
+
+    // New replies scroll into view (ThreadSidebar.tsx), and a resize keeps
+    // the end (Yap.Ui's ChatScroll, as the phone's thread page).
+    ChatScroll {
+        view: list
+        thread: true
+        wheel: WheelScroll
+        barPressed: list.ScrollBar.vertical.pressed
     }
 
     Column {
