@@ -34,14 +34,14 @@ Item {
     function startEdit(messageId) {
         if (messageId.length === 0)
             return
-        followEnd = false
+        scroll.followEnd = false
         editingId = messageId
         Qt.callLater(revealEdit)
     }
     function endEdit() {
         editingId = ""
         Qt.inputMethod.hide()
-        followEnd = view.nearEnd()
+        scroll.followEnd = scroll.isNearEnd()
     }
     // The edited row, whole, above the keyboard as it comes up.
     function revealEdit() {
@@ -51,109 +51,20 @@ Item {
     }
     onKeyboardChanged: if (editingId.length > 0) Qt.callLater(revealEdit)
 
-    // The page outlives the conversation, so each one lands as it opens:
-    // on the unread divider when there is one, else at its end (the
-    // desktop's land()). Until then nothing follows the end, so a row
-    // arriving cannot report the conversation read before the divider does.
-    property bool userMoved: false
-    function land() {
-        root.userMoved = false
-        root.followEnd = false
-        landing.tries = 6
-        landing.stop()
-        // The first try once this event is done (the list has its new rows
-        // by then), before a frame shows them where a reset left them.
-        Qt.callLater(root.landStep)
-    }
-    // One try: the divider's place, else the end. Not against a finger.
-    function landStep() {
-        if (root.userMoved || view.dragging || landing.tries <= 0)
-            return
-        if (!root.placeAtUnread()) {
-            // Before, so a row that sizes itself meanwhile is followed, and
-            // after: positionViewAtEnd() stops a fling, whose end reads
-            // followEnd from where the list was.
-            root.followEnd = true
-            view.positionViewAtEnd()
-            root.followEnd = true
-        }
-        root.noteTop()
-        // A conversation shorter than the list never moves it: say where
-        // it landed (the desktop's land() does too).
-        root.reportPosition()
-        landing.tries -= 1
-        if (landing.tries > 0)
-            landing.start()
-    }
-    // False when there is no divider to stand on.
-    function placeAtUnread() {
-        const index = Chat.dividerId.length > 0 ? Chat.indexOfMessage(Chat.dividerId) : -1
-        if (index < 0)
-            return false
-        view.positionViewAtIndex(index, ListView.Beginning)
-        // Just under the banner, not behind it (unless the list ends here).
-        root.followEnd = view.nearEnd()
-        if (!root.followEnd)
-            view.contentY = Math.max(view.originY, view.contentY - banner.height)
-        return true
-    }
-    Connections {
-        target: Nav
-        function onActiveChannelIdChanged() {
-            root.seenTop = ""
-            root.land()
-        }
-    }
-
-    // The oldest message that has stood at the top of the list this visit.
-    // Reaching the end then counts the mentions from it on as seen, not
-    // only the last screenful's: they were all scrolled past (useChatArea.ts
-    // marks each one that becomes visible).
-    property string seenTop: ""
-    function topId() {
-        const top = view.itemAt(view.width / 2, view.contentY + 1)
-        return top && top.messageId ? top.messageId : ""
-    }
-    function noteTop() {
-        const id = root.topId()
-        if (id.length === 0 || id === root.seenTop)
-            return
-        const seen = root.seenTop.length > 0 ? Chat.indexOfMessage(root.seenTop) : -1
-        if (seen < 0 || Chat.indexOfMessage(id) < seen)
-            root.seenTop = id
-    }
-    // At the end (or all of it on screen): read, and its mentions from the
-    // oldest top row on seen (the desktop's reportPosition).
-    function reportPosition() {
-        const end = view.count > 0 && view.nearEnd()
-        if (end) {
-            const from = root.seenTop.length > 0 ? root.seenTop : root.topId()
-            if (from.length > 0)
-                Chat.setSeenFrom(from)
-        }
-        Chat.setAtBottom(end)
-    }
-    Connections {
-        target: Chat
-        // The divider was placed after the list had landed.
-        function onReland() {
-            if (!root.userMoved)
-                root.land()
-        }
-    }
-    // The rows arrive and size themselves over a few frames.
-    Timer {
-        id: landing
-        property int tries: 0
-        interval: 60
-        onTriggered: root.landStep()
-    }
-
-    // The banner's jump: the first unread message, under the banner.
-    function jumpToUnread() {
-        landing.tries = 0
-        landing.stop()
-        root.placeAtUnread()
+    // Landing (on the unread divider when there is one, else at the end),
+    // following the end, read state and older pages: Yap.Ui's ChatScroll,
+    // the desktop's too. The rows size themselves over a few frames
+    // (pictures), so a landing places them six times, 60 ms apart.
+    ChatScroll {
+        id: scroll
+        view: view
+        endSlack: 56
+        dividerGap: banner.height
+        historyFetchPx: 600
+        landTries: 6
+        landInterval: 60
+        // The phone does not reopen a channel where it was left.
+        rememberPosition: false
     }
 
     // Reply to a message (the long-press sheet, swipe to reply, the hover
@@ -186,30 +97,6 @@ Item {
     readonly property real topInset: SafeArea.margins.top
     readonly property real leftInset: SafeArea.margins.left
     readonly property real rightInset: SafeArea.margins.right
-
-    // Follow the newest message unless the user scrolled away from it.
-    property bool followEnd: true
-
-    // The list keeps to its end as rows arrive and resize, once per turn of
-    // the event loop (the desktop's reflow()) and never from inside the
-    // list's own signals: its content height and count change in the middle
-    // of its refill, where positionViewAtEnd() cannot build a row. Called
-    // there with the last row pushed out of the cache buffer (a row above
-    // it grew), it released every built row and built none.
-    function settle() {
-        if (root.followEnd)
-            Qt.callLater(root.settleNow)
-    }
-    function settleNow() {
-        if (!root.followEnd || view.dragging)
-            return
-        view.positionViewAtEnd()
-        // It stops a fling, whose end reads followEnd from where the list
-        // was (a send of ours while the list still coasts).
-        root.followEnd = true
-        // Rows that fit move nothing, so nothing else reports them.
-        root.reportPosition()
-    }
 
     Rectangle {
         anchors.fill: parent
@@ -331,7 +218,7 @@ Item {
         today: Chat.today
         jumpable: true
         keyHeight: 32
-        onJumpRequested: root.jumpToUnread()
+        onJumpRequested: scroll.jumpToUnread()
         onMarkRead: {
             Native.haptic(Native.Tick)
             Chat.markRead()
@@ -400,7 +287,7 @@ Item {
             width: view.width
             today: Chat.today
             editingId: root.editingId
-            highlightId: ""
+            highlightId: scroll.highlightId
             // A long press (the delegate's, under a finger) opens the sheet;
             // a swipe left replies.
             onMenuRequested: actions.openFor(message)
@@ -441,44 +328,6 @@ Item {
                 Native.haptic(Native.Reject)
             }
         }
-
-        function nearEnd() {
-            return contentHeight - (contentY - originY) - height < 48
-        }
-
-        onMovementStarted: {
-            root.userMoved = true
-            root.followEnd = false
-        }
-        onMovementEnded: {
-            root.followEnd = nearEnd()
-            root.noteTop()
-        }
-        onContentHeightChanged: root.settle()
-        // The keyboard and the typing line, not the list's own layout.
-        onHeightChanged: if (root.followEnd) positionViewAtEnd()
-        onContentYChanged: {
-            if (contentY - originY < 600 && Chat.hasOlder && !Chat.olderLoading && moving)
-                Chat.loadOlder()
-            root.reportPosition()
-        }
-        onCountChanged: root.settle()
-
-        Connections {
-            target: MessageListModel
-            // A send of ours always lands at the end, as on the desktop.
-            function onAppended(mine) {
-                if (mine)
-                    root.followEnd = true
-                root.settle()
-            }
-            // The core laid the conversation out again (the open channel
-            // picked again in the drawer): land again, as the desktop does.
-            // The list is at its first row after a reset.
-            function onModelReset() {
-                root.land()
-            }
-        }
     }
 
     Spinner {
@@ -511,7 +360,7 @@ Item {
             : qsTr("Message #%1").arg(Nav.activeChannelName)
         enabled: !Chat.readOnly
         onSend: (text, replyToId) => {
-            root.followEnd = true
+            scroll.followEnd = true
             Chat.sendMessage(text, replyToId)
         }
         onOpenImages: (images, index) => viewer.show(images, index)
@@ -537,6 +386,4 @@ Item {
         // Its ground is black whatever the theme: light bar icons while up.
         onShownChanged: shown ? Native.holdDarkBars(viewer) : Native.releaseDarkBars(viewer)
     }
-
-    Component.onCompleted: root.land()
 }

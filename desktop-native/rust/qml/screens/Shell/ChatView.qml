@@ -15,14 +15,11 @@ import Yap.Ui
 Rectangle {
     id: root
 
-    // Whether the list was at its end right before the latest append.
-    property bool stickToEnd: true
     // The row a live append made, to play its entrance (onRowsInserted).
     property bool appending: false
     property int enterRow: -1
     property double enterAt: 0
     property string editingId
-    property string highlightId
     property string replyToId
     property string replyToName
     // The replied author's display-name style (ReplyIndicator.tsx
@@ -31,20 +28,7 @@ Rectangle {
     property string replyToText
     // Its attachments, for "Click to see attachment" when it has no text.
     property int replyToFiles: 0
-    // Older pages load once the top is this close (HISTORY_FETCH_PX).
-    readonly property int historyFetchPx: 800
     readonly property bool windowActive: Window.active
-    // One older-page request per visit to the top band (or per answer),
-    // once the list has landed.
-    property bool olderAsked: false
-    // The same for newer pages of a jump's window.
-    property bool newerAsked: false
-    // A jumped-to message the next landing centres and highlights.
-    property string jumpTarget
-    property bool landed: false
-    // The user scrolled since the list landed: a late divider must not
-    // move it.
-    property bool userMoved: false
     // How far the composer's top stands above this view's foot: the floating
     // players keep clear of it (MessageInput.tsx `data-floating-avoid`).
     readonly property real composerAvoid: height - composer.y
@@ -57,119 +41,14 @@ Rectangle {
         root.draftChannel = Nav.activeChannelId
     }
 
-    // Within 12 px of the newest end counts as there (VirtualMessageList.tsx);
-    // a delegate that settles its height after a jump must not undo it.
-    property bool nearEnd: true
-
-    function isNearEnd() {
-        return view.count === 0
-            || view.contentY >= view.originY + view.contentHeight + view.bottomMargin - view.height - 12
-    }
-
-    // Whether the list follows its newest end: set by landing and by the
-    // user's own scrolling, never by geometry, so a resize or a DPI change
-    // (which moves contentY while the rows reflow) cannot drop it.
-    property bool followEnd: true
-    property bool reflowPending: false
-
-    function reflow() {
-        if (!root.landed || !root.followEnd || Chat.hasNewer) {
-            updateNearEnd()
-            return
-        }
-        if (root.reflowPending)
-            return
-        root.reflowPending = true
-        Qt.callLater(() => {
-            root.reflowPending = false
-            // Unless a jump, a reland or the user moved it meanwhile.
-            if (root.landed && root.followEnd && !Chat.hasNewer && !view.moving && !WheelScroll.active(view))
-                view.positionViewAtEnd()
-            root.updateNearEnd()
-        })
-    }
-
-    function updateNearEnd() {
-        const end = isNearEnd()
-        if (end !== root.nearEnd) {
-            root.nearEnd = end
-            root.reportPosition()
-        }
-    }
-
-    function reportPosition() {
-        if (view.count > 0 && root.nearEnd) {
-            // Mentions from the top row on have been seen.
-            const top = view.itemAt(view.width / 2, view.contentY + 1)
-            if (top)
-                Chat.setSeenFrom(top.messageId)
-        }
-        Chat.setAtBottom(view.count > 0 && root.nearEnd)
-    }
-
-    // Scrolled up, the top message on screen is where the channel reopens
-    // (useChatArea.ts `handleScrollRangeChange`, 120 ms after it settles).
-    Timer {
-        id: scrollReport
-        interval: 120
-        onTriggered: {
-            if (!root.landed || root.nearEnd || view.count === 0)
-                return
-            const top = view.itemAt(view.width / 2, view.contentY + 1)
-            if (top)
-                Chat.scrollAt(top.messageId)
-        }
-    }
-
-    // Opening a channel lands on the divider when there is one, else the end.
-    // Twice: the first pass creates the rows around the target, the second
-    // places it with their real heights.
-    // Following the end stops meanwhile, so a pending follow cannot undo it.
-    function land() {
-        root.landed = false
-        root.stickToEnd = false
-        place()
-        Qt.callLater(() => {
-            place()
-            root.landed = view.count > 0
-            if (root.jumpTarget.length > 0) {
-                root.highlightId = root.jumpTarget
-                root.jumpTarget = ""
-                highlightTimer.restart()
-            }
-            updateNearEnd()
-            root.followEnd = root.nearEnd && !Chat.hasNewer
-            reportPosition()
-        })
-    }
-
-    function place() {
-        if (root.jumpTarget.length > 0) {
-            const target = Chat.indexOfMessage(root.jumpTarget)
-            if (target >= 0) {
-                view.positionViewAtIndex(target, ListView.Center)
-                return
-            }
-        }
-        // Where the channel was left (useChatArea.ts restore): that message
-        // at the top, centred in a window loaded around it.
-        if (Chat.restoreId.length > 0) {
-            const saved = Chat.indexOfMessage(Chat.restoreId)
-            if (saved >= 0) {
-                view.positionViewAtIndex(saved, Chat.hasNewer ? ListView.Center : ListView.Beginning)
-                return
-            }
-        }
-        const divider = Chat.dividerId.length > 0 ? Chat.indexOfMessage(Chat.dividerId) : -1
-        if (divider < 0) {
-            view.positionViewAtEnd()
-            return
-        }
-        // The divider row sits just under the banner, not behind it (unless
-        // the list already ends there).
-        view.positionViewAtIndex(divider, ListView.Beginning)
-        if (!isNearEnd())
-            view.contentY = Math.max(view.originY, view.contentY - 32)
+    // Landing, following the end, read state and paging: Yap.Ui's
+    // ChatScroll, the phone's too. The wheel's eased scroll and the bar are
+    // the user's scrolling as well as Flickable's own movement.
+    ChatScroll {
+        id: scroll
+        view: view
+        wheel: WheelScroll
+        barPressed: view.ScrollBar.vertical.pressed
     }
 
     // A reply quote or a pin: loaded or not, the core brings it in and
@@ -411,12 +290,6 @@ Rectangle {
         }
     }
 
-    Timer {
-        id: highlightTimer
-        interval: 1500
-        onTriggered: root.highlightId = ""
-    }
-
     // Each channel's unsent text and reply target, kept while the app runs
     // and put back on return (Discord's drafts); a send clears it. The
     // composer is one instance, so nothing typed for one channel can be
@@ -495,15 +368,7 @@ Rectangle {
     Connections {
         target: MessageListModel
 
-        function onModelReset() {
-            root.landed = false
-            root.userMoved = false
-            Qt.callLater(root.land)
-        }
-
-        // A jump's window grows at its end without following it.
         function onAboutToAppend() {
-            root.stickToEnd = (root.nearEnd || root.followEnd) && !Chat.hasNewer
             root.appending = true
         }
 
@@ -518,18 +383,8 @@ Rectangle {
             }
         }
 
-        // Follow new messages when already at the end, and always after
-        // our own send.
         function onAppended(mine) {
             root.appending = false
-            if (root.stickToEnd || mine)
-                Qt.callLater(() => {
-                    if (!root.stickToEnd && !mine)
-                        return
-                    view.positionViewAtEnd()
-                    root.followEnd = true
-                    root.updateNearEnd()
-                })
         }
     }
 
@@ -537,22 +392,6 @@ Rectangle {
         target: Chat
         function onNotice(text) {
             toast.show(text, true)
-        }
-        function onReland() {
-            if (!root.userMoved)
-                root.land()
-        }
-        function onOlderLoadingChanged() {
-            if (!Chat.olderLoading)
-                root.olderAsked = false
-        }
-        function onNewerLoadingChanged() {
-            if (!Chat.newerLoading)
-                root.newerAsked = false
-        }
-        function onJumped(id) {
-            root.jumpTarget = id
-            Qt.callLater(root.land)
         }
         function onSaved(path, open) {
             if (root.copyPaths[path]) {
@@ -755,41 +594,6 @@ Rectangle {
             }
         }
 
-        onCountChanged: root.olderAsked = false
-        // A row at the end that grows (a failed-send line, an edit, a late
-        // layout), a resize, or a monitor scale change (every row reflows)
-        // keeps the list at its end if it was following it.
-        onContentHeightChanged: root.reflow()
-        onHeightChanged: root.reflow()
-        onWidthChanged: root.reflow()
-        onMovementStarted: root.userMoved = true
-        onContentYChanged: {
-            // Only the user's own scrolling (wheel, drag, flick, the bar)
-            // decides whether the end is followed.
-            // (The wheel's eased scroll is WheelScroll's, not Flickable's
-            // own movement: `moving` stays false for it.)
-            if (view.moving || WheelScroll.active(view) || view.ScrollBar.vertical.pressed)
-                root.followEnd = root.isNearEnd()
-            root.updateNearEnd()
-            if (root.landed && !root.nearEnd)
-                scrollReport.restart()
-            const nearTop = contentY - originY < root.historyFetchPx
-            if (!nearTop)
-                root.olderAsked = false
-            else if (root.landed && !root.olderAsked && Chat.hasOlder && !Chat.olderLoading) {
-                root.olderAsked = true
-                Chat.loadOlder()
-            }
-            // A jump's window loads what follows near its end.
-            const nearBottom = originY + contentHeight - contentY - height < root.historyFetchPx
-            if (!nearBottom)
-                root.newerAsked = false
-            else if (root.landed && !root.newerAsked && Chat.hasNewer && !Chat.newerLoading) {
-                root.newerAsked = true
-                Chat.loadNewer()
-            }
-        }
-
         delegate: MessageDelegate {
             id: row
             required property int index
@@ -805,7 +609,7 @@ Rectangle {
             editingId: root.editingId
             // The bar stays while its emoji picker is open (`keepBar`).
             keepBar: (reactionPicker.item?.visible ?? false) && reactionPicker.item.messageId === messageId
-            highlightId: root.highlightId
+            highlightId: scroll.highlightId
             onReplyRequested: (id, author, text) => root.replyTo(id, author, text, row.attachments, row.nameStyle)
             onEditRequested: id => root.startEdit(id)
             onEditSaved: (id, text) => {
