@@ -127,7 +127,7 @@ final class MessageNotifier {
                 .setWhen(push.sentAt)
                 .build();
         post(context, conversation.channelId, notification);
-        postSummary(context);
+        postSummary(context, conversation.channelId, notification);
     }
 
     /**
@@ -154,7 +154,7 @@ final class MessageNotifier {
 
     static void cancel(Context context, String channelId) {
         NotificationManagerCompat.from(context).cancel(channelId, CONVERSATION_ID);
-        postSummary(context);
+        postSummary(context, channelId, null);
     }
 
     /** Sign-out: no notification or shortcut outlives the account. */
@@ -246,14 +246,23 @@ final class MessageNotifier {
         }
     }
 
-    /** The group's summary while any conversation is up; gone with the last. */
+    /**
+     * The group's summary while any conversation is up; gone with the last,
+     * never posted without one. `changed` is the conversation just posted
+     * (`posted`) or cancelled (null): notify and cancel reach the system
+     * asynchronously, so the active list read right after may still show a
+     * cancelled one (an empty "1 conversation" summary, which the system
+     * then drops as a summary without children) or miss a new one.
+     */
     @SuppressLint("MissingPermission")
-    private static void postSummary(Context context) {
+    private static void postSummary(Context context, String changed, Notification posted) {
         NotificationManagerCompat manager = NotificationManagerCompat.from(context);
-        List<StatusBarNotification> conversations = new ArrayList<>();
+        List<Notification> conversations = new ArrayList<>();
+        if (posted != null) conversations.add(posted);
         for (StatusBarNotification active : manager.getActiveNotifications()) {
-            if (GROUP.equals(active.getNotification().getGroup()) && active.getId() == CONVERSATION_ID) {
-                conversations.add(active);
+            if (GROUP.equals(active.getNotification().getGroup()) && active.getId() == CONVERSATION_ID
+                    && !changed.equals(active.getTag())) {
+                conversations.add(active.getNotification());
             }
         }
         if (conversations.isEmpty()) {
@@ -261,8 +270,8 @@ final class MessageNotifier {
             return;
         }
         NotificationCompat.InboxStyle lines = new NotificationCompat.InboxStyle();
-        for (StatusBarNotification active : conversations.subList(0, Math.min(5, conversations.size()))) {
-            Bundle extras = active.getNotification().extras;
+        for (Notification active : conversations.subList(0, Math.min(5, conversations.size()))) {
+            Bundle extras = active.extras;
             CharSequence title = extras.getCharSequence(NotificationCompat.EXTRA_TITLE);
             if (title == null) continue;
             CharSequence text = extras.getCharSequence(NotificationCompat.EXTRA_TEXT);
