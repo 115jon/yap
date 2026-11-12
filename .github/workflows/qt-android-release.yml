@@ -462,7 +462,6 @@ jobs:
           name: yap-qt-${{ needs.plan.outputs.version }}
           path: out
 
-
       # The APKs as the sign job made them (the smoke job ran in between).
       - name: Check the APKs
         env:
