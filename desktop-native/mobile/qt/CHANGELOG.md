@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.2](https://github.com/115jon/yap/compare/qt-android-v0.3.1...qt-android-v0.3.2) (2026-11-12)
+
+
+### Bug Fixes
+
+* **desktop-native:** 🐛 drop the notification summary with its last chat ([d547cf9](https://github.com/115jon/yap/commit/d547cf99c19a263aff2523c79bcfb12d11b19380))
+* **desktop-native:** 🐛 end mark as read's calls by one deadline ([21f8d76](https://github.com/115jon/yap/commit/21f8d765f13d011c7a5cf8ea3cd26aea9947f96d))
+* **desktop-native:** 🐛 ignore the window overflow while it rotates ([987b199](https://github.com/115jon/yap/commit/987b19963ff84b89233f8edd322fda3ce70d14eb))
+* **desktop-native:** 🐛 keep bottom bars clear of gestures and captions ([d7bd92b](https://github.com/115jon/yap/commit/d7bd92b19ed28a6e5c522d6334078d1f000277f3))
+* **desktop-native:** 🐛 keep the chat list and composer off the cutout ([e349b7e](https://github.com/115jon/yap/commit/e349b7e42d9f7e6eef2220d94f9ba9ee6802cd96))
+* **desktop-native:** 🐛 post no summary for a message that did not show ([6ee45fc](https://github.com/115jon/yap/commit/6ee45fc6f13c84b7ce62d117d47879dbf9bef560))
+* **desktop-native:** 🐛 say reconnecting when only the app is blocked ([1d71de6](https://github.com/115jon/yap/commit/1d71de672016758b7b56aa71bcb7bbac120ff9ae))
+* **desktop-native:** 🐛 send notification actions from the background ([f71bc33](https://github.com/115jon/yap/commit/f71bc33ee2a917318f7e3fd5bbfc747825da1b3f))
+* **desktop-native:** qt android notification actions in the background, resume reconnect, gesture, pop-up and cutout insets ([ad4caa3](https://github.com/115jon/yap/commit/ad4caa329082968dea50c617b1d9c4b1f11b2ba3))
+
 ## [0.3.1](https://github.com/115jon/yap/compare/qt-android-v0.3.0...qt-android-v0.3.1) (2026-11-12)
 
 
