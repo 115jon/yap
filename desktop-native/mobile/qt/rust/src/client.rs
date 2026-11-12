@@ -214,6 +214,23 @@ impl Platform for Mobile {
         crate::push::started(commands);
     }
 
+    /// Android's own word on the network (cpp/native.cpp): in the
+    /// background the app's network is blocked while the device's is up.
+    #[cfg(target_os = "android")]
+    fn network_up(&self) -> Option<bool> {
+        extern "C" {
+            /// NetworkState.get: 1 up (blocked for this app or not),
+            /// 0 none, -1 unknown.
+            fn yap_mobile_network_state() -> i32;
+        }
+        // SAFETY: no arguments; the C++ side attaches the calling thread.
+        match unsafe { yap_mobile_network_state() } {
+            1 => Some(true),
+            0 => Some(false),
+            _ => None,
+        }
+    }
+
     /// The photo picker's copies in the app cache (`Native.pickMedia`):
     /// named after the picked item, with the extension its type implies.
     fn upload_files(&self, paths: &[String]) -> Vec<UploadFile> {

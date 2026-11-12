@@ -53,7 +53,9 @@ pub async fn run(
     };
     // Whether the last ticket request found no network (the strip's
     // "Offline"; the web reads `navigator.onLine`). The ticket is the
-    // first request of every try, on the same host as the socket.
+    // first request of every try, on the same host as the socket. A name
+    // that did not resolve while the system says its network is up is not
+    // that ([`no_network`]).
     let offline = Arc::new(AtomicBool::new(false));
     let last_offline = Arc::clone(&offline);
     let tickets = move || -> yap_realtime::TicketFuture {
@@ -61,7 +63,9 @@ pub async fn run(
         let last_offline = Arc::clone(&last_offline);
         Box::pin(async move {
             let ticket = api.gateway_ticket().await;
-            let no_network = ticket.as_ref().err().is_some_and(ApiError::is_offline);
+            let no_network = no_network(ticket.as_ref().err(), || {
+                crate::platform::installed().and_then(|p| p.network_up())
+            });
             last_offline.store(no_network, Ordering::Relaxed);
             ticket.map_err(ticket_error)
         })
@@ -91,6 +95,14 @@ pub async fn run(
             }
         }
     }
+}
+
+/// A failed ticket request found no network: the name did not resolve,
+/// and the system does not say its network is up (`network_up`, asked only
+/// then). A phone app's own network is blocked in the background while the
+/// device's stays up; its lookups fail the same way.
+fn no_network(error: Option<&ApiError>, network_up: impl FnOnce() -> Option<bool>) -> bool {
+    error.is_some_and(ApiError::is_offline) && network_up() != Some(true)
 }
 
 /// Forwards one connection event; `false` once the connection stopped.
@@ -138,4 +150,30 @@ fn handle(
         Event::Connected | Event::Frame(..) | Event::IdentifyRejected => {}
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DNS: &str = "error sending request: client error (Connect): dns error: no network";
+
+    #[test]
+    fn a_failed_lookup_is_no_network_unless_the_system_says_it_is_up() {
+        let dns = ApiError::Network(DNS.into());
+        // The desktop, which cannot ask: as before.
+        assert!(no_network(Some(&dns), || None));
+        assert!(no_network(Some(&dns), || Some(false)));
+        // A phone whose app was blocked in the background.
+        assert!(!no_network(Some(&dns), || Some(true)));
+    }
+
+    #[test]
+    fn other_failures_and_success_never_ask() {
+        let refused = ApiError::Network("connection refused".into());
+        let ask = || -> Option<bool> { panic!("asked") };
+        assert!(!no_network(Some(&refused), ask));
+        assert!(!no_network(Some(&ApiError::Unauthorized), ask));
+        assert!(!no_network(None, ask));
+    }
 }

@@ -19,6 +19,19 @@
 
 extern "C" void yap_mobile_flush();
 
+// The device's network for the core (rust/src/client.rs, from a Tokio
+// thread): 1 up, 0 none, -1 unknown.
+extern "C" int yap_mobile_network_state()
+{
+#ifdef Q_OS_ANDROID
+  return QJniObject::callStaticMethod<jint>("dev/yap/qtproto/NetworkState", "get",
+                                            "(Landroid/content/Context;)I",
+                                            QNativeInterface::QAndroidApplication::context().object());
+#else
+  return -1;
+#endif
+}
+
 namespace {
 
 std::atomic<Native*> g_native { nullptr };
