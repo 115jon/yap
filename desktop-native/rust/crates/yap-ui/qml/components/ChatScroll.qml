@@ -21,7 +21,8 @@ import Yap.Ui
 //   visible); scrolled up, the top row (`Chat.scrollAt`, where the channel
 //   reopens) when `rememberPosition`;
 // - asks for an older page near its top and, in a jump's window, a newer
-//   page near its end, once per visit to that band.
+//   page near its end, once per visit to that band; the row at the top
+//   stays where it was as an older page goes in above it.
 //
 // A thread list (`thread`, ThreadMessageModel) only keeps new replies in
 // view (ThreadSidebar.tsx) and its end over a resize.
@@ -71,6 +72,10 @@ Item {
     property bool olderAsked: false
     property bool newerAsked: false
     property int tries: 0
+    // The row at the top as an older page goes in, and how far below the
+    // list's top edge it stood.
+    property string keepId: ""
+    property real keepOffset: 0
 
     function userScrolling() {
         return root.view.moving || root.barPressed || (root.wheel !== null && root.wheel.active(root.view))
@@ -248,6 +253,31 @@ Item {
             root.landDone()
     }
 
+    // An older page went in above the rows: the row that was at the top
+    // stays where it was. A ListView that stands at its very beginning
+    // keeps standing there as rows are inserted before its first one, so
+    // the page pushed the rows down a screenful or more, and the list then
+    // stood at its new top, where no scroll moves it and nothing asks for
+    // the next page.
+    function keepTop() {
+        const id = root.keepId
+        root.keepId = ""
+        const index = id.length > 0 ? Chat.indexOfMessage(id) : -1
+        if (index < 0)
+            return
+        const v = root.view
+        let item = v.itemAtIndex(index)
+        if (!item) {
+            v.positionViewAtIndex(index, ListView.Beginning)
+            item = v.itemAtIndex(index)
+            if (!item)
+                return
+        }
+        const drift = item.y - v.contentY - root.keepOffset
+        if (Math.abs(drift) > 0.5)
+            v.contentY += drift
+    }
+
     // The rows arrive and size themselves over a few frames.
     Timer {
         id: landing
@@ -346,6 +376,21 @@ Item {
             root.landed = false
             root.userMoved = false
             Qt.callLater(root.land)
+        }
+        // An older page (rows before the first): note the top row.
+        function onRowsAboutToBeInserted(parent, first, last) {
+            if (first !== 0 || !root.landed || root.view.count === 0)
+                return
+            const v = root.view
+            const top = root.topRow()
+            if (!top)
+                return
+            root.keepId = top.messageId
+            root.keepOffset = top.y - v.contentY
+        }
+        function onRowsInserted(parent, first, last) {
+            if (first === 0 && root.keepId.length > 0)
+                Qt.callLater(root.keepTop)
         }
         // A jump's window grows at its end without following it.
         function onAboutToAppend() {
