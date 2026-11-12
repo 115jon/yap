@@ -348,6 +348,12 @@ Item {
         anchors.rightMargin: SafeArea.margins.right
         clip: true
         bottomMargin: 8
+        // Still under a sheet. The long press that opened it ends with no
+        // grabber (the row lets go of it), so the list never hears the
+        // lift and stays pressed; it then took the sheet's own drags from
+        // under it, and the next tap on the sheet only ended that drag.
+        // Not interactive clears that state and keeps it out of the way.
+        interactive: !actions.shown
         // No reuse, as on the desktop (ChatView): a pooled row handed to
         // another message keeps its old height until its columns lay out
         // again, a pass after the list has placed it. A row of pictures

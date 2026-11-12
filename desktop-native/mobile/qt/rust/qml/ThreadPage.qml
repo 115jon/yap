@@ -131,6 +131,9 @@ Rectangle {
         anchors.rightMargin: root.rightInset
         visible: root.ready
         clip: true
+        // As the chat's list: still under a sheet (its long press leaves
+        // the list pressed, which then took the sheet's drags).
+        interactive: !actions.shown
         // As the chat's list: a row has its height before it is placed.
         reuseItems: false
         bottomMargin: 8
