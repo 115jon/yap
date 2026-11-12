@@ -266,6 +266,9 @@ Item {
         if (index < 0)
             return
         const v = root.view
+        // The insert is applied at the list's next layout: until then the
+        // index names the row that still holds it, a page further down.
+        v.forceLayout()
         let item = v.itemAtIndex(index)
         if (!item) {
             v.positionViewAtIndex(index, ListView.Beginning)
