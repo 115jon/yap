@@ -21,12 +21,21 @@ jobs:
   # vX.Y.Z tag. The work is split into two passes so that a transient failure
   # while updating the next release PR can't block the desktop build for a
   # release that was already created.
+  #
+  # Two packages (release-please-config.json), each with its own release PR:
+  # the root (".", the desktop line, tags vX.Y.Z) and the Qt Android app
+  # (desktop-native/mobile/qt, tags qt-android-vX.Y.Z). The action's
+  # unprefixed outputs (release_created, tag_name) are the root's; the Qt
+  # app's carry the path as a prefix. releases_created is true for either,
+  # so nothing below keys on it.
   release:
     name: release
     runs-on: ubuntu-latest
     outputs:
-      releases_created: ${{ steps.release.outputs.releases_created }}
+      release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      qt_release_created: ${{ steps.release.outputs['desktop-native/mobile/qt--release_created'] }}
+      qt_tag_name: ${{ steps.release.outputs['desktop-native/mobile/qt--tag_name'] }}
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
@@ -46,7 +55,7 @@ jobs:
           skip-github-pull-request: true
 
       - name: Mark Release as Draft
-        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        if: ${{ steps.release.outputs.release_created == 'true' }}
         env:
           TAG: ${{ steps.release.outputs.tag_name }}
         run: |
@@ -61,7 +70,7 @@ jobs:
       # bytes), otherwise on the bridge. Never fails the job: the desktop job
       # must still run.
       - name: Checkout the bridge config
-        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        if: ${{ steps.release.outputs.release_created == 'true' }}
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           sparse-checkout: desktop-native/packaging/tauri-bridge.json
@@ -69,7 +78,7 @@ jobs:
           persist-credentials: false
 
       - name: Keep latest on a release that serves the bridge
-        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        if: ${{ steps.release.outputs.release_created == 'true' }}
         env:
           TAG: ${{ steps.release.outputs.tag_name }}
           PREVIOUS: ${{ steps.before.outputs.tag }}
@@ -94,13 +103,43 @@ jobs:
             echo "::warning::Could not mark $pick latest; Tauri installs may get no latest.json until $TAG is published."
           fi
 
+      # Hide the Qt app's release until the qt-android job attaches the
+      # signed APKs and publishes it, as a pre-release, which is never
+      # GitHub's latest. After the root's steps, and never failing the job,
+      # so the desktop release and the release PRs go ahead whatever
+      # happens here (the qt-android job's plan then refuses a release that
+      # is not a draft).
+      - name: Mark the Qt app's release as draft
+        # !cancelled(): also after a failed root step, so the Qt release is
+        # hidden even when this job fails (the qt-android job is then
+        # skipped; rerun it with a dispatch from main with release_tag).
+        if: ${{ !cancelled() && steps.release.outputs['desktop-native/mobile/qt--release_created'] == 'true' }}
+        continue-on-error: true
+        env:
+          TAG: ${{ steps.release.outputs['desktop-native/mobile/qt--tag_name'] }}
+          ROOT_RELEASED: ${{ steps.release.outputs.release_created }}
+          PREVIOUS: ${{ steps.before.outputs.tag }}
+        run: |
+          gh release edit "$TAG" --draft=true --prerelease -R "$REPO"
+          # release-please marks a 0.x release a pre-release, so latest never
+          # moved. From 1.0.0 it is created as latest: unless the root
+          # released too (the step above chose latest), put latest back.
+          if [[ "$TAG" =~ ^qt-android-v0\. ]] || [ "$ROOT_RELEASED" = "true" ] || [ -z "$PREVIOUS" ]; then
+            exit 0
+          fi
+          now=$(gh api "repos/$REPO/releases/latest" --jq .tag_name 2>/dev/null || true)
+          if [ "$now" != "$PREVIOUS" ]; then
+            gh release edit "$PREVIOUS" --latest -R "$REPO" ||
+              echo "::warning::Could not mark $PREVIOUS latest again (now: ${now:-none})."
+          fi
+
   # The native app (desktop-native/) is the desktop release from 4.0.0. The
   # Tauri app's desktop-release.yml is no longer called here; it stays
   # dispatch-only until desktop/ is removed.
   desktop:
     name: desktop release
     needs: release
-    if: ${{ needs.release.outputs.releases_created == 'true' }}
+    if: ${{ needs.release.outputs.release_created == 'true' }}
     permissions:
       contents: write
       # Azure Artifact Signing logs in with the GitHub OIDC token.
@@ -112,6 +151,30 @@ jobs:
     uses: ./.github/workflows/desktop-native-release.yml
     with:
       release_tag: ${{ needs.release.outputs.tag_name }}
+
+  # The Qt Android app (dev.yap.app), called the same way: builds the
+  # qt-android-v<x.y.z> tag release-please made, signs it in the
+  # android-release environment (admits refs/heads/main, this run's ref),
+  # attaches the APKs to the draft and publishes it as a pre-release.
+  qt-android:
+    name: qt android release
+    needs: release
+    if: ${{ needs.release.outputs.qt_release_created == 'true' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/qt-android-release.yml
+    with:
+      release_tag: ${{ needs.release.outputs.qt_tag_name }}
+    # By name, never `inherit`: the Firebase client configuration (it ships
+    # inside the APK; build jobs read it) and the release key's names (empty
+    # here: they are android-release environment secrets, which the called
+    # workflow's sign job reads in that environment). No other secret
+    # reaches the called workflow.
+    secrets:
+      QT_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.QT_GOOGLE_SERVICES_JSON_BASE64 }}
+      QT_ANDROID_KEYSTORE_BASE64: ${{ secrets.QT_ANDROID_KEYSTORE_BASE64 }}
+      QT_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.QT_ANDROID_KEYSTORE_PASSWORD }}
+      QT_ANDROID_KEY_ALIAS: ${{ secrets.QT_ANDROID_KEY_ALIAS }}
 
   release-pr:
     name: release-pr
@@ -136,7 +199,7 @@ jobs:
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASED: ${{ needs.release.outputs.releases_created }}
+          RELEASED: ${{ needs.release.outputs.release_created }}
         run: |
           pinned=$(jq -r '.packages["."]["release-as"] // empty' release-please-config.json)
           if [ -n "$pinned" ] && gh api "repos/$REPO/git/ref/tags/v$pinned" >/dev/null 2>&1; then
