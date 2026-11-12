@@ -87,8 +87,8 @@ Rectangle {
             height: root.rowHeight
             radius: Theme.radius
             color: index === root.currentIndex || (Theme.touch && tap.pressed) ? Theme.tint2 : "transparent"
-            Accessible.role: Accessible.Button
-            Accessible.name: qsTr("Mention %1").arg(suggestion.name)
+            Accessible.role: Theme.touch ? Accessible.Button : Accessible.ListItem
+            Accessible.name: Theme.touch ? qsTr("Mention %1").arg(suggestion.name) : suggestion.name
             Accessible.onPressAction: root.picked(suggestion.username)
             Avatar {
                 x: 8

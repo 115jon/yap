@@ -39,7 +39,7 @@ Row {
             name: root.meta[modelData]?.icon ?? "globe"
             size: root.size
             color: root.shown
-            HoverHandler { id: glyphHover }
+            HoverHandler { id: glyphHover; enabled: Theme.hoverUi }
             LazyPopup {
                 when: glyphHover.hovered
                 sourceComponent: Tooltip {
