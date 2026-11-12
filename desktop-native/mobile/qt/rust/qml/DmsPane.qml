@@ -102,7 +102,7 @@ Item {
             }
         }
 
-        delegate: DmItem {
+        delegate: DmRow {
             id: dm
             width: list.width
             active: dm.channelId === Nav.activeChannelId

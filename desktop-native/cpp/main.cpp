@@ -752,6 +752,7 @@ static void registerPlatformTypes()
     { "delegates/MessageMedia.qml", "MessageMedia" },
     { "delegates/VoiceStatusLine.qml", "VoiceStatusLine" },
     { "components/VoiceStreamHoverCard.qml", "VoiceStreamHoverCard" },
+    { "components/NameplateLayer.qml", "NameplateLayer" },
   };
   for (const auto& type : types)
     qmlRegisterType(QUrl(QStringLiteral("qrc:/qt/qml/com/yap/native/qml/") + QLatin1String(type.path)),

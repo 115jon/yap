@@ -9,8 +9,8 @@ fn main() {
     }
     // The QML both apps show: tokens, shell state, and the rows and
     // components they are made of. What differs per app (rich embeds,
-    // media, voice status, the stream card) is imported from Yap.Platform,
-    // which each app registers (its main.cpp).
+    // media, voice status, the stream card, a row's nameplate) is imported
+    // from Yap.Platform, which each app registers (its main.cpp).
     let files = [
         QmlFile::from("qml/Theme.qml").singleton(true),
         QmlFile::from("qml/ShellState.qml").singleton(true),
@@ -29,7 +29,9 @@ fn main() {
         QmlFile::from("qml/components/Led.qml"),
         QmlFile::from("qml/components/LinkText.qml"),
         QmlFile::from("qml/components/ListEnter.qml"),
+        QmlFile::from("qml/components/MentionPanel.qml"),
         QmlFile::from("qml/components/MessageEditor.qml"),
+        QmlFile::from("qml/components/PlatformIcons.qml"),
         QmlFile::from("qml/components/PresenceAvatar.qml"),
         QmlFile::from("qml/components/PresenceIn.qml"),
         QmlFile::from("qml/components/PresenceOut.qml"),
@@ -41,7 +43,9 @@ fn main() {
         QmlFile::from("qml/components/UnreadBanner.qml"),
         QmlFile::from("qml/delegates/CategoryLabel.qml"),
         QmlFile::from("qml/delegates/ChannelRow.qml"),
+        QmlFile::from("qml/delegates/DmRow.qml"),
         QmlFile::from("qml/delegates/ListenSidebarStatus.qml"),
+        QmlFile::from("qml/delegates/MemberEntry.qml"),
         QmlFile::from("qml/delegates/MemberRow.qml"),
         QmlFile::from("qml/delegates/MessageDelegate.qml"),
         QmlFile::from("qml/delegates/ReactionStrip.qml"),

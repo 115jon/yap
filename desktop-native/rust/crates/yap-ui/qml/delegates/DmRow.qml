@@ -1,12 +1,14 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
-// A conversation in the home list (DMListPanel.tsx, sidebar-row.ts): 32
-// high, 40 with a custom status line; px-2, gap 8, a 24 px avatar with its
-// presence LED cut out of ply-1, the name at 14/500 (unread: 600, ink-1).
-// Selected tint-2, hover tint-1. Unread draws the 2x8 pill at the panel
-// edge; mentions add a count chip. The avatar opens the profile.
+// A conversation in the home list (DMListPanel.tsx, sidebar-row.ts), on
+// DmListModel: the desktop's DM sidebar and the phone's Home pane. The
+// avatar with its presence LED cut out of ply-1, the name (unread: 600,
+// ink-1), what they play or their custom status under it. Selected tint-2,
+// hover (or a finger's press) tint-1. Unread draws the pill at the panel's
+// edge; mentions add a count chip. The avatar opens the profile; with a
+// pointer, a right click asks for the conversation's menu (the desktop's
+// DmSidebar has it).
 Rectangle {
     id: row
 
@@ -29,76 +31,72 @@ Rectangle {
     required property bool active
     signal selected()
     signal profileRequested(Item anchor)
+    // A right click at `at` (in the row).
+    signal menuRequested(point at)
 
-    height: customStatus.length > 0 || game.length > 0 ? 40 : Theme.treeRow
+    // The desktop's sizes (32 high, 40 with a status line; px-2, gap 8, a
+    // 24 px face; the 2x8 pill in the list's margin), or a thumb's
+    // (Theme.touch: a 56dp row, a 40dp face 16 from the edge, a 3x8 pill
+    // at the screen's edge).
+    readonly property bool twoLines: customStatus.length > 0 || game.length > 0
+    property int rowHeight: Theme.touch ? 56 : twoLines ? 40 : Theme.treeRow
+    property int faceSize: Theme.touch ? 40 : 24
+    property int faceX: Theme.touch ? 16 : 8
+    property int textGap: Theme.touch ? 12 : 8
+    property int edge: Theme.touch ? 16 : 8
+    property int pillX: Theme.touch ? 0 : -8
+    property int pillWidth: Theme.touch ? 3 : 2
+    property int faceOverhang: Theme.touch ? 2 : 4
+    property int faceSlop: Theme.touch ? 4 : 2
+    property int lineGap: Theme.touch ? 2 : 0
+
+    height: rowHeight
     radius: Theme.radius
-    color: active ? Theme.tint2 : hover.hovered ? Theme.tint1 : "transparent"
+    color: active ? Theme.tint2 : hover.hovered || (Theme.touch && tap.pressed) ? Theme.tint1 : "transparent"
     Behavior on color { ColorAnimation { duration: Theme.dur1 } }
 
     Accessible.role: Accessible.Button
     Accessible.name: qsTr("Open DM with %1").arg(name)
         + (mentions > 0 ? qsTr(", %n mention(s)", "", mentions) : unread ? qsTr(", unread") : "")
+    Accessible.onPressAction: row.selected()
 
     Rectangle {
         visible: row.unread && !row.active
-        x: -8
+        x: row.pillX
         anchors.verticalCenter: parent.verticalCenter
-        width: 2
+        width: row.pillWidth
         height: 8
         color: Theme.ink1
     }
 
-    HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
-    TapHandler { onTapped: row.selected() }
-    // Right click: the conversation's menu (Start a call asks first).
+    HoverHandler { id: hover; enabled: Theme.hoverUi; cursorShape: Qt.PointingHandCursor }
     TapHandler {
-        acceptedButtons: Qt.RightButton
-        onTapped: eventPoint => rowMenu.load()?.popup(row, eventPoint.position.x, eventPoint.position.y)
+        id: tap
+        onTapped: row.selected()
     }
-    LazyPopup {
-        id: rowMenu
-        // DMSidebar.tsx: Profile (the full profile), Start a call (not
-        // while it rings or runs), Copy ID ("Channel ID copied").
-        sourceComponent: MenuPanel {
-            MenuRow {
-                text: qsTr("Profile")
-                glyph: "account"
-                onTriggered: ShellState.showFullProfile(row.userId, row)
-            }
-            MenuRow {
-                readonly property var call: JSON.parse(Calls.view)
-                visible: !(call.channelId === row.channelId && (call.status === "ringing_outgoing" || call.status === "ringing_incoming" || call.joined === true))
-                height: visible ? implicitHeight : 0
-                text: qsTr("Start a call")
-                glyph: "call"
-                onTriggered: ShellState.startCall(row.channelId, row.name, true)
-            }
-            MenuRow {
-                text: qsTr("Copy ID")
-                glyph: "copy"
-                onTriggered: {
-                    dmClipboard.copyText(row.channelId)
-                    Chat.notice(qsTr("Channel ID copied"))
-                }
-            }
-        }
+    TapHandler {
+        // Not under a finger: a touch carries no button, so its tap would
+        // pass for a right click.
+        enabled: !Theme.touch
+        acceptedButtons: Qt.RightButton
+        onTapped: eventPoint => row.menuRequested(eventPoint.position)
     }
 
     PresenceAvatar {
         id: face
-        x: 8
+        x: row.faceX
         anchors.verticalCenter: parent.verticalCenter
-        size: 24
+        size: row.faceSize
         initials: row.initials
         source: row.avatar
         deco: row.deco
         presence: row.presence
         ground: Theme.ply1
-        overhang: 4
+        overhang: row.faceOverhang
         // A MouseArea, so the press stops here instead of opening the DM.
         MouseArea {
             anchors.fill: parent
-            anchors.margins: -2
+            anchors.margins: -row.faceSlop
             cursorShape: Qt.PointingHandCursor
             onClicked: row.profileRequested(face)
         }
@@ -109,10 +107,11 @@ Rectangle {
 
     Column {
         anchors.left: face.right
-        anchors.leftMargin: 8
+        anchors.leftMargin: row.textGap
         anchors.right: badge.visible ? badge.left : parent.right
-        anchors.rightMargin: 8
+        anchors.rightMargin: badge.visible ? 8 : row.edge
         anchors.verticalCenter: parent.verticalCenter
+        spacing: row.lineGap
         DisplayName {
             width: parent.width
             text: row.name
@@ -146,9 +145,8 @@ Rectangle {
     CountBadge {
         id: badge
         anchors.right: parent.right
-        anchors.rightMargin: 8
+        anchors.rightMargin: row.edge
         anchors.verticalCenter: parent.verticalCenter
         count: row.active ? 0 : row.mentions
     }
-    ClipboardText { id: dmClipboard }
 }

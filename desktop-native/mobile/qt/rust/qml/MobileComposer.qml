@@ -92,30 +92,26 @@ Rectangle {
     // The `@` token before the caret: where it starts and what follows it.
     property int mentionStart: -1
     property string mentionQuery: ""
-    readonly property bool mentionOpen: mentionStart >= 0 && suggestions.count > 0
-
-    function mentionMatch(before) {
-        return /(^|\s)@([^\s@]*)$/.exec(before)
-    }
+    readonly property bool mentionOpen: mentionStart >= 0 && mentionPanel.count > 0
 
     function updateMention() {
         const before = field.text.slice(0, field.cursorPosition) + field.preeditText
-        const match = root.mentionMatch(before)
+        const token = mentionPanel.tokenBefore(before)
         const asked = root.mentionStart >= 0
-        root.mentionStart = match ? before.length - match[2].length - 1 : -1
-        root.mentionQuery = match ? match[2] : ""
-        if (match || asked)
-            Chat.queryMentions(root.mentionQuery, match !== null)
+        root.mentionStart = token ? token.start : -1
+        root.mentionQuery = token ? token.query : ""
+        if (token || asked)
+            Chat.queryMentions(root.mentionQuery, token !== null)
     }
 
     function insertMention(username) {
         // Commit the word in progress first: it is part of the query.
         Qt.inputMethod.commit()
         const before = field.text.slice(0, field.cursorPosition)
-        const match = root.mentionMatch(before)
-        if (!match)
+        const token = mentionPanel.tokenBefore(before)
+        if (!token)
             return
-        const start = before.length - match[2].length - 1
+        const start = token.start
         const insert = "@" + username + " "
         field.remove(start, field.cursorPosition)
         field.insert(start, insert)
@@ -249,82 +245,15 @@ Rectangle {
 
     // Member suggestions (MentionAutocomplete.tsx): up to five rows over the
     // messages, a tap puts `@username ` in.
-    Rectangle {
+    MentionPanel {
         id: mentionPanel
-        opacity: root.mentionOpen ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
-        visible: opacity > 0
+        open: root.mentionOpen
+        heading: false
         z: 3
         x: 8
         width: parent.width - 16
-        height: suggestions.contentHeight + 8
         y: -height - 4
-        radius: Theme.radius
-        color: Theme.ply3
-        border.width: 1
-        border.color: Theme.lineStrong
-        Accessible.role: Accessible.List
-        Accessible.name: qsTr("Members")
-        // The panel floats over the messages: no tap on it reaches them.
-        TapHandler {
-            gesturePolicy: TapHandler.ReleaseWithinBounds
-        }
-
-        ListView {
-            id: suggestions
-            x: 4
-            y: 4
-            width: parent.width - 8
-            height: contentHeight
-            interactive: false
-            model: MentionListModel
-            delegate: Rectangle {
-                id: suggestion
-                required property string username
-                required property string name
-                required property string avatar
-                required property string initials
-                required property string nameStyle
-                width: suggestions.width
-                height: 48
-                radius: Theme.radius
-                color: suggestionTap.pressed ? Theme.tint2 : "transparent"
-                Accessible.role: Accessible.Button
-                Accessible.name: qsTr("Mention %1").arg(suggestion.name)
-                Avatar {
-                    x: 8
-                    anchors.verticalCenter: parent.verticalCenter
-                    size: 28
-                    initials: suggestion.initials
-                    source: suggestion.avatar
-                }
-                DisplayName {
-                    x: 48
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: Math.min(implicitWidth, parent.width - x - handle.width - 20)
-                    text: suggestion.name
-                    nameStyle: suggestion.nameStyle
-                    color: Theme.ink1
-                    font: Theme.type.row
-                    ground: Theme.ply3
-                }
-                Text {
-                    id: handle
-                    anchors.right: parent.right
-                    anchors.rightMargin: 12
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.PlainText
-                    text: "@" + suggestion.username
-                    color: Theme.ink3
-                    font: Theme.type.caption
-                }
-                TapHandler {
-                    id: suggestionTap
-                    gesturePolicy: TapHandler.ReleaseWithinBounds
-                    onTapped: root.insertMention(suggestion.username)
-                }
-            }
-        }
+        onPicked: username => root.insertMention(username)
     }
 
     Column {

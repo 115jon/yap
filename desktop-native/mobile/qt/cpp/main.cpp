@@ -77,7 +77,7 @@ int main(int argc, char* argv[])
   // The mobile side of the shared QML's seams (Yap.Ui imports
   // Yap.Platform): this app's own files, under the names the shared QML
   // uses. The desktop registers its own.
-  for (const char* name : { "EmbedCard", "MessageMedia", "VoiceStatusLine", "VoiceStreamHoverCard" })
+  for (const char* name : { "EmbedCard", "MessageMedia", "NameplateLayer", "VoiceStatusLine", "VoiceStreamHoverCard" })
     qmlRegisterType(QUrl(QStringLiteral("qrc:/qt/qml/com/yap/mobile/qml/seams/%1.qml").arg(QLatin1String(name))),
                     "Yap.Platform", 1, 0, name);
   auto* shell = new MobileShell(&app);
