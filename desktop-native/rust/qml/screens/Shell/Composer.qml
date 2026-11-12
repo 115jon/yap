@@ -27,27 +27,33 @@ Item {
     property bool voice: false
     // No Send messages here (ComposerReadOnly): the lock line instead.
     property bool readOnly: false
-    // The message being replied to (empty: none).
-    property string replyToId
-    property string replyToName
-    property string replyToStyle
-    property string replyToText
-    property int replyToFiles: 0
+    // The message being replied to (empty: none): ComposerCore's.
+    property alias replyToId: core.replyToId
+    property alias replyToName: core.replyToName
+    property alias replyToStyle: core.replyToStyle
+    property alias replyToText: core.replyToText
+    property alias replyToFiles: core.replyToFiles
 
     signal send(string text, string replyToId)
-    signal cancelReply()
     signal editLast()
     // Esc in an empty composer with nothing else to close.
     signal markRead()
 
-    // The `@` token before the cursor: where it starts, and what follows it.
-    property int mentionStart: -1
-    property string mentionQuery
-    property bool mentionDismissed: false
-    property int mentionIndex: 0
-    readonly property bool mentionOpen: mentionStart >= 0 && !mentionDismissed && mentionPanel.count > 0
-    // When the last typing ping went out (TYPING_THROTTLE in useMessageInput.ts).
-    property double typingSentAt: 0
+    // The draft, reply, `@` suggestions, server emoji placeholders, typing
+    // pings and the send, shared with the phone's composer. The keys, the
+    // paste, the pickers and the pictures over the text are the desktop's.
+    ComposerCore {
+        id: core
+        textField: input
+        mentions: mentionPanel
+        liveWord: false
+        atomicMentions: true
+        onSend: (text, replyToId) => root.send(text, replyToId)
+        // A put-back draft brings its own server emoji.
+        onRestored: root.updateEmoji()
+    }
+
+    readonly property bool mentionOpen: core.mentionOpen
     // Links resolve early (embed-prefetch.ts): a pasted text at once, typed
     // text after a 350 ms pause (only links typed past count then).
     property bool pastePending: false
@@ -61,26 +67,9 @@ Item {
         input.forceActiveFocus()
     }
 
-    // The unsent text of the channel being left (with its server emoji
-    // placeholders), and the composer emptied for the next one.
-    function takeDraft() {
-        const draft = { text: input.text, map: root.customMap }
-        input.clear()
-        root.customMap = ({})
-        root.typingSentAt = 0
-        root.mentionDismissed = false
-        return draft
-    }
-    // A channel's kept draft back, the cursor at its end (no typing ping:
-    // nobody typed).
-    property bool puttingDraft: false
-    function putDraft(draft) {
-        root.puttingDraft = true
-        root.customMap = draft ? draft.map : ({})
-        input.text = draft ? draft.text : ""
-        input.cursorPosition = input.length
-        root.updateEmoji()
-        root.puttingDraft = false
+    // The reply bar shows (the message menu, the R key, the hover bar).
+    function startReply(messageId, author, text, files, nameStyle) {
+        core.startReply(messageId, author, text, files, nameStyle)
     }
 
     // The + key: the system's file dialog.
@@ -91,38 +80,11 @@ Item {
         input.forceActiveFocus()
     }
 
-    // Inserts at the cursor (an emoji from the picker). A server emoji
-    // goes in as one private-use placeholder drawn as its picture, and
-    // back to its `<:name:id>` token on send (useMessageInput.ts
-    // `insertEmoji`, message-input-utils.ts placeholders).
+    // Inserts at the cursor (an emoji from the picker, a key typed while
+    // the list had focus).
     function insertText(text) {
-        if (/^<:[a-z0-9_]+:[a-z0-9-]+>$/i.test(text)) {
-            let code = 0xe000
-            while (code <= 0xf8ff && (root.customMap[String.fromCharCode(code)] !== undefined
-                    || input.text.indexOf(String.fromCharCode(code)) >= 0))
-                code++
-            if (code <= 0xf8ff) {
-                const placeholder = String.fromCharCode(code)
-                const spans = JSON.parse(Chat.composerEmoji(text))
-                const next = Object.assign({}, root.customMap)
-                next[placeholder] = { token: text, url: spans.length > 0 ? spans[0][2] : "" }
-                root.customMap = next
-                text = placeholder
-            }
-        }
-        const at = input.cursorPosition
-        input.insert(at, text)
-        input.cursorPosition = at + text.length
+        core.insertText(text)
         input.forceActiveFocus()
-    }
-
-    // Placeholder character -> {token, url} of a picked server emoji.
-    property var customMap: ({})
-    function expandPlaceholders(text) {
-        let out = ""
-        for (const c of text)
-            out += root.customMap[c] !== undefined ? root.customMap[c].token : c
-        return out
     }
 
     // The composer's pictures, recomputed with the text: [start, end, url,
@@ -132,7 +94,7 @@ Item {
     function updateEmoji() {
         const spans = JSON.parse(Chat.composerEmoji(input.text)).map(s => [s[0], s[1], s[2], false])
         for (let i = 0; i < input.text.length; i++) {
-            const entry = root.customMap[input.text[i]]
+            const entry = core.customMap[input.text[i]]
             if (entry !== undefined && entry.url.length > 0)
                 spans.push([i, i + 1, entry.url, true])
         }
@@ -144,108 +106,10 @@ Item {
         root.emojiSpans = spans
     }
 
-    // Mentions of a member edit as one unit (useMessageInput.ts
-    // `getValidMentions`): not inside a link, and the name is a member's.
-    readonly property var memberNames: {
-        const set = {}
-        for (const name of JSON.parse(Chat.mentionNames || "[]"))
-            set[name] = true
-        return set
-    }
-    function validMentions() {
-        const re = /@([a-zA-Z0-9_]+)/g
-        const text = input.text
-        const out = []
-        let m
-        while ((m = re.exec(text)) !== null) {
-            const before = text.slice(0, m.index)
-            const tokenStart = Math.max(before.lastIndexOf(" "), before.lastIndexOf("\n"), before.lastIndexOf("\t")) + 1
-            const token = text.slice(tokenStart).split(/\s/)[0]
-            if (/^https?:\/\//i.test(token))
-                continue
-            if (root.memberNames[m[1].toLowerCase()])
-                out.push({ start: m.index, end: m.index + m[0].length })
-        }
-        return out
-    }
-    // A caret or selection edge inside a mention moves out of it
-    // (`enforceAtomicMentions`).
-    property bool enforcing: false
-    // The text's length at the last check: a caret moved by typing (the
-    // length changed) is left alone, as the web runs this on select and
-    // click only, so finishing a name before a space keeps the caret.
-    property int enforcedLength: 0
-    function enforceAtomic() {
-        if (root.enforcing || input.preeditText.length > 0)
-            return
-        if (input.length !== root.enforcedLength) {
-            root.enforcedLength = input.length
-            return
-        }
-        const text = input.text
-        const start = input.selectionStart
-        const end = input.selectionEnd
-        let ns = start
-        let ne = end
-        for (const m of validMentions()) {
-            if (start > m.start && start <= m.end && start === end) {
-                if (start < m.start + (m.end - m.start) / 2)
-                    ns = m.start
-                else
-                    ns = text[m.end] === " " ? m.end + 1 : m.end
-                ne = ns
-            } else if (start > m.start && start < m.end) {
-                ns = m.start
-            }
-            if (end > m.start && end < m.end)
-                ne = text[m.end] === " " ? m.end + 1 : m.end
-        }
-        if (ns === start && ne === end)
-            return
-        root.enforcing = true
-        if (ns === ne)
-            input.cursorPosition = ns
-        else
-            input.select(ns, ne)
-        root.enforcing = false
-    }
-    // The member mention ending at the caret (or one space before it).
-    function mentionBefore(cursor) {
-        const text = input.text
-        return validMentions().find(m => cursor === m.end || (cursor === m.end + 1 && text[m.end] === " "))
-    }
-
     // Puts a discarded send back, unless something new was typed meanwhile.
     function restore(text) {
-        if (input.text.trim().length === 0) {
-            input.text = text
-            input.cursorPosition = input.length
-        }
+        core.restore(text)
         input.forceActiveFocus()
-    }
-
-    function updateMention() {
-        const before = input.text.slice(0, input.cursorPosition)
-        const token = mentionPanel.tokenBefore(before)
-        const start = token ? token.start : -1
-        if (start !== root.mentionStart || (token && token.query !== root.mentionQuery))
-            root.mentionDismissed = false
-        const asked = root.mentionStart >= 0
-        root.mentionStart = start
-        root.mentionQuery = token ? token.query : ""
-        root.mentionIndex = 0
-        if (start >= 0 || asked)
-            Chat.queryMentions(root.mentionQuery, start >= 0)
-    }
-
-    function insertMention(username) {
-        // Editing the text re-runs updateMention: keep the range first.
-        const start = root.mentionStart
-        const end = input.cursorPosition
-        const insert = "@" + username + " "
-        input.remove(start, end)
-        input.insert(start, insert)
-        input.cursorPosition = start + insert.length
     }
 
     implicitHeight: readOnly ? lockedPlate.height : plate.height
@@ -265,7 +129,7 @@ Item {
         keep: true
         sourceComponent: GifPicker {
             replyToId: root.replyToId
-            onSent: root.cancelReply()
+            onSent: core.cancelReply()
             onClosed: input.forceActiveFocus()
         }
     }
@@ -283,9 +147,9 @@ Item {
         x: 0
         width: Math.min(root.width, 360)
         y: plate.y - height - 6
-        currentIndex: root.mentionIndex
-        onPointed: index => root.mentionIndex = index
-        onPicked: username => root.insertMention(username)
+        currentIndex: core.mentionIndex
+        onPointed: index => core.mentionIndex = index
+        onPicked: username => core.insertMention(username)
     }
 
     // ComposerReadOnly (MessageInput.tsx): the composer's box with the lock
@@ -452,7 +316,7 @@ Item {
                 tone: "muted"
                 iconName: "close"
                 tip: qsTr("Cancel reply")
-                onClicked: root.cancelReply()
+                onClicked: core.cancelReply()
             }
         }
 
@@ -671,13 +535,8 @@ Item {
                     input.clearMentionHover()
                     root.updateEmoji()
                     input.layoutTick++
-                    root.updateMention()
-                    const now = Date.now()
-                    if (!root.puttingDraft && text.trim().length > 0 && now - root.typingSentAt > 3000) {
-                        root.typingSentAt = now
-                        Chat.sendTyping()
-                    }
-                    if (root.puttingDraft) {
+                    // The `@` token and the typing ping: ComposerCore.
+                    if (core.puttingDraft) {
                         root.pastePending = false
                     } else if (root.pastePending) {
                         root.pastePending = false
@@ -686,23 +545,6 @@ Item {
                     } else {
                         prefetchPause.restart()
                     }
-                }
-                onCursorPositionChanged: {
-                    root.enforceAtomic()
-                    root.updateMention()
-                }
-                onSelectionStartChanged: root.enforceAtomic()
-                onSelectionEndChanged: root.enforceAtomic()
-
-                function submit() {
-                    const text = input.text.trim()
-                    // Finished uploads go even without text (a single space).
-                    if (text.length === 0 && Chat.uploadsReady === 0)
-                        return
-                    root.send(root.expandPlaceholders(text), root.replyToId)
-                    input.clear()
-                    root.customMap = ({})
-                    root.typingSentAt = 0
                 }
 
                 Keys.onPressed: event => {
@@ -720,66 +562,18 @@ Item {
                         root.pastePending = true
                     }
                     // A member's mention moves and deletes as one unit
-                    // (useMessageInput.ts handleKeyDown).
-                    const caret = input.cursorPosition
-                    const collapsed = input.selectionStart === input.selectionEnd
-                    if (collapsed && !(event.modifiers & (Qt.ShiftModifier | Qt.ControlModifier | Qt.AltModifier))) {
-                        if (event.key === Qt.Key_Left) {
-                            const m = root.mentionBefore(caret)
-                            if (m) {
-                                root.enforcing = true
-                                input.cursorPosition = m.start
-                                root.enforcing = false
-                                event.accepted = true
-                                return
-                            }
-                        } else if (event.key === Qt.Key_Right) {
-                            const m = root.validMentions().find(m => caret === m.start)
-                            if (m) {
-                                root.enforcing = true
-                                input.cursorPosition = input.text[m.end] === " " ? m.end + 1 : m.end
-                                root.enforcing = false
-                                event.accepted = true
-                                return
-                            }
-                        } else if (event.key === Qt.Key_Backspace && caret > 0) {
-                            const m = root.mentionBefore(caret)
-                            if (m) {
-                                input.remove(m.start, caret)
-                                event.accepted = true
-                                return
-                            }
-                        }
-                    }
-                    if (root.mentionOpen) {
-                        const n = mentionPanel.count
-                        if (event.key === Qt.Key_Down || event.key === Qt.Key_Up) {
-                            const step = event.key === Qt.Key_Down ? 1 : n - 1
-                            root.mentionIndex = (root.mentionIndex + step) % n
-                            event.accepted = true
-                            return
-                        }
-                        if (event.key === Qt.Key_Tab || ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && plain)) {
-                            const username = mentionPanel.usernameAt(root.mentionIndex)
-                            if (username.length > 0)
-                                root.insertMention(username)
-                            event.accepted = true
-                            return
-                        }
-                        if (event.key === Qt.Key_Escape) {
-                            root.mentionDismissed = true
-                            event.accepted = true
-                            return
-                        }
-                    }
+                    // (useMessageInput.ts handleKeyDown), and the
+                    // suggestions take their keys while they are open.
+                    if (core.atomicKeys(event) || core.mentionKeys(event))
+                        return
                     if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && plain) {
-                        input.submit()
+                        core.submit()
                         event.accepted = true
                     } else if (event.key === Qt.Key_Up && input.text.trim().length === 0) {
                         root.editLast()
                         event.accepted = true
                     } else if (event.key === Qt.Key_Escape && root.replyToId.length > 0) {
-                        root.cancelReply()
+                        core.cancelReply()
                         event.accepted = true
                     } else if (event.key === Qt.Key_Escape && event.modifiers === Qt.NoModifier
                                && input.length === 0 && !root.emojiOpen && !root.gifOpen) {
