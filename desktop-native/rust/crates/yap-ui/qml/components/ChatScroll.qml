@@ -56,6 +56,8 @@ Item {
     property bool followEnd: true
     // Whether it shows its end (`endSlack`).
     property bool nearEnd: true
+    // Others' new messages leave the list where it is (an edit in place).
+    property bool holdEnd: false
     // The conversation has landed: following, reporting and paging start.
     property bool landed: false
     // The user scrolled since the conversation opened: a late divider
@@ -401,7 +403,7 @@ Item {
         }
         // A jump's window grows at its end without following it.
         function onAboutToAppend() {
-            root.stickToEnd = (root.nearEnd || root.followEnd) && !Chat.hasNewer
+            root.stickToEnd = !root.holdEnd && (root.nearEnd || root.followEnd) && !Chat.hasNewer
         }
         // Follow new messages when already at the end, and always after
         // our own send.

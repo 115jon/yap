@@ -35,11 +35,13 @@ Item {
         if (messageId.length === 0)
             return
         scroll.followEnd = false
+        scroll.holdEnd = true
         editingId = messageId
         Qt.callLater(revealEdit)
     }
     function endEdit() {
         editingId = ""
+        scroll.holdEnd = false
         Qt.inputMethod.hide()
         scroll.followEnd = scroll.isNearEnd()
     }
