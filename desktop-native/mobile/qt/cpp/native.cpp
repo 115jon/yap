@@ -84,6 +84,7 @@ Native::Native(QObject* parent)
   // Before API 33 (and on a hardware Back key) Qt delivers Back as a key.
   qGuiApp->installEventFilter(this);
 #ifdef Q_OS_ANDROID
+  m_backByCallback = QNativeInterface::QAndroidApplication::sdkVersion() >= 33;
   const JNINativeMethod methods[] = {
     { "nativeBackProgress", "(F)V", reinterpret_cast<void*>(jniBackProgress) },
     { "nativeBackCancelled", "()V", reinterpret_cast<void*>(jniBackCancelled) },
@@ -343,11 +344,16 @@ void Native::onIme(qreal dp)
 
 bool Native::eventFilter(QObject* watched, QEvent* event)
 {
-  // Back as a key (before API 33): a page to pop, or leaving at the root,
-  // never Qt's default of closing the window.
-  if (event->type() == QEvent::KeyRelease) {
+  // Back as a key. From API 33 the shim's callback (or the system's own
+  // handler at the root) takes Back, yet Qt still hears the key too (a
+  // Back key and the gesture on some phones): taking both stepped twice, a
+  // page closed and the chat under it went to the drawer. Before API 33
+  // the key is the only Back: a page to pop, or leaving at the root, never
+  // Qt's default of closing the window.
+  if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease) {
     if (static_cast<QKeyEvent*>(event)->key() == Qt::Key_Back) {
-      onBackInvoked();
+      if (event->type() == QEvent::KeyRelease && !m_backByCallback)
+        onBackInvoked();
       return true;
     }
   }
