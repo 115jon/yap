@@ -182,6 +182,8 @@ private:
   void installVoice();
 
   bool m_handlesBack = false;
+  // Back reaches the app through the shim's OnBackInvokedCallback (API 33+).
+  bool m_backByCallback = false;
   qreal m_imeHeight = 0;
   qreal m_fontScale = 1;
   bool m_reducedMotion = false;
