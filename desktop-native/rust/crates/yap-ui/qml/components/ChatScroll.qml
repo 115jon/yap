@@ -318,6 +318,10 @@ Item {
 
         function onCountChanged() {
             root.olderAsked = false
+            // A conversation that opened empty lands on its first rows,
+            // which come as an insert, not a reset.
+            if (!root.landed && root.tries <= 0 && root.view.count > 0)
+                Qt.callLater(root.land)
             root.reflow()
         }
         // A row at the end that grows (a picture, a failed-send line, an
@@ -422,8 +426,14 @@ Item {
 
         // The divider was placed after the list had landed.
         function onReland() {
-            if (!root.userMoved)
-                Qt.callLater(root.land)
+            if (root.userMoved)
+                return
+            // Rows appended in the same update must not follow the end and
+            // report it read before the list lands on the divider.
+            root.landed = false
+            root.followEnd = false
+            root.stickToEnd = false
+            Qt.callLater(root.land)
         }
         function onOlderLoadingChanged() {
             if (!Chat.olderLoading)
@@ -433,8 +443,10 @@ Item {
             if (!Chat.newerLoading)
                 root.newerAsked = false
         }
+        // A jump moves the list whatever the user scrolled before it.
         function onJumped(id) {
             root.jumpTarget = id
+            root.userMoved = false
             Qt.callLater(root.land)
         }
     }
