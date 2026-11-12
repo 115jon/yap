@@ -42,7 +42,7 @@ that feel off, each with a known fix.
 - **Per platform:** about 7,400 lines of QML (shell, pager, pages,
   composer, upload tray, image viewer, the sheets and message actions,
   Settings and Friends, and
-  the mobile side of four seams), about 720 lines of Rust (the app's
+  the mobile side of five seams), about 720 lines of Rust (the app's
   `Platform`: TLS client, realtime, token store, and the HTTP behind Qt's
   own loads), and about 1,650 lines of C++/Java: the shim for back,
   keyboard, haptics, share, the photo picker, text size, fling and the
@@ -78,7 +78,7 @@ for any one surface (for example a call screen) if Qt ever falls short there.
 | Theme tokens                  | `Theme.qml` (palettes, type roles, motion, spacing), `ShellState.qml`                                                                                                                                                                                                                                                                                                                                          | Which theme (Settings' choice; Match system, the default, follows the light/dark mode), the text size factor (`Prefs`), and the input flags the shell binds: `Theme.touch`, `Theme.hoverUi`, `Theme.textScale`                                                                                                   |
 | Components and list delegates | `Yap.Ui`: `MessageDelegate` (the message renderer: grouping, replies, reactions, mention and pending rows, Markdown via Qt rich text), `TreeRow`, `ChannelRow`, `CategoryLabel`, `MemberRow`, `MemberEntry`, `DmRow`, `MentionPanel`, `PlatformIcons`, `ServerIcon`, `RailPill`, `CountBadge`, `Avatar`, `DisplayName`, `Icon`, `IconKey`, `KitButton`, `Led`, `Spinner`, `LinkText`, `LazyPopup`, `Tooltip` … | Each app's side of the five seams the shared files import from `Yap.Platform`, with the same API: `EmbedCard`, `MessageMedia`, `NameplateLayer`, `VoiceStatusLine`, `VoiceStreamHoverCard` (mobile: `qt/rust/qml/seams`; desktop: its own `com.yap.native` files)                                                |
 | C++                           | yap-ui `cpp/`: `AnimatedPicture` and `ViewportWatch` (GIF/APNG/WebP through yap-anim), the `icon` and `dither` image providers, `yap_ui_register(engine)`; `yap_ui.cmake` compiles them in each app's target                                                                                                                                                                                                   | `Native` (the platform shim) and `main.cpp`. The Windows C++ (window chrome, toasts, WebView2, Media Foundation, D3D11 video) stays desktop-only                                                                                                                                                                 |
-| Page layouts and navigation   | `ConnectionStrip`, `UnreadBanner`, `PresenceAvatar`, `GameLine` (moved into `Yap.Ui` for the phone pages; the desktop uses the same files)                                                                                                                                                                                                                                                                     | The pager and its pages (`Pager`, `DrawerPage`, `DmsPane`, `ChatPage`, `MembersPage`), the stacked `ProfilePage`, `SettingsPage` and `FriendsPage`, phone-sized rows where the desktop's are pointer-sized (`DmItem`, `MemberItem`, `AccountBar`), `PlatformList` (the platform's scroll feel). See "Navigation" |
+| Page layouts and navigation   | `ConnectionStrip`, `UnreadBanner`, `PresenceAvatar`, `GameLine` (moved into `Yap.Ui` for the phone pages; the desktop uses the same files)                                                                                                                                                                                                                                                                     | The pager and its pages (`Pager`, `DrawerPage`, `DmsPane`, `ChatPage`, `MembersPage`), the stacked `ProfilePage`, `SettingsPage` and `FriendsPage`, phone-sized rows where the desktop's are pointer-sized (`AccountBar`), `PlatformList` (the platform's scroll feel). See "Navigation" |
 | Shell                         | —                                                                                                                                                                                                                                                                                                                                                                                                              | `Main.qml` (edge to edge, phases, foreground/background), the Android manifest, the Java shim                                                                                                                                                                                                                    |
 
 ### How the sharing is built
@@ -230,10 +230,6 @@ Not there yet:
   (effects, frames, video banners, badges, platform icons). It rises as a
   page of the stack; it moves into the shared bottom sheet (drag to
   dismiss) when that lands.
-- `DmItem` and `MemberItem` are phone rows on the shared models. The
-  desktop's `DmRow` and `MemberEntry` carry right-click menus, nameplates
-  and hover prefetch, and are 32 to 40 px high; sharing them waits for the
-  touch gating of the shared delegates.
 - The rail has no unread-DM avatar keys under Home (the desktop's), no
   create-server tile and no shop row. Friends is the first row of Home's
   pane ("Settings and Friends").

@@ -3,7 +3,7 @@ use cxx_qt_build::{CxxQtBuilder, QmlFile, QmlModule};
 /// The mobile shell (`com.yap.mobile`): the window, the pager and its pages,
 /// and the mobile side of each seam the shared QML (`Yap.Ui`, from the
 /// yap-ui crate) imports from `Yap.Platform`: rich embeds, media, the voice
-/// status line and the stream card. main.cpp registers those four under
+/// status line, the stream card and the nameplate. main.cpp registers those five under
 /// Yap.Platform.
 const QML: &[&str] = &[
     "qml/Main.qml",
