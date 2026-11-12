@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.0.3](https://github.com/115jon/yap/compare/v4.0.2...v4.0.3) (2026-11-12)
+
+
+### Bug Fixes
+
+* **desktop-native:** 🐛 keep the top row in place as older messages load ([edf1484](https://github.com/115jon/yap/commit/edf14844a78e6cb2f442028d5614c05c2e891169))
+* **desktop-native:** 🐛 lay the list out before keeping its top row ([2336afc](https://github.com/115jon/yap/commit/2336afc72ced073c8cc774f604fd9f74ed89eef9))
+* **desktop-native:** 🐛 reconnect at once when the phone app comes back ([e65225d](https://github.com/115jon/yap/commit/e65225d5eb872a6051ad59c6e1d340ec240fc07c))
+* **desktop-native:** 🐛 say reconnecting when only the app is blocked ([1d71de6](https://github.com/115jon/yap/commit/1d71de672016758b7b56aa71bcb7bbac120ff9ae))
+* **desktop-native:** qt android back, sheet taps, slow pan, notification taps, mark as read, refresh rate ([cc36f4a](https://github.com/115jon/yap/commit/cc36f4a593a117789239affc994f06d1a411be8b))
+* **desktop-native:** qt android notification actions in the background, resume reconnect, gesture, pop-up and cutout insets ([ad4caa3](https://github.com/115jon/yap/commit/ad4caa329082968dea50c617b1d9c4b1f11b2ba3))
+
 ## [4.0.2](https://github.com/115jon/yap/compare/v4.0.1...v4.0.2) (2026-11-11)
 
 
