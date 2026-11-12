@@ -3045,6 +3045,41 @@ fn mention_notifications_should_count_on_the_channel_and_server() {
 }
 
 #[test]
+fn a_mention_read_past_while_away_should_stay_unread_after_a_reconnect() {
+    let (mut client, _) = Client::quiet(two_message_page());
+    client.gateway(GatewayEvent::Ready);
+    client.command(Command::SetAtBottom(true));
+    client.command(Command::SetFocused(false));
+    // A mention arrives in the open channel while the window is away: the
+    // read mark moves past it (the server stamps it at the PUT), unseen.
+    client.dispatch("MESSAGE_CREATE", msg(TEXT, "m3", "user_fixture_alice", A3));
+    let mut note = mention("n3", TEXT, "m3");
+    note["created_at"] = json!("2026-11-04T12:30:00.020Z");
+    client.dispatch("NOTIFICATION_CREATE", note.clone());
+    client.dispatch(
+        "READ_STATE_UPDATE",
+        json!({ "channel_id": TEXT, "last_read_at": "2026-11-04T12:30:00.150Z" }),
+    );
+    // The gateway drops and comes back with a fresh session; still away.
+    client.gateway(GatewayEvent::Closed);
+    let fx = client.gateway(GatewayEvent::Ready);
+    let rs = request_for(&fx, &ApiRequest::ReadStates);
+    let notes = request_for(&fx, &ApiRequest::Notifications);
+    let mut all = client.respond(
+        rs,
+        &ApiRequest::ReadStates,
+        read_states(&[(TEXT, "2026-11-04T12:30:00.150Z")], &[(TEXT, A3)]),
+    );
+    all.extend(client.respond(
+        notes,
+        &ApiRequest::Notifications,
+        json!({ "notifications": [note] }),
+    ));
+    assert!(notifications_marked(&all).is_empty());
+    assert_eq!(client.state.channel_mentions(TEXT), 1);
+}
+
+#[test]
 fn a_live_mention_should_update_the_server_badge() {
     let (mut client, _) = Client::quiet(two_message_page());
     let fx = client.dispatch("NOTIFICATION_CREATE", mention("n1", SECOND_TEXT, "x1"));
