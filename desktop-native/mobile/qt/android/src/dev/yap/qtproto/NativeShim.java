@@ -15,12 +15,18 @@ import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.util.Log;
 import android.webkit.MimeTypeMap;
+import android.view.Display;
 import android.view.HapticFeedbackConstants;
+import android.view.Surface;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewConfiguration;
 import android.view.WindowInsets;
 import android.view.WindowInsetsAnimation;
 import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.window.BackEvent;
 import android.window.OnBackAnimationCallback;
 import android.window.OnBackInvokedCallback;
@@ -89,8 +95,78 @@ public final class NativeShim {
         // animation callback there on each showKeyboard, replacing ours.
         if (Build.VERSION.SDK_INT >= 30) {
             installIme();
+            preferFastestRefresh();
         }
         installBack();
+    }
+
+    /**
+     * The display's fastest refresh rate at the current resolution, asked
+     * for by the window and by the surface Qt draws into. Without a vote the
+     * system runs an app it knows nothing about at its "high" frame rate
+     * category (90 Hz on some 120 Hz panels). The user's own cap in the
+     * system settings still applies: these are requests.
+     */
+    private static void preferFastestRefresh() {
+        Display display = activity.getDisplay();
+        if (display == null) return;
+        Display.Mode current = display.getMode();
+        Display.Mode fastest = current;
+        for (Display.Mode mode : display.getSupportedModes()) {
+            if (mode.getPhysicalWidth() == current.getPhysicalWidth()
+                    && mode.getPhysicalHeight() == current.getPhysicalHeight()
+                    && mode.getRefreshRate() > fastest.getRefreshRate()) {
+                fastest = mode;
+            }
+        }
+        final float rate = fastest.getRefreshRate();
+        WindowManager.LayoutParams attrs = activity.getWindow().getAttributes();
+        attrs.preferredDisplayModeId = fastest.getModeId();
+        attrs.preferredRefreshRate = rate;
+        activity.getWindow().setAttributes(attrs);
+        // Qt draws into a SurfaceView of its own (made after this runs, and
+        // made again after the app was away): its surface asks too.
+        View decor = activity.getWindow().getDecorView();
+        decor.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            SurfaceView view = findSurfaceView(decor);
+            if (view == null || view == refreshView) return;
+            refreshView = view;
+            SurfaceHolder holder = view.getHolder();
+            holder.addCallback(new SurfaceHolder.Callback() {
+                @Override
+                public void surfaceCreated(SurfaceHolder h) { setFrameRate(h.getSurface(), rate); }
+
+                @Override
+                public void surfaceChanged(SurfaceHolder h, int format, int width, int height) {}
+
+                @Override
+                public void surfaceDestroyed(SurfaceHolder h) {}
+            });
+            setFrameRate(holder.getSurface(), rate);
+        });
+    }
+
+    /** The SurfaceView whose refresh rate is asked for (Qt's). */
+    private static SurfaceView refreshView;
+
+    private static SurfaceView findSurfaceView(View view) {
+        if (view instanceof SurfaceView) return (SurfaceView) view;
+        if (!(view instanceof ViewGroup)) return null;
+        ViewGroup group = (ViewGroup) view;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            SurfaceView found = findSurfaceView(group.getChildAt(i));
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static void setFrameRate(Surface surface, float rate) {
+        if (surface == null || !surface.isValid()) return;
+        try {
+            surface.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);
+        } catch (RuntimeException e) {
+            Log.w("yap-native", "could not ask for the refresh rate", e);
+        }
     }
 
     private static void installIme() {
