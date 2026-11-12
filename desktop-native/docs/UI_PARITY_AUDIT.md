@@ -233,9 +233,10 @@ Fixes:
 - `cpp/webembed.cpp`, `src/webembed.rs`: the player's rasterization scale is
   Qt's device pixel ratio (monitor detection off), and WebView2 hears
   `NotifyParentWindowPositionChanged` when the window moves.
-- `screens/Shell/ChatView.qml`: following the end is the user's choice
-  (`followEnd`), not geometry, so a resize, a width change or a scale
-  change keeps the list at its newest message.
+- `Yap.Ui` `ChatScroll.qml` (used by `screens/Shell/ChatView.qml`):
+  following the end is the user's choice (`followEnd`), not geometry, so
+  a resize, a width change or a scale change keeps the list at its newest
+  message.
 
 Video tiles size from `Screen.devicePixelRatio`, and the camera tile was
 sharp at 100 %. The calls ran at 100 %, so tiles at other scales were not
