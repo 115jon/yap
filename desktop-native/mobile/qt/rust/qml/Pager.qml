@@ -132,10 +132,27 @@ Item {
         awaitedDm = userId
         awaitTimer.restart()
     }
+    // Opening a conversation by its id from outside the drawer (a
+    // notification): the core may close the open one first (a server
+    // switch, a DM left for a server), which snaps the pager to the drawer
+    // on the way, so the chat slides in once that id is the open one.
+    property string awaitedChannel: ""
+    function showChannelWhenOpen(channelId) {
+        if (Nav.activeChannelId === channelId) {
+            awaitedChannel = ""
+            show("chat")
+            return
+        }
+        awaitedChannel = channelId
+        awaitTimer.restart()
+    }
     Timer {
         id: awaitTimer
         interval: 8000
-        onTriggered: pager.awaitedDm = ""
+        onTriggered: {
+            pager.awaitedDm = ""
+            pager.awaitedChannel = ""
+        }
     }
     Connections {
         target: Nav
@@ -144,6 +161,12 @@ Item {
                 return
             pager.awaitedDm = ""
             // After the conversation itself changed (the same update).
+            Qt.callLater(pager.show, "chat")
+        }
+        function onActiveChannelIdChanged() {
+            if (pager.awaitedChannel.length === 0 || Nav.activeChannelId !== pager.awaitedChannel)
+                return
+            pager.awaitedChannel = ""
             Qt.callLater(pager.show, "chat")
         }
     }

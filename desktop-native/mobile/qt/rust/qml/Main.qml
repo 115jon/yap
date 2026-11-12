@@ -103,7 +103,7 @@ Window {
         if (request.userId)
             pager.showDmWhenOpen(request.userId)
         else
-            pager.show("chat")
+            pager.showChannelWhenOpen(request.channelId)
     }
     Connections {
         target: Native
