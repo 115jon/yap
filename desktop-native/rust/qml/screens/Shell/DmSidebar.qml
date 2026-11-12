@@ -240,6 +240,37 @@ Item {
             active: dm.channelId === Nav.activeChannelId
             onSelected: Nav.selectChannel(dm.channelId)
             onProfileRequested: anchor => ShellState.showProfile(dm.userId, anchor, "right")
+            // Right click: the conversation's menu (Start a call asks first).
+            onMenuRequested: at => rowMenu.load()?.popup(dm, at.x, at.y)
+            LazyPopup {
+                id: rowMenu
+                // DMSidebar.tsx: Profile (the full profile), Start a call (not
+                // while it rings or runs), Copy ID ("Channel ID copied").
+                sourceComponent: MenuPanel {
+                    MenuRow {
+                        text: qsTr("Profile")
+                        glyph: "account"
+                        onTriggered: ShellState.showFullProfile(dm.userId, dm)
+                    }
+                    MenuRow {
+                        readonly property var call: JSON.parse(Calls.view)
+                        visible: !(call.channelId === dm.channelId && (call.status === "ringing_outgoing" || call.status === "ringing_incoming" || call.joined === true))
+                        height: visible ? implicitHeight : 0
+                        text: qsTr("Start a call")
+                        glyph: "call"
+                        onTriggered: ShellState.startCall(dm.channelId, dm.name, true)
+                    }
+                    MenuRow {
+                        text: qsTr("Copy ID")
+                        glyph: "copy"
+                        onTriggered: {
+                            dmClipboard.copyText(dm.channelId)
+                            Chat.notice(qsTr("Channel ID copied"))
+                        }
+                    }
+                }
+            }
+            ClipboardText { id: dmClipboard }
         }
 
         footer: Column {

@@ -45,7 +45,7 @@ Item {
     property string mentionQuery
     property bool mentionDismissed: false
     property int mentionIndex: 0
-    readonly property bool mentionOpen: mentionStart >= 0 && !mentionDismissed && suggestions.count > 0
+    readonly property bool mentionOpen: mentionStart >= 0 && !mentionDismissed && mentionPanel.count > 0
     // When the last typing ping went out (TYPING_THROTTLE in useMessageInput.ts).
     property double typingSentAt: 0
     // Links resolve early (embed-prefetch.ts): a pasted text at once, typed
@@ -226,13 +226,13 @@ Item {
 
     function updateMention() {
         const before = input.text.slice(0, input.cursorPosition)
-        const match = /(^|\s)@([^\s@]*)$/.exec(before)
-        const start = match ? before.length - match[2].length - 1 : -1
-        if (start !== root.mentionStart || (match && match[2] !== root.mentionQuery))
+        const token = mentionPanel.tokenBefore(before)
+        const start = token ? token.start : -1
+        if (start !== root.mentionStart || (token && token.query !== root.mentionQuery))
             root.mentionDismissed = false
         const asked = root.mentionStart >= 0
         root.mentionStart = start
-        root.mentionQuery = match ? match[2] : ""
+        root.mentionQuery = token ? token.query : ""
         root.mentionIndex = 0
         if (start >= 0 || asked)
             Chat.queryMentions(root.mentionQuery, start >= 0)
@@ -276,91 +276,16 @@ Item {
 
     // Mention suggestions (MentionAutocomplete.tsx): up to five members,
     // over the list, Up/Down to move, Enter or Tab to insert, Esc to close.
-    Rectangle {
+    MentionPanel {
         id: mentionPanel
-        // MentionAutocomplete.tsx: an opacity fade at dur-1, in and out.
-        opacity: root.mentionOpen ? 1 : 0
-        EaseNumber on opacity {}
-        visible: opacity > 0
+        open: root.mentionOpen
         z: 2
         x: 0
         width: Math.min(root.width, 360)
-        height: suggestions.contentHeight + 32
         y: plate.y - height - 6
-        radius: Theme.radius
-        color: Theme.ply3
-        border.width: 1
-        border.color: Theme.lineStrong
-        Accessible.role: Accessible.List
-        Accessible.name: qsTr("Members")
-
-        Text {
-            x: 12
-            y: 8
-            text: qsTr("Members")
-            color: Theme.ink3
-            font: Theme.type.silk
-        }
-        ListView {
-            id: suggestions
-            x: 4
-            y: 28
-            width: parent.width - 8
-            height: contentHeight
-            interactive: false
-            model: MentionListModel
-            currentIndex: root.mentionIndex
-            delegate: Rectangle {
-                id: suggestion
-                required property int index
-                required property string username
-                required property string name
-                required property string avatar
-                required property string initials
-                required property string nameStyle
-                width: suggestions.width
-                height: 36
-                radius: Theme.radius
-                color: index === root.mentionIndex ? Theme.tint2 : "transparent"
-                Accessible.role: Accessible.ListItem
-                Accessible.name: suggestion.name
-                Avatar {
-                    x: 8
-                    anchors.verticalCenter: parent.verticalCenter
-                    size: 20
-                    initials: suggestion.initials
-                    source: suggestion.avatar
-                }
-                // MentionAutocomplete.tsx: UserDisplayName, in their style.
-                DisplayName {
-                    x: 36
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: Math.min(implicitWidth, parent.width - x - handle.width - 20)
-                    text: suggestion.name
-                    playing: suggestionHover.hovered
-                    nameStyle: suggestion.nameStyle
-                    color: Theme.ink1
-                    font: Theme.type.row
-                    ground: Theme.ply3
-                }
-                Text {
-                    id: handle
-                    anchors.right: parent.right
-                    anchors.rightMargin: 8
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.PlainText
-                    text: "@" + suggestion.username
-                    color: Theme.ink3
-                    font: Theme.type.caption
-                }
-                HoverHandler {
-                    id: suggestionHover
-                    cursorShape: Qt.PointingHandCursor
-                    onHoveredChanged: if (hovered) root.mentionIndex = suggestion.index
-                }
-                TapHandler { onTapped: root.insertMention(suggestion.username) }
-            }
-        }
+        currentIndex: root.mentionIndex
+        onPointed: index => root.mentionIndex = index
+        onPicked: username => root.insertMention(username)
     }
 
     // ComposerReadOnly (MessageInput.tsx): the composer's box with the lock
@@ -827,7 +752,7 @@ Item {
                         }
                     }
                     if (root.mentionOpen) {
-                        const n = suggestions.count
+                        const n = mentionPanel.count
                         if (event.key === Qt.Key_Down || event.key === Qt.Key_Up) {
                             const step = event.key === Qt.Key_Down ? 1 : n - 1
                             root.mentionIndex = (root.mentionIndex + step) % n
@@ -835,9 +760,9 @@ Item {
                             return
                         }
                         if (event.key === Qt.Key_Tab || ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && plain)) {
-                            const row = suggestions.itemAtIndex(root.mentionIndex)
-                            if (row)
-                                root.insertMention(row.username)
+                            const username = mentionPanel.usernameAt(root.mentionIndex)
+                            if (username.length > 0)
+                                root.insertMention(username)
                             event.accepted = true
                             return
                         }

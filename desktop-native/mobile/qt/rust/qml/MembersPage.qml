@@ -78,12 +78,10 @@ Rectangle {
         clip: true
         model: MemberListModel
 
-        delegate: MemberItem {
+        delegate: MemberEntry {
             width: list.width
             ground: root.color
-            onProfileRequested: userId => {
-                root.profileRequested(userId)
-            }
+            onProfileRequested: userId => root.profileRequested(userId)
         }
     }
 

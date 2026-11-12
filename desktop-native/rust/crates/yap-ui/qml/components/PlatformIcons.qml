@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // UserPlatformIndicators.tsx: where someone is signed in, as glyphs 6 px
@@ -40,7 +39,7 @@ Row {
             name: root.meta[modelData]?.icon ?? "globe"
             size: root.size
             color: root.shown
-            HoverHandler { id: glyphHover }
+            HoverHandler { id: glyphHover; enabled: Theme.hoverUi }
             LazyPopup {
                 when: glyphHover.hovered
                 sourceComponent: Tooltip {
