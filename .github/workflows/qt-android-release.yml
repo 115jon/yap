@@ -60,15 +60,19 @@ on:
     secrets:
       QT_GOOGLE_SERVICES_JSON_BASE64:
         required: true
-      # The release key. Only the sign job (environment android-release)
-      # reads them. The caller passes each by name, never `inherit`, so the
-      # called workflow gets these and the Firebase configuration only.
+      # The release key, read only by the sign job. They are android-release
+      # environment secrets: the caller (a job without an environment)
+      # passes them by name, never `inherit`, but its values are empty, and
+      # in the sign job, which has `environment: android-release`, GitHub
+      # uses the environment's secrets instead of the caller's. Not
+      # required, so empty caller values cannot fail the call; the sign job
+      # fails on an empty key.
       QT_ANDROID_KEYSTORE_BASE64:
-        required: true
+        required: false
       QT_ANDROID_KEYSTORE_PASSWORD:
-        required: true
+        required: false
       QT_ANDROID_KEY_ALIAS:
-        required: true
+        required: false
   workflow_dispatch:
     inputs:
       release_tag:

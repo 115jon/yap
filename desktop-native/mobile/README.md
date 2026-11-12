@@ -1112,8 +1112,10 @@ other branches and tags never see the key. So whoever can merge to main or
 start the workflow on main can have a commit signed. `qt-android-v*` tags are
 release-please's: the repository ruleset "Protect qt-android tags" lets only
 repository admins create, move or delete them (release-please creates them
-with the owner's `RELEASE_TOKEN`), and the release workflow has no tag
-trigger: only release-please's call and a dispatch from main build.
+with the owner's `RELEASE_TOKEN`; release-please.yml's fallback to
+`GITHUB_TOKEN` cannot create them, so the Qt release needs that secret), and
+the release workflow has no tag trigger: only release-please's call and a
+dispatch from main build.
 
 The key: a PKCS12 keystore (RSA 4096, alias `yapapp`, valid 100 years),
 kept by the owner outside the repository with access limited to the owner's

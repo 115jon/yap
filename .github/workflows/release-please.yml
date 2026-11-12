@@ -110,7 +110,10 @@ jobs:
       # happens here (the qt-android job's plan then refuses a release that
       # is not a draft).
       - name: Mark the Qt app's release as draft
-        if: ${{ steps.release.outputs['desktop-native/mobile/qt--release_created'] == 'true' }}
+        # !cancelled(): also after a failed root step, so the Qt release is
+        # hidden even when this job fails (the qt-android job is then
+        # skipped; rerun it with a dispatch from main with release_tag).
+        if: ${{ !cancelled() && steps.release.outputs['desktop-native/mobile/qt--release_created'] == 'true' }}
         continue-on-error: true
         env:
           TAG: ${{ steps.release.outputs['desktop-native/mobile/qt--tag_name'] }}
@@ -163,9 +166,10 @@ jobs:
     with:
       release_tag: ${{ needs.release.outputs.qt_tag_name }}
     # By name, never `inherit`: the Firebase client configuration (it ships
-    # inside the APK; build jobs read it) and the release key (only the
-    # called workflow's sign job, in the android-release environment, reads
-    # it). No other secret reaches the called workflow.
+    # inside the APK; build jobs read it) and the release key's names (empty
+    # here: they are android-release environment secrets, which the called
+    # workflow's sign job reads in that environment). No other secret
+    # reaches the called workflow.
     secrets:
       QT_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.QT_GOOGLE_SERVICES_JSON_BASE64 }}
       QT_ANDROID_KEYSTORE_BASE64: ${{ secrets.QT_ANDROID_KEYSTORE_BASE64 }}
