@@ -496,7 +496,7 @@ jobs:
           fi
           gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber out/*.apk out/*.apk.sha256
           marker="<!-- qt-android-assets -->"
-          gh api "repos/$GITHUB_REPOSITORY/releases/$id" --jq .body >changelog.md
+          gh api "repos/$GITHUB_REPOSITORY/releases/$id" --jq '.body // ""' >changelog.md
           awk -v m="$marker" '$0 == m { exit } { print }' changelog.md >notes.md
           cat >>notes.md <<EOF
           $marker
