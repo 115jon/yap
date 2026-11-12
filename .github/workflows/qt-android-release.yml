@@ -41,7 +41,8 @@ name: "Qt Android Release"
 # Who can have a commit signed: whoever can merge to main (the release PR,
 # or any commit a dispatch from main builds) or start this workflow on
 # main. qt-android-v* tags are release-please's (a repository ruleset lets
-# only admins create, move or delete them); a tag push starts nothing.
+# only admins create, move or delete them). This workflow has no tag
+# trigger, and the plan job refuses any ref but refs/heads/main.
 #
 # Version codes: (2000000 + minutes since 2026-01-01 UTC) * 10 + the ABI
 # digit (2 arm64-v8a, 4 x86_64), from the plan job's clock: every build is
@@ -59,15 +60,15 @@ on:
     secrets:
       QT_GOOGLE_SERVICES_JSON_BASE64:
         required: true
-      # Declared for the linter only; callers pass none of them. The sign
-      # job reads the android-release environment's secrets, which take
-      # precedence over anything a caller passes.
+      # The release key. Only the sign job (environment android-release)
+      # reads them. The caller passes each by name, never `inherit`, so the
+      # called workflow gets these and the Firebase configuration only.
       QT_ANDROID_KEYSTORE_BASE64:
-        required: false
+        required: true
       QT_ANDROID_KEYSTORE_PASSWORD:
-        required: false
+        required: true
       QT_ANDROID_KEY_ALIAS:
-        required: false
+        required: true
   workflow_dispatch:
     inputs:
       release_tag:
@@ -166,6 +167,15 @@ jobs:
             states="$(awk -F '\t' -v t="$tag" '$1 == t { print $2 }' <<<"$releases")"
             if [ "$states" != draft ]; then
               echo "::error::Expected one draft release for $tag, found: ${states:-none}. To rebuild a published one, make it a draft first (gh release edit $tag --draft=true)."
+              exit 1
+            fi
+            # The build's version code would be above a newer published
+            # release's, so testers on that one would "update" to an older
+            # version.
+            newest="$(awk -F '\t' '$2 == "published" && $1 ~ /^qt-android-v[0-9]+\.[0-9]+\.[0-9]+$/ { sub(/^qt-android-v/, "", $1); print $1 }' <<<"$releases" | sort -V | tail -n 1)"
+            if [ -n "$newest" ] && [ "$newest" != "$version" ] &&
+              [ "$(printf '%s\n%s\n' "$newest" "$version" | sort -V | tail -n 1)" = "$newest" ]; then
+              echo "::error::qt-android-v$newest is already published, newer than $tag; release a newer version instead."
               exit 1
             fi
           else

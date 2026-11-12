@@ -62,28 +62,6 @@ jobs:
           # Hide the release until the desktop job uploads the installer and publishes it.
           gh release edit "$TAG" --draft=true -R "$REPO"
 
-      # Same for the Qt app's release until the qt-android job attaches the
-      # signed APKs and publishes it. A pre-release (release-please marks
-      # 0.x ones; this covers any version), so it is never GitHub's latest.
-      - name: Mark the Qt app's release as draft
-        if: ${{ steps.release.outputs['desktop-native/mobile/qt--release_created'] == 'true' }}
-        env:
-          TAG: ${{ steps.release.outputs['desktop-native/mobile/qt--tag_name'] }}
-          ROOT_RELEASED: ${{ steps.release.outputs.release_created }}
-          PREVIOUS: ${{ steps.before.outputs.tag }}
-        run: |
-          gh release edit "$TAG" --draft=true --prerelease -R "$REPO"
-          # A non-pre-release (1.0.0 or later) is created as latest. When the
-          # root released too, the steps below choose latest; otherwise put
-          # it back where it was.
-          if [ "$ROOT_RELEASED" != "true" ] && [ -n "$PREVIOUS" ]; then
-            now=$(gh api "repos/$REPO/releases/latest" --jq .tag_name 2>/dev/null || true)
-            if [ "$now" != "$PREVIOUS" ]; then
-              gh release edit "$PREVIOUS" --latest -R "$REPO" ||
-                echo "::warning::Could not mark $PREVIOUS latest again (now: ${now:-none})."
-            fi
-          fi
-
       # Making the new release a draft lets GitHub pick a new latest by date,
       # which can be a release without latest.json (desktop-native-v*), so
       # Tauri installs would get a 404 until the desktop job publishes. Put
@@ -125,6 +103,33 @@ jobs:
             echo "::warning::Could not mark $pick latest; Tauri installs may get no latest.json until $TAG is published."
           fi
 
+      # Hide the Qt app's release until the qt-android job attaches the
+      # signed APKs and publishes it, as a pre-release, which is never
+      # GitHub's latest. After the root's steps, and never failing the job,
+      # so the desktop release and the release PRs go ahead whatever
+      # happens here (the qt-android job's plan then refuses a release that
+      # is not a draft).
+      - name: Mark the Qt app's release as draft
+        if: ${{ steps.release.outputs['desktop-native/mobile/qt--release_created'] == 'true' }}
+        continue-on-error: true
+        env:
+          TAG: ${{ steps.release.outputs['desktop-native/mobile/qt--tag_name'] }}
+          ROOT_RELEASED: ${{ steps.release.outputs.release_created }}
+          PREVIOUS: ${{ steps.before.outputs.tag }}
+        run: |
+          gh release edit "$TAG" --draft=true --prerelease -R "$REPO"
+          # release-please marks a 0.x release a pre-release, so latest never
+          # moved. From 1.0.0 it is created as latest: unless the root
+          # released too (the step above chose latest), put latest back.
+          if [[ "$TAG" =~ ^qt-android-v0\. ]] || [ "$ROOT_RELEASED" = "true" ] || [ -z "$PREVIOUS" ]; then
+            exit 0
+          fi
+          now=$(gh api "repos/$REPO/releases/latest" --jq .tag_name 2>/dev/null || true)
+          if [ "$now" != "$PREVIOUS" ]; then
+            gh release edit "$PREVIOUS" --latest -R "$REPO" ||
+              echo "::warning::Could not mark $PREVIOUS latest again (now: ${now:-none})."
+          fi
+
   # The native app (desktop-native/) is the desktop release from 4.0.0. The
   # Tauri app's desktop-release.yml is no longer called here; it stays
   # dispatch-only until desktop/ is removed.
@@ -157,11 +162,15 @@ jobs:
     uses: ./.github/workflows/qt-android-release.yml
     with:
       release_tag: ${{ needs.release.outputs.qt_tag_name }}
-    # Only the Firebase client configuration (it ships inside the APK). The
-    # release key is an android-release environment secret, which the
-    # called workflow's sign job reads itself.
+    # By name, never `inherit`: the Firebase client configuration (it ships
+    # inside the APK; build jobs read it) and the release key (only the
+    # called workflow's sign job, in the android-release environment, reads
+    # it). No other secret reaches the called workflow.
     secrets:
       QT_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.QT_GOOGLE_SERVICES_JSON_BASE64 }}
+      QT_ANDROID_KEYSTORE_BASE64: ${{ secrets.QT_ANDROID_KEYSTORE_BASE64 }}
+      QT_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.QT_ANDROID_KEYSTORE_PASSWORD }}
+      QT_ANDROID_KEY_ALIAS: ${{ secrets.QT_ANDROID_KEY_ALIAS }}
 
   release-pr:
     name: release-pr

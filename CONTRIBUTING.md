@@ -47,6 +47,12 @@ breaking changes on main into release PRs (`release-please-config.json`):
 Keep `feat`/`fix` for user-facing changes: a commit that touches both the
 app and other paths shows up in both changelogs.
 
+The root's `exclude-paths` also drops commits that change no files, so an
+empty commit with a `Release-As: x.y.z` footer does not pin the root's next
+version. Pin it with `"release-as"` in `release-please-config.json` (remove
+it after the release), or put the footer on a commit that changes a file
+outside `desktop-native/mobile/qt/`.
+
 ## Review expectations
 
 One pull request should contain one logical change. Changes to installer

@@ -12,8 +12,9 @@ name: Release Watchdog
 # - anything else (a desktop-native-v* release became latest): a failure,
 #   because Tauri installs then get a 404 for latest.json.
 #
-# - a draft vX.Y.Z older than 6 hours (release-please made it, the native
-#   workflow never published it): a failure.
+# - a draft vX.Y.Z or qt-android-vX.Y.Z older than 6 hours (release-please
+#   made it, the native or Qt Android workflow never published it): a
+#   failure.
 #
 # A failure opens an issue labelled release-watchdog, or comments on the
 # open one. While a release is being published (release-please's draft, or
@@ -56,15 +57,17 @@ jobs:
       - name: Release in progress?
         id: busy
         run: |
-          $running = @("release-please.yml", "desktop-native-release.yml" | ForEach-Object {
+          $running = @("release-please.yml", "desktop-native-release.yml", "qt-android-release.yml" | ForEach-Object {
             gh run list --repo $env:REPO --workflow $_ --limit 20 --json status --jq '.[] | select(.status != "completed") | .status'
           }) | Where-Object { $_ }
-          # Draft vX.Y.Z releases: one from the last 6 hours is a release in
+          # Draft vX.Y.Z and qt-android-vX.Y.Z releases (release-please's;
+          # a manual Qt test build's draft has a -build.N suffix and is
+          # left out): one from the last 6 hours is a release in
           # progress; an older one is stuck (its run failed or never
           # published), which the check below reports.
           $since = (Get-Date).ToUniversalTime().AddHours(-6).ToString("yyyy-MM-ddTHH:mm:ssZ")
           # "tag created_at" lines; the ISO timestamps compare as text.
-          $all = @(gh api --paginate "repos/$env:REPO/releases?per_page=100" --jq ".[] | select(.draft and (.tag_name | test(`"^v[0-9]+[.][0-9]+[.][0-9]+$`"))) | .tag_name + `" `" + .created_at")
+          $all = @(gh api --paginate "repos/$env:REPO/releases?per_page=100" --jq ".[] | select(.draft and (.tag_name | test(`"^(qt-android-)?v[0-9]+[.][0-9]+[.][0-9]+$`"))) | .tag_name + `" `" + .created_at")
           if ($LASTEXITCODE) { throw "Could not list the releases ($LASTEXITCODE)" }
           $all = @($all | Where-Object { $_ } | ForEach-Object { $t, $c = $_ -split ' ', 2; [pscustomobject]@{ Tag = $t; Created = $c } })
           $drafts = @($all | Where-Object { $_.Created -gt $since } | ForEach-Object Tag)
@@ -91,7 +94,7 @@ jobs:
             $problems += "releases/latest check failed: $($_.Exception.Message)"
           }
           if ($env:STUCK) {
-            $msg = "Stuck draft release(s): $env:STUCK. release-please made them, but the desktop job never published them; rerun Desktop Native Release with release_tag (desktop-native/docs/INSTALLER.md, ""A failed release run"")."
+            $msg = "Stuck draft release(s): $env:STUCK. release-please made them, but the release job never published them; rerun Desktop Native Release (v*; desktop-native/docs/INSTALLER.md, ""A failed release run"") or Qt Android Release (qt-android-v*; desktop-native/mobile/README.md, ""Releases"") from main with release_tag."
             $msg | Out-File -FilePath $log -Encoding utf8 -Append
             $problems += $msg
           }
