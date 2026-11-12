@@ -286,13 +286,17 @@ public final class NativeShim {
      *   a freeform window (Samsung's pop-up view) the caption bar pushes the
      *   content view down by its height, while Qt sizes its window to the
      *   whole task window: the bottom of the page is cut off by the caption's
-     *   height. The shell keeps its content above that line.
+     *   height. The shell keeps its content above that line (at most the
+     *   caption bar's height).
      */
     private static void reportEdges(WindowInsets insets) {
         Insets mandatory = insets.getInsets(WindowInsets.Type.mandatorySystemGestures());
         Insets tappable = insets.getInsets(WindowInsets.Type.tappableElement());
         int gesture = Math.max(mandatory.bottom, tappable.bottom);
-        int clipped = clippedBottom();
+        // Only as much as the caption bar took: while the window turns, Qt's
+        // window keeps its old size for a frame or two and reaches far
+        // below the layout (it has no caption bar then).
+        int clipped = Math.min(clippedBottom(), insets.getInsets(WindowInsets.Type.captionBar()).top);
         if (gesture == edgeGesture && clipped == edgeClipped) return;
         edgeGesture = gesture;
         edgeClipped = clipped;
