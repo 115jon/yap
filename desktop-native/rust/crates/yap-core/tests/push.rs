@@ -274,6 +274,59 @@ fn back_in_front_within_the_grace_should_keep_the_gateway() {
 }
 
 #[test]
+fn back_in_front_with_the_link_down_should_reconnect_at_once() {
+    // The socket dropped in the background (the phone blocked the app's
+    // network) and its retries are backing off.
+    let mut client = Client::signed_in();
+    client.gateway(GatewayEvent::Ready);
+    let (_, grace) = later(&client.command(Command::Suspend(true))).expect("a grace timer");
+    client.gateway(GatewayEvent::Closed);
+    client.gateway(GatewayEvent::Reconnecting {
+        attempt: 5,
+        offline: true,
+    });
+    let before = client.state.session().expect("session").id;
+    let fx = client.command(Command::Suspend(false));
+    let connects: Vec<_> = fx
+        .iter()
+        .filter_map(|e| match e {
+            Effect::GatewayConnect { session, .. } => Some(*session),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(connects.len(), 1, "{fx:#?}");
+    assert_ne!(connects[0], before, "a fresh connection, its backoff from the start");
+    assert!(fx.contains(&Effect::View(ViewUpdate::Link {
+        attempt: 0,
+        offline: true,
+    })));
+    // The old socket's late retry no longer counts.
+    let fx = client.input(Input::Gateway {
+        session: before,
+        event: GatewayEvent::Reconnecting {
+            attempt: 6,
+            offline: true,
+        },
+    });
+    assert!(fx.is_empty(), "{fx:#?}");
+    // And the grace that was running no longer closes anything.
+    assert_eq!(
+        count(&client.input(grace), |e| matches!(e, Effect::GatewayDisconnect)),
+        0
+    );
+    let fx = client.gateway(GatewayEvent::Ready);
+    assert!(fx.contains(&Effect::View(ViewUpdate::Connected(true))));
+}
+
+#[test]
+fn back_in_front_while_still_connecting_the_first_time_should_not_restart() {
+    let mut client = Client::signed_in();
+    client.command(Command::Suspend(true));
+    let fx = client.command(Command::Suspend(false));
+    assert_eq!(count(&fx, |e| matches!(e, Effect::GatewayConnect { .. })), 0);
+}
+
+#[test]
 fn an_older_grace_should_not_close_the_gateway() {
     let mut client = Client::signed_in();
     client.gateway(GatewayEvent::Ready);

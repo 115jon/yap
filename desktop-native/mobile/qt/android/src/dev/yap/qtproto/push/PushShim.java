@@ -16,10 +16,10 @@ import com.google.firebase.messaging.FirebaseMessaging;
 
 /**
  * The push side of `Native` (cpp/push.cpp): the FCM token, a notification's
- * tap, Reply and Mark as read into the core while the app runs, the
+ * tap, Reply and Mark as read into the core while the app is in front, the
  * conversation on screen (its pushes stay quiet), and the notification
- * permission. Without Qt (the app killed) the service and the receiver
- * work on their own (PushStore, PushApi).
+ * permission. Otherwise (the app in the background or killed) the service
+ * and the receiver work on their own (PushStore, PushApi).
  */
 public final class PushShim {
     private PushShim() {}

@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.database.Cursor;
+import android.graphics.Insets;
 import android.hardware.SensorManager;
 import android.net.Uri;
 import android.os.Build;
@@ -55,6 +56,7 @@ public final class NativeShim {
     static native void nativeBackCancelled();
     static native void nativeBackInvoked();
     static native void nativeIme(float dp);
+    static native void nativeEdges(float gestureBottom, float clippedBottom);
     static native void nativeMediaCopying();
     static native void nativeMediaPicked(String[] paths, int failed);
 
@@ -75,6 +77,9 @@ public final class NativeShim {
     /** Back at the root leaves the task alive without our help. */
     private static boolean systemKeepsTask;
     private static float density = 1f;
+    /** What nativeEdges was last told (px), so a layout pass that changes nothing stays quiet. */
+    private static int edgeGesture = -1;
+    private static int edgeClipped = -1;
 
     public static void install(Activity a) {
         activity = a;
@@ -173,7 +178,14 @@ public final class NativeShim {
         View decor = activity.getWindow().getDecorView();
         decor.setOnApplyWindowInsetsListener((v, insets) -> {
             reportIme(insets);
+            reportEdges(insets);
             return v.onApplyWindowInsets(insets);
+        });
+        // Every layout pass: the window Qt draws can come out taller than
+        // the view that holds it (below).
+        decor.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            WindowInsets insets = decor.getRootWindowInsets();
+            if (insets != null) reportEdges(insets);
         });
         View content = activity.findViewById(android.R.id.content);
         content.setWindowInsetsAnimationCallback(
@@ -261,6 +273,53 @@ public final class NativeShim {
     }
 
     /**
+     * What Qt's safe area leaves out at the bottom (API 30+), in dp:
+     *
+     * - The bottom system gesture zone. Qt's safe area is the system bars and
+     *   the cutout; with gesture navigation some phones (Samsung's One UI)
+     *   report no navigation bar at all while the home gesture still takes
+     *   the bottom strip, so a control at the edge sits under the handle.
+     *   Bottom controls keep clear of the larger of the mandatory gesture
+     *   inset and the tappable element inset, the areas Android says taps
+     *   are not reliably delivered to (Compose's safeGestures).
+     * - How far the window Qt draws reaches past the view that holds it. In
+     *   a freeform window (Samsung's pop-up view) the caption bar pushes the
+     *   content view down by its height, while Qt sizes its window to the
+     *   whole task window: the bottom of the page is cut off by the caption's
+     *   height. The shell keeps its content above that line (at most the
+     *   caption bar's height).
+     */
+    private static void reportEdges(WindowInsets insets) {
+        Insets mandatory = insets.getInsets(WindowInsets.Type.mandatorySystemGestures());
+        Insets tappable = insets.getInsets(WindowInsets.Type.tappableElement());
+        int gesture = Math.max(mandatory.bottom, tappable.bottom);
+        // Only as much as the caption bar took: while the window turns, Qt's
+        // window keeps its old size for a frame or two and reaches far
+        // below the layout (it has no caption bar then).
+        int clipped = Math.min(clippedBottom(), insets.getInsets(WindowInsets.Type.captionBar()).top);
+        if (gesture == edgeGesture && clipped == edgeClipped) return;
+        edgeGesture = gesture;
+        edgeClipped = clipped;
+        nativeEdges(gesture / density, clipped / density);
+    }
+
+    /** Pixels of Qt's window below the bottom of its parent layout (0: none). */
+    private static int clippedBottom() {
+        View content = activity.findViewById(android.R.id.content);
+        if (!(content instanceof ViewGroup) || ((ViewGroup) content).getChildCount() == 0) return 0;
+        View root = ((ViewGroup) content).getChildAt(0);
+        if (!(root instanceof ViewGroup)) return 0;
+        ViewGroup layout = (ViewGroup) root;
+        int clipped = 0;
+        for (int i = 0; i < layout.getChildCount(); i++) {
+            View child = layout.getChildAt(i);
+            if (child.getVisibility() != View.VISIBLE) continue;
+            clipped = Math.max(clipped, child.getBottom() - layout.getHeight());
+        }
+        return clipped;
+    }
+
+    /**
      * The IME inset as it is now. Back from another activity (the photo
      * picker) the keyboard may have gone while the listeners were not
      * called, which would leave the composer floating where it was.
@@ -271,7 +330,10 @@ public final class NativeShim {
             View decor = activity.getWindow().getDecorView();
             decor.post(() -> {
                 WindowInsets insets = decor.getRootWindowInsets();
-                if (insets != null) reportIme(insets);
+                if (insets != null) {
+                    reportIme(insets);
+                    reportEdges(insets);
+                }
             });
         });
     }

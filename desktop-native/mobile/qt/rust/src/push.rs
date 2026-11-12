@@ -1,7 +1,8 @@
 //! Push notifications, the core's side (cpp/push.cpp calls these): the FCM
-//! token for `/api/push-tokens`, and a notification's Reply, Mark as read
-//! and tap while the app runs. With the app killed the Java side
-//! (android/src/dev/yap/qtproto/push) calls the server itself.
+//! token for `/api/push-tokens`, a notification's tap, and its Reply and
+//! Mark as read while the app is in front. Otherwise (in the background or
+//! killed) the Java side (android/src/dev/yap/qtproto/push) calls the server
+//! itself.
 
 use std::ffi::{c_char, CStr, CString};
 use std::sync::{Mutex, OnceLock};
