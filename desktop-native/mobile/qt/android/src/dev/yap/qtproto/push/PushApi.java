@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.util.Log;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -14,6 +15,8 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -51,6 +54,38 @@ final class PushApi {
         return request(session, "PUT", "/api/channels/" + Uri.encode(channelId) + "/read-state", "{}");
     }
 
+    /**
+     * The conversation's unread notifications marked read, as the core's
+     * Mark as read does while the app runs (toast_mark_read): the read state
+     * alone leaves its mentions counted on every device. GET the unread
+     * ones (the core's own page, 100), PATCH those of this channel. The
+     * PATCH's status, 0 when there was nothing to mark, -1 on a failure.
+     */
+    static int markNotificationsRead(PushStore.Session session, String channelId) {
+        String body = get(session, "/api/notifications?limit=100&unread=true");
+        if (body == null) return -1;
+        try {
+            JSONObject json = new JSONObject(body);
+            JSONObject data = json.optJSONObject("data");
+            JSONArray list = (data != null ? data : json).optJSONArray("notifications");
+            if (list == null) return -1;
+            List<String> ids = new ArrayList<>();
+            for (int i = 0; i < list.length(); i++) {
+                JSONObject n = list.optJSONObject(i);
+                if (n != null && channelId.equals(n.optString("channel_id")) && !n.optBoolean("is_read")) {
+                    String id = n.optString("id");
+                    if (!id.isEmpty()) ids.add(id);
+                }
+            }
+            if (ids.isEmpty()) return 0;
+            String patch = new JSONObject().put("ids", new JSONArray(ids)).toString();
+            return request(session, "PATCH", "/api/notifications", patch);
+        } catch (JSONException e) {
+            Log.w(TAG, "notifications: unreadable answer");
+            return -1;
+        }
+    }
+
     /** POST /api/push-tokens (a rotated token, the app not running). */
     static int register(PushStore.Session session, String token) {
         try {
@@ -83,6 +118,34 @@ final class PushApi {
         } catch (Exception e) {
             Log.w(TAG, method + " failed: " + e.getClass().getSimpleName());
             return -1;
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    /** A GET's body on a 2xx, else null. */
+    private static String get(PushStore.Session session, String path) {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(session.apiBase + path).openConnection();
+            connection.setConnectTimeout(TIMEOUT_MS);
+            connection.setReadTimeout(TIMEOUT_MS);
+            connection.setRequestProperty("Authorization", "Bearer " + session.token);
+            int status = connection.getResponseCode();
+            if (status < 200 || status > 299) {
+                Log.w(TAG, "GET: HTTP " + status);
+                return null;
+            }
+            try (InputStream in = connection.getInputStream()) {
+                ByteArrayOutputStream all = new ByteArrayOutputStream();
+                byte[] buffer = new byte[16 * 1024];
+                int n;
+                while ((n = in.read(buffer)) > 0) all.write(buffer, 0, n);
+                return all.toString(StandardCharsets.UTF_8.name());
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "GET failed: " + e.getClass().getSimpleName());
+            return null;
         } finally {
             if (connection != null) connection.disconnect();
         }

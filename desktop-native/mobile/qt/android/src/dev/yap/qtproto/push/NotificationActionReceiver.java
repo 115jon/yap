@@ -72,8 +72,11 @@ public final class NotificationActionReceiver extends BroadcastReceiver {
                     MessageNotifier.showReply(app, conversation, text, status >= 200 && status < 300);
                 } else {
                     // Down at once; the server's read push clears other devices.
+                    // Its notifications too, as the core's Mark as read does,
+                    // or its mentions stay counted past the read mark.
                     MessageNotifier.cancel(app, conversation.channelId);
                     PushApi.markRead(session, conversation.channelId);
+                    PushApi.markNotificationsRead(session, conversation.channelId);
                 }
             } finally {
                 pending.finish();
