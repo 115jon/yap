@@ -346,8 +346,8 @@ Item {
         anchors.bottom: typing.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.leftMargin: SafeArea.margins.left
-        anchors.rightMargin: SafeArea.margins.right
+        anchors.leftMargin: root.leftInset
+        anchors.rightMargin: root.rightInset
         clip: true
         bottomMargin: 8
         // Still under a sheet. The long press that opened it ends with no
@@ -491,8 +491,8 @@ Item {
     Text {
         id: typing
         anchors.bottom: composer.top
-        x: 16 + SafeArea.margins.left
-        width: parent.width - 32
+        x: 16 + root.leftInset
+        width: parent.width - 32 - root.leftInset - root.rightInset
         height: Chat.typingText.length > 0 ? 20 : 0
         text: Chat.typingText
         color: Theme.ink3
@@ -507,8 +507,8 @@ Item {
         anchors.bottomMargin: root.bottomInset
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.leftMargin: SafeArea.margins.left
-        anchors.rightMargin: SafeArea.margins.right
+        anchors.leftMargin: root.leftInset
+        anchors.rightMargin: root.rightInset
         placeholder: root.dm ? qsTr("Message @%1").arg(Nav.activeChannelName)
             : qsTr("Message #%1").arg(Nav.activeChannelName)
         enabled: !Chat.readOnly
