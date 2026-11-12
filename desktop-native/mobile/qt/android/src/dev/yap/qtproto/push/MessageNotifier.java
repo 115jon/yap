@@ -126,8 +126,11 @@ final class MessageNotifier {
                 .setLocusId(new LocusIdCompat(shortcutId))
                 .setWhen(push.sentAt)
                 .build();
-        post(context, conversation.channelId, notification);
-        postSummary(context, conversation.channelId, notification);
+        // A post that failed, or went to a channel the user turned off,
+        // leaves no child: the summary then goes by the active list alone.
+        boolean shown = post(context, conversation.channelId, notification)
+                && channelOn(context, conversation.channel);
+        postSummary(context, shown ? conversation.channelId : null, shown ? notification : null);
     }
 
     /**
@@ -237,22 +240,33 @@ final class MessageNotifier {
         return null;
     }
 
+    /** Whether the notify call went through (not whether the system shows it). */
     @SuppressLint("MissingPermission")
-    private static void post(Context context, String channelId, Notification notification) {
+    private static boolean post(Context context, String channelId, Notification notification) {
         try {
             NotificationManagerCompat.from(context).notify(channelId, CONVERSATION_ID, notification);
+            return true;
         } catch (RuntimeException e) {
             Log.w(TAG, "could not post a message notification", e);
+            return false;
         }
+    }
+
+    /** The notification channel shows what is posted to it (not turned off in Settings). */
+    private static boolean channelOn(Context context, String channelId) {
+        NotificationChannelCompat channel =
+                NotificationManagerCompat.from(context).getNotificationChannelCompat(channelId);
+        return channel != null && channel.getImportance() != NotificationManagerCompat.IMPORTANCE_NONE;
     }
 
     /**
      * The group's summary while any conversation is up; gone with the last,
      * never posted without one. `changed` is the conversation just posted
-     * (`posted`) or cancelled (null): notify and cancel reach the system
-     * asynchronously, so the active list read right after may still show a
-     * cancelled one (an empty "1 conversation" summary, which the system
-     * then drops as a summary without children) or miss a new one.
+     * (`posted`) or cancelled (`posted` null); null when nothing is known to
+     * have changed. notify and cancel reach the system asynchronously, so
+     * the active list read right after may still show a cancelled one (an
+     * empty "1 conversation" summary, which the system then drops as a
+     * summary without children) or miss a new one.
      */
     @SuppressLint("MissingPermission")
     private static void postSummary(Context context, String changed, Notification posted) {
@@ -261,7 +275,7 @@ final class MessageNotifier {
         if (posted != null) conversations.add(posted);
         for (StatusBarNotification active : manager.getActiveNotifications()) {
             if (GROUP.equals(active.getNotification().getGroup()) && active.getId() == CONVERSATION_ID
-                    && !changed.equals(active.getTag())) {
+                    && (changed == null || !changed.equals(active.getTag()))) {
                 conversations.add(active.getNotification());
             }
         }
