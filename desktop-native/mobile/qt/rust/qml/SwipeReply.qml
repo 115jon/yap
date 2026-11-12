@@ -35,8 +35,12 @@ Item {
         enabled: swipe.enabled && !(swipe.view && swipe.view.moving)
         yAxis.enabled: false
         // Leftward only: with the finger right of where it went down the
-        // handler has no axis, so it never takes that drag.
-        xAxis.enabled: active || centroid.position.x <= centroid.pressPosition.x
+        // handler has no axis, so it never takes that drag. Measured on the
+        // screen, not in the row: while the pager pans the chat (a drag to
+        // the right), the row moves along under the finger, which then
+        // seemed not to have moved right at all, and this handler took the
+        // pan's drag away from it.
+        xAxis.enabled: active || centroid.scenePosition.x <= centroid.scenePressPosition.x
         dragThreshold: 16
         onActiveTranslationChanged: {
             if (!active)

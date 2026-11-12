@@ -441,9 +441,19 @@ Item {
             xAxis.enabled: true
             yAxis.enabled: false
             dragThreshold: 14
+            // Once it pans, the drag is its own: a row's handler under the
+            // finger (which moves along with the chat) does not take it over.
+            grabPermissions: PointerHandler.CanTakeOverFromAnything
+
+            // A drag taken away (by the system's back gesture, a sheet that
+            // opened) lands back where it started, not where it was heading
+            // (`canceled` comes right after the handler goes inactive).
+            property bool lost: false
+            onCanceled: lost = true
 
             onActiveChanged: {
                 if (active) {
+                    lost = false
                     spring.halt()
                     from = pager.offset
                     // From where the finger went down, so the page is
@@ -455,6 +465,18 @@ Item {
                     samples = 0
                     Qt.inputMethod.hide()
                     follow()
+                    return
+                }
+                Qt.callLater(settle)
+            }
+            onCentroidChanged: if (active) follow()
+
+            function settle() {
+                if (active)
+                    return
+                if (lost) {
+                    lost = false
+                    pager.show(pager.page)
                     return
                 }
                 // A finger that stopped before lifting is not a flick.
@@ -477,7 +499,6 @@ Item {
                     Native.haptic(Native.Tick)
                 pager.show(next, speed)
             }
-            onCentroidChanged: if (active) follow()
 
             function follow() {
                 const x = centroid.scenePosition.x
