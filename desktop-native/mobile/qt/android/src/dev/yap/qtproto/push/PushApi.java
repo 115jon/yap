@@ -20,10 +20,10 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * The few API calls notifications make while the app is not running, on
+ * The few API calls notifications make while the app is not in front, on
  * the caller's (background) thread, as the Expo app's RalphApi.kt does.
  * Bearer auth with the core's session; never logs the token or message text.
- * While the app runs, the core makes these calls instead (PushShim).
+ * With the app in front, the core makes these calls instead (PushShim).
  */
 final class PushApi {
     private PushApi() {}
