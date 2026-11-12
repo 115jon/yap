@@ -180,9 +180,11 @@ Item {
     }
 
     readonly property real keyboard: Native.imeHeight
-    readonly property real bottomInset: Math.max(SafeArea.margins.bottom, keyboard)
-    // Read here for the header: a key that asks for its own insets feeds
-    // its position back in.
+    // Clear of the bottom gesture zone too (Native.gestureInset).
+    readonly property real bottomInset: Math.max(SafeArea.margins.bottom, Native.gestureInset, keyboard)
+    // Read here, for the header, the list and the composer: an item that
+    // asks for its own insets and moves by them feeds its position back in
+    // (and ends up with none).
     readonly property real topInset: SafeArea.margins.top
     readonly property real leftInset: SafeArea.margins.left
     readonly property real rightInset: SafeArea.margins.right
@@ -344,8 +346,8 @@ Item {
         anchors.bottom: typing.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.leftMargin: SafeArea.margins.left
-        anchors.rightMargin: SafeArea.margins.right
+        anchors.leftMargin: root.leftInset
+        anchors.rightMargin: root.rightInset
         clip: true
         bottomMargin: 8
         // Still under a sheet. The long press that opened it ends with no
@@ -489,8 +491,8 @@ Item {
     Text {
         id: typing
         anchors.bottom: composer.top
-        x: 16 + SafeArea.margins.left
-        width: parent.width - 32
+        x: 16 + root.leftInset
+        width: parent.width - 32 - root.leftInset - root.rightInset
         height: Chat.typingText.length > 0 ? 20 : 0
         text: Chat.typingText
         color: Theme.ink3
@@ -505,8 +507,8 @@ Item {
         anchors.bottomMargin: root.bottomInset
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.leftMargin: SafeArea.margins.left
-        anchors.rightMargin: SafeArea.margins.right
+        anchors.leftMargin: root.leftInset
+        anchors.rightMargin: root.rightInset
         placeholder: root.dm ? qsTr("Message @%1").arg(Nav.activeChannelName)
             : qsTr("Message #%1").arg(Nav.activeChannelName)
         enabled: !Chat.readOnly

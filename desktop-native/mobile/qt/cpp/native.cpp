@@ -19,6 +19,19 @@
 
 extern "C" void yap_mobile_flush();
 
+// The device's network for the core (rust/src/client.rs, from a Tokio
+// thread): 1 up, 0 none, -1 unknown.
+extern "C" int yap_mobile_network_state()
+{
+#ifdef Q_OS_ANDROID
+  return QJniObject::callStaticMethod<jint>("dev/yap/qtproto/NetworkState", "get",
+                                            "(Landroid/content/Context;)I",
+                                            QNativeInterface::QAndroidApplication::context().object());
+#else
+  return -1;
+#endif
+}
+
 namespace {
 
 std::atomic<Native*> g_native { nullptr };
@@ -52,6 +65,11 @@ void jniBackInvoked(JNIEnv*, jclass)
 void jniIme(JNIEnv*, jclass, jfloat dp)
 {
   post([dp] { Native::instance()->onIme(dp); });
+}
+
+void jniEdges(JNIEnv*, jclass, jfloat gestureBottom, jfloat clippedBottom)
+{
+  post([gestureBottom, clippedBottom] { Native::instance()->onEdges(gestureBottom, clippedBottom); });
 }
 
 void jniMediaCopying(JNIEnv*, jclass)
@@ -90,6 +108,7 @@ Native::Native(QObject* parent)
     { "nativeBackCancelled", "()V", reinterpret_cast<void*>(jniBackCancelled) },
     { "nativeBackInvoked", "()V", reinterpret_cast<void*>(jniBackInvoked) },
     { "nativeIme", "(F)V", reinterpret_cast<void*>(jniIme) },
+    { "nativeEdges", "(FF)V", reinterpret_cast<void*>(jniEdges) },
     { "nativeMediaCopying", "()V", reinterpret_cast<void*>(jniMediaCopying) },
     { "nativeMediaPicked", "([Ljava/lang/String;I)V", reinterpret_cast<void*>(jniMediaPicked) },
   };
@@ -340,6 +359,15 @@ void Native::onIme(qreal dp)
     return;
   m_imeHeight = dp;
   emit imeHeightChanged();
+}
+
+void Native::onEdges(qreal gestureBottom, qreal clippedBottom)
+{
+  if (qFuzzyCompare(m_gestureInset + 1, gestureBottom + 1) && qFuzzyCompare(m_clippedBottom + 1, clippedBottom + 1))
+    return;
+  m_gestureInset = gestureBottom;
+  m_clippedBottom = clippedBottom;
+  emit edgesChanged();
 }
 
 bool Native::eventFilter(QObject* watched, QEvent* event)

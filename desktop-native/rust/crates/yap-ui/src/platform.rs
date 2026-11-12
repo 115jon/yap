@@ -94,6 +94,14 @@ pub trait Platform: Send + Sync + 'static {
     fn player_level(&self) -> f64 {
         0.0
     }
+
+    /// Whether the system has a network, when the app can ask (`None`:
+    /// it cannot). A phone app in the background can have its own network
+    /// blocked while the device's is up: a host name that does not resolve
+    /// there is not "no network" (the gateway's strip says Reconnecting).
+    fn network_up(&self) -> Option<bool> {
+        None
+    }
 }
 
 static PLATFORM: OnceLock<Box<dyn Platform>> = OnceLock::new();

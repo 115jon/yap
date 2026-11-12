@@ -102,6 +102,15 @@ impl State {
             });
         } else if std::mem::take(&mut self.gateway_suspended) {
             self.retry_gateway(fx);
+        } else if self
+            .signed_in()
+            .is_some_and(|(session, _)| session.gateway.was_ready && !session.gateway.ready)
+        {
+            // Back before the grace with the link down (a phone blocks a
+            // background app's network, so its tries failed and the backoff
+            // grew): a fresh connection now, its backoff from the start,
+            // rather than at the end of a wait of up to 16 s.
+            self.retry_gateway(fx);
         }
     }
 

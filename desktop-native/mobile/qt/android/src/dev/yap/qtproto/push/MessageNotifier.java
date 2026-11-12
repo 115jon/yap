@@ -126,8 +126,11 @@ final class MessageNotifier {
                 .setLocusId(new LocusIdCompat(shortcutId))
                 .setWhen(push.sentAt)
                 .build();
-        post(context, conversation.channelId, notification);
-        postSummary(context);
+        // A post that failed, or went to a channel the user turned off,
+        // leaves no child: the summary then goes by the active list alone.
+        boolean shown = post(context, conversation.channelId, notification)
+                && channelOn(context, conversation.channel);
+        postSummary(context, shown ? conversation.channelId : null, shown ? notification : null);
     }
 
     /**
@@ -154,7 +157,7 @@ final class MessageNotifier {
 
     static void cancel(Context context, String channelId) {
         NotificationManagerCompat.from(context).cancel(channelId, CONVERSATION_ID);
-        postSummary(context);
+        postSummary(context, channelId, null);
     }
 
     /** Sign-out: no notification or shortcut outlives the account. */
@@ -237,23 +240,43 @@ final class MessageNotifier {
         return null;
     }
 
+    /** Whether the notify call went through (not whether the system shows it). */
     @SuppressLint("MissingPermission")
-    private static void post(Context context, String channelId, Notification notification) {
+    private static boolean post(Context context, String channelId, Notification notification) {
         try {
             NotificationManagerCompat.from(context).notify(channelId, CONVERSATION_ID, notification);
+            return true;
         } catch (RuntimeException e) {
             Log.w(TAG, "could not post a message notification", e);
+            return false;
         }
     }
 
-    /** The group's summary while any conversation is up; gone with the last. */
+    /** The notification channel shows what is posted to it (not turned off in Settings). */
+    private static boolean channelOn(Context context, String channelId) {
+        NotificationChannelCompat channel =
+                NotificationManagerCompat.from(context).getNotificationChannelCompat(channelId);
+        return channel != null && channel.getImportance() != NotificationManagerCompat.IMPORTANCE_NONE;
+    }
+
+    /**
+     * The group's summary while any conversation is up; gone with the last,
+     * never posted without one. `changed` is the conversation just posted
+     * (`posted`) or cancelled (`posted` null); null when nothing is known to
+     * have changed. notify and cancel reach the system asynchronously, so
+     * the active list read right after may still show a cancelled one (an
+     * empty "1 conversation" summary, which the system then drops as a
+     * summary without children) or miss a new one.
+     */
     @SuppressLint("MissingPermission")
-    private static void postSummary(Context context) {
+    private static void postSummary(Context context, String changed, Notification posted) {
         NotificationManagerCompat manager = NotificationManagerCompat.from(context);
-        List<StatusBarNotification> conversations = new ArrayList<>();
+        List<Notification> conversations = new ArrayList<>();
+        if (posted != null) conversations.add(posted);
         for (StatusBarNotification active : manager.getActiveNotifications()) {
-            if (GROUP.equals(active.getNotification().getGroup()) && active.getId() == CONVERSATION_ID) {
-                conversations.add(active);
+            if (GROUP.equals(active.getNotification().getGroup()) && active.getId() == CONVERSATION_ID
+                    && (changed == null || !changed.equals(active.getTag()))) {
+                conversations.add(active.getNotification());
             }
         }
         if (conversations.isEmpty()) {
@@ -261,8 +284,8 @@ final class MessageNotifier {
             return;
         }
         NotificationCompat.InboxStyle lines = new NotificationCompat.InboxStyle();
-        for (StatusBarNotification active : conversations.subList(0, Math.min(5, conversations.size()))) {
-            Bundle extras = active.getNotification().extras;
+        for (Notification active : conversations.subList(0, Math.min(5, conversations.size()))) {
+            Bundle extras = active.extras;
             CharSequence title = extras.getCharSequence(NotificationCompat.EXTRA_TITLE);
             if (title == null) continue;
             CharSequence text = extras.getCharSequence(NotificationCompat.EXTRA_TEXT);
