@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/115jon/yap/compare/qt-android-v0.6.0...qt-android-v0.6.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **desktop-native:** 🐛 stop pulling a watched share no page shows ([4d88cc5](https://github.com/115jon/yap/commit/4d88cc5cf23da974ddc749b7c843327b3fc0880c))
+
 ## [0.6.0](https://github.com/115jon/yap/compare/qt-android-v0.5.0...qt-android-v0.6.0) (2026-11-13)
 
 
