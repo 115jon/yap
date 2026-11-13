@@ -8,16 +8,13 @@
 //! `VideoOutput` samples as it is (zero copy).
 //!
 //! Demand: each `VideoSurface` in QML reports the device-pixel size it shows
-//! a key at, and withdraws when it goes. The largest size per key, with the
-//! stage, is the call's [`VideoIntent`]: it decides what is pulled, at which
-//! simulcast layer, and which frames are routed at all.
+//! a key at, and withdraws when it goes ([`yap_voice::demand`], shared with
+//! the mobile app): that decides what is pulled, at which simulcast layer,
+//! and which frames are routed at all.
 
-use std::collections::{BTreeMap, HashMap};
 use std::ffi::c_char;
-use std::sync::{Mutex, OnceLock, PoisonError};
 
-use tokio::sync::watch;
-use yap_voice::{I420Frame, RenderSize, VideoIntent, VideoOutput};
+use yap_voice::{I420Frame, VideoOutput};
 
 extern "C" {
     fn yap_video_frame(
@@ -120,96 +117,4 @@ pub fn install_output() {
     OUTPUT.call_once(|| {
         yap_voice::LibwebrtcEngine::set_video_output(std::sync::Arc::new(QtOutput));
     });
-}
-
-/// What the visible surfaces show, by surface id.
-#[derive(Default)]
-struct Surfaces {
-    shown: HashMap<i32, (String, RenderSize)>,
-    stage: Option<String>,
-    next_id: i32,
-}
-
-impl Surfaces {
-    fn intent(&self) -> VideoIntent {
-        let mut demand: BTreeMap<String, RenderSize> = BTreeMap::new();
-        for (key, size) in self.shown.values() {
-            demand
-                .entry(key.clone())
-                .and_modify(|largest| *largest = largest.larger(*size))
-                .or_insert(*size);
-        }
-        VideoIntent {
-            demand,
-            stage: self.stage.clone(),
-        }
-    }
-}
-
-fn surfaces() -> &'static Mutex<Surfaces> {
-    static SURFACES: OnceLock<Mutex<Surfaces>> = OnceLock::new();
-    SURFACES.get_or_init(Mutex::default)
-}
-
-fn intents() -> &'static watch::Sender<VideoIntent> {
-    static INTENT: OnceLock<watch::Sender<VideoIntent>> = OnceLock::new();
-    INTENT.get_or_init(|| watch::channel(VideoIntent::default()).0)
-}
-
-/// The call's video intent, as it changes.
-pub fn subscribe() -> watch::Receiver<VideoIntent> {
-    intents().subscribe()
-}
-
-fn update(change: impl FnOnce(&mut Surfaces)) {
-    let mut surfaces = surfaces().lock().unwrap_or_else(PoisonError::into_inner);
-    change(&mut surfaces);
-    let intent = surfaces.intent();
-    intents().send_if_modified(|current| {
-        let changed = *current != intent;
-        *current = intent;
-        changed
-    });
-}
-
-/// A fresh id for a surface to report under.
-pub fn new_surface() -> i32 {
-    let mut surfaces = surfaces().lock().unwrap_or_else(PoisonError::into_inner);
-    surfaces.next_id += 1;
-    surfaces.next_id
-}
-
-/// Surface `id` shows `key` at `width` x `height` device pixels; an empty
-/// key or size withdraws it.
-pub fn report(id: i32, key: &str, width: u32, height: u32) {
-    update(|s| {
-        if key.is_empty() || width == 0 || height == 0 {
-            s.shown.remove(&id);
-        } else {
-            s.shown
-                .insert(id, (key.to_owned(), RenderSize { width, height }));
-        }
-    });
-}
-
-/// The participant focused on stage (empty: none).
-pub fn set_stage(participant_id: &str) {
-    update(|s| s.stage = Some(participant_id.to_owned()).filter(|p| !p.is_empty()));
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn intent_should_keep_the_largest_size_per_key() {
-        let mut s = Surfaces::default();
-        let size = |width, height| RenderSize { width, height };
-        s.shown.insert(1, ("cam-video-a".into(), size(320, 180)));
-        s.shown.insert(2, ("cam-video-a".into(), size(1280, 720)));
-        s.shown.insert(3, ("cam-video-b".into(), size(640, 360)));
-        let intent = s.intent();
-        assert_eq!(intent.demand["cam-video-a"], size(1280, 720));
-        assert_eq!(intent.demand["cam-video-b"], size(640, 360));
-    }
 }

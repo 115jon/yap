@@ -501,6 +501,9 @@ async fn pump_video(track: RtcVideoTrack, key: String) {
         return;
     };
     let (mut frames, mut since) = (0u32, Instant::now());
+    // Frames that came as something other than I420 (Android's
+    // MediaCodec output, through Java) and the time their read back took.
+    let (mut converted_frames, mut converting) = (0u32, Duration::ZERO);
     while let Some(frame) = stream.next().await {
         let buffer = frame.buffer.as_ref();
         let rotation = match frame.rotation {
@@ -524,7 +527,10 @@ async fn pump_video(track: RtcVideoTrack, key: String) {
             let i420 = match buffer.as_i420() {
                 Some(i420) => i420,
                 None => {
+                    let started = Instant::now();
                     converted = buffer.to_i420();
+                    converting += started.elapsed();
+                    converted_frames += 1;
                     &converted
                 }
             };
@@ -548,14 +554,69 @@ async fn pump_video(track: RtcVideoTrack, key: String) {
         frames += 1;
         let elapsed = since.elapsed();
         if elapsed >= VIDEO_STATS_EVERY {
+            let read_back = if converted_frames > 0 {
+                format!(
+                    ", {converted_frames} read back to I420 at {:.2} ms each",
+                    converting.as_secs_f64() * 1000.0 / f64::from(converted_frames)
+                )
+            } else {
+                String::new()
+            };
             eprintln!(
-                "[video] {key} {}x{} {:.1} fps",
+                "[video] {key} {}x{} {:.1} fps{read_back}",
                 size.0,
                 size.1,
                 f64::from(frames) / elapsed.as_secs_f64()
             );
             (frames, since) = (0, Instant::now());
+            (converted_frames, converting) = (0, Duration::ZERO);
         }
+    }
+}
+
+impl I420Frame<'_> {
+    /// The frame as RGBA bytes (R, G, B, A in memory; BT.601 limited
+    /// range, as WebRTC's own renderers) into `dst`, `stride` bytes a row,
+    /// unturned. False, with `dst` untouched, when `dst` is too small, a
+    /// stride is narrower than its plane's rows or a plane is shorter than
+    /// its stride and rows say.
+    pub fn write_rgba(&self, dst: &mut [u8], stride: u32) -> bool {
+        let (Ok(width), Ok(height)) = (i32::try_from(self.width), i32::try_from(self.height))
+        else {
+            return false;
+        };
+        let rows = self.height as usize;
+        let chroma_rows = self.height.div_ceil(2) as usize;
+        let fits = |len: usize, stride: u32, rows: usize| len >= stride as usize * rows;
+        let chroma_width = self.width.div_ceil(2);
+        if width == 0
+            || height == 0
+            || (stride as usize) < self.width as usize * 4
+            || self.stride_y < self.width
+            || self.stride_u < chroma_width
+            || self.stride_v < chroma_width
+            || !fits(dst.len(), stride, rows)
+            || !fits(self.y.len(), self.stride_y, rows)
+            || !fits(self.u.len(), self.stride_u, chroma_rows)
+            || !fits(self.v.len(), self.stride_v, chroma_rows)
+        {
+            return false;
+        }
+        // libyuv names formats by the 32-bit word, little endian: its ABGR
+        // is R, G, B, A in memory.
+        libwebrtc::native::yuv_helper::i420_to_abgr(
+            self.y,
+            self.stride_y,
+            self.u,
+            self.stride_u,
+            self.v,
+            self.stride_v,
+            dst,
+            stride,
+            width,
+            height,
+        );
+        true
     }
 }
 
@@ -2254,5 +2315,68 @@ mod tests {
             (adm.inputs, adm.outputs),
             "WASAPI and ADM device lists"
         );
+    }
+}
+
+#[cfg(test)]
+mod rgba_tests {
+    use super::I420Frame;
+
+    fn gray(width: u32, height: u32, luma: u8) -> (Vec<u8>, Vec<u8>) {
+        let y = vec![luma; (width * height) as usize];
+        let chroma = vec![128; (width.div_ceil(2) * height.div_ceil(2)) as usize];
+        (y, chroma)
+    }
+
+    #[test]
+    fn write_rgba_should_turn_gray_into_opaque_gray() {
+        let (y, chroma) = gray(4, 2, 235);
+        let frame = I420Frame {
+            width: 4,
+            height: 2,
+            rotation: 0,
+            y: &y,
+            u: &chroma,
+            v: &chroma,
+            stride_y: 4,
+            stride_u: 2,
+            stride_v: 2,
+        };
+        let mut rgba = vec![0u8; 4 * 4 * 2];
+        assert!(frame.write_rgba(&mut rgba, 16));
+        // Limited range white is full white, alpha opaque.
+        for pixel in rgba.chunks(4) {
+            assert!(
+                pixel[0] >= 250 && pixel[1] >= 250 && pixel[2] >= 250,
+                "{pixel:?}"
+            );
+            assert_eq!(pixel[3], 255);
+        }
+    }
+
+    #[test]
+    fn write_rgba_should_refuse_a_short_buffer() {
+        let (y, chroma) = gray(4, 2, 16);
+        let frame = I420Frame {
+            width: 4,
+            height: 2,
+            rotation: 0,
+            y: &y,
+            u: &chroma,
+            v: &chroma,
+            stride_y: 4,
+            stride_u: 2,
+            stride_v: 2,
+        };
+        let mut rgba = vec![7u8; 4 * 4];
+        assert!(!frame.write_rgba(&mut rgba, 16));
+        assert!(rgba.iter().all(|b| *b == 7));
+        assert!(!frame.write_rgba(&mut vec![0u8; 64], 8));
+        // A luma stride narrower than the frame would read past each row.
+        let narrow = I420Frame {
+            stride_y: 2,
+            ..frame
+        };
+        assert!(!narrow.write_rgba(&mut vec![0u8; 64], 16));
     }
 }

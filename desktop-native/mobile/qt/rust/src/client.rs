@@ -1,5 +1,6 @@
 //! The mobile app's side of the shared view layer: rustls HTTP, the shared
-//! gateway task, voice calls on Android (`voice.rs`), the session token
+//! gateway task, voice calls and their video on Android (`voice.rs`,
+//! `video.rs`), the session token
 //! sealed with an Android Keystore key, and the data folder and device name
 //! handed to the core.
 
@@ -229,6 +230,23 @@ impl Platform for Mobile {
             0 => Some(false),
             _ => None,
         }
+    }
+
+    /// The call's video surfaces (seams/VideoSurface.qml): what each
+    /// shows, at what size, and the stage, as on the desktop.
+    #[cfg(target_os = "android")]
+    fn new_video_surface(&self) -> i32 {
+        yap_voice::demand::new_surface()
+    }
+
+    #[cfg(target_os = "android")]
+    fn report_video(&self, surface: i32, key: &str, width: u32, height: u32) {
+        yap_voice::demand::report(surface, key, width, height);
+    }
+
+    #[cfg(target_os = "android")]
+    fn set_video_stage(&self, participant_id: &str) {
+        yap_voice::demand::set_stage(participant_id);
     }
 
     /// The photo picker's copies in the app cache (`Native.pickMedia`):
