@@ -54,6 +54,7 @@ import { Route as ApiServerIconsSplatRouteImport } from './routes/api/server-ico
 import { Route as ApiProfileAssetsManageRouteImport } from './routes/api/profile-assets/manage'
 import { Route as ApiProfileAssetsSplatRouteImport } from './routes/api/profile-assets/$'
 import { Route as ApiMyinstantsFavoritesRouteImport } from './routes/api/myinstants/favorites'
+import { Route as ApiMediaGrantRouteImport } from './routes/api/media/grant'
 import { Route as ApiListenTogetherStreamRouteImport } from './routes/api/listen-together/stream'
 import { Route as ApiListenTogetherSearchRouteImport } from './routes/api/listen-together/search'
 import { Route as ApiListenTogetherResolveRouteImport } from './routes/api/listen-together/resolve'
@@ -360,6 +361,11 @@ const ApiMyinstantsFavoritesRoute = ApiMyinstantsFavoritesRouteImport.update({
   id: '/favorites',
   path: '/favorites',
   getParentRoute: () => ApiMyinstantsRoute,
+} as any)
+const ApiMediaGrantRoute = ApiMediaGrantRouteImport.update({
+  id: '/api/media/grant',
+  path: '/api/media/grant',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiListenTogetherStreamRoute = ApiListenTogetherStreamRouteImport.update({
   id: '/api/listen-together/stream',
@@ -840,6 +846,7 @@ export interface FileRoutesByFullPath {
   '/api/listen-together/resolve': typeof ApiListenTogetherResolveRoute
   '/api/listen-together/search': typeof ApiListenTogetherSearchRoute
   '/api/listen-together/stream': typeof ApiListenTogetherStreamRoute
+  '/api/media/grant': typeof ApiMediaGrantRoute
   '/api/myinstants/favorites': typeof ApiMyinstantsFavoritesRoute
   '/api/profile-assets/$': typeof ApiProfileAssetsSplatRoute
   '/api/profile-assets/manage': typeof ApiProfileAssetsManageRoute
@@ -967,6 +974,7 @@ export interface FileRoutesByTo {
   '/api/listen-together/resolve': typeof ApiListenTogetherResolveRoute
   '/api/listen-together/search': typeof ApiListenTogetherSearchRoute
   '/api/listen-together/stream': typeof ApiListenTogetherStreamRoute
+  '/api/media/grant': typeof ApiMediaGrantRoute
   '/api/myinstants/favorites': typeof ApiMyinstantsFavoritesRoute
   '/api/profile-assets/$': typeof ApiProfileAssetsSplatRoute
   '/api/profile-assets/manage': typeof ApiProfileAssetsManageRoute
@@ -1095,6 +1103,7 @@ export interface FileRoutesById {
   '/api/listen-together/resolve': typeof ApiListenTogetherResolveRoute
   '/api/listen-together/search': typeof ApiListenTogetherSearchRoute
   '/api/listen-together/stream': typeof ApiListenTogetherStreamRoute
+  '/api/media/grant': typeof ApiMediaGrantRoute
   '/api/myinstants/favorites': typeof ApiMyinstantsFavoritesRoute
   '/api/profile-assets/$': typeof ApiProfileAssetsSplatRoute
   '/api/profile-assets/manage': typeof ApiProfileAssetsManageRoute
@@ -1224,6 +1233,7 @@ export interface FileRouteTypes {
     | '/api/listen-together/resolve'
     | '/api/listen-together/search'
     | '/api/listen-together/stream'
+    | '/api/media/grant'
     | '/api/myinstants/favorites'
     | '/api/profile-assets/$'
     | '/api/profile-assets/manage'
@@ -1351,6 +1361,7 @@ export interface FileRouteTypes {
     | '/api/listen-together/resolve'
     | '/api/listen-together/search'
     | '/api/listen-together/stream'
+    | '/api/media/grant'
     | '/api/myinstants/favorites'
     | '/api/profile-assets/$'
     | '/api/profile-assets/manage'
@@ -1478,6 +1489,7 @@ export interface FileRouteTypes {
     | '/api/listen-together/resolve'
     | '/api/listen-together/search'
     | '/api/listen-together/stream'
+    | '/api/media/grant'
     | '/api/myinstants/favorites'
     | '/api/profile-assets/$'
     | '/api/profile-assets/manage'
@@ -1603,6 +1615,7 @@ export interface RootRouteChildren {
   ApiListenTogetherResolveRoute: typeof ApiListenTogetherResolveRoute
   ApiListenTogetherSearchRoute: typeof ApiListenTogetherSearchRoute
   ApiListenTogetherStreamRoute: typeof ApiListenTogetherStreamRoute
+  ApiMediaGrantRoute: typeof ApiMediaGrantRoute
   ApiProfileAssetsSplatRoute: typeof ApiProfileAssetsSplatRoute
   ApiProfileAssetsManageRoute: typeof ApiProfileAssetsManageRoute
   ApiServerIconsSplatRoute: typeof ApiServerIconsSplatRoute
@@ -1945,6 +1958,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/myinstants/favorites'
       preLoaderRoute: typeof ApiMyinstantsFavoritesRouteImport
       parentRoute: typeof ApiMyinstantsRoute
+    }
+    '/api/media/grant': {
+      id: '/api/media/grant'
+      path: '/api/media/grant'
+      fullPath: '/api/media/grant'
+      preLoaderRoute: typeof ApiMediaGrantRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/listen-together/stream': {
       id: '/api/listen-together/stream'
@@ -2904,6 +2924,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiListenTogetherResolveRoute: ApiListenTogetherResolveRoute,
   ApiListenTogetherSearchRoute: ApiListenTogetherSearchRoute,
   ApiListenTogetherStreamRoute: ApiListenTogetherStreamRoute,
+  ApiMediaGrantRoute: ApiMediaGrantRoute,
   ApiProfileAssetsSplatRoute: ApiProfileAssetsSplatRoute,
   ApiProfileAssetsManageRoute: ApiProfileAssetsManageRoute,
   ApiServerIconsSplatRoute: ApiServerIconsSplatRoute,

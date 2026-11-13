@@ -84,11 +84,12 @@ export interface SessionHeaders {
   readonly cookie: string | null;
 }
 
-/** Everything a request may prove its session with. */
-export interface Credentials extends SessionHeaders {
-  /** `?token=`: the desktop app's fallback where it cannot set a header. */
-  readonly queryToken: string | null;
-}
+/**
+ * Everything a request may prove its session with: its headers. Never the
+ * query string: a URL leaks into logs, the clipboard and shared links, so
+ * the private media routes take a capability there instead (lib/media-auth).
+ */
+export type Credentials = SessionHeaders;
 
 export interface KovaOptions {
   readonly url: string;
@@ -404,18 +405,17 @@ function bearerToken(authorization: string | null): string | null {
     : null;
 }
 
-/** The credentials on a request: its authorization and cookie headers and `?token=`. */
+/** The credentials on a request: its authorization and cookie headers. */
 function credentialsOf(request: Request): Credentials {
   return {
     authorization: request.headers.get("authorization"),
     cookie: request.headers.get("cookie"),
-    queryToken: new URL(request.url).searchParams.get("token"),
   };
 }
 
 /**
  * Who is calling. First the request's own headers; when Kova finds no
- * session there, the desktop app's bearer token (or `?token=`) alone. Either
+ * session there, the desktop app's bearer token alone. Either
  * lookup finding a session wins. If neither does and either could not reach
  * Kova, the answer is `AuthUnavailable`, not `Unauthenticated`.
  */
@@ -423,8 +423,7 @@ export const authenticate = Effect.fn("kova.authenticate")(function* (
   credentials: Credentials,
 ) {
   const kova = yield* KovaAuth;
-  const token =
-    bearerToken(credentials.authorization) || credentials.queryToken;
+  const token = bearerToken(credentials.authorization);
 
   const byToken = token
     ? kova.lookup({ authorization: `Bearer ${token}`, cookie: null })
@@ -443,17 +442,16 @@ export const authenticate = Effect.fn("kova.authenticate")(function* (
 
 /**
  * The one credential a call about the caller's own sessions uses: the bearer
- * (or `?token=`) alone when there is one, else the cookie. The caller is
+ * alone when there is one, else the cookie. The caller is
  * identified with exactly this (`signedInIdentity(request, credentials)`),
  * so "the current session" and the session Kova acts for are the same.
  */
 export function appSessionCredentials(request: Request): Credentials {
   const credentials = credentialsOf(request);
-  const token =
-    bearerToken(credentials.authorization) || credentials.queryToken;
+  const token = bearerToken(credentials.authorization);
   return token
-    ? { authorization: `Bearer ${token}`, cookie: null, queryToken: null }
-    : { ...credentials, queryToken: null };
+    ? { authorization: `Bearer ${token}`, cookie: null }
+    : credentials;
 }
 
 /**

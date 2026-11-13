@@ -234,6 +234,11 @@ crons = ["0 */6 * * *", "17 * * * *", "*/10 * * * *"]
 
 # ── Observability ────────────────────────────────────────────────────────
 
+[observability]
+# Logs and traces record request URLs without their query strings: media
+# capabilities (`?cap=`) and the Tauri app's legacy `?token=` ride there.
+redact_query_string = true
+
 [observability.logs]
 enabled = true
 invocation_logs = true

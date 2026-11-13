@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { apiError, getBucket, getDB, requireAuth } from "@/lib/api-helpers";
+import { apiError, getBucket, getDB } from "@/lib/api-helpers";
+import { requireMediaAuth } from "@/lib/media-auth";
 import { getGeneratedEmojiAssetById } from "@/services/emoji.service";
 
 const GET = async ({ request, params }: any) => {
-  const authResult = await requireAuth(request);
+  const authResult = await requireMediaAuth(request);
   if (authResult instanceof Response) return authResult;
 
   const record = await getGeneratedEmojiAssetById(getDB(), params.id);

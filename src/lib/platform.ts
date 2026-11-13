@@ -5,7 +5,8 @@
 // Desktop: absolute URLs ("https://ralph-meet.workers.dev/api/...")
 //          running inside Tauri system webview as client-only SPA
 // ============================================================================
-import { getDesktopToken, getStoredKovaAuthSessionToken } from "./desktop-auth";
+import { isCapProtectedMediaPath, isMediaCap } from "@/lib/media-capability";
+import { signMediaUrl } from "@/lib/media-grant";
 import { clog } from "@/lib/console-logger";
 import { isDesktop, isMobile, isTauri } from "@/lib/runtime";
 import {
@@ -250,16 +251,13 @@ export function getWebOrigin(): string {
   return getPublicApiUrl();
 }
 
-function withAuthTokenForProtectedAsset(fullUrl: string): string {
-  const token = (() => {
-    try {
-      return getDesktopToken() ?? getStoredKovaAuthSessionToken();
-    } catch {
-      return null;
-    }
-  })();
-  if (!token) return fullUrl;
-
+/**
+ * Private media (attachments, emoji, soundboard, camera backgrounds, voice
+ * status media, Listen Together) signed with a short-lived media capability
+ * for this one URL (lib/media-grant). Never the session token: URLs end up
+ * in logs, the clipboard and shared links.
+ */
+function withMediaCapability(fullUrl: string): string {
   try {
     const urlObj = new URL(
       fullUrl,
@@ -267,23 +265,26 @@ function withAuthTokenForProtectedAsset(fullUrl: string): string {
         ? window.location.origin
         : getPublicApiUrl(),
     );
-    if (urlObj.searchParams.has("cap")) {
+    if (!isCapProtectedMediaPath(urlObj.pathname)) return fullUrl;
+
+    const relative = fullUrl.startsWith("/");
+    const format = (url: URL) =>
+      relative ? `${url.pathname}${url.search}` : url.toString();
+
+    // An issued capability (a DM call's soundboard clip) stands as it is;
+    // a media capability is signed again (it may be stale or another user's).
+    const existingCap = urlObj.searchParams.get("cap");
+    if (existingCap !== null && !isMediaCap(existingCap)) {
       if (!urlObj.searchParams.has("token")) return fullUrl;
       urlObj.searchParams.delete("token");
-      return fullUrl.startsWith("/")
-        ? `${urlObj.pathname}${urlObj.search}`
-        : urlObj.toString();
+      return format(urlObj);
     }
-    if (
-      urlObj.pathname.startsWith("/api/attachments/") ||
-      urlObj.pathname.startsWith("/api/soundboard/uploads/") ||
-      urlObj.pathname.startsWith("/api/camera-backgrounds/") ||
-      urlObj.pathname.startsWith("/api/listen-together/stream") ||
-      urlObj.pathname.startsWith("/api/voice-status-media/") ||
-      urlObj.pathname.startsWith("/api/emojis/assets/")
-    ) {
-      urlObj.searchParams.set("token", token);
-      return urlObj.toString();
+
+    const signed = signMediaUrl(urlObj);
+    if (signed) return format(signed);
+    if (urlObj.searchParams.has("token")) {
+      urlObj.searchParams.delete("token");
+      return format(urlObj);
     }
   } catch {
     // Keep the original URL if URL parsing is unavailable.
@@ -327,8 +328,9 @@ function isInternalAbsoluteAssetUrl(pathOrUrl: string): boolean {
 }
 
 /**
- * Returns a URL for an asset. Protected attachments include the Ralph Auth
- * session token because raw <img>/<video>/<a> requests cannot set auth headers.
+ * Returns a URL for an asset. Private media carries a short-lived media
+ * capability for that one URL, because raw <img>/<video>/<a> requests cannot
+ * set auth headers (lib/media-capability).
  */
 export function getAuthAssetUrl(pathOrUrl: string): string {
   // If it's already an absolute URL not pointing to our API, just return it
@@ -347,7 +349,7 @@ export function getAuthAssetUrl(pathOrUrl: string): string {
     fullUrl = apiUrl(fullUrl);
   }
 
-  return withAuthTokenForProtectedAsset(fullUrl);
+  return withMediaCapability(fullUrl);
 }
 
 /**
@@ -355,7 +357,7 @@ export function getAuthAssetUrl(pathOrUrl: string): string {
  *
  * In Tauri, `http://tauri.localhost` URLs don't resolve outside the webview,
  * so we reconstruct the URL using the real backend origin (the dev server or
- * the deployed Workers URL). The auth token is appended just like `getAuthAssetUrl`.
+ * the deployed Workers URL), signed just like `getAuthAssetUrl`.
  */
 export function getDownloadUrl(pathOrUrl: string): string {
   if (!isTauri()) {
@@ -389,7 +391,7 @@ export function getDownloadUrl(pathOrUrl: string): string {
 
   const fullUrl = `${backendOrigin}${path}`;
 
-  return withAuthTokenForProtectedAsset(fullUrl);
+  return withMediaCapability(fullUrl);
 }
 
 /**

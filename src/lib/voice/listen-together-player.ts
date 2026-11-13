@@ -2,7 +2,20 @@ import {
   LISTEN_TOGETHER_DRIFT_TOLERANCE_MS,
   type ListenTogetherStateSnapshot,
 } from "@/lib/listen-together";
-import { getMediaUrl } from "@/lib/platform";
+import { stripMediaCredentials } from "@/lib/media-capability";
+import { getMediaUrl, getWebOrigin } from "@/lib/platform";
+
+/** `src` without its media capability, for telling two stream URLs apart. */
+function withoutMediaCap(src: string | null): string | null {
+  if (!src) return src;
+  try {
+    const url = new URL(src, "https://stream.invalid");
+    url.searchParams.delete("cap");
+    return url.toString();
+  } catch {
+    return src;
+  }
+}
 
 export interface ListenTogetherPlaybackState {
   src: string | null;
@@ -116,8 +129,12 @@ export const LISTEN_TOGETHER_PREFETCH_JITTER_MS = 6_000;
 export async function prefetchListenTogetherStream(src: string): Promise<void> {
   try {
     // `warm=1`: the route resolves and caches the track, and skips the
-    // googlevideo request a plain HEAD would make.
-    await fetch(`${src}${src.includes("?") ? "&" : "?"}warm=1`, {
+    // googlevideo request a plain HEAD would make. It goes in before the URL
+    // is signed: the capability covers the whole query.
+    const url = new URL(src, getWebOrigin() || "https://localhost");
+    stripMediaCredentials(url);
+    url.searchParams.set("warm", "1");
+    await fetch(getMediaUrl(`${url.pathname}${url.search}`), {
       method: "HEAD",
       cache: "no-store",
       credentials: "include",
@@ -327,7 +344,10 @@ export function getListenTogetherPlaybackPlan(args: {
   }
 
   const isRadio = currentEntry.track.kind === "radio";
-  const shouldLoad = args.playback.src !== args.streamUrl;
+  // A fresh media capability alone is no reason to reload the playing track:
+  // the old one is good for hours yet, and a failed load clears the src.
+  const shouldLoad =
+    withoutMediaCap(args.playback.src) !== withoutMediaCap(args.streamUrl);
   const shouldSeek =
     !isRadio &&
     (shouldLoad ||
