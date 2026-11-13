@@ -5,7 +5,7 @@
 // so a decoder walks past them as before. Frames, colour tables, the
 // NETSCAPE loop block and ICC application blocks are never touched.
 
-import { type Reader, startsWith } from "./bytes";
+import { MalformedFile, type Reader, startsWith } from "./bytes";
 import { type ScanState, zero } from "./scan-state";
 
 /**
@@ -30,17 +30,20 @@ export async function scanGif(reader: Reader, state: ScanState): Promise<void> {
   /** Walks sub-blocks from `at`, zeroing their data when `wipe`. */
   const subBlocks = async (at: number, wipe: boolean): Promise<number> => {
     let p = at;
-    for (; blocks < MAX_BLOCKS; blocks += 1) {
+    for (; ; blocks += 1) {
+      if (blocks >= MAX_BLOCKS) throw new MalformedFile("too many blocks");
       const size = await reader.u8(p);
       if (size === 0) return p + 1;
       if (wipe) zero(state, p + 1, size);
       p += 1 + size;
     }
-    return reader.size;
   };
 
-  while (pos < reader.size && blocks < MAX_BLOCKS) {
+  // Every way out of the walk but the trailer or the end of the file
+  // throws: a scan that stopped early can't say the rest is clean.
+  while (pos < reader.size) {
     blocks += 1;
+    if (blocks >= MAX_BLOCKS) throw new MalformedFile("too many blocks");
     const introducer = await reader.u8(pos);
     if (introducer === 0x3b) return; // trailer
     if (introducer === 0x2c) {
@@ -62,7 +65,7 @@ export async function scanGif(reader: Reader, state: ScanState): Promise<void> {
         pos = await subBlocks(pos, false);
       }
     } else {
-      return; // not a block we know: leave the rest alone
+      throw new MalformedFile(`unknown block at ${pos}`);
     }
   }
 }

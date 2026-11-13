@@ -120,7 +120,7 @@ export async function scanIsoVideo(
     if (k >= MAX_TOP_LEVEL_BOXES) throw new MalformedFile("too many boxes");
     const head = await reader.bytes(pos, 32);
     const box = topLevelBox(head, reader.size - pos);
-    if (!box) return;
+    if (!box) throw new MalformedFile(`bad box at ${pos}`);
     if (box.type === "moov" || box.type === "udta" || box.type === "meta") {
       if (box.size > MAX_MOOV) throw new MoovTooLarge();
       // `walk` over a range holding just this box handles it as a child.

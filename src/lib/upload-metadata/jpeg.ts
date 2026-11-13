@@ -11,7 +11,13 @@
 // Images listed in an MPF index (an Ultra HDR gain map, a camera's preview)
 // are walked the same way.
 
-import { asciiBytes, type Reader, startsWith, u16be } from "./bytes";
+import {
+  asciiBytes,
+  MalformedFile,
+  type Reader,
+  startsWith,
+  u16be,
+} from "./bytes";
 import {
   ORIENTATION_TIFF_LENGTH,
   orientationTiff,
@@ -38,11 +44,15 @@ const MPF_ID = "MPF\0";
 const XMP_EXTENSION_ID = "http://ns.adobe.com/xmp/extension/\0";
 const GAIN_MAP_ID = "urn:iso:std:iso:ts:21496:-1\0";
 const MPF_ENTRY_TAG = 0xb002;
+/** Marker segments before the first scan (fill and stray bytes don't count). */
 const MAX_SEGMENTS = 4096;
 const MAX_MPF_IMAGES = 16;
+/** Bytes read at a time while looking for the next marker. */
+const MARKER_WINDOW = 4096;
 
+/** SOI is all a decoder needs; what follows may start with stray bytes. */
 export function isJpeg(head: Uint8Array): boolean {
-  return head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
+  return head[0] === 0xff && head[1] === 0xd8;
 }
 
 export async function scanJpeg(
@@ -58,26 +68,26 @@ export async function scanJpeg(
   let keptOrientation = false;
   const secondaryImages: number[] = [];
 
-  for (let segments = 0; segments < MAX_SEGMENTS; segments += 1) {
-    const head = await reader.bytes(pos, 4);
-    if (head.byteLength < 2 || head[0] !== 0xff) return;
-    const marker = head[1];
-    if (marker === 0xff) {
-      pos += 1; // fill byte
-      continue;
-    }
+  // Decoders look for the next marker past stray bytes and fill bytes, so
+  // this walk does too; and every way out of it but SOS or EOI throws, since
+  // a scan that stopped early can't say the rest of the file is clean.
+  for (let segments = 0; ; segments += 1) {
+    if (segments >= MAX_SEGMENTS) throw new MalformedFile("too many segments");
+    const found = await nextMarker(reader, pos);
+    if (!found) throw new MalformedFile("no scan");
+    const { at, marker } = found;
     if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
-      pos += 2;
+      pos = at + 2;
       continue;
     }
     if (marker === MARKER_SOS || marker === MARKER_EOI) break;
-    if (head.byteLength < 4) return;
-    const length = u16be(head, 2);
-    if (length < 2) return;
-    const payloadStart = pos + 4;
+    const length = u16be(await reader.exact(at + 2, 2), 0);
+    if (length < 2) throw new MalformedFile(`bad segment length at ${at}`);
+    const payloadStart = at + 4;
     const payloadLength = length - 2;
-    const next = pos + 2 + length;
-    if (next > reader.size) return;
+    const next = at + 2 + length;
+    if (next > reader.size)
+      throw new MalformedFile(`segment past end at ${at}`);
 
     if ((marker >= APP0 && marker <= APP15) || marker === MARKER_COM) {
       const id = await reader.bytes(payloadStart, Math.min(payloadLength, 48));
@@ -149,6 +159,42 @@ export async function scanJpeg(
       await scanJpeg(reader, state, offset, true);
     }
   }
+}
+
+/**
+ * The next marker at or after `from`, found the way libjpeg's next_marker
+ * finds it: bytes other than 0xFF are skipped, a run of 0xFF fill bytes
+ * counts as one, and 0xFF 0x00 is skipped as garbage. `at` is the 0xFF
+ * just before the marker code. Null at the end of the file.
+ */
+async function nextMarker(
+  reader: Reader,
+  from: number,
+): Promise<{ at: number; marker: number } | null> {
+  let pos = from;
+  while (pos < reader.size) {
+    const window = await reader.bytes(pos, MARKER_WINDOW);
+    let k = 0;
+    while (k < window.byteLength) {
+      k = window.indexOf(0xff, k);
+      if (k < 0) break;
+      let code = k + 1;
+      while (code < window.byteLength && window[code] === 0xff) code += 1;
+      if (code === window.byteLength) break; // the run goes on past the window
+      if (window[code] !== 0x00) {
+        return { at: pos + code - 1, marker: window[code] };
+      }
+      k = code + 1;
+    }
+    if (k < 0) {
+      pos += window.byteLength;
+    } else {
+      // Read again from the window's last byte, which may start a marker.
+      if (pos + window.byteLength >= reader.size) return null;
+      pos += window.byteLength - 1;
+    }
+  }
+  return null;
 }
 
 /**

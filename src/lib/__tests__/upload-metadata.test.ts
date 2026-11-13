@@ -610,3 +610,81 @@ describe("hostile files", () => {
     expect(state.patches).toHaveLength(2);
   });
 });
+
+describe("early exits", () => {
+  /** BASE_JPEG with `before` bytes, then a GPS EXIF, after SOI. */
+  const jpegAfter = (before: number[]) =>
+    concat(
+      BASE_JPEG.subarray(0, 2),
+      before,
+      exifSegment(),
+      BASE_JPEG.subarray(2),
+    );
+
+  it("finds EXIF past a stray byte between segments", async () => {
+    const { out, scan } = await strip(jpegAfter([0x00]));
+    expect(scan.stripped).toContain("gps");
+    expect(scan.unchecked).toBeNull();
+    noSecrets(out);
+  });
+
+  it("finds EXIF past stray 0xFF 0x00 pairs and other junk", async () => {
+    const { out, scan } = await strip(jpegAfter([0x12, 0xff, 0x00, 0x34]));
+    expect(scan.stripped).toContain("gps");
+    noSecrets(out);
+  });
+
+  it("does not count 5000 fill bytes as segments", async () => {
+    const { out, scan } = await strip(
+      jpegAfter(Array.from({ length: 5000 }, () => 0xff)),
+    );
+    expect(scan.stripped).toContain("gps");
+    expect(scan.unchecked).toBeNull();
+    noSecrets(out);
+  });
+
+  it("flags a JPEG with more segments than it walks", async () => {
+    const empty = jpegSegment(0xfe, new Uint8Array(0));
+    const file = jpegWith(
+      ...Array.from({ length: 5000 }, () => empty),
+      exifSegment(),
+    );
+    const { scan } = await strip(file);
+    expect(scan.unchecked).toBe("malformed");
+  });
+
+  it("flags a JPEG segment with a bad length", async () => {
+    const file = jpegWith(Uint8Array.of(0xff, 0xfe, 0x00, 0x01), exifSegment());
+    const { scan } = await strip(file);
+    expect(scan.unchecked).toBe("malformed");
+  });
+
+  it("flags a JPEG that ends before its scan", async () => {
+    const file = concat(BASE_JPEG.subarray(0, 2), exifSegment());
+    const { out, scan } = await strip(file);
+    expect(scan.unchecked).toBe("malformed");
+    noSecrets(out);
+  });
+
+  it("flags a GIF block it doesn't know", async () => {
+    const file = gifWith({ comment: "shot at home" });
+    const at = file.indexOf(0x2c, 13); // the frame
+    const bad = concat(file.subarray(0, at), [0x99], file.subarray(at));
+    const { scan } = await strip(bad);
+    expect(scan.unchecked).toBe("malformed");
+    expect(scan.stripped).toContain("comment");
+  });
+
+  it("flags a PNG without IEND", async () => {
+    const file = pngWith(pngChunk("tEXt", text("Comment\0hi")));
+    const { scan } = await strip(file.subarray(0, file.length - 12));
+    expect(scan.unchecked).toBe("malformed");
+  });
+
+  it("flags a WebP chunk that runs past the file", async () => {
+    const file = webpWith({ xmp: xmpPacket() });
+    const cut = file.slice(0, file.length - 10);
+    const { scan } = await strip(cut);
+    expect(scan.unchecked).toBe("malformed");
+  });
+});
