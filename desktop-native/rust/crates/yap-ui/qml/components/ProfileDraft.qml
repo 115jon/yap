@@ -47,7 +47,7 @@ QtObject {
     // The frame editor's crop (`{x, y, width, height}` in percent, or
     // null), when it changed (a recent avatar starts without one).
     property var crop: null
-    property bool cropChanged: false
+    property bool cropEdited: false
     // The display-name style as the views carry it, or empty.
     property string nameStyle
     // A picture or video for the nameplate, or the upload to delete.
@@ -70,7 +70,7 @@ QtObject {
         || bannerColor !== Settings.bannerColor
         || avatarPath.length > 0 || removeAvatar || avatarUrl.length > 0
         || bannerPath.length > 0 || removeBanner
-        || cropChanged || nameStyle !== Session.meNameStyle
+        || cropEdited || nameStyle !== Session.meNameStyle
         || nameplatePath.length > 0 || removeNameplate
     readonly property bool dirty: profileDirty || nameChanged
     // The display name as the core would refuse it, or empty.
@@ -93,7 +93,7 @@ QtObject {
         const display = JSON.parse(Session.meDisplay)
         return display && display.crop ? display.crop : null
     }
-    readonly property var shownCrop: removeAvatar ? null : cropChanged ? crop : storedCrop
+    readonly property var shownCrop: removeAvatar ? null : cropEdited ? crop : storedCrop
     readonly property string nameplateType: nameplatePath.length > 0 ? Settings.nameplateType(nameplatePath) : ""
     // The plate the preview wears: the picked file, else the saved one.
     readonly property string shownPlate: removeNameplate ? ""
@@ -140,7 +140,7 @@ QtObject {
         bannerPath = ""
         removeBanner = false
         crop = null
-        cropChanged = false
+        cropEdited = false
         nameStyle = Session.meNameStyle
         nameplatePath = ""
         removeNameplate = false
@@ -181,7 +181,7 @@ QtObject {
             bannerPath: bannerPath,
             removeBanner: removeBanner,
             crop: crop,
-            cropChanged: cropChanged,
+            cropChanged: cropEdited,
             nameStyle: nameStyle,
             nameStyleChanged: nameStyle !== Session.meNameStyle,
             nameplatePath: nameplatePath,
@@ -214,7 +214,7 @@ QtObject {
         }
         removeAvatar = false
         crop = frame
-        cropChanged = true
+        cropEdited = true
     }
     // One of the recent uploads again (`stored` is what the save sends,
     // `url` its picture); it starts unframed (withoutCrop).
@@ -225,14 +225,14 @@ QtObject {
         avatarUrl = stored
         avatarUrlShown = url
         crop = null
-        cropChanged = true
+        cropEdited = true
     }
     // Remove: a picked or recent picture is dropped, else the saved one
     // comes off on Save.
     function dropAvatar() {
         localError = ""
         crop = null
-        cropChanged = false
+        cropEdited = false
         if (avatarPath.length > 0 || avatarUrl.length > 0) {
             avatarPath = ""
             avatarUrl = ""
