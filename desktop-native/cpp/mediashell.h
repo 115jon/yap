@@ -11,7 +11,16 @@
 //                              when unset
 //   Files.clipboardFiles()     files copied in Explorer, or a copied picture
 //                              saved as a PNG (empty when neither); the
-//                              core deletes the PNG once it is uploaded
+//                              core deletes the PNG once it is uploaded.
+//                              With YAP_TEST_PASTE=<file> (tests) the
+//                              clipboard is never read: that file stands in
+//                              for it, a picture as a copied image (decoded,
+//                              then saved as a PNG like a real one),
+//                              anything else as a file copied in Explorer
+//   Files.testPaste()          tests: YAP_TEST_PASTE is set
+//   Files.testPasteKey(item)   tests: Ctrl+V sent to `item` as a key press
+//                              (the composer's paste path), never through
+//                              the real keyboard
 //   Files.downloadPath(name)   a free path in the Downloads folder
 //   Files.openPath(name)       a path in the app's cache for opening
 //   Files.reveal(path)         shows the file in Explorer, selected
@@ -51,6 +60,8 @@ public:
   Q_INVOKABLE QStringList pickFiles(const QString& title);
   Q_INVOKABLE QString testPickColor() const;
   Q_INVOKABLE QStringList clipboardFiles();
+  Q_INVOKABLE bool testPaste() const;
+  Q_INVOKABLE void testPasteKey(QObject* item) const;
   Q_INVOKABLE QString downloadPath(const QString& name) const;
   Q_INVOKABLE QString openPath(const QString& name) const;
   Q_INVOKABLE QString copyPath(const QString& name) const;
