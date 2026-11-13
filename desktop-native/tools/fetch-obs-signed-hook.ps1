@@ -3,7 +3,7 @@
     Fetch and verify the pinned, OBS-signed game-capture files.
 
 .DESCRIPTION
-    Reads desktop/packaging/obs-signed-hook.lock.json, downloads the official
+    Reads desktop-native/packaging/obs-signed-hook.lock.json, downloads the official
     OBS Studio Windows release zip from the obsproject GitHub release (unless the
     files are already in place and valid), checks the zip's SHA-256, extracts the
     six capture files unmodified, and checks each one against the lock: SHA-256,
@@ -18,7 +18,7 @@
     for attaching to a desktop release.
 
 .PARAMETER Destination
-    Where the six files go. Default: desktop/src-tauri/resources/obs-capture/obs-signed.
+    Where the six files go (package.ps1 passes the staged obs-capture\obs-signed).
 
 .PARAMETER CacheDir
     Where the release zip is cached between runs. Default: $env:TEMP\ralph-obs-signed-hook.
@@ -31,7 +31,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $Destination,
+    [Parameter(Mandatory)] [string] $Destination,
     [string] $CacheDir = (Join-Path $env:TEMP 'ralph-obs-signed-hook'),
     [string] $ZipPath,
     [string] $SourcesDir
@@ -40,12 +40,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$desktopDir = Split-Path -Parent $PSScriptRoot
-$lockPath = Join-Path $desktopDir 'packaging/obs-signed-hook.lock.json'
+$nativeDir = Split-Path -Parent $PSScriptRoot
+$lockPath = Join-Path $nativeDir 'packaging/obs-signed-hook.lock.json'
 $lock = Get-Content -Raw -Path $lockPath | ConvertFrom-Json
-if (-not $Destination) {
-    $Destination = Join-Path $desktopDir 'src-tauri/resources/obs-capture/obs-signed'
-}
 
 function Get-Sha256([string] $Path) {
     (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLowerInvariant()

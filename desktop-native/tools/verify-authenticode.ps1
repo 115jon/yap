@@ -7,7 +7,7 @@
     Runs `signtool verify /pa /all` (default Authenticode policy, every
     signature) on each file, then checks the signer's common name and that the
     signature has an RFC 3161 timestamp, so it stays valid after the
-    short-lived Artifact Signing certificate expires. The desktop-release
+    short-lived Artifact Signing certificate expires. The desktop-native-release
     workflow calls it after Azure Artifact Signing. See CODE_SIGNING_POLICY.md.
 
 .PARAMETER Path

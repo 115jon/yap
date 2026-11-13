@@ -563,10 +563,10 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
 
-      # Yap.exe is signed here, as desktop-release.yml signs its binaries;
-      # vpk then signs what it adds (Update.exe, the root stub, Setup.exe)
-      # through the same account. OBS's and Microsoft's files keep their
-      # own signatures (package.ps1 --signExclude).
+      # Yap.exe is signed here first; vpk then signs what it adds
+      # (Update.exe, the root stub, Setup.exe) through the same account.
+      # OBS's and Microsoft's files keep their own signatures (package.ps1
+      # --signExclude).
       - name: Sign Yap.exe
         if: needs.plan.outputs.dry_run != 'true'
         uses: azure/artifact-signing-action@208f8af4bf26cf2af8597424e3cb5582801523ba # v2.0.0
@@ -613,7 +613,7 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $files = @("$env:OUT\$env:PACK_ID-$env:CHANNEL-Setup.exe") + (Get-ChildItem "$x\lib\app" -Filter *.exe).FullName
           if ($files.Count -ne 4) { throw "Expected Setup.exe and three exes in the package, found $($files.Count)" }
-          ./desktop/scripts/verify-authenticode.ps1 -ExpectedSigner $env:ARTIFACT_SIGNING_SIGNER -Path $files
+          ./desktop-native/tools/verify-authenticode.ps1 -ExpectedSigner $env:ARTIFACT_SIGNING_SIGNER -Path $files
 
       # Manual mode. A draft first, so nothing is visible while files
       # upload; packages and the OBS source archives before the feed file, so
