@@ -63,6 +63,21 @@ Item {
         onTriggered: Chat.prefetchEmbeds(input.text, false)
     }
 
+    // Tests: with YAP_TEST_PASTE (Files.clipboardFiles' stand-in for the
+    // clipboard) Ctrl+V reaches the field once as a key press, 3 s after
+    // the first channel opens: the paste path without the real clipboard
+    // or keyboard.
+    property bool testPasted: false
+    Timer {
+        interval: 3000
+        running: !root.testPasted && !root.readOnly && Nav.activeChannelId.length > 0 && Files.testPaste()
+        onTriggered: {
+            root.testPasted = true
+            input.forceActiveFocus()
+            Files.testPasteKey(input)
+        }
+    }
+
     function focusInput() {
         input.forceActiveFocus()
     }

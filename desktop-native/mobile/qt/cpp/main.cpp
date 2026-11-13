@@ -158,6 +158,9 @@ int main(int argc, char* argv[])
                                         // Qt's splash (sticky in the manifest)
                                         // fades out over the first frame.
                                         QNativeInterface::QAndroidApplication::hideSplashScreen(200);
+                                        // The window's text view, taught to
+                                        // take the keyboard's pictures.
+                                        Native::instance()->installContent();
 #endif
                                       });
                    });

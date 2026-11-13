@@ -10,8 +10,10 @@ import Yap.Ui
 // toggle; one still going is dimmed with its progress; a failed one says
 // so and Retry starts it again. Remove (or cancel) is always shown: touch
 // has no hover. A file over the limit is never uploaded: the core keeps it
-// as a too-big card (the desktop's TooBigCard copy, without the mascot),
-// and two or more of them fold into one card with "Remove the big ones".
+// as a too-big card (Yap.Ui's TooBigCard, the desktop's: Yappy's pose, the
+// name, "31.2 MB · 6.2 MB over the 25 MB limit", Remove and Choose
+// another), and two or more of them fold into one card with "Remove the
+// big ones". The tray grows to the tallest card.
 Item {
     id: root
 
@@ -41,63 +43,18 @@ Item {
         return { images: images, index: at }
     }
 
-    implicitHeight: shown ? 88 : 0
+    // The cards' width: the phone's, less the tray's margins, at most the
+    // desktop tray's.
+    readonly property real cardWidth: Math.min(width - 24, 380)
+    // The tallest tile (a card is taller than a picture).
+    readonly property real rowHeight: Math.max(72, tiles.contentItem.childrenRect.height)
+
+    implicitHeight: shown ? rowHeight + 16 : 0
     clip: true
     Behavior on implicitHeight { NumberAnimation { duration: Theme.dur2; easing.type: Easing.OutCubic } }
 
     Accessible.role: Accessible.List
     Accessible.name: qsTr("Attachments")
-
-    component Card: Rectangle {
-        id: card
-        property var info: ({})
-        signal action(string id)
-        readonly property var actions: info.actions ?? []
-        width: 248
-        height: 72
-        radius: Theme.radius
-        color: Theme.ply2
-        border.width: 1
-        border.color: Theme.mix(Theme.warningInk, 0.36)
-        Accessible.role: Accessible.AlertMessage
-        Accessible.name: info.alert ?? ""
-        Column {
-            x: 10
-            y: 8
-            width: parent.width - 20
-            spacing: 2
-            Text {
-                width: parent.width
-                text: card.info.headline ?? ""
-                textFormat: Text.PlainText
-                elide: Text.ElideRight
-                color: Theme.ink1
-                font: Theme.type.labelStrong
-            }
-            Text {
-                width: parent.width
-                text: card.info.line ?? ""
-                textFormat: Text.PlainText
-                elide: Text.ElideRight
-                color: Theme.ink2
-                font: Theme.type.caption
-            }
-            Row {
-                spacing: 16
-                Repeater {
-                    model: card.actions
-                    LinkText {
-                        required property string modelData
-                        text: modelData === "remove" ? qsTr("Remove")
-                            : modelData === "choose" ? qsTr("Choose another")
-                            : modelData === "removeBig" ? qsTr("Remove the big ones")
-                            : modelData === "pick" ? qsTr("Pick another") : modelData
-                        onActivated: card.action(modelData)
-                    }
-                }
-            }
-        }
-    }
 
     ListView {
         id: tiles
@@ -115,10 +72,13 @@ Item {
 
         header: Item {
             width: root.folded ? summary.width + 8 : 0
-            height: tiles.height
-            Card {
+            height: root.folded ? summary.implicitHeight : 0
+            TooBigCard {
                 id: summary
                 visible: root.folded
+                width: root.cardWidth
+                compact: true
+                edge: Theme.mix(Theme.warningInk, 0.36)
                 info: root.folded ? JSON.parse(Limits.traySummary(Chat.uploadsTooBig, tiles.count - Chat.uploadsTooBig, Settings.attachmentLimit)) : ({})
                 onAction: id => {
                     if (id === "removeBig")
@@ -154,15 +114,18 @@ Item {
             readonly property bool hidden: root.folded && uploadState === "toobig"
 
             width: hidden ? 0 : isCard ? tooBig.width : 72
-            height: 72
+            height: isCard ? tooBig.implicitHeight : 72
             visible: !hidden
             Accessible.role: Accessible.ListItem
             Accessible.name: tile.failed ? qsTr("%1, upload failed. Tap to retry").arg(tile.name)
                 : tile.going ? qsTr("%1, uploading").arg(tile.name) : tile.name
 
-            Card {
+            TooBigCard {
                 id: tooBig
                 visible: tile.isCard
+                width: root.cardWidth
+                compact: true
+                edge: Theme.mix(Theme.warningInk, 0.36)
                 info: tile.isCard ? JSON.parse(tile.card) : ({})
                 onAction: id => {
                     Chat.removeUpload(tile.uploadId)

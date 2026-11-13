@@ -30,6 +30,7 @@ const QML: &[&str] = &[
     "qml/CallBar.qml",
     "qml/DmCallStrip.qml",
     "qml/IncomingCallSheet.qml",
+    "qml/AttachSheet.qml",
     "qml/BottomSheet.qml",
     "qml/SheetRow.qml",
     "qml/ServerSheet.qml",

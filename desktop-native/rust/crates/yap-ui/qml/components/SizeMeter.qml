@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // The too-big size meter (toobig-spec.md): a 6 px track spanning

@@ -11,7 +11,9 @@
      until main.cpp hides it at the first frame; push notifications
      (the FCM service, the Reply and Mark as read receiver, the permission);
      and voice calls (the mic, the audio route, the call's service);
-     and links into the app (LinkActivity's filters).
+     and links into the app (LinkActivity's filters); the composer's Camera
+     (CaptureProvider, where the camera app writes the photo; no camera
+     permission: the system camera takes it).
      No package attribute: the application id is CMake's YAP_ANDROID_APP_ID
      (Gradle's namespace); the label is YAP_ANDROID_APP_NAME ("Yap", CI's
      "Yap CI"). -->
@@ -55,6 +57,11 @@
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.HOME" />
+        </intent>
+        <!-- The composer's Camera: is there a camera app to take the photo
+             (NativeShim.takePhotoIntent)? -->
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
         </intent>
     </queries>
     <!-- %%INSERT_PERMISSIONS -->
@@ -185,6 +192,16 @@
             android:name="com.google.firebase.messaging.default_notification_color"
             android:resource="@color/yap_accent" />
 
+        <!-- The composer's Camera writes its photo here (cache/capture). -->
+        <provider
+            android:name="dev.yap.qtproto.CaptureProvider"
+            android:authorities="${applicationId}.capture"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/yap_capture_paths"/>
+        </provider>
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.qtprovider"

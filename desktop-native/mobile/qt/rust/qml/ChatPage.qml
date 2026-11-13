@@ -89,6 +89,7 @@ Item {
     // emoji and GIF picker): Back and its gesture are that thing's, and the
     // pager does not pan.
     readonly property bool overlayShown: viewer.shown || actions.shown || (picker.item?.up ?? false)
+        || (attachSheet.item?.up ?? false)
     // The back gesture's progress while it does (the viewer shrinks and
     // fades); the pager passes it on.
     property real backProgress: 0
@@ -413,6 +414,29 @@ Item {
         onPickerRequested: tab => {
             picker.active = true
             picker.item.openOn(tab, "gifs")
+        }
+        onAttachRequested: {
+            attachSheet.active = true
+            attachSheet.item.open()
+        }
+    }
+
+    // The + key's sheet (photos and videos, camera, files, GIFs, stickers),
+    // made on first use.
+    Loader {
+        id: attachSheet
+        anchors.fill: parent
+        z: 9
+        active: false
+        sourceComponent: AttachSheet {
+            onChosen: what => {
+                if (what === "gifs" || what === "stickers") {
+                    picker.active = true
+                    picker.item.openOn("gifs", what)
+                } else {
+                    composer.attach(what)
+                }
+            }
         }
     }
 

@@ -8,9 +8,12 @@ import Yap.Ui
 // The composer, phone layout. From the top: the reply bar (who and what is
 // being answered, and Cancel), a notice line (an upload or send the core
 // refused), the emoji row (its last cell opens the whole picker), the
-// upload tray, then the field row: attach, the growing field (up to five
-// lines) with the GIF key (the picker sheet on its GIFs tab) and the emoji
-// key, and Send. Member
+// upload tray, then the field row: attach (the page's attach sheet: photos
+// and videos, the camera, files, GIFs, stickers), the growing field (up to
+// five lines) with the GIF key (the picker sheet on its GIFs tab) and the
+// emoji key, and Send. Paste with a picture or files on the clipboard
+// attaches them, and so do the pictures, GIFs and stickers a keyboard
+// inserts (Gboard, Samsung Keyboard: Native's commitContent hook). Member
 // suggestions for `@` float above it all, over the messages. The soft
 // keyboard's Enter adds a line (Android gives a multi-line field no Send
 // action) and the send key sends; a hardware keyboard's Enter sends and
@@ -36,6 +39,9 @@ Rectangle {
     signal pickerRequested(string tab)
     // A GIF or a sticker went out (through `core`).
     signal gifSent()
+    // The + key: the page opens its attach sheet (AttachSheet), whose
+    // choice comes back to `attach`.
+    signal attachRequested()
 
     // The shared composer logic, for the picker sheet's sends.
     readonly property alias core: core
@@ -123,6 +129,41 @@ Rectangle {
         root.picking = true
         Native.pickMedia(Settings.attachmentLimit)
     }
+    // An attach sheet choice that opens a system picker: media | camera |
+    // files.
+    function attach(what) {
+        if (what === "files") {
+            root.picking = true
+            Native.pickFiles(Settings.attachmentLimit)
+        } else if (what === "camera") {
+            root.picking = true
+            const state = Native.takePhoto()
+            if (state !== 0)
+                root.picking = false
+            if (state === 1)
+                root.showNotice(qsTr("There is no camera app to take a photo with."))
+            else if (state === 2)
+                root.showNotice(qsTr("Allow the camera, then tap Camera again."))
+        } else {
+            root.pickMedia()
+        }
+    }
+    // A photo the camera took after Android killed the app behind it goes
+    // to the tray once a channel's composer can take it.
+    readonly property bool takesLeftover: root.enabled && Nav.activeChannelId.length > 0
+    onTakesLeftoverChanged: takeLeftoverPhoto()
+    Component.onCompleted: takeLeftoverPhoto()
+    function takeLeftoverPhoto() {
+        if (!root.takesLeftover)
+            return
+        const path = Native.takeLeftoverPhoto()
+        if (path.length === 0)
+            return
+        Chat.addFiles([path])
+        root.showNotice(qsTr("Your camera photo is in the tray, ready to send."))
+    }
+    // A paste's files are being copied in.
+    property bool pasting: false
     Connections {
         target: Native
         function onMediaPicked(paths, failed) {
@@ -134,7 +175,24 @@ Rectangle {
             if (failed > 0)
                 root.showNotice(qsTr("%n of the picked files could not be read.", "", failed))
         }
+        // A paste's files, or a picture the keyboard inserted into this
+        // composer's field.
+        function onContentReceived(paths, failed) {
+            if (!root.pasting && !field.activeFocus)
+                return
+            root.pasting = false
+            if (paths.length > 0)
+                Chat.addFiles(paths)
+            if (failed > 0)
+                root.showNotice(qsTr("%n of the pasted files could not be read.", "", failed))
+        }
     }
+    // The keyboard may insert pictures while this field has focus.
+    function offerContent() {
+        Native.setAcceptContent(field.activeFocus && root.enabled, Settings.attachmentLimit)
+    }
+    onEnabledChanged: offerContent()
+    Component.onDestruction: Native.setAcceptContent(false, 0)
 
     // ---- Emoji --------------------------------------------------------------
 
@@ -332,7 +390,7 @@ Rectangle {
         UploadTray {
             width: parent.width
             height: implicitHeight
-            onChooseAnother: root.pickMedia()
+            onChooseAnother: root.attachRequested()
             onExplain: text => root.showNotice(text)
             onPreview: (images, index) => root.openImages(images, index)
         }
@@ -355,10 +413,10 @@ Rectangle {
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 8 + (Math.min(plate.height, 48) - height) / 2
             iconName: "add"
-            tip: qsTr("Add photos or videos")
+            tip: qsTr("Add attachment")
             enabled: !Native.pickingMedia
             opacity: Native.pickingMedia ? 0 : 1
-            onClicked: root.pickMedia()
+            onClicked: root.attachRequested()
         }
         Spinner {
             anchors.centerIn: attachKey
@@ -404,6 +462,18 @@ Rectangle {
                     // Text selection on touch: Qt draws the platform's handles
                     // and its cut/copy/paste bar (QtQuick native handles).
                     persistentSelection: true
+                    onActiveFocusChanged: root.offerContent()
+                    // Paste (the selection bar's, which Qt sends as the
+                    // shortcut, or a hardware keyboard's) with files or a
+                    // picture on the clipboard attaches them, as on the web
+                    // and the desktop; text pastes as text.
+                    Keys.onPressed: event => {
+                        if (event.matches(StandardKey.Paste) && Native.clipboardHasFiles()
+                                && Native.pasteFiles(Settings.attachmentLimit)) {
+                            root.pasting = true
+                            event.accepted = true
+                        }
+                    }
                     Keys.onReturnPressed: event => {
                         // A new line from the soft keyboard's Enter, and from
                         // Shift+Enter; a hardware keyboard's Enter sends.
