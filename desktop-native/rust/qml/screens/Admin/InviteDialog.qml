@@ -13,14 +13,11 @@ PlateDialog {
     property string serverName
     property int expiresHours: 24
     property int maxUses: 0
-    property int doneCount: 0
     property bool showLink: false
     property bool copied: false
 
-    readonly property var model: JSON.parse(Admin.state)
-    readonly property var act: model.acts["quick-invite"] ?? { busy: false, error: "", done: 0 }
     readonly property var schema: JSON.parse(Admin.schema())
-    readonly property string link: model.createdInviteLink
+    readonly property string link: maker.url
 
     function start(name) {
         serverName = name
@@ -28,9 +25,13 @@ PlateDialog {
         maxUses = 0
         showLink = false
         copied = false
-        Admin.clear("quick-invite")
-        doneCount = act.done
+        maker.reset()
         open()
+    }
+
+    InviteMaker {
+        id: maker
+        onMade: if (dialog.opened) dialog.showLink = true
     }
 
     // DialogContent as it stands (the 28/32 title, the close key) at its
@@ -42,15 +43,7 @@ PlateDialog {
     rule: true
     description: showLink ? qsTr("Share this link with others to let them join your server.")
         : qsTr("Choose how long the link lasts and how many people can use it.")
-    busy: act.busy
-    onActChanged: {
-        if (act.done < doneCount)
-            doneCount = act.done
-        else if (opened && act.done > doneCount) {
-            doneCount = act.done
-            showLink = true
-        }
-    }
+    busy: maker.busy
 
     Timer {
         id: copiedTimer
@@ -90,9 +83,9 @@ PlateDialog {
         }
     }
     RowError {
-        visible: !dialog.showLink && dialog.act.error.length > 0
+        visible: !dialog.showLink && maker.error.length > 0
         above: 0
-        text: dialog.act.error
+        text: maker.error
     }
 
     FieldPlate {
@@ -113,7 +106,7 @@ PlateDialog {
         variant: "rule"
         text: qsTr("Generate new link")
         onClicked: {
-            Admin.clear("quick-invite")
+            maker.reset()
             dialog.showLink = false
         }
     }
@@ -122,7 +115,7 @@ PlateDialog {
         KitButton {
             variant: "ghost"
             text: dialog.showLink ? qsTr("Done") : qsTr("Cancel")
-            enabled: !dialog.act.busy
+            enabled: !maker.busy
             onClicked: dialog.close()
         },
         KitButton {
@@ -130,8 +123,8 @@ PlateDialog {
             variant: "primary"
             ground: Theme.ply3
             text: qsTr("Generate invite link")
-            loading: dialog.act.busy
-            onClicked: if (!dialog.act.busy) Admin.createQuickInvite(dialog.expiresHours, dialog.maxUses)
+            loading: maker.busy
+            onClicked: maker.makeServer(dialog.expiresHours, dialog.maxUses)
         },
         KitButton {
             visible: dialog.showLink
