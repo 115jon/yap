@@ -20,6 +20,7 @@ Item {
     property string staged: ""
     readonly property real gap: 8
     readonly property real cell: Math.floor((width - gap) / 2)
+    readonly property real stageHeight: Math.round(width * 9 / 16)
 
     implicitHeight: count > 0 ? column.implicitHeight : 0
     visible: count > 0
@@ -55,12 +56,11 @@ Item {
         width: root.width
         spacing: root.gap
 
-        // The stage: the tile on it, full width. The grid's own delegate is
-        // moved here, so its video keeps playing across the move.
+        // The stage: the face of the tile on it, full width.
         Item {
             id: stageSlot
             width: parent.width
-            height: root.staged.length > 0 ? Math.round(width * 9 / 16) : 0
+            height: root.staged.length > 0 ? root.stageHeight : 0
             visible: height > 0
         }
 
@@ -74,10 +74,16 @@ Item {
                 model: VoiceTileModel
                 onCountChanged: Qt.callLater(root.recount)
 
-                delegate: Rectangle {
+                // Each delegate is a slot that stays where the model has it
+                // (Flow lays out in child order; QML cannot restack an item).
+                // Its face is what moves: to the stage while on it, so its
+                // video keeps playing across the move, and back into its own
+                // slot after. A staged slot has no size, so the grid closes
+                // up around it; it stays visible, and the face's size follows
+                // the stage, so the video is never hidden mid-move.
+                delegate: Item {
                     id: tile
 
-                    required property int index
                     required property string tileId
                     required property string kind
                     required property string participantId
@@ -101,182 +107,166 @@ Item {
                     readonly property bool talking: speaking && !muted
 
                     onShownChanged: Qt.callLater(root.recount)
-                    onOnStageChanged: place()
-                    Component.onCompleted: {
-                        // Made while on stage (the model reset): straight there.
-                        place()
-                        Qt.callLater(root.recount)
-                    }
-                    // On stage the tile moves into the stage slot; back in the
-                    // grid it goes where the model has it (Flow lays out in
-                    // child order, and a new child is the last).
-                    function place() {
-                        if (onStage) {
-                            parent = stageSlot
-                            return
-                        }
-                        if (parent === flow)
-                            return
-                        parent = flow
-                        for (let i = index + 1; i < grid.count; ++i) {
-                            const next = grid.itemAt(i)
-                            if (next && next.parent === flow) {
-                                stackBefore(next)
-                                return
-                            }
-                        }
-                    }
+                    Component.onCompleted: Qt.callLater(root.recount)
 
                     visible: shown
-                    width: onStage ? stageSlot.width : root.cell
-                    height: onStage ? stageSlot.height : Math.round(root.cell * 9 / 16)
-                    radius: Theme.radius
-                    color: playing && screen ? "black" : Theme.ply2
-                    border.width: 1
-                    border.color: onStage ? Theme.accentInk : Theme.line
-                    clip: true
-                    Accessible.role: Accessible.Button
-                    Accessible.name: screen ? qsTr("%1's screen").arg(name) : qsTr("%1's camera").arg(name)
+                    width: onStage ? 0 : root.cell
+                    height: onStage ? 0 : Math.round(root.cell * 9 / 16)
 
-                    // Before the first frame, and for a share not watched:
-                    // the owner's face, or their share's still.
-                    Avatar {
-                        anchors.centerIn: parent
-                        visible: !tile.playing && !(tile.screen && tile.preview.length > 0)
-                        size: Math.min(64, Math.round(parent.height * 0.4))
-                        initials: tile.initials.length > 0 ? tile.initials : tile.name
-                        source: tile.avatar
-                    }
-                    Image {
-                        anchors.fill: parent
-                        anchors.margins: 1
-                        visible: tile.screen && !tile.playing && tile.preview.length > 0
-                        source: visible ? tile.preview : ""
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: false
-                        cache: false
-                        retainWhileLoading: true
-                        Accessible.ignored: true
-                    }
                     Rectangle {
-                        anchors.fill: parent
-                        anchors.margins: 1
-                        visible: tile.watchPrompt
-                        color: Theme.ply2
-                        opacity: 0.85
-                    }
-
-                    Loader {
-                        id: surface
-                        anchors.fill: parent
-                        anchors.margins: 1
-                        active: tile.showsVideo
-                        sourceComponent: VideoSurface {
-                            videoKey: tile.videoKey
-                            crop: !tile.screen
-                        }
-                    }
-                    Spinner {
-                        anchors.centerIn: parent
-                        running: tile.showsVideo && !tile.playing
-                        onMedia: true
-                    }
-
-                    TapHandler {
-                        onTapped: {
-                            Native.haptic(Native.Tick)
-                            if (tile.onStage)
-                                root.stage("", "")
-                            else
-                                root.stage(tile.tileId, tile.participantId)
-                        }
-                    }
-
-                    // A share nobody here watches: Watch.
-                    Column {
-                        visible: tile.watchPrompt
-                        anchors.centerIn: parent
-                        width: parent.width - 16
-                        spacing: 6
-                        Text {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            elide: Text.ElideRight
-                            textFormat: Text.PlainText
-                            text: qsTr("%1 is sharing").arg(tile.name)
-                            color: Theme.ink1
-                            font: Theme.type.captionStrong
-                        }
-                        KitButton {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            size: "sm"
-                            iconName: "screenShare"
-                            text: qsTr("Watch")
-                            onClicked: {
-                                Native.haptic(Native.Tick)
-                                Voice.watch(tile.participantId, true)
-                            }
-                        }
-                    }
-
-                    // A watched share: stop watching.
-                    IconKey {
-                        visible: tile.screen && tile.watching
-                        anchors.top: parent.top
-                        anchors.right: parent.right
-                        anchors.margins: 4
-                        size: 32
-                        iconName: "close"
-                        tone: "rest"
-                        tip: qsTr("Stop watching")
-                        onClicked: {
-                            Native.haptic(Native.Tick)
-                            if (tile.onStage)
-                                root.stage("", "")
-                            Voice.watch(tile.participantId, false)
-                        }
-                    }
-
-                    // The nameplate: talk LED and name on a dark chip.
-                    Rectangle {
-                        x: 6
-                        anchors.bottom: parent.bottom
-                        anchors.bottomMargin: 6
-                        width: Math.min(plate.implicitWidth + 12, parent.width - 12)
-                        height: 22
+                        id: face
+                        parent: tile.onStage ? stageSlot : tile
+                        visible: tile.shown
+                        width: tile.onStage ? root.width : root.cell
+                        height: tile.onStage ? root.stageHeight : Math.round(root.cell * 9 / 16)
                         radius: Theme.radius
-                        color: Qt.rgba(0, 0, 0, 0.6)
-                        Row {
-                            id: plate
-                            x: 6
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 6
-                            Led {
-                                anchors.verticalCenter: parent.verticalCenter
-                                lit: tile.talking
-                                color: Theme.talk
+                        color: tile.playing && tile.screen ? "black" : Theme.ply2
+                        border.width: 1
+                        border.color: tile.onStage ? Theme.accentInk : Theme.line
+                        clip: true
+                        Accessible.role: Accessible.Button
+                        Accessible.name: tile.screen ? qsTr("%1's screen").arg(tile.name) : qsTr("%1's camera").arg(tile.name)
+
+                        // Before the first frame, and for a share not watched:
+                        // the owner's face, or their share's still.
+                        Avatar {
+                            anchors.centerIn: parent
+                            visible: !tile.playing && !(tile.screen && tile.preview.length > 0)
+                            size: Math.min(64, Math.round(parent.height * 0.4))
+                            initials: tile.initials.length > 0 ? tile.initials : tile.name
+                            source: tile.avatar
+                        }
+                        Image {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            visible: tile.screen && !tile.playing && tile.preview.length > 0
+                            source: visible ? tile.preview : ""
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: false
+                            cache: false
+                            retainWhileLoading: true
+                            Accessible.ignored: true
+                        }
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            visible: tile.watchPrompt
+                            color: Theme.ply2
+                            opacity: 0.85
+                        }
+
+                        Loader {
+                            id: surface
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            active: tile.showsVideo
+                            sourceComponent: VideoSurface {
+                                videoKey: tile.videoKey
+                                crop: !tile.screen
                             }
+                        }
+                        Spinner {
+                            anchors.centerIn: parent
+                            running: tile.showsVideo && !tile.playing
+                            onMedia: true
+                        }
+
+                        TapHandler {
+                            onTapped: {
+                                Native.haptic(Native.Tick)
+                                if (tile.onStage)
+                                    root.stage("", "")
+                                else
+                                    root.stage(tile.tileId, tile.participantId)
+                            }
+                        }
+
+                        // A share nobody here watches: Watch.
+                        Column {
+                            visible: tile.watchPrompt
+                            anchors.centerIn: parent
+                            width: parent.width - 16
+                            spacing: 6
                             Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: Math.min(implicitWidth, tile.width - 44)
+                                width: parent.width
+                                horizontalAlignment: Text.AlignHCenter
                                 elide: Text.ElideRight
                                 textFormat: Text.PlainText
-                                text: tile.name
-                                color: "white"
+                                text: qsTr("%1 is sharing").arg(tile.name)
+                                color: Theme.ink1
                                 font: Theme.type.captionStrong
                             }
+                            KitButton {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                size: "sm"
+                                iconName: "screenShare"
+                                text: qsTr("Watch")
+                                onClicked: {
+                                    Native.haptic(Native.Tick)
+                                    Voice.watch(tile.participantId, true)
+                                }
+                            }
                         }
-                    }
 
-                    // The speaking ring, as the roster's.
-                    Rectangle {
-                        anchors.fill: parent
-                        color: "transparent"
-                        radius: Theme.radius
-                        border.width: 2
-                        border.color: Theme.talk
-                        opacity: tile.talking && !tile.screen ? 1 : 0
-                        Behavior on opacity { NumberAnimation { duration: tile.talking ? Theme.speakOn : Theme.speakOff } }
+                        // A watched share: stop watching.
+                        IconKey {
+                            visible: tile.screen && tile.watching
+                            anchors.top: parent.top
+                            anchors.right: parent.right
+                            anchors.margins: 4
+                            size: 32
+                            iconName: "close"
+                            tone: "rest"
+                            tip: qsTr("Stop watching")
+                            onClicked: {
+                                Native.haptic(Native.Tick)
+                                if (tile.onStage)
+                                    root.stage("", "")
+                                Voice.watch(tile.participantId, false)
+                            }
+                        }
+
+                        // The nameplate: talk LED and name on a dark chip.
+                        Rectangle {
+                            x: 6
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 6
+                            width: Math.min(plate.implicitWidth + 12, parent.width - 12)
+                            height: 22
+                            radius: Theme.radius
+                            color: Qt.rgba(0, 0, 0, 0.6)
+                            Row {
+                                id: plate
+                                x: 6
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 6
+                                Led {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    lit: tile.talking
+                                    color: Theme.talk
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: Math.min(implicitWidth, face.width - 44)
+                                    elide: Text.ElideRight
+                                    textFormat: Text.PlainText
+                                    text: tile.name
+                                    color: "white"
+                                    font: Theme.type.captionStrong
+                                }
+                            }
+                        }
+
+                        // The speaking ring, as the roster's.
+                        Rectangle {
+                            anchors.fill: parent
+                            color: "transparent"
+                            radius: Theme.radius
+                            border.width: 2
+                            border.color: Theme.talk
+                            opacity: tile.talking && !tile.screen ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: tile.talking ? Theme.speakOn : Theme.speakOff } }
+                        }
                     }
                 }
             }
