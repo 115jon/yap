@@ -231,9 +231,11 @@ mod tests {
     #[test]
     fn max_shown_should_keep_the_stage_then_shares_then_the_largest() {
         let mut s = Surfaces::default();
-        s.shown.insert(1, ("cam-video-small".into(), size(100, 100)));
+        s.shown
+            .insert(1, ("cam-video-small".into(), size(100, 100)));
         s.shown.insert(2, ("cam-video-big".into(), size(600, 400)));
-        s.shown.insert(3, ("screen-video-sharer".into(), size(50, 50)));
+        s.shown
+            .insert(3, ("screen-video-sharer".into(), size(50, 50)));
         s.shown.insert(4, ("cam-video-staged".into(), size(10, 10)));
         s.shown.insert(5, ("cam-video-mid".into(), size(300, 200)));
         s.stage = Some("staged".into());

@@ -99,7 +99,8 @@ impl RenderSize {
         if need <= most {
             return self;
         }
-        let scale = |n: u32| u32::try_from(u64::from(n) * u64::from(most) / u64::from(need)).unwrap_or(0);
+        let scale =
+            |n: u32| u32::try_from(u64::from(n) * u64::from(most) / u64::from(need)).unwrap_or(0);
         Self {
             width: scale(self.width),
             height: scale(self.height),
@@ -181,8 +182,14 @@ mod tests {
             height: 720,
         };
         assert_eq!(big.within(Quality::High), big);
-        assert_eq!(resolve_quality(Some(big.within(Quality::Medium))), Quality::Medium);
-        assert_eq!(resolve_quality(Some(big.within(Quality::Low))), Quality::Low);
+        assert_eq!(
+            resolve_quality(Some(big.within(Quality::Medium))),
+            Quality::Medium
+        );
+        assert_eq!(
+            resolve_quality(Some(big.within(Quality::Low))),
+            Quality::Low
+        );
         let small = RenderSize {
             width: 320,
             height: 180,
@@ -193,7 +200,10 @@ mod tests {
             width: 300,
             height: 600,
         };
-        assert_eq!(resolve_quality(Some(tall.within(Quality::Medium))), Quality::Medium);
+        assert_eq!(
+            resolve_quality(Some(tall.within(Quality::Medium))),
+            Quality::Medium
+        );
     }
 
     #[test]
