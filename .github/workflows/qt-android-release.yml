@@ -419,6 +419,10 @@ jobs:
     needs: [plan, sign]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      EMULATOR_API: 35
+      EMULATOR_TARGET: google_apis
+      EMULATOR_ARCH: x86_64
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -438,13 +442,44 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      # The emulator's system image (about 1 GB) comes from dl.google.com,
+      # which sometimes drops the download ("Premature EOF"), and
+      # android-emulator-runner does not retry it. So the image is cached
+      # (keyed on the API level, target and architecture the action is asked
+      # for), and a miss downloads it here with retries; the action then
+      # finds it installed. The AVD is not cached: the smoke is a cold boot
+      # (-no-snapshot), which a cached AVD would not speed up. The same two
+      # steps are in desktop-native-mobile.yml and qt-android-release.yml.
+      - name: Cache the emulator system image
+        id: system-image
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: /usr/local/lib/android/sdk/system-images/android-${{ env.EMULATOR_API }}/${{ env.EMULATOR_TARGET }}/${{ env.EMULATOR_ARCH }}
+          key: android-system-image-v1-${{ env.EMULATOR_API }}-${{ env.EMULATOR_TARGET }}-${{ env.EMULATOR_ARCH }}
+
+      - name: Download the emulator system image
+        if: steps.system-image.outputs.cache-hit != 'true'
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          image="system-images;android-$EMULATOR_API;$EMULATOR_TARGET;$EMULATOR_ARCH"
+          for attempt in 1 2 3 4; do
+            # `yes` accepts the licence prompt (as the action does).
+            if "$sdkmanager" --install "$image" < <(yes); then
+              exit 0
+            fi
+            echo "::warning::sdkmanager could not install $image (attempt $attempt of 4)"
+            sleep $((attempt * 15))
+          done
+          echo "::error::the emulator system image could not be downloaded"
+          exit 1
+
       - name: Cold start on an emulator
         # ReactiveCircus/android-emulator-runner v2.38.0
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
-          api-level: 35
-          arch: x86_64
-          target: google_apis
+          api-level: ${{ env.EMULATOR_API }}
+          arch: ${{ env.EMULATOR_ARCH }}
+          target: ${{ env.EMULATOR_TARGET }}
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           script: YAP_ANDROID_APP_ID=${{ env.APP_ID }} bash desktop-native/mobile/qt/smoke.sh out/yap-qt-${{ needs.plan.outputs.version }}-x86_64.apk 180
