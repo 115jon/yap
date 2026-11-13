@@ -33,6 +33,9 @@ QtObject {
     property string pronouns
     property string bio
     property string customStatus
+    // The status the draft took from the account: only a field changed from
+    // it goes out (the account's can move while the editor is up).
+    property string loadedStatus
     property string accentColor
     property string backgroundColor
     property string bannerColor
@@ -62,9 +65,10 @@ QtObject {
     property bool waitingProfile: false
 
     readonly property bool nameChanged: editsName && displayName.trim() !== Settings.displayName
+    readonly property bool statusChanged: customStatus.trim() !== loadedStatus.trim()
     readonly property bool profileDirty: pronouns !== Settings.pronouns
         || bio !== Settings.bio
-        || customStatus.trim() !== Settings.customStatus
+        || statusChanged
         || accentColor !== Settings.accentColor
         || backgroundColor !== Settings.backgroundColor
         || bannerColor !== Settings.bannerColor
@@ -130,6 +134,7 @@ QtObject {
         pronouns = Settings.pronouns
         bio = Settings.bio
         customStatus = Settings.customStatus
+        loadedStatus = customStatus
         accentColor = Settings.accentColor
         backgroundColor = Settings.backgroundColor
         bannerColor = Settings.bannerColor
@@ -172,6 +177,7 @@ QtObject {
             pronouns: pronouns,
             bio: bio,
             customStatus: customStatus,
+            customStatusChanged: statusChanged,
             accentColor: accentColor,
             backgroundColor: backgroundColor,
             bannerColor: bannerColor,

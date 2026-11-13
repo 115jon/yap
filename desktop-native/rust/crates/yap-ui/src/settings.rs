@@ -170,7 +170,8 @@ pub mod qobject {
         fn save_display_name(self: &Settings, name: &QString);
 
         /// The profile editor's draft as JSON: `{pronouns, bio,
-        /// customStatus, accentColor, backgroundColor, bannerColor,
+        /// customStatus (sent when `customStatusChanged`), accentColor,
+        /// backgroundColor, bannerColor,
         /// avatarPath, removeAvatar, avatarUrl, bannerPath, removeBanner,
         /// crop ({x, y, width, height} in percent, or null; sent when
         /// `cropChanged`), nameStyle (sent when `nameStyleChanged`),
@@ -520,7 +521,10 @@ impl Drop for SettingsRust {
 struct Draft {
     pronouns: String,
     bio: String,
+    /// What the field holds; it goes out only when the user changed it
+    /// from what the editor loaded.
     custom_status: String,
+    custom_status_changed: bool,
     accent_color: String,
     background_color: String,
     banner_color: String,
@@ -667,7 +671,7 @@ impl qobject::Settings {
         client::command(Command::SaveProfile(Box::new(ProfileDraft {
             pronouns: draft.pronouns,
             bio: draft.bio,
-            custom_status: draft.custom_status,
+            custom_status: draft.custom_status_changed.then_some(draft.custom_status),
             accent_color: color(&draft.accent_color),
             background_color: color(&draft.background_color),
             banner_color: color(&draft.banner_color),

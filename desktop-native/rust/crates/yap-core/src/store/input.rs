@@ -337,7 +337,9 @@ pub enum Command {
 pub struct ProfileDraft {
     pub pronouns: String,
     pub bio: String,
-    pub custom_status: String,
+    /// The custom status when the editor's field was changed from what it
+    /// loaded: `None` leaves the account's, `Some("")` clears it.
+    pub custom_status: Option<String>,
     pub accent_color: Option<String>,
     pub background_color: Option<String>,
     pub banner_color: Option<String>,
