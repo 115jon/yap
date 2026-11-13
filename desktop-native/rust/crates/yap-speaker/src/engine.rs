@@ -131,6 +131,7 @@ pub struct Speaker {
     /// The device open now, for the stats.
     device: Mutex<String>,
     delay_ms: AtomicU32,
+    clock: Arc<dyn Clock>,
 }
 
 impl std::fmt::Debug for Speaker {
@@ -194,11 +195,42 @@ fn tap_file() -> Option<WavWriter> {
 /// The idle timer of one render thread.
 #[derive(Default)]
 struct Idle {
-    since: Option<Instant>,
+    since: Option<Duration>,
+}
+
+/// Where the clock-paced mix reads time and sleeps. The speaker runs on
+/// the system clock; tests drive a virtual one so a slow or busy machine
+/// cannot change how many frames a span of time holds.
+trait Clock: Send + Sync {
+    /// Time since the clock began.
+    fn now(&self) -> Duration;
+    /// Blocks until [`Self::now`] reaches `deadline`.
+    fn sleep_until(&self, deadline: Duration);
+}
+
+struct SystemClock {
+    origin: Instant,
+}
+
+impl Clock for SystemClock {
+    fn now(&self) -> Duration {
+        self.origin.elapsed()
+    }
+
+    fn sleep_until(&self, deadline: Duration) {
+        std::thread::sleep(deadline.saturating_sub(self.now()));
+    }
 }
 
 impl Speaker {
     fn new(null: bool, ahead_ms: u32) -> Self {
+        let clock = SystemClock {
+            origin: Instant::now(),
+        };
+        Self::with_clock(null, ahead_ms, Arc::new(clock))
+    }
+
+    fn with_clock(null: bool, ahead_ms: u32, clock: Arc<dyn Clock>) -> Self {
         Self {
             bus: Bus::new(),
             taps: Mutex::new(Vec::new()),
@@ -214,6 +246,7 @@ impl Speaker {
             counters: Counters::default(),
             device: Mutex::new(String::new()),
             delay_ms: AtomicU32::new(0),
+            clock,
         }
     }
 
@@ -363,8 +396,9 @@ impl Speaker {
             idle.since = None;
             return false;
         }
-        let since = *idle.since.get_or_insert_with(Instant::now);
-        if since.elapsed() < IDLE_CLOSE {
+        let now = self.clock.now();
+        let since = *idle.since.get_or_insert(now);
+        if now.saturating_sub(since) < IDLE_CLOSE {
             return false;
         }
         let mut thread = lock(&self.thread);
@@ -385,14 +419,14 @@ impl Speaker {
         idle: &mut Idle,
         limit: Option<Duration>,
     ) -> Step {
-        let start = Instant::now();
+        let start = self.clock.now();
         let mut sent = 0u64;
         loop {
-            if limit.is_some_and(|l| start.elapsed() >= l) {
+            if limit.is_some_and(|l| self.clock.now().saturating_sub(start) >= l) {
                 return Step::Reopen;
             }
             let due = start + Duration::from_millis(10 * (sent + 1));
-            std::thread::sleep(due.saturating_duration_since(Instant::now()));
+            self.clock.sleep_until(due);
             let active = self.next_frame(frame, file, 10);
             sent += 1;
             if self.idle_over(active, idle) {
@@ -549,6 +583,8 @@ impl Speaker {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Condvar;
+
     use super::*;
 
     /// A constant on both channels, active while `on`.
@@ -584,8 +620,76 @@ mod tests {
         }
     }
 
-    fn null_speaker() -> &'static Speaker {
-        Box::leak(Box::new(Speaker::new(true, DEFAULT_AHEAD_MS)))
+    /// A clock that moves only when the test says so. The render thread
+    /// parks in [`Clock::sleep_until`]; [`Self::settle`] waits for it to be
+    /// parked again, so everything due by the new time has been mixed.
+    #[derive(Default)]
+    struct Manual {
+        state: Mutex<ManualState>,
+        changed: Condvar,
+    }
+
+    #[derive(Default)]
+    struct ManualState {
+        now: Duration,
+        /// What the render thread is sleeping toward.
+        parked: Option<Duration>,
+    }
+
+    impl Clock for Manual {
+        fn now(&self) -> Duration {
+            lock(&self.state).now
+        }
+
+        fn sleep_until(&self, deadline: Duration) {
+            let mut state = lock(&self.state);
+            while state.now < deadline {
+                state.parked = Some(deadline);
+                self.changed.notify_all();
+                state = self
+                    .changed
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+            state.parked = None;
+        }
+    }
+
+    impl Manual {
+        /// Waits for the render thread to be asleep ahead of the clock (or
+        /// for `stop`, when it is expected to end instead).
+        fn settle(&self, stop: impl Fn() -> bool) {
+            let give_up = Instant::now() + Duration::from_secs(30);
+            let mut state = lock(&self.state);
+            while !state.parked.is_some_and(|t| t > state.now) && !stop() {
+                assert!(Instant::now() < give_up, "the render thread never settled");
+                state = self
+                    .changed
+                    .wait_timeout(state, Duration::from_millis(5))
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .0;
+            }
+        }
+
+        /// One mix period (10 ms) at a time, so that each frame is mixed
+        /// at its own time as it is on the real clock.
+        fn tick(&self, times: u32, stop: impl Fn() -> bool) {
+            for _ in 0..times {
+                self.settle(&stop);
+                if stop() {
+                    return;
+                }
+                lock(&self.state).now += Duration::from_millis(10);
+                self.changed.notify_all();
+            }
+            self.settle(&stop);
+        }
+    }
+
+    fn null_speaker() -> (&'static Speaker, Arc<Manual>) {
+        let clock = Arc::new(Manual::default());
+        let s = Speaker::with_clock(true, DEFAULT_AHEAD_MS, clock.clone());
+        (Box::leak(Box::new(s)), clock)
     }
 
     fn running(s: &Speaker) -> bool {
@@ -594,7 +698,7 @@ mod tests {
 
     #[test]
     fn the_tap_should_hear_every_frame_on_the_clock() {
-        let s = null_speaker();
+        let (s, clock) = null_speaker();
         let tap = Arc::new(Count::default());
         let tap_dyn: Arc<dyn Tap> = tap.clone();
         s.add_tap(&tap_dyn);
@@ -604,36 +708,45 @@ mod tests {
         let input: Arc<dyn Input> = dc.clone();
         s.add(&input);
         let hold = s.hold();
-        std::thread::sleep(Duration::from_millis(300));
-        let frames = tap.frames.load(Ordering::Relaxed);
-        assert!((20..=40).contains(&frames), "{frames} frames in 300 ms");
-        assert_eq!(tap.loud.load(Ordering::Relaxed), frames);
+        // 300 ms of the clock is exactly 30 periods.
+        clock.tick(30, || false);
+        assert_eq!(tap.frames.load(Ordering::Relaxed), 30, "frames in 300 ms");
+        assert_eq!(tap.loud.load(Ordering::Relaxed), 30);
         s.remove_tap(&tap_dyn);
-        std::thread::sleep(Duration::from_millis(50));
-        let after = tap.frames.load(Ordering::Relaxed);
-        std::thread::sleep(Duration::from_millis(100));
+        clock.tick(15, || false);
         assert_eq!(
             tap.frames.load(Ordering::Relaxed),
-            after,
+            30,
             "removed: hears no more"
+        );
+        assert_eq!(
+            s.counters.frames.load(Ordering::Relaxed),
+            45,
+            "the mix went on without it"
         );
         drop(hold);
     }
 
     #[test]
     fn the_thread_should_end_once_idle_and_start_again_on_a_wake() {
-        let s = null_speaker();
+        let (s, clock) = null_speaker();
         let dc = Arc::new(Dc {
             on: AtomicBool::new(true),
         });
         let input: Arc<dyn Input> = dc.clone();
         s.add(&input);
         s.wake();
-        std::thread::sleep(Duration::from_millis(100));
+        clock.tick(10, || false);
         assert!(running(s));
         dc.on.store(false, Ordering::Relaxed);
-        std::thread::sleep(IDLE_CLOSE + Duration::from_millis(400));
+        let silent_from = clock.now();
+        clock.tick(300, || !running(s));
         assert!(!running(s), "idle for {IDLE_CLOSE:?}: closed");
+        let silent = clock.now() - silent_from;
+        assert!(
+            (IDLE_CLOSE..IDLE_CLOSE + Duration::from_millis(50)).contains(&silent),
+            "closed after {silent:?} of silence"
+        );
         dc.on.store(true, Ordering::Relaxed);
         s.wake();
         assert!(running(s));
@@ -641,9 +754,10 @@ mod tests {
 
     #[test]
     fn a_hold_should_keep_an_idle_speaker_running() {
-        let s = null_speaker();
+        let (s, clock) = null_speaker();
         let hold = s.hold();
-        std::thread::sleep(IDLE_CLOSE + Duration::from_millis(300));
+        clock.tick(300, || false);
+        assert!(clock.now() > IDLE_CLOSE);
         assert!(running(s));
         drop(hold);
     }
