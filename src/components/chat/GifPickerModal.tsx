@@ -257,14 +257,12 @@ export default function GifPickerModal({
     (state) => state.setCurrentUser,
   );
   const mediaRequestQuerySuffix = useMemo(() => {
+    // The server sends KLIPY a pseudonym of the signed-in user itself.
     const queryParams = new URLSearchParams({
       contentFilter: mediaSafetySettings.contentFilter,
     });
-    if (settingsUserId) {
-      queryParams.set("customerId", settingsUserId);
-    }
     return `&${queryParams.toString()}`;
-  }, [mediaSafetySettings.contentFilter, settingsUserId]);
+  }, [mediaSafetySettings.contentFilter]);
   const requestApiQuerySuffix = `${mediaRequestQuerySuffix}${externalApiQuerySuffix}`;
   const requestContextKey = `${mediaSafetySettings.contentFilter}:${settingsUserId ?? "guest"}`;
 

@@ -2,7 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Schema } from "effect";
 
 import { apiError, apiSuccess, requireAuth } from "@/lib/api-helpers";
-import { extractEmbedUrls, MAX_EMBEDS_PER_MESSAGE } from "@/lib/embed-urls";
+import {
+  extractEmbedUrls,
+  looksPrivateLink,
+  MAX_EMBEDS_PER_MESSAGE,
+} from "@/lib/embed-urls";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isFetchablePreviewUrl } from "@/lib/url-guard";
 import { validateBody } from "@/lib/validate-body";
@@ -17,6 +21,10 @@ import { prefetchEmbedUrls } from "@/services/embed-fetcher";
  *
  * Only positive results are cached from here (half-typed URLs must not spend
  * KV writes). Nothing from the caller's request is forwarded upstream.
+ *
+ * Links that look like they carry a credential or open a sign-in step (magic
+ * links, password resets, OAuth callbacks, signed URLs; looksPrivateLink) are
+ * not fetched: the message is not sent yet, and fetching one could spend it.
  */
 export const EMBED_PREFETCH_RATE_LIMIT = { limit: 30, windowMs: 60_000 };
 const MAX_URL_LENGTH = 2048;
@@ -46,7 +54,7 @@ export const POST = async ({ request }: { request: Request }) => {
 
   // The same extraction the send path runs, so the cache keys match.
   const urls = extractEmbedUrls(body.urls.join(" ")).filter(
-    isFetchablePreviewUrl,
+    (url) => isFetchablePreviewUrl(url) && !looksPrivateLink(url),
   );
   if (urls.length === 0) {
     return apiError("No embeddable URL", 400, "NO_EMBEDDABLE_URL");

@@ -594,10 +594,16 @@ You need:
 - a static Qt 6 built with `-static -static-runtime`;
 - LiveKit's prebuilt libwebrtc. `webrtc-sys` downloads it (about 430 MB
   extracted) unless `LK_CUSTOM_WEBRTC` or `YAP_LIBWEBRTC_DIR` points at an
-  extracted copy. `build.ps1` uses `F:/ct/libwebrtc/...` when present.
+  extracted copy. `build.ps1` uses `<scratch>/libwebrtc/...` when present.
+
+`<scratch>` in these docs is the folder outside the repo that holds the
+dependencies (the custom Qt, libwebrtc, ONNX Runtime) and the agents' build
+trees. `build.ps1` finds it as `YAP_DEPS_ROOT`, else a `ct` folder at the
+root of any drive; `-QtDir`, `YAP_QT_DIR`, `YAP_LIBWEBRTC_DIR` and
+`YAP_ORT_DIR` override the single paths.
 
 ```powershell
-# Defaults: Qt at F:/Files/Downloads/qt/src/6.6.3, build dir build/Release
+# Defaults: the newest custom Qt 6.11.3 under <scratch>, build dir build/Release
 ./build.ps1 -QtDir C:/path/to/qt-static
 ```
 
@@ -655,7 +661,7 @@ downloads a newer package in the background, then offers "Restart now"
 is up; with "Install updates on quit" (on by default) a plain quit installs
 it too. The beta channel, a pinned version and a feed override live in
 `Yap.Data\updates.json`. Dev builds, copies, the portable zip, named
-profiles and anything under `F:\ct\yapn` never update. Updates come from
+profiles and anything under `<scratch>\yapn` never update. Updates come from
 this repository's GitHub Releases (tags `desktop-native-v*`, published by
 `.github/workflows/desktop-native-release.yml`, never "latest"). The flow,
 the feed, hosting and how to publish a release are in
@@ -663,7 +669,7 @@ the feed, hosting and how to publish a release are in
 
 ```powershell
 # A local test feed (INSTALLER.md, "Test hooks and a local feed")
-$env:YAP_UPDATE_URL = "file:///F:/ct/yapn/run/updater/feed"
+$env:YAP_UPDATE_URL = "file:///<scratch>/yapn/run/updater/feed"
 $env:YAP_UPDATE_INTERVAL = "60"   # check every minute
 ```
 
@@ -732,10 +738,10 @@ $env:QT_FORCE_STDERR_LOGGING = "1"   # see Qt warnings (WIN32 app)
 | `YAP_TEST_GAME_PROCESSES`       | unset                         | `name.exe\|C:/path/name.exe;...`: game detection sees this process list instead of the system's (an entry without `\|path` cannot be opened), with no Steam; Add it lists the same (tests)                                                                      |
 | `YAP_GAME_ACTIVITY_SEND`        | on                            | `off`: our game activity (op 43) is never sent, even to a gateway that takes it; it still shows here                                                                                                                                                            |
 | `YAP_TRACE_GAMES`               | unset                         | `1`: each detection scan (counts, time) and the game keys it reports, in the log                                                                                                                                                                                |
-| `YAP_UPDATE_URL`                | `updates.json`, else compiled | the update feed: `https://...`, `file:///F:/feed` or a folder (docs/INSTALLER.md, "Updates")                                                                                                                                                                    |
+| `YAP_UPDATE_URL`                | `updates.json`, else compiled | the update feed: `https://...`, `file:///D:/feed` or a folder (docs/INSTALLER.md, "Updates")                                                                                                                                                                    |
 | `YAP_UPDATE_INTERVAL`           | `21600` (6 h)                 | seconds between update checks; retries and the first check never wait longer (tests)                                                                                                                                                                            |
 | `YAP_UPDATE_DELAY`              | `20`                          | seconds before the first update check (tests)                                                                                                                                                                                                                   |
-| `YAP_UPDATE_TEST`               | unset                         | `1`: a Velopack layout under `F:\ct\yapn` or on a named profile updates itself (an end-to-end run in a scratch root; never a dev build or a copy)                                                                                                               |
+| `YAP_UPDATE_TEST`               | unset                         | `1`: a Velopack layout under `<scratch>\yapn` or on a named profile updates itself (an end-to-end run in a scratch root; never a dev build or a copy)                                                                                                           |
 | `YAP_TEST_HOTKEY_FILE`          | unset                         | `<file>`: keybinds act only on the steps appended to this file after start (`down RCtrl`, `up RCtrl`, `tap Mouse4`, `chord Ctrl+Shift+M`, `wait 50`, `elevated game.exe`; `yap-hotkeys` `script.rs`); the hook is installed but what it sees is dropped (tests) |
 | `YAP_TEST_HOTKEY_INJECTED`      | unset                         | `1`: keybinds act only on injected input (`LLKHF_INJECTED`, e.g. SendInput) and drop typed input (tests)                                                                                                                                                        |
 
@@ -781,11 +787,11 @@ profile, so leave it unset for a signed-in profile. The profile rules live in
 ### Testing notes (agents)
 
 Agents run the test account as profile `spike`, with the session from
-`F:/ct/yapn/secrets/owner.json` (`peer.json` for a second account) in
+`<scratch>/yapn/secrets/owner.json` (`peer.json` for a second account) in
 `YAP_TOKEN`, so nothing signs in anew and no credential is stored:
 
 ```powershell
-$env:YAP_TOKEN = (Get-Content -Raw F:/ct/yapn/secrets/owner.json | ConvertFrom-Json).tok
+$env:YAP_TOKEN = (Get-Content -Raw <scratch>/yapn/secrets/owner.json | ConvertFrom-Json).tok
 ./Yap.exe --profile spike
 ```
 

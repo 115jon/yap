@@ -1,6 +1,6 @@
 # Yap Privacy Policy
 
-Effective date: November 9, 2026
+Effective date: November 13, 2026
 
 Yap is operated by 115jon. Questions about this policy, privacy requests,
 or data deletion requests can be sent to <115jon@proton.me>.
@@ -27,20 +27,54 @@ resources and local storage, may also be stored locally.
 Yap can show others the game a user is playing ("Playing X"): the game's
 name, an icon from Yap's game catalog, and when it started. Yap shares it only
 with people who share a server, a direct message or a friendship with the
-user, keeps it only while the user's connection is open, does not store it with
-the account, and never shows it while the user's status is invisible. "Share my
-activity" is on by default and can be turned off at any time in Privacy &
-safety settings; while it is off, Yap shows no game activity for the user.
-Game icons are served from Yap's own storage, so viewing someone's activity
-does not contact a third party.
+user, keeps the live activity only while the user's connection is open, and
+never shows it while the user's status is invisible. "Share my activity" is on
+by default and can be turned off at any time in Privacy & safety settings;
+while it is off, Yap shows no game activity for the user. Game icons are
+served from Yap's own storage, so viewing someone's activity does not contact
+a third party.
 
-Automatic game detection is planned for the Yap desktop application and is not
-part of the current release. When the desktop application supports it, it will
-compare the names of running programs on the user's device against Yap's
-published game catalog; the list of running programs will stay on the device,
-and only a matched game's name, catalog icon and start time will be sent.
-Hiding a single game will be a setting of the desktop application on that
-device. This section will be updated when detection ships.
+When a game session of five minutes or more ends, Yap adds it to the user's
+Activity timeline and to per-day play time (the game, the day and the time
+played), which the profile's Top games widget reads. Nothing is added while
+"Share my activity" is off or the user is invisible (see Activity timeline).
+
+The Yap desktop application detects games itself. On the user's device it
+reads the list of running programs, Steam's currently running game and the
+foreground window, and compares them against Yap's game catalog, which ships
+with the application and is refreshed from Yap's server. The list of running
+programs stays on the device; only a matched game's name, catalog icon and
+start time are sent. Detection can be turned off, and single games hidden, in
+the desktop application's Registered games settings on that device.
+
+## Activity timeline
+
+A user's profile has an Activity timeline that Yap's server writes:
+
+- games played for five minutes or more;
+- voice calls of 15 minutes or more and screen shares of five minutes or
+  more, with the channel and server they were in;
+- Listen Together sessions of three tracks or more, with the most played
+  track;
+- badges earned and servers joined.
+
+Games, calls, screen shares and Listen Together sessions are not recorded
+on the timeline while "Share my activity" is off or the user is invisible (as
+of when the session ends). The usage counters above (voice and screen-share
+time per day) still count them.
+
+The user sees their whole timeline. Other people see it only when they share
+a server or a friendship with the user, or a direct message the user has
+written in, and never when
+either side has blocked the other. They do not see events or kinds of events
+the user has hidden, or calls, screen shares and Listen Together sessions in
+direct messages and group direct messages; and they see the channel and server
+of a call only when they are in that server. Events are kept for the period
+the user chooses (7, 30 or 90 days; 30 by default) and then deleted.
+
+Profile board widgets the user adds, such as Top games and Voice hours, show
+summaries of these records and counters to anyone who can open the profile;
+they leave out calls and Listen Together sessions in direct messages.
 
 ## Connections
 
@@ -101,6 +135,39 @@ Yap uses these services:
 - `steamcommunity.com` when a user links a Steam account (see Connections).
 - `deadlock-api.com`, from Yap's server only, for Deadlock stats (see
   Deadlock stats).
+- Firebase Cloud Messaging (Google) for push notifications to the mobile
+  apps. A message notification carries the sender's name, account ID and
+  avatar address, the channel and server names and IDs, the message ID and
+  send time, and the start of the message (up to 180 characters).
+- KLIPY and Tenor for GIF, sticker and clip search. Yap's server sends them
+  the search terms; KLIPY also gets a pseudonymous identifier derived from
+  the account (never the account ID or name). The pictures and videos
+  themselves currently load in the apps from the providers' servers.
+
+### Link previews
+
+When a message contains a link, Yap's server fetches the page to build a
+preview. Some sites are read through other services:
+
+- X/Twitter posts through the public mirror services FxTwitter
+  (`api.fxtwitter.com`), vxTwitter (`api.vxtwitter.com`, `vxtwitter.com`)
+  and their `fixupx.com` and `fixvx.com` hosts;
+- TikTok videos through TikTok's oEmbed, page and player API and through
+  `tikwm.com`;
+- Instagram posts through Instagram's oEmbed and media endpoints.
+
+Some of these requests, and YouTube requests for Listen Together, go through
+a relay Yap's operator runs on a server in the United States
+(`egress.115jon.com`); YouTube requests leave that relay through a VPN. The
+relay forwards the link, never who posted it. Pasting a link in the composer
+can start the preview before the message is sent, except for links that look
+like sign-in, password-reset or magic links or carry a token in the address.
+A link written as `<https://...>` gets no preview.
+
+Some previews load the provider's own content in the apps, so the provider
+sees the viewer's IP address and its own cookies: YouTube's player (when the
+viewer presses play) and video thumbnails, Spotify's player (when the preview
+scrolls into view), and TikTok's player when no video file is available.
 
 The web and desktop applications can also connect to locations selected by the
 user or supplied in user content, such as a shared link, embed, attachment, or

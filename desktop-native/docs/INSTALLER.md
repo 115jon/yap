@@ -177,7 +177,7 @@ why in Settings (`update::eligibility`, the same layout rule as the hooks):
 | a dev build, a copy of the exe (no `<root>\current\Yap.exe` + `<root>\Update.exe`) | nothing to update                                          |
 | the portable zip (`<root>\.portable`)                                              | not an install                                             |
 | a named profile (`--profile`, `YAP_PROFILE`)                                       | profiles share one install; the default profile updates it |
-| anything under `F:\ct\yapn` (agents' builds and runs)                              | would replace a build under test                           |
+| anything under `<scratch>\yapn` (agents' builds and runs)                          | would replace a build under test                           |
 
 `YAP_UPDATE_TEST=1` lifts the last two for an end-to-end run in a scratch
 root; it never makes a dev build or a portable copy update.
@@ -214,7 +214,7 @@ switches, kept per profile in `Yap.Data\updates.json`:
 | ------------------------ | -------------------------------------------------------------------------------------------------- |
 | compiled default         | `yap_core::update::DEFAULT_FEED_URL`: `https://github.com/115jon/yap`, its native releases         |
 | `updates.json` `feedUrl` | overrides the default                                                                              |
-| `YAP_UPDATE_URL`         | overrides both: `https://github.com/<owner>/<repo>`, `https://...`, `file:///F:/feed` or `F:\feed` |
+| `YAP_UPDATE_URL`         | overrides both: `https://github.com/<owner>/<repo>`, `https://...`, `file:///D:/feed` or `D:\feed` |
 
 A URL that is exactly `https://github.com/<owner>/<repo>` is read as a
 repository's releases (`Feed::Github`, below); any other `https://` URL is
@@ -412,20 +412,20 @@ release's draft, then the feed file, publish it, and run
 
 ### Test hooks and a local feed
 
-| variable              | does                                                                                   |
-| --------------------- | -------------------------------------------------------------------------------------- |
-| `YAP_UPDATE_URL`      | the feed: a URL, `file:///F:/ct/yapn/run/updater/feed` or a folder path                |
-| `YAP_UPDATE_INTERVAL` | seconds between checks (instead of 6 h); retries and the first check never wait longer |
-| `YAP_UPDATE_DELAY`    | seconds before the first check (instead of 20 s)                                       |
-| `YAP_UPDATE_TEST`     | `1`: a Velopack layout under `F:\ct\yapn` or on a named profile updates (never a copy) |
+| variable              | does                                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------------ |
+| `YAP_UPDATE_URL`      | the feed: a URL, `file:///<scratch>/yapn/run/updater/feed` or a folder path                |
+| `YAP_UPDATE_INTERVAL` | seconds between checks (instead of 6 h); retries and the first check never wait longer     |
+| `YAP_UPDATE_DELAY`    | seconds before the first check (instead of 20 s)                                           |
+| `YAP_UPDATE_TEST`     | `1`: a Velopack layout under `<scratch>\yapn` or on a named profile updates (never a copy) |
 
 A local feed with two versions, without installing anything:
 
 ```powershell
-$feed = "F:/ct/yapn/run/updater/feed"; $out = "F:/ct/yapn/run/updater/pack"
-./tools/package.ps1 -SkipBuild -BuildDir F:/ct/yapn/rel-updater -OutDir $out `
+$feed = "<scratch>/yapn/run/updater/feed"; $out = "<scratch>/yapn/run/updater/pack"
+./tools/package.ps1 -SkipBuild -BuildDir <scratch>/yapn/rel-updater -OutDir $out `
   -PackId Yap.UpdateTest -Title "Yap UpdateTest" -Version 0.2.22
-./tools/package.ps1 -SkipBuild -BuildDir F:/ct/yapn/rel-updater -OutDir $out `
+./tools/package.ps1 -SkipBuild -BuildDir <scratch>/yapn/rel-updater -OutDir $out `
   -PackId Yap.UpdateTest -Title "Yap UpdateTest" -Version 0.2.23 -ReleaseNotes notes.md
 vpk upload local --outputDir $out --path $feed --channel win
 ```
@@ -648,7 +648,7 @@ Python with Pillow for the splash (see "Splash"):
 ```powershell
 dotnet tool install -g vpk --version 1.3.39-g8d2844f   # the script does this if vpk is missing
 ./tools/package.ps1                       # build/Release -> build/installer
-./tools/package.ps1 -SkipBuild -BuildDir F:/ct/yapn/inst-build -OutDir F:/ct/yapn/inst-out
+./tools/package.ps1 -SkipBuild -BuildDir <scratch>/yapn/inst-build -OutDir <scratch>/yapn/inst-out
 ```
 
 `-PackId`, `-Version`, `-Title` and `-OutDir` override the defaults. The
@@ -692,7 +692,7 @@ Python or Pillow the script warns and packs the old `assets/app/yap-256.png`
 (the bar is still the accent). To look at it:
 
 ```powershell
-python tools/build-splash.py --version 0.2.12 --out F:/ct/yapn/tmp/splash.png
+python tools/build-splash.py --version 0.2.12 --out <scratch>/yapn/tmp/splash.png
 ```
 
 ## Game capture hook payload
@@ -895,10 +895,10 @@ released-identity (`Yap.App`) Setup on a PC whose Tauri app or data matter:
 its first start uninstalls the Tauri app.
 
 ```powershell
-./tools/package.ps1 -SkipBuild -BuildDir F:/ct/yapn/inst-build -OutDir F:/ct/yapn/inst-out `
+./tools/package.ps1 -SkipBuild -BuildDir <scratch>/yapn/inst-build -OutDir <scratch>/yapn/inst-out `
   -PackId Yap.InstallTest -Title "Yap InstallTest" -Version 0.0.1
 $env:YAP_PROFILE = "spike"   # in case anything starts the app
-F:/ct/yapn/inst-out/Yap.InstallTest-win-Setup.exe --silent -- --no-launch
+<scratch>/yapn/inst-out/Yap.InstallTest-win-Setup.exe --silent -- --no-launch
 ```
 
 A test pack id is never the released install, so it never replaces the
@@ -913,7 +913,7 @@ unsigned, the same exe packed as 0.0.1, 0.0.2, 0.0.3):
 | step                                  | result                                                                                                                                                                             |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | silent install 0.0.1                  | exit 0; `Update.exe`, stub, `current\YapNative.exe`, `packages\*.nupkg`; uninstall entry as in the parity table; both shortcuts, AUMID `com.115jon.yap.native`; install hook 34 ms |
-| hooks with a live dev build present   | scheme (owned by `F:\ct\yapn\rel\YapNative.exe`) and the existing AUMID key left alone, on install and uninstall                                                                   |
+| hooks with a live dev build present   | scheme (owned by `<scratch>\yapn\rel\YapNative.exe`) and the existing AUMID key left alone, on install and uninstall                                                               |
 | start `--profile spike` + `YAP_TOKEN` | first frame 865 ms, messages 1.6 s, gateway ready                                                                                                                                  |
 | Setup 0.0.2 over it, app running      | Setup killed the running PID, installed 0.0.2 (`sq.version`, DisplayVersion), did not relaunch (silent)                                                                            |
 | `Update.exe apply` 0.0.3, app running | killed the PID, swapped `current\`, after-update hook, restarted with `--profile spike`                                                                                            |

@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.1.2](https://github.com/115jon/yap/compare/v4.1.1...v4.1.2) (2026-11-13)
+
+
+### Bug Fixes
+
+* **api:** 🐛 stop putting the session token in media urls ([94c4147](https://github.com/115jon/yap/commit/94c4147eab6d4f56c8b2aa0b4cd3a032bb0d5446))
+* **api:** stop putting the session token in media urls ([b7fa98b](https://github.com/115jon/yap/commit/b7fa98b37c2ef1f18f3a3e523efad00999c0dd2f))
+* **chat:** 🐛 copy and open media links without credentials ([7e3e1d6](https://github.com/115jon/yap/commit/7e3e1d6488036298e67c318805fe215ced152696))
+
 ## [4.1.1](https://github.com/115jon/yap/compare/v4.1.0...v4.1.1) (2026-11-13)
 
 

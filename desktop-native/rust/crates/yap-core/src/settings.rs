@@ -1295,6 +1295,9 @@ pub fn is_managed_nameplate(url: &str) -> bool {
 /// The web's failure copy for a REST call (`describeApiError`); `action`
 /// completes "Unable to …" ("save your profile").
 pub fn describe_api_error(error: &ApiError, action: &str) -> String {
+    if let Some(sentence) = error.refusal_sentence() {
+        return sentence.to_owned();
+    }
     // The too-big spec: the server's own number, never "too large" alone.
     if let ApiError::Http {
         status: 413,

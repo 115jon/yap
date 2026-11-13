@@ -33,6 +33,7 @@ import {
   previewUrlBlockReason,
 } from "@/lib/url-guard";
 import { singleFlight } from "@/lib/single-flight";
+import { logHost } from "@/lib/log-host";
 import { upstreamGuard } from "@/lib/upstream-guard";
 import {
   parseHtmlMeta,
@@ -194,7 +195,7 @@ export async function extractAndProcessEmbedsWithStatus(
     } else if (outcome.status === "retry") {
       hadFailures = true;
       log.warn("Embed fetch failed transiently; will retry", {
-        url: outcome.url,
+        host: logHost(outcome.url),
         reason: outcome.reason,
       });
       const previous = previousByUrl.get(outcome.url);
@@ -402,7 +403,7 @@ async function fetchEmbedOutcome(url: string): Promise<EmbedUrlOutcome> {
         reason: error instanceof Error ? error.message : String(error),
       };
     }
-    log.error("Embed fetch failed permanently:", url, error);
+    log.error("Embed fetch failed permanently:", logHost(url), error);
     return { url, status: "none" };
   }
 }
@@ -761,7 +762,7 @@ async function fetchTwitterData(url: string): Promise<EmbedInfo | null> {
   const answers = await Promise.all(
     apis.map(async (apiUrl) => {
       try {
-        twitterLog.info(`Trying API: ${apiUrl}`);
+        twitterLog.info(`Trying API: ${logHost(apiUrl)}`);
         // One circuit per mirror host: a mirror that rate limits us is
         // skipped (and counts as transient) until it recovers.
         const res = await upstreamGuard.fetch(
@@ -838,7 +839,7 @@ async function fetchTwitterData(url: string): Promise<EmbedInfo | null> {
       }
     } catch (e) {
       sawTransient = true;
-      twitterLog.error(`API ${apiUrl} failed:`, e);
+      twitterLog.error(`API ${logHost(apiUrl)} failed:`, e);
     }
   }
 
@@ -853,7 +854,7 @@ async function fetchTwitterData(url: string): Promise<EmbedInfo | null> {
   // Fallback: scrape OG tags from vxtwitter.com
   try {
     const vxUrl = `https://vxtwitter.com${normalizeTwitterStatusPath(parsed.pathname)}`;
-    twitterLog.info(`Fallback: scraping vxtwitter OG: ${vxUrl}`);
+    twitterLog.info("Fallback: scraping vxtwitter OG");
     const res = await safeFetch(vxUrl, {
       headers: {
         "User-Agent":

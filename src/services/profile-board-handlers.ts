@@ -16,6 +16,12 @@ import { hasPerk, type Entitlement } from "@/lib/entitlements";
 import { genId } from "@/lib/id";
 import { validateImageBuffer } from "@/lib/image-validation";
 import {
+  metadataResponseFields,
+  stripMetadataInPlace,
+  UNCHECKED_UPLOAD_CODE,
+  uncheckedUploadError,
+} from "@/lib/upload-metadata/strip-upload";
+import {
   ACTIVITY_RETENTION_DAYS,
   isActivityKind,
   newWidgetId,
@@ -31,6 +37,7 @@ import { tooLargeMessage, uploadLimitFor } from "@/lib/upload-limits";
 import { deadlockBoardData } from "@/services/deadlock/board";
 import { getEntitlement } from "@/services/entitlement.service";
 import {
+  inPresenceAudience,
   listProfileActivity,
   setActivityEventHidden,
 } from "@/services/profile-activity.service";
@@ -298,6 +305,12 @@ export function createProfileBoardHandlers(deps: ProfileBoardDeps) {
           "ANIMATED_NEEDS_LOUD",
         );
       }
+      const metadata = await stripMetadataInPlace(buffer, {
+        route: "profile-board",
+        userId: session.userId,
+      });
+      const unclean = uncheckedUploadError(metadata);
+      if (unclean) return error(unclean, 415, UNCHECKED_UPLOAD_CODE);
       const asset = `${newWidgetId()}${newWidgetId()}.${checked.ext}`;
       await deps.bucket.put(
         `${widgetAssetPrefix(session.userId)}${asset}`,
@@ -315,6 +328,7 @@ export function createProfileBoardHandlers(deps: ProfileBoardDeps) {
           url: widgetAssetUrl(session.userId, asset),
           content_type: checked.mimeType,
           size: file.size,
+          ...metadataResponseFields(metadata),
         },
         201,
       );
@@ -330,6 +344,14 @@ export function createProfileBoardHandlers(deps: ProfileBoardDeps) {
         (await eitherBlocked(deps.db, ownerId, session.userId))
       ) {
         return error("You can't see this profile.", 403, "BLOCKED");
+      }
+      // Only the presence audience (a shared server, a friendship or a DM)
+      // sees someone's timeline; anyone else gets an empty one.
+      if (
+        ownerId !== session.userId &&
+        !(await inPresenceAudience(deps.db, ownerId, session.userId))
+      ) {
+        return json({ events: [], next_cursor: null, is_owner: false });
       }
       const url = new URL(request.url);
       const kind = url.searchParams.get("kind");

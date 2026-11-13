@@ -58,6 +58,31 @@ describe("describeApiError", () => {
   });
 });
 
+describe("415: the server's sentence is shown", () => {
+  const refused = (message: string, body?: unknown) =>
+    Object.assign(new Error(message), { status: 415, body });
+
+  it("shows why an upload was refused", () => {
+    const sentence =
+      "This image format can't be checked for location data. Use JPEG, PNG, WebP or GIF.";
+    expect(
+      describeApiError(
+        refused(sentence, { error: sentence, code: "METADATA_UNCHECKED" }),
+        "upload your avatar",
+      ),
+    ).toBe(sentence);
+  });
+
+  it("falls back to the generic copy when the body had no sentence", () => {
+    expect(
+      describeApiError(refused("Upload failed: HTTP 415"), "upload the icon"),
+    ).toBe("Unable to upload the icon. Check the details and try again.");
+    expect(
+      describeApiError(refused("x", { error: "  " }), "upload the icon"),
+    ).toBe("Unable to upload the icon. Check the details and try again.");
+  });
+});
+
 describe("413: the server's own limit survives", () => {
   it("says the limit the server named", () => {
     expect(

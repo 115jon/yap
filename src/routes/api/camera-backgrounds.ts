@@ -15,6 +15,12 @@ import { tooLargeMessage } from "@/lib/upload-limits";
 import { readJsonBody } from "@/lib/validate-body";
 import { Schema } from "effect";
 import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
+import {
+  metadataResponseFields,
+  stripMetadataInPlace,
+  UNCHECKED_UPLOAD_CODE,
+  uncheckedUploadError,
+} from "@/lib/upload-metadata/strip-upload";
 
 interface CameraBackgroundAsset {
   id: string;
@@ -144,6 +150,14 @@ export const POST = async ({ request }: any) => {
     });
     return apiError(validation.error, 415, undefined, request);
   }
+  const metadata = await stripMetadataInPlace(buffer, {
+    route: "camera-background",
+    userId,
+  });
+  const unclean = uncheckedUploadError(metadata);
+  if (unclean) {
+    return apiError(unclean, 415, UNCHECKED_UPLOAD_CODE, request);
+  }
 
   const id = genId();
   const filename = `${sanitizeBaseName(file.name)}.${validation.ext}`;
@@ -169,13 +183,16 @@ export const POST = async ({ request }: any) => {
 
   return apiSuccess(
     {
-      id,
-      name: file.name || filename,
-      url: backgroundUrl(id, filename),
-      contentType: validation.mimeType,
-      sizeBytes: file.size,
-      createdAt,
-    } satisfies CameraBackgroundAsset,
+      ...({
+        id,
+        name: file.name || filename,
+        url: backgroundUrl(id, filename),
+        contentType: validation.mimeType,
+        sizeBytes: file.size,
+        createdAt,
+      } satisfies CameraBackgroundAsset),
+      ...metadataResponseFields(metadata),
+    },
     201,
     request,
   );

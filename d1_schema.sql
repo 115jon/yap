@@ -373,6 +373,7 @@ CREATE TABLE IF NOT EXISTS push_tokens (
     platform TEXT NOT NULL,              -- 'android' | 'ios'
     app_variant TEXT,                    -- 'development' | 'preview' | 'production'
     push_format TEXT,                    -- NULL = legacy notification push | 'native' = data-only, app renders
+    session_id TEXT,                     -- Kova session that registered it; NULL = before migration 045
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -537,6 +538,7 @@ CREATE INDEX IF NOT EXISTS idx_notification_delivery_markers_message
 
 -- Push fan-out per recipient
 CREATE INDEX IF NOT EXISTS idx_push_tokens_user_id ON push_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_push_tokens_user_session ON push_tokens(user_id, session_id);
 
 -- Billing webhooks find a plan by its Stripe customer
 CREATE INDEX IF NOT EXISTS idx_user_entitlements_stripe_customer

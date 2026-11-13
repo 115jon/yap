@@ -1150,18 +1150,18 @@ mod windows_startup_registration_tests {
     #[test]
     fn versioned_install_root_resolves_from_app_directory() {
         let root = versioned_windows_install_root_from_exe_path(Path::new(
-            r"C:\Users\jon\AppData\Local\Yap\app-1.13.0\Yap.exe",
+            r"C:\Users\someone\AppData\Local\Yap\app-1.13.0\Yap.exe",
         ));
         assert_eq!(
             root.as_deref(),
-            Some(Path::new(r"C:\Users\jon\AppData\Local\Yap"))
+            Some(Path::new(r"C:\Users\someone\AppData\Local\Yap"))
         );
     }
 
     #[test]
     fn non_versioned_paths_do_not_report_install_root() {
         let root = versioned_windows_install_root_from_exe_path(Path::new(
-            r"C:\Users\jon\AppData\Local\Yap\Yap.exe",
+            r"C:\Users\someone\AppData\Local\Yap\Yap.exe",
         ));
         assert!(root.is_none());
     }
@@ -1169,24 +1169,24 @@ mod windows_startup_registration_tests {
     #[test]
     fn startup_command_targets_stable_update_launcher_when_available() {
         let command = build_windows_startup_command_for_executable(
-            Path::new(r"C:\Users\jon\AppData\Local\Yap\Update.exe"),
+            Path::new(r"C:\Users\someone\AppData\Local\Yap\Update.exe"),
             true,
         );
         assert_eq!(
             command,
-            "\"C:\\Users\\jon\\AppData\\Local\\Yap\\Update.exe\" --processStart Yap.exe"
+            "\"C:\\Users\\someone\\AppData\\Local\\Yap\\Update.exe\" --processStart Yap.exe"
         );
     }
 
     #[test]
     fn startup_command_marks_the_stub_launch_as_autostart() {
         let command = build_windows_startup_command_for_executable(
-            Path::new(r"C:\Users\jon\AppData\Local\Yap\Yap.exe"),
+            Path::new(r"C:\Users\someone\AppData\Local\Yap\Yap.exe"),
             false,
         );
         assert_eq!(
             command,
-            "\"C:\\Users\\jon\\AppData\\Local\\Yap\\Yap.exe\" --autostart"
+            "\"C:\\Users\\someone\\AppData\\Local\\Yap\\Yap.exe\" --autostart"
         );
     }
 
