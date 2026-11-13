@@ -220,16 +220,19 @@ const revokeSessions = Effect.fn("sessions.revoke")(function* (
     );
   }
 
+  // Without the caller's own session id, "all others" cannot spare this
+  // device's tokens: they are left for FCM to expire instead.
   const db = yield* Database;
-  yield* Effect.promise(() =>
-    deleteSessionPushTokens(
-      db,
-      identity.user.id,
-      body.sessionId
-        ? { sessionId: body.sessionId }
-        : { allExcept: identity.session.id ?? "" },
-    ),
-  );
+  const signedOut = body.sessionId
+    ? { sessionId: body.sessionId }
+    : identity.session.id
+      ? { allExcept: identity.session.id }
+      : null;
+  if (signedOut) {
+    yield* Effect.promise(() =>
+      deleteSessionPushTokens(db, identity.user.id, signedOut),
+    );
+  }
 
   // A session that was already gone counts 0: the device is signed out.
   // Null when Kova did not say how many.
