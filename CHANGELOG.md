@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.1.1](https://github.com/115jon/yap/compare/v4.1.0...v4.1.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **api:** 🐛 ask klipy for webp gif picker thumbs ([df69e37](https://github.com/115jon/yap/commit/df69e37051f1560af989acfc403cd035da612eef))
+* **api:** 🐛 ask tenor for tinywebp gif picker thumbs ([e2b256d](https://github.com/115jon/yap/commit/e2b256ded4b66f7c58dcbb19167cf6a400e06c74))
+* **api:** 🐛 rank a sizeless gif thumb by its area ([9198010](https://github.com/115jon/yap/commit/919801067f513d5ceff14d5df84628f876a8937f))
+* **api:** 🐛 send a small picture for each gif picker tile ([645fb24](https://github.com/115jon/yap/commit/645fb2440f8fe45d7835c9dd1426b19001f9672a))
+* **api:** gif and sticker picker tiles load small thumbnails, not the sent file ([2c15627](https://github.com/115jon/yap/commit/2c15627a6ab629c142c7b1d1c80a83705f7f16fb))
+* **desktop-native:** 🐛 show gif picker tiles from the small thumb ([a22a7e2](https://github.com/115jon/yap/commit/a22a7e292510c9bff3393c6d1ecc70e5e7c976ae))
+* **mobile:** 🐛 draw gif picker tiles from the small thumb ([da1bb54](https://github.com/115jon/yap/commit/da1bb54449a5821fead0b340cc3a95d49ddf55d7))
+
 ## [4.1.0](https://github.com/115jon/yap/compare/v4.0.3...v4.1.0) (2026-11-13)
 
 
