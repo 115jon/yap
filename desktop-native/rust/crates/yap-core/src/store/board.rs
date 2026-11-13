@@ -326,14 +326,20 @@ pub(super) struct ViewCtx<'a> {
     pub offset: super::LocalOffset,
 }
 
-/// Every `*_url` string that is a server path becomes absolute.
+/// Every `*url` string that is a server path becomes absolute. A `*_url`
+/// (a picture: `avatar_url`, `icon_url`, `asset_url`) that is not ours goes
+/// through the media proxy, or loads nothing when it is not http(s): a
+/// guestbook author's avatar is another user's. A bare `url` is a link and
+/// stays as it is.
 pub(super) fn absolutize(value: &mut Value, api_base: &str) {
     match value {
         Value::Object(map) => {
             for (key, item) in map.iter_mut() {
                 if key.ends_with("url") {
                     if let Value::String(text) = item {
-                        if text.starts_with('/') {
+                        if key.ends_with("_url") && !text.is_empty() {
+                            *text = crate::store::view::absolute_url(api_base, Some(text));
+                        } else if text.starts_with('/') {
                             *text = format!("{api_base}{text}");
                         }
                     }
@@ -814,10 +820,7 @@ fn activity_view(state: &BoardState, ctx: &ViewCtx) -> String {
         let day = super::time::local_day(at, ctx.offset);
         let (title, detail) = activity_line(event);
         let stamp = super::time::Stamp::new(at, ctx.offset);
-        let mut icon = event.data.icon_url.clone().unwrap_or_default();
-        if icon.starts_with('/') {
-            icon = format!("{}{icon}", ctx.api_base);
-        }
+        let icon = crate::store::view::absolute_url(ctx.api_base, event.data.icon_url.as_deref());
         let row = json!({
             "id": event.id,
             "kind": event.kind,
@@ -955,7 +958,12 @@ mod tests {
         let mut value = json!({
             "icon_url": "/api/x.png",
             "servers": [{ "icon_url": "/api/s.png" }, { "icon_url": null }],
-            "notes": [{ "author": { "avatar_url": "https://cdn.invalid/a.png" } }],
+            "notes": [
+                { "author": { "avatar_url": "https://cdn.invalid/a.png" } },
+                { "author": { "avatar_url": "file://attacker.invalid/a.png" } },
+                { "author": { "avatar_url": "smb://attacker.invalid/a.png" } },
+            ],
+            "links": [{ "url": "https://example.invalid/page" }, { "url": "/u/me" }],
             "name": "/not-a-url",
         });
         absolutize(&mut value, "https://yap.invalid");
@@ -964,10 +972,17 @@ mod tests {
             value["servers"][0]["icon_url"],
             "https://yap.invalid/api/s.png"
         );
+        // Another user's picture: through the media proxy.
         assert_eq!(
             value["notes"][0]["author"]["avatar_url"],
-            "https://cdn.invalid/a.png"
+            "https://yap.invalid/api/proxy-media?url=https%3A%2F%2Fcdn.invalid%2Fa.png"
         );
+        // Not http(s) (a UNC path on Windows): nothing.
+        assert_eq!(value["notes"][1]["author"]["avatar_url"], "");
+        assert_eq!(value["notes"][2]["author"]["avatar_url"], "");
+        // Links stay links.
+        assert_eq!(value["links"][0]["url"], "https://example.invalid/page");
+        assert_eq!(value["links"][1]["url"], "https://yap.invalid/u/me");
         assert_eq!(value["name"], "/not-a-url");
     }
 

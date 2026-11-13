@@ -115,6 +115,11 @@ pub fn asset_url(value: Option<&Value>) -> Option<String> {
     ASSET_HOSTS.contains(&host.as_str()).then(|| url.to_owned())
 }
 
+/// True for a URL [`asset_url`] keeps: https on a collectible CDN.
+pub fn is_asset_url(url: &str) -> bool {
+    asset_url(Some(&Value::String(url.to_owned()))).is_some()
+}
+
 fn text(value: Option<&Value>) -> Option<String> {
     let text = value?.as_str()?.trim();
     (!text.is_empty()).then(|| text.chars().take(120).collect())
@@ -495,6 +500,22 @@ fn with_params(url: &str, params: &[(&str, String)]) -> String {
     format!("{base}?{}", query.join("&"))
 }
 
+/// True for an `https://` URL. Catalog art is only ever https on a CDN;
+/// anything else (`file://host/x` opens as a UNC path on Windows) loads
+/// nothing.
+pub fn is_https(url: &str) -> bool {
+    url.get(..8)
+        .is_some_and(|s| s.eq_ignore_ascii_case("https://"))
+        && url.len() > 8
+}
+
+/// `url` when it is https, else empty ([`is_https`]).
+pub fn https_only(url: Option<&str>) -> String {
+    url.filter(|u| is_https(u))
+        .map(str::to_owned)
+        .unwrap_or_default()
+}
+
 /// A decoration's still first frame, sized for a tile.
 pub fn decoration_still_url(item: &Item, size: u32) -> String {
     if let Some(asset) = item.asset.as_deref().filter(|a| !a.is_empty()) {
@@ -503,6 +524,7 @@ pub fn decoration_still_url(item: &Item, size: u32) -> String {
     item.static_url
         .as_deref()
         .or(item.preview_url.as_deref())
+        .filter(|url| is_https(url))
         .map(|url| {
             with_params(
                 url,
@@ -519,15 +541,15 @@ pub fn decoration_motion_url(item: &Item) -> String {
             "https://{CDN_HOST}/avatar-decoration-presets/{asset}.png?size=240&passthrough=true"
         );
     }
-    item.animated_url
-        .clone()
-        .or_else(|| item.static_url.clone())
-        .unwrap_or_default()
+    https_only(item.animated_url.as_deref().or(item.static_url.as_deref()))
 }
 
 /// A shop image resized by Discord's media proxy (a 900 x 1760 PNG of
 /// 260 KB becomes 17 KB at 225 x 440).
 pub fn resized_shop_image_url(url: &str, width: f64, height: f64) -> String {
+    if !is_https(url) {
+        return String::new();
+    }
     let Some(rest) = url.strip_prefix(&format!("https://{CDN_HOST}")) else {
         return url.to_owned();
     };

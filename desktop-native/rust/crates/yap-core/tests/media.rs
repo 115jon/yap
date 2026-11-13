@@ -26,6 +26,19 @@ fn fixture(name: &str) -> Value {
     serde_json::from_str(&text).unwrap_or_else(|e| panic!("{name}: {e}"))
 }
 
+/// `url` as the client loads a third-party picture: through the media proxy.
+fn proxied(url: &str) -> String {
+    let mut out = String::new();
+    for byte in url.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    format!("https://api.fixture.invalid/api/proxy-media?url={out}")
+}
+
 fn requests(fx: &[Effect]) -> Vec<(RequestId, ApiRequest)> {
     fx.iter()
         .filter_map(|e| match e {
@@ -572,13 +585,8 @@ fn gif_tiles_should_fall_back_from_video_previews_and_alternate_columns() {
         .iter()
         .map(|r| (r.preview.as_str(), r.column, r.aspect))
         .collect();
-    assert_eq!(
-        shape,
-        [
-            ("https://static.klipy.com/s.gif", 0, 500),
-            ("https://static.klipy.com/s.gif", 1, 500)
-        ]
-    );
+    let still = proxied("https://static.klipy.com/s.gif");
+    assert_eq!(shape, [(still.as_str(), 0, 500), (still.as_str(), 1, 500)]);
 }
 
 fn gif_tiles_for(client: &mut Client, results: Vec<GifItem>) -> Vec<yap_core::store::GifRow> {
@@ -615,7 +623,8 @@ fn gif_tiles_should_show_the_small_thumb_not_the_sent_gif() {
         .iter()
         .map(|t| (t.preview.as_str(), t.video.as_str(), t.aspect))
         .collect();
-    assert_eq!(shape, [("https://static.klipy.com/t.gif", "", 500)]);
+    let thumb = proxied("https://static.klipy.com/t.gif");
+    assert_eq!(shape, [(thumb.as_str(), "", 500)]);
 }
 
 #[test]
@@ -630,13 +639,8 @@ fn a_heavy_sent_gif_should_loop_its_small_video_preview_instead() {
         .iter()
         .map(|t| (t.preview.as_str(), t.video.as_str()))
         .collect();
-    assert_eq!(
-        shape,
-        [
-            ("", "https://static.klipy.com/p.mp4"),
-            ("", "https://static.klipy.com/p.mp4")
-        ]
-    );
+    let preview = proxied("https://static.klipy.com/p.mp4");
+    assert_eq!(shape, [("", preview.as_str()), ("", preview.as_str())]);
 }
 
 #[test]
@@ -979,8 +983,8 @@ fn the_start_screen_should_ask_for_categories_and_the_trending_gif_once() {
             browse["categoriesLoading"].clone()
         ),
         (
-            json!([{ "id": "hello", "label": "hello", "query": "hello", "image": "https://static.klipy.com/h.gif" }]),
-            json!("https://static.klipy.com/s.gif"),
+            json!([{ "id": "hello", "label": "hello", "query": "hello", "image": proxied("https://static.klipy.com/h.gif") }]),
+            json!(proxied("https://static.klipy.com/s.gif")),
             json!(false)
         )
     );
@@ -1025,8 +1029,8 @@ fn clips_should_loop_their_mp4_with_its_length_and_poster() {
             tile.aspect
         ),
         (
-            "https://static.klipy.com/clips/c.mp4",
-            "https://static.klipy.com/c.jpg",
+            proxied("https://static.klipy.com/clips/c.mp4").as_str(),
+            proxied("https://static.klipy.com/c.jpg").as_str(),
             true,
             "1:12",
             563

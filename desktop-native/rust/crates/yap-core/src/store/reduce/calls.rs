@@ -522,7 +522,9 @@ impl State {
         self.calls.sticker_seq += 1;
         self.calls.stickers.push(StickerView {
             seq: self.calls.sticker_seq,
-            url: sticker.url,
+            // Another user sent it: through the media proxy, or nothing
+            // when it is not http(s).
+            url: view::absolute_url(&self.api_base, Some(&sticker.url)),
             content_type: sticker.content_type,
             display_mode: sticker.display_mode,
             user_id: sticker.user_id.unwrap_or_default(),

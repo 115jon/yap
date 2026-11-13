@@ -120,12 +120,21 @@ fn is_proxy_url(url: &str) -> bool {
 /// collect every viewer's). The API's own files and proxy URLs the server
 /// built (signed, or the social form with its post) load as they are; an
 /// unsigned one carries the session (`api::media_needs_auth`).
+///
+/// A value that names no web host loads nothing (empty). These values come
+/// from the server or from other users, and Qt opens `file://host/x` as the
+/// UNC path `\\host\x` (SMB or WebDAV, which hands that host this device's
+/// address and possibly an NTLM hash); `ftp:`, `smb:` and the like reach a
+/// host directly.
 pub(crate) fn via_media_proxy(url: &str, api_base: &str) -> String {
     let Some(web) = web_url(url) else {
-        return url.to_owned();
+        return String::new();
     };
     let url = web.as_str();
-    if !is_web_url(url) || crate::api::is_api_url(api_base, url) {
+    if !is_web_url(url) {
+        return String::new();
+    }
+    if crate::api::is_api_url(api_base, url) {
         return url.to_owned();
     }
     // A proxy path on another host goes to our API with its query: never
@@ -167,8 +176,19 @@ fn encode_path(path: &str) -> String {
     out
 }
 
+/// A `file:` URL on this device (`file:///C:/…`, `file:///data/…`): no host,
+/// and a path that cannot start a UNC name (`file:////host`,
+/// `file:///\\host`, `file:///%2F%2Fhost`), which Qt would open over the
+/// network.
+pub(crate) fn is_local_file_url(url: &str) -> bool {
+    url.strip_prefix("file:///")
+        .and_then(|path| path.chars().next())
+        .is_some_and(|first| first.is_ascii_alphanumeric())
+}
+
 /// Where an attachment loads from: `url`, else `getAttachmentUrl(file_key)`,
-/// made absolute against the API. A local `file:` preview passes through.
+/// made absolute against the API. A local `file:` preview (an upload in
+/// flight) passes through; any other `file:` URL loads nothing.
 pub fn attachment_url(attachment: &Attachment, api_base: &str) -> String {
     let raw = attachment
         .url
@@ -177,8 +197,14 @@ pub fn attachment_url(attachment: &Attachment, api_base: &str) -> String {
         .or(attachment.file_key.as_deref())
         .unwrap_or_default();
     // `qrc:` is the offline fixture's picture.
-    if raw.starts_with("file:") || raw.starts_with("qrc:") {
+    if is_local_file_url(raw) || raw.starts_with("qrc:") {
         return raw.to_owned();
+    }
+    if raw
+        .get(..5)
+        .is_some_and(|s| s.eq_ignore_ascii_case("file:"))
+    {
+        return String::new();
     }
     // A sent GIF keeps its provider's URL: load it through the proxy.
     if is_web_url(raw) {
@@ -812,13 +838,15 @@ pub fn gif_duration(seconds: Option<f64>) -> String {
 
 /// A shortcut tile's media (`GifShortcutCardMedia`): a picture, or a
 /// muted loop when the item has only video.
-fn shortcut_media(item: Option<&GifItem>) -> Value {
+fn shortcut_media(item: Option<&GifItem>, api_base: &str) -> Value {
     let Some(item) = item else {
         return json!({ "image": "", "video": "" });
     };
-    let image = gif_preview(item).unwrap_or_default();
+    let image = gif_preview(item)
+        .map(|url| via_media_proxy(url, api_base))
+        .unwrap_or_default();
     let video = gif_video(item, false)
-        .map(|a| a.url.as_str())
+        .map(|a| via_media_proxy(&a.url, api_base))
         .unwrap_or_default();
     json!({ "image": image, "video": video })
 }
@@ -827,11 +855,15 @@ fn shortcut_media(item: Option<&GifItem>) -> Value {
 /// the rest of the picker: its start screen (categories, the Favorites and
 /// Trending tiles' media), the provider and the search terms, as JSON.
 /// `saved` is every favourite's `provider:id` (the tiles' stars) and
-/// `favorite` the newest favourite of the media type.
+/// `favorite` the newest favourite of the media type. Every picture and
+/// clip loads through [`via_media_proxy`]: the server sends them proxied,
+/// favourites keep the provider's URL, and a value that is not http(s)
+/// loads nothing.
 pub(in crate::store) fn gif_rows(
     browse: &GifBrowse,
     saved: &[String],
     favorite: Option<&GifItem>,
+    api_base: &str,
 ) -> (Vec<GifRow>, GifStatusView) {
     let mut units = [0i64; 2];
     let mut counts = [0i64; 2];
@@ -861,8 +893,12 @@ pub(in crate::store) fn gif_rows(
                 .filter(|t| !t.is_empty())
                 .unwrap_or(&item.title)
                 .to_owned(),
-            preview: image.map(|a| a.url.clone()).unwrap_or_default(),
-            video: video.map(|a| a.url.clone()).unwrap_or_default(),
+            preview: image
+                .map(|a| via_media_proxy(&a.url, api_base))
+                .unwrap_or_default(),
+            video: video
+                .map(|a| via_media_proxy(&a.url, api_base))
+                .unwrap_or_default(),
             clip: clips && video.is_some(),
             duration: gif_duration(item.duration),
             aspect,
@@ -880,11 +916,7 @@ pub(in crate::store) fn gif_rows(
             list.iter()
                 .filter(|c| !c.label.is_empty())
                 .map(|c| {
-                    let image = if is_web_url(&c.image_url) {
-                        c.image_url.as_str()
-                    } else {
-                        ""
-                    };
+                    let image = via_media_proxy(&c.image_url, api_base);
                     json!({ "id": c.id, "label": c.label, "query": c.query, "image": image })
                 })
                 .collect()
@@ -907,8 +939,8 @@ pub(in crate::store) fn gif_rows(
         "rateLimited": browse.rate_limited,
         "categoriesLoading": browse.categories_loading,
         "categories": categories,
-        "trending": shortcut_media(trending),
-        "favorite": shortcut_media(favorite),
+        "trending": shortcut_media(trending, api_base),
+        "favorite": shortcut_media(favorite, api_base),
         "terms": terms,
     });
     let status = GifStatusView {
@@ -977,6 +1009,41 @@ mod tests {
     }
 
     #[test]
+    fn only_a_local_file_attachment_should_load_from_disk() {
+        let at = |url: &str| {
+            attachment_url(
+                &Attachment {
+                    url: Some(url.into()),
+                    ..Attachment::default()
+                },
+                "https://yap.test",
+            )
+        };
+        // An upload in flight previews from disk.
+        assert_eq!(at("file:///C:/Users/me/x.png"), "file:///C:/Users/me/x.png");
+        assert_eq!(at("file:///data/user/0/x.png"), "file:///data/user/0/x.png");
+        assert_eq!(at("qrc:/fixture/a.png"), "qrc:/fixture/a.png");
+        // A file URL that names a host (a UNC path on Windows) loads nothing.
+        for url in [
+            "file://attacker.example/x.png",
+            "FILE://attacker.example/x.png",
+            "file:////attacker.example/x.png",
+            r"file:///\\attacker.example\x.png",
+            "file:///%2F%2Fattacker.example/x.png",
+            "file:/x.png",
+        ] {
+            assert_eq!(at(url), "", "{url}");
+        }
+        // Other schemes are read as a file key: a path on our own API.
+        for url in [
+            "smb://attacker.example/x.png",
+            "ftp://attacker.example/x.png",
+        ] {
+            assert!(at(url).starts_with("https://yap.test/api/"), "{url}");
+        }
+    }
+
+    #[test]
     fn video_kinds_should_follow_the_playable_allowlist() {
         let kinds = [
             "video/mp4; codecs=x",
@@ -1041,8 +1108,6 @@ mod tests {
         for url in [
             "https://y/api/attachments/c/a/b.png",
             "https://y/api/proxy-media?url=https%3A%2F%2Fcdn.example%2Fa.png&sig=s",
-            "file:///c:/x.png",
-            "",
         ] {
             assert_eq!(via_media_proxy(url, "https://y"), url, "{url}");
         }
@@ -1090,18 +1155,27 @@ mod tests {
     }
 
     #[test]
-    fn values_without_a_web_host_should_not_load_from_one() {
+    fn values_without_a_web_host_should_load_nothing() {
         for url in [
             "file:///c:/x.png",
-            "qrc:/a.png",
+            // Qt opens these as \\attacker.example\x.png: SMB or WebDAV to
+            // that host, with this device's address and maybe an NTLM hash.
+            "file://attacker.example/x.png",
+            "FILE://attacker.example/x.png",
+            "file:////attacker.example/x.png",
+            r"file:///\\attacker.example\x.png",
+            "smb://attacker.example/share/x.png",
+            "ftp://attacker.example/x.png",
+            "javascript:alert(1)",
             "data:image/png;base64,AA",
+            "qrc:/a.png",
             "https:",
             "https://",
             "a.png",
             "",
         ] {
             assert_eq!(web_url(url), None, "{url:?}");
-            assert_eq!(via_media_proxy(url, "https://y"), url, "{url:?}");
+            assert_eq!(via_media_proxy(url, "https://y"), "", "{url:?}");
             assert_eq!(
                 embed_image_url(url, "https://a", "https://y"),
                 "",

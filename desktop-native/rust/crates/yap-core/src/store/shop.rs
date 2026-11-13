@@ -278,13 +278,10 @@ fn item_art(item: &Item, kind: Kind) -> (String, String) {
         ),
         Kind::Effect => (c::effect_still_url(item, 150.0), String::new()),
         Kind::Nameplate => (
-            item.static_url
-                .clone()
-                .or_else(|| item.preview_url.clone())
-                .unwrap_or_default(),
-            item.animated_url.clone().unwrap_or_default(),
+            c::https_only(item.static_url.as_deref().or(item.preview_url.as_deref())),
+            c::https_only(item.animated_url.as_deref()),
         ),
-        Kind::Frame => (item.preview_url.clone().unwrap_or_default(), String::new()),
+        Kind::Frame => (c::https_only(item.preview_url.as_deref()), String::new()),
     }
 }
 
@@ -550,8 +547,8 @@ fn picker_preview(
     let me_id = me.map_or("", |m| m.id.as_str());
     let plate = match item.filter(|_| kind == Kind::Nameplate) {
         Some(item) => {
-            let animated = item.animated_url.as_deref();
-            let url = animated.or(item.static_url.as_deref());
+            let animated = item.animated_url.as_deref().filter(|u| c::is_https(u));
+            let url = animated.or(item.static_url.as_deref().filter(|u| c::is_https(u)));
             let content = if animated.is_some() {
                 "video/webm"
             } else {
@@ -715,8 +712,8 @@ fn detail_json(state: &ShopState, me: Option<&User>) -> Value {
     let preview = c::display_with(display, kind, Some(item));
     let me_id = me.map_or("", |m| m.id.as_str());
     let plate = if kind == Kind::Nameplate {
-        let animated = item.animated_url.as_deref();
-        let url = animated.or(item.static_url.as_deref());
+        let animated = item.animated_url.as_deref().filter(|u| c::is_https(u));
+        let url = animated.or(item.static_url.as_deref().filter(|u| c::is_https(u)));
         let content = if animated.is_some() {
             "video/webm"
         } else {
