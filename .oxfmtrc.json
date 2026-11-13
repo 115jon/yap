@@ -34,8 +34,6 @@
     "*.lock",
     "desktop-native/mobile/qt/qt-sdk.lock.json",
     "**/*.toml",
-    "desktop/src-tauri/**",
-    "mobile/src-tauri/**",
     "src/components/ui/icon/glyphs.generated.ts",
     "src/lib/ytdlp/assets/*.min.js",
     "tools/oxlint/anti-slop/**"

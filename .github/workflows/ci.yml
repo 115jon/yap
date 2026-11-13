@@ -49,8 +49,6 @@ jobs:
               - 'realtime/**'
               - 'scripts/**'
               - 'public/**'
-              - 'desktop/**'
-              - 'mobile/**'
               - 'migrations/**'
               - 'patches/**'
               - '**/*.ts'

@@ -134,8 +134,7 @@ jobs:
           fi
 
   # The native app (desktop-native/) is the desktop release from 4.0.0. The
-  # Tauri app's desktop-release.yml is no longer called here; it stays
-  # dispatch-only until desktop/ is removed.
+  # Tauri app is archived on the archive/tauri-desktop branch.
   desktop:
     name: desktop release
     needs: release

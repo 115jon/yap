@@ -21,10 +21,8 @@ import { defineConfig } from "oxlint";
  * - TanStack Router rules run as a JS plugin (alias `tanstack-router`).
  * - anti-slop rules are the vendored plugins under tools/oxlint/anti-slop.
  *
- * Scope: ESLint ignored realtime/, desktop/ and mobile/. realtime/ is linted
- * now (0 errors, 50 warnings, mostly anti-slop ratchets). desktop/ and mobile/
- * stay ignored because their vendored Tauri plugin code produces errors we
- * cannot fix locally.
+ * Scope: ESLint ignored realtime/. It is linted now (0 errors, 50 warnings,
+ * mostly anti-slop ratchets).
  */
 export default defineConfig({
   ignorePatterns: [
@@ -38,8 +36,6 @@ export default defineConfig({
     "target-test/**",
     "public/mediapipe/**",
     "packages/*/dist/**",
-    "desktop/**",
-    "mobile/**",
     "src/routeTree.gen.ts",
     // Third-party minified yt-dlp solver payloads are consumed as opaque
     // runtime assets; linting them creates hundreds of non-actionable
