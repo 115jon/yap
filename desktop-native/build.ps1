@@ -25,12 +25,12 @@ param(
 $ErrorActionPreference = "Stop"
 
 # The dependency root: where the custom Qt, libwebrtc and ONNX Runtime live
-# side by side. YAP_DEPS_ROOT, else a `ct` folder at the root of any drive.
-# Paths passed in (-QtDir, YAP_*_DIR) win over it.
+# side by side. YAP_DEPS_ROOT, else a `ct` folder at the root of any drive
+# that holds a custom Qt. Paths passed in (-QtDir, YAP_*_DIR) win over it.
 $deps = if ($env:YAP_DEPS_ROOT) { $env:YAP_DEPS_ROOT } else {
     Get-PSDrive -PSProvider FileSystem |
         ForEach-Object { Join-Path $_.Root "ct" } |
-        Where-Object { Test-Path $_ } |
+        Where-Object { Test-Path (Join-Path $_ "qt-custom-6.11*") } |
         Select-Object -First 1
 }
 # Forward slashes, as the paths below and CMake use them.
