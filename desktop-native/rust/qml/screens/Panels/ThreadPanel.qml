@@ -138,7 +138,7 @@ SidePanelFrame {
                 else
                     Chat.deleteMessage(id)
             }
-            onMenuRequested: (id, author, text, mine, anchor, x, y) => rowMenu.openOn(row, id, author, text, mine, anchor, x, y)
+            onMenuRequested: (id, author, text, mine, anchor, x, y) => rowMenu.openOn(row, anchor, x, y)
             onReactionDetailsRequested: (id, emoji) => ShellState.reactionsRequested(id, emoji)
             onJumpRequested: id => Chat.jumpToMessage(Nav.activeChannelId, id)
             onProfileRequested: (userId, anchor) => ShellState.showProfile(userId, anchor, "left")
@@ -315,11 +315,11 @@ SidePanelFrame {
     }
 
     // The full message menu, as the web gives thread rows (MessageMenu.qml),
-    // without the thread row. Reply goes to the thread's own field.
+    // without the thread row (the rows say so: `threadActions`). Reply goes
+    // to the thread's own field.
     MessageMenu {
         id: rowMenu
         host: root
-        threadActions: false
         onEditRequested: id => root.editingId = id
         onReplyRequested: replyField.forceActiveFocus()
         onPinRequested: (id, author, text, pin, confirm) => root.setPin(id, author, text, pin, confirm)

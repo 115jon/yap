@@ -148,39 +148,40 @@ Rectangle {
         }
         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Menu
                 || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
-            messageMenuHost.load()?.openOn(row, row.messageId, row.author, row.body, row.mine,
-                                           row, row.width - 24, row.padTop)
+            messageMenuHost.load()?.openOn(row, row, row.width - 24, row.padTop)
             event.accepted = true
             return
         }
         if (!plain)
             return
+        // The gates are the message menu's (Yap.Ui MessageActionModel).
+        const m = rowActions.snapshot(row)
         switch (event.key) {
         case Qt.Key_R:
             root.replyTo(row.messageId, row.author, row.body, row.attachments, row.nameStyle)
             event.accepted = true
             return
         case Qt.Key_E:
-            if (row.mine) {
+            if (rowActions.can("edit", m)) {
                 root.startEdit(row.messageId)
                 event.accepted = true
             }
             return
         case Qt.Key_Delete:
         case Qt.Key_Backspace:
-            if (row.canDelete) {
+            if (rowActions.can("delete", m)) {
                 root.deleteMessage(row.messageId, row.author, row.body, !(event.modifiers & Qt.ShiftModifier), row)
                 event.accepted = true
             }
             return
         case Qt.Key_P:
-            if (Panels.canPin) {
+            if (rowActions.can("pin", m)) {
                 root.setPin(row.messageId, row.author, row.body, !row.pinned, !(event.modifiers & Qt.ShiftModifier))
                 event.accepted = true
             }
             return
         case Qt.Key_T:
-            if (row.threadActions) {
+            if (rowActions.can("thread", m)) {
                 root.openThread(row.messageId)
                 event.accepted = true
             }
@@ -203,6 +204,8 @@ Rectangle {
             event.accepted = true
         }
     }
+
+    MessageActionModel { id: rowActions }
 
     // `row`: the message's delegate, for the dialog's preview card
     // (avatar, time, attachments, edited).
@@ -569,7 +572,7 @@ Rectangle {
             onEditCancelled: root.endEdit()
             onDeleteRequested: (id, author, text, confirm) => root.deleteMessage(id, author, text, confirm, row)
             onMenuRequested: (id, author, text, mine, anchor, x, y) => {
-                messageMenuHost.load()?.openOn(row, id, author, text, mine, anchor, x, y)
+                messageMenuHost.load()?.openOn(row, anchor, x, y)
             }
             onThreadRequested: id => root.openThread(id)
             onPinRequested: (id, author, text, pin, confirm) => root.setPin(id, author, text, pin, confirm)
