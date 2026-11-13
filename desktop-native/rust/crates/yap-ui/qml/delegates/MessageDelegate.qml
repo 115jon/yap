@@ -982,6 +982,23 @@ Item {
             }
             FloatShadow {}
             ClipboardText { id: clipboard }
+            MessageActionModel {
+                id: keyActions
+                message: keyActions.snapshot(root)
+                onReactRequested: anchor => root.reactionPickerRequested(root.messageId, anchor, false)
+                onReplyRequested: (id, author, text) => root.replyRequested(id, author, text)
+                onEditRequested: id => root.editRequested(id)
+                onThreadRequested: id => root.threadRequested(id)
+                onPinRequested: (id, author, text, pin, confirm) => root.pinRequested(id, author, text, pin, confirm)
+                onDeleteRequested: (id, author, text, confirm) => root.deleteRequested(id, author, text, confirm)
+                onCopyRequested: (text, notice) => {
+                    clipboard.copyText(text)
+                    Chat.notice(notice)
+                }
+                onLinkRequested: id => root.linkRequested(id)
+                onMoreRequested: anchor => root.menuRequested(root.messageId, root.author, root.body, root.mine,
+                                                              anchor, anchor.width - 200, anchor.height + 4)
+            }
             Row {
                 id: actions
                 anchors.centerIn: parent
@@ -1036,98 +1053,44 @@ Item {
                         color: Theme.line
                     }
                 }
-                // Shift: the power keys (MessageItem.tsx): copy ID, link,
-                // mark unread, pin, thread. The bar is only built for a
-                // settled message.
-                IconKey {
-                    size: 28
-                    iconName: "copyId"
-                    tip: qsTr("Copy message ID")
-                    visible: root.shiftHeld
-                    onClicked: {
-                        clipboard.copyText(root.messageId)
-                        Chat.notice(qsTr("Message ID copied"))
+                // The keys, from Yap.Ui's MessageActionModel: React, Reply,
+                // Edit, More; with Shift the power keys (MessageItem.tsx:
+                // copy ID, link, mark unread, pin, thread), a seam, and
+                // Delete in More's place (`[:root[data-shift]_&]:hidden`).
+                // The bar is only built for a settled message, and its keys
+                // never confirm (a pin still does: ChatView.setPin).
+                Repeater {
+                    model: keyActions.groups(root.shiftHeld ? "shiftBar" : "bar")
+                    Row {
+                        id: keyGroup
+                        required property var modelData
+                        required property int index
+                        spacing: 2
+                        Item {
+                            visible: keyGroup.index > 0
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 5
+                            height: 16
+                            Rectangle {
+                                x: 2
+                                width: 1
+                                height: 16
+                                color: Theme.line
+                            }
+                        }
+                        Repeater {
+                            model: keyGroup.modelData
+                            IconKey {
+                                id: key
+                                required property var modelData
+                                size: 28
+                                iconName: key.modelData.glyph
+                                tip: key.modelData.text
+                                tone: key.modelData.danger ? "destructive" : key.modelData.on ? "toggled" : "ghost"
+                                onClicked: keyActions.run(key.modelData.id, key, false)
+                            }
+                        }
                     }
-                }
-                IconKey {
-                    size: 28
-                    iconName: "link"
-                    tip: qsTr("Copy message link")
-                    visible: root.shiftHeld
-                    onClicked: root.linkRequested(root.messageId)
-                }
-                IconKey {
-                    size: 28
-                    iconName: "markUnread"
-                    tip: qsTr("Mark unread")
-                    visible: root.shiftHeld
-                    onClicked: Extras.markUnread(root.messageId)
-                }
-                IconKey {
-                    size: 28
-                    iconName: "pin"
-                    tone: root.pinned ? "toggled" : "ghost"
-                    tip: root.pinned ? qsTr("Unpin message") : qsTr("Pin message")
-                    visible: root.shiftHeld && Panels.canPin
-                    onClicked: root.pinRequested(root.messageId, root.author, root.body, !root.pinned, false)
-                }
-                IconKey {
-                    size: 28
-                    iconName: "thread"
-                    tip: root.replyCount > 0 ? qsTr("View thread") : qsTr("Create thread")
-                    visible: root.shiftHeld && root.threadActions
-                    onClicked: root.threadRequested(root.messageId)
-                }
-                Item {
-                    visible: root.shiftHeld
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 5
-                    height: 16
-                    Rectangle {
-                        x: 2
-                        width: 1
-                        height: 16
-                        color: Theme.line
-                    }
-                }
-                IconKey {
-                    id: reactKey
-                    size: 28
-                    iconName: "react"
-                    tip: qsTr("Add reaction")
-                    onClicked: root.reactionPickerRequested(root.messageId, reactKey, false)
-                }
-                IconKey {
-                    size: 28
-                    iconName: "reply"
-                    tip: qsTr("Reply")
-                    onClicked: root.replyRequested(root.messageId, root.author, root.body)
-                }
-                IconKey {
-                    size: 28
-                    iconName: "edit"
-                    tip: qsTr("Edit message")
-                    visible: root.mine
-                    onClicked: root.editRequested(root.messageId)
-                }
-                IconKey {
-                    size: 28
-                    iconName: "trash"
-                    tone: "destructive"
-                    tip: qsTr("Delete message")
-                    visible: root.canDelete && root.shiftHeld
-                    onClicked: root.deleteRequested(root.messageId, root.author, root.body, false)
-                }
-                // Hidden whenever Shift is held, delete rights or not
-                // (MessageItem.tsx `[:root[data-shift]_&]:hidden`).
-                IconKey {
-                    id: moreKey
-                    size: 28
-                    iconName: "more"
-                    tip: qsTr("More")
-                    visible: !root.shiftHeld
-                    onClicked: root.menuRequested(root.messageId, root.author, root.body, root.mine,
-                                                  moreKey, moreKey.width - 200, moreKey.height + 4)
                 }
             }
         }
