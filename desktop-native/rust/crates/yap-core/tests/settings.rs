@@ -248,6 +248,16 @@ fn a_display_name_over_80_characters_should_be_refused() {
 }
 
 #[test]
+fn a_display_name_should_be_counted_in_utf16_units_as_the_server_counts_it() {
+    // 40 emoji outside the BMP are 80 UTF-16 units: the limit exactly.
+    assert!(validate_display_name(&"\u{1F600}".repeat(40)).is_ok());
+    // 41 are 82 units, though only 41 chars: the server refuses them.
+    assert!(validate_display_name(&"\u{1F600}".repeat(41)).is_err());
+    // A BMP character is one unit, whatever its UTF-8 length.
+    assert!(validate_display_name(&"\u{00E9}".repeat(80)).is_ok());
+}
+
+#[test]
 fn a_display_name_should_be_trimmed() {
     assert_eq!(validate_display_name("  Ada ").as_deref(), Ok("Ada"));
 }
