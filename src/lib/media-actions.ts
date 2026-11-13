@@ -1,4 +1,8 @@
-import { getWebOrigin } from "@/lib/platform";
+import {
+  isCapProtectedMediaPath,
+  stripMediaCredentials,
+} from "@/lib/media-capability";
+import { getPublicApiUrl, getWebOrigin } from "@/lib/platform";
 
 export interface MediaActionTarget {
   url: string;
@@ -6,10 +10,54 @@ export interface MediaActionTarget {
   filename?: string;
 }
 
+/** Hosts that are Yap itself: the page, the web origin, the API, the desktop webview. */
+function isOwnHost(hostname: string): boolean {
+  const own = new Set(["localhost", "tauri.localhost"]);
+  for (const origin of [
+    typeof window !== "undefined" ? window.location.origin : "",
+    getWebOrigin(),
+    getPublicApiUrl(),
+  ]) {
+    try {
+      if (origin) own.add(new URL(origin).hostname);
+    } catch {
+      // Not a URL: nothing to add.
+    }
+  }
+  return own.has(hostname);
+}
+
+/**
+ * A link that is safe to hand to someone else (clipboard, share sheet,
+ * system browser). Yap's own private media becomes its canonical address on
+ * the web origin, without the media capability or a session token: whoever
+ * opens it needs their own sign-in. Anything else is returned as it is.
+ */
+export function getShareableUrl(url: string): string {
+  const relative = !/^[a-z][a-z0-9+.-]*:/i.test(url);
+  let parsed: URL;
+  try {
+    parsed = new URL(
+      relative && !url.startsWith("/") ? `/${url}` : url,
+      getWebOrigin() || "https://localhost",
+    );
+  } catch {
+    return url;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return url;
+  if (!relative && !isOwnHost(parsed.hostname)) return url;
+  if (!isCapProtectedMediaPath(parsed.pathname)) {
+    return relative
+      ? `${getWebOrigin()}${parsed.pathname}${parsed.search}${parsed.hash}`
+      : url;
+  }
+
+  stripMediaCredentials(parsed);
+  return `${getWebOrigin()}${parsed.pathname}${parsed.search}`;
+}
+
 export function getPublicMediaUrl(url: string): string {
-  if (/^https?:\/\//i.test(url)) return url;
-  const path = url.startsWith("/") ? url : `/${url}`;
-  return `${getWebOrigin()}${path}`;
+  return getShareableUrl(url);
 }
 
 function getMediaFilename(url: string, fallback = "media"): string {
@@ -70,5 +118,5 @@ export async function saveMedia(target: MediaActionTarget): Promise<void> {
 }
 
 export async function copyMediaLink(url: string): Promise<void> {
-  await navigator.clipboard.writeText(url);
+  await navigator.clipboard.writeText(getShareableUrl(url));
 }

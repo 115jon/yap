@@ -1,6 +1,6 @@
 import { getDisplayName } from "@/lib/display-name";
 import { getAuthAssetUrl } from "@/lib/platform";
-import { getWebOrigin } from "@/lib/platform";
+import { getShareableUrl } from "@/lib/media-actions";
 import { Icon } from "@/components/ui/icon";
 import { HIT, PRESS, PRESS_ICON } from "@/components/ui/interaction";
 import { Num } from "@/components/ui/num";
@@ -93,11 +93,10 @@ export function ImageViewerToolbar({
 
   const handleCopyLink = () => {
     if (currentImage) {
-      const url = currentImage.downloadUrl || getUrl(currentImage);
-      const shareableUrl = /^https?:\/\//i.test(url)
-        ? url
-        : `${getWebOrigin()}${url}`;
-      navigator.clipboard.writeText(shareableUrl);
+      // The canonical address: a copied link carries no capability or
+      // session, whoever opens it signs in.
+      const source = currentImage.downloadUrl || getUrl(currentImage);
+      void navigator.clipboard.writeText(getShareableUrl(source));
     }
   };
 

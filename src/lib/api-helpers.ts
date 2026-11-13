@@ -9,6 +9,7 @@ import {
   isSuspended,
   SUSPENDED_MESSAGE,
 } from "@/lib/suspension";
+import type { Credentials } from "@/server/kova-auth";
 export { genId } from "@/lib/id";
 
 const authLog = clog("requireAuth");
@@ -353,11 +354,21 @@ export async function requireActiveVoiceChannelSession(
 export async function requireAuth(
   req?: Request,
 ): Promise<{ userId: string } | Response> {
-  const { checkCredentials, requestCredentials } =
-    await import("@/lib/kova-auth-server");
+  const { requestCredentials } = await import("@/lib/kova-auth-server");
+  return requireCredentials(req, requestCredentials(req));
+}
+
+/**
+ * `requireAuth` with these credentials instead of the request's headers
+ * (lib/media-auth hands in a legacy client's query token as a bearer).
+ */
+export async function requireCredentials(
+  req: Request | undefined,
+  credentials: Credentials,
+): Promise<{ userId: string } | Response> {
+  const { checkCredentials } = await import("@/lib/kova-auth-server");
   const requestContext = getRequestLogContext(req);
   try {
-    const credentials = requestCredentials(req);
     const check = await checkCredentials(credentials);
 
     if (check.status === "signed-in") {
@@ -372,7 +383,6 @@ export async function requireAuth(
     const credentialContext = {
       hasAuthorizationHeader: !!credentials.authorization,
       hasBearerToken: !!credentials.authorization?.startsWith("Bearer "),
-      hasQueryToken: !!credentials.queryToken,
     };
 
     if (check.status === "unavailable") {

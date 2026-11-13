@@ -12,13 +12,102 @@ import {
   isDesktop,
   isMobile,
 } from "../platform";
+import { issueMediaGrant, verifyMediaCap } from "../media-capability";
+import {
+  resetMediaGrantForTests,
+  seedMediaGrantForTests,
+} from "../media-grant";
 
 afterEach(() => {
   vi.unstubAllGlobals();
   if (typeof window !== "undefined") delete window.__TAURI_INTERNALS__;
+  window.localStorage.clear();
+  resetMediaGrantForTests();
 });
 
+const SECRET = "test-secret";
+
+/** A signed-in session with a media grant for it. */
+function signInWithGrant(token = "session-token") {
+  window.localStorage.setItem("desktop_auth_token", token);
+  Object.defineProperty(window, "__TAURI_INTERNALS__", {
+    configurable: true,
+    value: {},
+  });
+  seedMediaGrantForTests(issueMediaGrant(SECRET, "user-1", Date.now()), token);
+}
+
 describe("platform asset urls", () => {
+  it("signs private media with a capability, never the session token", () => {
+    signInWithGrant();
+
+    for (const path of [
+      "/api/attachments/c1/a1/f.png",
+      "/api/emojis/assets/e1",
+      "/api/voice-status-media/s1/a1/clip.gif",
+      "/api/camera-backgrounds/beach.png",
+    ]) {
+      const url = new URL(getAuthAssetUrl(path), window.location.origin);
+      expect(url.searchParams.has("token"), path).toBe(false);
+      expect(url.toString(), path).not.toContain("session-token");
+      const verification = verifyMediaCap(
+        url.searchParams.get("cap") ?? "",
+        url,
+        SECRET,
+        Date.now(),
+      );
+      expect(verification, path).toMatchObject({ ok: true, userId: "user-1" });
+    }
+  });
+
+  it("signs a stale media capability again instead of passing it through", () => {
+    signInWithGrant();
+
+    const url = new URL(
+      getAuthAssetUrl("/api/attachments/c1/a1/f.png?cap=m1.b2xk.1.stale"),
+      window.location.origin,
+    );
+    expect(url.searchParams.getAll("cap")).toHaveLength(1);
+    expect(
+      verifyMediaCap(
+        url.searchParams.get("cap") ?? "",
+        url,
+        SECRET,
+        Date.now(),
+      ),
+    ).toMatchObject({ ok: true });
+  });
+
+  it("adds nothing to private media while there is no grant", () => {
+    window.localStorage.setItem("desktop_auth_token", "session-token");
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => undefined)),
+    );
+
+    const url = new URL(
+      getMediaUrl("/api/attachments/c1/a1/f.png?token=stale-token"),
+    );
+    expect(url.searchParams.has("token")).toBe(false);
+    expect(url.searchParams.has("cap")).toBe(false);
+  });
+
+  it("does not use a grant issued for another session", () => {
+    signInWithGrant("first-session");
+    window.localStorage.setItem("desktop_auth_token", "second-session");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => undefined)),
+    );
+
+    const url = new URL(getMediaUrl("/api/attachments/c1/a1/f.png"));
+    expect(url.searchParams.has("cap")).toBe(false);
+  });
+
   it("does not append a session token to capability media URLs", () => {
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
