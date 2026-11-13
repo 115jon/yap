@@ -94,7 +94,7 @@ One crate, one QML module, two consumers. No file is copied:
 - **Each app crate** (`yap_native` on the desktop, `yap_mobile_qt` here)
   depends on it by path. Its CMake imports both modules from the one crate it
   builds: `cxx_qt_import_qml_module(yap_ui_qml URI "Yap.Ui" SOURCE_CRATE
-  <app crate>)` beside its own, and includes `yap-ui/cpp/yap_ui.cmake` for the
+<app crate>)` beside its own, and includes `yap-ui/cpp/yap_ui.cmake` for the
   shared C++ (an INTERFACE library, so it compiles with the app's flags).
 - **The app's own QML** is its own module: `com.yap.native` on the desktop,
   `com.yap.mobile` here. Its files `import Yap.Ui`.
@@ -102,7 +102,7 @@ One crate, one QML module, two consumers. No file is copied:
   differ per app (`EmbedCard`, `MessageMedia`, `NameplateLayer`,
   `VoiceStatusLine`, `VoiceStreamHoverCard`). Each app's `main.cpp`
   registers its own file for each name by URL (`qmlRegisterType(QUrl("qrc:/qt/qml/<module>/..."),
-  "Yap.Platform", 1, 0, name)`); the desktop's are bytecode-only with the
+"Yap.Platform", 1, 0, name)`); the desktop's are bytecode-only with the
   sources discarded, which URL registration handles. `Yap.Media` and
   `Yap.Chrome` stay C++ registrations: `yap_ui_register` adds the shared
   `AnimatedPicture`; each app registers its `DesktopShell`.
@@ -723,7 +723,7 @@ desktop's objects with phone list layouts:
   sessions (`Settings.loadSessions`); another device signs out after a
   confirm (`Extras.revokeSession`). The server lists only the current
   session today (`GET /api/sessions` returns it alone, with `activity:
-  null`), so the row reads "Desktop · Desktop client", the client's
+null`), so the row reads "Desktop · Desktop client", the client's
   fallback title, on a phone too, and other devices never show. _About_: the APK's version name, the
   licence and the privacy policy. _Sign out_ asks first, in place.
 - **Friends** (the first row of Home's pane, with the incoming count): the
