@@ -293,10 +293,11 @@ export class VoiceSession<C extends VoiceSessionClient> {
     };
     if (plan.sendWindowMs > 0) {
       this.drains.add(drain);
-      drain.timer = this.timers.setTimeout(
-        () => this.finish(drain),
-        plan.sendWindowMs,
-      );
+      drain.timer = this.timers.setTimeout(() => {
+        // It has fired: there is nothing left to clear.
+        drain.timer = null;
+        this.finish(drain);
+      }, plan.sendWindowMs);
     } else {
       this.finish(drain);
     }
@@ -311,7 +312,10 @@ export class VoiceSession<C extends VoiceSessionClient> {
   private finish(drain: Drain<C>): void {
     if (drain.done) return;
     drain.done = true;
-    if (this.drains.delete(drain)) this.timers.clearTimeout(drain.timer);
+    if (this.drains.delete(drain) && drain.timer !== null) {
+      this.timers.clearTimeout(drain.timer);
+      drain.timer = null;
+    }
     const { context, steps } = drain;
     this.runStep("disconnect", () =>
       context.client.disconnect(context.plan.reason),
