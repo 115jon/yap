@@ -11,6 +11,7 @@ export default defineConfig({
       "src/**/*.test.tsx",
       "realtime/**/*.test.ts",
       "packages/*/src/**/*.test.ts",
+      "tools/vite/**/*.test.ts",
       // The admin console's client (its Worker tests run under
       // vitest.realtime.config.ts, from apps/admin/test).
       "apps/admin/src/**/*.test.ts",

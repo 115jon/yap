@@ -10,6 +10,7 @@ import {
   resolveWebDevPort,
 } from "../src/lib/dev-port";
 import { busyPortHint } from "../tools/vite/busy-port-hint";
+import { serverOnlyStub } from "../tools/vite/server-only-stub";
 
 const rootDir = path.resolve(import.meta.dirname, "..");
 const shimDir = path.resolve(rootDir, "src/shims");
@@ -77,6 +78,9 @@ export default defineConfig(async ({ mode }) => {
         routeFileIgnorePattern: "^api$",
         quoteStyle: "double",
       }),
+      // Server-fn handlers stay in this build (dead code, see the shim), so
+      // the server modules they import would too. Node-only ones are stubbed.
+      serverOnlyStub([path.resolve(rootDir, "src/server/media-proxy")]),
       viteReact(),
       tailwindcss(),
     ],
