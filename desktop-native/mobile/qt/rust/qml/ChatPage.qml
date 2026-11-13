@@ -377,11 +377,14 @@ Item {
     // Unread from before this visit: how many and since when; a tap jumps
     // to the first of them. A float of its own under the bar, over the
     // list, which never jumps.
+    // Its plate lets presses through: a drag that starts on the banner
+    // scrolls the list (the banner's taps are TapHandlers of its own).
     FloatPlate {
         anchors.fill: banner
         visible: banner.visible
         z: 2
         transform: Translate { y: -bar.lift }
+        blocksInput: false
     }
     UnreadBanner {
         id: banner
@@ -523,10 +526,18 @@ Item {
     property int newBelow: 0
     Connections {
         target: MessageListModel
-        // Appended rows (an older page goes in at 0) while away from the end.
+        // How many rows the last insert brought; `appended` says whether
+        // they went in at the end (not an older page, not a gap filled).
+        property int inserted: 0
         function onRowsInserted(parent, first, last) {
-            if (first > 0 && !scroll.nearEnd && !Chat.hasNewer)
-                root.newBelow += last - first + 1
+            inserted = last - first + 1
+        }
+        // Others' messages the list does not follow (our own send always
+        // comes into view).
+        function onAppended(mine) {
+            if (!mine && (!scroll.stickToEnd || view.dragging) && !Chat.hasNewer)
+                root.newBelow += inserted
+            inserted = 0
         }
     }
     Connections {
@@ -549,7 +560,10 @@ Item {
     // with how many came in since. It rises 8 and fades in.
     Item {
         id: present
+        // Not over the `@` suggestions, which float up from the composer
+        // over the list.
         readonly property bool shown: view.count > 0 && scroll.landed && (Chat.hasNewer || !scroll.nearEnd)
+            && !composer.core.mentionOpen
         property real rise: shown || Theme.reducedMotion ? 0 : 8
         anchors.horizontalCenter: parent.horizontalCenter
         y: typing.y - height - 8 + rise
