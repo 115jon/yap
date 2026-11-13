@@ -125,10 +125,11 @@ QSGNode* VideoView::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
   }
   if (frame.serial != m_drawn) {
     // Uploaded when the material next commits; the plain texture drops its
-    // copy of the image then, so the hub can lend the buffer again.
+    // copy of the image then, so the hub can lend the buffer again. Not
+    // setTexture again: the node owns the texture, and setTexture deletes
+    // the one it has before taking the new one, even when they are the same.
     node->m_texture->setImage(frame.image);
     node->m_texture->setHasAlphaChannel(false);
-    node->m_quad.setTexture(node->m_texture);
     node->m_quad.markDirty(QSGNode::DirtyMaterial);
     m_drawn = frame.serial;
   }
