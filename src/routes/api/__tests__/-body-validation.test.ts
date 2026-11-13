@@ -44,6 +44,7 @@ vi.mock("@/services/channel.service", async (importOriginal) => ({
 }));
 vi.mock("@/services/message-share.service", () => ({
   createMessageShare: mocks.createMessageShare,
+  proxyShareForDelivery: <T>(share: T) => share,
 }));
 vi.mock("@/services/voice-status-media.service", () => ({
   createOrReuseExternalVoiceStatusMediaAsset:

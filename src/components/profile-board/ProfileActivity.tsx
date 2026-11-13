@@ -12,6 +12,7 @@
  * Nothing here ticks or animates at rest: times are printed once.
  */
 
+import { getAuthAssetUrl } from "@/lib/platform";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
@@ -438,7 +439,7 @@ function GameIcon({ src }: { src: string }) {
   if (failed) return <Icon name="gamepad" size="lg" />;
   return (
     <img
-      src={src}
+      src={getAuthAssetUrl(src)}
       alt=""
       loading="lazy"
       decoding="async"

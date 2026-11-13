@@ -39,6 +39,12 @@ import {
 import { klipyCustomerId } from "@/lib/klipy-customer";
 import { looseStruct } from "@/lib/schema";
 import { validateBody } from "@/lib/validate-body";
+import {
+  getMediaRewriteContext,
+  proxyGifItemsForDelivery,
+  rewriteGifItemMedia,
+  unwrapProxiedMediaUrl,
+} from "@/server/media-proxy/rewrite";
 
 const KLIPY_API_URL = "https://api.klipy.com/v2";
 const TENOR_BOOTSTRAP_URL = "https://tenor.com/search/cat-gifs";
@@ -334,9 +340,14 @@ function normalizeFavorite(raw: any): StoredGifFavoriteRow | null {
   const preview =
     raw.preview && typeof raw.preview === "object" ? raw.preview : null;
   const send = raw.send && typeof raw.send === "object" ? raw.send : null;
-  const sourceUrl = raw.sourceUrl;
-  const previewUrl = preview?.url;
-  const sendUrl = send?.url;
+  // Clients send back the proxied URLs they were given: keep the originals.
+  const original = (value: unknown) =>
+    typeof value === "string"
+      ? unwrapProxiedMediaUrl(value.trim(), { keepSocialForm: true })
+      : value;
+  const sourceUrl = original(raw.sourceUrl);
+  const previewUrl = original(preview?.url);
+  const sendUrl = original(send?.url);
   if (
     !isSafeFavoriteUrl(sourceUrl) ||
     !isSafeFavoriteUrl(previewUrl) ||
@@ -402,19 +413,22 @@ function toGifPickerItem(row: StoredGifFavoriteRow) {
         send,
       });
 
-  return {
-    id: row.gif_id,
-    title: row.title,
-    provider: normalizeFavoriteProvider(row.provider),
-    altText: row.alt_text || undefined,
-    query: row.query || undefined,
-    preview,
-    send,
-    sourceUrl: row.source_url,
-    aspectRatio: row.aspect_ratio,
-    duration: row.duration ?? undefined,
-    mediaType,
-  };
+  return rewriteGifItemMedia(
+    {
+      id: row.gif_id,
+      title: row.title,
+      provider: normalizeFavoriteProvider(row.provider),
+      altText: row.alt_text || undefined,
+      query: row.query || undefined,
+      preview,
+      send,
+      sourceUrl: row.source_url,
+      aspectRatio: row.aspect_ratio,
+      duration: row.duration ?? undefined,
+      mediaType,
+    },
+    getMediaRewriteContext(),
+  );
 }
 
 async function listGifFavorites(userId: string) {
@@ -910,7 +924,8 @@ const GET = async ({ request }: any) => {
     }
 
     return apiSuccess({
-      results: dedupeGifPickerItems(results),
+      // Tiles and the sent GIF render through the media proxy.
+      results: proxyGifItemsForDelivery(dedupeGifPickerItems(results)),
       next: nextCursor,
     });
   } catch (error) {

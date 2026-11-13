@@ -1,3 +1,4 @@
+import { getAuthAssetUrl } from "@/lib/platform";
 import { Slider } from "@/components/ContextMenu/ContextMenuItems";
 import { useVoiceSettingsStore } from "@/stores/useVoiceSettingsStore";
 import { cn } from "@/lib/utils";
@@ -387,7 +388,7 @@ function FocusedStage({
               />
             ) : focusedThumbnailPoster ? (
               <img
-                src={focusedThumbnailPoster}
+                src={getAuthAssetUrl(focusedThumbnailPoster)}
                 alt={`${focusedItem.name} stream thumbnail`}
                 className="h-full w-full object-contain"
               />

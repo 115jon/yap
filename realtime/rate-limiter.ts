@@ -23,8 +23,11 @@ export const SOUNDBOARD_MEDIA_RATE_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
 };
 
+// Every third-party picture, GIF tile, avatar and video range now loads
+// through /api/proxy-media, so a busy channel or a fast GIF scroll (and a
+// shared NAT) needs room; signed requests are cheap and mostly cache hits.
 export const PROXY_MEDIA_RATE_LIMIT: RateLimitConfig = {
-  limit: 480,
+  limit: 1_500,
   windowMs: 60_000,
 };
 

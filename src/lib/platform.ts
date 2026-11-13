@@ -8,6 +8,9 @@
 import { isCapProtectedMediaPath, isMediaCap } from "@/lib/media-capability";
 import { signMediaUrl } from "@/lib/media-grant";
 import { clog } from "@/lib/console-logger";
+import { getDesktopToken, getStoredKovaAuthSessionToken } from "./desktop-auth";
+import { cleanUrlInput, isOwnZoneHostname } from "@/lib/media-url-class";
+import { signedMediaPathFor } from "@/lib/signed-media-paths";
 import { isDesktop, isMobile, isTauri } from "@/lib/runtime";
 import {
   DEFAULT_ABUSE_EMAIL,
@@ -279,6 +282,9 @@ function withMediaCapability(fullUrl: string): string {
       urlObj.searchParams.delete("token");
       return format(urlObj);
     }
+    // Only our own origin gets a capability (an embed can carry a
+    // protocol-relative or foreign URL with one of our paths in it).
+    if (!isOwnAssetOrigin(urlObj)) return fullUrl;
 
     const signed = signMediaUrl(urlObj);
     if (signed) return format(signed);
@@ -291,6 +297,20 @@ function withMediaCapability(fullUrl: string): string {
   }
 
   return fullUrl;
+}
+
+function isOwnAssetOrigin(url: URL): boolean {
+  const origins = new Set<string>();
+  if (typeof window !== "undefined") origins.add(window.location.origin);
+  for (const base of [getApiBaseUrl(), getPublicApiUrl()]) {
+    if (!base) continue;
+    try {
+      origins.add(new URL(base).origin);
+    } catch {
+      // Not a URL: nothing to add.
+    }
+  }
+  return origins.has(url.origin);
 }
 
 function shouldProxyExternalAssetUrl(pathOrUrl: string): boolean {
@@ -307,49 +327,103 @@ function buildExternalAssetProxyUrl(pathOrUrl: string): string {
   return apiUrl(`/api/proxy-media?${params.toString()}`);
 }
 
-function isInternalAbsoluteAssetUrl(pathOrUrl: string): boolean {
+/** `/api/proxy-media?...` when `url` is one of our proxy URLs on any host. */
+function proxyMediaPathOf(url: URL): string | null {
+  return url.pathname.endsWith("/api/proxy-media")
+    ? `/api/proxy-media${url.search}`
+    : null;
+}
+
+function hasSignedInSession(): boolean {
   try {
-    const url = new URL(pathOrUrl);
-    if (url.hostname === "localhost" || url.hostname === "tauri.localhost") {
-      return true;
-    }
-
-    const apiBase = getApiBaseUrl();
-    if (!apiBase) return false;
-
-    try {
-      return url.hostname === new URL(apiBase).hostname;
-    } catch {
-      return pathOrUrl.includes(apiBase);
-    }
+    return !!(getDesktopToken() ?? getStoredKovaAuthSessionToken());
   } catch {
     return false;
   }
 }
 
 /**
+ * A third-party image or video, loaded through /api/proxy-media so its host
+ * never sees the viewer's address: with the server's signature when the
+ * server sent one for this URL, else on the media pass cookie a signed-in
+ * session holds (lib/media-pass). With no session there is nothing to
+ * authorize with, so only the always-proxied Google avatars go through.
+ */
+function externalAssetUrl(rawUrl: string): string {
+  const signed = signedMediaPathFor(rawUrl);
+  if (signed) return apiUrl(signed);
+  if (!hasSignedInSession() && !shouldProxyExternalAssetUrl(rawUrl)) {
+    return rawUrl;
+  }
+  return buildExternalAssetProxyUrl(rawUrl);
+}
+
+/**
+ * True for a URL this app serves or may load directly: the page's own
+ * origin, the API (`getApiBaseUrl`, which is "" on the web, and
+ * `getPublicApiUrl`), localhost and the Tauri webview, and our own DNS
+ * zones. Host names compare without case and without the root dot.
+ */
+function isOwnAssetUrl(url: URL): boolean {
+  const hostname = url.hostname.replace(/\.+$/, "");
+  if (hostname === "localhost" || hostname === "tauri.localhost") return true;
+  if (isOwnZoneHostname(hostname)) return true;
+  if (isOwnAssetOrigin(url)) return true;
+  if (hostname === url.hostname) return false;
+  const bare = new URL(url.href);
+  bare.hostname = hostname;
+  return isOwnAssetOrigin(bare);
+}
+
+/** Schemes an asset may use that load nothing from a host. */
+const INLINE_ASSET_PROTOCOLS = new Set(["data:", "blob:"]);
+
+/** What an <img>/<video> resolves a relative URL against. */
+function documentBaseUrl(): string {
+  if (typeof window !== "undefined" && window.location?.href) {
+    return window.location.href;
+  }
+  return getApiBaseUrl() || getPublicApiUrl();
+}
+
+/**
  * Returns a URL for an asset. Private media carries a short-lived media
  * capability for that one URL, because raw <img>/<video>/<a> requests cannot
- * set auth headers (lib/media-capability).
+ * set auth headers (lib/media-capability). Third-party media go through the
+ * media proxy (externalAssetUrl).
+ *
+ * The input is read the way the browser will read the result: cleaned of
+ * what the URL parser drops (tab, newline, C0 controls), then resolved
+ * against the page. Whatever host that names decides: ours loads directly,
+ * any other one through the proxy. So "/\t/evil.example/a.png" (which a
+ * browser loads from evil.example) and "https:evil.example/a.png" (another
+ * host from a page on http://tauri.localhost) never reach their host.
  */
-export function getAuthAssetUrl(pathOrUrl: string): string {
-  // If it's already an absolute URL not pointing to our API, just return it
-  if (pathOrUrl.startsWith("http")) {
-    if (shouldProxyExternalAssetUrl(pathOrUrl)) {
-      return buildExternalAssetProxyUrl(pathOrUrl);
-    }
-    if (!isInternalAbsoluteAssetUrl(pathOrUrl)) {
-      return pathOrUrl;
-    }
+export function getAuthAssetUrl(input: string): string {
+  if (typeof input !== "string") return input;
+  const value = cleanUrlInput(input);
+  let resolved: URL;
+  try {
+    resolved = new URL(value, documentBaseUrl());
+  } catch {
+    return withMediaCapability(value);
+  }
+  if (resolved.protocol !== "http:" && resolved.protocol !== "https:") {
+    // data: and blob: load nothing from a host. Any other scheme (file:,
+    // ftp:, smb:, ...) could reach one outside the proxy, or the local
+    // network, so it loads nothing.
+    return INLINE_ASSET_PROTOCOLS.has(resolved.protocol) ? value : "";
   }
 
-  let fullUrl = pathOrUrl;
+  // Our proxy path on any host (a server-built payload): from our API,
+  // never from that host.
+  const proxyPath = proxyMediaPathOf(resolved);
+  if (proxyPath) return apiUrl(proxyPath);
+  if (!isOwnAssetUrl(resolved)) return externalAssetUrl(resolved.href);
 
-  if (fullUrl.startsWith("/")) {
-    fullUrl = apiUrl(fullUrl);
-  }
-
-  return withMediaCapability(fullUrl);
+  // A path of ours (one slash, not two: `//host` was another host above).
+  if (/^\/(?![\\/])/.test(value)) return withMediaCapability(apiUrl(value));
+  return withMediaCapability(value);
 }
 
 /**

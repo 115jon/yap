@@ -83,10 +83,13 @@ Item {
             text: root.waiting ? qsTr("Open browser") : qsTr("Sign in")
             onClicked: {
                 Native.haptic(Native.Confirm)
-                if (root.waiting)
-                    Qt.openUrlExternally(Session.verificationUrl)
-                else
+                if (root.waiting) {
+                    // The server's verification page: https only.
+                    if (/^https:\/\//i.test(Session.verificationUrl))
+                        Qt.openUrlExternally(Session.verificationUrl)
+                } else {
                     Session.startSignIn()
+                }
             }
         }
 

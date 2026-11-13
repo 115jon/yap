@@ -459,7 +459,7 @@ function StationGlyph({ favicon }: { favicon?: string }) {
   if (!favicon || failed) return <Icon name="soundboard" size="lg" />;
   return (
     <img
-      src={favicon}
+      src={getAuthAssetUrl(favicon)}
       alt=""
       onError={() => setFailed(true)}
       className="size-6 rounded-xs object-cover"

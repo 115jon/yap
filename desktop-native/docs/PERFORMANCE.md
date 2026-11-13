@@ -727,8 +727,10 @@ The tools:
   - `build.ps1` is the pass build, with a map.
 - **`YAP_FIXTURE_ICON=<url>`** and **`YAP_FIXTURE_GIF=<url>`**
   (`fixture.rs`) add a server icon (a GIF one animates) and two GIF
-  attachments to the fixture. They take local `file://` URLs
-  (`<scratch>/yapn/tmp/anim`), giving an animated scene without an account.
+  attachments to the fixture, giving an animated scene without an account.
+  `YAP_FIXTURE_GIF` takes local `file:///` URLs (`<scratch>/yapn/tmp/anim`).
+  `YAP_FIXTURE_ICON` needs an http(s) URL: server icons load through
+  `absolute_url`, which loads nothing that is not http(s).
 
 ## Where the idle memory goes
 

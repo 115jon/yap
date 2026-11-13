@@ -1,3 +1,4 @@
+import { getAuthAssetUrl } from "@/lib/platform";
 import {
   avatarDisplayToImageStyle,
   getAvatarDecoration,
@@ -47,8 +48,10 @@ export function AvatarImage({
           avatarDecoration ? "rounded-full" : "rounded-[inherit]",
         )}
       >
+        {/* Every avatar is someone's stored URL: third-party ones load
+            through the media proxy, and other schemes load nothing. */}
         <img
-          src={src}
+          src={src ? getAuthAssetUrl(src) : src}
           alt={alt}
           loading={loading}
           decoding={decoding}
@@ -65,7 +68,7 @@ export function AvatarImage({
       </span>
       {avatarDecoration && (
         <img
-          src={avatarDecoration.imageUrl}
+          src={getAuthAssetUrl(avatarDecoration.imageUrl)}
           alt=""
           aria-hidden="true"
           loading={loading}

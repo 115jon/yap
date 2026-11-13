@@ -1124,14 +1124,14 @@ describe("voice roster: released clients' op 33 / 34 / 15", () => {
         d: {
           self_mute: false,
           self_deaf: true,
-          stream_preview_url: "https://example.com/preview.png",
+          stream_preview_url: "data:image/jpeg;base64,/9j/preview",
         },
       }),
     );
     await waitForMember(channelId, userId, {
       self_mute: true,
       self_deaf: false,
-      stream_preview_url: "https://example.com/preview.png",
+      stream_preview_url: "data:image/jpeg;base64,/9j/preview",
     });
 
     // An old client's leave (or its 30 s re-join) does not move the entry.

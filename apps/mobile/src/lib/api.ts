@@ -3,6 +3,7 @@ import { Schema } from "effect";
 import { useSession } from "@/features/auth/session";
 
 import { config } from "./config";
+import { viaMediaProxy } from "./media-proxy";
 
 /**
  * Fetches `path` on the Ralph API with the session's Bearer token. The server
@@ -105,8 +106,10 @@ export function mediaUrl(path: string | null | undefined): string | null {
 }
 
 /**
- * An image source for `url`: the API's own media (attachments sit behind
- * auth) gets the session's Bearer token, anything else goes bare.
+ * An image, video or audio source for `url`. Everything loads from the API:
+ * its own media as they are, third-party media through its media proxy
+ * (lib/media-proxy). Requests to the API carry the session's Bearer token
+ * (attachments sit behind auth; the proxy needs it for unsigned URLs).
  */
 export interface MediaSource {
   readonly uri: string;
@@ -114,7 +117,7 @@ export interface MediaSource {
 }
 
 export function mediaSource(url: string): MediaSource {
-  const uri = mediaUrl(url) ?? url;
+  const uri = viaMediaProxy(mediaUrl(url) ?? url, config.apiBaseUrl);
   const { token } = useSession.getState();
   if (!token || !uri.startsWith(`${config.apiBaseUrl}/`)) return { uri };
   return { uri, headers: { Authorization: `Bearer ${token}` } };

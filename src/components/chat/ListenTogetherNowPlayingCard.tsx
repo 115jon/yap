@@ -354,7 +354,7 @@ export function ListenTogetherNowPlayingCard({
 
   const artwork = currentEntry.track.artworkUrl ? (
     <img
-      src={currentEntry.track.artworkUrl}
+      src={getAuthAssetUrl(currentEntry.track.artworkUrl)}
       alt={`${currentEntry.track.title} artwork`}
       className="h-full w-full object-cover"
     />

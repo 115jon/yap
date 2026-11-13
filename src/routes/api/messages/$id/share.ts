@@ -3,7 +3,10 @@ import { requireChannelAccess } from "@/lib/require-channel-access";
 import { safeParse } from "@/lib/schema";
 import { ServiceError } from "@/lib/service-error";
 import { Schema } from "effect";
-import { createMessageShare } from "@/services/message-share.service";
+import {
+  createMessageShare,
+  proxyShareForDelivery,
+} from "@/services/message-share.service";
 import { createFileRoute } from "@tanstack/react-router";
 
 const EXPIRY_DAYS: Record<string, number | null> = {
@@ -65,7 +68,10 @@ export const POST = async ({ request, params }: any) => {
     const url = new URL(request.url);
     const share_url = `${url.origin}/share/${share.token}`;
 
-    return Response.json({ share, share_url }, { status: 201 });
+    return Response.json(
+      { share: proxyShareForDelivery(share), share_url },
+      { status: 201 },
+    );
   } catch (error) {
     if (error instanceof ServiceError) {
       return apiError(error.message, error.status, error.code);

@@ -1,4 +1,5 @@
 #include "rustnetwork.h"
+#include "yap_ui.h"
 
 #include <QtCore/QDateTime>
 #include <QtCore/QLocale>
@@ -578,6 +579,14 @@ QNetworkReply* RustNetworkAccessManager::createRequest(Operation op, const QNetw
   const QString scheme = request.url().scheme();
   if (op == GetOperation && (scheme == QLatin1String("https") || scheme == QLatin1String("http")))
     return new RustReply(request, m_disk, this);
+  // Image URLs come from the server and other users: anything else that is
+  // not the app's own (qrc:, data:, a file on this device) is an error.
+  // QML's Image opens `file:` itself, never here: yap-core guards those.
+  if (op == GetOperation && !yap_ui_media_url_allowed(request.url())) {
+    QNetworkRequest blocked(request);
+    blocked.setUrl(QUrl());
+    return QNetworkAccessManager::createRequest(op, blocked, data);
+  }
   return QNetworkAccessManager::createRequest(op, request, data);
 }
 

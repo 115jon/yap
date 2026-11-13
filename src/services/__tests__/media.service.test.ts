@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createMockD1 } from "../../lib/__tests__/mock-d1";
+import { unwrapProxiedMediaUrl } from "@/server/media-proxy/rewrite";
 import { fetchChannelMedia } from "../media.service";
 
 describe("fetchChannelMedia", () => {
@@ -130,8 +131,11 @@ describe("fetchChannelMedia", () => {
 
     const items = await fetchChannelMedia(db as any, "channel_1");
 
+    // Social CDN media leave the server through the allowlisted proxy form.
+    const original = (url?: string | null) =>
+      url ? unwrapProxiedMediaUrl(url) : url;
     expect(items[0]?.message_id).toBe("m_embed");
-    expect(items.map((item) => item.url)).toEqual(
+    expect(items.map((item) => original(item.url))).toEqual(
       expect.arrayContaining([
         "https://pbs.twimg.com/media/one.jpg?name=orig",
         "https://video.twimg.com/tweet_video/example.mp4",
@@ -140,12 +144,21 @@ describe("fetchChannelMedia", () => {
       ]),
     );
 
-    expect(
-      items.find(
-        (item) =>
-          item.url === "https://video.twimg.com/tweet_video/example.mp4",
-      ),
-    ).toMatchObject({
+    const video = items.find(
+      (item) =>
+        original(item.url) ===
+        "https://video.twimg.com/tweet_video/example.mp4",
+    );
+    expect(video?.url).toBe(
+      `https://yap.115jon.com/api/proxy-media?${new URLSearchParams({
+        url: "https://video.twimg.com/tweet_video/example.mp4",
+        sourceUrl: "https://x.com/example/status/1",
+      })}`,
+    );
+    expect({
+      ...video,
+      thumbnail_url: original(video?.thumbnail_url),
+    }).toMatchObject({
       message_id: "m_embed",
       source_kind: "embed",
       source_url: "https://x.com/example/status/1",

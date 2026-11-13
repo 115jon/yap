@@ -1,3 +1,4 @@
+import { getAuthAssetUrl } from "@/lib/platform";
 import { useLongPressMenu } from "@/hooks/useLongPress";
 import { useSpeakingAttr } from "@/hooks/useIsSpeaking";
 import { Button } from "@/components/ui/button";
@@ -220,7 +221,7 @@ function ParticipantCardImpl({
           {shouldRenderThumbnailPoster && (
             <div className="pointer-events-none absolute inset-0 z-10 bg-black">
               <img
-                src={streamThumbnails[item.userId]}
+                src={getAuthAssetUrl(streamThumbnails[item.userId])}
                 alt={`${item.name} stream thumbnail`}
                 className="h-full w-full object-cover"
               />
@@ -249,7 +250,7 @@ function ParticipantCardImpl({
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 overflow-hidden p-2 text-center">
               {streamThumbnails[item.userId] && (
                 <img
-                  src={streamThumbnails[item.userId]}
+                  src={getAuthAssetUrl(streamThumbnails[item.userId])}
                   className="pointer-events-none absolute inset-0 h-full w-full object-cover"
                   alt=""
                 />

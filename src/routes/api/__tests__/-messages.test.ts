@@ -514,4 +514,96 @@ describe("message history GET limit", () => {
       );
     });
   });
+
+  describe("embed removal", () => {
+    const stored = [
+      {
+        id: "e1",
+        url: "https://news.example/a",
+        type: "link",
+        fields: [],
+        thumbnail: { url: "https://cdn.example/a.png" },
+      },
+      {
+        id: "e2",
+        url: "https://news.example/b",
+        type: "link",
+        fields: [],
+      },
+    ];
+
+    function fakeDb() {
+      const writes: unknown[][] = [];
+      const db = {
+        prepare: (sql: string) => ({
+          bind: (...args: unknown[]) => ({
+            first: async () => {
+              if (sql.includes("SELECT")) {
+                return {
+                  author_id: "user-1",
+                  content_revision: 1,
+                  embeds: JSON.stringify(stored),
+                };
+              }
+              writes.push(args);
+              return { content_revision: 2 };
+            },
+          }),
+        }),
+      };
+      mocks.getDB.mockReturnValue(db);
+      return writes;
+    }
+
+    function patchEmbeds(embeds: unknown[]) {
+      return PATCH({
+        request: new Request(
+          "https://meet.test/api/channels/channel-1/messages",
+          {
+            method: "PATCH",
+            body: JSON.stringify({ message_id: "message-1", embeds }),
+          },
+        ),
+        params: { id: "channel-1" },
+      });
+    }
+
+    it("removes every preview", async () => {
+      const writes = fakeDb();
+      const response = await patchEmbeds([]);
+      expect(response.status).toBe(200);
+      expect(writes[0]?.[0]).toBe("[]");
+    });
+
+    it("keeps the stored copy of a preview the client still shows", async () => {
+      const writes = fakeDb();
+      // The client's copy carries a different (forged) picture.
+      const response = await patchEmbeds([
+        {
+          ...stored[0],
+          thumbnail: { url: "/\t/evil.example/a.png" },
+        },
+      ]);
+      expect(response.status).toBe(200);
+      expect(JSON.parse(writes[0]?.[0] as string)).toEqual([stored[0]]);
+    });
+
+    it("refuses an embed the message does not have", async () => {
+      const writes = fakeDb();
+      const response = await patchEmbeds([
+        {
+          id: "e9",
+          url: "https://attacker.example/",
+          type: "image",
+          fields: [],
+          thumbnail: { url: "https://tracker.example/pixel.png" },
+        },
+      ]);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: "Embeds can only be removed",
+      });
+      expect(writes).toEqual([]);
+    });
+  });
 });

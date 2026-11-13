@@ -24,6 +24,7 @@ import {
 import { buildHealthzPayload } from "./src/lib/healthz";
 import { handleAssetLinksRequest } from "./src/server/assetlinks";
 import { legacyHostRedirect } from "./src/server/legacy-host";
+import { withRequestOrigin } from "./src/server/media-proxy/origin";
 import { handleYtDlpRequest } from "./src/lib/ytdlp/http";
 import { syncYtDlpUpstream } from "./src/lib/ytdlp/upstream";
 import {
@@ -469,7 +470,8 @@ export default {
     // ── Everything else → TanStack Start ──────────────────────────────
     let response: Response;
     try {
-      response = await handler(request);
+      // Payload builders put this request's origin in proxy URLs.
+      response = await withRequestOrigin(request, () => handler(request));
     } catch (err: any) {
       console.error("Error in handler:", err?.message || err);
       response = new Response(

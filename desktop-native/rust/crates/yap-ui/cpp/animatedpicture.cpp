@@ -1,4 +1,5 @@
 #include "animatedpicture.h"
+#include "yap_ui.h"
 
 #include <QtCore/QBuffer>
 #include <QtCore/QDateTime>
@@ -436,7 +437,8 @@ void AnimationCache::request(QNetworkAccessManager* network, const QUrl& url,
   if (m_entries.contains(key) || m_pending.contains(key) || failed(key))
     return;
   m_failed.remove(key);
-  if (!network || !url.isValid())
+  // A server's or another user's URL: never a UNC path or another scheme.
+  if (!network || !url.isValid() || !yap_ui_media_url_allowed(url))
     return;
   m_pending.insert(key);
   QNetworkRequest request(url);

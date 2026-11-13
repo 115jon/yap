@@ -7,7 +7,6 @@
  */
 
 import { ServiceError } from "@/lib/service-error";
-import { getAttachmentUrl } from "@/lib/attachment-url";
 import type { AvatarDisplay } from "@/lib/avatar-display";
 import { cacheGet, cacheSet } from "@/lib/cache";
 import { hydrateSocialEmbeds } from "@/lib/share-embed-refresh";
@@ -16,6 +15,11 @@ import type { D1Database } from "@cloudflare/workers-types";
 import { markSharesDeletedForMessage } from "./message-share.service";
 import type { BroadcastDescriptor } from "./server.service";
 import { clog } from "@/lib/console-logger";
+import {
+  proxyAttachmentUrlForDelivery,
+  proxyAvatarUrlForDelivery,
+  proxyEmbedsForDelivery,
+} from "@/server/media-proxy/rewrite";
 import {
   extractAndProcessEmbedsWithStatus,
   lookupCachedEmbeds,
@@ -152,7 +156,7 @@ export async function batchFetchAttachments(
       content_type: r.content_type as string | null,
       size_bytes: r.size_bytes as number,
       is_nsfw: r.is_nsfw === 1,
-      url: getAttachmentUrl(r.file_key as string),
+      url: proxyAttachmentUrlForDelivery(r.file_key as string),
     });
   }
   return map;
@@ -180,7 +184,7 @@ export function formatMessageRow(
       id: row.author_id,
       username: (row.author_username as string) ?? "Unknown",
       display_name: (row.author_display_name as string) ?? null,
-      avatar_url: row.author_avatar_url,
+      avatar_url: proxyAvatarUrlForDelivery(row.author_avatar_url),
       avatar_display: row.author_avatar_display,
     },
     content: row.content,
@@ -198,7 +202,9 @@ export function formatMessageRow(
       me: r.user_ids.includes(currentUserId),
       users: r.user_ids,
     })),
-    embeds: row.embeds ? parseStoredEmbeds(row.embeds) : undefined,
+    embeds: row.embeds
+      ? proxyEmbedsForDelivery(parseStoredEmbeds(row.embeds))
+      : undefined,
     reply_count: (row.reply_count as number) ?? 0,
     // A DM call record: `type: "call"` and its outcome.
     ...callRecordFields(row),
@@ -860,7 +866,7 @@ export async function refreshMessageEmbeds(
         id: String(row.id),
         channel_id: capturedChannelId,
         content_revision: capturedRevision,
-        embeds: refreshedEmbeds,
+        embeds: proxyEmbedsForDelivery(refreshedEmbeds),
       } satisfies MessageEmbedUpdate;
     }),
   );
@@ -1035,7 +1041,7 @@ async function processPostprocessingEmbeds(
     id: task.messageId,
     channel_id: task.channelId,
     content_revision: task.revision,
-    embeds,
+    embeds: proxyEmbedsForDelivery(embeds),
   };
   const emitEmbedUpdate = async (
     target: MessagePostprocessingBroadcastTarget,
@@ -1232,7 +1238,7 @@ export async function createMessage(
       content_type: r.content_type as string | null,
       size_bytes: r.size_bytes as number,
       is_nsfw: r.is_nsfw === 1,
-      url: getAttachmentUrl(r.file_key as string),
+      url: proxyAttachmentUrlForDelivery(r.file_key as string),
     }));
   }
 
@@ -1264,7 +1270,7 @@ export async function createMessage(
       id: userId,
       username: authorRow?.username ?? "User",
       display_name: authorRow?.display_name ?? null,
-      avatar_url: authorRow?.avatar_url ?? null,
+      avatar_url: proxyAvatarUrlForDelivery(authorRow?.avatar_url ?? null),
       avatar_display: authorRow?.avatar_display ?? null,
     },
     content,
@@ -1279,7 +1285,7 @@ export async function createMessage(
     reactions: [],
     reply_count: 0,
     content_revision: 1,
-    embeds: cachedEmbeds,
+    embeds: proxyEmbedsForDelivery(cachedEmbeds),
   };
 }
 

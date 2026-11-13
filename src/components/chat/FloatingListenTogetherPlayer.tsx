@@ -1,3 +1,4 @@
+import { getAuthAssetUrl } from "@/lib/platform";
 import { Icon } from "@/components/ui/icon";
 import type { SFUClient } from "@/lib/sfu-client";
 
@@ -50,7 +51,7 @@ export function FloatingListenTogetherPlayer({
       bubble={
         artworkUrl ? (
           <img
-            src={artworkUrl}
+            src={getAuthAssetUrl(artworkUrl)}
             alt=""
             className="size-full object-cover"
             draggable={false}

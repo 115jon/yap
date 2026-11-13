@@ -10,7 +10,10 @@ import {
 import { createServerFn } from "@tanstack/react-start";
 
 interface ShareLoaderData {
+  /** As stored: the page's metadata (og:image and friends) reads this. */
   share: MessageShare | null;
+  /** As shown: third-party media through the signed media proxy. */
+  displayShare?: MessageShare | null;
   gone: boolean;
   origin: string;
 }
@@ -26,7 +29,7 @@ const loadPublicShare = createServerFn({ method: "GET" })
       { getDB },
       { hydrateInstagramEmbedsForShare },
       { ServiceError },
-      { getPublicMessageShare },
+      { getPublicMessageShare, proxyShareForDelivery },
     ] = await Promise.all([
       import("@/lib/api-helpers"),
       import("@/lib/share-embed-refresh"),
@@ -41,7 +44,12 @@ const loadPublicShare = createServerFn({ method: "GET" })
           incrementView: false,
         }),
       );
-      return { share, gone: false, origin };
+      return {
+        share,
+        displayShare: proxyShareForDelivery(share),
+        gone: false,
+        origin,
+      };
     } catch (error) {
       if (
         error instanceof ServiceError &&
@@ -205,7 +213,7 @@ function SharedMessageRoute() {
   return (
     <SharedMessagePage
       token={token}
-      initialShare={data.share}
+      initialShare={data.displayShare ?? data.share}
       initialGone={data.gone}
     />
   );
