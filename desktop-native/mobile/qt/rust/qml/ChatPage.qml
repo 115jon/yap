@@ -24,6 +24,13 @@ Item {
     signal threadRequested(string messageId)
 
     readonly property bool dm: Nav.dmUserId.length > 0
+    // The composer's shared core, for the picker sheet (its sends reply).
+    readonly property ComposerCore composerCore: composer.core
+    // An emoji from the picker sheet: at the caret, the keyboard back up.
+    function insertEmoji(emoji) {
+        composer.insertText(emoji)
+        composer.focusField()
+    }
     // The conversation shows rows (the drawer reopens it only when not).
     readonly property bool hasRows: view.count > 0
 
@@ -368,6 +375,23 @@ Item {
             Chat.sendMessage(text, replyToId)
         }
         onOpenImages: (images, index) => viewer.show(images, index)
+        onGifSent: scroll.followEnd = true
+        onPickerRequested: tab => {
+            picker.active = true
+            picker.item.openOn(tab, "gifs")
+        }
+    }
+
+    // The composer's emoji and GIF picker, made on first use.
+    Loader {
+        id: picker
+        anchors.fill: parent
+        z: 9
+        active: false
+        sourceComponent: PickerSheet {
+            composer: root.composerCore
+            onPicked: emoji => root.insertEmoji(emoji)
+        }
     }
 
     // The message sheet and what it leads to, over the page.
