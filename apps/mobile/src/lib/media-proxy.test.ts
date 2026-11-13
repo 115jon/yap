@@ -46,4 +46,37 @@ describe("viaMediaProxy", () => {
       expect(viaMediaProxy(uri, API)).toBe(uri);
     }
   });
+
+  it("proxies another host hidden behind what URL libraries ignore", () => {
+    for (const uri of [
+      " https://evil.example/a.png",
+      "\thttps://evil.example/a.png",
+      "https://evil.example/a.png\n",
+      "ht\ttps://evil.example/a.png",
+      "\u0000https://evil.example/a.png",
+      "HTTPS://evil.example/a.png",
+      "https:evil.example/a.png",
+      "https:/evil.example/a.png",
+      "https:\\\\evil.example/a.png",
+      "//evil.example/a.png",
+      "/\t/evil.example/a.png",
+      "\\\\evil.example/a.png",
+    ]) {
+      expect(viaMediaProxy(uri, API), JSON.stringify(uri)).toBe(
+        `${API}/api/proxy-media?url=https%3A%2F%2Fevil.example%2Fa.png`,
+      );
+    }
+  });
+
+  it("keeps the API's own URLs, however they are written", () => {
+    expect(viaMediaProxy(` ${API}/api/attachments/a.png\n`, API)).toBe(
+      `${API}/api/attachments/a.png`,
+    );
+  });
+
+  it("leaves values that name no web host alone", () => {
+    for (const uri of ["https:", "https://", "https:?x", "a.png", ""]) {
+      expect(viaMediaProxy(uri, API), JSON.stringify(uri)).toBe(uri);
+    }
+  });
 });
