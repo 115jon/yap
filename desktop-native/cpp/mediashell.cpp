@@ -2,6 +2,7 @@
 
 #include "profile.h"
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -14,6 +15,7 @@
 #include <QtGui/QDesktopServices>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QWindow>
 
 #include <cstdio>
@@ -199,10 +201,13 @@ QStringList MediaShell::pickFiles(const QString& title)
   return paths;
 }
 
-QStringList MediaShell::clipboardFiles()
+namespace {
+
+// What a paste uploads from the clipboard's data: its local files, else
+// its picture saved as a PNG under the cache.
+QStringList filesFromMime(const QMimeData* mime)
 {
   QStringList paths;
-  const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
   if (!mime)
     return paths;
   if (mime->hasUrls()) {
@@ -225,6 +230,38 @@ QStringList MediaShell::clipboardFiles()
     }
   }
   return paths;
+}
+
+} // namespace
+
+QStringList MediaShell::clipboardFiles()
+{
+  const QString test = qEnvironmentVariable("YAP_TEST_PASTE");
+  if (!test.isEmpty()) {
+    QMimeData mime;
+    const QImage image(test);
+    if (!image.isNull())
+      mime.setImageData(image);
+    else
+      mime.setUrls({ QUrl::fromLocalFile(test) });
+    return filesFromMime(&mime);
+  }
+  return filesFromMime(QGuiApplication::clipboard()->mimeData());
+}
+
+bool MediaShell::testPaste() const
+{
+  return !qEnvironmentVariable("YAP_TEST_PASTE").isEmpty();
+}
+
+void MediaShell::testPasteKey(QObject* item) const
+{
+  if (!item || !testPaste())
+    return;
+  QKeyEvent press(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier, QStringLiteral("\x16"));
+  QCoreApplication::sendEvent(item, &press);
+  QKeyEvent release(QEvent::KeyRelease, Qt::Key_V, Qt::ControlModifier, QStringLiteral("\x16"));
+  QCoreApplication::sendEvent(item, &release);
 }
 
 QString MediaShell::downloadPath(const QString& name) const
