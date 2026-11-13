@@ -12,17 +12,17 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/115jon/yap/ci.yml?branch=main&label=CI&style=flat-square&labelColor=000)](https://github.com/115jon/yap/actions/workflows/ci.yml)
 [![Deploy web](https://img.shields.io/github/actions/workflow/status/115jon/yap/deploy-web.yml?branch=main&label=deploy%20web&style=flat-square&labelColor=000)](https://github.com/115jon/yap/actions/workflows/deploy-web.yml)
-[![Desktop release](https://img.shields.io/github/actions/workflow/status/115jon/yap/desktop-release.yml?label=desktop%20release&style=flat-square&labelColor=000)](https://github.com/115jon/yap/actions/workflows/desktop-release.yml)
+[![Desktop release](https://img.shields.io/github/actions/workflow/status/115jon/yap/desktop-native-release.yml?label=desktop%20release&style=flat-square&labelColor=000)](https://github.com/115jon/yap/actions/workflows/desktop-native-release.yml)
 <br>
 [![Latest release](https://img.shields.io/github/v/release/115jon/yap?filter=v*&label=release&style=flat-square&labelColor=000&color=ff3d8b)](https://github.com/115jon/yap/releases/latest)
-[![Android](https://img.shields.io/github/v/release/115jon/yap?filter=mobile-v*&label=android&style=flat-square&labelColor=000&color=3ddc84)](https://github.com/115jon/yap/releases?q=mobile-v&expanded=true)
+[![Android](https://img.shields.io/github/v/release/115jon/yap?filter=qt-android-v*&include_prereleases&label=android&style=flat-square&labelColor=000&color=3ddc84)](https://github.com/115jon/yap/releases?q=qt-android-v&expanded=true)
 [![License](https://img.shields.io/github/license/115jon/yap?style=flat-square&labelColor=000)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/115jon/yap?label=stars&style=flat-square&labelColor=000)](https://github.com/115jon/yap)
 [![Web app](https://img.shields.io/badge/web-yap.115jon.com-ff3d8b?style=flat-square&labelColor=000)](https://yap.115jon.com)
 
 [Open the web app](https://yap.115jon.com) ·
 [Download for Windows](https://github.com/115jon/yap/releases/latest/download/YapSetup.exe) ·
-[Android APK](https://github.com/115jon/yap/releases?q=mobile-v&expanded=true) ·
+[Android APK](https://github.com/115jon/yap/releases?q=qt-android-v&expanded=true) ·
 [Changelog](CHANGELOG.md)
 
 </div>
@@ -89,7 +89,7 @@ idle and answers at once when someone reaches for it.
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Browser** | Open [yap.115jon.com](https://yap.115jon.com). Nothing to install.                                                                                                                               |
 | **Windows** | Download [`YapSetup.exe`](https://github.com/115jon/yap/releases/latest/download/YapSetup.exe) from the [latest release](https://github.com/115jon/yap/releases/latest). The app updates itself. |
-| **Android** | Download `yap-X.Y.Z.apk` from the newest [`mobile-v*` release](https://github.com/115jon/yap/releases?q=mobile-v&expanded=true) and install it over any earlier one.                             |
+| **Android** | Download `yap-qt-X.Y.Z-arm64-v8a.apk` from the newest [`qt-android-v*` release](https://github.com/115jon/yap/releases?q=qt-android-v&expanded=true) and install it over any earlier one.        |
 
 All three sign in to the same account and the same rooms.
 
@@ -101,7 +101,7 @@ All three sign in to the same account and the same rooms.
 
 ```text
   Web app            Desktop app            Android app
-  React, TanStack    Tauri + custom CEF     Expo, React Native
+  React, TanStack    Rust core, Qt/QML      Rust core, Qt/QML
        |                    |                      |
        +---------- HTTP + WebSocket gateway -------+
                             |
@@ -126,24 +126,26 @@ All three sign in to the same account and the same rooms.
   [`migrations/`](migrations).
 - **Auth:** [Kova](https://github.com/115jon/kova), through `@kova/react` on
   every client.
-- **Desktop:** [`desktop/`](desktop) is a Tauri 2 app on a
-  [Tauri fork](https://github.com/115jon/tauri-fork) (a git submodule) and a custom
-  CEF/Chromium runtime. It loads the same React UI as the web app, adds
-  native screen and game capture, and updates from `latest.json` on the
-  latest GitHub release. The installer, `YapSetup.exe`, is a .NET
-  Framework program in [`desktop/installer`](desktop/installer).
-- **Android:** [`apps/mobile`](apps/mobile) is an Expo app with
-  `react-native-webrtc`, sharing the protocol and realtime packages in
-  [`packages/`](packages).
+- **Desktop:** [`desktop-native/`](desktop-native) is a native Windows
+  client: a Rust core behind a QML UI through
+  [cxx-qt](https://github.com/KDAB/cxx-qt), linked against a static Qt into
+  one `Yap.exe`, with libwebrtc for voice and video and native screen and
+  game capture. It installs and updates through Velopack; `YapSetup.exe` is
+  a copy of its `Yap.App-win-Setup.exe`.
+- **Android:** [`desktop-native/mobile/qt`](desktop-native/mobile/qt) runs
+  the same Rust core and QML on Android under a mobile shell.
+- The earlier Tauri desktop app and Expo Android app are archived on the
+  `archive/tauri-desktop` and `archive/expo-mobile` branches.
 
 ## Desktop release contents
 
-The desktop client includes a custom CEF/Chromium runtime and an in-repository
-Tauri fork. The optional capture feature ships separately built
-OBS-derived hook and helper binaries. Their source, attribution, license text,
-and written source offer are documented in
-[`desktop/src-tauri/resources/obs-capture`](desktop/src-tauri/resources/obs-capture)
-and [desktop third-party notices](desktop/THIRD_PARTY_LICENSES.md).
+The Windows client links Qt (LGPL-3.0) and libwebrtc statically and ships
+Microsoft's ONNX Runtime for camera backgrounds. Game capture uses OBS
+Studio's own signed hook and helper binaries, shipped unmodified under
+GPL-2.0 with their license text and a written source offer
+([`desktop-native/packaging/obs-capture`](desktop-native/packaging/obs-capture));
+each release attaches the corresponding source. See the
+[native third-party notices](desktop-native/THIRD_PARTY_NOTICES.md).
 
 The capture component injects a graphics hook into a user-selected game process
 to capture that process. It is not a security scanner, exploit tool, or bypass
@@ -156,7 +158,7 @@ tool.
 - [Security Policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Desktop third-party notices](desktop/THIRD_PARTY_LICENSES.md)
+- [Native third-party notices](desktop-native/THIRD_PARTY_NOTICES.md)
 - [Deploying the web app](docs/deploy.md)
 - [Design system](DESIGN.md) and [product brief](PRODUCT.md)
 
@@ -217,10 +219,8 @@ The server never falls back to the next free port on its own, because the
 `http://127.0.0.1:5173` and `http://localhost:1420`. On any other port the
 app loads, but sign-in fails until that origin is added to the Kova app.
 
-Desktop dev (`desktop/`, `pnpm run dev`) always uses port 1420, the `devUrl`
-in `desktop/src-tauri/tauri.conf.json`. Its `/api` and `/ws` proxy follows
-`RALPH_DEV_PORT`, so set the same value in both terminals. See
-[desktop/README.md](desktop/README.md).
+The native clients build from [`desktop-native/`](desktop-native); see
+[desktop-native/README.md](desktop-native/README.md).
 
 ### Game catalog
 
@@ -245,7 +245,7 @@ repository variable `WEB_DEPLOY_ENABLED` is `true`. `pnpm deploy:main` remains
 the manual fallback. See [docs/deploy.md](docs/deploy.md) for the steps,
 rollbacks, Preview resources and required settings.
 
-Do not use locally built desktop or CEF artifacts as release-signing inputs.
+Do not use locally built desktop artifacts as release-signing inputs.
 Release provenance must be verified by the repository's release workflow.
 
 ## Contributing
@@ -255,7 +255,7 @@ Release provenance must be verified by the repository's release workflow.
 Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md)
 and the [Code of Conduct](CODE_OF_CONDUCT.md) before opening a pull request.
 Changes to installer behavior, release workflows, signing configuration,
-authentication, CEF provenance, policies, or game capture require maintainer
+authentication, toolchain provenance, policies, or game capture require maintainer
 review. Report security issues privately as described in
 [SECURITY.md](SECURITY.md).
 
