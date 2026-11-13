@@ -112,6 +112,48 @@ Window {
         }
     }
 
+    // Links the app was opened with (an invite or a chat link on the web
+    // host, or yap://), once signed in: the core opens what they point at.
+    // An invite raises its landing (Invites.landingRequested); a channel
+    // link slides the chat in once that channel is the open one.
+    function openFromLink() {
+        if (!ready)
+            return
+        const url = Native.takeLinkRequest()
+        if (url.length === 0)
+            return
+        const channelId = Invites.linkChannel(url)
+        if (!Invites.openLink(url)) {
+            console.warn("[link] not a link to Yap")
+            return
+        }
+        if (channelId.length > 0) {
+            closeTop(true)
+            pager.showChannelWhenOpen(channelId)
+        }
+    }
+    Connections {
+        target: Native
+        function onLinkRequested() {
+            window.openFromLink()
+        }
+    }
+    // An invite's landing, from a link here or one tapped in a message.
+    Connections {
+        target: Invites
+        function onLandingRequested() {
+            window.openLanding()
+        }
+    }
+    function openLanding() {
+        if (!ready || stack.currentItem?.isLanding === true)
+            return
+        closeTop(true)
+        Qt.inputMethod.hide()
+        stack.sheet = false
+        stack.push(landingPage, {}, StackView.PushTransition)
+    }
+
     // A conversation opened by the app (a notification, a profile's
     // Message): the core hears it was picked out of view, as a pick in the
     // drawer is, so whether it shows its unread divider does not depend on
@@ -216,6 +258,11 @@ Window {
             Native.leave()
             return
         }
+        // A join in flight holds the landing.
+        if (stack.currentItem?.holdsBack === true) {
+            stack.currentItem.backProgress = 0
+            return
+        }
         if (stack.depth > 1)
             closeTop(false)
         else if (!pager.back())
@@ -227,6 +274,7 @@ Window {
     onReadyChanged: {
         if (ready) {
             openFromNotification()
+            openFromLink()
             return
         }
         stack.pop(null, StackView.Immediate)
@@ -279,6 +327,8 @@ Window {
                 onVoiceRequested: channelId => window.joinVoice(channelId)
                 onCallRequested: window.openCall()
                 onThreadRequested: messageId => window.openThread(messageId)
+                onServerMenuRequested: serverSheet.openServer()
+                onChannelMenuRequested: (channelId, name, voice) => serverSheet.openChannel(channelId, name, voice)
             }
 
             pushEnter: Transition {
@@ -342,6 +392,21 @@ Window {
             }
         }
         Component {
+            id: landingPage
+            InviteLandingPage {
+                id: landingItem
+                onCloseRequested: {
+                    if (stack.currentItem === landingItem)
+                        window.closeTop(false)
+                }
+                // Back to the drawer, on the server's tree.
+                onServerOpened: {
+                    window.closeTop(true)
+                    pager.show("drawer")
+                }
+            }
+        }
+        Component {
             id: friendsPage
             FriendsPage {
                 onCloseRequested: window.closeTop(false)
@@ -353,6 +418,14 @@ Window {
                 }
             }
         }
+    }
+
+    // The open server's menu and a channel's: Invite people (through the
+    // share sheet), Mark as read, a channel's Copy link.
+    ServerSheet {
+        id: serverSheet
+        anchors.fill: parent
+        anchors.bottomMargin: Native.clippedBottom
     }
 
     // The microphone was refused: say what it is for, and where to allow it

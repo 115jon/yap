@@ -62,6 +62,7 @@ qt_add_executable(yapqt
   cpp/main.cpp
   cpp/native.cpp cpp/native.h
   cpp/push.cpp
+  cpp/links.cpp
   cpp/keystore.cpp
   cpp/voice.cpp
   cpp/rustnetwork.cpp cpp/rustnetwork.h)
@@ -121,7 +122,9 @@ list(TRANSFORM YAP_ICON_NAMES PREPEND icons/ OUTPUT_VARIABLE YAP_ICON_FILES)
 set(YAP_ASSET_FILES ${YAP_ICON_FILES}
   svg/home-light.svg svg/home-dark.svg
   svg/home-miku-light.svg svg/home-miku-dark.svg
-  svg/home-spiderman-light.svg svg/home-spiderman-dark.svg)
+  svg/home-spiderman-light.svg svg/home-spiderman-dark.svg
+  # The GIF picker's "Powered by" KLIPY wordmark (Yap.Ui ProviderMark).
+  svg/klipy-text-light.svg)
 list(TRANSFORM YAP_ASSET_FILES PREPEND ${DESKTOP}/assets/ OUTPUT_VARIABLE YAP_ASSET_PATHS)
 qt_add_resources(yapqt yap_assets
   PREFIX /

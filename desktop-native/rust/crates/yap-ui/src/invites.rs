@@ -71,6 +71,12 @@ pub mod qobject {
         #[cxx_name = "openLink"]
         fn open_link(self: &Invites, url: &QString) -> bool;
 
+        /// The channel (or DM) a link opens, or empty when it opens none:
+        /// for a shell that shows the conversation once it is the open one.
+        #[qinvokable]
+        #[cxx_name = "linkChannel"]
+        fn link_channel(self: &Invites, url: &QString) -> QString;
+
         /// A command-line argument (first launch or a second instance):
         /// only `yap://` and `yap-native://` links count.
         #[qinvokable]
@@ -252,6 +258,13 @@ impl qobject::Invites {
 
     pub fn open_link(&self, url: &QString) -> bool {
         open(links::parse_link(&url.to_string(), web_origin()))
+    }
+
+    pub fn link_channel(&self, url: &QString) -> QString {
+        match links::parse_link(&url.to_string(), web_origin()) {
+            Some(Link::Channel { channel_id, .. }) => q(&channel_id),
+            _ => QString::default(),
+        }
     }
 
     pub fn open_arg(&self, arg: &QString) -> bool {

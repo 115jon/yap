@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
-import QtQuick.Effects
 import QtQuick.Layouts
 import QtMultimedia
 import Yap.Chrome
@@ -36,25 +35,30 @@ import Yap.Ui
 Popup {
     id: root
 
-    property string replyToId
+    // What the picker does (the media type, provider, screens, search,
+    // terms, recents, paging and the send) is GifPickerCore's, shared with
+    // the phone's sheet; this is its desktop look and keys.
+    GifPickerCore {
+        id: core
+        searchField: search
+        flickable: flick
+        onDone: root.close()
+        onSent: root.sent()
+        onPicked: gifId => root.picked(gifId)
+    }
+    // The composer it sends for (its reply goes along), or a reply target.
+    property alias composer: core.composer
+    property alias replyToId: core.replyToId
     // The tab it opens on (InputControls.tsx `gifPickerMediaType`).
-    property string defaultMediaType: "gifs"
-    property string mediaType: "gifs"
+    property alias defaultMediaType: core.defaultMediaType
     // The media type it was opened for (the composer's GIF or sticker key).
-    property string openedAs: ""
-    // GifPickerModal.tsx `DEFAULT_PROVIDER_OPTIONS`.
-    property var providers: ["klipy", "tenor"]
-    property string provider: "klipy"
-    readonly property var klipyOnly: ["stickers", "clips", "memes"]
-    readonly property string providerLabel: provider === "tenor" ? "Tenor" : "KLIPY"
-    readonly property var labels: ({ gifs: qsTr("GIFs"), stickers: qsTr("stickers"), clips: qsTr("clips"), memes: qsTr("memes") })
-    readonly property string mediaLabel: labels[mediaType] ?? "GIFs"
-    // categories | featured | search | favorites (`GifPickerMode`).
-    property string mode: "categories"
-    // Where Back and an emptied search return (`browseModeRef`).
-    property string browseMode: "categories"
-    // The debounced, trimmed search.
-    property string query: ""
+    readonly property alias openedAs: core.openedAs
+    // A pick (the voice status picture) instead of a send.
+    property alias picking: core.picking
+    // Voice reaction mode (GifPickerModal.tsx `voiceMode`): a tile goes
+    // into the call as a sticker reaction and the picker stays open, with
+    // the display mode row and the rate limit line.
+    property alias voiceMode: core.voiceMode
     readonly property real gap: 2
     property bool initialExpanded: false
     property bool expanded: false
@@ -68,17 +72,6 @@ Popup {
     readonly property real colW: (gridW - gap * (columns - 1)) / columns
     readonly property real col0: Chat.gifUnits0 / 1000 * colW + Math.max(0, Chat.gifCount0 - 1) * gap
     readonly property real col1: Chat.gifUnits1 / 1000 * colW + Math.max(0, Chat.gifCount1 - 1) * gap
-    // The rest of the picker's state (yap-core `gif_rows`).
-    readonly property var browse: Chat.gifBrowse.length > 0 ? JSON.parse(Chat.gifBrowse) : ({})
-    // Through a string, so an update that leaves them as they were does
-    // not make the cells again.
-    readonly property string categoriesJson: JSON.stringify(browse.categories ?? [])
-    readonly property var categories: JSON.parse(categoriesJson)
-    readonly property bool categoriesLoading: browse.categoriesLoading === true
-    readonly property bool rateLimited: browse.rateLimited === true
-    // The picker-wide clip mute (`chat:clips:muted`, muted by default).
-    property bool clipsMuted: true
-    onClipsMutedChanged: saveMemory()
     // The clip that plays (the Clips tab): the one pointed at or focused.
     // Every other clip rests on its first frame (the tiles' `still`).
     property Item clipTile: null
@@ -88,7 +81,7 @@ Popup {
     // the pointer has settled on it (`clipPlaying`).
     readonly property bool clipVideoWanted: clipTile !== null && visible
         && Qt.application.state === Qt.ApplicationActive
-        && (!clipsMuted && !ShellState.videoMuted || clipTile.preview.length === 0)
+        && (!core.clipsMuted && !ShellState.videoMuted || clipTile.preview.length === 0)
     property Item clipPlaying: null
     // The player has drawn the playing clip's first frame.
     property bool clipFrame: false
@@ -104,7 +97,7 @@ Popup {
         defaultLogLevel: LoggingCategory.Warning
     }
     // Heard (YAP_EMBED_MUTED's mediaMuted silences it, tests only).
-    readonly property bool clipSound: !clipsMuted && !ShellState.videoMuted && !ShellState.mediaMuted
+    readonly property bool clipSound: !core.clipsMuted && !ShellState.videoMuted && !ShellState.mediaMuted
     // Clip lengths in seconds by tile id, learnt from their previews or the
     // player (KLIPY sends none; the web reads the <video>'s duration).
     property var clipLengths: ({})
@@ -129,54 +122,6 @@ Popup {
         const next = Object.assign({}, clipLengths)
         next[id] = seconds
         clipLengths = next
-    }
-    // Recent searches per media type (`chat:gifs:recent:<type>`), five.
-    property var recents: ({})
-    onRecentsChanged: saveMemory()
-    // The web's localStorage for these three (and the voice display mode)
-    // is `ui-gif-picker.json` on this device; read at each open, since
-    // the composer's, the vibe's and the call's pickers share it.
-    property bool memoryLoaded: false
-    function loadMemory() {
-        memoryLoaded = false
-        const text = Chat.uiMemory("gif-picker")
-        let stored = {}
-        try {
-            stored = text.length > 0 ? JSON.parse(text) : {}
-        } catch (e) {
-            stored = {}
-        }
-        clipsMuted = stored.clipsMuted !== false
-        const kept = {}
-        for (const media of ["gifs", "stickers", "clips", "memes"]) {
-            const list = stored.recent ? stored.recent[media] : null
-            if (Array.isArray(list))
-                kept[media] = list.filter(q => typeof q === "string" && q.trim().length > 0).slice(0, 5)
-        }
-        recents = kept
-        displayMode = displayModes.some(m => m.id === stored.voiceDisplayMode) ? stored.voiceDisplayMode : "single"
-        memoryLoaded = true
-    }
-    function saveMemory() {
-        if (memoryLoaded)
-            Chat.setUiMemory("gif-picker", JSON.stringify({ clipsMuted: clipsMuted, recent: recents, voiceDisplayMode: displayMode }))
-    }
-    // Each feed's scroll, restored when it shows again (the web's cache
-    // keeps `scrollTop`); for this open only.
-    property var scrollMemo: ({})
-    property string feedKey: ""
-    property real pendingScroll: 0
-    readonly property var recentQueries: recents[mediaType] ?? []
-    // KLIPY's 429 on a "more": the next page waits 5 s.
-    property bool coolingDown: false
-    onRateLimitedChanged: if (rateLimited) {
-        coolingDown = true
-        cooldown.restart()
-    }
-    Timer {
-        id: cooldown
-        interval: 5000
-        onTriggered: root.coolingDown = false
     }
 
     // The expanded grid's round-robin over `columns` (the model places
@@ -212,26 +157,6 @@ Popup {
     }
     onColumnsChanged: relayout()
 
-    // A pick (the voice status picture) instead of a send.
-    property bool picking: false
-    // Voice reaction mode (GifPickerModal.tsx `voiceMode`): a tile goes
-    // into the call as a sticker reaction and the picker stays open, with
-    // the display mode row and the rate limit line.
-    property bool voiceMode: false
-    property string displayMode: "single"
-    onDisplayModeChanged: saveMemory()
-    readonly property var displayModes: [
-        { id: "single", text: qsTr("Single") }, { id: "burst", text: qsTr("Burst 💥") },
-        { id: "rain", text: qsTr("Rain 🌧️") }, { id: "bounce", text: qsTr("Bounce 🏀") }]
-
-    // The asset's type from its URL (the overlay renders video or a picture).
-    function stickerType(url) {
-        const path = url.split("?")[0].toLowerCase()
-        return path.endsWith(".mp4") || path.indexOf("/clips/") >= 0 ? "video/mp4"
-            : path.endsWith(".webp") ? "image/webp"
-            : path.endsWith(".png") ? "image/png" : "image/gif"
-    }
-
     signal sent()
     signal picked(string gifId)
 
@@ -253,6 +178,11 @@ Popup {
         y = Math.max(10, at.y - h - 8)
         height = h
     }
+    // A fresh picker each open, as the web mounts one per open.
+    function reset() {
+        core.reset()
+        expanded = initialExpanded
+    }
     function openAt(anchor) {
         reset()
         anchorItem = anchor
@@ -268,16 +198,16 @@ Popup {
     // The composer's keys: the same key again closes, the other switches
     // the tab (InputControls.tsx `openGifPicker`).
     function toggleFor(anchor, media) {
-        if (visible && openedAs === media) {
+        if (visible && core.openedAs === media) {
             close()
             return
         }
-        defaultMediaType = media
+        core.defaultMediaType = media
         if (visible) {
-            openedAs = media
+            core.openedAs = media
             anchorItem = anchor
             place()
-            changeMediaType(media)
+            core.changeMediaType(media)
             return
         }
         openAt(anchor)
@@ -292,175 +222,21 @@ Popup {
     // place again once it has (it was centred on the old, narrow width).
     onWidthChanged: if (visible) place()
 
-    // The provider a media type can use (`KLIPY_ONLY_MEDIA_TYPES`).
-    function providerFor(media, wanted) {
-        return klipyOnly.indexOf(media) >= 0 || providers.indexOf(wanted) < 0 ? "klipy" : wanted
-    }
-
-    // Loads what the mode shows.
-    function load() {
-        if (feedKey.length > 0)
-            scrollMemo[feedKey] = flick.contentY
-        feedKey = [mode, mediaType, provider, mode === "search" ? query : ""].join("|")
-        pendingScroll = scrollMemo[feedKey] ?? 0
-        flick.contentY = 0
-        if (mode === "categories")
-            Chat.startGifs(mediaType, provider)
-        else if (mode === "favorites")
-            Chat.showGifFavorites(mediaType)
-        else if (mode === "featured")
-            Chat.searchGifs("", mediaType, provider)
-        else if (query.length > 0)
-            Chat.searchGifs(query, mediaType, provider)
-        else
-            Chat.startGifs(mediaType, provider)
-    }
-    function setSearchText(text) {
-        quietText = true
-        search.text = text
-        quietText = false
-    }
-    property bool quietText: false
-    function clearSearch() {
-        debounce.stop()
-        termsDebounce.stop()
-        setSearchText("")
-        query = ""
-        termsOpen = false
-        activeTerm = -1
-    }
-    // A fresh picker each open, as the web mounts one per open.
-    function reset() {
-        scrollMemo = {}
-        feedKey = ""
-        pendingScroll = 0
-        openedAs = defaultMediaType
-        mediaType = defaultMediaType
-        provider = providerFor(mediaType, "klipy")
-        expanded = initialExpanded
-        mode = "categories"
-        browseMode = "categories"
-        clearSearch()
-    }
-    function openFavorites() {
-        mode = "favorites"
-        clearSearch()
-        load()
-    }
-    function openFeatured() {
-        browseMode = "featured"
-        mode = "featured"
-        clearSearch()
-        load()
-    }
-    function back() {
-        browseMode = "categories"
-        mode = "categories"
-        clearSearch()
-        load()
-    }
-    // `commitProgrammaticSearch`: a category or a recent search; focus
-    // moves to the results so the terms list stays shut.
+    // The core's moves, with where the keyboard focus goes after each:
+    // a category or a recent search moves it to the results so the terms
+    // list stays shut; a provider or a term keeps it in the field.
     function commitSearch(text) {
-        mode = "search"
-        setSearchText(text)
-        query = text.trim()
-        termsOpen = false
-        activeTerm = -1
-        load()
+        core.commitSearch(text)
         flick.forceActiveFocus()
     }
-    function changeMediaType(media) {
-        mediaType = media
-        provider = providerFor(media, provider)
-        termsOpen = false
-        activeTerm = -1
-        if (mode !== "favorites")
-            mode = search.text.trim().length > 0 ? "search" : browseMode
-        load()
-    }
     function changeProvider(next) {
-        provider = next
-        if (next === "tenor" && klipyOnly.indexOf(mediaType) >= 0)
-            mediaType = "gifs"
-        termsOpen = false
-        activeTerm = -1
-        load()
-        if (mode !== "favorites")
+        core.changeProvider(next)
+        if (core.mode !== "favorites")
             search.forceActiveFocus()
     }
-    function remember(text) {
-        const q = text.trim()
-        if (q.length === 0)
-            return
-        const list = (recents[mediaType] ?? []).filter(item => item.toLowerCase() !== q.toLowerCase())
-        const next = Object.assign({}, recents)
-        next[mediaType] = [q].concat(list).slice(0, 5)
-        recents = next
-    }
-    function forget(text) {
-        const next = Object.assign({}, recents)
-        next[mediaType] = (recents[mediaType] ?? []).filter(item => item !== text)
-        recents = next
-    }
-    function forgetAll() {
-        const next = Object.assign({}, recents)
-        next[mediaType] = []
-        recents = next
-    }
-
-    // Search terms: matching history first, then the provider's, eight.
-    property bool termsOpen: false
-    property int activeTerm: -1
-    readonly property var terms: {
-        const typed = search.text.trim().toLowerCase()
-        const out = []
-        const add = term => {
-            if (out.indexOf(term) < 0 && out.length < 8)
-                out.push(term)
-        }
-        for (const q of recentQueries)
-            if (q.toLowerCase().indexOf(typed) >= 0 && q.toLowerCase() !== typed)
-                add(q)
-        for (const term of (browse.terms ?? []))
-            add(term)
-        return typed.length >= 2 ? out : []
-    }
-    readonly property bool termsShown: termsOpen && search.activeFocus && terms.length > 0
-        && search.text.trim().length >= 2 && mode !== "favorites"
-    // A new answer opens the list (not every picker update).
-    readonly property string termsKey: JSON.stringify(browse.terms ?? [])
-    onTermsKeyChanged: {
-        activeTerm = -1
-        if (!quietText && search.activeFocus && terms.length > 0)
-            termsOpen = true
-    }
     function pickTerm(term) {
-        setSearchText(term)
-        query = term
-        mode = "search"
-        remember(term)
-        termsOpen = false
-        activeTerm = -1
-        load()
+        core.pickTerm(term)
         search.forceActiveFocus()
-    }
-
-    function select(tile) {
-        if (root.voiceMode) {
-            const url = tile.preview.length > 0 ? tile.preview : tile.video
-            Calls.sendSticker(url, root.stickerType(url), root.displayMode)
-            return
-        }
-        if (root.query.length > 0)
-            root.remember(root.query)
-        if (root.picking)
-            root.picked(tile.gifId)
-        else {
-            Chat.sendGif(tile.gifId, root.replyToId)
-            root.sent()
-        }
-        root.close()
     }
 
     // handlePickerGridKeyDown: arrows move by geometry among the cells
@@ -469,7 +245,7 @@ Popup {
         if ([Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down, Qt.Key_Home, Qt.Key_End].indexOf(key) < 0)
             return false
         const cells = []
-        if (mode === "categories") {
+        if (core.mode === "categories") {
             for (let i = 0; i < cellGrid.children.length; ++i) {
                 const c = cellGrid.children[i]
                 if (c.visible && c.activeFocusOnTab)
@@ -543,21 +319,13 @@ Popup {
     Overlay.modal: Scrim { color: Theme.scrimStacked }
     // Escape is handled below: it first shuts the terms list.
     closePolicy: Popup.CloseOnPressOutside
-    onAboutToShow: {
-        loadMemory()
-        Chat.resetGifs()
-    }
+    onAboutToShow: core.prepare()
     onOpened: {
         relayout()
-        Chat.loadGifFavorites()
         search.forceActiveFocus()
-        load()
+        core.begin()
     }
-    onClosed: {
-        termsOpen = false
-        debounce.stop()
-        termsDebounce.stop()
-    }
+    onClosed: core.end()
 
     background: Rectangle {
         radius: Theme.radius
@@ -573,30 +341,6 @@ Popup {
     }
     enter: PresenceIn {}
     exit: PresenceOut {}
-
-    Timer {
-        id: debounce
-        interval: 300
-        onTriggered: {
-            root.query = search.text.trim()
-            if (root.mode === "favorites")
-                return
-            root.mode = root.query.length > 0 ? "search" : root.browseMode
-            root.load()
-        }
-    }
-    Timer {
-        id: termsDebounce
-        interval: 200
-        onTriggered: Chat.suggestGifs(search.text, root.provider)
-    }
-    // Saves a search that found something after 1.5 s (typing settles).
-    Timer {
-        id: saveSearch
-        interval: 1500
-        onTriggered: if (root.mode === "search" && root.query.length > 0 && tiles.count > 0) root.remember(root.query)
-    }
-    onQueryChanged: saveSearch.restart()
 
     // Over media: a fixed black scrim and the ink hover tint.
     component MediaScrim: Rectangle {
@@ -734,12 +478,12 @@ Popup {
             visible: (cell.media?.image ?? "").length > 0
             stream: true
             fillMode: AnimatedPicture.PreserveAspectCrop
-            source: root.visible && root.mode === "categories" ? (cell.media?.image ?? "") : ""
+            source: root.visible && core.mode === "categories" ? (cell.media?.image ?? "") : ""
             playing: root.visible
         }
         Loader {
             anchors.fill: parent
-            active: root.visible && root.mode === "categories" && (cell.media?.image ?? "").length === 0
+            active: root.visible && core.mode === "categories" && (cell.media?.image ?? "").length === 0
                 && (cell.media?.video ?? "").length > 0 && Compat.mediaPlayback
             sourceComponent: LoopVideo { source: cell.media.video }
         }
@@ -774,11 +518,11 @@ Popup {
         // field (the web's pointerdown listener).
         PointHandler {
             onActiveChanged: {
-                if (!active || !root.termsShown)
+                if (!active || !core.termsShown)
                     return
                 const p = searchBox.mapFromItem(body, point.position.x, point.position.y)
                 if (p.x < 0 || p.y < 0 || p.x > searchBox.width || p.y > searchBox.height + termsPanel.height + 8) {
-                    root.termsOpen = false
+                    core.termsOpen = false
                     flick.forceActiveFocus()
                 }
             }
@@ -787,7 +531,7 @@ Popup {
         Item {
             id: header
             width: parent.width
-            height: 48 + 32 + 1 + (root.voiceMode ? 40 : 0)
+            height: 48 + 32 + 1 + (core.voiceMode ? 40 : 0)
 
             RowLayout {
                 id: searchRow
@@ -796,61 +540,55 @@ Popup {
                 height: 48
                 spacing: 4
                 IconKey {
-                    visible: root.mode !== "categories"
+                    visible: core.mode !== "categories"
                     size: 32
                     iconName: "back"
                     Accessible.name: qsTr("Back")
-                    onClicked: root.back()
+                    onClicked: core.back()
                 }
                 Text {
-                    visible: root.mode === "favorites"
+                    visible: core.mode === "favorites"
                     Layout.fillWidth: true
                     elide: Text.ElideRight
                     textFormat: Text.PlainText
-                    text: qsTr("Favorite %1").arg(root.mediaLabel)
+                    text: qsTr("Favorite %1").arg(core.mediaLabel)
                     color: Theme.ink1
                     font: Theme.type.panelTitle
                 }
                 Item {
                     id: searchBox
-                    visible: root.mode !== "favorites"
+                    visible: core.mode !== "favorites"
                     Layout.fillWidth: true
                     Layout.preferredHeight: 40
                     KitField {
                         id: search
                         anchors.fill: parent
                         leadingInset: 20
-                        placeholderText: root.provider === "tenor" ? qsTr("Search Tenor") : qsTr("Search KLIPY")
-                        Accessible.name: qsTr("Search %1 %2").arg(root.providerLabel).arg(root.mediaLabel)
-                        onTextChanged: {
-                            if (root.quietText)
-                                return
-                            debounce.restart()
-                            termsDebounce.restart()
-                        }
-                        onActiveFocusChanged: if (!activeFocus) root.termsOpen = false
+                        placeholderText: core.provider === "tenor" ? qsTr("Search Tenor") : qsTr("Search KLIPY")
+                        Accessible.name: qsTr("Search %1 %2").arg(core.providerLabel).arg(core.mediaLabel)
+                        onActiveFocusChanged: if (!activeFocus) core.termsOpen = false
                         Keys.onPressed: event => {
                             if (event.key === Qt.Key_Escape) {
-                                if (root.termsShown) {
-                                    root.termsOpen = false
-                                    root.activeTerm = -1
+                                if (core.termsShown) {
+                                    core.termsOpen = false
+                                    core.activeTerm = -1
                                 } else {
                                     root.close()
                                 }
                                 event.accepted = true
                                 return
                             }
-                            if (!root.termsShown)
+                            if (!core.termsShown)
                                 return
-                            const n = root.terms.length
+                            const n = core.terms.length
                             if (event.key === Qt.Key_Down) {
-                                root.activeTerm = root.activeTerm < 0 || root.activeTerm >= n - 1 ? 0 : root.activeTerm + 1
+                                core.activeTerm = core.activeTerm < 0 || core.activeTerm >= n - 1 ? 0 : core.activeTerm + 1
                                 event.accepted = true
                             } else if (event.key === Qt.Key_Up) {
-                                root.activeTerm = root.activeTerm <= 0 ? n - 1 : root.activeTerm - 1
+                                core.activeTerm = core.activeTerm <= 0 ? n - 1 : core.activeTerm - 1
                                 event.accepted = true
-                            } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && root.activeTerm >= 0) {
-                                root.pickTerm(root.terms[root.activeTerm])
+                            } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && core.activeTerm >= 0) {
+                                root.pickTerm(core.terms[core.activeTerm])
                                 event.accepted = true
                             }
                         }
@@ -864,17 +602,17 @@ Popup {
                     }
                 }
                 IconKey {
-                    visible: root.mode !== "favorites"
+                    visible: core.mode !== "favorites"
                     size: 32
                     iconName: "star"
                     tip: qsTr("Favorites")
                     tipSide: "bottom"
                     Accessible.name: qsTr("View favorites")
-                    onClicked: root.openFavorites()
+                    onClicked: core.openFavorites()
                 }
                 IconKey {
                     // `max-md:hidden`, and not in voice mode or when locked.
-                    visible: !root.voiceMode && !root.lockExpanded && root.windowWidth >= 768
+                    visible: !core.voiceMode && !root.lockExpanded && root.windowWidth >= 768
                     size: 32
                     iconName: root.expanded ? "minimize" : "maximize"
                     tip: root.expanded ? qsTr("Shrink") : qsTr("Expand")
@@ -919,7 +657,7 @@ Popup {
                             id: tab
                             required property var modelData
                             required property int index
-                            readonly property bool active: root.mediaType === modelData.id
+                            readonly property bool active: core.mediaType === modelData.id
                             width: tabText.implicitWidth
                             height: 40
                             y: -2
@@ -956,16 +694,16 @@ Popup {
                                     return
                                 event.accepted = true
                                 const item = tabRepeater.itemAt(next)
-                                root.changeMediaType(item.modelData.id)
+                                core.changeMediaType(item.modelData.id)
                                 item.forceActiveFocus(Qt.TabFocusReason)
                             }
                             HoverHandler { id: tabHover; cursorShape: Qt.PointingHandCursor }
-                            TapHandler { onTapped: if (!tab.active) root.changeMediaType(tab.modelData.id) }
+                            TapHandler { onTapped: if (!tab.active) core.changeMediaType(tab.modelData.id) }
                         }
                     }
                 }
                 Rectangle {
-                    readonly property Item chosen: tabRepeater.itemAt(["gifs", "stickers", "clips", "memes"].indexOf(root.mediaType)) ?? null
+                    readonly property Item chosen: tabRepeater.itemAt(["gifs", "stickers", "clips", "memes"].indexOf(core.mediaType)) ?? null
                     y: parent.height - 1
                     x: chosen ? chosen.x : 0
                     width: chosen ? chosen.width : 0
@@ -986,7 +724,7 @@ Popup {
             // React mode, then "Slow down!" while the rate limit holds.
             Item {
                 y: 81
-                visible: root.voiceMode
+                visible: core.voiceMode
                 width: parent.width
                 height: 40
                 Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.line }
@@ -997,7 +735,7 @@ Popup {
                 Loader {
                     x: 8
                     anchors.verticalCenter: parent.verticalCenter
-                    active: root.voiceMode
+                    active: core.voiceMode
                     sourceComponent: Row {
                         spacing: 4
                         Text {
@@ -1009,11 +747,11 @@ Popup {
                             font: Theme.type.captionStrong
                         }
                         Repeater {
-                            model: root.displayModes
+                            model: core.displayModes
                             Rectangle {
                                 id: mode
                                 required property var modelData
-                                readonly property bool active: root.displayMode === modelData.id
+                                readonly property bool active: core.displayMode === modelData.id
                                 width: modeText.implicitWidth + 16
                                 height: 28
                                 radius: Theme.radius
@@ -1032,7 +770,7 @@ Popup {
                                     font: Theme.type.captionStrong
                                 }
                                 HoverHandler { id: modeHover; cursorShape: Qt.PointingHandCursor }
-                                TapHandler { onTapped: root.displayMode = mode.modelData.id }
+                                TapHandler { onTapped: core.displayMode = mode.modelData.id }
                             }
                         }
                     }
@@ -1085,22 +823,7 @@ Popup {
                 contentY = Math.max(0, Math.min(contentHeight - height, contentY + step))
                 event.accepted = true
             }
-            // Page in near the end, or while the first pages do not fill it.
-            function maybeMore() {
-                if (Chat.gifMore && !Chat.gifLoading && !root.coolingDown
-                        && (root.mode === "search" || root.mode === "featured")
-                        && contentY + height > contentHeight - 320)
-                    Chat.moreGifs()
-            }
-            onContentYChanged: maybeMore()
-            onContentHeightChanged: {
-                // A kept feed comes back at its scroll once its tiles are in.
-                if (root.pendingScroll > 0 && contentHeight - height >= root.pendingScroll) {
-                    contentY = root.pendingScroll
-                    root.pendingScroll = 0
-                }
-                maybeMore()
-            }
+            // Paging and the kept scroll are the core's (`flickable`).
             ScrollBar.vertical: ThinScrollBar {}
 
             Column {
@@ -1113,7 +836,7 @@ Popup {
                 // Recent searches (the start screen, nothing typed).
                 Column {
                     width: parent.width
-                    visible: root.mode === "categories" && search.text.trim().length === 0 && root.recentQueries.length > 0
+                    visible: core.mode === "categories" && search.text.trim().length === 0 && core.recentQueries.length > 0
                     bottomPadding: 4
                     Item {
                         width: parent.width
@@ -1139,7 +862,7 @@ Popup {
                             Accessible.role: Accessible.Button
                             Accessible.name: text
                             HoverHandler { id: clearHover; cursorShape: Qt.PointingHandCursor }
-                            TapHandler { onTapped: root.forgetAll() }
+                            TapHandler { onTapped: core.forgetAll() }
                         }
                     }
                     Flow {
@@ -1148,7 +871,7 @@ Popup {
                         bottomPadding: 4
                         spacing: 4
                         Repeater {
-                            model: root.recentQueries
+                            model: core.recentQueries
                             Rectangle {
                                 id: chip
                                 required property string modelData
@@ -1172,7 +895,7 @@ Popup {
                                     HoverHandler { id: chipHover; cursorShape: Qt.PointingHandCursor }
                                     TapHandler {
                                         onTapped: {
-                                            root.remember(chip.modelData)
+                                            core.remember(chip.modelData)
                                             root.commitSearch(chip.modelData)
                                         }
                                     }
@@ -1185,7 +908,7 @@ Popup {
                                     tone: "muted"
                                     iconName: "close"
                                     Accessible.name: qsTr("Remove %1 from history").arg(chip.modelData)
-                                    onClicked: root.forget(chip.modelData)
+                                    onClicked: core.forget(chip.modelData)
                                 }
                             }
                         }
@@ -1196,7 +919,7 @@ Popup {
                 // (two columns, three when expanded at 768).
                 Grid {
                     id: cellGrid
-                    visible: root.mode === "categories"
+                    visible: core.mode === "categories"
                     width: parent.width
                     columns: root.isExpanded && root.windowWidth >= 768 ? 3 : 2
                     spacing: root.gap
@@ -1205,18 +928,18 @@ Popup {
                         width: cellGrid.cellW
                         label: qsTr("Favorites")
                         glyph: "star"
-                        media: root.browse.favorite ?? null
-                        onActivated: root.openFavorites()
+                        media: core.browse.favorite ?? null
+                        onActivated: core.openFavorites()
                     }
                     ShortcutCell {
                         width: cellGrid.cellW
                         label: qsTr("Trending")
                         glyph: "trendUp"
-                        media: root.browse.trending ?? null
-                        onActivated: root.openFeatured()
+                        media: core.browse.trending ?? null
+                        onActivated: core.openFeatured()
                     }
                     Repeater {
-                        model: root.mode === "categories" ? root.categories : []
+                        model: core.mode === "categories" ? core.categories : []
                         Rectangle {
                             id: category
                             required property var modelData
@@ -1232,7 +955,7 @@ Popup {
                             Accessible.role: Accessible.Button
                             Accessible.name: modelData.label
                             function activate() {
-                                root.browseMode = "categories"
+                                core.browseMode = "categories"
                                 root.commitSearch(category.modelData.query)
                             }
                             Keys.onReturnPressed: activate()
@@ -1271,19 +994,19 @@ Popup {
 
                 // Status lines (web copy).
                 Text {
-                    visible: root.mode === "categories" && root.categoriesLoading
+                    visible: core.mode === "categories" && core.categoriesLoading
                     width: parent.width
                     topPadding: 32
                     bottomPadding: 32
                     horizontalAlignment: Text.AlignHCenter
                     textFormat: Text.PlainText
-                    text: qsTr("Loading %1 %2 categories…").arg(root.providerLabel).arg(root.mediaLabel)
+                    text: qsTr("Loading %1 %2 categories…").arg(core.providerLabel).arg(core.mediaLabel)
                     color: Theme.ink3
                     font: Theme.type.occupant
                     Accessible.role: Accessible.StaticText
                 }
                 Item {
-                    visible: root.mode === "categories" && !root.categoriesLoading && root.categories.length === 0
+                    visible: core.mode === "categories" && !core.categoriesLoading && core.categories.length === 0
                     width: parent.width
                     height: 160
                     Text {
@@ -1292,14 +1015,14 @@ Popup {
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.Wrap
                         textFormat: Text.PlainText
-                        text: qsTr("No %1 %2 categories available right now.").arg(root.providerLabel).arg(root.mediaLabel)
+                        text: qsTr("No %1 %2 categories available right now.").arg(core.providerLabel).arg(core.mediaLabel)
                         color: Theme.ink3
                         font: Theme.type.description
                     }
                 }
                 // The error alert: danger tint, 4 px in.
                 Item {
-                    visible: Chat.gifError.length > 0 && root.mode !== "categories"
+                    visible: Chat.gifError.length > 0 && core.mode !== "categories"
                     width: parent.width
                     height: visible ? errorBox.height + 8 : 0
                     Rectangle {
@@ -1327,7 +1050,7 @@ Popup {
                 // FavoritesEmptyState (EmptyState sm): the star, the title
                 // and how to add one.
                 Column {
-                    visible: root.mode === "favorites" && tiles.count === 0
+                    visible: core.mode === "favorites" && tiles.count === 0
                     width: parent.width
                     topPadding: 24
                     bottomPadding: 24
@@ -1355,7 +1078,7 @@ Popup {
                         wrapMode: Text.Wrap
                         textFormat: Text.PlainText
                         text: qsTr("Click the star in the corner of a %1 to favorite it.")
-                            .arg(root.mediaLabel.toLowerCase().replace(/s$/, ""))
+                            .arg(core.mediaLabel.toLowerCase().replace(/s$/, ""))
                         color: Theme.ink2
                         font: Theme.type.description
                     }
@@ -1364,7 +1087,7 @@ Popup {
                 // The tiles.
                 Item {
                     id: tileBox
-                    visible: root.mode !== "categories" && tiles.count > 0
+                    visible: core.mode !== "categories" && tiles.count > 0
                     width: parent.width
                     height: visible ? root.contentBottom : 0
                     Repeater {
@@ -1412,9 +1135,9 @@ Popup {
                             activeFocusOnTab: true
                             Accessible.role: Accessible.Button
                             Accessible.name: qsTr("Send asset: %1").arg(title)
-                            Keys.onReturnPressed: root.select(tile)
-                            Keys.onEnterPressed: root.select(tile)
-                            Keys.onSpacePressed: root.select(tile)
+                            Keys.onReturnPressed: core.select(tile)
+                            Keys.onEnterPressed: core.select(tile)
+                            Keys.onSpacePressed: core.select(tile)
                             Keys.onPressed: event => event.accepted = root.moveFocus(tile, event.key)
                             // Streamed (one frame held, never every frame: the
                             // picker is never destroyed) so it loops; see
@@ -1466,7 +1189,7 @@ Popup {
                                     const onChip = chip => chip.visible
                                         && chip.contains(chip.mapFromItem(tile, eventPoint.position))
                                     if (!onChip(muteChip) && !onChip(starChip))
-                                        root.select(tile)
+                                        core.select(tile)
                                 }
                             }
                             MediaChip {
@@ -1475,11 +1198,11 @@ Popup {
                                 x: 4
                                 y: tile.height - height - 4
                                 shown: tile.hovered || tile.activeFocus
-                                readonly property bool muted: !tile.hovered || root.clipsMuted
+                                readonly property bool muted: !tile.hovered || core.clipsMuted
                                 glyph: muted ? "speakerOff" : "voiceChannel"
                                 tip: ""
                                 Accessible.name: muted ? qsTr("Unmute clip preview") : qsTr("Mute clip preview")
-                                onTapped: root.clipsMuted = !root.clipsMuted
+                                onTapped: core.clipsMuted = !core.clipsMuted
                             }
                             Rectangle {
                                 readonly property real seconds: clipLoader.item ? clipLoader.item.seconds
@@ -1600,7 +1323,7 @@ Popup {
 
                 // No results (search or featured, settled, no error).
                 Item {
-                    visible: (root.mode === "search" || root.mode === "featured") && tiles.count === 0
+                    visible: (core.mode === "search" || core.mode === "featured") && tiles.count === 0
                         && !Chat.gifLoading && Chat.gifError.length === 0
                     width: parent.width
                     height: 160
@@ -1610,9 +1333,9 @@ Popup {
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.Wrap
                         textFormat: Text.PlainText
-                        text: root.mode === "featured" ? qsTr("No featured %1 found right now.").arg(root.mediaLabel)
-                            : root.query.length > 0 ? qsTr("No %1 found for \"%2\".").arg(root.mediaLabel).arg(root.query)
-                            : qsTr("No %1 found.").arg(root.mediaLabel)
+                        text: core.mode === "featured" ? qsTr("No featured %1 found right now.").arg(core.mediaLabel)
+                            : core.query.length > 0 ? qsTr("No %1 found for \"%2\".").arg(core.mediaLabel).arg(core.query)
+                            : qsTr("No %1 found.").arg(core.mediaLabel)
                         color: Theme.ink3
                         font: Theme.type.description
                     }
@@ -1621,7 +1344,7 @@ Popup {
                 // GifLoadingSkeleton: the line, then eight static tint-1
                 // blocks (112, 80, 96 high in turn) in two columns.
                 Column {
-                    visible: Chat.gifLoading && tiles.count === 0 && root.mode !== "categories" && root.mode !== "favorites"
+                    visible: Chat.gifLoading && tiles.count === 0 && core.mode !== "categories" && core.mode !== "favorites"
                     width: parent.width
                     topPadding: 12
                     bottomPadding: 12
@@ -1630,7 +1353,7 @@ Popup {
                         width: parent.width
                         horizontalAlignment: Text.AlignHCenter
                         textFormat: Text.PlainText
-                        text: qsTr("Loading %1 %2…").arg(root.providerLabel).arg(root.mediaLabel)
+                        text: qsTr("Loading %1 %2…").arg(core.providerLabel).arg(core.mediaLabel)
                         color: Theme.ink3
                         font: Theme.type.captionStrong
                     }
@@ -1652,7 +1375,7 @@ Popup {
                 }
                 // Loading more, or waiting out the rate limit.
                 Row {
-                    visible: (Chat.gifLoading && tiles.count > 0) || root.coolingDown
+                    visible: (Chat.gifLoading && tiles.count > 0) || core.coolingDown
                     anchors.horizontalCenter: parent.horizontalCenter
                     topPadding: 12
                     bottomPadding: 12
@@ -1675,8 +1398,8 @@ Popup {
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         textFormat: Text.PlainText
-                        text: root.coolingDown ? qsTr("%1 is rate limiting us. Waiting before the next retry…").arg(root.providerLabel)
-                            : qsTr("Loading more %1 %2…").arg(root.providerLabel).arg(root.mediaLabel)
+                        text: core.coolingDown ? qsTr("%1 is rate limiting us. Waiting before the next retry…").arg(core.providerLabel)
+                            : qsTr("Loading more %1 %2…").arg(core.providerLabel).arg(core.mediaLabel)
                         color: Theme.ink3
                         font: Theme.type.captionStrong
                     }
@@ -1688,7 +1411,7 @@ Popup {
         // the term, and "Enter" on the active row.
         Rectangle {
             id: termsPanel
-            visible: root.termsShown
+            visible: core.termsShown
             z: 10
             readonly property point at: searchBox.mapToItem(body, 0, searchBox.height + 8)
             x: at.x
@@ -1713,12 +1436,12 @@ Popup {
                 y: 6
                 width: parent.width - 8
                 Repeater {
-                    model: root.termsShown ? root.terms : []
+                    model: core.termsShown ? core.terms : []
                     Rectangle {
                         id: termRow
                         required property string modelData
                         required property int index
-                        readonly property bool active: root.activeTerm === index
+                        readonly property bool active: core.activeTerm === index
                         width: termsColumn.width
                         height: 36
                         radius: Theme.radius
@@ -1759,7 +1482,7 @@ Popup {
                         }
                         HoverHandler {
                             cursorShape: Qt.PointingHandCursor
-                            onHoveredChanged: if (hovered) root.activeTerm = termRow.index
+                            onHoveredChanged: if (hovered) core.activeTerm = termRow.index
                         }
                         TapHandler { onTapped: root.pickTerm(termRow.modelData) }
                     }
@@ -1791,7 +1514,7 @@ Popup {
                 }
                 Rectangle {
                     id: providerKey
-                    readonly property bool switchable: root.mediaType === "gifs" && root.providers.length > 1
+                    readonly property bool switchable: core.mediaType === "gifs" && core.providers.length > 1
                     anchors.verticalCenter: parent.verticalCenter
                     width: providerRow.width + 12
                     height: 24
@@ -1800,8 +1523,8 @@ Popup {
                     EaseColor on color {}
                     activeFocusOnTab: switchable
                     Accessible.role: switchable ? Accessible.ComboBox : Accessible.StaticText
-                    Accessible.name: switchable ? qsTr("GIF provider") : root.providerLabel
-                    Accessible.description: root.providerLabel
+                    Accessible.name: switchable ? qsTr("GIF provider") : core.providerLabel
+                    Accessible.description: core.providerLabel
                     Keys.onReturnPressed: if (switchable) providerMenu.open()
                     Keys.onSpacePressed: if (switchable) providerMenu.open()
                     Rectangle {
@@ -1818,60 +1541,9 @@ Popup {
                         x: 6
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 4
-                        // ProviderMark: KLIPY's wordmark through a mask in
-                        // the current ink (ink-2), so it holds in every
-                        // theme; Tenor is its name in 600.
-                        Item {
-                            visible: root.provider !== "tenor"
+                        ProviderMark {
                             anchors.verticalCenter: parent.verticalCenter
-                            width: Math.round(12 * 375.1 / 102.5)
-                            height: 12
-                            Image {
-                                id: klipyMask
-                                anchors.fill: parent
-                                source: "qrc:/svg/klipy-text-light.svg"
-                                // Rasterized at the screen's pixels, not a
-                                // fixed 2x scaled down.
-                                sourceSize: Qt.size(Math.ceil(width * Screen.devicePixelRatio), Math.ceil(height * Screen.devicePixelRatio))
-                                smooth: true
-                                visible: false
-                                layer.enabled: true
-                                layer.smooth: true
-                            }
-                            Rectangle {
-                                id: klipyInk
-                                anchors.fill: parent
-                                color: Theme.ink2
-                                visible: false
-                                layer.enabled: true
-                            }
-                            MultiEffect {
-                                anchors.fill: parent
-                                source: klipyInk
-                                maskEnabled: true
-                                maskSource: klipyMask
-                                // The wordmark's alpha as coverage: MultiEffect
-                                // takes smoothstep(min (1 + s) - s, min (1 + s)),
-                                // here 0..0.5, so the ground stays clear, edges
-                                // ramp and the 12 px strokes (alpha ~0.7 at
-                                // most) reach full ink-2. The default hard
-                                // threshold at 0 turned every edge pixel
-                                // solid (the jagged mark).
-                                maskThresholdMin: 0.3334
-                                maskSpreadAtMin: 0.5
-                            }
-                            Accessible.role: Accessible.Graphic
-                            Accessible.name: "KLIPY"
-                        }
-                        Text {
-                            visible: root.provider === "tenor"
-                            anchors.verticalCenter: parent.verticalCenter
-                            textFormat: Text.PlainText
-                            text: "Tenor"
-                            color: Theme.ink2
-                            font.family: Theme.type.labelStrong.family
-                            font.weight: Theme.type.labelStrong.weight
-                            font.pixelSize: 12
+                            provider: core.provider
                         }
                         Icon {
                             visible: providerKey.switchable
@@ -1889,13 +1561,13 @@ Popup {
                         y: -height - 4
                         MenuChoice {
                             text: "KLIPY"
-                            selected: root.provider === "klipy"
-                            onTriggered: if (root.provider !== "klipy") root.changeProvider("klipy")
+                            selected: core.provider === "klipy"
+                            onTriggered: if (core.provider !== "klipy") root.changeProvider("klipy")
                         }
                         MenuChoice {
                             text: "Tenor"
-                            selected: root.provider === "tenor"
-                            onTriggered: if (root.provider !== "tenor") root.changeProvider("tenor")
+                            selected: core.provider === "tenor"
+                            onTriggered: if (core.provider !== "tenor") root.changeProvider("tenor")
                         }
                     }
                 }

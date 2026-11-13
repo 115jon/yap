@@ -258,6 +258,12 @@ pub mod qobject {
         #[qsignal]
         fn saved(self: Pin<&mut Chat>, path: QString, open: bool);
 
+        /// The download to `path` failed; `text` says why (the same words
+        /// `notice` carries just before).
+        #[qsignal]
+        #[cxx_name = "downloadFailed"]
+        fn download_failed(self: Pin<&mut Chat>, path: QString, text: QString);
+
         /// Adds the user's reaction, or removes it when it is there.
         #[qinvokable]
         #[cxx_name = "toggleReaction"]

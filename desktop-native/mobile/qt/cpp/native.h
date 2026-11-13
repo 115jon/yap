@@ -11,17 +11,22 @@
 //   system bars    light or dark status and navigation bar icons
 //   keyboard       the IME inset, frame by frame (WindowInsetsAnimation)
 //   haptics        View.performHapticFeedback
-//   share          the system share sheet (ACTION_SEND)
+//   share          the system share sheet (ACTION_SEND), with a title
 //   text size      Configuration.fontScale
 //   motion         the animator duration scale (Remove animations)
 //   accent         Material You's system accent (Android 12+)
 //   fling          ViewConfiguration's fling speed and a matching friction
 //   media          the photo picker (ACTION_PICK_IMAGES, GET_CONTENT before
-//                  13), each item copied into the cache for the core
+//                  13), each item copied into the cache for the core; and
+//                  a picture saved into the gallery (MediaStore,
+//                  Pictures/Yap)
 //   push           FCM's token for the core, a notification's tap, Reply and
 //                  Mark as read, the conversation on screen (its pushes stay
 //                  quiet) and the notification permission (cpp/push.cpp,
 //                  android/src/dev/yap/qtproto/push)
+//   links          the web's invite and chat links and yap:// links the
+//                  app was opened with, held until the QML takes them
+//                  (cpp/links.cpp, android/src/dev/yap/qtproto/LinkShim)
 //   voice          the microphone permission, the call's audio routes
 //                  (speaker, earpiece, headset, Bluetooth) and what the call
 //                  notification shows (cpp/voice.cpp,
@@ -108,7 +113,8 @@ public:
   void setActiveConversation(const QString& channelId);
 
   Q_INVOKABLE void haptic(Haptic kind) const;
-  Q_INVOKABLE void share(const QString& text) const;
+  // `title` heads the share sheet (empty: the system's own).
+  Q_INVOKABLE void share(const QString& text, const QString& title = QString()) const;
   Q_INVOKABLE void copy(const QString& text) const;
   // Back at the root: leave as the system would (the task goes back).
   Q_INVOKABLE void leave() const;
@@ -117,6 +123,11 @@ public:
   // The system photo picker; the copies' paths arrive as mediaPicked. An
   // item over `limitBytes` (the account's attachment limit) is not copied.
   Q_INVOKABLE void pickMedia(qreal limitBytes);
+  // Save image: where to download a picture named `name` first (a fresh
+  // folder under the cache; empty off Android), then the download into the
+  // gallery's Pictures/Yap. The outcome arrives as imageSaved.
+  Q_INVOKABLE QString saveTarget(const QString& name) const;
+  Q_INVOKABLE void saveToGallery(const QString& path, const QString& mime) const;
   // Turns notifications on: the permission dialog while it can still show,
   // else the app's notification settings.
   Q_INVOKABLE void requestNotifications();
@@ -124,6 +135,9 @@ public:
   // `serverId`, and a DM's `userId`; empty: none). `openRequested` says one
   // is waiting.
   Q_INVOKABLE QVariantMap takeOpenRequest();
+  // The link the app was last opened with, once (empty: none).
+  // `linkRequested` says one is waiting.
+  Q_INVOKABLE QString takeLinkRequest();
   // Signed out: the account's notifications and conversation shortcuts go.
   Q_INVOKABLE void forgetNotifications() const;
 
@@ -151,7 +165,9 @@ public:
   void readConfiguration();
   void onMediaCopying();
   void onMediaPicked(const QStringList& paths, int failed);
+  void onImageSaved(const QString& path, int result);
   void onOpenRequest(const QString& channelId, const QString& serverId, const QString& userId);
+  void onLinkRequest(const QString& url);
   void onAudioRoutes(const QByteArray& json);
 
 signals:
@@ -167,9 +183,14 @@ signals:
   // Local copies of what was picked (none: cancelled); `failed` items could
   // not be read.
   void mediaPicked(const QStringList& paths, int failed);
+  // saveToGallery's outcome for `path`: 0 saved, 1 failed, 2 the storage
+  // permission was asked for (API 28; the save can be tried again), 3 it
+  // is refused for good, so the app's settings page was opened.
+  void imageSaved(const QString& path, int result);
   void notificationsEnabledChanged();
   void activeConversationChanged();
   void openRequested();
+  void linkRequested();
   void audioRoutesChanged();
   void microphoneAnswered(bool granted);
 
@@ -192,6 +213,8 @@ private:
   void readNotificationsEnabled();
   // cpp/voice.cpp.
   void installVoice();
+  // cpp/links.cpp.
+  void installLinks();
 
   bool m_handlesBack = false;
   // Back reaches the app through the shim's OnBackInvokedCallback (API 33+).
@@ -213,6 +236,7 @@ private:
   qint64 m_pickStartedMs = 0;
   bool m_notificationsEnabled = false;
   QString m_activeConversation;
+  QString m_linkRequest;
   QVariantMap m_openRequest;
   QVariantList m_audioRoutes;
   bool m_askingMicrophone = false;

@@ -923,10 +923,14 @@ impl State {
     ) {
         match result {
             Ok(_) => fx.view(ViewUpdate::Saved { path: dest, open }),
-            Err(error) => fx.view(ViewUpdate::Notice(describe_error(
-                &error,
-                "download that file",
-            ))),
+            Err(error) => {
+                let message = describe_error(&error, "download that file");
+                fx.view(ViewUpdate::Notice(message.clone()));
+                fx.view(ViewUpdate::DownloadFailed {
+                    path: dest,
+                    message,
+                });
+            }
         }
     }
 

@@ -10,7 +10,8 @@
      Android 12+, window background before) hands over to Qt's, which stays
      until main.cpp hides it at the first frame; push notifications
      (the FCM service, the Reply and Mark as read receiver, the permission);
-     and voice calls (the mic, the audio route, the call's service).
+     and voice calls (the mic, the audio route, the call's service);
+     and links into the app (LinkActivity's filters).
      No package attribute: the application id is CMake's YAP_ANDROID_APP_ID
      (Gradle's namespace); the label is YAP_ANDROID_APP_NAME ("Yap", CI's
      "Yap CI"). -->
@@ -35,6 +36,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- The image viewer's Save image into Pictures/Yap (NativeShim
+         saveToGallery): MediaStore needs no permission for the app's own
+         pictures from API 29; API 28 (the minimum) needs this one. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <!-- The shim asks which app is the home screen (was this start the
          launcher's? NativeShim.keepsTaskAtRoot). -->
@@ -99,6 +105,40 @@
             <meta-data
                 android:name="android.app.background_running"
                 android:value="true" />
+        </activity>
+
+        <!-- Links into the app (LinkActivity hands them to YapActivity):
+             the web's invite and chat links, as the Expo app takes them
+             (apps/mobile app.config.ts), on the web origin the core uses
+             (yap-core config.rs `api_base`), and the yap:// links the core
+             reads (yap-core links.rs). Not autoVerify: the web serves no
+             Digital Asset Links statement for this app yet, so on Android
+             12+ an https link opens in the browser until the user turns on
+             "Open supported links" for it. -->
+        <activity
+            android:name="dev.yap.qtproto.LinkActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="yap.115jon.com" />
+                <data android:pathPrefix="/invite/" />
+                <data android:pathPrefix="/chat/" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="yap" />
+                <data android:host="invite" />
+                <data android:host="chat" />
+            </intent-filter>
         </activity>
 
         <!-- Yap's data-only pushes, drawn natively (push/MessageNotifier),

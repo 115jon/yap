@@ -7,8 +7,10 @@ import Yap.Ui
 
 // The composer, phone layout. From the top: the reply bar (who and what is
 // being answered, and Cancel), a notice line (an upload or send the core
-// refused), the emoji row, the upload tray, then the field row: attach,
-// the growing field (up to five lines) with the emoji key, and Send. Member
+// refused), the emoji row (its last cell opens the whole picker), the
+// upload tray, then the field row: attach, the growing field (up to five
+// lines) with the GIF key (the picker sheet on its GIFs tab) and the emoji
+// key, and Send. Member
 // suggestions for `@` float above it all, over the messages. The soft
 // keyboard's Enter adds a line (Android gives a multi-line field no Send
 // action) and the send key sends; a hardware keyboard's Enter sends and
@@ -29,6 +31,14 @@ Rectangle {
     signal send(string text, string replyToId)
     // An attached picture was tapped (the viewer's images and index).
     signal openImages(var images, int index)
+    // The picker sheet (PickerSheet) on `tab` (emoji | gifs), which the
+    // page holds over itself.
+    signal pickerRequested(string tab)
+    // A GIF or a sticker went out (through `core`).
+    signal gifSent()
+
+    // The shared composer logic, for the picker sheet's sends.
+    readonly property alias core: core
 
     // The draft, reply, `@` suggestions, typing pings and the send, shared
     // with the desktop's composer; the keyboard's word in progress counts
@@ -42,6 +52,7 @@ Rectangle {
         atomicMentions: false
         onSend: (text, replyToId) => root.send(text, replyToId)
         onSent: root.emojiOpen = false
+        onGifSent: root.gifSent()
     }
 
     // What is in the field, the keyboard's word in progress included.
@@ -272,6 +283,20 @@ Rectangle {
             boundsBehavior: Flickable.StopAtBounds
             model: root.emojiRow
             Behavior on height { NumberAnimation { duration: Theme.dur2; easing.type: Easing.OutCubic } }
+            // The whole picker, after the row.
+            footer: Item {
+                width: 48
+                height: 48
+                IconKey {
+                    focusPolicy: Qt.NoFocus
+                    anchors.centerIn: parent
+                    size: 40
+                    tone: "muted"
+                    iconName: "more"
+                    tip: qsTr("All emoji")
+                    onClicked: root.pickerRequested("emoji")
+                }
+            }
             delegate: Item {
                 id: emojiCell
                 required property string modelData
@@ -357,7 +382,7 @@ Rectangle {
                 id: flick
                 anchors.fill: parent
                 anchors.leftMargin: 14
-                anchors.rightMargin: emojiKey.width + 2
+                anchors.rightMargin: emojiKey.width + gifKey.width + 2
                 contentHeight: field.implicitHeight
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
@@ -391,6 +416,16 @@ Rectangle {
                 }
             }
 
+            IconKey {
+                id: gifKey
+                focusPolicy: Qt.NoFocus
+                anchors.right: emojiKey.left
+                anchors.bottom: emojiKey.bottom
+                size: 40
+                iconName: "gif"
+                tip: qsTr("GIFs and stickers")
+                onClicked: root.pickerRequested("gifs")
+            }
             IconKey {
                 id: emojiKey
                 focusPolicy: Qt.NoFocus

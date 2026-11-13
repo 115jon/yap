@@ -8,7 +8,9 @@ import Yap.Ui
 // server's channel tree (or Home's direct messages) beside it, the call in
 // progress and your account along the bottom. The rows are the desktop's
 // own delegates (ServerIcon, TreeRow) on its own list models. A voice
-// channel's row joins it (or opens the call you are in there).
+// channel's row joins it (or opens the call you are in there). A tap on
+// the server's name opens its menu (ServerSheet: Invite people, Mark as
+// read); a long press on a channel opens the channel's.
 Item {
     id: root
 
@@ -22,6 +24,9 @@ Item {
     signal voiceRequested(string channelId)
     // The call bar was tapped.
     signal callRequested()
+    // The open server's menu, and a channel's (ServerSheet).
+    signal serverMenuRequested()
+    signal channelMenuRequested(string channelId, string name, bool voice)
 
     // A conversation picked in the drawer. The open one picked again is a
     // way back to it, not a reload: the desktop's reselect lays the list
@@ -145,21 +150,46 @@ Item {
             width: parent.width
             topPadding: root.topInset
             Item {
+                id: titleBar
                 width: parent.width
                 height: 56
+                // A server's name opens its menu.
+                readonly property bool menu: !Nav.home && Nav.activeServerId.length > 0
+                Rectangle {
+                    anchors.fill: parent
+                    color: titleBar.menu && titleTap.pressed ? Theme.tint1 : "transparent"
+                    EaseColor on color {}
+                }
                 Text {
+                    id: titleText
                     anchors.left: parent.left
                     anchors.leftMargin: 16
-                    anchors.right: status.left
-                    anchors.rightMargin: 12
                     anchors.verticalCenter: parent.verticalCenter
+                    width: Math.min(implicitWidth, status.x - 12 - x - (caret.visible ? caret.width + 6 : 0))
                     textFormat: Text.PlainText
                     text: Nav.home ? qsTr("Direct messages")
                         : Nav.activeServerName.length > 0 ? Nav.activeServerName : qsTr("Yap")
                     color: Theme.ink1
                     font: Theme.type.serverTitle
                     elide: Text.ElideRight
-                    Accessible.role: Accessible.Heading
+                    Accessible.role: titleBar.menu ? Accessible.Button : Accessible.Heading
+                    Accessible.name: titleBar.menu ? qsTr("%1, server menu").arg(text) : text
+                    Accessible.onPressAction: if (titleBar.menu) root.serverMenuRequested()
+                }
+                Icon {
+                    id: caret
+                    visible: titleBar.menu
+                    anchors.left: titleText.right
+                    anchors.leftMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    name: "chevronDown"
+                    size: Theme.iconSm
+                    color: Theme.ink2
+                }
+                TapHandler {
+                    id: titleTap
+                    enabled: titleBar.menu
+                    onTapped: root.serverMenuRequested()
                 }
                 Led {
                     id: status
@@ -204,6 +234,12 @@ Item {
                         return
                     }
                     root.openConversation(channelId)
+                }
+                // Named parameters: the signal's own `row` would shadow
+                // this delegate's id.
+                onMenuRequested: (item, at) => {
+                    if (row.kind === "channel")
+                        root.channelMenuRequested(row.itemId, row.name, row.voice)
                 }
             }
         }

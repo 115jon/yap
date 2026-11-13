@@ -89,6 +89,12 @@ void jniMediaPicked(JNIEnv* env, jclass, jobjectArray paths, jint failed)
   post([list, failed] { Native::instance()->onMediaPicked(list, failed); });
 }
 
+void jniImageSaved(JNIEnv*, jclass, jstring path, jint result)
+{
+  const QString where = QJniObject(path).toString();
+  post([where, result] { Native::instance()->onImageSaved(where, result); });
+}
+
 // The picker's request code (any number of ours; Qt routes the result back).
 constexpr int kPickMedia = 0x5961;
 #endif
@@ -111,6 +117,7 @@ Native::Native(QObject* parent)
     { "nativeEdges", "(FF)V", reinterpret_cast<void*>(jniEdges) },
     { "nativeMediaCopying", "()V", reinterpret_cast<void*>(jniMediaCopying) },
     { "nativeMediaPicked", "([Ljava/lang/String;I)V", reinterpret_cast<void*>(jniMediaPicked) },
+    { "nativeImageSaved", "(Ljava/lang/String;I)V", reinterpret_cast<void*>(jniImageSaved) },
   };
   QJniEnvironment env;
   if (!env.registerNativeMethods(kShim, methods, std::size(methods)))
@@ -123,6 +130,7 @@ Native::Native(QObject* parent)
   applyBars();
   installPush();
   installVoice();
+  installLinks();
   // Text size, Remove animations and the wallpaper accent can change while
   // the app is away; read them again when it comes back, and the keyboard's
   // inset, which can go stale behind another activity (the photo picker).
@@ -254,13 +262,15 @@ void Native::haptic(Haptic kind) const
 #endif
 }
 
-void Native::share(const QString& text) const
+void Native::share(const QString& text, const QString& title) const
 {
 #ifdef Q_OS_ANDROID
-  QJniObject::callStaticMethod<void>(kShim, "share", "(Ljava/lang/String;)V",
-                                     QJniObject::fromString(text).object<jstring>());
+  QJniObject::callStaticMethod<void>(kShim, "share", "(Ljava/lang/String;Ljava/lang/String;)V",
+                                     QJniObject::fromString(text).object<jstring>(),
+                                     QJniObject::fromString(title).object<jstring>());
 #else
   Q_UNUSED(text);
+  Q_UNUSED(title);
 #endif
 }
 
@@ -305,6 +315,35 @@ void Native::pickMedia(qreal limitBytes)
 #else
   Q_UNUSED(limitBytes);
 #endif
+}
+
+QString Native::saveTarget(const QString& name) const
+{
+#ifdef Q_OS_ANDROID
+  return QJniObject::callStaticObjectMethod(kShim, "saveTarget", "(Ljava/lang/String;)Ljava/lang/String;",
+                                            QJniObject::fromString(name).object<jstring>())
+      .toString();
+#else
+  Q_UNUSED(name);
+  return {};
+#endif
+}
+
+void Native::saveToGallery(const QString& path, const QString& mime) const
+{
+#ifdef Q_OS_ANDROID
+  QJniObject::callStaticMethod<void>(kShim, "saveToGallery", "(Ljava/lang/String;Ljava/lang/String;)V",
+                                     QJniObject::fromString(path).object<jstring>(),
+                                     QJniObject::fromString(mime).object<jstring>());
+#else
+  Q_UNUSED(path);
+  Q_UNUSED(mime);
+#endif
+}
+
+void Native::onImageSaved(const QString& path, int result)
+{
+  emit imageSaved(path, result);
 }
 
 void Native::onMediaCopying()

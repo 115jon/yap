@@ -29,39 +29,22 @@ import Yap.Ui
 T.Popup {
     id: page
 
-    readonly property var model: JSON.parse(Invites.state)
-    readonly property var landing: model.landing ?? null
-    readonly property string step: landing ? landing.step : ""
-    readonly property bool joining: step === "joining"
-    readonly property bool showsInvite: step === "preview" || step === "joining"
-    readonly property string serverName: landing ? landing.serverName : ""
-
-    // InviteClient.tsx INVITE_REDIRECT_MS.
-    readonly property int redirectMs: 1500
+    // The core's landing, its state and copy (shared with the phone).
+    readonly property InviteLandingState invite: InviteLandingState {}
+    readonly property var landing: invite.landing
+    readonly property string step: invite.step
+    readonly property bool joining: invite.joining
+    readonly property bool showsInvite: invite.showsInvite
+    readonly property string serverName: invite.serverName
 
     readonly property bool wide: width >= 1024
     // public-type.ts PUBLIC_DISPLAY: clamp(2.75rem, 2.2rem + 2.6vw, 4.25rem).
     readonly property real displaySize: Math.round(Math.max(44, Math.min(68, 35.2 + 0.026 * width)))
 
-    // PageState's parts per state.
-    readonly property string tileIcon: step === "joined" ? "check"
-        : step === "member" ? "userCheck"
-        : step === "invalid" ? "linkBroken"
-        : step === "error" ? "alert" : ""
-    readonly property string tileTone: step === "joined" ? "success"
-        : step === "error" ? "danger" : "neutral"
-    readonly property string titleText: step === "joined" ? qsTr("Joined %1").arg(serverName)
-        : step === "member" ? qsTr("You're already a member")
-        : step === "invalid" ? qsTr("This invite isn't valid")
-        : step === "error" ? (landing.hasInvite ? qsTr("Couldn't join the server") : qsTr("Couldn't load this invite"))
-        : ""
-    readonly property string bodyText: step === "joined" ? qsTr("Opening the server…")
-        : step === "member" ? qsTr("You're already in %1.").arg(serverName)
-        : step === "invalid" ? (landing.expired
-            ? qsTr("It expired or has been used too many times. Ask for a new invite.")
-            : qsTr("The link may be mistyped, or the invite was deleted. Ask for a new invite."))
-        : step === "error" ? qsTr("Check your connection and try again.")
-        : ""
+    readonly property string tileIcon: invite.tileIcon
+    readonly property string tileTone: invite.tileTone
+    readonly property string titleText: invite.titleText
+    readonly property string bodyText: invite.bodyText
 
     // The whole window under the title bar (none in stage fullscreen).
     parent: T.Overlay.overlay
@@ -80,19 +63,7 @@ T.Popup {
     onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
     onClosed: Invites.closeLanding()
     onLandingChanged: if (!landing && opened) close()
-    onStepChanged: {
-        if (step === "joined")
-            redirect.restart()
-        else
-            redirect.stop()
-        enterAnim.restart()
-    }
-
-    Timer {
-        id: redirect
-        interval: page.redirectMs
-        onTriggered: if (page.step === "joined") Invites.openServer(page.landing.serverId)
-    }
+    onStepChanged: enterAnim.restart()
 
     enter: PresenceIn { fromScale: 1 }
     exit: PresenceOut { toScale: 1 }
@@ -112,11 +83,7 @@ T.Popup {
         Accessible.role: Accessible.Pane
         Accessible.name: qsTr("Join Server")
         // What changed (InviteClient `announcement`).
-        Accessible.description: page.step === "loading" ? qsTr("Loading invite")
-            : page.step === "joining" ? qsTr("Joining %1").arg(page.serverName)
-            : page.step === "joined" ? qsTr("Joined %1. Opening the server.").arg(page.serverName)
-            : page.step === "member" ? qsTr("You're already in %1.").arg(page.serverName)
-            : ""
+        Accessible.description: page.invite.announcement
 
         // ── The dither: one painted frame, decorative ───────────────────
         readonly property int artWidth: Math.min(600, Math.round(width * 0.36))
@@ -459,7 +426,7 @@ T.Popup {
                             variant: "primary"
                             size: "lg"
                             text: qsTr("Open now")
-                            onClicked: Invites.openServer(page.landing.serverId)
+                            onClicked: page.invite.openServer()
                         }
                         KitButton {
                             Layout.fillWidth: true
@@ -467,7 +434,7 @@ T.Popup {
                             variant: "primary"
                             size: "lg"
                             text: qsTr("Open %1").arg(page.serverName)
-                            onClicked: Invites.openServer(page.landing.serverId)
+                            onClicked: page.invite.openServer()
                         }
                         KitButton {
                             Layout.fillWidth: true
