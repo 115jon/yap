@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- CaptureProvider: the camera's photo for the composer, under the cache. -->
+<paths>
+    <cache-path name="capture" path="capture/" />
+</paths>

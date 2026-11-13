@@ -3,11 +3,13 @@ package dev.yap.qtproto;
 import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.database.Cursor;
@@ -38,6 +40,10 @@ import android.window.OnBackAnimationCallback;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 
+import androidx.core.content.FileProvider;
+
+import org.qtproject.qt.android.YapEditText;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -46,7 +52,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
@@ -66,11 +74,20 @@ public final class NativeShim {
     static native void nativeMediaCopying();
     static native void nativeMediaPicked(String[] paths, int failed);
     static native void nativeImageSaved(String path, int result);
+    static native void nativeContentReceived(String[] paths, int failed);
 
     /** The most files one pick hands to the tray. */
     private static final int PICK_MAX = 10;
     /** Picked files are copied under the cache, here, until the next start. */
     private static final String UPLOADS = "uploads";
+    /** The camera writes the composer's photo under the cache, here (CaptureProvider). */
+    private static final String CAPTURE = "capture";
+    /** cameraState's outcomes (Native.takePhoto). */
+    private static final int CAMERA_OK = 0;
+    private static final int CAMERA_NONE = 1;
+    private static final int CAMERA_NEEDS_PERMISSION = 2;
+    /** The camera permission's request code (only when the manifest declares it). */
+    private static final int CAMERA_PERMISSION_REQUEST = 0x5963;
     /** Pictures being saved wait under the cache, here, on their way to the gallery. */
     private static final String SAVES = "saves";
     /** Saved pictures go in the gallery's Pictures/Yap. */
@@ -109,9 +126,11 @@ public final class NativeShim {
         // Nothing uploads before the app is up: last run's copies can go.
         final File uploads = new File(a.getCacheDir(), UPLOADS);
         final File saves = new File(a.getCacheDir(), SAVES);
+        final File capture = new File(a.getCacheDir(), CAPTURE);
         new Thread(() -> {
             deleteTree(uploads);
             deleteTree(saves);
+            deleteTree(capture);
         }, "yap-uploads-clean").start();
     }
 
@@ -532,9 +551,21 @@ public final class NativeShim {
     }
 
     private static File copyIn(Uri uri, File dir) {
+        return copyIn(uri, dir, null);
+    }
+
+    /** `mime`: the type the sender named, for a provider that names none. */
+    private static File copyIn(Uri uri, File dir, String mime) {
         ContentResolver resolver = activity.getContentResolver();
         if (!dir.mkdirs() && !dir.isDirectory()) return null;
-        File out = new File(dir, fileName(resolver, uri, resolver.getType(uri)));
+        String type = null;
+        try {
+            type = resolver.getType(uri);
+        } catch (RuntimeException e) {
+            // A provider that cannot say: the sender's type.
+        }
+        if (type == null) type = mime;
+        File out = new File(dir, fileName(resolver, uri, type));
         long size = size(resolver, uri);
         if (size > pickLimit) {
             try (RandomAccessFile stand = new RandomAccessFile(out, "rw")) {
@@ -559,6 +590,180 @@ public final class NativeShim {
             out.delete();
             return null;
         }
+    }
+
+    // ---- Files, the camera, the clipboard, the keyboard ---------------------
+
+    /**
+     * The composer's Files: the documents UI on any type, several at once.
+     * Its result goes through mediaPicked, as the photo picker's.
+     */
+    public static Intent pickFilesIntent(long limitBytes) {
+        pickLimit = limitBytes > 0 ? limitBytes : Long.MAX_VALUE;
+        return new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("*/*")
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+    }
+
+    /** The photo the camera is taking (takePhotoIntent), until photoTaken. */
+    private static File pendingPhoto;
+
+    /**
+     * Can the composer's Camera start: CAMERA_OK, CAMERA_NONE (no camera
+     * app), or CAMERA_NEEDS_PERMISSION (asked now; the next tap goes). The
+     * system camera takes the photo, so the app needs no camera permission
+     * of its own; Android requires it only of an app whose manifest
+     * declares it (a library could add it), and then it is asked for here.
+     */
+    public static int cameraState() {
+        if (activity == null) return CAMERA_NONE;
+        if (new Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                .resolveActivity(activity.getPackageManager()) == null) return CAMERA_NONE;
+        if (declares(Manifest.permission.CAMERA)
+                && activity.checkSelfPermission(Manifest.permission.CAMERA)
+                        != PackageManager.PERMISSION_GRANTED) {
+            activity.runOnUiThread(() -> activity.requestPermissions(
+                    new String[] {Manifest.permission.CAMERA}, CAMERA_PERMISSION_REQUEST));
+            return CAMERA_NEEDS_PERMISSION;
+        }
+        return CAMERA_OK;
+    }
+
+    private static boolean declares(String permission) {
+        try {
+            PackageInfo info = activity.getPackageManager().getPackageInfo(
+                    activity.getPackageName(), PackageManager.GET_PERMISSIONS);
+            if (info.requestedPermissions == null) return false;
+            for (String p : info.requestedPermissions) {
+                if (permission.equals(p)) return true;
+            }
+        } catch (PackageManager.NameNotFoundException e) {
+            // Our own package: always there.
+        }
+        return false;
+    }
+
+    /**
+     * The system camera, writing its photo into a fresh file under the
+     * cache through CaptureProvider (null when it cannot start). Its result
+     * goes to photoTaken.
+     */
+    public static Intent takePhotoIntent() {
+        if (activity == null) return null;
+        File dir = new File(new File(activity.getCacheDir(), CAPTURE), Long.toString(System.nanoTime()));
+        if (!dir.mkdirs() && !dir.isDirectory()) return null;
+        String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(new Date());
+        File photo = new File(dir, "photo-" + stamp + ".jpg");
+        Uri uri;
+        try {
+            uri = FileProvider.getUriForFile(activity, activity.getPackageName() + ".capture", photo);
+        } catch (IllegalArgumentException e) {
+            Log.w("yap-native", "no capture provider", e);
+            return null;
+        }
+        pendingPhoto = photo;
+        Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                .putExtra(MediaStore.EXTRA_OUTPUT, uri)
+                .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        intent.setClipData(ClipData.newRawUri("", uri));
+        return intent;
+    }
+
+    /**
+     * The camera's result: the photo's path through nativeMediaPicked (an
+     * empty file, or none, counts as cancelled, and its folder goes).
+     */
+    public static void photoTaken(int resultCode) {
+        final File photo = pendingPhoto;
+        pendingPhoto = null;
+        if (photo != null && resultCode == Activity.RESULT_OK && photo.isFile() && photo.length() > 0) {
+            nativeMediaPicked(new String[] {photo.getAbsolutePath()}, 0);
+            return;
+        }
+        File dir = photo == null ? null : photo.getParentFile();
+        if (dir != null) deleteTree(dir);
+        nativeMediaPicked(new String[0], 0);
+    }
+
+    /** The content:// items on the clipboard (a copied picture, a file). */
+    private static List<Uri> clipboardUris() {
+        List<Uri> uris = new ArrayList<>();
+        if (activity == null) return uris;
+        ClipboardManager clipboard = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+        ClipData clip;
+        try {
+            if (clipboard == null || !clipboard.hasPrimaryClip()) return uris;
+            clip = clipboard.getPrimaryClip();
+        } catch (RuntimeException e) {
+            return uris;
+        }
+        for (int i = 0; clip != null && i < clip.getItemCount() && uris.size() < PICK_MAX; i++) {
+            Uri uri = clip.getItemAt(i).getUri();
+            if (uri != null && ContentResolver.SCHEME_CONTENT.equals(uri.getScheme())) uris.add(uri);
+        }
+        return uris;
+    }
+
+    /** Whether the clipboard holds a picture or files (Paste attaches them). */
+    public static boolean clipboardHasFiles() {
+        return !clipboardUris().isEmpty();
+    }
+
+    /**
+     * Paste: the clipboard's files or picture copied in (as the picker's;
+     * over the limit, a sized stand-in), reported through
+     * nativeContentReceived. False when it holds none (a text paste).
+     */
+    public static boolean pasteFiles(long limitBytes) {
+        final List<Uri> uris = clipboardUris();
+        if (uris.isEmpty()) return false;
+        pickLimit = limitBytes > 0 ? limitBytes : Long.MAX_VALUE;
+        final File batch = new File(new File(activity.getCacheDir(), UPLOADS),
+                Long.toString(System.nanoTime()));
+        new Thread(() -> {
+            List<String> paths = new ArrayList<>();
+            for (int i = 0; i < uris.size(); i++) {
+                File copy = copyIn(uris.get(i), new File(batch, Integer.toString(i)));
+                if (copy != null) paths.add(copy.getAbsolutePath());
+            }
+            nativeContentReceived(paths.toArray(new String[0]), uris.size() - paths.size());
+        }, "yap-paste-copy").start();
+        return true;
+    }
+
+    /**
+     * Pictures from the keyboard (YapEditText): Qt's text view is swapped
+     * for ours once the window is up (Native, at the first frame); what it
+     * receives is copied in and reported through nativeContentReceived.
+     */
+    public static void installContent() {
+        if (activity == null) return;
+        YapEditText.setSink((uri, mime, done) -> {
+            final File dir = new File(new File(new File(activity.getCacheDir(), UPLOADS),
+                    Long.toString(System.nanoTime())), "0");
+            new Thread(() -> {
+                File copy = copyIn(uri, dir, mime);
+                done.run();
+                nativeContentReceived(copy == null ? new String[0] : new String[] {copy.getAbsolutePath()},
+                        copy == null ? 1 : 0);
+            }, "yap-keyboard-copy").start();
+        });
+        activity.runOnUiThread(() -> YapEditText.install(activity.getWindow().getDecorView()));
+    }
+
+    /**
+     * The composer's field has focus (on) or lost it: the keyboard may
+     * insert pictures, held to the account's limit as a pick is.
+     */
+    public static void setAcceptContent(final boolean on, long limitBytes) {
+        if (activity == null) return;
+        if (on) pickLimit = limitBytes > 0 ? limitBytes : Long.MAX_VALUE;
+        activity.runOnUiThread(() -> {
+            View root = activity.getWindow().getDecorView();
+            YapEditText.install(root);
+            YapEditText.setAccepting(root, on);
+        });
     }
 
     /** The item's size from its provider, or -1 when it does not say. */

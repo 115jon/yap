@@ -16,10 +16,14 @@
 //   motion         the animator duration scale (Remove animations)
 //   accent         Material You's system accent (Android 12+)
 //   fling          ViewConfiguration's fling speed and a matching friction
-//   media          the photo picker (ACTION_PICK_IMAGES, GET_CONTENT before
-//                  13), each item copied into the cache for the core; and
-//                  a picture saved into the gallery (MediaStore,
-//                  Pictures/Yap)
+//   media          the composer's attach menu: the photo picker
+//                  (ACTION_PICK_IMAGES, GET_CONTENT before 13), the files
+//                  picker (OPEN_DOCUMENT) and the system camera, each item
+//                  copied into the cache for the core; Paste with files or a
+//                  picture on the clipboard, and pictures the keyboard
+//                  inserts (commitContent, org/qtproject/qt/android/
+//                  YapEditText.java); and a picture saved into the gallery
+//                  (MediaStore, Pictures/Yap)
 //   push           FCM's token for the core, a notification's tap, Reply and
 //                  Mark as read, the conversation on screen (its pushes stay
 //                  quiet) and the notification permission (cpp/push.cpp,
@@ -131,6 +135,22 @@ public:
   // The system photo picker; the copies' paths arrive as mediaPicked. An
   // item over `limitBytes` (the account's attachment limit) is not copied.
   Q_INVOKABLE void pickMedia(qreal limitBytes);
+  // The files picker (any type, several), the same way.
+  Q_INVOKABLE void pickFiles(qreal limitBytes);
+  // The system camera; the photo's path arrives as mediaPicked. 0: it
+  // opened; 1: no camera app; 2: the camera permission was asked for (try
+  // again); 3: another pick is under way, or it could not start.
+  Q_INVOKABLE int takePhoto();
+  // Paste: whether the clipboard holds files or a picture, and copying them
+  // in (their paths arrive as contentReceived; false: none, a text paste).
+  Q_INVOKABLE bool clipboardHasFiles() const;
+  Q_INVOKABLE bool pasteFiles(qreal limitBytes);
+  // While the composer's field has focus the keyboard may insert pictures
+  // (they arrive as contentReceived), held to `limitBytes` as a pick is.
+  Q_INVOKABLE void setAcceptContent(bool on, qreal limitBytes);
+  // Swaps in the text view that takes the keyboard's pictures (main.cpp,
+  // once the window shows).
+  void installContent() const;
   // Save image: where to download a picture named `name` first (a fresh
   // folder under the cache; empty off Android), then the download into the
   // gallery's Pictures/Yap. The outcome arrives as imageSaved.
@@ -187,6 +207,7 @@ public:
   void readConfiguration();
   void onMediaCopying();
   void onMediaPicked(const QStringList& paths, int failed);
+  void onContentReceived(const QStringList& paths, int failed);
   void onImageSaved(const QString& path, int result);
   void onOpenRequest(const QString& channelId, const QString& serverId, const QString& userId);
   void onLinkRequest(const QString& url);
@@ -208,6 +229,8 @@ signals:
   // Local copies of what was picked (none: cancelled); `failed` items could
   // not be read.
   void mediaPicked(const QStringList& paths, int failed);
+  // Files from a paste or the keyboard, copied in; `failed` could not be read.
+  void contentReceived(const QStringList& paths, int failed);
   // saveToGallery's outcome for `path`: 0 saved, 1 failed, 2 the storage
   // permission was asked for (API 28; the save can be tried again), 3 it
   // is refused for good, so the app's settings page was opened.
@@ -226,6 +249,10 @@ protected:
 
 private:
   QObject* backLayer();
+  // A picker (or the camera) was started and has not come back.
+  bool pickBusy() const;
+  // Starts the shim's `intentMethod(long limit)` intent for the pickers' result.
+  void pickWith(const char* intentMethod, qreal limitBytes);
   void applyBack();
   void applyBars();
 
