@@ -17,7 +17,9 @@
 //   accent         Material You's system accent (Android 12+)
 //   fling          ViewConfiguration's fling speed and a matching friction
 //   media          the photo picker (ACTION_PICK_IMAGES, GET_CONTENT before
-//                  13), each item copied into the cache for the core
+//                  13), each item copied into the cache for the core; and
+//                  a picture saved into the gallery (MediaStore,
+//                  Pictures/Yap)
 //   push           FCM's token for the core, a notification's tap, Reply and
 //                  Mark as read, the conversation on screen (its pushes stay
 //                  quiet) and the notification permission (cpp/push.cpp,
@@ -117,6 +119,11 @@ public:
   // The system photo picker; the copies' paths arrive as mediaPicked. An
   // item over `limitBytes` (the account's attachment limit) is not copied.
   Q_INVOKABLE void pickMedia(qreal limitBytes);
+  // Save image: where to download a picture named `name` first (a fresh
+  // folder under the cache; empty off Android), then the download into the
+  // gallery's Pictures/Yap. The outcome arrives as imageSaved.
+  Q_INVOKABLE QString saveTarget(const QString& name) const;
+  Q_INVOKABLE void saveToGallery(const QString& path, const QString& mime) const;
   // Turns notifications on: the permission dialog while it can still show,
   // else the app's notification settings.
   Q_INVOKABLE void requestNotifications();
@@ -151,6 +158,7 @@ public:
   void readConfiguration();
   void onMediaCopying();
   void onMediaPicked(const QStringList& paths, int failed);
+  void onImageSaved(int result);
   void onOpenRequest(const QString& channelId, const QString& serverId, const QString& userId);
   void onAudioRoutes(const QByteArray& json);
 
@@ -167,6 +175,9 @@ signals:
   // Local copies of what was picked (none: cancelled); `failed` items could
   // not be read.
   void mediaPicked(const QStringList& paths, int failed);
+  // saveToGallery's outcome: 0 saved, 1 failed, 2 the storage permission
+  // was asked for (API 28; the save can be tried again).
+  void imageSaved(int result);
   void notificationsEnabledChanged();
   void activeConversationChanged();
   void openRequested();
