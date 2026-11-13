@@ -86,6 +86,7 @@ impl State {
             target_user_id: recipient,
             channel_id: channel_id.to_owned(),
         };
+        self.calls.initiating = Some(channel_id.to_owned());
         self.gateway_send(fx, frame(GatewayOp::CallInitiate, &initiate));
     }
 
@@ -108,6 +109,7 @@ impl State {
             return;
         };
         ring.with_video = video;
+        ring.answered_here = true;
         let (call_id, channel_id) = (ring.call_id.clone(), ring.channel_id.clone());
         if self.voice.as_ref().is_some_and(|call| !call.dm) {
             self.leave_voice(fx);
@@ -170,9 +172,13 @@ impl State {
             room: room.clone(),
             joined_sfu: false,
             with_video: false,
+            answered_here: true,
         });
         ring.status = RingStatus::Active;
         ring.with_video = video;
+        // Joining a ringing DM's room answers it (the server's
+        // `acceptRingOnJoin`).
+        ring.answered_here = true;
         self.calls.end_reason.clear();
         self.join_ring_room(fx);
     }
@@ -269,12 +275,19 @@ impl State {
             channel_id: ring.channel_id,
             joined_sfu: false,
             with_video: false,
+            answered_here: false,
         });
         self.sync_calls(fx);
     }
 
-    /// `CALL_RINGING`: our call rings; the caller goes to the DM.
+    /// `CALL_RINGING`: our call rings; the caller goes to the DM. Every
+    /// session of ours gets it, so only the device that asked for the call
+    /// (op 36) takes it up, as the mobile app does.
     pub(super) fn on_call_ringing(&mut self, fx: &mut Effects, ringing: CallRinging) {
+        if self.calls.initiating.as_deref() != Some(ringing.channel_id.as_str()) {
+            return;
+        }
+        self.calls.initiating = None;
         if self
             .calls
             .ring
@@ -315,6 +328,7 @@ impl State {
             channel_id: ringing.channel_id,
             joined_sfu: false,
             with_video: false,
+            answered_here: true,
         });
         fx.view(ViewUpdate::Sound(Sound::OutgoingRing));
         if self.active_channel.as_deref() != Some(channel_id.as_str()) {
@@ -325,8 +339,14 @@ impl State {
 
     /// `CALL_RING_STOP`: accepted joins the room (both sides); a caller
     /// whose ring timed out or was declined stays in the call's room;
-    /// anything else ends the call.
+    /// anything else ends the call. Only the device that answered or
+    /// started the call joins: on our other devices the ring just ends,
+    /// quietly ("answered_elsewhere").
     pub(super) fn on_call_ring_stop(&mut self, fx: &mut Effects, stop: CallRingStop) {
+        if self.calls.ring.is_none() {
+            // Our op 36 was refused (busy, unavailable, invalid).
+            self.calls.initiating = None;
+        }
         // A stop for another call (a ring we declined while busy) is not ours.
         let ours = self.calls.ring.as_ref().and_then(|r| r.call_id.as_deref());
         if let (Some(ours), Some(theirs)) = (ours, stop.call_id.as_deref()) {
@@ -338,11 +358,23 @@ impl State {
         fx.view(ViewUpdate::StopSound(Sound::OutgoingRing));
         let status = self.calls.ring.as_ref().map(|r| r.status);
         let outgoing = status == Some(RingStatus::RingingOutgoing);
-        if stop.reason == "accepted" {
-            fx.view(ViewUpdate::Sound(Sound::CallConnect));
+        let here = self.calls.ring.as_ref().is_some_and(|r| r.answered_here);
+        let accepted = stop.reason == "accepted";
+        let stays =
+            accepted || (outgoing && matches!(stop.reason.as_str(), "timeout" | "declined"));
+        if stays && here {
+            if accepted {
+                fx.view(ViewUpdate::Sound(Sound::CallConnect));
+            }
             self.accept_call(fx);
-        } else if outgoing && matches!(stop.reason.as_str(), "timeout" | "declined") {
-            self.accept_call(fx);
+        } else if stays {
+            // The call goes on, on another device of ours.
+            let reason = if accepted {
+                c::ANSWERED_ELSEWHERE
+            } else {
+                stop.reason.as_str()
+            };
+            self.end_ring(fx, reason);
         } else {
             let was = status.is_some();
             if was && !c::silent_stop(&stop.reason) {

@@ -51,6 +51,10 @@ pub struct Ring {
     pub joined_sfu: bool,
     /// Turn the camera on once the call's room joins ("Join with video").
     pub with_video: bool,
+    /// This device answered or started the call. The server sends the ring
+    /// and its stop to every session of both users, so a device that only
+    /// saw the call ring must not join when it is accepted elsewhere.
+    pub answered_here: bool,
 }
 
 /// What the UI asks for.
@@ -260,6 +264,9 @@ pub struct CallsView {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CallsState {
     pub ring: Option<Ring>,
+    /// The DM whose call this device asked for (op 36), until its
+    /// `CALL_RINGING` (or a refusal) arrives.
+    pub initiating: Option<String>,
     pub end_reason: String,
     pub details_open: bool,
     pub stats: Option<CallStats>,
@@ -295,10 +302,17 @@ pub fn ring_toast_title(name: &str) -> String {
     format!("Incoming call from {name}")
 }
 
+/// Why a ring ended on this device when another device of ours answered
+/// it (the server's stop only says `accepted`).
+pub const ANSWERED_ELSEWHERE: &str = "answered_elsewhere";
+
 /// A ring stop that ends a call plays the end tone, except for these
 /// (chat-gateway.ts CALL_RING_STOP).
 pub fn silent_stop(reason: &str) -> bool {
-    matches!(reason, "busy" | "unavailable" | "invalid" | "declined")
+    matches!(
+        reason,
+        "busy" | "unavailable" | "invalid" | "declined" | ANSWERED_ELSEWHERE
+    )
 }
 
 #[cfg(test)]
