@@ -577,8 +577,9 @@ async fn pump_video(track: RtcVideoTrack, key: String) {
 impl I420Frame<'_> {
     /// The frame as RGBA bytes (R, G, B, A in memory; BT.601 limited
     /// range, as WebRTC's own renderers) into `dst`, `stride` bytes a row,
-    /// unturned. False, with `dst` untouched, when `dst` is too small or a
-    /// plane is shorter than its stride and rows say.
+    /// unturned. False, with `dst` untouched, when `dst` is too small, a
+    /// stride is narrower than its plane's rows or a plane is shorter than
+    /// its stride and rows say.
     pub fn write_rgba(&self, dst: &mut [u8], stride: u32) -> bool {
         let (Ok(width), Ok(height)) = (i32::try_from(self.width), i32::try_from(self.height))
         else {
@@ -587,9 +588,13 @@ impl I420Frame<'_> {
         let rows = self.height as usize;
         let chroma_rows = self.height.div_ceil(2) as usize;
         let fits = |len: usize, stride: u32, rows: usize| len >= stride as usize * rows;
+        let chroma_width = self.width.div_ceil(2);
         if width == 0
             || height == 0
             || (stride as usize) < self.width as usize * 4
+            || self.stride_y < self.width
+            || self.stride_u < chroma_width
+            || self.stride_v < chroma_width
             || !fits(dst.len(), stride, rows)
             || !fits(self.y.len(), self.stride_y, rows)
             || !fits(self.u.len(), self.stride_u, chroma_rows)
@@ -2367,5 +2372,11 @@ mod rgba_tests {
         assert!(!frame.write_rgba(&mut rgba, 16));
         assert!(rgba.iter().all(|b| *b == 7));
         assert!(!frame.write_rgba(&mut vec![0u8; 64], 8));
+        // A luma stride narrower than the frame would read past each row.
+        let narrow = I420Frame {
+            stride_y: 2,
+            ..frame
+        };
+        assert!(!narrow.write_rgba(&mut vec![0u8; 64], 16));
     }
 }
