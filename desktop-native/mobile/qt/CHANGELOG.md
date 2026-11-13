@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.0](https://github.com/115jon/yap/compare/qt-android-v0.7.0...qt-android-v0.8.0) (2026-11-13)
+
+
+### Features
+
+* **desktop-native:** ✨ float the account plate and grow a panel from it ([ce2b138](https://github.com/115jon/yap/commit/ce2b138ba9ad9805ad7b9b294e45251084e1a0c3))
+* **desktop-native:** ✨ float the chat header and compact it on scroll ([5008b48](https://github.com/115jon/yap/commit/5008b483db8befdd496b2bb59a78d456bcca0196))
+* **desktop-native:** ✨ link edit profile from the account panel ([69ed4cc](https://github.com/115jon/yap/commit/69ed4cc64138940fde2b2108a4f0355aa9d5d9ac))
+
 ## [0.7.0](https://github.com/115jon/yap/compare/qt-android-v0.6.1...qt-android-v0.7.0) (2026-11-13)
 
 
