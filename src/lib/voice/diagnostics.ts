@@ -8,10 +8,13 @@ const SENSITIVE_KEY_PATTERN = /(token|authorization|secret|user[_-]?id)/i;
  * port-less relatedAddress, and the STUN/TURN url it came from.
  */
 const ADDRESS_KEY_PATTERN = /^(address|ip|relatedAddress|url)$/i;
-const IPV4_PATTERN = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
-// Full eight-group addresses and "::"-compressed ones (fe80::1, 2001:db8::5).
+// Not inside a longer word or dotted run ("Chrome/144.0.0.0" is still
+// masked; harmless).
+const IPV4_PATTERN = /(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])/g;
+// Full eight-group addresses and "::"-compressed ones (fe80::1, 2001:db8::5),
+// not inside a word ("std::string" stays).
 const IPV6_PATTERN =
-  /(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:)*[0-9a-f]{0,4}::(?:[0-9a-f]{1,4}:)*[0-9a-f]{0,4}/gi;
+  /(?<![\w.:])(?:(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:)*[0-9a-f]{0,4}::(?:[0-9a-f]{1,4}:)*[0-9a-f]{0,4})(?![\w.:])/gi;
 
 export interface VoiceDiagnosticsBundleInput {
   detailedStats: unknown;

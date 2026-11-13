@@ -56,6 +56,7 @@ describe("buildVoiceDiagnosticsBundle", () => {
         v6: "candidate:2 1 udp 1 2001:db8:85a3::8a2e:370:7334 9 typ host",
         v6full: "fe80:0:0:0:200:f8ff:fe21:67cf",
         codec: "audio/opus",
+        note: "decode::failed in std::string",
       },
       connectionStats: null,
     });
@@ -74,6 +75,7 @@ describe("buildVoiceDiagnosticsBundle", () => {
       v6: "candidate:2 1 udp 1 [ip] 9 typ host",
       v6full: "[ip]",
       codec: "audio/opus",
+      note: "decode::failed in std::string",
     });
   });
 });
