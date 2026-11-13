@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.1.4](https://github.com/115jon/yap/compare/v4.1.3...v4.1.4) (2026-11-13)
+
+
+### Bug Fixes
+
+* **desktop-native:** 🐛 keep the custom status a profile save sets ([6118a3f](https://github.com/115jon/yap/commit/6118a3f4b7b32d5aee56f9199c6695c5c6040678))
+
 ## [4.1.3](https://github.com/115jon/yap/compare/v4.1.2...v4.1.3) (2026-11-13)
 
 
