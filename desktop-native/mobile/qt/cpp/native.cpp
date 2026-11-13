@@ -353,6 +353,11 @@ void Native::pickFiles(qreal limitBytes)
   pickWith("pickFilesIntent", limitBytes);
 }
 
+void Native::pickImage(qreal limitBytes)
+{
+  pickWith("pickImageIntent", limitBytes);
+}
+
 int Native::takePhoto()
 {
 #ifdef Q_OS_ANDROID

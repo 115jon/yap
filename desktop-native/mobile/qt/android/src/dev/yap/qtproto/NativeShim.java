@@ -518,6 +518,21 @@ public final class NativeShim {
     }
 
     /**
+     * The photo picker for one picture (an avatar or a banner): images only,
+     * one item, no permission (API 33+), else the documents UI on images.
+     * Its result comes back through mediaPicked like the composer's.
+     */
+    public static Intent pickImageIntent(long limitBytes) {
+        pickLimit = limitBytes > 0 ? limitBytes : Long.MAX_VALUE;
+        if (Build.VERSION.SDK_INT >= 33) {
+            return new Intent(MediaStore.ACTION_PICK_IMAGES).setType("image/*");
+        }
+        return new Intent(Intent.ACTION_GET_CONTENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("image/*");
+    }
+
+    /**
      * The picker's result. The core uploads from a path and a content://
      * grant ends with the activity, so each item is copied into the app's
      * cache under its display name (with the extension its type implies),
