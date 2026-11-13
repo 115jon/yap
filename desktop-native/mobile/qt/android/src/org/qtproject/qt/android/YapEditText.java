@@ -1,10 +1,10 @@
 package org.qtproject.qt.android;
 
-import android.content.ClipData;
 import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.pm.ProviderInfo;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
@@ -118,6 +118,28 @@ public class YapEditText extends QtEditText {
         return false;
     }
 
+    /**
+     * Content from outside the app: a content:// URI whose provider is not
+     * one of ours. A keyboard or the clipboard naming our own providers
+     * (the capture or Qt's file providers) could make us upload a private
+     * file; file:// and other schemes are refused too.
+     */
+    public static boolean isForeignContent(Context context, Uri uri) {
+        if (context == null || uri == null || !ContentResolver.SCHEME_CONTENT.equals(uri.getScheme())) {
+            return false;
+        }
+        String authority = uri.getAuthority();
+        if (authority == null || authority.isEmpty()) return false;
+        // "<user>@<authority>" reaches the same provider in that user.
+        authority = authority.substring(authority.lastIndexOf('@') + 1);
+        try {
+            ProviderInfo provider = context.getPackageManager().resolveContentProvider(authority, 0);
+            return provider == null || !context.getPackageName().equals(provider.packageName);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
     @Override
     public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
         InputConnection ic = super.onCreateInputConnection(outAttrs);
@@ -126,14 +148,18 @@ public class YapEditText extends QtEditText {
         return new InputConnectionWrapper(ic, false) {
             @Override
             public boolean commitContent(InputContentInfo info, int flags, Bundle opts) {
-                return YapEditText.commit(info, flags);
+                return YapEditText.commit(getContext(), info, flags);
             }
         };
     }
 
-    private static boolean commit(InputContentInfo info, int flags) {
+    private static boolean commit(Context context, InputContentInfo info, int flags) {
         Sink s = sink;
         if (!accepting || s == null || info == null) return false;
+        if (!isForeignContent(context, info.getContentUri())) {
+            Log.w(TAG, "keyboard content: refused a URI that is not another app's content");
+            return false;
+        }
         ClipDescription description = info.getDescription();
         String mime = null;
         for (int i = 0; description != null && i < description.getMimeTypeCount(); i++) {

@@ -700,7 +700,8 @@ public final class NativeShim {
         }
         for (int i = 0; clip != null && i < clip.getItemCount() && uris.size() < PICK_MAX; i++) {
             Uri uri = clip.getItemAt(i).getUri();
-            if (uri != null && ContentResolver.SCHEME_CONTENT.equals(uri.getScheme())) uris.add(uri);
+            // Another app's content only: never our own providers' files.
+            if (YapEditText.isForeignContent(activity, uri)) uris.add(uri);
         }
         return uris;
     }
@@ -740,6 +741,11 @@ public final class NativeShim {
     public static void installContent() {
         if (activity == null) return;
         YapEditText.setSink((uri, mime, done) -> {
+            if (!YapEditText.isForeignContent(activity, uri)) {
+                done.run();
+                nativeContentReceived(new String[0], 1);
+                return;
+            }
             final File dir = new File(new File(new File(activity.getCacheDir(), UPLOADS),
                     Long.toString(System.nanoTime())), "0");
             new Thread(() -> {
