@@ -10,14 +10,20 @@
 // tables still point at the same bytes. The moov box is read whole, up to
 // MAX_MOOV bytes; mdat is only stepped over.
 //
-// A track whose samples are themselves metadata (GoPro's GPMF `gpmd`, the
-// `camm` camera motion track) can carry a GPS fix per frame; it isn't
-// rewritten, and the file is reported as unchecked.
+// A track whose samples are themselves metadata can carry a GPS fix per
+// frame: GoPro's GPMF `gpmd`, the `camm` camera motion track, DJI's `djmd`,
+// any timed-metadata (`meta` handler) track except Apple's `mebx` with no
+// location key, and subtitle or text tracks (drones write their position
+// as subtitles). Dashcams keep GPS of their own: a Novatek `gps ` atom, or
+// data in top-level `free`/`skip` boxes. None of these is rewritten; the
+// file is reported as unchecked.
 //
 // HEIF/HEIC and AVIF stills share the container but keep their EXIF in an
 // item; they are reported as unchecked, not cleaned. So is any other brand
-// that isn't a known video one (Canon CR3 raw photos, for one): only MP4,
-// QuickTime, M4V/M4A and 3GPP files are walked as video.
+// that isn't a video one (Canon CR3 raw photos, for one): MP4, QuickTime,
+// M4V/M4A and 3GPP files are walked as video, and so is a vendor's own
+// major brand (Sony XAVC) when its compatible brands name MP4 and no still
+// format.
 
 import {
   ascii,
@@ -92,8 +98,25 @@ const CONTAINERS = new Set([
   "minf",
   "stbl",
 ]);
-/** Sample entries of timed metadata that may hold location. */
-const TIMED_METADATA_ENTRIES = new Set(["gpmd", "camm"]);
+/** Sample entries of timed metadata or text that may hold location. */
+const TIMED_METADATA_ENTRIES = new Set([
+  "gpmd",
+  "camm",
+  "djmd",
+  "tx3g",
+  "text",
+  "sbtl",
+  "wvtt",
+  "stpp",
+]);
+/** Track handlers whose samples are text (subtitles, captions). */
+const TEXT_HANDLERS = new Set(["text", "sbtl", "subt"]);
+const METADATA_HANDLER = "meta";
+/** Novatek dashcams' GPS index (QuickTime `gps `, sometimes upper case). */
+const VENDOR_GPS_ATOMS = new Set(["gps ", "GPS "]);
+/** Top-level padding boxes; a dashcam may keep its GPS log in one. */
+const PADDING_BOXES = new Set(["free", "skip"]);
+const PADDING_READ = 64 * 1024;
 
 /** Which kind a QuickTime metadata key holds, or null to leave it. */
 function keyKind(name: string): MetadataKind | null {
@@ -173,9 +196,29 @@ export async function scanIsoVideo(
     ) {
       state.kinds.add("xmp");
       toFree(state, pos, box);
+    } else if (VENDOR_GPS_ATOMS.has(box.type)) {
+      state.unchecked ??= "vendor-data";
+    } else if (
+      PADDING_BOXES.has(box.type) &&
+      (await holdsData(reader, pos + box.headerSize, pos + box.size))
+    ) {
+      state.unchecked ??= "vendor-data";
     }
     pos += box.size;
   }
+}
+
+/** Whether any byte of [start, end) is not zero (padding normally is). */
+async function holdsData(
+  reader: Reader,
+  start: number,
+  end: number,
+): Promise<boolean> {
+  for (let at = start; at < end; at += PADDING_READ) {
+    const bytes = await reader.exact(at, Math.min(PADDING_READ, end - at));
+    if (bytes.some((byte) => byte !== 0)) return true;
+  }
+  return false;
 }
 
 /** A moov bigger than the scanner will hold. */
@@ -254,9 +297,13 @@ function walk(
         ? payload
         : payload + 4;
       walkMeta(b, children, boxEnd, base, state, depth + 1);
-    } else if (box.type === "stsd") {
-      if (hasTimedMetadata(b, payload, boxEnd))
-        state.unchecked = "timed-metadata";
+    } else if (VENDOR_GPS_ATOMS.has(box.type)) {
+      state.unchecked ??= "vendor-data";
+    } else if (box.type === "trak") {
+      if (trackMayHoldLocation(b, payload, boxEnd)) {
+        state.unchecked ??= "timed-metadata";
+      }
+      walk(b, payload, boxEnd, base, state, depth + 1);
     } else if (CONTAINERS.has(box.type)) {
       walk(b, payload, boxEnd, base, state, depth + 1);
     }
@@ -264,17 +311,110 @@ function walk(
   }
 }
 
-/** Whether an stsd (payload b[start, end)) lists a gpmd or camm entry. */
-function hasTimedMetadata(b: Uint8Array, start: number, end: number): boolean {
-  // version and flags (4), entry count (4), then the sample entries
-  let i = start + 8;
+/** The first child of b[start, end) of this type, as [payload, end). */
+function child(
+  b: Uint8Array,
+  start: number,
+  end: number,
+  type: string,
+): [number, number] | null {
+  let i = start;
   while (i + 8 <= end) {
-    const entry = boxAt(b, i, end);
-    if (!entry) return false;
-    if (TIMED_METADATA_ENTRIES.has(entry.type)) return true;
+    const box = boxAt(b, i, end);
+    if (!box) return null;
+    if (box.type === type) return [i + box.headerSize, i + box.size];
+    i += box.size;
+  }
+  return null;
+}
+
+/**
+ * Whether a track (trak payload b[start, end)) may carry location in its
+ * samples: a GPS, sensor or text sample entry, a subtitle handler, or a
+ * timed-metadata handler other than an Apple `mebx` whose keys name no
+ * location.
+ */
+function trackMayHoldLocation(
+  b: Uint8Array,
+  start: number,
+  end: number,
+): boolean {
+  const mdia = child(b, start, end, "mdia");
+  if (!mdia) return false;
+  // hdlr: version and flags (4), pre_defined or component type (4), then
+  // the handler (component subtype).
+  const hdlr = child(b, mdia[0], mdia[1], "hdlr");
+  const handler =
+    hdlr && hdlr[0] + 12 <= hdlr[1] ? ascii(b, hdlr[0] + 8, 4) : "";
+  if (TEXT_HANDLERS.has(handler)) return true;
+
+  const entries = sampleEntries(b, mdia[0], mdia[1]);
+  if (entries.some((entry) => TIMED_METADATA_ENTRIES.has(entry.type))) {
+    return true;
+  }
+  const mebx = entries.filter((entry) => entry.type === "mebx");
+  if (mebx.some((entry) => mebxMayHoldLocation(b, entry.start, entry.end))) {
+    return true;
+  }
+  // Timed metadata of any other kind (mett, metx, urim, a vendor's own).
+  return handler === METADATA_HANDLER && mebx.length < entries.length;
+}
+
+interface SampleEntry {
+  type: string;
+  /** Payload, after the entry's box header. */
+  start: number;
+  end: number;
+}
+
+/** The sample entries in an mdia (payload b[start, end))'s stsd. */
+function sampleEntries(
+  b: Uint8Array,
+  start: number,
+  end: number,
+): SampleEntry[] {
+  const minf = child(b, start, end, "minf");
+  const stbl = minf && child(b, minf[0], minf[1], "stbl");
+  const stsd = stbl && child(b, stbl[0], stbl[1], "stsd");
+  if (!stsd) return [];
+  const entries: SampleEntry[] = [];
+  // version and flags (4), entry count (4), then the sample entries
+  let i = stsd[0] + 8;
+  while (i + 8 <= stsd[1]) {
+    const entry = boxAt(b, i, stsd[1]);
+    if (!entry) break;
+    entries.push({
+      type: entry.type,
+      start: i + entry.headerSize,
+      end: i + entry.size,
+    });
     i += entry.size;
   }
-  return false;
+  return entries;
+}
+
+/**
+ * Whether an Apple `mebx` sample entry may carry location: one of its
+ * `keyd` keys names location, or it has no key this can read.
+ */
+function mebxMayHoldLocation(
+  b: Uint8Array,
+  start: number,
+  end: number,
+): boolean {
+  // Keys sit in keys/<local id>/keyd as namespace (4) + name. Writers
+  // differ on whether `keys` has a version field, so every `keyd` in the
+  // entry is read wherever it sits.
+  let keys = 0;
+  for (let i = start + 4; i + 8 <= end; i += 1) {
+    if (!startsWith(b, i, "keyd")) continue;
+    const size = u32be(b, i - 4);
+    if (size < 12 || i - 4 + size > end) continue;
+    keys += 1;
+    if (keyKind(ascii(b, i + 8, size - 12)) === "gps") return true;
+    i += size - 5;
+  }
+  return keys === 0;
 }
 
 /** A meta box's children: `keys` names what `ilst` items hold. */

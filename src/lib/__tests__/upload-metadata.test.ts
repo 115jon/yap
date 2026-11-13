@@ -879,30 +879,60 @@ describe("container brands", () => {
 });
 
 describe("timed metadata tracks", () => {
-  const withTrack = (entry: string) =>
+  const hdlr = (handler: string) =>
+    box("hdlr", u32(0), u32(0), text(handler), new Uint8Array(12), [0]);
+  const track = (entries: Uint8Array[], handler?: string) =>
+    box(
+      "trak",
+      box(
+        "mdia",
+        ...(handler ? [hdlr(handler)] : []),
+        box(
+          "minf",
+          box("stbl", box("stsd", u32(0), u32(entries.length), ...entries)),
+        ),
+      ),
+    );
+  const video = (...moovChildren: Uint8Array[]) =>
     concat(
       box("ftyp", text("mp41"), [0, 0, 0, 0], text("mp41")),
       box(
         "moov",
-        box(
-          "trak",
-          box(
-            "mdia",
-            box(
-              "minf",
-              box(
-                "stbl",
-                box("stsd", u32(0), u32(1), box(entry, new Uint8Array(16))),
-              ),
-            ),
-          ),
-        ),
+        ...moovChildren,
         box("udta", box([0xa9, 0x78, 0x79, 0x7a], text(FAKE_ISO6709))),
       ),
     );
+  const withTrack = (entry: string, handler?: string) =>
+    video(track([box(entry, new Uint8Array(16))], handler));
+  /** Apple's timed-metadata entry naming these keys. */
+  const mebx = (...keys: string[]) =>
+    box(
+      "mebx",
+      new Uint8Array(6),
+      [0, 1],
+      box(
+        "keys",
+        ...keys.map((key, k) =>
+          box(
+            u32(k + 1),
+            box("keyd", text("mdta"), text(key)),
+            box("dtyp", u32(0), text("com.apple.quicktime.text")),
+          ),
+        ),
+      ),
+    );
 
-  it("flags a GoPro gpmd or camm track and still cleans the rest", async () => {
-    for (const entry of ["gpmd", "camm"]) {
+  it("flags a GPS, sensor or subtitle track and still cleans the rest", async () => {
+    for (const entry of [
+      "gpmd",
+      "camm",
+      "djmd",
+      "tx3g",
+      "text",
+      "sbtl",
+      "wvtt",
+      "stpp",
+    ]) {
       const { out, scan } = await strip(withTrack(entry));
       expect(scan.format).toBe("video");
       expect(scan.unchecked).toBe("timed-metadata");
@@ -911,8 +941,132 @@ describe("timed metadata tracks", () => {
     }
   });
 
-  it("leaves an ordinary video track alone", async () => {
-    const { scan } = await strip(withTrack("avc1"));
+  it("flags any track with a subtitle or text handler", async () => {
+    for (const handler of ["text", "sbtl", "subt"]) {
+      const { scan } = await strip(withTrack("abcd", handler));
+      expect(scan.unchecked).toBe("timed-metadata");
+    }
+  });
+
+  it("flags a timed-metadata track of a kind it can't read", async () => {
+    for (const entry of ["mett", "metx", "urim", "abcd"]) {
+      const { scan } = await strip(withTrack(entry, "meta"));
+      expect(scan.unchecked).toBe("timed-metadata");
+    }
+  });
+
+  it("flags an Apple mebx track whose keys name location", async () => {
+    const { scan } = await strip(
+      video(
+        track(
+          [
+            mebx(
+              "com.apple.quicktime.video-orientation",
+              "com.apple.quicktime.location.ISO6709",
+            ),
+          ],
+          "meta",
+        ),
+      ),
+    );
+    expect(scan.unchecked).toBe("timed-metadata");
+  });
+
+  it("flags an Apple mebx track with no key it can read", async () => {
+    const { scan } = await strip(video(track([mebx()], "meta")));
+    expect(scan.unchecked).toBe("timed-metadata");
+  });
+
+  it("leaves an iPhone's mebx track without location alone", async () => {
+    const { scan } = await strip(
+      video(
+        track(
+          [
+            mebx(
+              "com.apple.quicktime.video-orientation",
+              "com.apple.quicktime.live-photo-info",
+            ),
+          ],
+          "meta",
+        ),
+        track([box("avc1", new Uint8Array(16))], "vide"),
+      ),
+    );
+    expect(scan.unchecked).toBeNull();
+    expect(scan.stripped).toEqual(["gps"]);
+  });
+
+  it("leaves ordinary video, sound and timecode tracks alone", async () => {
+    for (const [entry, handler] of [
+      ["avc1", "vide"],
+      ["mp4a", "soun"],
+      ["tmcd", "tmcd"],
+      ["avc1", undefined],
+    ] as const) {
+      const { scan } = await strip(withTrack(entry, handler));
+      expect(scan.unchecked).toBeNull();
+      expect(scan.stripped).toEqual(["gps"]);
+    }
+  });
+});
+
+describe("dashcam GPS", () => {
+  const head = box("ftyp", text("mp42"), [0, 0, 0, 0], text("isom"));
+  const moov = box(
+    "moov",
+    box("udta", box([0xa9, 0x78, 0x79, 0x7a], text(FAKE_ISO6709))),
+  );
+
+  it("flags a Novatek gps atom in moov or at the top level", async () => {
+    for (const file of [
+      concat(
+        head,
+        box(
+          "moov",
+          box("gps ", u32(0x101), u32(1), u32(100), u32(4096)),
+          box("udta", box([0xa9, 0x78, 0x79, 0x7a], text(FAKE_ISO6709))),
+        ),
+      ),
+      concat(head, moov, box("GPS ", text("$GPRMC,1,A"))),
+    ]) {
+      const { out, scan } = await strip(file);
+      expect(scan.unchecked).toBe("vendor-data");
+      // The rest is still cleaned.
+      expect(scan.stripped).toEqual(["gps"]);
+      expect(contains(out, text(FAKE_ISO6709))).toBe(false);
+    }
+  });
+
+  it("flags a top-level free or skip box that holds data", async () => {
+    for (const type of ["free", "skip"]) {
+      const file = concat(
+        head,
+        box(type, text("freeGPS "), new Uint8Array(64).fill(7)),
+        moov,
+      );
+      const { out, scan } = await strip(file);
+      expect(scan.unchecked).toBe("vendor-data");
+      // Flagged, not rewritten.
+      expect(contains(out, text("freeGPS "))).toBe(true);
+    }
+  });
+
+  it("finds data at the end of a big free box", async () => {
+    const payload = new Uint8Array(200 * 1024);
+    payload[payload.length - 1] = 1;
+    const { scan } = await strip(concat(head, box("free", payload), moov));
+    expect(scan.unchecked).toBe("vendor-data");
+  });
+
+  it("leaves zeroed and empty padding alone", async () => {
+    const file = concat(
+      head,
+      box("free"),
+      box("free", new Uint8Array(200 * 1024)),
+      box("skip", new Uint8Array(16)),
+      moov,
+    );
+    const { scan } = await strip(file);
     expect(scan.unchecked).toBeNull();
     expect(scan.stripped).toEqual(["gps"]);
   });
