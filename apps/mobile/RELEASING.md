@@ -37,7 +37,7 @@ generated `android/app/build.gradle`. It reads `RALPH_UPLOAD_STORE_FILE`,
 build time. Without them a release build falls back to debug signing.
 
 The keystore (PKCS12, alias `ralphmeet`) lives at
-`C:\Users\jon\.config\ralph-meet\android-signing\ralph-meet-release.p12`, with
+`%USERPROFILE%\.config\ralph-meet\android-signing\ralph-meet-release.p12`, with
 its password in `keystore-password.txt` beside it. CI gets it from the
 `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_PASSWORD`,
 `ANDROID_KEY_ALIAS` and `GOOGLE_SERVICES_JSON_BASE64` repository secrets.

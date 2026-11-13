@@ -4,11 +4,11 @@ Pass of 2026-11-06. Both sides ran as the test account "Native Spike" in
 "Native Spike Lab" and its DM with Spike Peer, at 1280 x 800, light theme
 (the account's synced theme on the web, `YAP_THEME=light` on native).
 
-- Web captures come from `F:/ct/yapn/tools/web-shot.mjs`, which now takes
+- Web captures come from `<scratch>/yapn/tools/web-shot.mjs`, which now takes
   `--path`, `--viewport`, `--secrets <file>` and repeatable `--do` steps.
 - Native captures come from `shot.ps1`. It now crops to the DWM frame, so
   its pixels match `click.ps1`.
-- Pairs are in `F:/ct/yapn/run/parity/<screen>-{web,native}.png`, and the
+- Pairs are in `<scratch>/yapn/run/parity/<screen>-{web,native}.png`, and the
   fixed state is in `<screen>-native-after.png`.
 
 Web paths are under `src/components/` unless they say otherwise. Native
@@ -108,7 +108,7 @@ were rendered from the dev fixtures (`/ui-fixtures?surface=settings-desktop`,
 `desktop/desktop-entry.tsx`, `desktop/styles.css`, `desktop/src-tauri/src`
 and `src/lib/host/**`. The installed app was not opened. Native ran as
 `--profile parity` at 1280 x 800, light theme. Captures are in
-`F:/ct/yapn/run/parity2/`. The display is at 100 % (96 dpi), so that is the
+`<scratch>/yapn/run/parity2/`. The display is at 100 % (96 dpi), so that is the
 scale compared.
 
 | #   | area                | difference                                                                                                                                                                                                                                                                                                                                                                                                           | desktop source                                                       | native                                                                                     | fixed                                                                                                                                                                                                                                          |
@@ -160,7 +160,7 @@ scale compared.
   `crates/yap-capture/src/hook/*`: 6 lints, among them `useless_conversion`,
   `field_reassign_with_default` and `manual_range_patterns`.
 - `cargo test -p yap-core`: 1073 passed, 0 failed.
-- `build.ps1` into `F:/ct/yapn/parity-build` is green.
+- `build.ps1` into `<scratch>/yapn/parity-build` is green.
 - The QML runtime log has no warnings.
 - `qt-qml-review` lint found nothing new in the changed code. It still
   reports patterns that were already there, such as the imperative popup
@@ -173,14 +173,14 @@ Pass of 2026-11-06 (later the same day). Native ran as `--profile spike`
 (the owner test account); the web side was `web-shot.mjs` as Spike Peer
 (`--media`, `--fake-share`: a fake mic and camera, and a canvas for the
 shared screen, never the desktop). Captures are in
-`F:/ct/yapn/run/display/` and `F:/ct/yapn/run/voice/`.
+`<scratch>/yapn/run/display/` and `<scratch>/yapn/run/voice/`.
 
 ### Display configurations
 
 The test display was `\\.\DISPLAY15`, a Parsec Virtual Display Adapter
 (IddCx) at 3840,0, the only display with no windows on it. The primary
 (`DISPLAY37`, "VDD by MTT") is the only HDR-capable one and was left
-alone, as was `DISPLAY14` (one browser window). `F:/ct/yapn/tools/display.ps1`
+alone, as was `DISPLAY14` (one browser window). `<scratch>/yapn/tools/display.ps1`
 (`list`, `save`, `set`, `restore`) changes it: modes with a dynamic
 `ChangeDisplaySettingsEx`, the scale with the DPI-scale packet of
 `DisplayConfigSetDeviceInfo`, HDR with `SET_ADVANCED_COLOR_STATE`. Every
@@ -278,7 +278,7 @@ rules, it was never opened. Every native capture below is the test account
 the window tools could not reach another instance), and the web side is
 "Native Spike" through `web-shot.mjs`. The real-data sweep (many servers,
 long history, roles, popouts, DMs, friends, inbox, search, settings, shop)
-is still to do on that account. Captures are in `F:/ct/yapn/run/parity4/`.
+is still to do on that account. Captures are in `<scratch>/yapn/run/parity4/`.
 Another agent edited this worktree (voice reset, `yap-voice`) and ran its
 own spike instance during the pass; its files were left alone.
 
@@ -323,7 +323,7 @@ Web paths are under `src/`, native paths under `desktop-native/`.
 - `cargo clippy --workspace -- -D warnings` passes.
 - `cargo test -p yap-core -p yap-protocol -p yap-cache`: 1258 passed,
   0 failed.
-- `build.ps1` into `F:/ct/yapn/rel` is green.
+- `build.ps1` into `<scratch>/yapn/rel` is green.
 - The QML runtime log has no warnings.
 - `qt-qml-review` lint (deterministic pass only, no agents): the ordering
   findings from the new cursor handlers were fixed; the rest are older
@@ -331,13 +331,13 @@ Web paths are under `src/`, native paths under `desktop-native/`.
 
 ## Pass 5 (real account sweep)
 
-Pass of 2026-11-06 on the user's account: `F:/ct/yapn/sweep-build/YapNative.exe
+Pass of 2026-11-06 on the user's account: `<scratch>/yapn/sweep-build/YapNative.exe
 --profile jontest` ("goat of goats", dark theme), at 1282 x 832. The web side
 was the user's own session in Vespera ("jon", forced to the dark class, read
 only) until that tab was closed and Yap signed out underneath it partway
 through; after that the web side is the source, plus `web-shot.mjs` as the
 test account for layout (Ctrl+K). Captures stay local in
-`F:/ct/yapn/run/sweep/` (`<screen>-web.png`, `<screen>-native.png`,
+`<scratch>/yapn/run/sweep/` (`<screen>-web.png`, `<screen>-native.png`,
 `-after` for the fixed state, `pair-*.png` for side-by-side crops). The only
 post (bare and masked links, a member and a non-member mention, two
 reactions) went to Predators Only #general and was deleted.
@@ -398,16 +398,16 @@ voice, so those tree states were not exercised.
 Pass of 2026-11-07. Native ran on the user's account (`--profile jontest`,
 "goat of goats", dark) for read-only checks, and on the test account
 (`--profile spike`, YAP_TOKEN from `owner.json`) for voice and writes. Each
-build ran as a copy in `F:/ct/yapn/run/sweep6/bin-<tag>/`, so the build
+build ran as a copy in `<scratch>/yapn/run/sweep6/bin-<tag>/`, so the build
 folder was never locked, and the 0.2.1 build was kept in `before/` for the
 "before" captures. The user's Vespera session was signed out, so the web
 side is `web-shot.mjs` as "Native Spike" with the `dark` class forced, plus
 the source for what only the user's account has (their animated banner).
 The only post was a test GIF link from the test account in Native Spike
-Lab #general, deleted afterwards. Captures stay local in `F:/ct/yapn/run/sweep6/` (`-web`,
+Lab #general, deleted afterwards. Captures stay local in `<scratch>/yapn/run/sweep6/` (`-web`,
 `-native-before`, `-native-after`, `pair-*` side by side).
 
-The window is never focused, so `F:/ct/yapn/tools/activate.ps1` (new) posts
+The window is never focused, so `<scratch>/yapn/tools/activate.ps1` (new) posts
 `WM_ACTIVATE` to our window only, which makes Qt report the app as active
 (`app state 4` under `YAP_DEBUG_ANIMATIONS`) so GIFs and pictures play.
 Animation was proved by diffing a region across captures 0.5-1 s apart.
@@ -502,7 +502,7 @@ AbstractButton or Button that had none (each is a `<button>`, a
 - `cargo clippy --workspace -- -D warnings` passes.
 - `cargo test -p yap-core -p yap-protocol -p yap-cache`: 1309 passed, 0
   failed.
-- `build.ps1` into `F:/ct/yapn/rel` is green; the QML log has no warnings
+- `build.ps1` into `<scratch>/yapn/rel` is green; the QML log has no warnings
   from the changed files.
 
 ## Pass 7 (profile modal, pickers, video, vibe, spatial)
@@ -510,7 +510,7 @@ AbstractButton or Button that had none (each is a `<button>`, a
 Pass of 2026-11-07. Native ran on the test account (`--profile spike`,
 YAP_TOKEN from `owner.json`) for everything that writes or calls, and on
 the user's account (`--profile jontest`) read-only for name effects, pins
-and threads. Each build ran as a copy in `F:/ct/yapn/run/sweep7/bin-<tag>/`
+and threads. Each build ran as a copy in `<scratch>/yapn/run/sweep7/bin-<tag>/`
 (`run-p7-spike.ps1`, `run-p7.ps1`); the pass 6 build was kept in
 `sweep7/before/`. The web side is `web-shot.mjs` as "Native Spike" with the
 `dark` class forced, at 1282 x 832 (the member list hides below 1280). Test
@@ -519,7 +519,7 @@ data lived in Native Spike Lab: three channels (`p7-unread`, `p7-mention`,
 and a PNG attachment); all were deleted afterwards. The one call was the
 test owner with the peer (`peer.mjs`, fake mic) in Native Spike Lab General
 for four minutes; both left. Captures stay local in
-`F:/ct/yapn/run/sweep7/`.
+`<scratch>/yapn/run/sweep7/`.
 
 Two test switches: `YAP_NO_CLIPBOARD=1` (already there) makes Copy image
 log `[clipboard] would copy an image WxH` instead of touching the
@@ -585,13 +585,13 @@ Web paths are under `src/`, native paths under `desktop-native/`.
 - `cargo clippy --workspace -- -D warnings` passes.
 - `cargo test -p yap-core -p yap-protocol -p yap-cache -p yap-voice`: 1639
   passed, 0 failed.
-- `build.ps1` into `F:/ct/yapn/rel` is green (10 builds this pass); the QML
+- `build.ps1` into `<scratch>/yapn/rel` is green (10 builds this pass); the QML
   log has no warnings from the changed files.
 
 ## Pass 8 (pass 7 leftovers, click-through, hover states)
 
-Pass of 2026-11-07, on the 0.2.2 build (kept in `F:/ct/yapn/run/sweep8/before/`).
-Native ran as copies in `F:/ct/yapn/run/sweep8/bin-<tag>/` (`run-p8.ps1`;
+Pass of 2026-11-07, on the 0.2.2 build (kept in `<scratch>/yapn/run/sweep8/before/`).
+Native ran as copies in `<scratch>/yapn/run/sweep8/bin-<tag>/` (`run-p8.ps1`;
 `-Spike` for the test owner, YAP_TOKEN from `owner.json`) and on the user's
 account (`--profile jontest`) read-only. The web side is `web-shot.mjs` as
 "Native Spike" with the `dark` class forced. The user's Vespera browser was
@@ -600,11 +600,11 @@ pass), so it was left alone after one look and the jontest screens were
 compared with the test account's web views and the source. The calls were
 the test owner alone in Native Spike Lab General, under five minutes each,
 and left. The vibe set while testing was removed. Captures stay local in
-`F:/ct/yapn/run/sweep8/`.
+`<scratch>/yapn/run/sweep8/`.
 
 New test switch: `YAP_TEST_POINTER=1` (`cpp/main.cpp` TestPointer). A tool
 posts the registered message `YapTestPointer` to our window only
-(`F:/ct/yapn/tools/qpoint.ps1 -TargetPid <pid> -X -Y -Action
+(`<scratch>/yapn/tools/qpoint.ps1 -TargetPid <pid> -X -Y -Action
 move|leave|down|up`), and the process turns it into the QMouseEvent a real
 pointer would give the QQuickWindow. Hover, tooltips, hover cards and held
 presses now show on a window behind others. The real cursor, keyboard and
@@ -670,12 +670,12 @@ Web paths are under `src/`, native paths under `desktop-native/`.
   already unformatted at the 0.2.2 commit.
 - `cargo test -p yap-core -p yap-protocol -p yap-cache -p yap-voice`
   (`LK_CUSTOM_WEBRTC` set): 1253 passed, 0 failed.
-- `build.ps1` into `F:/ct/yapn/rel` is green (8 builds this pass).
+- `build.ps1` into `<scratch>/yapn/rel` is green (8 builds this pass).
 
 ## Pass 9 (pass 8 leftovers, settings and editors, functional gaps)
 
-Pass of 2026-11-07, on the pass 8 build (kept in `F:/ct/yapn/run/sweep9/before/`).
-Native ran as copies in `F:/ct/yapn/run/sweep9/bin-<tag>/` (`run-p9.ps1`, the
+Pass of 2026-11-07, on the pass 8 build (kept in `<scratch>/yapn/run/sweep9/before/`).
+Native ran as copies in `<scratch>/yapn/run/sweep9/bin-<tag>/` (`run-p9.ps1`, the
 pass 8 runner pointed at sweep9; `-Spike` for the test owner). The test owner
 owns Native Spike Lab, so every server and channel settings page was opened
 there. One override was changed (@everyone denied Send messages in #general,
@@ -686,7 +686,7 @@ The only writes from the peer were typing pings. jontest was not used. The web
 side is `web-shot.mjs` as the test owner at the native window's size
 (1268 x 825). It gained `--scheme dark|light` (the colour scheme the default
 "system" theme follows); the themes were set through `localStorage.theme` in
-the headless context. Captures stay local in `F:/ct/yapn/run/sweep9/`.
+the headless context. Captures stay local in `<scratch>/yapn/run/sweep9/`.
 
 The web's server settings have five tabs: Overview, Roles, Invites, Bans and
 Audit log. Members, emoji, stickers, soundboard, moderation and integrations
@@ -781,23 +781,23 @@ parity.
   still flags `rust/build.rs` and `yap-core/src/fixture.rs`, as at 0.2.2.
 - `cargo test -p yap-core -p yap-protocol -p yap-cache -p yap-voice`
   (`LK_CUSTOM_WEBRTC` set): 1644 passed, 0 failed.
-- `build.ps1` into `F:/ct/yapn/rel` is green (7 builds this pass).
+- `build.ps1` into `<scratch>/yapn/rel` is green (7 builds this pass).
 
 ## Pass 10 (pass 9 gaps F13-F20, profile editor, sweep)
 
-Pass of 2026-11-07, on the pass 9 build (kept in `F:/ct/yapn/run/sweep10/before/`).
-Native ran as copies in `F:/ct/yapn/run/sweep10/bin-<tag>/` (`run-p10.ps1`,
+Pass of 2026-11-07, on the pass 9 build (kept in `<scratch>/yapn/run/sweep10/before/`).
+Native ran as copies in `<scratch>/yapn/run/sweep10/bin-<tag>/` (`run-p10.ps1`,
 the pass 9 runner pointed at sweep10; `-Spike` for the test owner). The
 profile editor was done in a parallel session as Spike Peer
-(`--profile spikepeer`, its own build dir `F:/ct/yapn/rel-p10b`); the peer's
+(`--profile spikepeer`, its own build dir `<scratch>/yapn/rel-p10b`); the peer's
 profile was put back as it was (only `updated_at` differs). The test owner
 joined Native Spike Lab's General voice channel alone a few times, each for
 under a minute, and left. Nothing was posted on the server. jontest was not
 used. The web side is `web-shot.mjs` at 1268 x 825 with `--scheme dark` (it
 gained `mclick:<x>,<y>`, a real click at a point). Captures stay local in
-`F:/ct/yapn/run/sweep10/`.
+`<scratch>/yapn/run/sweep10/`.
 
-New test switches (YAP_TEST_POINTER builds only): `F:/ct/yapn/tools/qkey.ps1
+New test switches (YAP_TEST_POINTER builds only): `<scratch>/yapn/tools/qkey.ps1
 -TargetPid <pid> -Key L -Mods ctrl` posts the registered message `YapTestKey`
 to our window, and the process delivers the key through
 `QWindowSystemInterface`, so shortcuts see it (a posted WM_KEYDOWN carries no
@@ -865,7 +865,7 @@ Web paths are under `src/`, native paths under `desktop-native/`.
   (`LK_CUSTOM_WEBRTC` set): 1669 passed, 0 failed. New tests cover the voice
   chat, scroll restore, call records, the composer's emoji, the cache round
   trip and the profile editor.
-- `build.ps1` into `F:/ct/yapn/rel` is green (7 builds this pass); the QML
+- `build.ps1` into `<scratch>/yapn/rel` is green (7 builds this pass); the QML
   log has no warnings.
 - A review pass found three issues, fixed: the newest page shown while a
   saved window loads no longer overwrites the position or marks the channel
@@ -876,8 +876,8 @@ Web paths are under `src/`, native paths under `desktop-native/`.
 ## Pass 11 (user reports on 0.2.3, pass 10 leftovers)
 
 Pass of 2026-11-07, on the 0.2.3 build (HEAD d3ff2e92, kept in
-`F:/ct/yapn/run/sweep11/before/`). Native ran as copies in
-`F:/ct/yapn/run/sweep11/bin-<tag>/` (`run-p11.ps1`: `-Spike` is the test owner on
+`<scratch>/yapn/run/sweep11/before/`). Native ran as copies in
+`<scratch>/yapn/run/sweep11/bin-<tag>/` (`run-p11.ps1`: `-Spike` is the test owner on
 profile `spike`, `-Peer` Spike Peer on `spikepeer`). The perf agent held both
 test accounts for most of the pass, so the user reports were checked
 read-only on jontest in Predators Only #general, and text on a signed-out
@@ -886,10 +886,10 @@ joined voice (a row click joins, as on the web) and it was left after about
 4 s; GIF searches typed in the picker landed in the local recent list and
 were cleared. One owner web-shot overlapped the perf agent's owner session
 for a few seconds (headless, no voice). Nothing was posted. Captures stay local
-in `F:/ct/yapn/run/sweep11/`.
+in `<scratch>/yapn/run/sweep11/`.
 
-New tools: `F:/ct/yapn/tools/resize.ps1` (our window only, no move or
-activate), `F:/ct/yapn/tmp/text/{shot.mjs,zoom.ps1,ink.ps1,shift.py,motion.py}`
+New tools: `<scratch>/yapn/tools/resize.ps1` (our window only, no move or
+activate), `<scratch>/yapn/tmp/text/{shot.mjs,zoom.ps1,ink.ps1,shift.py,motion.py}`
 (a local page in headless Edge at a scale, nearest-neighbour zooms, ink and
 edge-pixel counts, the scroll shift between two captures, per-cell motion over
 a series). A window behind others stops rendering (`[window] released spare
@@ -962,24 +962,24 @@ New switches: `YAP_TEXT_HINTING`, `YAP_QT_WHEEL=1`, `YAP_DEBUG_OFFLINE_SECS`
   - a prefetched or late-prefetched profile;
   - a collectible nameplate's Remove waiting for Save.
 - `rustfmt --check` is clean for the Rust files this pass changed.
-- `build.ps1` into `F:/ct/yapn/rel` is green (7 builds this pass), and the
+- `build.ps1` into `<scratch>/yapn/rel` is green (7 builds this pass), and the
   runs' logs have no QML warnings.
 
 ## Pass 12 (calls sweep, profile editor on screen, wider sweep)
 
 Pass of 2026-11-07, on the 0.2.5 build (HEAD 5519fa3d, kept in
-`F:/ct/yapn/run/sweep12/before/`). Native ran as copies in
-`F:/ct/yapn/run/sweep12/bin-<tag>/` (`F:/ct/yapn/tools/run-p12.ps1`; the
-wrapper `F:/ct/yapn/tmp/p12/start.ps1` adds the test devices below). The test
+`<scratch>/yapn/run/sweep12/before/`). Native ran as copies in
+`<scratch>/yapn/run/sweep12/bin-<tag>/` (`<scratch>/yapn/tools/run-p12.ps1`; the
+wrapper `<scratch>/yapn/tmp/p12/start.ps1` adds the test devices below). The test
 owner ran on profile `spike`, Spike Peer on `spikepeer`, both native; the web
 side is `web-shot.mjs` at 1268 x 825 `--scheme dark`, as the peer
 (`peer.json`, `--media`, `--fake-share`) for call references and as the owner
 for read-only views. jontest was not used. Captures stay local in
-`F:/ct/yapn/run/sweep12/` (`calls/`, `dm/`, `profile/`, `invite/`,
+`<scratch>/yapn/run/sweep12/` (`calls/`, `dm/`, `profile/`, `invite/`,
 `create/`, `notify/`, `sweep/`, `text/`).
 
 Test devices for every voice run from build 1 on: `YAP_FAKE_MIC` (a
-synthetic 140 Hz voiced burst, `F:/ct/yapn/tmp/p12/fake-voice.wav`),
+synthetic 140 Hz voiced burst, `<scratch>/yapn/tmp/p12/fake-voice.wav`),
 `YAP_NULL_SPEAKER`, `YAP_FAKE_CAMERA`, `YAP_FAKE_SHARE_SOURCE=1280x720`,
 `YAP_SHARE_ONLY_OURS`, `YAP_FAKE_SHARE_AUDIO`, `YAP_NO_CLIPBOARD`,
 `YAP_LOG_EXTERNAL_OPEN`, `YAP_NO_TOASTS`. `web-shot.mjs` leaves voice more
@@ -1066,7 +1066,7 @@ apart from `updated_at`; the uploaded avatar stays in "Recent avatars").
 ### Text on the p7 Qt (item 6)
 
 Native (b0 and b5, patch 0005 in) against headless Edge on the same page
-(`F:/ct/yapn/tmp/text/page.html`), sign-in text, ink as the sum of covered
+(`<scratch>/yapn/tmp/text/page.html`), sign-in text, ink as the sum of covered
 pixels over the line box:
 
 | scale | body (native / web)      | edge pixels | title  |
@@ -1116,7 +1116,7 @@ Qt was not changed.
   (`LK_CUSTOM_WEBRTC` set): 1695 passed, 0 failed.
 - `cargo clippy --workspace --all-targets -- -D warnings` passes (`QMAKE` set
   to the p7 qmake).
-- `build.ps1` into `F:/ct/yapn/rel` is green (7 builds this pass); the runs'
+- `build.ps1` into `<scratch>/yapn/rel` is green (7 builds this pass); the runs'
   logs have no QML warnings.
 - A review pass found, and this pass fixed: the sign-in browser open never
   had its URL (now follows the URL); `Theme.hinting` started at vertical and
@@ -1131,8 +1131,8 @@ Qt was not changed.
 
 The user still found native text jagged beside the web and Tauri apps on
 joi2 (100 % on every monitor, ClearType on). Captures and tools stay local:
-`F:/ct/yapn/run/text13/` (captures, `zoom/`, `measure-*.txt`) and
-`F:/ct/yapn/tmp/text/` (`probe/dwprobe.cpp`: DirectWrite rasterizer with a
+`<scratch>/yapn/run/text13/` (captures, `zoom/`, `measure-*.txt`) and
+`<scratch>/yapn/tmp/text/` (`probe/dwprobe.cpp`: DirectWrite rasterizer with a
 chosen mode, used to fit Chromium's output; `lab/`: a reference page and a
 Qt text lab on the app's Qt and fonts, same blocks in dark and light).
 
@@ -1171,7 +1171,7 @@ Qt text lab on the app's Qt and fonts, same blocks in dark and light).
 - Qt `patches/qt/6.11.3/0006-quick-text-preblend.patch` (LIBRARIES.md):
   Skia's preblend in the A32 shader; grayscale into translucent targets,
   under a scale or rotation, and with ClearType off. `0005` is retired.
-  Built into `F:/ct/qt-custom-6.11p8/6.11.3-yap`, now `build.ps1`'s default.
+  Built into `<scratch>/qt-custom-6.11p8/6.11.3-yap`, now `build.ps1`'s default.
 - `Theme.qml`: the `hinting` comment only.
 
 ### Results (`zoom/final100-*.png`, `zoom/final150-*.png`: web, before, after)
@@ -1204,14 +1204,14 @@ monitor's, read at launch.
 ## Pass 13 (pass 12 leftovers, menus, error states, stream previews)
 
 Pass of 2026-11-07, on the 0.2.6 build (HEAD d65f3c85, kept in
-`F:/ct/yapn/run/sweep13/before/`). Native ran as copies in
-`F:/ct/yapn/run/sweep13/bin-<tag>/` (`F:/ct/yapn/tools/run-p13.ps1`, wrapper
-`F:/ct/yapn/tmp/p13/start.ps1` with the pass 12 test devices: `YAP_FAKE_MIC`,
+`<scratch>/yapn/run/sweep13/before/`). Native ran as copies in
+`<scratch>/yapn/run/sweep13/bin-<tag>/` (`<scratch>/yapn/tools/run-p13.ps1`, wrapper
+`<scratch>/yapn/tmp/p13/start.ps1` with the pass 12 test devices: `YAP_FAKE_MIC`,
 `YAP_NULL_SPEAKER`, `YAP_FAKE_CAMERA`, `YAP_FAKE_SHARE_SOURCE`,
 `YAP_NO_TOASTS`, `YAP_NO_CLIPBOARD`, `YAP_LOG_EXTERNAL_OPEN`, from the first
 launch). The test owner ran natively on `spike`; the web side is
 `web-shot.mjs` as Spike Peer (`peer.json`) at 1268 x 825 dark. jontest was
-not used. Captures stay local in `F:/ct/yapn/run/sweep13/` (`calls/`,
+not used. Captures stay local in `<scratch>/yapn/run/sweep13/` (`calls/`,
 `create/`, `invite/`, `errors/`, `menus/`, `web/`, and `ref/`, which holds
 the pass 12 references reused here).
 
@@ -1271,7 +1271,7 @@ New switches:
   (`LK_CUSTOM_WEBRTC` set): 1761 passed, 0 failed.
 - `cargo clippy --workspace --all-targets -- -D warnings` passes (`QMAKE` set
   to the p7 qmake).
-- `build.ps1` into `F:/ct/yapn/rel` is green: 6 builds this pass, the first
+- `build.ps1` into `<scratch>/yapn/rel` is green: 6 builds this pass, the first
   of which failed on desktopshell.cpp and was fixed. The runs' logs have no
   QML warnings.
 - A review pass found the following, and this pass fixed all of it:
@@ -1306,9 +1306,9 @@ Native ran on the offline fixture only (`YAP_FIXTURE=chat-10k`, profiles
 `motion`, `motion2`, `motion3`, with `YAP_TEST_POINTER`, `YAP_NO_TOASTS`,
 `YAP_NO_CLIPBOARD`, `YAP_LOG_EXTERNAL_OPEN`, `YAP_NULL_SPEAKER`). No call
 was made and jontest was not used. The baseline is the 0.2.7 exe, copied to
-`F:/ct/yapn/tmp/motion/base/` before any change. The web side is headless
+`<scratch>/yapn/tmp/motion/base/` before any change. The web side is headless
 Edge as Spike Peer (`peer.json`), dark, 1280 x 800. Everything stays in
-`F:/ct/yapn/tmp/motion/`.
+`<scratch>/yapn/tmp/motion/`.
 
 ### Method
 
@@ -1407,7 +1407,7 @@ either). Durations are in ms. "House ease-out" is
 
 ### Evidence
 
-All of these frame sequences are in `F:/ct/yapn/tmp/motion/`. `b-*` is the
+All of these frame sequences are in `<scratch>/yapn/tmp/motion/`. `b-*` is the
 0.2.7 baseline, `n-*` and `n2-*` are this build, and `web/` is the live
 web. Native times count from the posted event.
 
@@ -1495,11 +1495,11 @@ Translate only. Text and Rectangle colours ease; Icons do not.
 
 ### Checks
 
-- `build.ps1` into `F:/ct/yapn/rel` was green three times
-  (`F:/ct/yapn/build-motion-1.log` to `-3.log`). The runs' logs have no QML
+- `build.ps1` into `<scratch>/yapn/rel` was green three times
+  (`<scratch>/yapn/build-motion-1.log` to `-3.log`). The runs' logs have no QML
   warnings.
 - `cargo test -p yap-core -p yap-protocol -p yap-cache -p yap-voice -p yap-realtime`
-  (`CARGO_TARGET_DIR=F:/ct/yapn/check`, `LK_CUSTOM_WEBRTC` set): 1336
+  (`CARGO_TARGET_DIR=<scratch>/yapn/check`, `LK_CUSTOM_WEBRTC` set): 1336
   passed, 0 failed.
 - `cargo clippy --workspace --all-targets -- -D warnings` (`QMAKE` set to
   the p7 qmake) is clean.
@@ -1536,8 +1536,8 @@ Twelve open gaps from a read-only sweep, each checked against both
 codebases first. Native ran as "Native Spike" (profile `spike`) and
 "Spike Peer" (`spikepeer`) in "Native Spike Lab" and their DM, with fake
 devices only. Web references come from the local `/ui-fixtures` route in
-headless Edge (`F:/ct/yapn/tmp/parity/web/`). Native captures are in
-`F:/ct/yapn/tmp/parity/native/`.
+headless Edge (`<scratch>/yapn/tmp/parity/web/`). Native captures are in
+`<scratch>/yapn/tmp/parity/native/`.
 
 ### Closed
 
@@ -1586,11 +1586,11 @@ Notes:
 ### Checks
 
 - `cargo test -p yap-core -p yap-protocol -p yap-cache -p yap-voice -p yap-realtime`
-  (`LK_CUSTOM_WEBRTC` set, target `F:/ct/yapn/check-parity`): 1404 passed, 0 failed.
+  (`LK_CUSTOM_WEBRTC` set, target `<scratch>/yapn/check-parity`): 1404 passed, 0 failed.
 - `cargo clippy --workspace --all-targets -- -D warnings` (`QMAKE` set to
   the p8 qmake) is clean.
-- `build.ps1` into `F:/ct/yapn/rel-parity` was green three times
-  (`F:/ct/yapn/build-parity-0.log` to `-2.log`).
+- `build.ps1` into `<scratch>/yapn/rel-parity` was green three times
+  (`<scratch>/yapn/build-parity-0.log` to `-2.log`).
 - Found while testing:
   - Build 1 crashed after a delete: the fade's NumberAnimation kept the
     deleted row as its target, which is not a guarded reference. Fixed in
@@ -1646,7 +1646,7 @@ modal system window unlike the rest of the app. The web gets Chromium's
   the name style's base and highlight) and `RoleEditor.qml` (the role
   colour key).
 
-Evidence (`F:/ct/yapn/tmp/colorpicker/`, profile `spike`; nothing was
+Evidence (`<scratch>/yapn/tmp/colorpicker/`, profile `spike`; nothing was
 saved, and every draft was reset):
 
 - the background picker open, flipped above its key with recents
@@ -1683,7 +1683,7 @@ Found and fixed while testing:
 Checks:
 
 - `cargo test -p yap-core -p yap-protocol -p yap-cache -p yap-voice`
-  (target `F:/ct/yapn/check-color`): 1887 passed, 0 failed.
+  (target `<scratch>/yapn/check-color`): 1887 passed, 0 failed.
 - `cargo clippy --workspace --all-targets -- -D warnings` is clean.
-- `build.ps1` into `F:/ct/yapn/rel-color` was green
-  (`F:/ct/yapn/build-color-1.log` to `-4.log`).
+- `build.ps1` into `<scratch>/yapn/rel-color` was green
+  (`<scratch>/yapn/build-color-1.log` to `-4.log`).
