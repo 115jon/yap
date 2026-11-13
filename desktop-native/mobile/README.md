@@ -765,6 +765,57 @@ turning them on showed on return. Not verified: signing out another device
 <img src="docs/qt-friends-actions.png" width="180" alt="Qt: Friends, a friend's actions">
 </p>
 
+### Invites and links
+
+Handing out an invite, and opening one, as the Expo app does
+(`features/servers/ServerSheet.tsx`, `app/invite/[code].tsx`), on the
+core's invites:
+
+- **Making a link.** A tap on the server's name over the tree opens its
+  menu (`ServerSheet`); a long press on a channel's row opens the
+  channel's. Invite people makes a link that lasts a week with no use
+  limit (Admin's quick invite on the open server); a channel's Invite to
+  channel makes its 7-day link that lands in the channel (Extras' channel
+  invite). The link goes to the system share sheet, headed "Invite people
+  to <server>"; one that could not be made says why under its row. The
+  rows show only with the server's Create invite permission. The menus
+  also carry Mark as read, and a channel's Copy link.
+- **Opening one.** The manifest takes the web's links,
+  `https://<web host>/invite/<code>` and `/chat/…`, the paths the Expo app
+  takes, and `yap://invite/<code>` and `yap://chat/…`, the core's own (one
+  activity, `LinkActivity`, with no window: it hands the link to the app's
+  activity in the app's own task, so a link from a browser never starts a
+  second Qt activity in the browser's task). `LinkShim` holds a cold
+  start's link until Qt is up; `Native.takeLinkRequest` gives it to
+  `Main.qml` once signed in, which hands it to `Invites.openLink`. An
+  invite opens `InviteLandingPage` over the pager: the server's tile,
+  who invited, its name and member count, then No thanks and Accept
+  invite, or Open <server> for a server you are in, and the expired,
+  missing and failed states. A joined server opens on its tree after
+  1.5 s. A chat link opens the channel and slides the chat in.
+- **No verified links yet.** The web's `/.well-known/assetlinks.json` names
+  only the Expo app's packages, so the filter is not `autoVerify`: Android
+  asks which app opens a web link, or the user turns on "Open supported
+  links" for Yap. `yap://` links open the app directly.
+
+Shared with the desktop (`Yap.Ui`): `InviteLandingState` (the landing's
+states, their copy and the redirect after a join; the desktop's
+`InviteLanding` draws the same object) and `InviteMaker` (making a server
+or channel link and its answer; the desktop's Invite people dialog uses
+it), and `Invites.linkChannel`, the channel a link opens.
+
+Verified on the S22 (Android 16) against the test accounts, with the web
+host approved for the test build in its link settings: Invite people and
+Invite to channel handing a link to the share sheet; an invite to a server
+the account is in, opened with the app running and from killed, landing on
+the preview, then "You're already a member" and Open landing on its tree;
+an invite to a server it is not in, by `yap://` with the app running and
+by the web link from killed, joining (the API listed the account as a
+member) and opening the server after 1.5 s; a chat link switching servers
+and sliding the chat in. Not verified: a link from a browser or another
+app (only `adb shell am start`), and the error, expired and missing
+states.
+
 ### Voice calls
 
 A voice channel's row in the drawer joins it. The call is the desktop's:
