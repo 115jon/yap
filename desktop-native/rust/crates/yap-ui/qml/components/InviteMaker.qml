@@ -35,8 +35,14 @@ QtObject {
     // one is this link's answer.
     property int doneBefore: 0
 
+    // The core's own flag for the quick invite: it clears even when the
+    // core drops the request (no server shown), which `busy` would not see.
+    readonly property bool serverBusy: quickAct.busy
+
     function makeServer(expiresHours, maxUses) {
-        if (busy)
+        // A server request the core dropped leaves `busy` set: only the
+        // core's flag (or a channel link in flight) holds a new one back.
+        if (quickAct.busy || (busy && scope === "channel"))
             return
         Admin.clear("quick-invite")
         scope = "server"

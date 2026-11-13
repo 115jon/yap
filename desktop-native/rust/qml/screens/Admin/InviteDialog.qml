@@ -43,7 +43,7 @@ PlateDialog {
     rule: true
     description: showLink ? qsTr("Share this link with others to let them join your server.")
         : qsTr("Choose how long the link lasts and how many people can use it.")
-    busy: maker.busy
+    busy: maker.serverBusy
 
     Timer {
         id: copiedTimer
@@ -115,7 +115,7 @@ PlateDialog {
         KitButton {
             variant: "ghost"
             text: dialog.showLink ? qsTr("Done") : qsTr("Cancel")
-            enabled: !maker.busy
+            enabled: !maker.serverBusy
             onClicked: dialog.close()
         },
         KitButton {
@@ -123,7 +123,7 @@ PlateDialog {
             variant: "primary"
             ground: Theme.ply3
             text: qsTr("Generate invite link")
-            loading: maker.busy
+            loading: maker.serverBusy
             onClicked: maker.makeServer(dialog.expiresHours, dialog.maxUses)
         },
         KitButton {
