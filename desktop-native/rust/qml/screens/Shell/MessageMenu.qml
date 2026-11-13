@@ -77,13 +77,16 @@ MenuPanel {
     function rebuild() {
         for (const item of made)
             removeItem(item)
+        // Made inside the panel's list (an item, which also keeps them from
+        // the collector); addItem places them.
+        const list = messageMenu.contentItem
         const out = []
         actions.groups("menu").forEach((group, index) => {
             if (index > 0)
-                out.push(ruleRow.createObject(messageMenu))
+                out.push(ruleRow.createObject(list))
             for (const entry of group) {
                 if (entry.id !== "react")
-                    out.push(actionRow.createObject(messageMenu, {
+                    out.push(actionRow.createObject(list, {
                         actionId: entry.id, text: entry.text, glyph: entry.glyph, danger: entry.danger
                     }))
             }
