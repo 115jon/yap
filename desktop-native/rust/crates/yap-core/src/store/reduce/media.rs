@@ -515,8 +515,10 @@ impl State {
                     .iter()
                     .filter(|g| {
                         media::gif_preview(g).is_some()
-                            || gif_favorite::normalize_content_type(Some(&g.send.content_type))
-                                == "video/mp4"
+                            || [&g.send, &g.preview].iter().any(|a| {
+                                gif_favorite::normalize_content_type(Some(&a.content_type))
+                                    == "video/mp4"
+                            })
                     })
                     .count();
                 self.gifs.items.extend(fresh);
@@ -635,6 +637,9 @@ impl State {
             .filter_map(|item| serde_json::from_value::<GifItem>(item.clone()).ok())
             .map(|mut item| {
                 absolute(&mut item.preview.url);
+                if let Some(thumb) = item.thumb.as_mut() {
+                    absolute(&mut thumb.url);
+                }
                 absolute(&mut item.send.url);
                 item
             })
