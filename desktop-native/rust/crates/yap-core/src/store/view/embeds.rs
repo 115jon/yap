@@ -67,7 +67,8 @@ pub fn proxied(url: &str, page: &str, api_base: &str) -> String {
     )
 }
 
-/// Social pictures that load straight (no signed CDN).
+/// Social pictures: the social proxy form for signed CDNs, the generic
+/// media proxy for the rest.
 fn picture(url: &str, page: &str, api_base: &str) -> String {
     if !is_web(url) {
         return String::new();
@@ -75,7 +76,7 @@ fn picture(url: &str, page: &str, api_base: &str) -> String {
     if super::media::needs_proxy(url) {
         proxied(url, page, api_base)
     } else {
-        url.to_owned()
+        super::media::via_media_proxy(url, api_base)
     }
 }
 

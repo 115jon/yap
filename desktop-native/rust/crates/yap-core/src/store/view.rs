@@ -1399,7 +1399,9 @@ pub(super) fn absolute_url(api_base: &str, url: Option<&str>) -> String {
         url if is_google_avatar(url) => {
             format!("{api_base}/api/proxy-media?url={}", query_value(url))
         }
-        url => url.to_owned(),
+        // Any other third party (an OAuth provider's avatar, a status
+        // picture, artwork) loads through the media proxy too.
+        url => media::via_media_proxy(url, api_base),
     }
 }
 

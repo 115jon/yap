@@ -126,7 +126,8 @@ pub fn is_api_url(api_base: &str, url: &str) -> bool {
 }
 
 /// The session for a media URL the image loader is about to fetch: only
-/// the API's attachments and custom emoji images need (and get) it.
+/// the API's attachments and custom emoji images need (and get) it, and
+/// third-party media we proxy without the server's signature.
 pub fn media_needs_auth(api_base: &str, url: &str) -> bool {
     let base = api_base.trim_end_matches('/');
     url.strip_prefix(base).is_some_and(|rest| {
@@ -135,6 +136,41 @@ pub fn media_needs_auth(api_base: &str, url: &str) -> bool {
             || rest.starts_with("/api/camera-backgrounds/")
             // Uploaded voice status pictures (getAuthAssetUrl adds the token).
             || rest.starts_with("/api/voice-status-media/")
+            || unsigned_proxy_media(rest)
+    })
+}
+
+/// `/api/proxy-media?url=...` the server did not sign: the proxy serves it
+/// to a signed-in session only. Signed URLs, the social form (`sourceUrl`)
+/// and lh3 Google avatars need no session, so they keep the disk cache.
+fn unsigned_proxy_media(path_and_query: &str) -> bool {
+    let Some(query) = path_and_query.strip_prefix("/api/proxy-media?") else {
+        return false;
+    };
+    let query = query.split('#').next().unwrap_or_default();
+    let mut target = None;
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        match key {
+            "sig" | "sourceUrl" => return false,
+            "url" => target = Some(value),
+            _ => {}
+        }
+    }
+    target.is_some_and(|target| {
+        let decoded = target
+            .replace("%3A", ":")
+            .replace("%3a", ":")
+            .replace("%2F", "/")
+            .replace("%2f", "/");
+        let host = decoded
+            .strip_prefix("https://")
+            .or_else(|| decoded.strip_prefix("http://"))
+            .and_then(|rest| rest.split(['/', '?', '#', '%']).next())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        // The one Google host the server's allowlist serves unsigned.
+        host != "lh3.googleusercontent.com"
     })
 }
 
@@ -446,5 +482,27 @@ mod tests {
             BASE,
             "https://elsewhere.test/api/camera-backgrounds/id/x.png"
         ));
+    }
+
+    #[test]
+    fn only_unsigned_proxy_media_should_get_the_session() {
+        let unsigned = "https://yap.test/api/proxy-media?url=https%3A%2F%2Fcdn.example%2Fa.png";
+        assert!(media_needs_auth(BASE, unsigned));
+        // An avatar crop fragment does not change that.
+        assert!(media_needs_auth(BASE, &format!("{unsigned}#crop=0,0,1,1")));
+        // Only lh3 rides the server's allowlist; other Google hosts need it.
+        assert!(media_needs_auth(
+            BASE,
+            "https://yap.test/api/proxy-media?url=https%3A%2F%2Flh5.googleusercontent.com%2Fa"
+        ));
+        for url in [
+            "https://yap.test/api/proxy-media?url=https%3A%2F%2Fcdn.example%2Fa.png&sig=abc",
+            "https://yap.test/api/proxy-media?url=https%3A%2F%2Fpbs.twimg.com%2Fa.jpg&sourceUrl=https%3A%2F%2Fx.com%2Fp",
+            "https://yap.test/api/proxy-media?url=https%3A%2F%2Flh3.googleusercontent.com%2Fa%2Fx%3Ds96-c",
+            "https://yap.test/api/proxy-media",
+            "https://elsewhere.test/api/proxy-media?url=https%3A%2F%2Fcdn.example%2Fa.png",
+        ] {
+            assert!(!media_needs_auth(BASE, url), "{url}");
+        }
     }
 }
