@@ -75,6 +75,7 @@ import { SocketTicketError } from "@/lib/voice/socket-ticket-client";
 import {
   playCallConnect,
   playCallEnd,
+  playOutgoingRingStart,
   playOutgoingRingStop,
   playRingStop,
 } from "@/lib/sounds";
@@ -714,6 +715,7 @@ describe("chat gateway frame decoding", () => {
         },
       },
     });
+    gateway.sendCallInitiate("user-c", "dm-2");
     socket.message({
       op: 19,
       d: {
@@ -791,10 +793,18 @@ describe("chat gateway CALL_RING_STOP", () => {
   async function connectWithCall(callState: {
     status: string;
     callId: string | null;
+    hasJoinedSFU?: boolean;
   }) {
     const endCall = vi.fn();
     const acceptCall = vi.fn();
-    mocks.callState = { ...callState, endCall, acceptCall };
+    const setOutgoingCall = vi.fn();
+    mocks.callState = {
+      hasJoinedSFU: false,
+      ...callState,
+      endCall,
+      acceptCall,
+      setOutgoingCall,
+    };
     const { gateway } = createFixture();
     gateway.initGateway("user-1");
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -802,7 +812,23 @@ describe("chat gateway CALL_RING_STOP", () => {
     socket.open();
     socket.message({ op: 8, d: { heartbeat_interval: 45_000 } });
     socket.message({ op: 2, d: { participant_id: "session-1" } });
-    return { gateway, socket, endCall, acceptCall };
+    return { gateway, socket, endCall, acceptCall, setOutgoingCall };
+  }
+
+  function ringing(socket: FakeWebSocket, callId: string, channelId: string) {
+    socket.message({
+      op: 19,
+      d: {
+        seq: 1,
+        event: "CALL_RINGING",
+        data: {
+          call_id: callId,
+          callee_id: "user-2",
+          callee_name: "Two",
+          channel_id: channelId,
+        },
+      },
+    });
   }
 
   function ringStop(
@@ -858,6 +884,102 @@ describe("chat gateway CALL_RING_STOP", () => {
     expect(endCall).toHaveBeenCalledWith("busy");
     expect(playRingStop).toHaveBeenCalledTimes(1);
     expect(playOutgoingRingStop).toHaveBeenCalledTimes(1);
+    gateway.disconnectGateway();
+  });
+
+  it("joins when this tab answered the call", async () => {
+    const { gateway, socket, endCall, acceptCall } = await connectWithCall({
+      status: "ringing_incoming",
+      callId: "call-1",
+    });
+
+    gateway.sendCallAccept("call-1");
+    ringStop(socket, { call_id: "call-1", reason: "accepted" });
+
+    expect(acceptCall).toHaveBeenCalledTimes(1);
+    expect(playCallConnect).toHaveBeenCalledTimes(1);
+    expect(endCall).not.toHaveBeenCalled();
+    gateway.disconnectGateway();
+  });
+
+  it("ends the ring without joining when another session answered", async () => {
+    const { gateway, socket, endCall, acceptCall } = await connectWithCall({
+      status: "ringing_incoming",
+      callId: "call-1",
+    });
+
+    ringStop(socket, { call_id: "call-1", reason: "accepted" });
+
+    expect(acceptCall).not.toHaveBeenCalled();
+    expect(endCall).toHaveBeenCalledWith("answered_elsewhere");
+    expect(playRingStop).toHaveBeenCalledTimes(1);
+    expect(playCallConnect).not.toHaveBeenCalled();
+    expect(playCallEnd).not.toHaveBeenCalled();
+    gateway.disconnectGateway();
+  });
+
+  it("keeps a tab that is already in the call's room in it", async () => {
+    const { gateway, socket, endCall, acceptCall } = await connectWithCall({
+      status: "active",
+      callId: "call-1",
+      hasJoinedSFU: true,
+    });
+
+    ringStop(socket, { call_id: "call-1", reason: "accepted" });
+
+    expect(acceptCall).toHaveBeenCalledTimes(1);
+    expect(endCall).not.toHaveBeenCalled();
+    gateway.disconnectGateway();
+  });
+
+  it("joins the caller tab that started the call", async () => {
+    const { gateway, socket, acceptCall, setOutgoingCall } =
+      await connectWithCall({ status: "idle", callId: null });
+
+    gateway.sendCallInitiate("user-2", "dm-2");
+    ringing(socket, "call-2", "dm-2");
+    expect(setOutgoingCall).toHaveBeenCalledTimes(1);
+    expect(playOutgoingRingStart).toHaveBeenCalledTimes(1);
+    mocks.callState = {
+      ...mocks.callState,
+      status: "ringing_outgoing",
+      callId: "call-2",
+    };
+    ringStop(socket, { call_id: "call-2", reason: "accepted" });
+
+    expect(acceptCall).toHaveBeenCalledTimes(1);
+    gateway.disconnectGateway();
+  });
+
+  it("ignores a call another session of ours started", async () => {
+    const { gateway, socket, acceptCall, setOutgoingCall } =
+      await connectWithCall({ status: "idle", callId: null });
+
+    ringing(socket, "call-2", "dm-2");
+    expect(setOutgoingCall).not.toHaveBeenCalled();
+    expect(playOutgoingRingStart).not.toHaveBeenCalled();
+    for (const reason of ["accepted", "timeout", "declined"]) {
+      ringStop(socket, { call_id: "call-2", reason });
+    }
+
+    // The tab stays idle: no join, no tones (endCall on idle is a no-op).
+    expect(acceptCall).not.toHaveBeenCalled();
+    expect(playCallConnect).not.toHaveBeenCalled();
+    expect(playCallEnd).not.toHaveBeenCalled();
+    gateway.disconnectGateway();
+  });
+
+  it("forgets a refused call start", async () => {
+    const { gateway, socket, setOutgoingCall } = await connectWithCall({
+      status: "idle",
+      callId: null,
+    });
+
+    gateway.sendCallInitiate("user-2", "dm-2");
+    ringStop(socket, { call_id: null, reason: "busy" });
+    ringing(socket, "call-3", "dm-2");
+
+    expect(setOutgoingCall).not.toHaveBeenCalled();
     gateway.disconnectGateway();
   });
 
