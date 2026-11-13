@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.0](https://github.com/115jon/yap/compare/qt-android-v0.4.0...qt-android-v0.5.0) (2026-11-13)
+
+
+### Features
+
+* **desktop-native:** ✨ add gifs and stickers to the phone composer ([ac7c584](https://github.com/115jon/yap/commit/ac7c58432d2959bc6288e6a6946176faa104d723))
+* **desktop-native:** ✨ save images from the phone viewer to the gallery ([0c58719](https://github.com/115jon/yap/commit/0c58719a038a2579de8264d51da0e5cef2626be4))
+* **desktop-native:** ✨ share and open server invites on android ([bf83624](https://github.com/115jon/yap/commit/bf83624243c2b00658868c6996a4819a0efe1c8e))
+* **desktop-native:** gifs and stickers in the phone composer, save image ([c62b94d](https://github.com/115jon/yap/commit/c62b94dec85b9acda3f1bd3064acab30744488b3))
+* **desktop-native:** share and open server invites in the android app ([3d20e13](https://github.com/115jon/yap/commit/3d20e132069d8544122f438f1c9e2b471d49baad))
+
 ## [0.4.0](https://github.com/115jon/yap/compare/qt-android-v0.3.2...qt-android-v0.4.0) (2026-11-13)
 
 
