@@ -8,12 +8,13 @@ import Yap.Ui
 // as an LED word (Connecting, Voice connected, Reconnecting) with the link
 // quality beside it, everyone in the call as rows (the desktop's occupant
 // leaf at phone size: square avatar with the 2 px talk ring, the name, the
-// state glyphs, the talk LED), and the one dock: mic, deafen, where it
-// plays, leave. Opened by joining a voice channel in the drawer and from
-// the drawer's call bar; Back leaves the page, not the call. A DM call is
-// the same page under the other person's name; while ours rings them (no
-// room joined yet) it shows them ringing, with Cancel as its one key.
-// Leave hangs a DM call up (the core's Calls.leave, which ends it).
+// state glyphs, the talk LED) under their cameras and shares (CallVideo),
+// and the one dock: mic, deafen, where it plays, leave. Opened by joining
+// a voice channel in the drawer and from the drawer's call bar; Back
+// leaves the page, not the call. A DM call is the same page under the
+// other person's name; while ours rings them (no room joined yet) it
+// shows them ringing, with Cancel as its one key. Leave hangs a DM call
+// up (the core's Calls.leave, which ends it).
 Rectangle {
     id: root
 
@@ -256,6 +257,17 @@ Rectangle {
         bottomMargin: 8
         clip: true
         model: VoiceRosterModel
+        // Cameras and shares above everyone (nothing until one is on).
+        header: Item {
+            width: roster.width
+            height: callVideo.count > 0 ? callVideo.height + 12 : 0
+            CallVideo {
+                id: callVideo
+                x: 16
+                width: parent.width - 32
+                height: implicitHeight
+            }
+        }
 
         delegate: Item {
             id: person

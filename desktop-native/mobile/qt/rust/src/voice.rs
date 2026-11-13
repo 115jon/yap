@@ -5,11 +5,12 @@
 //! android/src/dev/yap/qtproto/voice): the call notification's Mute and
 //! Leave, and an audio focus loss (a phone call).
 //!
-//! No screen share, camera or video from the phone yet, and no RNNoise or
-//! per-person panning: those need the desktop's own audio path.
+//! Remote cameras and shares are shown (video.rs); no screen share or
+//! camera from the phone yet, and no RNNoise or per-person panning: those
+//! need the desktop's own audio path.
 
 use std::ffi::c_void;
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -35,12 +36,12 @@ impl Host for Phone {
         NoCapture
     }
 
+    fn prepare(&self) {
+        crate::video::install_output();
+    }
+
     fn video(&self) -> watch::Receiver<VideoIntent> {
-        // No video surface on the phone yet: nothing is ever shown, so no
-        // remote video is pulled.
-        static NONE: OnceLock<watch::Sender<VideoIntent>> = OnceLock::new();
-        NONE.get_or_init(|| watch::channel(VideoIntent::default()).0)
-            .subscribe()
+        yap_voice::demand::subscribe()
     }
 }
 
