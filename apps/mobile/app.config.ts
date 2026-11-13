@@ -84,6 +84,10 @@ const config: ExpoConfig = {
     versionCode,
     googleServicesFile,
     predictiveBackGestureEnabled: true,
+    // No Google backup or device transfer of app data: drafts and the open
+    // conversation (src/lib/persist.ts) stay on the phone. A new phone signs
+    // in again. (expo-secure-store's backup rules then go unused.)
+    allowBackup: false,
     // Voice: the microphone, the camera and call audio routing. The
     // background call's foreground service (incl. screen sharing's
     // mediaProjection type), notification, Telecom and Bluetooth permissions
