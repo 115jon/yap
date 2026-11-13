@@ -1066,11 +1066,11 @@ export function ListenTogetherPanel({
                   {resolvedPreview.collection?.artworkUrl ||
                   resolvedPreview.tracks[0]?.artworkUrl ? (
                     <img
-                      src={
+                      src={getAuthAssetUrl(
                         resolvedPreview.collection?.artworkUrl ??
-                        resolvedPreview.tracks[0]?.artworkUrl ??
-                        ""
-                      }
+                          resolvedPreview.tracks[0]?.artworkUrl ??
+                          "",
+                      )}
                       alt=""
                       className="h-full w-full object-cover"
                     />

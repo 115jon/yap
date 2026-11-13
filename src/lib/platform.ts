@@ -375,6 +375,9 @@ function isOwnAssetUrl(url: URL): boolean {
   return isOwnAssetOrigin(bare);
 }
 
+/** Schemes an asset may use that load nothing from a host. */
+const INLINE_ASSET_PROTOCOLS = new Set(["data:", "blob:"]);
+
 /** What an <img>/<video> resolves a relative URL against. */
 function documentBaseUrl(): string {
   if (typeof window !== "undefined" && window.location?.href) {
@@ -405,9 +408,11 @@ export function getAuthAssetUrl(input: string): string {
   } catch {
     return withMediaCapability(value);
   }
-  // data:, blob: and the like load nothing from a host.
   if (resolved.protocol !== "http:" && resolved.protocol !== "https:") {
-    return withMediaCapability(value);
+    // data: and blob: load nothing from a host. Any other scheme (file:,
+    // ftp:, smb:, ...) could reach one outside the proxy, or the local
+    // network, so it loads nothing.
+    return INLINE_ASSET_PROTOCOLS.has(resolved.protocol) ? value : "";
   }
 
   // Our proxy path on any host (a server-built payload): from our API,

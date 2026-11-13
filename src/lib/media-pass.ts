@@ -6,6 +6,11 @@
 // are left (checked every 10 minutes and when the tab comes back), on every
 // app start, and cleared on sign-out. Each renewal checks the session, so a
 // signed-out session's pass ends within the hour.
+//
+// The expiry is kept on this device's clock: the server says how long the
+// pass lasts (`expiresIn`), and the client adds that to its own now. A
+// clock that is off by more than the renewal margin would otherwise never
+// renew (behind) or renew on every check (ahead).
 
 import {
   getDesktopToken,
@@ -59,7 +64,23 @@ function requestHeaders(token: string | null): Headers {
 
 let inflight: Promise<void> | null = null;
 
-/** Asks for a pass unless the current one has more than a few hours left. */
+/**
+ * When a pass answered at `nowMs` expires, in this device's clock: now plus
+ * the server's `expiresIn`. Null when the answer has none (an older server,
+ * whose absolute `expiresAt` is on its own clock and is not used).
+ */
+export function localPassExpiry(
+  body: { expiresIn?: unknown } | null,
+  nowMs: number = Date.now(),
+): number | null {
+  const ttl = body?.expiresIn;
+  if (typeof ttl !== "number" || !Number.isFinite(ttl) || ttl <= 0) {
+    return null;
+  }
+  return nowMs + ttl * 1000;
+}
+
+/** Asks for a pass unless the current one has more than 20 minutes left. */
 export function ensureMediaPass(force = false): Promise<void> {
   const token = currentToken();
   if (!token) return Promise.resolve();
@@ -74,11 +95,10 @@ export function ensureMediaPass(force = false): Promise<void> {
     .then(async (response) => {
       if (!response.ok) return;
       const body = (await response.json().catch(() => null)) as {
-        expiresAt?: number;
+        expiresIn?: number;
       } | null;
-      if (typeof body?.expiresAt === "number") {
-        writeExpiry(body.expiresAt * 1000);
-      }
+      // Without a TTL the next check asks again (no expiry stored).
+      writeExpiry(localPassExpiry(body));
     })
     .catch(() => {
       // Offline or refused: images fall back to signed URLs where the

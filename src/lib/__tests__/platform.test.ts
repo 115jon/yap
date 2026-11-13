@@ -261,6 +261,19 @@ describe("platform asset urls", () => {
     );
   });
 
+  it("loads nothing for a scheme that could reach a host outside the proxy", () => {
+    for (const value of [
+      "file://attacker.example/x.png",
+      "file:///c:/x.png",
+      "smb://attacker.example/share/x.png",
+      "ftp://attacker.example/x.png",
+      "javascript:alert(1)",
+      "gopher://attacker.example/x",
+    ]) {
+      expect(getAuthAssetUrl(value), value).toBe("");
+    }
+  });
+
   it("loads an unwrapped original with the server's signature", () => {
     window.localStorage.removeItem("desktop_auth_token");
     const signed =
