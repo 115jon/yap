@@ -56,7 +56,8 @@ export function matchEmbedUrls(
   for (const match of withoutCode.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
     const candidate = trimUnbalancedClosers(match[0]);
     const start = match.index ?? 0;
-    if (isSuppressed(withoutCode, start, start + candidate.length)) continue;
+    // The bracket closes what was matched, before any trimming.
+    if (isSuppressed(withoutCode, start, start + match[0].length)) continue;
     let normalized: string;
     try {
       const parsed = new URL(candidate);
@@ -96,18 +97,23 @@ export function extractEmbedUrls(
  * (`access_token`, `X-Amz-Signature`, `api_key`).
  */
 const SECRET_PARAM =
-  /(?:^|[^a-z])(?:token|code|key|sig|signature|auth|magic|otp|password|passwd|pwd|pass|secret|credential|session|sid|ticket|nonce|hmac)s?(?:$|[^a-z])|token|signature|password|secret|apikey|authkey/i;
+  /(?:^|[^a-z])(?:token|code|key|sig|signature|auth|magic|otp|password|passwd|pwd|pass|secret|credential|session|sid|ticket|nonce|hmac)s?(?:$|[^a-z])|token|signature|password|secret|apikey|authkey|sessid/i;
 
-/** Path segments of sign-in, magic-link, verification and reset pages. */
+/** Whole path segments of sign-in, magic-link, verification and reset pages. */
 const AUTH_PATH =
-  /(?:^|\/)(?:magic[-_]?links?|magic|auth|oauth2?|sso|saml|login|log-?in|sign-?in|signin|callback|verify|verification|confirm|activate|reset[-_]?password|password[-_]?reset|reset|one[-_]?time)(?:$|[/._-])/i;
+  /(?:^|\/)(?:magic[-_]?links?|auth|authorize|oauth2?|sso|saml|login|log[-_]?in|sign[-_]?in|callback|verify|verify[-_]?email|verification|confirm|confirm[-_]?email|activate|reset[-_]?password|password[-_]?reset|reset|recover|recovery|unsubscribe|one[-_]?time)(?:$|\/)/i;
+
+/** A path segment this long and opaque is a token (a JWT, a signed id). */
+const OPAQUE_SEGMENT = /(?:^|\/)[A-Za-z0-9_\-.~%=]{40,}(?:$|\/)/;
 
 /** An opaque value this long is treated as a credential whatever its key. */
 const OPAQUE_VALUE = /^[A-Za-z0-9_\-.~%+/=]{40,}$/;
 
 function hasSecretParams(params: URLSearchParams): boolean {
   for (const [key, value] of params) {
-    if (SECRET_PARAM.test(key) || OPAQUE_VALUE.test(value)) return true;
+    // `sessionId`, `authCode` read as `session_id`, `auth_code`.
+    const words = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2");
+    if (SECRET_PARAM.test(words) || OPAQUE_VALUE.test(value)) return true;
   }
   return false;
 }
@@ -127,6 +133,7 @@ export function looksPrivateLink(url: string): boolean {
   }
   if (parsed.username || parsed.password) return true;
   if (AUTH_PATH.test(parsed.pathname)) return true;
+  if (OPAQUE_SEGMENT.test(parsed.pathname)) return true;
   if (hasSecretParams(parsed.searchParams)) return true;
   const fragment = parsed.hash.slice(1);
   return (

@@ -51,6 +51,12 @@ describe("links not to prefetch", () => {
       "https://app.example/reset-password/abc",
       "https://app.example/oauth/callback",
       "https://user:pw@app.example/",
+      "https://app.example/x?sessionId=abc",
+      "https://app.example/x?oobCode=abc",
+      "https://app.example/x?PHPSESSID=abc",
+      "https://app.example/users/sign_in",
+      "https://app.example/unsubscribe/x",
+      "https://app.example/e/" + "b".repeat(48),
     ];
     for (const url of privateLinks) {
       expect(looksPrivateLink(url), url).toBe(true);
@@ -66,6 +72,9 @@ describe("links not to prefetch", () => {
       "https://x.com/someone/status/1234567890123456789",
       "https://en.wikipedia.org/wiki/Author",
       "https://example.com/keyboards?keyword=split",
+      "https://en.wikipedia.org/wiki/Magic",
+      "https://en.wikipedia.org/wiki/Callback_(computer_programming)",
+      "https://blog.example/reset-your-router",
     ];
     for (const url of ordinary) {
       expect(looksPrivateLink(url), url).toBe(false);
