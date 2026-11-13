@@ -3808,7 +3808,11 @@ describe("VoiceRoom lifecycle", () => {
               provider: "radio",
               title: "Resolved Radio Station",
               streamUrl: "https://stream.example.com/radio",
-              artworkUrl: "https://station.example.com/artwork.png",
+              // The station's favicon reaches listeners through the
+              // signed media proxy, never from the station's host.
+              artworkUrl: expect.stringMatching(
+                /\/api\/proxy-media\?url=https%3A%2F%2Fstation\.example\.com%2Fartwork\.png&sig=[\w-]{22}$/,
+              ),
               canonicalUrl: "https://station.example.com/",
               sourceLabel: "Live Radio",
             },
