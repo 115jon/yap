@@ -1055,7 +1055,7 @@ describe("dashcam GPS", () => {
     }
   });
 
-  it("flags a top-level free or skip box that holds data", async () => {
+  it("zeroes a top-level free or skip box that holds data", async () => {
     for (const type of ["free", "skip"]) {
       const file = concat(
         head,
@@ -1063,17 +1063,35 @@ describe("dashcam GPS", () => {
         moov,
       );
       const { out, scan } = await strip(file);
-      expect(scan.unchecked).toBe("vendor-data");
-      // Flagged, not rewritten.
-      expect(contains(out, text("freeGPS "))).toBe(true);
+      expect(scan.unchecked ?? null).toBe(null);
+      expect(scan.stripped).toContain("other");
+      expect(contains(out, text("freeGPS "))).toBe(false);
+      expect(out.byteLength).toBe(file.byteLength);
     }
+  });
+
+  it("zeroes an encoder note in a free box without refusing the file", async () => {
+    const file = concat(
+      head,
+      box("free", text("IsoMedia File Produced by Google, 5-11-2011")),
+      moov,
+    );
+    const { out, scan } = await strip(file);
+    expect(scan.unchecked ?? null).toBe(null);
+    expect(contains(out, text("Produced by Google"))).toBe(false);
   });
 
   it("finds data at the end of a big free box", async () => {
     const payload = new Uint8Array(200 * 1024);
     payload[payload.length - 1] = 1;
-    const { scan } = await strip(concat(head, box("free", payload), moov));
-    expect(scan.unchecked).toBe("vendor-data");
+    const file = concat(head, box("free", payload), moov);
+    const { out, scan } = await strip(file);
+    expect(scan.unchecked ?? null).toBe(null);
+    expect(out.byteLength).toBe(file.byteLength);
+    const start = head.byteLength + 8;
+    expect(
+      out.subarray(start, start + payload.length).every((b) => b === 0),
+    ).toBe(true);
   });
 
   it("leaves zeroed and empty padding alone", async () => {

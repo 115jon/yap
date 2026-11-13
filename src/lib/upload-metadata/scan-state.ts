@@ -20,8 +20,7 @@ export type UncheckedReason =
    */
   | "timed-metadata"
   /**
-   * A dashcam's own GPS store: a Novatek `gps ` atom, or data left in a
-   * top-level `free`/`skip` box.
+   * A dashcam's own GPS store: a Novatek `gps ` atom.
    */
   | "vendor-data";
 

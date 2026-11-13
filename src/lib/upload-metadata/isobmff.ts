@@ -14,9 +14,10 @@
 // frame: GoPro's GPMF `gpmd`, the `camm` camera motion track, DJI's `djmd`,
 // any timed-metadata (`meta` handler) track except Apple's `mebx` with no
 // location key, and subtitle or text tracks (drones write their position
-// as subtitles). Dashcams keep GPS of their own: a Novatek `gps ` atom, or
-// data in top-level `free`/`skip` boxes. None of these is rewritten; the
-// file is reported as unchecked.
+// as subtitles), and a Novatek dashcam keeps a `gps ` atom. None of these
+// is rewritten; the file is reported as unchecked. Data in a top-level
+// `free`/`skip` box (dashcam freeGPS, encoder notes) is padding by
+// definition, so it is zeroed instead.
 //
 // HEIF/HEIC and AVIF stills share the container but keep their EXIF in an
 // item; they are reported as unchecked, not cleaned. So is any other brand
@@ -224,7 +225,11 @@ export async function scanIsoVideo(
       PADDING_BOXES.has(box.type) &&
       (await holdsData(reader, pos + box.headerSize, pos + box.size))
     ) {
-      state.unchecked ??= "vendor-data";
+      // Padding's payload is ignored by every reader, so blanking it is
+      // always safe; it clears dashcam freeGPS and encoder notes alike
+      // ("IsoMedia File Produced by Google") without refusing the file.
+      state.kinds.add("other");
+      zero(state, pos + box.headerSize, box.size - box.headerSize);
     }
     pos += box.size;
   }
