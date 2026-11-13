@@ -38,6 +38,11 @@ pub struct Limits {
     /// video pull after its delay, watched shares too, and pulls them
     /// again when this clears.
     pub paused: bool,
+    /// A watched share is pulled only while a tile shows it, so it is
+    /// dropped with the rest when no page shows the call or past
+    /// `max_shown` ([`VideoIntent::watch_needs_tile`]). The phone sets it;
+    /// the desktop leaves it off and keeps a watched share pulled.
+    pub watch_needs_tile: bool,
 }
 
 /// A phone's thermal status, as Android's `PowerManager` numbers it
@@ -68,6 +73,7 @@ impl Limits {
             full_on_stage_only: true,
             max_shown: Some(PHONE_MAX_SHOWN),
             paused: background,
+            watch_needs_tile: false,
         }
     }
 }
@@ -127,6 +133,7 @@ impl Surfaces {
             demand,
             stage: self.stage.clone(),
             suspended: self.limits.paused,
+            watch_needs_tile: self.limits.watch_needs_tile,
         }
     }
 }
@@ -244,6 +251,29 @@ mod tests {
         assert!(!s.intent().suspended);
         s.limits = Limits::phone(0, false, false);
         assert!(!s.intent().suspended);
+    }
+
+    #[test]
+    fn watch_needs_tile_should_pass_through_and_default_off() {
+        let mut s = Surfaces::default();
+        assert!(!s.intent().watch_needs_tile);
+        assert!(!Limits::phone(0, false, false).watch_needs_tile);
+        s.limits.watch_needs_tile = true;
+        assert!(s.intent().watch_needs_tile);
+    }
+
+    #[test]
+    fn max_shown_should_leave_the_fifth_share_out() {
+        let mut s = Surfaces::default();
+        for (id, pid) in (1..).zip(["a", "b", "c", "d", "e"]) {
+            s.shown
+                .insert(id, (format!("screen-video-{pid}"), size(640, 360)));
+        }
+        s.limits = Limits {
+            watch_needs_tile: true,
+            ..Limits::phone(0, false, false)
+        };
+        assert_eq!(s.intent().demand.len(), PHONE_MAX_SHOWN);
     }
 
     #[test]
