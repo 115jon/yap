@@ -59,19 +59,22 @@ A user's profile has an Activity timeline that Yap's server writes:
 - badges earned and servers joined.
 
 Games, calls, screen shares and Listen Together sessions are not recorded
-while "Share my activity" is off or the user is invisible (as of when the
-session ends).
+on the timeline while "Share my activity" is off or the user is invisible (as
+of when the session ends). The usage counters above (voice and screen-share
+time per day) still count them.
 
 The user sees their whole timeline. Other people see it only when they share
-a server, a direct message or a friendship with the user, and never when
+a server or a friendship with the user, or a direct message the user has
+written in, and never when
 either side has blocked the other. They do not see events or kinds of events
 the user has hidden, or calls, screen shares and Listen Together sessions in
 direct messages and group direct messages; and they see the channel and server
 of a call only when they are in that server. Events are kept for the period
 the user chooses (7, 30 or 90 days; 30 by default) and then deleted.
 
-Profile board widgets the user adds, such as Top games, show summaries of
-these records to anyone who can open the profile.
+Profile board widgets the user adds, such as Top games and Voice hours, show
+summaries of these records and counters to anyone who can open the profile;
+they leave out calls and Listen Together sessions in direct messages.
 
 ## Connections
 
@@ -133,8 +136,9 @@ Yap uses these services:
 - `deadlock-api.com`, from Yap's server only, for Deadlock stats (see
   Deadlock stats).
 - Firebase Cloud Messaging (Google) for push notifications to the mobile
-  apps. A message notification carries the sender's name, where it was sent
-  and the start of the message (up to 180 characters).
+  apps. A message notification carries the sender's name, account ID and
+  avatar address, the channel and server names and IDs, the message ID and
+  send time, and the start of the message (up to 180 characters).
 - KLIPY and Tenor for GIF, sticker and clip search. Yap's server sends them
   the search terms; KLIPY also gets a pseudonymous identifier derived from
   the account (never the account ID or name). The pictures and videos
