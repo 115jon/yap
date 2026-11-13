@@ -11,7 +11,7 @@
 //   system bars    light or dark status and navigation bar icons
 //   keyboard       the IME inset, frame by frame (WindowInsetsAnimation)
 //   haptics        View.performHapticFeedback
-//   share          the system share sheet (ACTION_SEND)
+//   share          the system share sheet (ACTION_SEND), with a title
 //   text size      Configuration.fontScale
 //   motion         the animator duration scale (Remove animations)
 //   accent         Material You's system accent (Android 12+)
@@ -22,6 +22,9 @@
 //                  Mark as read, the conversation on screen (its pushes stay
 //                  quiet) and the notification permission (cpp/push.cpp,
 //                  android/src/dev/yap/qtproto/push)
+//   links          the web's invite and chat links and yap:// links the
+//                  app was opened with, held until the QML takes them
+//                  (cpp/links.cpp, android/src/dev/yap/qtproto/LinkShim)
 //   voice          the microphone permission, the call's audio routes
 //                  (speaker, earpiece, headset, Bluetooth) and what the call
 //                  notification shows (cpp/voice.cpp,
@@ -108,7 +111,8 @@ public:
   void setActiveConversation(const QString& channelId);
 
   Q_INVOKABLE void haptic(Haptic kind) const;
-  Q_INVOKABLE void share(const QString& text) const;
+  // `title` heads the share sheet (empty: the system's own).
+  Q_INVOKABLE void share(const QString& text, const QString& title = QString()) const;
   Q_INVOKABLE void copy(const QString& text) const;
   // Back at the root: leave as the system would (the task goes back).
   Q_INVOKABLE void leave() const;
@@ -124,6 +128,9 @@ public:
   // `serverId`, and a DM's `userId`; empty: none). `openRequested` says one
   // is waiting.
   Q_INVOKABLE QVariantMap takeOpenRequest();
+  // The link the app was last opened with, once (empty: none).
+  // `linkRequested` says one is waiting.
+  Q_INVOKABLE QString takeLinkRequest();
   // Signed out: the account's notifications and conversation shortcuts go.
   Q_INVOKABLE void forgetNotifications() const;
 
@@ -152,6 +159,7 @@ public:
   void onMediaCopying();
   void onMediaPicked(const QStringList& paths, int failed);
   void onOpenRequest(const QString& channelId, const QString& serverId, const QString& userId);
+  void onLinkRequest(const QString& url);
   void onAudioRoutes(const QByteArray& json);
 
 signals:
@@ -170,6 +178,7 @@ signals:
   void notificationsEnabledChanged();
   void activeConversationChanged();
   void openRequested();
+  void linkRequested();
   void audioRoutesChanged();
   void microphoneAnswered(bool granted);
 
@@ -192,6 +201,8 @@ private:
   void readNotificationsEnabled();
   // cpp/voice.cpp.
   void installVoice();
+  // cpp/links.cpp.
+  void installLinks();
 
   bool m_handlesBack = false;
   // Back reaches the app through the shim's OnBackInvokedCallback (API 33+).
@@ -213,6 +224,7 @@ private:
   qint64 m_pickStartedMs = 0;
   bool m_notificationsEnabled = false;
   QString m_activeConversation;
+  QString m_linkRequest;
   QVariantMap m_openRequest;
   QVariantList m_audioRoutes;
   bool m_askingMicrophone = false;

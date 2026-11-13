@@ -30,6 +30,8 @@ Item {
     signal friendsRequested()
     signal voiceRequested(string channelId)
     signal callRequested()
+    signal serverMenuRequested()
+    signal channelMenuRequested(string channelId, string name, bool voice)
     // A message's "N replies": its thread, as a page.
     signal threadRequested(string messageId)
 
@@ -292,6 +294,8 @@ Item {
         onFriendsRequested: pager.friendsRequested()
         onVoiceRequested: channelId => pager.voiceRequested(channelId)
         onCallRequested: pager.callRequested()
+        onServerMenuRequested: pager.serverMenuRequested()
+        onChannelMenuRequested: (channelId, name, voice) => pager.channelMenuRequested(channelId, name, voice)
     }
 
     Item {

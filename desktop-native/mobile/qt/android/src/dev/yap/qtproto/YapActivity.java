@@ -9,10 +9,11 @@ import dev.yap.qtproto.push.PushShim;
 import dev.yap.qtproto.voice.VoiceShim;
 
 /**
- * Qt's activity, with a notification's tap kept for the push code: a tap
- * can arrive (onCreate, or onNewIntent on a task relaunched from Recents)
- * before Qt's main() has installed the push shim, so PushShim holds it
- * until install() reads it. And with a call's goodbye on the way out.
+ * Qt's activity, with a notification's tap kept for the push code and a
+ * link for the link code: either can arrive (onCreate, or onNewIntent on a
+ * task relaunched from Recents) before Qt's main() has installed its shim,
+ * so PushShim and LinkShim hold it until install() reads it. And with a
+ * call's goodbye on the way out.
  */
 public class YapActivity extends QtActivity {
     @Override
@@ -21,7 +22,10 @@ public class YapActivity extends QtActivity {
         // Recents) carries the intent it was first started with: an old tap.
         boolean fresh = savedInstanceState == null
                 && (getIntent().getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0;
-        if (fresh) PushShim.offer(getIntent());
+        if (fresh) {
+            PushShim.offer(getIntent());
+            LinkShim.offer(getIntent());
+        }
         super.onCreate(savedInstanceState);
     }
 
@@ -29,6 +33,7 @@ public class YapActivity extends QtActivity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         PushShim.offer(intent);
+        LinkShim.offer(intent);
     }
 
     @Override
