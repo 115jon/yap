@@ -19,6 +19,7 @@ import {
   inferGifPickerMediaType,
   isGifPickerMediaType,
   MAX_GIF_FAVORITES,
+  gifSearchMediaFilter,
   normalizeKlipyCategory,
   normalizeKlipyGifResult,
   normalizeKlipyNativeResult,
@@ -858,11 +859,7 @@ const GET = async ({ request }: any) => {
       if (provider === "tenor" && mediaType === "stickers") {
         params.searchfilter = "sticker";
       } else if (mediaType === "gifs") {
-        // Tenor's tinywebp is the light tile picture (a sixth of tinygif).
-        params.media_filter =
-          provider === "tenor"
-            ? "gif,mediumgif,tinygif,mp4,tinymp4,tinywebp"
-            : "gif,mediumgif,tinygif,mp4,tinymp4";
+        params.media_filter = gifSearchMediaFilter(provider);
       }
     }
 

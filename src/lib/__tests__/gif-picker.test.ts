@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  gifSearchMediaFilter,
   appendUniqueGifPickerItems,
   DEFAULT_GIF_PROVIDER,
   buildTenorCacheKey,
@@ -610,6 +611,42 @@ describe("picker tile renditions", () => {
       url: "https://m.test/tiny.webp",
       contentType: "image/webp",
     });
+  });
+
+  it("prefers KLIPY's lighter webp over its tinygif", () => {
+    const item = normalizeKlipyGifResult({
+      id: "k",
+      media_formats: {
+        gif: big,
+        tinygif: {
+          url: "https://m.test/tiny.gif",
+          dims: [220, 123],
+          size: 636_095,
+        },
+        tinymp4,
+        webp: {
+          url: "https://m.test/full.webp",
+          dims: [478, 332],
+          size: 53_490,
+        },
+      },
+    })!;
+    expect(item.thumb).toMatchObject({
+      url: "https://m.test/full.webp",
+      contentType: "image/webp",
+    });
+    expect(item.preview.url).toBe(tinymp4.url);
+    expect(item.send.url).toBe(big.url);
+  });
+
+  it("asks each provider for its light tile picture", () => {
+    expect(gifSearchMediaFilter("tenor").split(",")).toContain("tinywebp");
+    expect(gifSearchMediaFilter("klipy").split(",")).toContain("webp");
+    for (const provider of ["tenor", "klipy"] as const) {
+      expect(gifSearchMediaFilter(provider).split(",")).toEqual(
+        expect.arrayContaining(["gif", "tinygif", "mp4", "tinymp4"]),
+      );
+    }
   });
 
   it("falls back to the biggest small picture when none is tile sized", () => {

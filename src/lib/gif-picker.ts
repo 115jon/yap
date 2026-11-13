@@ -341,6 +341,17 @@ function normalizeTenorAsset(
   };
 }
 
+/**
+ * The renditions a GIF search asks the provider for: the sent and preview
+ * ones, plus a light tile picture for pickGifThumb. Tenor's tinywebp is
+ * about a sixth of its tinygif. KLIPY has no tinywebp; its webp is
+ * full-size but about a third of its tinygif at median.
+ */
+export function gifSearchMediaFilter(provider: GifProvider): string {
+  const base = "gif,mediumgif,tinygif,mp4,tinymp4";
+  return provider === "tenor" ? `${base},tinywebp` : `${base},webp`;
+}
+
 /** A tile is about this wide on a dense phone screen; smaller looks soft. */
 export const GIF_THUMB_MIN_EDGE = 180;
 
