@@ -10,6 +10,8 @@
 
 import { notePublicOrigin } from "../src/server/media-proxy/origin";
 import {
+  getMediaRewriteContext,
+  proxiedClientMediaUrl,
   proxyAvatarUrlForDelivery,
   proxyEmbedsForDelivery,
 } from "../src/server/media-proxy/rewrite";
@@ -196,6 +198,11 @@ interface Env {
 // Opcodes, codes and payload schemas: src/lib/gateway-protocol.
 
 const MAX_STREAM_PREVIEW_URL_BYTES = 4_096;
+
+/** A share's still as clients send it: an inline image, never a host's URL. */
+export function isStreamPreviewStill(value: string): boolean {
+  return /^data:image\//i.test(value);
+}
 const MAX_WEBSOCKET_ATTACHMENT_BYTES = 16_384;
 
 // ── Shared interfaces ───────────────────────────────────────────────────────
@@ -3834,7 +3841,16 @@ export class MeetingRoom extends DurableObject<Env> {
       let resolvedName = d.name;
       let resolvedUsername = d.username ?? d.name;
       let resolvedDisplayName = d.display_name ?? null;
-      let resolvedAvatar: string | null | undefined = d.avatar_url;
+      // Without a stored profile (a demo guest, a user not synced yet) the
+      // picture is the client's own URL, which the whole room loads: through
+      // the media proxy with an expiring signature, never as sent.
+      let resolvedAvatar: string | null | undefined =
+        typeof d.avatar_url === "string" && d.avatar_url
+          ? proxiedClientMediaUrl(
+              d.avatar_url.slice(0, 2048),
+              getMediaRewriteContext(),
+            )
+          : d.avatar_url;
       // An AvatarDisplay object (not only its string form) is stored and
       // broadcast as sent, as before; profiles from the resolver are strings.
       let resolvedAvatarDisplay = (d.avatar_display ?? null) as string | null;
@@ -4565,8 +4581,15 @@ export class MeetingRoom extends DurableObject<Env> {
     }
     if (d.self_stream_audio !== undefined)
       session.self_stream_audio = d.self_stream_audio;
-    if (d.stream_preview_url !== undefined)
-      session.stream_preview_url = d.stream_preview_url;
+    // A share's still is a data:image/ URL. Anything else (a URL every
+    // viewer would fetch from a host of the sender's choosing) is cleared.
+    const streamPreviewUrl =
+      typeof d.stream_preview_url === "string" &&
+      !isStreamPreviewStill(d.stream_preview_url)
+        ? null
+        : d.stream_preview_url;
+    if (streamPreviewUrl !== undefined)
+      session.stream_preview_url = streamPreviewUrl;
     if (d.spatial_audio_enabled !== undefined)
       session.spatial_audio_enabled = d.spatial_audio_enabled;
     if (d.spatial_audio_high_fidelity !== undefined)
@@ -4593,8 +4616,8 @@ export class MeetingRoom extends DurableObject<Env> {
     }
     if (hintChannel && session.user_id) {
       const hint: VoiceMemberHint = {};
-      if (d.stream_preview_url !== undefined)
-        hint.stream_preview_url = d.stream_preview_url;
+      if (streamPreviewUrl !== undefined)
+        hint.stream_preview_url = streamPreviewUrl;
       if (d.spatial_audio_enabled !== undefined)
         hint.spatial_audio_enabled = d.spatial_audio_enabled;
       if (d.spatial_audio_high_fidelity !== undefined)
