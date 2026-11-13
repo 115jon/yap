@@ -7,20 +7,29 @@
 // eXIf, cut down to that one tag. Critical chunks, colour chunks (iCCP,
 // sRGB, gAMA, cHRM, cICP) and APNG frames are never touched.
 
-import { ascii, asciiBytes, type Reader, startsWith, u32be } from "./bytes";
+import {
+  ascii,
+  asciiBytes,
+  MalformedFile,
+  type Reader,
+  startsWith,
+  u32be,
+} from "./bytes";
 import {
   ORIENTATION_TIFF_LENGTH,
   orientationTiff,
   summarizeTiff,
 } from "./exif";
-import { addKinds, type ScanState } from "./scan-state";
+import { addKinds, type ScanState, write } from "./scan-state";
 import { summarizeXmp } from "./xmp";
 
 const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 /** Ancillary, private, safe to copy: ignored by every PNG decoder. */
-const PADDING_TYPE = "yaPd";
+const PADDING_TYPE = asciiBytes("yaPd");
+const EXIF_TYPE = asciiBytes("eXIf");
 const TEXT_TYPES = new Set(["tEXt", "zTXt", "iTXt"]);
-const MAX_CHUNKS = 1_000_000;
+/** More chunks than this is not a picture anyone exported. */
+const MAX_CHUNKS = 200_000;
 /** Text chunks bigger than this are zeroed without being read. */
 const MAX_INSPECTED_TEXT = 1024 * 1024;
 
@@ -28,16 +37,20 @@ export function isPng(head: Uint8Array): boolean {
   return SIGNATURE.every((byte, k) => head[k] === byte);
 }
 
+/**
+ * Every way out of the walk but IEND throws: a scan that stopped early
+ * can't say the rest of the file is clean.
+ */
 export async function scanPng(reader: Reader, state: ScanState): Promise<void> {
   let pos = 8;
   for (let chunks = 0; chunks < MAX_CHUNKS; chunks += 1) {
     const head = await reader.bytes(pos, 8);
-    if (head.byteLength < 8) return;
+    if (head.byteLength < 8) throw new MalformedFile("no IEND");
     const length = u32be(head, 0);
     const type = ascii(head, 4, 4);
     const dataStart = pos + 8;
     const next = dataStart + length + 4;
-    if (next > reader.size) return;
+    if (next > reader.size) throw new MalformedFile(`chunk past end at ${pos}`);
     if (type === "IEND") return;
 
     if (type === "eXIf") {
@@ -50,7 +63,13 @@ export async function scanPng(reader: Reader, state: ScanState): Promise<void> {
         orientation !== 1 &&
         length >= ORIENTATION_TIFF_LENGTH
       ) {
-        rewriteChunk(state, pos, "eXIf", length, orientationTiff(orientation));
+        rewriteChunk(
+          state,
+          pos,
+          EXIF_TYPE,
+          length,
+          orientationTiff(orientation),
+        );
       } else {
         rewriteChunk(state, pos, PADDING_TYPE, length);
       }
@@ -75,6 +94,38 @@ export async function scanPng(reader: Reader, state: ScanState): Promise<void> {
     }
     pos = next;
   }
+  throw new MalformedFile("too many chunks");
+}
+
+/** CRCs of zero-filled padding chunks by length (most files reuse one). */
+const paddingCrcs = new Map<number, Uint8Array>();
+const MAX_CACHED_CRCS = 64;
+
+function crcBytes(crc: number): Uint8Array {
+  return Uint8Array.from(
+    [crc >>> 24, crc >>> 16, crc >>> 8, crc],
+    (b) => b & 0xff,
+  );
+}
+
+function chunkCrc(
+  type: Uint8Array,
+  length: number,
+  data?: Uint8Array,
+): Uint8Array {
+  if (!data && type === PADDING_TYPE) {
+    const cached = paddingCrcs.get(length);
+    if (cached) return cached;
+  }
+  let crc = crc32Update(0xffffffff, type);
+  if (data) crc = crc32Update(crc, data);
+  crc = crc32Zeros(crc, length - (data?.byteLength ?? 0));
+  const bytes = crcBytes((crc ^ 0xffffffff) >>> 0);
+  if (!data && type === PADDING_TYPE) {
+    if (paddingCrcs.size >= MAX_CACHED_CRCS) paddingCrcs.clear();
+    paddingCrcs.set(length, bytes);
+  }
+  return bytes;
 }
 
 /**
@@ -84,24 +135,19 @@ export async function scanPng(reader: Reader, state: ScanState): Promise<void> {
 function rewriteChunk(
   state: ScanState,
   pos: number,
-  type: string,
+  type: Uint8Array,
   length: number,
   data?: Uint8Array,
 ) {
-  const typeBytes = asciiBytes(type);
-  let crc = crc32Update(0xffffffff, typeBytes);
-  if (data) crc = crc32Update(crc, data);
-  crc = crc32Zeros(crc, length - (data?.byteLength ?? 0));
-  crc = (crc ^ 0xffffffff) >>> 0;
-  state.patches.push({ offset: pos + 4, length: 4, bytes: typeBytes });
-  state.patches.push({ offset: pos + 8, length, bytes: data });
-  state.patches.push({
-    offset: pos + 8 + length,
-    length: 4,
-    bytes: new Uint8Array(
-      [crc >>> 24, crc >>> 16, crc >>> 8, crc].map((b) => b & 0xff),
-    ),
-  });
+  // Type and data are one patch: the type bytes, then data, then zeros.
+  let head = type;
+  if (data) {
+    head = new Uint8Array(4 + data.byteLength);
+    head.set(type);
+    head.set(data, 4);
+  }
+  write(state, pos + 4, 4 + length, head);
+  write(state, pos + 8 + length, 4, chunkCrc(type, length, data));
 }
 
 let crcTable: Uint32Array | null = null;

@@ -10,6 +10,12 @@ import {
   scanUploadMetadata,
 } from "@/lib/upload-metadata";
 import { summarizeTiff } from "@/lib/upload-metadata/exif";
+import {
+  MAX_PATCHES,
+  type ScanState,
+  write,
+  zero,
+} from "@/lib/upload-metadata/scan-state";
 
 import {
   BASE_JPEG,
@@ -34,6 +40,10 @@ import {
   webpWith,
   xmpPacket,
 } from "./fixtures/metadata-files";
+
+function u32(value: number): number[] {
+  return [value >>> 24, (value >>> 16) & 255, (value >>> 8) & 255, value & 255];
+}
 
 async function strip(
   file: Uint8Array,
@@ -513,5 +523,90 @@ describe("sources and streams", () => {
       }).pipeThrough(patchingStream(scan.patches)),
     ).arrayBuffer();
     expect(new Uint8Array(streamed)).toEqual(expected);
+  });
+});
+
+describe("hostile files", () => {
+  /** Scans `file` and returns the scan and the heap it grew by, in MB. */
+  async function scanMeasured(file: Uint8Array) {
+    const before = process.memoryUsage().heapUsed;
+    const scan = await scanUploadMetadata(bufferSource(file));
+    const grownMb = (process.memoryUsage().heapUsed - before) / 1e6;
+    return { scan, grownMb };
+  }
+
+  it("stops a GIF of ten million 1-byte comment blocks", async () => {
+    const blocks = 10_000_000;
+    const file = new Uint8Array(13 + 2 + blocks * 2 + 2);
+    file.set([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 0, 1, 0, 0, 0, 0]);
+    let p = 13;
+    file[p++] = 0x21;
+    file[p++] = 0xfe;
+    for (let k = 0; k < blocks; k += 1) {
+      file[p++] = 1;
+      file[p++] = 0x41;
+    }
+    file[p++] = 0;
+    file[p] = 0x3b;
+    const { scan, grownMb } = await scanMeasured(file);
+    expect(scan.unchecked).toBe("malformed");
+    expect(scan.patches.length).toBeLessThanOrEqual(MAX_PATCHES);
+    expect(grownMb).toBeLessThan(32);
+  });
+
+  it("stops a PNG of a million empty text chunks", async () => {
+    const chunks = 1_000_000;
+    const file = new Uint8Array(8 + chunks * 12 + 12);
+    file.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    for (let k = 0; k < chunks; k += 1) {
+      file.set([0, 0, 0, 0, 0x74, 0x45, 0x58, 0x74], 8 + k * 12);
+    }
+    file.set([0, 0, 0, 0, 0x49, 0x45, 0x4e, 0x44], 8 + chunks * 12);
+    const { scan, grownMb } = await scanMeasured(file);
+    expect(scan.unchecked).toBe("malformed");
+    expect(scan.patches.length).toBeLessThanOrEqual(MAX_PATCHES);
+    expect(grownMb).toBeLessThan(32);
+    // The padding chunks share their type bytes and CRC.
+    expect(new Set(scan.patches.map((patch) => patch.bytes)).size).toBe(2);
+  });
+
+  it("stops an MP4 of millions of 8-byte location boxes", async () => {
+    const atoms = 3_000_000;
+    const udtaSize = 8 + atoms * 8;
+    const moov = new Uint8Array(8 + udtaSize);
+    const view = new DataView(moov.buffer);
+    view.setUint32(0, moov.length);
+    moov.set(text("moov"), 4);
+    view.setUint32(8, udtaSize);
+    moov.set(text("udta"), 12);
+    for (let k = 0; k < atoms; k += 1) {
+      view.setUint32(16 + k * 8, 8);
+      moov.set([0xa9, 0x78, 0x79, 0x7a], 20 + k * 8);
+    }
+    const file = concat(box("ftyp", text("isom"), u32(0), text("isom")), moov);
+    const { scan, grownMb } = await scanMeasured(file);
+    expect(scan.unchecked).toBe("malformed");
+    expect(scan.patches.length).toBeLessThanOrEqual(MAX_PATCHES);
+    expect(grownMb).toBeLessThan(64);
+  });
+
+  it("merges zeroed ranges that touch", () => {
+    const state: ScanState = { kinds: new Set(), patches: [] };
+    const head = Uint8Array.of(1, 2);
+    write(state, 0, 4, head);
+    zero(state, 4, 10); // starts where the last patch ends
+    zero(state, 8, 20); // overlaps it
+    zero(state, 30, 2); // a gap: a new patch
+    expect(state.patches).toEqual([
+      { offset: 0, length: 28, bytes: head },
+      { offset: 30, length: 2 },
+    ]);
+  });
+
+  it("does not merge zeros into the bytes a patch writes", () => {
+    const state: ScanState = { kinds: new Set(), patches: [] };
+    write(state, 0, 8, Uint8Array.of(1, 2, 3, 4));
+    zero(state, 2, 4);
+    expect(state.patches).toHaveLength(2);
   });
 });

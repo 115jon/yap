@@ -18,7 +18,7 @@ import {
   readIfd0Tag,
   summarizeTiff,
 } from "./exif";
-import { addKinds, type ScanState, zero } from "./scan-state";
+import { addKinds, type ScanState, write, zero } from "./scan-state";
 import { isRenderOnlyXmp, summarizeXmp } from "./xmp";
 
 const MARKER_SOS = 0xda;
@@ -114,11 +114,7 @@ export async function scanJpeg(
             );
             bytes.set(asciiBytes(EXIF_ID));
             bytes.set(orientationTiff(orientation), EXIF_ID.length);
-            state.patches.push({
-              offset: payloadStart,
-              length: payloadLength,
-              bytes,
-            });
+            write(state, payloadStart, payloadLength, bytes);
           } else {
             zero(state, payloadStart, payloadLength);
           }

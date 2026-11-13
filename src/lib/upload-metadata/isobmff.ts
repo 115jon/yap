@@ -13,9 +13,16 @@
 // HEIF/HEIC and AVIF stills share the container but keep their EXIF in an
 // item; they are reported as unchecked, not cleaned.
 
-import { ascii, asciiBytes, type Reader, startsWith, u32be } from "./bytes";
+import {
+  ascii,
+  asciiBytes,
+  MalformedFile,
+  type Reader,
+  startsWith,
+  u32be,
+} from "./bytes";
 import type { MetadataKind } from "./exif";
-import { addKinds, type ScanState, zero } from "./scan-state";
+import { addKinds, type ScanState, write, zero } from "./scan-state";
 import { summarizeXmp } from "./xmp";
 
 export type IsoBrand = "video" | "heif" | "avif";
@@ -43,6 +50,7 @@ const XMP_UUID = [
 
 const MAX_MOOV = 32 * 1024 * 1024;
 const MAX_TOP_LEVEL_BOXES = 100_000;
+const FREE_TYPE = asciiBytes("free");
 const MAX_DEPTH = 8;
 
 const LOCATION_ATOMS = new Set(["\xa9xyz", "loci"]);
@@ -108,7 +116,8 @@ export async function scanIsoVideo(
   state: ScanState,
 ): Promise<void> {
   let pos = 0;
-  for (let k = 0; k < MAX_TOP_LEVEL_BOXES && pos < reader.size; k += 1) {
+  for (let k = 0; pos < reader.size; k += 1) {
+    if (k >= MAX_TOP_LEVEL_BOXES) throw new MalformedFile("too many boxes");
     const head = await reader.bytes(pos, 32);
     const box = topLevelBox(head, reader.size - pos);
     if (!box) return;
@@ -153,8 +162,14 @@ function topLevelBox(head: Uint8Array, remaining: number): BoxHeader | null {
 
 /** Turns the box at file offset `at` into a zero-filled `free` box. */
 function toFree(state: ScanState, at: number, box: BoxHeader) {
-  state.patches.push({ offset: at + 4, length: 4, bytes: asciiBytes("free") });
-  zero(state, at + box.headerSize, box.size - box.headerSize);
+  if (box.headerSize === 8) {
+    // The type and the payload are contiguous: one patch.
+    write(state, at + 4, box.size - 4, FREE_TYPE);
+  } else {
+    // A 64-bit size sits between them and stays.
+    write(state, at + 4, 4, FREE_TYPE);
+    zero(state, at + box.headerSize, box.size - box.headerSize);
+  }
 }
 
 function isXmpUuid(b: Uint8Array, at: number): boolean {

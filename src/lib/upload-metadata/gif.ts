@@ -8,7 +8,11 @@
 import { type Reader, startsWith } from "./bytes";
 import { type ScanState, zero } from "./scan-state";
 
-const MAX_BLOCKS = 10_000_000;
+/**
+ * Blocks and sub-blocks walked per file: a 255-byte sub-block each is
+ * about 500 MB of frames, more than any upload limit.
+ */
+const MAX_BLOCKS = 2_000_000;
 
 export function isGif(head: Uint8Array): boolean {
   return startsWith(head, 0, "GIF87a") || startsWith(head, 0, "GIF89a");

@@ -191,7 +191,13 @@ export function applyPatches(bytes: Uint8Array, patches: Patch[]): void {
 export function patchingStream(
   patches: Patch[],
 ): TransformStream<Uint8Array, Uint8Array> {
-  const sorted = [...patches].sort((a, b) => a.offset - b.offset);
+  // Scanners emit patches in file order, so this is almost always a check,
+  // not a sort (and there are at most MAX_PATCHES of them either way).
+  const sorted = patches.every(
+    (patch, k) => k === 0 || patches[k - 1].offset <= patch.offset,
+  )
+    ? patches
+    : [...patches].sort((a, b) => a.offset - b.offset);
   let position = 0;
   let first = 0;
   return new TransformStream<Uint8Array, Uint8Array>({

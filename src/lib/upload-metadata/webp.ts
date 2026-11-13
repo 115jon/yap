@@ -6,19 +6,28 @@
 // an Orientation other than 1 stays EXIF, cut down to that tag. ICCP,
 // ALPH, ANIM/ANMF frames and the bitstream are never touched.
 
-import { ascii, asciiBytes, type Reader, startsWith, u32le } from "./bytes";
+import {
+  ascii,
+  asciiBytes,
+  MalformedFile,
+  type Reader,
+  startsWith,
+  u32le,
+} from "./bytes";
 import {
   ORIENTATION_TIFF_LENGTH,
   orientationTiff,
   summarizeTiff,
 } from "./exif";
-import { addKinds, type ScanState } from "./scan-state";
+import { addKinds, type ScanState, write, zero } from "./scan-state";
 import { isRenderOnlyXmp, summarizeXmp } from "./xmp";
 
 const FLAG_EXIF = 0x08;
 const FLAG_XMP = 0x04;
-const PADDING_FOURCC = "JUNK";
-const MAX_CHUNKS = 1_000_000;
+const PADDING_FOURCC = asciiBytes("JUNK");
+const EXIF_PREFIX = asciiBytes("Exif\0\0");
+/** More chunks than this is not a picture anyone exported. */
+const MAX_CHUNKS = 200_000;
 /** Metadata chunks bigger than this are zeroed without being read. */
 const MAX_INSPECTED = 4 * 1024 * 1024;
 
@@ -36,13 +45,18 @@ export async function scanWebp(
   let flagsAt = -1;
   let clearFlags = 0;
 
-  for (let chunks = 0; chunks < MAX_CHUNKS && pos + 8 <= riffEnd; chunks += 1) {
+  // Running out of chunks or into a chunk that overruns the file throws: a
+  // scan that stopped early can't say the rest of the file is clean.
+  for (let chunks = 0; pos + 8 <= riffEnd; chunks += 1) {
+    if (chunks >= MAX_CHUNKS) throw new MalformedFile("too many chunks");
     const head = await reader.exact(pos, 8);
     const fourcc = ascii(head, 0, 4);
     const length = u32le(head, 4);
     const dataStart = pos + 8;
     const next = dataStart + length + (length & 1);
-    if (dataStart + length > riffEnd) break;
+    if (dataStart + length > riffEnd) {
+      throw new MalformedFile(`chunk past end at ${pos}`);
+    }
 
     if (fourcc === "VP8X" && pos === 12 && length >= 1) {
       flagsAt = dataStart;
@@ -60,9 +74,9 @@ export async function scanWebp(
         length >= prefix + ORIENTATION_TIFF_LENGTH
       ) {
         const bytes = new Uint8Array(prefix + ORIENTATION_TIFF_LENGTH);
-        if (prefix) bytes.set(asciiBytes("Exif\0\0"));
+        if (prefix) bytes.set(EXIF_PREFIX);
         bytes.set(orientationTiff(orientation), prefix);
-        state.patches.push({ offset: dataStart, length, bytes });
+        write(state, dataStart, length, bytes);
       } else {
         rename(state, pos, length);
         clearFlags |= FLAG_EXIF;
@@ -82,20 +96,12 @@ export async function scanWebp(
   if (clearFlags && flagsAt >= 0) {
     const flags = await reader.u8(flagsAt);
     if (flags & clearFlags) {
-      state.patches.push({
-        offset: flagsAt,
-        length: 1,
-        bytes: new Uint8Array([flags & ~clearFlags]),
-      });
+      write(state, flagsAt, 1, Uint8Array.of(flags & ~clearFlags));
     }
   }
 }
 
 function rename(state: ScanState, pos: number, length: number) {
-  state.patches.push({
-    offset: pos,
-    length: 4,
-    bytes: asciiBytes(PADDING_FOURCC),
-  });
-  if (length > 0) state.patches.push({ offset: pos + 8, length });
+  write(state, pos, 4, PADDING_FOURCC);
+  zero(state, pos + 8, length);
 }
