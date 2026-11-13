@@ -7,10 +7,16 @@
 // this isolate served, then to the deployment default. The proxy signature
 // covers only the target URL, so any origin of this deployment serves it.
 
-import { AsyncLocalStorage } from "node:async_hooks";
+// A namespace import: the desktop build bundles this module (the share
+// page's server function) against an empty browser stub, where a named
+// import of a Node built-in fails the build. It only runs on the Worker.
+import * as asyncHooks from "node:async_hooks";
 import { DEFAULT_PUBLIC_WEB_URL } from "@/lib/site-defaults";
 
-const storage = new AsyncLocalStorage<string>();
+const storage =
+  typeof asyncHooks.AsyncLocalStorage === "function"
+    ? new asyncHooks.AsyncLocalStorage<string>()
+    : null;
 let lastSeenOrigin: string | null = null;
 
 export function withRequestOrigin<T>(request: Request, run: () => T): T {
@@ -21,7 +27,7 @@ export function withRequestOrigin<T>(request: Request, run: () => T): T {
     return run();
   }
   lastSeenOrigin = origin;
-  return storage.run(origin, run);
+  return storage ? storage.run(origin, run) : run();
 }
 
 /**
@@ -40,7 +46,7 @@ export function notePublicOrigin(request: Request): void {
 
 export function currentPublicOrigin(): string {
   return (
-    storage.getStore() ??
+    storage?.getStore() ??
     lastSeenOrigin ??
     DEFAULT_PUBLIC_WEB_URL.replace(/\/$/, "")
   );

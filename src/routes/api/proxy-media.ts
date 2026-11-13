@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import * as nodeCrypto from "node:crypto";
 import { createFileRoute } from "@tanstack/react-router";
 import * as cloudflareWorkers from "cloudflare:workers";
 import { apiError, apiSuccess, getEnv, requireAuth } from "@/lib/api-helpers";
@@ -1158,7 +1158,8 @@ const bearerMemo = new Map<string, number>();
 async function bearerIsSignedIn(request: Request): Promise<boolean> {
   const authorization = request.headers.get("authorization");
   if (!authorization?.startsWith("Bearer ")) return false;
-  const memoKey = createHash("sha256")
+  const memoKey = nodeCrypto
+    .createHash("sha256")
     .update(authorization)
     .digest("base64url");
   const now = Date.now();

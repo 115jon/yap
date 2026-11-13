@@ -12,7 +12,9 @@
 // node:crypto (nodejs_compat) keeps signing synchronous, so payload rewriting
 // can run where messages are serialized without threading async through.
 
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+// A namespace import, for the same reason as origin.ts: the desktop build
+// bundles this against an empty browser stub; it only runs on the Worker.
+import * as nodeCrypto from "node:crypto";
 
 const URL_SIGNATURE_DOMAIN = "yap/media-proxy/url/v1";
 const PASS_DOMAIN = "yap/media-proxy/pass/v1";
@@ -37,11 +39,12 @@ export interface MediaProxySecretEnv {
 export function mediaProxyKey(env: MediaProxySecretEnv): Buffer | null {
   const base = env.MEDIA_PROXY_SECRET || env.REALTIME_TICKET_SECRET;
   if (!base) return null;
-  return createHmac("sha256", base).update(KEY_DOMAIN).digest();
+  return nodeCrypto.createHmac("sha256", base).update(KEY_DOMAIN).digest();
 }
 
 function mac(key: Buffer, domain: string, value: string): Buffer {
-  return createHmac("sha256", key)
+  return nodeCrypto
+    .createHmac("sha256", key)
     .update(domain)
     .update("\n")
     .update(value)
@@ -49,7 +52,7 @@ function mac(key: Buffer, domain: string, value: string): Buffer {
 }
 
 function equalBytes(a: Buffer, b: Buffer): boolean {
-  return a.length === b.length && timingSafeEqual(a, b);
+  return a.length === b.length && nodeCrypto.timingSafeEqual(a, b);
 }
 
 function decodeBase64Url(value: string): Buffer | null {
@@ -93,7 +96,7 @@ export function issueMediaPass(
   ttlSeconds: number = MEDIA_PASS_TTL_SECONDS,
 ): MediaPass {
   const expiresAt = Math.floor(nowMs / 1000) + ttlSeconds;
-  const nonce = randomBytes(9).toString("base64url");
+  const nonce = nodeCrypto.randomBytes(9).toString("base64url");
   const body = `${PASS_VERSION}.${expiresAt}.${nonce}`;
   const signature = mac(key, PASS_DOMAIN, body)
     .subarray(0, SIGNATURE_BYTES)
