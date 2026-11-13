@@ -1,3 +1,5 @@
+import type { EmbedInfo } from "@/lib/types";
+import { unwrapEmbedsMedia } from "@/server/media-proxy/rewrite";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockD1 } from "../../lib/__tests__/mock-d1";
 
@@ -79,7 +81,10 @@ describe("listMessages embed hydration", () => {
     const result = await listMessages(db as any, CHANNEL_ID, USER_ID);
 
     expect(hoisted.hydrateSocialEmbedsMock).not.toHaveBeenCalled();
-    expect(result.messages[0]?.embeds).toEqual(staleEmbeds);
+    // As stored, apart from the proxy form media are delivered in.
+    expect(
+      unwrapEmbedsMedia((result.messages[0]?.embeds ?? []) as EmbedInfo[]),
+    ).toEqual(unwrapEmbedsMedia(staleEmbeds as unknown as EmbedInfo[]));
     db.assertNotCalled(/UPDATE messages SET embeds = \? WHERE id = \?/);
   });
 

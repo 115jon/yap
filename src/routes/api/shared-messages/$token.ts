@@ -1,13 +1,16 @@
 import { apiError, getDB } from "@/lib/api-helpers";
 import { ServiceError } from "@/lib/service-error";
-import { getPublicMessageShare } from "@/services/message-share.service";
+import {
+  getPublicMessageShare,
+  proxyShareForDelivery,
+} from "@/services/message-share.service";
 import { createFileRoute } from "@tanstack/react-router";
 
 const GET = async ({ params }: any) => {
   try {
     const share = await getPublicMessageShare(getDB(), params.token);
     return Response.json(
-      { share },
+      { share: proxyShareForDelivery(share) },
       {
         headers: {
           "Cache-Control": "no-store",

@@ -8,6 +8,11 @@
 // Clients authenticate via voice_token issued by MeetingRoom on Identify.
 // ============================================================================
 
+import { notePublicOrigin } from "../src/server/media-proxy/origin";
+import {
+  getMediaRewriteContext,
+  proxiedMediaUrl,
+} from "../src/server/media-proxy/rewrite";
 import { DurableObject } from "cloudflare:workers";
 import { clog } from "../src/lib/console-logger";
 import { isSupersededVoiceConnection } from "./connection-lifecycle";
@@ -511,6 +516,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
   }
 
   async fetch(request: Request): Promise<Response> {
+    notePublicOrigin(request);
     const url = new URL(request.url);
     const gatewayVersion = requestedGatewayVersion(url);
 
@@ -1263,9 +1269,14 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
                 ? track.album.trim().slice(0, 120)
                 : null,
             durationMs: Math.max(1, Math.floor(durationMs)),
+            // Client-supplied: proxied, so a listener's address never
+            // reaches a host a participant picked.
             artworkUrl:
               typeof track?.artworkUrl === "string"
-                ? track.artworkUrl.slice(0, 2048)
+                ? proxiedMediaUrl(
+                    track.artworkUrl.slice(0, 2048),
+                    getMediaRewriteContext(),
+                  )
                 : null,
             canonicalUrl:
               typeof track?.canonicalUrl === "string"

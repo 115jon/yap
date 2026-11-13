@@ -22,6 +22,11 @@ import { logger } from "@/lib/logger";
 import { validateBody } from "@/lib/validate-body";
 import { Schema } from "effect";
 import { withDefault } from "@/lib/schema";
+import type { EmbedInfo } from "@/lib/types";
+import {
+  proxyEmbedsForDelivery,
+  unwrapEmbedsMedia,
+} from "@/server/media-proxy/rewrite";
 import {
   createMessage,
   deleteMessage,
@@ -267,7 +272,12 @@ export const PATCH = async ({ request, params }: any) => {
            WHERE id = ? AND channel_id = ?
            RETURNING content_revision`,
         )
-        .bind(JSON.stringify(body.embeds), body.message_id, channelId)
+        .bind(
+          // Clients send back what they were given: store the originals.
+          JSON.stringify(unwrapEmbedsMedia(body.embeds as EmbedInfo[])),
+          body.message_id,
+          channelId,
+        )
         .first<{ content_revision: number }>();
       if (!cleared) return apiError("Message not found", 404);
 
@@ -275,7 +285,9 @@ export const PATCH = async ({ request, params }: any) => {
         id: body.message_id,
         channel_id: channelId,
         content_revision: Number(cleared.content_revision),
-        embeds: body.embeds,
+        embeds: proxyEmbedsForDelivery(
+          unwrapEmbedsMedia(body.embeds as EmbedInfo[]),
+        ),
       };
       const { serverId: editServerId } = accessResult as {
         serverId: string | null;

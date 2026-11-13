@@ -1,3 +1,4 @@
+import { unwrapProxiedMediaUrl } from "@/server/media-proxy/rewrite";
 import { createFileRoute } from "@tanstack/react-router";
 
 import {
@@ -143,10 +144,28 @@ const POST = async ({ params, request }: any) => {
   if (!body.source_url) {
     return apiError("source_url required", 400);
   }
-
   const requestUrl = new URL(request.url);
   const contentType = normalizeGifContentType(body.content_type);
   const provider = normalizeUploadProvider(body.provider);
+
+  // GIF results reach clients as proxy URLs; the message keeps the
+  // provider's own URL (clients render it through the proxy) whenever that
+  // original passes the host checks below. Anything else is checked as sent.
+  const original = unwrapProxiedMediaUrl(body.source_url.trim(), {
+    keepSocialForm: true,
+  });
+  if (original !== body.source_url) {
+    try {
+      const originalUrl = new URL(original);
+      const acceptable =
+        provider === "external"
+          ? isAllowedExternalMediaUrl(originalUrl)
+          : isAllowedProviderUrl(originalUrl, provider);
+      if (acceptable) body.source_url = original;
+    } catch {
+      // Not an absolute URL: checked as sent.
+    }
+  }
   let parsedSourceUrl: URL;
   try {
     parsedSourceUrl = new URL(body.source_url, requestUrl);

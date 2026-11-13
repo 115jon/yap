@@ -1,4 +1,13 @@
 import type { ListenTogetherRadioTrack } from "../../src/lib/listen-together";
+import {
+  getMediaRewriteContext,
+  proxiedMediaUrl,
+} from "../../src/server/media-proxy/rewrite";
+
+/** A station's favicon through the media proxy (any host radio lists). */
+function proxyFavicon(href: string | undefined): string | undefined {
+  return href ? proxiedMediaUrl(href, getMediaRewriteContext()) : href;
+}
 
 interface RadioBrowserStation {
   stationuuid?: unknown;
@@ -111,7 +120,9 @@ export class RadioStationResolver {
         provider: "radio",
         station_uuid: stationUuid,
         title,
-        artworkUrl: this.sanitizePublicHttpsUrl(station.favicon)?.href,
+        artworkUrl: proxyFavicon(
+          this.sanitizePublicHttpsUrl(station.favicon)?.href,
+        ),
         canonicalUrl:
           this.sanitizePublicHttpsUrl(station.homepage)?.href ??
           streamUrl.origin,

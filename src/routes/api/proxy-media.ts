@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
 import { createFileRoute } from "@tanstack/react-router";
+import * as cloudflareWorkers from "cloudflare:workers";
+import { apiError, apiSuccess, getEnv, requireAuth } from "@/lib/api-helpers";
 import { cacheFetch, cacheGet, cacheSet } from "@/lib/cache";
 import { clog } from "@/lib/console-logger";
 import { resolveInstagramVideoMetadata } from "@/lib/instagram-video-resolver";
@@ -8,6 +11,18 @@ import {
 } from "@/lib/share-preview-proxy";
 import { isTikTokMediaHostname } from "@/lib/tiktok-hosts";
 import type { EmbedInfo } from "@/lib/types";
+import { serveGenericMedia } from "@/server/media-proxy/generic";
+import { isSocialRefreshMediaUrl } from "@/server/media-proxy/rewrite";
+import {
+  issueMediaPass,
+  MEDIA_PASS_TTL_SECONDS,
+  mediaPassCookie,
+  mediaProxyKey,
+  readMediaPassCookie,
+  verifyMediaPass,
+  verifyMediaUrlSignature,
+} from "@/server/media-proxy/signing";
+import { createDohResolver } from "@/server/media-proxy/ssrf";
 import { extractAndProcessEmbeds } from "@/services/embed-fetcher";
 
 const log = clog("proxy-media");
@@ -1113,16 +1128,191 @@ export async function proxyMedia(
   });
 }
 
+type WaitUntil = (promise: Promise<unknown>) => void;
+
+/** workerd exports waitUntil from cloudflare:workers; absent in tests. */
+function getWaitUntil(): WaitUntil | undefined {
+  const candidate = (cloudflareWorkers as { waitUntil?: unknown }).waitUntil;
+  return typeof candidate === "function" ? (candidate as WaitUntil) : undefined;
+}
+
+function getDefaultCache(): Cache | null {
+  try {
+    return (
+      (globalThis.caches as { default?: Cache } | undefined)?.default ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
+const BEARER_MEMO_TTL_MS = 5 * 60_000;
+const BEARER_MEMO_MAX = 2_000;
+const bearerMemo = new Map<string, number>();
+
+/**
+ * Expo and the native apps send their session bearer to the API's own URLs.
+ * A valid session is remembered per isolate for a few minutes, keyed by a
+ * hash of the token, so a screen of images costs one session lookup.
+ */
+async function bearerIsSignedIn(request: Request): Promise<boolean> {
+  const authorization = request.headers.get("authorization");
+  if (!authorization?.startsWith("Bearer ")) return false;
+  const memoKey = createHash("sha256")
+    .update(authorization)
+    .digest("base64url");
+  const now = Date.now();
+  const until = bearerMemo.get(memoKey);
+  if (until && until > now) return true;
+
+  const result = await requireAuth(request);
+  if (result instanceof Response) return false;
+  if (bearerMemo.size >= BEARER_MEMO_MAX) {
+    const oldest = bearerMemo.keys().next().value;
+    if (oldest !== undefined) bearerMemo.delete(oldest);
+  }
+  bearerMemo.set(memoKey, now + BEARER_MEMO_TTL_MS);
+  return true;
+}
+
+export type GenericMediaAuthorization = "signature" | "pass" | "bearer" | null;
+
+/** How (if at all) a generic-mode request is allowed to use the proxy. */
+export async function authorizeGenericMediaRequest(
+  request: Request,
+  targetUrl: string,
+  key: Buffer,
+  checkBearer: (request: Request) => Promise<boolean> = bearerIsSignedIn,
+): Promise<GenericMediaAuthorization> {
+  const signature = new URL(request.url).searchParams.get("sig");
+  // A bad signature (a rotated key) still lets a pass or session through.
+  if (signature && verifyMediaUrlSignature(targetUrl, signature, key)) {
+    return "signature";
+  }
+  if (
+    verifyMediaPass(readMediaPassCookie(request.headers.get("cookie")), key)
+  ) {
+    return "pass";
+  }
+  return (await checkBearer(request)) ? "bearer" : null;
+}
+
+/**
+ * The route: social CDN links (X, TikTok, Instagram) keep the allowlisted
+ * path with its link refresh; any other http(s) media goes through the
+ * generic mode when the request is signed, carries the media pass or a
+ * signed-in bearer (a `sourceUrl` is then ignored). Unsigned requests for the remaining allowlisted hosts
+ * (KLIPY, Tenor, Google and Steam avatars) still work as before.
+ */
+export async function handleProxyMedia(
+  request: Request,
+  includeBody: boolean,
+  nested = false,
+): Promise<Response> {
+  const requestUrl = new URL(request.url);
+  const target = requestUrl.searchParams.get("url");
+  if (!target) return new Response("Missing media URL", { status: 400 });
+  let targetUrl: URL;
+  try {
+    targetUrl = new URL(target);
+  } catch {
+    return new Response("Invalid media URL", { status: 400 });
+  }
+
+  // A proxy URL inside a proxy URL: clients deployed before the server
+  // rewrote payloads wrap the delivered form again. Serve the inner one
+  // (its own `url`, `sig` and `sourceUrl`), one level deep.
+  if (!nested && targetUrl.pathname === "/api/proxy-media") {
+    const inner = new URL(requestUrl);
+    inner.search = targetUrl.search;
+    return handleProxyMedia(
+      new Request(inner, { method: request.method, headers: request.headers }),
+      includeBody,
+      true,
+    );
+  }
+
+  if (isSocialRefreshMediaUrl(targetUrl)) {
+    return proxyMedia(request, includeBody);
+  }
+
+  const key = mediaProxyKey(
+    getEnv() as unknown as {
+      MEDIA_PROXY_SECRET?: string;
+      REALTIME_TICKET_SECRET?: string;
+    },
+  );
+  const authorization = key
+    ? await authorizeGenericMediaRequest(request, target, key)
+    : null;
+
+  if (!authorization) {
+    if (isAllowedMediaUrl(targetUrl)) return proxyMedia(request, includeBody);
+    return new Response("Media proxy request is not authorized", {
+      status: 401,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+
+  // Never proxy ourselves (a loop that would only cost requests).
+  if (targetUrl.host === requestUrl.host) {
+    return new Response("Unsupported media URL", { status: 400 });
+  }
+
+  return serveGenericMedia(request, targetUrl, includeBody, {
+    resolve: dohResolver,
+    ownHost: requestUrl.host,
+    cache: getDefaultCache(),
+    waitUntil: getWaitUntil(),
+  });
+}
+
+const dohResolver = createDohResolver();
+
 const GET = async ({ request }: { request: Request }) =>
-  proxyMedia(request, true);
+  handleProxyMedia(request, true);
 const HEAD = async ({ request }: { request: Request }) =>
-  proxyMedia(request, false);
+  handleProxyMedia(request, false);
+
+/**
+ * POST: the media pass for a signed-in web session, as an HttpOnly cookie
+ * scoped to this path (the web app's own <img> requests then carry it).
+ * DELETE: clears it on sign-out.
+ */
+const POST = async ({ request }: { request: Request }) => {
+  const auth = await requireAuth(request);
+  if (auth instanceof Response) return auth;
+  const key = mediaProxyKey(
+    getEnv() as unknown as {
+      MEDIA_PROXY_SECRET?: string;
+      REALTIME_TICKET_SECRET?: string;
+    },
+  );
+  if (!key) return apiError("Media proxy is not configured", 503);
+  const pass = issueMediaPass(key);
+  const response = apiSuccess({ expiresAt: pass.expiresAt }, 200, request);
+  response.headers.set(
+    "Set-Cookie",
+    mediaPassCookie(pass.value, MEDIA_PASS_TTL_SECONDS),
+  );
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+};
+
+const DELETE = async ({ request }: { request: Request }) => {
+  const response = apiSuccess({ ok: true }, 200, request);
+  response.headers.set("Set-Cookie", mediaPassCookie("", 0));
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+};
 
 export const Route = createFileRoute("/api/proxy-media")({
   server: {
     handlers: {
       GET,
       HEAD,
+      POST,
+      DELETE,
     },
   },
 });

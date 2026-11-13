@@ -42,6 +42,12 @@ declare global {
      * Worker Previews), TikTok lookups go direct only.
      */
     EGRESS_PROXY_SECRET?: string;
+    /**
+     * Secret: signs /api/proxy-media URLs and media passes. Optional: unset,
+     * a key derived from REALTIME_TICKET_SECRET is used; neither set, the
+     * generic media proxy is off (server/media-proxy/signing.ts).
+     */
+    MEDIA_PROXY_SECRET?: string;
     /** Egress proxy base URL; defaults to https://egress.115jon.com. */
     EGRESS_PROXY_URL?: string;
     /** Admin user ids ("id1, id2"): manual badges (POST /api/admin/badges). */

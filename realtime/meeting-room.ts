@@ -8,6 +8,11 @@
 // Answer) is handled by the separate VoiceRoom DO.
 // ============================================================================
 
+import { notePublicOrigin } from "../src/server/media-proxy/origin";
+import {
+  proxyAvatarUrlForDelivery,
+  proxyEmbedsForDelivery,
+} from "../src/server/media-proxy/rewrite";
 import { DurableObject } from "cloudflare:workers";
 import {
   resolveVisibleChannelPermissions,
@@ -906,6 +911,7 @@ export class MeetingRoom extends DurableObject<Env> {
   }
 
   async fetch(request: Request): Promise<Response> {
+    notePublicOrigin(request);
     const url = new URL(request.url);
     const gatewayVersion = requestedGatewayVersion(url);
 
@@ -5587,7 +5593,7 @@ export class MeetingRoom extends DurableObject<Env> {
         id: session.user_id,
         username: session.username ?? session.name,
         display_name: session.display_name ?? session.name,
-        avatar_url: session.avatar_url,
+        avatar_url: proxyAvatarUrlForDelivery(session.avatar_url),
         avatar_display: session.avatar_display,
       },
       content: d.content.trim(),
@@ -5598,7 +5604,7 @@ export class MeetingRoom extends DurableObject<Env> {
       nonce: d.nonce,
       attachments: [],
       reactions: [],
-      embeds: cachedEmbeds,
+      embeds: proxyEmbedsForDelivery(cachedEmbeds),
     };
 
     const messageDispatch = {
