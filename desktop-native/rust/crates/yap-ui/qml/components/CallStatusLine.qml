@@ -17,8 +17,7 @@ Item {
     // The clock ticks once a second only while it shows.
     property bool clockShown: true
     // From the LED to the word, and whether the place starts under the word
-    // rather than under the LED (the drawer's call bar keeps AccountBar's
-    // columns: 27, under the word).
+    // rather than under the LED.
     property real gap: 8
     property bool placeUnderWord: false
 
