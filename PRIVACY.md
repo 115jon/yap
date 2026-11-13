@@ -255,12 +255,21 @@ and are shown as from "Deleted user", so the other people in those
 conversations keep their history. The same goes for server soundboard sounds,
 invites, bans and server audit-log entries it made. A user who wants
 particular messages gone should delete them before deleting the account.
+Mentions of the account in other people's messages are text and are not
+rewritten.
+
+Bans and blocks against the account also stay: a server's ban of it, another
+user's block of it and a guestbook block are kept under the account's Kova
+sign-in id, so they still apply if that Kova account signs in to Yap again.
+A server's ban list shows such a ban as "Deleted user".
 
 The kept content is moved to a new "Deleted user" record that is not linked
 to the account's sign-in. The Kova sign-in account (`auth.115jon.com`) is
 not Yap's and is not deleted; it can be deleted from Kova separately, and if
-it is used to sign in to Yap again, Yap creates a new, empty account.
-Records listed under "Retention and deletion" as kept for security, legal or
+it is used to sign in to Yap again, Yap creates a new, empty account, to which
+the bans and blocks above still apply. Entries in Yap's site-admin audit log
+about the account (such as a suspension) keep its Kova id as a security
+record. Records listed under "Retention and deletion" as kept for security, legal or
 software-distribution reasons, and backups, follow their own retention
 periods.
 

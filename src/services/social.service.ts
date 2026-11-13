@@ -118,6 +118,20 @@ export async function sendFriendRequest(
     }
   }
 
+  // Refused when the target has blocked the sender (a block deletes the
+  // sender's own row, so `existing` is null then). The block may name an
+  // account purged and signed up again with the same id (migration 046).
+  const blockedBy = await db
+    .prepare(
+      `SELECT 1 FROM relationships
+       WHERE type = 1 AND user_id = ? AND target_user_id = ?`,
+    )
+    .bind(target.id as string, userId)
+    .first();
+  if (blockedBy) {
+    throw ServiceError.forbidden("Can't send a friend request to this user");
+  }
+
   // Create pending relationships
   const now = new Date().toISOString();
   await db.batch([

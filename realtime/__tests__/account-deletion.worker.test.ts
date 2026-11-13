@@ -13,10 +13,20 @@ import schema from "../../d1_schema.sql?raw";
 import { setTestRequestHeaders } from "../test-shims/react-start-server";
 import { invalidatePendingDeletionCache } from "../../src/lib/account-deletion";
 import { DEFAULT_KOVA_AUTH_URL } from "../../src/lib/site-defaults";
+import { PERMISSIONS } from "../../src/lib/permissions";
 import {
+  ownProfileFileKey,
   purgeAccount,
   purgeDueAccountDeletions,
+  requestAccountDeletion,
 } from "../../src/services/account-deletion.service";
+import { listBans } from "../../src/services/ban.service";
+import { hasBlocked } from "../../src/services/connection.service";
+import { guestbookDenial } from "../../src/services/profile-guestbook.service";
+import {
+  joinServer,
+  sendFriendRequest,
+} from "../../src/services/social.service";
 
 // Self-service account deletion end to end, against miniflare's D1 and R2
 // and the real route handlers, with throwaway users. Kova is faked at its
@@ -142,6 +152,9 @@ async function seed() {
   const now = new Date().toISOString();
   for (const table of [
     "account_deletions",
+    "server_bans",
+    "invites",
+    "profile_guestbook_blocks",
     "message_reactions",
     "messages",
     "dm_recipients",
@@ -497,17 +510,27 @@ describe("the purge after 30 days", () => {
   it("leaves accounts inside the grace period alone", async () => {
     await deletion("POST", "alice-token", { confirm_username: "alice" });
     const result = await purgeDueAccountDeletions(db, bucket, Date.now());
-    expect(result).toEqual({ purged: 0, failed: 0 });
+    expect(result).toEqual({ purged: 0, failed: 0, held: 0 });
     expect(
       await count(`SELECT COUNT(*) AS n FROM users WHERE id = ?`, ALICE),
     ).toBe(1);
   });
 
   it("anonymises kept messages and deletes the rest", async () => {
+    // An avatar from before 2026-07-17, outside the per-user folder, and an
+    // older one it replaced that nothing refers to.
+    await run(
+      `UPDATE users SET avatar_url = ? WHERE id = ?`,
+      `/api/avatars/${ALICE}.webp?v=2`,
+      ALICE,
+    );
+    await bucket.put(`avatars/${ALICE}.webp`, "webp");
+    await bucket.put(`avatars/${ALICE}.png`, "png");
+    await bucket.put(`avatars/${BOB}.png`, "png");
     await deletion("POST", "alice-token", { confirm_username: "alice" });
     const later = Date.now() + 31 * 86_400_000;
     const result = await purgeDueAccountDeletions(db, bucket, later);
-    expect(result).toEqual({ purged: 1, failed: 0 });
+    expect(result).toEqual({ purged: 1, failed: 0, held: 0 });
 
     // Nothing in Yap's database carries the Kova id any more.
     expect(
@@ -560,7 +583,11 @@ describe("the purge after 30 days", () => {
     // The account's files are gone; others' are not.
     expect(await bucket.head(`avatars/${ALICE}/av-1.png`)).toBeNull();
     expect(await bucket.head(`profile-assets/banner/${ALICE}.png`)).toBeNull();
+    expect(await bucket.head(`avatars/${ALICE}.webp`)).toBeNull();
+    expect(await bucket.head(`avatars/${ALICE}.png`)).toBeNull();
     expect(await bucket.head(`avatars/${BOB}/keep.png`)).not.toBeNull();
+    expect(await bucket.head(`avatars/${BOB}.png`)).not.toBeNull();
+    await bucket.delete(`avatars/${BOB}.png`);
 
     // Bob reads the channel: the author is anonymised, the content kept.
     setTestRequestHeaders({ authorization: "Bearer bob-token" });
@@ -620,61 +647,259 @@ describe("the purge after 30 days", () => {
     ).toBe(0);
   });
 
-  it("leaves a suspended account for the site admin", async () => {
+  it("holds a suspended account for the site admin, logging it once", async () => {
     await deletion("POST", "alice-token", { confirm_username: "alice" });
     await run(
       `UPDATE users SET suspended_at = ? WHERE id = ?`,
       new Date().toISOString(),
       ALICE,
     );
-    const result = await purgeDueAccountDeletions(
-      db,
-      bucket,
-      Date.now() + 31 * 86_400_000,
-    );
-    expect(result).toEqual({ purged: 0, failed: 1 });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const later = Date.now() + 31 * 86_400_000;
+    for (let i = 0; i < 3; i += 1) {
+      // Held is not a failure: the hourly job does not fail on it.
+      expect(await purgeDueAccountDeletions(db, bucket, later)).toEqual({
+        purged: 0,
+        failed: 0,
+        held: 1,
+      });
+    }
+    expect(
+      warn.mock.calls.filter((call) =>
+        String(call[0]).startsWith("account purge held"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      await db
+        .prepare(
+          `SELECT held_reason, attempts FROM account_deletions WHERE user_id = ?`,
+        )
+        .bind(ALICE)
+        .first(),
+    ).toEqual({ held_reason: "suspended", attempts: 0 });
     expect(
       await count(`SELECT COUNT(*) AS n FROM users WHERE id = ?`, ALICE),
     ).toBe(1);
   });
 
-  it("rewrites mentions of the account and clears its queued files", async () => {
-    await run(
-      `INSERT INTO messages (id, channel_id, author_id, content, created_at) VALUES ('m-3', 'ch-general', ?, ?, ?)`,
-      BOB,
-      `thanks <@${ALICE}>`,
-      new Date().toISOString(),
-    );
+  it("clears its queued files", async () => {
     await deletion("POST", "alice-token", { confirm_username: "alice" });
     await purgeDueAccountDeletions(db, bucket, Date.now() + 31 * 86_400_000);
-    const mention = await db
-      .prepare(`SELECT content FROM messages WHERE id = 'm-3'`)
-      .first<{ content: string }>();
-    expect(mention?.content).not.toContain(ALICE);
-    expect(mention?.content).toMatch(/^thanks <@deleted-/);
     // Deleted files leave nothing in the retry queue.
     expect(await count(`SELECT COUNT(*) AS n FROM r2_cleanup_jobs`)).toBe(0);
   });
 
-  it("does not purge an account that owns a server", async () => {
+  it("holds an account that owns a server, and tries it after the rest", async () => {
     await deletion("POST", "alice-token", { confirm_username: "alice" });
     // Ownership given to the account after it asked (not possible through
     // the API, which refuses it every request).
     await run(`UPDATE servers SET owner_id = ? WHERE id = 'srv-bob'`, ALICE);
-    const result = await purgeDueAccountDeletions(
-      db,
-      bucket,
-      Date.now() + 31 * 86_400_000,
-    );
-    expect(result).toEqual({ purged: 0, failed: 1 });
+    const later = Date.now() + 31 * 86_400_000;
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await purgeDueAccountDeletions(db, bucket, later)).toEqual({
+      purged: 0,
+      failed: 0,
+      held: 1,
+    });
     expect(
       await count(`SELECT COUNT(*) AS n FROM servers WHERE id = 'srv-bob'`),
     ).toBe(1);
     expect(
+      await db
+        .prepare(
+          `SELECT held_reason, attempts FROM account_deletions WHERE user_id = ?`,
+        )
+        .bind(ALICE)
+        .first(),
+    ).toEqual({ held_reason: "owns_servers", attempts: 0 });
+
+    // A later account is purged ahead of the held one, one per run.
+    const dave = `dave-throwaway-${aliceRun}`;
+    await run(
+      `INSERT INTO users (id, username, created_at) VALUES (?, ?, ?)`,
+      dave,
+      `dave${aliceRun}`,
+      new Date().toISOString(),
+    );
+    await requestAccountDeletion(db, dave, {
+      confirmUsername: `dave${aliceRun}`,
+      now: Date.now(),
+      deleteAfter: new Date(Date.now() + 1000).toISOString(),
+    });
+    expect(await purgeDueAccountDeletions(db, bucket, later, 1)).toEqual({
+      purged: 1,
+      failed: 0,
+      held: 0,
+    });
+    expect(
+      await count(`SELECT COUNT(*) AS n FROM users WHERE id = ?`, dave),
+    ).toBe(0);
+  });
+});
+
+describe("a request racing a new server", () => {
+  it("is refused when the server lands after the ownership check", async () => {
+    // Carol owns srv-carol; the first ownership read misses it, as if the
+    // server were created between that read and the request's batch.
+    let missed = false;
+    const racing = {
+      prepare: (sql: string) => {
+        if (!missed && sql.includes("FROM servers WHERE owner_id = ?")) {
+          missed = true;
+          return { bind: () => ({ all: async () => ({ results: [] }) }) };
+        }
+        return db.prepare(sql);
+      },
+      batch: db.batch.bind(db),
+    } as unknown as D1Database;
+    await expect(
+      requestAccountDeletion(racing, CAROL, {
+        confirmUsername: "carol",
+        now: Date.now(),
+        deleteAfter: new Date(Date.now() + 1000).toISOString(),
+      }),
+    ).rejects.toMatchObject({ code: "OWNS_SERVERS" });
+    expect(missed).toBe(true);
+    expect(await count(`SELECT COUNT(*) AS n FROM account_deletions`)).toBe(0);
+    expect(
+      await db
+        .prepare(`SELECT username, display_name FROM users WHERE id = ?`)
+        .bind(CAROL)
+        .first(),
+    ).toEqual({ username: "carol", display_name: "carol display" });
+  });
+});
+
+describe("bans and blocks against a purged account", () => {
+  it("still hold when the same Kova id signs up again", async () => {
+    const now = new Date().toISOString();
+    // Bob (an admin of his server) bans Alice and blocks her; Carol keeps
+    // her off her guestbook and has a friend request from her pending.
+    await run(
+      `INSERT INTO roles (id, server_id, name, permissions) VALUES ('role-admin', 'srv-bob', 'admin', ?)`,
+      PERMISSIONS.ADMINISTRATOR,
+    );
+    await run(
+      `INSERT INTO member_roles (server_id, user_id, role_id) VALUES ('srv-bob', ?, 'role-admin')`,
+      BOB,
+    );
+    await run(
+      `INSERT INTO server_bans (server_id, user_id, reason, banned_by) VALUES ('srv-bob', ?, 'spam', ?)`,
+      ALICE,
+      BOB,
+    );
+    await run(
+      `DELETE FROM relationships WHERE user_id = ? AND target_user_id = ?`,
+      ALICE,
+      BOB,
+    );
+    await run(
+      `UPDATE relationships SET type = 1 WHERE user_id = ? AND target_user_id = ?`,
+      BOB,
+      ALICE,
+    );
+    await run(
+      `INSERT INTO relationships (user_id, target_user_id, type) VALUES (?, ?, 2)`,
+      CAROL,
+      ALICE,
+    );
+    await run(
+      `INSERT INTO profile_guestbook_blocks (owner_id, blocked_user_id, created_at) VALUES (?, ?, ?)`,
+      CAROL,
+      ALICE,
+      now,
+    );
+    await run(
+      `INSERT INTO invites (code, server_id, inviter_id) VALUES ('inv-bob', 'srv-bob', ?)`,
+      BOB,
+    );
+
+    await deletion("POST", "alice-token", { confirm_username: "alice" });
+    expect(
+      await purgeDueAccountDeletions(db, bucket, Date.now() + 31 * 86_400_000),
+    ).toEqual({ purged: 1, failed: 0, held: 0 });
+    expect(
+      await count(`SELECT COUNT(*) AS n FROM users WHERE id = ?`, ALICE),
+    ).toBe(0);
+
+    // The ban and both blocks stay under the Kova id; Carol's pending
+    // request went with the account.
+    expect(
       await count(
-        `SELECT attempts AS n FROM account_deletions WHERE user_id = ?`,
+        `SELECT COUNT(*) AS n FROM server_bans WHERE user_id = ?`,
         ALICE,
       ),
     ).toBe(1);
+    expect(
+      await db
+        .prepare(
+          `SELECT user_id, type FROM relationships WHERE target_user_id = ?`,
+        )
+        .bind(ALICE)
+        .all(),
+    ).toMatchObject({ results: [{ user_id: BOB, type: 1 }] });
+    expect(
+      await count(
+        `SELECT COUNT(*) AS n FROM profile_guestbook_blocks WHERE blocked_user_id = ?`,
+        ALICE,
+      ),
+    ).toBe(1);
+    // The server's ban list names no one.
+    const bans = await listBans(db, "srv-bob", BOB);
+    expect(bans).toMatchObject([
+      { user_id: ALICE, username: "Deleted user", reason: "spam" },
+    ]);
+
+    // The same Kova account signs up again: a new, empty users row.
+    await run(
+      `INSERT INTO users (id, username, display_name, created_at) VALUES (?, 'alice_again', 'Alice again', ?)`,
+      ALICE,
+      now,
+    );
+    await expect(
+      joinServer(db, "inv-bob", ALICE, "alice_again", null),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(
+      await count(
+        `SELECT COUNT(*) AS n FROM server_members WHERE user_id = ?`,
+        ALICE,
+      ),
+    ).toBe(0);
+    await expect(sendFriendRequest(db, ALICE, "bob")).rejects.toMatchObject({
+      status: 403,
+    });
+    expect(
+      await count(
+        `SELECT COUNT(*) AS n FROM relationships WHERE user_id = ?`,
+        ALICE,
+      ),
+    ).toBe(0);
+    // The block hides Bob's connections from her and closes his guestbook
+    // (the DM call ring reads the same row), and Carol's guestbook block
+    // holds.
+    expect(await hasBlocked(db, BOB, ALICE)).toBe(true);
+    expect(await guestbookDenial(db, BOB, ALICE)).toBe("GUESTBOOK_BLOCKED");
+    expect(await guestbookDenial(db, CAROL, ALICE)).toBe("GUESTBOOK_BLOCKED");
+  });
+});
+
+describe("ownProfileFileKey", () => {
+  it("names only the account's own uploaded files", () => {
+    expect(ownProfileFileKey("/api/avatars/u1.png?v=3", "u1")).toBe(
+      "avatars/u1.png",
+    );
+    expect(ownProfileFileKey("/api/avatars/u1/up.webp", "u1")).toBe(
+      "avatars/u1/up.webp",
+    );
+    expect(ownProfileFileKey("/api/profile-assets/banner/u1.gif", "u1")).toBe(
+      "profile-assets/banner/u1.gif",
+    );
+    expect(ownProfileFileKey("/api/avatars/u10.png", "u1")).toBeNull();
+    expect(ownProfileFileKey("/api/avatars/presets/cat.png", "u1")).toBeNull();
+    expect(
+      ownProfileFileKey("https://cdn.test/avatars/u1.png", "u1"),
+    ).toBeNull();
+    expect(ownProfileFileKey("/api/avatars/u1/../u2.png", "u1")).toBeNull();
+    expect(ownProfileFileKey(null, "u1")).toBeNull();
   });
 });

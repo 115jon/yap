@@ -26,15 +26,20 @@
 // sounds and voice status media, invites, server audit entries and bans
 // made, notifications others got. Then the account's users row is deleted,
 // and with it, by ON DELETE CASCADE, everything else that is the account's
-// own: profile, board and widgets, Activity, guestbook, settings, friends and
-// blocks, reactions, read states, notifications, push tokens, badges, plan,
-// stats, connections, favourites, avatars and emojis. Its files in R2
-// (avatars, banner and nameplate, board images, generated emojis, camera
-// backgrounds, uploads never sent) are deleted, and any that fail go to the
-// R2 cleanup retry queue (they are queued there before the rows go). The Kova
-// identity is not Yap's and is left alone; the kept content no longer carries
-// its id, so the same Kova account can sign up to Yap again as a new account.
-// A suspended account is not purged (its row stays for the site admin).
+// own: profile, board and widgets, Activity, guestbook, settings, its friends
+// and the blocks it made, reactions, read states, notifications, push tokens,
+// badges, plan, stats, connections, favourites, avatars and emojis. Its files
+// in R2 (avatars, banner and nameplate, board images, generated emojis,
+// camera backgrounds, uploads never sent) are deleted, and any that fail go
+// to the R2 cleanup retry queue (they are queued there before the rows go).
+// The Kova identity is not Yap's and is left alone, so the same Kova account
+// can sign up to Yap again, as a new account with the same id. Bans and
+// blocks against the account are kept under that id (server_bans,
+// relationships type 1 and profile_guestbook_blocks have no foreign key on
+// that side since migration 046), so they still hold for it. Mentions in
+// kept messages are not rewritten: they are `@username` text.
+// An account suspended after asking, or owning a server again, is held, not
+// purged (its row stays for the site admin); the sweep tries it last.
 
 import { DELETED_USER_DISPLAY_NAME } from "@/lib/account-deletion";
 import { CacheKey } from "@/lib/cache";
@@ -228,12 +233,17 @@ export async function requestAccountDeletion(
   const requestedAt = new Date(input.now).toISOString();
   const placeholder = deletedUsername();
 
-  await db.batch([
+  // The row goes in only while the account still owns no server, so a server
+  // made after the check above cannot slip through; the other statements run
+  // only if it went in. One batch is one transaction.
+  const requested = `EXISTS (SELECT 1 FROM account_deletions WHERE user_id = ? AND requested_at = ?)`;
+  const [inserted] = await db.batch([
     db
       .prepare(
         `INSERT INTO account_deletions
            (user_id, requested_at, delete_after, reserved_username, snapshot)
-         VALUES (?, ?, ?, ?, ?)`,
+         SELECT ?, ?, ?, ?, ?
+         WHERE NOT EXISTS (SELECT 1 FROM servers WHERE owner_id = ?)`,
       )
       .bind(
         userId,
@@ -241,12 +251,22 @@ export async function requestAccountDeletion(
         input.deleteAfter,
         username.toLowerCase(),
         JSON.stringify(snapshot),
+        userId,
       ),
-    blankProfileStatement(db, userId, placeholder, requestedAt),
-    db.prepare(`DELETE FROM member_roles WHERE user_id = ?`).bind(userId),
-    db.prepare(`DELETE FROM server_members WHERE user_id = ?`).bind(userId),
-    db.prepare(`DELETE FROM push_tokens WHERE user_id = ?`).bind(userId),
+    blankProfileStatement(db, userId, placeholder, requestedAt, requested),
+    db
+      .prepare(`DELETE FROM member_roles WHERE user_id = ? AND ${requested}`)
+      .bind(userId, userId, requestedAt),
+    db
+      .prepare(`DELETE FROM server_members WHERE user_id = ? AND ${requested}`)
+      .bind(userId, userId, requestedAt),
+    db
+      .prepare(`DELETE FROM push_tokens WHERE user_id = ? AND ${requested}`)
+      .bind(userId, userId, requestedAt),
   ]);
+  if (Number(inserted?.meta?.changes ?? 0) === 0) {
+    throw new OwnsServersError(await ownedServers(db, userId));
+  }
 
   const serverIds = servers.map((s) => s.server_id);
   const hidden = hiddenProfile(userId, placeholder);
@@ -294,11 +314,13 @@ function hiddenProfile(userId: string, username: string) {
   };
 }
 
+/** `requested`: the condition that the request row went in (see above). */
 function blankProfileStatement(
   db: Db,
   userId: string,
   username: string,
   at: string,
+  requested: string,
 ) {
   return db
     .prepare(
@@ -309,9 +331,9 @@ function blankProfileStatement(
          profile_banner_color = NULL, display_name_style = NULL, bio = NULL,
          pronouns = NULL, status = 'offline', custom_status = NULL,
          updated_at = ?
-       WHERE id = ?`,
+       WHERE id = ? AND ${requested}`,
     )
-    .bind(username, DELETED_USER_DISPLAY_NAME, at, userId);
+    .bind(username, DELETED_USER_DISPLAY_NAME, at, userId, userId, at);
 }
 
 function parseSnapshot(raw: string): DeletionSnapshot | null {
@@ -585,13 +607,42 @@ async function repoint(
   }
 }
 
+/**
+ * The R2 key behind one of the account's own profile URLs (avatar, banner,
+ * nameplate) as the snapshot kept it, or null for a preset, an outside URL
+ * or someone else's file.
+ */
+export function ownProfileFileKey(url: unknown, userId: string): string | null {
+  if (typeof url !== "string" || !url.startsWith("/api/")) return null;
+  const key = url.slice("/api/".length).split(/[?#]/, 1)[0] ?? "";
+  const own = [
+    `avatars/${userId}/`,
+    `avatars/${userId}.`,
+    `${PROFILE_ASSET_PREFIX}/banner/${userId}.`,
+    `${PROFILE_ASSET_PREFIX}/nameplate/${userId}.`,
+  ];
+  return own.some((prefix) => key.startsWith(prefix)) && !key.includes("..")
+    ? key
+    : null;
+}
+
 /** The account's R2 objects that nothing kept refers to. */
 async function filesToDelete(
   db: Db,
   bucket: Pick<R2Bucket, "list">,
   userId: string,
+  snapshot: DeletionSnapshot | null,
 ): Promise<string[]> {
   const keys = new Set<string>();
+  // The profile as it was before the grace period blanked it.
+  for (const url of [
+    snapshot?.profile.avatar_url,
+    snapshot?.profile.banner_url,
+    snapshot?.profile.nameplate_url,
+  ]) {
+    const key = ownProfileFileKey(url, userId);
+    if (key) keys.add(key);
+  }
   const rows = await db.batch<{ file_key: string | null }>([
     db
       .prepare(`SELECT file_key FROM user_avatar_uploads WHERE user_id = ?`)
@@ -614,9 +665,11 @@ async function filesToDelete(
     }
   }
   // Keyed by user id: avatars, banner and nameplate, board images, generated
-  // emojis, camera backgrounds.
+  // emojis, camera backgrounds. Avatars uploaded from 2026-03-01 to
+  // 2026-07-17 sit at `avatars/<id>.<ext>`, outside the per-user folder.
   const prefixes = [
     `avatars/${userId}/`,
+    `avatars/${userId}.`,
     `${PROFILE_ASSET_PREFIX}/banner/${userId}.`,
     `${PROFILE_ASSET_PREFIX}/nameplate/${userId}.`,
     `emoji-assets/${userId}/`,
@@ -716,33 +769,41 @@ export type PurgeBucket = Pick<
   "delete" | "list" | "resumeMultipartUpload"
 >;
 
+/** Why the purge holds an account instead of deleting it. */
+export type PurgeHold = "owns_servers" | "suspended";
+
+/** Whether the purge must hold the account, and why. */
+async function purgeHold(db: Db, userId: string): Promise<PurgeHold | null> {
+  // A server owned now would go with the users row (ON DELETE CASCADE).
+  if ((await ownedServers(db, userId)).length > 0) return "owns_servers";
+  // A suspension made after the request stays for the site admin to see.
+  const suspended = await db
+    .prepare(`SELECT 1 FROM users WHERE id = ? AND suspended_at IS NOT NULL`)
+    .bind(userId)
+    .first();
+  return suspended ? "suspended" : null;
+}
+
 /**
  * Purge one account whose grace period is over. Null when there was nothing
  * to purge: the account was restored (or purged) since the sweep listed it.
+ * `{ held }` when it cannot be purged as it is (see PurgeHold); nothing was
+ * changed.
  */
 export async function purgeAccount(
   db: Db,
   bucket: PurgeBucket,
   userId: string,
   now: number,
-): Promise<{ tombstoneId: string; moved: number; files: number } | null> {
+): Promise<
+  | { tombstoneId: string; moved: number; files: number }
+  | { held: PurgeHold }
+  | null
+> {
   const at = new Date(now).toISOString();
 
-  // A server owned now would go with the users row (ON DELETE CASCADE).
-  const owned = await ownedServers(db, userId);
-  if (owned.length > 0) throw new OwnsServersError(owned);
-  // A suspension made after the request stays for the site admin to see.
-  const suspended = await db
-    .prepare(`SELECT 1 FROM users WHERE id = ? AND suspended_at IS NOT NULL`)
-    .bind(userId)
-    .first();
-  if (suspended) {
-    throw new ServiceError(
-      "Suspended account; left for the site admin",
-      409,
-      "ACCOUNT_SUSPENDED",
-    );
-  }
+  const held = await purgeHold(db, userId);
+  if (held) return { held };
 
   // Step 1: claim the row. From here a restore changes nothing, and a retry
   // reuses the same "Deleted user" row.
@@ -752,10 +813,10 @@ export async function purgeAccount(
        SET tombstone_id = COALESCE(tombstone_id, ?),
            purge_started_at = COALESCE(purge_started_at, ?)
        WHERE user_id = ? AND delete_after <= ?
-       RETURNING tombstone_id`,
+       RETURNING tombstone_id, snapshot`,
     )
     .bind(`deleted-${crypto.randomUUID()}`, at, userId, at)
-    .first<{ tombstone_id: string }>();
+    .first<{ tombstone_id: string; snapshot: string }>();
   if (!claim) return null;
   const tombstoneId = claim.tombstone_id;
   await db
@@ -771,8 +832,8 @@ export async function purgeAccount(
   for (const [table, column, extra] of KEPT) {
     moved += await repoint(db, table, column, userId, tombstoneId, extra);
   }
-  // The id inside kept rows: DM call records, server audit targets and
-  // mentions in kept messages.
+  // The id inside kept rows: DM call records and server audit targets.
+  // (Mentions are `@username` text and are left as they are.)
   const quoted = JSON.stringify(userId);
   const replacement = JSON.stringify(tombstoneId);
   await db.batch([
@@ -789,12 +850,6 @@ export async function purgeAccount(
     db
       .prepare(`UPDATE server_audit_logs SET target_id = ? WHERE target_id = ?`)
       .bind(tombstoneId, userId),
-    db
-      .prepare(
-        `UPDATE messages SET content = replace(content, ?, ?)
-         WHERE instr(content, ?) > 0`,
-      )
-      .bind(`<@${userId}>`, `<@${tombstoneId}>`, `<@${userId}>`),
   ]);
   // Public share links of those messages carry the author as it was.
   await db
@@ -814,12 +869,24 @@ export async function purgeAccount(
     .run();
 
   // Step 3: the account's files, listed and queued before their rows go.
-  const keys = await filesToDelete(db, bucket, userId);
+  const keys = await filesToDelete(
+    db,
+    bucket,
+    userId,
+    parseSnapshot(claim.snapshot),
+  );
   await queueFiles(db, keys, now);
   await abortPendingUploads(db, bucket, userId);
 
-  // Step 4: the account itself. Its own rows cascade from users.
+  // Step 4: the account itself. Its own rows cascade from users. Others'
+  // friend and pending rows naming it go too; their blocks of it stay
+  // (relationships.target_user_id has no foreign key, migration 046).
   await db.batch([
+    db
+      .prepare(
+        `DELETE FROM relationships WHERE target_user_id = ? AND type != 1`,
+      )
+      .bind(userId),
     db
       .prepare(
         `DELETE FROM channel_permission_overrides WHERE target_type = 'user' AND target_id = ?`,
@@ -836,37 +903,60 @@ export async function purgeAccount(
   return { tombstoneId, moved, files: keys.length };
 }
 
-/** The hourly sweep: purge accounts whose grace period is over. */
+/**
+ * The hourly sweep: purge accounts whose grace period is over. Held accounts
+ * (PurgeHold) are not failures: they are tried last, after every other due
+ * account, and logged only when their reason changes.
+ */
 export async function purgeDueAccountDeletions(
   db: Db,
   bucket: PurgeBucket,
   now: number = Date.now(),
   limit: number = PURGE_BATCH,
-): Promise<{ purged: number; failed: number }> {
+): Promise<{ purged: number; failed: number; held: number }> {
   const { results } = await db
     .prepare(
-      // Fewest failures first, so accounts that keep failing (a server
-      // owned again, a suspension) never hold the rest back.
-      `SELECT user_id FROM account_deletions
+      // Held accounts last, then fewest failures first, so accounts that
+      // cannot be purged or keep failing never hold the rest back.
+      `SELECT user_id, held_reason FROM account_deletions
        WHERE delete_after <= ?
-       ORDER BY attempts ASC, delete_after ASC
+       ORDER BY held_reason IS NOT NULL, attempts ASC, delete_after ASC
        LIMIT ?`,
     )
     .bind(new Date(now).toISOString(), limit)
-    .all<Pick<DeletionRow, "user_id">>();
+    .all<{ user_id: string; held_reason: string | null }>();
 
   let purged = 0;
   let failed = 0;
+  let held = 0;
   for (const row of results ?? []) {
     try {
-      if (await purgeAccount(db, bucket, row.user_id, now)) purged += 1;
+      const result = await purgeAccount(db, bucket, row.user_id, now);
+      if (result && "held" in result) {
+        held += 1;
+        if (row.held_reason !== result.held) {
+          console.warn(
+            `account purge held (${result.held}); left for the site admin`,
+          );
+          await db
+            .prepare(
+              `UPDATE account_deletions SET held_reason = ? WHERE user_id = ?`,
+            )
+            .bind(result.held, row.user_id)
+            .run()
+            .catch(() => undefined);
+        }
+      } else if (result) {
+        purged += 1;
+      }
     } catch (error) {
       failed += 1;
       const message = error instanceof Error ? error.message : String(error);
       console.error(`account purge failed: ${message}`);
       await db
         .prepare(
-          `UPDATE account_deletions SET attempts = attempts + 1, last_error = ?
+          `UPDATE account_deletions
+           SET attempts = attempts + 1, last_error = ?, held_reason = NULL
            WHERE user_id = ?`,
         )
         .bind(message.slice(0, 500), row.user_id)
@@ -874,7 +964,7 @@ export async function purgeDueAccountDeletions(
         .catch(() => undefined);
     }
   }
-  return { purged, failed };
+  return { purged, failed, held };
 }
 
 /** Whether `userId` is waiting for deletion: its profile is hidden from others. */

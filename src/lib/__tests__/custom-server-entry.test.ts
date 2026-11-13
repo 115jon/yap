@@ -22,7 +22,7 @@ const runDeadlockAssetSync = vi.hoisted(() =>
   vi.fn(async () => ({ version: 1, refreshed: false, mirrored: [] })),
 );
 const purgeDueAccountDeletions = vi.hoisted(() =>
-  vi.fn(async () => ({ purged: 0, failed: 0 })),
+  vi.fn(async () => ({ purged: 0, failed: 0, held: 0 })),
 );
 const runDeadlockCron = vi.hoisted(() =>
   vi.fn(async () => ({ added: 0, dropped: 0, fetched: 0 })),
